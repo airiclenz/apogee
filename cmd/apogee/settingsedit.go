@@ -144,9 +144,15 @@ type externalEdit struct {
 // to paint and the wrong thing to diff: repointing the one `mcp-servers:` entry at another machine
 // leaves it character-for-character identical. So the rows say what a changed key carries back
 // (appliedValue) and the values say WHETHER it changed (settingChanged).
+//
+// notices is what the loader had to SAY about the file on that reading — the lines start-up prints,
+// an unknown key above all — kept on the projection for the same reason the values are: a notice
+// is diffed against the baseline (newNotices), so a persistent typo is announced at the save that
+// introduced it and not again on every re-read that follows.
 type fileProjection struct {
-	rows []tui.SettingRow
-	opts config.Options
+	rows    []tui.SettingRow
+	opts    config.Options
+	notices []string
 }
 
 // newExternalEdit seeds the baseline from the file as it stands at launch. A projection that cannot
@@ -235,10 +241,16 @@ func (e *externalEdit) spec(key string) (tui.EditorCommand, error) {
 // Three kinds of key are never reported: the confinement pair, whose interlock stays single-homed in
 // /confine (ADR 0012 — binding G), `server:` (settingKeyServer), and `sub-agents-server:`
 // (settingKeySubAgentsServer) — both of them recorded choices a picker makes deliberately.
-func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
+//
+// The loader's notices ride back beside the keys, diffed the same way: only a notice the baseline
+// did not carry is reported (newNotices). The baseline moves on every write apogee itself makes
+// (refresh), so an unknown key the file has carried since start-up — already announced there — is
+// not said again at every pane commit the watcher sees; the save that ADDS one is the one that
+// reports it.
+func (e *externalEdit) changed() (tui.ConfigReload, error) {
 	after, err := e.projection()
 	if err != nil {
-		return nil, err
+		return tui.ConfigReload{}, err
 	}
 	e.mu.Lock()
 	before := e.baseline
@@ -258,7 +270,24 @@ func (e *externalEdit) changed() ([]tui.AppliedSetting, error) {
 		}
 		applied = append(applied, tui.AppliedSetting{Path: k.Path, Value: appliedValue(after.rows[i])})
 	}
-	return applied, nil
+	return tui.ConfigReload{Applied: applied, Notices: newNotices(before.notices, after.notices)}, nil
+}
+
+// newNotices is the notices in after that before did not carry, in after's own order. A notice is
+// matched by its whole text, line number included: the same unknown key moved to another line is a
+// different sentence, and saying it once more is cheaper than a diff clever enough to miss one.
+func newNotices(before, after []string) []string {
+	seen := make(map[string]bool, len(before))
+	for _, n := range before {
+		seen[n] = true
+	}
+	var fresh []string
+	for _, n := range after {
+		if !seen[n] {
+			fresh = append(fresh, n)
+		}
+	}
+	return fresh
 }
 
 // refresh re-takes the baseline from the file as it stands NOW — the whole of ADR 0041 decision 8 on
@@ -317,7 +346,10 @@ func appliedValue(row tui.SettingRow) string {
 // the STARTUP resolution (ApplyConfig) with no flags and no environment, which is what makes the two
 // sides of the diff comparable and the validation the real one rather than a second, weaker copy of
 // it; the rows come off that same resolution (settingsRows), so a key added to the registry is
-// diffed the day it is added rather than the day someone remembers.
+// diffed the day it is added rather than the day someone remembers. What that resolution has to say
+// on the way — the loader's notices, in the words start-up would print them — is collected onto the
+// projection rather than discarded, so a live re-read tells the human the same things a relaunch
+// would.
 //
 // The undetermined-startup refusal is held rather than returned, exactly as the TUI's own start-up
 // holds it (root.go): resolution succeeded, it simply could not name a server, and a config being
@@ -328,12 +360,14 @@ func (e *externalEdit) projection() (fileProjection, error) {
 		Workspace:       e.opts.Workspace,
 		ServerFlagBound: e.opts.ServerFlagBound,
 	}
-	err := config.ApplyConfig(&next, noFlagChanged, noEnvironment, os.ReadFile, func(string) {})
+	var notices []string
+	collect := func(notice string) { notices = append(notices, notice) }
+	err := config.ApplyConfig(&next, noFlagChanged, noEnvironment, os.ReadFile, collect)
 	var undetermined *config.StartupUndetermined
 	if err != nil && !errors.As(err, &undetermined) {
 		return fileProjection{}, err
 	}
-	return fileProjection{rows: settingsRows(next), opts: next}, nil
+	return fileProjection{rows: settingsRows(next), opts: next, notices: notices}, nil
 }
 
 // The two stubs that make ApplyConfig resolve from the FILE alone: no flag was set on this

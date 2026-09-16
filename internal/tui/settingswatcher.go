@@ -170,7 +170,9 @@ func (m Model) foldDetachedEdit(msg settingsDetachedMsg) (tea.Model, tea.Cmd) {
 //
 // Notes are per key, on the edit that earned them; a refusal is the pane's one failure slot, so a
 // reload in which two keys both refused shows the last of them — the slot describes the last attempt
-// rather than a row's condition ([settingFailure]), and this is one attempt.
+// rather than a row's condition ([settingFailure]), and this is one attempt. What the LOADER had to
+// say about the file — an unknown key the edit just introduced — is a different kind of news: it is
+// about no row, so it goes to the transcript (noteLoaderNotices), exactly as a watched save's does.
 func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 	rows := m.settingRows()
 	launched, ok := settingRowOf(rows, msg.path)
@@ -183,11 +185,12 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 	if m.opts.ReloadConfig == nil {
 		return m.settingsFailed(launched, noExternalEditNote)
 	}
-	applied, err := m.opts.ReloadConfig()
+	reload, err := m.opts.ReloadConfig()
 	if err != nil {
 		return m.settingsFailed(launched, stripEscapes(err.Error()))
 	}
-	m, cmds := m.applyReloaded(rows, applied, false)
+	m, cmds := m.applyReloaded(rows, reload.Applied, false)
+	m = m.noteLoaderNotices(reload.Notices)
 	return m, tea.Batch(cmds...)
 }
 
@@ -292,7 +295,9 @@ func (m Model) awaitConfigChange() tea.Cmd {
 // A re-read that DID move something says so, once, naming the keys (configWatchAppliedNote): the
 // human is owed the news that the conversation they are in the middle of is running different
 // settings from the ones it started with, and the markers on the rows only reach them if the pane is
-// open. A re-read that found nothing changed is silent.
+// open. A re-read that found nothing changed is silent — unless the loader found something to say
+// about the file that it had not said before (noteLoaderNotices): a key the schema does not spell
+// moves nothing, and that is exactly why the human has to be told.
 //
 // The next wait is opened before anything is applied, so a re-read that ends in a refusal still leaves
 // the session watching — a broken config the human is about to fix is exactly the file the next report
@@ -305,16 +310,32 @@ func (m Model) foldConfigChanged(msg configChangedMsg) (tea.Model, tea.Cmd) {
 	if m.opts.ReloadConfig == nil {
 		return m, next
 	}
-	applied, err := m.opts.ReloadConfig()
+	reload, err := m.opts.ReloadConfig()
 	if err != nil {
 		return m.foldConfigUnreadable(err), next
 	}
 	m.cfgWatch = configWatchState{}
-	m, cmds := m.applyReloaded(m.settingRows(), applied, true)
-	if len(applied) > 0 {
-		m.transcript.addNote(configWatchAppliedNote + strings.Join(appliedPaths(applied), ", "))
+	m, cmds := m.applyReloaded(m.settingRows(), reload.Applied, true)
+	if len(reload.Applied) > 0 {
+		m.transcript.addNote(configWatchAppliedNote + strings.Join(appliedPaths(reload.Applied), ", "))
 	}
+	m = m.noteLoaderNotices(reload.Notices)
 	return m, tea.Batch(append(cmds, next)...)
+}
+
+// noteLoaderNotices posts what the loader had to say about the re-read file — one transcript line
+// per notice, in the loader's own words, so the sentence a mid-session save earns is the one a
+// relaunch would print. It follows the applied-keys line where that line posts, because the keys
+// that moved are the headline and a notice is the footnote about the one that did not.
+//
+// Only what is NEW is handed here ([ConfigReload.Notices]): the binary diffs the notices against its
+// baseline, so a typo the file has carried since start-up — announced there — is not repeated on
+// every save, and apogee's own writes, which re-take the baseline, add nothing.
+func (m Model) noteLoaderNotices(notices []string) Model {
+	for _, n := range notices {
+		m.transcript.addNote(n)
+	}
+	return m
 }
 
 // appliedPaths is the note's list: the registry path of every key the re-read found changed, in the

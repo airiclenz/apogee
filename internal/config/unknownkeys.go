@@ -13,9 +13,10 @@ import (
 // yaml.v3 ignores a key the struct has no field for, so a misspelled `auto-compct:` or a `spiner:`
 // under `ui:` reads as an absent key and the session runs on the default with nothing pointing at
 // the line. This file finds those keys — every mapping key the schema does not spell, at the depth
-// the schema descends to — so parseConfigFile can announce each one through notify at startup. It
-// is a notice and never a refusal: an unknown key changes nothing the loader does, it only tells the
-// user which line is not doing what they think it is.
+// the schema descends to — so parseConfigFile can announce each one through notify, at startup and
+// on every live re-read that reports its notices. It is a notice and never a refusal: an unknown key
+// changes nothing the loader does, it only tells the user which line is not doing what they think
+// it is.
 //
 // The schema it walks against is the same one the registry bijection test reads (registry_test.go):
 // fileConfig's yaml tags, by reflection, through schemaKeys — so what the walk calls unknown and

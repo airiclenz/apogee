@@ -202,6 +202,45 @@ func TestE2ELiveStateFollowsTheRunningSession(t *testing.T) {
 	}
 }
 
+// TestE2ELiveStateSaysWhatTheLoaderNoticed is the notice half of a save on disk (apogee-ibd): a key
+// the schema does not spell moves nothing — there is no applied-keys line to put it on — so the
+// transcript carries the loader's own sentence for it, exactly as start-up would have printed it.
+// The first save is the news; a second save that only adds a real key leaves the typo's line at one,
+// since a notice the baseline already carries is not new.
+func TestE2ELiveStateSaysWhatTheLoaderNoticed(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "livestate"))
+	drv := tuitest.NewDriver(t, liveStateSize)
+	sess := launchTUI(t, drv, stub)
+	waitIdle(drv)
+	drv.WaitQuiet(settled)
+
+	appendHomeConfig(t, sess.Home(), "bogus-key: 1\n")
+	drv.WaitText(`"bogus-key"`)
+	drv.WaitQuiet(settled)
+	noticed := flatten(drv.Frame().String())
+	want := "apogee: config " + filepath.Join(sess.Home(), "config.yaml") + `: unknown key "bogus-key" at line `
+	if !strings.Contains(noticed, want) || !strings.Contains(noticed, "is ignored") {
+		t.Errorf("the transcript does not carry the loader's own sentence %q … %q:\n%s", want, "is ignored", drv.Frame())
+	}
+	if n := rowsContaining(drv.Frame(), appliedNote); n != 0 {
+		t.Errorf("an unknown key left %d applied-keys lines; it applied nothing:\n%s", n, drv.Frame())
+	}
+
+	appendHomeConfig(t, sess.Home(), "auto-compact: false\n")
+	drv.WaitText(appliedNote)
+	drv.WaitQuiet(settled)
+	if n := strings.Count(flatten(drv.Frame().String()), `"bogus-key"`); n != 1 {
+		t.Errorf("the typo is named %d times after a second save; want the one line the first save earned:\n%s",
+			n, drv.Frame())
+	}
+
+	if err := sess.Quit(); err != nil {
+		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+}
+
 // TestE2ELiveStateLauncherMoveKeepsTheSessionWorking is T-16 steps 11 and 12: `/model` lists the
 // launcher's Launch profiles, picking one that serves ELSEWHERE moves the session onto it, and the
 // moved session still delegates.

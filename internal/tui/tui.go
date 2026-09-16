@@ -1028,7 +1028,13 @@ type Options struct {
 	// keys the reload never reports are the confinement pair, fenced to `/confine` (ADR 0012), and
 	// `server:`, whose live move is a deliberate act at the picker rather than a consequence of
 	// re-reading a file. nil ⇒ the round trip ends at the editor, and the pane says so.
-	ReloadConfig func() ([]AppliedSetting, error)
+	//
+	// Beside the keys it carries the loader's NOTICES ([ConfigReload.Notices]) — the lines start-up
+	// would have printed for this file, an unknown key above all — but only the ones the re-read
+	// found NEW against its baseline: a notice the file has carried all along was said once already,
+	// at start-up or at the save that introduced it, and apogee's own writes re-take the baseline
+	// (ADR 0041 decision 8), so a persistent typo does not narrate itself on every pane commit.
+	ReloadConfig func() (ConfigReload, error)
 
 	// AwaitConfigChange blocks until the config file has changed on disk, and reports whether the
 	// watch is still open: false means it has ENDED — the program is shutting down, or the binary
@@ -1686,6 +1692,18 @@ type EditorCommand struct {
 type AppliedSetting struct {
 	Path  string // the key's registry path, as [SettingRow.Path] spells it
 	Value string // its new value, in the spelling the pane journals and applies
+}
+
+// ConfigReload is one answer from [Options.ReloadConfig]: the keys a re-read of the config file found
+// changed, and the notices the loader raised over that file that its baseline had not — both halves
+// of what a saved file has to tell a running session. The keys land (applyReloaded); the notices are
+// only SAID, one transcript line each in the loader's own words, because a notice is the trace a key
+// leaves when it changes nothing: an `auto-compct:` the schema does not spell reads as absent, and a
+// session that stayed silent about it would be running the default while the human believes the
+// file is in force.
+type ConfigReload struct {
+	Applied []AppliedSetting // every key whose value came back different, in registry order
+	Notices []string         // the loader's notices new since the baseline, verbatim, in file order
 }
 
 // ----------------------------------------------------------------------------

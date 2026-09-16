@@ -2922,8 +2922,9 @@ func parseConfigFile(path string, readFile func(string) ([]byte, error), notify 
 	// A key the schema does not spell is announced, never refused: the decoder above has already
 	// ignored it, so the notice is the only trace a misspelled key leaves. It walks the MIGRATED
 	// bytes, so a retired key the fold consumed is not reported a second time. The line reaches
-	// the user at startup only — every live re-read (LoadFileConfig's callers) passes a discarding
-	// notify, so a file edited mid-session stays silent here (ADR 0041; bead apogee-ibd).
+	// the user at startup, and again from a live re-read of the file (the settings round trip's
+	// projection collects notify and reports what is new against its baseline), so a key mistyped
+	// mid-session is said at the save that introduced it.
 	for _, unknown := range unknownKeys(data) {
 		notify(fmt.Sprintf(unknownKeyNotice, path, unknown.key, unknown.line))
 	}

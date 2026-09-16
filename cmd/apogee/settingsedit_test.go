@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -193,10 +194,11 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 		"  - name: other\n    endpoint: http://127.0.0.1:2222\n"+
 		"system-prompt-text: |\n  hand written\n")
 
-	applied, err := e.changed()
+	reload, err := e.changed()
 	if err != nil {
 		t.Fatalf("changed: %v", err)
 	}
+	applied := reload.Applied
 	got := map[string]string{}
 	for _, a := range applied {
 		got[a.Path] = a.Value
@@ -217,8 +219,8 @@ func TestExternalEditReloadReportsTheKeysTheFileChanged(t *testing.T) {
 	}
 
 	// A second reload over an unchanged file reports nothing: the baseline moved with the first one.
-	if again, err := e.changed(); err != nil || len(again) != 0 {
-		t.Errorf("second reload = (%v, %v), want nothing changed", again, err)
+	if again, err := e.changed(); err != nil || len(again.Applied) != 0 {
+		t.Errorf("second reload = (%v, %v), want nothing changed", again.Applied, err)
 	}
 }
 
@@ -232,10 +234,11 @@ func TestExternalEditReloadCarriesProseForATextKey(t *testing.T) {
 	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 	writeSettingsFixture(t, path, "system-prompt-text: |\n  first line\n  second line\n")
 
-	applied, err := e.changed()
+	reload, err := e.changed()
 	if err != nil {
 		t.Fatalf("changed: %v", err)
 	}
+	applied := reload.Applied
 	if len(applied) != 1 || applied[0].Path != "system-prompt-text" {
 		t.Fatalf("reload = %+v, want the one prompt key", applied)
 	}
@@ -258,10 +261,11 @@ func TestExternalEditReloadReportsAnMCPServerRepointedUnderTheSameSummary(t *tes
 
 	writeSettingsFixture(t, path, "mcp-servers:\n  - name: files\n    transport: streamable-http\n"+
 		"    endpoint: http://192.0.2.1:7331/mcp\n")
-	applied, err := e.changed()
+	reload, err := e.changed()
 	if err != nil {
 		t.Fatalf("changed: %v", err)
 	}
+	applied := reload.Applied
 	if len(applied) != 1 || applied[0].Path != "mcp-servers" {
 		t.Fatalf("reload = %+v, want the repointed mcp-servers block", applied)
 	}
@@ -270,8 +274,8 @@ func TestExternalEditReloadReportsAnMCPServerRepointedUnderTheSameSummary(t *tes
 	}
 
 	// The baseline moved with it, so the same file re-read reports nothing.
-	if again, err := e.changed(); err != nil || len(again) != 0 {
-		t.Errorf("second reload = (%v, %v), want nothing changed", again, err)
+	if again, err := e.changed(); err != nil || len(again.Applied) != 0 {
+		t.Errorf("second reload = (%v, %v), want nothing changed", again.Applied, err)
 	}
 }
 
@@ -290,10 +294,11 @@ func TestExternalEditReloadReportsThinkingDelimitersUnderTheSameSummary(t *testi
 	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 
 	writeSettingsFixture(t, path, profile("<|channel|>", "<|message|>"))
-	applied, err := e.changed()
+	reload, err := e.changed()
 	if err != nil {
 		t.Fatalf("changed: %v", err)
 	}
+	applied := reload.Applied
 	if len(applied) != 1 || applied[0].Path != "model-profiles" {
 		t.Fatalf("reload = %+v, want the re-delimited model-profiles entry", applied)
 	}
@@ -313,12 +318,12 @@ func TestExternalEditReloadRefusesAConfigItCannotResolve(t *testing.T) {
 	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mode: [this is not a mode]\n")
-	applied, err := e.changed()
+	refused, err := e.changed()
 	if err == nil {
-		t.Fatalf("changed over a malformed config = %+v, want the refusal", applied)
+		t.Fatalf("changed over a malformed config = %+v, want the refusal", refused.Applied)
 	}
-	if len(applied) != 0 {
-		t.Errorf("a refused reload reported %+v; nothing may be applied from a file that did not resolve", applied)
+	if len(refused.Applied) != 0 {
+		t.Errorf("a refused reload reported %+v; nothing may be applied from a file that did not resolve", refused.Applied)
 	}
 
 	writeSettingsFixture(t, path, "mode: auto\n")
@@ -326,7 +331,7 @@ func TestExternalEditReloadRefusesAConfigItCannotResolve(t *testing.T) {
 	if err != nil {
 		t.Fatalf("changed after the fix: %v", err)
 	}
-	if len(fixed) != 1 || fixed[0].Path != "mode" || fixed[0].Value != "auto" {
+	if got := fixed.Applied; len(got) != 1 || got[0].Path != "mode" || got[0].Value != "auto" {
 		t.Errorf("reload after the fix = %+v, want the mode change against the surviving baseline", fixed)
 	}
 }
@@ -342,10 +347,11 @@ func TestExternalEditReloadAcceptsAConfigWithNoStartupServer(t *testing.T) {
 	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
 
 	writeSettingsFixture(t, path, "mode: ask-before\nauto-compact: false\n")
-	applied, err := e.changed()
+	reload, err := e.changed()
 	if err != nil {
 		t.Fatalf("changed: %v", err)
 	}
+	applied := reload.Applied
 	if len(applied) != 1 || applied[0].Path != "auto-compact" || applied[0].Value != "false" {
 		t.Errorf("reload = %+v, want the one changed key", applied)
 	}
@@ -421,12 +427,52 @@ func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
 		t.Errorf("argv ends with %q, want the session's config %q", launch.Argv[len(launch.Argv)-1], want)
 	}
 	// Nothing has touched the file since the spec read it, so the return trip over it reports nothing.
-	applied, err := rec.opts.ReloadConfig()
+	reload, err := rec.opts.ReloadConfig()
 	if err != nil {
 		t.Fatalf("ReloadConfig: %v", err)
 	}
-	if len(applied) != 0 {
-		t.Errorf("ReloadConfig over an untouched config reported %+v, want nothing", applied)
+	if len(reload.Applied) != 0 {
+		t.Errorf("ReloadConfig over an untouched config reported %+v, want nothing", reload.Applied)
+	}
+}
+
+// A key the schema does not spell changes nothing, and that is exactly why the re-read has to say
+// so: the loader's notice rides back beside the applied keys, in the very sentence start-up would
+// have printed for the same file (apogee-ibd). It is diffed against the baseline like the keys are —
+// the notice is reported at the save that introduced the key, and a re-read that finds the same key
+// still there says nothing more, since apogee's own writes would otherwise narrate the typo on every
+// pane commit the watcher sees.
+func TestExternalEditReloadCarriesTheLoaderNotices(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	path := filepath.Join(home, "config.yaml")
+	writeSettingsFixture(t, path, "mode: ask-before\n")
+	e := newExternalEdit(config.Options{ConfigDir: home}, "", func(string) string { return "" })
+
+	writeSettingsFixture(t, path, "mode: ask-before\nbogus-key: 1\n")
+	reload, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	want := []string{fmt.Sprintf("apogee: config %s: unknown key %q at line %d is ignored", path, "bogus-key", 2)}
+	if !slices.Equal(reload.Notices, want) {
+		t.Errorf("notices = %q, want %q — the loader's own sentence, verbatim", reload.Notices, want)
+	}
+	if len(reload.Applied) != 0 {
+		t.Errorf("an unknown key applied %+v; it reaches no row", reload.Applied)
+	}
+
+	// The key is still there, and the baseline now knows it: the same sentence is not news twice.
+	writeSettingsFixture(t, path, "mode: ask-before\nbogus-key: 1\nauto-compact: false\n")
+	again, err := e.changed()
+	if err != nil {
+		t.Fatalf("changed: %v", err)
+	}
+	if len(again.Notices) != 0 {
+		t.Errorf("a re-read over the same unknown key reported %q again; it was said at the save that added it", again.Notices)
+	}
+	if len(again.Applied) != 1 || again.Applied[0].Path != "auto-compact" {
+		t.Errorf("reload = %+v, want the one changed key beside the silent notice", again.Applied)
 	}
 }
 
@@ -513,10 +559,11 @@ func TestExternalEditBaselineIsTheFileNotTheResolution(t *testing.T) {
 	// The session resolved `auto` (an APOGEE_MODE override would do this); the file still says plan.
 	e := newExternalEdit(config.Options{ConfigDir: home, Mode: "auto"}, "", func(string) string { return "" })
 
-	applied, err := e.changed()
+	reload, err := e.changed()
 	if err != nil {
 		t.Fatalf("changed: %v", err)
 	}
+	applied := reload.Applied
 	if len(applied) != 0 {
 		t.Errorf("reload reported %+v over an unedited file; the baseline must be the file's own view", applied)
 	}

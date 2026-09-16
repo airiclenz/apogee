@@ -555,12 +555,12 @@ func TestSubAgentsMigratorRewritesThenRetargets(t *testing.T) {
 	}
 	// The watcher must see nothing for a write apogee itself just made (ADR 0041 decision 8), which
 	// is what the baseline refresh inside the seam is for.
-	applied, err := w.externalEdits.changed()
+	reload, err := w.externalEdits.changed()
 	if err != nil {
 		t.Fatalf("the external-edit watcher: %v", err)
 	}
-	if len(applied) != 0 {
-		t.Errorf("the watcher reported %+v for apogee's own migration write", applied)
+	if len(reload.Applied) != 0 {
+		t.Errorf("the watcher reported %+v for apogee's own migration write", reload.Applied)
 	}
 }
 

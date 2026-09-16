@@ -2982,6 +2982,7 @@ type externalEditLog struct {
 	detached  bool
 	specErr   error
 	applied   []AppliedSetting
+	notices   []string
 	reloadErr error
 	reloads   int
 }
@@ -2994,12 +2995,12 @@ func (l *externalEditLog) spec(path string) (EditorCommand, error) {
 	return EditorCommand{Argv: l.argv, Detached: l.detached}, nil
 }
 
-func (l *externalEditLog) reload() ([]AppliedSetting, error) {
+func (l *externalEditLog) reload() (ConfigReload, error) {
 	l.reloads++
 	if l.reloadErr != nil {
-		return nil, l.reloadErr
+		return ConfigReload{}, l.reloadErr
 	}
-	return l.applied, nil
+	return ConfigReload{Applied: l.applied, Notices: l.notices}, nil
 }
 
 // externalEditModel is settingsEditModel with the round trip's two seams wired as well.
@@ -3369,6 +3370,73 @@ func TestConfigWatchNamesEveryAppliedKeyOnceAndIsSilentOnNoChange(t *testing.T) 
 
 	if got := appliedNotes(m); !reflect.DeepEqual(got, want) {
 		t.Errorf("notes = %v, want the first report's one: a re-read that changed nothing is silent", got)
+	}
+}
+
+// What the loader had to SAY about the saved file reaches the transcript too (apogee-ibd): one line
+// per notice, in the loader's own words, after the applied-keys line — the keys that moved are the
+// headline, the key that moved nothing because the schema does not spell it is the footnote. A
+// re-read that carries no notice adds no line: the binary already diffed them against its baseline,
+// so what arrives here is exactly what is new.
+func TestConfigWatchPostsEveryLoaderNotice(t *testing.T) {
+	rows := []SettingRow{
+		{Path: "ui.spinner", Section: "Presentation", Kind: SettingString, Value: "dots", Editable: true},
+	}
+	notices := []string{
+		`apogee: config /home/x/.apogee/config.yaml: unknown key "auto-compct" at line 3 is ignored`,
+		`apogee: config /home/x/.apogee/config.yaml: unknown key "ui.spiner" at line 5 is ignored`,
+	}
+	edit := &externalEditLog{
+		applied: []AppliedSetting{{Path: "ui.spinner", Value: "line"}},
+		notices: notices,
+	}
+	m := configWatchModel(t, rows, &settingsWriteLog{}, edit)
+	notes := func() []string {
+		var out []string
+		for _, e := range m.transcript.entries {
+			if strings.HasPrefix(e.text, configWatchAppliedNote) || strings.HasPrefix(e.text, "apogee: config") {
+				out = append(out, e.text)
+			}
+		}
+		return out
+	}
+
+	m = step(t, m, configChangedMsg{alive: true})
+
+	want := append([]string{configWatchAppliedNote + "ui.spinner"}, notices...)
+	if got := notes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("notes = %q, want %q — the applied line first, then one line per notice, verbatim", got, want)
+	}
+
+	edit.applied, edit.notices = nil, nil
+	m = step(t, m, configChangedMsg{alive: true})
+
+	if got := notes(); !reflect.DeepEqual(got, want) {
+		t.Errorf("notes = %q, want the first report's three: a re-read with nothing new adds no line", got)
+	}
+}
+
+// The editor's exit is the round trip's other trigger, and a notice earned there lands the same way:
+// in the transcript, not on the row the edit was launched from, since an unknown key has no row.
+func TestSettingsEditExitPostsTheLoaderNotices(t *testing.T) {
+	rows := []SettingRow{settingsStructuredRow()}
+	notice := `apogee: config /home/x/.apogee/config.yaml: unknown key "servrs" at line 2 is ignored`
+	edit := &externalEditLog{argv: []string{"vi", "/tmp/config.yaml"}, notices: []string{notice}}
+	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
+
+	m = step(t, m, settingsEditedMsg{path: "servers"})
+
+	var got []string
+	for _, e := range m.transcript.entries {
+		if strings.HasPrefix(e.text, "apogee: config") {
+			got = append(got, e.text)
+		}
+	}
+	if want := []string{notice}; !reflect.DeepEqual(got, want) {
+		t.Errorf("notes = %q, want %q — the editor's exit says what the loader noticed", got, want)
+	}
+	if m.settings.failure.msg != "" {
+		t.Errorf("failure slot = %q, want empty: a notice is news, not a refusal", m.settings.failure.msg)
 	}
 }
 

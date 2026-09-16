@@ -250,7 +250,12 @@ NOTES (2026-09-16): the manual never described the stderr-only startup line, so 
 
 commit: `feat(tui): startup confinement notices repeat in the transcript as ephemeral notes`
 
-## 13. Live config reload announces loader notices (apogee-ibd)
+## 13. Live config reload announces loader notices (apogee-ibd) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): consequential edit — cmd/apogee/keymigrate_test.go: made necessary by the `ReloadConfig`/`changed()` signature change to `tui.ConfigReload` (one call site reads `.Applied`).
+NOTES (2026-09-17): consequential edit — docs/manual/configuration.md: made necessary by the live re-read now announcing notices ("printed at start-up only" sentence rewritten).
+NOTES (2026-09-17): consequential edit — internal/config/unknownkeys.go: made necessary by the same ("through notify at startup" file comment now names the live re-read too).
+NOTES (2026-09-17): a second tui test, `TestSettingsEditExitPostsTheLoaderNotices`, pins the editor-exit path the item's What names beside the watcher path; `configwatch_apply_test.go`'s `watchedConfig.reload` helper keeps its `[]tui.AppliedSetting` return and unwraps `.Applied` so its five callers stay untouched.
 
 **What:** Closes apogee-ibd. `cmd/apogee/settingsedit.go` `externalEdit.projection` passes `func(string) {}` to `config.ApplyConfig`, discarding unknown-key and roster notices. Changed representation: `tui.Options.ReloadConfig` becomes `func() (ConfigReload, error)` with `type ConfigReload struct { Applied []AppliedSetting; Notices []string }` in `internal/tui/tui.go`; `projection` collects notices into `fileProjection.notices` and `changed()` returns them. Consumers (all updated): `internal/tui/settingswatcher.go` `foldSettingsEdit`, `foldConfigChanged`, `applyReloaded`; test doubles that set `ReloadConfig` in `internal/tui/skill_test.go`, `settings_test.go`, `settingsapply_test.go`, `cmd/apogee/settingsedit_test.go`, `configwatch_apply_test.go`, `confinement_e2e_test.go`. Posting: on both paths (watcher and editor exit) each notice is one `m.transcript.addNote(notice)` line, verbatim loader text (e.g. `apogee: config <path>: unknown key "bogus" at line 3 is ignored`), after the `config changed on disk — applied: …` line where that line posts. Also drop the "(ADR 0041; bead apogee-ibd)" clause in `internal/config/unknownkeys.go`'s comment — the notice now reaches live re-reads.
 

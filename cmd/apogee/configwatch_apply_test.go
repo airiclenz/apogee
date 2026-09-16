@@ -72,7 +72,8 @@ func (c *watchedConfig) reload(t *testing.T, why string) ([]tui.AppliedSetting, 
 	if !c.await(ctx) {
 		t.Fatalf("no change reported for %s", why)
 	}
-	return c.edits.changed()
+	reload, err := c.edits.changed()
+	return reload.Applied, err
 }
 
 // The headline of ADR 0041 decision 5: a key changed in the file by something that is not apogee
@@ -177,13 +178,13 @@ func TestRunRootWiresTheConfigWatch(t *testing.T) {
 	if err := rec.opts.Settings.Write("auto-title", "false"); err != nil {
 		t.Fatalf("Settings.Write: %v", err)
 	}
-	applied, err := rec.opts.ReloadConfig()
+	reload, err := rec.opts.ReloadConfig()
 	if err != nil {
 		t.Fatalf("ReloadConfig: %v", err)
 	}
-	if len(applied) != 0 {
+	if len(reload.Applied) != 0 {
 		t.Errorf("a re-read after apogee's own write reported %+v; the watcher would apply it a second "+
-			"time", applied)
+			"time", reload.Applied)
 	}
 }
 

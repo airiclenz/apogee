@@ -269,8 +269,9 @@ The check goes as deep as the schema does — `ui.spiner`, `servers[0].foo`, `mc
 webhook under a reaction's `run:` is never inspected. Two things are deliberately not reported: the
 keys the migration above folds or refuses, which are handled before this check runs, and a retired
 `sub-agents: true` line on a `servers:` entry, which start-up's own offer to move it (see
-[The servers you run models on](#the-servers-you-run-models-on)) is the place to act on. The line
-is printed at start-up only; a file edited while a session is running is re-read without it.
+[The servers you run models on](#the-servers-you-run-models-on)) is the place to act on. A file
+edited while a session is running gets the same line, in the transcript, at the save that introduced
+the key — once, not again on every later save or on apogee's own writes.
 
 ## Environment overrides
 
