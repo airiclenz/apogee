@@ -28,7 +28,8 @@ so every property below is a decision rather than a match.
 Two facts about the codebase bound the design before any preference does. First, the writes
 already funnel: every mutation a first-party tool performs passes a funnel in
 `internal/tools/path_safety.go` — `safeWriteFile` for the content verbs, `journaledMutation` for
-the byte-moving trio (see the 2026-08-24 amendment) — into `internal/security`'s fenced
+the byte-moving trio (see the 2026-08-24 amendment; since 2026-09-16 the pair is the write-side
+value's own `write` and `journaled`, in `write_target.go`) — into `internal/security`'s fenced
 primitives, and the tools that do it carry the unexported `workspaceScopedWriter` marker
 (`internal/tools/workspace_scoped.go`) that dispatch uses to path-bound rather than confine them.
 Second, only filesystem writes are durable and reconstructible at all — [ADR
@@ -235,3 +236,36 @@ the scan to find and fails here instead of dropping silently out of `/undo`. The
 drives is a checklist, not the second list of tool names this decision refuses: the walk is over the real
 tool set, so a writer with no probe entry fails by name rather than going unchecked. Decision 3's "stays
 that set as tools are added" now rests on that walk.
+
+## Amendment (2026-09-16) — the funnel pair moves onto the write-side value, and the scan follows it
+
+The 2026-08-24 amendment placed the pair in `internal/tools/path_safety.go` as free functions taking an
+argument and a root, and the capture underneath them (`capturePreImage` / `commit` / `commitReadBack`) took
+the same pair of strings — a shape that re-resolved the path the verb had already resolved, and that any
+file in the package could spell for itself. Since plan `2026-09-16 - 01` items 18–20, every write verb
+holds a `writeTarget` — the write side's scope value (`internal/tools/write_target.go`), resolved once per
+call from a `writeScope` that reads the workspace root, the approved-escape permit (ADR 0049) and the undo
+journal off the execution context together. The pair is now that value's own methods: `writeTarget.write`
+keeps the content verbs, `writeTarget.journaled` keeps the byte-moving trio (its multi-path form,
+`journaledTargets`, is what `journaledMutation` — the by-argument spelling the directory copy and the move
+still call with the slice they assemble — resolves into). The capture moved with them and takes the value:
+`writeTarget.capturePreImage` reads the pre-image through the value's own fenced `read`, the `preImage`
+it returns carries the value, and `commitReadBack` reads the post-image back through the same value. The
+two one-line shims the 2026-09-15 value kept for the by-argument capture (`readWriteTarget`,
+`currentPerm`) are gone with it. Nothing about coverage, ordering or record shape changes: decisions 2, 4
+and 6 hold verbatim, and every journal test that pinned the pair passes with only the funnel's names
+re-spelled.
+
+What the 2026-08-24 amendment made a property — the pair is the whole of the package's capture, which
+ADR 0074 keeps as the funnel's authority over every path it sees — is held the same way: by the two
+tests, not by the value. Every writer lives in package `tools`, so a method the value exposes is one a
+writer may still call at its own mutation site; the value narrows the shape of a stray capture (one line,
+through the value) without making it impossible. So `TestUndoCaptureHasExactlyTwoCallers` stays and
+follows the move: it now scans
+for the method spellings (`.capturePreImage(` / `.commit(` / `.commitReadBack(`) and refuses them in any
+non-test file but `write_target.go`, and it still checks the funnel file in the other direction so a
+rename cannot let it pass vacuously. `TestUndoJournalCoversEveryWriter` is untouched. The one shape under
+which this amendment could call the funnel a property rather than a scanned claim — the capture pair in
+its own package, where the compiler enforces the boundary — was considered and not taken: the capture
+needs the value's fenced read and the value is the tools package's, so the boundary would cost a second
+exported surface for what one test already holds.

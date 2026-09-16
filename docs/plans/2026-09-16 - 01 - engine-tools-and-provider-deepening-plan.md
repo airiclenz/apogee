@@ -670,7 +670,11 @@ rule (Named path; Real only under a permit) unchanged.
 
 **Commit:** `refactor(tools): copy_file and move_file take their destinations from writeTarget`
 
-## 21. Undo capture is structural
+## 21. Undo capture is structural — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `journaledMutation` (by argument and root) stays as the spelling `file_ops.go`'s directory copy and move call — the move's source is a `mutationPath` literal there, not a value — and resolves each path into a `journaledPath` value over the new core `journaledTargets(escape, paths, body)`; `writeTarget.journaled` uses the core directly. An empty spelling handed to `journaledMutation` is now refused as `errPathRequired` before capture (previously captured nothing and ran the body); unreachable, every verb refuses an empty path earlier.
+NOTES (2026-09-16): `writeScope` drops `ctx` and gains `journal` as its own doc comment forecast; the ADR amendment records the pair's move onto the value and keeps the scan as what holds the property, reconciled with ADR 0074's partial supersession of decision 3.
+NOTES (2026-09-16): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the removal of `safeWriteFile` (the ADR 0049 block's mention gains a since-2026-09-16 pointer to `writeTarget.write`, the style item 18 used in the same block); ADR 0049's own "never did" narrative and the archived plan/review mentions are historical and left as they are.
 
 **What.** Depends on items 19–20. `capturePreImage`, `commit`, `commitReadBack` move behind the
 value's `write`/`journaled` methods (unexported; no writer can reach a capture except through

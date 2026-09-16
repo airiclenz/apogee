@@ -1,7 +1,7 @@
 package tools
 
 // The tools' undo capture (ADR 0051), in two halves. Every content-writing verb reaches the
-// filesystem through safeWriteFile, so the first half asks that ONE seam the three questions the
+// filesystem through writeTarget.write, so the first half asks that ONE seam the three questions the
 // journal's usefulness rests on: does each verb leave exactly one record for the path it
 // touched, does that record hold the bytes that were there before (a revert puts them back),
 // and does a write that never landed leave the journal untouched. The byte-moving verbs —
@@ -51,7 +51,7 @@ func readOrAbsent(t *testing.T, path string) (string, bool) {
 }
 
 // TestWriteFunnelJournalsEveryContentVerb walks the four tools that write content through
-// safeWriteFile. Each records ONE change for its path; the previewed action being restore or
+// writeTarget.write. Each records ONE change for its path; the previewed action being restore or
 // delete (never skip) is the post-hash agreeing with what is on disk; and the revert putting
 // the file back exactly as it was is the pre-image being the real one.
 func TestWriteFunnelJournalsEveryContentVerb(t *testing.T) {
@@ -269,7 +269,7 @@ func TestWriteFunnelWritesWithoutAJournal(t *testing.T) {
 // The byte-moving verbs (item 3)
 // ----------------------------------------------------------------------------
 //
-// copy_file, move_file and delete_file never reach safeWriteFile, so each captures its own
+// copy_file, move_file and delete_file never reach writeTarget.write, so each captures its own
 // pre-image at its own mutation site and each has a record SHAPE the funnel's tests cannot
 // pin: a copy journals one end, a move journals two, and a delete journals the bytes that
 // stop existing. These tests read those shapes off the preview and then prove them by
@@ -865,21 +865,24 @@ func TestJournaledMutationWritesWithoutAJournal(t *testing.T) {
 	}
 }
 
-// undoFunnelFile is the one file the capture calls belong in: safeWriteFile and journaledMutation
-// live side by side there, and nothing else in the package may reach the journal.
-const undoFunnelFile = "path_safety.go"
+// undoFunnelFile is the one file the capture calls belong in: the write-side scope value, whose
+// write and journaled methods are the two funnels and whose capturePreImage is the pre-image they
+// take, live there, and nothing else in the package may reach the journal.
+const undoFunnelFile = "write_target.go"
 
 // undoCaptureSites are the call spellings that put a record in the undo journal — taking a
-// pre-image, and committing it under either post-image policy.
-var undoCaptureSites = []string{"capturePreImage(", ".commit(", ".commitReadBack("}
+// pre-image through the value, and committing it under either post-image policy.
+var undoCaptureSites = []string{".capturePreImage(", ".commit(", ".commitReadBack("}
 
 // TestUndoCaptureHasExactlyTwoCallers: ADR 0051 decision 3 — "capture is at the funnel, and that
-// IS the coverage boundary" — is only true while safeWriteFile and journaledMutation are the sole
-// capture sites in the package. A writer that captures at its own mutation site instead, the shape
-// copy, move and delete carried before the funnel, is invisible to that boundary and drops out of
-// `/undo` without anything failing, so this scans the package's own source and names the file that
-// did it. The funnel file is checked too, in the other direction: a capture call spelling that has
-// vanished from it is a rename this scan would otherwise pass vacuously.
+// IS the coverage boundary" — is only true while writeTarget.write and writeTarget.journaled (with
+// its multi-path form) are the sole capture sites in the package. The capture is a method of the
+// value every writer holds, so a writer that captures at its own mutation site instead — the shape
+// copy, move and delete carried before the funnel — is one line away from the same call, invisible
+// to that boundary, and drops out of `/undo` without anything failing; this scans the package's
+// own source and names the file that did it. The funnel file is checked too, in the other
+// direction: a capture call spelling that has vanished from it is a rename this scan would
+// otherwise pass vacuously.
 func TestUndoCaptureHasExactlyTwoCallers(t *testing.T) {
 	t.Parallel()
 
@@ -910,7 +913,7 @@ func TestUndoCaptureHasExactlyTwoCallers(t *testing.T) {
 		}
 		for _, site := range undoCaptureSites {
 			if strings.Contains(string(source), site) {
-				t.Errorf("%s reaches the undo journal directly through %s — capture belongs to safeWriteFile and journaledMutation in %s; route the mutation through one of them",
+				t.Errorf("%s reaches the undo journal directly through %s — capture belongs to writeTarget.write and writeTarget.journaled in %s; route the mutation through one of them",
 					name, site, undoFunnelFile)
 			}
 		}
@@ -1013,7 +1016,7 @@ func TestUndoJournalCoversEveryWriter(t *testing.T) {
 
 			step, ok := journal.Preview()
 			if !ok || len(step.Changes) == 0 {
-				t.Fatalf("%s mutated the workspace and left no undo record — it writes past safeWriteFile and journaledMutation; route it through one of them", name)
+				t.Fatalf("%s mutated the workspace and left no undo record — it writes past writeTarget.write and writeTarget.journaled; route it through one of them", name)
 			}
 		})
 	}

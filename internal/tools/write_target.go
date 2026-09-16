@@ -5,6 +5,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+
+	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ----------------------------------------------------------------------------
@@ -19,8 +22,11 @@ import (
 // it got back, so the six things a write verb does to its path can never be six resolutions of it.
 //
 // The fence itself is unchanged: every method reaches the filesystem through the same os.Root-pinned
-// primitives the free functions in path_safety.go reach, and the two of those the undo capture still
-// takes by argument and root (readWriteTarget, currentPerm) are one-line shims over these methods.
+// primitives path_safety.go's free functions reach. What the value ADDS is the undo capture (ADR
+// 0051): write and journaled are the package's two write funnels, and the capture they take — a
+// pre-image read through the value before the mutation, committed through it after — is a method of
+// the value, so a writer that holds one cannot land bytes past the journal without also spelling a
+// capture call of its own, which TestUndoCaptureHasExactlyTwoCallers refuses outside this file.
 
 // errPathRequired is the refusal every single-path writer spells for an empty argument, answered by
 // writeScope.target so a tool reads it off the one error return rather than checking first. It is a
@@ -28,25 +34,24 @@ import (
 var errPathRequired = errors.New("path is required")
 
 // writeScope is what ONE execution of a write tool may write, and through which fence: the
-// workspace root, and the one resolved out-of-workspace path an approved escape permits (ADR
-// 0049; "" for every ordinary call). It is built per call from the execution context because the
-// permit is stamped there by dispatch (writeScopeOf), and holds nothing a tool could not read for
-// itself — its job is to answer the question once and hand every later operation the same answer.
-//
-// ctx rides along ONLY for the undo funnels: capture still lives in path_safety.go and reads the
-// journal and the permit off the context (safeWriteFile, journaledMutation — ADR 0051), so write
-// and journaled hand it on unchanged. When capture becomes structural the journal joins the scope
-// beside the permit and the context leaves it.
+// workspace root, the one resolved out-of-workspace path an approved escape permits (ADR 0049; ""
+// for every ordinary call), and the undo journal recording this execution (ADR 0051; nil outside an
+// engine, or under one that keeps none). It is built per call from the execution context because
+// the permit and the journal are stamped there by dispatch (writeScopeOf), and holds nothing a tool
+// could not read for itself — its job is to answer the question once and hand every later operation
+// the same answer. The context itself does not ride along: everything the value needs of it is read
+// here, once.
 type writeScope struct {
-	ctx    context.Context
-	root   string
-	permit string
+	root    string
+	permit  string
+	journal *undo.Journal
 }
 
 // writeScopeOf reads the scope of one execution off its context: the workspace root the tool was
-// built with and the approved-escape permit dispatch stamped for THIS call, if any.
+// built with, the approved-escape permit dispatch stamped for THIS call, if any, and the undo
+// journal the engine put in force, if any.
 func writeScopeOf(ctx context.Context, root string) writeScope {
-	return writeScope{ctx: ctx, root: root, permit: writeEscapeTarget(ctx)}
+	return writeScope{root: root, permit: writeEscapeTarget(ctx), journal: undo.FromContext(ctx)}
 }
 
 // target resolves the one argument the marker names into the value every later operation of this
@@ -181,34 +186,307 @@ func (t writeTarget) note() string {
 	return " → resolves to " + t.Real
 }
 
-// write lands data on this target with perm through the TOCTOU-safe funnel (safeWriteFile): the
-// workspace fence — or the approved escape's permitted target — is enforced AT WRITE TIME through
-// an os.Root, parent directories are created within the same fence, and the undo journal takes its
-// pre-image before and its record after (ADR 0051). A virtual-mount reference is refused before
-// anything happens.
+// ----------------------------------------------------------------------------
+// The two write funnels (ADR 0051)
+// ----------------------------------------------------------------------------
+//
+// Every byte a write verb lands goes through one of the two methods below, and the undo journal
+// takes its pre-image inside them: the bytes a mutation is about to replace are read BEFORE it and
+// recorded only AFTER it succeeded, so a refused write journals nothing. write is the funnel of the
+// content verbs — write_file and the three edit tools, which hold the bytes they land — and
+// journaled is its sibling for the verbs that move or remove whole files, none of which hold in
+// memory the bytes they land. Because every writer reaches the filesystem through one of the two,
+// that is two capture sites rather than seven.
+
+// write lands data on this target with perm through the shared TOCTOU-safe guard: the workspace
+// fence — or the approved escape's permitted target — is enforced AT WRITE TIME (os.Root-pinned), so
+// a symlinked path component swapped to point outside the root — including a concurrent swap by a
+// confined subprocess — is refused rather than followed (security review H1), and parent
+// directories are created within the same fence.
+//
+// A target spelled as a virtual-mount reference is refused before anything else happens
+// (refuseVirtual): those trees are read-only by construction, and resolving `shipped:…` as an
+// ordinary relative name would create a colon-named file inside the workspace and report the write
+// as landed.
+//
+// The permit handed to security is the scope's approved-escape target (ADR 0049): empty for every
+// ordinary call, so the workspace root alone bounds the write exactly as it always did, and
+// otherwise the ONE resolved path the operator was shown and approved — which security re-resolves
+// the argument against before anything lands.
 func (t writeTarget) write(data []byte, perm os.FileMode) error {
-	return safeWriteFile(t.scope.ctx, t.input, t.scope.root, data, perm)
+	if err := t.refuseVirtual(); err != nil {
+		return err
+	}
+	pre := t.capturePreImage()
+	if err := security.SafeWriteFile(t.scope.root, t.input, data, perm, t.scope.permit); err != nil {
+		return err
+	}
+	pre.commit(data, true)
+	return nil
+}
+
+// postImage says how a mutated path's after-state reaches the journal once the body of a
+// journaled mutation has landed it. There is deliberately no "bytes the caller already holds"
+// case: that is write's shape, and a verb that holds its own post-bytes belongs there.
+type postImage int
+
+const (
+	// postAbsent is the path the mutation removed — a delete's target, a move's source. Its
+	// record's post-state is "nothing", which is what makes an undo put the file back.
+	postAbsent postImage = iota
+	// postReadBack is the path the mutation landed bytes on that this process never held — a
+	// copy's or a move's destination — so the journal reads them back off the file it left.
+	postReadBack
+)
+
+// journaled runs body as a mutation of this ONE target that lands or removes bytes this process
+// never holds — a delete, or one end of a copy or move — through the sibling funnel
+// (journaledTargets): the pre-image is captured before body runs, body is handed the
+// approved-escape target (ADR 0049), and the record is committed under post only when body reports
+// the target landed. body's error is returned unchanged; the fence primitive stays body's choice.
+func (t writeTarget) journaled(post postImage, body func(escape string) (landed bool, err error)) error {
+	paths := []journaledPath{{target: t, post: post}}
+	return journaledTargets(t.scope.permit, paths, func(escape string) ([]bool, error) {
+		landed, err := body(escape)
+		return []bool{landed}, err
+	})
+}
+
+// journaledPath is one path a multi-path mutation touches, as the VALUE the funnel captures its
+// pre-image through and reads its post-image back through, under its post-image policy.
+type journaledPath struct {
+	target writeTarget
+	post   postImage
+}
+
+// journaledTargets is the multi-path form of journaled, and the funnel proper: copy_file, move_file
+// and delete_file land bytes this process never holds, and one of them changes two paths. It
+// captures a pre-image for EVERY path before body runs, hands body the approved-escape target
+// (ADR 0049), then commits exactly the paths body reports as landed — each under its own post-image
+// policy — and returns body's error unchanged.
+//
+// landed carries one entry per path, in paths' order; a nil or short slice means the missing paths
+// did not land. It is REPORTED rather than inferred from err because a move can fail half way —
+// the copy landed, the removal was refused — and the journal has to keep the half that really
+// happened while the call still reports the failure.
+//
+// Capturing before body is the load-bearing ordering: after a move the source does not exist and
+// the destination holds the source's bytes, so neither pre-image is recoverable from the
+// filesystem the mutation leaves behind. A landed path whose read-back fails journals nothing, for
+// the reason an unreadable pre-image does: a record that describes a file it does not match turns
+// every later undo of that path into a conflict it never had.
+//
+// The fence primitive stays the BODY's choice — security.SafeRename, SafeCopyFileFrom and
+// SafeRemove differ in what they take and in how their failures triage — so this owns only the
+// capture and the commit. Outside an engine, or under one that keeps no journal, every capture is
+// nil and body runs byte-for-byte as it would have alone.
+func journaledTargets(
+	escape string,
+	paths []journaledPath,
+	body func(escape string) (landed []bool, err error),
+) error {
+	for _, path := range paths {
+		// Every path here is one this mutation WRITES, so a virtual-mount reference is refused
+		// before anything is captured: the mounts are read-only by construction, and a copy,
+		// move or delete that resolved `shipped:…` as an ordinary relative name would touch a
+		// colon-named file inside the workspace instead (path_virtual.go).
+		if err := path.target.refuseVirtual(); err != nil {
+			return err
+		}
+	}
+
+	captured := make([]*preImage, len(paths))
+	for i, path := range paths {
+		captured[i] = path.target.capturePreImage()
+	}
+
+	landed, err := body(escape)
+
+	for i, path := range paths {
+		if i >= len(landed) || !landed[i] {
+			continue
+		}
+		switch path.post {
+		case postAbsent:
+			captured[i].commit(nil, false)
+		case postReadBack:
+			captured[i].commitReadBack()
+		}
+	}
+	return err
+}
+
+// mutationPath names one path a multi-path mutation touches BY ARGUMENT, in the spelling and under
+// the root that mutation reaches it through — the form journaledMutation takes from the verbs that
+// assemble their paths rather than hold one value: a directory copy's N destinations, and a move's
+// two ends, whose source is spelled by argument and root because a move's source is not a write
+// target the marker resolves (destinationArgWriteTarget). input is the ARGUMENT's spelling rather
+// than its resolution because the funnel resolves the value from it exactly as the verb resolves
+// its own argument (writeScope.target), and root rides beside it because each path in the slice
+// names the root it was spelled under.
+type mutationPath struct {
+	input string
+	root  string
+	post  postImage
 }
 
 // mutation is this target as ONE path of a multi-path mutation (journaledMutation): the argument's
 // spelling and the root the funnel captures its pre-image through and reads its post-image back
 // through, under post. It is the value's MULTI-PATH form — a copy's directory form hands the funnel
 // N destinations and a move its two ends, so those verbs assemble the slice from their values and
-// keep the funnel's own body shape (one landed flag per path), where journaled below is the
+// keep the funnel's own body shape (one landed flag per path), where journaled above is the
 // one-target case.
 func (t writeTarget) mutation(post postImage) mutationPath {
 	return mutationPath{input: t.input, root: t.scope.root, post: post}
 }
 
-// journaled runs body as a mutation of this ONE target that lands or removes bytes this process
-// never holds — a delete, or one end of a copy or move — through the sibling funnel
-// (journaledMutation): the pre-image is captured before body runs, body is handed the
-// approved-escape target (ADR 0049), and the record is committed under post only when body reports
-// the target landed. body's error is returned unchanged; the fence primitive stays body's choice.
-func (t writeTarget) journaled(post postImage, body func(escape string) (landed bool, err error)) error {
-	paths := []mutationPath{t.mutation(post)}
-	return journaledMutation(t.scope.ctx, paths, func(escape string) ([]bool, error) {
-		landed, err := body(escape)
-		return []bool{landed}, err
+// journaledMutation is journaledTargets spelled by argument and root, for the verbs that assemble
+// a path slice (mutationPath): each path becomes the target the execution's scope answers for it —
+// the same resolution every write verb makes for its own argument — and the mutation runs over
+// those values. ctx is where the scope is read from: the approved-escape target body is handed and
+// the journal every capture records into. An empty spelling is refused as the value refuses it
+// (errPathRequired) before anything is captured; every verb refuses one earlier itself.
+func journaledMutation(
+	ctx context.Context,
+	paths []mutationPath,
+	body func(escape string) (landed []bool, err error),
+) error {
+	targets := make([]journaledPath, len(paths))
+	for i, path := range paths {
+		target, err := writeScopeOf(ctx, path.root).target(path.input)
+		if err != nil {
+			return err
+		}
+		targets[i] = journaledPath{target: target, post: path.post}
+	}
+	return journaledTargets(writeEscapeTarget(ctx), targets, body)
+}
+
+// ----------------------------------------------------------------------------
+// The undo capture (ADR 0051)
+// ----------------------------------------------------------------------------
+//
+// `/undo` restores what the agent's writes replaced, and the only bytes that can do that are
+// the ones that were there BEFORE the write. So the funnel reads them on the way in, holds
+// them while the mutation runs, and hands them to the journal only once the mutation has
+// actually landed. The two halves are deliberately separate calls: everything that could go
+// wrong — a fence refusal, a symlinked parent, a full disk — happens between them, and each
+// of those must leave the journal untouched, because a record claiming a change that never
+// happened would make a later undo write stale bytes over a file nobody edited.
+//
+// Nothing here is a precondition of the write. A call outside an engine, or under an engine
+// that keeps no journal, produces a nil preImage whose commit does nothing, and the mutation
+// behaves byte-for-byte as it did before this existed.
+
+// preImage is one pending journal record: what a mutation is about to replace, plus the value the
+// mutation reached it through — whose scope carries the root and approved-escape permit a revert
+// has to go back through to reach the same file the write reached, and whose read is the fence a
+// read-back (commitReadBack) goes through. It exists only between the capture and the commit.
+type preImage struct {
+	target    writeTarget
+	path      string
+	permitted string
+	data      []byte
+	existed   bool
+	perm      os.FileMode
+}
+
+// capturePreImage reads the current bytes of the file a mutation of this target is about to
+// change, through the same fence THAT mutation writes through (read, which follows an approved
+// escape to its permitted target and nowhere else).
+//
+// It answers nil — journal nothing — in two cases: no journal is recording, or the current bytes
+// could not be read for any reason OTHER than the file being absent. The second is the
+// load-bearing refusal: a pre-image
+// that is a guess would make a later undo destroy content rather than restore it, so an
+// unreadable target is left out of the journal entirely and the write proceeds unchanged.
+func (t writeTarget) capturePreImage() *preImage {
+	if t.scope.journal == nil {
+		return nil
+	}
+	path, permitted := t.journalTarget()
+	data, err := t.read()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	captured := &preImage{
+		target:    t,
+		path:      path,
+		permitted: permitted,
+		data:      data,
+		existed:   err == nil,
+	}
+	if captured.existed {
+		captured.perm = t.perm()
+	}
+	return captured
+}
+
+// commit records the completed mutation against the pre-image this value captured. Call it
+// ONLY after the mutation succeeded — that ordering is the whole reason capture and commit are
+// two calls. post is the content the mutation left and exists says whether it left any (false
+// for a removal).
+//
+// The record's restore mode is the PRE-IMAGE's own, never one the caller supplies: the journal
+// consults that mode only to recreate a file a revert RESTORES, and a revert restores only a
+// path whose pre-image existed — so the mode that file already carried is the only answer that
+// can be right, for a deletion and an overwrite alike.
+//
+// A nil receiver is the "nothing is recording" case and does nothing, so a caller journals by
+// writing one unconditional line rather than by branching around the journal.
+func (p *preImage) commit(post []byte, exists bool) {
+	if p == nil {
+		return
+	}
+	p.target.scope.journal.Record(undo.Mutation{
+		Root:       p.target.scope.root,
+		Path:       p.path,
+		Permitted:  p.permitted,
+		Perm:       p.perm,
+		Pre:        p.data,
+		PreExisted: p.existed,
+		Post:       post,
+		PostExists: exists,
 	})
+}
+
+// commitReadBack records the completed mutation with its post-image READ BACK from the file the
+// mutation left behind — the form the two byte-moving verbs need, since copy_file and move_file
+// never hold in memory the bytes they land. The read goes through the same fence the mutation
+// wrote through, so it sees exactly the file the mutation wrote.
+//
+// A read-back that fails journals NOTHING, for the same reason an unreadable pre-image does: a
+// post-hash that is a guess describes a file the record does not actually match, and every later
+// undo of that path would be refused as a conflict it never had.
+func (p *preImage) commitReadBack() {
+	if p == nil {
+		return
+	}
+	data, err := p.target.read()
+	if err != nil {
+		return
+	}
+	p.commit(data, true)
+}
+
+// journalTarget answers the pair a journal record identifies this mutation by: the absolute
+// path that IS the record's identity, and the approved-escape permit a revert must carry to
+// reach it (empty for every ordinary write).
+//
+// The ordinary answer is the path the argument NAMES, root-joined and cleaned — not its
+// symlink-resolved twin — because that is the spelling internal/security's fenced primitives
+// take: they relativise it against the workspace root lexically, so a revert handed a resolved
+// path would be refused as an escape on any host whose root is itself reached through a
+// symlink (macOS /tmp). The approved escape is the one exception and takes the RESOLVED path,
+// because that is what the permit names and what the approval pane disclosed (ADR 0049) — and
+// it is recognised by exactly the test pin uses, so a record can never claim a permit the write
+// itself did not run under.
+func (t writeTarget) journalTarget() (path, permitted string) {
+	if t.scope.permit == "" || t.Real != filepath.Clean(t.scope.permit) {
+		return t.Named, ""
+	}
+	if _, err := resolveInRoot(t.input, t.scope.root); err == nil {
+		return t.Named, ""
+	}
+	return t.Real, t.scope.permit
 }

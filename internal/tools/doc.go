@@ -137,12 +137,12 @@
 // write here; a move renames, falling back to copy-then-remove for a filesystem that cannot
 // rename across the two paths. They carry the workspaceScopedWriter marker, and it resolves their
 // DESTINATION — where the write lands — because the source is fenced by the operation itself
-// (destinationArgWriteTarget, workspace_scoped.go). Neither reaches safeWriteFile — a copy and a
+// (destinationArgWriteTarget, workspace_scoped.go). Neither reaches writeTarget.write — a copy and a
 // move never hold in memory the bytes they land — so both take their undo pre-images through that
-// funnel's SIBLING, journaledMutation (path_safety.go — ADR 0051), which captures every path a
-// mutation touches before its body runs and commits exactly the ones the body reports as landed.
-// The two are the whole of this package's undo capture, which
-// TestUndoCaptureHasExactlyTwoCallers keeps true. copy_file hands the funnel its DESTINATION
+// funnel's SIBLING, the value's journaled method in its multi-path form, journaledMutation
+// (write_target.go — ADR 0051), which captures every path a mutation touches before its body runs
+// and commits exactly the ones the body reports as landed. The two are the whole of this package's
+// undo capture, which TestUndoCaptureHasExactlyTwoCallers keeps true. copy_file hands the funnel its DESTINATION
 // alone, since a copy's source is a read; move_file hands it BOTH ends as two records — the
 // source post-absent, the destination holding the moved bytes — identically on the rename fast
 // path and the copy-then-remove fallback. Each half is committed only once the body reports THAT
@@ -206,7 +206,7 @@
 //
 // Thirty-three files carry the built-ins, grouped by what a call to them can do — which is
 // also what the dispatch disposition keys on (ADR 0012). A file holds a tool FAMILY, not
-// always a single tool: the two-tool file_ops.go and the five-tool git.go each keep a
+// always a single tool: the two-tool file_ops.go and the six-tool git.go each keep a
 // family's shared argument shape and error wording in one place.
 //
 // Reading and discovery. read_file.go is read_file, the line-spanned read that attaches a
@@ -300,13 +300,9 @@
 // one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
 // calling the same names while the rule lives in one place — plus the approved escape's
 // tools-side read (ADR 0049), which hands the security core the one permitted out-of-workspace
-// target and pins the write family's own read-back and pre-flight stat to it. It also holds BOTH
-// undo write funnels: safeWriteFile, the one filesystem reach of the content verbs (write_file
-// and the three edit tools, which hold the bytes they land), and journaledMutation, the sibling
-// for the multi-path verbs (copy_file, move_file, delete_file, which land bytes this process
-// never holds and may touch two paths over two roots) — the two are the ONLY callers of
-// capturePreImage / commit / commitReadBack, which is what makes them the whole of this
-// package's undo capture (ADR 0051 §3). path_read.go is
+// target and pins the write family's own read-back and pre-flight stat to it. The undo write
+// funnels are NOT here: they are the write-side value's own methods (write_target.go), where the
+// capture is a method of the value every writer holds (ADR 0051 §3). path_read.go is
 // the READ half carved out beside it: the one-handle bounded read every read tool goes through,
 // the binary sniff grep and read_file share (looksBinary), the model-facing wording a fenced
 // failure is rendered as, and readScope — the READ-only
@@ -333,12 +329,19 @@
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on. write_target.go is the WRITE side's scope value, readScope's
-// twin: writeScope, what one execution may write and through which fence (the root and the
-// approved-escape permit), and the writeTarget methods a write verb goes through once it has
-// asked its scope for the call's argument — read, stat, perm, refuseVirtual, notFound, note,
-// write, journaled and mutation — so a verb's every reach for its path is the one resolution
-// dispatch classified; path_safety.go's readWriteTarget and currentPerm are its free-function
-// spellings for the undo capture, which still takes its pre-image by argument and root.
+// twin: writeScope, what one execution may write and through which fence (the root, the
+// approved-escape permit and the undo journal, read off the context once), and the writeTarget
+// methods a write verb goes through once it has asked its scope for the call's argument — read,
+// stat, perm, refuseVirtual, notFound, note, write, journaled and mutation — so a verb's every
+// reach for its path is the one resolution dispatch classified. It also holds BOTH undo write
+// funnels (ADR 0051): write, the one filesystem reach of the content verbs (write_file and the
+// three edit tools, which hold the bytes they land), and journaled with its multi-path form
+// journaledTargets — spelled by argument as journaledMutation for the verbs that assemble a path
+// slice (mutationPath) — for copy_file, move_file and delete_file, which land bytes this process
+// never holds and may touch two paths. The capture the two take — capturePreImage on the value,
+// commit and commitReadBack on the preImage it returns — lives beside them, and
+// TestUndoCaptureHasExactlyTwoCallers refuses any spelling of it outside this file, which is what
+// makes the two funnels the whole of this package's undo capture.
 // readonly_subprocess.go is its sibling on the READ side: the
 // unexported readOnlySubprocess marker and IsReadOnlySubprocess, which say that a subprocess call
 // is one of apogee's own hardened read-side git reads — and with it the minting conditions a tool

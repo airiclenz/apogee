@@ -725,7 +725,9 @@ it without re-deciding.
 > **write-escape permit** on the context (`domain.WriteEscapePermit`, the §10 `SubprocessPermit`
 > idiom) pinned to the one disclosed `writeTarget.Real` for the duration of one tool execution.
 > `internal/tools/write_file.go:88` — and every other member of the family — mutates through
-> `safeWriteFile` (`internal/tools/path_safety.go:62`), which reads the permit off the execution
+> `safeWriteFile` (`internal/tools/path_safety.go:62`; since 2026-09-16 the write-side value's own
+> `writeTarget.write`, `internal/tools/write_target.go`, whose scope read the permit off the
+> execution context once), which reads the permit off the execution
 > context and hands its `Real` to the security core, where `openMutationRoot`
 > (`internal/security/writepermit.go:71`) is the single place the fence decides which `os.Root`
 > bounds a mutation. The branch is chosen by **resolved target**, asked first: an argument that
