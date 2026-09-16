@@ -341,7 +341,11 @@ cmd/apogee/schedule.go — scheduleWiring.fire, firingSpend; internal/schedule/s
 
 **Commit:** `refactor(cmd): one Firing account — Outcome carries what the Firing wrote and how to undo it`
 
-## 9. The in-session Firing block shows what an Auto Firing changed
+## 9. The in-session Firing block shows what an Auto Firing changed — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the plan's second test case names `UndoNote`, which `schedule.Outcome` does not carry (item 8 folded that gate into the runner's `undoCommand`); the case is pinned as the Outcome expresses it — `Wrote` set with an empty `UndoCommand` renders the files and no undo line (`TestScheduleFiringWithNoUndoOfferListsTheFilesAlone`).
+NOTES (2026-09-16): the changed lines and the undo line land between the anomalies and the record pointer, so the pointer keeps closing the block; each path and the command are flattened to one row (`flattenField`, the fault line's rule) before the seam's escape strip — a body-row test pins both.
+NOTES (2026-09-16): consequential edit — layout.md: made necessary by the two new body lines in the firing-block paragraph it specifies.
 
 **What.** Depends on item 8. `internal/tui/schedule.go` (`enrichWithFiring` and the block renderer)
 renders `Outcome.Wrote` as the changed-files list and `Outcome.UndoCommand` as the undo line, in the

@@ -1138,6 +1138,11 @@ final Turn), the line naming why it was
 abandoned when one was (`final turn abandoned — …`, the lead alone when the fault named no cause),
 one line for each thing the run found WRONG with the workspace's context files (`context: AGENTS.md
 unreadable — …`, the standing-content warning) and none at all when the loading went as expected,
+what an Auto Firing **changed** on disk (`changed — 2 files:` over one indented path per line, in
+the order the run first wrote each — "changed", since a deletion's target and a move's source ride
+in the list too) with the exact revert beneath it (`undo with: apogee undo <record-id>`, the very
+command the headless and daemon reports name, and no line when the runner had none to offer),
+neither shown at all on a run that wrote nothing,
 and the record pointer (`saved as "…" — find it in /sessions`), dropped when nothing was persisted.
 A failed Firing words its branch `error: …` and shows no answer — a partial answer under an error
 reads as a result — while keeping the stats and any salvaged pointer. The `⟳` is **static**: the

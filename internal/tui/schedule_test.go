@@ -825,6 +825,128 @@ func TestScheduleFiringStripsEscapesInTheContextAnomalies(t *testing.T) {
 	}
 }
 
+// What an Auto Firing CHANGED on disk and the command that puts it back land after the anomalies and
+// ahead of the record pointer: a header counting the paths, one indented path per line in the order
+// the run first wrote each, then the exact `apogee undo <record-id>` the runner composed. The block
+// is the one place this session shows a write nobody watched, so the whole of it is pinned: a fault
+// above, the pointer below, and the two new lines between them in the block's own voice.
+func TestScheduleFiringListsWhatItChangedAndTheUndoVerb(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the notes")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: 4 * time.Second,
+		Outcome: schedule.Outcome{
+			RecordID: "s1", Title: "nightly tidy — 14:05", FinalText: "tidied", Turns: 2,
+			ContextAnomalies: []string{"context: BROKEN.md unreadable — permission denied"},
+			Wrote:            []string{"notes/today.md", "notes/old.md"},
+			UndoCommand:      "apogee undo s1",
+		},
+	}})
+
+	e := lastEntry(t, m)
+	want := []string{
+		"prompt: tidy the notes",
+		"2 turns · 4s",
+		"context: BROKEN.md unreadable — permission denied",
+		"changed — 2 files:",
+		"  notes/today.md",
+		"  notes/old.md",
+		"undo with: apogee undo s1",
+		`saved as "nightly tidy — 14:05" — find it in /sessions`,
+	}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the changed list and the undo verb between the anomalies and the record %q", got, want)
+	}
+}
+
+// A Firing whose writes have no revert to offer — the runner composed no command, because its
+// journal was the in-memory funnel one (run.Result.UndoNote) or it persisted no record — still lists
+// what it changed and offers nothing beneath: the block renders the account it is handed and never
+// composes a verb of its own, so a human is not sent to a command that answers "nothing to undo".
+// A single path takes the singular header.
+func TestScheduleFiringWithNoUndoOfferListsTheFilesAlone(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the notes")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Elapsed: time.Second,
+		Outcome: schedule.Outcome{
+			RecordID: "s1", FinalText: "tidied", Turns: 1,
+			Wrote: []string{"notes/today.md"},
+		},
+	}})
+
+	e := lastEntry(t, m)
+	want := []string{
+		"prompt: tidy the notes",
+		"1 turn · 1s",
+		"changed — 1 file:",
+		"  notes/today.md",
+		"saved — find it in /sessions",
+	}
+	if got := firingBody(e); !slices.Equal(got, want) {
+		t.Errorf("body = %q, want the changed list and no undo line %q", got, want)
+	}
+}
+
+// A Firing that recorded no write shows no changed line at all — not a "0 files" header — so a
+// read-only run's block reads exactly as it did before the list existed
+// (TestScheduleFiringCompletesInPlace pins that whole body; this is the negative stated where the
+// pair is read).
+func TestScheduleFiringWithNoWritesShowsNoChangedLine(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{RecordID: "s1", FinalText: "the log is clean", Turns: 1},
+	}})
+
+	for _, line := range firingBody(lastEntry(t, m)) {
+		if strings.HasPrefix(line, scheduleChangedLead) || strings.HasPrefix(line, scheduleUndoLead) {
+			t.Errorf("body line %q reports a change on a run that wrote nothing", line)
+		}
+	}
+}
+
+// The changed paths and the undo command are RAW text like the anomalies — a path traces to a
+// model-chosen tool argument, the id to the record — so they are escape-stripped at the block's own
+// sanitize seam and nowhere earlier, and a line break inside either is flattened into the one row
+// the block authored for it rather than becoming a row the block did not.
+func TestScheduleFiringStripsEscapesInTheChangedLines(t *testing.T) {
+	m := scheduleModel(t, &fakeScheduler{}, "")
+	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the notes")
+
+	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
+		Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly tidy",
+		Outcome: schedule.Outcome{
+			RecordID:    "s1",
+			Wrote:       []string{"notes/\x1b]52;c;x\x07today\nevil.md"},
+			UndoCommand: "apogee undo \x1b[2Js1\nrm -rf /",
+		},
+	}})
+
+	e := lastEntry(t, m)
+	body := detailsText(e.tool)
+	if strings.ContainsRune(body, 0x1b) {
+		t.Errorf("an ESC byte reached the block through a changed line: %q", body)
+	}
+	got := firingBody(e)
+	if !slices.ContainsFunc(got, func(line string) bool {
+		return strings.HasPrefix(line, scheduleChangedIndent+"notes/") && strings.HasSuffix(line, "today evil.md")
+	}) {
+		t.Errorf("the path did not land as one stripped, flattened row: %q", got)
+	}
+	if !slices.ContainsFunc(got, func(line string) bool {
+		return strings.HasPrefix(line, scheduleUndoLead+"apogee undo ") && strings.HasSuffix(line, "s1 rm -rf /")
+	}) {
+		t.Errorf("the command did not land as one stripped, flattened row: %q", got)
+	}
+}
+
 // What the run COST joins the stats line after the denial cell and before the faulted one, so the
 // faulted cell stays the line's last word however much the line gained (layout.md). Both readings
 // are self-hiding, which is why a faulted Firing that also spent tokens is the case worth pinning:

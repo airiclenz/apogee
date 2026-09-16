@@ -430,6 +430,23 @@ const scheduleFaultedCell = "faulted"
 // sentence on its own so a fault that surfaced no cause still says what happened.
 const scheduleFaultLead = "final turn abandoned"
 
+// scheduleChangedLead opens the body line that heads what an Auto Firing CHANGED on disk, before
+// the count and the one-path-per-line list beneath it. "changed", not "wrote", because the list is
+// exactly schedule.Outcome.Wrote — the write funnel journals a deletion's target and a move's
+// source as well as a creation — so a "wrote" header over a removed path would be a lie (the
+// unattended Drivers' writtenFilesLines makes the same call).
+const scheduleChangedLead = "changed"
+
+// scheduleChangedIndent sets each changed path in from the header above it, so the list reads as
+// the header's own and a path is never mistaken for a body line the block worded itself.
+const scheduleChangedIndent = "  "
+
+// scheduleUndoLead opens the body line offering the revert those changes can still have — the
+// exact `apogee undo <record-id>` the runner composed (schedule.Outcome.UndoCommand). The same
+// words the unattended Drivers print (undoVerbLine), so every Driver offers one spelling of the
+// verb.
+const scheduleUndoLead = "undo with: "
+
 // addFiring appends the block one starting Firing gets, carrying the ScheduleID as its pairing key
 // (entry.callID) and the prompt as its body. It is left `!done`: the block is open until the
 // Firing's completed or failed Event enriches it, which is what enrichFiring scans for.
@@ -501,15 +518,17 @@ func presentFiring(ev schedule.Event) toolView {
 // fills the branch row's outcome slot and is read without a click, while a longer one sits
 // wholly behind the "+N more lines" marker until the block is opened. Everything the block already
 // held — the prompt — keeps its place beneath, and the facts a human judges a Firing by close it:
-// what it cost, why its final Turn was abandoned when one was, and where the record is.
+// what it cost, why its final Turn was abandoned when one was, what it changed on disk and how to
+// put that back, and where the record is.
 //
 // A failure words the summary itself and shows no answer: the error is what happened, and a partial
 // answer under an "error:" line would read as a result. The stats, what the run could not read of
-// the workspace's context files, and any salvaged record pointer still land, because a failed
-// Firing that got half way is exactly the one worth opening.
+// the workspace's context files, what it changed, and any salvaged record pointer still land,
+// because a failed Firing that got half way is exactly the one worth opening — and the one whose
+// half-finished writes most need to be seen.
 func (tv *toolView) enrichWithFiring(ev schedule.Event) {
 	defer tv.finishDisplay(workspaceRoot{})
-	lines := make([]detailLine, 0, tv.Details.len()+4+len(ev.Outcome.ContextAnomalies))
+	lines := make([]detailLine, 0, tv.Details.len()+6+len(ev.Outcome.ContextAnomalies)+len(ev.Outcome.Wrote))
 	if ev.Kind == schedule.EventFailed {
 		tv.Summary = namedSummary(detailLine{Text: "error: " + scheduleErrText(ev.Err)})
 	} else {
@@ -530,6 +549,16 @@ func (tv *toolView) enrichWithFiring(ev schedule.Event) {
 	// escape-stripped with them at this block's own sanitize seam.
 	for _, anomaly := range ev.Outcome.ContextAnomalies {
 		lines = append(lines, detailLine{Text: anomaly})
+	}
+	// What the run CHANGED on disk and the command that puts it back — the Firing's half of the
+	// account both unattended Drivers already print (writtenFilesLines, undoVerbLine). An Auto
+	// Firing is the one run in this session nobody watched write, so the block that announces it is
+	// where its writes have to be visible; a run that recorded none shows nothing, the header
+	// included. RAW text like the anomalies — a path traces to a model-chosen tool argument, the
+	// id to the record — landed and escape-stripped with them at this block's own sanitize seam.
+	lines = append(lines, firingChangedLines(ev.Outcome.Wrote)...)
+	if ev.Outcome.UndoCommand != "" {
+		lines = append(lines, detailLine{Text: firingUndoLine(ev.Outcome.UndoCommand)})
 	}
 	if ev.Outcome.RecordID != "" {
 		lines = append(lines, detailLine{Text: firingRecordLine(ev.Outcome.Title)})
@@ -628,6 +657,38 @@ func firingRecordLine(title string) string {
 		return "saved — find it in /sessions"
 	}
 	return fmt.Sprintf("saved as %q — find it in /sessions", title)
+}
+
+// firingChangedLines is what the Firing changed on disk as body lines: a header counting the paths
+// (schedule.Outcome.Wrote, in the order the run first wrote each), then one indented path per line.
+// Nothing at all for a run that recorded no write — a nil slice, not an empty header — which is what
+// lets a read-only Firing's block read exactly as it did before the list existed.
+//
+// Paths only, and no verb column: the session's own undo lines (undo.go) describe UNDOING a change
+// — `delete` for a created file, `restore` for a modified one — which is the opposite account of
+// the one these lines give. They say what happened; the revert is its own line beneath them
+// (firingUndoLine). Each path is flattened for the same reason the fault is (firingFaultLine): a
+// path is a NAME, so a line break inside one is a body row the block did not author. Clipped after,
+// so the clip counts the runes the row holds.
+func firingChangedLines(paths []string) []detailLine {
+	if len(paths) == 0 {
+		return nil
+	}
+	lines := make([]detailLine, 0, 1+len(paths))
+	lines = append(lines, detailLine{Text: scheduleChangedLead + " — " + plural(len(paths), "file") + ":"})
+	for _, path := range paths {
+		lines = append(lines, detailLine{Text: scheduleChangedIndent + clipDetail(flattenField(path))})
+	}
+	return lines
+}
+
+// firingUndoLine offers the revert the Firing's writes can still have: the exact
+// `apogee undo <record-id>` the runner composed and gated (schedule.Outcome.UndoCommand), under
+// the changed-files list it reverts. The block never composes the command itself — the runner
+// decides whether there is one to offer, and a surface that spelled its own would name a verb the
+// report would not. Flattened like the fault: the command is one row of the block's own.
+func firingUndoLine(command string) string {
+	return scheduleUndoLead + clipDetail(flattenField(command))
 }
 
 // ----------------------------------------------------------------------------
