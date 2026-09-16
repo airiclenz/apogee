@@ -2260,6 +2260,27 @@ func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 	}
 }
 
+// Every value of the pickerKind enum — pickerModel through the last declared constant — has a row
+// in pickerOfferings with all four answers filled in. The four lookups (pickerTitle, pickerHintFor,
+// pickerOfferingRows, acceptPicker) carry no missing-key branch on the strength of this test, so a
+// kind added to the enum without a row would fail here rather than as a nil call on the first ⏎.
+func TestEveryPickerKindHasAnOffering(t *testing.T) {
+	for kind := pickerModel; kind <= pickerFork; kind++ {
+		offering, ok := pickerOfferings[kind]
+		if !ok {
+			t.Errorf("pickerOfferings[%v]: no row", kind)
+			continue
+		}
+		if offering.title == nil || offering.hint == "" || offering.rows == nil || offering.accept == nil {
+			t.Errorf("pickerOfferings[%v] = {title:%v hint:%q rows:%v accept:%v}, want every answer filled in",
+				kind, offering.title != nil, offering.hint, offering.rows != nil, offering.accept != nil)
+		}
+	}
+	if got, want := len(pickerOfferings), int(pickerFork)+1; got != want {
+		t.Errorf("len(pickerOfferings) = %d, want %d — a row for every kind and nothing beyond the enum", got, want)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // Painting the filter — the line and its breathing room
 // ----------------------------------------------------------------------------

@@ -75,7 +75,8 @@ import (
 
 // pickerKind names WHICH offering an open picker is listing. It is an enum rather than a callback
 // field on the state so the Model keeps holding plain values only (ADR 0011) — every kind-specific
-// answer (the rows, the title, the accept) is one switch away.
+// answer (the title, the legend, the rows, the accept) is one table row away, in the package-level
+// [pickerOfferings]; the Model holds the kind and nothing that could point at a function.
 type pickerKind int
 
 const (
@@ -142,25 +143,163 @@ const maxPickerRows = 8
 // nowhere else the way "↑/↓" and "esc" do. What follows the segment is what differs by kind.
 const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 
-// pickerHintFor names what ⏎ does on the open kind. /schedule's two popups answer a question rather
-// than move anything (the Schedule is created after the LAST of them), /effort's ⏎ chooses a level
-// for a dial this session already has rather than re-pointing the session at anything, and
-// /schedule-stop's ⏎ ends something and /fork's ⏎ makes something (fork.go) — four verbs, because a
-// legend that promised a switch would be wrong on every kind that is not one.
+// pickerChooseHint and pickerStopHint are the legends for the kinds whose ⏎ answers a question
+// rather than moving the session: "choose" where a row is an answer (/schedule's two popups, /effort,
+// /sub-agents-server, the mode marker), "stop" where it ends something (/schedule-stop). The key
+// migration offers carry their own (keyMigrationHint) and /fork its "⏎ fork" (forkPickerHint) — four
+// verbs, because a legend that promised a switch would be wrong on every kind that is not one.
+const (
+	pickerChooseHint = "type to filter · ↑/↓ select · ⏎ choose · esc close"
+	pickerStopHint   = "type to filter · ↑/↓ select · ⏎ stop · esc close"
+)
+
+// pickerHintFor names what ⏎ does on the open kind — the legend its [pickerOfferings] row states.
 func pickerHintFor(k pickerKind) string {
-	switch k {
-	case pickerCycle, pickerScheduleMode, pickerEffort, pickerSubAgentsServer, pickerMode:
-		return "type to filter · ↑/↓ select · ⏎ choose · esc close"
-	case pickerSubAgentsMigration:
-		return keyMigrationHint
-	case pickerScheduleStop:
-		return "type to filter · ↑/↓ select · ⏎ stop · esc close"
-	case pickerKeyMigration:
-		return keyMigrationHint
-	case pickerFork:
-		return forkPickerHint
+	return pickerOfferings[k].hint
+}
+
+// pickerOffering is everything one [pickerKind] answers for itself: the pane's title, its key
+// legend, the FULL row list before the filter prunes it, and what ⏎ on a row does. rows and accept
+// take the Model rather than closing over it because the rows are DERIVED per frame from the state
+// they describe (the file's opening note), and accept takes the index into that OFFERING — the
+// highlight indexes the filtered rows and is mapped back before it gets here (acceptPicker) — so a
+// kind whose list is asked per draw re-reads it by that index at accept time rather than trusting
+// the frame that drew it.
+type pickerOffering struct {
+	title  func(Model) string
+	hint   string
+	rows   func(Model) []popupRow
+	accept func(Model, int) (tea.Model, tea.Cmd)
+}
+
+// fixedTitle is the title func of a kind whose pane is named by a constant — most of them; the
+// model picker names its host and the two migration offers name their entry, so those derive
+// theirs from the Model.
+func fixedTitle(title string) func(Model) string {
+	return func(Model) string { return title }
+}
+
+// pickerOfferings is the one table every kind-specific question is answered from — pickerTitle,
+// pickerHintFor, pickerOfferingRows and acceptPicker are each a lookup into it. It is package-level
+// and keyed by the enum precisely so that no function value ever sits on the Model (ADR 0011); every
+// value of [pickerKind] has a row here (TestEveryPickerKindHasAnOffering pins it), so the lookups
+// need no missing-key branch.
+//
+// It is filled in by init rather than by its declaration for settingsSteps' reason (settings.go): the
+// rows name Model methods that reach the painter (startProfileLoad → layout → renderPicker), and the
+// painter reads the table (pickerListContent → pickerHintFor) — a reference loop the compiler refuses
+// as an initialization cycle for a variable's initializer and permits for an init function, which
+// runs after every declaration has been initialized. The table is written once, here, and never
+// again.
+var pickerOfferings map[pickerKind]pickerOffering
+
+func init() {
+	pickerOfferings = map[pickerKind]pickerOffering{
+		pickerModel: {
+			title: func(m Model) string { return "switch model — " + hostDisplay(m.opts) },
+			hint:  pickerHint,
+			rows:  Model.modelRows,
+			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
+				return m.bindPickedModel(m.offeredModels()[offered])
+			},
+		},
+		pickerServer: {
+			title: fixedTitle("switch server"),
+			hint:  pickerHint,
+			rows:  Model.serverRows,
+			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
+				// The one kind whose list is asked per draw (ServerHost.List): the rows are re-read here
+				// rather than trusted from the frame that drew them, so a `servers:` block that shrank under
+				// the open overlay costs the accept and not the process.
+				servers := m.servers()
+				if offered >= len(servers) {
+					return m, nil
+				}
+				return m.switchToServer(servers[offered])
+			},
+		},
+		pickerLoad: {
+			title: fixedTitle(loadPickerTitle),
+			hint:  pickerHint,
+			rows:  Model.launchProfileRows,
+			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
+				return m.startProfileLoad(m.picker.profiles[offered].Name)
+			},
+		},
+		pickerCycle: {
+			title: fixedTitle("schedule — how often"),
+			hint:  pickerChooseHint,
+			rows:  func(Model) []popupRow { return cycleRows() },
+			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
+				return m.acceptCycle(scheduleCycles[offered])
+			},
+		},
+		pickerScheduleMode: {
+			title: fixedTitle("schedule — autonomy mode"),
+			hint:  pickerChooseHint,
+			rows:  func(m Model) []popupRow { return scheduleModeRows(m.opts.ScheduleAutoBlocked) },
+			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
+				return m.acceptScheduleMode(scheduleModes[offered])
+			},
+		},
+		pickerScheduleStop: {
+			title:  fixedTitle("stop a schedule"),
+			hint:   pickerStopHint,
+			rows:   func(m Model) []popupRow { return scheduleStopRows(m.liveSchedules()) },
+			accept: Model.acceptScheduleStop,
+		},
+		pickerKeyMigration: {
+			title:  Model.keyMigrationTitle,
+			hint:   keyMigrationHint,
+			rows:   func(m Model) []popupRow { return keyMigrationRows(m.opts.KeyMigration.StoreName) },
+			accept: Model.acceptKeyMigration,
+		},
+		pickerEffort: {
+			title:  fixedTitle("thinking effort — how hard the model thinks"),
+			hint:   pickerChooseHint,
+			rows:   func(m Model) []popupRow { return effortRows(m.effortSupport()) },
+			accept: Model.acceptEffort,
+		},
+		pickerSubAgentsServer: {
+			title: fixedTitle(subAgentsServerTitle),
+			hint:  pickerChooseHint,
+			rows:  Model.subAgentsServerRows,
+			accept: func(m Model, offered int) (tea.Model, tea.Cmd) {
+				// Re-read for pickerServer's reason and with the same answer: the targets are asked per
+				// draw, so a `servers:` block that shrank under the open overlay costs the accept and nothing
+				// more. The mapping past the last target is the effort picker's — absence, not an entry: the
+				// one row the offering appends is `auto`, which resolves to the empty name, and anything
+				// beyond it names no row at all and moves nothing.
+				targets := m.subAgentsTargets()
+				if offered < 0 || offered > len(targets) {
+					return m, nil
+				}
+				name := ""
+				if offered < len(targets) {
+					name = targets[offered].Name
+				}
+				return m.retargetSubAgents(name)
+			},
+		},
+		pickerSubAgentsMigration: {
+			title:  Model.subAgentsMigrationTitle,
+			hint:   keyMigrationHint,
+			rows:   func(m Model) []popupRow { return subAgentsMigrationRows(m.opts.SubAgentsMigration) },
+			accept: Model.acceptSubAgentsMigration,
+		},
+		pickerMode: {
+			title:  fixedTitle(modePickerTitle),
+			hint:   pickerChooseHint,
+			rows:   func(Model) []popupRow { return modeRows() },
+			accept: Model.acceptMode,
+		},
+		pickerFork: {
+			title:  fixedTitle(forkPickerTitle),
+			hint:   forkPickerHint,
+			rows:   func(m Model) []popupRow { return forkRows(m.transcript.forkPoints()) },
+			accept: Model.acceptFork,
+		},
 	}
-	return pickerHint
 }
 
 // currentRowCell marks the server row the session is already on. It is plain text, not styling:
@@ -885,65 +1024,19 @@ func (m Model) pickerWheel(msg tea.MouseWheelMsg) (Model, bool) {
 	return m, true
 }
 
-// acceptPicker resolves ⏎ on the highlighted row, by kind. The highlight indexes the FILTERED rows,
-// so it is mapped back to the offering it names (pickerView.offeringIndex) before any underlying
-// list is touched: with a filter set, "the third painted row" and "the third model advertised" are
-// different rows, and taking the second would move the session somewhere the human never saw. The
-// caller has already established that there is a row to take (pickerKey) and the selection is
-// clamped, so the mapping fails only on a list that emptied between the two reads.
+// acceptPicker resolves ⏎ on the highlighted row through the open kind's [pickerOfferings] row. The
+// highlight indexes the FILTERED rows, so it is mapped back to the offering it names
+// (pickerView.offeringIndex) before any underlying list is touched: with a filter set, "the third
+// painted row" and "the third model advertised" are different rows, and taking the second would move
+// the session somewhere the human never saw. The caller has already established that there is a row
+// to take (pickerKey) and the selection is clamped, so the mapping fails only on a list that emptied
+// between the two reads.
 func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 	offered, ok := m.pickerFilteredView().offeringIndex(m.picker.selected)
 	if !ok {
 		return m, nil
 	}
-	switch m.picker.kind {
-	case pickerModel:
-		picked := m.offeredModels()[offered]
-		return m.bindPickedModel(picked)
-	case pickerServer:
-		// The one kind whose list is asked per draw (ServerHost.List): the rows are re-read here
-		// rather than trusted from the frame that drew them, so a `servers:` block that shrank under the
-		// open overlay costs the accept and not the process.
-		servers := m.servers()
-		if offered >= len(servers) {
-			return m, nil
-		}
-		return m.switchToServer(servers[offered])
-	case pickerLoad:
-		return m.startProfileLoad(m.picker.profiles[offered].Name)
-	case pickerCycle:
-		return m.acceptCycle(scheduleCycles[offered])
-	case pickerScheduleMode:
-		return m.acceptScheduleMode(scheduleModes[offered])
-	case pickerScheduleStop:
-		return m.acceptScheduleStop(offered)
-	case pickerKeyMigration:
-		return m.acceptKeyMigration(offered)
-	case pickerEffort:
-		return m.acceptEffort(offered)
-	case pickerSubAgentsServer:
-		// Re-read for pickerServer's reason and with the same answer: the targets are asked per draw,
-		// so a `servers:` block that shrank under the open overlay costs the accept and nothing more.
-		// The mapping past the last target is the effort picker's — absence, not an entry: the one row
-		// the offering appends is `auto`, which resolves to the empty name, and anything beyond it
-		// names no row at all and moves nothing.
-		targets := m.subAgentsTargets()
-		if offered < 0 || offered > len(targets) {
-			return m, nil
-		}
-		name := ""
-		if offered < len(targets) {
-			name = targets[offered].Name
-		}
-		return m.retargetSubAgents(name)
-	case pickerSubAgentsMigration:
-		return m.acceptSubAgentsMigration(offered)
-	case pickerMode:
-		return m.acceptMode(offered)
-	case pickerFork:
-		return m.acceptFork(offered)
-	}
-	return m, nil
+	return pickerOfferings[m.picker.kind].accept(m, offered)
 }
 
 // acceptMode takes the mode picker's highlighted row, named by its index into the OFFERING
@@ -1125,38 +1218,12 @@ func (m Model) pickerListContent() (listContent, bool) {
 	}, true
 }
 
-// pickerTitle names what is being switched and, for the model picker, on which host — the same
-// label the footer and the start-up box use (hostDisplay), so a session with two servers configured
-// can never mistake which one's offering it is looking at. The server picker needs no such
-// qualifier: its rows name the hosts themselves.
+// pickerTitle names what is being switched — the open kind's [pickerOfferings] title. For the
+// model picker that includes on which host, the same label the footer and the start-up box use
+// (hostDisplay), so a session with two servers configured can never mistake which one's offering
+// it is looking at. The server picker needs no such qualifier: its rows name the hosts themselves.
 func (m Model) pickerTitle() string {
-	switch m.picker.kind {
-	case pickerModel:
-		return "switch model — " + hostDisplay(m.opts)
-	case pickerServer:
-		return "switch server"
-	case pickerLoad:
-		return loadPickerTitle
-	case pickerCycle:
-		return "schedule — how often"
-	case pickerScheduleMode:
-		return "schedule — autonomy mode"
-	case pickerScheduleStop:
-		return "stop a schedule"
-	case pickerKeyMigration:
-		return m.keyMigrationTitle()
-	case pickerEffort:
-		return "thinking effort — how hard the model thinks"
-	case pickerSubAgentsServer:
-		return subAgentsServerTitle
-	case pickerSubAgentsMigration:
-		return m.subAgentsMigrationTitle()
-	case pickerMode:
-		return modePickerTitle
-	case pickerFork:
-		return forkPickerTitle
-	}
-	return ""
+	return pickerOfferings[m.picker.kind].title(m)
 }
 
 // pickerRows is the row list the popup module PAINTS: the open kind's offering with the overlay's
@@ -1167,39 +1234,14 @@ func (m Model) pickerRows() []popupRow {
 	return m.pickerFilteredView().rows
 }
 
-// pickerOfferingRows composes the kind's FULL row list — the offering before the filter prunes it.
-// Each kind emits its own fixed column schema and the module owns the alignment, along with the
-// marker, the highlight, the truncation and the scroll windowing; cells arrive plain and
-// escape-stripped, as its contract requires — a model id is the SERVER's text and a profile name the
-// LAUNCHER's, so both are sanitized here rather than trusted.
+// pickerOfferingRows composes the kind's FULL row list — the offering before the filter prunes it,
+// as the open kind's [pickerOfferings] row derives it. Each kind emits its own fixed column schema
+// and the module owns the alignment, along with the marker, the highlight, the truncation and the
+// scroll windowing; cells arrive plain and escape-stripped, as its contract requires — a model id is
+// the SERVER's text and a profile name the LAUNCHER's, so both are sanitized here rather than
+// trusted.
 func (m Model) pickerOfferingRows() []popupRow {
-	switch m.picker.kind {
-	case pickerModel:
-		return m.modelRows()
-	case pickerServer:
-		return m.serverRows()
-	case pickerLoad:
-		return m.launchProfileRows()
-	case pickerCycle:
-		return cycleRows()
-	case pickerScheduleMode:
-		return scheduleModeRows(m.opts.ScheduleAutoBlocked)
-	case pickerScheduleStop:
-		return scheduleStopRows(m.liveSchedules())
-	case pickerKeyMigration:
-		return keyMigrationRows(m.opts.KeyMigration.StoreName)
-	case pickerEffort:
-		return effortRows(m.effortSupport())
-	case pickerSubAgentsServer:
-		return m.subAgentsServerRows()
-	case pickerSubAgentsMigration:
-		return subAgentsMigrationRows(m.opts.SubAgentsMigration)
-	case pickerMode:
-		return modeRows()
-	case pickerFork:
-		return forkRows(m.transcript.forkPoints())
-	}
-	return nil
+	return pickerOfferings[m.picker.kind].rows(m)
 }
 
 // modelRows is one row per OFFERED model (offeredModels — everything advertised but the binding this

@@ -330,7 +330,10 @@ NOTES (2026-09-17): the settings `sel` drop is pinned by the new `TestSettingsEn
 
 commit: `refactor(tui): pointer clicks and wheels walk one table keyed by framePane`
 
-## 17. `pickerOffering` folds the picker switches (apogee-agk, picker half)
+## 17. `pickerOffering` folds the picker switches (apogee-agk, picker half) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): the table is declared `var pickerOfferings map[pickerKind]pickerOffering` and filled in `init()` rather than by its declaration — a literal initializer is an initialization cycle (pickerOfferings → startProfileLoad → layout → renderPicker → pickerListContent → pickerHintFor → pickerOfferings), the same loop `settingsSteps` (settings.go) already solves the same way; the doc comment says so.
+NOTES (2026-09-17): two named legends added (`pickerChooseHint`, `pickerStopHint`) so the table rows carry constants rather than five copies of one literal, plus a `fixedTitle` helper for the kinds whose title is a constant; the four lookup functions keep their names and carry no missing-key branch (the totality test is the guard).
 
 **What:** Closes apogee-agk. Depends on item 16. In `internal/tui/picker.go` a package-level `var pickerOfferings = map[pickerKind]pickerOffering{…}` with `pickerOffering{title func(Model) string; hint string; rows func(Model) []popupRow; accept func(Model, int) (tea.Model, tea.Cmd)}` (field types follow what the four switches return today) replaces the switches in `pickerHintFor`, `pickerOfferingRows`, `pickerTitle`, `acceptPicker` — each becomes a one-line lookup; every value of the enum, read from the tree, stays. The type's doc comment moves from "one switch away" to "one table row away" and keeps the ADR 0011 rationale (the table is package-level; `Model` holds the kind only).
 
