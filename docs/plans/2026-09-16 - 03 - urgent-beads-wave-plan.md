@@ -300,7 +300,11 @@ NOTES (2026-09-16): fix-retry — `serverBinder.bind` (wire_server.go) now sets 
 
 **Commit:** `feat(agent): the server's wire rides Config, UpstreamSpec and DelegationTarget into every dial`
 
-## 13. stubllm speaks Messages on `/v1/messages` (apogee-6fp)
+## 13. stubllm speaks Messages on `/v1/messages` (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): a Turn's `reasoning` streams as a `thinking` block (`thinking_delta`) on the Messages wire — the item's list named text and tool_use only, but silently dropping a scripted channel would leave the provider's thinking_delta arm unprovable; noted rather than asked since it adds a channel, changes nothing the item named.
+NOTES (2026-09-16): the chat route's log entry is built inline in `handleChat` (server.go) rather than as a `chatRequest.logEntry()` method, keeping `wire.go` — not in the item's Files — untouched.
+NOTES (2026-09-16): in-band error codes render as Messages class slugs (429 → `rate_limit_error`, 500 → `api_error`, other 5xx incl. the default 502 → `overloaded_error`, 400/401/403/404/413 → their named classes) so an `error` turn stays retryable on both wires; `stop_sequence: null` is written on `message_delta` and the whole reply as the real API does.
 
 **What:** `internal/stubllm/server.go` `Handler()` gains `POST /v1/messages` → `handleMessages`: decode an `anthropicRequest` (`internal/stubllm/wire_anthropic.go`) into the neutral `log.Request` (which gains `Wire string`, `"openai"`/`"anthropic"`, set by the route handler — item 14 judges on it) — top-level `system` → a synthesised role-`system` message (so `when.system` and captures work), `tool_result` blocks → role `tool` + `ToolCallID`, `tool_use` → `ToolCalls`, `output_config.effort` → a fourth `Effort` member `OutputEffort` — then `take`/`reply` as today, and write Anthropic-shaped output: streaming `message_start`, `content_block_start/delta/stop` (text and `tool_use` with `input_json_delta` fragments honouring `Turn.Chunks`), `message_delta{stop_reason, usage}`, `message_stop`; whole-reply JSON likewise; `finishReason` mapped stop→`end_turn`, tool_calls→`tool_use`, length→`max_tokens`; `Turn.Error`/`HTTP` render the Anthropic error body; auth accepts `x-api-key` or Bearer. Recorder unchanged. `docs/design/test-drivers.md` gains a `### Wires` subsection under stubllm naming both routes.
 

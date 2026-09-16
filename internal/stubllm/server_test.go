@@ -686,8 +686,14 @@ type reply struct {
 // newRequest builds a chat-completions POST against server.
 func newRequest(t *testing.T, ctx context.Context, server *Server, body string) *http.Request {
 	t.Helper()
+	return newRequestAt(t, ctx, server, "/v1/chat/completions", body)
+}
 
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+"/v1/chat/completions", strings.NewReader(body))
+// newRequestAt builds a JSON POST against one of server's routes.
+func newRequestAt(t *testing.T, ctx context.Context, server *Server, path, body string) *http.Request {
+	t.Helper()
+
+	request, err := http.NewRequestWithContext(ctx, http.MethodPost, server.URL+path, strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("build request: %v", err)
 	}
@@ -1101,4 +1107,295 @@ func TestServerWritesTheScriptedSpellingOfTheThinkingChannel(t *testing.T) {
 			}
 		})
 	}
+}
+
+// --- the Messages route ---
+
+// TestMessagesRouteRunsAScriptedToolLoop pins that the same Script answers on /v1/messages: a
+// hand-built Messages request is reduced to the neutral log — the top-level system visible as
+// a role-system message, the effort dial on Effort.OutputEffort — the tool_use id the stub
+// issued rounds back in as the tool_result that a `when.tool_result` turn matches on, and every
+// finish reason reaches the wire as its Messages stop_reason.
+func TestMessagesRouteRunsAScriptedToolLoop(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Turns: []Turn{
+		{ToolCalls: []ToolCall{{Name: "list_dir", Arguments: `{"path":"."}`}}},
+		{When: &Match{ToolResult: "list_dir"}, Text: "There are three files."},
+		{Text: "cut short", FinishReason: "length"},
+	}})
+	tools := `"tools":[{"name":"list_dir","description":"list","input_schema":{"type":"object"}}]`
+
+	first := postMessages(t, server, `{"model":"stub-model","max_tokens":64,"system":"You are apogee.",`+
+		`"messages":[{"role":"user","content":"look around"}],`+tools+`,"output_config":{"effort":"high"}}`)
+	if first.status != http.StatusOK || first.contentType != "application/json" {
+		t.Fatalf("first reply = %d %s %s, want a 200 JSON message", first.status, first.contentType, first.body)
+	}
+	call := decodeMessage(t, first.body)
+	if len(call.Content) != 1 || call.Content[0].Type != "tool_use" || call.Content[0].ID != "call_1" ||
+		call.Content[0].Name != "list_dir" || string(call.Content[0].Input) != `{"path":"."}` {
+		t.Errorf("content = %s, want one tool_use block call_1 list_dir {\"path\":\".\"}", first.body)
+	}
+	if call.StopReason == nil || *call.StopReason != "tool_use" {
+		t.Errorf("stop_reason = %v, want tool_use", call.StopReason)
+	}
+
+	second := postMessages(t, server, `{"model":"stub-model","max_tokens":64,"system":"You are apogee.","messages":[`+
+		`{"role":"user","content":[{"type":"text","text":"look around"}]},`+
+		`{"role":"assistant","content":[{"type":"tool_use","id":"call_1","name":"list_dir","input":{"path":"."}}]},`+
+		`{"role":"user","content":[{"type":"tool_result","tool_use_id":"call_1","content":"a\nb\nc"}]}],`+tools+`}`)
+	text := decodeMessage(t, second.body)
+	if len(text.Content) != 1 || text.Content[0].Type != "text" || text.Content[0].text() != "There are three files." {
+		t.Errorf("content = %s, want one text block with the matched turn's text", second.body)
+	}
+	if text.StopReason == nil || *text.StopReason != "end_turn" {
+		t.Errorf("stop_reason = %v, want end_turn", text.StopReason)
+	}
+
+	third := decodeMessage(t, postMessages(t, server, `{"model":"stub-model","max_tokens":1,"messages":[{"role":"user","content":"go on"}]}`).body)
+	if third.StopReason == nil || *third.StopReason != "max_tokens" {
+		t.Errorf("stop_reason = %v, want max_tokens for a length finish", third.StopReason)
+	}
+
+	requests := server.Requests()
+	if len(requests) != 3 {
+		t.Fatalf("requests = %+v, want three", requests)
+	}
+	got := requests[0]
+	if got.Wire != WireAnthropic || got.Model != "stub-model" || got.Stream || got.TurnIndex != 0 {
+		t.Errorf("request 1 = %+v, want the anthropic wire, whole path, answered by turn 0", got)
+	}
+	wantMessages := []Message{{Role: "system", Content: "You are apogee."}, {Role: "user", Content: "look around"}}
+	if !reflect.DeepEqual(got.Messages, wantMessages) {
+		t.Errorf("request 1 messages = %+v, want %+v", got.Messages, wantMessages)
+	}
+	if !reflect.DeepEqual(got.Tools, []string{"list_dir"}) || got.Effort.OutputEffort != "high" {
+		t.Errorf("request 1 tools = %v effort = %+v, want [list_dir] and output effort high", got.Tools, got.Effort)
+	}
+	if got.Sampling.MaxTokens == nil || *got.Sampling.MaxTokens != 64 {
+		t.Errorf("request 1 max_tokens = %v, want 64", got.Sampling.MaxTokens)
+	}
+	wantLoop := []Message{
+		{Role: "system", Content: "You are apogee."},
+		{Role: "user", Content: "look around"},
+		{Role: "assistant", ToolCalls: []ToolCall{{ID: "call_1", Name: "list_dir", Arguments: `{"path":"."}`}}},
+		{Role: "tool", ToolCallID: "call_1", Content: "a\nb\nc"},
+	}
+	if !reflect.DeepEqual(requests[1].Messages, wantLoop) || requests[1].TurnIndex != 1 {
+		t.Errorf("request 2 = %+v, want the folded tool loop answered by turn 1", requests[1])
+	}
+	server.AssertConsumed(t)
+}
+
+// TestMessagesRouteStreamsBlockEvents pins the streamed shape of the Messages wire, first on
+// the raw events — the block runs in order, each payload typed on its `event:` line, the text
+// deltas at the scripted boundaries, the tool input in two fragments, the usage split across
+// message_start and message_delta with the cached share outside input_tokens — and then as the
+// real provider client on the anthropic wire reassembles it.
+func TestMessagesRouteStreamsBlockEvents(t *testing.T) {
+	t.Parallel()
+
+	script := Script{Model: "stub-model", Turns: []Turn{{
+		Reasoning: "hmm",
+		Chunks:    []string{"Hel", "lo"},
+		ToolCalls: []ToolCall{{Name: "read_file", Arguments: `{"path":"a.go"}`}},
+		Usage:     &Usage{Prompt: 10, Completion: 4, Cached: 3},
+		Repeat:    true,
+	}}}
+	server := New(t, script)
+
+	events := postMessagesStream(t, server, `{"model":"stub-model","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"read it"}]}`)
+
+	var types []string
+	var texts, inputs []string
+	for _, event := range events {
+		types = append(types, event.Type)
+		if event.Delta != nil {
+			texts = append(texts, event.Delta.Text)
+			inputs = append(inputs, event.Delta.PartialJSON)
+		}
+	}
+	wantTypes := []string{
+		"message_start",
+		"content_block_start", "content_block_delta", "content_block_stop",
+		"content_block_start", "content_block_delta", "content_block_delta", "content_block_stop",
+		"content_block_start", "content_block_delta", "content_block_delta", "content_block_stop",
+		"message_delta", "message_stop",
+	}
+	if !reflect.DeepEqual(types, wantTypes) {
+		t.Fatalf("event types = %v, want %v", types, wantTypes)
+	}
+	if got := strings.Join(texts, "|"); got != "|Hel|lo|||" {
+		t.Errorf("text deltas = %q, want the scripted chunks Hel then lo", got)
+	}
+	if got := strings.Join(inputs, ""); got != `{"path":"a.go"}` {
+		t.Errorf("input_json_delta fragments = %q, want them to concatenate to the arguments", got)
+	}
+	start, closing := events[0], events[len(events)-2]
+	if start.Message == nil || start.Message.Usage == nil || start.Message.Usage.InputTokens == nil ||
+		*start.Message.Usage.InputTokens != 7 || *start.Message.Usage.CacheReadTokens != 3 {
+		t.Errorf("message_start = %+v, want input_tokens 7 beside cache_read_input_tokens 3", start.Message)
+	}
+	if closing.Delta == nil || closing.Delta.StopReason != "tool_use" || closing.Usage == nil ||
+		closing.Usage.OutputTokens == nil || *closing.Usage.OutputTokens != 4 {
+		t.Errorf("message_delta = %+v, want stop_reason tool_use and output_tokens 4", closing)
+	}
+	if events[1].ContentBlock == nil || events[1].ContentBlock.Type != "thinking" ||
+		events[8].ContentBlock == nil || events[8].ContentBlock.ID != "call_1" || events[8].ContentBlock.Name != "read_file" {
+		t.Errorf("block starts = %+v / %+v, want a thinking block first and the id'd tool_use block last", events[1].ContentBlock, events[8].ContentBlock)
+	}
+
+	var content, thinking string
+	var calls []provider.ToolCall
+	client := provider.NewClient(server.URL, server.Model, provider.WithWire(provider.WireAnthropic))
+	var done provider.Delta
+	for delta := range client.Stream(t.Context(), provider.Request{Messages: []provider.Message{{Role: "user", Content: "read it"}}}) {
+		switch delta.Kind {
+		case provider.DeltaError:
+			t.Fatalf("stream error: %s", delta.Err)
+		case provider.DeltaContent:
+			content += delta.Content
+		case provider.DeltaThinking:
+			thinking += delta.Thinking
+		case provider.DeltaToolCall:
+			calls = append(calls, *delta.ToolCall)
+		case provider.DeltaDone:
+			done = delta
+		}
+	}
+	if content != "Hello" || thinking != "hmm" {
+		t.Errorf("content = %q thinking = %q, want Hello and hmm", content, thinking)
+	}
+	if len(calls) != 1 || calls[0].ID != "call_1" || calls[0].Function.Name != "read_file" || calls[0].Function.Arguments != `{"path":"a.go"}` {
+		t.Errorf("tool calls = %+v, want call_1 read_file with whole arguments", calls)
+	}
+	if done.FinishReason != "tool_calls" || done.Usage == nil || done.Usage.PromptTokens != 10 || done.Usage.CachedPromptTokens != 3 || done.Usage.CompletionTokens != 4 {
+		t.Errorf("done = %+v, want tool_calls with the scripted usage (prompt 10, cached 3, completion 4)", done)
+	}
+}
+
+// TestMessagesRouteRendersTheErrorBodyAndReadsXAPIKey pins the two remaining wire facts: an
+// `error` turn is the API's error body — on the streamed path an `error` event with no
+// message_stop after it, on the whole path the body itself — with the default 502 rendered as
+// the overloaded class, and the x-api-key header opens the api-key gate.
+func TestMessagesRouteRendersTheErrorBodyAndReadsXAPIKey(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Turns: []Turn{
+		{Text: "partial", Error: &InBandError{Message: "upstream fell over"}, Repeat: true},
+	}}, WithAPIKey("s3cret"))
+	body := `{"model":"stub-model","max_tokens":8,"messages":[{"role":"user","content":"hi"}]}`
+
+	if got := postMessages(t, server, body).status; got != http.StatusUnauthorized {
+		t.Errorf("unauthenticated status = %d, want 401", got)
+	}
+
+	request := newRequestAt(t, t.Context(), server, "/v1/messages", body)
+	request.Header.Set("x-api-key", "s3cret")
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("authenticated request: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, err := readAll(resp)
+	if err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	var whole anthropicErrorBody
+	if err := json.Unmarshal([]byte(raw), &whole); err != nil {
+		t.Fatalf("decode %q: %v", raw, err)
+	}
+	if resp.StatusCode != http.StatusOK || whole.Type != "error" || whole.Error.Type != "overloaded_error" || whole.Error.Message != "upstream fell over" {
+		t.Errorf("whole reply = %d %s, want a 200 error body of the overloaded class", resp.StatusCode, raw)
+	}
+
+	stream := newRequestAt(t, t.Context(), server, "/v1/messages", `{"model":"stub-model","max_tokens":8,"stream":true,"messages":[{"role":"user","content":"hi"}]}`)
+	stream.Header.Set("x-api-key", "s3cret")
+	events := readMessagesEvents(t, stream)
+	last := events[len(events)-1]
+	if last.Type != "error" || last.Error == nil || last.Error.Type != "overloaded_error" {
+		t.Errorf("last event = %+v, want the error event with no message_stop after it", last)
+	}
+	if got := events[len(events)-2].Type; got != "content_block_stop" {
+		t.Errorf("event before the error = %q, want the text block to have streamed first", got)
+	}
+}
+
+// postMessages sends one non-streamed Messages request and reads the whole reply.
+func postMessages(t *testing.T, server *Server, body string) reply {
+	t.Helper()
+
+	resp, err := http.DefaultClient.Do(newRequestAt(t, t.Context(), server, "/v1/messages", body))
+	if err != nil {
+		t.Fatalf("post: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	raw, err := readAll(resp)
+	if err != nil {
+		t.Fatalf("read reply: %v", err)
+	}
+	return reply{status: resp.StatusCode, body: raw, contentType: resp.Header.Get("Content-Type")}
+}
+
+// decodeMessage decodes a whole Messages reply.
+func decodeMessage(t *testing.T, body string) anthropicReply {
+	t.Helper()
+
+	var message anthropicReply
+	if err := json.Unmarshal([]byte(body), &message); err != nil {
+		t.Fatalf("decode message %q: %v", body, err)
+	}
+	return message
+}
+
+// postMessagesStream sends one streaming Messages request and returns its decoded events.
+func postMessagesStream(t *testing.T, server *Server, body string) []anthropicEvent {
+	t.Helper()
+	return readMessagesEvents(t, newRequestAt(t, t.Context(), server, "/v1/messages", body))
+}
+
+// readMessagesEvents sends a streaming request and decodes every event, checking that each
+// `event:` line names the type its `data:` payload carries.
+func readMessagesEvents(t *testing.T, request *http.Request) []anthropicEvent {
+	t.Helper()
+
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("post stream: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if contentType := resp.Header.Get("Content-Type"); contentType != "text/event-stream" {
+		t.Fatalf("content type = %q, want text/event-stream", contentType)
+	}
+
+	var events []anthropicEvent
+	var named string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		line := scanner.Text()
+		if name, ok := strings.CutPrefix(line, "event: "); ok {
+			named = name
+			continue
+		}
+		payload, ok := strings.CutPrefix(line, "data: ")
+		if !ok {
+			continue
+		}
+		var event anthropicEvent
+		if err := json.Unmarshal([]byte(payload), &event); err != nil {
+			t.Fatalf("decode event %q: %v", payload, err)
+		}
+		if event.Type != named {
+			t.Errorf("event line %q does not name the payload type %q", named, event.Type)
+		}
+		events = append(events, event)
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("read stream: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("stream carried no events")
+	}
+	return events
 }

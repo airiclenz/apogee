@@ -46,8 +46,10 @@ func WithRequestLog(enabled bool) Option {
 	return func(s *settings) { s.requestLog = enabled }
 }
 
-// WithAPIKey requires every request to carry `Authorization: Bearer key`; a request without it
-// is answered 401. Unset (the default) accepts any request, authenticated or not.
+// WithAPIKey requires every request to carry the key — as `Authorization: Bearer key`, the
+// chat-completions spelling, or as `x-api-key: key`, the Messages one; either header opens
+// either route. A request carrying neither is answered 401. Unset (the default) accepts any
+// request, authenticated or not.
 func WithAPIKey(key string) Option {
 	return func(s *settings) { s.apiKey = key }
 }
@@ -58,8 +60,10 @@ func WithLatency(d time.Duration) Option {
 	return func(s *settings) { s.latency = d }
 }
 
-// Server is a scripted OpenAI-compatible upstream. Build one with [New] inside a test or with
-// [Serve] from a binary; both play the same Script through the same handler.
+// Server is a scripted upstream that speaks both of apogee's wires — chat-completions on
+// /v1/chat/completions and Anthropic Messages on /v1/messages — from one Script. Build one with
+// [New] inside a test or with [Serve] from a binary; both play the same Script through the same
+// handler.
 type Server struct {
 	// URL is the base URL to hand provider.NewClient: no trailing slash, no /v1 suffix.
 	URL string
@@ -220,27 +224,36 @@ func (s *Server) gate(label string) chan struct{} {
 	return made
 }
 
-// Handler is the routing surface: the two endpoints the provider client uses, behind the
-// optional api-key gate. Everything else 404s, which is what a real server does for the
-// llama.cpp-only paths (/props) the client probes and tolerates. [New] and [Serve] put it
+// Handler is the routing surface: discovery, the chat-completions route the openai wire posts
+// to and the Messages route the anthropic wire posts to, behind the optional api-key gate. Both
+// completion routes play the SAME Script — each decodes its own request shape into the neutral
+// [Request] and renders the Turn it took in its own reply shape, so a fixture is written once
+// whichever wire the test drives. Everything else 404s, which is what a real server does for
+// the llama.cpp-only paths (/props) the client probes and tolerates. [New] and [Serve] put it
 // behind a listener; [InProcess] hands it out bare, for a test that reaches it through
 // [Server.Transport] or mounts it under a mux of its own.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", s.handleModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleChat)
+	mux.HandleFunc("POST /v1/messages", s.handleMessages)
 	return s.authorized(mux)
 }
 
-// authorized enforces WithAPIKey when one is set.
+// authorized enforces WithAPIKey when one is set, in either header spelling.
 func (s *Server) authorized(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if s.set.apiKey != "" && r.Header.Get("Authorization") != "Bearer "+s.set.apiKey {
+		if s.set.apiKey != "" && !s.carriesKey(r) {
 			http.Error(w, "stubllm: bad or missing api key", http.StatusUnauthorized)
 			return
 		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// carriesKey reports whether r presents the configured key as a Bearer token or as x-api-key.
+func (s *Server) carriesKey(r *http.Request) bool {
+	return r.Header.Get("Authorization") == "Bearer "+s.set.apiKey || r.Header.Get("x-api-key") == s.set.apiKey
 }
 
 // handleModels answers the discovery probe with the one model the Script names.
@@ -252,20 +265,52 @@ func (s *Server) handleModels(w http.ResponseWriter, _ *http.Request) {
 	})
 }
 
-// handleChat matches the request against the script and plays the Turn it took.
+// handleChat decodes a chat-completions request and serves it.
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
+	var request chatRequest
+	if !decodeRequest(w, r, &request) {
+		return
+	}
+	s.serve(w, r, Request{
+		Wire:     WireOpenAI,
+		Model:    request.Model,
+		Messages: request.messages(),
+		Tools:    request.toolNames(),
+		Stream:   request.Stream,
+		Sampling: request.sampling(),
+		Effort:   request.effort(),
+	})
+}
+
+// handleMessages decodes an Anthropic Messages request and serves it — the same matching,
+// gating and Turn as the chat route, rendered in the Messages reply shape.
+func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
+	var request anthropicRequest
+	if !decodeRequest(w, r, &request) {
+		return
+	}
+	s.serve(w, r, request.logEntry())
+}
+
+// decodeRequest reads a request body under maxRequestBytes into v and reports whether it
+// could; a failure is already answered 400 when it returns false.
+func decodeRequest(w http.ResponseWriter, r *http.Request, v any) bool {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes))
 	if err != nil {
 		http.Error(w, "stubllm: read request: "+err.Error(), http.StatusBadRequest)
-		return
+		return false
 	}
-	var request chatRequest
-	if err := json.Unmarshal(body, &request); err != nil {
+	if err := json.Unmarshal(body, v); err != nil {
 		http.Error(w, "stubllm: undecodable request: "+err.Error(), http.StatusBadRequest)
-		return
+		return false
 	}
+	return true
+}
 
-	turn, err := s.take(request)
+// serve matches the decoded request against the script and plays the Turn it took, on the wire
+// the entry names.
+func (s *Server) serve(w http.ResponseWriter, r *http.Request, entry Request) {
+	turn, err := s.take(entry)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -284,7 +329,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if !sleep(r.Context(), s.set.latency) {
 		return
 	}
-	s.reply(w, r, turn, request.Stream)
+	s.reply(w, r, turn, entry)
 }
 
 // awaitRelease holds a request until [Server.Release] opens label's gate. It answers true when the
@@ -311,27 +356,20 @@ func (s *Server) awaitRelease(ctx context.Context, label string) (bool, error) {
 	}
 }
 
-// take logs a request and hands back the Turn that answers it, expanded against the request's
-// own text. The lock spans all of it so request numbering, turn consumption and the capture
-// evaluation stay in step under concurrent requests. Both failures — no turn at all, and a turn
-// whose captures found nothing — log the request with Unmatched set and leave the script where
-// it was, so the 500 body is the whole story of what went wrong.
-func (s *Server) take(request chatRequest) (Turn, error) {
+// take logs a request — the wire-neutral entry its route decoded, numbered and stamped here —
+// and hands back the Turn that answers it, expanded against the request's own text. The lock
+// spans all of it so request numbering, turn consumption and the capture evaluation stay in
+// step under concurrent requests. Both failures — no turn at all, and a turn whose captures
+// found nothing — log the request with Unmatched set and leave the script where it was, so the
+// 500 body is the whole story of what went wrong.
+func (s *Server) take(entry Request) (Turn, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	s.count++
-	entry := Request{
-		N:         s.count,
-		Model:     request.Model,
-		Messages:  request.messages(),
-		Tools:     request.toolNames(),
-		Stream:    request.Stream,
-		Sampling:  request.sampling(),
-		Effort:    request.effort(),
-		TurnIndex: -1,
-		At:        time.Now(),
-	}
+	entry.N = s.count
+	entry.TurnIndex = -1
+	entry.At = time.Now()
 
 	index := s.matcher.next(entry)
 	if index < 0 {
@@ -363,8 +401,9 @@ func (s *Server) record(entry Request) {
 	}
 }
 
-// reply plays one Turn onto the wire in the shape the request asked for.
-func (s *Server) reply(w http.ResponseWriter, r *http.Request, t Turn, stream bool) {
+// reply plays one Turn onto the wire in the shape the request asked for: streamed or whole, on
+// the wire the request arrived by. An http turn and a hang are wire-neutral and come first.
+func (s *Server) reply(w http.ResponseWriter, r *http.Request, t Turn, request Request) {
 	if t.HTTP != nil {
 		writeHTTPReply(w, *t.HTTP)
 		return
@@ -372,11 +411,16 @@ func (s *Server) reply(w http.ResponseWriter, r *http.Request, t Turn, stream bo
 	if !sleep(r.Context(), t.Hang) {
 		return
 	}
-	if stream {
+	switch {
+	case request.Wire == WireAnthropic && request.Stream:
+		writeMessagesStream(r.Context(), w, t, s.Model)
+	case request.Wire == WireAnthropic:
+		writeMessagesWhole(w, t, s.Model)
+	case request.Stream:
 		writeStream(r.Context(), w, t, s.Model)
-		return
+	default:
+		writeWhole(w, t, s.Model)
 	}
-	writeWhole(w, t, s.Model)
 }
 
 // writeStream plays a Turn as SSE: reasoning first, then content, then the tool-call
@@ -573,6 +617,181 @@ func writeWhole(w http.ResponseWriter, t Turn, model string) {
 	}
 	if t.Error != nil {
 		reply.Error = t.Error.wire()
+	}
+	_ = json.NewEncoder(w).Encode(reply)
+}
+
+// writeMessagesStream plays a Turn as the Messages event stream: message_start, then one
+// content block per channel — thinking, text, one tool_use per call — each opened, streamed
+// as deltas and stopped, then message_delta with the stop reason and the output usage, then
+// message_stop — the order and framing the real API uses, with the `event:` line every payload
+// repeats its type on. The text deltas honour Turn.Chunks and ChunkRunes as the chat route's
+// do; a tool_use input streams as the head-and-tail split the chat route's fragments use. A
+// `cut` turn kills the connection where message_delta would go; an `error` turn writes the
+// in-band error event there instead — and no message_stop after it, as the real API sends none.
+func writeMessagesStream(ctx context.Context, w http.ResponseWriter, t Turn, model string) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "stubllm: response writer cannot flush", http.StatusInternalServerError)
+		return
+	}
+
+	header := w.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	send := func(event anthropicEvent) bool {
+		data, err := json.Marshal(event)
+		if err != nil {
+			return false
+		}
+		if _, err := fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event.Type, data); err != nil {
+			return false
+		}
+		flusher.Flush()
+		return true
+	}
+
+	var usage *anthropicUsage
+	if t.Usage != nil {
+		usage = anthropicUsageOf(*t.Usage)
+	}
+	start := &anthropicReply{ID: messageID, Type: "message", Role: "assistant", Model: model, Content: []anthropicBlock{}}
+	if usage != nil {
+		start.Usage = usage.inputSide()
+	}
+	if !send(anthropicEvent{Type: eventMessageStart, Message: start}) {
+		return
+	}
+
+	// TokenDelay spaces the deltas, as on the chat route: the pause lands before every delta
+	// but the first, and never before a block's start or stop.
+	sentDelta := false
+	for _, event := range messageEvents(t.beforeCut()) {
+		if event.Type == eventBlockDelta {
+			if sentDelta && !sleep(ctx, t.TokenDelay) {
+				return
+			}
+			sentDelta = true
+		}
+		if !send(event) {
+			return
+		}
+	}
+	if t.Cut != nil {
+		kill(w)
+		return
+	}
+	if t.Error != nil {
+		wire := t.Error.anthropicWire()
+		send(anthropicEvent{Type: eventError, Error: &wire})
+		return
+	}
+	closing := anthropicEvent{Type: eventMessageDelta, Delta: &anthropicDelta{StopReason: t.stopReason(), StopSequence: jsonNull}}
+	if usage != nil {
+		closing.Usage = usage.outputSide()
+	}
+	if !send(closing) {
+		return
+	}
+	send(anthropicEvent{Type: eventMessageStop})
+}
+
+// messageEvents is the ordered list of block events a Turn streams between message_start and
+// its terminator: the thinking block, the text block, then one tool_use block per call, each
+// as start, deltas and stop. An empty-reply turn yields none. Block indexes count up across
+// the channels, as the real API numbers them.
+func messageEvents(t Turn) []anthropicEvent {
+	var events []anthropicEvent
+	index := 0
+	block := func(open anthropicBlock, deltas []anthropicDelta) {
+		at := index
+		index++
+		events = append(events, anthropicEvent{Type: eventBlockStart, Index: &at, ContentBlock: &open})
+		for _, delta := range deltas {
+			d := delta
+			events = append(events, anthropicEvent{Type: eventBlockDelta, Index: &at, Delta: &d})
+		}
+		events = append(events, anthropicEvent{Type: eventBlockStop, Index: &at})
+	}
+
+	if t.hasReasoning() {
+		var deltas []anthropicDelta
+		for _, part := range t.reasoningDeltas() {
+			deltas = append(deltas, anthropicDelta{Type: deltaThinking, Thinking: part})
+		}
+		block(anthropicBlock{Type: blockThinking, Thinking: new(string)}, deltas)
+	}
+	if parts := t.contentDeltas(); len(parts) > 0 {
+		var deltas []anthropicDelta
+		for _, part := range parts {
+			deltas = append(deltas, anthropicDelta{Type: deltaText, Text: part})
+		}
+		block(anthropicBlock{Type: blockText, Text: new(string)}, deltas)
+	}
+	for i, call := range t.ToolCalls {
+		var deltas []anthropicDelta
+		head, tail := splitHalf(call.arguments())
+		deltas = append(deltas, anthropicDelta{Type: deltaInputJSON, PartialJSON: head})
+		if tail != "" {
+			deltas = append(deltas, anthropicDelta{Type: deltaInputJSON, PartialJSON: tail})
+		}
+		block(anthropicBlock{
+			Type:  blockToolUse,
+			ID:    call.callID(i),
+			Name:  call.Name,
+			Input: json.RawMessage(`{}`),
+		}, deltas)
+	}
+	return events
+}
+
+// writeMessagesWhole plays a Turn as a single Messages body — the non-streamed path — with the
+// same content blocks the stream opens, whole. An `error` turn is the error body in place of
+// the message, the way the API frames one; a `cut` kills the connection after the 200 header,
+// before any body, as writeWhole does.
+func writeMessagesWhole(w http.ResponseWriter, t Turn, model string) {
+	w.Header().Set("Content-Type", "application/json")
+	if t.Cut != nil {
+		w.WriteHeader(http.StatusOK)
+		if flusher, ok := w.(http.Flusher); ok {
+			flusher.Flush()
+		}
+		kill(w)
+		return
+	}
+	if t.Error != nil {
+		_ = json.NewEncoder(w).Encode(anthropicErrorBody{Type: eventError, Error: t.Error.anthropicWire()})
+		return
+	}
+	stop := t.stopReason()
+	reply := anthropicReply{
+		ID:         messageID,
+		Type:       "message",
+		Role:       "assistant",
+		Model:      model,
+		Content:    []anthropicBlock{},
+		StopReason: &stop,
+	}
+	if t.hasReasoning() {
+		thinking := t.reasoning()
+		reply.Content = append(reply.Content, anthropicBlock{Type: blockThinking, Thinking: &thinking})
+	}
+	if text := t.content(); text != "" {
+		reply.Content = append(reply.Content, anthropicBlock{Type: blockText, Text: &text})
+	}
+	for i, call := range t.ToolCalls {
+		reply.Content = append(reply.Content, anthropicBlock{
+			Type:  blockToolUse,
+			ID:    call.callID(i),
+			Name:  call.Name,
+			Input: json.RawMessage(call.arguments()),
+		})
+	}
+	if t.Usage != nil {
+		reply.Usage = anthropicUsageOf(*t.Usage)
 	}
 	_ = json.NewEncoder(w).Encode(reply)
 }

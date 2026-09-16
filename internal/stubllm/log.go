@@ -12,6 +12,12 @@ import (
 type Request struct {
 	// N is the request's 1-based position in the run, counted whether or not the log is on.
 	N int
+	// Wire is the protocol the request arrived on — WireOpenAI for POST /v1/chat/completions,
+	// WireAnthropic for POST /v1/messages — set by the route that decoded it. Every other
+	// member is wire-neutral: a Messages request's top-level `system` lands as a role-system
+	// Message, its tool_result blocks as role-tool Messages, so a matcher, a capture or an
+	// assertion reads one shape whichever wire apogee spoke.
+	Wire string
 	// Model is the model id the request named.
 	Model string
 	// Messages is the conversation the request carried, in wire order.
@@ -43,9 +49,10 @@ type Sampling struct {
 }
 
 // Effort is a request's thinking-effort keys, one member per wire dialect apogee speaks
-// (internal/provider's applyEffort): a request carries at most one of them, and a request
-// that asked for no effort — or whose server's dialect is `off` — carries none, so a test that
-// asserts "nothing about effort reached the wire" checks all three are empty.
+// (internal/provider's applyEffort, and the Messages wire's own `output_config.effort`): a
+// request carries at most one of them, and a request that asked for no effort — or whose
+// server's dialect is `off` — carries none, so a test that asserts "nothing about effort
+// reached the wire" checks all four are empty.
 type Effort struct {
 	// ChatTemplateKwargs is llama.cpp's `chat_template_kwargs` object as the body carried it:
 	// `{"enable_thinking": false}` for the off rung, `{"reasoning_effort": "<level>"}` for a
@@ -57,7 +64,19 @@ type Effort struct {
 	// ReasoningEffort is the top-level `reasoning_effort` string OpenAI and Groq read, or ""
 	// when the body carried none.
 	ReasoningEffort string
+	// OutputEffort is the `output_config.effort` level a Messages request carried — the effort
+	// dial of the anthropic wire, which implies its own mapping (ADR 0078) — or "" when the
+	// body carried none.
+	OutputEffort string
 }
+
+// The two wires a request arrives on, as [Request.Wire] names them.
+const (
+	// WireOpenAI is the chat-completions wire: POST /v1/chat/completions.
+	WireOpenAI = "openai"
+	// WireAnthropic is the Anthropic Messages wire: POST /v1/messages.
+	WireAnthropic = "anthropic"
+)
 
 // Message is one message off a request, reduced to what a test or a matcher reads.
 type Message struct {

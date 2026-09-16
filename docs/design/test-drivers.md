@@ -27,12 +27,12 @@ test step may be **manual** only where the table below says no driver observes i
 ## stubllm
 
 `internal/stubllm` is the ONE scripted upstream apogee's tests talk to (ADR 0062). A test names
-the replies it wants as a `Script` and gets an OpenAI-compatible HTTP server that plays them back
-through the wire shapes a real llama.cpp or OpenRouter endpoint uses — SSE content deltas, a
-reasoning channel in either of its two wire spellings, two-fragment tool calls, a terminal usage
-object with the cached-prompt
-breakdown, plain HTTP failures, and a stall. The package imports nothing of apogee's: the code
-under test reaches it through `internal/provider` exactly as it reaches a real server.
+the replies it wants as a `Script` and gets an HTTP server that plays them back on either of the
+wires apogee speaks (see [Wires](#wires)) through the shapes a real endpoint uses — on the
+chat-completions wire, SSE content deltas, a reasoning channel in either of its two wire
+spellings, two-fragment tool calls, a terminal usage object with the cached-prompt breakdown,
+plain HTTP failures, and a stall. The package imports nothing of apogee's: the code under test
+reaches it through `internal/provider` exactly as it reaches a real server.
 
 ```go
 server := stubllm.New(t, stubllm.Script{
@@ -52,8 +52,28 @@ server on no port at all — its `Handler()` served over a pipe by `Transport()`
 hands the real provider client as `provider.WithHTTPClient(&http.Client{Transport:
 server.Transport()})`. That is how `internal/agent`'s engine tests play a Script: one decoder,
 the same bytes a listening stub would send, and no loopback socket per fake. Options: `WithRequestLog(bool)` (on by default), `WithAPIKey(key)` (401s a
-request without `Authorization: Bearer key`), `WithLatency(d)` (time-to-first-token for every
-reply).
+request carrying neither `Authorization: Bearer key` nor `x-api-key: key`), `WithLatency(d)`
+(time-to-first-token for every reply).
+
+### Wires
+
+One `Script`, two routes. `POST /v1/chat/completions` is the OpenAI chat-completions wire and
+`POST /v1/messages` the Anthropic Messages wire — the two `internal/provider` codecs a server
+entry's `wire:` key selects (ADR 0078). Each route decodes its own request shape into the same
+neutral `Request` the log records and the matcher reads, so a `when:` block, a capture and a
+`LastMessage` assertion are written once: on the Messages route the top-level `system` lands as
+a leading role-`system` message, a `tool_result` block as a role-`tool` message carrying its
+`tool_use_id`, a `tool_use` block as a `ToolCall`, and `output_config.effort` on
+`Effort.OutputEffort`. The log's `Wire` member (`"openai"` / `"anthropic"`) says which route a
+request arrived on. Each route then renders the Turn it took in its own reply shape — on the
+Messages wire, `message_start`, one `content_block_start`/`delta`/`stop` run per channel
+(thinking, text, one `tool_use` per call with `input_json_delta` fragments), `message_delta`
+with the mapped `stop_reason` (`end_turn` / `tool_use` / `max_tokens`) and `message_stop`; a
+whole message on the non-streamed path; the `{"type":"error","error":{…}}` body for an
+`error` turn, its scripted code rendered as the API's class slug (the default 502 is
+`overloaded_error`, so it stays retryable); a `cut` kills the connection where `message_delta`
+would go. `GET /v1/models` serves discovery for both. The recorder (`stubllm record`) stays a
+chat-completions proxy.
 
 ### The script format
 
@@ -209,12 +229,13 @@ said, while a capture is something a test author adds.
 Every served request lands in the log, which is the stub's half of an assertion: what the agent
 actually sent, in order, and which turn answered it.
 
-- `server.Requests() []Request` — `N`, `Model`, `Messages`, `Tools`, `Stream`, `Sampling`,
-  `Effort`, `Unmatched`, `TurnIndex`, `At`. `Sampling` is the `max_tokens` and `temperature` the
-  body carried (nil where it carried none); `Effort` is the thinking-effort key it carried, in
-  whichever dialect the provider spoke — `chat_template_kwargs`, `reasoning` or
-  `reasoning_effort`, recorded verbatim — so a test about "what did the engine ask the sampler
-  for" reads the log instead of a fake that captured the request before the client shaped it.
+- `server.Requests() []Request` — `N`, `Wire`, `Model`, `Messages`, `Tools`, `Stream`,
+  `Sampling`, `Effort`, `Unmatched`, `TurnIndex`, `At`. `Sampling` is the `max_tokens` and
+  `temperature` the body carried (nil where it carried none); `Effort` is the thinking-effort
+  key it carried, in whichever dialect the provider spoke — `chat_template_kwargs`, `reasoning`,
+  `reasoning_effort` or the Messages wire's `output_config.effort`, recorded verbatim — so a
+  test about "what did the engine ask the sampler for" reads the log instead of a fake that
+  captured the request before the client shaped it.
 - `server.LastMessage(n)` — the text of request *n*'s last message; the shortest way to assert
   what was asked.
 - `server.Unmatched()` — the requests the script did not anticipate.
