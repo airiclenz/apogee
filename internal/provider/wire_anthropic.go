@@ -11,8 +11,9 @@ import (
 // This file is the Anthropic Messages codec — the wireCodec a server entry with
 // `wire: anthropic` speaks (ADR 0078). It owns the request projection onto the Messages body
 // (system fold, tool_result / tool_use blocks, output_config.effort), the whole-reply decode
-// over anthropicResponse, and the in-band error body. The JSON shapes live at the foot of this
-// file; nothing outside it branches on the Messages dialect.
+// over anthropicResponse, and the in-band error body; the event-typed SSE parser is its other
+// half, in wire_anthropic_stream.go. The JSON shapes live at the foot of this file; nothing
+// outside the two branches on the Messages dialect.
 //
 // Thinking is never requested on this wire in v1: every request carries
 // `thinking: {"type":"disabled"}` explicitly, because the current models run adaptive thinking
@@ -33,9 +34,13 @@ const (
 	anthropicThinkingDisabled = "disabled"
 )
 
-// anthropicCodec speaks the Anthropic Messages protocol on behalf of one Client. It carries no
-// state: the Messages path is fixed and the version header is a constant of the wire.
-type anthropicCodec struct{}
+// anthropicCodec speaks the Anthropic Messages protocol on behalf of one Client. The Messages
+// path is fixed and the version header is a constant of the wire; the one thing it holds is
+// that Client, for the codec-neutral service the stream parser needs mid-decode — the
+// in-band error renderer, inBandErrorDelta (wire_anthropic_stream.go).
+type anthropicCodec struct {
+	client *Client
+}
 
 // path is the Messages endpoint; the chat path option is a chat-completions fact and is not read.
 func (a *anthropicCodec) path() string { return anthropicMessagesPath }

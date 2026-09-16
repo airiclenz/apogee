@@ -319,6 +319,9 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 // codec for folds to WireOpenAI — and builds that wire's codec. It runs once, after the
 // options, so the codec sees the final chat path.
 func (c *Client) selectCodec() (Wire, wireCodec) {
+	if c.wire == WireAnthropic {
+		return WireAnthropic, &anthropicCodec{client: c}
+	}
 	return WireOpenAI, &openaiCodec{client: c, chatPath: c.chatPath}
 }
 
@@ -641,7 +644,8 @@ func isRetryableStatus(status int) bool {
 }
 
 // isContextOverflow reports whether a 400 body looks like a context-window rejection,
-// matching the markers the TS oracle recognises across server implementations.
+// matching the markers the TS oracle recognises across server implementations plus the
+// Messages API's "prompt is too long" (its invalid_request_error for an oversized prompt).
 func isContextOverflow(text string) bool {
 	lower := strings.ToLower(text)
 	for _, marker := range []string{
@@ -650,6 +654,7 @@ func isContextOverflow(text string) bool {
 		"context length exceeded",
 		"maximum context length",
 		"too many tokens",
+		"prompt is too long",
 	} {
 		if strings.Contains(lower, marker) {
 			return true

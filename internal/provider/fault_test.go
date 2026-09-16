@@ -11,7 +11,10 @@ import (
 // overflow marker is an overflow (never retryable, never hinted, whatever the request
 // carried); 429, 5xx and the aggregator's provider_unavailable slug are retryable; an effort
 // on the wire hints every non-overflow fault. The marker is read off the text as given —
-// unsanitised, case-insensitively — and only a 400 can be an overflow.
+// unsanitised, case-insensitively — and only a 400 can be an overflow. The Messages API's
+// slugs are the second wire's arm: overloaded_error is retryable, rate_limit_error is the 429
+// it stands for, and an invalid_request_error whose message says the prompt is too long is an
+// overflow even in-band, where no 400 frames it.
 func TestClassify(t *testing.T) {
 	t.Parallel()
 
@@ -107,6 +110,48 @@ func TestClassify(t *testing.T) {
 			status:  0,
 			errType: "rate_limit_exceeded",
 			text:    "slow down",
+			want:    fault{code: 0},
+		},
+		{
+			name:    "an in-band anthropic overloaded_error is retryable without a code",
+			status:  0,
+			errType: anthropicOverloaded,
+			text:    "Overloaded",
+			want:    fault{code: 0, retryable: true},
+		},
+		{
+			name:    "an in-band anthropic rate_limit_error is the 429 it stands for",
+			status:  0,
+			errType: anthropicRateLimited,
+			text:    "This request would exceed your organization's rate limit",
+			want:    fault{code: http.StatusTooManyRequests, retryable: true},
+		},
+		{
+			name:    "a rate_limit_error that arrived with a status keeps that status",
+			status:  http.StatusTooManyRequests,
+			errType: anthropicRateLimited,
+			text:    "slow down",
+			want:    fault{code: http.StatusTooManyRequests, retryable: true},
+		},
+		{
+			name:   "a 400 saying the prompt is too long is an overflow",
+			status: http.StatusBadRequest,
+			text:   `{"type":"error","error":{"type":"invalid_request_error","message":"prompt is too long: 213462 tokens > 200000 maximum"}}`,
+			want:   fault{overflow: true, code: http.StatusBadRequest},
+		},
+		{
+			name:    "an in-band invalid_request_error saying the prompt is too long is an overflow",
+			status:  0,
+			errType: anthropicInvalidRequest,
+			text:    "prompt is too long: 213462 tokens > 200000 maximum",
+			effort:  true,
+			want:    fault{overflow: true, code: 0},
+		},
+		{
+			name:    "an in-band invalid_request_error without the marker is a plain fault",
+			status:  0,
+			errType: anthropicInvalidRequest,
+			text:    "messages: at least one message is required",
 			want:    fault{code: 0},
 		},
 	}

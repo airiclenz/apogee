@@ -235,7 +235,12 @@ NOTES (2026-09-16): observation, no action — per the current Anthropic API ref
 
 **Commit:** `feat(provider): Anthropic Messages codec — request encoder and whole-response decoder`
 
-## 10. Anthropic SSE parser and fault arms (apogee-6fp)
+## 10. Anthropic SSE parser and fault arms (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `selectCodec` (client.go) gains its `WireAnthropic` arm here — no item owns it, item 9 deferred it "until item 10 adds the parser", and this item's `TestWireObserver_StreamRecordsTheAnthropicResponse` goes through `Client.Stream`, which only reaches the codec the Client selected; `TestAnthropicWireSelectsTheCodec` pins it.
+NOTES (2026-09-16): `anthropicCodec` (wire_anthropic.go) gains a `client *Client` field, as `openaiCodec` holds one, for the shared `inBandErrorDelta` the parser's error event renders through; the existing `&anthropicCodec{}` tests are unchanged. client.go is also where `isContextOverflow` lives, hence its place on FILES beyond the item's list.
+NOTES (2026-09-16): in-band overflow is judged by `errType == invalid_request_error` as well as status 400, since the Messages error event carries no code (`intCode` is 0); usage on the stream is overlaid per event (message_start's input side, message_delta's output side, each written only when non-zero) so neither zeroes the other; a tool_use block that streams no input yields `{}`, matching the whole-reply path.
+NOTES (2026-09-16): the "server closed without message_stop" path keeps the stop reason and usage a message_delta already carried (the openai parser drops usage on its equivalent path by oracle parity; this wire has no oracle to mirror).
 
 **What:** Depends on item 9. `internal/provider/wire_anthropic_stream.go`: `anthropicCodec.parseSSE` keyed on the JSON `type` of each `data:` payload (never `[DONE]`): `message_start` → Model + input usage; `content_block_start` text/tool_use (open a tool call in `openToolCalls` by block index with id+name); `content_block_delta` `text_delta`→content Delta, `input_json_delta`→argument fragment, `thinking_delta`→Thinking Delta; `content_block_stop`; `message_delta` → FinishReason (mapped as item 9) + output usage; `message_stop` → flush tool calls, Done; `ping` ignored; in-band `error` → `inBandErrorDelta`. Existing caps (`maxToolCallBytes`, `maxReplyTextBytes`) apply. `fault.go` gains the one classifier arm the header comment reserves: `529`/`overloaded_error` retryable, `rate_limit_error` as 429, and `prompt is too long` (400 `invalid_request_error`) as context overflow; `isContextOverflow` gains that marker.
 
