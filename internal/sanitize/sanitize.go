@@ -71,8 +71,8 @@ func StripEscapesAll(xs []string) []string {
 // U+200F. Every one of them reorders the glyphs around it while leaving the underlying bytes alone,
 // which at a display seam means the row can say something other than what it holds.
 //
-// Deliberately the bidi set and NOT the whole of unicode.Cf, which the INGESTION and STORAGE seams
-// drop wholesale (neuterInert in internal/tools, SanitizeContent in internal/library). The
+// Deliberately the bidi set and NOT the whole of unicode.Cf, which the INGESTION seam drops
+// wholesale (neuterInert in internal/tools, the only wholesale dropper). The
 // asymmetry is intended, not an inconsistency to repair later: Cf also holds U+200D ZWJ, which is
 // load-bearing inside an emoji sequence, and U+00AD soft hyphen — dropping those where untrusted
 // bytes ARRIVE costs nothing, but dropping them at a DISPLAY seam would mangle the user's own prose

@@ -144,10 +144,9 @@ func redirectTarget(resp netResponse) string {
 	return neuterInert(resp.header.Get("Location"), maxLocationBytes, "location")
 }
 
-// neuterInert returns raw response-header text in the directive-inert shape
-// library.SanitizeContent applies to untrusted stored text: control (Cc), format (Cf),
-// private-use (Co) and surrogate (Cs) runes are dropped, and whitespace runs are folded to a
-// single space. Folding keeps the whole value rather than cutting at the first space: a URI
+// neuterInert returns raw response-header text in a directive-inert shape — the one wholesale
+// dropper untrusted arriving text passes through: control (Cc), format (Cf), private-use (Co)
+// and surrogate (Cs) runes are dropped, and whitespace runs are folded to a single space. Folding keeps the whole value rather than cutting at the first space: a URI
 // carries no raw space, but the servers that emit an unencoded one would then be answered with a
 // WRONG target, and folded text can only ever sit inside its one rendered line — it can open
 // neither a header line nor a body of its own. The result is capped at capBytes because the

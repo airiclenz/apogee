@@ -696,7 +696,11 @@ decision 3 into a property; `internal/tools/doc.go` and `CONTEXT.md`'s undo-capt
 
 **Commit:** `refactor(tools): undo capture funnels through writeTarget; the source scan follows it`
 
-## 22. One confinement handoff in `internal/subprocess`
+## 22. One confinement handoff in `internal/subprocess` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — internal/subprocess/scratchenv.go: made necessary by ScratchEnv's doc naming `run` and console_open's confined branch as its two callers, which ConfinementHandoff's hook replaced.
+NOTES (2026-09-16): `internal/tools/console_open_test.go` left untouched — the four named console tests pass unchanged against the collapsed `consolePrepare`; the handoff's three branches gained a direct `TestConfinementHandoff` in `internal/subprocess/subprocess_test.go` instead.
+NOTES (2026-09-16): `run` hands the handoff `runCtx` (the per-call timeout child of ctx), preserving the Confiner's previous context exactly; the console hands its own ctx as before.
 
 **What.** `internal/subprocess/subprocess.go` exports `ConfinementHandoff(ctx, program string)
 (prepare func(*exec.Cmd) error, confined bool, box *domain.ConfinementBox, err error)` — the one

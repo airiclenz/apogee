@@ -49,9 +49,10 @@ func ScratchEnvKeys() []string {
 // ScratchEnv returns the "KEY=value" entries that point a confined toolchain's temp and cache
 // dirs beneath box.ScratchDir — `<scratch>/tmp`, `<scratch>/go-build` and `<scratch>/cache` —
 // creating each directory first, so the child never finds its TMPDIR missing. It is the ONE
-// place the seed is built: the subprocess funnel (run) and console_open's confined branch both
-// call it, and only on a confined run, so an unconfined run's environment stays byte-identical
-// to the host's. A box with no ScratchDir yields nil and creates nothing.
+// place the seed is built: ConfinementHandoff's prepare hook — what the subprocess funnel (run)
+// and console_open both spawn under — calls it, and only on a confined run, so an unconfined
+// run's environment stays byte-identical to the host's. A box with no ScratchDir yields nil and
+// creates nothing.
 //
 // The entries are meant to be APPENDED to the child's environment: os/exec resolves a duplicate
 // key last-wins, so the seed overrides whatever the host or the tool's own allowlist carried for

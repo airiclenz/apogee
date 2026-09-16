@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -70,6 +71,86 @@ func TestRunSubprocessNilConfinerFailsClosed(t *testing.T) {
 	if _, statErr := os.Stat(canary); !errors.Is(statErr, os.ErrNotExist) {
 		t.Errorf("stat %s = %v, want not-exist — the command must not have run unconfined", canary, statErr)
 	}
+}
+
+// TestConfinementHandoff pins the one handoff rule both spawners read a handle through: no
+// handle is an unconfined run with nothing to prepare; a handle with no Confiner is refused
+// closed; a live handle yields a hook that confines the cmd and then seeds the scratch env on top
+// of the cmd's own environment — the order the console and the funnel both depend on.
+func TestConfinementHandoff(t *testing.T) {
+	t.Parallel()
+
+	t.Run("absent handle is unconfined", func(t *testing.T) {
+		t.Parallel()
+		prepare, confined, box, err := ConfinementHandoff(context.Background(), "sh")
+		if err != nil || prepare != nil || confined || box != nil {
+			t.Fatalf("ConfinementHandoff() = (prepare nil=%v, %v, %v, %v), want (nil, false, nil, nil)", prepare == nil, confined, box, err)
+		}
+	})
+
+	t.Run("nil Confiner fails closed", func(t *testing.T) {
+		t.Parallel()
+		ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+			Box: domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
+		})
+		prepare, confined, box, err := ConfinementHandoff(ctx, "sh")
+		if !errors.Is(err, domain.ErrConfinementUnavailable) {
+			t.Fatalf("err = %v, want ErrConfinementUnavailable", err)
+		}
+		if want := "confine sh: "; !strings.HasPrefix(err.Error(), want) || !strings.HasSuffix(err.Error(), ": the installed handle carries no Confiner") {
+			t.Errorf("err = %q, want the %q … \"carries no Confiner\" sentence", err, want)
+		}
+		if prepare != nil || confined || box != nil {
+			t.Errorf("a refused handoff must yield nothing to prepare (prepare nil=%v, %v, %v)", prepare == nil, confined, box)
+		}
+	})
+
+	t.Run("live handle confines then seeds", func(t *testing.T) {
+		t.Parallel()
+		scratch := filepath.Join(t.TempDir(), "scratch")
+		confiner := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}}
+		want := domain.ConfinementBox{WorkspaceRoot: t.TempDir(), ScratchDir: scratch}
+		ctx := domain.WithConfinement(context.Background(), domain.Confinement{Confiner: confiner, Box: want})
+
+		prepare, confined, box, err := ConfinementHandoff(ctx, "sh")
+
+		if err != nil {
+			t.Fatalf("ConfinementHandoff err = %v, want nil", err)
+		}
+		if !confined || box == nil || !reflect.DeepEqual(*box, want) {
+			t.Fatalf("confined=%v box=%v, want true and %v", confined, box, want)
+		}
+		cmd := exec.Command("sh")
+		cmd.Env = []string{"PATH=/usr/bin", "TMPDIR=/host/tmp"}
+		if err := prepare(cmd); err != nil {
+			t.Fatalf("prepare err = %v, want nil", err)
+		}
+		if confiner.confined != 1 {
+			t.Errorf("Confine called %d times, want 1", confiner.confined)
+		}
+		seeded := "TMPDIR=" + filepath.Join(scratch, "tmp")
+		if len(cmd.Env) < 3 || cmd.Env[0] != "PATH=/usr/bin" || cmd.Env[len(cmd.Env)-len(scratchEnvEntries)] != seeded {
+			t.Errorf("cmd.Env = %q, want the caller's entries first and %q leading the seed", cmd.Env, seeded)
+		}
+		if info, err := os.Stat(filepath.Join(scratch, "tmp")); err != nil || !info.IsDir() {
+			t.Errorf("scratch/tmp was not created by the hook: %v", err)
+		}
+	})
+
+	t.Run("backend refusal propagates through the hook", func(t *testing.T) {
+		t.Parallel()
+		ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+			Confiner: &fakeConfiner{unavailable: true},
+			Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir()},
+		})
+		prepare, _, _, err := ConfinementHandoff(ctx, "sh")
+		if err != nil {
+			t.Fatalf("ConfinementHandoff err = %v, want nil — the backend is only asked inside the hook", err)
+		}
+		if err := prepare(exec.Command("sh")); !errors.Is(err, domain.ErrConfinementUnavailable) {
+			t.Errorf("prepare err = %v, want ErrConfinementUnavailable", err)
+		}
+	})
 }
 
 // TestRunSubprocessReportsAWedgedDrain pins the second half of the same finding: when something

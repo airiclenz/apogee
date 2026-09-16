@@ -200,41 +200,15 @@ func (t *ConsoleOpen) consoleArgv(ctx context.Context, callID, command string) (
 }
 
 // consolePrepare returns the hook that fences a Console's command before it starts, and whether
-// the Console will run confined. No handle on ctx means an unconfined run — the
-// `confine-to-workspace: false` opt-in and the gated-then-approved case, where the Resolution
-// already decided — and nil Prepare is how the process layer spells "nothing to prepare".
-//
-// A handle carrying no Confiner is broken wiring rather than permission to run free: it fails
-// CLOSED as ErrConfinementUnavailable, the same refusal runSubprocess makes, so the escape
-// surfaces as a truthful demote instead of an unfenced shell nobody gated.
-//
-// A Console never passes through the subprocess funnel — it builds its own environment and starts
-// under the pseudo-terminal — so the hook is also where a confined Console gets what the funnel
-// gives every other confined run: the toolchain's temp and cache variables seeded beneath the
-// session scratch dir (subprocess.ScratchEnv), appended after Confine so the wrapper the backend
-// interposed inherits them too.
+// the Console will run confined — the one handoff rule the subprocess funnel spawns under
+// (subprocess.ConfinementHandoff): no handle on ctx is an unconfined run with nil Prepare (how the
+// process layer spells "nothing to prepare"); a handle carrying no Confiner fails CLOSED as
+// ErrConfinementUnavailable, the same refusal runSubprocess makes; a live handle yields the hook
+// that confines the assembled cmd and seeds the scratch env after it. The box rides only on the
+// funnel's result — a Console renders no denial label — so it is dropped here.
 func consolePrepare(ctx context.Context, program string) (func(*exec.Cmd) error, bool, error) {
-	handle, ok := domain.ConfinementFromContext(ctx)
-	if !ok {
-		return nil, false, nil
-	}
-	if handle.Confiner == nil {
-		return nil, false, fmt.Errorf("confine %s: %w: the installed handle carries no Confiner",
-			program, domain.ErrConfinementUnavailable)
-	}
-	return func(cmd *exec.Cmd) error {
-		if err := handle.Confiner.Confine(ctx, handle.Box, cmd); err != nil {
-			return fmt.Errorf("confine %s: %w", program, err)
-		}
-		if handle.Box.ScratchDir != "" {
-			seed, err := subprocess.ScratchEnv(handle.Box)
-			if err != nil {
-				return fmt.Errorf("seed scratch env for %s: %w", program, err)
-			}
-			cmd.Env = append(cmd.Environ(), seed...)
-		}
-		return nil
-	}, true, nil
+	prepare, confined, _, err := subprocess.ConfinementHandoff(ctx, program)
+	return prepare, confined, err
 }
 
 var (

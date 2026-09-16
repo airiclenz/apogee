@@ -248,36 +248,25 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	// every real argv leaves this empty and the cmd untouched.
 	setRawCommandLine(cmd, spec.Cmdline)
 
-	// Confine the command if the disposition installed a handle. ErrConfinementUnavailable
-	// is propagated so dispatch demotes to Approval rather than running unconfined. An
-	// installed handle carrying no Confiner is broken wiring, not permission to run free: it
-	// fails closed the same way, so the escape surfaces as the truthful demote instead of a
-	// silent unconfined run.
-	confined := false
+	// Confine the command if the disposition installed a handle — the one handoff rule
+	// (ConfinementHandoff), so the refusal and the seed here are the Console's too.
+	// ErrConfinementUnavailable is propagated so dispatch demotes to Approval rather than
+	// running unconfined. The handoff reads the handle off runCtx, a child of ctx, so the
+	// Confiner sees the per-call deadline the run itself is governed by.
+	prepare, confined, fence, err := ConfinementHandoff(runCtx, spec.Argv[0])
+	if err != nil {
+		return SubprocessResult{}, err
+	}
+	if prepare != nil {
+		if err := prepare(cmd); err != nil {
+			return SubprocessResult{}, err
+		}
+	}
+	// The box the run was fenced by rides along on the result: it is what the denial labels
+	// name the writable roots from, and this is the only place it is in hand.
 	var box domain.ConfinementBox
-	if conf, ok := domain.ConfinementFromContext(ctx); ok {
-		if conf.Confiner == nil {
-			return SubprocessResult{}, fmt.Errorf("confine %s: %w: the installed handle carries no Confiner",
-				spec.Argv[0], domain.ErrConfinementUnavailable)
-		}
-		if err := conf.Confiner.Confine(runCtx, conf.Box, cmd); err != nil {
-			return SubprocessResult{}, fmt.Errorf("confine %s: %w", spec.Argv[0], err)
-		}
-		confined = true
-		// The box the run was fenced by rides along on the result: it is what the denial
-		// labels name the writable roots from, and this is the only place it is in hand.
-		box = conf.Box
-		// A confined toolchain is pointed at the scratch dir for its temp and cache files —
-		// /tmp and ~/.cache are outside the fence. The seed is appended AFTER the spec's own
-		// environment (or the inherited one) so it wins the last-wins duplicate resolution,
-		// and after Confine so the wrapper the backend interposed inherits it too.
-		if conf.Box.ScratchDir != "" {
-			seed, err := ScratchEnv(conf.Box)
-			if err != nil {
-				return SubprocessResult{}, fmt.Errorf("seed scratch env for %s: %w", spec.Argv[0], err)
-			}
-			cmd.Env = append(cmd.Environ(), seed...)
-		}
+	if fence != nil {
+		box = *fence
 	}
 
 	// A CONFINED run's output is watched live for an OS-denial signature; the first match
@@ -321,6 +310,53 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	res.FailFast = spec.FailFast
 	res.Dir = spec.Dir
 	return res, nil
+}
+
+// ConfinementHandoff is the ONE rule for "a Confinement handle on ctx" — what the one-shot
+// runner (run) and the Console (internal/tools' console_open) both spawn under, spelled once so
+// the two can never disagree on what a handle means:
+//
+//   - No handle on ctx is an UNCONFINED run — the `confine-to-workspace: false` opt-in and the
+//     gated-then-approved case, where the Resolution already decided. prepare is nil (how the
+//     process layers spell "nothing to prepare"), confined is false and box is nil.
+//   - A handle whose Confiner is nil is broken wiring, not permission to run free: it fails
+//     CLOSED with ErrConfinementUnavailable, the "confine %s: %w: the installed handle carries no
+//     Confiner" refusal, so the escape surfaces as a truthful demote to Approval instead of a
+//     silent unconfined run (contract §2.2, §4).
+//   - Otherwise prepare is the hook the spawner calls on its assembled *exec.Cmd before the
+//     process starts: it asks the Confiner to wrap the cmd (an ErrConfinementUnavailable from the
+//     backend is propagated wrapped, for the same demote), then — on a box naming a ScratchDir —
+//     seeds the toolchain's temp and cache variables beneath it (ScratchEnv), appended AFTER
+//     cmd.Environ() so they win os/exec's last-wins duplicate resolution and after Confine so the
+//     wrapper the backend interposed inherits them too. confined is true and box is the policy the
+//     run executes under, for the spawner's denial labels to name the writable roots from.
+//
+// program is the argv[0] the refusal and the seed errors name.
+func ConfinementHandoff(ctx context.Context, program string) (prepare func(*exec.Cmd) error, confined bool, box *domain.ConfinementBox, err error) {
+	handle, ok := domain.ConfinementFromContext(ctx)
+	if !ok {
+		return nil, false, nil, nil
+	}
+	if handle.Confiner == nil {
+		return nil, false, nil, fmt.Errorf("confine %s: %w: the installed handle carries no Confiner",
+			program, domain.ErrConfinementUnavailable)
+	}
+	prepare = func(cmd *exec.Cmd) error {
+		if err := handle.Confiner.Confine(ctx, handle.Box, cmd); err != nil {
+			return fmt.Errorf("confine %s: %w", program, err)
+		}
+		// A confined toolchain is pointed at the scratch dir for its temp and cache files —
+		// /tmp and ~/.cache are outside the fence.
+		if handle.Box.ScratchDir != "" {
+			seed, err := ScratchEnv(handle.Box)
+			if err != nil {
+				return fmt.Errorf("seed scratch env for %s: %w", program, err)
+			}
+			cmd.Env = append(cmd.Environ(), seed...)
+		}
+		return nil
+	}
+	return prepare, true, &handle.Box, nil
 }
 
 // exitCodeOf extracts the process exit code from a finished cmd: the child's code on a clean
