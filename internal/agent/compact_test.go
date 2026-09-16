@@ -990,3 +990,252 @@ func TestCompactDoesNotRestreamAPlainSummaryFault(t *testing.T) {
 		t.Errorf("conv mutated on a faulted compaction: Len = %d, want %d", a.conv.Len(), before)
 	}
 }
+
+// TestFoldTable drives foldFor per trigger and pins each row of the latch table — the gate column
+// (what closes it, and whether a closed gate refuses or declines silently) and the latch columns
+// (stand-down, event, saturation, bridge) — so the three wrappers cannot drift back into three
+// prose-governed copies.
+func TestFoldTable(t *testing.T) {
+	type env struct {
+		a    *Agent
+		sink *recordingSink
+		up   *compactSpyResponder
+	}
+	// over seeds a history far past the 8k window's allocation, so the estimate row's gate opens.
+	over := func(t *testing.T, cfg func(*domain.Config)) env {
+		t.Helper()
+		sink := &recordingSink{}
+		up := &compactSpyResponder{reply: "FOLDED-SUMMARY"}
+		c := autoCompactConfig(sink)
+		if cfg != nil {
+			cfg(&c)
+		}
+		a, err := newAgent(c, up)
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		seedLargeConv(a)
+		return env{a, sink, up}
+	}
+	// midExchange places the agent inside an open Exchange at a quiescent Turn boundary, as a
+	// child agent (midExchangeCompaction) sits at every Turn.
+	midExchange := func(a *Agent) {
+		a.midExchangeCompaction = true
+		a.turns.restore(turnSnapshot{inExchange: true, exchangeStart: 1})
+	}
+	autoOff := func(c *domain.Config) { c.Context.CompactionEnabled = false }
+
+	t.Run("gate column", func(t *testing.T) {
+		gates := []struct {
+			name    string
+			kind    foldKind
+			arrange func(env)
+			refusal error // the error a closed gate hands the caller; nil = declines silently
+		}{
+			{"on demand refuses mid-Exchange", foldOnDemand, func(e env) { midExchange(e.a) }, domain.ErrInputPending},
+			{"estimate declines while another fold runs", foldEstimate, func(e env) { e.a.compacting = true }, nil},
+			{"estimate declines under auto-compact: false", foldEstimate, func(e env) { e.a.SetCompactionEnabled(false) }, nil},
+			{"estimate declines on the stand-down latch", foldEstimate, func(e env) { e.a.turns.foldFaulted() }, nil},
+			{"overflow declines while another fold runs", foldOverflow, func(e env) { e.a.compacting = true }, nil},
+			{"overflow declines under auto-compact: false", foldOverflow, func(e env) { e.a.SetCompactionEnabled(false) }, nil},
+		}
+		for _, g := range gates {
+			t.Run(g.name, func(t *testing.T) {
+				e := over(t, nil)
+				g.arrange(e)
+				r := e.a.foldFor(context.Background(), 0, g.kind)
+				if r.end != foldEndDeclined || r.skipped {
+					t.Fatalf("result = %+v, want a declined, unskipped fold", r)
+				}
+				if !errors.Is(r.err, g.refusal) || (g.refusal == nil && r.err != nil) {
+					t.Errorf("err = %v, want %v", r.err, g.refusal)
+				}
+				if e.up.summaryCalls != 0 {
+					t.Errorf("summarizer calls = %d, want 0 (the gate precedes the wire)", e.up.summaryCalls)
+				}
+				if n := countCompactionErrors(e.sink.events); n != 0 {
+					t.Errorf("compaction ErrorEvents = %d, want 0 (a closed gate is silent)", n)
+				}
+			})
+		}
+		t.Run("on demand ignores auto-compact: false and both latches", func(t *testing.T) {
+			e := over(t, autoOff)
+			e.a.turns.foldFaulted()
+			e.a.turns.foldSaturated()
+			if r := e.a.foldFor(context.Background(), 0, foldOnDemand); r.end != foldEndFolded || r.err != nil {
+				t.Fatalf("result = %+v, want a fold that ran", r)
+			}
+			if e.up.summaryCalls != 1 {
+				t.Errorf("summarizer calls = %d, want 1", e.up.summaryCalls)
+			}
+		})
+		t.Run("overflow ignores both latches", func(t *testing.T) {
+			e := over(t, nil)
+			e.a.turns.foldFaulted()
+			e.a.turns.foldSaturated()
+			if r := e.a.foldFor(context.Background(), 0, foldOverflow); r.end != foldEndFolded {
+				t.Fatalf("result = %+v, want a fold that ran", r)
+			}
+		})
+	})
+
+	t.Run("fault row", func(t *testing.T) {
+		faults := []struct {
+			name       string
+			kind       foldKind
+			inExchange bool
+			latched    bool // compactFailed after the fault
+			events     int  // compaction ErrorEvents
+			standsDown bool // the event carries foldStandDownSuffix
+		}{
+			{"on demand: no latch, no event, the caller gets the error", foldOnDemand, false, false, 0, false},
+			{"estimate at an opening: latch + one event", foldEstimate, false, true, 1, false},
+			{"estimate mid-Exchange: latch + one event that says so", foldEstimate, true, true, 1, true},
+			{"overflow: one event, no latch", foldOverflow, true, false, 1, false},
+		}
+		for _, f := range faults {
+			t.Run(f.name, func(t *testing.T) {
+				sink := &recordingSink{}
+				a, err := newAgent(autoCompactConfig(sink), overflowResponder{}) // every summary call faults
+				if err != nil {
+					t.Fatalf("newAgent: %v", err)
+				}
+				seedLargeConv(a)
+				if f.inExchange {
+					midExchange(a)
+				}
+				before := a.conv.Len()
+				r := a.foldFor(context.Background(), 0, f.kind)
+				if r.end != foldEndFaulted || r.err == nil || r.skipped {
+					t.Fatalf("result = %+v, want faulted with the error carried", r)
+				}
+				if a.conv.Len() != before {
+					t.Errorf("conv.Len() = %d, want %d (a faulted fold leaves history untouched)", a.conv.Len(), before)
+				}
+				if a.turns.compactFailed != f.latched {
+					t.Errorf("compactFailed = %v, want %v", a.turns.compactFailed, f.latched)
+				}
+				texts := compactionErrorTexts(sink.events)
+				if len(texts) != f.events {
+					t.Fatalf("compaction ErrorEvents = %v, want %d", texts, f.events)
+				}
+				if f.events == 1 && strings.HasSuffix(texts[0], foldStandDownSuffix) != f.standsDown {
+					t.Errorf("event %q: stand-down suffix present = %v, want %v", texts[0], !f.standsDown, f.standsDown)
+				}
+			})
+		}
+	})
+
+	t.Run("bridge column", func(t *testing.T) {
+		bridges := []struct {
+			name       string
+			kind       foldKind
+			inExchange bool
+			bridged    bool
+		}{
+			{"on demand: no bridge", foldOnDemand, false, false},
+			{"estimate at an opening: no bridge", foldEstimate, false, false},
+			{"estimate mid-Exchange: bridge", foldEstimate, true, true},
+			{"overflow at an opening: bridge", foldOverflow, false, true},
+			{"overflow mid-Exchange: bridge", foldOverflow, true, true},
+		}
+		for _, b := range bridges {
+			t.Run(b.name, func(t *testing.T) {
+				e := over(t, nil)
+				if b.inExchange {
+					midExchange(e.a)
+				}
+				if r := e.a.foldFor(context.Background(), 0, b.kind); r.end != foldEndFolded || r.err != nil || r.skipped {
+					t.Fatalf("result = %+v, want a fold that ran", r)
+				}
+				last := e.a.conv.Messages()[e.a.conv.Len()-1]
+				if got := last.Role == domain.RoleUser && last.Content == overflowBridge; got != b.bridged {
+					t.Errorf("ends on the bridge = %v, want %v (roles %s)", got, b.bridged, convRoles(e.a))
+				}
+				if b.bridged && b.inExchange && e.a.turns.exchangeStart != e.a.conv.Len()-1 {
+					t.Errorf("exchangeStart = %d, want %d (re-anchored at the bridge)", e.a.turns.exchangeStart, e.a.conv.Len()-1)
+				}
+				if n := countCompactionErrors(e.sink.events); n != 0 {
+					t.Errorf("compaction ErrorEvents = %d, want 0 (a fold that ran is quiet)", n)
+				}
+			})
+		}
+	})
+
+	t.Run("saturation column", func(t *testing.T) {
+		// A protected prefix (the first user message) larger than the whole allocation: the fold
+		// runs and the history is STILL over it.
+		sat := func(a *Agent) {
+			a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("goal ", 8000)})
+			a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "on it"})
+			a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "more"})
+			a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "done"})
+		}
+		for _, s := range []struct {
+			name      string
+			kind      foldKind
+			saturates bool
+		}{
+			{"estimate latches with one event", foldEstimate, true},
+			{"on demand never saturates", foldOnDemand, false},
+			{"overflow never saturates", foldOverflow, false},
+		} {
+			t.Run(s.name, func(t *testing.T) {
+				sink := &recordingSink{}
+				a, err := newAgent(autoCompactConfig(sink), &compactSpyResponder{reply: "FOLDED-SUMMARY"})
+				if err != nil {
+					t.Fatalf("newAgent: %v", err)
+				}
+				sat(a)
+				if r := a.foldFor(context.Background(), 0, s.kind); r.end != foldEndFolded {
+					t.Fatalf("result = %+v, want a fold that ran", r)
+				}
+				if a.turns.compactSat != s.saturates {
+					t.Errorf("compactSat = %v, want %v", a.turns.compactSat, s.saturates)
+				}
+				want := 0
+				if s.saturates {
+					want = 1
+				}
+				if n := countCompactionErrors(sink.events); n != want {
+					t.Errorf("compaction ErrorEvents = %d, want %d", n, want)
+				}
+			})
+		}
+	})
+
+	t.Run("cancel and skip end silently on every row", func(t *testing.T) {
+		for _, kind := range []foldKind{foldOnDemand, foldEstimate, foldOverflow} {
+			t.Run(fmt.Sprintf("kind %d cancelled", kind), func(t *testing.T) {
+				e := over(t, nil)
+				before := e.a.conv.Len()
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				r := e.a.foldFor(ctx, 0, kind)
+				if r.end != foldEndCancelled || !errors.Is(r.err, context.Canceled) || r.skipped {
+					t.Fatalf("result = %+v, want cancelled carrying ctx.Err()", r)
+				}
+				if e.a.conv.Len() != before || e.a.turns.compactFailed || countCompactionErrors(e.sink.events) != 0 {
+					t.Errorf("a cancel must leave the conversation, the latch and the event stream untouched: len %d→%d, latched %v, events %d",
+						before, e.a.conv.Len(), e.a.turns.compactFailed, countCompactionErrors(e.sink.events))
+				}
+			})
+			t.Run(fmt.Sprintf("kind %d skipped", kind), func(t *testing.T) {
+				sink := &recordingSink{}
+				up := &compactSpyResponder{reply: "UNREACHED"}
+				a, err := newAgent(autoCompactConfig(sink), up)
+				if err != nil {
+					t.Fatalf("newAgent: %v", err)
+				}
+				a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("x", 40000)}) // over budget, nothing past the prefix
+				r := a.foldFor(context.Background(), 0, kind)
+				if r.end != foldEndDeclined || !r.skipped || r.err != nil {
+					t.Fatalf("result = %+v, want declined + skipped", r)
+				}
+				if up.summaryCalls != 0 || a.turns.compactSat || countCompactionErrors(sink.events) != 0 {
+					t.Errorf("a skip proves nothing: calls %d, saturated %v, events %d", up.summaryCalls, a.turns.compactSat, countCompactionErrors(sink.events))
+				}
+			})
+		}
+	})
+}

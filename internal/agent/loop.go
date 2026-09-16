@@ -291,10 +291,12 @@ const (
 
 // refold runs the emergency fold-and-rebuild ritual both overflow paths (the predictive guard and
 // the reactive respond loop) previously copied: re-queue t's drained corrections so the rebuilt
-// request carries them, run the emergency fold, resolve the ctx-cancel emergencyFold delegates to
-// its caller, and re-derive t's working values from the (possibly folded) conversation. It latches
-// t.foldSpent on a fold that ran — the Turn's one fold, shared by both paths — and returns how the
-// fold ended so the caller can route it (proceed / give up / cancel).
+// request carries them, run the overflow row of the fold table (foldFor, compact.go), and
+// re-derive t's working values from the (possibly folded) conversation. It latches t.foldSpent on
+// a fold that ran — the Turn's one fold, shared by both paths — and maps foldFor's four-way result
+// onto the three-way outcome the caller routes on: folded → foldFolded; declined and faulted →
+// foldDeclined (the fold already surfaced a fault from source "compaction", and either way the
+// conversation is untouched); cancelled → foldCancelled.
 //
 // On foldDeclined the conversation is untouched, so the re-derive reproduces the pre-fold values
 // exactly and the unfolded Turn proceeds bit-for-bit as before. On foldCancelled nothing was
@@ -304,17 +306,15 @@ func (a *Agent) refold(ctx context.Context, t *turnRun) foldOutcome {
 	// Re-queue the drained corrections FIRST so the rebuilt request carries them (armRequest's
 	// buildRequest drains the queue again below).
 	a.turns.restoreDeferred(t.deferred)
-	folded := a.emergencyFold(ctx, t.turn)
-	if ctx.Err() != nil {
-		// A cancel mid-summary masquerades as a stream error, so only ctx can tell it from a
-		// silent decline (the check emergencyFold delegates to its caller). Leave t untouched.
-		return foldCancelled
+	r := a.foldFor(ctx, t.turn, foldOverflow)
+	if r.end == foldEndCancelled {
+		return foldCancelled // leave t untouched; the caller routes the cancel
 	}
 	// Re-derive every value the request depends on from the (possibly folded) conversation.
 	// exchangeStart is re-anchored by the fold itself (compact.go). When nothing was folded the
 	// conversation is untouched, so all three re-derive to what they already were.
 	a.armRequest(t)
-	if folded {
+	if r.end == foldEndFolded {
 		t.foldSpent = true // spend the Turn's one fold, shared by the predictive and reactive paths
 		return foldFolded
 	}

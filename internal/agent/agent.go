@@ -356,7 +356,7 @@ type Agent struct {
 
 	conv         domain.Conversation // serializable conversation state (ADR 0001)
 	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)
-	compacting   bool                // guards the automatic Compaction trigger against re-entry (item 9)
+	compacting   bool                // the fold re-entrancy guard, held by foldFor for every trigger (compact.go)
 	stepNoticeAt int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the notice rode, 0 = none; latches the notice against that Turn's further tool results, and a cancelled Turn's rollback re-arms it (rearmStepNotice)
 	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
 	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
@@ -669,10 +669,6 @@ func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, err
 // sockets, so a later request dials again. The other live resources of a running session belong
 // to the host that wired them rather than to this call: cmd/apogee closes the MCP connections
 // alongside it, and the log sink is torn down by the TUI that opened it (internal/tui).
-// The Library store this session's catalogue opened is flushed here too, between the two: the
-// observations describe the run the Consoles were part of, and the flush must land before the
-// socket goes back. It is a bounded flush (library.Store.Close), so a hung filesystem cannot hold
-// up a shutdown.
 func (a *Agent) Close() error {
 	a.closeConsoles()
 	return a.closeOwnedUpstream(a.upstream)

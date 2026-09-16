@@ -139,7 +139,12 @@ does). Existing: `streamsuppress_test.go`, `loop_cleanup_test.go`, the 15 `compa
 
 **Commit:** `fix(agent): one Delta collector; a transient fault during a summary re-streams instead of failing the fold`
 
-## 3. One fold aftermath
+## 3. One fold aftermath — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `foldFor` takes the Turn index alongside ctx and kind (`foldFor(ctx, turn, kind)`) — the ErrorEvent base needs it and the two loop-driven wrappers already carry it; `Compact` passes `a.turns.index`.
+NOTES (2026-09-16): `foldResult` carries the fold's own `error` value (returned by `Compact` as-is, `ctx.Err()` on a cancel, `domain.ErrInputPending` on the on-demand refusal) rather than a text re-wrapped with `errors.New` — `errors.Is` on the refusal and the cancel keeps working exactly as before; the fault text on the event is `err.Error()` as today.
+NOTES (2026-09-16): the re-entrancy guard (`compacting`) is now held for the on-demand row too (foldFor owns it for every row); the two automatic gates still check it, the on-demand gate does not.
+NOTES (2026-09-16): `internal/agent/emergencyfold_test.go` (in Files) needed no change — its six direct `emergencyFold` calls pass against the thin wrapper; the new table test lives in `compact_test.go` (`TestFoldTable`, 32 subtests).
 
 **What.** `internal/agent/compact.go`: `foldFor(ctx, kind foldKind) foldOutcome` (kinds onDemand |
 estimate | overflow; outcomes folded | declined | cancelled | faulted(text)) owns the re-entrancy
