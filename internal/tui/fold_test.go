@@ -506,12 +506,13 @@ func TestFoldEventPairsResultWithCallBeforeActivity(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // mainUsage is one reading the top-level agent reported: the Turn's own fill, and the running
-// totals the agent stamped it with (domain.UsageEvent's Cumulative* fields).
+// totals the agent stamped it with (domain.UsageEvent.Cumulative).
 func mainUsage(prompt, completion, total, cumPrompt, cumCompletion, cumTotal, calls int) domain.UsageEvent {
 	return domain.UsageEvent{
 		PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total,
-		CumulativePromptTokens: cumPrompt, CumulativeCompletionTokens: cumCompletion,
-		CumulativeTotalTokens: cumTotal, CumulativeCalls: calls,
+		Cumulative: domain.Usage{
+			Calls: calls, PromptTokens: cumPrompt, CompletionTokens: cumCompletion, TotalTokens: cumTotal,
+		},
 	}
 }
 

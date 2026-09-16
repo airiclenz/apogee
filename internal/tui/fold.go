@@ -75,23 +75,17 @@ func (m Model) foldEvent(e domain.Event) Model {
 }
 
 // usageReading is the cumulative half of a UsageEvent as one domain.Usage: the emitting agent's
-// own running sum (the Cumulative* fields), which the view reads LATEST-WINS rather than adding
+// own running sum (its Cumulative reading), which the view reads LATEST-WINS rather than adding
 // events up — so a fold that joined the stream late, or dropped an event, still reports the same
 // totals as one that saw every one. An event stamped by an agent that has accounted for no call —
 // a hand-built stream, or a record from before the engine counted — reads as the zero Usage, whose
 // zero Calls is the absence of accounting (domain.Usage) rather than a spend of zero, so it never
 // blanks a reading that already stands (Adopt refuses it; foldStats checks the same counter).
 func usageReading(e domain.UsageEvent) domain.Usage {
-	if e.CumulativeCalls <= 0 {
+	if e.Cumulative.Calls <= 0 {
 		return domain.Usage{}
 	}
-	return domain.Usage{
-		Calls:              e.CumulativeCalls,
-		PromptTokens:       e.CumulativePromptTokens,
-		CachedPromptTokens: e.CumulativeCachedPromptTokens,
-		CompletionTokens:   e.CumulativeCompletionTokens,
-		TotalTokens:        e.CumulativeTotalTokens,
-	}
+	return e.Cumulative
 }
 
 // foldStats updates the live token stats from one engine Event (the eventMsg fold). Only the

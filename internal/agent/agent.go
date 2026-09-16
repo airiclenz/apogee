@@ -506,7 +506,7 @@ func (a *Agent) boundErrText() string {
 }
 
 // usageTally is one Agent's running token accounting: the sums and the call count behind the
-// cumulative fields of every domain.UsageEvent that Agent emits. It is deliberately a plain
+// Cumulative reading of every domain.UsageEvent that Agent emits. It is deliberately a plain
 // value struct on the Agent — the loop touches it only from the goroutine driving that Agent
 // (the single-goroutine contract above; a fan-out's children are separate Agents with separate
 // tallies), so it needs no lock, and holding no pointer keeps it copy-safe.
@@ -520,7 +520,7 @@ type usageTally struct {
 
 // record folds one completed upstream call's server-reported usage into the running totals and
 // returns the UsageEvent to emit for it: the call's OWN counts in the fill fields, the UPDATED
-// totals in the cumulative ones. TotalTokens is folded as the server reported it rather than
+// totals in Cumulative. TotalTokens is folded as the server reported it rather than
 // recomputed from the two parts, so the totals stay consistent with the server's own arithmetic
 // (a server may count cached or reasoning tokens the split does not show). cached — the share of
 // the prompt the server answered from its prefix cache, 0 where it reports none — folds in the
@@ -544,19 +544,21 @@ func (t *usageTally) record(base domain.EventBase, model, served string, window,
 	t.cached += cached
 	t.calls++
 	return domain.UsageEvent{
-		EventBase:                    base,
-		PromptTokens:                 prompt,
-		CompletionTokens:             completion,
-		TotalTokens:                  total,
-		CachedPromptTokens:           cached,
-		Model:                        model,
-		ServedModel:                  served,
-		ContextWindow:                window,
-		CumulativePromptTokens:       t.prompt,
-		CumulativeCompletionTokens:   t.completion,
-		CumulativeTotalTokens:        t.total,
-		CumulativeCachedPromptTokens: t.cached,
-		CumulativeCalls:              t.calls,
+		EventBase:          base,
+		PromptTokens:       prompt,
+		CompletionTokens:   completion,
+		TotalTokens:        total,
+		CachedPromptTokens: cached,
+		Model:              model,
+		ServedModel:        served,
+		ContextWindow:      window,
+		Cumulative: domain.Usage{
+			Calls:              t.calls,
+			PromptTokens:       t.prompt,
+			CachedPromptTokens: t.cached,
+			CompletionTokens:   t.completion,
+			TotalTokens:        t.total,
+		},
 	}
 }
 

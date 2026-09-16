@@ -87,15 +87,15 @@ func TestUsageEventsCarryCumulativeTotals(t *testing.T) {
 	want := []domain.UsageEvent{
 		{
 			PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19, CachedPromptTokens: 4,
-			CumulativePromptTokens: 12, CumulativeCompletionTokens: 7, CumulativeTotalTokens: 19,
-			CumulativeCachedPromptTokens: 4,
-			CumulativeCalls:              1,
+			Cumulative: domain.Usage{
+				Calls: 1, PromptTokens: 12, CachedPromptTokens: 4, CompletionTokens: 7, TotalTokens: 19,
+			},
 		},
 		{
 			PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35, CachedPromptTokens: 11,
-			CumulativePromptTokens: 42, CumulativeCompletionTokens: 12, CumulativeTotalTokens: 54,
-			CumulativeCachedPromptTokens: 15,
-			CumulativeCalls:              2,
+			Cumulative: domain.Usage{
+				Calls: 2, PromptTokens: 42, CachedPromptTokens: 15, CompletionTokens: 12, TotalTokens: 54,
+			},
 		},
 	}
 	for i, w := range want {
@@ -104,23 +104,23 @@ func TestUsageEventsCarryCumulativeTotals(t *testing.T) {
 			t.Errorf("event %d fill fields = {%d %d %d}, want {%d %d %d} (the call's own counts)",
 				i, g.PromptTokens, g.CompletionTokens, g.TotalTokens, w.PromptTokens, w.CompletionTokens, w.TotalTokens)
 		}
-		if g.CumulativeCalls != w.CumulativeCalls {
-			t.Errorf("event %d CumulativeCalls = %d, want %d", i, g.CumulativeCalls, w.CumulativeCalls)
+		if g.Cumulative.Calls != w.Cumulative.Calls {
+			t.Errorf("event %d Cumulative.Calls = %d, want %d", i, g.Cumulative.Calls, w.Cumulative.Calls)
 		}
 		// The cached share is a subset of the prompt count, folded on the same terms: the call's
 		// own reading in the fill field, the running sum in the cumulative one.
 		if g.CachedPromptTokens != w.CachedPromptTokens ||
-			g.CumulativeCachedPromptTokens != w.CumulativeCachedPromptTokens {
+			g.Cumulative.CachedPromptTokens != w.Cumulative.CachedPromptTokens {
 			t.Errorf("event %d cached = {%d, cumulative %d}, want {%d, cumulative %d}",
-				i, g.CachedPromptTokens, g.CumulativeCachedPromptTokens,
-				w.CachedPromptTokens, w.CumulativeCachedPromptTokens)
+				i, g.CachedPromptTokens, g.Cumulative.CachedPromptTokens,
+				w.CachedPromptTokens, w.Cumulative.CachedPromptTokens)
 		}
-		if g.CumulativePromptTokens != w.CumulativePromptTokens ||
-			g.CumulativeCompletionTokens != w.CumulativeCompletionTokens ||
-			g.CumulativeTotalTokens != w.CumulativeTotalTokens {
+		if g.Cumulative.PromptTokens != w.Cumulative.PromptTokens ||
+			g.Cumulative.CompletionTokens != w.Cumulative.CompletionTokens ||
+			g.Cumulative.TotalTokens != w.Cumulative.TotalTokens {
 			t.Errorf("event %d cumulative = {%d %d %d}, want {%d %d %d} (running totals over both calls)",
-				i, g.CumulativePromptTokens, g.CumulativeCompletionTokens, g.CumulativeTotalTokens,
-				w.CumulativePromptTokens, w.CumulativeCompletionTokens, w.CumulativeTotalTokens)
+				i, g.Cumulative.PromptTokens, g.Cumulative.CompletionTokens, g.Cumulative.TotalTokens,
+				w.Cumulative.PromptTokens, w.Cumulative.CompletionTokens, w.Cumulative.TotalTokens)
 		}
 		if g.Maintenance {
 			t.Errorf("event %d is flagged Maintenance; a Turn's completion is not maintenance accounting", i)
@@ -172,27 +172,27 @@ func TestSubAgentUsageIsChildLocal(t *testing.T) {
 		t.Fatalf("parent emitted %d UsageEvents, want 2", len(parent))
 	}
 
-	if c := child[0]; c.CumulativeCalls != 1 || c.CumulativePromptTokens != 40 ||
-		c.CumulativeCompletionTokens != 4 || c.CumulativeTotalTokens != 44 {
+	if c := child[0].Cumulative; c.Calls != 1 || c.PromptTokens != 40 ||
+		c.CompletionTokens != 4 || c.TotalTokens != 44 {
 		t.Errorf("child cumulative = {calls %d, %d %d %d}, want {calls 1, 40 4 44} — its own call only",
-			c.CumulativeCalls, c.CumulativePromptTokens, c.CumulativeCompletionTokens, c.CumulativeTotalTokens)
+			c.Calls, c.PromptTokens, c.CompletionTokens, c.TotalTokens)
 	}
 	// The cached share is per-agent on the same terms as the counters it qualifies: the child
 	// starts at zero rather than inheriting the 50 the parent's spawning call had cached.
-	if c := child[0]; c.CumulativeCachedPromptTokens != 9 {
-		t.Errorf("child cumulative cached = %d, want 9 — its own call only", c.CumulativeCachedPromptTokens)
+	if c := child[0]; c.Cumulative.CachedPromptTokens != 9 {
+		t.Errorf("child cumulative cached = %d, want 9 — its own call only", c.Cumulative.CachedPromptTokens)
 	}
 	if c := child[0]; c.CallID != "c1" {
 		t.Errorf("child event CallID = %q, want the spawning call %q (the grouping key)", c.CallID, "c1")
 	}
-	if p := parent[1]; p.CumulativeCalls != 2 || p.CumulativePromptTokens != 300 ||
-		p.CumulativeCompletionTokens != 30 || p.CumulativeTotalTokens != 330 {
+	if p := parent[1].Cumulative; p.Calls != 2 || p.PromptTokens != 300 ||
+		p.CompletionTokens != 30 || p.TotalTokens != 330 {
 		t.Errorf("parent cumulative after the delegation = {calls %d, %d %d %d}, want {calls 2, 300 30 330} — the child's tokens must not fold in",
-			p.CumulativeCalls, p.CumulativePromptTokens, p.CumulativeCompletionTokens, p.CumulativeTotalTokens)
+			p.Calls, p.PromptTokens, p.CompletionTokens, p.TotalTokens)
 	}
-	if p := parent[1]; p.CumulativeCachedPromptTokens != 140 {
+	if p := parent[1]; p.Cumulative.CachedPromptTokens != 140 {
 		t.Errorf("parent cumulative cached after the delegation = %d, want 140 — the child's 9 must not fold in",
-			p.CumulativeCachedPromptTokens)
+			p.Cumulative.CachedPromptTokens)
 	}
 }
 
@@ -254,10 +254,10 @@ func TestCompactionUsageRidesFlaggedMaintenanceEvent(t *testing.T) {
 		t.Errorf("compaction fill fields = {%d %d %d}, want {500 60 560} (the summary call's own counts)",
 			fold.PromptTokens, fold.CompletionTokens, fold.TotalTokens)
 	}
-	if fold.CumulativeCalls != 3 || fold.CumulativePromptTokens != 542 ||
-		fold.CumulativeCompletionTokens != 72 || fold.CumulativeTotalTokens != 614 {
+	if c := fold.Cumulative; c.Calls != 3 || c.PromptTokens != 542 ||
+		c.CompletionTokens != 72 || c.TotalTokens != 614 {
 		t.Errorf("compaction cumulative = {calls %d, %d %d %d}, want {calls 3, 542 72 614} — the two Turns plus the fold",
-			fold.CumulativeCalls, fold.CumulativePromptTokens, fold.CumulativeCompletionTokens, fold.CumulativeTotalTokens)
+			c.Calls, c.PromptTokens, c.CompletionTokens, c.TotalTokens)
 	}
 	if got[2] != fold {
 		t.Error("the Maintenance event is not the third emission; the fold must account at the point it ran")
@@ -273,9 +273,9 @@ func TestCompactionUsageRidesFlaggedMaintenanceEvent(t *testing.T) {
 	if after.Maintenance {
 		t.Error("the Turn after the fold is flagged Maintenance; only the compaction call is")
 	}
-	if after.CumulativeCalls != 4 || after.CumulativePromptTokens != 550 ||
-		after.CumulativeCompletionTokens != 75 || after.CumulativeTotalTokens != 625 {
+	if c := after.Cumulative; c.Calls != 4 || c.PromptTokens != 550 ||
+		c.CompletionTokens != 75 || c.TotalTokens != 625 {
 		t.Errorf("post-fold cumulative = {calls %d, %d %d %d}, want {calls 4, 550 75 625} — continuing from the fold's totals",
-			after.CumulativeCalls, after.CumulativePromptTokens, after.CumulativeCompletionTokens, after.CumulativeTotalTokens)
+			c.Calls, c.PromptTokens, c.CompletionTokens, c.TotalTokens)
 	}
 }

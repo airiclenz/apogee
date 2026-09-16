@@ -426,13 +426,13 @@ func (e RefClippedEvent) Notice() string {
 // completion against its own clock for throughput. Like every variant it nests by Depth, so
 // a sub-agent's usage reaches the parent's observer at its nesting level.
 //
-// The Cumulative* fields carry the EMITTING agent's running totals for the whole session —
+// Cumulative carries the EMITTING agent's running totals for the whole session as one Usage —
 // every completion it has accounted for, itself included — so a Driver reports session usage
 // by keeping the LATEST event per agent instead of summing a stream it may have joined late
-// or partially. They obey the same latest-wins rule as the fill fields above. They are
-// per-emitting-agent: a sub-agent counts only its OWN calls (it starts from zero and its
-// totals are never folded into the parent's), so an observer groups them by the Depth and
-// CallID stamps every event already carries and sums the agents it wants.
+// or partially. It obeys the same latest-wins rule as the fill fields above (Usage.Adopt is
+// that fold). It is per-emitting-agent: a sub-agent counts only its OWN calls (it starts from
+// zero and its totals are never folded into the parent's), so an observer groups readings by
+// the Depth and CallID stamps every event already carries and sums the agents it wants.
 //
 // Maintenance marks an accounting event that is NOT a Turn's completion — today the
 // Compaction call, whose tokens are real but whose prompt/completion counts describe the
@@ -475,13 +475,11 @@ type UsageEvent struct {
 	Model              string
 	ContextWindow      int
 
-	CumulativePromptTokens     int
-	CumulativeCompletionTokens int
-	CumulativeTotalTokens      int
-	// CumulativeCachedPromptTokens is the running sum of CachedPromptTokens over this Agent's
-	// calls, on the cumulative fields' terms exactly — and informational on CachedPromptTokens'.
-	CumulativeCachedPromptTokens int
-	CumulativeCalls              int
+	// Cumulative is the emitting Agent's running accounting after this call — Calls included, so
+	// a reading with none behind it is the absence of accounting (Usage). Its CachedPromptTokens
+	// is the running sum of CachedPromptTokens over this Agent's calls, on the same terms exactly
+	// — and informational on the fill field's.
+	Cumulative Usage
 
 	Maintenance bool
 	ServedModel string

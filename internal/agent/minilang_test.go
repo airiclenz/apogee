@@ -64,7 +64,7 @@ func TestClearContextResetsTheUsageTally(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if got := usageEvents(sink.events); len(got) != 1 || got[0].CumulativeCalls != 1 {
+	if got := usageEvents(sink.events); len(got) != 1 || got[0].Cumulative.Calls != 1 {
 		t.Fatalf("pre-clear usage events = %+v, want one reading at call 1", got)
 	}
 
@@ -86,13 +86,13 @@ func TestClearContextResetsTheUsageTally(t *testing.T) {
 		t.Fatalf("emitted %d UsageEvents, want 2 (one per completion)", len(got))
 	}
 	last := got[1]
-	if last.CumulativeCalls != 1 {
-		t.Errorf("post-clear CumulativeCalls = %d, want 1 — the dropped conversation's calls are "+
-			"still being counted against the new one", last.CumulativeCalls)
+	if last.Cumulative.Calls != 1 {
+		t.Errorf("post-clear Cumulative.Calls = %d, want 1 — the dropped conversation's calls are "+
+			"still being counted against the new one", last.Cumulative.Calls)
 	}
-	if last.CumulativeTotalTokens != 35 {
-		t.Errorf("post-clear CumulativeTotalTokens = %d, want 35 (this call alone)",
-			last.CumulativeTotalTokens)
+	if last.Cumulative.TotalTokens != 35 {
+		t.Errorf("post-clear Cumulative.TotalTokens = %d, want 35 (this call alone)",
+			last.Cumulative.TotalTokens)
 	}
 }
 

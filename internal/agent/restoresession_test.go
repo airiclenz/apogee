@@ -303,7 +303,7 @@ func TestRestoreSession_ResetsTheUsageTally(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if got := usageEvents(sink.events); len(got) != 1 || got[0].CumulativeCalls != 1 {
+	if got := usageEvents(sink.events); len(got) != 1 || got[0].Cumulative.Calls != 1 {
 		t.Fatalf("pre-restore usage events = %+v, want one reading at call 1", got)
 	}
 
@@ -322,13 +322,13 @@ func TestRestoreSession_ResetsTheUsageTally(t *testing.T) {
 		t.Fatalf("emitted %d UsageEvents, want 2 (one per completion)", len(got))
 	}
 	last := got[1]
-	if last.CumulativeCalls != 1 {
-		t.Errorf("post-restore CumulativeCalls = %d, want 1 — the outgoing session's calls are "+
-			"still being counted against the restored one", last.CumulativeCalls)
+	if last.Cumulative.Calls != 1 {
+		t.Errorf("post-restore Cumulative.Calls = %d, want 1 — the outgoing session's calls are "+
+			"still being counted against the restored one", last.Cumulative.Calls)
 	}
-	if last.CumulativeTotalTokens != 35 {
-		t.Errorf("post-restore CumulativeTotalTokens = %d, want 35 (this call alone)",
-			last.CumulativeTotalTokens)
+	if last.Cumulative.TotalTokens != 35 {
+		t.Errorf("post-restore Cumulative.TotalTokens = %d, want 35 (this call alone)",
+			last.Cumulative.TotalTokens)
 	}
 }
 
@@ -399,9 +399,9 @@ func TestRestoreSession_RefusalLeavesConsolesAndTallyStanding(t *testing.T) {
 	if len(got) != counted+1 {
 		t.Fatalf("emitted %d UsageEvents, want %d", len(got), counted+1)
 	}
-	if last := got[len(got)-1]; last.CumulativeCalls != counted+1 {
-		t.Errorf("CumulativeCalls after two refused restores = %d, want %d — a refusal reset the tally",
-			last.CumulativeCalls, counted+1)
+	if last := got[len(got)-1]; last.Cumulative.Calls != counted+1 {
+		t.Errorf("Cumulative.Calls after two refused restores = %d, want %d — a refusal reset the tally",
+			last.Cumulative.Calls, counted+1)
 	}
 }
 

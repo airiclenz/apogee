@@ -2202,13 +2202,11 @@ func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		fold := domain.UsageEvent{
-			EventBase:              domain.EventBase{Depth: 1},
-			TotalTokens:            8400,
-			CumulativeCalls:        2,
-			CumulativeTotalTokens:  20400,
-			CumulativePromptTokens: 19000,
-			Model:                  "qwen3-4b",
-			Maintenance:            true,
+			EventBase:   domain.EventBase{Depth: 1},
+			TotalTokens: 8400,
+			Cumulative:  domain.Usage{Calls: 2, PromptTokens: 19000, TotalTokens: 20400},
+			Model:       "qwen3-4b",
+			Maintenance: true,
 		}
 		tr.applyUsage(fold, window, "gpt-oss-20b")
 
@@ -3234,13 +3232,9 @@ func callEntry(tr *transcript, id string) *entry {
 // spawning call (callID) identifies.
 func childUsage(callID string, depth, total int, cum domain.Usage) domain.UsageEvent {
 	return domain.UsageEvent{
-		EventBase:                    domain.EventBase{Depth: depth, CallID: callID},
-		TotalTokens:                  total,
-		CumulativePromptTokens:       cum.PromptTokens,
-		CumulativeCachedPromptTokens: cum.CachedPromptTokens,
-		CumulativeCompletionTokens:   cum.CompletionTokens,
-		CumulativeTotalTokens:        cum.TotalTokens,
-		CumulativeCalls:              cum.Calls,
+		EventBase:   domain.EventBase{Depth: depth, CallID: callID},
+		TotalTokens: total,
+		Cumulative:  cum,
 	}
 }
 

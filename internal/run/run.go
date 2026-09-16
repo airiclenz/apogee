@@ -652,13 +652,7 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 		fill = ev.PromptTokens + ev.CompletionTokens
 	}
 	countsFill := fill > 0 && !ev.Maintenance
-	cumulative := Usage{
-		Calls:              ev.CumulativeCalls,
-		PromptTokens:       ev.CumulativePromptTokens,
-		CompletionTokens:   ev.CumulativeCompletionTokens,
-		TotalTokens:        ev.CumulativeTotalTokens,
-		CachedPromptTokens: ev.CumulativeCachedPromptTokens,
-	}
+	cumulative := ev.Cumulative
 
 	t.mu.Lock()
 	defer t.mu.Unlock()

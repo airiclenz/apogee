@@ -362,7 +362,10 @@ codec goldens (`TestTranscriptCodecGoldenV1`) unchanged.
 
 **Commit:** `refactor(tui): usage counters are domain.Usage`
 
-## 10. `UsageEvent` carries one cumulative `domain.Usage`
+## 10. `UsageEvent` carries one cumulative `domain.Usage` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — internal/domain/usage.go: made necessary by the Cumulative field (its doc named "UsageEvent's Cumulative* fields").
+NOTES (2026-09-16): consequential edit — internal/session/store.go: made necessary by the Cumulative field (session.Usage's doc named "the Cumulative* fields an engine UsageEvent stamps").
 
 **What.** Depends on items 8–9. `internal/domain/events.go` `UsageEvent`: the five cumulative ints
 become one embedded `Cumulative domain.Usage` (the per-call half has no `Calls`, so it stays as

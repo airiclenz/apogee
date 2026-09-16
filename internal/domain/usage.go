@@ -9,7 +9,7 @@ package domain
 // It is per-agent as REPORTED: a sub-agent starts from zero and its totals stay its own, so a
 // session-wide figure is a Sum taken deliberately, never a counter that folded a delegate's
 // spend into its parent's. A reading is READ off the latest event the agent stamped rather than
-// summed from the stream (UsageEvent's Cumulative* fields; Adopt is that fold), so it is whole
+// summed from the stream (UsageEvent.Cumulative; Adopt is that fold), so it is whole
 // even for an observer that joined late. Every counter is zero when nothing accounted for the
 // agent at all — an Upstream that reports no usage, or a run that never completed a call — and
 // Calls is the counter that says so: a reading with no call behind it is the ABSENCE of

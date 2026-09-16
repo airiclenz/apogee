@@ -135,7 +135,7 @@ type Meta struct {
 
 // Usage is one agent's cumulative token accounting over a session: how many completions it
 // accounted for and the prompt, completion and total tokens they carried. It mirrors the
-// Cumulative* fields an engine UsageEvent stamps (domain.UsageEvent) and keeps their latest-wins
+// Cumulative reading an engine UsageEvent stamps (domain.UsageEvent) and keeps its latest-wins
 // rule — the emitting agent owns the running sum, an observer only ever holds its newest reading —
 // so storing it is a copy of that reading rather than a total the store re-derives.
 //

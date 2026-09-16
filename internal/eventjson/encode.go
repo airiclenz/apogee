@@ -150,11 +150,11 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 			Model:                        e.Model,
 			ServedModel:                  e.ServedModel,
 			ContextWindow:                e.ContextWindow,
-			CumulativePromptTokens:       e.CumulativePromptTokens,
-			CumulativeCompletionTokens:   e.CumulativeCompletionTokens,
-			CumulativeTotalTokens:        e.CumulativeTotalTokens,
-			CumulativeCachedPromptTokens: e.CumulativeCachedPromptTokens,
-			CumulativeCalls:              e.CumulativeCalls,
+			CumulativePromptTokens:       e.Cumulative.PromptTokens,
+			CumulativeCompletionTokens:   e.Cumulative.CompletionTokens,
+			CumulativeTotalTokens:        e.Cumulative.TotalTokens,
+			CumulativeCachedPromptTokens: e.Cumulative.CachedPromptTokens,
+			CumulativeCalls:              e.Cumulative.Calls,
 			Maintenance:                  e.Maintenance,
 		}, true
 	case domain.AuditEvent:

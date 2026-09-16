@@ -1265,13 +1265,10 @@ func TestEventTapDropsWhatItCannotAttribute(t *testing.T) {
 // describes the summarizer's request rather than the conversation.
 func usageWithTotals(depth int, spawnCallID string, fill int, cumulative Usage, maintenance bool) domain.UsageEvent {
 	return domain.UsageEvent{
-		EventBase:                  domain.EventBase{Depth: depth, CallID: spawnCallID},
-		TotalTokens:                fill,
-		CumulativePromptTokens:     cumulative.PromptTokens,
-		CumulativeCompletionTokens: cumulative.CompletionTokens,
-		CumulativeTotalTokens:      cumulative.TotalTokens,
-		CumulativeCalls:            cumulative.Calls,
-		Maintenance:                maintenance,
+		EventBase:   domain.EventBase{Depth: depth, CallID: spawnCallID},
+		TotalTokens: fill,
+		Cumulative:  cumulative,
+		Maintenance: maintenance,
 	}
 }
 
