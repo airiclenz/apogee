@@ -17,9 +17,8 @@ package agent
 // Riding first means no workspace text ever precedes the engine's own facts (F-19); the fence
 // contextBlocks applies to the content below is the other half of the same guard.
 //
-// It RIDES ALONG (ADR 0023 §6 amendment, 2026-08-25): standingSystem appends it only when a
-// standing system message exists anyway, never on its own, so the documented "send no system
-// prompt" configuration stays byte-identical on the wire.
+// Its position, its fence and the fact that it RIDES ALONG (ADR 0023 §6 amendment, 2026-08-25)
+// are one row of the standingBlocks table (standingblocks.go).
 
 import (
 	"fmt"

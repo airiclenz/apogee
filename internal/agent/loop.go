@@ -843,9 +843,8 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// context files — is seeded at position 0 of the REQUEST projection, never the conversation,
 	// so it is re-composed per request (armRequest, and refold after an overflow fold), stays out
 	// of history and the snapshot, and both AppendToSystem (mechanism directives) and the wire
-	// seam's tool-instruction block fold into THIS one message (prompt → orientation block →
-	// delegate report block, delegations only → task list block, when the model has written one →
-	// context files → directives → tool block). ""
+	// seam's tool-instruction block fold into THIS one message (the standingBlocks table's five
+	// rows in order — standingblocks.go — → directives → tool block). ""
 	// seeds nothing: with no prompt AND no context files the native anchor stays byte-identical.
 	//
 	// Two consequences are deliberate, not defects: the Budget's predictive guard and its
@@ -856,25 +855,16 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	if sys := a.standingSystem(); sys != "" {
 		msgs = append([]domain.Message{{Role: domain.RoleSystem, Content: sys}}, msgs...)
 	}
-	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn)
-	// The reply ceiling the engine states on the wire (ADR 0046), stamped HERE — after construction
-	// and before any pre-request hook sees the Request — for two reasons. It is the engine's own
-	// bound, so it holds under Bypass, where no hook runs at all; and being the loop's value rather
-	// than a projection-time constant, a hook that sets MaxTokens overrides it, which is what makes
-	// SamplingParams's "a nil field leaves the loop's value untouched" true of this field at last.
-	// Temperature stays nil: the server's own default is still the right answer for it.
-	outputCap := a.maxOutputTokens()
-	req.SetSampling(domain.SamplingParams{MaxTokens: &outputCap})
-	req.SetDepth(a.depth)                      // surface this Agent's nesting level through req.View().Depth() (ADR 0013/0014)
-	req.SetParallelAgents(a.delegationWidth()) // and the width a delegation batch may take through req.View().ParallelAgents() (ADR 0039)
+	req := a.newProjection(msgs, turn)
 	// The wrap-up directive (subagent.go), stamped at the same moment and for the same reason as
-	// the reply ceiling above: after construction, before any pre-request hook, because it is the
-	// engine's own bound and must hold under Bypass, where no hook runs at all. It is the other
-	// half of the withdrawn menu toolMenu just returned — without it the child is left to guess
-	// why its tools vanished — and it carries the output clause exactly when that menu kept
-	// write_file for the delegation's `output_path` (wrapUpWriter). AppendToSystem CREATES the
-	// system message when none exists, so a
-	// session with no configured prompt and no context files still carries the directive.
+	// the reply ceiling newProjection stamps: after construction, before any pre-request hook,
+	// because it is the engine's own bound and must hold under Bypass, where no hook runs at all.
+	// It is the other half of the withdrawn menu toolMenu just returned — without it the child is
+	// left to guess why its tools vanished — and it carries the output clause exactly when that
+	// menu kept write_file for the delegation's `output_path` (wrapUpWriter). It is per-request
+	// and stands alone — not a standingBlocks row: AppendToSystem CREATES the system message when
+	// none exists, so a session with no configured prompt and no context files still carries the
+	// directive.
 	if a.turns.wrappingUp() {
 		req.AppendToSystem(wrapUpMarker, a.wrapUpDirective())
 	}
@@ -888,52 +878,35 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 }
 
 // standingSystem composes this request's standing system content — what buildRequest seeds as
-// the position-0 system message — from the two INDEPENDENT CONFIGURED sources of it, the
-// rendered prompt template and the workspace context files' blocks, with the engine's own
-// orientation block — and, on a delegated Agent, its delegate report block, and the model's own
-// task list when it has written one — BETWEEN them, all separated by blank lines. Either
-// configured source alone seeds a message; only with neither is the result "" and nothing seeded
-// at all (the no-prompt-AND-no-context-files native anchor).
-//
-// All three engine-owned blocks RIDE ALONG (orientation.go, delegatereport.go, tasklistblock.go)
-// — each is composed in only when a configured source already put something in the message, never
-// on its own, which is why the empty check is taken on the two configured sources BEFORE any
-// block is asked for. That is what keeps the documented "delete it to send no system prompt"
-// configuration byte-identical on the wire, and with it the Bypass floor; every session that
-// seeds anything at all also carries the host facts no edit to the user-editable template can
-// lose.
-//
-// The order is the wire order: the user's standing instructions first, then the harness's own
-// orientation, then — for a delegation only — what the child's final reply is for, then the
-// model's own checklist, then the workspace's own conventions, then whatever the mechanism
-// directives and the tool block append after all five. Every engine-owned block precedes the
-// workspace blocks deliberately: everything after them is repo-controlled text, so nothing a repo
-// ships can be read as preceding — and thereby overriding — the host facts (F-19; orientation.go).
-// The task list goes LAST of the engine's own for the same reason it goes ahead of the workspace's
-// (ADR 0023's 2026-08-26 forgery argument, tasklistblock.go): it is model-authored text, so it
-// sits behind every host statement and ahead of every repo one.
+// the position-0 system message — by walking standingBlocks (standingblocks.go) in table order
+// and joining every non-empty render with a blank line. The "" contract is kept on the two
+// CONFIGURED rows alone: only when neither the rendered prompt template nor the workspace context
+// files' blocks render anything is the result "" and nothing seeded at all (the no-prompt-AND-no-
+// context-files native anchor), and that check is taken BEFORE any ride-along row is asked to
+// render — the ride-along rule the table's ridesAlong column states.
 func (a *Agent) standingSystem() string {
-	rendered := a.systemPrompt()
-	blocks := a.contextBlocks()
-	if rendered == "" && blocks == "" {
+	rows := standingBlocks()
+	rendered := make([]string, len(rows))
+	seeded := false
+	for i, row := range rows {
+		if row.ridesAlong {
+			continue
+		}
+		rendered[i] = row.render(a)
+		seeded = seeded || rendered[i] != ""
+	}
+	if !seeded {
 		return ""
 	}
 
-	parts := make([]string, 0, 5)
-	if rendered != "" {
-		parts = append(parts, rendered)
-	}
-	if orientation := a.orientationBlock(); orientation != "" {
-		parts = append(parts, orientation)
-	}
-	if delegate := a.delegateReportBlock(); delegate != "" {
-		parts = append(parts, delegate)
-	}
-	if tasks := a.taskListBlock(); tasks != "" {
-		parts = append(parts, tasks)
-	}
-	if blocks != "" {
-		parts = append(parts, blocks)
+	parts := make([]string, 0, len(rows))
+	for i, row := range rows {
+		if row.ridesAlong {
+			rendered[i] = row.render(a)
+		}
+		if rendered[i] != "" {
+			parts = append(parts, rendered[i])
+		}
 	}
 	return strings.Join(parts, "\n\n")
 }
@@ -1465,15 +1438,31 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 // REQUEST-projection concern owned by buildRequest, while this view is "the conversation so
 // far" — which is why the profile's tool-instruction block is likewise absent from it.
 func (a *Agent) loopView(turn int) domain.LoopView {
-	req := domain.NewRequest(a.cfg.Model, a.conv.Messages(), a.toolMenu(), a.budget(), turn)
-	// Stamped here too, on the same call as buildRequest's, so the two projections of one Turn
+	// Stamped by the same helper as buildRequest's projection, so the two projections of one Turn
 	// never state different ceilings (ADR 0046). This one reaches no server — a LoopView is read by
-	// the tool-stage hooks and drained by nobody — so it is a consistency stamp, not a wire bound.
+	// the tool-stage hooks and drained by nobody — so its stamps are a consistency measure, not a
+	// wire bound.
+	return a.newProjection(a.conv.Messages(), turn).View()
+}
+
+// newProjection constructs the domain.Request both projections of a Turn — buildRequest's
+// hook-facing request and loopView's tool-stage window — are built from: msgs over the
+// Plan-filtered tool menu and the Budget, stamped with the three facts the engine states itself,
+// HERE, after construction and before any pre-request hook sees the Request. The reply ceiling
+// (ADR 0046) is stamped here for two reasons: it is the engine's own bound, so it holds under
+// Bypass, where no hook runs at all; and being the loop's value rather than a projection-time
+// constant, a hook that sets MaxTokens overrides it, which is what makes SamplingParams's "a nil
+// field leaves the loop's value untouched" true of this field at last. Temperature stays nil: the
+// server's own default is still the right answer for it. Depth surfaces this Agent's nesting
+// level through req.View().Depth() (ADR 0013/0014) and ParallelAgents the width a delegation
+// batch may take through req.View().ParallelAgents() (ADR 0039).
+func (a *Agent) newProjection(msgs []domain.Message, turn int) *domain.Request {
+	req := domain.NewRequest(a.cfg.Model, msgs, a.toolMenu(), a.budget(), turn)
 	outputCap := a.maxOutputTokens()
 	req.SetSampling(domain.SamplingParams{MaxTokens: &outputCap})
-	req.SetDepth(a.depth)                      // the tool-stage view reports the same nesting level as the request view
-	req.SetParallelAgents(a.delegationWidth()) // and the same delegation width (ADR 0039)
-	return req.View()
+	req.SetDepth(a.depth)
+	req.SetParallelAgents(a.delegationWidth())
+	return req
 }
 
 // base is the EventBase every Event this Agent emits carries: the given Turn index, the

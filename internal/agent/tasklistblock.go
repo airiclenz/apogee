@@ -5,20 +5,12 @@ package agent
 // only through the task_list tool (internal/tasklist, ADR 0072) — so a run that has been compacted
 // still reads what it set out to do and what is left of it.
 //
-// It RIDES ALONG under the orientation block's rule (ADR 0023 §6 amendment, third addendum
-// 2026-09-02): standingSystem composes it in only when a configured source already put something
-// in the message, never on its own, so the no-prompt-AND-no-context-files anchor stays
-// byte-identical on the wire and the Bypass floor with it. An empty list renders "" as well, so a
-// session whose model never called the tool costs nothing here.
-//
-// Position — after the delegate report block, AHEAD of the workspace context files' blocks — is
-// the same SECURITY property the two blocks before it have (F-19, orientation.go): every
-// engine-owned part rides ahead of the repo-controlled context blocks, so no workspace text can
-// precede — and thereby read as a correction of — the host's own statements. ADR 0023's
-// 2026-08-26 forgery argument is the whole reason this block goes last of the engine's four
-// rather than first of anything: the list is model-authored text, and text the model wrote must
-// still not be able to sit where the host's facts sit. TaskListFence below is the other half of
-// that guard, exactly as delegateReportFence is for the delegate block's.
+// Its position — after the delegate report block, AHEAD of the workspace context files' blocks,
+// last of the engine's own because the list is model-authored text (ADR 0023's 2026-08-26
+// forgery argument) — its fence (TaskListFence below) and the fact that it RIDES ALONG (ADR 0023
+// §6 amendment, third addendum 2026-09-02) are one row of the standingBlocks table
+// (standingblocks.go). An empty list renders "" as well, so a session whose model never called
+// the tool costs nothing here.
 //
 // KV CACHE — the one thing that makes this block unlike the three around it. Every other part of
 // the standing content is a per-session constant, so a server's prefix cache survives a whole

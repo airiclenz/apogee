@@ -91,6 +91,9 @@
 // Sub-agent server through, held by one handle for a whole agent tree (ADR 0045).
 // delegationseat.go is that same server's DISPLAY half — the seat facts the orientation block
 // names it by, moved only where the human moves the key (ADR 0069).
+// standingblocks.go is the standing system message as one ordered table — each block's render,
+// its forgery fences and whether it rides along — that standingSystem composes from and the
+// context-file fence is derived from.
 // contextfiles.go owns the workspace context files' discovery half — the session-scoped cache,
 // its loader, and the construction-time name gate. orientation.go composes the engine-owned
 // orientation block that rides directly after the prompt on that same standing system message,

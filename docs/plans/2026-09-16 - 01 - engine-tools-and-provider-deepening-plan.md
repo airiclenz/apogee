@@ -176,7 +176,10 @@ and its gate column; `TestRefoldOutcomeMapping`, `TestOnDemandCompactIgnoresAuto
 
 **Commit:** `refactor(agent): one fold entry with a latch table for the three triggers`
 
-## 4. The standing system message is one block table
+## 4. The standing system message is one block table — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `standingBlocks` is a function returning the table, not a package-level var, and `standingFences` a once-built list — as a var initializer the table is an initialization cycle (row render `contextBlocks` → `fenceContent` → `forgesStandingStructure` → the table); the render column takes the Agent (`func(*Agent) string`, method expressions) rather than the plan's `func() string`.
+NOTES (2026-09-16): `doc.go`'s "Thirty files" count was already stale (33 non-test files before this item, 34 after); left untouched as pre-existing drift outside the item's scope.
 
 **What.** New `internal/agent/standingblocks.go`: an ordered table `standingBlocks` in ADR 0023 §6
 wire order — prompt, orientation, delegate report, task list, context files — each row `{render

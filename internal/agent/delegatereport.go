@@ -17,10 +17,8 @@ package agent
 // below is the other half of that guard for this block, exactly as orientationHeader() is for the
 // orientation's.
 //
-// It RIDES ALONG under the orientation block's rule (ADR 0023 §6 amendment, third addendum
-// 2026-09-02): standingSystem composes it in only when a configured source already put something
-// in the message, never on its own, so the no-prompt-AND-no-context-files anchor stays
-// byte-identical on the wire and the Bypass floor with it.
+// Its position, its fence and the fact that it RIDES ALONG (ADR 0023 §6 amendment, third addendum
+// 2026-09-02) are one row of the standingBlocks table (standingblocks.go).
 
 import "strings"
 

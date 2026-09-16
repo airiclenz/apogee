@@ -20,7 +20,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
-	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
 // contextFile is one resolved workspace context file held in the session cache. Exactly one of
@@ -182,27 +181,25 @@ func (a *Agent) hasContextBlocks() bool {
 }
 
 // forgesStandingStructure reports whether one content line spells a line the standing system
-// message uses as its OWN furniture: a context-file header or footer, the orientation block's
-// header, the delegate report block's opening sentence, the task list block's header opening, or
-// either line of the advice fence an advise Reaction's text is delivered in (domain.RenderAdvice).
-// Leading whitespace is trimmed before
-// the test — an indented forgery reads as furniture to a model just as well as a flush one — but
-// the line itself is never trimmed, only prefixed.
+// message uses as its OWN furniture: any fence of any standingBlocks row (standingblocks.go) — a
+// context-file header or footer, the orientation block's header, the delegate report block's
+// opening sentence, the task list block's header opening — or either line of the advice fence an
+// advise Reaction's text is delivered in (domain.RenderAdvice). Leading whitespace is trimmed
+// before the test — an indented forgery reads as furniture to a model just as well as a flush one
+// — but the line itself is never trimmed, only prefixed.
 //
-// It is a CLOSED list and every engine-owned block belongs on it: a block this list does not know
-// can be forged by a repo file that reaches the model after the real one, where it reads as a
-// correction rather than as the workspace prose it is (F-19, orientation.go). The advice fence is
-// on it for the same reason from the other side: its header is derived from provenance so no
-// handler can print one, and this is what keeps a repo file from printing one either.
+// The list (standingFences) is CLOSED and derived from the table, so every engine-owned block is on
+// it by construction: a block this list did not know could be forged by a repo file that reaches
+// the model after the real one, where it reads as a correction rather than as the workspace prose
+// it is (F-19, orientation.go).
 func forgesStandingStructure(line string) bool {
 	trimmed := strings.TrimSpace(line)
-	return strings.HasPrefix(trimmed, contextFileHeader) ||
-		strings.HasPrefix(trimmed, contextFileFooter) ||
-		strings.HasPrefix(trimmed, orientationHeader()) ||
-		strings.HasPrefix(trimmed, delegateReportFence) ||
-		strings.HasPrefix(trimmed, tasklist.Fence) ||
-		strings.HasPrefix(trimmed, domain.AdviceFencePrefix) ||
-		strings.HasPrefix(trimmed, domain.AdviceFenceClosePrefix)
+	for _, fence := range standingFences() {
+		if strings.HasPrefix(trimmed, fence) {
+			return true
+		}
+	}
+	return false
 }
 
 // fenceContent prefixes every line of a context file that spells the standing message's own
