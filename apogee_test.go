@@ -225,10 +225,15 @@ func TestFacadeExportsEventLines(t *testing.T) {
 	sink := lines.Wrap(nopSink{})
 	lines.RunStarted(apogee.RunStarted{Session: "sess-1", Mode: "plan"})
 	sink.Emit(apogee.MessageEvent{Text: "hi"})
+	clipped := apogee.RefClippedEvent{Ref: "@notes.md", Tokens: 32000, Absolute: true}
+	if notice := clipped.Notice(); !strings.Contains(notice, "@notes.md") || !strings.Contains(notice, "32k") {
+		t.Errorf("RefClippedEvent.Notice() = %q, want the ref and its bound", notice)
+	}
+	sink.Emit(clipped)
 	lines.RunFinished(apogee.RunFinished{ExitCode: 0, Turns: 1, Saved: true})
 
 	got := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
-	wantKinds := []string{"run_started", "message", "run_finished"}
+	wantKinds := []string{"run_started", "message", "ref_clipped", "run_finished"}
 	if len(got) != len(wantKinds) {
 		t.Fatalf("wrote %d lines, want %d:\n%s", len(got), len(wantKinds), out.String())
 	}

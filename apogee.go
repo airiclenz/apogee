@@ -284,6 +284,7 @@ type (
 	SeamClosedEvent        = domain.SeamClosedEvent
 	ErrorEvent             = domain.ErrorEvent
 	PruneEvent             = domain.PruneEvent
+	RefClippedEvent        = domain.RefClippedEvent
 	UsageEvent             = domain.UsageEvent
 	AuditEvent             = domain.AuditEvent
 	WireEvent              = domain.WireEvent

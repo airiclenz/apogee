@@ -92,7 +92,7 @@ NOTES (2026-09-16): bead close is the verifier's at commit time — `bd close ap
 
 **Commit:** `fix(headless): --help names exit code 3 and the unanswered-server case`
 
-## 3. Public Event alias list gains RefClippedEvent (apogee-5wb)
+## 3. Public Event alias list gains RefClippedEvent (apogee-5wb) — ✅ DONE (2026-09-16)
 
 **What:** Fix: `apogee.go`'s Event alias type block (18 members) lacks `RefClippedEvent = domain.RefClippedEvent`, so an embedder cannot type-switch on it or reach `Notice()`. Add it beside `PruneEvent`. Add `TestEveryDomainEventVariantIsAliased` in `apogee_alias_internal_test.go` (package `apogee`, precedent `version_internal_test.go`): parse `internal/domain/events.go`, collect every struct embedding `EventBase`, and require an `X = domain.X` spec for each in `apogee.go`. Extend `TestFacadeExportsEventLines` (`apogee_test.go`) to emit an `apogee.RefClippedEvent` and call `.Notice()`.
 
