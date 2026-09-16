@@ -173,7 +173,10 @@ looking, at the moment it happened, and does not become permanent scrollback.
   `internal/tui` is the standing guard that no new literal creeps back in.
 - **A runtime theme switch now exists**, which makes `paintcache.go`'s standing obligation live: the
   block paint cache is cleared on every scheme apply, and the apply ends in a relayout plus a full
-  repaint. Any future cache keyed on painted output inherits the same obligation.
+  repaint. Any future cache keyed on painted output inherits the same obligation. *(Amended
+  2026-09-16, plan `2026-09-16 - 00` item 20: the apply no longer lays out itself — the scheme name
+  is an input of the frame key (`paintcache.go`), so Update's repaint tail (`settle`, `model.go`)
+  performs the relayout and the full repaint; the cache clear stays the apply's own.)*
 - **`internal/scheme` is plain data with no lipgloss and no TUI import**, so schemes resolve and
   validate in the composition root and the renderer is handed a struct — ADR 0031's wire-silence
   shape, and ADR 0011's "no YAML in the renderer" honoured by construction. Any Driver gets color

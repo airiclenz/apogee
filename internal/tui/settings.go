@@ -358,11 +358,9 @@ func settingsSourceMarker(source SettingSource) string {
 func (m Model) runSettingsCommand() (tea.Model, tea.Cmd) {
 	if len(m.settingRows()) == 0 {
 		m.transcript.addNote(noSettingsNote)
-		m.layout()
 		return m, nil
 	}
 	m.settings = settingsPane{open: true}
-	m.layout()
 	return m, nil
 }
 
@@ -409,7 +407,6 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// rather than let it through: a ⏎ aimed at a value must not land on whatever key now sits at
 		// that index, and the human's next press is aimed at a list they can see.
 		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
-		m.layout()
 		return m, nil
 	}
 	if m.settings.kind == settingsValueBuffer {
@@ -436,7 +433,6 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// journal does NOT: it is on the Model, and the ` *` markers it carries describe a session that
 		// is still running the values it recorded (ADR 0037 decision 8).
 		m.settings = settingsPane{}
-		m.layout()
 		return m, nil
 	case listAccepts:
 		return m.settingsEnter(rows)
@@ -498,7 +494,6 @@ func (m Model) settingsEditorMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 	case settingsTextEditor:
 		m.settings.sel = promptSel{}
 		cmd := m.settings.editor.editMsg(msg)
-		m.layout()
 		return m, cmd, true
 	}
 	return m, nil, false
@@ -510,7 +505,6 @@ func (m Model) settingsEditorMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 // confirmation for a row that left cannot be confirmed.
 func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, listCursor{}, lineEditor{}
-	m.layout()
 	return m, nil
 }
 
@@ -558,17 +552,14 @@ func (m Model) settingsEnter(rows []SettingRow) (tea.Model, tea.Cmd) {
 		// nothing for — where a highlight reset to the first row would have silently changed the key.
 		m.settings.kind = settingsEnumList
 		m.settings.sub.selected = max(0, indexOfSetting(values, m.settingsCurrentValue(row)))
-		m.layout()
 		return m, nil
 	case SettingString, SettingInt:
 		m.settings.kind = settingsValueBuffer
 		m.settings.editor = newSettingsEditor(m.opts.CursorShape, m.th.surface, m.settingsBufferSeed(row))
-		m.layout()
 		return m, nil
 	case SettingText:
 		m.settings.kind = settingsTextEditor
 		m.settings.editor = newSettingsTextEditor(m.opts.CursorShape, m.th.surface, m.settingsTextValue(row))
-		m.layout()
 		return m, nil
 	case SettingStructured:
 		return m, nil // never Editable; the registry terminates descent here
@@ -592,7 +583,6 @@ func (m Model) settingsEnumKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, 
 	switch m.settings.sub.key(msg, len(values), listWrapsAround) {
 	case listCloses:
 		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
-		m.layout()
 		return m, nil
 	case listAccepts:
 		// The cursor clamped itself against this composition of the vocabulary before it answered, so
@@ -658,12 +648,11 @@ func (m Model) settingsSwitchServer(row SettingRow, name string) (tea.Model, tea
 	return m.foldServerSwitch(from, result, recordServerChoice(m.opts.Server, choice.Name))
 }
 
-// settingsFailed puts msg on row as this pane's one failure slot and repaints — the outcome shape
+// settingsFailed puts msg on row as this pane's one failure slot — the outcome shape
 // every refused act in the pane ends in (settingsNote paints it, the next landed edit clears it).
 func (m Model) settingsFailed(row SettingRow, msg string) (tea.Model, tea.Cmd) {
 	m.settings.failure = settingFailure{path: row.Path, msg: msg}
 	m.settings.answer = settingAnswer{} // the last act's outcome, replaced by this one's
-	m.layout()
 	return m, nil
 }
 
@@ -709,31 +698,28 @@ func newSettingsEditor(shape tea.CursorShape, surface color.Color, seed string) 
 // editor (ADR 0037 decision 10) — so each state claims its own before reaching this, and the
 // difference stays readable at the two call sites rather than as a parameter naming a keystroke.
 //
-// relayout is the second thing they disagree on, and it IS a parameter because it is not a key: the
-// multi-line field is the pane's row list, so a line added or removed changes how many rows the pane
-// measures, where the one-line buffer is one cell of one row and changes nothing it measures.
+// Neither state lays out from here. The multi-line field is the pane's row list, so a line added or
+// removed changes how many rows the pane measures — and that is exactly what Update's repaint tail
+// asks after every fold (settle's height half, model.go), where the one-line buffer is one cell of
+// one row and changes nothing it measures.
 //
 // Backspace reaches the field in both states rather than arming a reset: inside an edit it means what
 // it means in every other text field on the screen. That is exactly why the two idioms can share the
 // key — the pane's kind says which of them is being typed at, and the field claims backspace only
 // while it is open.
-func (m Model) settingsEditKey(msg tea.KeyPressMsg, relayout bool) (tea.Model, tea.Cmd) {
+func (m Model) settingsEditKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if msg.String() == "esc" {
 		// An abandoned edit takes its refusal with it: the ✗ on this row is the reason THIS edit was
 		// not accepted, and leaving it up after the human walked away from the edit would report a
 		// failure against a row nobody is editing any more.
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 		m.settings.failure = settingFailure{}
-		m.layout()
 		return m, nil
 	}
 	// Whatever Cmd the widget asks for is returned rather than dropped, exactly as the chat box
 	// returns it (model.go) — a single-line field asks for none today (lineEditor.singleLine), and
 	// swallowing one silently is how that stops being true unnoticed.
 	cmd := m.settings.editor.editKey(msg)
-	if relayout {
-		m.layout()
-	}
 	return m, cmd
 }
 
@@ -755,7 +741,6 @@ func (m Model) settingsEditKey(msg tea.KeyPressMsg, relayout bool) (tea.Model, t
 func (m Model) settingsCommitEdit(row SettingRow, value string, blank bool) (tea.Model, tea.Cmd) {
 	if blank {
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
-		m.layout()
 		return m, nil
 	}
 	next, cmd, landed := m.settingsPersist(row, value)
@@ -763,7 +748,6 @@ func (m Model) settingsCommitEdit(row SettingRow, value string, blank bool) (tea
 	if landed {
 		m.settings.kind, m.settings.editor = settingsKeyList, lineEditor{}
 	}
-	m.layout()
 	return m, cmd
 }
 
@@ -772,13 +756,13 @@ func (m Model) settingsCommitEdit(row SettingRow, value string, blank bool) (tea
 // state's commit because a scalar config value has no second line to walk to, so the widget's newline
 // binding is free for it (newSettingsEditor).
 //
-// The frame is NOT laid out again on an edited character: the buffer is one cell of one row, so
-// nothing typed into it changes what the pane measures.
+// Nothing typed into it changes what the pane measures: the buffer is one cell of one row, so the
+// repaint tail's height half finds nothing to lay out again on an edited character.
 func (m Model) settingsBufferKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
 	if msg.String() == "enter" {
 		return m.settingsCommitBuffer(row)
 	}
-	return m.settingsEditKey(msg, false)
+	return m.settingsEditKey(msg)
 }
 
 // settingsCommitBuffer commits the string/int buffer — the shared commit (settingsCommitEdit) against
@@ -848,13 +832,14 @@ func settingsWritable(row SettingRow) bool {
 //
 // esc discarding rather than committing is deliberate and is what the legend says (settingsTextHint):
 // the field holds a page of prose, and the key that walks away from an edit must not be the one that
-// persists it. The frame IS laid out again on an edited character, unlike the buffer's: this field is
-// the pane's row list, so a line added or removed changes how many rows the pane measures.
+// persists it. An edited character DOES move what the pane measures, unlike the buffer's: this field
+// is the pane's row list, so a line added or removed changes how many rows the pane takes, and the
+// repaint tail lays out again when it does (settle's height half, model.go).
 func (m Model) settingsTextKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd) {
 	if msg.String() == "ctrl+s" {
 		return m.settingsCommitText(row)
 	}
-	return m.settingsEditKey(msg, true)
+	return m.settingsEditKey(msg)
 }
 
 // settingsCommitText commits the prose field — the shared commit (settingsCommitEdit) against this

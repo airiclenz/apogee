@@ -723,7 +723,12 @@ golden byte-identical.
 
 **Commit:** `refactor(tui): transcript arms stop calling layout and repaint by hand`
 
-## 20. Strip the pane arms
+## 20. Strip the pane arms — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): acceptance grep `grep -c 'm.layout()\|m.refreshViewport()'` over the six files: before 62 (settings 15, settingsapply 9, settingswatcher 5, picker 13, sessions 12, colorscheme 8), after 0 — plus one the pattern misses, `next.layout()` in picker.go's `bindPickedModel` (a `next` receiver after `applyRebind` + addNote), stripped under the same rule — 63 stripped. No pane-open arm read geometry on its next line, so no "keep with a comment" case arose; every site was either a transcript write (item 19's rule) or a pane state change carried by settle's height half (item 18's stated ground), or a frame-key input (`HideScrollbar`, the theme swap in `applyColorScheme`).
+NOTES (2026-09-16): `settingsEditKey`'s `relayout bool` parameter existed only to drive the stripped `m.layout()`; it is dropped from the signature and its two callers (`settingsBufferKey`, `settingsTextKey`), and its doc paragraph now states the repaint tail's height half carries the text field's row change. Comment sweep folded in: `settingsBufferKey`/`settingsTextKey` docs, `settingsFailed`'s "and repaints", `settingsPersist`'s "the caller does" sentence, the `HideScrollbar` and `TaskListOpen` arms in `settingsApplyLocal`, and the `listSwallowed` rationales in `sessionBrowserKey` and `pickerKey` (those two cases now hold the comment alone).
+NOTES (2026-09-16): consequential edit — docs/adr/0040-color-schemes-are-embedded-roles-with-user-shadowing.md: made necessary by stripping `applyColorScheme`'s `m.layout()` (its "the apply ends in a relayout plus a full repaint" sentence gains a dated in-place amendment naming the repaint tail).
+NOTES (2026-09-16): no test needed rerouting through `step`/`settle()` — `go test ./internal/tui` and every `TestE2E*` golden in `cmd/apogee` passed unchanged.
 
 **What.** Depends on item 18. Same rule as item 19 over the pane files: `settings.go`,
 `settingsapply.go`, `settingswatcher.go`, `picker.go`, `sessions.go`, `colorscheme.go` (~70

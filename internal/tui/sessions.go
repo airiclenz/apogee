@@ -128,7 +128,6 @@ var (
 func (m Model) openSessionBrowser() (tea.Model, tea.Cmd) {
 	if m.sessions == nil {
 		m.transcript.addNote("no saved sessions")
-		m.layout()
 		return m, nil
 	}
 	return m, m.listSessions()
@@ -154,19 +153,16 @@ func (m *Model) foldSessionList(msg sessionListMsg) tea.Cmd {
 	if msg.err != nil {
 		m.sessionBrowser = sessionBrowser{}
 		m.transcript.addNote("could not list sessions: " + msg.err.Error())
-		m.layout()
 		return nil
 	}
 	if len(msg.metas) == 0 {
 		m.sessionBrowser = sessionBrowser{}
 		m.transcript.addNote("no saved sessions")
-		m.layout()
 		return nil
 	}
 	m.sessionBrowser.metas = msg.metas
 	m.sessionBrowser.open = true
 	m.sessionBrowser.clampSelection(len(m.sessionBrowserView().metas))
-	m.layout() // the pane just took its rows out of the transcript: the scroll clamp moves with them
 	return nil
 }
 
@@ -290,7 +286,6 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch verdict {
 	case listCloses:
 		m.sessionBrowser = sessionBrowser{}
-		m.layout()
 		return m, nil
 	case listAccepts:
 		return m.acceptBrowser(rows)
@@ -298,9 +293,9 @@ func (m Model) sessionBrowserKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.sessionBrowserVerb(msg, rows)
 	case listSwallowed:
 		// The surface spent the key — an arrow, or a rune into the filter, whose Cmd rides back below.
-		// A rune prunes rows, and a shorter row list is a shorter pane, so this lays out: the viewport
-		// widget's height is the transcript's drawn row count (layout(), model.go).
-		m.layout()
+		// A rune prunes rows, and a shorter row list is a shorter pane: the repaint tail lays out again
+		// when the viewport widget's height no longer matches the transcript's drawn row count
+		// (settle, model.go).
 	}
 	return m, cmd
 }
@@ -324,7 +319,6 @@ func (m Model) acceptBrowser(rows []popupRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.sessionBrowser = sessionBrowser{} // close; the resume runs when the record loads (sessionLoadedMsg)
-	m.layout()
 	return m, m.loadSession(meta.ID)
 }
 
@@ -341,7 +335,6 @@ func (m Model) sessionBrowserVerb(msg tea.KeyPressMsg, rows []popupRow) (tea.Mod
 		// stands: it is what the human is looking FOR, and the toggle changes where they are looking.
 		m.sessionBrowser.allWorkspaces = !m.sessionBrowser.allWorkspaces
 		m.sessionBrowser.selected = 0
-		m.layout() // a different row set is a differently TALL pane, and the scroll clamp is sized to it
 	case "ctrl+d":
 		if _, ok := m.sessionBrowser.record(m.opts.Workspace, rows); ok {
 			m.sessionBrowser.confirming = true // arm the inline "delete? y/n" on the selected row
@@ -387,7 +380,6 @@ func (m Model) sessionConfirmKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			// as ONE dispatched Cmd (a fold may never batch two record writes — model.go).
 			m.queueWrite(recordWrite{kind: writeRotate})
 			m.transcript.addNote("current session's file deleted — it lives on in memory; the next turn saves it as a new session")
-			m.refreshViewport()
 		}
 		cmd := m.deleteSession(id) // queued: it mutates m, so it is sequenced before the return
 		return m, cmd
@@ -537,12 +529,10 @@ func (m Model) loadSession(id string) tea.Cmd {
 func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	if msg.err != nil {
 		m.transcript.addNote("could not load session: " + msg.err.Error())
-		m.refreshViewport()
 		return nil
 	}
 	if err := m.eng.RestoreSession(msg.rec.Session); err != nil {
 		m.transcript.addNote("could not restore session: " + err.Error())
-		m.refreshViewport()
 		return nil
 	}
 	// The restore succeeded, so it is now safe to redirect saves at the loaded session's file
@@ -613,7 +603,6 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	m.servedModels = slices.Clone(msg.rec.Meta.ServedModels)
 	m.detached = false // re-arm follow-the-tail: the resumed view opens at its tail like a launch
 	m.flash = ""
-	m.layout()
 	return cmd // the queued Activate, when this fold's schedule found the queue idle
 }
 

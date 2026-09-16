@@ -108,7 +108,6 @@ func (m Model) settingsExternalEdit(row SettingRow) (tea.Model, tea.Cmd) {
 	// or the screen is staying and the editor is opening elsewhere — and a ✗ from an earlier attempt
 	// has nothing to say about the file they are about to edit.
 	m.settings.failure = settingFailure{}
-	m.layout()
 	if launch.Detached {
 		return m, startDetachedEditor(row.Path, argv)
 	}
@@ -155,7 +154,6 @@ func (m Model) foldDetachedEdit(msg settingsDetachedMsg) (tea.Model, tea.Cmd) {
 		return m.settingsFailed(launched, stripEscapes(msg.err.Error()))
 	}
 	m.settings.answer = settingAnswer{path: msg.path, msg: settingsDetachedEditNote}
-	m.layout()
 	return m, nil
 }
 
@@ -190,7 +188,6 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 		return m.settingsFailed(launched, stripEscapes(err.Error()))
 	}
 	m, cmds := m.applyReloaded(rows, applied, false)
-	m.layout()
 	return m, tea.Batch(cmds...)
 }
 
@@ -317,7 +314,6 @@ func (m Model) foldConfigChanged(msg configChangedMsg) (tea.Model, tea.Cmd) {
 	if len(applied) > 0 {
 		m.transcript.addNote(configWatchAppliedNote + strings.Join(appliedPaths(applied), ", "))
 	}
-	m.layout()
 	return m, tea.Batch(append(cmds, next)...)
 }
 
@@ -349,7 +345,6 @@ func (m Model) foldConfigUnreadable(err error) Model {
 	}
 	m.cfgWatch.noted = true
 	m.transcript.addNote(configWatchStalledNote + err.Error())
-	m.layout()
 	return m
 }
 

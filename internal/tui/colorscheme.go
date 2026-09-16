@@ -40,7 +40,6 @@ func (m Model) runColorScheme(args colorSchemeArgs) (tea.Model, tea.Cmd) {
 		return m.exportColorScheme(args.name)
 	}
 	m.transcript.addNote(colorSchemeListNote(m.availableSchemes(), m.currentSchemeName()))
-	m.layout()
 	return m, nil
 }
 
@@ -56,12 +55,10 @@ func (m Model) runColorScheme(args colorSchemeArgs) (tea.Model, tea.Cmd) {
 func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 	if m.opts.Settings == nil {
 		m.transcript.addError(colorSchemeSource, noSettingsWriterNote, runRef{})
-		m.layout()
 		return m, nil
 	}
 	if err := m.opts.Settings.Write(settingKeyColorScheme, name); err != nil {
 		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
-		m.layout()
 		return m, nil
 	}
 	// The same journal entry the pane records, so a key changed from the transcript wears the pane's
@@ -70,11 +67,9 @@ func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 	warnings, cmd, err := m.applyColorScheme(name)
 	if err != nil {
 		m.transcript.addNote(settingsApplyFailedNote + err.Error())
-		m.layout()
 		return m, cmd
 	}
 	m.transcript.addNote(colorSchemeSwitchedNote(name, warnings))
-	m.layout()
 	return m, cmd
 }
 
@@ -85,17 +80,14 @@ func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 func (m Model) exportColorScheme(name string) (tea.Model, tea.Cmd) {
 	if m.opts.Schemes == nil {
 		m.transcript.addError(colorSchemeSource, noSchemeExporterNote, runRef{})
-		m.layout()
 		return m, nil
 	}
 	path, err := m.opts.Schemes.Export(name)
 	if err != nil {
 		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
-		m.layout()
 		return m, nil
 	}
 	m.transcript.addNote(colorSchemeExportedNote(name, path))
-	m.layout()
 	return m, nil
 }
 

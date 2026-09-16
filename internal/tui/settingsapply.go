@@ -51,7 +51,6 @@ func (m Model) settingsArmReset(rows []SettingRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	m.settings.kind = settingsResetArmed
-	m.layout()
 	return m, nil
 }
 
@@ -62,7 +61,6 @@ func (m Model) settingsResetKey(msg tea.KeyPressMsg, row SettingRow) (tea.Model,
 	switch msg.String() {
 	case "esc":
 		m.settings.kind = settingsKeyList
-		m.layout()
 		return m, nil
 	case "enter":
 		return m.settingsReset(row)
@@ -82,16 +80,13 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 	m.settings.kind = settingsKeyList
 	if m.opts.Settings == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
-		m.layout()
 		return m, nil
 	}
 	if err := m.opts.Settings.Reset(row.Path); err != nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: err.Error()}
-		m.layout()
 		return m, nil
 	}
 	m, cmd := m.settingsApplied(row, settingEdit{path: row.Path, value: row.Default, reset: true})
-	m.layout()
 	return m, cmd
 }
 
@@ -108,15 +103,14 @@ func (m Model) settingsReset(row SettingRow) (tea.Model, tea.Cmd) {
 //     same keypress (settingsApplied), so the session and the file agree the same instant.
 func (m Model) settingsWrite(row SettingRow, value string) (tea.Model, tea.Cmd) {
 	m, cmd, _ := m.settingsPersist(row, value)
-	m.layout()
 	return m, cmd
 }
 
 // settingsPersist is settingsWrite's body and its outcome: the model after the attempt, and whether the
 // write LANDED. The bool exists for the edit buffer, which is the one caller whose next move depends on
 // it — a refused value keeps its buffer open so it can be corrected (settingsCommitBuffer), where a
-// refused toggle has nothing to keep. It does not lay out: the caller does, once, after it has finished
-// deciding what the pane is now doing.
+// refused toggle has nothing to keep. Nothing lays out here or in its callers: what the attempt moved —
+// a row's slot, the pane's step, a key in the paint — is settled by Update's repaint tail (model.go).
 func (m Model) settingsPersist(row SettingRow, value string) (Model, tea.Cmd, bool) {
 	if m.opts.Settings == nil {
 		m.settings.failure = settingFailure{path: row.Path, msg: noSettingsWriterNote}
@@ -263,10 +257,10 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		}
 	case settingKeyShowScrollbar:
 		// The config key is positive and the option is inverted (the polarity flips in cmd/apogee).
-		// The bar's gutter column is transcript width, so the frame is laid out again from here
-		// rather than left to the next resize.
+		// The bar's gutter column is transcript width, which is why the option is in the frame key
+		// (paintcache.go): the repaint tail lays out again from it rather than leaving the column to
+		// the next resize.
 		m.opts.HideScrollbar = value != settingTrue
-		m.layout()
 	case settingKeySpinner:
 		style, err := ParseSpinnerStyle(value)
 		if err != nil {
@@ -289,9 +283,9 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// and the value lands on every task-list card at once: this is the same sweep a click on a
 		// card takes (toggleTaskListFold), which is what makes a `/settings` edit and a hand-edited
 		// file apply live — and a resumed session, whose cards were seeded from the file, paint
-		// per the file. The frame is laid out again because the cards' height just moved.
+		// per the file. The sweep bumps the transcript's generation, so the repaint tail lays out
+		// again for the cards' moved height.
 		m.setTaskListFolded(value != settingTrue)
-		m.layout()
 	case settingKeyStallAfter:
 		after, err := parseStallAfter(value)
 		if err != nil {
@@ -379,7 +373,6 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	for _, w := range warnings {
 		m.transcript.addEphemeralNote(w)
 	}
-	m.layout()
 	return colorSchemeWarningNote(len(warnings)), tea.ClearScreen, nil
 }
 

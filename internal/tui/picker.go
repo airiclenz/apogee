@@ -231,7 +231,6 @@ func (m Model) pickAdvertisedModel(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(noOtherModelNote)
 	}
 	m.picker = picker{open: true, kind: pickerModel}
-	m.layout()
 	return m, nil
 }
 
@@ -306,7 +305,6 @@ func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
 	}
 	m.picker = picker{open: true, kind: pickerServer,
 		listSurface: listSurface{listCursor: listCursor{selected: m.currentServerRow()}}}
-	m.layout()
 	return m, nil
 }
 
@@ -404,14 +402,12 @@ func (m Model) switchToServer(choice ServerChoice) (tea.Model, tea.Cmd) {
 			m.transcript.addNote(serverSavedNote)
 		}
 		record.warn(&m.transcript)
-		m.layout()
 		return m, nil
 	}
 	from := hostDisplay(m.opts) // the label the footer used for the old server, captured before it moves
 	result, err := m.opts.Server.Switch(choice.Name)
 	if err != nil {
 		m.transcript.addNote("could not switch server: " + err.Error())
-		m.layout()
 		return m, nil
 	}
 	// The move is now true, so it is also the choice this human should not have to make again: the
@@ -516,7 +512,6 @@ func (m Model) runSubAgentsServerCommand(args []string) (tea.Model, tea.Cmd) {
 	// now is the wiring's state, not the renderer's, and a highlight guessed from the session's own
 	// server would point at the wrong row on every session that routes elsewhere.
 	m.picker = picker{open: true, kind: pickerSubAgentsServer}
-	m.layout()
 	return m, nil
 }
 
@@ -587,7 +582,6 @@ func (m Model) retargetSubAgents(name string) (tea.Model, tea.Cmd) {
 	}
 	if err := m.opts.Delegation.Retarget(name); err != nil {
 		m.transcript.addNote("could not retarget the sub-agents: " + stripEscapes(err.Error()))
-		m.layout()
 		return m, nil
 	}
 	// The move is now true, so it is also the choice this human should not have to make again: the
@@ -611,7 +605,6 @@ func (m Model) retargetSubAgents(name string) (tea.Model, tea.Cmd) {
 	}
 	m.transcript.addNote("sub-agents server: " + label + clause)
 	record.warn(&m.transcript)
-	m.layout()
 	return m, nil
 }
 
@@ -708,7 +701,6 @@ func (m Model) pickLaunchProfile(args []string) (tea.Model, tea.Cmd) {
 		return m.pickerNote(onlyProfileLoadedNote)
 	}
 	m.picker = picker{open: true, kind: pickerLoad, profiles: offered}
-	m.layout()
 	return m, nil
 }
 
@@ -827,7 +819,6 @@ func elsewherePort(addr, here string) string {
 // transcript note and an unchanged session.
 func (m Model) pickerNote(note string) (tea.Model, tea.Cmd) {
 	m.transcript.addNote(note)
-	m.layout()
 	return m, nil
 }
 
@@ -846,16 +837,15 @@ func (m Model) pickerKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	switch verdict {
 	case listCloses:
 		m.picker = picker{}
-		m.layout()
 		return m, nil
 	case listAccepts:
 		return m.acceptPicker()
 	case listSwallowed, listUnclaimed:
 		// Both end the same way here: the surface either spent the key or found no use for it, and a
-		// modal with no verbs of its own swallows whatever is left. It still lays out: a rune into the
-		// filter prunes rows, and a shorter row list is a shorter pane — the viewport widget's height
-		// is the transcript's drawn row count (layout(), model.go).
-		m.layout()
+		// modal with no verbs of its own swallows whatever is left. A rune into the filter prunes
+		// rows, and a shorter row list is a shorter pane — the repaint tail lays out again when the
+		// viewport widget's height no longer matches the transcript's drawn row count (settle,
+		// model.go).
 	}
 	return m, cmd
 }
@@ -970,7 +960,6 @@ func (m Model) acceptMode(offered int) (tea.Model, tea.Cmd) {
 	mode := ladder[offered]
 	m.eng.SetMode(mode)
 	m.opts.Mode = mode // the footer renders the mode from opts.Mode (footerContent)
-	m.layout()
 	return m, nil
 }
 
@@ -1014,7 +1003,6 @@ func (m Model) bindPickedModel(picked heartbeat.ModelSummary) (tea.Model, tea.Cm
 			m.transcript.addNote(modelSavedNote)
 		}
 		record.warn(&m.transcript)
-		m.layout()
 		return m, nil
 	}
 	m.hb.observedModel, m.hb.observedWindow = id, window
@@ -1035,7 +1023,6 @@ func (m Model) bindPickedModel(picked heartbeat.ModelSummary) (tea.Model, tea.Cm
 		}
 		record.warn(&next.transcript)
 	}
-	next.layout()
 	return next, nil
 }
 
