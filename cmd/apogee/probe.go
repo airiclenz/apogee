@@ -28,6 +28,11 @@ import (
 // no agent, no model, no write — but it is a named child rather than part of the bare parent's
 // report because it is the one probe that needs the screen: it measures the terminal by painting
 // on the alternate screen and reading the cursor back, so it must be asked for.
+//
+// `apogee probe config` is the fourth, free like the host report: it reads config.yaml the way a
+// live reload does and reports the notices, a pending migration and every key's resolved value —
+// a named child because its question ("what does the file say?") is narrower than the host
+// report's ("what would a session run with?"), and it never migrates the file it describes.
 func newProbeCommand() *cobra.Command {
 	cmd := probeHostCommand("probe",
 		"Report this host: confinement, roots, and endpoint reachability",
@@ -45,6 +50,7 @@ func newProbeCommand() *cobra.Command {
 			"prints — identical output, spelled out for scripts."))
 	cmd.AddCommand(probeModelCommand())
 	cmd.AddCommand(probeTerminalCommand())
+	cmd.AddCommand(probeConfigCommand())
 
 	return cmd
 }

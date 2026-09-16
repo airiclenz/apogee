@@ -461,15 +461,32 @@ func migrationNote(path, backup string, entry ServerEntry, lc legacyFileConfig) 
 		path, strings.Join(moved, ", "), entry.Name, backup)
 }
 
+// ErrRetiredShape is the sentinel every refusal of a config still written in a retired shape
+// carries (errors.Is): a caller that reads the file without the startup fold — `apogee probe
+// config` — tells "the file needs the migration a startup makes" apart from a malformed file or
+// a refused value by it, and reports the refusal's own sentence rather than failing on it. It is
+// attached beside the sentence, not spelled into it, because the sentence is the user's whole
+// answer and stays exactly as it was.
+var ErrRetiredShape = errors.New("apogee: the config file is written in a retired shape")
+
+// retiredShapeRefusal is a refusal sentence that answers errors.Is(err, ErrRetiredShape) without
+// the sentinel's own text appearing in it — a refusal reads as one sentence to the user, and the
+// two live refusals below are pinned byte-for-byte by their tests.
+type retiredShapeRefusal struct{ error }
+
+func (r retiredShapeRefusal) Is(target error) bool { return target == ErrRetiredShape }
+
+func (r retiredShapeRefusal) Unwrap() error { return r.error }
+
 // legacyRefusal is what a config in the retired schema gets when the fold cannot be made safely:
 // the same refusal apogee gave before the rewrite existed, plus the reason it could not be done for
 // them this time. Nothing has been written when this is returned, so the paste-able block is a
 // complete answer on its own.
 func legacyRefusal(path string, lc legacyFileConfig, why error) error {
-	return fmt.Errorf("apogee: %s still uses the retired top-level endpoint:/api-key:/host-alias:/model: "+
+	return retiredShapeRefusal{fmt.Errorf("apogee: %s still uses the retired top-level endpoint:/api-key:/host-alias:/model: "+
 		"keys — the servers: list is now the single definition of the servers you run models on.\n\n"+
 		"apogee did not fold them in for you because %v.\n\n"+
-		"Delete those keys and put this in their place:\n\n%s", path, why, lc.block())
+		"Delete those keys and put this in their place:\n\n%s", path, why, lc.block())}
 }
 
 // liveLegacyRefusal is what a LIVE re-read of a file still carrying the retired quadruple gets: the
@@ -1608,8 +1625,8 @@ func reactionsRefusal(path string, why error) error {
 // it already had.
 func liveReactionsRefusal(path string) error {
 	//nolint:staticcheck // ST1005: a refusal that closes with the fix in prose.
-	return fmt.Errorf("apogee: %s still has a hooks: block, and apogee does not rewrite a config "+
+	return retiredShapeRefusal{fmt.Errorf("apogee: %s still has a hooks: block, and apogee does not rewrite a config "+
 		"file while a session is running — hooks: becomes reactions: at startup. Restart apogee to "+
 		"let it fold the block in, or move the entries into reactions: yourself (name: → id:, "+
-		"events: → on:, command: or webhook: → run:).", path)
+		"events: → on:, command: or webhook: → run:).", path)}
 }

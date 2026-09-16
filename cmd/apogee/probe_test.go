@@ -239,13 +239,22 @@ func TestSubcommandsRegistersProbe(t *testing.T) {
 	t.Parallel()
 	root := newRootCommand((&recordingLauncher{}).launch, subcommands()...)
 
-	found := false
+	var probe *cobra.Command
 	for _, c := range root.Commands() {
 		if c.Name() == "probe" {
-			found = true
+			probe = c
 		}
 	}
-	if !found {
+	if probe == nil {
 		t.Fatal("the shipped subcommand set does not register `probe`")
+	}
+	children := map[string]bool{}
+	for _, c := range probe.Commands() {
+		children[c.Name()] = true
+	}
+	for _, want := range []string{"host", "model", "terminal", "config"} {
+		if !children[want] {
+			t.Errorf("`probe` does not register the %q child; has %v", want, children)
+		}
 	}
 }

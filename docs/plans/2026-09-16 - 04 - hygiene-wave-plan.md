@@ -290,7 +290,13 @@ NOTES (2026-09-17): consequential edit — internal/config/configwrite.go: made 
 
 commit: `refactor(tui): ConfigHost groups the eight config-file acts on Options (ADR 0054)`
 
-## 15. `apogee probe config` (apogee-lpi)
+## 15. `apogee probe config` (apogee-lpi) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): `%w` would have spelled the sentinel's text into refusal sentences two tests pin byte-for-byte (`configmigrate_test.go` :1257, :1285), so `ErrRetiredShape` is attached through a small `retiredShapeRefusal` wrapper whose `Is` method answers `errors.Is(err, config.ErrRetiredShape)`; the sentences are unchanged and the probe branches on `errors.Is` exactly as planned.
+NOTES (2026-09-17): the `resolved` section keeps `field()`'s `"  %-Ns %s"` layout but sizes N to the registry's longest path (23 chars) instead of 14, so the 62 rows align; a `%-14s` column would have broken on more than half the keys.
+NOTES (2026-09-17): consequential edit — cmd/apogee/doc.go: made necessary by the new probeconfig.go (the package map TestDocMapNamesEveryFile enumerates every file).
+NOTES (2026-09-17): consequential edit — README.md, docs/manual/README.md: made necessary by the new verb (the two front-door lines enumerate the probe family as host/model/terminal).
+NOTES (2026-09-17): a third test, `TestProbeConfigFailsOnAMalformedFile`, pins that a non-retired-shape reader error is the command's own failure rather than a `migration` finding; the test helper is `seedConfigHome` because `writeProbeConfig` already exists in probemodel_test.go.
 
 **What:** Closes apogee-lpi under the ratified call. New verb `config` under `probe` (`cmd/apogee/probeconfig.go`, registered in `probe.go`'s `newProbeCommand`; flag `--config` only). It reads the file through the LIVE path — `config.LoadFileConfig(config.FilePath(dir), os.ReadFile, collect)` — so it never migrates or writes. Output, `Host.Report()`'s layout (`field()` = `"  %-14s %s"`): header `apogee probe — config report` + `  (nothing is written; the file is read the way a live reload reads it)`; section `notices` listing every collected notice one per line (or `  (none)`); section `migration` — when `LoadFileConfig` returns the legacy-shape refusal, its sentence verbatim and the `resolved` section is replaced by `  (start apogee once to migrate the file, then re-run)`; otherwise `  (none)` and section `resolved` with one `field(row.Path, value)` per `config.KeyRegistry` row in registry order, `value = row.Read(o)` or `row.Default` when `Read` is empty, and `Masked` rows rendered as `••••` when non-empty. Printed via `sanitize.StripEscapes` like `probe host`. `docs/manual/probe.md` documents the verb in the family's style.
 

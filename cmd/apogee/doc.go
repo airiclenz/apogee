@@ -123,7 +123,9 @@
 // probeterminal.go `apogee probe terminal`, which measures the terminal by painting on
 // it and reading the cursor back, with probeterminal_windows.go putting the console
 // into the mode a bubbletea session runs it in and probeterminal_other.go its POSIX
-// no-op twin; undo.go `apogee undo <session-id> [confirm]`, the revert an unattended
+// no-op twin; probeconfig.go `apogee probe config`, which reads config.yaml the way a live
+// reload does and reports its notices, a pending migration and every key's resolved value;
+// undo.go `apogee undo <session-id> [confirm]`, the revert an unattended
 // Firing has nobody to offer — it opens one saved session's snapshot store from a fresh
 // process and shows `/undo`'s own listing (ADR 0074).
 //
