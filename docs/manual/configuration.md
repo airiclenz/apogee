@@ -1071,8 +1071,8 @@ session is being built.
 ## The servers you run models on
 
 The `servers:` list is the **single definition** of what apogee can talk to — one
-entry per OpenAI-compatible server — and the `server:` key names the one a session
-starts on.
+entry per server, OpenAI-compatible unless its `wire` says otherwise — and the
+`server:` key names the one a session starts on.
 
 ```yaml
 # ~/.apogee/config.yaml
@@ -1083,6 +1083,10 @@ servers:
   - name: rented-box
     endpoint: https://llm.example.com
     api-key: sk-rented-token     # optional; or api-key-cmd: / api-key-env: — exactly one of the three
+  - name: claude
+    endpoint: https://api.anthropic.com
+    api-key-env: ANTHROPIC_API_KEY
+    wire: anthropic              # the Messages wire; openai (chat-completions) is the default
 
 server: workstation
 ```
@@ -1092,9 +1096,13 @@ An entry's `name` is the label `/server` lists it under, the argument
 footer shows while the session is on it — one name for all four jobs, so no two
 entries may share one. `endpoint` is required; `api-key` (or `api-key-cmd` /
 `api-key-env` — exactly one of the three), `model`, `parallel-agents`,
-`working-window` (the room a session on that server works in, above)
-and `effort-dialect` (which of the three wires carries the
-thinking-effort dial, described above) are optional, as are `description` — free
+`working-window` (the room a session on that server works in, above),
+`effort-dialect` (which of the three wires carries the
+thinking-effort dial, described above) and `wire` (which protocol family the
+server speaks: `openai`, the chat-completions wire and the default, or
+`anthropic`, the Messages wire — `/v1/messages`, the key sent as `x-api-key`,
+and the effort dial spelled by the wire itself, so an `anthropic` entry names
+no `effort-dialect`) are optional, as are `description` — free
 text saying what that server is **for**, which the `/sub-agents-server` picker
 shows and which the model reads when you let it pick the seat
 ([below](#letting-the-model-pick-the-seat)) — and `llama-launcher`,

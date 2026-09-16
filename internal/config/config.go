@@ -1849,6 +1849,18 @@ type UnconfinedHost struct {
 // all, the escape hatch for a server that errors on a kwarg it does not know. The key names a
 // DIALECT, never a model family — it is the fallback ADR 0050 decision 2 anticipated, one statement
 // per endpoint, and not a table of who speaks what.
+//
+// Wire is which request/response protocol family this server speaks — the codec the provider
+// Client encodes a request in and decodes the stream with (ADR 0078). `openai` — the default, and
+// what an absent key means — is the chat-completions wire every entry spoke before the key existed:
+// `/v1/chat/completions`, `Authorization: Bearer`, the OpenAI stream. `anthropic` is the Messages
+// wire: `/v1/messages`, `x-api-key`, Anthropic's event stream, and `GET /v1/models` for discovery
+// with no `/props` behind it. The wire is a property of the ENDPOINT, never of the model served
+// there, which is why it sits on the entry beside `endpoint:` rather than in a model profile — and
+// it is why the two keys do not compose freely: the anthropic wire carries the thinking-effort
+// dial in exactly one spelling (`output_config.effort`), so an `effort-dialect:` on an anthropic
+// entry would name a wire the request never travels on, and ValidateServers refuses the pair
+// rather than letting one key silently outrank the other.
 type ServerEntry struct {
 	Name            string     `yaml:"name"`
 	Endpoint        string     `yaml:"endpoint"`
@@ -1867,6 +1879,7 @@ type ServerEntry struct {
 	MaxOutputTokens int        `yaml:"max-output-tokens,omitempty"`
 	ResponseReserve float64    `yaml:"response-reserve,omitempty"`
 	EffortDialect   string     `yaml:"effort-dialect,omitempty"`
+	Wire            string     `yaml:"wire,omitempty"`
 }
 
 // canonicaliseServers trims the whitespace around every entry's `name:` and `endpoint:`, so the
@@ -1959,6 +1972,11 @@ func canonicaliseServers(fc *fileConfig) {
 // reading as configured while the session went on detecting the wire for itself. The refusal names
 // the entry, the key and what may stand there, the way the thinking axes' own enum refusal does
 // (validateThinkingAxes). Absent is `auto` spelled by omission and is not a defect.
+//
+// The entry's optional `wire:` value is the same shape of enum — `openai` or `anthropic` (ADR 0078),
+// absent being `openai` spelled by omission — and is refused the same way. One more rule rides it:
+// an `anthropic` entry may name no `effort-dialect:` at all, because that wire spells the effort
+// dial itself and a dialect word beside it would describe a request that is never sent.
 //
 // What it deliberately does NOT check is the delegation posture: `bypass:` is legal
 // on every entry, because which one takes the delegations is the root `sub-agents-server:` key's
@@ -2065,8 +2083,31 @@ func ValidateServers(servers []ServerEntry) error {
 				"openai to force one of the three, or off to send no thinking effort at all; or "+
 				"remove the key, which is auto", i+1, s.Name, dialect)
 		}
+		if wire := s.Wire; wire != "" && !isKnownWire(wire) {
+			return fmt.Errorf("apogee: servers: entry %d (%q): wire: %q is not a wire — want openai for "+
+				"the chat-completions wire or anthropic for the Messages wire; or remove the key, which "+
+				"is openai", i+1, s.Name, wire)
+		}
+		if s.Wire == "anthropic" && s.EffortDialect != "" {
+			return fmt.Errorf("apogee: servers: entry %d (%q): effort-dialect: %q — wire: anthropic sets "+
+				"the effort spelling itself — drop effort-dialect", i+1, s.Name, s.EffortDialect)
+		}
 	}
 	return nil
+}
+
+// isKnownWire reports whether name is one of the two words an entry's `wire:` may take (ADR 0078):
+// `openai`, the chat-completions wire every server spoke before the key existed, and `anthropic`,
+// the Messages wire. The empty value is `openai` spelled by omission and is answered by the caller,
+// so it is not one of the names here; the words are matched exactly, as the effort dialect's are
+// (isKnownEffortDialect).
+func isKnownWire(name string) bool {
+	switch name {
+	case "openai", "anthropic":
+		return true
+	default:
+		return false
+	}
 }
 
 // isKnownEffortDialect reports whether name is one of the five words an entry's `effort-dialect:`

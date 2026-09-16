@@ -168,7 +168,10 @@ NOTES (2026-09-16): `bd close apogee-1mj --reason="<commit subject>"` is the ver
 
 **Commit:** `fix(platform): the confinement denial kill watches stderr on pipes and matches a line-anchored signature`
 
-## 7. Per-server `wire:` key — config, template, manual, term, ADR (apogee-6fp)
+## 7. Per-server `wire:` key — config, template, manual, term, ADR (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the template's `api-key` header comment also gained the `x-api-key` parenthetical, beside the endpoint widening the item names — its "sent as Authorization: Bearer on EVERY request" claim is false on the anthropic wire.
+NOTES (2026-09-16): CONTEXT.md's Upstream entry cross-references the Wire term in prose ("below") rather than by anchor — glossary terms are not headings, so `#wire` would not resolve.
 
 **What:** Add `Wire string \`yaml:"wire,omitempty"\`` to `internal/config/config.go` `ServerEntry` with a doc paragraph in the `effort-dialect` style; `ValidateServers` refuses values other than empty/`openai`/`anthropic` with `apogee: servers: entry %d (%q): wire: …` and refuses a non-empty `effort-dialect` on an `anthropic` entry (`wire: anthropic sets the effort spelling itself — drop effort-dialect`); helper `isKnownWire`. Template `internal/config/defaults/config.yaml`: a `wire:` stanza after `effort-dialect` and the `endpoint` comment widened (`/v1/messages` on the anthropic wire); manual `docs/manual/configuration.md` `## The servers you run models on` key list gains `wire`. CONTEXT.md: a *Wire* glossary entry (the request/response protocol family a server speaks; `openai` chat-completions, `anthropic` Messages) and the *Upstream* entry widened from "OpenAI HTTP surface". Write ADR 0078 "a server's wire is a per-entry codec inside the provider Client" (decisions: key, zero value, effort implication, no thinking in v1, x-api-key auth, discovery shape, stub route).
 

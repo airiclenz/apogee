@@ -2489,6 +2489,127 @@ func TestValidateServersRefusesAnEntryResponseReserveThatIsNotAShare(t *testing.
 	}
 }
 
+// A `wire:` on a `servers:` entry is an enum the way `effort-dialect:` is (ADR 0078): the two words
+// pass, absent is `openai` spelled by omission, and any other word names no codec at all — refused at
+// startup with the entry, the key and the two words that may stand there, never resolved silently
+// to the default while the entry reads as configured.
+func TestValidateServersRefusesAnUnknownWire(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		wire    string
+		wantErr bool
+	}{
+		{name: "the chat-completions wire", wire: "openai"},
+		{name: "the Messages wire", wire: "anthropic"},
+		{name: "the key absent", wire: ""},
+		{name: "a word naming no wire", wire: "bogus", wantErr: true},
+		{name: "a spelling that differs only in case", wire: "Anthropic", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateServers([]ServerEntry{{
+				Name: "workstation", Endpoint: "http://127.0.0.1:1111", Wire: tt.wire,
+			}})
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("ValidateServers refused wire: %q — %v", tt.wire, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateServers accepted wire: %q; want a refusal", tt.wire)
+			}
+			for _, want := range []string{"servers: entry 1", "workstation", "wire: " + fmt.Sprintf("%q", tt.wire) + " is not a wire", "openai", "anthropic"} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q; want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// The anthropic wire spells the thinking-effort dial itself (`output_config.effort`, ADR 0078), so
+// an `effort-dialect:` beside `wire: anthropic` describes a request that is never sent — refused
+// rather than letting one key silently outrank the other, and refused for EVERY dialect word,
+// `auto` and `off` included, because none of them has a meaning on that wire. The same dialect on
+// the openai wire, and an anthropic entry naming none, both pass.
+func TestValidateServersRefusesEffortDialectOnTheAnthropicWire(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		wire    string
+		dialect string
+		wantErr bool
+	}{
+		{name: "anthropic with no dialect", wire: "anthropic"},
+		{name: "openai with a dialect", wire: "openai", dialect: "kwargs"},
+		{name: "the absent wire with a dialect", wire: "", dialect: "reasoning"},
+		{name: "anthropic with the openai dialect", wire: "anthropic", dialect: "openai", wantErr: true},
+		{name: "anthropic with auto", wire: "anthropic", dialect: "auto", wantErr: true},
+		{name: "anthropic with off", wire: "anthropic", dialect: "off", wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			err := ValidateServers([]ServerEntry{{
+				Name: "claude-box", Endpoint: "https://api.anthropic.com", Wire: tt.wire, EffortDialect: tt.dialect,
+			}})
+			if !tt.wantErr {
+				if err != nil {
+					t.Fatalf("ValidateServers refused wire: %q with effort-dialect: %q — %v", tt.wire, tt.dialect, err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ValidateServers accepted effort-dialect: %q on the anthropic wire; want a refusal", tt.dialect)
+			}
+			for _, want := range []string{
+				"servers: entry 1", "claude-box", "effort-dialect: " + fmt.Sprintf("%q", tt.dialect),
+				"wire: anthropic sets the effort spelling itself — drop effort-dialect",
+			} {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("error = %q; want it to contain %q", err, want)
+				}
+			}
+		})
+	}
+}
+
+// The wire rides the entry it describes and reaches the composition root as the word the user
+// wrote (ADR 0078): mapping it onto a codec is the provider package's job, and an absent key
+// travels as the empty string, which every reader treats as `openai`.
+func TestServerEntryWireRoundTrips(t *testing.T) {
+	t.Parallel()
+	configYAML := `servers:
+  - name: claude-box
+    endpoint: https://api.anthropic.com
+    api-key-env: ANTHROPIC_API_KEY
+    wire: anthropic
+  - name: openai
+    endpoint: https://api.openai.com/v1
+    wire: openai
+    effort-dialect: openai
+  - name: absent
+    endpoint: http://192.168.64.1:1111
+server: absent
+`
+	home := testConfigHome(t, configYAML)
+	opts := Options{ConfigDir: home}
+	if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+	want := []ServerEntry{
+		{Name: "claude-box", Endpoint: "https://api.anthropic.com", APIKeyEnv: "ANTHROPIC_API_KEY", Wire: "anthropic"},
+		{Name: "openai", Endpoint: "https://api.openai.com/v1", Wire: "openai", EffortDialect: "openai"},
+		{Name: "absent", Endpoint: "http://192.168.64.1:1111"},
+	}
+	if !reflect.DeepEqual(opts.Servers, want) {
+		t.Errorf("opts.servers = %#v; want %#v", opts.Servers, want)
+	}
+}
+
 // The share a session STARTS with is the selected entry's own, flattened exactly as its
 // `context-window:` pin is and for that pin's reason: the number belongs to the entry, so the
 // composition root resolves it over the top-level key at the bind rather than a beat later. An entry

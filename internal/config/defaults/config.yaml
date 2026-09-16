@@ -41,10 +41,10 @@
 #              `/server <name>` takes, the value server: below points at, and the host name the
 #              status footer shows while the session is on it. Required, and no two entries may
 #              share one.
-#   endpoint   that server's OpenAI-compatible URL — the BASE, without `/v1`: apogee appends
-#              `/v1/chat/completions` and `/v1/models` itself, so OpenRouter is
-#              `https://openrouter.ai/api`. Spelled with the suffix, the chat and model-list
-#              requests land on `/api/v1/v1/…` and 404s. Required.
+#   endpoint   that server's URL — the BASE, without `/v1`: apogee appends
+#              `/v1/chat/completions` and `/v1/models` itself (`/v1/messages` on the anthropic
+#              wire, below), so OpenRouter is `https://openrouter.ai/api`. Spelled with the
+#              suffix, the chat and model-list requests land on `/api/v1/v1/…` and 404s. Required.
 #   description
 #              free text saying what this server IS — "fast local 27B, good at search and edits",
 #              "the big remote model". Optional, never checked, and written for one reader: with
@@ -52,8 +52,9 @@
 #              pick where each delegation runs. The /sub-agents-server picker shows it too.
 #   api-key    the bearer token that server wants, if it wants one — llama.cpp started with
 #              --api-key, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is
-#              sent as `Authorization: Bearer <key>` on EVERY request to that server: your
-#              conversation, the ten-second heartbeat, and both halves of `apogee probe`.
+#              sent as `Authorization: Bearer <key>` (`x-api-key: <key>` on the anthropic wire,
+#              below) on EVERY request to that server: your conversation, the ten-second
+#              heartbeat, and both halves of `apogee probe`.
 #              Optional — leave it out for a keyless local server and no Authorization header is
 #              sent at all. APOGEE_API_KEY overrides it for the server this session starts on
 #              (no flag, deliberately: a secret typed on the command line lands in your shell
@@ -173,6 +174,14 @@
 #              one of the three wires, and off never sends an effort at all.
 #
 #                effort-dialect: openai
+#
+#   wire       which protocol family this server speaks: openai (the default) is the
+#              chat-completions wire every OpenAI-compatible server reads; anthropic is the
+#              Messages wire — `/v1/messages`, the key sent as `x-api-key`, and the
+#              thinking-effort dial spelled by the wire itself, so an anthropic entry names no
+#              effort-dialect. Optional.
+#
+#                wire: anthropic
 #
 #   plaintext-key-ok
 #              written beside a plaintext api-key: by "never for this entry" — the answer to the

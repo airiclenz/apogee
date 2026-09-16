@@ -444,14 +444,15 @@ conversation state — which is precisely what lets formerly lab-only Mechanisms
 _Avoid_: "the pipeline" (that was the proxy-era Transform chain — a narrower thing).
 
 **Upstream**:
-The local LLM server that runs the model — Ollama, llama.cpp, LM Studio, vLLM, or any
-endpoint honouring the OpenAI HTTP surface. Apogee reaches the Upstream directly through
+The LLM server that runs the model — Ollama, llama.cpp, LM Studio, vLLM, or any endpoint
+speaking one of the two **Wires** (below) apogee has a codec for: the OpenAI chat-completions surface
+(the default) or the Anthropic Messages API. Apogee reaches the Upstream directly through
 its `provider/` package; there is no intervening proxy. A session is not married to one: the
 [Heartbeat](#probing-and-model-identity)'s Rebind half moves it to another configured server
 mid-session (`/server`), unbound until that server's first Beat says what it serves.
 The Upstreams apogee knows are exactly the entries of config's **`servers:` list — the single
 definition of what servers exist** (one entry = a `name`, an `endpoint`, an optional `api-key`, an
-optional `model` discovery hint). The `name` is also the **host alias** the footer shows, so no
+optional `model` discovery hint, an optional `wire`). The `name` is also the **host alias** the footer shows, so no
 standalone `host-alias:` key exists. A session starts on the entry the `server:` key names — the
 last one a `/server` switch chose, recorded automatically — and asks with the picker when that key
 is unset or names an entry that is gone; a raw `--endpoint`/`APOGEE_ENDPOINT` override builds an
@@ -459,6 +460,22 @@ unlisted, unpersisted entry for one run
 ([ADR 0036](docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-the-startup-choice.md)).
 _Avoid_: "the model server", "the backend" (a `backend` detector package may exist, but
 it detects Upstreams — it is not the Upstream).
+
+**Wire**:
+The request/response protocol family a server speaks — the codec the provider Client encodes a
+request in and decodes the stream with. Two exist: `openai`, the chat-completions wire
+(`/v1/chat/completions`, `Authorization: Bearer`, the OpenAI stream) every Upstream spoke before
+the key existed and the default; and `anthropic`, the Messages wire (`/v1/messages`, `x-api-key`,
+Anthropic's event stream, `GET /v1/models` for discovery with no `/props` behind it). A wire is
+chosen per **`servers:` entry** by its `wire:` key, is a property of the endpoint rather than of
+the model served there, and implies the [effort dialect](#identity-and-shape) on the anthropic
+side (`output_config.effort`), so `wire: anthropic` and `effort-dialect:` do not compose. It is
+one codec inside the one `provider.Client`, never a second client and never a second engine path —
+the engine stays wire-silent
+([ADR 0078](docs/adr/0078-a-servers-wire-is-a-per-entry-codec-inside-the-provider-client.md)).
+_Avoid_: "dialect" for this (the **wire dialect** / `effort-dialect:` is how the thinking-effort
+dial is spelled ON a wire, a narrower thing — ADR 0060); "provider" as the family name (the
+`provider/` package is the client that speaks every wire; `openai` is a wire, not a vendor).
 
 **Key source**:
 The one place a server entry's API key comes from: a literal `api-key`, a command (`api-key-cmd`)
