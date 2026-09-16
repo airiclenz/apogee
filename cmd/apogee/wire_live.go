@@ -21,7 +21,6 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/schedule"
@@ -189,27 +188,38 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	// 0036 decision 3). Everything below this line wires against the holder and never learns which
 	// of the two happened — the seams are identical, and the engine is behind them either way.
 	w.engine = newLateEngine(w.mode, w.opts.ConfineToWorkspace)
+	// The startup snapshot's MUTABLE half (ADR 0037): the `context-window:` pin, the `servers:` list,
+	// the `system-prompt-*` inputs — every value below that a committed `/settings` edit can now
+	// move mid-session. The seams that used to capture each of them by value read this holder
+	// instead, so the next thing
+	// that re-resolves — a rebind, a server switch, a scheduled Firing — sees what the human
+	// changed rather than what the process launched with. Seeded from opts, so a session nobody
+	// edits behaves exactly as it did. It is constructed HERE, ahead of the engine seed below,
+	// because that seed is the holder's first reader: the Generation the engine starts on is derived
+	// from the overlay (liveSettings.generation), never spelled a second time.
+	//
+	// The servers this session can be moved to are derived from it the same way they always were: the
+	// `servers:` entries plus a synthesized row for the startup endpoint only when that endpoint came
+	// from a raw override and is therefore in no entry (upstreamChoices), so the way back is always
+	// offered. The verbs in wire_verbs.go resolve a name against THAT list (they need the key and the
+	// hint); the TUI is handed the display-and-identity projection of the same list, in the same order.
+	w.live = newLiveSettings(w.opts)
+
 	// The Reaction surface's two halves, handed to the holder that swaps them together: the Runner
 	// built at boot (wire_boot.go), and the generation both are already running — the Floor gates and
 	// Bypass this run's Config was constructed with, and the observe list the Runner was built from.
 	// From here on ONE apply moves both (ADR 0076 A8), and a partial edit knows where the fields it
-	// does not touch stand.
+	// does not touch stand. The generation is read off the live holder rather than spelled from
+	// Config: the holder derives it from the same Options the Config was built from (generationOf),
+	// so the seed and every later apply are one projection.
 	//
-	// The `reactions:` file arms BOTH lanes, so the resolved list is divided here and each half
+	// The `reactions:` file arms BOTH lanes, so the resolved list is divided there and each half
 	// seeded under its own name: the observe rows the Runner was built from (wire_boot.go), and the
 	// sync rows — advise and gate — the Agent runs inside the loop, which reach it when the bind
 	// replays this generation onto it. That replay is the ONE route the sync lane takes into a
 	// session, which is why nothing writes Config.Reactions: a list written to both would arm every
 	// entry twice.
-	observe, sync := domain.SplitLanes(w.opts.Reactions)
-	w.engine.seedReactions(w.hooks, apogee.Generation{
-		Floor:             w.cfg.Floor,
-		Bypass:            w.cfg.Bypass,
-		ContextFillNotice: w.cfg.ContextFillNotice,
-		StepBudgetNotice:  w.cfg.StepBudgetNotice,
-		Observe:           observe,
-		Sync:              sync,
-	})
+	w.engine.seedReactions(w.hooks, w.live.generation())
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
 	// quit) and backs the /sessions browser. It owns id minting and the metadata policy — the
@@ -272,21 +282,6 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 			return err
 		}
 	}
-
-	// The startup snapshot's MUTABLE half (ADR 0037): the `context-window:` pin, the `servers:` list,
-	// the `system-prompt-*` inputs — every value below that a committed `/settings` edit can now
-	// move mid-session. The seams that used to capture each of them by value read this holder
-	// instead, so the next thing
-	// that re-resolves — a rebind, a server switch, a scheduled Firing — sees what the human
-	// changed rather than what the process launched with. Seeded from opts, so a session nobody
-	// edits behaves exactly as it did.
-	//
-	// The servers this session can be moved to are derived from it the same way they always were: the
-	// `servers:` entries plus a synthesized row for the startup endpoint only when that endpoint came
-	// from a raw override and is therefore in no entry (upstreamChoices), so the way back is always
-	// offered. The verbs in wire_verbs.go resolve a name against THAT list (they need the key and the
-	// hint); the TUI is handed the display-and-identity projection of the same list, in the same order.
-	w.live = newLiveSettings(w.opts)
 
 	// The Sub-agent server (ADR 0045): the `servers:` entry the root `sub-agents-server:` key names,
 	// the second heartbeat that discovers what it is serving, and the Delegation target every beat

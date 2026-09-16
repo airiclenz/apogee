@@ -446,6 +446,57 @@ func TestBypassRowAppliesOneGeneration(t *testing.T) {
 	}
 }
 
+// The Generation is DERIVED from the overlay, never held beside it: what generation() reports after
+// two rows have moved is byte-for-byte the value the last apply pushed through the engine seam, and
+// the two lanes of the `reactions:` key ride along in it. A mirror kept beside the overlay is the one
+// place these two could have come to disagree; with the value derived there is nothing to disagree.
+func TestLiveSettingsGenerationIsDerivedFromTheOverlay(t *testing.T) {
+	t.Parallel()
+	spy := &applySettingSpy{}
+	armed := []domain.Reaction{observeReaction("notify"), gateReaction("read-cache")}
+	live := newLiveSettings(config.Options{
+		ToolUseEnforcer:       true,
+		EmptyResponseRecovery: true,
+		ToolCallRepair:        true,
+		ToolCallSalvage:       true,
+		ToolLoopBreaker:       true,
+		ToolResultCap:         true,
+		ReadCache:             true,
+		Reactions:             armed,
+	})
+	apply := applySettingFor(settingsApplier{engine: spy, live: live})
+
+	if _, err := apply("bypass", "true"); err != nil {
+		t.Fatalf("apply bypass=true: %v", err)
+	}
+	if _, err := apply("read-cache", "false"); err != nil {
+		t.Fatalf("apply read-cache=false: %v", err)
+	}
+
+	if len(spy.generations) != 2 {
+		t.Fatalf("SetReactions = %+v, want one generation per apply", spy.generations)
+	}
+	got, pushed := live.generation(), spy.generations[1]
+	if !reflect.DeepEqual(got, pushed) {
+		t.Errorf("generation() = %+v, want the %+v the engine received", got, pushed)
+	}
+	want := apogee.Generation{
+		Floor:   apogee.FloorConfig{DisableReadCache: true},
+		Bypass:  true,
+		Observe: armed[:1],
+		Sync:    armed[1:],
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("generation() = %+v, want %+v — both moves and both lanes, derived from the overlay", got, want)
+	}
+	// And the answer is the holder's own: a caller that edits the lanes it was handed edits nothing
+	// this session is running.
+	got.Observe[0].ID = "edited"
+	if again := live.generation(); again.Observe[0].ID != "notify" {
+		t.Errorf("generation().Observe[0].ID = %q after editing a handed-out copy; want %q", again.Observe[0].ID, "notify")
+	}
+}
+
 // The `context-fill-notice` row is the third writer of the same generation (ADR 0077): one field of
 // the value the single seam takes, so its apply has to carry the seven gates, the `bypass:` switch
 // and both lanes it never names — and, being no Floor guard, it must move WITHOUT the negation the

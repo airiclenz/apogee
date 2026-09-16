@@ -81,23 +81,13 @@ type liveSettings struct {
 	// contextFileNames below).
 	now config.Options
 
-	// gen is the Reaction surface as the session is running it NOW: the Floor enable set, the
-	// `bypass:` switch and the user-origin observe list, in the ONE value a live swap carries
-	// (ADR 0076 A8). It is held beside now rather than derived from it because a generation is exactly
-	// what the engine seam takes — a row that knew only its own key would have to compose the other
-	// halves from somewhere, and composing them from the launch snapshot is how two guards flipped in
-	// one session come to disagree. Every writer that moves it moves the matching keys on now in the
-	// same locked act, so the two never describe two different edits.
-	//
-	// The Floor gates are held NEGATIVE here, the engine's own spelling, because that is the shape
-	// the seam takes; floorFromOptions is the one seam that turns the file's seven positive keys —
-	// which live on now — into it, so "off in the file" and "off in the pane" cannot come to mean
-	// two different things. The observe list lives here for the reason the rest of this holder
-	// exists: a Firing raised INSIDE the session builds a Runner of its own out of this projection,
-	// so a `reactions:` edit that reached the session and not the runs it raises would be exactly the
-	// drift ADR 0037 abolished. It is written by the reload arm only after the swap has committed, so
-	// a refused edit leaves both the session and this mirror on the list that is actually running.
-	gen apogee.Generation
+	// The Reaction surface the engine seam takes — the Floor gates, `bypass:`, the two notice
+	// switches and the two Reaction lanes in the ONE value a live swap carries (ADR 0076 A8) — is not
+	// held beside now but DERIVED from it (generation, generationOf): the seven Floor keys, the switches
+	// and the `reactions:` list are all keys on now, so there is nothing a second value could remember
+	// that this one does not, and a mirror kept beside it was one more place two edits could come to
+	// disagree. The Floor gates are spelled NEGATIVE in the derived value, the engine's own spelling,
+	// and floorFromOptions is the one seam that turns the file's seven positive keys into it.
 
 	// observedWindow is the window the last beat could name — remembered because a pin EDIT re-drives
 	// the rebind closure with no beat of its own, and a pin CLEARED to 0 must then bind the discovered
@@ -170,7 +160,6 @@ type liveSettings struct {
 // two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
 // list at startup, so an enable read back off that list and a row showing `false` say the same thing.
 func newLiveSettings(opts config.Options) *liveSettings {
-	observe, sync := domain.SplitLanes(opts.Reactions)
 	return &liveSettings{
 		boot: opts,
 		// Cloned rather than assigned so the overlay's lists are the holder's own from the first
@@ -190,22 +179,6 @@ func newLiveSettings(opts config.Options) *liveSettings {
 		entry:            opts.StartupEntry,
 		contextFilesOn:   len(opts.ContextFiles) > 0,
 		contextFileNames: opts.ContextFiles,
-
-		// The Reaction surface as one generation, seeded from the very values the composition root
-		// hands the engine holder (wire_live.go): the seven Floor keys through their one negation
-		// seam, `bypass:`, the `context-fill-notice:` and `step-budget-notice:` switches as is, and
-		// the two lanes the resolved `reactions:` list divides into — the observe rows the Runner was
-		// built from and the sync rows the Agent runs. Seeded rather than left zero because the zero
-		// Generation is a DIFFERENT session — every guard on, nothing armed — and a first partial
-		// edit would install it over what the file asked for.
-		gen: apogee.Generation{
-			Floor:             floorFromOptions(opts),
-			Bypass:            opts.Bypass,
-			ContextFillNotice: opts.ContextFillNotice,
-			StepBudgetNotice:  opts.StepBudgetNotice,
-			Observe:           observe,
-			Sync:              sync,
-		},
 	}
 }
 
@@ -586,29 +559,36 @@ func (s *liveSettings) setSubAgentsServer(name string) {
 }
 
 // generation hands back the Reaction surface as the session is running it — the value a PARTIAL
-// edit modifies one field of, and the base the reload arm hangs a re-read observe list on. The
-// observe list comes back as a COPY, for options()' reason: the value travels to the engine seam and
-// on to a Runner that keeps it, and a caller that sorted or appended to the slice it was given would
-// be editing the list this session is firing.
+// edit modifies one field of, and the base the reload arm hangs a re-read observe list on. It is
+// derived from now on every read (generationOf) rather than kept beside it: the keys it is made of
+// are the overlay's own, so the value the engine seam takes and the projection a Firing composes
+// from cannot describe two different edits. The two lanes come back as fresh slices that share no
+// array with the overlay, for options()' reason: the value travels to the engine seam and on to a
+// Runner that keeps it, and a caller that sorted or appended to the list it was given must never be
+// editing the list this session is firing.
 func (s *liveSettings) generation() apogee.Generation {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.generationLocked()
+	return generationOf(s.now)
 }
 
-// generationLocked is generation's body, split out for the two writers below that must move one
-// field and hand the WHOLE value back under a single lock — the read and the write are one act on
-// purpose, since the engine seam takes all of it at once and an apply that read the other fields
-// outside the lock could restate what a concurrent apply had just moved.
-func (s *liveSettings) generationLocked() apogee.Generation {
-	gen := s.gen
-	gen.Observe = slices.Clone(s.gen.Observe)
-	// The sync lane is cloned for the observe lane's reason and not quite: an apply that moved one
-	// field hands the WHOLE value back through the engine's swap door, where it reaches the Agent
-	// and is held for the rest of the session — so a caller appending to what it was handed would
-	// write through into the roster this holder still reports.
-	gen.Sync = slices.Clone(s.gen.Sync)
-	return gen
+// generationOf is the one projection from the session's configuration onto the Generation the
+// engine seam takes (SetReactions, ADR 0076 A8): the seven positive Floor keys through their one
+// negation seam, `bypass:` and the two notice switches as is, and the resolved `reactions:` list
+// divided into the observe rows the Runner fires and the sync rows the Agent runs. Both composition
+// roots read the seed through it and every writer below hands its answer back through it, so a
+// partial edit knows where the fields it does not touch stand without a second value remembering
+// them. SplitLanes builds two fresh slices, which is what lets the answer leave without cloning.
+func generationOf(o config.Options) apogee.Generation {
+	observe, sync := domain.SplitLanes(o.Reactions)
+	return apogee.Generation{
+		Floor:             floorFromOptions(o),
+		Bypass:            o.Bypass,
+		ContextFillNotice: o.ContextFillNotice,
+		StepBudgetNotice:  o.StepBudgetNotice,
+		Observe:           observe,
+		Sync:              sync,
+	}
 }
 
 // setReactionLanes installs BOTH halves of the re-read `reactions:` list the session has just
@@ -624,14 +604,12 @@ func (s *liveSettings) generationLocked() apogee.Generation {
 // a Firing a list this session never ran.
 //
 // The `reactions:` key on now holds BOTH lanes in one list, which is what the resolved key is
-// (config.Options.Reactions), so the two the generation keeps apart are folded back together there —
-// a Firing raised from this session splits them again for its own two halves, and one that saw only
-// the observe half would run without the `gate:` the session is answering to.
+// (config.Options.Reactions), so the two the generation keeps apart are folded back together here —
+// generationOf splits them again for the engine seam, and a Firing raised from this session for its
+// own two halves; one that saw only the observe half would run without the `gate:` the session is
+// answering to.
 func (s *liveSettings) setReactionLanes(observe, sync []domain.Reaction) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.gen.Observe, s.gen.Sync = observe, sync
-	s.now.Reactions = append(slices.Clone(observe), sync...)
+	s.update(func(o *config.Options) { o.Reactions = append(slices.Clone(observe), sync...) })
 }
 
 // setToolSet mirrors the spec the live tool set was just BUILT from — the four keys that reach the
@@ -652,18 +630,20 @@ func (s *liveSettings) setToolSet(spec toolSetSpec) {
 	})
 }
 
-// setBypass moves `bypass:` on the held generation and hands back the WHOLE value the engine seam
+// setBypass moves `bypass:` on the overlay and hands back the WHOLE Generation the engine seam
 // must be re-seeded with — setFloorGuard's shape, for setFloorGuard's reason: one swap carries the
 // Floor gates and the observe list beside the switch, and a row that composed a fresh Generation
-// from its own key alone would take away every guard and every armed Reaction the session has.
+// from its own key alone would take away every guard and every armed Reaction the session has. The
+// write and the derivation are one locked act, so the value handed back cannot restate a field a
+// concurrent apply had just moved.
 //
-// It is also the copy a Firing composed out of this session is armed from, since that Firing builds
-// an Agent of its own that nothing pushed the toggle at.
+// The same key is what a Firing composed out of this session is armed from, since that Firing
+// builds an Agent of its own that nothing pushed the toggle at.
 func (s *liveSettings) setBypass(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.gen.Bypass, s.now.Bypass = on, on
-	return s.generationLocked()
+	s.now.Bypass = on
+	return generationOf(s.now)
 }
 
 // setFloorGuard flips ONE Floor-guard key on the holder and hands back the WHOLE Generation the
@@ -686,8 +666,7 @@ func (s *liveSettings) setFloorGuard(key string, on bool) apogee.Generation {
 	if field, known := floorGuardFields[key]; known {
 		*field(&s.now) = on
 	}
-	s.gen.Floor = floorFromOptions(s.now)
-	return s.generationLocked()
+	return generationOf(s.now)
 }
 
 // floorGuardFields maps each Floor-guard key onto the config.Options field that spells it — the
@@ -706,8 +685,8 @@ var floorGuardFields = map[string]func(*config.Options) *bool{
 	"read-cache":              func(o *config.Options) *bool { return &o.ReadCache },
 }
 
-// setContextFillNotice moves the `context-fill-notice:` switch on the held generation and hands
-// back the WHOLE value the engine seam must be re-seeded with — setBypass' shape, for setBypass'
+// setContextFillNotice moves the `context-fill-notice:` switch on the overlay and hands back the
+// WHOLE Generation the engine seam must be re-seeded with — setBypass' shape, for setBypass'
 // reason: the switch is one field of the generation the single seam takes (ADR 0077), so a row that
 // composed a fresh Generation from its own key alone would take away every guard and every armed
 // Reaction the session has. It is NOT a Floor key and never goes through setFloorGuard's negation
@@ -715,8 +694,8 @@ var floorGuardFields = map[string]func(*config.Options) *bool{
 func (s *liveSettings) setContextFillNotice(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.gen.ContextFillNotice, s.now.ContextFillNotice = on, on
-	return s.generationLocked()
+	s.now.ContextFillNotice = on
+	return generationOf(s.now)
 }
 
 // setStepBudgetNotice is setContextFillNotice for the `step-budget-notice:` switch — the same
@@ -724,8 +703,8 @@ func (s *liveSettings) setContextFillNotice(on bool) apogee.Generation {
 func (s *liveSettings) setStepBudgetNotice(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.gen.StepBudgetNotice, s.now.StepBudgetNotice = on, on
-	return s.generationLocked()
+	s.now.StepBudgetNotice = on
+	return generationOf(s.now)
 }
 
 // floorFromOptions is the ONE negation seam between the seven positive config keys and the engine's

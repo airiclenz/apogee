@@ -182,7 +182,11 @@ returns copies.
 
 **Commit:** `refactor(cmd): liveSettings keeps boot plus one live overlay behind one door`
 
-## 4. The Generation is derived from the overlay, not stored
+## 4. The Generation is derived from the overlay, not stored — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `optionsFromFloor` and `TestOptionsFromFloorInvertsFloorFromOptions` were already deleted by item 3 (22cbc58c); the acceptance grep matched nothing before this item started, so nothing to delete here.
+NOTES (2026-09-16): regression guard taken as the first option — `w.live = newLiveSettings(w.opts)` (with its comment block) moved ahead of the `seedReactions` call in wire_live.go, which now reads `w.live.generation()`; the `domain` import in wire_live.go went with the moved `SplitLanes` call. `cmd/apogee/wire_engine_test.go` was listed in Files but needed no edit — its generation-equality tests stay green unchanged.
+NOTES (2026-09-16): `generationLocked` deleted along with `gen` (its only purpose was cloning the stored lanes); `generationOf(config.Options)` builds fresh lanes through `domain.SplitLanes`, so no clone is needed. `setReactionLanes` is now a plain `update` of `now.Reactions`.
 
 **What.** Depends on item 3. The `gen apogee.Generation` mirror (11 fields) goes:
 `setFloorGuard`, `setBypass`, `setContextFillNotice`, `setStepBudgetNotice`, `setReactionLanes`
