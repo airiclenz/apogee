@@ -92,7 +92,7 @@ commit: `fix(tui): a queued command holds a Schedule's Firing like a staged inte
 
 commit: `fix(tui): the grep and find_files transcript slots name a paths-scoped call's scope`
 
-## 4. An empty int value lands the row's Default through `applySettingFor` (apogee-1ah)
+## 4. An empty int value lands the row's Default through `applySettingFor` (apogee-1ah) — ✅ DONE (2026-09-16)
 
 **What:** Test-only, closes apogee-1ah. `landSetting` in `cmd/apogee/wire_settings.go` resolves an empty value to `row.Default` for every row, but no test drives the empty-int case (`context-window`, `working-window`, `delegate-max-steps`, `delegate-max-depth`, `delegate-max-tokens`) end to end. Add `TestApplySettingOnAnEmptyIntValueLandsTheRowDefault` in `wire_settings_test.go` beside `TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault`: per key, `applySettingFor(settingsApplier{engine: spy, live: <a live double that records update>})(key, "")` returns `"", nil` and the recorded `config.Options` field equals the row's `Default` parsed with `strconv.Atoi`; a second case with `"  "` (whitespace) lands the same. Read the live-double shape from the existing `applyWorkingWindow`/`applyDelegateMaxSteps` tests in the same file.
 

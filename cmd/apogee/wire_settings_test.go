@@ -1965,6 +1965,76 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 	})
 }
 
+// The five int rows take the same empty value the same way, end to end through applySettingFor: an
+// emptied `context-window`, `working-window`, `delegate-max-steps`, `delegate-max-depth` or
+// `delegate-max-tokens` is landed as the row's own Default (landSetting) and mirrored onto the holder
+// — so a session that launched with a pin or a bound reads the built-in a fresh start without the
+// key would, rather than standing on the number it launched with. Whitespace is the same empty
+// value. The two window keys ride the rebind, which is silent while nothing is bound
+// (TestApplySettingRideIsSilentBeforeAServerIsBound), so the applier is composed for the ride.
+func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
+	t.Parallel()
+	rows := []struct {
+		key  string
+		read func(config.Options) int
+	}{
+		{key: "context-window", read: func(o config.Options) int { return o.ContextWindow }},
+		{key: "working-window", read: func(o config.Options) int { return o.WorkingWindow }},
+		{key: "delegate-max-steps", read: func(o config.Options) int { return o.DelegateMaxSteps }},
+		{key: "delegate-max-depth", read: func(o config.Options) int { return o.DelegateMaxDepth }},
+		{key: "delegate-max-tokens", read: func(o config.Options) int { return o.DelegateMaxTokens }},
+	}
+	for _, row := range rows {
+		for _, value := range []string{"", "  "} {
+			t.Run(fmt.Sprintf("%s %q", row.key, value), func(t *testing.T) {
+				t.Parallel()
+				entry, ok := config.LookupKey(row.key)
+				if !ok {
+					t.Fatalf("no registry row for %s", row.key)
+				}
+				want, err := strconv.Atoi(entry.Default)
+				if err != nil {
+					t.Fatalf("%s Default %q is not an int: %v", row.key, entry.Default, err)
+				}
+				// Seeded off every row's Default, so a landed Default is a MOVE the read can see.
+				live := newLiveSettings(config.Options{
+					ContextWindow: 4096, WorkingWindow: 8192,
+					DelegateMaxSteps: 7, DelegateMaxDepth: 3, DelegateMaxTokens: 5000,
+				})
+				if got := row.read(live.options()); got == want {
+					t.Fatalf("%s seeded at its Default %d; the seed must differ for the landing to show", row.key, got)
+				}
+				spy := &applySettingSpy{}
+				probe := &rebindProbe{}
+				apply := applySettingFor(settingsApplier{
+					engine:  spy,
+					live:    live,
+					binding: func() upstreamBinding { return upstreamBinding{} },
+					rebind:  probe.rebind,
+				})
+
+				note, err := apply(row.key, value)
+
+				if err != nil || note != "" {
+					t.Fatalf("apply %s %q = (%q, %v), want a silent success", row.key, value, note, err)
+				}
+				if got := row.read(live.options()); got != want {
+					t.Errorf("%s = %d after the empty apply, want the row's Default %d", row.key, got, want)
+				}
+				if row.key == "context-window" && live.pin() != want {
+					t.Errorf("pin = %d, want the row's Default %d", live.pin(), want)
+				}
+				if spy.drove() != 0 {
+					t.Errorf("clearing %s drove an anytime-safe mutator: %+v", row.key, spy)
+				}
+				if len(probe.calls) != 0 {
+					t.Errorf("rebind drives = %+v, want none: nothing is bound to rebind", probe.calls)
+				}
+			})
+		}
+	}
+}
+
 // The headline of ADR 0037 decision 6: a committed `mcp-servers:` edit DIALS. The new set answers
 // first, the whole tool registry is rebuilt around what it advertises and handed to the engine, and
 // only then are the connections it replaced torn down — so at no instant is the session without the
