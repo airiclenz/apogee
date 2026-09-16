@@ -233,10 +233,12 @@
 // and the 8 KiB condensed verdict. diagnostics.go is diagnostics — go/parser in process, an
 // optional go vet, and the graceful "no provider" for every other language. git.go is the
 // whole git family: git_branch, git_commit, git_diff_range, git_status, git_log and git_show, with the
-// ref guards and porcelain-v2 parsing they share — plus RunGitQuery, the package's one exported
-// non-tool entry, which lends the same hardened funnel to the ENGINE's own read-side git (the
-// tracked-file mutation floor, internal/agent/treesnapshot.go) so no bookkeeping git of
-// apogee's has to spawn outside it. The funnel itself is not here: the exec fence on git, the
+// ref guards and porcelain-v2 parsing they share and gitRead, the one read call the four
+// RO-subproc tools spawn through (a gitRef, minted by the guard alone, is the only revision it
+// takes) — plus RunGitQuery, the package's one exported non-tool entry, which lends the same
+// hardened funnel to the ENGINE's own read-side git (the tracked-file mutation floor,
+// internal/agent/treesnapshot.go) so no bookkeeping git of apogee's has to spawn outside it.
+// The funnel itself is not here: the exec fence on git, the
 // allowlisted environment, the per-invocation hardening and the repo-local command-config
 // refusal live in internal/gitexec, and what git.go holds are the thin wrappers this package's
 // tools and tests reach them by.

@@ -28,13 +28,14 @@ import "github.com/airiclenz/apogee/internal/domain"
 // The marker may therefore be minted ONLY for a tool that, on EVERY reachable path (the four
 // carriers today: git_status, git_log, git_diff_range and, since 2026-09-15, git_show):
 //
-//   - spawns git through runGit alone, so internal/gitexec's hardening options,
-//     GIT_CONFIG_NOSYSTEM, the repo-local command-config refusal and the argv[0] fence all
-//     apply;
-//   - passes gitexec.DiffHardeningArgs on every diff-producing invocation — and on a blob read by
-//     path (git_show), where --no-textconv is what keeps the repository's textconv driver off
-//     the object;
-//   - validates each ref it accepts with validRef AND looksLikeOption;
+//   - spawns git only through gitRead (git.go) with a gitRef — the one read call, which spawns
+//     through runGit, so internal/gitexec's hardening options, GIT_CONFIG_NOSYSTEM, the
+//     repo-local command-config refusal and the argv[0] fence all apply, and which takes a
+//     revision only as a gitRef, the type guardRef alone mints from validRef AND
+//     looksLikeOption;
+//   - marks every diff-producing invocation diffProducing, so gitRead passes
+//     gitexec.DiffHardeningArgs — and on a blob read by path (git_show), where --no-textconv is
+//     what keeps the repository's textconv driver off the object;
 //   - writes nothing to the tree, the index or the repository.
 //
 // A tool that grows a path missing any of those must lose the marker in the same change.

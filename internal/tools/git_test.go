@@ -1071,12 +1071,14 @@ func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
 	}
 }
 
-// TestGitReadTrio_ArgvCarriesTheHardening pins the argv of ALL THREE reads the readOnlySubprocess
-// marker is minted for. The marker's own doc names the conditions a tool must keep to carry it —
-// runGit, gitexec.DiffHardeningArgs on every diff-producing path, the ref guards — and the first two of
-// those are visible in the command line, so this is where a refactor that quietly drops one is
-// caught. Without it the marker could go on taking the read-only row for a git that no longer
-// refuses the repository's own textconv and ext-diff drivers.
+// TestGitReadTrio_ArgvCarriesTheHardening pins the argv gitRead spells for the three reads the
+// readOnlySubprocess marker was first minted for (git_show's is pinned by
+// TestGitShow_ArgvIsHardenedAndCwdRelative). The marker's own doc names the conditions a tool
+// must keep to carry it — gitRead, gitexec.DiffHardeningArgs on every diff-producing path, the
+// gitRef guard — and the hardening and the pathspec placement are visible in the command line,
+// so this is where a refactor that quietly drops one is caught. Without it the marker could go
+// on taking the read-only row for a git that no longer refuses the repository's own textconv and
+// ext-diff drivers.
 //
 // It reads the real command line through a fake git that records it (the shape
 // TestGitCommit_PassesNoGpgSign uses), so it asserts what git was LAUNCHED with rather than what
@@ -1155,7 +1157,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 		},
 		{
 			// With paths the "--" appears exactly once and IMMEDIATELY before them, so a path
-			// that looks like an option can never be read as one.
+			// that looks like an option can never be read as one — and each path is the
+			// workspace-relative pathspec (workspacePathspec), not an absolute real path.
 			name: "git_diff_range with paths",
 			verb: "diff",
 			exec: func(root string) (domain.ToolResult, error) {
@@ -1179,10 +1182,10 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 					t.Fatalf("diff argv = %q, want a \"--\" before the resolved paths", argv)
 				}
 				if sep != len(argv)-2 {
-					t.Errorf("diff argv = %q, want \"--\" immediately before the one resolved path", argv)
+					t.Errorf("diff argv = %q, want \"--\" immediately before the one pathspec", argv)
 				}
-				if !strings.HasSuffix(argv[len(argv)-1], "a.txt") {
-					t.Errorf("diff argv last element = %q, want the resolved a.txt", argv[len(argv)-1])
+				if got := argv[len(argv)-1]; got != "a.txt" {
+					t.Errorf("diff argv last element = %q, want the workspace-relative pathspec a.txt", got)
 				}
 			},
 		},
@@ -2216,9 +2219,10 @@ func TestGitShow_InheritsTheOpenEndedCap(t *testing.T) {
 	}
 }
 
-// TestGitShow_ArgvIsHardenedAndCwdRelative pins what git is handed: --no-textconv --no-ext-diff
-// (a blob named by path would otherwise run the repository's textconv driver) and the object
-// spelled `<ref>:./<relative path>`, so git resolves it against the process's cwd.
+// TestGitShow_ArgvIsHardenedAndCwdRelative pins what gitRead hands git for git_show:
+// --no-textconv --no-ext-diff (a blob named by path would otherwise run the repository's
+// textconv driver) and the object spelled `<ref>:./<relative path>`, so git resolves it against
+// the process's cwd — with no "--" after it, since an object is neither a bare ref nor a pathspec.
 func TestGitShow_ArgvIsHardenedAndCwdRelative(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
@@ -2233,6 +2237,92 @@ func TestGitShow_ArgvIsHardenedAndCwdRelative(t *testing.T) {
 	}
 	if got := argv[len(argv)-1]; got != "v1.2:./docs/guide.md" {
 		t.Errorf("show argv last element = %q, want v1.2:./docs/guide.md", got)
+	}
+}
+
+// TestGitReadCall_Argv pins the one argv spelling gitRead gives the four reads: the verb, the
+// hardening pair only when the call produces a diff, the flags, then a bare ref — which is
+// ALWAYS terminated by "--", because a bare name is where git's ref-vs-pathspec ambiguity lives
+// — or a composed object, which takes "--" only when pathspecs follow it.
+func TestGitReadCall_Argv(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		call gitReadCall
+		want string
+	}{
+		{
+			name: "status: flags alone, no hardening, no terminator",
+			call: gitReadCall{verb: "status", flags: []string{"--porcelain=v2", "-z"}},
+			want: "status --porcelain=v2 -z",
+		},
+		{
+			name: "log: a bare ref is terminated even without a pathspec",
+			call: gitReadCall{verb: "log", diffProducing: true, flags: []string{"--max-count=5"}, refs: []gitRef{"HEAD"}},
+			want: "log --no-textconv --no-ext-diff --max-count=5 HEAD --",
+		},
+		{
+			name: "log: the pathspec follows the terminator",
+			call: gitReadCall{verb: "log", diffProducing: true, refs: []gitRef{"HEAD"}, pathspecs: []string{"internal/"}},
+			want: "log --no-textconv --no-ext-diff HEAD -- internal/",
+		},
+		{
+			name: "diff: an object without pathspecs takes no terminator",
+			call: gitReadCall{verb: "diff", diffProducing: true, flags: []string{"--stat"}, object: "main...HEAD"},
+			want: "diff --no-textconv --no-ext-diff --stat main...HEAD",
+		},
+		{
+			name: "diff: pathspecs bring the terminator",
+			call: gitReadCall{verb: "diff", diffProducing: true, object: "main...HEAD", pathspecs: []string{"a.txt", "b.txt"}},
+			want: "diff --no-textconv --no-ext-diff main...HEAD -- a.txt b.txt",
+		},
+		{
+			name: "show: the object alone",
+			call: gitReadCall{verb: "show", diffProducing: true, object: "v1:./docs/guide.md"},
+			want: "show --no-textconv --no-ext-diff v1:./docs/guide.md",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := strings.Join(tc.call.argv(), " "); got != tc.want {
+				t.Errorf("argv = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestGuardRef pins the only mint of a gitRef: both halves of the guard must pass — the
+// conservative character class AND the leading-"-" refusal — and a refused ref yields no value.
+func TestGuardRef(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		ref string
+		ok  bool
+	}{
+		{"HEAD", true},
+		{"feature/x-1", true},
+		{"v1.2~3^{}", true},
+		{"-D", false},
+		{"--upload-pack=x", false},
+		{"HEAD:./a", false},
+		{"a b", false},
+		{"", false},
+	} {
+		t.Run(tc.ref, func(t *testing.T) {
+			t.Parallel()
+			got, ok := guardRef(tc.ref)
+			if ok != tc.ok {
+				t.Fatalf("guardRef(%q) ok = %v, want %v", tc.ref, ok, tc.ok)
+			}
+			if ok && string(got) != tc.ref {
+				t.Errorf("guardRef(%q) = %q, want the ref itself", tc.ref, got)
+			}
+			if !ok && got != "" {
+				t.Errorf("guardRef(%q) = %q on refusal, want the zero gitRef", tc.ref, got)
+			}
+		})
 	}
 }
 

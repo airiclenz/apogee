@@ -728,7 +728,14 @@ demotes), `…ConfinesThroughTheHandleOnContext`, `…ConfinedConsoleCarriesTheS
 
 **Commit:** `refactor(subprocess): one confinement handoff for the one-shot runner and the console`
 
-## 23. `gitRead` — one read call under the six git tools
+## 23. `gitRead` — one read call under the six git tools — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): gitRead takes its inputs as one `gitReadCall` value (`verb`, `diffProducing`, `flags`, `refs []gitRef`, `object`, `pathspecs`, `failWording`, `fallback`) rather than the plan's nine positional parameters — the same parameter set, plus the `object` slot the regression guard names for git_show's `<ref>:./<rel>` (git_diff_range's `base...head` range rides it too), with an `argv()` method as the one spelling of the command line; eleven positional arguments, four of them adjacent strings, was the footgun the struct removes.
+NOTES (2026-09-16): timeout keyed per verb inside gitRead (`gitReadTimeout`: `diff`/`show` → `gitDiffTimeout` 10s, everything else → `gitTimeout` 15s) — the "keys it per verb" option of the regression guard, so no caller can pass the wrong ceiling.
+NOTES (2026-09-16): gitRead returns `(res, text, ok, err)` — the raw `subprocess.SubprocessResult` beside the rendering (git_show hands `res.CombinedOutput` to `renderFile` untrimmed, git_status parses it); a git that cannot be resolved (`gitexec.Program` refusal) is returned in the shape `gitexec.Capture` already gives a refused repository (a failed outcome carrying the sentence), so git_show now prefixes that refusal with its `git_show: cannot read <rel> at <ref>:` wording exactly as it already did for the command-config refusal; the other three surface it verbatim as before (`TestGit_GracefulWhenAbsent` unchanged).
+NOTES (2026-09-16): git_diff_range's recorded argv changes from absolute resolved paths to workspace-relative pathspecs (`TestGitReadTrio_ArgvCarriesTheHardening/git_diff_range with paths` now pins `a.txt` exactly); the argv order for a diff with flags is now `diff <hardening> --stat main...HEAD` (flags before the range, as git_log already spelled it) — git accepts either, and no test pinned the old order.
+NOTES (2026-09-16): the two named argv tests keep their names and now read as tests of gitRead's spelling; `TestGitReadCall_Argv` (slot order and the terminator rule: a bare ref is always followed by `--`, a composed object only when pathspecs follow) and `TestGuardRef` (the only mint) added.
+NOTES (2026-09-16): `docs/design/confinement-execution-contract.md` §4's "spawns git through `runGit`" left as is — still true, since gitRead spawns through runGit; the finer condition (only through gitRead, with a gitRef) lives in `readonly_subprocess.go` as the item asks.
 
 **What.** `internal/tools/git.go`: a `gitRef` type minted only by the ref guard (`validRef` +
 `looksLikeOption`; `git_branch` keeps its own name guard — `validRef` would tighten it);

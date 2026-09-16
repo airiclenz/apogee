@@ -122,6 +122,118 @@ func gitResultText(res subprocess.SubprocessResult, successFallback string) stri
 }
 
 // ----------------------------------------------------------------------------
+// gitRead — the one read call under git_status, git_log, git_diff_range and git_show
+// ----------------------------------------------------------------------------
+
+// gitRef is a revision the ref guard admitted: validRef's conservative character class AND
+// looksLikeOption's refusal of a leading "-" (SEC-06 — "-" is itself a legal ref character, so
+// a ref passing the class alone could still be read by git as an option flag). guardRef is its
+// only mint, which is what lets gitRead take revisions by this type and lets the RO-subproc
+// conditions (readonly_subprocess.go) read "a gitRef" rather than "a ref each tool remembered
+// to check". git_branch keeps its own name guard: a branch name there is CREATED as well as
+// named, and validRef would tighten what may be created.
+type gitRef string
+
+// guardRef mints a gitRef from a model-supplied revision, or reports ok=false when the ref
+// fails either half of the guard. The caller renders the refusal, since the wording names the
+// field the ref came from ("invalid base ref: …", "invalid ref: …").
+func guardRef(ref string) (gitRef, bool) {
+	if !validRef.MatchString(ref) || looksLikeOption(ref) {
+		return "", false
+	}
+	return gitRef(ref), true
+}
+
+// gitReadCall is one read-side invocation for gitRead: the verb and whether it produces a diff,
+// its own options, the revisions and pathspecs the model chose, and the two fallback wordings
+// gitResultText renders when git printed nothing. Its argv method is the one spelling of the
+// command line the four read tools share.
+type gitReadCall struct {
+	// verb is the git subcommand; it also keys the timeout (gitReadTimeout).
+	verb string
+	// diffProducing puts gitexec.DiffHardeningArgs right after the verb — required on every
+	// invocation that could run a textconv or ext-diff driver (log, diff, and a blob read by
+	// path). `git status` takes none and would reject them.
+	diffProducing bool
+	// flags are the verb's own options, after the hardening.
+	flags []string
+	// refs are bare revisions, positional after the flags and ALWAYS followed by "--": a bare
+	// name is where git's ref-vs-pathspec ambiguity lives — `git log <name>` where <name> is
+	// not a ref but IS a tracked path is a pathspec log that silently answers a different
+	// question with exit 0 — and the terminator turns that into a loud "bad revision".
+	refs []gitRef
+	// object is a composed positional argument that is not a bare ref — git_diff_range's
+	// `base...head` range, git_show's `<ref>:./<rel>` blob — spelled by the caller from gitRef
+	// values. It takes "--" only when pathspecs follow.
+	object string
+	// pathspecs narrow the call; each is workspace-relative (workspacePathspec) because the
+	// process runs in the root, and they come last, after the "--" that is the one place git
+	// reads them as pathspecs and nothing else.
+	pathspecs []string
+	// failWording is what gitResultText shows for a non-zero exit that printed nothing.
+	failWording string
+	// fallback is what gitResultText shows for a success that printed nothing.
+	fallback string
+}
+
+// argv spells the command line, without the program: verb, hardening, flags, refs, object,
+// the "--" terminator whenever a bare ref or a pathspec is present, then the pathspecs.
+func (c gitReadCall) argv() []string {
+	args := []string{c.verb}
+	if c.diffProducing {
+		args = append(args, gitexec.DiffHardeningArgs...)
+	}
+	args = append(args, c.flags...)
+	for _, ref := range c.refs {
+		args = append(args, string(ref))
+	}
+	if c.object != "" {
+		args = append(args, c.object)
+	}
+	if len(c.refs) > 0 || len(c.pathspecs) > 0 {
+		args = append(args, "--")
+	}
+	return append(args, c.pathspecs...)
+}
+
+// gitReadTimeout keys the per-call ceiling on the verb: a diff and a blob read can be larger
+// and keep gitDiffTimeout (the oracle's separate diff ceiling); status and log keep gitTimeout.
+func gitReadTimeout(verb string) time.Duration {
+	switch verb {
+	case "diff", "show":
+		return gitDiffTimeout
+	default:
+		return gitTimeout
+	}
+}
+
+// gitRead is the one read call the four RO-subproc git tools spawn through: it resolves git for
+// root (gitexec.Program, with this package's lookGit), runs the call's argv through runGit under
+// the verb's timeout, and renders the outcome with gitResultText. It returns the raw capture
+// alongside the rendering because two callers read the bytes rather than the text — git_show
+// hands res.CombinedOutput to renderFile untrimmed, git_status parses its porcelain — and text
+// is the model-facing sentence for the rest: on ok=false the failure (git absent or fenced, a
+// refused repository, or a non-zero exit rendered with failWording), on ok=true the success
+// rendered with fallback. A git that could not be resolved is returned in the same shape
+// gitexec.Capture gives a refused repository — a failed outcome carrying the sentence — so a
+// caller has one failure branch. The Go error is non-nil only for ctx cancellation or a
+// confinement-unavailable demotion (the runSubprocess contract).
+func gitRead(ctx context.Context, root string, c gitReadCall) (res subprocess.SubprocessResult, text string, ok bool, err error) {
+	gitPath, refusal, ok := gitexec.Program(ctx, root, lookGit)
+	if !ok {
+		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, refusal, false, nil
+	}
+	res, err = runGit(ctx, gitPath, root, gitReadTimeout(c.verb), c.argv()...)
+	if err != nil {
+		return subprocess.SubprocessResult{}, "", false, err
+	}
+	if res.ExitCode != 0 {
+		return res, gitResultText(res, c.failWording), false, nil
+	}
+	return res, gitResultText(res, c.fallback), true, nil
+}
+
+// ----------------------------------------------------------------------------
 // git_branch — create / switch / list / delete
 // ----------------------------------------------------------------------------
 
@@ -538,9 +650,9 @@ func (t *GitDiffRange) ReadOnly() bool { return true }
 // readOnlySubprocess marker below classifies the call RO-subproc.
 func (t *GitDiffRange) Subprocess() bool { return true }
 
-// readOnlySubprocess mints the RO-subproc marker for git_diff_range: every invocation
-// goes through runGit, carries gitexec.DiffHardeningArgs, validates both refs with validRef
-// plus looksLikeOption, and writes nothing (readonly_subprocess.go).
+// readOnlySubprocess mints the RO-subproc marker for git_diff_range: its one invocation goes
+// through gitRead as a diff-producing call (gitexec.DiffHardeningArgs), names both refs as
+// gitRef values guardRef minted, and writes nothing (readonly_subprocess.go).
 func (t *GitDiffRange) readOnlySubprocess() {}
 
 // Execute runs the three-dot diff between the validated refs through the system
@@ -562,52 +674,53 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 	if strings.TrimSpace(args.Head) == "" {
 		return errorResult(call.ID, "head ref is required"), nil
 	}
-	// validRef's character class permits "-" (it is a legal git ref char), so a ref could
-	// otherwise begin with "-" and be read as an option even after the diff-range "..." join.
-	// Reject a leading-"-" ref explicitly (SEC-06) before the class check.
-	if !validRef.MatchString(args.Base) || looksLikeOption(args.Base) {
+	// The two-part ref guard (guardRef): the conservative character class, plus an explicit
+	// leading-"-" rejection, because "-" is a legal ref character and a ref beginning with it
+	// would be read as an option even after the "..." join (SEC-06).
+	base, ok := guardRef(args.Base)
+	if !ok {
 		return errorResult(call.ID, "invalid base ref: "+args.Base), nil
 	}
-	if !validRef.MatchString(args.Head) || looksLikeOption(args.Head) {
+	head, ok := guardRef(args.Head)
+	if !ok {
 		return errorResult(call.ID, "invalid head ref: "+args.Head), nil
 	}
 
-	gitArgs := append([]string{"diff"}, gitexec.DiffHardeningArgs...)
-	gitArgs = append(gitArgs, args.Base+"..."+args.Head)
+	var flags []string
 	if args.Stat {
-		gitArgs = append(gitArgs, "--stat")
+		flags = append(flags, "--stat")
 	}
 	if args.NameOnly {
-		gitArgs = append(gitArgs, "--name-only")
+		flags = append(flags, "--name-only")
 	}
-	if len(args.Paths) > 0 {
-		// Path-scope each restriction to the workspace, so the diff cannot be
-		// pointed outside the root.
-		paths := make([]string, 0, len(args.Paths))
-		for _, p := range args.Paths {
-			abs, err := resolveInRoot(p, t.root)
-			if err != nil {
-				return errorResult(call.ID, err.Error()), nil
-			}
-			paths = append(paths, abs)
+	// Path-scope each restriction to the workspace, so the diff cannot be pointed outside the
+	// root; the pathspec git gets is the workspace-relative spelling (workspacePathspec), the
+	// same rule git_log and git_show follow.
+	pathspecs := make([]string, 0, len(args.Paths))
+	for _, p := range args.Paths {
+		pathspec, err := workspacePathspec(p, t.root)
+		if err != nil {
+			return errorResult(call.ID, err.Error()), nil
 		}
-		gitArgs = append(gitArgs, "--")
-		gitArgs = append(gitArgs, paths...)
+		pathspecs = append(pathspecs, pathspec)
 	}
 
-	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
-	if !ok {
-		return errorResult(call.ID, refusal), nil
-	}
-
-	res, err := runGit(ctx, gitPath, t.root, gitDiffTimeout, gitArgs...)
+	_, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+		verb:          "diff",
+		diffProducing: true,
+		flags:         flags,
+		object:        string(base) + "..." + string(head),
+		pathspecs:     pathspecs,
+		failWording:   "git diff failed",
+		fallback:      "No differences found",
+	})
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.ExitCode != 0 {
-		return errorResult(call.ID, gitResultText(res, "git diff failed")), nil
+	if !ok {
+		return errorResult(call.ID, text), nil
 	}
-	return okResult(call.ID, gitResultText(res, "No differences found")), nil
+	return okResult(call.ID, text), nil
 }
 
 // ----------------------------------------------------------------------------
@@ -668,7 +781,7 @@ func (t *GitStatus) ReadOnly() bool { return true }
 func (t *GitStatus) Subprocess() bool { return true }
 
 // readOnlySubprocess mints the RO-subproc marker for git_status: its one invocation goes
-// through runGit, takes no ref from the model, and writes nothing (readonly_subprocess.go).
+// through gitRead, takes no ref from the model, and writes nothing (readonly_subprocess.go).
 func (t *GitStatus) readOnlySubprocess() {}
 
 // Execute runs `git status` in porcelain v2 form and renders it for the model. A missing git
@@ -677,11 +790,6 @@ func (t *GitStatus) readOnlySubprocess() {}
 func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
-	}
-
-	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
-	if !ok {
-		return errorResult(call.ID, refusal), nil
 	}
 
 	// Porcelain v2 is the stable machine format (it carries the branch and ahead/behind
@@ -695,13 +803,19 @@ func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// repository does not guard the child. dirty drops the child spawn while still reporting a
 	// submodule whose recorded commit moved; only work-tree dirt inside a submodule goes
 	// unreported.
-	res, err := runGit(ctx, gitPath, t.root, gitTimeout,
-		"status", "--porcelain=v2", "--branch", "--ignore-submodules=dirty", "-z")
+	//
+	// It is the one read that produces no diff, so it carries no gitexec.DiffHardeningArgs —
+	// `git status` would reject them.
+	res, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+		verb:        "status",
+		flags:       []string{"--porcelain=v2", "--branch", "--ignore-submodules=dirty", "-z"},
+		failWording: "git status failed",
+	})
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.ExitCode != 0 {
-		return errorResult(call.ID, gitResultText(res, "git status failed")), nil
+	if !ok {
+		return errorResult(call.ID, text), nil
 	}
 	rep := parseGitStatus(res.CombinedOutput)
 	return okSummary(call.ID, renderGitStatus(rep), rep.changedFiles()), nil
@@ -929,8 +1043,8 @@ func (t *GitLog) ReadOnly() bool { return true }
 func (t *GitLog) Subprocess() bool { return true }
 
 // readOnlySubprocess mints the RO-subproc marker for git_log: its one invocation goes through
-// runGit, carries gitexec.DiffHardeningArgs, validates its ref with validRef plus looksLikeOption,
-// and writes nothing (readonly_subprocess.go).
+// gitRead as a diff-producing call (gitexec.DiffHardeningArgs), names its ref as the gitRef
+// guardRef minted, and writes nothing (readonly_subprocess.go).
 func (t *GitLog) readOnlySubprocess() {}
 
 // Execute runs `git log` over the validated ref and renders one line per commit. A missing
@@ -951,48 +1065,50 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 	if ref == "" {
 		ref = "HEAD"
 	}
-	// Same two-part ref guard as git_diff_range: the conservative character class, plus an
-	// explicit leading-"-" rejection because "-" is itself a legal ref character and git would
-	// otherwise read such a ref as an option flag (SEC-06).
-	if !validRef.MatchString(ref) || looksLikeOption(ref) {
+	// Same two-part ref guard as git_diff_range (guardRef): the conservative character class,
+	// plus an explicit leading-"-" rejection because "-" is itself a legal ref character and
+	// git would otherwise read such a ref as an option flag (SEC-06).
+	guarded, ok := guardRef(ref)
+	if !ok {
 		return errorResult(call.ID, "invalid ref: "+ref), nil
 	}
 
-	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
-	if !ok {
-		return errorResult(call.ID, refusal), nil
-	}
-
-	// The trailing "--" terminates the ref position, closing the same ref-vs-pathspec
-	// ambiguity buildBranchArgs closes: `git log <name>` where <name> is not a ref but IS a
-	// tracked path is a PATHSPEC log — it silently answers "which commits touched this file"
-	// with exit 0, so a model's typo'd branch name would return a plausible, wrong history
-	// reported as success. With "--" the same call fails loudly ("fatal: bad revision").
-	// A path the call DID ask for goes after that "--" — the one place git reads it as a
-	// pathspec and nothing else — workspace-relative, since the process runs in the root.
-	gitArgs := append([]string{"log"}, gitexec.DiffHardeningArgs...)
-	gitArgs = append(gitArgs,
-		fmt.Sprintf("--max-count=%d", clampGitLogCount(args.MaxCount)),
-		"--date="+gitLogDateFormat,
-		"--format=%h %ad %s",
-		ref,
-		"--",
-	)
+	// The ref rides gitReadCall's refs slot, which gitRead ALWAYS follows with "--": that
+	// terminator closes the same ref-vs-pathspec ambiguity buildBranchArgs closes — `git log
+	// <name>` where <name> is not a ref but IS a tracked path is a PATHSPEC log, silently
+	// answering "which commits touched this file" with exit 0, so a model's typo'd branch name
+	// would return a plausible, wrong history reported as success; with "--" the same call
+	// fails loudly ("fatal: bad revision"). A path the call DID ask for goes after that "--" —
+	// the one place git reads it as a pathspec and nothing else — workspace-relative, since
+	// the process runs in the root.
+	var pathspecs []string
 	if strings.TrimSpace(args.Path) != "" {
 		pathspec, err := workspacePathspec(args.Path, t.root)
 		if err != nil {
 			return errorResult(call.ID, err.Error()), nil
 		}
-		gitArgs = append(gitArgs, pathspec)
+		pathspecs = []string{pathspec}
 	}
-	res, err := runGit(ctx, gitPath, t.root, gitTimeout, gitArgs...)
+	_, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+		verb:          "log",
+		diffProducing: true,
+		flags: []string{
+			fmt.Sprintf("--max-count=%d", clampGitLogCount(args.MaxCount)),
+			"--date=" + gitLogDateFormat,
+			"--format=%h %ad %s",
+		},
+		refs:        []gitRef{guarded},
+		pathspecs:   pathspecs,
+		failWording: "git log failed",
+		fallback:    "No commits found",
+	})
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.ExitCode != 0 {
-		return errorResult(call.ID, gitResultText(res, "git log failed")), nil
+	if !ok {
+		return errorResult(call.ID, text), nil
 	}
-	return okResult(call.ID, gitResultText(res, "No commits found")), nil
+	return okResult(call.ID, text), nil
 }
 
 // clampGitLogCount pins a requested commit count to the 1–maxGitLogCount range. A count of
@@ -1085,10 +1201,10 @@ func (t *GitShow) ReadOnly() bool { return true }
 func (t *GitShow) Subprocess() bool { return true }
 
 // readOnlySubprocess mints the RO-subproc marker for git_show: its one invocation goes through
-// runGit, carries gitexec.DiffHardeningArgs (--no-textconv matters here — `git show <ref>:<path>`
-// would otherwise run the repository's textconv driver on the blob), validates its ref with
-// validRef plus looksLikeOption, fences its path with resolveInRoot, and writes nothing
-// (readonly_subprocess.go).
+// gitRead as a diff-producing call (gitexec.DiffHardeningArgs — --no-textconv matters here, since
+// `git show <ref>:<path>` would otherwise run the repository's textconv driver on the blob),
+// names its ref as the gitRef guardRef minted, fences its path with workspacePathspec, and
+// writes nothing (readonly_subprocess.go).
 func (t *GitShow) readOnlySubprocess() {}
 
 // Execute reads the file at the revision and renders it exactly as read_file would render the
@@ -1119,10 +1235,11 @@ func (t *GitShow) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	if ref == "" {
 		return errorResult(call.ID, "ref is required"), nil
 	}
-	// The same two-part ref guard as git_log: the conservative character class, plus an
-	// explicit leading-"-" rejection (SEC-06). The class has no ":" in it, so the ref can never
-	// carry a second path into the <ref>:<path> join below.
-	if !validRef.MatchString(ref) || looksLikeOption(ref) {
+	// The same two-part ref guard as git_log (guardRef): the conservative character class, plus
+	// an explicit leading-"-" rejection (SEC-06). The class has no ":" in it, so the ref can
+	// never carry a second path into the <ref>:<path> join below.
+	guarded, ok := guardRef(ref)
+	if !ok {
 		return errorResult(call.ID, "invalid ref: "+ref), nil
 	}
 	if strings.TrimSpace(args.Path) == "" {
@@ -1136,20 +1253,21 @@ func (t *GitShow) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 		return errorResult(call.ID, "git_show: path must name a file inside the workspace, not the workspace root"), nil
 	}
 
-	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
-	if !ok {
-		return errorResult(call.ID, refusal), nil
-	}
-
-	gitArgs := append([]string{"show"}, gitexec.DiffHardeningArgs...)
-	gitArgs = append(gitArgs, ref+":./"+rel)
-	res, err := runGit(ctx, gitPath, t.root, gitDiffTimeout, gitArgs...)
+	// The object is the composed `<ref>:./<rel>` argument, not a bare ref or a pathspec: the
+	// `./` prefix makes git resolve the path against the process's cwd (the workspace root)
+	// rather than the repository root. --no-textconv matters here — `git show <ref>:<path>`
+	// would otherwise run the repository's textconv driver on the blob.
+	res, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+		verb:          "show",
+		diffProducing: true,
+		object:        string(guarded) + ":./" + rel,
+		failWording:   "git show failed",
+	})
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.ExitCode != 0 {
-		return errorResult(call.ID, fmt.Sprintf("git_show: cannot read %s at %s: %s",
-			rel, ref, gitResultText(res, "git show failed"))), nil
+	if !ok {
+		return errorResult(call.ID, fmt.Sprintf("git_show: cannot read %s at %s: %s", rel, ref, text)), nil
 	}
 	if looksBinary([]byte(res.CombinedOutput)) {
 		return errorResult(call.ID, fmt.Sprintf("git_show: %s at %s is a binary file (%d bytes)",
