@@ -1278,6 +1278,31 @@ func TestReportActivityHoldsWhileAQueueIsHeld(t *testing.T) {
 	}
 }
 
+// A command queued while a worker worked — or held over into stateErrored — is the human's own
+// row waiting to go out, exactly like a staged interjection: a Firing released there would drive
+// the engine the queued /clear is about to reset. quiescent() holds until the queue drains.
+func TestReportActivityHoldsWhileACommandIsQueued(t *testing.T) {
+	var reports []bool
+	m := activityModel(t, &reports)
+
+	next, _ := m.queueCommand(parseInput("/clear", nil))
+	m = next.(Model)
+	if len(m.deferredCommands) != 1 {
+		t.Fatalf("queued commands = %d, want 1", len(m.deferredCommands))
+	}
+	if m.quiescent() {
+		t.Error("quiescent() is true with a command still queued; a firing would contend with its run")
+	}
+
+	m, _ = m.runDeferredCommands()
+	if len(m.deferredCommands) != 0 {
+		t.Fatalf("queued commands after the drain = %d, want 0", len(m.deferredCommands))
+	}
+	if !m.quiescent() {
+		t.Error("quiescent() is false with the queue drained and nothing else in flight")
+	}
+}
+
 // The composition root's Notify seam: one scheduler Event, sent from the scheduler's own goroutine
 // through the Bridge, arrives as the Msg the Update loop folds into a note.
 func TestBridgeNotifyScheduleReachesTheTranscript(t *testing.T) {

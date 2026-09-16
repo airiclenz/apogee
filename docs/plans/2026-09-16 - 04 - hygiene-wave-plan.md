@@ -64,7 +64,7 @@ NOTES (2026-09-16): verified on the tree — `docs/plans/archived/2026-09-16 - 0
 
 commit: none — verification only.
 
-## 2. `quiescent()` counts queued commands (apogee-289)
+## 2. `quiescent()` counts queued commands (apogee-289) — ✅ DONE (2026-09-16)
 
 **What:** Fix apogee-289. `Model.quiescent()` in `internal/tui/schedule.go` gates a Firing on `pendingInterjections` only; a command queued in `deferredCommands` while `stateErrored` does not hold a Schedule. Add `len(m.deferredCommands) == 0` as the fourth term and extend the doc comment ("no row the human typed — an interjection or a queued command — is still waiting to go out"). Its sole caller `reportActivity` needs no change.
 

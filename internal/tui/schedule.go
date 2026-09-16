@@ -272,19 +272,22 @@ func reportActivity(next tea.Model) tea.Model {
 
 // quiescent reports whether nothing this session owns is in flight: no worker drives the engine
 // (m.busy covers a running Exchange and both blocked rendezvous), no launcher verb owns the server,
-// and no row the human typed is still waiting to go out.
+// and no row the human typed — an interjection or a queued command — is still waiting to go out.
 //
-// The three terms are the three ways a Firing could collide with the human's own work. The first is
+// The four terms are the four ways a Firing could collide with the human's own work. The first is
 // the Exchange, and it is deliberately the WHOLE Exchange rather than a Turn boundary (ADR 0025).
 // The second is the actuation latch: a profile load restarts the very server a Firing would dial,
 // and the Model already pairs it with busy() wherever it asks "is the engine mine right now"
 // (observeBinding). The third is the interjection queue: rows held over from a stop or a fault are a
 // message the next ⏎ sends, so the session is between two halves of one thought rather than done.
+// The fourth is the command queue: a /command typed while a worker worked runs at the next idle
+// (runDeferredCommands), and one held over into stateErrored runs at the ⏎ that dismisses the
+// failure — so a queued /clear is about to reset the very session a Firing would drive.
 //
 // stateErrored with nothing queued IS quiescent: the worker has unwound and the engine is idle, and
 // a human reading a failure is not a reason to hold a standing instruction back.
 func (m Model) quiescent() bool {
-	return !m.busy() && !m.actuation.inFlight && len(m.pendingInterjections) == 0
+	return !m.busy() && !m.actuation.inFlight && len(m.pendingInterjections) == 0 && len(m.deferredCommands) == 0
 }
 
 // ----------------------------------------------------------------------------
