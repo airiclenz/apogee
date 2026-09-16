@@ -42,6 +42,7 @@
 //   - doc.go — this map and the package's rationale.
 //   - store.go — the Tree id type, Open/Remove/Available, and the capture, diff, listing and
 //     blob-read calls that make up the store's surface.
-//   - journal.go — the store path, the Snapshotter adapter, and OpenJournal: the one call a
-//     Driver makes for a session's snapshot-backed journal, with the reasons it falls back.
+//   - journal.go — the store path, the Snapshotter adapter, OpenJournal: the one call a Driver
+//     makes for a session's snapshot-backed journal, with the reasons it falls back, and
+//     OpenStored, the same journal for a saved session from its index alone.
 package snapshot

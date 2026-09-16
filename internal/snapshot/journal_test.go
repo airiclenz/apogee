@@ -8,6 +8,7 @@ package snapshot
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -196,6 +197,133 @@ func TestOpenJournalErrorsOnAnUnreadableIndex(t *testing.T) {
 	}
 	if journal != nil {
 		t.Error("an errored OpenJournal handed back a journal; the caller's fallback is its own")
+	}
+}
+
+// OpenStored is the verb's opener: home and id alone, the workspace read from the index the session
+// left beside its objects. The reopened journal holds the step the session recorded, which pins
+// both facts the verb used to compose for itself — the index file's name at Dir, and the workspace
+// field inside it — so a rename on either side cannot turn every saved session into "nothing to
+// undo" silently.
+func TestOpenStoredReadsTheWorkspaceFromTheIndex(t *testing.T) {
+	t.Parallel()
+	requireGit(t)
+	home, workspace := newHomeAndWorkspace(t)
+	ctx := context.Background()
+
+	journal, reason, err := OpenJournal(ctx, home, "s1", workspace, true)
+	if err != nil || reason != "" {
+		t.Fatalf("OpenJournal: err=%v reason=%q", err, reason)
+	}
+	journal.BeginGroup()
+	if err := journal.MarkPre(ctx); err != nil {
+		t.Fatalf("MarkPre: %v", err)
+	}
+	writeFile(t, workspace, "note.txt", "written\n")
+	if err := journal.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	stored, reason, err := OpenStored(ctx, home, "s1")
+
+	if err != nil {
+		t.Fatalf("OpenStored: %v", err)
+	}
+	if reason != "" {
+		t.Fatalf("reason = %q, want none: the index names the workspace", reason)
+	}
+	step, ok := stored.Preview()
+	if !ok {
+		t.Fatal("the stored journal has no step; the index's workspace did not reach the store")
+	}
+	if len(step.Changes) != 1 || step.Changes[0].Path != filepath.Join(workspace, "note.txt") {
+		t.Errorf("stored step changes = %+v, want the one file under %s", step.Changes, workspace)
+	}
+}
+
+// The missing-index contract: a session that left no index is ErrNoIndex — before git is even
+// looked for, and without a store being initialised under the home for an id that names nothing.
+func TestOpenStoredAnswersErrNoIndexBeforeLookingForGit(t *testing.T) {
+	home, _ := newHomeAndWorkspace(t)
+	t.Setenv("PATH", "")
+
+	journal, reason, err := OpenStored(context.Background(), home, "s-never")
+
+	if !errors.Is(err, ErrNoIndex) {
+		t.Fatalf("OpenStored: journal=%v reason=%q err=%v, want ErrNoIndex", journal != nil, reason, err)
+	}
+	if _, err := os.Stat(Dir(home, "s-never")); !os.IsNotExist(err) {
+		t.Errorf("an unknown id still opened a store (err %v)", err)
+	}
+	if _, _, err := OpenStored(context.Background(), "", "s-never"); !errors.Is(err, ErrNoIndex) {
+		t.Errorf("OpenStored with no home: %v, want ErrNoIndex", err)
+	}
+}
+
+// With an index present and git absent, the answer is OpenJournal's own reason — the same
+// sentence `/undo` names in the session — never ErrNoIndex.
+func TestOpenStoredReportsAnAbsentGit(t *testing.T) {
+	home, workspace := newHomeAndWorkspace(t)
+	writeIndex(t, Dir(home, "s1"), undo.Index{Version: 1, Workspace: workspace})
+	t.Setenv("PATH", "")
+
+	journal, reason, err := OpenStored(context.Background(), home, "s1")
+
+	if err != nil {
+		t.Fatalf("OpenStored: %v", err)
+	}
+	if journal == nil || reason != reasonNoGit {
+		t.Errorf("journal=%v reason=%q, want a fallback journal with %q", journal != nil, reason, reasonNoGit)
+	}
+}
+
+// An index that is there and wrong is an error in the verb's own words, which the verb wraps
+// unchanged: corrupt bytes, and a file that names no workspace.
+func TestOpenStoredErrorsOnAnIndexItCannotUse(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		index []byte
+		want  string
+	}{
+		{"corrupt", []byte("{not json"), "decode the session's undo index"},
+		{"no workspace", []byte(`{"version":1}`), "the session's undo index names no workspace"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home, _ := newHomeAndWorkspace(t)
+			dir := Dir(home, "s1")
+			if err := os.MkdirAll(dir, storeDirPerm); err != nil {
+				t.Fatalf("create the store directory: %v", err)
+			}
+			if err := os.WriteFile(filepath.Join(dir, journalFileName), tc.index, 0o600); err != nil {
+				t.Fatalf("write the index: %v", err)
+			}
+
+			journal, _, err := OpenStored(context.Background(), home, "s1")
+
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("OpenStored: journal=%v err=%v, want %q", journal != nil, err, tc.want)
+			}
+		})
+	}
+}
+
+// writeIndex encodes index as the session's journal.json under dir, creating the store directory.
+func writeIndex(t *testing.T, dir string, index undo.Index) {
+	t.Helper()
+
+	if err := os.MkdirAll(dir, storeDirPerm); err != nil {
+		t.Fatalf("create the store directory: %v", err)
+	}
+	data, err := json.Marshal(index)
+	if err != nil {
+		t.Fatalf("encode the index: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, journalFileName), data, 0o600); err != nil {
+		t.Fatalf("write the index: %v", err)
 	}
 }
 

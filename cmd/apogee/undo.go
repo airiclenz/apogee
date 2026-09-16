@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -32,21 +31,16 @@ import (
 // was read. internal/undo composes the rows so the three surfaces cannot drift; only the verb —
 // the head of the first line and the line that applies the step — belongs here.
 //
-// What it deliberately does NOT take is a workspace. The store images ONE tree, journal.json says
+// What it deliberately does NOT take is a workspace. The store images ONE tree, its index says
 // which, and every recorded path is spelled against it: a `--workspace` that disagreed would
 // restore one project's files over another's. So the flag is not registered at all — Cobra refuses
-// it as unknown — and the workspace is read out of the index instead.
+// it as unknown — and snapshot.OpenStored reads the workspace out of the index instead; the index's
+// name and layout are internal/snapshot's alone.
 
 // undoConfirmArg is the second positional argument that turns the preview into the revert. A word
 // rather than a flag, because it is the human's authorization of the listing they just read and
 // reads that way in a shell history: `apogee undo <id> confirm`.
 const undoConfirmArg = "confirm"
-
-// undoIndexFile is journal.json, the index that sits beside a session's objects. internal/snapshot
-// owns the name and keeps it unexported; this verb is the one caller outside that package that has
-// to open the file itself, because the workspace it needs to OPEN the journal is recorded inside
-// it. Spelled once here, and pinned against snapshot.Dir by TestUndoVerbReadsTheWorkspaceFromTheIndex.
-const undoIndexFile = "journal.json"
 
 // maxUndoIDLen bounds the id this verb will compose a path from, matching the session store's own
 // limit (internal/session): an id longer than this can name no record and no store.
@@ -106,9 +100,9 @@ func undoArgs(cmd *cobra.Command, args []string) error {
 
 // runUndoVerb previews or applies the top exchange of one saved session's journal.
 //
-// The order of its refusals is the point: the index is read BEFORE the store is opened, so an id
-// that names no session answers "nothing to undo" without leaving a freshly initialised object
-// database behind under the apogee home.
+// The order of its refusals is snapshot.OpenStored's: the index is read BEFORE the store is
+// opened, so an id that names no session answers "nothing to undo" without leaving a freshly
+// initialised object database behind under the apogee home.
 func runUndoVerb(cmd *cobra.Command, id string, confirm bool, configDir string) error {
 	if err := validateUndoID(id); err != nil {
 		return err
@@ -129,19 +123,12 @@ func runUndoVerb(cmd *cobra.Command, id string, confirm bool, configDir string) 
 		return err
 	}
 
-	workspace, err := undoIndexWorkspace(snapshot.Dir(roots.config, id))
+	// A session with no index — an id that names none, or a run that recorded nothing — is this
+	// verb's "nothing to undo" rather than a failure; an index that is there and wrong IS one.
+	journal, reason, err := snapshot.OpenStored(cmd.Context(), roots.config, id)
 	switch {
-	case err != nil:
-		return fmt.Errorf("undo snapshots unavailable: %w", err)
-	case workspace == "":
+	case errors.Is(err, snapshot.ErrNoIndex):
 		return undoNothingToDo(id)
-	}
-
-	// enabled: true unconditionally. `undo-snapshots:` governs whether a RUN images its exchanges,
-	// not whether a store that already exists may be read back — refusing to open one because the
-	// key has since been turned off would strand the very writes it was on for.
-	journal, reason, err := snapshot.OpenJournal(cmd.Context(), roots.config, id, workspace, true)
-	switch {
 	case err != nil:
 		return fmt.Errorf("undo snapshots unavailable: %w", err)
 	case reason != "":
@@ -224,34 +211,6 @@ func undoVerbHint(id string) string {
 // a quiet exit 0, because the caller of this verb asked for a revert and did not get one.
 func undoNothingToDo(id string) error {
 	return fmt.Errorf("nothing to undo for session %s", id)
-}
-
-// undoIndexWorkspace reads the workspace one session's snapshots were taken of out of its
-// journal.json. It answers "" with no error when there is no index at all — an id that names no
-// session, or a run that recorded nothing — which is this verb's "nothing to undo" rather than a
-// failure; an index that exists but cannot be read or decoded IS a failure, because a store is
-// there and something is wrong with it.
-func undoIndexWorkspace(dir string) (string, error) {
-	if dir == "" {
-		return "", nil
-	}
-
-	data, err := os.ReadFile(filepath.Join(dir, undoIndexFile))
-	if errors.Is(err, os.ErrNotExist) {
-		return "", nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("read the session's undo index: %w", err)
-	}
-
-	var index undo.Index
-	if err := json.Unmarshal(data, &index); err != nil {
-		return "", fmt.Errorf("decode the session's undo index: %w", err)
-	}
-	if index.Workspace == "" {
-		return "", errors.New("the session's undo index names no workspace")
-	}
-	return index.Workspace, nil
 }
 
 // validateUndoID refuses an id that is not a single clean path component, before it is joined onto

@@ -2,7 +2,10 @@ package snapshot
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee/internal/undo"
@@ -29,6 +32,12 @@ const (
 	reasonNoHome    = "no apogee home"
 	reasonNoWorkDir = "no workspace"
 )
+
+// ErrNoIndex is [OpenStored]'s answer to a session that left no index behind — an id that names no
+// session, or a run that recorded nothing. It is a sentinel rather than a nil journal because the
+// caller's answer to it is a sentence ("nothing to undo"), not a fallback, and errors.Is is how a
+// Driver tells that case from an index that IS there and cannot be read.
+var ErrNoIndex = errors.New("no undo index for the session")
 
 // Dir names the store directory a session's snapshots live in: `<home>/snapshots/<sessionID>`,
 // outside the workspace by construction (ADR 0074 decision 1). It answers "" when either half is
@@ -84,6 +93,54 @@ func OpenJournal(ctx context.Context, home, sessionID, workspace string, enabled
 		return nil, "", err
 	}
 	return journal, "", nil
+}
+
+// OpenStored opens the journal of a SAVED session from its own index alone: the workspace the
+// snapshots were taken of is the one the index records (ADR 0074 decision 5, trivially — the
+// recorded workspace is the workspace), so a caller that was never in the session, `apogee undo`,
+// needs nothing but the home and the id. Everything past the index read is [OpenJournal] with
+// `enabled` true: `undo-snapshots:` governs whether a RUN images its exchanges, not whether a
+// store that already exists may be read back, and a store is prepared or reopened exactly as a
+// live session's would be.
+//
+// The order of its refusals is the point. The index is looked for BEFORE git is, so an id that
+// names no session answers [ErrNoIndex] without leaving a freshly initialised object database
+// behind under home and without the "git not found" reason standing in for "no such session". An
+// index that exists but cannot be read, decoded or names no workspace is an error in its own
+// words — a store is there and something is wrong with it — and the reasons are [OpenJournal]'s.
+func OpenStored(ctx context.Context, home, sessionID string) (*undo.Journal, string, error) {
+	dir := Dir(home, sessionID)
+	if dir == "" {
+		return nil, "", ErrNoIndex
+	}
+
+	workspace, err := storedWorkspace(filepath.Join(dir, journalFileName))
+	if err != nil {
+		return nil, "", err
+	}
+	return OpenJournal(ctx, home, sessionID, workspace, true)
+}
+
+// storedWorkspace reads the workspace one session's snapshots were taken of out of its index at
+// path. A missing file is [ErrNoIndex]; a file that is there and unreadable, undecodable or
+// silent about its workspace is a failure worded for the human who asked about the session.
+func storedWorkspace(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", ErrNoIndex
+	}
+	if err != nil {
+		return "", fmt.Errorf("read the session's undo index: %w", err)
+	}
+
+	var index undo.Index
+	if err := json.Unmarshal(data, &index); err != nil {
+		return "", fmt.Errorf("decode the session's undo index: %w", err)
+	}
+	if index.Workspace == "" {
+		return "", errors.New("the session's undo index names no workspace")
+	}
+	return index.Workspace, nil
 }
 
 // journalSource adapts a [Store] to [undo.Snapshotter]. The journal speaks in plain strings so it

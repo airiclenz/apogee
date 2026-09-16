@@ -365,7 +365,11 @@ lines; one with `UndoNote` renders the files and no undo line. Existing
 
 **Commit:** `feat(tui): the Firing block lists the files an Auto Firing wrote and the undo verb`
 
-## 10. `snapshot.OpenStored` — the undo verb stops reading the index
+## 10. `snapshot.OpenStored` — the undo verb stops reading the index — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the missing-index contract is the `snapshot.ErrNoIndex` sentinel (the plan's second option), answered before `Available()`; `runUndoVerb` maps it to `undoNothingToDo` with `errors.Is`.
+NOTES (2026-09-16): consequential edit — internal/snapshot/doc.go: made necessary by adding OpenStored to journal.go (the package map's half-line role for the file).
+NOTES (2026-09-16): the moved test is `TestOpenStoredReadsTheWorkspaceFromTheIndex`, joined by three OpenStored contract tests (ErrNoIndex before git, absent git with an index present, corrupt / workspace-less index wordings).
 
 **What.** `internal/snapshot/journal.go` gains `OpenStored(ctx, home, id string) (*undo.Journal,
 reason string, err error)`: reads the session's own index (its recorded workspace is the workspace

@@ -287,32 +287,6 @@ func TestUndoVerbIsRegistered(t *testing.T) {
 	t.Fatal("`undo` is not registered in subcommands()")
 }
 
-// TestUndoVerbReadsTheWorkspaceFromTheIndex pins the two facts the verb composes for itself because
-// internal/snapshot keeps them unexported: the index file's NAME, beside the objects at snapshot.Dir,
-// and the workspace field inside it. A rename on either side would otherwise turn every session into
-// "nothing to undo" silently.
-func TestUndoVerbReadsTheWorkspaceFromTheIndex(t *testing.T) {
-	requireSnapshotStore(t)
-
-	home := t.TempDir()
-	var workspace string
-	undoStore(t, home, "s-undo-7", func(ws string) {
-		workspace = ws
-		if err := os.WriteFile(filepath.Join(ws, "note.txt"), []byte("written"), 0o600); err != nil {
-			t.Fatalf("WriteFile: %v", err)
-		}
-	})
-
-	read, err := undoIndexWorkspace(snapshot.Dir(home, "s-undo-7"))
-
-	if err != nil {
-		t.Fatalf("undoIndexWorkspace: %v", err)
-	}
-	if read != workspace {
-		t.Errorf("the index names the workspace %q, want %q", read, workspace)
-	}
-}
-
 // ---------------------------------------------------------------------------
 // The `undo with:` line the unattended Drivers close their report with
 // ---------------------------------------------------------------------------
