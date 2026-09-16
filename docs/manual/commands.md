@@ -32,7 +32,7 @@ a typo is visible before you send.
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache, and a `served:` line above the rows names the models the server actually answered with once a reply has carried one | ✅ |
 | `/inspect` | The request and response traffic of the recent model calls, **readable** by default — each request summarised as `N messages · N tools · model …`, each response as the passages its stream spells, thinking and reply as wrapped prose and every tool call named; `ctrl+r` flips the pane to the raw pretty-printed protocol and back. It opens on the newest record and follows it, so traffic arriving while the pane is open is shown until you scroll up off the end. With a sub-agent's run view open the pane shows that run's traffic alone and names it in its title — close the view for the whole ring. Armed by `ui.inspector` (off by default) | ✅ |
 | `/thinking` | The model's thinking as plain text — the reasoning it streams beside its answer, one record per completed turn, newest last, with no protocol and no prefixes. Opens on the newest record and follows it, so reasoning arriving while the pane is open is shown until you scroll up off the end; with a sub-agent's run view open it shows that run's thinking alone and names it in its title, and at the top level the main agent's alone. Always recorded, nothing to arm, nothing saved with the session | ✅ |
-| `/confine` | Report or change Auto's blast radius — see [below](configuration.md#auto-modes-blast-radius) | ✅ report only |
+| `/confine` | Report or change Auto's blast radius — `/confine [status]`, `/confine off [--save]`, `/confine on`; `--save` records the choice for later sessions too — see [below](configuration.md#auto-modes-blast-radius) | ✅ report only |
 | `/effort` | Set how hard the model thinks this session — opens a picker of the levels this model supports, plus `auto` (back to the profile); the resolved effort reads in the footer, and the command is hidden when the model reports no dial — see [below](configuration.md) | ✅ |
 | `/schedule` | Run a prompt on a cycle — bare lists what is live, `/schedule <prompt>` asks for the cycle and mode, `/schedule <cycle> [auto] <prompt>` creates one outright. A firing that comes due while the footer says the server is **not there at all** — the dial refused, the name unresolvable, the connection timed out — is refused before the prompt is sent, with the same sentence a send earns: `cannot send — server offline (<endpoint>)`, no record written and no tokens spent; a server that answers anything at all still runs | ✅ |
 | `/schedule-stop` | Take a schedule off the clock — the only one straight away, a picker when several are live | ✅ |
@@ -52,7 +52,7 @@ a typo is visible before you send.
 | `/settings` | Browse and change every setting, live — see [below](#the-settings-screen--settings) | ⧖ |
 
 A lone `/word` that names neither a command nor a skill is **not** sent to the model:
-apogee says `unknown command or skill: /…` and leaves your line in the box to fix.
+apogee says `unknown command or skill: /… — nothing sent` and leaves your line in the box to fix.
 Anywhere else in a message a slash is just text, so paths like `/usr/bin` travel
 untouched.
 
@@ -99,13 +99,16 @@ target — opens a picker listing the four rungs, so you can name the one you wa
 of cycling to it; the picker takes the rung through exactly the path `⇧⇥` does. The
 marker answers a click only when the picker could actually be answered — not while
 another picker, the `/sessions` browser or the `/settings` screen is up, and not while a
-call is awaiting approval — and `⇧⇥` stays the route that works in every state. When a mode gates a
+call is awaiting approval or a question from the model is up — and `⇧⇥` stays the route that works in every state. When a mode gates a
 call, the approval prompt's decision keys — `a`, `s`, `d`, and the `⏎` that takes the
 highlighted row — take effect a moment after the prompt appears, so a keystroke already
 in flight cannot answer a call you have not read; `esc` is live from the instant the
 prompt is up, and stops the run on the second press within the window, exactly as it does
 anywhere else while the model works — the pane's own `[esc]` Cancel row is the one-press
-spelling of the same stop. `⌥↑`/`⌥↓` light a
+spelling of the same stop. A question from the model is the one carve-out: there a single `esc`
+cancels — the pane's hint reads `esc cancel` — because backing out of a question is not
+abandoning a turn you lost track of; and on a multi-select question `space` ticks and un-ticks
+the highlighted row. `⌥↑`/`⌥↓` light a
 bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
 the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
 the bar, and `esc`, or simply typing your next message, gives the keys back. `⏎` on a
@@ -216,7 +219,8 @@ whose tool recorded or printed the regions it changed paints one. That is the fo
 `write_file`, `edit_existing_file`, `single_find_and_replace` and `multi_find_and_replace`, which
 attach those regions as they apply the change — plus `view_diff` and `git_diff_range`, which cut
 them out of the diff they printed. An overwrite or a fresh create through `write_file` therefore
-reads exactly the way an edit does.
+reads exactly the way an edit does, and `view_diff` on a path that does not exist yet diffs against
+empty, so the preview of a new file is every line added.
 
 The same regions paint **two ways**. Given room they go side by side: before on the left with its
 own line numbers, after on the right with its own. Below that room they stack instead, each region's
@@ -233,9 +237,10 @@ in one reading or whole in the other, never half of each.
 Removed rows wear `-` on a red band, added rows `+` on a turquoise band. Turquoise rather than green
 is deliberate — paired with red it survives red-green-weak vision — and in any case the **marker is
 what says which way a line went**, never the colour alone; the bands are there to find the change
-quickly, not to carry it. A line wider than its pane wraps onto further rows rather than being
-clipped, so nothing is hidden off the right edge, and a continuation row carries no number and no
-marker, which is how you tell it from a line of its own. The full layout — the alignment of the two
+quickly, not to carry it. In the side-by-side reading a line wider than its pane wraps onto further
+rows rather than being clipped, so nothing is hidden off the right edge, and a continuation row
+carries no number and no marker, which is how you tell it from a line of its own. The stacked
+reading clips instead: a row is cut at 160 characters with a `…`, its number and marker kept. The full layout — the alignment of the two
 sides, the `⋯` rule between regions that do not touch, the per-file headers a multi-file diff paints
 — is specified in [`docs/layout/split-diff-layout.md`](../layout/split-diff-layout.md).
 
@@ -248,8 +253,9 @@ ends with a tail saying so and how to get the rest:
 [showing lines 1-400 of 1180 — pass start_line/end_line for the rest]
 ```
 
-The header and the block's line count state the lines that actually came back, not the file's
-length. A `start_line` on its own is still open-ended and is bounded from where it starts, so
+The header names both the file's length and the lines that actually came back
+(`[File: src/main.go, 1180 lines total, showing lines 1-400]`); the block's line count is the
+latter, not the file's length. A `start_line` on its own is still open-ended and is bounded from where it starts, so
 "the rest" is paged the same way; an explicit `end_line` or `max_lines` is honoured as written,
 however large. Two ranges are refused rather than answered with nothing: an `end_line` before its
 `start_line` (`read_file: end_line (2) is before start_line (3)`) and a `start_line` past the
@@ -266,7 +272,8 @@ and returned as extracted text.
 branch or tag — the committed version beside your edits, an older one, or a file a later commit
 deleted — and renders it exactly as `read_file` would: the same header (`[File: README.md @ HEAD~1,
 …]`), the same `start_line`/`end_line`/`max_lines`/`locate` arguments, the same 400-line default
-bound and tail, and the same one-line refusal for a binary. A path that does not exist at that
+bound and tail, and a one-line refusal of its own for a binary (`git_show: build/apogee at HEAD is
+a binary file (10094249 bytes)`). A path that does not exist at that
 revision is refused naming both (`git_show: cannot read docs/old.md at HEAD~5: …`). Its companions
 in the read-only git set: `git_log` takes an optional `path` to list only the commits that touched
 it, and `git_branch`'s list marks every remote-tracking branch ` (remote)`.
@@ -283,7 +290,8 @@ cap says how to get under it: its header ends `— narrow with include, exclude 
 `paths` list beside the single `path` — `paths: ["src", "docs"]`, or an absolute path under a
 read-only root alongside a workspace one — and searches them together: the header names each
 (`[5 total matches in src, docs, showing 1-5]`), every row is prefixed with the path it came from
-as it was spelled, and a path that is refused refuses the call with the same wording the single
+as it was spelled — once more than one target resolves; a `paths` list of one reads exactly as the
+single form does — and a path that is refused refuses the call with the same wording the single
 form gives. `exclude` is a comma-separated list of file-name or directory-name globs to skip
 (`exclude: "*_test.go,vendor"`) on top of the directories a search never enters (`node_modules`,
 `.git`, `dist`, `build`, `.next`, `coverage`, `__pycache__`); it narrows that one call and nothing
@@ -308,8 +316,10 @@ itself — to find a link's `href`, a form's fields, a meta tag — pass `raw: t
 `delete_file`, `diagnostics`, `present_document` or a `run_tests` path — the refusal does not stop
 at saying so: it adds a `did you mean:` clause naming up to five entries of the named parent
 directory whose names begin with the name that is missing. Matching ignores case, the suggestions
-come back sorted, and each is spelled the way the call spelled the path, so one can be handed
-straight back as the next call:
+come back sorted, a directory carries a trailing `/`, several are joined with `; `, and each is
+spelled onto the parent the call named, so one can be handed straight back as the next call —
+`read_file` alone spells them onto the root it actually looked in, the symlink-resolved one, since
+its refusal quotes the path it examined:
 
 ```
 file not found: docs/adr/0025 — did you mean: docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md
@@ -332,11 +342,19 @@ found, found more than once, a multi-edit that would push the file past the size
 carries #1. `write_file` handed a directory answers `write_file: target is a directory: <path>`
 rather than the filesystem's own rename error.
 
+**`terminal` runs `sh`, not bash.** The command goes to the platform's POSIX shell — `dash` on
+Debian and Ubuntu — so a bash-only construct (`${var//x/y}`, `<(cmd)`, `arr=(a b)`, `shopt`) fails
+with the shell's own complaint, `Bad substitution` or `Syntax error: "(" unexpected`, and the failed
+result gains one line above its exit code, `hint: the shell is sh, not bash`, so the model rewrites
+the line rather than retrying it.
+
 **What the read tools may read.** The roots those tools accept are the workspace, the session's
 scratch directory, the skill libraries, and — when `go` is on your PATH — the Go toolchain's own two
 trees: `GOROOT` and the module cache (`GOMODCACHE`). apogee asks `go env` for the two once at
-start-up, in its own home rather than your project (so a `go.mod` asking for a newer toolchain
-cannot make the question download one) and off the start-up path, and lists whichever of them exist
+start-up, in the system's temp directory rather than your project and with `GOTOOLCHAIN=local`,
+`GOWORK=off` and `GOFLAGS=-mod=readonly` pinned (so neither a `go.mod` asking for a newer
+toolchain nor an exported `GOTOOLCHAIN` can make the question download one, and nothing it does
+edits a `go.mod`) and off the start-up path, and lists whichever of them exist
 on the orientation's `Read-only library roots:` line beside the skill folders — so a model asked
 about a standard-library function or a dependency's source can `read_file`, `grep`, `list_dir`,
 `find_files` or `copy_file` it rather than being refused the very trees its `go build` had just
@@ -406,7 +424,10 @@ machine, so the address is `shipped:<id>` — `shipped:debugging/checklist.md` n
 inside the binary. Both spellings work in `read_file`, `list_dir`, `grep`, `find_files` and as
 the **source** of a `copy_file`, which is how you take a bundled file out into your project —
 one file at a time: directories under a shipped mount are not supported as a `copy_file` source
-(a folder on disk copies whole; `/skills export` is the way to take a whole shipped skill out).
+(a folder on disk copies whole — recursively, up to 2000 files, journalled so `/undo` takes the
+copy back as one step, and with `overwrite: true` merged into an existing destination, replacing
+the files it already holds under the same names and leaving the rest; `/skills export` is the way
+to take a whole shipped skill out).
 Neither is writable: `shipped:` is refused by every write, and the skill folders on disk are
 mounted read-only. To edit a shipped skill, take a copy of it first: `/skills export <id>` writes
 the whole folder — SKILL.md and everything bundled beside it — to `~/.apogee/skills/<id>/`, and
@@ -462,14 +483,15 @@ Both verbs **run at idle** — typed while the model works, they queue and run o
 ## The settings screen — `/settings`
 
 `/settings` opens a **full-height pane** over your whole configuration: one row per setting,
-in the order the starter `config.yaml` documents them and grouped under section headings,
+in registry order — roughly the order the starter `config.yaml` documents them — and grouped under section headings,
 each row showing the value **this run resolved** for it. Where a higher-precedence source
 beat the file, the row says which — `(env)` or `(flag)` — so a key that reads one way in the
 file and another on screen explains itself. Two rows answer from the **running session**
 instead of that resolution — `mode:` and `confine-to-workspace:` show what apogee is running
-right now, so a `shift+tab` or a `/confine off` shows up the next time you open the pane, and
+right now — and the rows are re-derived at every paint, not read once when the pane opens, so a
+`shift+tab` or a `/confine off` is already on the row whenever the pane paints, and
 the `mode:` list opens on the rung you are actually on. The conversation gives way
-entirely while the pane is up, because fifty-odd keys are a screen to read rather
+entirely while the pane is up, because sixty-odd keys are a screen to read rather
 than a choice to scan: `↑/↓` move the `❯`, a fixed two-line `Description:` header above the
 list says what the key under the cursor is for, and `esc` closes the pane and hands the
 transcript back. Section labels stand in white above the rows they open, the row being typed
@@ -477,20 +499,23 @@ into is lit, and the mouse works where the keys do — a click selects a row, th
 the list one row per notch. It needs a quiet engine, so typed mid-run it queues and **opens at idle**.
 
 **Editing writes one key, when you ask.** `⏎` on a true/false row toggles it, `⏎` on a row
-with a fixed set of values — `mode:`, `server:` — opens that list to pick from, `⏎` on a
+with a fixed set of values — such as `mode:`, `server:`, `ui.spinner:` or `cursor-shape:` — opens that list to pick from, `⏎` on a
 string or a number opens a buffer on the row itself, and `⏎` on the inline system prompt
 opens a multi-line field over the list, where `⏎` makes a new line, `ctrl+s` saves and `esc`
 discards. A buffer is a real field: the arrow keys, `home`/`end` and word jumps move the
 caret, and the mouse seats it and drags a selection exactly as it does in the prompt box. Each
 committed edit is spliced straight into `~/.apogee/config.yaml` — your
 comments, your layout and every other key untouched, the result re-parsed and compared
-against the original before it replaces the file — and a key that was still one of the
-commented examples lands directly below it. A value the key cannot hold is refused before
-anything is written, with the reason on the row and your text still in the buffer. Nothing
-else is ever written: apogee still makes no edit to that file you did not ask for.
+against the original before it replaces the file — and a top-level key that was still one of the
+commented examples lands directly below it; a nested key joins the end of its block when the
+block is there, and lands below the whole commented example block when it is not. A value the
+key cannot hold is refused before anything is written, with the reason on the row and your text
+still in the buffer. The file is written only on your own act — a pane edit, a verb that records
+its choice such as `/server`, `/sub-agents-server` or `/color-scheme`, the click that folds or
+opens the task-list card (`ui.task-list-open`) — never on one you did not ask for.
 
 **And what is saved is applied — to the session you are in.** The `⏎` that persists a key
-also puts it into effect, so no setting waits for a restart: change `mode:`, `bypass:`, the
+also puts it into effect, so as a rule a setting does not wait for a restart: change `mode:`, `bypass:`, the
 web-search endpoint, the presentation keys or the model profile and the next thing apogee does
 uses it. The row keeps a ` *` after its value — `false *` — which says
 *you changed this here, this session*; it is cleared only by a relaunch. A ` ~` in that same
@@ -501,7 +526,10 @@ applied (`config changed on disk — applied: ui.spinner, auto-title`), because 
 likely not open when it happens; a re-read that found nothing changed says nothing. One pair
 lands at a boundary the session crosses anyway rather than mid-conversation, and says so on
 the row: the `context-files:` keys are part of the prefix every request is cached against, so they take
-effect at the next `/clear` — `· applies at next clear`. On a key an environment variable or
+effect at the next `/clear` — `· applies at next clear`. A few keys are read only while apogee
+starts — `ui.inspector`, `undo-snapshots`, `delegate-timeout`, `sessions.max-age` and
+`sessions.max-count` — so an edit there is written and takes effect at the next start; the row's
+`Description:` says so, and the value cell shows what was written. On a key an environment variable or
 a flag is overriding, the edit still applies and is still written, and the row adds that the
 override will win again the next time apogee starts — startup precedence is unchanged. If a
 write lands but the live apply refuses it, the row says exactly that

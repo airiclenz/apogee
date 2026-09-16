@@ -79,7 +79,9 @@ entry that spells no action key at all earns the `run:` sentence. Inside the
 webhook mapping the three keys above are the whole vocabulary — a misspelt `header-env:` is a
 startup refusal and not a token that never gets sent. The whole block is checked when the file is
 read, and a malformed entry is a startup refusal naming the entry rather than a Reaction that
-silently never fires.
+silently never fires: a Moment listed twice under `on:`, an argv whose first element is blank, a
+`url:` that is not an absolute `http://` or `https://` URL with a host, and a `headers-env:` value
+that is blank are each refused.
 
 The block is file-only: there is no flag and no environment variable for it. `/settings` shows a
 read-only `reactions:` row counting what is armed, and `⏎` on it opens your editor, because no
@@ -131,15 +133,15 @@ Present on every notice:
 | `depth` | The emitting agent's sub-agent nesting level; `0` is the top-level agent. |
 | `turn` | The turn index the notice belongs to. |
 | `call_id` | The emitting agent's run identity — the id of the `sub_agent` call that spawned it. Absent at depth 0. |
-| `schedule` | `{"id": …, "name": …}` — the schedule this firing ran for. Present only on a `/schedule` or daemon firing. |
+| `schedule` | `{"id": …, "name": …}` — the schedule this firing ran for. Present only on a `/schedule` or daemon firing; `name` is omitted for an unnamed schedule, and `APOGEE_REACTION_SCHEDULE_NAME` is then unset. |
 
 Per notice, added to that block:
 
 | Field | On | Meaning |
 |---|---|---|
-| `status` | `turn-finished`, `exchange-finished` | The turn's disposition: `turn-complete`, `exchange-complete` or `cancelled`. |
-| `faulted` | `turn-finished`, `exchange-finished` | The loop abandoned the turn rather than completing it. |
-| `step_capped` | `turn-finished`, `exchange-finished` | The step cap ended the exchange, not the model. |
+| `status` | `turn-finished`, `exchange-finished` | The turn's disposition. On `turn-finished` it is `turn-complete`, `exchange-complete` or `cancelled`; on `exchange-finished`, which fires only when the exchange closed, it is always `exchange-complete`. |
+| `faulted` | `turn-finished`, `exchange-finished` | The loop abandoned the turn rather than completing it. Written only when true, so a script treats its absence as `false`. |
+| `step_capped` | `turn-finished`, `exchange-finished` | The step cap ended the exchange, not the model. Written only when true, like `faulted`. |
 | `tool` | `file-changed`, the two approval notices | The tool that wrote the file, or whose call the approval is about. |
 | `path` | `file-changed` | The absolute, symlink-resolved path the write landed on. |
 | `reason` | The two approval notices | Why the approval was required, in the engine's own words. |
@@ -225,6 +227,8 @@ The rest of the posture, which is the one an `api-key-cmd:` already runs under:
 
 - **Outside confinement.** An entry here is your configuration rather than anything the model
   chose, so it is not sandboxed — even in Auto mode.
+- **In apogee's own working directory**, never the workspace — the payload names the workspace by
+  path, and so does `APOGEE_REACTION_WORKSPACE`. This holds for `advise:` and `gate:` too.
 - **Fenced at the program.** apogee refuses to run a program that lives somewhere the model could
   have written it, so a `file-changed` entry cannot end up executing the script the agent just
   produced. A bare name is looked up on `PATH`; a name carrying a path separator is resolved
@@ -234,7 +238,8 @@ The rest of the posture, which is the one an `api-key-cmd:` already runs under:
   inherited variable of the same name.
 - **Stdout is discarded**, because nothing an observe Reaction prints may reach the model, the
   conversation or the session. Stderr is kept only to quote back: at most 4 KiB is read, and the
-  first ~240 characters of it, folded onto one line, are appended to the failure notice.
+  first 240 runes of it, folded onto one line and ending in `…` when cut, are appended to the
+  failure notice.
 - **A non-zero exit is a failure** and is reported to you. So is a program that cannot be found or
   is refused by the fence.
 - **`timeout:` (default `30s`) ends the run.** The process is killed, and a wrapper that left a
@@ -279,8 +284,10 @@ The command is run like a `run:` list — directly, no shell — with the
 environment. What it prints goes through three steps before the model sees it:
 
 1. **Redaction.** Every value of a configured secret — the variables your `api-key-env:` entries
-   name — is replaced by `[redacted]`, so a script that echoes its own config file cannot hand the
-   model a token the credential scrub kept out of the child's environment.
+   and your webhook `headers-env:` entries name — is replaced by `[redacted]`, so a script that
+   echoes its own config file cannot hand the model a token the credential scrub kept out of the
+   child's environment. apogee's own `APOGEE_API_KEY` is scrubbed from that environment but is
+   not among the values redacted here.
 2. **The cap.** Output past **8 KiB** is cut on a character boundary and ends in
    `[advice truncated at 8 KiB]`; nothing spills to a file.
 3. **The fence.** The text is appended to the tool result, after a blank line, as
@@ -300,8 +307,11 @@ environment. What it prints goes through three steps before the model sees it:
 The trailer is what the model reads, and only the model: the **session record is written from the
 result as it stood before the fence**, so a resumed session carries no advice, a replay never
 re-reads a stale timestamp, and the transcript you save is the tool's own words. The firing is
-booked all the same — in [`apogee headless`](headless.md) a `reaction_fired` line carries the text
-as its `detail` — so what the model was told is always attributable to the entry that told it.
+booked all the same — in [`apogee headless`](headless.md) a `reaction_fired` line with
+`"action": "advise"` carries the text as its `detail` — so what the model was told is always
+attributable to the entry that told it. A gate's every answer is booked the same way, with
+`action` the verdict — `allow`, `deny` or `ask` — and `detail` the reason, or
+`deferred to the child's calls` for an `ask` on a delegation.
 
 Advise is **fail-open in every direction**, and each of them costs the turn nothing: a command
 that prints nothing injects no fence, so an entry that only sometimes has something to say is
@@ -328,13 +338,14 @@ question apogee would put to you. It reacts at `pre-tool-exec` and nowhere else,
 `APOGEE_REACTION_*` facts in its environment. It answers on **stdout**:
 
 - the **first line** is the verdict — `allow`, `deny` or `ask`;
-- every line after it is the **reason**, kept to its first ~240 characters and shown to the
-  human, never to the model.
+- every line after it is the **reason**: blank lines dropped, the rest folded onto one line and
+  kept to its first 240 runes, shown to the human, never to the model.
 
 `deny` ends the call: the model reads `tool call denied by reaction <id>` and nothing else — the
 reason is yours, so a script cannot write into the conversation through a refusal it manufactured.
 `ask` forces the approval prompt whatever the mode had decided, skipping the approval cache, and
-the prompt reads `reaction <id> asks: <reason>`; in [`apogee headless`](headless.md) and the
+the prompt reads `reaction <id> asks: <reason>` — or `reaction <id> asks` when no reason was
+given; in [`apogee headless`](headless.md) and the
 [daemon](daemon.md) nobody is there to answer, so the call is denied as
 `tool call denied by approver`. `allow` means **nothing**: the mode ladder's own verdict stands,
 because a script that could pre-approve a call would be a second autonomy ladder nobody audited —
@@ -342,9 +353,10 @@ a gate can say No, never Yes.
 
 Every answer apogee cannot read **escalates to `ask`**, never to `allow`: an empty stdout, a first
 line that is none of the three words, a non-zero exit, a timeout (default `timeout:` `5s`), a
-command that could not be spawned. A gate you armed and apogee cannot run is a question, never a
-silent pass — which is why this is the one user Reaction `bypass:` leaves armed: Bypass switches
-off what shapes the model's view, and a gate shapes nothing the model sees.
+command that could not be spawned — and the prompt then reads
+`reaction <id> asks: did not answer (<error>)`. A gate you armed and apogee cannot run is a
+question, never a silent pass — which is why this is the one user Reaction `bypass:` leaves
+armed: Bypass switches off what shapes the model's view, and a gate shapes nothing the model sees.
 
 Gates run in the order the list gives them, on every call the mode has not already refused — a
 call that will never run is not put to them. The first `deny` ends the call; otherwise the first
@@ -363,9 +375,17 @@ it does not run at all: `workspace confinement is unavailable on this host` is r
 advise contributes nothing and a gate asks. As with `run:`, the program is resolved before it
 starts and refused when it lives somewhere the model could have written it. Unlike `run:`, the
 command is spawned through the same door every execution tool uses, so it gets that door's
-credential scrub — apogee's own key and every `api-key-env:` value are **absent** from its
-environment — along with the output cap and the process-tree teardown; a `run:` command alone
-inherits the environment whole.
+credential scrub — apogee's own key, every `api-key-env:` variable and every webhook
+`headers-env:` variable are **absent** from its environment — along with the process-tree teardown
+and that door's ceilings: combined stdout and stderr are capped at 256 KiB before the 8 KiB advice
+cap is applied, and a `timeout:` above 600 s is clamped to 600 s. A `timeout: 0s` on an entry that
+spells only `advise:` or `gate:` falls back to the class default, where the same value on a `run:`
+entry is a startup refusal. A `run:` command alone inherits the environment whole.
+
+Both keys are inherited by every sub-agent, unconditionally, because a Reaction the parent runs
+with is part of the posture a delegation inherits: an `advise:` fence lands on the child's tool
+results and a `gate:` is asked on the child's calls, each with the child's `depth` and `call_id`
+stamped on the document.
 
 ## `workspace:` — scoping an entry
 
@@ -409,8 +429,11 @@ A notice names the entry and the notice it was firing on:
 that entry has succeeded in between.
 
 An `advise:` or `gate:` command that fails — a non-zero exit, a timeout, a refused permit — reaches
-you at the same place and in the same words, `reaction <id> (<moment>): <error>`, each time it
-fails; the once-only fold above is the `run:` lane's. It is booked as a `reaction_fired` line with
+you at the same place under the same prefix, `reaction <id> (<moment>): <error>`, each time it
+fails; the once-only fold above is the `run:` lane's. The error itself is worded by the door the
+command ran through, so it differs from a `run:` failure's: `<program> exited 3: <last 256 bytes
+of stderr>` or `<program> timed out`, where a `run:` reports `exit 3: <first 240 runes>` or
+`timed out after 30s`. It is booked as a `reaction_fired` line with
 `"action": "failed"` and the error as its `detail`, never as an `error` notice, and the turn goes
 on: the advise contributes nothing, the gate escalates to `ask`.
 

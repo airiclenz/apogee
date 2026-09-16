@@ -19,14 +19,24 @@ A `Makefile` wraps the common Go invocations:
 | `make build` | Compile the binary to `./apogee` |
 | `make install` | Build, then copy the binary to a directory on your `PATH` |
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
-| `make test` | Run the test suite with the race detector, sharded across processes (see [Testing](#testing)) |
+| `make stubllm` | Compile the scripted test upstream to `./stubllm` — a dev tool, never a release asset |
+| `make test` | Run the test suite with the race detector, sharded across processes (see [Testing](#testing)); `ARGS="..."` passes extra `go test` flags to every shard |
+| `make live-eval` | Run the opt-in live-model eval and the judge tests against a real server, always `-count=1`; `LIVE_ENDPOINT=` (default `http://127.0.0.1:1111`) becomes `APOGEE_LIVE_ENDPOINT` and `JUDGE_ENDPOINT=` (default the same) `APOGEE_JUDGE_ENDPOINT`, with `APOGEE_LIVE_MODEL` / `APOGEE_JUDGE_MODEL` set in the environment to pin the models; fails if the real `~/.apogee` grew during the run |
+| `make home-census` | Print the entry counts of the real `~/.apogee` sessions and scratch dirs (what `live-eval` compares) |
+| `make fmt` | `gofmt -w` over the tree |
+| `make vet` | `go vet ./...` |
 | `make lint` | Run `golangci-lint` (the standard linter set, configured by `.golangci.yml`) over the module |
 | `make vulncheck` | Run `govulncheck` over the dependency graph — needs the network |
-| `make cross` | Cross-build all six release targets (Linux/macOS/Windows × amd64/arm64) |
+| `make actionlint` | Lint the GitHub workflow files with the pinned `actionlint` |
+| `make cross` | Cross-compile every package for all six release targets (Linux/macOS/Windows × amd64/arm64), as a check |
 | `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
-| `make check` | The full acceptance gate — gofmt, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
+| `make check` | The full acceptance gate — gofmt, `GOOS=windows go vet` over `internal/platform` and `internal/probe`, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
 | `make release-smoke VERSION=v0.18.0` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
+| `make clean` | Remove the built binary |
 | `make help` | List every target |
+
+The built binary also carries Cobra's `apogee completion <shell>`, which prints a
+shell-completion script for `bash`, `zsh`, `fish` or `powershell`.
 
 To run `apogee` from anywhere, `make install` copies the built binary to the first
 directory that is both on your `PATH` and writable without `sudo`, trying
@@ -70,8 +80,8 @@ before it releases the parallel ones. `internal/tui`'s driver tests are still se
 processes as well. A shard is a process of its own, so every test runs exactly as it does
 today — same flags but one, same isolation, nothing skipped or reordered within its shard —
 and the run is bounded by the slowest shard rather than the slowest package. Measured on a
-9-core box before the `cmd/apogee` sweep: 212s in one process, 68s sharded, with `make check`
-going from 224s to 77s; after it, 72s sharded, since the shards were already spending the box.
+9-core box before the `cmd/apogee` sweep: 212s in one process, 82s sharded cold (no timing
+cache) and around 55s warm.
 
 The one flag is `-parallel`. `go test` runs a package's `t.Parallel` tests GOMAXPROCS at a
 time by default, as if it had the box to itself; a shard does not, and a shard that also fanned
@@ -135,14 +145,20 @@ vulnerabilities your code actually reaches; it is the one gate that needs the ne
 it fails with the tool's own error when the database is unreachable rather than passing
 quietly. Both run in CI too.
 Windows-tagged tests run on a `windows-latest` job; `make check` on a Linux or macOS box
-compiles them (`GOOS=windows go vet`) but cannot run them.
+vets the two trees that carry them (`GOOS=windows go vet ./internal/platform/...
+./internal/probe/...`) but cannot run them.
 
-Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` does the same thing — the
+Prefer the raw toolchain? `go build -o apogee ./cmd/apogee` builds the same binary, minus
+one field of provenance: `make build` injects the build number — the commit count, via
+`-ldflags -X github.com/airiclenz/apogee.buildCount=…` — so `apogee --version` reports
+`vX.Y.Z+N.g<rev>[.dirty]` from a Make build and `vX.Y.Z+g<rev>[.dirty]` from a bare
+`go build`; the version number itself comes from `VERSION` either way. Otherwise the
 Makefile just gives the common commands one-word names. Releases are cross-compiled to
 all **six** targets — Linux, macOS and Windows × `amd64` and `arm64` — from any one of
 them: the tree is CGO-free, so `make dist` builds and packs the entire published
-matrix on whichever machine cuts the release (`make cross` is the same six builds
-thrown away, as a compile check), and every OS-specific backend is behind a build tag
+matrix on whichever machine cuts the release (`make cross` is the compile check beside
+it — the same six targets, but compiling every package, `./...`, to `/dev/null`, where
+`dist` builds only `./cmd/apogee`, with `-trimpath`), and every OS-specific backend is behind a build tag
 rather than a separate artifact. `make dist` needs `zip` on the box for the two
 Windows archives; everything else it reaches for is either the Go toolchain itself or
 standard on any Unix-like box (`tar`, `sed`, and `sha256sum`/`shasum`).

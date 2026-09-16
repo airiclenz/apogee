@@ -7,7 +7,9 @@ the Auto verdict, the effective `confine-to-workspace` after any host acknowledg
 the workspace root and config home, and whether the configured endpoint answers
 (`/v1/models`, plus llama.cpp's `/props`). It is free, offline and **read-only** — no
 model is called, no starter config is seeded, nothing is written. `apogee probe host`
-is the same report under a named child, for scripts.
+is the same report under a named child, for scripts. Both take `--endpoint`, `--workspace`
+and `--config`, so the report can describe a server, a tree or a home other than the ones the
+current directory and `~/.apogee` would give.
 
 ```console
 $ apogee probe
@@ -38,11 +40,16 @@ model it probed, and paste-ready as YAML
 (your `config.yaml` is never edited). It also records a **behavioral fingerprint**: the
 model keeps its advertised name — probing never renames it, so aliases keyed on that
 name keep matching — but its identity rises from *low* to *medium* confidence.
-`--no-save` runs the whole battery and records nothing; the record's path is printed
-either way, so deleting that file undoes it. It takes `--endpoint`, `--model` and
+`--no-save` runs the whole battery and records nothing; when the battery completed, the
+record's path is printed either way, so deleting that file undoes it. A battery that did not
+complete derives no identity, records nothing and prints no path — its `record` block reads
+`written: no — an incomplete battery derives no identity to record`. It takes `--endpoint`, `--model` and
 `--config` as well, so you can point the battery at a server and a model this host has
 never been configured for — with no `--model` the server is asked which one it is
-serving.
+serving. Both `apogee probe` and `apogee probe model` resolve the entry's API key before
+they look at the server, and a source that refuses — an `api-key-cmd:` that fails, an
+`api-key-env:` naming a variable that is not set — fails the command with that source's own
+message rather than probing unauthenticated: *unreachable* would be the wrong finding.
 
 `apogee probe terminal` is the third subject, and it is free like the host report. It
 **measures** the terminal instead of trusting it: it writes real escape sequences to your

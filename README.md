@@ -6,6 +6,8 @@
   </picture>
 </p>
 
+# apogee — an AI coding agent for local LLMs, in your terminal
+
 <p align="center">
   <a href="https://github.com/airiclenz/apogee/releases/latest"><img src="https://img.shields.io/github/v/release/airiclenz/apogee?label=release" alt="Latest release"></a>
   <img src="https://img.shields.io/badge/platforms-Windows%20%C2%B7%20macOS%20%C2%B7%20Linux-blue" alt="Runs on Windows, macOS and Linux">
@@ -17,6 +19,9 @@
 local LLMs.** Point it at a local model server — llama.cpp, Ollama, LM Studio, vLLM —
 and your code never leaves your machine: no API key, no cloud, works offline. Point it
 at any OpenAI-compatible cloud endpoint instead and the same agent runs there.
+
+Works with llama.cpp, Ollama, LM Studio, vLLM and OpenRouter, and ships tuned model
+profiles for Qwen3, Gemma 4, gpt-oss and MiniMax.
 
 <p align="center">
   <img src="graphics/demo.gif" alt="apogee, an AI coding agent in the terminal, finding a failing Go test, fixing the bug and proving the tests pass — with a follow-up instruction typed mid-run, queued and delivered at the next tool boundary, the fix shown as a side-by-side diff, and a closing /undo preview that reverts nothing">
@@ -53,7 +58,7 @@ Three things set it apart from other AI coding assistants.
   file edits, shell, git, tests, web, MCP servers, skills, parallel sub-agents — inside
   a terminal UI built with care: type your next message while the model streams and
   queue it into the running task, recall any prompt you have sent, fold away what you
-  are done reading, click every path it prints, and undo an exchange's file changes one
+  are done reading, open any path it prints with a click, and undo an exchange's file changes one
   at a time — snapshot-backed, so a shell command's writes are in reach too, and it
   survives a relaunch.
 
@@ -130,7 +135,7 @@ apogee --endpoint http://localhost:8080 --model qwen3-coder
 ```
 
 Then just describe what you want done. `Shift+Tab` cycles the autonomy mode — Plan
-(read-only) → Ask-Before → Allow-Edits → Auto — `/` opens the command menu, `@`
+(read-only) → Ask-Before → Allow-Edits → Auto — and `--mode plan` starts there; `/` opens the command menu, `@`
 references a file, and a double-tap of `esc` — twice within one second, so a stray key
 cannot do it — stops a run. The full tour is in [the manual](docs/manual/README.md).
 
@@ -152,22 +157,33 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 - **Sub-agents can run on a different server than you do** — a small model steering
   while a bigger one does the heavy reading, or the reverse. You choose the server, or
   let the model pick per job.
-- **[llama-launcher](https://github.com/airiclenz/llama-launcher) integration** — load,
-  switch and stop local model servers from `/model`, and remember your pick per server.
+- **[llama-launcher](https://github.com/airiclenz/llama-launcher) integration** — load and
+  switch local model servers from `/model`, unload or stop them with `/unload-model` and
+  `/stop-server`, and remember your pick per server.
 
 ### The agent loop
 
-- **30 built-in tools**: read, write and edit files, grep and find, git, terminal,
-  Python, test runners, web fetch and web search, a task list the model keeps for itself,
-  and delegation to sub-agents.
-- **Parallel sub-agents**, each with a context window of its own. Open one as its own
-  full screen to watch it work, and type to it while it runs.
+- **34 built-in tools** (30 on the default menu): read, write, edit, copy, move and
+  delete files, grep and find, git, terminal, Python, diagnostics, test runners, web fetch,
+  web search and raw HTTP, a task list the model keeps for itself, a question back to you,
+  skills the model loads for itself, and delegation to sub-agents.
+- **Parallel sub-agents**, each with a context window of its own and a token, time and
+  step budget; a job can be narrowed to read-only tools, and by default a sub-agent cannot
+  delegate further. Open one as its own full screen to watch it work, and type to it while
+  it runs.
 - **Skills** — short markdown playbooks you invoke with `/name`. apogee ships a few
   (debugging, planning, code review, commit hygiene), reads your own from
   `~/.apogee/skills`, and picks up skills a repository ships to everyone working in it.
   As you type, it names the skills that clearly fit, up to three, above the input box;
-  `Tab` picks one.
-- **MCP servers** over stdio, SSE, or streamable-http, for tools apogee doesn't ship.
+  `Tab` picks one. `/skills export` copies a shipped skill into your library to make it
+  your own.
+- **Workspace context files** — an `AGENTS.md` at the workspace root goes into the system
+  prompt on its own; `context-files:` picks the names, or turns it off.
+- **MCP servers** over stdio, SSE, or streamable-http, for tools apogee doesn't ship — with
+  an `env-allowlist:` so a stdio server inherits only the environment you name.
+- **Reads your dependencies.** On a Go project the toolchain's `GOROOT` and module cache
+  are readable, so the model can open the standard library and your modules, never write
+  them.
 - **A Console family, off by default** — the REPLs, shells and dev servers a model
   keeps alive across turns, for models that ask for them.
 - **Long jobs don't fall off the context window.** apogee compacts the conversation,
@@ -177,16 +193,20 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 
 ### Safety and control
 
-- **Four autonomy modes** — read-only Plan (its own per-session scratch directory is the one
-  place it writes), Ask-Before, Allow-Edits, and OS-confined Auto. `Shift+Tab` cycles them at any time, mid-run included, and `/confine` reports or
-  changes [Auto's blast radius](docs/manual/configuration.md#auto-modes-blast-radius).
+- **Four autonomy modes** — Plan (reads code and git history; its own per-session scratch
+  directory is the one place it writes), Ask-Before (asks before every write and command,
+  except into that scratch directory), Allow-Edits, and OS-confined Auto. `Shift+Tab` cycles
+  them at any time, mid-run included — or click the mode marker in the footer — and
+  `/confine` reports or changes
+  [Auto's blast radius](docs/manual/configuration.md#auto-modes-blast-radius).
 - **A dangerous-action guard in every mode** — the genuinely destructive commands are
   refused outright, and the merely alarming ones are put in front of you first.
 - **Approvals you grant once mean what you think they mean**: they are scoped to the
   call you approved and honoured across the whole sub-agent tree, and the prompt shows
   the path a call really resolves to before you answer.
-- **Allow and deny lists for anything that reaches the network** — the web tools, MCP
-  endpoints, and the model endpoint itself. Subprocesses never see your API key.
+- **Allow and deny lists for every address a model can choose** — the web tools and MCP
+  endpoints; private and link-local ranges are refused by default. Subprocesses never see
+  your API key.
 - **`/undo` and `/redo`** — put back everything an exchange changed in your workspace,
   one exchange at a time, with a preview before anything is touched and a skip for any
   file you edited since. apogee images the workspace around each exchange, so a write by
@@ -200,10 +220,14 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
   your next message into the running task, walk back through every prompt you have sent,
   select transcript text mid-stream.
 - **Read what you want, hide what you don't.** Fold any block or group of tool calls,
-  scroll with the keyboard or the mouse, and click any path apogee prints to open it.
+  scroll with the keyboard or the mouse; paths are printed as plain text, so your
+  terminal's own cmd/ctrl-click opens them.
+- **The mouse answers everything.** Every approval, picker, menu and browser takes two
+  clicks — the first highlights, the second sends.
 - **Side-by-side diffs** for every file the agent writes.
-- **`/thinking`** shows the model's reasoning as plain text, **`/inspect`** shows the
-  raw traffic, and **`/usage`** shows what the session cost — the main agent and each
+- **`/thinking`** shows the model's reasoning as plain text, **`/inspect`** (once
+  `ui.inspector` is on) shows every request and response, readable by default and raw on
+  `ctrl+r`, and **`/usage`** shows what the session cost — the main agent and each
   sub-agent, cache hits included.
 - **Colour schemes** as single YAML files, switchable live, with your own beside the
   built-in `dark` and `light`.
@@ -216,9 +240,11 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
   keep the store from growing for ever. See [Sessions](docs/manual/sessions.md).
 - **Scheduled prompts** — `/schedule` runs a prompt on a cycle while apogee is open;
   [`apogee daemon`](docs/manual/daemon.md) keeps standing schedules running under your
-  OS's supervisor, every firing saved as a session you can browse.
+  OS's supervisor — `apogee daemon install` writes the systemd, launchd or Task Scheduler
+  unit — every firing saved as a session you can browse.
 - **Scriptable** — [`apogee headless`](docs/manual/headless.md) runs one prompt
-  unattended with clean stdout and meaningful exit codes.
+  unattended with clean stdout and meaningful exit codes, or with `--format json` a
+  versioned stream of event lines for a script to parse.
 - **Reactions** — run a command or POST a webhook when an exchange ends, a file changes or an
   approval is waiting; a `gate:` entry can deny a tool call, or hand it to you, before it runs;
   an `advise:` entry hands the model a fact about a call that just finished — fenced, capped,
@@ -234,8 +260,8 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
   value came from, and writes one key at a time with your comments and layout intact.
 - **A watched config** — edits to `~/.apogee/config.yaml` from anywhere apply to the
   running session; nothing waits for a restart.
-- **Your own system prompt**, replacing apogee's or appended to it, globally or per
-  model.
+- **Your own system prompt** — replace apogee's, layer your text onto it, or give one
+  model a prompt of its own.
 - **Turn any tool off** — or on — for every model or for one, because a shorter tool
   list is often the thing that makes a small model better.
 

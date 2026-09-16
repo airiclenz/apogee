@@ -16,8 +16,11 @@ session: 20260805-141233-7f2a · turns: 3 · denied: 0
 The prompt is the single **quoted** argument; with no argument the whole of stdin is
 the prompt, so `cat task.md | apogee headless` works too. Empty from both is a usage
 error. `@path` tokens in the prompt are **file references** — bare or quoted
-(`@"a b.md"`) — read from the workspace and attached to the message as in a session; a
-missing ref is skipped without notice — a Firing has no event sink. `/id` tokens are
+(`@"a b.md"`) — read from the workspace and attached to the message as in a session. A
+missing or unreadable ref is skipped and the run goes on with the rest: the engine reports it
+as an error event, which under `--format text` nothing prints — the live narration carries no
+error line — and under `--format json` arrives as an `error` line; the saved record keeps it
+either way. `/id` tokens are
 **skill references** on the same terms: a token naming a skill in this run's catalog
 attaches that skill's instructions to the message exactly as typing it into a session
 would, and any other slash word — a path, a typo — stays plain text.
@@ -33,6 +36,11 @@ connection timed out — is refused the same way, before the prompt is sent: `ca
 server offline (<endpoint>)`, exit `2`, no record written and no tokens spent. A server that
 answers anything at all still runs: a rate-limited or unreadable model list is not a dead
 server, and an endpoint that serves completions without advertising a list never was one.
+A run whose bound entry has no context window — the server did not advertise one and no
+`context-window:` pins it — says so once on stderr, `context window unknown — automatic
+compaction and the Budget are inactive; set context-window: in config.yaml` (for a model the
+server does not list, the same fact rides the not-advertised notice as a clause), and runs on
+with both inactive.
 The run is saved to
 `~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
 records nothing. Either way the startup sweep still applies whatever bound the `sessions:`
@@ -40,10 +48,14 @@ block names — `--no-save` drops this run's own record, not the retention polic
 driven only headlessly still keeps its store within `max-age` / `max-count`.
 
 `--mode` takes `plan` (the default — read-only, except for the run's own scratch directory)
-or `auto` — the two modes that never need a human. `ask-before` and `allow-edits` are refused, and so is `auto` on a host whose
+or `auto` — the two modes that never need a human. `--mode ask-before` and `--mode allow-edits` are refused, and so is `auto` on a host whose
 confinement backend cannot fence the filesystem: there the interactive fallback is
 approval, and an unattended run has nobody to approve (see
-[Auto mode's blast radius](configuration.md#auto-modes-blast-radius)). Whatever the mode, every gated
+[Auto mode's blast radius](configuration.md#auto-modes-blast-radius)). The two modes that
+need a human are not treated alike when they come from `APOGEE_MODE` or the `mode:` key
+rather than the flag: `ask-before` from either — the interactive ladder's own default, which
+a host that never spelled a mode out would otherwise carry — is silently replaced by `plan`,
+while `allow-edits` from either is refused exactly as the flag is. Whatever the mode, every gated
 action is refused rather than parked — the refusals are the `denied:` count — `ask_user`
 and `present_document` are not registered, and no MCP server is contacted.
 
@@ -80,7 +92,9 @@ finished — because
 each child fills a context window of its own that the run's own figures say nothing
 about; a run that delegated nothing prints none. That name is the one the delegating
 call supplied, else the short one apogee generated for an unnamed run while it worked
-(the `auto-title:` switch, on by default), else the delegated task's first line.
+(the `auto-title:` switch, on by default), else the delegated task's first line. A
+delegation that ran on a model other than the run's own adds a trailing `· <model>` column
+naming it; one on the same model adds nothing.
 Beside those, and on the same terms,
 comes what the run **spent**: `usage: calls 3 · prompt 18k · completion 1k · total 19k`
 for the run itself and one such line per delegated run (labelled the same way), counting
@@ -267,7 +281,8 @@ that survivable:
 - The first Ctrl-C is the polite stop: the run unwinds, its record is saved and its closing frame
   is written. A Ctrl-C that lands **before the run starts** — while the server is still being
   asked whether it is there — is the offline refusal instead: `cannot send — server offline
-  (<endpoint>): context canceled`, exit `2`, the closing frame written and nothing sent. A
+  (<endpoint>): …`, its suffix the discovery error verbatim and so ending in `context canceled`,
+  exit `2`, the closing frame written and nothing sent. A
   **second** interrupt is taken literally — one stderr line, `apogee headless: second
   interrupt — exiting without waiting for the run`, and the process ends with exit `1` and **no
   `run_finished`**. It is the escape hatch for a stream nobody is draining, and the one path on

@@ -23,19 +23,26 @@ overrides](#environment-overrides).
 That file is also readable and editable from inside apogee:
 [`/settings`](commands.md#the-settings-screen--settings) lists every setting with the value this
 run resolved for it, and writes a committed edit back as a **single key**, comments and
-layout preserved. Apogee writes that file in exactly three places and nowhere else: a
-committed edit you asked for, the `server:` line a `/server` switch records for your
-next start, and the one-time migration of a config still written in the retired
-schema — which copies the file aside first and says so on startup. "Your edits are
-never overwritten" stands: nothing is rewritten at upgrade, and no line you wrote is
-touched at any other time.
+layout preserved. Apogee writes that file only on an act of your own, and, the migration
+aside, each such write is a single key: a committed `/settings` edit; the `server:` line a
+`/server` switch records for your next start, and the `sub-agents-server:` line a
+`/sub-agents-server` pick records the same way; the `model:` — or, on a launcher-fronted
+entry, the `launch-profile:` — a `/model` pick writes into that entry when `remember-model:`
+is on; the `ui.task-list-open` flip a click on a task-list card records; the consented move
+of a `servers:` entry's retired `sub-agents: true` flag onto `sub-agents-server:`; and the
+one-time migration of a config still written in the retired schema — which copies the file
+aside first and says so on startup. "Your edits are never overwritten" stands: nothing is
+rewritten at upgrade, and no line you wrote is touched at any other time.
 
 **And that file is watched.** While apogee runs it polls `~/.apogee/config.yaml`, and a save
 applies itself to the session you are in — whoever wrote it: the `/settings` pane's `⏎` jump, a
 GUI editor you left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal.
-No key waits for a restart and nothing has to be re-entered in the pane; every key that came back
+Nothing has to be re-entered in the pane: every key that came back
 different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
-for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. An
+for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Four
+keys are the exception to "applied now", because they are read only while a session is being wired:
+`ui.inspector`, `undo-snapshots`, `sessions.max-age` and `sessions.max-count` take the save and honour
+it at the next start, as their `/settings` rows say. An
 edit reaches the runs this session raises, too: a `/schedule` firing composes itself from the
 settings the session is running at the moment it fires, so a tool you disabled or a host you denied
 is disabled and denied for it as well. A file that does not parse changes nothing — the session
@@ -114,8 +121,9 @@ key is the one top-level boolean beside the seven Floor keys that an untouched c
 and — unlike the Floor — `--bypass` turns it off together with every other advise reaction. It is
 file-only (no flag, no environment variable) but live: the `/settings` row switches it for the
 running session. It is silent until a context window is known: with
-no window the percentage would be a guess, and apogee never fires on a guess. The line is dropped
-from a session record on resume, so a reopened session is not told it was at 90 percent an hour ago.
+no window the percentage would be a guess, and apogee never fires on a guess. The line is
+never written into a session record — an advice fence is stripped before a snapshot is taken — so a
+reopened session is not told it was at 90 percent an hour ago.
 
 ### step-budget-notice
 
@@ -203,8 +211,9 @@ re-list the ones you still want under `enabled:`.
 
 ## Keys apogee migrates for you
 
-Three keys earlier releases carried have left the schema, and none of them is a reason a saved file
-stops loading. apogee **rewrites the file for you** on the start-up that first reads it: it takes a
+Five keys earlier releases carried have left the schema. Three of them apogee handles for you, and
+none of those three is a reason a saved file stops loading: apogee **rewrites the file for you** on
+the start-up that first reads it — it takes a
 dated backup beside `config.yaml`, applies every fold and strip in one edit, and prints one line
 saying what it did and where the backup is. Your other keys, your comments and your layout are left
 exactly where they were.
@@ -226,11 +235,23 @@ exactly where they were.
   cleared for your model. With the catalogue gone there is no set left for it to name, and there is
   no successor key to point at.
 
+The other two are **refused at startup** rather than rewritten, because what replaces them is a
+shape you have to choose, not a fold apogee can make for you. The global **`model-profile:`** block
+gave way to [`model-profiles:`](#model-profiles--model-profiles), where a profile is keyed by a
+pattern the model's name contains: the refusal names the file and the line, and prints the block
+you had back under a pattern for you to paste — or to delete outright, if the built-in table
+already covers that model. The top-level **`llama-launcher:`** key moved onto the `servers:` entry
+it fronts, and its refusal is described under
+[Local servers](#local-servers--llama-launcher). Both run before the fold above reads anything, so
+a file carrying either is refused with nothing written — no rewrite, and no backup either.
+
 A whole rewritten file is verified before it replaces the original — the folded entries must fire
 exactly what the old block fired, and no other setting may have moved — so a fold apogee cannot make
 safely leaves your file untouched and says so instead. A **live** re-read never rewrites: the fold
-belongs to start-up, so an editor left open on a file that still carries a retired key is told to
-restart rather than having the file changed under it.
+belongs to start-up, so an editor left open on a file that still carries `hooks:` is told to
+restart rather than having the file changed under it, and the session keeps firing the list it
+already had; a live re-read of a file that still carries `mechanisms:` or `validated-sets:` is
+simply left alone, since neither key is read by anything.
 
 ## Keys apogee does not recognise
 
@@ -363,7 +384,9 @@ provider, so web search works out of the box with no API key and nothing to run.
 (or `none`, or `disabled`; case does not matter) turns the tool into a graceful refusal without
 taking it off the menu: the model still sees `web_search`, and a call answers "web search is
 disabled on this host (web-search-endpoint: off); web_search is unavailable." Anything else is
-your own search backend, which receives the query as the `q` URL parameter — an HTML response is
+your own search backend, which receives the query as the `q` URL parameter (a value whose host is
+`html.duckduckgo.com` is the built-in provider under your own spelling, and is asked the way that
+provider is asked: the query POSTed as a form, not carried as a parameter) — an HTML response is
 cleaned into title/url/snippet results, a JSON or text one passes through unchanged. A
 scheme-less value heals to `https://`, and the only value refused at startup is text that no URL
 parse can make sense of even after that.
@@ -892,7 +915,8 @@ error naming the entry and the key. See
 [ADR 0060](../adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md).
 
 A model that thinks for a long time can also go silent. `ui.stall-after` — a duration
-written the way Go spells one (`90s`, `2m`), default `90s`, `0` turns it off — sets how
+written the way Go spells one (`90s`, `2m`), default `90s` though the starter file apogee seeds
+on first run sets it to `120s`, `0` turns it off — sets how
 long the engine may say nothing before the status line adds a warning-tinted `quiet`
 qualifier to its running phrase: `thinking · quiet · 12m`. It reports a fact, not a
 verdict — nothing has arrived in that long — and any engine event clears it.
@@ -930,10 +954,15 @@ A `model-profiles:` key is a **pattern, not a name**: it matches when the model 
 *contains* it, ignoring case, which is what survives quants, provider prefixes and `:tag` suffixes —
 `minimax-m3` covers `minimax/minimax-m3:exacto` and `minimax-m3-Q4_K_M` alike. Apogee ships a
 built-in table of known families and announces a built-in match at startup and at every model
-switch; your own entries beat every built-in and apply silently, because you wrote them. A matching
+switch — `model profile: <pattern> (built-in)`; your own entries beat every built-in, and one that
+leaves the table nothing to say applies silently, because you wrote it. Where several patterns
+match, the longest wins, and equal lengths are broken alphabetically, so the outcome never depends
+on the order the entries are written in. A matching
 entry is read **axis by axis**, not as a whole: an axis you spell is the last word on it, an axis
 you leave out falls through to the built-in table and then to the default — native tool calls,
-nothing stripped. The `thinking:` block goes one step further and resolves its `style:` and its
+nothing stripped — and an entry of yours that leaves an axis to the built-in table still earns the
+notice, since part of the shape in force is one you did not write. The `thinking:` block goes one
+step further and resolves its `style:` and its
 `effort:` independently, so an entry spelling only `effort:` keeps whatever channel style the
 built-in carries. Turning a built-in axis off is therefore a matter of *spelling* its off value —
 `tool-call-format: native`, a thinking `style: none` — rather than leaving the key out. Every axis
@@ -964,8 +993,9 @@ out of what you are shown and keep it as reasoning in the history. `none` — th
 there is no inline channel and content passes through untouched, which is the right answer when the
 server already splits reasoning into a wire field of its own. `delimited` means the model brackets
 its reasoning with a literal token pair, and needs BOTH `start:` and `end:` set to the tokens that
-model actually emits — they vary per build, not just per family, and a profile missing either half
-strips nothing, so the thinking lands in the visible reply. `harmony` is the gpt-oss channel form,
+model actually emits — they vary per build, not just per family — and a profile missing either half
+is a startup error naming the missing key, because a pair with one half would strip nothing and the
+thinking would land in the visible reply. `harmony` is the gpt-oss channel form,
 which needs no tokens at all. `style:` is orthogonal to the `effort:` key beside it, described above:
 `style:` only says how reasoning *arrives*, `effort:` says how much of it to ask for.
 
@@ -1200,7 +1230,8 @@ list does not name (an `--endpoint` URL, a llama-launcher profile) has no name t
 record and writes nothing.
 
 **And it can remember the model too.** `remember-model:` (a file-only key, off by
-default) set to `true` makes an explicit `/model` pick write itself into that entry's
+default, though the starter file apogee seeds on first run switches it on) set to `true`
+makes an explicit `/model` pick write itself into that entry's
 `model:` key, so your next session on that server starts bound to it. A
 launcher-fronted entry records the Launch profile name in `launch-profile:`
 instead, and an interactive session that starts there loads that profile again —
@@ -1354,16 +1385,21 @@ manager that already holds it: the line is split on spaces and quotes and run **
 shell** — pipes, redirections and `$VARIABLES` need a wrapper script of your own — and
 the command's stdout, trailing whitespace trimmed, is the key. Its **program is resolved
 before it runs and refused if it lands inside the workspace**, the way apogee fences every
-program it executes: the config file is yours, the workspace is the model's, and a key
+program it executes (a run with no workspace to measure against — `apogee probe model`, and
+the daemon itself — refuses nothing): the config file is yours, the workspace is the model's, and a key
 command sitting in the latter would hand the model the credential the key source exists to
 protect. So a wrapper script of your own belongs outside the workspace, or is named by an
 absolute path. `api-key-env:` names an
 environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY`), read
-from the environment apogee itself was started in — and dropped from the environment the
-`terminal`, `python_exec`, `run_tests` and `console_open` tools hand a subprocess, so a command
-the model chose cannot read that key back out. Both resolve the first time this session actually
-needs that server's key — never at startup for entries you do not use — and the answer is
-remembered for the rest of the session. A non-zero exit, a 60-second timeout, empty output,
+from the environment apogee itself was started in — and dropped from the environment every
+tool subprocess and every reaction command is handed, so a command the model chose cannot
+read that key back out. That scrub is one list, whichever server the session is on: the
+union of every entry's `api-key-env:` name, every webhook reaction's `headers-env:` names and
+`APOGEE_API_KEY`. A stdio MCP server is the exception — it inherits apogee's full environment
+unless its entry sets `env-allowlist:`. Both resolve the first time this session actually
+needs that server's key — never at startup for entries you do not use — and a key that
+resolved is remembered for the rest of the session, while a failure is not: a locked keychain
+or a dismissed prompt is asked again at the next use. A non-zero exit, a 60-second timeout, empty output,
 or an unset or empty variable is an **error** naming the entry, never a silent keyless
 request: "no key" is spelled by leaving all three keys out.
 
@@ -1441,7 +1477,8 @@ looks like: `/server workstation`, then `/model`.
 
 Absent (the default) means **no launcher for that server**: `/model` simply lists what
 it advertises, and `/unload-model` and `/stop-server` answer
-`llama-launcher not configured`. `auto` reads the launcher's own default config under
+`llama-launcher not configured — set llama-launcher: in config.yaml or install the launcher`.
+`auto` reads the launcher's own default config under
 your home directory — `~/.config/llama-launcher/config.yaml` — and a path reads that
 config instead (`~` expands). Nothing is checked at startup — a config that is not there
 is reported the first time a command reaches for it, naming the path, never as a refusal
@@ -1545,8 +1582,7 @@ default-prompt install has that wording from the next binary on; a `system-promp
 of your own is yours to qualify. Ahead of them is deliberate: nothing a repository ships
 can then precede the host's own facts. That block is not part of `system-prompt-text`, cannot be edited out
 of it, and is not sent in the one posture where no system message goes out at all —
-`use-default-prompt: false` (or an explicitly empty prompt of your own) together with
-no context files.
+`use-default-prompt: false` together with no context files.
 
 A sub-agent additionally carries a short **delegate report block**, right after the
 orientation block and still ahead of any workspace context files. It tells the child
@@ -1685,8 +1721,9 @@ among them — a file as it was at a commit, branch or tag, rendered the way `re
 it (the same header, line-range and `locate` arguments, and the same 400-line default cap); `git_log`
 takes an optional `path` to list only the commits that touched it, and `git_branch`'s list marks
 every remote-tracking branch ` (remote)`. What the prompts and the fence
-above are for is the rest — `terminal`, `python_exec`, `run_tests`, `diagnostics`, the
-Console four, and the writing git tools `git_branch` and `git_commit`.
+above are for is the rest — `terminal`, `python_exec`, `run_tests`, `diagnostics`, `console_open`
+and `console_send` (a Console's read and close are read-only and ask nobody), and the writing git
+tools `git_branch` and `git_commit`.
 
 **The session scratch directory is writable on every rung, Plan included.** Each session
 gets its own `~/.apogee/scratch/<session-id>/` — created private to you, named to the
@@ -1704,11 +1741,13 @@ there is one it can read and show you (a document outside the workspace is opene
 a remote session the transcript shows its path only, because the doc server serves the
 workspace alone). Nothing under `~/.apogee` reads or loads what lands
 there, and a program planted in it is refused by the same exec fence that refuses one
-planted in the workspace.
+planted in the workspace. It is also the one path under `~/.apogee` a terminal command may
+name without tripping the [dangerous-action guard](#the-dangerous-action-guard)'s forced look.
 
 **A confined command's temp and cache files land in the scratch directory too.** `/tmp` and
 `~/.cache` are outside the fence, so on every confined run — `terminal`, `python_exec`,
-`run_tests`, `diagnostics` and the Console four — apogee sets `TMPDIR`, `TMP`, `TEMP` and
+`run_tests`, `diagnostics` and `console_open`, the one Console call that starts a process —
+apogee sets `TMPDIR`, `TMP`, `TEMP` and
 `GOTMPDIR` to `<scratch>/tmp`, `GOCACHE` to `<scratch>/go-build` and `XDG_CACHE_HOME` to
 `<scratch>/cache`, creating the directories first; `gh`, `pip` and everything else that
 follows `XDG_CACHE_HOME` lands there with them. The caches are cold per session and are
@@ -1734,8 +1773,11 @@ things worth knowing before you use it: network egress is **not** claimed on Win
 (the network is open there exactly as elsewhere, and a box that asks for network *deny*
 is refused rather than silently ignored), and the marking pass costs roughly a
 millisecond per file or directory — with a large `.git` or `node_modules` in the
-workspace, the first confined command of a session visibly pauses while it runs
-(measured: ~5 s to mark a 5,000-object tree, ~2 s to revert it), after which every later
+workspace it is a visible pause (measured: ~5 s to mark a 5,000-object tree, ~2 s to
+revert it). A session that starts in Auto with confinement on pays it at startup, behind a
+progress notice printed before the screen opens, so its first confined command finds the
+walk already done; a session that moves onto Auto later, or a writable root added
+mid-session, pays it at the first confined command instead — and either way every later
 command in that session pays nothing. And one limit: what the Windows fence covers is
 workspace-scoped writes. A low-integrity process cannot write to an unmarked directory
 at all, so a confined `go build`, `pip install` or `npm ci` fails when it reaches its
@@ -1795,7 +1837,8 @@ stricter than the mode would have made it, never looser. It has two tiers.
 prompt to say yes on: an `rm -rf` aimed at an absolute path — any absolute path, the
 workspace's own directory included; a relative target such as `./build` is allowed — a
 fork bomb, a write to `~/.ssh`, to a credential or persistence file, or to a repository's
-`.git/hooks`. The model gets back an error naming why, and — where the matched rule knows a
+git control plane — `.git/hooks`, `.git/config` or `.git/modules`. The model gets back an error
+naming why, and — where the matched rule knows a
 sanctioned route — where to go instead: the `rm -rf` refusal, for one, says to re-issue the
 path relative to the workspace or delete through the native tools. The git control-plane
 rule reads a terminal command for what it *writes*: `cat .git/config` or `ls -la .git/hooks`
@@ -1807,7 +1850,11 @@ These are the idioms that are usually legitimate and occasionally catastrophic: 
 sh`, `sudo`, and a terminal command naming apogee's own `~/.apogee` control plane — where a
 mere read trips the rule as readily as a write, because the terminal declares no read sources for
 the guard to spare (the hint it carries names `list_dir`, `read_file`, `grep`, `find_files` and
-`copy_file` as the route that does not ask).
+`copy_file` as the route that does not ask). The one path under `~/.apogee` that never trips it
+is the session's own scratch directory, `~/.apogee/scratch/<session-id>/`: its spellings are
+masked out of the command before any rule runs, because the fence already declares that
+directory writable and a look there would answer nothing — another session's scratch
+directory, and every other path under `~/.apogee`, keep the look.
 A forced prompt is a speed-bump, not a block — you can say yes to it. But it carries no
 cache key, so **it offers no "Always allow this session" row** — the pane closes on
 `a forced look is asked every time` in its place: the yes authorises that one call, and
@@ -1887,7 +1934,9 @@ you have no command that edits one, and nothing infers a checklist from what you
 that never calls the tool runs exactly the agent it ran before. One call carries the **whole** list
 and replaces what was there — the model sends the complete set of tasks with each one marked done
 or not — so ticking a task off is resending the list with that task done, and clearing it is
-sending an empty one. There are no task ids to get wrong. The current list is what you see in the
+sending an empty one. There are no task ids to get wrong. There are two limits: a list holds at
+most **40** tasks, and one task's text runs to at most **200** characters; a call over either
+comes back as an error naming the limit, and the list apogee holds is unchanged. The current list is what you see in the
 transcript's `Task List` card, rendered `[✔]` for a finished row and `[ ]` for a row still open. The
 card's header counts them, `✦ Task List (done/total)`, and the card folds to that header alone:
 click it, or press `enter` with the block cursor on it, and every task-list card in the session

@@ -2,9 +2,13 @@
 
 Every conversation is a session, saved continuously: after each completed turn the
 session is written to `~/.apogee/sessions/` (asynchronously, best-effort), so a
-crash or `kill -9` costs at most the turn in flight. A turn that hands work to a
+crash or `kill -9` costs at most the turn in flight. A closing save also runs when you
+quit — `⌃c` twice mid-answer included, which waits for the worker to unwind and then
+writes what it had — and when `/clear` or `/new` closes the session into history. A turn that hands work to a
 sub-agent is saved as that work runs — a **progress save** fires when the
-delegation is issued and each time the sub-agent finishes a tool — so a long
+delegation is issued, each time the sub-agent finishes a tool, when a sub-agent finishes
+(unless its bracket was cancelled and rolled back, which lands nothing to save), and when
+a delegation's generated name arrives — so a long
 delegation is on disk while it happens, not only once its turn ends. A saved
 session stores the engine's conversation **and** the TUI scrollback, so
 resuming repaints the transcript you actually saw — tool cards included — and
@@ -12,14 +16,19 @@ relights the context gauge, instead of opening an empty view over a model that
 still remembers.
 
 - `apogee --continue` resumes this workspace's most recent session; `--resume`
-  takes a session id (from `/sessions`) or a file path.
+  takes a session id (from `/sessions`) or a file path. The two are mutually exclusive —
+  naming both is a flag error — and `--continue` in a workspace with no saved session
+  refuses, naming the workspace and pointing at `--resume <id>`. Resuming also re-opens
+  the session's snapshot store, so
+  [`/undo`](commands.md#undoing-the-agents-file-writes--undo-and-redo) still reaches what
+  an earlier process wrote.
 - `/sessions` opens the in-TUI browser (newest first): typing filters the list,
   `⏎` resumes, `^r` renames inline, `^d` deletes after a confirm, `^a` toggles
   between this workspace and all workspaces. The verbs are chords precisely so
   the letters are free to type with — every selector pop-up filters as you type.
   A new session names itself: on its first prompt apogee asks the
   model, in a single call off to the side of the conversation, for a short title
-  (`auto-title:`, a file-only key, on by default). With that off — or when the
+  (`auto-title:`, a key with no flag and no environment variable, on by default). With that off — or when the
   call fails or answers with nothing usable — the title falls back to the first
   user message, or to a dated `Session <date>` when that message is empty or
   opens a code fence. A bare `/rename` later re-reads the session — your opening
