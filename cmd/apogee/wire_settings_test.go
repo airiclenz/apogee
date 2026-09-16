@@ -4041,3 +4041,55 @@ func TestSettingsApplierReloadsRefuseAnUnparseableFile(t *testing.T) {
 		t.Errorf("readmitMCP note = %q, want %q", got, wantNote)
 	}
 }
+
+// A live apply reads the pane's value through the registry row's Set — the ONE admission the writer
+// judged the same keystrokes by — onto a scratch Options, so what is refused is refused in the
+// writer's own sentence (the key's validator where it has one, the kind's where the kind is the whole
+// contract), what is accepted lands typed on the field the row reads, an empty value lands the row's
+// own Default, and a key with no spelled inverse is the dispatcher's refusal rather than a reading
+// of its own.
+func TestLandSettingIsTheRowsOwnReading(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name, key, value string
+		want             func(config.Options) bool
+		wantErr          string
+	}{
+		{name: "a bool lands typed", key: "auto-compact", value: " false ",
+			want: func(o config.Options) bool { return !o.AutoCompact }},
+		{name: "a count lands typed", key: "delegate-max-steps", value: "80",
+			want: func(o config.Options) bool { return o.DelegateMaxSteps == 80 }},
+		{name: "a list lands typed", key: "tools.disabled", value: "grep, view_diff",
+			want: func(o config.Options) bool { return slices.Equal(o.ToolsDisabled, []string{"grep", "view_diff"}) }},
+		{name: "a block field lands on its block", key: "present.port", value: "8080",
+			want: func(o config.Options) bool { return o.Present.Port == 8080 }},
+		{name: "an empty value lands the row's Default", key: "sub-agents-choice", value: "",
+			want: func(o config.Options) bool { return o.SubAgentsChoice == config.SubAgentsChoiceFixed }},
+		{name: "a bool that is not one is the kind's sentence", key: "bypass", value: "yes please",
+			wantErr: `bypass is true or false, not "yes please"`},
+		{name: "a negative count is the validator's sentence", key: "context-window", value: "-1",
+			wantErr: `invalid context-window "-1"`},
+		{name: "a row with no spelled inverse is the dispatcher's refusal", key: "context-files.enable", value: "true",
+			wantErr: "context-files.enable cannot be applied to the running session"},
+		{name: "a key that is not a setting is the dispatcher's refusal", key: "nonsense", value: "1",
+			wantErr: "nonsense cannot be applied to the running session"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			landed, err := landSetting(tt.key, tt.value)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("landSetting(%s, %q): err = %v, want it to contain %q", tt.key, tt.value, err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("landSetting(%s, %q): %v", tt.key, tt.value, err)
+			}
+			if !tt.want(landed) {
+				t.Errorf("landSetting(%s, %q) landed %+v; the row's field did not take the value", tt.key, tt.value, landed)
+			}
+		})
+	}
+}

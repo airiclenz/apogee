@@ -496,7 +496,11 @@ re-read.
 
 **Commit:** `refactor(config): the file pass refuses through the registry rows`
 
-## 14. Live applies land through `row.Set`
+## 14. Live applies land through `row.Set` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `mode` stays on `domain.ParseMode` (the guard lists it hand-written: an engine push of a domain.Mode, not an Options edit), so 22 of the 23 counted sites land through `row.Set`; `context-files.enable` has no row `Set` (item 12 left it nil — it owns no Options field), so its bool is read inline with `strconv.ParseBool` in the kind's own sentence rather than through a surviving `settingBool`.
+NOTES (2026-09-16): `landSetting` lands the row's `Default` for an empty value — the dispatcher doc's one empty-value rule made mechanical; needed because a row's kind (enum, bool, int) refuses "" where the retired parsers resolved it (`sub-agents-choice` "" = fixed, held by TestApplySettingSubAgentsChoiceSwapsTheSeatGate's reset case).
+NOTES (2026-09-16): int refusals now carry the row's sentence (validator's `invalid context-window "-1": …` / kind's `is a whole number`) instead of settingInt's `is a count of 0 or more` — the items 11/12/14 one-refusal-sentence decision; no test pinned the old sentence. `TestLandSettingIsTheRowsOwnReading` added.
 
 **What.** Recast at the regression check (2026-09-16). Depends on items 5 and 12.
 `cmd/apogee/wire_settings.go` and `cmd/apogee/wire_present.go`: the 23 re-parse sites, counted as

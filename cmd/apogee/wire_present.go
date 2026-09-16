@@ -119,8 +119,8 @@ func newLivePresentation(p config.PresentSettings, workspace, goos string, env f
 }
 
 // apply moves one `present.` key and re-installs the ladder built from the block it leaves behind.
-// The value is the one the file now spells; it is parsed here rather than trusted, exactly as the
-// other dispatcher entries parse theirs.
+// The value is the one the file now spells; it is landed through the key's registry row rather
+// than trusted (landSetting), exactly as the other dispatcher entries land theirs.
 func (l *livePresentation) apply(key, value string) error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -128,19 +128,19 @@ func (l *livePresentation) apply(key, value string) error {
 	next := l.settings
 	switch key {
 	case "present.auto-open":
-		on, err := settingBool(key, value)
+		landed, err := landSetting(key, value)
 		if err != nil {
 			return err
 		}
-		next.AutoOpen = on
+		next.AutoOpen = landed.Present.AutoOpen
 	case "present.command":
 		next.Command = value
 	case "present.port":
-		port, err := settingInt(key, value)
+		landed, err := landSetting(key, value)
 		if err != nil {
 			return err
 		}
-		next.Port = port
+		next.Port = landed.Present.Port
 	case "present.host":
 		next.Host = value
 	default:

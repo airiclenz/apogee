@@ -56,6 +56,15 @@ import (
 // value. They are what the live-edited keys are resolved through at a rebind, and they move with the
 // session (followEntry, observe) rather than with the file.
 //
+// Every key whose apply IS an Options edit reads its value through the registry row's Set
+// (landSetting): the file-spelled value the pane handed it is landed on a scratch Options under the
+// same admission the writer judged it by, the seam is driven off the landed value, and now is
+// written once the seam has returned. The HAND-WRITTEN applies are the closed set of keys whose
+// apply is not an Options edit: `mode` (an engine push of a domain.Mode, which the engine holds),
+// `use-project-skills` and `use-shipped-skills` (the seam is the Provider's skills.Sources),
+// `/confine` (bypasses this holder altogether — ADR 0037 2026-08-25 note), `context-files.enable`
+// (owns no Options field; the pair below is its home) and the latches, which no key spells.
+//
 // The mutex is real work rather than ceremony. The writes come from the Update goroutine — the pane's
 // keypress, through the live-apply dispatcher below — while a scheduled Firing reads them from the
 // Scheduler's own goroutine (scheduleWiring.fire), so the fields are genuinely shared. It is an
@@ -917,6 +926,12 @@ type settingsApplier struct {
 // as the empty list the guard tightens nothing from, the `system-prompt-` pair re-read a file that no
 // longer carries the key, and `editor` is in force from the write itself.
 // TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault holds this side of it.
+//
+// The READING of a value is one per key, and it is the writer's: an apply that takes the value at
+// all lands it through the registry row's Set (landSetting), so a value the pane refused to write
+// and a value the apply refuses are refused by one admission in one sentence. The applies that
+// never read the value — the structured keys re-read the file — and the hand-written ones the
+// holder doc closes are the only ones that do not.
 func applySettingFor(a settingsApplier) func(key, value string) (string, error) {
 	return func(key, value string) (string, error) {
 		// A member this Driver did not compose is a legitimate configuration rather than a bug (ADR
@@ -1008,12 +1023,13 @@ var settingsTable = []settingsEntry{
 		reaches: reachesTheSwapDoor,
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// An empty value is the pane's RESET, and it means what an absent key means: `fixed`, the
-			// seat the `sub-agents-server:` key picks on its own. The parse answers that, so no branch
-			// here has to know the default a second time.
-			choice, err := config.ParseSubAgentsChoice(value)
+			// seat the `sub-agents-server:` key picks on its own — the row's own Default, which is what
+			// landSetting lands for it, so no branch here has to know the default a second time.
+			landed, err := landSetting(key, value)
 			if err != nil {
 				return "", err
 			}
+			choice := landed.SubAgentsChoice
 			if err := a.tools.setSeatChoice(choice == config.SubAgentsChoiceModel, a.engine); err != nil {
 				return "", err
 			}
@@ -1028,6 +1044,11 @@ var settingsTable = []settingsEntry{
 		key:     "mode",
 		reaches: reachesTheEngine,
 		apply: func(a settingsApplier, key, value string) (string, error) {
+			// Hand-written rather than landed through the row (landSetting): the apply is an engine
+			// push of a domain.Mode, not an Options edit — the row's Set lands the file's word onto
+			// the string field, and the ladder's own parse is what turns that word into the mode the
+			// seam takes. The overlay is not written either: the engine holds the mode, and a Firing
+			// composes its own from the schedule (ADR 0037 2026-08-25 note, with `/confine`).
 			mode, err := domain.ParseMode(value)
 			if err != nil {
 				return "", err
@@ -1063,9 +1084,12 @@ var settingsTable = []settingsEntry{
 		key:     "context-files.enable",
 		reaches: reachesTheEngineAndTheHolder,
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			on, err := settingBool(key, value)
+			// Hand-written rather than landed through the row: the switch owns no Options field (its
+			// registry row has no Set — the block resolves to ONE list, and the pair the pane edits is
+			// held beside the overlay), so the bool is read here, in the kind's own sentence.
+			on, err := strconv.ParseBool(strings.TrimSpace(value))
 			if err != nil {
-				return "", err
+				return "", fmt.Errorf("apogee: %s is true or false, not %q", key, value)
 			}
 			// The names the session holds NOW: this run's resolution until a names edit replaced them.
 			// A block that STARTED off resolved to no names at all (the two spellings of "off" collapse
@@ -1116,9 +1140,13 @@ var settingsTable = []settingsEntry{
 		apply: func(a settingsApplier, key, value string) (string, error) {
 			// The roster reaches the session as a whole tool SET rather than as a value on a tool, so
 			// this is the swap door and not a re-point (setDisabled). The value arrives as the FILE
-			// spells it and is read back by the same parse the writer rendered it with, so the set the
-			// session runs and the line the file carries cannot be two readings of one edit.
-			names := config.ParseSettingList(value)
+			// spells it and is landed through the row the writer rendered it by (landSetting), so the
+			// set the session runs and the line the file carries cannot be two readings of one edit.
+			landed, err := landSetting(key, value)
+			if err != nil {
+				return "", err
+			}
+			names := landed.ToolsDisabled
 			if err := a.tools.setDisabled(names, a.engine); err != nil {
 				return "", err
 			}
@@ -1145,8 +1173,8 @@ var settingsTable = []settingsEntry{
 		key:     "use-project-skills",
 		reaches: func(a settingsApplier) bool { return a.skills != nil },
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			return applySkillSourceGate(a, key, value, func(src *skills.Sources, on bool) {
-				src.UseProjectSkills = on
+			return applySkillSourceGate(a, key, value, func(src *skills.Sources, landed config.Options) {
+				src.UseProjectSkills = landed.UseProjectSkills
 			})
 		},
 	},
@@ -1154,8 +1182,8 @@ var settingsTable = []settingsEntry{
 		key:     "use-shipped-skills",
 		reaches: func(a settingsApplier) bool { return a.skills != nil },
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			return applySkillSourceGate(a, key, value, func(src *skills.Sources, on bool) {
-				src.UseShippedSkills = on
+			return applySkillSourceGate(a, key, value, func(src *skills.Sources, landed config.Options) {
+				src.UseShippedSkills = landed.UseShippedSkills
 			})
 		},
 	},
@@ -1163,15 +1191,15 @@ var settingsTable = []settingsEntry{
 		key:     "auto-compact",
 		reaches: reachesTheEngine,
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			on, err := settingBool(key, value)
+			landed, err := landSetting(key, value)
 			if err != nil {
 				return "", err
 			}
-			a.engine.SetCompactionEnabled(on)
+			a.engine.SetCompactionEnabled(landed.AutoCompact)
 			// Mirrored onto the holder so a Firing raised from this session compacts the way the
 			// session does — the engine holds the toggle, and a Firing builds an engine of its own.
 			if a.live != nil {
-				a.live.update(func(o *config.Options) { o.AutoCompact = on })
+				a.live.update(func(o *config.Options) { o.AutoCompact = landed.AutoCompact })
 			}
 			return "", nil
 		},
@@ -1180,15 +1208,15 @@ var settingsTable = []settingsEntry{
 		key:     "prune-tool-results",
 		reaches: reachesTheEngine,
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			on, err := settingBool(key, value)
+			landed, err := landSetting(key, value)
 			if err != nil {
 				return "", err
 			}
-			a.engine.SetPruneToolResults(on)
+			a.engine.SetPruneToolResults(landed.PruneToolResults)
 			// Mirrored onto the holder for auto-compact's reason above: a Firing raised from this
 			// session prunes the way the session does, off an engine it builds for itself.
 			if a.live != nil {
-				a.live.update(func(o *config.Options) { o.PruneToolResults = on })
+				a.live.update(func(o *config.Options) { o.PruneToolResults = landed.PruneToolResults })
 			}
 			return "", nil
 		},
@@ -1283,7 +1311,7 @@ var settingsTable = []settingsEntry{
 		// engine seam and rides no rebind — the seams it gates read it back out of this holder.
 		reaches: reachesTheHolder,
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			on, err := settingBool(key, value)
+			landed, err := landSetting(key, value)
 			if err != nil {
 				return "", err
 			}
@@ -1292,7 +1320,7 @@ var settingsTable = []settingsEntry{
 			// profile load records — and a decision the next start-up makes. So the holder store is the
 			// whole apply, and the seams that ask (recordModelChoice, recordLaunchProfile,
 			// launcherWiring.restore) read it from there at the moment they have something to record.
-			a.live.update(func(o *config.Options) { o.RememberModel = on })
+			a.live.update(func(o *config.Options) { o.RememberModel = landed.RememberModel })
 			return "", nil
 		},
 	},
@@ -1300,7 +1328,7 @@ var settingsTable = []settingsEntry{
 		key:     "context-window",
 		reaches: settingsApplier.rides,
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			tokens, err := settingInt(key, value)
+			landed, err := landSetting(key, value)
 			if err != nil {
 				return "", err
 			}
@@ -1308,7 +1336,7 @@ var settingsTable = []settingsEntry{
 			// beat reported, so clearing a pin hands the session back to the server rather than to
 			// "unknown". No note — the pin is what the Budget and Compaction measure against from the
 			// moment the rebind commits.
-			a.live.update(func(o *config.Options) { o.ContextWindow = tokens })
+			a.live.update(func(o *config.Options) { o.ContextWindow = landed.ContextWindow })
 			return "", a.rideTheRebind()
 		},
 	},
@@ -1384,14 +1412,14 @@ var settingsTable = []settingsEntry{
 		// off the holder rather than compose a generation out of its own key.
 		reaches: reachesTheEngineAndTheHolder,
 		apply: func(a settingsApplier, key, value string) (string, error) {
-			on, err := settingBool(key, value)
+			landed, err := landSetting(key, value)
 			if err != nil {
 				return "", err
 			}
 			// The floor travels with the session onto the runs it raises, for `auto-compact:`'s
 			// reason: the engine holds it, and a Firing constructs one that nobody pushed it at — so
 			// the holder move and the engine swap are the one call, on applyFloorGuard's terms.
-			return "", a.engine.SetReactions(a.live.setBypass(on))
+			return "", a.engine.SetReactions(a.live.setBypass(landed.Bypass))
 		},
 	},
 	{
@@ -1457,26 +1485,28 @@ func applySystemPromptBlock(a settingsApplier, key, value string) (string, error
 }
 
 // applySkillSourceGate commits one of the two skill-source gates — `use-project-skills` and
-// `use-shipped-skills` — with set naming the field that key owns. Both are booleans over ONE
-// skills.Sources value, so the layering is spelled the way startup spells it (this session's
-// resolved roots) but the SIBLING gate is read back off the Provider rather than recomposed here:
-// the two keys are committed independently, and a literal built from the key in hand alone would
-// zero whichever gate the human is not currently editing.
+// `use-shipped-skills` — with set copying the field that key owns off the landed value onto the
+// Sources. Both are booleans over ONE skills.Sources value, so the layering is spelled the way
+// startup spells it (this session's resolved roots) but the SIBLING gate is read back off the
+// Provider rather than recomposed here: the two keys are committed independently, and a literal
+// built from the key in hand alone would zero whichever gate the human is not currently editing.
 //
-// Re-pointing alone would change nothing anybody sees — the Provider serves the catalogue it has
-// until asked for a fresh one — so the re-scan is part of the same act.
+// The apply is hand-written past the parse — the seam is the Provider's skills.Sources, not an
+// Options field, and the overlay is not written: a Firing composes its own Sources from the same
+// roots (ADR 0037). Re-pointing alone would change nothing anybody sees — the Provider serves the
+// catalogue it has until asked for a fresh one — so the re-scan is part of the same act.
 func applySkillSourceGate(
 	a settingsApplier,
 	key, value string,
-	set func(src *skills.Sources, on bool),
+	set func(src *skills.Sources, landed config.Options),
 ) (string, error) {
-	on, err := settingBool(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	src := a.skills.Sources()
 	src.Home, src.Workspace = a.roots.config, a.roots.workspace
-	set(&src, on)
+	set(&src, landed)
 	a.skills.SetSources(src)
 	// The scan's error is soft and is dropped here for the reason the "/" menu's reload drops it:
 	// Load never signals an unusable catalogue — a malformed skill is skipped and shown in the
@@ -1497,14 +1527,17 @@ func applyURLSafetyHosts(a settingsApplier, key, value string) (string, error) {
 	// and the guard's own SSRF floor still standing under both (it is not reachable from
 	// configuration). An entry that normalises to nothing is dropped where the guard is
 	// built, exactly as it is at startup, so there is nothing to report on the row.
-	hosts := config.ParseSettingList(value)
+	landed, err := landSetting(key, value)
+	if err != nil {
+		return "", err
+	}
 	// The lists the live connections were admitted under, read BEFORE the swap door moves them:
 	// whether the MCP half below has anything to do is a question about the DIFFERENCE the edit
 	// makes, and after the rebuild there is nothing left to compare against.
 	before := a.tools.built()
-	move := a.tools.setAllowHosts
+	hosts, move := landed.URLAllowHosts, a.tools.setAllowHosts
 	if key == "url-safety.deny-hosts" {
-		move = a.tools.setDenyHosts
+		hosts, move = landed.URLDenyHosts, a.tools.setDenyHosts
 	}
 	if err := move(hosts, a.engine); err != nil {
 		return "", err
@@ -1652,12 +1685,12 @@ func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
 // at the next start" carrying the promise — while parsing the value, for applyInspector's reason: a
 // value that is to be recorded has to be read.
 func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error) {
-	steps, err := settingInt(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateMaxSteps = steps })
+		a.live.update(func(o *config.Options) { o.DelegateMaxSteps = landed.DelegateMaxSteps })
 	}
 	return "", nil
 }
@@ -1668,12 +1701,12 @@ func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error)
 // Firings it raises. Success, no note, the Description's "takes effect at the next start" carrying
 // the promise; the value is parsed because a value that is to be recorded has to be read.
 func applyDelegateMaxDepth(a settingsApplier, key, value string) (string, error) {
-	depth, err := settingInt(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateMaxDepth = depth })
+		a.live.update(func(o *config.Options) { o.DelegateMaxDepth = landed.DelegateMaxDepth })
 	}
 	return "", nil
 }
@@ -1684,29 +1717,29 @@ func applyDelegateMaxDepth(a settingsApplier, key, value string) (string, error)
 // of the Firings it raises. Success, no note, the Description's "takes effect at the next start"
 // carrying the promise; the value is parsed because a value that is to be recorded has to be read.
 func applyDelegateMaxTokens(a settingsApplier, key, value string) (string, error) {
-	tokens, err := settingInt(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateMaxTokens = tokens })
+		a.live.update(func(o *config.Options) { o.DelegateMaxTokens = landed.DelegateMaxTokens })
 	}
 	return "", nil
 }
 
-// applyDelegateTimeout is `delegate-timeout:`, on the same footing, read through the ONE parser
-// of the key (config.ParseDelegateTimeout) — the reading startup resolves by and the registry's
-// validator judges by — rather than a second duration parse with an empty-value rule of its
-// own: an empty value is the built-in default there, as it is for an absent key, and `0` is
-// unbounded. A negative one is refused here too rather than trusted from the file, settingInt's
-// reason, in the parser's own words.
-func applyDelegateTimeout(a settingsApplier, _, value string) (string, error) {
-	limit, err := config.ParseDelegateTimeout(value)
+// applyDelegateTimeout is `delegate-timeout:`, on the same footing, landed through the row whose
+// validator and landing are both the ONE parser of the key (config.ParseDelegateTimeout) — the
+// reading startup resolves by — rather than a second duration parse with an empty-value rule of
+// its own: an empty value is the built-in default there, as it is for an absent key, and `0` is
+// unbounded. A negative one is refused there too rather than trusted from the file, in the
+// parser's own words.
+func applyDelegateTimeout(a settingsApplier, key, value string) (string, error) {
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateTimeout = limit })
+		a.live.update(func(o *config.Options) { o.DelegateTimeout = landed.DelegateTimeout })
 	}
 	return "", nil
 }
@@ -1721,12 +1754,12 @@ func applyDelegateTimeout(a settingsApplier, _, value string) (string, error) {
 // effect at the next start" carrying the promise — while parsing the value, for that apply's reason:
 // a value that is to be recorded has to be read.
 func applyWorkingWindow(a settingsApplier, key, value string) (string, error) {
-	tokens, err := settingInt(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.WorkingWindow = tokens })
+		a.live.update(func(o *config.Options) { o.WorkingWindow = landed.WorkingWindow })
 	}
 	return "", nil
 }
@@ -1742,12 +1775,12 @@ func applyWorkingWindow(a settingsApplier, key, value string) (string, error) {
 // Driver that composed none has no Firing to compose either, and refusing the key over its absence
 // would report a failure over a save that did what the key promises.
 func applyInspector(a settingsApplier, key, value string) (string, error) {
-	on, err := settingBool(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.UI.Inspector = on })
+		a.live.update(func(o *config.Options) { o.UI.Inspector = landed.UI.Inspector })
 	}
 	return "", nil
 }
@@ -1763,12 +1796,12 @@ func applyInspector(a settingsApplier, key, value string) (string, error) {
 // that is to be recorded has to be read. The holder is optional in the same sense too: a Driver that
 // composed none has no Firing to compose either.
 func applyUndoSnapshots(a settingsApplier, key, value string) (string, error) {
-	on, err := settingBool(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.UndoSnapshots = on })
+		a.live.update(func(o *config.Options) { o.UndoSnapshots = landed.UndoSnapshots })
 	}
 	return "", nil
 }
@@ -1784,11 +1817,17 @@ func applyUndoSnapshots(a settingsApplier, key, value string) (string, error) {
 // returned rather than discarded because that is the seam's contract, and a row that swallowed a
 // refusal would be a row that lies about an edit the file already carries.
 func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
-	on, err := settingBool(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
-	return "", a.engine.SetReactions(a.live.setFloorGuard(key, on))
+	// The landed value is read back off the scratch through the same key→field map the holder
+	// writes through, so the row and the overlay cannot name two different fields for one key.
+	field, known := floorGuardFields[key]
+	if !known {
+		return "", cannotApply(key)
+	}
+	return "", a.engine.SetReactions(a.live.setFloorGuard(key, *field(&landed)))
 }
 
 // applyContextFillNotice is the `context-fill-notice:` row's apply, on applyFloorGuard's terms: the
@@ -1798,22 +1837,22 @@ func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
 // (Agent.SetReactions), so the notice is armed or disarmed the moment this returns; the refusal it
 // returns cannot arrive here, for applyFloorGuard's reason.
 func applyContextFillNotice(a settingsApplier, key, value string) (string, error) {
-	on, err := settingBool(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
-	return "", a.engine.SetReactions(a.live.setContextFillNotice(on))
+	return "", a.engine.SetReactions(a.live.setContextFillNotice(landed.ContextFillNotice))
 }
 
 // applyStepBudgetNotice is the `step-budget-notice:` row's apply, on applyContextFillNotice's terms
 // exactly: the switch is written onto the holder and the whole generation pushed at the single
 // engine seam, which rebuilds its builtin ladder from the moved switch.
 func applyStepBudgetNotice(a settingsApplier, key, value string) (string, error) {
-	on, err := settingBool(key, value)
+	landed, err := landSetting(key, value)
 	if err != nil {
 		return "", err
 	}
-	return "", a.engine.SetReactions(a.live.setStepBudgetNotice(on))
+	return "", a.engine.SetReactions(a.live.setStepBudgetNotice(landed.StepBudgetNotice))
 }
 
 // reachesTheEngine reports whether the anytime-safe mutator class is composed: the keys that are
@@ -2117,26 +2156,35 @@ func (a settingsApplier) reloadModelProfiles() error {
 	return a.tools.setProfileRoster(profile.Tools, a.engine)
 }
 
-// settingInt reads a whole count the same way (KindInt's own validators do, validateContextWindow),
-// so a value the registry accepted is a value this parses. Negative is refused here too rather than
-// trusted from the file: the pane is not the only thing that can write one.
-func settingInt(key, value string) (int, error) {
-	n, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("apogee: %s is a count of 0 or more, not %q", key, value)
+// landSetting reads one committed value through its registry row's Set — the key's own validate
+// hook, then the kind's parse, then the landing onto the typed field (config.Key.Set, the inverse of
+// the row's Read) — onto a SCRATCH Options, and hands that Options back for the apply to read the
+// field off. It is the one reading a live apply makes of the file-spelled value the pane handed it,
+// and it is the writer's reading: a value refused here is refused in the sentence the settings pane
+// already refuses the same keystrokes with, and a value it accepts is one the row admitted. Nothing
+// the session holds is touched by it — the seam is driven off the scratch value, and the overlay is
+// written by the apply itself only once the seam has returned (recordToolSet's order: a refused
+// swap leaves the overlay on the set the session is still running).
+//
+// An EMPTY value is the pane's reset of a key whose default is unset, and it means one thing for
+// every key (applySettingFor): the file no longer sets the key, so the row's own Default is what is
+// landed — the built-in a fresh start resolves from a file that does not carry it, which is what
+// the registry's defaults pin holds every Default to. A row this package cannot land — no row, or a
+// row with no spelled inverse — is the dispatcher's refusal, since no apply of that key can read a
+// value it has no reading of.
+func landSetting(key, value string) (config.Options, error) {
+	row, ok := config.LookupKey(key)
+	if !ok || row.Set == nil {
+		return config.Options{}, cannotApply(key)
 	}
-	return n, nil
-}
-
-// settingBool reads a bool exactly as the splice writer renders one (renderSettingValue), so the
-// value a key was persisted with is the value it is applied with. The message names the key, because
-// it lands on that key's row.
-func settingBool(key, value string) (bool, error) {
-	on, err := strconv.ParseBool(strings.TrimSpace(value))
-	if err != nil {
-		return false, fmt.Errorf("apogee: %s is true or false, not %q", key, value)
+	if strings.TrimSpace(value) == "" {
+		value = row.Default
 	}
-	return on, nil
+	var landed config.Options
+	if err := row.Set(value, &landed); err != nil {
+		return config.Options{}, err
+	}
+	return landed, nil
 }
 
 // ----------------------------------------------------------------------------
