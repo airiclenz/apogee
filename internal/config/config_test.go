@@ -2213,8 +2213,8 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 		wantPath string
 	}{
 		{name: "delegate-timeout", file: "delegate-timeout: 5x\n", wantErr: `apogee: invalid delegate-timeout "5x": want a length of time like 2h or 30m, or 0 to let a delegation run unbounded`},
-		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: "apogee: invalid cursor-shape: "},
-		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana"`},
+		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: `apogee: invalid cursor-shape: unknown cursor shape "sideways" (known shapes: block, underline, bar)`},
+		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana" — it takes "fixed" (the sub-agents-server: key alone picks where a delegation runs) or "model" (the top-level model may say run_on per delegation)`},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
@@ -2225,8 +2225,8 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 				func(string) string { return "" }, os.ReadFile, noNotify)
 			_, liveErr := LoadFileConfig(FilePath(home), os.ReadFile, noNotify)
 
-			if startupErr == nil || !strings.HasPrefix(startupErr.Error(), tt.wantErr) {
-				t.Fatalf("ApplyConfig error = %v, want it to open with %q", startupErr, tt.wantErr)
+			if startupErr == nil || startupErr.Error() != tt.wantErr {
+				t.Fatalf("ApplyConfig error = %v, want the row's whole sentence %q", startupErr, tt.wantErr)
 			}
 			if liveErr == nil || liveErr.Error() != startupErr.Error() {
 				t.Fatalf("LoadFileConfig error = %v, want the startup sentence %q", liveErr, startupErr)

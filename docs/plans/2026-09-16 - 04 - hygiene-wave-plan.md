@@ -107,7 +107,7 @@ commit: `fix(tui): the grep and find_files transcript slots name a paths-scoped 
 
 commit: `test(cmd/apogee): an empty int value lands the registry row's Default through applySettingFor`
 
-## 5. The file pass pins the full refusal sentence for cursor-shape and sub-agents-choice (apogee-ah5)
+## 5. The file pass pins the full refusal sentence for cursor-shape and sub-agents-choice (apogee-ah5) — ✅ DONE (2026-09-16)
 
 **What:** Test-only, closes apogee-ah5. In `internal/config/config_test.go`, `TestFilePassRefusesThroughTheRows` matches `startupErr` by prefix, so the domain tail of two rows' sentences is unpinned. Replace the two `wantErr` prefixes with the full sentences the emitters produce — cursor-shape (`validateCursorShapeName` → `domain.UnknownCursorShapeError`): `apogee: invalid cursor-shape: unknown cursor shape "sideways" (known shapes: block, underline, bar)`; sub-agents-choice (`ParseSubAgentsChoice`): `apogee: invalid sub-agents-choice: "banana" — it takes "fixed" (the sub-agents-server: key alone picks where a delegation runs) or "model" (the top-level model may say run_on per delegation)` — and change the assertion from `strings.HasPrefix` to equality for every case (the delegate-timeout case already carries its full sentence). Take the sentences from the emitting code, not from this plan, if they differ.
 
