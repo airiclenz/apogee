@@ -118,20 +118,6 @@ func streamReply(content string) iter.Seq[provider.Delta] {
 	}
 }
 
-// recordingResponder is the canned-reply fake that also captures the last request it was handed,
-// as the provider sees it — its remaining users assert the effort dialect and thinking effort
-// straight off provider.Request; the stubllm request log carries Effort too, so they are
-// migration candidates. A pointer receiver so last survives across calls.
-type recordingResponder struct {
-	reply string
-	last  provider.Request
-}
-
-func (r *recordingResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	r.last = req
-	return streamReply(r.reply)
-}
-
 // blockingResponder blocks until ctx is cancelled, then surfaces the cancellation as a
 // terminal stream error — the fake that drives the cancel-mid-stream path. started is
 // closed once the stream is in flight so the test can cancel deterministically (no sleep).

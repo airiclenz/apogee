@@ -143,18 +143,18 @@ func TestTurnRequestCarriesTheOutputCap(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 98304
-	resp := &capturingResponder{reply: "ok"}
+	resp := echoResponder(t, "ok")
 	driveOneStep(t, cfg, resp)
 
-	got := resp.got.Sampling.MaxTokens
-	if got == nil {
-		t.Fatalf("provider request carried a nil MaxTokens — the reply is unbounded again")
+	sent := resp.last().Sampling
+	if sent.MaxTokens == nil {
+		t.Fatalf("the request carried no max_tokens — the reply is unbounded again")
 	}
-	if *got != 19660 {
-		t.Errorf("MaxTokens = %d, want the derived cap 19660", *got)
+	if *sent.MaxTokens != 19660 {
+		t.Errorf("max_tokens = %d, want the derived cap 19660", *sent.MaxTokens)
 	}
-	if resp.got.Sampling.Temperature != nil {
-		t.Errorf("Temperature = %v, want it left nil (the server's own default)", *resp.got.Sampling.Temperature)
+	if sent.Temperature != nil {
+		t.Errorf("temperature = %v, want none on the wire (the server's own default)", *sent.Temperature)
 	}
 }
 
@@ -183,12 +183,12 @@ func TestPreRequestReactionBeatsTheOutputCap(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 98304
 	cfg.Reactions = []domain.Reaction{cappingReaction(77)}
-	resp := &capturingResponder{reply: "ok"}
+	resp := echoResponder(t, "ok")
 	driveOneStep(t, cfg, resp)
 
-	got := resp.got.Sampling.MaxTokens
+	got := resp.last().Sampling.MaxTokens
 	if got == nil || *got != 77 {
-		t.Fatalf("MaxTokens = %v, want the Reaction's 77 rather than the loop's derived cap", got)
+		t.Fatalf("max_tokens = %v, want the Reaction's 77 rather than the loop's derived cap", got)
 	}
 }
 

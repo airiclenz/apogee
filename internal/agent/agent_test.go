@@ -10,6 +10,7 @@ package agent
 
 import (
 	"context"
+	"reflect"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -134,7 +135,7 @@ func TestEffortOverrideSurvivesARebind(t *testing.T) {
 // engine built with a dialect on its Config sends that dialect on its FIRST request, with nobody
 // having rebound anything. That is what makes a Driver that never rebinds — an unattended Firing, a
 // bench arm, any embedder over run.Once — reach the same wire a session reaches (ADR 0031 parity;
-// the 2026-08-25 audit's C-03). It reads the body the fake provider was actually handed, not the
+// the 2026-08-25 audit's C-03). It reads the body the stub upstream was actually sent, not the
 // projection, so nothing between the seed and the Upstream can quietly drop it.
 func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
 	t.Parallel()
@@ -143,7 +144,7 @@ func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
 	cfg.EffortDialect = domain.EffortDialectReasoning
 	cfg.Profile.Thinking.Effort = domain.EffortMedium
 
-	up := &recordingResponder{reply: "done"} // an effort assertion off provider.Request; the stubllm log carries it too
+	up := echoResponder(t, "done")
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -155,19 +156,21 @@ func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	if got := up.last.EffortDialect; got != provider.EffortDialectReasoning {
-		t.Errorf("first request's dialect = %q, want the Config's %q — an unrebound Driver must still speak the server's shape",
-			got, provider.EffortDialectReasoning)
+	// The reasoning dialect puts the profile's level in a top-level `reasoning` object and
+	// nothing in any other dialect's key — an unrebound Driver must still speak the server's shape.
+	if got := up.last().Effort.Reasoning; !reflect.DeepEqual(got, map[string]any{"effort": string(provider.EffortMedium)}) {
+		t.Errorf("first request's reasoning = %v, want the Config's dialect carrying the profile's %q", got, provider.EffortMedium)
 	}
-	if got := up.last.ThinkingEffort; got != provider.EffortMedium {
-		t.Errorf("first request's effort = %q, want the profile's %q", got, provider.EffortMedium)
+	if got := up.last().Effort; got.ChatTemplateKwargs != nil || got.ReasoningEffort != "" {
+		t.Errorf("first request carried another dialect's effort key: %+v", got)
 	}
 
 	// And the seed is TOTAL: a dialect no build understands degrades to the zero — the historical
 	// chat_template_kwargs shape — rather than putting an unknown word on the wire mid-Turn.
 	bogus := baseConfig(&recordingSink{})
 	bogus.EffortDialect = domain.EffortDialect("no-such-dialect")
-	strange := &recordingResponder{reply: "done"}
+	bogus.Profile.Thinking.Effort = domain.EffortMedium
+	strange := echoResponder(t, "done")
 	b, err := newAgent(bogus, strange)
 	if err != nil {
 		t.Fatalf("newAgent with an unknown dialect: %v", err)
@@ -178,9 +181,7 @@ func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
 	if _, err := b.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if got := strange.last.EffortDialect; got != provider.EffortDialectNone {
-		t.Errorf("first request's dialect for an unknown seed = %q, want the zero anchor", got)
-	}
+	assertKwargsEffort(t, "first request for an unknown seed", strange.last(), provider.EffortMedium)
 }
 
 // TestRebindCarriesTheEffortDialectOntoTheRequest is the server half of the effort seam: the

@@ -4,12 +4,11 @@ package agent
 // Outcome{Retry, Inject} post-response decision re-streams the corrected request in the same
 // Turn — the loop appends the superseded assistant message (text + tool calls) and then
 // the role-safe user correction to the in-flight request, request-scoped, never committed
-// to history. These tests drive the seam end-to-end through a request-capturing scripted
-// responder and assert the shape of every provider request the retry sent.
+// to history. These tests drive the seam end-to-end through a scripted upstream and assert
+// the shape of every provider request the retry sent off its request log.
 
 import (
 	"context"
-	"iter"
 	"reflect"
 	"testing"
 
@@ -17,31 +16,6 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
-
-// captureAllResponder yields a pre-scripted stream per call and records EVERY request it was
-// handed as the provider sees it. Its remaining user asserts a request's Sampling straight off
-// provider.Request; the stubllm request log carries Sampling and Effort too, so the user is a
-// migration candidate. Every assertion on the messages sent reads the scripted upstream's log.
-type captureAllResponder struct {
-	scripts [][]provider.Delta
-	got     []provider.Request
-}
-
-func (r *captureAllResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	i := len(r.got)
-	r.got = append(r.got, req)
-	return func(yield func(provider.Delta) bool) {
-		if i >= len(r.scripts) {
-			yield(provider.Delta{Kind: provider.DeltaError, Err: "captureAllResponder: out of scripts"})
-			return
-		}
-		for _, d := range r.scripts[i] {
-			if !yield(d) {
-				return
-			}
-		}
-	}
-}
 
 // scriptedRetryReaction returns a Retry Outcome with injects[n] on its n-th invocation, then lets
 // the response stand — distinct per-attempt texts prove corrections accumulate.

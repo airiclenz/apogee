@@ -365,7 +365,7 @@ func TestRebindCarriesTheReplyCeiling(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 98304
 	cfg.Context.MaxOutputTokens = 2048
-	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("bounded")}} // a Sampling assertion off provider.Request; the stubllm log carries it too
+	responder := scriptedResponder(t, contentTurn("bounded"))
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -385,10 +385,10 @@ func TestRebindCarriesTheReplyCeiling(t *testing.T) {
 		t.Errorf("reply cap = %d after the rebind, want the spec's 8192", got)
 	}
 	runExchange(t, a, "answer within the edited ceiling")
-	if len(responder.got) != 1 {
-		t.Fatalf("responder saw %d requests, want 1", len(responder.got))
+	if got := responder.calls(); got != 1 {
+		t.Fatalf("responder saw %d requests, want 1", got)
 	}
-	sent := responder.got[0].Sampling.MaxTokens
+	sent := responder.last().Sampling.MaxTokens
 	if sent == nil {
 		t.Fatalf("the request carried a nil max_tokens — the rebound ceiling reached the engine only halfway")
 	}

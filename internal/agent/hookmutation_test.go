@@ -3,33 +3,17 @@ package agent
 // P1.5 acceptance: a pre-request Reaction's mutations provably reach the bytes the
 // provider receives — closing the P0.6 gap where reactions fired but their Request
 // mutations were dropped. These tests drive a real Step through the unexported
-// newAgent seam (the provider stays internal) and assert on the captured
-// provider.Request.
+// newAgent seam (the provider stays internal) and assert on the request the scripted
+// upstream logged.
 
 import (
 	"context"
-	"iter"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 )
-
-// capturingResponder records the request it is asked to send, as the provider sees it, then
-// replies with a canned message. Its remaining users assert the request's Sampling straight off
-// provider.Request; the stubllm request log carries Sampling and Effort too, so they are
-// migration candidates. What a Reaction shaped onto the wire is read off the scripted
-// upstream's log.
-type capturingResponder struct {
-	got   provider.Request
-	reply string
-}
-
-func (r *capturingResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	r.got = req
-	return streamReply(r.reply)
-}
 
 const guidanceMarker = "[apogee:guidance]"
 
