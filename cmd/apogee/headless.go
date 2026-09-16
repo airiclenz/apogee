@@ -628,7 +628,9 @@ func contextFilesFrame(report domain.ContextFilesReport) eventjson.ContextFiles 
 	}
 }
 
-// usageFrame restates the Firing's own cumulative token accounting for the frame.
+// usageFrame restates the Firing's own cumulative token accounting for the frame. It is written
+// out field by field on purpose: the frame's key order is golden-pinned (ADR 0075 D4) and differs
+// from domain.Usage's field order, so a struct conversion cannot land here.
 func usageFrame(u run.Usage) eventjson.Usage {
 	return eventjson.Usage{
 		Calls:              u.Calls,
@@ -1286,14 +1288,7 @@ func headlessUsageLines(res run.Result) []string {
 		lines = append(lines, line)
 	}
 	for _, r := range res.SubAgents {
-		usage := run.Usage{
-			Calls:              r.Calls,
-			PromptTokens:       r.PromptTokens,
-			CompletionTokens:   r.CompletionTokens,
-			TotalTokens:        r.TotalTokens,
-			CachedPromptTokens: r.CachedPromptTokens,
-		}
-		if line := headlessUsageLine(usage, headlessSubAgentTarget(r)); line != "" {
+		if line := headlessUsageLine(r.Usage, headlessSubAgentTarget(r)); line != "" {
 			lines = append(lines, line)
 		}
 	}

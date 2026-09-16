@@ -320,8 +320,8 @@ func TestDaemonFireReportsWhatTheRunDid(t *testing.T) {
 		Denied:    2,
 		Usage:     run.Usage{TotalTokens: 30000},
 		SubAgents: []run.SubAgentUsage{
-			{Task: "read the tree", TotalTokens: 8000},
-			{Task: "read the tests", TotalTokens: 3984},
+			{Task: "read the tree", Usage: run.Usage{TotalTokens: 8000}},
+			{Task: "read the tests", Usage: run.Usage{TotalTokens: 3984}},
 		},
 	}
 

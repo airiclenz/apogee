@@ -1451,7 +1451,7 @@ func TestHeadlessOutputRouting(t *testing.T) {
 			SubAgents: []run.SubAgentUsage{
 				{
 					Used: 12000, Limit: 32768, Task: "audit the issues", Name: "repo-scout",
-					Calls: 2, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000,
+					Usage: run.Usage{Calls: 2, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000},
 				},
 			},
 		}}
@@ -1510,7 +1510,7 @@ func TestHeadlessOutputRouting(t *testing.T) {
 			SubAgents: []run.SubAgentUsage{
 				{
 					Used: 12000, Limit: 32768, Task: "audit the issues", Name: "repo-scout",
-					Calls: 2, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000,
+					Usage: run.Usage{Calls: 2, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000},
 				},
 			},
 		}}

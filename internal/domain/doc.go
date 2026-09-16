@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-four files, grouped by which part of the language each one carries.
+// Twenty-five files, grouped by which part of the language each one carries.
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
@@ -39,7 +39,9 @@
 // hands it — the out-of-band naming of a delegation the model left unnamed (ADR 0068).
 // events.go is EventSink and every typed Event the loop emits: tokens and reasoning, messages,
 // tool calls and results, approvals, delegation lifecycle and naming, Reaction firings, usage,
-// audit.
+// audit. usage.go is Usage, the five cumulative counters one agent's accounting travels in on
+// every surface that restates a spend, with the Sum a caller rolls agents up by on purpose and
+// the latest-wins Adopt every reader of a cumulative stream folds by.
 //
 // The loop's working values. hooks.go is the substrate a reaction actually touches — Message and
 // its wire JSON, Role, ToolDef, Budget, the method-only Request / Response / Conversation,

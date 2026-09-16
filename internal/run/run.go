@@ -180,37 +180,19 @@ type Result struct {
 	Err error
 }
 
-// Usage is one agent's CUMULATIVE token accounting for a whole run: every completion that
-// agent accounted for, itself included. A caller READS it off the latest UsageEvent the agent
-// stamped rather than summing the stream (domain.UsageEvent), so the figure is whole even for
-// an observer that joined late — and it counts the maintenance work a Compaction fold does,
-// which no fill reading shows.
+// Usage is one agent's CUMULATIVE token accounting for a whole run — domain.Usage under the
+// name this package's callers already read it by. Its doc carries the semantics; what the
+// Firing adds is WHOSE figure this is: a caller READS it off the latest UsageEvent the agent
+// stamped rather than summing the stream (eventTap.noteUsage folds it with Adopt), so the
+// figure is whole even for an observer that joined late — and it counts the maintenance work
+// a Compaction fold does, which no fill reading shows.
 //
 // It is per-agent as REPORTED: a sub-agent starts from zero and its totals stay its own on
-// Result.SubAgents, so this figure is the top-level agent's alone. The session-wide sum is taken
+// Result.SubAgents, so Result.Usage is the top-level agent's alone. The session-wide sum is taken
 // once, where the record is written: Once folds the delegated runs' counters into the record's
 // Meta.DelegateUsage beside this figure's Meta.Usage, because an unattended record has no Driver
-// to take that sum for it. Every counter is zero when nothing accounted for the agent at all — an
-// Upstream that reports no usage, or a run that never completed a call.
-type Usage struct {
-	// Calls is how many completed upstream calls the agent accounted for, Compaction folds
-	// included.
-	Calls int
-	// PromptTokens is the sum of the prompt (context) tokens those calls were charged.
-	PromptTokens int
-	// CompletionTokens is the sum of the tokens they generated.
-	CompletionTokens int
-	// TotalTokens is the sum of the totals the SERVER reported for them, folded as reported
-	// rather than recomputed from the two parts above, so it stays consistent with the server's
-	// own arithmetic (which may count cached or reasoning tokens the split does not show). A
-	// server that reports the parts and omits the sum therefore leaves this at zero.
-	TotalTokens int
-	// CachedPromptTokens is the share of PromptTokens the Upstream answered from its prefix
-	// cache, where it reports one (0 on every server that omits the breakdown). It is
-	// INFORMATIONAL: it is already counted inside PromptTokens and no bound reads it — a cached
-	// prompt token is still context the model reads, only the bill differs.
-	CachedPromptTokens int
-}
+// to take that sum for it.
+type Usage = domain.Usage
 
 // SubAgentUsage is one finished sub-agent run's context fill and cumulative spend. It exists
 // because both are otherwise unobservable to a Firing's caller: the child fills a window of its
@@ -254,16 +236,13 @@ type SubAgentUsage struct {
 	// and makes it line-safe at its own render seam exactly as it does Task and Name.
 	Model string
 
-	// The five below are this run's CUMULATIVE accounting, on Usage's terms exactly (its doc
-	// carries the semantics): the child's own totals, latest-wins from its own events, counting
-	// only the calls IT made. They are spelled flat here rather than reached through a member
-	// so a caller reads a run's spend beside the fill it produced. Zero throughout when the
-	// child's Upstream reported no usage.
-	Calls              int
-	PromptTokens       int
-	CompletionTokens   int
-	TotalTokens        int
-	CachedPromptTokens int
+	// Usage is this run's CUMULATIVE accounting, on the type's terms exactly (its doc carries
+	// the semantics): the child's own totals, latest-wins from its own events, counting only the
+	// calls IT made. It is EMBEDDED so a caller reads a run's spend beside the fill it produced
+	// (r.TotalTokens) and still lifts the whole figure as one value (r.Usage) for a Sum or a
+	// surface that renders any agent's spend the same way. Zero throughout when the child's
+	// Upstream reported no usage.
+	Usage
 }
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
@@ -445,17 +424,12 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	return res, runErr
 }
 
-// sessionUsage restates a Firing's own accounting in the record's shape. run.Usage and
-// session.Usage carry the same five counters in a DIFFERENT field order, so the conversion is
-// written out field by field on purpose: a positional literal would transpose them silently.
+// sessionUsage restates a Firing's own accounting in the record's shape. domain.Usage is
+// declared with session.Usage's field names and order exactly so this is a struct conversion
+// the compiler checks: a counter that moved or was renamed on either side fails to build here
+// rather than transposing silently.
 func sessionUsage(u Usage) session.Usage {
-	return session.Usage{
-		Calls:              u.Calls,
-		PromptTokens:       u.PromptTokens,
-		CachedPromptTokens: u.CachedPromptTokens,
-		CompletionTokens:   u.CompletionTokens,
-		TotalTokens:        u.TotalTokens,
-	}
+	return session.Usage(u)
 }
 
 // delegateTotals sums the five flat counters of every finished sub-agent run into the single
@@ -466,15 +440,11 @@ func sessionUsage(u Usage) session.Usage {
 // summing — Result.SubAgents still carries it, entry by entry, to a caller that wants it.
 // A Firing that delegated nothing sums to the zero Usage, which omitzero keeps out of the JSON.
 func delegateTotals(runs []SubAgentUsage) session.Usage {
-	var total session.Usage
+	readings := make([]Usage, 0, len(runs))
 	for _, r := range runs {
-		total.Calls += r.Calls
-		total.PromptTokens += r.PromptTokens
-		total.CachedPromptTokens += r.CachedPromptTokens
-		total.CompletionTokens += r.CompletionTokens
-		total.TotalTokens += r.TotalTokens
+		readings = append(readings, r.Usage)
 	}
-	return total
+	return sessionUsage(domain.Sum(readings...))
 }
 
 // knownSkillID is the catalog membership test refs.SkillSpans needs to tell a skill token
@@ -672,7 +642,8 @@ func (t *eventTap) Emit(e domain.Event) {
 //
 // Each reading is taken only when it says something: a zero fill is the absence of a fill and
 // a reading that counted no call is the absence of accounting (a pre-feature event stream, an
-// Upstream that reports no usage), so neither overwrites what an earlier event established.
+// Upstream that reports no usage), so neither overwrites what an earlier event established —
+// the totals' half of that rule is Usage.Adopt.
 func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 	// Prefer the server's total; fall back to prompt+completion when it omits the sum (the same
 	// degrade the interactive gauge applies).
@@ -695,9 +666,7 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 		if countsFill {
 			t.total = fill
 		}
-		if cumulative.Calls > 0 {
-			t.usage = cumulative
-		}
+		t.usage.Adopt(cumulative)
 		return
 	}
 	run := t.open[ev.CallID]
@@ -720,9 +689,7 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 	if ev.ContextWindow > 0 {
 		run.window = ev.ContextWindow
 	}
-	if cumulative.Calls > 0 {
-		run.usage = cumulative
-	}
+	run.usage.Adopt(cumulative)
 }
 
 // openSubAgentRun starts the bracket for the run call is delegating, filed under that call's
@@ -780,16 +747,12 @@ func (t *eventTap) closeSubAgentRun(callID string) {
 		return
 	}
 	t.runs = append(t.runs, SubAgentUsage{
-		Used:               run.used,
-		Limit:              runWindow(run.window, t.window),
-		Task:               run.task,
-		Name:               run.name,
-		Model:              differingModel(run.model, t.model),
-		Calls:              run.usage.Calls,
-		PromptTokens:       run.usage.PromptTokens,
-		CompletionTokens:   run.usage.CompletionTokens,
-		TotalTokens:        run.usage.TotalTokens,
-		CachedPromptTokens: run.usage.CachedPromptTokens,
+		Used:  run.used,
+		Limit: runWindow(run.window, t.window),
+		Task:  run.task,
+		Name:  run.name,
+		Model: differingModel(run.model, t.model),
+		Usage: run.usage,
 	})
 }
 

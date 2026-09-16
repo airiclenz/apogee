@@ -306,7 +306,10 @@ wording assertions updated to the new sentences.
 
 **Commit:** `docs(probe): the report, manual, CONTEXT and ADR 0021 say what a probe record buys today`
 
-## 8. `domain.Usage` — the five counters get a name
+## 8. `domain.Usage` — the five counters get a name — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `cmd/apogee/headless.go`'s "three re-packs become conversions" landed as ONE: `headlessUsageLines` now hands the embedded `r.Usage` through; `usageFrame` stays field-by-field per the regression guard (golden-pinned key order), and `subAgentFrames` maps `eventjson.SubAgentUsage`'s flat ten-field shape, which no struct conversion can produce — its promoted reads compile unchanged.
+NOTES (2026-09-16): test literals that set counters on `SubAgentUsage` were rewritten to `Usage: run.Usage{...}` — go.mod is at go 1.26.3 and a promoted field in a struct literal needs go 1.27 (vet's exact complaint); `wire_session_test.go`'s `session.Usage{}` literals are already empty and needed no rewrite.
 
 **What.** New `internal/domain/usage.go`: `Usage{Calls, PromptTokens, CachedPromptTokens,
 CompletionTokens, TotalTokens int}` with `Sum(...Usage) Usage` and `Adopt(reading

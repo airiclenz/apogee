@@ -872,7 +872,7 @@ func TestOnceReportsEachSubAgentsContextFill(t *testing.T) {
 	// travels along because the assertion is on the WHOLE entry.
 	want := SubAgentUsage{
 		Used: 12000, Limit: window, Task: taskLine,
-		Calls: 1, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000,
+		Usage: Usage{Calls: 1, PromptTokens: 11800, CompletionTokens: 200, TotalTokens: 12000},
 	}
 	if res.SubAgents[0] != want {
 		t.Errorf("Result.SubAgents[0] = %+v, want %+v", res.SubAgents[0], want)
@@ -1304,7 +1304,7 @@ func TestEventTapKeepsCumulativeTotalsPerAgent(t *testing.T) {
 	}
 	want := SubAgentUsage{
 		Used: 12000, Limit: window, Task: "audit the issues",
-		Calls: 2, PromptTokens: 16600, CompletionTokens: 400, TotalTokens: 17000,
+		Usage: Usage{Calls: 2, PromptTokens: 16600, CompletionTokens: 400, TotalTokens: 17000},
 	}
 	if runs[0] != want {
 		t.Errorf("subAgentRuns()[0] = %+v, want %+v", runs[0], want)
@@ -1357,7 +1357,7 @@ func TestEventTapCountsMaintenanceInTheTotalsOnly(t *testing.T) {
 	}
 	wantRun := SubAgentUsage{
 		Used: 9000, Limit: window, Task: "audit the issues",
-		Calls: 2, PromptTokens: 19600, CompletionTokens: 400, TotalTokens: 20000,
+		Usage: Usage{Calls: 2, PromptTokens: 19600, CompletionTokens: 400, TotalTokens: 20000},
 	}
 	if runs[0] != wantRun {
 		t.Errorf("subAgentRuns()[0] = %+v, want %+v", runs[0], wantRun)
