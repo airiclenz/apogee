@@ -85,7 +85,9 @@ archiving.
 
 ---
 
-## 1. Verify plan A is archived
+## 1. Verify plan A is archived — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): gate passed — `docs/plans/archived/2026-09-16 - 00 - host-config-and-tui-deepening-plan.md` exists (archived at commit 044c6c5a) and `ls docs/plans/2026-09-16\ -\ 00*` matches nothing; the only untracked plan is `2026-09-16 - 02 - demo-storyboard-rig-plan.md`, outside this gate.
 
 **What.** Confirm `docs/plans/archived/2026-09-16 - 00 - host-config-and-tui-deepening-plan.md`
 exists and no file named `2026-09-16 - 00 - *` remains under `docs/plans/`. Plan A rewrites
