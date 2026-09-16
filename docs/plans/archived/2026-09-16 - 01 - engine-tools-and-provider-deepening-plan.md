@@ -180,6 +180,7 @@ and its gate column; `TestRefoldOutcomeMapping`, `TestOnDemandCompactIgnoresAuto
 
 NOTES (2026-09-16): `standingBlocks` is a function returning the table, not a package-level var, and `standingFences` a once-built list — as a var initializer the table is an initialization cycle (row render `contextBlocks` → `fenceContent` → `forgesStandingStructure` → the table); the render column takes the Agent (`func(*Agent) string`, method expressions) rather than the plan's `func() string`.
 NOTES (2026-09-16): `doc.go`'s "Thirty files" count was already stale (33 non-test files before this item, 34 after); left untouched as pre-existing drift outside the item's scope.
+NOTES (2026-09-16): deferred fix D4 — the Acceptance regex gained `StandingBlocks`: `Fence` matched only two of the three `TestStandingBlocks_*` tests the item's new forgery test file carries, leaving `TestStandingBlocks_ConfiguredRowsSeedAndRideAlongRowsDoNot` unrun; the amended command runs all three.
 
 **What.** New `internal/agent/standingblocks.go`: an ordered table `standingBlocks` in ADR 0023 §6
 wire order — prompt, orientation, delegate report, task list, context files — each row `{render
@@ -204,7 +205,7 @@ spelling that fence is prefixed and the row renders at its index. The 73 order/r
 equality unchanged.
 
 **Acceptance.**
-- `go test ./internal/agent -run 'ContextSeam|Orientation|DelegateReport|TaskList|Fence|WrapUp|Fanout|Hook'`
+- `go test ./internal/agent -run 'ContextSeam|Orientation|DelegateReport|TaskList|Fence|WrapUp|Fanout|Hook|StandingBlocks'`
 
 **Commit:** `refactor(agent): standing system blocks are one ordered table`
 
