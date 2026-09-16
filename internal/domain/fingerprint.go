@@ -60,16 +60,3 @@ type ModelFingerprint struct {
 // IsZero reports whether the fingerprint failed to identify the model (no Label). An inert
 // Library (nothing to observe or inject against) is the zero-fingerprint case.
 func (f ModelFingerprint) IsZero() bool { return f.Label == "" }
-
-// FingerprintResolver resolves the model behind the Upstream to a confidence-tagged
-// ModelFingerprint. It is the seam for the three identity tiers: a production resolver
-// returns the best available — a weights-hash when the model file is reachable, else a stored
-// behavioral-probe record for this endpoint and label, else the metadata label — and the loop
-// never changes shape as rungs are added behind it (D8). Domain declares the seam;
-// internal/library implements it (ADR 0010 — the dependency points at domain).
-type FingerprintResolver interface {
-	// Resolve returns the best-available fingerprint for modelID. A resolver that cannot
-	// identify the model returns the zero ModelFingerprint rather than an error — an
-	// unidentified model simply leaves the Library inert.
-	Resolve(modelID string) ModelFingerprint
-}

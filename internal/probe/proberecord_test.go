@@ -1,4 +1,4 @@
-package library
+package probe
 
 import (
 	"encoding/json"
@@ -41,9 +41,9 @@ func TestSaveAndLoadProbeRecord(t *testing.T) {
 	if !ok || warning != "" {
 		t.Fatalf("load: ok=%v warning=%q; want a clean read", ok, warning)
 	}
-	if got.Version != ProbeRecordVersion || got.BatteryVersion != ProbeBatteryVersion {
+	if got.Version != ProbeRecordVersion || got.BatteryVersion != BatteryVersion {
 		t.Errorf("versions = %d/%d; want %d/%d stamped by Save",
-			got.Version, got.BatteryVersion, ProbeRecordVersion, ProbeBatteryVersion)
+			got.Version, got.BatteryVersion, ProbeRecordVersion, BatteryVersion)
 	}
 	if got.Behavior != rec.Behavior || got.ModelLabel != rec.ModelLabel || !got.ProbedAt.Equal(rec.ProbedAt) {
 		t.Errorf("round-trip lost the claim: %+v", got)
@@ -67,7 +67,7 @@ func TestProbeRecordPathIsKeyedOnEndpointAndLabel(t *testing.T) {
 		}
 	}
 	if ProbeRecordPath("", "http://a", "m") != "" {
-		t.Error("no directory means no record path — the resolver must not invent a home")
+		t.Error("no directory means no record path — the record must not invent a home")
 	}
 }
 
@@ -128,7 +128,7 @@ func TestLoadProbeRecordSoftDegradesOnDefect(t *testing.T) {
 		},
 		{
 			name:    "stale battery",
-			mutate:  func(r *ProbeRecord) { r.BatteryVersion = ProbeBatteryVersion + 1 },
+			mutate:  func(r *ProbeRecord) { r.BatteryVersion = BatteryVersion + 1 },
 			wantsIn: "re-run `apogee probe model`",
 		},
 		{
@@ -157,7 +157,7 @@ func TestLoadProbeRecordSoftDegradesOnDefect(t *testing.T) {
 			t.Parallel()
 			dir := filepath.Join(t.TempDir(), "probe")
 			rec := sampleRecord()
-			rec.Version, rec.BatteryVersion = ProbeRecordVersion, ProbeBatteryVersion
+			rec.Version, rec.BatteryVersion = ProbeRecordVersion, BatteryVersion
 			if tc.mutate != nil {
 				tc.mutate(&rec)
 			}

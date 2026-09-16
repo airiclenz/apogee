@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
@@ -166,7 +165,7 @@ func TestProbeModelRunsTheBatteryAndRecords(t *testing.T) {
 		}
 	}
 
-	rec, warning, ok := library.LoadProbeRecord(library.ProbeDir(configHome), srv.URL, "battery-model")
+	rec, warning, ok := probe.LoadProbeRecord(probe.ProbeDir(configHome), srv.URL, "battery-model")
 	if !ok {
 		t.Fatalf("no probe record was written (warning=%q)", warning)
 	}
@@ -259,10 +258,11 @@ func assertNoTerminalControls(t *testing.T, what, s string) {
 	}
 }
 
-// Once the record exists, the identity ladder resolves the same model at MEDIUM confidence
-// offline — which is the whole reason the probe persists. Print-only would leave
-// ConfidenceMedium a tier nothing can produce.
-func TestProbeModelRecordReachesTheResolver(t *testing.T) {
+// Once the record exists, it loads back from the roots a later run resolves — under the same
+// endpoint and the advertised label unchanged, which is the whole reason the probe persists:
+// the dated claim is what a second `apogee probe model` compares against to detect a model
+// swapped behind an unchanged label.
+func TestProbeModelRecordLoadsBack(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
 	configHome := upstreamHome(t, srv.URL)
@@ -273,17 +273,16 @@ func TestProbeModelRecordReachesTheResolver(t *testing.T) {
 	if err != nil {
 		t.Fatalf("resolve roots: %v", err)
 	}
-	fp := library.ResolveFingerprintFrom(library.Sources{
-		ModelID:  "battery-model",
-		Endpoint: srv.URL,
-		ProbeDir: roots.probe,
-	})
-	if fp.Confidence.String() != "medium" {
-		t.Fatalf("confidence = %s; want medium after the probe recorded a fingerprint", fp.Confidence)
+	rec, warning, ok := probe.LoadProbeRecord(roots.probe, srv.URL, "battery-model")
+	if !ok || warning != "" {
+		t.Fatalf("load: ok=%v warning=%q; want the record the probe wrote to load back cleanly", ok, warning)
 	}
-	if fp.Label != "battery-model" {
-		t.Errorf("label = %q; want the advertised label unchanged — probing promotes the tier, "+
-			"it must not re-key the model", fp.Label)
+	if rec.ModelLabel != "battery-model" {
+		t.Errorf("label = %q; want the advertised label unchanged — probing records a claim about "+
+			"the label, it must not re-key the model", rec.ModelLabel)
+	}
+	if rec.Endpoint != srv.URL {
+		t.Errorf("endpoint = %q; want the probed server %q", rec.Endpoint, srv.URL)
 	}
 }
 
@@ -313,14 +312,14 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
 	configHome := upstreamHome(t, srv.URL)
-	dir := library.ProbeDir(configHome)
+	dir := probe.ProbeDir(configHome)
 	// Seeded in a zone that is NOT local's, so the date the effect line prints proves the display
 	// converts to the reader's own clock on any machine's TZ (the stored stamp is unaffected —
 	// asserted below by Equal, which compares instants rather than spellings).
 	local := time.Date(2026, 1, 2, 23, 0, 0, 0, time.Local)
 	probedAt := awayFromLocal(t, local)
 
-	if _, err := library.SaveProbeRecord(dir, library.ProbeRecord{
+	if _, err := probe.SaveProbeRecord(dir, probe.ProbeRecord{
 		Endpoint:   srv.URL,
 		ModelLabel: "battery-model",
 		ProbedAt:   probedAt,
@@ -341,7 +340,7 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 	if strings.Contains(report, "identity stays at the label tier") {
 		t.Errorf("the report denies a record that is still on disk:\n%s", report)
 	}
-	rec, warning, ok := library.LoadProbeRecord(dir, srv.URL, "battery-model")
+	rec, warning, ok := probe.LoadProbeRecord(dir, srv.URL, "battery-model")
 	if !ok || !rec.ProbedAt.Equal(probedAt) {
 		t.Errorf("--no-save must leave the stored record untouched (ok=%v warning=%q rec=%+v)", ok, warning, rec)
 	}
@@ -354,13 +353,13 @@ func TestProbeModelWarnsAboutAnOldFormatRecord(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
 	configHome := upstreamHome(t, srv.URL)
-	dir := library.ProbeDir(configHome)
+	dir := probe.ProbeDir(configHome)
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatalf("mkdir probe dir: %v", err)
 	}
 	v1 := `{"version":1,"battery-version":1,"endpoint":"` + srv.URL +
 		`","model-label":"battery-model","probed-at":"2026-01-02T03:04:05Z"}`
-	if err := os.WriteFile(library.ProbeRecordPath(dir, srv.URL, "battery-model"), []byte(v1), 0o600); err != nil {
+	if err := os.WriteFile(probe.ProbeRecordPath(dir, srv.URL, "battery-model"), []byte(v1), 0o600); err != nil {
 		t.Fatalf("write v1 record: %v", err)
 	}
 
@@ -429,13 +428,13 @@ func TestProbeModelReportsAChangedModelBehindTheLabel(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
 	configHome := upstreamHome(t, srv.URL)
-	dir := library.ProbeDir(configHome)
+	dir := probe.ProbeDir(configHome)
 	// As in the surviving-record test: a stored zone that is not local's, so "changed since <date>"
 	// is proved to reach the reader in the reader's own clock whatever the machine's TZ.
 	local := time.Date(2026, 1, 2, 23, 0, 0, 0, time.Local)
 	probedAt := awayFromLocal(t, local)
 
-	if _, err := library.SaveProbeRecord(dir, library.ProbeRecord{
+	if _, err := probe.SaveProbeRecord(dir, probe.ProbeRecord{
 		Endpoint:   srv.URL,
 		ModelLabel: "battery-model",
 		ProbedAt:   probedAt,
@@ -807,7 +806,7 @@ func TestProbeModelPlaceholderToolCallsAreNotEvidence(t *testing.T) {
 		t.Errorf("a placeholder entry was reported as a native tool call:\n%s", report)
 	}
 
-	rec, warning, ok := library.LoadProbeRecord(library.ProbeDir(configHome), srv.URL, "placeholder-model")
+	rec, warning, ok := probe.LoadProbeRecord(probe.ProbeDir(configHome), srv.URL, "placeholder-model")
 	if !ok {
 		t.Fatalf("no probe record was written (warning=%q)", warning)
 	}

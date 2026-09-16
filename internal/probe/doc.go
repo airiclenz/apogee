@@ -19,10 +19,12 @@
 // never re-spells it (ADR 0021, Amendment 2026-07-22) — the label is the key every per-model
 // setting and every Library observation is filed under. What was observed travels beside
 // the identity as the BehaviorSignature: a fuzzy feature match, never a hash of a response,
-// which sampling alone would move (ADR 0021 §6). It still writes nothing itself: the
-// record is persisted by the composition root through internal/library, so `--no-save` is a
-// genuine off-switch rather than a rollback, and so the one act that promotes a model from a
-// name-only identity to an observed one stays visible at the command that performs it.
+// which sampling alone would move (ADR 0021 §6). The battery still writes nothing itself: the
+// record is persisted by the composition root through this package's SaveProbeRecord, so
+// `--no-save` is a genuine off-switch rather than a rollback, and so the one act that promotes
+// a model from a name-only identity to an observed one stays visible at the command that
+// performs it. The record's directory is an injected path (the apogee home a Driver passes in);
+// nothing here reaches for an ambient ~/.apogee (ADR 0001).
 //
 // The capability tier the model report carries is a REPORTED SIGNAL ONLY — nothing reads it.
 // Adaptive prompt complexity, the transform that would, is a follow-on recorded in the issue
@@ -54,7 +56,10 @@
 // domain.ModelFingerprint, the BehaviorSignature (a fuzzy feature match, never a hash of a
 // response, which sampling alone would move), and the suggested ModelProfile with its YAML
 // rendering. model.go is the model report — ModelInputs, GatherModel, the SaveOutcome the
-// composition root fills in after it persists, and the report sections.
+// composition root fills in after it persists, and the report sections. proberecord.go is the
+// record that persisting writes: its schema version, the digest that names its file, ProbeDir,
+// and the Save/Load pair with the owner-only directory and file permissions — one deletable
+// file per probed model, which is ADR 0021 §4's printed undo.
 //
 // The terminal half. terminal.go is `apogee probe terminal` whole: the alternate-screen
 // measurement session (DSR-CPR read-back, mode reports, glyph widths, tab stops, the last-column

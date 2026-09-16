@@ -243,7 +243,12 @@ unchanged; TUI `toolshape_test.go` opener literals unchanged.
 
 **Commit:** `refactor(domain): one skill-block renderer; the loop's composition twins share helpers`
 
-## 6. The probe record lives beside its writer; `internal/library` goes
+## 6. The probe record lives beside its writer; `internal/library` goes — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `TestProbeModelRecordReachesTheResolver` was renamed `TestProbeModelRecordLoadsBack` — the item recasts it as a load-back test and no resolver remains for the old name to be true about; still matched by the acceptance `-run 'Probe|Record|Fingerprint'`.
+NOTES (2026-09-16): consequential edit — internal/probe/prompts/README.md: made necessary by retiring `library.ProbeBatteryVersion` (the README named it, with a file:line into the deleted package, as the constant's home).
+NOTES (2026-09-16): `internal/library/proberecord.go` and its test were moved with `git mv` (the index records the rename); the deletion of `internal/library/{doc,fingerprint,fingerprint_test}.go` is staged via `git rm` — the FILES list names both the old and new paths so the verifier's stage covers the whole move.
+NOTES (2026-09-16): the "beside library/ and sessions/" comment on `TestProbeRecordLivesUnderTheApogeeHome` and ADR 0021 / CONTEXT.md's `internal/library` mentions are left to item 7 (the words), which owns the record's wording; `internal/sanitize`, `internal/recall` historical comments stay per the plan.
 
 **What.** Move `internal/library/proberecord.go` (+ test) into `internal/probe` — JSON keys,
 `probeRecordKey` digest, dir name `probe`, file perms byte-identical so every existing

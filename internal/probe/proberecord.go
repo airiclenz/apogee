@@ -1,4 +1,4 @@
-package library
+package probe
 
 import (
 	"crypto/sha256"
@@ -11,29 +11,26 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The behavioral-probe record (ADR 0021 §3 — the middle rung's on-disk form)
+// The behavioral-probe record (ADR 0021 §3 — the dated claim's on-disk form)
 // ----------------------------------------------------------------------------
 
 // ProbeRecordVersion is the record schema version SaveProbeRecord stamps and LoadProbeRecord
 // accepts. A record at any OTHER version — newer from a later build, older from an earlier one
 // — is SKIPPED with a warning naming the one-command fix, never repaired and never fatal:
-// identity is a convenience layer above a safe floor (the Store's ErrStoreVersion posture, for
-// the same reason). There is deliberately no migration path; re-running `apogee probe model`
-// costs one command and re-earns the claim against THIS build's battery, which a rewritten old
-// record could only pretend to.
+// identity is a convenience layer above a safe floor (the retired Library store's
+// ErrStoreVersion posture, for the same reason). There is deliberately no migration path;
+// re-running `apogee probe model` costs one command and re-earns the claim against THIS build's
+// battery, which a rewritten old record could only pretend to.
 //
 // v2 (2026-07-22) replaced the record's `fingerprint` field — which used to hold a synthesised
 // behavioural label — with `behavior`, the observed signature, once the identity became the
 // advertised label itself (ADR 0021, Amendment 2026-07-22). v1 records are therefore skipped.
+//
+// The battery version the record also carries is BatteryVersion (battery.go) — the one
+// constant, now that the record lives beside the battery that stamps it. It used to be
+// mirrored from `internal/library`, whose fingerprint resolver was the record's reader; that
+// resolver had no caller, and the package went with it.
 const ProbeRecordVersion = 2
-
-// ProbeBatteryVersion is the capability battery this build understands. It is homed HERE
-// rather than beside the battery itself because the resolver is the constant's real consumer:
-// `internal/library` decides whether a stored record is comparable to what this build would
-// produce, and it cannot import `internal/probe` to ask (that would invert the dependency —
-// probe writes records, library reads them). `probe.BatteryVersion` mirrors it, so bumping the
-// battery in one place retires every incomparable record.
-const ProbeBatteryVersion = 1
 
 const (
 	// probeDirName is the probe records' own subdirectory of the apogee home. A directory of
@@ -49,16 +46,17 @@ const (
 	// behavioural claim about the user's own endpoint is a private record, so neither the
 	// directory nor the file is group/world readable (the same posture as internal/session).
 	// They lived beside the Library store's writer until the `library` Mechanism retired in v0.20.0
-	// and moved here with SaveProbeRecord, their one remaining consumer.
+	// and followed SaveProbeRecord, their one remaining consumer, first into `internal/library` and
+	// then here.
 	dirPerm  os.FileMode = 0o700
 	filePerm os.FileMode = 0o600
 )
 
 // ProbeRecord is one dated behavioral-identity claim: `apogee probe model` measured the model
 // answering at Endpoint under the advertised label ModelLabel, at ProbedAt (ADR 0021 §3's key
-// triple). Its EXISTENCE is the claim the resolver reads — it is what lifts ModelLabel from the
-// metadata tier to ConfidenceMedium (ADR 0021, Amendment 2026-07-22) — so the record carries no
-// separate identity string; the identity is the label it is filed under.
+// triple). Its EXISTENCE is the claim — it is what earns ModelLabel a fingerprint at
+// ConfidenceMedium rather than the metadata tier (ADR 0021, Amendment 2026-07-22) — so the
+// record carries no separate identity string; the identity is the label it is filed under.
 //
 // Behavior is the observed signature (`probe:<battery>:<features>[:lp-<digest>]`) and it is the
 // record's DISCRIMINATING half: a model swapped behind an unchanged label yields a different
@@ -78,9 +76,8 @@ type ProbeRecord struct {
 }
 
 // ProbeDir returns the probe records' directory under the apogee home. An empty home yields
-// an empty path, which every function here treats as "no probe records are available" — the
-// resolver then simply has no middle rung, rather than reaching for an ambient ~/.apogee
-// (ADR 0001: the library never assumes a home).
+// an empty path, which every function here treats as "no probe records are available" —
+// rather than reaching for an ambient ~/.apogee (ADR 0001: the library never assumes a home).
 func ProbeDir(home string) string {
 	if home == "" {
 		return ""
@@ -110,7 +107,7 @@ func SaveProbeRecord(dir string, rec ProbeRecord) (string, error) {
 		return "", fmt.Errorf("apogee: no probe record directory resolved")
 	}
 	rec.Version = ProbeRecordVersion
-	rec.BatteryVersion = ProbeBatteryVersion
+	rec.BatteryVersion = BatteryVersion
 
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return "", fmt.Errorf("apogee: create probe record directory %q: %w", dir, err)
@@ -164,9 +161,9 @@ func probeRecordDefect(rec ProbeRecord) string {
 	case rec.Version < ProbeRecordVersion:
 		return fmt.Sprintf("it is schema version %d, which this build (v%d) no longer reads — re-run `apogee probe model` to record it again",
 			rec.Version, ProbeRecordVersion)
-	case rec.BatteryVersion != ProbeBatteryVersion:
+	case rec.BatteryVersion != BatteryVersion:
 		return fmt.Sprintf("it was produced by capability battery v%d, not this build's v%d — re-run `apogee probe model`",
-			rec.BatteryVersion, ProbeBatteryVersion)
+			rec.BatteryVersion, BatteryVersion)
 	case rec.ModelLabel == "":
 		return "it names no model, so there is no identity to resolve"
 	case rec.Behavior == "":

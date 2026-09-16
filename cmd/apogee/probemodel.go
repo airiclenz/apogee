@@ -10,7 +10,6 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/airiclenz/apogee/internal/config"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/sanitize"
@@ -199,7 +198,7 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, save bool, printErr
 	if m.Fingerprint.IsZero() {
 		return out
 	}
-	out.Path = library.ProbeRecordPath(roots.probe, m.Endpoint, m.Model)
+	out.Path = probe.ProbeRecordPath(roots.probe, m.Endpoint, m.Model)
 
 	// A previous record for the same key whose behavioral SIGNATURE differs is the ADR 0021 §3
 	// signal: the label did not change, the model behind it did. The identity cannot carry that
@@ -211,7 +210,7 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, save bool, printErr
 	// Both dates taken off that record below are for the REPORT to print, so both are spelled in
 	// the machine's own zone — the same conversion the `probed at` line makes, and for the same
 	// reason. The record itself is untouched: what SaveProbeRecord writes stays UTC.
-	prev, warning, ok := library.LoadProbeRecord(roots.probe, m.Endpoint, m.Model)
+	prev, warning, ok := probe.LoadProbeRecord(roots.probe, m.Endpoint, m.Model)
 	if warning != "" {
 		printErr(warning)
 	}
@@ -227,7 +226,7 @@ func recordProbeFingerprint(m probe.Model, roots stateRoots, save bool, printErr
 	if !save {
 		return out
 	}
-	path, err := library.SaveProbeRecord(roots.probe, library.ProbeRecord{
+	path, err := probe.SaveProbeRecord(roots.probe, probe.ProbeRecord{
 		Endpoint:       m.Endpoint,
 		ModelLabel:     m.Model,
 		ProbedAt:       m.ProbedAt,

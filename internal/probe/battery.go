@@ -9,17 +9,17 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // BatteryVersion is the version of the capability suite below. It stamps every recorded
 // fingerprint, because a label derived by one battery is not comparable to a label derived by
-// another — change a prompt or a pass rule and every stored claim must be re-earned. The
-// constant itself is homed in internal/library (see library.ProbeBatteryVersion): the resolver
-// is what has to decide comparability, and it cannot import this package.
-const BatteryVersion = library.ProbeBatteryVersion
+// another — change a prompt or a pass rule and every stored claim must be re-earned. It is the
+// one constant: SaveProbeRecord stamps it into every record and LoadProbeRecord compares a
+// stored record's stamp against it (proberecord.go), so bumping it here retires every
+// incomparable record.
+const BatteryVersion = 1
 
 // Capability names one thing the battery asks the model to do. The values are stable slugs:
 // they are reported to the user AND folded into the behavioral fingerprint, so renaming one

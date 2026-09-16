@@ -86,8 +86,7 @@
 // window. workspacename.go is the machine-independent rule for whether a configured
 // context-file NAME can only ever resolve inside the workspace root, spoken identically by
 // the host's config gate and the engine's construction gate (ADR 0023). fingerprint.go is
-// ModelFingerprint, its confidence tiers and the resolver seam — what the Library keys
-// learned observations on.
+// ModelFingerprint and its confidence tiers — the identity `apogee probe model` earns a model.
 //
 // And doc.go this map.
 package domain

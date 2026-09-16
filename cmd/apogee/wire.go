@@ -57,8 +57,8 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/filewatch"
-	"github.com/airiclenz/apogee/internal/library"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -443,11 +443,10 @@ func resolveRoots(configDir, workspace string) (stateRoots, error) {
 	return stateRoots{
 		config:   absHome,
 		sessions: filepath.Join(absHome, "sessions"),
-		// The behavioral-probe records `apogee probe model` writes and the fingerprint
-		// resolver reads back (ADR 0021 §3). Named by internal/library rather than joined
-		// here, because the resolver has to find the same directory from the apogee home
-		// alone when it is reached from the engine's construction path.
-		probe: library.ProbeDir(absHome),
+		// The behavioral-probe records `apogee probe model` writes and reads back (ADR 0021
+		// §3). Named by internal/probe rather than joined here, so the writer and the record
+		// it compares against find the same directory from the apogee home alone.
+		probe: probe.ProbeDir(absHome),
 		// Prompt recall: one JSONL file per workspace, keyed by a digest of its path
 		// (internal/recall). It lives under the apogee home rather than in the project tree —
 		// what the human typed is theirs, not the repository's — and, like every root here, it is
