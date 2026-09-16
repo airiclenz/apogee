@@ -113,19 +113,24 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	}
 }
 
-// statusDelta classifies a non-2xx streamed response into a terminal Delta, mirroring
-// statusError but on the streaming surface — including its maxErrorBodyBytes read cap and its
-// thinking-effort hint: carriedEffort reports that the failed request expressed a thinking
-// effort in some dialect, and a turn is where that failure actually lands, since the loop streams.
+// statusDelta renders a non-2xx streamed response as a terminal Delta, mirroring statusError
+// on the streaming surface — the same maxErrorBodyBytes read cap, the same classify verdict
+// over the raw body, the same thinking-effort hint: carriedEffort reports that the failed
+// request expressed a thinking effort in some dialect, and a turn is where that failure
+// actually lands, since the loop streams. The Delta keeps Retryable false whatever the
+// fault's own verdict: send already retried a 429/5xx before one reached here (see
+// Delta.Retryable — the class the client WOULD have retried had it arrived as a status is
+// the in-band case, inBandErrorDelta's).
 func (c *Client) statusDelta(resp *http.Response, carriedEffort bool) Delta {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
 	c.observeWire(WireResponse, []byte(text))
-	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
+	f := classify(resp.StatusCode, "", string(raw), carriedEffort)
+	if f.overflow {
 		return Delta{Kind: DeltaContextOverflow, Err: "apogee: context window exceeded: " + text}
 	}
-	message := upstreamStatusText(resp.StatusCode, text, resp.Header.Get("Location"))
-	if carriedEffort {
+	message := upstreamStatusText(f.code, text, resp.Header.Get("Location"))
+	if f.hinted {
 		message += " " + thinkingEffortHint
 	}
 	return Delta{Kind: DeltaError, Err: message}
@@ -135,26 +140,25 @@ func (c *Client) statusDelta(resp *http.Response, carriedEffort bool) Delta {
 // gone" — a transient class even when it arrives with a 4xx or a non-numeric code.
 const providerUnavailable = "provider_unavailable"
 
-// inBandErrorDelta classifies an in-band error member into a terminal Delta, mirroring
+// inBandErrorDelta renders an in-band error member as a terminal Delta, mirroring
 // statusDelta but for a failure the server wrapped in an HTTP 200. The text is the whole raw
 // SSE payload (sanitised), so provider-specific metadata — OpenRouter's metadata.raw, say —
-// reaches the user verbatim instead of being flattened away. Retryable mirrors the client's
-// own HTTP retry policy (isRetryableStatus) so an in-band 502 is treated exactly like a 502
-// status, with the error_type slug covering the shapes that carry no usable code.
-// carriedEffort appends thinkingEffortHint exactly as statusDelta does — an effort
-// failure an aggregator wrapped in a 200 needs the same explanation as one that arrived as a
-// status — and an overflow stays unhinted, since no thinking effort caused it.
+// reaches the user verbatim instead of being flattened away; the classify verdict is read
+// off the raw message. This is the one renderer that surfaces the fault's retryable verdict:
+// an in-band 502 is treated exactly like a 502 status would have been by send, with the
+// error_type slug covering the shapes that carry no usable code. A hinted fault appends
+// thinkingEffortHint exactly as statusDelta does — an effort failure an aggregator wrapped
+// in a 200 needs the same explanation as one that arrived as a status.
 func (c *Client) inBandErrorDelta(werr wireError, raw string, carriedEffort bool) Delta {
-	code := werr.intCode()
-	text := fmt.Sprintf("apogee: upstream in-band error %d: %s", code, c.sanitize(raw))
-	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
+	f := classify(werr.intCode(), werr.ErrorType, werr.Message, carriedEffort)
+	text := fmt.Sprintf("apogee: upstream in-band error %d: %s", f.code, c.sanitize(raw))
+	if f.overflow {
 		return Delta{Kind: DeltaContextOverflow, Err: text}
 	}
-	if carriedEffort {
+	if f.hinted {
 		text += " " + thinkingEffortHint
 	}
-	retryable := isRetryableStatus(code) || werr.ErrorType == providerUnavailable
-	return Delta{Kind: DeltaError, Err: text, Retryable: retryable}
+	return Delta{Kind: DeltaError, Err: text, Retryable: f.retryable}
 }
 
 // parseSSE reads the SSE body line by line and yields Deltas. It accumulates every tool

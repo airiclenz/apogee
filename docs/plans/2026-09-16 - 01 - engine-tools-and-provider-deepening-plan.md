@@ -387,7 +387,10 @@ across the seven test files follow (keyed fields).
 
 **Commit:** `refactor(domain): UsageEvent carries one cumulative Usage`
 
-## 11. One upstream fault classifier
+## 11. One upstream fault classifier — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `fault.code` is `int`, not the plan's `string` — `StatusError.Code`, `wireError.intCode` and the in-band Delta text are all int-shaped; `fault.text` dropped and `body, msg` folded into one `text` parameter — the regression guard keeps `sanitize` in the renderers, so the classifier has no sanitised text to carry, and each caller sniffs exactly one text (the raw body, or `wireError.Message`).
+NOTES (2026-09-16): `faultError` added in `client.go` as the one blocking-surface renderer over a `fault` (`statusError` and `inBandError` produced byte-identical error shapes); the two stream renderers keep their own texts and read the fault inline.
 
 **What.** New `internal/provider/fault.go`: `classify(status int, errType, body, msg string,
 effort bool) fault{overflow bool, code string, text string, retryable bool, hinted bool}` owning the

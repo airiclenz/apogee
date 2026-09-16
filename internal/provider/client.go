@@ -501,42 +501,42 @@ func parseRetryAfter(h string) (time.Duration, bool) {
 const thinkingEffortHint = "(this request asked for a thinking effort — one this model does not accept? check model-profiles thinking.effort or the /effort override)"
 
 // statusError reads a non-2xx body — at most maxErrorBodyBytes of it, so an oversized one
-// cannot exhaust memory — and classifies it: a 400 overflow → ErrContextOverflow, anything
-// else → a *StatusError carrying the code. The body is sanitised (API key redacted, length
-// capped) before it reaches the caller. carriedEffort reports that the failed request expressed
-// a thinking effort in some dialect, which appends thinkingEffortHint to the surfaced error;
-// the wrapping keeps errors.As(*StatusError) working for callers that branch on the code.
-// A classified context overflow is left unhinted: that failure is already named, and no
-// thinking effort caused it.
+// cannot exhaust memory — classifies it (classify, over the raw bytes) and renders the fault
+// through faultError. The body is sanitised (API key redacted, length capped) before it
+// reaches the caller. carriedEffort reports that the failed request expressed a thinking
+// effort in some dialect.
 func (c *Client) statusError(resp *http.Response, carriedEffort bool) error {
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 	text := c.sanitize(string(raw))
 	c.observeWire(WireResponse, []byte(text))
-	if resp.StatusCode == http.StatusBadRequest && isContextOverflow(string(raw)) {
-		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
-	}
-	err := &StatusError{Code: resp.StatusCode, Body: text, Location: resp.Header.Get("Location")}
-	if !carriedEffort {
-		return err
-	}
-	return fmt.Errorf("%w %s", err, thinkingEffortHint)
+	f := classify(resp.StatusCode, "", string(raw), carriedEffort)
+	return faultError(f, text, resp.Header.Get("Location"))
 }
 
-// inBandError classifies an error member the server wrapped in an HTTP 200, mirroring
-// statusError so both framings of the same failure reach callers as the same error types:
-// a 400 overflow → ErrContextOverflow, anything else → a *StatusError. A non-numeric code
-// yields Code 0 — the sanitised body carries the truth in that case. carriedEffort rides
-// along for the same reason it does on statusError: an aggregator that wraps an effort
-// failure in a 200 leaves the user just as blind as a raw 500 would, so the hint is appended
-// to the wrapping error (never to StatusError.Body) and an overflow is left unhinted.
+// inBandError renders an error member the server wrapped in an HTTP 200 exactly as
+// statusError renders a status, so both framings of the same failure reach callers as the
+// same error types: one classify verdict over the raw message, one faultError. A non-numeric
+// code yields Code 0 — the sanitised body carries the truth in that case. carriedEffort
+// rides along for the same reason it does on statusError: an aggregator that wraps an effort
+// failure in a 200 leaves the user just as blind as a raw 500 would.
 func (c *Client) inBandError(werr wireError, carriedEffort bool) error {
-	code := werr.intCode()
-	text := c.sanitize(werr.render())
-	if code == http.StatusBadRequest && isContextOverflow(werr.Message) {
+	f := classify(werr.intCode(), werr.ErrorType, werr.Message, carriedEffort)
+	return faultError(f, c.sanitize(werr.render()), "")
+}
+
+// faultError is the blocking surface's renderer over a fault: an overflow wraps
+// ErrContextOverflow, anything else is a *StatusError carrying the code, the sanitised text
+// and the Location header ("" for an in-band error, which carries none). A hinted fault
+// appends thinkingEffortHint to the WRAPPING error, never to StatusError.Body, and the
+// wrapping keeps errors.As(*StatusError) working for callers that branch on the code.
+// The fault's retryable verdict is not read here: send already retried the statuses it
+// covers before one became an error.
+func faultError(f fault, text, location string) error {
+	if f.overflow {
 		return fmt.Errorf("%w: %s", ErrContextOverflow, text)
 	}
-	err := &StatusError{Code: code, Body: text}
-	if !carriedEffort {
+	err := &StatusError{Code: f.code, Body: text, Location: location}
+	if !f.hinted {
 		return err
 	}
 	return fmt.Errorf("%w %s", err, thinkingEffortHint)
