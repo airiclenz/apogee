@@ -28,7 +28,6 @@ import (
 // nothing is staged, and no worker is disturbed — hence the nil Cmd.
 func (m Model) refuseUnknownSlash(parsed parsedInput) (tea.Model, tea.Cmd) {
 	m.transcript.addNote(unknownSlashNote(parsed.text))
-	m.refreshViewport()
 	return m, nil
 }
 
@@ -162,7 +161,6 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	if m.prebound() && m.opts.Resumed == nil {
 		// Nothing to flush, abort or clear while no engine exists, so the reset is the view's alone.
 		m.resetSessionView()
-		m.layout()
 		return m, nil
 	}
 	cmd := m.saveAtIdle() // flush the outgoing session into history before it closes (queued, gated)
@@ -175,7 +173,6 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 	}
 	if err := m.eng.ClearContext(); err != nil {
 		m.transcript.addNote("could not clear context: " + err.Error())
-		m.layout()
 		return m, cmd // the flush above still runs: the queue must not be left holding a dispatched write
 	}
 	// Close the outgoing session so the next Turn's save mints a fresh id. Queued, so it can never
@@ -185,7 +182,6 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 		cmd = rotate
 	}
 	m.resetSessionView()
-	m.layout()
 	return m, cmd
 }
 
@@ -289,7 +285,6 @@ func (m *Model) resetSessionView() {
 func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	if parsed.err != nil {
 		m.transcript.addNote(parsed.err.Error())
-		m.layout()
 		return m, nil
 	}
 
@@ -299,7 +294,6 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	// so there is nothing to send to and nothing stable to switch. Everything else stays live.
 	if m.actuation.inFlight && actuationBlocked(parsed.command) {
 		m.transcript.addNote(m.actuationBlockNote())
-		m.layout()
 		return m, nil
 	}
 
@@ -312,7 +306,6 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 	// answer (modelSwitchBlocked owns that ladder).
 	if m.blockedUpstream() && parsed.opensExchange() {
 		m.transcript.addNote(m.upstreamBlockNote())
-		m.layout()
 		return m, nil
 	}
 
@@ -334,7 +327,6 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// tokens when it is eventually sent, and nothing is silently borrowed from it here.
 		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
 		m.transcript.addUser("/continue", nil)
-		m.layout()               // before the launch: the verb lays nothing out (enterRunning)
 		box := newInterjectBox() // the canned turn is a launch like any other (launchExchange)
 		cmd, cancel := startExchange(m.parent, m.eng,
 			domain.UserInput{Text: "Please continue"}, box, m.notify, m.flushEvents)
@@ -427,7 +419,6 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
 		// seam) as a transcript note and stay idle — no upstream call, no worker.
 		m.transcript.addNote("apogee " + m.opts.Version)
-		m.layout()
 		return m, nil
 
 	case "skills":
@@ -524,6 +515,5 @@ func (m Model) foldCompactDone(msg compactDoneMsg) (tea.Model, tea.Cmd) {
 		m.transcript.addCompacted(runRef{})
 	}
 	cmd := m.finishWorker(stateIdle)
-	m.refreshViewport()
 	return m.drainThenFlush(cmd)
 }

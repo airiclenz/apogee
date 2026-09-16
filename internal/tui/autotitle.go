@@ -244,7 +244,6 @@ func (m *Model) foldManualTitle(msg manualTitleMsg) tea.Cmd {
 			note = "the model spent its whole reply thinking and never wrote the title"
 		}
 		m.transcript.addNote(note + " — " + renameUsage)
-		m.layout()
 		return nil
 	}
 	m.titleTouched = true
@@ -362,14 +361,12 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 		// No persistence host: there is no Session record, so there is nothing named to change. Said
 		// plainly rather than accepted and dropped — the note below would otherwise be a lie.
 		m.transcript.addNote("this session is not being saved, so it has no name to change")
-		m.layout()
 		return m, nil
 	}
 	if len(args) > 0 {
 		name, ok := title.Sanitize(strings.Join(args, " "))
 		if !ok {
 			m.transcript.addNote("that name is empty once cleaned up — " + renameUsage)
-			m.layout()
 			return m, nil
 		}
 		m.titleTouched = true
@@ -381,7 +378,6 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 		// The seam is unwired (no upstream client was built for it), which is a property of the run
 		// and not a failure: the manual form still names anything.
 		m.transcript.addNote("title generation is not available — " + renameUsage)
-		m.layout()
 		return m, nil
 	}
 	prompts := m.transcript.userTexts()
@@ -389,11 +385,9 @@ func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 		// The model names a session from what it has been asked, and nothing has been asked yet. The
 		// manual form works from the very first keystroke, so it is what the note offers.
 		m.transcript.addNote("nothing to name yet — ask something first, or " + renameUsage)
-		m.layout()
 		return m, nil
 	}
 	m.transcript.addNote("naming this session…")
-	m.layout()
 	return m, m.titleCmd(prompts, func(raw string, err error) tea.Msg {
 		return manualTitleMsg{title: raw, err: err}
 	})
@@ -415,5 +409,4 @@ func (m *Model) noteRenamed(name string, stashed bool) {
 	} else {
 		m.transcript.addNote("session renamed: " + name)
 	}
-	m.layout()
 }

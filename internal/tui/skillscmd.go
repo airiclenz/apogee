@@ -93,17 +93,14 @@ func (m Model) runSkillsCommand(args skillsArgs) (tea.Model, tea.Cmd) {
 func (m Model) exportShippedSkill(id string) (tea.Model, tea.Cmd) {
 	if m.opts.ConfigHome == "" {
 		m.transcript.addError(skillsSource, noSkillExporterNote, runRef{})
-		m.layout()
 		return m, nil
 	}
 	dir, err := skills.ExportShipped(id, filepath.Join(m.opts.ConfigHome, "skills"))
 	if err != nil {
 		m.transcript.addError(skillsSource, err.Error(), runRef{})
-		m.layout()
 		return m, nil
 	}
 	m.transcript.addNote(skillExportedNote(id, dir))
-	m.layout()
 	return m, nil
 }
 

@@ -226,7 +226,6 @@ func (m Model) acceptCycle(cycle time.Duration) (tea.Model, tea.Cmd) {
 func (m Model) acceptScheduleMode(mode domain.Mode) (tea.Model, tea.Cmd) {
 	if mode == domain.ModeAuto && m.opts.ScheduleAutoBlocked != "" {
 		m.transcript.addNote(autoBlockedNote(m.opts.ScheduleAutoBlocked))
-		m.layout()
 		return m, nil
 	}
 	draft := m.picker.draft

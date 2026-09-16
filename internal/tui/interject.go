@@ -397,7 +397,6 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 // gauge's slot for its two seconds — statusRight's existing priority order, unchanged.
 func (m Model) refuseChildMessage(note string) (tea.Model, tea.Cmd) {
 	m.transcript.addNote(note)
-	m.refreshViewport()
 	if !m.inRunView() {
 		return m, nil
 	}
@@ -496,11 +495,11 @@ func (m *Model) foldInterjected(items []queuedInterjection) {
 		}
 	}
 	m.pendingInterjections = kept
-	// layout(), not a bare repaint: the rows that went out have left the staged band above the input
-	// box, so the band is drawn shorter (or not at all) and the transcript's own row count moved with
-	// it. The viewport WIDGET's height IS that count (layout(), model.go), and a stale one leaves the
-	// scroll clamp holding back the tail the band no longer covers.
-	m.layout()
+	// The rows that went out have left the staged band above the input box, so the band is drawn
+	// shorter (or not at all) and the transcript's own row count moved with it. Nothing is laid out
+	// here: the committed rows moved the transcript's generation, and the repaint tail of the Update
+	// this runs inside lays out from that ([Model.settle]), sizing the viewport WIDGET to the rows the
+	// band no longer covers.
 }
 
 // ----------------------------------------------------------------------------
@@ -558,7 +557,6 @@ func (m Model) flushInterjections() (tea.Model, tea.Cmd) {
 	m.pendingInterjections = nil
 	m.detached = false // the flushed prompt re-arms follow-the-tail, exactly as a typed one does
 	m.transcript.addUser(in.Text, spans)
-	m.layout() // the strip above the box loses its rows; the new prompt opens at the top
 	return m.launchExchange(in)
 }
 

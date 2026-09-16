@@ -500,11 +500,10 @@ func (m *Model) applyPendingRebind() {
 		return
 	}
 	m.hb.pendingRebind = nil
-	next, noted := m.applyRebind(*intent)
+	// What applyRebind wrote — a note, the restated start-up box — moved the transcript's
+	// generation, and the repaint tail of the Update this runs inside answers it ([Model.settle]).
+	next, _ := m.applyRebind(*intent)
 	*m = next
-	if noted {
-		m.refreshViewport()
-	}
 }
 
 // unknownWindowNote is the honesty line for a binding whose context window nobody could name. The
@@ -615,7 +614,6 @@ func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record c
 	m.transcript.refreshStartup(newStartupView(m.opts))
 	m.transcript.addNote(serverSwitchNote(from, m.opts, record.saved))
 	record.warn(&m.transcript)
-	m.layout()
 	// The fresh generation IS the retirement of the old chain, so the first beat is armed rather than
 	// merely issued — in a statement of its own, per [Model.armBeat].
 	beat := m.armBeat()
@@ -724,6 +722,5 @@ func (m Model) upstreamBlockNote() string {
 // server nobody has beaten since — and five resumes would keep five of them (addEphemeralNote).
 func (m Model) foldRoutingNotice(msg routingNoticeMsg) (tea.Model, tea.Cmd) {
 	m.transcript.addEphemeralNote(msg.note)
-	m.refreshViewport()
 	return m, nil
 }

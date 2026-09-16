@@ -358,11 +358,9 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 	case err != nil && !m.saveFailing:
 		m.saveFailing = true
 		m.transcript.addNote("session save failed: " + err.Error() + " — will keep retrying")
-		m.refreshViewport()
 	case err == nil && m.saveFailing:
 		m.saveFailing = false
 		m.transcript.addNote("session saving recovered")
-		m.refreshViewport()
 	}
 	if err == nil {
 		m.flushPendingTitle()

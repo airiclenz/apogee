@@ -1003,11 +1003,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// record, a fired mechanism — still counts as life on the stall guard's clock (activity.go).
 		m.noteEngineHeard()
 		m = m.foldEvent(msg.Event)
-		// layout(), not a bare repaint: an Event also feeds the Inspector's ring (foldWire) and the
-		// /usage accounting, and both panes derive their rows — and so their drawn height — from what
-		// it just wrote. The widget's height IS the transcript's drawn row count (layout()), so a
-		// report pane that grew under a stale one strands the tail below the scroll clamp.
-		m.layout()
+		// Nothing is laid out here: the fold moved the transcript's generation, and the repaint tail
+		// (settleFrame, deferred above) lays out from that. An Event also feeds the Inspector's ring
+		// (foldWire) and the /usage accounting, and both panes derive their rows — and so their drawn
+		// height — from what it just wrote; the tail's height half (freshenTranscriptClamp) catches a
+		// report pane that grew under an unchanged paint, so the widget's height never goes stale
+		// under the scroll clamp.
 		// A tool result is a child that just finished with the terminal — at any depth, a
 		// sub-agent's included — so it is the moment mouse tracking may have been reset behind
 		// apogee's back. Say it again (mousereassert.go); the sequence is idempotent, so the
@@ -1048,7 +1049,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// nor the running Turn, because the Firing it describes is a separate headless run that
 		// this session's conversation knows nothing about.
 		m = m.foldScheduleEvent(msg.Event)
-		m.refreshViewport()
 		return m, nil
 
 	case routingNoticeMsg:
@@ -1068,7 +1068,6 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// nothing back — unlike the two rendezvous Msgs above, a presentation is a record, not a
 		// gate — so it neither moves the state machine nor interrupts the running Turn.
 		m.transcript.addPresented(msg)
-		m.refreshViewport()
 		return m, nil
 
 	case exchangeDoneMsg:
@@ -1828,7 +1827,6 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// as an offline upstream is refused, and for the same reason: the typed line stays in the box
 		// so ⏎ sends it the moment the actuation completes.
 		m.transcript.addNote(m.actuationBlockNote())
-		m.refreshViewport()
 		return m, nil
 	}
 	if m.blockedUpstream() {
@@ -1838,7 +1836,6 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 		// else about the state moves (no worker, no reset, and a held interjection queue stays
 		// held), so ⏎ once the heartbeat recovers sends the very same message.
 		m.transcript.addNote(m.upstreamBlockNote())
-		m.refreshViewport()
 		return m, nil
 	}
 	if m.eng.InExchange() {
@@ -1874,7 +1871,6 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	// it between Turns 1 and 2 (autotitle.go). It drives no engine and enters no transcript — it
 	// simply rides along in the batch below, and is nil whenever nothing should fire.
 	nameCmd := m.maybeAutoTitle(in.Text)
-	m.layout() // the emptied input box shrinks back; the repaint follows the tail onto the new prompt
 	next, cmd := m.launchExchange(in)
 	return next, tea.Batch(cmd, nameCmd, record)
 }
@@ -1898,8 +1894,10 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 // the boundary is still the pre-Submit one: a tea.Cmd is inert until the program runs it after
 // Update returns, so the Snapshot taken here precedes the Submit that rides cmd whatever the
 // caller's statement order. Everything upstream of the launch stays the caller's — the parse, the
-// upstream and InExchange guards, the transcript block, the layout — and the box that reaches
-// this verb is the same one the worker was built over, so the two readers of the mailbox agree.
+// upstream and InExchange guards, the transcript block — and the box that reaches this verb is the
+// same one the worker was built over, so the two readers of the mailbox agree. Neither side lays
+// out: the transcript block moved the generation, and the Update's repaint tail ([Model.settle])
+// paints it.
 //
 // It takes a pointer because the generation bump and the frame reset must land on the Model copy
 // the caller returns — so a caller binds the Cmd in a statement of its own, never
@@ -2062,7 +2060,6 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 // claiming a failure nobody has seen since, and five resumes would keep five of them.
 func (m Model) foldHookNotice(msg hookNoticeMsg) (tea.Model, tea.Cmd) {
 	m.transcript.addEphemeralNote(msg.note)
-	m.refreshViewport()
 	return m, nil
 }
 
@@ -2101,7 +2098,6 @@ func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
 	// that worker's fold.
 	m, drained := m.runDeferredCommands()
 	m.noteHeldQueue()
-	m.refreshViewport()
 	return m, tea.Batch(cmd, drained)
 }
 
@@ -2126,7 +2122,6 @@ func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
 	m.transcript.addError("loop", msg.Err.Error(), runRef{})
 	cmd := m.finishWorker(stateErrored)
 	m.noteHeldQueue()
-	m.refreshViewport()
 	return m, cmd
 }
 

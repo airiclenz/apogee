@@ -284,7 +284,6 @@ func (m Model) acceptSubAgentsMigration(choice int) (tea.Model, tea.Cmd) {
 			"back at the next start-up", entryNameList(entries)))
 	}
 	m.picker = picker{}
-	m.layout()
 	return m, nil
 }
 

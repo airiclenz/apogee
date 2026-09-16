@@ -352,7 +352,6 @@ func (m Model) foldActuation(msg actuationMsg) (tea.Model, tea.Cmd) {
 	// The launcher's own words about a machine's processes and files, so escape-stripped on the
 	// way to the terminal exactly as a model id or a context file's name is.
 	m.transcript.addNote(stripEscapes(msg.ev.step))
-	m.refreshViewport()
 	return m, actuationListen(msg.gen, m.actuation.events)
 }
 
@@ -407,9 +406,9 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 			// actuating one), so the recording belongs with the load's narration above rather than with
 			// the switch below, whose subject is the server the session is arriving on.
 			m.recordLoadedProfile(profile)
-			// The /server fold repaints on its way out (it restates the start-up box and lays out), so
-			// the notices above are on screen with the move rather than one frame behind it. It also
-			// replaces the whole heartbeat state, which discards any rebind stashed under the latch —
+			// The /server fold restates the start-up box on its way out, and the Update's repaint tail
+			// paints it and the notices above together ([Model.settle]), so they are on screen with the
+			// move rather than one frame behind it. It also replaces the whole heartbeat state, which discards any rebind stashed under the latch —
 			// an observation of the server being LEFT is not news about the one being joined.
 			// Nothing is RECORDED here: a profile's server is an address the launcher chose, not an
 			// entry of `servers:`, so there is no name a next session could start on (ADR 0036
@@ -434,7 +433,6 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 			note += startupTimeoutCoda
 		}
 		m.transcript.addNote(note)
-		m.refreshViewport()
 		return m, nil
 	}
 	if verb != verbLoad {
@@ -446,14 +444,12 @@ func (m Model) foldActuationDone(ev actuationEvent) (tea.Model, tea.Cmd) {
 		if verb == verbUnload {
 			m.transcript.addNote(stripEscapes(unloadOutcome(ev.result)))
 		}
-		m.refreshViewport()
 		return m, nil
 	}
 	m.transcript.addNote("profile " + stripEscapes(profile) + " loaded — waiting for the beat")
 	// The other commit: the load landed on the very server this session is on, so the profile it now
 	// serves is the one the actuating entry should come back on (see the move's own record above).
 	m.recordLoadedProfile(profile)
-	m.refreshViewport()
 	// Armed in a statement of its own: the immediate beat opens a FRESH chain, and the generation
 	// bump has to land on the Model this returns (the spinnerAnim.arm convention, [Model.armBeat]).
 	beat := m.armBeat()
@@ -479,7 +475,7 @@ const launchProfileSavedNote = "launch-profile: saved — apogee loads it at the
 //
 // It takes a pointer receiver for [choiceRecord.warn]'s reason — a Model is copied by value on every
 // Update (ADR 0011), so the notes have to land on the CALLER's own copy — and it lays nothing out:
-// both call sites are mid-fold and repaint on their way out.
+// both call sites are mid-fold, and the Update's repaint tail paints the notes ([Model.settle]).
 func (m *Model) recordLoadedProfile(profile string) {
 	record := recordLaunchProfile(m.opts.Launcher, profile)
 	if record.saved {
@@ -566,7 +562,6 @@ func (m Model) foldRestore(msg restoreMsg) (tea.Model, tea.Cmd) {
 		// The binary's own words about a machine's servers and config, escape-stripped on the way to
 		// the terminal exactly as the launcher's narration steps are.
 		m.transcript.addNote(stripEscapes(note))
-		m.refreshViewport()
 	}
 	if msg.err != nil || msg.restore.Load == "" || !m.restorable() {
 		return m, nil

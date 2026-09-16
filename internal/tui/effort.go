@@ -145,7 +145,6 @@ func (m Model) runEffort(level domain.ThinkingEffort) (tea.Model, tea.Cmd) {
 	m.eng.SetEffortOverride(level)
 	override, profile := m.eng.ThinkingEffort()
 	m.transcript.addNote(effortResolutionNote(override, profile))
-	m.layout()
 	return m, nil
 }
 
