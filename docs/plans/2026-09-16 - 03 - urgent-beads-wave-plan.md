@@ -56,7 +56,11 @@
 
 **Out of scope:** `Client.CanAskForNoReasoning()` (bead note, optional); signed-thinking replay on the anthropic wire (file a bead at item 9); Anthropic OAuth/Bearer tokens; the curl-23/useradd denial misses (no signature printed); headless `--resume`; block-cursor stops on user blocks; copying the parent's undo odb; every P3/P4 non-bug bead.
 
-## 1. Guard: no parallel test swaps a package-level seam (apogee-ku1)
+## 1. Guard: no parallel test swaps a package-level seam (apogee-ku1) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the guard treats parallelism as transitive — a serial `t.Run` literal inside a parallel test, and a parallel `t.Run` literal inside a serial test, both count as running under `t.Parallel` (a subtest of a parallel test still races every other parallel test); the plan's "both calls `t.Parallel()` and assigns" reads as the direct case only — the superset passes at HEAD.
+NOTES (2026-09-16): assignment targets rooted at a seam (`seam.field = …`, `seam[k] = …`, `seam++`) count as writes; a name the test function declares locally (`:=`, `var`, parameter, range variable) shadows the seam and is skipped — pinned by the fixture's `TestParallelShadow` case.
+NOTES (2026-09-16): bead close is the verifier's at commit time — `bd close apogee-ku1 --reason="test(cmd/apogee): guard that no parallel test swaps a package-level seam — race fixed at 52e0d677, guard pins the shape"`.
 
 **What:** apogee-ku1's race (`runOnce` swapped by a `t.Parallel()` test while a Scheduler firing read it) was fixed at `52e0d677`; this item pins the shape out. Add `TestNoParallelTestSwapsAPackageSeam` to `cmd/apogee/seams_guard_test.go`: with `go/parser` collect every identifier declared by a top-level `var` in the package's non-test files (the seam set: `runOnce`, `hardExit`, `interruptSignals`, `prewarmLabelWalk`, `discoverBeat`, `discoverDelegationBeat`, `tuiScheduleClock`, `daemonClock`, `acquireDaemonLock`, `watchSchedules`, `daemonExecutable`, `daemonUserHome`, `probeKeyStore`, `probeTerminalStreams`, `newConfiner`, `hostToolchain` today — derived, never a literal list), then fail for any test func or `t.Run` literal that both calls `t.Parallel()` and assigns to one of them, reporting `file:line`. Close the bead with the commit subject and a reason naming `52e0d677`.
 
