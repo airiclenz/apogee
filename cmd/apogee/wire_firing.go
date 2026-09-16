@@ -290,132 +290,60 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// workspace is only what its PATH is scoped out of.
 	hostToolchain.start(in.roots.workspace)
 
-	cfg := apogee.Config{
-		Endpoint: in.entry.Endpoint,
-		Model:    spec.Model,
-		APIKey:   apiKey,
-		// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
-		// seat by when the model is offered a seat to choose (ADR 0069, wire_server.go's shape). An
-		// unattended run needs them for the same reason a session does: the bullet that names the
-		// far seat is unreadable beside a near one the model can only call "this server".
-		ServerName:        in.entry.Name,
-		ServerDescription: in.entry.Description,
-		Mode:              in.mode,
-		Bypass:            in.opts.Bypass,
-		ConfigDir:         in.roots.config,
-		WorkspaceDir:      in.roots.workspace,
-		ScratchDir:        scratchDir,
-		// And the same dir as the read root the read tools reach it back through: a Firing's model
-		// is told the dir is writable exactly as a session's is, and must be able to read what it
-		// wrote there (ADR 0031's Driver parity).
-		ScratchReadRoot: func() string { return scratchDir },
-		// Confiner and posture as the session's CONFIGURED one, so an Auto run here is fenced by the
-		// same box an Auto session on this configuration would be. The posture is the boot value and
-		// not a `/confine` toggled since: that command moves the blast radius on the live engine and
-		// nothing mirrors it onto the settings holder, so it never reaches `in.opts`. That is the
-		// second named exception to "a Firing sees exactly what the session sees" (ADR 0037, note of
-		// 2026-08-25) — a `/confine off` is a per-session act a watching human takes on their own
-		// turn, while `/confine off --save`, which writes the host acknowledgement, is what loosens
-		// the Firings a LATER session raises.
-		Confiner:           in.confiner,
-		ConfineToWorkspace: in.opts.ConfineToWorkspace,
-		// The dialect resolved above, spelled in the domain's mirror of the provider vocabulary —
-		// the same five words on this side of the boundary (internal/agent's toProviderDialect
-		// converts them back at the wire seam, where the provider package holds no domain import).
-		EffortDialect:     domain.EffortDialect(effortDialect),
-		WebSearchEndpoint: in.opts.WebSearchEndpoint,
-		// Every file-only key from here down is honoured for one reason: it is one configuration,
-		// and an unattended run must offer the model the same tools, obey the same host allow/deny
-		// lists, scrub the same variables out of a subprocess it chose the contents of, mount the
-		// same context files and read responses in the same shape a session on this host would.
-		// `ui.inspector:` too — this run has no /inspect pane to show the capture in, but its sink
-		// sees the WireEvents like any other, which is the benchable-all-the-way-up shape (ADR 0031).
-		DisabledTools: in.opts.ToolsDisabled,
-		EnabledTools:  in.opts.ToolsEnabled,
-		URLAllowHosts: in.opts.URLAllowHosts,
-		URLDenyHosts:  in.opts.URLDenyHosts,
-		Inspector:     in.opts.UI.Inspector,
-		// `undo-snapshots:` — whether this run images the workspace around each Exchange into a
-		// store of its own (ADR 0074). It rides the Config because the Config is what an unattended
-		// run is composed from: run.Once opens the store itself, under the record id this Driver
-		// already minted, and a flag it could not read there would make the key silently a TUI-only
-		// one — the Driver-parity break ADR 0031 rules out. It is what gives `apogee undo
-		// <session-id>` something to reverse after a headless or scheduled run.
-		UndoSnapshots: in.opts.UndoSnapshots,
-		// Both halves of what the `terminal` tool may not read back out of the environment it inherits:
-		// the names an API key is resolved from, and the names a Reaction's webhook header is
-		// (config.ReactionEnvNames). A Firing runs the same `reactions:` list a session does, so it has
-		// to scrub the same variables — a token the session hides would otherwise be readable by a model
-		// the moment the same configuration ran unattended.
-		SecretEnvVars: append(config.APIKeyEnvNames(in.opts), config.ReactionEnvNames(in.opts)...),
-		// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
-		// rather than off opts, so the run reads responses in the same shape a session on the same
-		// model would, and a built-in match has already narrated itself through the notices.
-		Profile:      spec.Profile,
-		SystemPrompt: spec.SystemPrompt,
-		ContextFiles: in.opts.ContextFiles,
-		Skills:       skillProvider,
-		// And the same provider behind the model-facing door (ADR 0065 §6): an unattended run gets
-		// load_skill exactly as a session does, so a Firing's model can reach a written procedure
-		// without a human there to attach one (ADR 0031's Driver parity).
-		SkillLookup: skillProvider,
-		// The same read-only mounts a session gets: the model can read the bundled files of a skill
-		// it was given exactly as an interactive one can. Sub-agents inherit them through the tool
-		// instances a Subset carries, so no per-child wiring exists.
-		// ReadRoots, like the session's own mount, is the resolved-path view of the same sources —
-		// a workspace anchor that is a symlink out of the workspace is dropped rather than mounted
-		// (audit 2026-08-25 F-13), and it stays a method value so the mount follows SetSources.
-		// The toolchain roots follow the skill libraries on the same func exactly as a session's
-		// do (toolchain_roots.go): one probe per process, so a Firing raised inside a session
-		// composes over the answer the session already has, and a headless or daemon run starts
-		// the probe here because nothing before it did.
-		ExtraReadRoots: composeReadRoots(skillProvider.ReadRoots, hostToolchain.roots),
-		// And the mount a shipped skill's bundled files are served through, so an unattended run
-		// reads the `shipped:<id>` address its own injected block announces exactly as a session
-		// does (ADR 0031's Driver parity).
-		VirtualReadRoots: skillProvider.VirtualReadRoots,
-		ParallelAgents:   config.ResolveParallelAgents(in.entry.ParallelAgents, slots),
-		Context: apogee.ContextConfig{
-			MaxContextTokens: spec.MaxContextTokens,
-			// The room inside it this run works in: the bound entry's own `working-window:` over the
-			// top-level key (config.ResolveWorkingWindow, the ranks the window pin above spells).
-			// Unbounded at both scopes it stays 0 and the run works in the whole advertised window.
-			WorkingWindow: config.ResolveWorkingWindow(in.entry.WorkingWindow, in.opts.WorkingWindow),
-			// The `response-reserve:` share the bound entry resolves to, read back off the spec
-			// above. Unstated at both scopes it stays 0 and the Budget holds its own built-in fifth
-			// back.
-			ResponseReserveFraction: reserve,
-			// The bound entry's `max-output-tokens:` pin (ADR 0046). Unpinned it stays 0 and the
-			// engine derives the cap from its own reply budget — never "no cap", which for an
-			// unattended run is precisely the thing a runaway reply must not be able to become.
-			MaxOutputTokens:   in.entry.MaxOutputTokens,
-			CompactionEnabled: in.opts.AutoCompact,
-			// And the `prune-tool-results:` toggle beside it, so a scheduled Firing prunes stale
-			// tool results the way the session it was raised from does.
-			PruneToolResults: in.opts.PruneToolResults,
-		},
-		// The `delegate-max-steps` bound on a sub-agent's Exchange (default 80; 0 ⇒ unbounded),
-		// the `delegate-max-depth` bound on how deep delegation nests (default 1), and the
-		// `delegate-max-tokens` / `delegate-timeout` bounds on what one delegation may spend
-		// (defaults 20M prompt tokens and 2h; 0 ⇒ unbounded). A Firing runs while nobody watches,
-		// which is exactly the case a runaway delegation must not be able to become.
-		Delegation: apogee.DelegationConfig{
-			MaxSteps:  in.opts.DelegateMaxSteps,
-			MaxDepth:  in.opts.DelegateMaxDepth,
-			MaxTokens: in.opts.DelegateMaxTokens,
-			Timeout:   in.opts.DelegateTimeout,
-		},
-		// The seven Floor-guard gates the session resolved, negated at the one seam that negates them
-		// (floorFromOptions). A Firing is composed out of the session's LIVE options, so a guard
-		// switched off in `/settings` is off for the run this session raises as well.
-		Floor: floorFromOptions(in.opts),
-		// And the `context-fill-notice` switch beside it (ADR 0077), carried as is: a Firing's
-		// model is told how full its context is exactly when the session's would be.
-		ContextFillNotice: in.opts.ContextFillNotice,
-		// And the `step-budget-notice` switch, its twin: a Firing's delegates are warned at three
-		// quarters of their cap exactly when the session's would be.
-		StepBudgetNotice: in.opts.StepBudgetNotice,
-	}
+	// The keys every Driver fills identically come off the one projection (wire_config.go) — the
+	// projection is called after hostToolchain.start above so the read-roots func it composes lists
+	// the toolchain roots — and what an unattended run adds on top is the entry it bound to and the
+	// observation it took of that server. Confiner and posture are the session's CONFIGURED ones,
+	// so an Auto run here is fenced by the same box an Auto session on this configuration would be;
+	// the posture is the boot value and not a `/confine` toggled since — that command moves the
+	// blast radius on the live engine and nothing mirrors it onto the settings holder, so it never
+	// reaches `in.opts`. That is the second named exception to "a Firing sees exactly what the
+	// session sees" (ADR 0037, note of 2026-08-25) — a `/confine off` is a per-session act a
+	// watching human takes on their own turn, while `/confine off --save`, which writes the host
+	// acknowledgement, is what loosens the Firings a LATER session raises.
+	//
+	// Every file-only key the projection carries is honoured for one reason: it is one
+	// configuration, and an unattended run must offer the model the same tools, obey the same host
+	// allow/deny lists, scrub the same variables out of a subprocess it chose the contents of, mount
+	// the same context files and read responses in the same shape a session on this host would.
+	cfg := projectConfig(in.opts, in.roots, in.confiner, in.mode, skillProvider)
+	cfg.Endpoint = in.entry.Endpoint
+	cfg.Model = spec.Model
+	cfg.APIKey = apiKey
+	// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
+	// seat by when the model is offered a seat to choose (ADR 0069, wire_server.go's shape). An
+	// unattended run needs them for the same reason a session does: the bullet that names the
+	// far seat is unreadable beside a near one the model can only call "this server".
+	cfg.ServerName = in.entry.Name
+	cfg.ServerDescription = in.entry.Description
+	cfg.ScratchDir = scratchDir
+	// And the same dir as the read root the read tools reach it back through: a Firing's model
+	// is told the dir is writable exactly as a session's is, and must be able to read what it
+	// wrote there (ADR 0031's Driver parity).
+	cfg.ScratchReadRoot = func() string { return scratchDir }
+	// The dialect resolved above, spelled in the domain's mirror of the provider vocabulary —
+	// the same five words on this side of the boundary (internal/agent's toProviderDialect
+	// converts them back at the wire seam, where the provider package holds no domain import).
+	cfg.EffortDialect = domain.EffortDialect(effortDialect)
+	// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
+	// rather than off opts, so the run reads responses in the same shape a session on the same
+	// model would, and a built-in match has already narrated itself through the notices.
+	cfg.Profile = spec.Profile
+	cfg.SystemPrompt = spec.SystemPrompt
+	cfg.ParallelAgents = config.ResolveParallelAgents(in.entry.ParallelAgents, slots)
+	cfg.Context.MaxContextTokens = spec.MaxContextTokens
+	// The room inside it this run works in: the bound entry's own `working-window:` over the
+	// top-level key (config.ResolveWorkingWindow, the ranks the window pin above spells).
+	// Unbounded at both scopes it stays 0 and the run works in the whole advertised window.
+	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(in.entry.WorkingWindow, in.opts.WorkingWindow)
+	// The `response-reserve:` share the bound entry resolves to, read back off the spec
+	// above. Unstated at both scopes it stays 0 and the Budget holds its own built-in fifth
+	// back.
+	cfg.Context.ResponseReserveFraction = reserve
+	// The bound entry's `max-output-tokens:` pin (ADR 0046). Unpinned it stays 0 and the
+	// engine derives the cap from its own reply budget — never "no cap", which for an
+	// unattended run is precisely the thing a runaway reply must not be able to become.
+	cfg.Context.MaxOutputTokens = in.entry.MaxOutputTokens
 
 	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink
 	// (ADR 0073 §2). It is assigned after the literal rather than inside it because a nil

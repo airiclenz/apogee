@@ -29,7 +29,9 @@
 // The phases runRoot walks, one file each (ADR 0043): wire_boot.go the facilities one
 // run owns before a session exists — skills, Bridge, presentation ladder, Confiner —
 // the base Config built from them, and what this host's confinement posture says for
-// itself on stderr; wire_live.go the live-session assembly, from the MCP connections
+// itself on stderr; wire_config.go the one Options→Config projection that base and the
+// Firing composer share — every key both Drivers fill identically, filled once (ADR 0031);
+// wire_live.go the live-session assembly, from the MCP connections
 // and the tool registry through the engine and Upstream holders and the bind that fills
 // them to the config watcher and the out-of-band work; wire_verbs.go the composition
 // root's own verbs — the rebind, the beat wrapper, and the three ways a session arrives

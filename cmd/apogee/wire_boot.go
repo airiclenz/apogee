@@ -205,177 +205,69 @@ func (w *rootWiring) resolveConfig() error {
 	}
 	w.hooks = runner
 
-	w.cfg = apogee.Config{
-		Endpoint: w.opts.Endpoint,
-		Model:    w.opts.Model,
-		// The upstream bearer token resolved above, from the startup `servers:` entry's own key
-		// source, which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
-		// Authorization header at all.
-		APIKey: apiKey,
-		Mode:   w.mode,
-		Bypass: w.opts.Bypass,
-		// The Reaction Runner built above, which DECORATES the Bridge's sink: the renderer sees every
-		// Event exactly as it did before this key existed, and the `reactions:` list is fired behind it
-		// (ADR 0073 §2 — observe-only, nothing a Reaction does reaches the model or the record).
-		Events: w.hooks,
-		// Where a SYNC-lane reaction's trouble is said out loud — a gate or advise command that
-		// failed, timed out or could not be spawned. It is the same seam the Runner reports the
-		// observe lane's failures through (Report above), so one `reactions:` file's trouble reads
-		// the same way whichever lane it came from.
-		Report:   w.bridge.NotifyHook,
-		Approver: w.bridge.Approver(),
-		Asker:    w.bridge.Asker(),
-		// The pre-emption seam (ADR 0025): the Bridge answers whether the TUI's queue holds a
-		// message, off the live Exchange's mailbox, so a queued message skips the sub-agents of the
-		// running group that have not started. The headless and Firing configs leave it nil — no
-		// human queue, nothing to pre-empt for.
-		InterjectionPending: w.bridge.InterjectionPending,
-		// The namer built above: an unnamed delegation is named out of band on the CHILD's own
-		// Upstream (ADR 0068), so the engine never learns which endpoint answered.
-		Namer:        w.namer,
-		Presenter:    w.bridge.Presenter(),
-		ConfigDir:    w.roots.config,
-		WorkspaceDir: w.roots.workspace,
-		// The host's real Confiner backend for this OS (landlock on Linux, seatbelt on macOS,
-		// denyConfiner elsewhere — confinement-execution-contract §2.6). It is no longer
-		// denyConfiner, so --mode auto WORKS where fs-confinement exists and gates the
-		// subprocess surface where it does not (rather than refusing Auto).
-		Confiner:           w.confiner,
-		ConfineToWorkspace: w.opts.ConfineToWorkspace,
-		WebSearchEndpoint:  w.opts.WebSearchEndpoint,
-		// The `tools.disabled:` roster switch: the built-in tools this config takes off the menu.
-		// Empty ⇒ the whole roster, exactly the set built before the key existed. It is carried on
-		// Config rather than passed to the assembly alone so every Driver — this session, a headless
-		// run, an embedder — prunes the same roster from the same value.
-		DisabledTools: w.opts.ToolsDisabled,
-		// The `tools.enabled:` lift — the same global rung's ADD direction (ADR 0057): the built-in
-		// tools this config puts back on the menu when the build or the list above leaves them off.
-		// Empty ⇒ nothing is lifted. It rides Config for DisabledTools' reason: every Driver lifts
-		// the same names from the same value.
-		EnabledTools: w.opts.ToolsEnabled,
-		// The `url-safety:` host layer: the hosts the network tools may reach and the hosts they
-		// may not. Empty ⇒ every host, exactly the reach before this key existed — and never less
-		// safe either way, since the guard's SSRF floor is not reachable from configuration. It
-		// rides Config for DisabledTools' reason: every Driver must fence the same hosts from the
-		// same value.
-		URLAllowHosts: w.opts.URLAllowHosts,
-		URLDenyHosts:  w.opts.URLDenyHosts,
-		// `ui.inspector:` — whether this session captures its own wire traffic for /inspect. It is
-		// read ONCE, here, because that is where the engine installs the observer: a mid-session
-		// edit of the key changes the file and the next start, never the running engine.
-		Inspector: w.opts.UI.Inspector,
-		// Every variable this configuration reads an API key out of (`api-key-env:`, ADR 0047),
-		// which the execution tools drop from the environment they hand a subprocess. It is the
-		// union across ALL configured entries rather than the bound one's: `/server` switches
-		// mid-session, and a scrub that followed the binding would leave the other entries' keys
-		// readable in every `terminal` / `python_exec` / `run_tests` child until it happened. Empty
-		// ⇒ apogee's own APOGEE_API_KEY alone, exactly the scrub before this key existed.
-		// A webhook Reaction's `headers-env:` names variables holding a token too (ADR 0073 §6), and they
-		// are scrubbed beside the key sources for exactly the same reason: a token readable out of a
-		// `terminal` child is a token the model can read.
-		SecretEnvVars: append(config.APIKeyEnvNames(w.opts), config.ReactionEnvNames(w.opts)...),
-		// The Model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
-		// resolved above for THIS model out of the `model-profiles:` map and the shipped shape
-		// table. A model neither tier knows gets the zero profile: native tool calls with no inline
-		// thinking, exactly as an unprofiled model has always behaved.
-		Profile: bindings.Profile,
-		// The resolved system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per request
-		// and seeds as the first system message — the user's own prompt, or apogee's embedded
-		// default when nothing is configured (ADR 0064). Empty ⇒ no prompt, which now takes an
-		// explicit `use-default-prompt: false`: the request opens with the user's own message,
-		// exactly as it did before this key existed.
-		SystemPrompt: bindings.SystemPrompt,
-		// The workspace context files (`context-files:`, file-only): the names the engine looks for
-		// in the workspace root at every session boundary, whose content rides the same first system
-		// message as the prompt above — verbatim, never as a template. Nil ⇒ the feature is off, and
-		// the request is exactly what it was before the key existed.
-		ContextFiles: w.opts.ContextFiles,
-		Skills:       w.skillProvider,
-		// The SAME provider as the model-facing door (ADR 0065 §6): load_skill searches the catalog
-		// the user's "/id" resolves against, so a skill added or edited mid-session is reachable
-		// through both as soon as the next Reload lands. nil would simply leave the tool out of the
-		// roster; wiring it is what puts the door in the menu.
-		SkillLookup: w.skillProvider,
-		// The skill source dirs, mounted as read-only roots for the model's read tools: an
-		// attached skill names its folder, and this is what makes that address readable
-		// (read_file, list_dir, grep, find_files — nothing else; the dirs stay unwritable).
-		// ReadRoots rather than SourceDirs, which only DISPLAYS the sources: it hands back each
-		// dir's symlink-RESOLVED real path and drops a workspace anchor that resolves outside the
-		// workspace, so a cloned repo shipping `.apogee/skills` as a symlink to /home or /etc
-		// cannot relocate the read fence the way it could before (audit 2026-08-25 F-13).
-		// It is the PROVIDER's method value, so the mount is live in both senses — it follows a
-		// mid-session `use-project-skills` flip through SetSources, and it is re-read per tool
-		// call rather than frozen here.
-		// Sub-agents need no wiring of their own: a child's registry is a Subset of the parent's
-		// tool INSTANCES (domain.ToolRegistry.Subset), so the same read tools — and with them
-		// this same func — ride along at every depth.
-		// The toolchain roots the host probed (toolchain_roots.go) follow the skill libraries on
-		// the same func, in that order, so the orientation line and the mount list one library.
-		ExtraReadRoots: composeReadRoots(w.skillProvider.ReadRoots, hostToolchain.roots),
-		// The same mount for the source that has NO host path: apogee's own shipped skills live in
-		// the binary, so their bundled files are reachable only under the `shipped:<id>` address
-		// their SKILL.md block announces (ADR 0065 §3). Without this the announced files: line
-		// would name a folder every read tool refuses — the one thing an announced path may not do.
-		// Like ReadRoots it is the PROVIDER's method value, so a `use-shipped-skills` flip moves
-		// the mount with no re-wiring, and sub-agents inherit it through the same tool instances.
-		VirtualReadRoots: w.skillProvider.VirtualReadRoots,
-		// The `context-window:` PIN (0 when unpinned — nothing probes at startup any more). It is
-		// the budget /compact and the automatic Compaction trigger bound their summary request
-		// against so compaction survives high fill (the summary call would otherwise overflow near
-		// n_ctx); the same value drives the TUI's footer/gauge below. Unpinned it stays 0 until the
-		// first heartbeat rebind binds the observed window. CompactionEnabled carries the
-		// `auto-compact` key (default on) — the budget-driven automatic trigger (item 9); the
-		// on-demand /compact runs regardless of it. PruneToolResults carries the
-		// `prune-tool-results` key (default on) — the structural stale-tool-result collapse that
-		// runs at a Turn boundary before Compaction is ever reached.
-		// MaxOutputTokens is the startup entry's own `max-output-tokens:` pin (0 ⇒ unpinned, and the
-		// engine derives the reply cap from the room its Budget reserves — ADR 0046). It is seeded
-		// here as well as at the bind so the session runs capped from its first Turn. A scheduled
-		// Firing does not copy this Config: firingConfig (wire_firing.go) builds its own from the
-		// same Options and the entry it binds to (firingInputs), which is how a run nobody watches
-		// gets the same cap without sharing the session's value.
-		// WorkingWindow is the top-level `working-window:` key (0 ⇒ unbounded, and the working room
-		// IS the advertised window); firingConfig seeds it from the same key, so a run nobody
-		// watches works in the room the human bounded.
-		// ResponseReserveFraction is the top-level `response-reserve:` share (0 ⇒ unset, and the
-		// Budget holds its own built-in fifth back); firingConfig seeds it the same way, so the
-		// window is divided alike whether a human is watching or not.
-		Context: apogee.ContextConfig{
-			MaxContextTokens:        w.opts.ContextWindow,
-			WorkingWindow:           w.opts.WorkingWindow,
-			ResponseReserveFraction: w.opts.ResponseReserve,
-			MaxOutputTokens:         w.opts.StartupEntry.MaxOutputTokens,
-			CompactionEnabled:       w.opts.AutoCompact,
-			PruneToolResults:        w.opts.PruneToolResults,
-		},
-		// And how far a delegation of this session's may run before the engine ends it: the
-		// `delegate-max-steps` key (default 80; 0 ⇒ unbounded, what a delegation cost before the
-		// cap existed), how deep delegation may nest: `delegate-max-depth` (default 1 — the
-		// session delegates, its delegates do not), and what one delegation may spend in prompt
-		// tokens and wall clock: `delegate-max-tokens` (default 20M) and `delegate-timeout`
-		// (default 2h), 0 disabling either. firingConfig reads the same four keys off the Options a
-		// Firing is raised with, so a delegate is bounded the same whether a human is watching or
-		// not.
-		Delegation: apogee.DelegationConfig{
-			MaxSteps:  w.opts.DelegateMaxSteps,
-			MaxDepth:  w.opts.DelegateMaxDepth,
-			MaxTokens: w.opts.DelegateMaxTokens,
-			Timeout:   w.opts.DelegateTimeout,
-		},
-		// And which Floor guards this session runs WITHOUT (ADR 0071). The seven keys are positive in
-		// the file and negative at the engine, and floorFromOptions is the one place that turns one
-		// spelling into the other — firingConfig calls it on the same Options, so a guard the human
-		// took away is taken away for the runs nobody watches too.
-		Floor: floorFromOptions(w.opts),
-		// And whether the engine's context-fill notice is on (ADR 0077): the `context-fill-notice`
-		// key, default off. Not a Floor guard, so it is carried as is — no negation — beside Bypass,
-		// which switches it off with the rest of the advise class; firingConfig carries it the same
-		// way.
-		ContextFillNotice: w.opts.ContextFillNotice,
-		// And the `step-budget-notice` switch beside it, its twin in every respect (ADR 0077,
-		// 2026-09-15 addendum): carried as is, off by default, off under Bypass.
-		StepBudgetNotice: w.opts.StepBudgetNotice,
-	}
+	// The keys both Drivers fill identically come off the one projection (wire_config.go); what a
+	// watched session adds on top is the binding it starts on and the human seams the Bridge stands
+	// behind. hostToolchain.start has already run (newRootWiring), so the read-roots func the
+	// projection composes lists the toolchain roots as soon as the probe answers.
+	w.cfg = projectConfig(w.opts, w.roots, w.confiner, w.mode, w.skillProvider)
+	w.cfg.Endpoint = w.opts.Endpoint
+	w.cfg.Model = w.opts.Model
+	// The upstream bearer token resolved above, from the startup `servers:` entry's own key
+	// source, which APOGEE_API_KEY overlays. Empty — the keyless local default — sends no
+	// Authorization header at all.
+	w.cfg.APIKey = apiKey
+	// The Reaction Runner built above, which DECORATES the Bridge's sink: the renderer sees every
+	// Event exactly as it did before this key existed, and the `reactions:` list is fired behind it
+	// (ADR 0073 §2 — observe-only, nothing a Reaction does reaches the model or the record).
+	w.cfg.Events = w.hooks
+	// Where a SYNC-lane reaction's trouble is said out loud — a gate or advise command that
+	// failed, timed out or could not be spawned. It is the same seam the Runner reports the
+	// observe lane's failures through (Report above), so one `reactions:` file's trouble reads
+	// the same way whichever lane it came from.
+	w.cfg.Report = w.bridge.NotifyHook
+	w.cfg.Approver = w.bridge.Approver()
+	w.cfg.Asker = w.bridge.Asker()
+	// The pre-emption seam (ADR 0025): the Bridge answers whether the TUI's queue holds a
+	// message, off the live Exchange's mailbox, so a queued message skips the sub-agents of the
+	// running group that have not started. The headless and Firing configs leave it nil — no
+	// human queue, nothing to pre-empt for.
+	w.cfg.InterjectionPending = w.bridge.InterjectionPending
+	// The namer built above: an unnamed delegation is named out of band on the CHILD's own
+	// Upstream (ADR 0068), so the engine never learns which endpoint answered.
+	w.cfg.Namer = w.namer
+	w.cfg.Presenter = w.bridge.Presenter()
+	// The Model profile (CONTEXT: Model profile) — tool-call format + thinking channel —
+	// resolved above for THIS model out of the `model-profiles:` map and the shipped shape
+	// table. A model neither tier knows gets the zero profile: native tool calls with no inline
+	// thinking, exactly as an unprofiled model has always behaved.
+	w.cfg.Profile = bindings.Profile
+	// The resolved system-prompt TEMPLATE (ADR 0023), which the loop renders fresh per request
+	// and seeds as the first system message — the user's own prompt, or apogee's embedded
+	// default when nothing is configured (ADR 0064). Empty ⇒ no prompt, which now takes an
+	// explicit `use-default-prompt: false`: the request opens with the user's own message,
+	// exactly as it did before this key existed.
+	w.cfg.SystemPrompt = bindings.SystemPrompt
+	// The `context-window:` PIN (0 when unpinned — nothing probes at startup any more). It is
+	// the budget /compact and the automatic Compaction trigger bound their summary request
+	// against so compaction survives high fill (the summary call would otherwise overflow near
+	// n_ctx); the same value drives the TUI's footer/gauge below. Unpinned it stays 0 until the
+	// first heartbeat rebind binds the observed window.
+	// MaxOutputTokens is the startup entry's own `max-output-tokens:` pin (0 ⇒ unpinned, and the
+	// engine derives the reply cap from the room its Budget reserves — ADR 0046). It is seeded
+	// here as well as at the bind so the session runs capped from its first Turn. A scheduled
+	// Firing does not copy this Config: firingConfig (wire_firing.go) builds its own from the
+	// same Options and the entry it binds to (firingInputs), which is how a run nobody watches
+	// gets the same cap without sharing the session's value.
+	// WorkingWindow is the top-level `working-window:` key (0 ⇒ unbounded, and the working room
+	// IS the advertised window); firingConfig seeds it from the same key, so a run nobody
+	// watches works in the room the human bounded.
+	// ResponseReserveFraction is the top-level `response-reserve:` share (0 ⇒ unset, and the
+	// Budget holds its own built-in fifth back); firingConfig seeds it the same way, so the
+	// window is divided alike whether a human is watching or not.
+	w.cfg.Context.MaxContextTokens = w.opts.ContextWindow
+	w.cfg.Context.WorkingWindow = w.opts.WorkingWindow
+	w.cfg.Context.ResponseReserveFraction = w.opts.ResponseReserve
+	w.cfg.Context.MaxOutputTokens = w.opts.StartupEntry.MaxOutputTokens
 	return nil
 }
 

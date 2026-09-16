@@ -373,6 +373,7 @@ func TestOpenSessionJournalWithNoApogeeHome(t *testing.T) {
 
 	w := &rootWiring{
 		opts:   config.Options{UndoSnapshots: true},
+		cfg:    apogee.Config{UndoSnapshots: true},
 		roots:  stateRoots{workspace: t.TempDir()},
 		engine: newLateEngine(apogee.ModeAskBefore, true),
 	}
@@ -394,6 +395,7 @@ func TestOpenSessionJournalWithoutGit(t *testing.T) {
 	home := t.TempDir()
 	w := &rootWiring{
 		opts:   config.Options{UndoSnapshots: true},
+		cfg:    apogee.Config{UndoSnapshots: true},
 		roots:  stateRoots{config: home, workspace: t.TempDir()},
 		engine: newLateEngine(apogee.ModeAskBefore, true),
 	}

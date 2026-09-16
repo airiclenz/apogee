@@ -244,7 +244,11 @@ the `firingBinding` and reload-projection tests.
 
 **Commit:** `refactor(cmd): Firings and rebinds read the live overlay; every live key tested through options()`
 
-## 6. One `projectConfig` for the session and the Firing
+## 6. One `projectConfig` for the session and the Firing — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the plan's signature names the roots type `hostRoots`; the type in the tree is `stateRoots` (wire.go) and `projectConfig` takes that — no such `hostRoots` type exists.
+NOTES (2026-09-16): the new table test lives in `cmd/apogee/wire_config_test.go` (co-located with its source per the coding standards) rather than in `wire_boot_test.go` / `wire_firing_test.go`, which needed no change.
+NOTES (2026-09-16): consequential edit — cmd/apogee/doc.go: made necessary by the new wire_config.go (TestDocMapNamesEveryFile enumerates the package's files).
 
 **What.** Depends on item 4. New `cmd/apogee/wire_config.go`: `projectConfig(opts config.Options,
 roots hostRoots, confiner, mode, skills) apogee.Config` fills the ~22 keys `resolveConfig`

@@ -446,8 +446,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 // in-memory funnel journal and a reason to tell the human, and the one case it reports as an error
 // (a store that could not be prepared, an index this build cannot read) gets the same treatment
 // here with the error's own text as that reason. An undo store is never worth a session.
+//
+// The switch is read off the Config rather than the boot Options: `undo-snapshots:` is a shared
+// key the projection fills for both Drivers (projectConfig, wire_config.go), and reading it back
+// from the one place it is carried is what keeps a session and a Firing answering the same value.
 func (w *rootWiring) openSessionJournal(ctx context.Context, id string) {
-	journal, reason, err := snapshot.OpenJournal(ctx, w.roots.config, id, w.roots.workspace, w.opts.UndoSnapshots)
+	journal, reason, err := snapshot.OpenJournal(ctx, w.roots.config, id, w.roots.workspace, w.cfg.UndoSnapshots)
 	if err != nil {
 		journal, reason = undo.New(), err.Error()
 	}
