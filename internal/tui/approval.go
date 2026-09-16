@@ -128,8 +128,9 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
 	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts.
 	// The state flip above is all it takes — the legend is derived from it at paint and yields to
-	// the pane for as long as the question stands ([Model.legend]).
-	m.layout() // the pane the decision turns on outranks the draft's extra rows
+	// the pane for as long as the question stands ([Model.legend]) — and so is the frame: the pane
+	// the decision turns on outranks the draft's extra rows (draftRowsCeiling), and Update's tail
+	// lays out when either height has moved from under its last set ([Model.settle]).
 	return m, tea.Tick(approvalArmDelay, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} })
 }
 

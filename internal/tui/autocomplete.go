@@ -285,8 +285,7 @@ func (m *Model) foldSkillsReloaded() {
 	prev := m.autocomplete
 	next := m.computeAutocomplete(m.caretByteOffset())
 	next.selected = reselectRow(prev, next)
-	m.autocomplete = next
-	m.layout() // the dropdown's rows come out of the viewport, and a fresh catalog may change how many
+	m.autocomplete = next // the dropdown's rows come out of the viewport, and a fresh catalog may change how many
 }
 
 // reselectRow maps the highlighted row of prev onto next by the VALUE it stood on, falling back to
@@ -693,8 +692,7 @@ func (m Model) autocompleteKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 		m.autocomplete = ac // an arrow: the moved highlight is the whole of what it did
 		return true, m, nil
 	case listCloses:
-		m.dismissAutocomplete()
-		m.layout() // the dropdown's rows go back to the transcript, which moves the scroll clamp with them
+		m.dismissAutocomplete() // the dropdown's rows go back to the transcript
 		return true, m, nil
 	case listAccepts:
 		// Enter falls through to submit when the token is already fully typed AND submitting is the
@@ -935,7 +933,6 @@ func (m Model) removeCompletionToken() Model {
 	m.input.SetValue(head + tail)
 	m.caretToOffset(len(head))
 	m.dismissAutocomplete()
-	m.layout()
 	return m
 }
 
@@ -984,7 +981,6 @@ func (m Model) spliceCompletion(token string) (Model, tea.Cmd) {
 	m.caretToOffset(len(head) + len(lead) + len(token) + len(sep))
 	var reload tea.Cmd
 	m, reload = m.recomputeAutocomplete() // the separator ends the token, so this closes the overlay
-	m.layout()
 	return m, reload
 }
 

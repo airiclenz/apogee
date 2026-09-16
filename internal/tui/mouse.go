@@ -596,7 +596,6 @@ func (m Model) handleFooterModeClick(pre Model, msg tea.MouseClickMsg) (Model, t
 		return m, nil, false
 	}
 	m.picker = picker{open: true, kind: pickerMode}
-	m.layout()
 	return m, nil, true
 }
 
@@ -1479,7 +1478,6 @@ func (m Model) handleBrowserClick(pre Model, msg tea.MouseClickMsg) (Model, tea.
 	row, inRect, onRow := popupPaneHit(pre, paneBrowser, pre.renderSessionBrowserPlaced, msg.Y)
 	if !inRect {
 		m.sessionBrowser = sessionBrowser{} // outside the modal: dismissed, and the click is spent on that
-		m.layout()
 		return m, nil, true
 	}
 	if !onRow {
@@ -1523,7 +1521,6 @@ func (m Model) handlePickerClick(pre Model, msg tea.MouseClickMsg) (Model, tea.C
 	row, inRect, onRow := popupPaneHit(pre, panePicker, pre.renderPickerPlaced, msg.Y)
 	if !inRect {
 		m.picker = picker{} // outside the modal: dismissed, and the click is spent on that
-		m.layout()
 		return m, nil, true
 	}
 	if !onRow {
@@ -1703,8 +1700,7 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 //
 // The open gate comes BEFORE the rectangle, as dropdownWheel's does (autocomplete.go): ungated,
 // inRect == false cannot tell "no menu on the frame" from "a click outside the menu", so every click
-// in the program would pay a layout() and clear the skillRegion edge-trigger the menu's dismissal
-// carries with it.
+// in the program would clear the skillRegion edge-trigger the menu's dismissal carries with it.
 //
 // pre is the pre-click frame the pane is placed from and the live model is what mutates
 // (handleMouseClick's rule); the geometry is composed from pre's own menu, so a second click reads
@@ -1716,7 +1712,6 @@ func (m Model) handleDropdownClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 	row, inRect, onRow := popupPaneHit(pre, paneDropdown, pre.renderAutocompletePlaced, msg.Y)
 	if !inRect {
 		m.dismissAutocomplete() // outside a menu that decides nothing: it closes, and the click travels on
-		m.layout()              // the menu's rows go back to the transcript, which moves the scroll clamp with them
 		return m, nil, false
 	}
 	if !onRow {

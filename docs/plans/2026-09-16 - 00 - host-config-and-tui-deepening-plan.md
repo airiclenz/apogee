@@ -749,7 +749,11 @@ byte-identical (never `-update` them).
 
 **Commit:** `refactor(tui): pane arms stop calling layout and repaint by hand`
 
-## 21. Strip the input arms and state the rule
+## 21. Strip the input arms and state the rule — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `grep -c 'm.layout()\|m.refreshViewport()'` over the five files: before 12 (mouse 4, autocomplete 4, approval 1, ask 1, runview 2), after 2 (runview's two `refreshViewport` in openRun/upRun, kept by the item's decision with a comment each naming why: positioning, beside refreshViewportAnchored; upRun reads AtBottom/SetYOffset right after) — 10 stripped. The plan's 14 counted approval.go sendApproval and ask.go submitAnswer, which at HEAD carry no call of their own: item 15's `resumeRunning` (model.go) holds the departed pane's layout for both, and it is outside this item's Files (model.go is comment sweep only), so it stays.
+NOTES (2026-09-16): none of the ten stripped sites was followed by a geometry read in its arm, so no "stays with a comment" case arose; all ten go on item 18's ground alone (settle's height half — every pane in `openPanes` feeds `transcriptRows`, and the box writes move `inputRows`), not on item 19's strip rule, which strips none of them. foldApprovalRequest's "the pane the decision turns on outranks the draft's extra rows (draftRowsCeiling)" comment is kept and now names the tail as what lays out.
+NOTES (2026-09-16): comment sweep: model.go's `keyClaimOrder`, `claimKey` (doc + inline) and `freshenTranscriptClamp` docs no longer say "the layout() rule" / "own path did not lay out" — `freshenTranscriptClamp` is now named as the tail's height half and the one ground an input-write or pane-open arm goes on; mouse.go's handleDropdownClick doc no longer says an ungated click "would pay a layout()"; autocomplete.go's two "moves the scroll clamp with them" comments folded into the surviving lines. doc.go gains an "Invariant — an arm mutates; Update's tail lays out and repaints" paragraph naming the three positioning keepers (refreshViewportAnchored, openRun/upRun, the claim walk's freshenTranscriptClamp); layout.md's leading paragraph gains the one sentence. No test needed rerouting: `go test ./internal/tui` and every `TestE2E*` golden in `cmd/apogee` pass unchanged; `TestDecisionSurfaceStaysOnTheFrame` and `TestRunViewEscGoesOneLevelUp` untouched.
 
 **What.** Recast at the regression check (2026-09-16). Depends on item 18. Same rule as item 19
 (its input-write and generation preconditions included) over `mouse.go`, `autocomplete.go`,

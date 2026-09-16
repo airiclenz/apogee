@@ -201,6 +201,12 @@ func (m Model) openRun(ref runRef) Model {
 	// The box now addresses the child rather than the conversation, and the next frame says so on
 	// its own: the legend is derived at paint from the stack this just pushed ([Model.legend]), so
 	// the move sets nothing.
+	//
+	// The repaint is the move's own and stays here, beside refreshViewportAnchored: opening a view
+	// is a POSITIONING — following was re-armed above, and this is what lands the view on the run's
+	// tail — so a Model handed back from openRun is already standing on the run, rather than on a
+	// frame Update's tail has yet to settle (the moved root would miss the frame key and repaint
+	// there anyway; a positioning repaint is stated where the move is written, not left to it).
 	m.refreshViewport()
 	return m
 }
@@ -234,6 +240,9 @@ func (m Model) upRun() Model {
 	m.detached = left.detached
 	// Whatever the box is addressing now — the level below's own child, or the conversation itself
 	// at the top — the next frame says so, by the same derivation the move in relies on (openRun).
+	//
+	// The repaint stays here for the reason openRun's does: it positions, and the restore right
+	// below reads the geometry it produced (SetYOffset against the repainted level, AtBottom).
 	m.refreshViewport()
 	if left.detached {
 		m.viewport.SetYOffset(left.yOffset)

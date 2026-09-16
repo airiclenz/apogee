@@ -1341,8 +1341,8 @@ func paneClaim(key func(Model, tea.KeyPressMsg) (bool, tea.Model, tea.Cmd)) func
 // file — never another `if` in handleKey.
 //
 // The entry buys more than routing: the walk freshens the transcript's scroll clamp after any claim
-// that moved a pane's height ([Model.claimKey]), so a surface added here inherits the layout() rule
-// rather than having to remember it.
+// that moved a pane's height ([Model.claimKey]), so a surface added here has its height settled
+// before the key's own Update ends, and its author lays nothing out.
 var keyClaimOrder = []keyClaimant{
 	{
 		// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
@@ -1457,8 +1457,8 @@ var keyClaimOrder = []keyClaimant{
 // command, and whether anything claimed at all.
 //
 // The order is a PARAMETER rather than [keyClaimOrder] read directly, so the walk — and the freshness
-// repair below, which is the whole of what makes the layout() rule hold for panes nobody has written
-// yet — can be exercised against a surface that is not on the list (model_test.go).
+// repair below, which settles a pane's height for panes nobody has written yet — can be exercised
+// against a surface that is not on the list (model_test.go).
 func (m Model) claimKey(order []keyClaimant, msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	for _, claimant := range order {
 		if claimant.open != nil && !claimant.open(m) {
@@ -1471,11 +1471,12 @@ func (m Model) claimKey(order []keyClaimant, msg tea.KeyPressMsg) (Model, tea.Cm
 		}
 		// A claim is where a pane's HEIGHT moves: a filter rune prunes its rows, ^a widens its listing,
 		// esc closes it altogether. The viewport widget is sized to the rows the transcript is DRAWN on
-		// (layout), so a pane redrawn at a new height whose own path did not lay out leaves the scroll
-		// clamp measuring the frame before it, and strands that many transcript lines under the clamp.
-		// Repairing it HERE — the one place every pane's keys are routed through — is what makes the
-		// rule structural rather than a list to remember: a surface added to the order inherits the
-		// freshening, and its author never has to know layout() exists.
+		// (layout), so a pane redrawn at a new height leaves the scroll clamp measuring the frame
+		// before it, and strands that many transcript lines under the clamp until the height is
+		// settled. Update's tail settles it anyway ([Model.settle]); repairing it HERE as well — the
+		// one place every pane's keys are routed through — keeps the claim's own Model fresh for
+		// whatever the arm reads of it next, and a surface added to the order inherits the freshening
+		// without its author knowing layout() exists.
 		m.freshenTranscriptClamp()
 		return m, cmd, true
 	}
@@ -2266,11 +2267,13 @@ func (m Model) transcriptWidgetRows() int {
 }
 
 // freshenTranscriptClamp lays out again when the viewport widget's height no longer matches the rows
-// the transcript is drawn on — the state a pane redrawn at a new height leaves behind when its own
-// path did not lay out — or when the input box's height no longer matches the rows its draft wants
-// ([Model.inputRows]) — the state an editor write leaves behind when its own path did not lay out.
-// layout() stays the single setter of both heights (design call 3): this asks only whether the last
-// set still holds, and hands the setting back to layout() when it does not.
+// the transcript is drawn on — the state a pane opened, closed or redrawn at a new height leaves
+// behind — or when the input box's height no longer matches the rows its draft wants
+// ([Model.inputRows]) — the state an editor write leaves behind. It is the height half of the
+// repaint tail ([Model.settle]), and the ONE ground on which an arm that opens a pane or writes the
+// box owes no layout of its own (doc.go, "an arm mutates"). layout() stays the single setter of both
+// heights (design call 3): this asks only whether the last set still holds, and hands the setting
+// back to layout() when it does not.
 //
 // The question is asked rather than the answer simply re-applied because layout() re-renders the whole
 // transcript: a pane key that moved no rows — a selection step in the browser, a scroll in /usage —

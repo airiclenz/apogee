@@ -1054,6 +1054,24 @@
 // strings.Builder case structurally — the behaviour is address-dependent and a behavioural
 // test cannot reliably reproduce the panic.
 //
+// Invariant — an arm mutates; Update's tail lays out and repaints. An Update arm writes the
+// transcript, opens or closes a pane, writes the input box, and returns: it never calls
+// [Model.layout] or [Model.refreshViewport] to make the frame agree with what it changed. That is
+// the tail's job ([Model.settle], deferred by Update itself): a moved paint input — the transcript
+// generation, the theme, the width, the scrollbar, a blink over an open call, the back hint
+// ([frameKey]) — lays out, and under an unchanged paint a height gone stale — a pane's rows, the
+// draft's rows ([Model.freshenTranscriptClamp]) — lays out too, so every pane open and every
+// editor write is carried by the tail rather than by a call each arm has to remember. An arm calls
+// layout() (or refreshViewport) itself only when it READS geometry afterwards in the same arm — the
+// offset, the widget's bottom, a placed pane's rows — and then says so beside the call, because
+// what it reads has to be the frame it just made rather than the one the tail has yet to settle.
+// The positioning repaints keep their calls under that reading: [Model.refreshViewportAnchored]
+// (an anchored block), the run view's openRun and upRun (a view landed or restored, runview.go),
+// and the claim walk's [Model.freshenTranscriptClamp] (a pane key answered with its height fresh
+// for whatever the claimant reads next). Everything else is a mutation and a return.
+// TestMouseMotionNeverRepaints pins the one exemption the tail itself makes, and the
+// strip that took the last per-arm calls out is plan "2026-09-16 - 00", items 18–21.
+//
 // Invariant — untrusted text is escape-stripped at the SEAM it enters the view through, never
 // at each producer. The frame is painted through ultraviolet's cell buffer, which drops most
 // zero-width sequences but deliberately HONOURS OSC 8 hyperlinks and never resets the link state

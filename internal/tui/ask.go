@@ -38,7 +38,6 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	// box back the moment submitAnswer moves the state on.
 	m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
 	m.dropRecall()      // and any walk in progress: the box now belongs to the question
-	m.layout()
 	return m, m.input.Focus()
 }
 

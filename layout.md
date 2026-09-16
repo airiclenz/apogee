@@ -12,7 +12,10 @@
   its replies are on screen. Scrolling up detaches from that: the view holds exactly
   where it was scrolled to and new output no longer moves it. Scrolling back down to
   the very bottom — or sending a prompt — resumes following (this is also implemented
-  in apogee-code).
+  in apogee-code). Every repaint the frame owes is a consequence of a change of state,
+  never a step a handler remembers: a handler mutates, and the update's tail lays the
+  frame out and repaints it — a handler lays out itself only when it reads the geometry
+  straight afterwards, and says so.
 
 ✦ The LLM's answer looks like this. There is exactly one empty line between the users
   prompt and the agents response — and exactly one between the answer and the next
