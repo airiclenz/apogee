@@ -110,6 +110,13 @@ type Entry struct {
 	// ever had, which is how such a record was written and how it still reads.
 	SpawnCallID string `json:"spawnCallID,omitempty"`
 	Done        bool   `json:"done,omitempty"`
+	// Aborted marks a prompt entry whose Exchange the engine SCRAPPED before it completed — the
+	// human stopped it, or the loop faulted — so the engine holds no Exchange for it (the abort
+	// rolls the conversation back to the boundary the prompt opened at). A Driver reading the
+	// record to fork it uses the mark to count the prompts that reached the wire. Absent for every
+	// completed prompt and, additively, for every record written before the mark existed — such a
+	// record's cancelled prompts read as completed ones.
+	Aborted bool `json:"aborted,omitempty"`
 	// The fill a sub-agent run's head wears: what the delegate's context held when it last
 	// reported, and the window that reading filled. The two travel together, because a fill says
 	// nothing without its limit. Frozen at fold time, so what a record keeps is the reading as it

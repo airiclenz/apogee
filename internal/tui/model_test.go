@@ -503,6 +503,72 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 	})
 }
 
+// TestCancelledMarkLandsOnlyOnTheTwoFolds pins WHERE the aborted mark a fork reads
+// (transcript.forkPoints) is set: on the two folds that scrap an Exchange — a cancel and a loop
+// fault — and nowhere else. An Exchange that faulted but closed on its own (an exchangeDoneMsg
+// with Faulted set) keeps its opening in the engine (turn.go endAbandoned), so its prompt reached
+// the wire, stays unmarked and still counts; a cancelled /compact drives no Exchange and marks
+// nothing.
+func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
+	cases := []struct {
+		name string
+		msg  tea.Msg
+		want bool
+	}{
+		{name: "a cancel marks the prompt", msg: cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}}, want: true},
+		{name: "a loop fault marks the prompt", msg: errMsg{Err: errors.New("loop fault mid-exchange")}, want: true},
+		{name: "a faulted Exchange that closed keeps its prompt", msg: exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete, Faulted: true}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newTestModel(t)
+			m.transcript.addUser("first", nil)
+			m.transcript.commitAssistant("done", runRef{})
+			m.transcript.addUser("second", nil)
+			startStubWorker(t, &m)
+
+			m = step(t, m, tc.msg)
+
+			var prompts []entry
+			for _, e := range m.transcript.entries {
+				if e.kind == entryUser {
+					prompts = append(prompts, e)
+				}
+			}
+			if len(prompts) != 2 {
+				t.Fatalf("prompts = %d, want 2", len(prompts))
+			}
+			if prompts[0].aborted {
+				t.Error("the completed first prompt was marked")
+			}
+			if prompts[1].aborted != tc.want {
+				t.Errorf("second prompt aborted = %v, want %v", prompts[1].aborted, tc.want)
+			}
+			wantDrops := [][2]int{{1, 0}}
+			if !tc.want {
+				wantDrops = [][2]int{{1, 1}, {3, 0}}
+			}
+			if got := forkDrops(m.transcript.forkPoints()); !reflect.DeepEqual(got, wantDrops) {
+				t.Errorf("forkPoints (index, drop) = %v, want %v", got, wantDrops)
+			}
+		})
+	}
+
+	t.Run("a cancelled /compact marks nothing", func(t *testing.T) {
+		m := newTestModel(t)
+		m.transcript.addUser("first", nil)
+		m.transcript.commitAssistant("done", runRef{})
+		m.worker.start(func() {}, nil) // the /compact worker drives no Exchange: no mailbox
+		m.state = stateRunning
+
+		m = step(t, m, cancelledMsg{})
+
+		if m.transcript.entries[0].aborted {
+			t.Error("a cancelled /compact marked the completed prompt")
+		}
+	})
+}
+
 // ----------------------------------------------------------------------------
 // The single-worker invariant
 // ----------------------------------------------------------------------------

@@ -1297,7 +1297,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			return out
 		}
 		wantEntry := []string{
-			"Kind", "At", "Text", "Depth", "CallID", "SpawnCallID", "Done",
+			"Kind", "At", "Text", "Depth", "CallID", "SpawnCallID", "Done", "Aborted",
 			"CtxUsed", "CtxLimit", "CtxModel",
 			"UsageCalls", "UsagePromptTokens", "UsageCachedPromptTokens", "UsageCompletionTokens",
 			"UsageTotalTokens",

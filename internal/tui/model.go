@@ -2089,6 +2089,12 @@ func (m Model) foldHookNotice(msg hookNoticeMsg) (tea.Model, tea.Cmd) {
 // the visible record of the model having read it before the Exchange was scrapped, not a claim that
 // it is still waiting to go out.
 func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
+	// The prompt that opened the scrapped Exchange is marked as never having reached a close, so a
+	// fork counts it out ([transcript.markAborted]). Only an Exchange worker has a mailbox: a
+	// cancelled /compact returns through here too, and it scrapped no prompt.
+	if m.worker.box != nil {
+		m.transcript.markAborted()
+	}
 	m.eng.AbortExchange()
 	m.transcript.commitCancelled()
 	m.transcript.addNote("cancelled")
@@ -2118,6 +2124,9 @@ func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
 // the next. The commands queued before the fault wait with it — the errored state is not idle —
 // and run at that dismissing ⏎ (handleKey's stateErrored case), still ahead of any held message.
 func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
+	if m.worker.box != nil { // an Exchange worker's fault, not a /compact's (foldCancelled's gate)
+		m.transcript.markAborted()
+	}
 	m.eng.AbortExchange()
 	m.lastErr = msg.Err
 	m.transcript.addError("loop", msg.Err.Error(), runRef{})

@@ -40,9 +40,17 @@ import (
 // Skipping is deliberately encode-side only: nothing ephemeral ever reaches the wire, so decode
 // needs no counterpart and the wire format is unchanged (an old file keeps decoding identically).
 func encodeTranscript(t *transcript) ([]byte, error) {
-	entries := make([]session.Entry, 0, len(t.entries))
-	for i := range t.entries {
-		e := &t.entries[i]
+	return session.EncodeTranscript(entriesToRecords(t.entries))
+}
+
+// entriesToRecords projects committed entries onto their neutral form under encodeTranscript's
+// skip rules — it IS the save path's encoder, split out so a cut prefix ([transcript.prefixThrough])
+// can be encoded exactly as the whole scrollback is: a forked child's transcript blob then holds
+// what the parent's would, up to the cut, and nothing a resume would have skipped.
+func entriesToRecords(entries []entry) []session.Entry {
+	records := make([]session.Entry, 0, len(entries))
+	for i := range entries {
+		e := &entries[i]
 		if e.ephemeral {
 			continue // display-only: re-derived at startup/resume, so persisting it only accumulates
 		}
@@ -50,9 +58,9 @@ func encodeTranscript(t *transcript) ([]byte, error) {
 		if name == "" {
 			continue // entryStartup (or any future non-persisted kind): opening chrome, not conversation
 		}
-		entries = append(entries, toWireEntry(e, name))
+		records = append(records, toWireEntry(e, name))
 	}
-	return session.EncodeTranscript(entries)
+	return records
 }
 
 // decodeTranscript turns a stored scrollback blob back into committed entries for replay. Empty or
@@ -138,6 +146,7 @@ func toWireEntry(e *entry, kind string) session.Entry {
 		CallID:      e.callID,
 		SpawnCallID: e.spawnCallID,
 		Done:        e.done,
+		Aborted:     e.aborted,
 		CtxUsed:     e.ctxUsed,
 		CtxLimit:    e.ctxLimit,
 		CtxModel:    e.ctxModel,
@@ -277,6 +286,7 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 		callID:      w.CallID,
 		spawnCallID: w.SpawnCallID,
 		done:        w.Done,
+		aborted:     w.Aborted,
 		ctxUsed:     w.CtxUsed,
 		ctxLimit:    w.CtxLimit,
 		ctxModel:    w.CtxModel,

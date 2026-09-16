@@ -301,6 +301,13 @@ type entry struct {
 	spawnCallID string
 	tool        toolView
 	done        bool
+	// aborted is a depth-0 entryUser only: the Exchange this prompt opened was SCRAPPED before it
+	// completed — the human stopped it (foldCancelled) or the loop faulted (foldLoopError) — so
+	// the engine dropped the prompt with it (Agent.AbortExchange) and holds no Exchange for it.
+	// The scrollback keeps the block, as it keeps everything that reached the screen; the mark is
+	// what lets a fork count the prompts that reached the wire ([transcript.forkPoints]). It is
+	// persisted (session.Entry.Aborted) so a resumed transcript still skips it, and never painted.
+	aborted bool
 	// the head of a sub-agent run only: the delegation's lifecycle phase as its child reported it
 	// (domain.SubAgentPhaseEvent); view-only liveness beside done's pairing, never persisted
 	phase domain.SubAgentPhase
@@ -978,6 +985,111 @@ func (t *transcript) userTexts() []string {
 		}
 	}
 	return texts
+}
+
+// markAborted marks the prompt whose Exchange was just scrapped: the LAST depth-0 entryUser, which
+// is the one an open Exchange always belongs to — a prompt is committed at submit and the next one
+// cannot be sent until the Exchange it opened has closed. Its two callers are the two folds that
+// abort an Exchange, foldCancelled and foldLoopError; a faulted Exchange that closed on its own
+// (an exchangeDoneMsg with Faulted set) is NOT marked, because the engine kept its opening
+// (turn.go endAbandoned) and the prompt did reach the wire. No-op on a transcript without a prompt
+// — a cancelled /compact reaches foldCancelled too, but its caller gates on the worker's mailbox
+// (an Exchange has one, a /compact does not) before reaching here.
+//
+// It touches nothing: the mark is never painted, so the repaint counter has nothing to see.
+func (t *transcript) markAborted() {
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		e := &t.entries[i]
+		if e.kind == entryUser && e.depth == 0 {
+			e.aborted = true
+			return
+		}
+	}
+}
+
+// forkPoint is one prompt a session can be forked at: the index of its entryUser in the
+// scrollback, its text (what a picker shows), and drop — how many LATER depth-0 prompts reached
+// the wire, i.e. the number of Exchanges the engine cuts from the END of its State to stand at
+// this prompt's close (agent.CutSession's dropExchanges). Counted from the end because that is the
+// only direction the transcript and the engine agree on: every prompt BEFORE a fold but the first
+// is gone from the engine (context.Compact keeps the prefix and a summary), an overflow fold adds
+// a bridge opening the scrollback never shows, and a scrapped prompt is gone from the engine while
+// the scrollback keeps its block — so start-ordinals disagree and end-ordinals, over the post-fold
+// stretch, do not.
+type forkPoint struct {
+	index int
+	drop  int
+	text  string
+}
+
+// forkPoints lists the prompts the session can be forked at, oldest first — every depth-0
+// entryUser that lies AFTER the last depth-0 entryCompacted and whose Exchange the engine actually
+// opened. Two kinds of prompt are neither listed nor counted:
+//
+//   - a prompt before the last fold (owner ruling, 2026-09-16): its Exchange was folded into the
+//     summary, so there is no State to stand at. This includes the prompt whose own Step ran the
+//     fold — the engine folds BEFORE it opens that Exchange (agent.step), so the compacted entry
+//     lands after the prompt in the scrollback and the prompt reads as pre-fold; its Exchange is in
+//     fact intact, and not offering it is the conservative side of the rule;
+//   - a prompt whose Exchange was scrapped (entry.aborted): the engine dropped it, so it is not an
+//     Exchange to cut and not one to stand at.
+//
+// nil on a session with no eligible prompt — empty, or every prompt folded — which is the
+// caller's cue for the "that stretch was folded" note. A record written before the aborted mark
+// existed carries none, so every unmarked prompt counts as one that reached the wire (limitation
+// dated 2026-09-16): such a record with a cancelled prompt cuts one Exchange later than picked, and
+// CutSession's own range check is what keeps that a later cut rather than a wrong State.
+func (t *transcript) forkPoints() []forkPoint {
+	from := 0
+	for i := range t.entries {
+		if t.entries[i].kind == entryCompacted && t.entries[i].depth == 0 {
+			from = i + 1
+		}
+	}
+	var points []forkPoint
+	for i := from; i < len(t.entries); i++ {
+		e := &t.entries[i]
+		if e.kind != entryUser || e.depth != 0 || e.aborted {
+			continue
+		}
+		for j := range points {
+			points[j].drop++
+		}
+		points = append(points, forkPoint{index: i, text: e.text})
+	}
+	return points
+}
+
+// prefixThrough returns a copy of the scrollback up to and including the whole Exchange the
+// depth-0 entryUser at index opened — every entry before the NEXT depth-0 entryUser, so the
+// Exchange's tool cards, its delegates' blocks (depth ≥ 1, a child's own entryUser included), and
+// the host notes that landed behind it all stay — with the one-time start-up box left out, because
+// a child session re-seeds its own (encodeTranscript skips it for the same reason). It is the
+// child's transcript when a session is forked at that prompt: the same cut the engine makes from
+// the end ([forkPoint.drop]), made here from the front, because the scrollback is what the picker
+// showed and the index is what it picked. An index that is not a depth-0 prompt returns nil.
+func (t *transcript) prefixThrough(index int) []entry {
+	if index < 0 || index >= len(t.entries) {
+		return nil
+	}
+	if e := &t.entries[index]; e.kind != entryUser || e.depth != 0 {
+		return nil
+	}
+	end := len(t.entries)
+	for i := index + 1; i < len(t.entries); i++ {
+		if t.entries[i].kind == entryUser && t.entries[i].depth == 0 {
+			end = i
+			break
+		}
+	}
+	prefix := make([]entry, 0, end)
+	for i := 0; i < end; i++ {
+		if t.entries[i].kind == entryStartup {
+			continue
+		}
+		prefix = append(prefix, t.entries[i])
+	}
+	return prefix
 }
 
 // presentedStatus is the short line that closes a presentation entry. A rung that was tried and

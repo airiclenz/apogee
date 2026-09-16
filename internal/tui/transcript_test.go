@@ -3792,3 +3792,193 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 		})
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Fork points and the cut prefix (apogee-zci)
+// ----------------------------------------------------------------------------
+
+// forkDrops flattens the points a fixture reports to their (index, drop) pairs, which is what the
+// engine cut reads: a test asserts drop values, never start-ordinals, because start-ordinals are
+// exactly what a fold and a scrapped prompt make disagree between the scrollback and the State.
+func forkDrops(points []forkPoint) [][2]int {
+	var got [][2]int
+	for _, p := range points {
+		got = append(got, [2]int{p.index, p.drop})
+	}
+	return got
+}
+
+// A prompt before the last fold has no State to stand at, so the picker never lists it and the
+// cut never counts it: the two prompts after the compacted entry are the points, and each one's
+// drop is the number of prompts that follow it.
+func TestForkPointsSkipFoldedPrompts(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{entries: []entry{
+		{kind: entryUser, text: "first"},
+		{kind: entryAssistant, text: "done"},
+		{kind: entryCompacted, text: compactedNoteText},
+		{kind: entryUser, text: "second"},
+		{kind: entryAssistant, text: "done"},
+		{kind: entryUser, text: "third"},
+		{kind: entryAssistant, text: "done"},
+	}}
+
+	got := tr.forkPoints()
+
+	if want := [][2]int{{3, 1}, {5, 0}}; !reflect.DeepEqual(forkDrops(got), want) {
+		t.Fatalf("forkPoints (index, drop) = %v, want %v", forkDrops(got), want)
+	}
+	if got[0].text != "second" || got[1].text != "third" {
+		t.Errorf("forkPoints texts = %q/%q, want second/third", got[0].text, got[1].text)
+	}
+
+	t.Run("an empty session has no point", func(t *testing.T) {
+		t.Parallel()
+		if got := (&transcript{}).forkPoints(); got != nil {
+			t.Errorf("forkPoints on an empty transcript = %v, want nil", got)
+		}
+	})
+
+	t.Run("a session folded after its last prompt has no point", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{entries: []entry{
+			{kind: entryUser, text: "first"},
+			{kind: entryAssistant, text: "done"},
+			{kind: entryCompacted, text: compactedNoteText},
+		}}
+		if got := tr.forkPoints(); got != nil {
+			t.Errorf("forkPoints = %v, want nil when every prompt precedes the fold", got)
+		}
+	})
+
+	t.Run("a delegate's fold does not gate the human's prompts", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{entries: []entry{
+			{kind: entryUser, text: "first"},
+			{kind: entryCompacted, text: compactedNoteText, depth: 1, spawnCallID: "s1"},
+			{kind: entryUser, text: "second"},
+		}}
+		if want := [][2]int{{0, 1}, {2, 0}}; !reflect.DeepEqual(forkDrops(tr.forkPoints()), want) {
+			t.Errorf("forkPoints (index, drop) = %v, want %v", forkDrops(tr.forkPoints()), want)
+		}
+	})
+}
+
+// A scrapped prompt keeps its block in the scrollback but the engine dropped its Exchange, so it
+// is neither a point nor one of the prompts a later point's drop counts — and the mark that says
+// so survives the record, so a resumed transcript still skips it.
+func TestForkPointsSkipCancelledPrompts(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{entries: []entry{
+		{kind: entryUser, text: "first"},
+		{kind: entryAssistant, text: "done"},
+		{kind: entryUser, text: "second"},
+		{kind: entryNote, text: "cancelled"},
+		{kind: entryUser, text: "third"},
+		{kind: entryAssistant, text: "done"},
+	}}
+	tr.entries[2].aborted = true
+
+	if want := [][2]int{{0, 1}, {4, 0}}; !reflect.DeepEqual(forkDrops(tr.forkPoints()), want) {
+		t.Fatalf("forkPoints (index, drop) = %v, want %v", forkDrops(tr.forkPoints()), want)
+	}
+
+	t.Run("the mark survives an encode/decode round trip", func(t *testing.T) {
+		t.Parallel()
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatal(err)
+		}
+		entries, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resumed := &transcript{entries: entries}
+		if want := [][2]int{{0, 1}, {4, 0}}; !reflect.DeepEqual(forkDrops(resumed.forkPoints()), want) {
+			t.Errorf("forkPoints after a round trip = %v, want %v", forkDrops(resumed.forkPoints()), want)
+		}
+		if !entries[2].aborted || entries[0].aborted || entries[4].aborted {
+			t.Errorf("aborted marks after a round trip = %v/%v/%v, want only the second prompt marked",
+				entries[0].aborted, entries[2].aborted, entries[4].aborted)
+		}
+	})
+
+	t.Run("markAborted lands on the last top-level prompt", func(t *testing.T) {
+		t.Parallel()
+		tr := &transcript{entries: []entry{
+			{kind: entryUser, text: "first"},
+			{kind: entryUser, text: "to the child", depth: 1, spawnCallID: "s1"},
+			{kind: entryNote, text: "cancelled"},
+		}}
+		tr.markAborted()
+		if !tr.entries[0].aborted || tr.entries[1].aborted {
+			t.Errorf("aborted = %v/%v, want the depth-0 prompt marked and the child's untouched",
+				tr.entries[0].aborted, tr.entries[1].aborted)
+		}
+		(&transcript{}).markAborted() // no prompt: nothing to mark, nothing to panic on
+	})
+}
+
+// The cut prefix is the whole Exchange the picked prompt opened — its tool cards, a delegate's own
+// prompt and the note that landed behind it — and stops at the next top-level prompt; the start-up
+// box never rides along, because a child session re-seeds its own.
+func TestPrefixThroughKeepsTheWholeExchange(t *testing.T) {
+	t.Parallel()
+
+	tr := &transcript{entries: []entry{
+		{kind: entryStartup},
+		{kind: entryUser, text: "first"},
+		{kind: entryAssistant, text: "done"},
+		{kind: entryUser, text: "second"},
+		toolCallCard("Read", "a.go", 0),
+		subAgentCard("surveyor", 0),
+		{kind: entryUser, text: "to the child", depth: 1, spawnCallID: "s1"},
+		{kind: entryAssistant, text: "child says", depth: 1, spawnCallID: "s1"},
+		{kind: entryNote, text: "model switched"},
+		{kind: entryUser, text: "third"},
+		{kind: entryAssistant, text: "done"},
+	}}
+
+	got := tr.prefixThrough(3)
+
+	var texts []string
+	for _, e := range got {
+		texts = append(texts, e.text)
+	}
+	want := []string{"first", "done", "second", "", "", "to the child", "child says", "model switched"}
+	if !reflect.DeepEqual(texts, want) {
+		t.Fatalf("prefixThrough(3) texts = %q, want %q", texts, want)
+	}
+	for i, e := range got {
+		if e.kind == entryStartup {
+			t.Errorf("entry %d is the start-up box, which never rides a cut prefix", i)
+		}
+	}
+
+	t.Run("the last prompt's prefix is the whole scrollback", func(t *testing.T) {
+		t.Parallel()
+		if got := tr.prefixThrough(9); len(got) != len(tr.entries)-1 {
+			t.Errorf("prefixThrough(9) kept %d entries, want %d (everything but the start-up box)", len(got), len(tr.entries)-1)
+		}
+	})
+
+	t.Run("an index that is not a top-level prompt is no prefix", func(t *testing.T) {
+		t.Parallel()
+		for _, index := range []int{-1, 2, 6, len(tr.entries)} {
+			if got := tr.prefixThrough(index); got != nil {
+				t.Errorf("prefixThrough(%d) = %d entries, want nil", index, len(got))
+			}
+		}
+	})
+
+	t.Run("the prefix is a copy the scrollback does not share", func(t *testing.T) {
+		t.Parallel()
+		got := tr.prefixThrough(1)
+		got[0].text = "edited"
+		if tr.entries[1].text != "first" {
+			t.Error("editing the prefix reached the transcript's own entries")
+		}
+	})
+}
