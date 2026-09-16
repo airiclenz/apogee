@@ -131,19 +131,9 @@ func (a *Agent) restoreSnapshot(snap domain.Session) error {
 // message only. Enforcing the invariant here — the one seam where outside bytes become history —
 // keeps every later reader (the request projection, the next snapshot) clean.
 func (a *Agent) restoreState(state json.RawMessage) error {
-	var st agentState
-	if len(state) == 0 {
-		// An empty payload is not "nothing to restore". On the LIVE path (RestoreSession) the
-		// Agent still holds the OUTGOING session, so returning early would leave that session's
-		// conversation, Turn counters, pending input and task list standing underneath the
-		// incoming session's file — a half-restore with no error for the caller to see, and one
-		// the /sessions flow would then redirect saves into. What an empty payload MEANS is a
-		// never-stepped Agent, so the zero agentState is what gets applied. apogee's own
-		// Snapshot never writes one (encodeState always emits a conversation); a hand-edited,
-		// truncated or foreign session file can, and this is the seam that reads it.
-		st.Conversation = domain.NewConversation(nil)
-	} else if err := json.Unmarshal(state, &st); err != nil {
-		return fmt.Errorf("apogee: decode session state: %w", err)
+	st, err := decodeState(state)
+	if err != nil {
+		return err
 	}
 	// The task list is restored FIRST and through its own validator, so a snapshot carrying more
 	// tasks — or a longer one — than the caps allow is a DECODE ERROR rather than a list silently
@@ -176,6 +166,97 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 		pendingInput:  st.PendingInput,
 	})
 	return nil
+}
+
+// decodeState unmarshals a Session.State payload into an agentState without touching any Agent —
+// the shared decode of the two readers of the payload, restoreState (which then applies it) and
+// CutSession (which rewrites it). An empty payload is not "nothing to decode". On the LIVE restore
+// path (RestoreSession) the Agent still holds the OUTGOING session, so treating it as a no-op would
+// leave that session's conversation, Turn counters, pending input and task list standing
+// underneath the incoming session's file — a half-restore with no error for the caller to see, and
+// one the /sessions flow would then redirect saves into. What an empty payload MEANS is a
+// never-stepped Agent, so the zero agentState — with an empty conversation — is what it decodes to.
+// apogee's own Snapshot never writes one (encodeState always emits a conversation); a hand-edited,
+// truncated or foreign session file can, and this is the seam that reads it.
+func decodeState(state json.RawMessage) (agentState, error) {
+	var st agentState
+	if len(state) == 0 {
+		st.Conversation = domain.NewConversation(nil)
+	} else if err := json.Unmarshal(state, &st); err != nil {
+		return agentState{}, fmt.Errorf("apogee: decode session state: %w", err)
+	}
+	return st, nil
+}
+
+// CutSession returns a copy of snap with its last dropExchanges Exchanges removed and the loop
+// state normalised to an idle boundary — the engine's fork primitive (the session-fork feature
+// composes it with a transcript prefix and a fresh record id; ADR 0001's bench fork deep-copies
+// the whole Session instead). It is pure over the opaque State: snap is decoded, rewritten and
+// re-encoded, and the caller's value is never touched.
+//
+// The cut counts FROM THE END, never by ordinal from the start: an Exchange's opening is a RoleUser
+// message that is not an Interjection (domain.CurrentExchange's rule), and the overflow bridge a
+// fold appends is an opening like any other — so after a fold the openings walked backwards match
+// the engine's own boundaries exactly, where an ordinal counted from the start would name a
+// message the summary folded away. Walking backwards, the last dropExchanges openings are dropped
+// together with everything after them, so the history ends at the surviving opening's Exchange
+// end; dropExchanges == 0 leaves the message history untouched. Either way the result is
+// normalised to a clean boundary: the deferred-correction queue is cleared, no Exchange is open
+// (InExchange false, ExchangeStart 0), no input is pending, and the task list is empty — a fork at
+// the newest prompt clears the checklist exactly like a fork at an earlier one. The Turn counter
+// carries over, so the child's Turn numbering continues the parent's.
+//
+// A negative dropExchanges, or one that would drop every opening, is refused with an error naming
+// both counts; a snapshot newer than this build understands is refused with ErrSessionVersion,
+// exactly as Resume refuses it.
+func CutSession(snap domain.Session, dropExchanges int) (domain.Session, error) {
+	if snap.Version > domain.SessionVersion {
+		return domain.Session{}, domain.ErrSessionVersion
+	}
+	st, err := decodeState(snap.State)
+	if err != nil {
+		return domain.Session{}, err
+	}
+	conv := st.Conversation
+	if conv == nil {
+		conv = domain.NewConversation(nil)
+	}
+	openings := exchangeOpenings(conv)
+	if dropExchanges < 0 || dropExchanges >= len(openings) {
+		return domain.Session{}, fmt.Errorf(
+			"apogee: cut session: cannot drop %d of %d exchanges", dropExchanges, len(openings),
+		)
+	}
+	if dropExchanges > 0 {
+		conv.DropRange(openings[len(openings)-dropExchanges], conv.Len())
+	}
+	conv.ClearDeferred()
+	state, err := json.Marshal(agentState{
+		Conversation:  conv,
+		TurnIndex:     st.TurnIndex,
+		InExchange:    false,
+		ExchangeStart: 0,
+		PendingInput:  nil,
+		Tasks:         nil,
+	})
+	if err != nil {
+		return domain.Session{}, fmt.Errorf("apogee: encode session state: %w", err)
+	}
+	return domain.Session{Version: domain.SessionVersion, State: state}, nil
+}
+
+// exchangeOpenings returns the indices, in order, of every message in conv that opens an Exchange
+// — a RoleUser message that is not an Interjection, the same rule domain.CurrentExchange applies
+// to find the LAST one.
+func exchangeOpenings(conv *domain.Conversation) []int {
+	var openings []int
+	conv.Range(func(i int, m domain.Message) bool {
+		if m.Role == domain.RoleUser && !m.Interjected {
+			openings = append(openings, i)
+		}
+		return true
+	})
+	return openings
 }
 
 // dropLeadingSystem removes conv's leading RoleSystem messages and reports how many it dropped —

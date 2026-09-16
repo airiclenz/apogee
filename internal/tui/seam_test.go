@@ -246,6 +246,10 @@ func (f *fakeEngine) Snapshot() (domain.Session, error) {
 	}
 	return domain.Session{}, nil
 }
+
+// CutSnapshot answers the Snapshot script: the fake keeps no message history to cut, so the count
+// is not interpreted.
+func (f *fakeEngine) CutSnapshot(int) (domain.Session, error) { return f.Snapshot() }
 func (f *fakeEngine) ClearContext() error {
 	f.mu.Lock()
 	f.clearCalls++

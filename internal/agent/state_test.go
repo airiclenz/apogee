@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -422,5 +423,222 @@ func TestRestoreSessionClearsCompactionLatches(t *testing.T) {
 	}
 	if a.turns.fillRung != 0 {
 		t.Errorf("fillRung = %d after RestoreSession, want 0 — the ladder climbed the conversation just swapped out", a.turns.fillRung)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// CutSession — the fork primitive cuts a snapshot at an earlier Exchange
+// ---------------------------------------------------------------------------
+
+// cutFixtureSession encodes a hand-built loop state as a current-version Session, so the cut tests
+// assert what CutSession does to a payload rather than how an Agent produced it.
+func cutFixtureSession(t *testing.T, st agentState) domain.Session {
+	t.Helper()
+
+	state, err := json.Marshal(st)
+	if err != nil {
+		t.Fatalf("encode the fixture state: %v", err)
+	}
+	return domain.Session{Version: domain.SessionVersion, State: state}
+}
+
+// decodeCutState reads a cut Session back into the loop state it carries.
+func decodeCutState(t *testing.T, snap domain.Session) agentState {
+	t.Helper()
+
+	var st agentState
+	if err := json.Unmarshal(snap.State, &st); err != nil {
+		t.Fatalf("decode the cut state: %v", err)
+	}
+	if st.Conversation == nil {
+		t.Fatal("the cut state carries no conversation")
+	}
+	return st
+}
+
+// threeExchanges is a history of three Exchanges: the first a plain reply, the second a tool call
+// with an interjection landing mid-Exchange, the third a plain reply.
+func threeExchanges() []domain.Message {
+	return []domain.Message{
+		{Role: domain.RoleUser, Content: "first"},
+		{Role: domain.RoleAssistant, Content: "first reply"},
+		{Role: domain.RoleUser, Content: "second"},
+		{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup", Arguments: json.RawMessage(`{}`)}}},
+		{Role: domain.RoleTool, ToolCallID: "c1", Content: "42"},
+		{Role: domain.RoleUser, Content: "also check the date", Interjected: true},
+		{Role: domain.RoleAssistant, Content: "second reply"},
+		{Role: domain.RoleUser, Content: "third"},
+		{Role: domain.RoleAssistant, Content: "third reply"},
+	}
+}
+
+// contents lists the Content of every message in conv, the shape the cut assertions compare.
+func contents(conv *domain.Conversation) []string {
+	out := make([]string, 0, conv.Len())
+	conv.Range(func(_ int, m domain.Message) bool {
+		out = append(out, m.Content)
+		return true
+	})
+	return out
+}
+
+// TestCutSessionDropsTheLastExchanges is the cut itself: counted from the end, drop 1 ends the
+// history at the second Exchange's final assistant message — the interjection inside it opened
+// nothing and stays — and drop 2 ends it at the first's; either way the result is an idle boundary
+// with an empty task list.
+func TestCutSessionDropsTheLastExchanges(t *testing.T) {
+	t.Parallel()
+
+	snap := cutFixtureSession(t, agentState{
+		Conversation: domain.NewConversation(threeExchanges()),
+		TurnIndex:    5,
+		Tasks:        []tasklist.Item{{Text: "finish the third"}},
+	})
+	cases := []struct {
+		drop int
+		want []string
+	}{
+		{drop: 1, want: []string{"first", "first reply", "second", "", "42", "also check the date", "second reply"}},
+		{drop: 2, want: []string{"first", "first reply"}},
+	}
+	for _, tc := range cases {
+		t.Run(fmt.Sprintf("drop %d", tc.drop), func(t *testing.T) {
+			cut, err := CutSession(snap, tc.drop)
+			if err != nil {
+				t.Fatalf("CutSession(%d): %v", tc.drop, err)
+			}
+
+			st := decodeCutState(t, cut)
+			if got := contents(st.Conversation); fmt.Sprint(got) != fmt.Sprint(tc.want) {
+				t.Errorf("cut history = %q, want %q", got, tc.want)
+			}
+			if st.InExchange || st.ExchangeStart != 0 || st.PendingInput != nil {
+				t.Errorf("cut state = (inExchange %v, exchangeStart %d, pendingInput %v), want an idle boundary",
+					st.InExchange, st.ExchangeStart, st.PendingInput)
+			}
+			if len(st.Tasks) != 0 {
+				t.Errorf("cut task list = %v, want it cleared", st.Tasks)
+			}
+			if st.TurnIndex != 5 {
+				t.Errorf("cut turnIndex = %d, want the parent's 5 carried over", st.TurnIndex)
+			}
+		})
+	}
+}
+
+// TestCutSessionCountsTheBridgeAsAnOpening pins the from-the-end rule on a folded history: after a
+// fold the history is [first user, summary, bridge, …] where the bridge is a RoleUser message with
+// no transcript entry, and counted from the end it is an opening like any other — so drop 1 removes
+// only the last post-bridge Exchange and the bridge's own Exchange survives.
+func TestCutSessionCountsTheBridgeAsAnOpening(t *testing.T) {
+	t.Parallel()
+
+	snap := cutFixtureSession(t, agentState{Conversation: domain.NewConversation([]domain.Message{
+		{Role: domain.RoleUser, Content: "first"},
+		{Role: domain.RoleAssistant, Content: "summary of the folded stretch"},
+		{Role: domain.RoleUser, Content: overflowBridge},
+		{Role: domain.RoleAssistant, Content: "continuing after the fold"},
+		{Role: domain.RoleUser, Content: "after the bridge"},
+		{Role: domain.RoleAssistant, Content: "last reply"},
+	})})
+
+	cut, err := CutSession(snap, 1)
+	if err != nil {
+		t.Fatalf("CutSession(1): %v", err)
+	}
+
+	want := []string{"first", "summary of the folded stretch", overflowBridge, "continuing after the fold"}
+	if got := contents(decodeCutState(t, cut).Conversation); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("cut history = %q, want %q", got, want)
+	}
+}
+
+// TestCutSessionZeroIsAClone pins the drop-0 contract a fork at the newest prompt relies on: the
+// message history is untouched, yet the normalisation still applies — tasks cleared, no pending
+// input, no open Exchange, no deferred correction — exactly as at any earlier prompt.
+func TestCutSessionZeroIsAClone(t *testing.T) {
+	t.Parallel()
+
+	conv := domain.NewConversation(threeExchanges())
+	conv.Defer("a stale correction")
+	snap := cutFixtureSession(t, agentState{
+		Conversation:  conv,
+		TurnIndex:     3,
+		InExchange:    true,
+		ExchangeStart: 7,
+		PendingInput:  &domain.UserInput{Text: "queued"},
+		Tasks:         []tasklist.Item{{Text: "still open"}},
+	})
+
+	cut, err := CutSession(snap, 0)
+	if err != nil {
+		t.Fatalf("CutSession(0): %v", err)
+	}
+
+	st := decodeCutState(t, cut)
+	if got, want := contents(st.Conversation), contents(domain.NewConversation(threeExchanges())); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Errorf("cut history = %q, want the parent's %q", got, want)
+	}
+	if st.InExchange || st.ExchangeStart != 0 || st.PendingInput != nil || len(st.Tasks) != 0 {
+		t.Errorf("cut state = (inExchange %v, exchangeStart %d, pendingInput %v, tasks %v), want an idle boundary with no tasks",
+			st.InExchange, st.ExchangeStart, st.PendingInput, st.Tasks)
+	}
+	if st.Conversation.DeferredLen() != 0 {
+		t.Errorf("cut state keeps %d deferred corrections, want none", st.Conversation.DeferredLen())
+	}
+}
+
+// TestCutSessionRejectsOutOfRange: a negative count and one that would drop every opening are
+// refused with an error naming both counts, and the caller's snapshot is untouched.
+func TestCutSessionRejectsOutOfRange(t *testing.T) {
+	t.Parallel()
+
+	snap := cutFixtureSession(t, agentState{Conversation: domain.NewConversation(threeExchanges())})
+	for _, drop := range []int{-1, 3, 4} {
+		_, err := CutSession(snap, drop)
+		if err == nil {
+			t.Errorf("CutSession(%d) accepted, want a refusal", drop)
+			continue
+		}
+		if want := fmt.Sprintf("drop %d of 3 exchanges", drop); !strings.Contains(err.Error(), want) {
+			t.Errorf("CutSession(%d) err = %q, want it to name %q", drop, err, want)
+		}
+	}
+}
+
+// TestCutSessionRejectsAForeignVersion: a snapshot newer than this build understands is refused
+// exactly as Resume refuses it, before its payload is read.
+func TestCutSessionRejectsAForeignVersion(t *testing.T) {
+	t.Parallel()
+
+	future := domain.Session{Version: domain.SessionVersion + 1, State: json.RawMessage(`{"conversation":{"messages":[]}}`)}
+	if _, err := CutSession(future, 0); !errors.Is(err, domain.ErrSessionVersion) {
+		t.Errorf("CutSession(future) err = %v, want ErrSessionVersion", err)
+	}
+}
+
+// TestCutSessionResumes closes the loop: the cut Session is a well-formed snapshot, so Resume
+// rebuilds an idle Agent over the kept prefix that accepts a fresh Submit.
+func TestCutSessionResumes(t *testing.T) {
+	snap := cutFixtureSession(t, agentState{
+		Conversation: domain.NewConversation(threeExchanges()),
+		InExchange:   true,
+		PendingInput: &domain.UserInput{Text: "queued"},
+	})
+	cut, err := CutSession(snap, 1)
+	if err != nil {
+		t.Fatalf("CutSession(1): %v", err)
+	}
+
+	a, err := resumeAgent(baseConfig(&recordingSink{}), cut, scriptedResponder(t))
+	if err != nil {
+		t.Fatalf("resumeAgent(cut): %v", err)
+	}
+
+	if a.conv.Len() != 7 || a.InExchange() {
+		t.Errorf("resumed Agent = (%d messages, inExchange %v), want the 7-message prefix at idle", a.conv.Len(), a.InExchange())
+	}
+	if err := a.Submit(domain.UserInput{Text: "a fresh prompt on the fork"}); err != nil {
+		t.Errorf("Submit on the resumed cut: %v", err)
 	}
 }

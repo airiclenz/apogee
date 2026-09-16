@@ -310,6 +310,16 @@ func (e *lateEngine) Snapshot() (apogee.Session, error) {
 	return agent.Snapshot()
 }
 
+// CutSnapshot captures the conversation cut at an earlier Exchange, or refuses like Snapshot: an
+// unbound session has no conversation to fork.
+func (e *lateEngine) CutSnapshot(dropExchanges int) (apogee.Session, error) {
+	agent := e.bound()
+	if agent == nil {
+		return apogee.Session{}, errNoServerBound
+	}
+	return agent.CutSnapshot(dropExchanges)
+}
+
 // Interject commits a message into the open Exchange; unbound there is none.
 func (e *lateEngine) Interject(ctx context.Context, in apogee.UserInput) error {
 	agent := e.bound()

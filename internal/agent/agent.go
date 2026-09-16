@@ -1450,8 +1450,9 @@ func (a *Agent) effortOverrideValue() domain.ThinkingEffort {
 
 // Snapshot captures the Agent's conversation state at the current quiescent
 // boundary as a copyable, serializable value (ADR 0001/0007). It is valid only at a
-// boundary (between Steps). Apogee exposes snapshot/resume; it exposes no fork — the
-// bench composes forking by deep-copying a Session and the sandbox directory.
+// boundary (between Steps). Apogee exposes snapshot/resume and, through CutSnapshot, a
+// cut of the snapshot at an earlier Exchange; the bench composes forking by deep-copying
+// a Session and the sandbox directory.
 //
 // Domain owns the Session envelope and its version; the engine owns the opaque State
 // payload, so Snapshot serializes the engine's loop state (conversation + turnIndex +
@@ -1462,6 +1463,17 @@ func (a *Agent) Snapshot() (domain.Session, error) {
 		return domain.Session{}, err
 	}
 	return domain.Session{Version: domain.SessionVersion, State: state}, nil
+}
+
+// CutSnapshot captures the Agent's conversation state like Snapshot and cuts its last
+// dropExchanges Exchanges off (CutSession) — the value a session fork at an earlier prompt
+// starts from. Like Snapshot it is valid only at a boundary; the live Agent is untouched.
+func (a *Agent) CutSnapshot(dropExchanges int) (domain.Session, error) {
+	snap, err := a.Snapshot()
+	if err != nil {
+		return domain.Session{}, err
+	}
+	return CutSession(snap, dropExchanges)
 }
 
 // ----------------------------------------------------------------------------

@@ -373,7 +373,9 @@ NOTES (2026-09-16): `TestAnUnsafeParentIDLoadsCleared` iterates the existing `un
 
 **Commit:** `feat(session): Meta.ParentID records the session a record was forked from`
 
-## 17. Engine cut primitive `CutSession` (apogee-zci)
+## 17. Engine cut primitive `CutSession` (apogee-zci) — ✅ DONE (2026-09-16)
+NOTES (2026-09-16): the payload decode restoreState carried inline was extracted to `decodeState` so CutSession and restoreState share one reader (the empty-payload rule moved with it, behaviour unchanged); the cut keeps the parent's `TurnIndex` (the item's normalisation list does not name it, so the child's Turn numbering continues the parent's).
+NOTES (2026-09-16): ADR 0001's "the loop itself exposes no fork" was left as written — CutSession is a pure cut of the copyable Session value, and the fork (new record id, transcript prefix, parent pointer) is still composed on top of it by the Driver (items 19/20).
 
 **What:** Recast at the regression check (2026-09-16). `internal/agent/state.go`: `func CutSession(snap domain.Session, dropExchanges int) (domain.Session, error)` — pure over the opaque State: decode (`ErrSessionVersion` forward-reject as `restoreState`), locate the opening user messages (`RoleUser && !Interjected`, the `domain.lastExchangeOpening` rule; the overflow bridge is an opening like any other) walking BACKWARDS from the end, drop the last `dropExchanges` openings and everything after the surviving opening's Exchange end (`DropRange` from the earliest dropped opening to `Len`), `ClearDeferred`, `InExchange=false`, `ExchangeStart=0`, `PendingInput=nil`, `Tasks=nil` (ratified: task list cleared), re-encode. `dropExchanges < 0` or ≥ the number of openings → error naming the counts; `dropExchanges == 0` leaves the message history untouched but still applies the normalisation above. Export through the root facade as `apogee.CutSession`. Add `CutSnapshot(dropExchanges int) (domain.Session, error)` to `tui.Engine` (`internal/tui/tui.go`) = `CutSession(Snapshot(), n)` on the agent, forwarded by `cmd/apogee/wire_engine.go` `lateEngine`, stubbed on `internal/tui/seam_test.go` `fakeEngine`.
 

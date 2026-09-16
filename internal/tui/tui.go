@@ -641,6 +641,13 @@ type Engine interface {
 	Step(context.Context) (domain.StepResult, error)
 	// Snapshot captures the serializable conversation state at a boundary.
 	Snapshot() (domain.Session, error)
+	// CutSnapshot captures the same state with its last dropExchanges Exchanges cut off and the
+	// loop state normalised to an idle boundary (no open Exchange, no pending input, an empty
+	// task list) — what a session fork at an earlier prompt starts from. Exchanges are counted
+	// from the END; dropExchanges == 0 keeps the whole history. Like Snapshot it is a
+	// boundary-only call: at idle, never while a worker drives a Step. It refuses a negative
+	// count or one that would drop every Exchange, and leaves the live conversation untouched.
+	CutSnapshot(dropExchanges int) (domain.Session, error)
 	// Interject commits a user message into the OPEN Exchange, so a remark the human typed
 	// while the model was working reaches it mid-task instead of waiting for the Exchange to
 	// end (ADR 0025). Called ONLY by the worker goroutine, between Steps of the Exchange it

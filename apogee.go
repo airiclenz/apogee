@@ -683,6 +683,15 @@ type Session = domain.Session
 // version is newer than this build understands.
 func DecodeSession(data []byte) (Session, error) { return domain.DecodeSession(data) }
 
+// CutSession returns a copy of snap with its last dropExchanges Exchanges removed and its loop
+// state normalised to an idle boundary (no open Exchange, no pending input, an empty task list) —
+// the engine's fork primitive, pure over the opaque State. Exchanges are counted from the END:
+// dropExchanges == 0 keeps the whole message history, dropExchanges < 0 or one that would drop
+// every Exchange is an error, and a future-version snapshot is refused with ErrSessionVersion.
+func CutSession(snap Session, dropExchanges int) (Session, error) {
+	return agent.CutSession(snap, dropExchanges)
+}
+
 // ----------------------------------------------------------------------------
 // The observe lane (internal/reactions) — user-origin Reactions on the notice
 // Moments, run out of process by a Driver (ADR 0073, ADR 0076)
