@@ -139,9 +139,10 @@
 // DESTINATION — where the write lands — because the source is fenced by the operation itself
 // (destinationArgWriteTarget, workspace_scoped.go). Neither reaches writeTarget.write — a copy and a
 // move never hold in memory the bytes they land — so both take their undo pre-images through that
-// funnel's SIBLING, the value's journaled method in its multi-path form, journaledMutation
-// (write_target.go — ADR 0051), which captures every path a mutation touches before its body runs
-// and commits exactly the ones the body reports as landed. The two are the whole of this package's
+// funnel's SIBLING, the value's journaled method — a single-file copy on the destination's own,
+// the directory copy and the move on its multi-path form, journaledTargets over the values they
+// resolve (writeTarget.mutation; write_target.go — ADR 0051) — which captures every path a
+// mutation touches before its body runs and commits exactly the ones the body reports as landed. The two are the whole of this package's
 // undo capture, which TestUndoCaptureHasExactlyTwoCallers keeps true. copy_file hands the funnel its DESTINATION
 // alone, since a copy's source is a read; move_file hands it BOTH ends as two records — the
 // source post-absent, the destination holding the moved bytes — identically on the rename fast
@@ -340,9 +341,9 @@
 // reach for its path is the one resolution dispatch classified. It also holds BOTH undo write
 // funnels (ADR 0051): write, the one filesystem reach of the content verbs (write_file and the
 // three edit tools, which hold the bytes they land), and journaled with its multi-path form
-// journaledTargets — spelled by argument as journaledMutation for the verbs that assemble a path
-// slice (mutationPath) — for copy_file, move_file and delete_file, which land bytes this process
-// never holds and may touch two paths. The capture the two take — capturePreImage on the value,
+// journaledTargets — taking the values the directory copy and the move assemble (writeTarget.mutation) —
+// for copy_file, move_file and delete_file, which land bytes this process never holds and may
+// touch two paths. The capture the two take — capturePreImage on the value,
 // commit and commitReadBack on the preImage it returns — lives beside them, and
 // TestUndoCaptureHasExactlyTwoCallers refuses any spelling of it outside this file, which is what
 // makes the two funnels the whole of this package's undo capture.

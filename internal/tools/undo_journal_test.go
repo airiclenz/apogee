@@ -700,16 +700,30 @@ func TestFileOpsJournalNothingWhenRefused(t *testing.T) {
 	}
 }
 
-// The funnel itself, asked directly. journaledMutation is the multi-path half of the capture
+// The funnel itself, asked directly. journaledTargets is the multi-path half of the capture
 // (ADR 0051) and it carries three rules the verb-level tests above can only observe indirectly:
 // it commits exactly what the body reports as landed, it reads every pre-image BEFORE the body
 // runs, and it journals nothing it cannot describe truthfully — a failed body, or a landed path
-// whose post-image will not read back. A fake body pins each of them on its own.
+// whose post-image will not read back. A fake body pins each of them on its own. Each path is
+// handed to it the way the verbs hand theirs: as a value of the execution's scope, in the value's
+// multi-path form (mutationOf).
 
-// TestJournaledMutationCommitsOnlyLandedPaths: the body's report — not the error, not the state
+// mutationOf resolves input through scope into the one path of a multi-path mutation the funnel
+// takes (writeTarget.mutation), failing the test on the value's one error — an empty argument,
+// which no case here spells.
+func mutationOf(t *testing.T, scope writeScope, input string, post postImage) journaledPath {
+	t.Helper()
+	target, err := scope.target(input)
+	if err != nil {
+		t.Fatalf("scope.target(%q): %v", input, err)
+	}
+	return target.mutation(post)
+}
+
+// TestJournaledTargetsCommitsOnlyLandedPaths: the body's report — not the error, not the state
 // of the files — decides what is journalled, which is what lets a half-failed move keep the half
 // that really happened.
-func TestJournaledMutationCommitsOnlyLandedPaths(t *testing.T) {
+func TestJournaledTargetsCommitsOnlyLandedPaths(t *testing.T) {
 	t.Parallel()
 
 	root := tempRoot(t)
@@ -719,18 +733,19 @@ func TestJournaledMutationCommitsOnlyLandedPaths(t *testing.T) {
 	writeFixtureFile(t, skippedPath, "before the skipped write")
 
 	journal := undo.New()
-	err := journaledMutation(
-		undo.WithJournal(context.Background(), journal),
-		[]mutationPath{
-			{input: "landed.txt", root: root, post: postReadBack},
-			{input: "skipped.txt", root: root, post: postReadBack},
+	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
+	err := journaledTargets(
+		scope.permit,
+		[]journaledPath{
+			mutationOf(t, scope, "landed.txt", postReadBack),
+			mutationOf(t, scope, "skipped.txt", postReadBack),
 		},
 		func(string) ([]bool, error) {
 			writeFixtureFile(t, landedPath, "after the landed write")
 			return []bool{true, false}, nil
 		})
 	if err != nil {
-		t.Fatalf("journaledMutation returned error: %v", err)
+		t.Fatalf("journaledTargets returned error: %v", err)
 	}
 
 	step, ok := journal.Preview()
@@ -744,10 +759,10 @@ func TestJournaledMutationCommitsOnlyLandedPaths(t *testing.T) {
 	assertChange(t, step.Changes, 0, landedPath, undo.ActionRestore)
 }
 
-// TestJournaledMutationCapturesEveryPathBeforeTheBody: the pre-image is the state the mutation
+// TestJournaledTargetsCapturesEveryPathBeforeTheBody: the pre-image is the state the mutation
 // started from, so it has to be read before the body touches anything — a move's ends are both
 // unrecoverable afterwards. The revert proves the recorded bytes are the pre-body ones.
-func TestJournaledMutationCapturesEveryPathBeforeTheBody(t *testing.T) {
+func TestJournaledTargetsCapturesEveryPathBeforeTheBody(t *testing.T) {
 	t.Parallel()
 
 	root := tempRoot(t)
@@ -757,18 +772,19 @@ func TestJournaledMutationCapturesEveryPathBeforeTheBody(t *testing.T) {
 	writeFixtureFile(t, mutatedPath, "pre-body bytes")
 
 	journal := undo.New()
-	err := journaledMutation(
-		undo.WithJournal(context.Background(), journal),
-		[]mutationPath{
-			{input: "first.txt", root: root, post: postReadBack},
-			{input: "second.txt", root: root, post: postReadBack},
+	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
+	err := journaledTargets(
+		scope.permit,
+		[]journaledPath{
+			mutationOf(t, scope, "first.txt", postReadBack),
+			mutationOf(t, scope, "second.txt", postReadBack),
 		},
 		func(string) ([]bool, error) {
 			writeFixtureFile(t, mutatedPath, "post-body bytes")
 			return []bool{false, true}, nil
 		})
 	if err != nil {
-		t.Fatalf("journaledMutation returned error: %v", err)
+		t.Fatalf("journaledTargets returned error: %v", err)
 	}
 
 	revertCleanly(t, journal)
@@ -778,10 +794,10 @@ func TestJournaledMutationCapturesEveryPathBeforeTheBody(t *testing.T) {
 	}
 }
 
-// TestJournaledMutationJournalsNothingWhenTheBodyFails: a mutation that never landed leaves the
+// TestJournaledTargetsJournalsNothingWhenTheBodyFails: a mutation that never landed leaves the
 // journal — and the generation a pending preview is validated against — exactly as it found it,
 // and the body's error reaches the caller unchanged.
-func TestJournaledMutationJournalsNothingWhenTheBodyFails(t *testing.T) {
+func TestJournaledTargetsJournalsNothingWhenTheBodyFails(t *testing.T) {
 	t.Parallel()
 
 	root := tempRoot(t)
@@ -789,13 +805,14 @@ func TestJournaledMutationJournalsNothingWhenTheBodyFails(t *testing.T) {
 	refusal := errors.New("the body refused")
 
 	journal := undo.New()
-	err := journaledMutation(
-		undo.WithJournal(context.Background(), journal),
-		[]mutationPath{{input: "kept.txt", root: root, post: postAbsent}},
+	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
+	err := journaledTargets(
+		scope.permit,
+		[]journaledPath{mutationOf(t, scope, "kept.txt", postAbsent)},
 		func(string) ([]bool, error) { return nil, refusal })
 
 	if !errors.Is(err, refusal) {
-		t.Fatalf("journaledMutation returned %v, want the body's own error", err)
+		t.Fatalf("journaledTargets returned %v, want the body's own error", err)
 	}
 	if step, ok := journal.Preview(); ok {
 		t.Fatalf("a failed mutation left an undo step: %+v", step.Changes)
@@ -805,10 +822,10 @@ func TestJournaledMutationJournalsNothingWhenTheBodyFails(t *testing.T) {
 	}
 }
 
-// TestJournaledMutationReadBackFailureJournalsNothing: a post-image that will not read back is
+// TestJournaledTargetsReadBackFailureJournalsNothing: a post-image that will not read back is
 // left out entirely rather than guessed, because a record that does not match the file it names
 // would turn every later undo of that path into a conflict it never had.
-func TestJournaledMutationReadBackFailureJournalsNothing(t *testing.T) {
+func TestJournaledTargetsReadBackFailureJournalsNothing(t *testing.T) {
 	t.Parallel()
 
 	root := tempRoot(t)
@@ -816,9 +833,10 @@ func TestJournaledMutationReadBackFailureJournalsNothing(t *testing.T) {
 	writeFixtureFile(t, vanishedPath, "before the body")
 
 	journal := undo.New()
-	err := journaledMutation(
-		undo.WithJournal(context.Background(), journal),
-		[]mutationPath{{input: "vanished.txt", root: root, post: postReadBack}},
+	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
+	err := journaledTargets(
+		scope.permit,
+		[]journaledPath{mutationOf(t, scope, "vanished.txt", postReadBack)},
 		func(string) ([]bool, error) {
 			if removeErr := os.Remove(vanishedPath); removeErr != nil {
 				t.Fatalf("remove %s: %v", vanishedPath, removeErr)
@@ -826,7 +844,7 @@ func TestJournaledMutationReadBackFailureJournalsNothing(t *testing.T) {
 			return []bool{true}, nil
 		})
 	if err != nil {
-		t.Fatalf("journaledMutation returned error: %v", err)
+		t.Fatalf("journaledTargets returned error: %v", err)
 	}
 
 	if step, ok := journal.Preview(); ok {
@@ -834,10 +852,10 @@ func TestJournaledMutationReadBackFailureJournalsNothing(t *testing.T) {
 	}
 }
 
-// TestJournaledMutationWritesWithoutAJournal: journalling is never a precondition of the write.
+// TestJournaledTargetsWritesWithoutAJournal: journalling is never a precondition of the write.
 // With no journal on the context every capture is nil, and the body still runs — the nil-receiver
 // commits do nothing rather than panic.
-func TestJournaledMutationWritesWithoutAJournal(t *testing.T) {
+func TestJournaledTargetsWritesWithoutAJournal(t *testing.T) {
 	t.Parallel()
 
 	root := tempRoot(t)
@@ -845,9 +863,10 @@ func TestJournaledMutationWritesWithoutAJournal(t *testing.T) {
 	writeFixtureFile(t, targetPath, "before the body")
 
 	bodyRan := false
-	err := journaledMutation(
-		context.Background(),
-		[]mutationPath{{input: "solo.txt", root: root, post: postReadBack}},
+	scope := writeScopeOf(context.Background(), root)
+	err := journaledTargets(
+		scope.permit,
+		[]journaledPath{mutationOf(t, scope, "solo.txt", postReadBack)},
 		func(string) ([]bool, error) {
 			bodyRan = true
 			writeFixtureFile(t, targetPath, "after the body")
@@ -855,7 +874,7 @@ func TestJournaledMutationWritesWithoutAJournal(t *testing.T) {
 		})
 
 	if err != nil {
-		t.Fatalf("journaledMutation returned error: %v", err)
+		t.Fatalf("journaledTargets returned error: %v", err)
 	}
 	if !bodyRan {
 		t.Fatal("the body did not run without a journal on the context")

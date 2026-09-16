@@ -152,7 +152,7 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 			return t.copyDirectory(ctx, call, args, sourceRoot, source)
 		}
 	}
-	destination, refusal := checkFileOpsPathsFrom(ctx, args, source, sourceRoot, t.root)
+	destination, refusal := checkFileOpsPathsFrom(writeScopeOf(ctx, t.root), args, source, sourceRoot)
 	if refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
@@ -162,19 +162,16 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// nothing. The SOURCE gets no note of its own: it is a read, and this is the writers'
 	// disclosure (workspace_scoped.go).
 	resolved := destination.note()
-	// The DESTINATION is the only end a copy mutates, so it is the only path handed to the funnel
-	// (writeTarget.mutation over journaledMutation, ADR 0051): pre-image bytes when overwrite:true
-	// clobbers a file, pre-absent when the copy creates one — which is what makes an undo restore
-	// the first and remove the second. The source is a read and records nothing.
-	err = journaledMutation(
-		ctx,
-		[]mutationPath{destination.mutation(postReadBack)},
-		func(escape string) ([]bool, error) {
-			if err := security.SafeCopyFileFrom(sourceRoot, source, t.root, args.Destination, escape); err != nil {
-				return nil, err
-			}
-			return []bool{true}, nil
-		})
+	// The DESTINATION is the only end a copy mutates, so it is the only target handed to the
+	// funnel (writeTarget.journaled, ADR 0051): pre-image bytes when overwrite:true clobbers a
+	// file, pre-absent when the copy creates one — which is what makes an undo restore the first
+	// and remove the second. The source is a read and records nothing.
+	err = destination.journaled(postReadBack, func(escape string) (bool, error) {
+		if err := security.SafeCopyFileFrom(sourceRoot, source, t.root, args.Destination, escape); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
@@ -182,14 +179,14 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 }
 
 // maxCopyDirectoryFiles bounds how many files one directory copy may land. Every destination is
-// journalled before the first byte moves (journaledMutation captures a pre-image per path), so an
+// journalled before the first byte moves (journaledTargets captures a pre-image per path), so an
 // unbounded tree — a `node_modules`, a build output — would hold that many records in memory and
 // take that many undo steps; a model that hits the cap is told to copy the subtrees separately.
 const maxCopyDirectoryFiles = 2000
 
 // copyDirectory is Execute's DIRECTORY branch (2026-09-15): the source tree is enumerated
 // through the fence of its own root (directoryFiles), every destination path is resolved through
-// the scope of this execution — N targets, one per file — and handed to ONE journaledMutation
+// the scope of this execution — N targets, one per file — and handed to ONE journaledTargets call
 // (writeTarget.mutation), so an undo takes the whole copy back as one step and a clobbered file's
 // pre-image is captured before anything lands — and each file is copied with SafeCopyFileFrom,
 // the same primitive a single-file copy uses, so the symlink-spelling rules, the source's mode
@@ -239,7 +236,7 @@ func (t *CopyFile) copyDirectory(
 	// Each file's own destination is a target of the same scope: the directory's destination
 	// was refused above if empty, so a joined path never is and the value's one error is
 	// unreachable here.
-	paths := make([]mutationPath, len(files))
+	paths := make([]journaledPath, len(files))
 	for i, rel := range files {
 		target, err := scope.target(filepath.Join(args.Destination, rel))
 		if err != nil {
@@ -247,7 +244,7 @@ func (t *CopyFile) copyDirectory(
 		}
 		paths[i] = target.mutation(postReadBack)
 	}
-	err = journaledMutation(ctx, paths, func(escape string) ([]bool, error) {
+	err = journaledTargets(scope.permit, paths, func(escape string) ([]bool, error) {
 		landed := make([]bool, len(files))
 		for i, rel := range files {
 			if err := ctx.Err(); err != nil {
@@ -400,7 +397,8 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	if !ok {
 		return fail, nil
 	}
-	destination, refusal := checkFileOpsPaths(ctx, args, t.root)
+	scope := writeScopeOf(ctx, t.root)
+	source, destination, refusal := checkFileOpsPaths(scope, args)
 	if refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
@@ -409,7 +407,7 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// operator needed to see would be gone from the sentence (writeTarget.note).
 	resolved := destination.note()
 
-	if err := t.move(ctx, args, destination); err != "" {
+	if err := t.move(scope, args, source, destination); err != "" {
 		return errorResult(call.ID, err), nil
 	}
 	// args.Source is paths[0] by the helper's contract — the pre-move path whose trackedness
@@ -441,19 +439,19 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 //
 // A move is TWO journal records (ADR 0051) because it changes two files: the source, whose
 // pre-image bytes are the only copy of it left once it is gone, and the destination, which the
-// move either creates or clobbers. Both are handed to the funnel as one mutation — the source by
-// its workspace-rooted spelling, the destination through the value Execute resolved
-// (writeTarget.mutation) — so both pre-images are read BEFORE anything moves — afterwards the
+// move either creates or clobbers. Both are handed to the funnel as one mutation — the two values
+// Execute's scope resolved, in the value's multi-path form (writeTarget.mutation over
+// journaledTargets) — so both pre-images are read BEFORE anything moves — afterwards the
 // source does not exist and the destination holds the source's bytes, so neither is recoverable
 // from the filesystem a move leaves behind — and each is committed only once the route below
 // REPORTS its own half landed. That is what makes the two routes journal identically, and it is
 // what keeps the split failure honest: a copy that landed while the removal was refused reports
 // [false, true], recording the destination alone, because the source really is still there.
-func (t *MoveFile) move(ctx context.Context, args fileOpsArgs, destination writeTarget) string {
-	err := journaledMutation(
-		ctx,
-		[]mutationPath{
-			{input: args.Source, root: t.root, post: postAbsent},
+func (t *MoveFile) move(scope writeScope, args fileOpsArgs, source, destination writeTarget) string {
+	err := journaledTargets(
+		scope.permit,
+		[]journaledPath{
+			source.mutation(postAbsent),
 			destination.mutation(postReadBack),
 		},
 		func(permitted string) ([]bool, error) {
@@ -494,9 +492,22 @@ func (t *MoveFile) move(ctx context.Context, args fileOpsArgs, destination write
 
 // checkFileOpsPaths is checkFileOpsPathsFrom's EQUAL-ROOTS case: one root fences both ends, which
 // is what move_file needs — its removal of the source is itself a write, so the source may never
-// come from anywhere the destination fence does not already cover.
-func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) (writeTarget, string) {
-	return checkFileOpsPathsFrom(ctx, args, args.Source, root, root)
+// come from anywhere the destination fence does not already cover. That is also why the SOURCE
+// comes back as a value of the same scope beside the destination: a move removes it, so its
+// pre-image is journalled through the value exactly as the destination's is (MoveFile.move). The
+// pre-flight stat of the source stays the plain workspace-rooted one the shared check makes — the
+// value is for the journal, never for widening what the source may be.
+func checkFileOpsPaths(scope writeScope, args fileOpsArgs) (source, destination writeTarget, refusal string) {
+	destination, refusal = checkFileOpsPathsFrom(scope, args, args.Source, scope.root)
+	if refusal != "" {
+		return writeTarget{}, writeTarget{}, refusal
+	}
+	// The shared check has refused an empty source, so the value's one error is unreachable here.
+	source, err := scope.target(args.Source)
+	if err != nil {
+		return writeTarget{}, writeTarget{}, err.Error()
+	}
+	return source, destination, ""
 }
 
 // checkFileOpsPathsFrom validates the pair the file-operation tools need before either touches the
@@ -508,12 +519,13 @@ func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) (writ
 // here, while copy_file branches on a directory source BEFORE reaching this check (copyDirectory).
 //
 // The two roots differ for copy_file alone, whose source may have matched a configured read-only
-// root (a copy's source is a read) while its destination stays workspace-fenced; move_file passes
-// the workspace root for both. sourcePath travels with sourceRoot for the same reason and from the
-// same one answer (readScope.locate): under an extra root it is the RESOLVED source, not the
-// argument's spelling. The REFUSALS still name args.Source — the spelling the model wrote is the
-// one it can act on. Everything else is identical for the two tools, refusal wording included, so
-// they can never drift into different answers for the same mistake.
+// root (a copy's source is a read) while its destination stays fenced by the scope of this
+// execution; move_file's source sits under the scope's own root. sourcePath travels with
+// sourceRoot for the same reason and from the same one answer (readScope.locate): under an extra
+// root it is the RESOLVED source, not the argument's spelling. The REFUSALS still name args.Source
+// — the spelling the model wrote is the one it can act on. Everything else is identical for the
+// two tools, refusal wording included, so they can never drift into different answers for the
+// same mistake.
 //
 // Every stat goes through the fence of ITS OWN root, so a path that escapes is refused here with
 // the uniform escape message rather than being reported as an ordinary absence. These checks are
@@ -521,21 +533,21 @@ func checkFileOpsPaths(ctx context.Context, args fileOpsArgs, root string) (writ
 // operation time, so a name swapped after this returns cannot widen anything — it can only turn
 // a friendly refusal into a blunter one.
 //
-// The two halves read ctx differently, which is the ADR 0049 asymmetry in one place: the
+// The two halves read the scope differently, which is the ADR 0049 asymmetry in one place: the
 // DESTINATION is resolved through the scope of this execution (fileOpsDestination) and stat'd
 // through that value, so an approved escape's pre-flight looks where the copy or move will
 // actually land, while the SOURCE keeps the plain workspace-rooted stat and no permit ever reaches
 // it — copy_file's source is already fenced by its read scope, and move_file's source is the one
 // path the Gate never disclosed.
 func checkFileOpsPathsFrom(
-	ctx context.Context,
+	scope writeScope,
 	args fileOpsArgs,
-	sourcePath, sourceRoot, destinationRoot string,
+	sourcePath, sourceRoot string,
 ) (writeTarget, string) {
 	if args.Source == "" {
 		return writeTarget{}, "source is required"
 	}
-	destination, refusal := fileOpsDestination(writeScopeOf(ctx, destinationRoot), args)
+	destination, refusal := fileOpsDestination(scope, args)
 	if refusal != "" {
 		return writeTarget{}, refusal
 	}

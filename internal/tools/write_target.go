@@ -245,8 +245,7 @@ const (
 // approved-escape target (ADR 0049), and the record is committed under post only when body reports
 // the target landed. body's error is returned unchanged; the fence primitive stays body's choice.
 func (t writeTarget) journaled(post postImage, body func(escape string) (landed bool, err error)) error {
-	paths := []journaledPath{{target: t, post: post}}
-	return journaledTargets(t.scope.permit, paths, func(escape string) ([]bool, error) {
+	return journaledTargets(t.scope.permit, []journaledPath{t.mutation(post)}, func(escape string) ([]bool, error) {
 		landed, err := body(escape)
 		return []bool{landed}, err
 	})
@@ -260,10 +259,12 @@ type journaledPath struct {
 }
 
 // journaledTargets is the multi-path form of journaled, and the funnel proper: copy_file, move_file
-// and delete_file land bytes this process never holds, and one of them changes two paths. It
-// captures a pre-image for EVERY path before body runs, hands body the approved-escape target
-// (ADR 0049), then commits exactly the paths body reports as landed — each under its own post-image
-// policy — and returns body's error unchanged.
+// and delete_file land bytes this process never holds, and one of them changes two paths. It takes
+// the paths as the VALUES the verb resolved (writeTarget.mutation) and the approved-escape target
+// of the scope that resolved them, captures a pre-image for EVERY path before body runs, hands body
+// that target (ADR 0049), then commits exactly the paths body reports as landed — each under its own
+// post-image policy — and returns body's error unchanged. journaled is its one-target spelling; the
+// directory copy and the move call it directly with the slice they assemble.
 //
 // landed carries one entry per path, in paths' order; a nil or short slice means the missing paths
 // did not land. It is REPORTED rather than inferred from err because a move can fail half way —
@@ -316,50 +317,15 @@ func journaledTargets(
 	return err
 }
 
-// mutationPath names one path a multi-path mutation touches BY ARGUMENT, in the spelling and under
-// the root that mutation reaches it through — the form journaledMutation takes from the verbs that
-// assemble their paths rather than hold one value: a directory copy's N destinations, and a move's
-// two ends, whose source is spelled by argument and root because a move's source is not a write
-// target the marker resolves (destinationArgWriteTarget). input is the ARGUMENT's spelling rather
-// than its resolution because the funnel resolves the value from it exactly as the verb resolves
-// its own argument (writeScope.target), and root rides beside it because each path in the slice
-// names the root it was spelled under.
-type mutationPath struct {
-	input string
-	root  string
-	post  postImage
-}
-
-// mutation is this target as ONE path of a multi-path mutation (journaledMutation): the argument's
-// spelling and the root the funnel captures its pre-image through and reads its post-image back
-// through, under post. It is the value's MULTI-PATH form — a copy's directory form hands the funnel
-// N destinations and a move its two ends, so those verbs assemble the slice from their values and
-// keep the funnel's own body shape (one landed flag per path), where journaled above is the
-// one-target case.
-func (t writeTarget) mutation(post postImage) mutationPath {
-	return mutationPath{input: t.input, root: t.scope.root, post: post}
-}
-
-// journaledMutation is journaledTargets spelled by argument and root, for the verbs that assemble
-// a path slice (mutationPath): each path becomes the target the execution's scope answers for it —
-// the same resolution every write verb makes for its own argument — and the mutation runs over
-// those values. ctx is where the scope is read from: the approved-escape target body is handed and
-// the journal every capture records into. An empty spelling is refused as the value refuses it
-// (errPathRequired) before anything is captured; every verb refuses one earlier itself.
-func journaledMutation(
-	ctx context.Context,
-	paths []mutationPath,
-	body func(escape string) (landed []bool, err error),
-) error {
-	targets := make([]journaledPath, len(paths))
-	for i, path := range paths {
-		target, err := writeScopeOf(ctx, path.root).target(path.input)
-		if err != nil {
-			return err
-		}
-		targets[i] = journaledPath{target: target, post: path.post}
-	}
-	return journaledTargets(writeEscapeTarget(ctx), targets, body)
+// mutation is this target as ONE path of a multi-path mutation (journaledTargets): the value the
+// funnel captures its pre-image through and reads its post-image back through, under post. It is
+// how the two-path verbs spell the value's MULTI-PATH form — a copy's directory form hands the
+// funnel N destinations and a move its two ends, each resolved by the execution's own scope exactly
+// as the verb resolves its destination (writeScope.target) — so those verbs assemble the slice from
+// their values and keep the funnel's own body shape (one landed flag per path), where journaled
+// above is the one-target case.
+func (t writeTarget) mutation(post postImage) journaledPath {
+	return journaledPath{target: t, post: post}
 }
 
 // ----------------------------------------------------------------------------

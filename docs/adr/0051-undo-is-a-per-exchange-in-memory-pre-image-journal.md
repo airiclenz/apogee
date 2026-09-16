@@ -247,8 +247,10 @@ holds a `writeTarget` — the write side's scope value (`internal/tools/write_ta
 call from a `writeScope` that reads the workspace root, the approved-escape permit (ADR 0049) and the undo
 journal off the execution context together. The pair is now that value's own methods: `writeTarget.write`
 keeps the content verbs, `writeTarget.journaled` keeps the byte-moving trio (its multi-path form,
-`journaledTargets`, is what `journaledMutation` — the by-argument spelling the directory copy and the move
-still call with the slice they assemble — resolves into). The capture moved with them and takes the value:
+`journaledTargets`, takes the slice of values the directory copy and the move assemble through
+`writeTarget.mutation` — a move's source is a value of the same scope as its destination; the by-argument
+spelling `journaledMutation` that first bridged the two was retired the same day, once no verb called it). The
+capture moved with them and takes the value:
 `writeTarget.capturePreImage` reads the pre-image through the value's own fenced `read`, the `preImage`
 it returns carries the value, and `commitReadBack` reads the post-image back through the same value. The
 two one-line shims the 2026-09-15 value kept for the by-argument capture (`readWriteTarget`,
