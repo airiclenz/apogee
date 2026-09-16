@@ -429,3 +429,83 @@ func kebabKey(name string) bool {
 	}
 	return true
 }
+
+// TestRegistryFollowsTheTemplateOrder pins the row order of KeyRegistry to the order the seeded
+// template first spells each key: the registry is the table /settings, the manual's key list and
+// the probe read in row order, so a registry that walks its keys in one order while the file the
+// user edits walks them in another teaches two orders for one surface. Every registry path is a
+// template key line today (TestTemplateMentionsEveryRegistryKey), so nothing is skipped; a path the
+// template names only in prose would keep its relative position and is left out of the check.
+func TestRegistryFollowsTheTemplateOrder(t *testing.T) {
+	t.Parallel()
+
+	lines := SplitConfigLines(defaultConfigYAML)
+
+	previousPath, previousLine := "", 0
+	for _, key := range KeyRegistry {
+		line := templateFirstMention(lines, key.Path)
+		if line == 0 {
+			continue
+		}
+		if line < previousLine {
+			t.Errorf("KeyRegistry lists %s (template line %d) after %s (template line %d); the registry "+
+				"rows follow the order defaults/config.yaml first spells each key — move the row",
+				key.Path, line, previousPath, previousLine)
+		}
+		previousPath, previousLine = key.Path, line
+	}
+}
+
+// TestRegistryFollowsTheTemplateOrderReadsTheFirstMention is the order test's negative case: the
+// index it sorts by is the FIRST key line spelling a path, so a path the template never spells
+// reports 0 (and is skipped), a nested leaf borrowed from another block is not mistaken for its
+// own, and a top-level key is found at its own line and no earlier.
+func TestRegistryFollowsTheTemplateOrderReadsTheFirstMention(t *testing.T) {
+	t.Parallel()
+
+	lines := SplitConfigLines(defaultConfigYAML)
+
+	for _, path := range []string{"no-such-setting", "ui.max-age"} {
+		if line := templateFirstMention(lines, path); line != 0 {
+			t.Errorf("templateFirstMention(%q) = %d; no such key is in defaults/config.yaml, so it must report 0",
+				path, line)
+		}
+	}
+	bypass := templateFirstMention(lines, "bypass")
+	reactions := templateFirstMention(lines, "reactions")
+	profiles := templateFirstMention(lines, "model-profiles")
+	if bypass == 0 || reactions == 0 || profiles == 0 {
+		t.Fatalf("bypass/reactions/model-profiles first mentions = %d/%d/%d; all three are template keys",
+			bypass, reactions, profiles)
+	}
+	if !(bypass < reactions && reactions < profiles) {
+		t.Errorf("template spells bypass at %d, reactions at %d, model-profiles at %d; the ratified order is "+
+			"bypass, reactions, model-profiles (the Reactions block sits directly after the bypass block)",
+			bypass, reactions, profiles)
+	}
+}
+
+// templateFirstMention is templateMentionsSetting's first-index sibling: the 1-based line of the
+// first key line spelling the path — a top-level key on its own column-0 line, a nested key as its
+// leaf under its own parent's block — or 0 when the template never spells it as a key.
+func templateFirstMention(lines []string, path string) int {
+	parent, leaf, nested := strings.Cut(path, ".")
+	block := ""
+	for i, line := range lines {
+		indent, name, ok := templateKeyLine(line)
+		if !ok {
+			continue
+		}
+		if indent == 0 {
+			block = name
+			if !nested && name == path {
+				return i + 1
+			}
+			continue
+		}
+		if nested && block == parent && name == leaf {
+			return i + 1
+		}
+	}
+	return 0
+}

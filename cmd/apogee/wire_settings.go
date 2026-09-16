@@ -1068,15 +1068,15 @@ var settingsTable = []settingsEntry{
 		apply:   applySystemPromptBlock,
 	},
 	{
-		key:     "system-prompt-models",
-		reaches: settingsApplier.rides,
-		apply:   applySystemPromptBlock,
-	},
-	{
 		// The fourth key of the same one prompt (ADR 0064 §2), so it lands on the same apply: what
 		// the switch changes is which prompt the block resolves to, and only the re-resolution can
 		// say that.
 		key:     "use-default-prompt",
+		reaches: settingsApplier.rides,
+		apply:   applySystemPromptBlock,
+	},
+	{
+		key:     "system-prompt-models",
 		reaches: settingsApplier.rides,
 		apply:   applySystemPromptBlock,
 	},
@@ -1242,11 +1242,6 @@ var settingsTable = []settingsEntry{
 		apply:   applyFloorGuard,
 	},
 	{
-		key:     "tool-call-salvage",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyFloorGuard,
-	},
-	{
 		key:     "tool-loop-breaker",
 		reaches: reachesTheEngineAndTheHolder,
 		apply:   applyFloorGuard,
@@ -1258,6 +1253,11 @@ var settingsTable = []settingsEntry{
 	},
 	{
 		key:     "read-cache",
+		reaches: reachesTheEngineAndTheHolder,
+		apply:   applyFloorGuard,
+	},
+	{
+		key:     "tool-call-salvage",
 		reaches: reachesTheEngineAndTheHolder,
 		apply:   applyFloorGuard,
 	},

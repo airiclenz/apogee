@@ -16,8 +16,8 @@
 │   System prompt                                                                                                                        │ │
 │   system-prompt-text                                                                                                                   │ │
 │   system-prompt-file                                                                                                                   │ │
+│   use-default-prompt       true                                                                                                        │ │
 │   system-prompt-models     none                   · ⏎ opens $EDITOR                                                                    │ │
-│   system-prompt-layers     none                   · ⏎ opens $EDITOR                                                                    │ │
 │                                                                                                                                          │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯

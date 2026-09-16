@@ -171,7 +171,11 @@ NOTES (2026-09-16): pre-existing drift left alone, not in Files — ADR 0064 Con
 
 commit: `docs: comment and doc drift from the 2026-09-16 fact-check`
 
-## 9. `KeyRegistry` follows the starter template's order, pinned (apogee-bsg, order half)
+## 9. `KeyRegistry` follows the starter template's order, pinned (apogee-bsg, order half) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — internal/config/registry.go: the `use-default-prompt` row's own comment ("the three rows above") made false by the row's move; reworded to name its template position (two global keys above, per-model map below). Row Desc unchanged — it still matches the template's "neither key above" wording.
+NOTES (2026-09-16): consequential edit — cmd/apogee/e2e_livestate_test.go: made necessary by the registry reorder — `use-default-prompt` moving up pushes `system-prompt-layers` one row below the settings pane's first screen, so `assertPanePaintsRow` (the ADR 0067 painted-row claim, read off the golden's frame) found 0 rows; the test now walks to that row with `settingsGoDown` first and asserts the same claim on that frame. The golden itself is recorded before the walk and changed by exactly the one row the reorder moves.
+NOTES (2026-09-16): `settingsTable` already had `reactions` directly after `bypass`; only the two prompt/guard moves were needed there.
 
 **What:** Recast at the regression check (2026-09-16). Closes apogee-bsg. Reorder the rows of `KeyRegistry` in `internal/config/registry.go` to the order the starter template first mentions each key — exactly three moves: `use-default-prompt` before `system-prompt-models`; `tool-loop-breaker` directly after `tool-call-repair`; `tool-call-salvage` directly after `read-cache` — with `bypass, reactions, model-profiles` staying last. Every registry key is a template key line today, so the order test skips nothing and bites on exactly those three rows. Keys the template names only in prose keep their relative position. Then pin it: `TestRegistryFollowsTheTemplateOrder` in `internal/config/defaults_test.go` walks `SplitConfigLines(defaultConfigYAML)` with `templateMentionsSetting`, records the first mention of every registry path, and asserts `KeyRegistry` is sorted by that index (paths never mentioned as a key line are skipped). The `KeyRegistry` doc comment stays true as written.
 

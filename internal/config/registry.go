@@ -300,6 +300,16 @@ var KeyRegistry = bindSetters([]Key{
 		Set:  land(asIs, func(o *Options) *string { return &o.SystemPrompt.Global.File }),
 	},
 	{
+		// The last rung of the prompt ladder (ADR 0064 §2), sitting where the template spells it:
+		// under the two global keys, ahead of the per-model map. It changes nothing while any rung
+		// above it hits — the row says so rather than pretending an effect it does not have.
+		Path: "use-default-prompt", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Fall back to apogee's built-in system prompt when none of the keys above sets one.",
+		Read:     func(o Options) string { return boolValue(o.UseDefaultPrompt) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseDefaultPrompt }),
+	},
+	{
 		Path: "system-prompt-models", Kind: KindStructured,
 		Desc:      "Per-model system prompts, keyed by resolved model name; a match replaces the global prompt whole.",
 		Read:      func(o Options) string { return countSummary(len(o.SystemPrompt.Models), "model") },
@@ -314,16 +324,6 @@ var KeyRegistry = bindSetters([]Key{
 		Desc:      "Prompt fragments appended, in listed order, to whichever system prompt is selected.",
 		Read:      func(o Options) string { return countSummary(len(o.SystemPrompt.Layers), "layer") },
 		Structure: func(o Options) any { return o.SystemPrompt.Layers },
-	},
-	{
-		// The last rung of the prompt ladder (ADR 0064 §2), and therefore this row's home: it is
-		// read as part of the same question the three rows above answer. It changes nothing while
-		// any of them is set — the row says so rather than pretending an effect it does not have.
-		Path: "use-default-prompt", Kind: KindBool, Default: "true",
-		Editable: true,
-		Desc:     "Fall back to apogee's built-in system prompt when none of the keys above sets one.",
-		Read:     func(o Options) string { return boolValue(o.UseDefaultPrompt) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseDefaultPrompt }),
 	},
 	{
 		Path: "context-files.enable", Kind: KindBool, Default: "true",
@@ -474,13 +474,6 @@ var KeyRegistry = bindSetters([]Key{
 		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolCallRepair }),
 	},
 	{
-		Path: "tool-call-salvage", Kind: KindBool, Default: "true",
-		Editable: true,
-		Desc:     "Floor guard: run a tool call the model wrote as JSON in its text instead of on the wire.",
-		Read:     func(o Options) string { return boolValue(o.ToolCallSalvage) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolCallSalvage }),
-	},
-	{
 		Path: "tool-loop-breaker", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: break an identical repeated tool call, or an exact A-B-A-B alternation, with a directive naming the repeat.",
@@ -500,6 +493,13 @@ var KeyRegistry = bindSetters([]Key{
 		Desc:     "Floor guard: cap a re-read of a file unchanged since apogee last read it.",
 		Read:     func(o Options) string { return boolValue(o.ReadCache) },
 		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ReadCache }),
+	},
+	{
+		Path: "tool-call-salvage", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc:     "Floor guard: run a tool call the model wrote as JSON in its text instead of on the wire.",
+		Read:     func(o Options) string { return boolValue(o.ToolCallSalvage) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolCallSalvage }),
 	},
 	{
 		Path: "context-fill-notice", Kind: KindBool, Default: "false",

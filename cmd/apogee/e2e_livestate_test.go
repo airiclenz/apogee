@@ -156,10 +156,12 @@ func TestE2ELiveStateFollowsTheRunningSession(t *testing.T) {
 	}
 	tuitest.Golden(t, "t16-settings-rows", drv.Frame(), goldenRedactions(sess)...)
 
-	// The same frame the golden just recorded, read for ONE claim a golden cannot make on its own: a
-	// registered config key with no row is invisible to the user, so the `system-prompt-layers:` key
-	// (ADR 0067) has to be painted — and painted with the $EDITOR affordance, since a list of prose
-	// blocks has no in-pane field to write it in.
+	// The pane the golden just recorded, walked one row past its first screen for ONE claim a golden
+	// cannot make on its own: a registered config key with no row is invisible to the user, so the
+	// `system-prompt-layers:` key (ADR 0067) — the last row of its section, just below the fold the
+	// golden shows — has to be painted, and painted with the $EDITOR affordance, since a list of
+	// prose blocks has no in-pane field to write it in.
+	settingsGoDown(t, drv, "system-prompt-layers")
 	assertPanePaintsRow(t, drv.Frame(), "system-prompt-layers", pointerExternalEdit)
 
 	closePane(drv, settingsHint)
