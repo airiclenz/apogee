@@ -397,6 +397,94 @@ func (a clickArm) holds(pane framePane, row int) bool {
 	return a.ok && a.pane == pane && a.row == row
 }
 
+// pointerPane is one boxed pane's two pointer answers, keyed by the framePane it is drawn as: click
+// is what [Model.handleMouseClick] asks of it, in that chain's three-part currency — the Model, a
+// tea.Cmd and whether the pane CLAIMED the click — and wheel is what [Model.foldMouseWheel] asks, in
+// the wheel's two-part one (no Cmd exists on that side: a notch moves a highlight and hands back no
+// work). Every click func takes the live m, which is what mutates, and the pre-click frame pre, which
+// every geometry question is put to (handleMouseClick's rule); the walk composes pre once and hands
+// the same value to every entry. The key verdicts stay per pane (ADR 0053 D3): an entry says what a
+// pane does with a click or a notch, never which keys it claims.
+type pointerPane struct {
+	pane  framePane
+	click func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool)
+	wheel func(m Model, msg tea.MouseWheelMsg) (Model, bool)
+}
+
+// pointerPanes is the click chain and the wheel chain in ONE order, the order the two gestures have
+// always been asked in — the CLICK-CHAIN order, which is NOT the slot's stacking order
+// (transcriptSlotPanes, model.go) — so a row a notch would walk is a row a click can highlight, and a
+// pane added later is asked by both gestures the day it is entered here. The table is a package
+// value rather than a field: the Model is copied on every Update (ADR 0011), and a table of funcs is
+// nothing a frame needs to carry.
+//
+// The order: the /settings pane is asked FIRST because it is the frame's one full-height pane, drawn
+// over the transcript for exactly its own rows. The report trio — /usage, /inspect, /thinking — is
+// asked next, in the order the slot draws them, because the reports are the only panes of that slot
+// that can be up TOGETHER (View): a click on the /inspect pane dismisses the /usage report before it
+// reaches it, and what makes that safe is the pre-click frame, not the geometry (reportpane.go). The
+// /sessions browser opens the MODAL half of the chain, asked first of the modals because it is the
+// top rung of the overlay precedence (keyClaimOrder, model.go): where it is up it is what the human
+// is looking at. The /model | /server picker is the rung below it. The prompt slot — the ask pane
+// and the approval pane beside it, which share panePrompt's rectangle — is asked next: while a
+// question is up it claims what lands INSIDE its box, and a click outside leaves the question standing
+// and travels on. The "/" | "@" dropdown closes the chain: it is the input slot's OWN tenant, drawn
+// flush over the box rather than over the transcript, and the one list that is not modal at all.
+// Wherever two of these panes can never share a frame the order between them is arbitrary, because
+// only one rectangle can hold the pointer at a time; what is never arbitrary is that every pane is
+// asked before the footer, the prompt and the transcript below.
+var pointerPanes = []pointerPane{
+	{pane: paneSettings, click: settingsPointerClick, wheel: Model.settingsWheel},
+	reportPointer(usageReport),
+	reportPointer(inspectReport),
+	reportPointer(thinkingReport),
+	{pane: paneBrowser, click: Model.handleBrowserClick, wheel: Model.browserWheel},
+	{pane: panePicker, click: Model.handlePickerClick, wheel: Model.pickerWheel},
+	{pane: panePrompt, click: promptPointerClick, wheel: Model.promptWheel},
+	{pane: paneDropdown, click: Model.handleDropdownClick, wheel: Model.dropdownWheel},
+}
+
+// settingsPointerClick is the /settings pane's entry: [Model.handleSettingsClick], plus the one thing
+// the chain does on its behalf when it does NOT claim the click — its highlight goes, as the other two
+// selections would. The converse is the pane's own (a claimed click drops the prompt's and the
+// transcript's spans); this half is the one a live selection makes silent, because a settings span
+// left armed would keep answering every motion and every release taken elsewhere on the frame.
+func settingsPointerClick(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	next, cmd, claimed := m.handleSettingsClick(pre, msg)
+	if !claimed {
+		next.settings.sel = promptSel{}
+	}
+	return next, cmd, claimed
+}
+
+// reportPointer is the entry for one of the read-only reports, resolved THROUGH its kind (reportpane.go):
+// the click is [Model.handleReportClick] — inside the box it is claimed and nothing happens, outside it
+// the report is dismissed and the click goes on — and the wheel is [Model.reportWheel], one row per notch
+// while the pointer is over it.
+func reportPointer(r reportKind) pointerPane {
+	return pointerPane{
+		pane: r.pane(),
+		click: func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+			return m.handleReportClick(r, pre, msg)
+		},
+		wheel: func(m Model, msg tea.MouseWheelMsg) (Model, bool) {
+			return m.reportWheel(r, msg)
+		},
+	}
+}
+
+// promptPointerClick is the prompt slot's entry: the ask pane ([Model.handleAskClick]) and the approval
+// pane ([Model.handleApprovalClick]) share panePrompt's rectangle ("the approval or the ask prompt",
+// model.go) and answer a click the same way, for the same reasons. Which of the two is up is a question
+// of STATE rather than of geometry, so the two are asked one after the other rather than arbitrated
+// between here — and a pane that is not up returns the model untouched, so the order is a formality.
+func promptPointerClick(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
+	if ask, cmd, claimed := m.handleAskClick(pre, msg); claimed {
+		return ask, cmd, true
+	}
+	return m.handleApprovalClick(pre, msg)
+}
+
 // handleMouseClick starts a fresh, collapsed selection under a left-click. It arbitrates by
 // region: a click on the open /settings pane's row list belongs to the pane (selecting a row, or
 // seating the caret in the row being typed into); a click on the footer's mode marker opens the mode
@@ -464,64 +552,16 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// here, and every rect below is a READ of it rather than a fresh render of every overlay
 	// ([Model.withFrameSpans], model.go).
 	pre := m.withFrameSpans()
-	if next, cmd, claimed := m.handleSettingsClick(pre, msg); claimed {
-		return next, cmd
+	// The panes, in the one order both gestures ask them in (pointerPanes). A pane that does not claim
+	// the click hands the model on — dismissed where its currency says so — and the next pane's rect is
+	// still read off pre, never off the model a dismissal has moved.
+	for _, p := range pointerPanes {
+		next, cmd, claimed := p.click(m, pre, msg)
+		if claimed {
+			return next, cmd
+		}
+		m = next
 	}
-	m.settings.sel = promptSel{} // the pane did not claim this click: its highlight goes, as the other two would
-	// The /usage report is asked next and answers in a different currency: a click on it is swallowed,
-	// and a click anywhere else DISMISSES it and then goes on to whatever it named (handleUsageClick).
-	usage, cmd, claimed := m.handleUsageClick(pre, msg)
-	if claimed {
-		return usage, cmd
-	}
-	m = usage
-	// The /inspect pane answers in the same currency (handleInspectorClick), and it is one of the two
-	// panes that can be up BESIDE the report — View draws them under the report, in the same slot — so
-	// it is asked right after it, in the order they are drawn in.
-	inspector, cmd, claimed := m.handleInspectorClick(pre, msg)
-	if claimed {
-		return inspector, cmd
-	}
-	m = inspector
-	// The /thinking pane closes that slot and so closes this chain of it: same currency again
-	// (handleThinkingClick), asked LAST of the three because it is drawn last of the three.
-	thinking, cmd, claimed := m.handleThinkingClick(pre, msg)
-	if claimed {
-		return thinking, cmd
-	}
-	m = thinking
-	// The /sessions browser opens the MODAL half of the chain (handleBrowserClick), and it is asked
-	// first of the modals for the reason foldMouseWheel gives: it is the top rung of the overlay
-	// precedence (keyClaimOrder, model.go), so where it is up it is what the human is looking at.
-	if browser, cmd, claimed := m.handleBrowserClick(pre, msg); claimed {
-		return browser, cmd
-	}
-	// The picker is the rung below it and answers a click the same way (handlePickerClick).
-	if picked, cmd, claimed := m.handlePickerClick(pre, msg); claimed {
-		return picked, cmd
-	}
-	// The ask pane is asked next: it is drawn over the transcript like the panes above it, and while a
-	// question is up it claims what lands INSIDE its box (handleAskClick). A click outside leaves the
-	// question standing and travels on, by the outside-click rule above.
-	if ask, cmd, claimed := m.handleAskClick(pre, msg); claimed {
-		return ask, cmd
-	}
-	// The approval pane is the other half of that slot: it shares the ask pane's rectangle (panePrompt
-	// is "the approval or the ask prompt", model.go) and answers a click the same way, for the same
-	// reasons (handleApprovalClick). Which of the two is up is a question of STATE rather than of
-	// geometry, so the two are asked one after the other rather than arbitrated between here.
-	if approval, cmd, claimed := m.handleApprovalClick(pre, msg); claimed {
-		return approval, cmd
-	}
-	// The "/" | "@" dropdown closes the chain of panes: it is the input slot's OWN tenant, drawn
-	// flush over the box rather than over the transcript (foldMouseWheel's reason for asking it
-	// last), and it answers in the report trio's currency — a click outside it dismisses the menu
-	// and travels on (handleDropdownClick).
-	dropdown, cmd, claimed := m.handleDropdownClick(pre, msg)
-	if claimed {
-		return dropdown, cmd
-	}
-	m = dropdown
 	// The footer's mode marker is the frame's one CHROME control ([Model.handleFooterModeClick]): a
 	// click on it opens the mode picker. It is asked after the panes that draw OVER the transcript —
 	// they can cover any row, the footer's included, and a click on a pane belongs to the pane — and
@@ -1690,7 +1730,7 @@ func (m Model) handleApprovalClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 // own default is never one of those.
 //
 // A click OUTSIDE the box DISMISSES the menu and then goes on down the chain unclaimed — the report
-// trio's currency (handleUsageClick, usage.go) rather than the modals' dismiss-and-claim (call C as
+// trio's currency (handleReportClick, reportpane.go) rather than the modals' dismiss-and-claim (call C as
 // the owner amended it). This is the one list of the package that is NOT modal: it hangs over a chat
 // box the human is still typing in, which is what its keys and its wheel already say
 // (autocompleteKey, dropdownWheel), so the click that closes it is very often the click that seats
@@ -1775,12 +1815,12 @@ func (m Model) highlightTranscript(view string) string {
 }
 
 // foldMouseWheel routes one wheel notch: to whichever open pane holds the pointer, and to the
-// transcript everywhere else. The chain asks every pane the frame can have open, in this order —
-// the /settings pane (settingsWheel), the /usage report (usageWheel), the /inspect pane
-// (inspectorWheel), the /thinking pane (thinkingWheel), the /sessions browser (browserWheel),
-// the /model | /server picker (pickerWheel),
-// the approval menu and the ask offering (promptWheel), the "/" | "@" autocomplete dropdown
-// (dropdownWheel) — and each one takes the notch only when the pointer is inside its own rectangle.
+// transcript everywhere else. The chain asks every pane the frame can have open, in the one order
+// pointerPanes holds — the /settings pane (settingsWheel), the /usage, /inspect and /thinking
+// reports (reportWheel), the /sessions browser (browserWheel), the /model | /server picker
+// (pickerWheel), the approval menu and the ask offering (promptWheel), the "/" | "@" autocomplete
+// dropdown (dropdownWheel) — and each one takes the notch only when the pointer is inside its own
+// rectangle.
 // Wherever two of those panes can never share a frame the order between them is arbitrary, because
 // only one rectangle can hold the pointer at a time.
 //
@@ -1812,53 +1852,12 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	// here rather than in each pane's wheel handler, the pair of the drop handleKey makes (model.go)
 	// — the two ways a highlight moves without a click, cleared in the two places they arrive.
 	m.clickArmed = clickArm{}
-	if next, handled := m.settingsWheel(msg); handled {
-		return next, nil
-	}
-	// A notch over the open /usage report scrolls its row list the same way, for the same reason
-	// (mouse.go) — the /settings pane and the reports never share a frame, so the order between them
-	// is arbitrary.
-	if next, handled := m.usageWheel(msg); handled {
-		return next, nil
-	}
-	// A notch over the open /inspect pane scrolls its record list on the same terms (mouse.go).
-	// It is asked after the report because it is drawn under it, and the two rectangles never
-	// overlap, so only one of them can hold the pointer.
-	if next, handled := m.inspectorWheel(msg); handled {
-		return next, nil
-	}
-	// A notch over the open /thinking pane scrolls its rows on those same terms, and it is asked
-	// after the /inspect pane because it is drawn under it — the rectangles never overlap, so only
-	// one of the three can hold the pointer.
-	if next, handled := m.thinkingWheel(msg); handled {
-		return next, nil
-	}
-	// A notch over the open /sessions browser walks its highlight (sessions.go). The panes never share
-	// a frame, so the order among them is arbitrary; what is not arbitrary is that every pane is asked
-	// before the transcript — the transcript is the floor a notch reaches when no pane holds the
-	// pointer, not the default a pane has to argue its way past.
-	if next, handled := m.browserWheel(msg); handled {
-		return next, nil
-	}
-	// A notch over the open /model | /server picker walks its highlight on the same terms (picker.go),
-	// and it is asked after the browser for the same non-reason: the two are modal overlays that never
-	// share a frame, so only one of them can hold the pointer.
-	if next, handled := m.pickerWheel(msg); handled {
-		return next, nil
-	}
-	// A notch over the approval menu or the ask offering walks it on the same terms (approval.go).
-	// These two are the frame's SOFT-modal panes — the transcript stays scrollable underneath them —
-	// so what they claim is the notch INSIDE their box and nothing else; a notch anywhere outside it
-	// carries on down this chain and scrolls the transcript exactly as it always did.
-	if next, handled := m.promptWheel(msg); handled {
-		return next, nil
-	}
-	// A notch over the open "/" | "@" autocomplete menu walks it on the same terms (autocomplete.go).
-	// It is asked LAST of the panes because it is the one that is not modal at all — it hangs over a
-	// chat box the human is still typing in, in the frame's OTHER overlay slot — so it claims the
-	// notches inside its own rectangle and gives up every other one to the transcript below.
-	if next, handled := m.dropdownWheel(msg); handled {
-		return next, nil
+	// The panes, in the one order both gestures ask them in (pointerPanes): each takes the notch only
+	// when the pointer is inside its own rectangle, and the first to take it answers.
+	for _, p := range pointerPanes {
+		if next, handled := p.wheel(m, msg); handled {
+			return next, nil
+		}
 	}
 	return m.scrollViewport(msg)
 }

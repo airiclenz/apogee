@@ -236,14 +236,3 @@ func (m Model) thinkingPaneRect() (y0, h int, ok bool) { return m.reportPaneRect
 
 // thinkingWindow is the row window the pane is showing as the frame DREW it.
 func (m Model) thinkingWindow() (reportWindow, bool) { return m.reportWindow(thinkingReport) }
-
-// handleThinkingClick answers a left-click while the pane is up: inside the box it is claimed and
-// nothing happens, outside it the pane is dismissed and the click goes on.
-func (m Model) handleThinkingClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	return m.handleReportClick(thinkingReport, pre, msg)
-}
-
-// thinkingWheel scrolls the record list one row per notch while the pointer is over it.
-func (m Model) thinkingWheel(msg tea.MouseWheelMsg) (Model, bool) {
-	return m.reportWheel(thinkingReport, msg)
-}

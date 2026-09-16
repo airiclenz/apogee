@@ -148,17 +148,6 @@ func (m Model) usagePaneRect() (y0, h int, ok bool) { return m.reportPaneRect(us
 // usageWindow is the row window the report is showing as the frame DREW it.
 func (m Model) usageWindow() (reportWindow, bool) { return m.reportWindow(usageReport) }
 
-// handleUsageClick answers a left-click while the report is up: inside the box it is claimed and
-// nothing happens, outside it the report is dismissed and the click goes on.
-func (m Model) handleUsageClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	return m.handleReportClick(usageReport, pre, msg)
-}
-
-// usageWheel scrolls the report one row per notch while the pointer is over it.
-func (m Model) usageWheel(msg tea.MouseWheelMsg) (Model, bool) {
-	return m.reportWheel(usageReport, msg)
-}
-
 // usageContent is what the report tells the shared module about itself for one frame: its name, the
 // keys it spells, how tall it likes to be, the rows it was composed with, and — where there are none
 // — the one sentence it shows instead of them. served is the set of model ids the session was

@@ -808,17 +808,6 @@ func (m Model) inspectorPaneRect() (y0, h int, ok bool) { return m.reportPaneRec
 // inspectorWindow is the row window the pane is showing as the frame DREW it.
 func (m Model) inspectorWindow() (reportWindow, bool) { return m.reportWindow(inspectReport) }
 
-// handleInspectorClick answers a left-click while the pane is up: inside the box it is claimed and
-// nothing happens, outside it the pane is dismissed and the click goes on.
-func (m Model) handleInspectorClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	return m.handleReportClick(inspectReport, pre, msg)
-}
-
-// inspectorWheel scrolls the record list one row per notch while the pointer is over it.
-func (m Model) inspectorWheel(msg tea.MouseWheelMsg) (Model, bool) {
-	return m.reportWheel(inspectReport, msg)
-}
-
 // inspectContent is what the pane tells the shared module about itself for one frame: its name, the
 // keys it spells, how tall it likes to be, and the record rows with the kinds composed beside them.
 // It words no empty state of its own — an empty ring is a ROW here, and which one depends on whether

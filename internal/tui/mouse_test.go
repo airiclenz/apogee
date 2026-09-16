@@ -3850,6 +3850,70 @@ func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------------
+// The one pointer table both gestures walk (mouse.go, pointerPanes)
+// ----------------------------------------------------------------------------
+
+// TestPointerPanesWalkInTheClickChainOrder pins the table's order literally: it is the CLICK-CHAIN
+// order — settings, then the report trio in the order the slot draws them, then the two modals, the
+// prompt slot and the dropdown — and NOT the slot's stacking order (transcriptSlotPanes), which puts
+// the prompt first. The report trio is asked before the modal half and the prompt after it because a
+// click on a lower report dismisses the one above it before it reaches it, and no pane is entered
+// twice: a pane asked twice would be dismissed by its own first answer.
+func TestPointerPanesWalkInTheClickChainOrder(t *testing.T) {
+	want := []framePane{paneSettings, paneUsage, paneInspector, paneThinking, paneBrowser, panePicker, panePrompt, paneDropdown}
+
+	if len(pointerPanes) != len(want) {
+		t.Fatalf("pointerPanes holds %d entries, want the %d panes of the click chain", len(pointerPanes), len(want))
+	}
+	seen := make(map[framePane]bool, len(want))
+	for i, p := range pointerPanes {
+		if p.pane != want[i] {
+			t.Errorf("pointerPanes[%d] is pane %d, want pane %d", i, p.pane, want[i])
+		}
+		if seen[p.pane] {
+			t.Errorf("pane %d is entered twice", p.pane)
+		}
+		seen[p.pane] = true
+		if p.click == nil || p.wheel == nil {
+			t.Errorf("pane %d is missing an answer: click %v, wheel %v", p.pane, p.click != nil, p.wheel != nil)
+		}
+	}
+}
+
+// The /settings entry drops the pane's own highlight on a click it does NOT claim — the one thing the
+// chain does on the pane's behalf, because a settings span left armed would keep answering every
+// motion and every release taken elsewhere on the frame. Asked of the entry itself, so the drop is
+// pinned where it lives rather than inferred from what the transcript did next
+// (TestTranscriptDragOutlivesASettingsHighlight covers that end).
+func TestSettingsEntryDropsTheHighlightOnAClickItDoesNotClaim(t *testing.T) {
+	m := settingsFrameModel(t, 80, 30, 8)
+	m = step(t, m, keyEnter()) // the buffer opens on key-00, seeded with its value
+	fieldX, fieldY := frameCell(t, m, "value-00")
+	m = step(t, m, leftClick(fieldX, fieldY))
+	m = step(t, m, leftDrag(fieldX+4, fieldY))
+	if !m.settings.sel.active || m.settings.sel.anchorOff == m.settings.sel.headOff {
+		t.Fatalf("the field holds no drag-selection to drop: %+v", m.settings.sel)
+	}
+	row := m.transcriptRows() - 1 // the last conversation row, immediately above the pane
+	if _, _, ok := m.pointTranscriptRow(0, row); !ok {
+		t.Fatalf("row %d is not a transcript row on this frame", row)
+	}
+	entry := pointerPanes[0]
+	if entry.pane != paneSettings {
+		t.Fatalf("the first entry is pane %d, want paneSettings", entry.pane)
+	}
+
+	next, _, claimed := entry.click(m, m.withFrameSpans(), leftClick(2, row))
+
+	if claimed {
+		t.Fatal("a click on the transcript was claimed by the /settings pane")
+	}
+	if next.settings.sel.active {
+		t.Errorf("the entry left the pane's highlight armed on a click it did not claim: %+v", next.settings.sel)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Mouse in the /sessions browser (sessions.go)
 // ----------------------------------------------------------------------------
 
