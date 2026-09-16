@@ -10,7 +10,7 @@ careful hand performance.
 ## Quick start
 
 ```sh
-# vhs 0.11.0 or newer — hero.tape's knob 3 needs Wait+Screen
+# vhs 0.11.0 or newer — hero.tape's beat 5 (knob 3) needs Wait+Screen
 brew install vhs gifsicle        # vhs pulls ttyd + ffmpeg and fetches its own headless Chromium
 export OPENROUTER_API_KEY=…      # the rig's default server is OpenRouter; the key is read from here
 ./setup.sh                       # build the rig (idempotent)
@@ -36,7 +36,8 @@ which refuses to start a take while it is unset.
 | `reset.sh` | restores the planted bug + CHANGELOG stub, wipes session state |
 | `gen.sh <src> <dst>` | writes the work-dir copy of a tape, expanding the hero tape's typed lines into humanized typing |
 | `type.sh <string>` | one typed string → its humanized typing block; `--check` asserts the profile's totals |
-| `tapes/` | one tape per clip; `hero.tape` is the README clip |
+| `tapes/` | one tape per clip; `hero.tape` is the README clip — VHS mechanics only |
+| `storyboards/<clip>.yaml` | one storyboard per clip: the beats, their session anchors, framing, expects and the director's notes (the `why`/`notes` every timing in the tape points at); `hero.yaml` is the README clip |
 | `stage/` | templates for the taskman stage repo (copied out by `setup.sh`) |
 | `history/` | one folder per shipped clip: the GIF that shipped, its variants, and a `NOTES.md` of the recording facts |
 
@@ -106,17 +107,20 @@ invisible (h.264 noise is all that separates them). `freezedetect` finds the can
 `ffmpeg -i take.mp4 -vf freezedetect=n=-55dB:d=1.5 -map 0:v -f null -` — but it also reports
 typing as frozen at that threshold, so confirm on real frames before trusting a window.
 
-**The knobs are marked in `hero.tape`.** Knob 1 decides where the interjection
-lands — it must arrive while tool cards are still streaming, or it reads as an ordinary next
-message instead of a queued one; the session JSON is the tell, where the entry reads
-`interjected` on a hit and `user` on a miss. Knob 2 must outlast the run's tail, but
-overshooting is **not** free the way this file used to claim: `render.sh` trims only the HEAD
-(`-ss`), so every idle second between the last beat and `/undo` ships as dead air in the middle
-of the clip. Give it margin for a slow run, not an unbounded cushion. Knob 3 is when the fix's
-card is opened: the tape opens that card, and the gesture only reaches the right one while the
-edit is still the most recent block.
+**The knobs are set in `hero.tape`; their reasoning lives in `storyboards/hero.yaml`.** The tape
+marks each one (`KNOB 1`/`2`/`3`) inside its `# beat N` section and keeps only the VHS mechanics;
+the `why` and `notes` of the matching storyboard beat carry the measurements and the tuning
+history. Knob 1 (storyboard beat 4) decides where the interjection lands — it must arrive while
+tool cards are still streaming, or it reads as an ordinary next message instead of a queued one;
+the session JSON is the tell, where the entry reads `interjected` on a hit and `user` on a miss.
+Knob 2 (beat 6) must outlast the run's tail, but overshooting is **not** free the way this file
+used to claim: `render.sh` trims only the HEAD (`-ss`), so every idle second between the last beat
+and `/undo` ships as dead air in the middle of the clip. Give it margin for a slow run, not an
+unbounded cushion. Knob 3 (beat 5) is when the fix's card is opened: the tape opens that card, and
+the gesture only reaches the right one while the edit is still the most recent block.
 
-**Knob 3 waits for the fix's card, and the measurement is why.** Against OpenRouter
+**Knob 3 waits for the fix's card, and the measurement is why** (recorded in full under the
+storyboard's beat 5 `notes`). Against OpenRouter
 `deepseek-v4-flash` the window it has to hit is the gap between the fix's `Replace` card painting
 and the queued interjection being *delivered*, and delivery lands at the very next tool boundary —
 so the window is under a second, while the run itself varies ~19 s to ~29 s end to end and slides
@@ -126,10 +130,10 @@ CHANGELOG card instead (`+3 −0 ▼` while `task.go` stayed `+1 −1 · +8 more
 the block cursor nothing settled to stand on, the leading ESC of the CSI was read alone, and the run
 was **cancelled** — the session JSON ends `note: cancelled` with the stage tree clean. The knob is
 now a screen wait, `Wait+Screen@40s /\+1 −1/`, which blocks on the fix card's own diffstat rather
-than on a clock — the same stat the comment uses to tell that card from the CHANGELOG one. Two
-things to know before touching it: the pattern is the *current* edit's diffstat, spelled with the
-table's typographic minus (U+2212), so a reseeded bug or a differently-shaped fix needs it
-re-derived; and the 40 s timeout is deliberately generous, because a timeout is a loud failure (vhs
+than on a clock — the same stat the storyboard's beat-5 `expect` uses to tell that card from the
+CHANGELOG one. Two things to know before touching it: the pattern is the *current* edit's diffstat,
+spelled with the table's typographic minus (U+2212), so a reseeded bug or a differently-shaped fix
+needs it re-derived in both places; and the 40 s timeout is deliberately generous, because a timeout is a loud failure (vhs
 exits non-zero and the take dies) where the old miss was silent.
 
 **Nothing on camera opens itself.** Tool blocks paint collapsed, always (`layout.md`, "Collapsed
@@ -187,8 +191,9 @@ every machine. The source tape keeps its plain `Type "…"` lines so it stays re
 machine-typed lines keep their exact speeds — which is what keeps `Escape` and its CSI tail one
 keystroke (**VHS pitfalls already paid for**, above). `type.sh --check` pins the totals; run it
 when a band, the seed or a typed string is edited, not per take. Two timing consequences: typed
-strings now run **longer** than `40 ms × N` (25–45 ms a letter, plus pauses), so knob 1 is
-retuned against a take; and the `render.sh` head trim above (`1.25 3.8`) is re-measured on the
+strings now run **longer** than `40 ms × N` (25–45 ms a letter, plus pauses), so knob 1 — beat
+4's `Sleep 8s`, reasoned in the storyboard's beat 4 `notes` — is retuned against a take, and the
+storyboard's `align.first_prompt_at` and beat-4 `offset` are re-derived from the new totals; and the `render.sh` head trim above (`1.25 3.8`) is re-measured on the
 next take: the expanded `apogee --mode auto` moves the shell+launch boundary by ~+0.2–0.5 s.
 
 The generator's byte-stability across awks is checkable, not just claimed: both `type.sh` and
@@ -206,10 +211,82 @@ for a in mawk gawk original-awk; do AWK=$a ./gen.sh tapes/hero.tape "/tmp/hero.$
 cmp /tmp/hero.mawk.tape /tmp/hero.gawk.tape && cmp /tmp/hero.mawk.tape /tmp/hero.original-awk.tape
 ```
 
+## Storyboards
+
+`storyboards/<clip>.yaml` is the durable storyboard behind a clip: the beats, where each one sits
+in a take, how it is framed in the shipped GIF, what a keeper take must contain, and the
+director's notes — the *why* that used to live in the tape's comments. The tape keeps only VHS
+mechanics (what to type, what to wait on, when) and points here for every timing it carries.
+**A re-record starts by editing the storyboard, not the tape.** It is read by humans and by
+`demorig`, the rig's Go dev tool (`make demorig`, never a release asset): `lint` checks the
+schema, `beats` locates each beat in a raw take from the saved session, `check` judges the take
+and `render` cuts the GIF from it.
+
+The schema, with `hero.yaml`'s beat 5 as the worked example:
+
+```yaml
+clip: hero
+tape: ../tapes/hero.tape         # relative to this storyboard file's own directory
+ship: ../../demo.gif             # likewise
+frame: {width: 1250, scale: 2, fps: 24, max_colors: 192}
+align: {scene_threshold: 0.4, first_prompt_at: 9.96s}   # video time of the first prompt's Enter
+paint_lag: 300ms                 # commit→paint only
+regions: {edit-card: [0, 0.45, 1, 0.55]}                      # fractional x,y,w,h of the frame
+expect: {stage: dirty}           # the stage repo has uncommitted changes after the take
+beats:
+  - id: 5
+    title: the fix lands — split diff on camera
+    why: biggest visual upgrade since the last clip
+    tape: beat 5                                               # `# beat 5` section header in the tape
+    anchor: {kind: toolCall, tool: Replace, target: task.go}   # first match unless nth: N | last
+    frame: {hold: 4s, zoom: {region: edit-card, factor: 1.5, in: 400ms, hold: 2500ms, out: 400ms}, speed: 1.5}
+    expect: [{contains: "+1 −1"}]                              # U+2212, as the TUI spells it
+    notes: |
+      Keep the card open and on screen; the PageDowns re-attach the viewport (layout.md).
+```
+
+**Alignment.** A session entry's `at` is a wall-clock stamp; the take's clock is the video. The
+first `user` entry is pinned to `align.first_prompt_at`, the *video* time of the first prompt's
+Enter, which the tape's head fixes (VHS records from `Show`; the storyboard comment shows the sum
+and says to re-derive it when the head or the typing profile changes), and every later session
+anchor maps through that offset plus `paint_lag`, the commit→paint delay. `scene_threshold` feeds
+the ffmpeg scene-change detection that finds the shell→TUI first paint, and serves only the
+`first-paint` video anchor. Session `createdAt` is first-save time, not launch, so it is never the
+pin.
+
+**Anchors** say where a beat starts. A *session* anchor is `{kind, text, tool, target, nth,
+offset}`: `kind` is an entry kind as the session JSON spells it (`user`, `toolCall`,
+`interjected`, …), `text`/`tool`/`target` are prefix matches on the entry's text, tool label and
+tool target, `nth` is an integer or `last` (default: the first match), `offset` a signed duration
+added last. A *video* anchor is `{video: first-paint | end, offset}` — the two fixed points of
+the take. A *beat* anchor is `{beat: <id>, offset}`, relative to that beat's resolved time — for a
+moment the session never records, such as the interjection's keypress (the `interjected` entry is
+stamped at delivery). Resolution order is session → video → beat, `offset` last.
+
+**Framing** is per beat, applied to the segment from the beat's anchor to the next beat's:
+`speed` (a multiplier on the segment, default 1), `hold` (leading seconds kept at 1×), `zoom`
+(`region` names a `regions:` entry; `factor`, `in`, `hold`, `out`) and `cut: true` (drop the
+segment). Framing values are tuned against a take; the storyboard is where they live so a re-pace
+costs an ffmpeg run, not another take.
+
+**Expects** are what a keeper take must show. Per beat: `contains` (a substring of the anchored
+entry's text, tool label or stat — `FAIL`, `PASS`, the fix's diffstat), `before: <id>` and
+`after: <id>` (ordering against another beat). An expect may carry its own `entry:` selector in the
+session-anchor grammar; it defaults to the beat's anchor entry and is required when the beat's
+anchor is a video or beat anchor. The top-level `expect: {stage: dirty}` asserts the stage repo
+still carries the exchange's writes after the take — the only proof there is that `/undo`
+reverted nothing, since its preview note is never persisted.
+
+**The 2× rule.** The tape records at twice the shipped geometry — `hero.tape` sets
+`Width 2500`, `Height 1360`, `FontSize 30`, `Padding 32` for a 1250-wide GIF — because VHS renders
+at device scale 1 and a zoom needs pixels to draw on. `frame.scale: 2` records the ratio; the render
+downscales to `frame.width`. Keep the four `Set` lines and `frame.scale` in step: a tape recorded
+at 1× under a storyboard that says `scale: 2` zooms into blur.
+
 ## Recording a new clip for a different feature
 
 Add `tapes/<name>.tape`, then `./record.sh <name>`. The stage repo, isolated home, warm
-cache and reset logic all come for free.
+cache and reset logic all come for free; add `storyboards/<name>.yaml` to get `check`/`render`.
 
 Worth knowing when scripting a new one:
 

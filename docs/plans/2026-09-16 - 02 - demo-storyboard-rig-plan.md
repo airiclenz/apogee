@@ -41,7 +41,11 @@ storyboard instead of hand-tuned `render.sh` arguments.
 
 ---
 
-## 1. `storyboards/hero.yaml` — the durable storyboard, beat headers in the tape, 2× geometry
+## 1. `storyboards/hero.yaml` — the durable storyboard, beat headers in the tape, 2× geometry — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): hero.tape's header still says "trimmed and compressed afterwards by render.sh" — true until item 5 retires render.sh, whose regression guard owns removing every render.sh mention from the tape and record.sh; render.sh's existing `scale=1250` keeps the Quick start correct against the 2× take meanwhile.
+NOTES (2026-09-16): the README's Storyboards section names `demorig` and its `lint`/`beats`/`check`/`render` verbs before items 2–5 land them, as the item's mandated "add `storyboards/<name>.yaml` to get `check`/`render`" sentence already does; the Quick start keeps `render.sh` until item 5 re-points it.
+NOTES (2026-09-16): beat 3 anchors `{kind: toolCall, tool: Tests}` with expect `contains: FAIL` and beat 6 `{kind: toolCall, tool: Tests, nth: last}` with `[{contains: PASS}, {after: 5}]` — run_tests' label is "Tests" and testVerdictStat words its Stat as the bare PASS/FAIL (internal/tui/toolregistry.go); beat 2 anchors `{kind: user}`. These are the author's first cut the plan leaves to the author; the binding beats 1/4/5/7/8 are as the plan states.
 
 **What:** Recast at the regression check (2026-09-16). Create `graphics/demo/storyboards/hero.yaml` holding the eight hero beats from the archived 2026-08-24 plan's storyboard table, and move the *why* / director's notes from `hero.tape`'s KNOB comments into it (the tape keeps only VHS mechanics). Binding schema (item 2 parses exactly this):
 
