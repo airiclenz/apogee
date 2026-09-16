@@ -355,7 +355,9 @@ NOTES (2026-09-16): consequential edit — docs/manual/commands.md: made necessa
 
 **Commit:** `feat(tui): the Inspector renders Anthropic Messages streams readably`
 
-## 16. `Meta.ParentID` — the fork pointer on the session record (apogee-zci)
+## 16. `Meta.ParentID` — the fork pointer on the session record (apogee-zci) — ✅ DONE (2026-09-16)
+NOTES (2026-09-16): apogee-zci is NOT closed at this commit — the bead spans items 16–22 and closes with the last of them.
+NOTES (2026-09-16): `TestAnUnsafeParentIDLoadsCleared` iterates the existing `unsafeIDs` table (empty skipped — "" is "not a fork") and adds a kept-safe-pointer check; a `mustJSON` test helper was added to splice the ids into hand-written records.
 
 **What:** `internal/session/store.go` `Meta` gains `ParentID string \`json:"parentID,omitempty"\`` (additive, no `RecordVersion` bump — the ScheduleID precedent, stated in the Meta doc comment). `validateID` applies to it on Load (a record whose ParentID is not a safe path component loads with ParentID cleared, never refused). `CONTEXT.md` §Session record gains one sentence: a forked record carries its parent's id.
 

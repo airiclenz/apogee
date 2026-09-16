@@ -722,6 +722,190 @@ func TestScheduleIdentityKeepsTheRecordVersion(t *testing.T) {
 	}
 }
 
+// forkedRecord is sampleRecord marked as a fork of another record: it carries that record's id
+// in Meta.ParentID.
+func forkedRecord(id, parentID string, updated time.Time) Record {
+	rec := sampleRecord(id, updated)
+	rec.Meta.ParentID = parentID
+	return rec
+}
+
+// A fork's parent pointer survives Save/Load and surfaces in List — the browser tags a forked
+// record from Meta alone, without decoding the conversation.
+func TestParentIDRoundTrips(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+
+	want := forkedRecord("20260916T100000Z-aaaabbbb", "20260916T090000Z-11112222",
+		time.Date(2026, 9, 16, 10, 0, 0, 0, time.UTC))
+	if err := st.Save(want); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	got, err := st.Load(want.Meta.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Meta.ParentID != want.Meta.ParentID {
+		t.Errorf("loaded ParentID = %q, want %q", got.Meta.ParentID, want.Meta.ParentID)
+	}
+
+	metas, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 1 {
+		t.Fatalf("List returned %d metas, want 1", len(metas))
+	}
+	if metas[0].ParentID != want.Meta.ParentID {
+		t.Errorf("listed ParentID = %q, want %q", metas[0].ParentID, want.Meta.ParentID)
+	}
+}
+
+// A record written before the field existed — no parentID key on disk — loads as an ordinary
+// session with an empty ParentID, and a plain Save writes no key back (omitempty), so an older
+// build reading the file sees exactly what it wrote.
+func TestRecordWithoutParentIDIsAnOrdinarySession(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+
+	legacy := fmt.Sprintf(
+		`{"recordVersion":%d,"meta":{"id":"20260724T120000Z-eeeeffff","title":"greet the world","createdAt":"2026-07-24T11:00:00Z","updatedAt":"2026-07-24T12:00:00Z","userMsgs":3},"session":{"Version":%d,"State":{"k":"v"}}}`,
+		RecordVersion, domain.SessionVersion)
+	if err := os.WriteFile(filepath.Join(dir, "20260724T120000Z-eeeeffff.json"), []byte(legacy), filePerm); err != nil {
+		t.Fatalf("write pre-fork record: %v", err)
+	}
+
+	got, err := st.Load("20260724T120000Z-eeeeffff")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got.Meta.ParentID != "" {
+		t.Errorf("pre-fork record loaded with ParentID %q, want empty", got.Meta.ParentID)
+	}
+
+	plain := sampleRecord("20260724T130000Z-11112222", time.Date(2026, 7, 24, 13, 0, 0, 0, time.UTC))
+	if err := st.Save(plain); err != nil {
+		t.Fatalf("Save plain: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(dir, plain.Meta.ID+".json"))
+	if err != nil {
+		t.Fatalf("read plain record: %v", err)
+	}
+	if bytes.Contains(data, []byte("parentID")) {
+		t.Errorf("plain record wrote %q; the field is omitempty on an ordinary session: %s", "parentID", data)
+	}
+}
+
+// The fork pointer is a compatible addition, not a schema change: a forked record is stamped
+// with the current RecordVersion, so no reader trips the forward-reject sentinel over it, and the
+// key is a plain JSON string in the wrapper's meta.
+func TestParentIDKeepsTheRecordVersion(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+
+	rec := forkedRecord("20260916T110000Z-ccccdddd", "20260916T090000Z-11112222",
+		time.Date(2026, 9, 16, 11, 0, 0, 0, time.UTC))
+	if err := st.Save(rec); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, rec.Meta.ID+".json"))
+	if err != nil {
+		t.Fatalf("read record: %v", err)
+	}
+	var onDisk struct {
+		RecordVersion int `json:"recordVersion"`
+		Meta          struct {
+			ParentID string `json:"parentID"`
+		} `json:"meta"`
+	}
+	if err := json.Unmarshal(data, &onDisk); err != nil {
+		t.Fatalf("decode stored bytes: %v", err)
+	}
+	if onDisk.RecordVersion != RecordVersion {
+		t.Errorf("stored recordVersion = %d, want %d (the fork pointer must not bump it)",
+			onDisk.RecordVersion, RecordVersion)
+	}
+	if onDisk.Meta.ParentID != rec.Meta.ParentID {
+		t.Errorf("stored parentID = %q, want %q", onDisk.Meta.ParentID, rec.Meta.ParentID)
+	}
+	if _, err := st.Load(rec.Meta.ID); errors.Is(err, ErrRecordVersion) {
+		t.Errorf("Load tripped ErrRecordVersion on a forked record: %v", err)
+	} else if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+}
+
+// A stored file whose ParentID is not a safe path component loads with the pointer CLEARED, never
+// refused: the parent is a reference to another record, not a path this record is written to, so
+// an unusable one costs the fork its parent tag and nothing else. The clear sits in decodeRecord,
+// the one path Load, LoadPath and List share — asserted through Load and List so the browser and
+// a resume can never disagree about it.
+func TestAnUnsafeParentIDLoadsCleared(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+
+	for _, tc := range unsafeIDs {
+		if tc.id == "" {
+			continue // an empty ParentID is "not a fork", not an unsafe pointer
+		}
+		planted := fmt.Sprintf(
+			`{"recordVersion":%d,"meta":{"id":"20260916T120000Z-ffff0000","title":"forked","parentID":%s},"session":{"Version":%d,"State":null}}`,
+			RecordVersion, mustJSON(t, tc.id), domain.SessionVersion)
+		if err := os.WriteFile(filepath.Join(dir, "20260916T120000Z-ffff0000.json"), []byte(planted), filePerm); err != nil {
+			t.Fatalf("write planted (%s): %v", tc.name, err)
+		}
+
+		got, err := st.Load("20260916T120000Z-ffff0000")
+		if err != nil {
+			t.Fatalf("Load (%s): %v — an unsafe ParentID must clear, not refuse", tc.name, err)
+		}
+		if got.Meta.ParentID != "" {
+			t.Errorf("Load (%s): ParentID = %q, want cleared", tc.name, got.Meta.ParentID)
+		}
+
+		metas, err := st.List()
+		if err != nil {
+			t.Fatalf("List (%s): %v", tc.name, err)
+		}
+		if len(metas) != 1 {
+			t.Fatalf("List (%s) returned %d metas, want 1", tc.name, len(metas))
+		}
+		if metas[0].ParentID != "" {
+			t.Errorf("List (%s): ParentID = %q, want cleared", tc.name, metas[0].ParentID)
+		}
+	}
+
+	// A safe pointer on the same file is untouched — the clear is a refusal, not a blanket.
+	kept := fmt.Sprintf(
+		`{"recordVersion":%d,"meta":{"id":"20260916T120000Z-ffff0000","title":"forked","parentID":"20260916T090000Z-11112222"},"session":{"Version":%d,"State":null}}`,
+		RecordVersion, domain.SessionVersion)
+	if err := os.WriteFile(filepath.Join(dir, "20260916T120000Z-ffff0000.json"), []byte(kept), filePerm); err != nil {
+		t.Fatalf("write safe fork: %v", err)
+	}
+	got, err := st.Load("20260916T120000Z-ffff0000")
+	if err != nil {
+		t.Fatalf("Load safe fork: %v", err)
+	}
+	if got.Meta.ParentID != "20260916T090000Z-11112222" {
+		t.Errorf("safe ParentID = %q, want it kept", got.Meta.ParentID)
+	}
+}
+
+// mustJSON encodes v as a JSON literal for splicing into a hand-written record.
+func mustJSON(t *testing.T, v any) string {
+	t.Helper()
+	b, err := json.Marshal(v)
+	if err != nil {
+		t.Fatalf("marshal %v: %v", v, err)
+	}
+	return string(b)
+}
+
 // A session's cumulative usage totals survive Save/Load and reach List, so a reopened session
 // reports what it spent from Meta alone — and a session that spent nothing writes no key at all,
 // which is what lets a record predating the accounting read back as the same nothing. Both halves

@@ -93,6 +93,13 @@ func validateID(id string) error {
 // ordinary session, both set on a record that is one Firing of a Schedule. They are
 // deliberately NOT a RecordVersion bump — the addition is compatible in both directions,
 // since an older build ignores the unknown keys on load and simply never writes them.
+//
+// ParentID is the fork pointer: the id of the record this one was cut from, "" on every record
+// that is not a fork. It follows the ScheduleID precedent exactly — an additive key, no
+// RecordVersion bump, omitted when empty — so a pre-fork build reads a forked record as an
+// ordinary session and a pre-fork record decodes with no parent. It is an id, so validateID
+// applies to it on decode; but it never becomes a path here, so an unsafe one is cleared rather
+// than refused (decodeRecord) — the record still loads, it merely forgets an unusable parent.
 type Meta struct {
 	ID           string    `json:"id"`
 	Title        string    `json:"title"`
@@ -102,6 +109,7 @@ type Meta struct {
 	Model        string    `json:"model,omitempty"`
 	ScheduleID   string    `json:"scheduleID,omitempty"`   // "" unless this record is a Firing
 	ScheduleName string    `json:"scheduleName,omitempty"` // the Schedule's display name
+	ParentID     string    `json:"parentID,omitempty"`     // id of the record this one was forked from; "" unless a fork
 	UserMsgs     int       `json:"userMsgs"`
 	CtxUsed      int       `json:"ctxUsed,omitempty"` // last observed context fill, for the gauge relight
 	// Usage is the MAIN agent's cumulative token accounting as of this Save — the latest reading
@@ -433,6 +441,12 @@ func (s *Store) Rename(id, title string) error {
 // Delete names <id>.json — so a file that declares a hostile id is rejected here, at the door,
 // rather than trusted by the writers downstream. List soft-skips such a file like any other it
 // cannot decode.
+//
+// ParentID is held to the same rule but with the opposite outcome: it names another record, and a
+// value that could not be a record's id is cleared instead of refusing the file, since a fork
+// with an unusable parent is still a whole session. The clear lives here, on the one decode path
+// List (scan), Load and LoadPath share, so the browser's list, an id resume and a path resume all
+// see the same cleared pointer rather than only one of them.
 func decodeRecord(data []byte, path string) (Record, error) {
 	rec, err := decodeAnyRecord(data, path)
 	if err != nil {
@@ -440,6 +454,9 @@ func decodeRecord(data []byte, path string) (Record, error) {
 	}
 	if err := validateID(rec.Meta.ID); err != nil {
 		return Record{}, fmt.Errorf("apogee: session %q: %w", path, err)
+	}
+	if rec.Meta.ParentID != "" && validateID(rec.Meta.ParentID) != nil {
+		rec.Meta.ParentID = ""
 	}
 	return rec, nil
 }

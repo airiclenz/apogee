@@ -414,7 +414,10 @@ written by the neutral codec in `internal/session` (the scrollback: user/assista
 cards, notes, sub-agent `Depth` and the
 **call-ID** of the `sub_agent` call that spawned each delegated entry, so a resumed fan-out
 regroups per child) — plus
-browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). Not
+browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). A
+forked record carries its parent's id in `Meta.ParentID` — an additive key like the Schedule
+identity, empty on every record that is not a fork, cleared (never refused) on load when it is
+not a valid id. Not
 every scrollback entry is persisted: an **ephemeral** entry is display-only — rendered exactly
 like its kind, skipped by the encoder — because it is *re-derived* at each startup or resume
 rather than earned by the conversation. Today those are the start-up box, the `resumed: <title>`
