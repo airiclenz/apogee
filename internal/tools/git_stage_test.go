@@ -231,7 +231,7 @@ func gitSubcommandOf(argv []string) string {
 
 // confinedStagingCtx is the context a workspace-scoped writer's call carries in Auto with
 // confine-to-workspace: the Confinement handle the Run verdict installed (internal/agent's
-// confineChildren), which is what runGit reads to fence the staging child.
+// confineChildren), which is what gitWrite's runGit reads to fence the staging child.
 func confinedStagingCtx(c domain.Confiner, root string) context.Context {
 	return domain.WithConfinement(context.Background(), domain.Confinement{
 		Confiner: c,

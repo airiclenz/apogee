@@ -2326,6 +2326,106 @@ func TestGuardRef(t *testing.T) {
 	}
 }
 
+// TestGitWrite_RendersTheOutcome pins the one write call under git_branch, git_commit and the
+// staging helper: the verb leads the argv as spelled, a non-zero exit is ok=false rendered with
+// the failWording when git printed nothing, a success is ok=true with git's trimmed output (empty
+// when it printed nothing — the success wording is the caller's), and an absent git is the same
+// ok=false carrying the graceful sentence, in the shape a refused repository already takes.
+func TestGitWrite_RendersTheOutcome(t *testing.T) {
+	posixScriptHost(t)
+
+	for _, tc := range []struct {
+		name        string
+		script      string
+		found       bool
+		failWording string
+		wantOK      bool
+		wantText    string
+		wantExit    int
+	}{
+		{
+			// The fake echoes its argv, so the text also shows the verb leading the caller's
+			// args (after gitexec's `-c` hardening pairs) — with no diff hardening on a write.
+			name:     "success echoes git's output trimmed",
+			script:   "#!/bin/sh\necho \"did: $*\"\n",
+			found:    true,
+			wantOK:   true,
+			wantText: " add -A -- a.txt",
+		},
+		{
+			name:     "a silent success leaves the wording to the caller",
+			script:   "#!/bin/sh\nexit 0\n",
+			found:    true,
+			wantOK:   true,
+			wantText: "",
+		},
+		{
+			name:        "a failure that spoke is shown verbatim",
+			script:      "#!/bin/sh\necho fatal: nope >&2\nexit 128\n",
+			found:       true,
+			failWording: "git add failed",
+			wantOK:      false,
+			wantText:    "fatal: nope",
+			wantExit:    128,
+		},
+		{
+			name:        "an absent git is the graceful sentence",
+			found:       false,
+			failWording: "git add failed",
+			wantOK:      false,
+			wantText:    gitexec.UnavailableMessage,
+			wantExit:    1,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Not parallel: withFakeGit swaps the package-level lookGit var.
+			fakeGit := filepath.Join(t.TempDir(), "fake-git")
+			if tc.found {
+				if err := os.WriteFile(fakeGit, []byte(tc.script), 0o755); err != nil {
+					t.Fatalf("write fake git: %v", err)
+				}
+			}
+			withFakeGit(t, tc.found, fakeGit)
+
+			res, text, ok, err := gitWrite(context.Background(), t.TempDir(), "add", []string{"-A", "--", "a.txt"}, tc.failWording)
+
+			if err != nil {
+				t.Fatalf("gitWrite err = %v", err)
+			}
+			if ok != tc.wantOK {
+				t.Fatalf("ok = %v, want %v (text %q)", ok, tc.wantOK, text)
+			}
+			if (tc.wantText == "" && text != "") || !strings.HasSuffix(text, tc.wantText) || strings.Contains(text, "--no-textconv") {
+				t.Errorf("text = %q, want it to end in %q with no diff hardening", text, tc.wantText)
+			}
+			if res.ExitCode != tc.wantExit {
+				t.Errorf("ExitCode = %d, want %d", res.ExitCode, tc.wantExit)
+			}
+		})
+	}
+}
+
+// TestGitCommit_StagesWorkspaceRelativePathspecs pins the pathspec rule git_commit's `add` shares
+// with the reads: the files it stages are spelled workspace-relative after the "--" terminator
+// (workspacePathspec, trailing slash kept), not as the absolute real paths the fence resolved.
+func TestGitCommit_StagesWorkspaceRelativePathspecs(t *testing.T) {
+	posixScriptHost(t)
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+	argv := recordGitArgv(t, "add", func() (domain.ToolResult, error) {
+		return NewGitCommit(root).Execute(context.Background(),
+			commitCall("c1", `{"message":"m","files":["a.txt","docs/"]}`))
+	})
+
+	const want = "add -- a.txt docs/"
+	if got := strings.Join(argv, " "); got != want {
+		t.Errorf("add argv = %q, want %q", got, want)
+	}
+}
+
 // TestGitLog_PathNarrowsAfterTheDoubleDash: the optional path is a pathspec placed after the
 // existing "--", workspace-relative and with its trailing slash kept, so the ref position stays
 // terminated and TestGitLog_PathShapedRefIsNotAPathspecLog's guarantee is untouched.

@@ -766,7 +766,15 @@ pathspecs (named in NOTES).
 
 **Commit:** `refactor(tools): gitRead — one validated read call under status, log, diff and show`
 
-## 24. `gitWrite` — branch, commit and stage
+## 24. `gitWrite` — branch, commit and stage — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `grep -c 'runGit('` → `internal/tools/git.go` 3 (the `func runGit` definition plus the two calls inside `gitRead` and `gitWrite`), `internal/tools/git_stage.go` 0 — the acceptance's "two calls" holds; the definition is the third match.
+NOTES (2026-09-16): gitWrite returns `(res, text, ok, err)` like gitRead; on ok=true text is git's trimmed output (empty when git was silent) because the plan's signature carries no success fallback — the success wording stays each caller's (`branchSuccessMessage`, `"commit created"`, `stageGitPaths`' note), and git_branch's list re-renders `res.CombinedOutput` first as before.
+NOTES (2026-09-16): git_commit's amend pre-check goes through gitRead with `HEAD` in the flags slot (`--contains HEAD` is an option value, not a positional revision, so no `--` terminator is added and the argv is byte-identical); its `log -1 --oneline` summary is a gitRead with `diffProducing: true`, so that argv now carries `--no-textconv --no-ext-diff` like every other log (no test pinned it).
+NOTES (2026-09-16): git resolves per call now (gitWrite/gitRead each call `gitexec.Program`) instead of once at the top of Execute; Program spawns nothing and the command-config probe is memoised, so `TestGitBranch_RunsUnderConfine`'s Confine count (3) and the staging tests are unchanged. With git absent and `amend: true`, the pre-check's ok=false falls through and the commit step reports the same graceful refusal.
+NOTES (2026-09-16): `git_stage.go`'s trackedness probe (`ls-files --error-unmatch`) is a read but rides gitWrite as the item says ("git_stage.go's two runs"); its `:(literal)` pathspecs are passed as before (not workspacePathspec — they are the tool's own already-fenced paths, and the helper's contract is "passed exactly as the tool received them"). The file no longer imports `internal/gitexec`.
+NOTES (2026-09-16): pre-existing debt (predates item 23, NOTES only): `gitResultText` substitutes its fallback only on exit 0, so the `failWording` gitRead and gitWrite carry never renders — a non-zero exit that printed nothing yields an empty error text for every git tool; `TestGitWrite_RendersTheOutcome` therefore pins the spoken failure, the silent success and the absent-git sentence, not a silent failure.
+NOTES (2026-09-16): tests added — `TestGitWrite_RendersTheOutcome` (verb-led argv with no diff hardening, trimmed success, verbatim failure, absent-git sentence in the refused-repository shape) and `TestGitCommit_StagesWorkspaceRelativePathspecs` (`add -- a.txt docs/`, trailing slash kept).
 
 **What.** Depends on item 23. `gitWrite(ctx, root, verb, args, failWording string)` for the
 mutating verbs; migrate `git_branch`, `git_commit` (its `branch -r --contains HEAD` pre-check and

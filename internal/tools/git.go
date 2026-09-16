@@ -234,6 +234,43 @@ func gitRead(ctx context.Context, root string, c gitReadCall) (res subprocess.Su
 }
 
 // ----------------------------------------------------------------------------
+// gitWrite — the one write call under git_branch, git_commit and the staging helper
+// ----------------------------------------------------------------------------
+
+// gitWrite is the one call every MUTATING git invocation spawns through — git_branch's four
+// actions, git_commit's `add` and `commit`, and the staging helper's trackedness probe and
+// `add -A` (internal/tools/git_stage.go). It resolves git for root (gitexec.Program, with this
+// package's lookGit), runs `verb args...` through runGit under gitTimeout, and returns the raw
+// capture beside its rendering the way gitRead does: on ok=false text is the failure (git absent
+// or fenced, a refused repository, or a non-zero exit rendered with failWording); on ok=true it
+// is git's trimmed output, which may be empty — the success wording is the caller's, since it
+// names the action ("Created and switched to branch …", "commit created") and git_branch's list
+// re-renders the raw output first. A git that could not be resolved is returned in the shape
+// gitexec.Capture gives a refused repository — a failed outcome carrying the sentence — so a
+// caller has one failure branch. The Go error is non-nil only for ctx cancellation or a
+// confinement-unavailable demotion (the runSubprocess contract).
+//
+// The write verbs carry no diff hardening (none of them renders a diff) and take their argv
+// as the caller spelled it: git_branch's argv is buildBranchArgs' validated output, git_commit
+// terminates its pathspecs with "--" under the workspace-relative rule (workspacePathspec), and
+// the staging helper's pathspecs carry the :(literal) magic. The read-side pre-check and summary
+// git_commit makes around its commit are reads and go through gitRead.
+func gitWrite(ctx context.Context, root, verb string, args []string, failWording string) (res subprocess.SubprocessResult, text string, ok bool, err error) {
+	gitPath, refusal, ok := gitexec.Program(ctx, root, lookGit)
+	if !ok {
+		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, refusal, false, nil
+	}
+	res, err = runGit(ctx, gitPath, root, gitTimeout, append([]string{verb}, args...)...)
+	if err != nil {
+		return subprocess.SubprocessResult{}, "", false, err
+	}
+	if res.ExitCode != 0 {
+		return res, gitResultText(res, failWording), false, nil
+	}
+	return res, gitResultText(res, ""), true, nil
+}
+
+// ----------------------------------------------------------------------------
 // git_branch — create / switch / list / delete
 // ----------------------------------------------------------------------------
 
@@ -302,17 +339,12 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, errMsg), nil
 	}
 
-	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
-	if !ok {
-		return errorResult(call.ID, refusal), nil
-	}
-
-	res, err := runGit(ctx, gitPath, t.root, gitTimeout, gitArgs...)
+	res, text, ok, err := gitWrite(ctx, t.root, gitArgs[0], gitArgs[1:], "git branch failed")
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.ExitCode != 0 {
-		return errorResult(call.ID, gitResultText(res, "git branch failed")), nil
+	if !ok {
+		return errorResult(call.ID, text), nil
 	}
 	if args.Action == "list" {
 		res.CombinedOutput = renderBranchList(res.CombinedOutput)
@@ -495,46 +527,48 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, "message is required and must be a non-empty string"), nil
 	}
 
-	gitPath, refusal, ok := gitexec.Program(ctx, t.root, lookGit)
-	if !ok {
-		return errorResult(call.ID, refusal), nil
-	}
-
 	// Amend is refused on a commit some remote already holds, so the tool never rewrites
 	// history a remote has seen. The question is put to git rather than inferred from the
 	// tip's decoration: `branch -r --contains HEAD` answers it for a remote under any name
 	// and for a local branch that has fallen BEHIND its remote, where the decoration names
 	// only the refs pointing AT the commit. A non-zero exit — no remotes configured, or a
 	// state git cannot answer — reads as unpublished, the guard's existing degrade: it lets
-	// the amend through rather than blocking work on an answer it does not have.
+	// the amend through rather than blocking work on an answer it does not have. It is a
+	// read and goes through gitRead; HEAD is --contains' value, not a positional revision, so
+	// it rides the flags slot. A git that cannot be resolved at all is the same ok=false and
+	// falls through to the commit itself, which reports the refusal.
 	if args.Amend {
-		remotes, err := runGit(ctx, gitPath, t.root, gitTimeout, "branch", "-r", "--contains", "HEAD")
+		remotes, _, ok, err := gitRead(ctx, t.root, gitReadCall{
+			verb:  "branch",
+			flags: []string{"-r", "--contains", "HEAD"},
+		})
 		if err != nil {
 			return domain.ToolResult{}, err
 		}
-		if remotes.ExitCode == 0 && remoteBranchesListed(remotes.CombinedOutput) {
+		if ok && remoteBranchesListed(remotes.CombinedOutput) {
 			return errorResult(call.ID, "cannot amend a commit that has been pushed to a remote; create a new commit instead"), nil
 		}
 	}
 
 	// Stage the named files first (path-safe), so a commit only ever touches paths
-	// inside the workspace.
+	// inside the workspace: each is fenced and spelled workspace-relative (workspacePathspec),
+	// after the "--" that makes git read it as a pathspec and nothing else.
 	if len(args.Files) > 0 {
-		resolved := make([]string, 0, len(args.Files))
+		addArgs := make([]string, 0, 1+len(args.Files))
+		addArgs = append(addArgs, "--")
 		for _, f := range args.Files {
-			abs, err := resolveInRoot(f, t.root)
+			pathspec, err := workspacePathspec(f, t.root)
 			if err != nil {
 				return errorResult(call.ID, err.Error()), nil
 			}
-			resolved = append(resolved, abs)
+			addArgs = append(addArgs, pathspec)
 		}
-		addArgs := append([]string{"add", "--"}, resolved...)
-		res, err := runGit(ctx, gitPath, t.root, gitTimeout, addArgs...)
+		_, text, ok, err := gitWrite(ctx, t.root, "add", addArgs, "git add failed")
 		if err != nil {
 			return domain.ToolResult{}, err
 		}
-		if res.ExitCode != 0 {
-			return errorResult(call.ID, gitResultText(res, "git add failed")), nil
+		if !ok {
+			return errorResult(call.ID, text), nil
 		}
 	}
 
@@ -549,31 +583,34 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// residual — the operator's OWN global gpg.program, which the refusal deliberately leaves
 	// alone — by not asking for a signature at all. apogee's commits are unsigned by design; a
 	// commit the operator wants signed is one they make themselves.
-	commitArgs := []string{"commit", "--no-verify", "--no-gpg-sign", "-m", message}
+	commitArgs := []string{"--no-verify", "--no-gpg-sign", "-m", message}
 	if args.Amend {
 		commitArgs = append(commitArgs, "--amend")
 	}
 	if args.AllowEmpty {
 		commitArgs = append(commitArgs, "--allow-empty")
 	}
-	res, err := runGit(ctx, gitPath, t.root, gitTimeout, commitArgs...)
+	res, text, ok, err := gitWrite(ctx, t.root, "commit", commitArgs, "git commit failed")
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if res.ExitCode != 0 {
-		return errorResult(call.ID, gitResultText(res, "git commit failed")), nil
+	if !ok {
+		return errorResult(call.ID, text), nil
 	}
 
 	// Report the new commit's one-line summary (best-effort; the commit already
-	// succeeded, so a failed summary is not surfaced as the call's error).
-	summary, err := runGit(ctx, gitPath, t.root, gitTimeout, "log", "-1", "--oneline")
+	// succeeded, so a failed summary is not surfaced as the call's error). A read, so it
+	// goes through gitRead and carries the diff hardening every log does.
+	_, summary, ok, err := gitRead(ctx, t.root, gitReadCall{
+		verb:          "log",
+		diffProducing: true,
+		flags:         []string{"-1", "--oneline"},
+	})
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
-	if summary.ExitCode == 0 {
-		if text := strings.TrimSpace(summary.CombinedOutput); text != "" {
-			return okResult(call.ID, text), nil
-		}
+	if ok && summary != "" {
+		return okResult(call.ID, summary), nil
 	}
 	return okResult(call.ID, gitResultText(res, "commit created")), nil
 }

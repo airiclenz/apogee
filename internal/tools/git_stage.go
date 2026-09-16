@@ -3,8 +3,6 @@ package tools
 import (
 	"context"
 	"strings"
-
-	"github.com/airiclenz/apogee/internal/gitexec"
 )
 
 // Git-aware file operations (2026-08-22) — the shared best-effort index update
@@ -25,8 +23,8 @@ import (
 //
 // Confinement (2026-08-26). This is the one in-process tool path that spawns a subprocess of
 // apogee's own, so in Auto with confine-to-workspace the Run verdict carries the Confinement
-// handle (internal/agent's confineChildren) and runGit fences the git child in the very box a git
-// TOOL's child would have run in. On every other rung the child's bound is its HARDENED ARGV
+// handle (internal/agent's confineChildren) and gitWrite — the one write call the git tools spawn
+// through — fences the git child in the very box a git TOOL's child would have run in. On every other rung the child's bound is its HARDENED ARGV
 // instead — apogee's own fixed `git add -A -- :(literal)<path>`, with the repository's own
 // command-valued config refused — which is the blast radius a workspace-scoped write already
 // declares. Best-effort survives a box that cannot be established: ErrConfinementUnavailable
@@ -56,7 +54,7 @@ import (
 //
 // Every pathspec carries the :(literal) magic, so a file whose name contains *, ? or [ is staged
 // as the file it is rather than glob-interpreted. Paths are passed exactly as the tool received
-// them: runGit runs with the workspace root as cwd and git resolves relative and
+// them: gitWrite runs with the workspace root as cwd and git resolves relative and
 // absolute-inside-repo pathspecs from there, so a workspace that is a SUBDIRECTORY of the
 // repository needs no special handling.
 func stageGitPaths(ctx context.Context, root, successNote string, paths ...string) string {
@@ -64,31 +62,28 @@ func stageGitPaths(ctx context.Context, root, successNote string, paths ...strin
 		return ""
 	}
 
-	// A missing git and the exec fence's refusal are both silent skips: staging is a courtesy on
-	// top of an operation that already stands, and neither is something the model can act on.
-	gitPath, _, ok := gitexec.Program(ctx, root, lookGit)
-	if !ok {
+	// A missing git, the exec fence's refusal and a probe that answers "not tracked" (or cannot
+	// answer) are all silent skips: staging is a courtesy on top of an operation that already
+	// stands, and none of them is something the model can act on. gitWrite folds the first two
+	// into the same ok=false as the probe's own non-zero exit.
+	_, _, ok, err := gitWrite(ctx, root, "ls-files", []string{"--error-unmatch", "--", literalPathspec(paths[0])}, "")
+	if err != nil || !ok {
 		return ""
 	}
 
-	probe, err := runGit(ctx, gitPath, root, gitTimeout, "ls-files", "--error-unmatch", "--", literalPathspec(paths[0]))
-	if err != nil || probe.ExitCode != 0 {
-		return ""
-	}
-
-	args := make([]string, 0, 3+len(paths))
-	args = append(args, "add", "-A", "--")
+	args := make([]string, 0, 2+len(paths))
+	args = append(args, "-A", "--")
 	for _, path := range paths {
 		args = append(args, literalPathspec(path))
 	}
 	// A Go error here is a cancelled context or a confinement-unavailable demotion (the runGit
 	// contract) rather than git's own verdict; it is still a stage that did not happen, and the
 	// model is told the same way.
-	add, err := runGit(ctx, gitPath, root, gitTimeout, args...)
+	add, _, ok, err := gitWrite(ctx, root, "add", args, "")
 	if err != nil {
 		return stagingSkipped(err.Error())
 	}
-	if add.ExitCode != 0 {
+	if !ok {
 		return stagingSkipped(add.CombinedOutput)
 	}
 	return successNote
