@@ -754,10 +754,11 @@ it without re-deciding.
 > refusal, having never been disclosed at the Gate. Reads are not widened: `security.SafeReadFile`
 > takes no permit and none may be added, and the READ tools are handed no permit ever. What an
 > approved write does read is its own target: the read-modify-write verbs, and the file-operation
-> pre-flights that describe what they are about to touch, reach it through `readWriteTarget` /
-> `statWriteTarget` (`internal/tools/path_safety.go:139`, `:153` — their doc comments carry the
-> rationale), which pin that one read at the permitted target's own parent, the same root the write
-> itself lands through. Without that half, "an approved gate executes" would be false for exactly
+> pre-flights that describe what they are about to touch, reach it through the write side's scope
+> value — `writeTarget.read` / `writeTarget.stat` (`internal/tools/write_target.go`; since
+> 2026-09-16 every write verb holds the value, and `writeTarget.pin`'s doc comment carries the
+> rationale) — which pins that one read at the permitted target's own parent, the same root the
+> write itself lands through. Without that half, "an approved gate executes" would be false for exactly
 > the verbs a model edits with — a `file_edit` unable to read the bytes it was approved to rewrite.
 > The marker's `workspaceWriteTarget` seam (§3.2) is what made the permit an additive change rather
 > than a rework.

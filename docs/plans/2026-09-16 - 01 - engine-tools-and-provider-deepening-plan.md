@@ -641,7 +641,13 @@ file ONCE through it. Wordings of every not-found prefix ("file not found: ", "d
 
 **Commit:** `refactor(tools): find/replace and delete_file take their target from writeTarget`
 
-## 20. `copy_file` and `move_file` adopt `writeTarget` for the destination
+## 20. `copy_file` and `move_file` adopt `writeTarget` for the destination — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `write_target.go` added to Files — `writeTarget.mutation(post) mutationPath` is the value's multi-path form the item names ("through the value's multi-path form, which is `journaledMutation`, `mutationPath` kept"); `journaled` now builds its one path through it.
+NOTES (2026-09-16): `fileOpsDestination(scope, args)` is the pair's one resolution site — it keeps the tools' own "destination is required" wording (the value's `errPathRequired` names "path", an argument neither tool has) and preserves the refusal order (source required → destination required → source stat → destination check) byte for byte.
+NOTES (2026-09-16): `file_ops_test.go` and `write_permit_test.go` needed no change (no test reaches the helpers by name; the 28 + permit tests pass unchanged).
+NOTES (2026-09-16): consequential edit — internal/tools/doc.go: made necessary by deleting `statWriteTarget` (the write_target.go sentence named it among the free-function spellings).
+NOTES (2026-09-16): consequential edit — docs/design/confinement-execution-contract.md: made necessary by deleting `statWriteTarget` (§4's ADR 0049 paragraph named `readWriteTarget`/`statWriteTarget` with stale line numbers; now names `writeTarget.read`/`.stat`, dated).
 
 **What.** Depends on item 18. `file_ops.go`: the destination(s) come from the value —
 `copy_file`'s directory form yields N destination targets and `move_file` its two paths — through the

@@ -19,8 +19,8 @@ import (
 // it got back, so the six things a write verb does to its path can never be six resolutions of it.
 //
 // The fence itself is unchanged: every method reaches the filesystem through the same os.Root-pinned
-// primitives the free functions in path_safety.go reach, and those functions are now one-line shims
-// over these methods for the verbs that have not yet adopted the value.
+// primitives the free functions in path_safety.go reach, and the two of those the undo capture still
+// takes by argument and root (readWriteTarget, currentPerm) are one-line shims over these methods.
 
 // errPathRequired is the refusal every single-path writer spells for an empty argument, answered by
 // writeScope.target so a tool reads it off the one error return rather than checking first. It is a
@@ -190,13 +190,23 @@ func (t writeTarget) write(data []byte, perm os.FileMode) error {
 	return safeWriteFile(t.scope.ctx, t.input, t.scope.root, data, perm)
 }
 
+// mutation is this target as ONE path of a multi-path mutation (journaledMutation): the argument's
+// spelling and the root the funnel captures its pre-image through and reads its post-image back
+// through, under post. It is the value's MULTI-PATH form — a copy's directory form hands the funnel
+// N destinations and a move its two ends, so those verbs assemble the slice from their values and
+// keep the funnel's own body shape (one landed flag per path), where journaled below is the
+// one-target case.
+func (t writeTarget) mutation(post postImage) mutationPath {
+	return mutationPath{input: t.input, root: t.scope.root, post: post}
+}
+
 // journaled runs body as a mutation of this ONE target that lands or removes bytes this process
 // never holds — a delete, or one end of a copy or move — through the sibling funnel
 // (journaledMutation): the pre-image is captured before body runs, body is handed the
 // approved-escape target (ADR 0049), and the record is committed under post only when body reports
 // the target landed. body's error is returned unchanged; the fence primitive stays body's choice.
 func (t writeTarget) journaled(post postImage, body func(escape string) (landed bool, err error)) error {
-	paths := []mutationPath{{input: t.input, root: t.scope.root, post: post}}
+	paths := []mutationPath{t.mutation(post)}
 	return journaledMutation(t.scope.ctx, paths, func(escape string) ([]bool, error) {
 		landed, err := body(escape)
 		return []bool{landed}, err

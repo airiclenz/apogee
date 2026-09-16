@@ -336,9 +336,9 @@
 // twin: writeScope, what one execution may write and through which fence (the root and the
 // approved-escape permit), and the writeTarget methods a write verb goes through once it has
 // asked its scope for the call's argument — read, stat, perm, refuseVirtual, notFound, note,
-// write and journaled — so a verb's every reach for its path is the one resolution dispatch
-// classified; path_safety.go's readWriteTarget, statWriteTarget and currentPerm are its
-// free-function spellings for the verbs that have not yet adopted the value.
+// write, journaled and mutation — so a verb's every reach for its path is the one resolution
+// dispatch classified; path_safety.go's readWriteTarget and currentPerm are its free-function
+// spellings for the undo capture, which still takes its pre-image by argument and root.
 // readonly_subprocess.go is its sibling on the READ side: the
 // unexported readOnlySubprocess marker and IsReadOnlySubprocess, which say that a subprocess call
 // is one of apogee's own hardened read-side git reads — and with it the minting conditions a tool

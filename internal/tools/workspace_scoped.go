@@ -116,8 +116,8 @@ func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
 // one less round trip through the call's JSON. The sentence a surface renders is its own (the
 // pane and the card share the TUI's); what all three must not do is disagree about the path,
 // which is why they all read resolveTargetUnbounded. The tail itself is writeTarget.note's; this
-// is the root-only spelling of it for a reader, and for a writer that has not yet adopted the
-// value.
+// is the root-only spelling of it for a reader, which holds no writeTarget — every writer now
+// reads the tail off its value.
 func resolvedTargetNote(input, root string) string {
 	target, err := writeScope{root: root}.target(input)
 	if err != nil {
@@ -180,7 +180,8 @@ func pathArgWriteTarget(call domain.ToolCall, root string) (writeTarget, bool) {
 // the same reason: classification asks only where the write would land, so a malformed sibling
 // argument still yields a target for dispatch to judge. TestWriteToolsDeclarePathArgument and
 // TestWriteTargetsAgreeOnPath drive both bodies from the tools' own surfaces, so a renamed json
-// tag fails there instead of blinding the fence.
+// tag fails there instead of blinding the fence. And like it, the answer comes off the VALUE
+// Execute resolves the destination through (writeScope.target), root-only for the same reason.
 func destinationArgWriteTarget(call domain.ToolCall, root string) (writeTarget, bool) {
 	var args struct {
 		Destination string `json:"destination"`
@@ -188,7 +189,11 @@ func destinationArgWriteTarget(call domain.ToolCall, root string) (writeTarget, 
 	if err := decodeArgs(call.Arguments, &args); err != nil {
 		return writeTarget{}, false
 	}
-	return resolveTargetUnbounded(args.Destination, root)
+	target, err := writeScope{root: root}.target(args.Destination)
+	if err != nil {
+		return writeTarget{}, false
+	}
+	return target, true
 }
 
 // resolveTargetUnbounded resolves input (relative to root, or absolute) to an absolute
