@@ -100,9 +100,11 @@ func (w *Writer) SetSession(id string) {
 // A domain.WireEvent is forwarded only: it is raw provider protocol and is excluded from the
 // contract (decision 2), and per the same decision it consumes no sequence number — a gap in seq
 // means a lost line, never an Inspector event. A domain.SeamClosedEvent is forwarded only as well
-// unless Options.Seams opted the stream in — and then it, too, consumes no sequence number. The
-// forward happens for every Event, including one whose line was dropped because the stream had
-// already stopped: the reactions.Runner beneath this Writer builds the five seam-closing notices
+// unless Options.Seams opted the stream in — and then its seam_closed line DOES consume a
+// sequence number, like every line writeLine writes; only an Event that is forwarded and not
+// encoded consumes none. The forward happens for every Event, including one whose line was
+// dropped because the stream had already stopped: the reactions.Runner beneath this Writer builds
+// the five seam-closing notices
 // from the very SeamClosedEvent the default stream holds back, so the forward is never gated.
 func (w *Writer) Emit(ev domain.Event) {
 	if _, held := ev.(domain.SeamClosedEvent); !held || w.seams {

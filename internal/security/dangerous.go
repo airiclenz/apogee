@@ -47,10 +47,11 @@ func (d Decision) Triggered() bool { return d.Tier != TierNone }
 // narrow literal/regex — there is no obfuscation-chasing (this is a footgun-guard catching
 // obvious mistakes, NOT an adversary boundary, ADR 0012).
 type Rule struct {
-	// ID is the stable identifier used by the config merge to remove a rule (global
-	// config may remove by ID). It must be non-empty, and is unique within a ruleset
-	// except for the one case MergeDangerousRules creates deliberately: a tighten-only
-	// project add coexisting with the shipped rule whose tier it promoted.
+	// ID is the stable identifier the config merge would remove a rule by (global config
+	// may remove by ID — MergeDangerousRules, the ADR 0012 merge seam no config key calls
+	// today; apogee-089 would wire it). It must be non-empty, and is unique within a
+	// ruleset except for the one case MergeDangerousRules creates deliberately: a
+	// tighten-only project add coexisting with the shipped rule whose tier it promoted.
 	ID string
 	// Pattern is a Go regexp matched against the normalized inspectable text. The text
 	// is whitespace-collapsed, lower-cased, and has `\` folded to `/` before matching, so

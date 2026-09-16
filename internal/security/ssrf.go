@@ -38,7 +38,8 @@ import (
 // The floor is a FLOOR: a URLGuard with DenyIPFloor() on (the default) cannot have it
 // dissolved by configuration — config can only ADD denials (more DenyHosts / a
 // stricter AllowHosts), never remove the floor. This mirrors the dangerous-rule
-// tighten-only semantics (MergeDangerousRules): a guardrail can be tightened, never
+// tighten-only semantics (MergeDangerousRules — the ADR 0012 merge seam, which no config
+// key calls today; apogee-089 would wire it): a guardrail can be tightened, never
 // loosened, by the invocation environment.
 //
 // DNS-rebinding / TOCTOU: a pre-flight resolve can be defeated by a name that resolves

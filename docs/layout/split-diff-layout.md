@@ -104,7 +104,11 @@ are untouched.
 ```
 
 - per region: context, then `-` rows (before numbers), then `+` rows (after
-  numbers), then trailing context. Same wrap rule, same `⋯` separator.
+  numbers), then trailing context. Same wrap rule, same `⋯` separator — with
+  one difference: it is the stacked reading that clips. A numbered body line is
+  first clipped at `detailClipRunes` (160 runes) with `…` (`stackedRow.line` →
+  `clipDetail`), then wrapped; the split reading wraps the whole line and never
+  clips.
 - Same chrome rule too: the band runs from the marker column to the block's wrap
   rail, on the first row of a line and on its continuation rows alike, while the
   number gutter left of it stays chrome. A continuation row hangs under that

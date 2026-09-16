@@ -360,7 +360,7 @@
 # read is skipped LOUDLY (a note in the transcript), never a startup failure: unlike
 # system-prompt-file, which you named, these are discovered.
 #
-# The content is DATA and travels VERBATIM: the three placeholders above do NOT apply to it, so
+# The content is DATA and travels VERBATIM: the four placeholders above do NOT apply to it, so
 # {{braces}} in some repo's AGENTS.md reach the model as written and can never fail apogee's
 # startup.
 #

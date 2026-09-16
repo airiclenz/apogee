@@ -15,11 +15,13 @@ import (
 
 // defaultConfigYAML is the starter config compiled into the binary from
 // defaults/config.yaml. //go:embed re-reads that file on every build, so the seeded
-// template can never drift from the binary that ships it. Every key it states is commented
-// out (ADR 0064 §4), so parsed, it resolves nothing: seeding it on first run changes nothing
-// about how a run resolves, and everything it drops is documentation the user can edit. The
-// default system prompt used to be its one active key; it is defaultSystemPrompt below now,
-// because a key seeded once is frozen per install and can never be improved again.
+// template can never drift from the binary that ships it. Its active keys restate the
+// registry's own defaults and the rest is commented documentation, so parsed, it resolves
+// exactly what no file resolves: seeding it on first run changes nothing about how a run
+// resolves, and every line of it is documentation the user can edit. The default system
+// prompt used to be its one active key that did NOT restate a default; it is
+// defaultSystemPrompt below now, and the template's prompt keys ship commented out (ADR 0064
+// §4), because a key seeded once is frozen per install and can never be improved again.
 //
 //go:embed defaults/config.yaml
 var defaultConfigYAML []byte

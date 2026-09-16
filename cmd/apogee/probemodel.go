@@ -68,8 +68,9 @@ func probeModelCommand() *cobra.Command {
 			"label changed since the earlier record's date.\n" +
 			"Probing does NOT rename your model: the identity stays the advertised label, so\n" +
 			"model-profile overrides keyed on it keep matching.\n\n" +
-			"Pass --no-save to run the full battery and write nothing; the record's path is\n" +
-			"printed either way, so deleting that file undoes it.\n\n" +
+			"Pass --no-save to run the full battery and write nothing; when the battery completes,\n" +
+			"the record's path is printed with or without --no-save, so deleting that file undoes\n" +
+			"it. A battery that does not complete records nothing and prints no path.\n\n" +
 			"Note (2026-07-22): probe records written by an earlier build use a record format\n" +
 			"this version no longer reads. They are skipped with a warning and there is no\n" +
 			"migration — re-run `apogee probe model` once per model to record them again.",

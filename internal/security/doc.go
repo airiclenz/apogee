@@ -33,7 +33,8 @@
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
 //     floor, two tiers (hard-refuse / force-approval), narrow precision-over-recall
 //     literal/regex matching, with config-merge semantics (global may add OR remove,
-//     project may only add — MergeDangerousRules). It matches a call's ACTION text —
+//     project may only add — MergeDangerousRules, the ADR 0012 merge seam no config key
+//     calls today; apogee-089 would wire it). It matches a call's ACTION text —
 //     the tool, its target paths, its command lines and code — and never the payload a
 //     write carries, so a document that merely quotes a guarded path is not an action
 //     (payloadKeys in dangerous.go). Two tool-declared argument classes narrow it further,
@@ -79,7 +80,8 @@
 // quotes a guarded path nor a delegated task that names one is an action. rules.go is the
 // content: DefaultDangerousRules, the narrow precision-over-recall built-in floor with a comment
 // per rule saying where its boundary is, and MergeDangerousRules, which encodes who may loosen it
-// (global may add or remove, project may only add — ADR 0012). shellwrites.go is the shell
+// (global may add or remove, project may only add — ADR 0012) — the merge seam that ADR fixes,
+// called by no config key today (apogee-089 would wire it). shellwrites.go is the shell
 // write view those two lean on: writeTargetsOf, the verb-aware reading of a command line that
 // keeps its redirect targets and the operands of mutating or unknown leaders and drops what a
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared

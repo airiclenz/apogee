@@ -175,9 +175,10 @@ func DefaultDangerousRules() []Rule {
 		// runs it, `~/.apogee` included. What earns the softer tier is what a write there does:
 		// `.git/hooks|config` above is delayed code execution outside every confinement (the
 		// shell-rc class), while `~/.apogee` holds the global config.yaml — the one source a
-		// dangerous-rule REMOVAL is honoured from (MergeDangerousRules below) — plus the skill
-		// library and the session records, so a write here can dissolve this floor for every
-		// later run: catastrophic as a model's mistake, ordinary as the operator's own step
+		// dangerous-rule REMOVAL would be honoured from (MergeDangerousRules below: the merge
+		// seam ADR 0012 fixes, which no config key calls today) — plus the skill library and
+		// the session records, so a write here can dissolve this floor for every later run:
+		// catastrophic as a model's mistake, ordinary as the operator's own step
 		// (curating the skill library, editing a scheme), which is the shape a look answers and
 		// a refusal does not. The boundary is the HOME
 		// copy: a project's own `<workspace>/.apogee/skills` is workspace territory and never
@@ -245,7 +246,10 @@ func DefaultDangerousRules() []Rule {
 	}
 }
 
-// MergeDangerousRules applies the config-merge semantics ADR 0012 fixes:
+// MergeDangerousRules is the config-merge seam ADR 0012 fixes. No config key calls it today —
+// the guard runs on DefaultDangerousRules as shipped, and this seam sits ready for the key that
+// would feed it (project-local config, apogee-089); the function and its tests stay because the
+// semantics below are the security-load-bearing part of that design. The merge:
 //
 //   - base is the built-in default ruleset (the floor).
 //   - globalAdd / globalRemove come from the user's global config
