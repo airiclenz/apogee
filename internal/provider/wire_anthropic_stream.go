@@ -134,6 +134,9 @@ func (s *anthropicStream) event(data string) (ended bool) {
 		return true
 	case anthropicEventError:
 		return s.fail(ev, data)
+	case anthropicEventBlockStop, anthropicEventPing:
+		// Named so the vocabulary stays complete: a block's close carries nothing the
+		// accumulator needs, and the keep-alive is just that.
 	}
 	return false
 }
