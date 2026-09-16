@@ -20,6 +20,7 @@ A `Makefile` wraps the common Go invocations:
 | `make install` | Build, then copy the binary to a directory on your `PATH` |
 | `make run ARGS="--help"` | Build-and-run, passing flags via `ARGS` |
 | `make stubllm` | Compile the scripted test upstream to `./stubllm` — a dev tool, never a release asset |
+| `make demorig` | Compile the demo storyboard rig to `./demorig` — a dev tool, never a release asset (see `graphics/demo/README.md`, "Storyboards") |
 | `make test` | Run the test suite with the race detector, sharded across processes (see [Testing](#testing)); `ARGS="..."` passes extra `go test` flags to every shard |
 | `make live-eval` | Run the opt-in live-model eval and the judge tests against a real server, always `-count=1`; `LIVE_ENDPOINT=` (default `http://127.0.0.1:1111`) becomes `APOGEE_LIVE_ENDPOINT` and `JUDGE_ENDPOINT=` (default the same) `APOGEE_JUDGE_ENDPOINT`, with `APOGEE_LIVE_MODEL` / `APOGEE_JUDGE_MODEL` set in the environment to pin the models; fails if the real `~/.apogee` grew during the run |
 | `make home-census` | Print the entry counts of the real `~/.apogee` sessions and scratch dirs (what `live-eval` compares) |

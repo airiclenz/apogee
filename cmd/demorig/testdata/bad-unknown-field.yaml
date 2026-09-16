@@ -1,0 +1,24 @@
+clip: tiny
+colour: red
+tape: tiny.tape
+ship: tiny.gif
+frame: {width: 600, scale: 2, fps: 24, max_colors: 128}
+align: {scene_threshold: 0.4, first_prompt_at: 2s}
+paint_lag: 300ms
+regions: {card: [0, 0.5, 1, 0.5]}
+expect: {stage: dirty}
+beats:
+  - id: 1
+    title: open
+    tape: beat 1
+    anchor: {video: first-paint}
+  - id: 2
+    title: middle
+    tape: beat 2
+    anchor: {kind: toolCall, tool: Tests, nth: last}
+    frame: {speed: 1.5, zoom: {region: card, factor: 1.5, in: 200ms, hold: 1s, out: 200ms}}
+    expect: [{contains: PASS}]
+  - id: 3
+    title: end
+    tape: beat 3
+    anchor: {video: end}

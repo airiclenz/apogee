@@ -93,7 +93,13 @@ internal/tui/undo.go — noteRevert, undoPreviewNote, revertNote; internal/sessi
 
 **Commit:** `docs(demo): hero storyboard with director's notes, beat headers in the tape, 2× geometry`
 
-## 2. `cmd/demorig` — storyboard loader and `lint`
+## 2. `cmd/demorig` — storyboard loader and `lint` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): bookend rule read as: the FIRST beat anchors bare `{video: first-paint}` and the LAST bare `{video: end}`, each unique; a video anchor carrying an `offset` (hero beat 7, `{video: end, offset: -6.5s}`) is an ordinary anchor, not a bookend — the only reading under which the item-1 hero storyboard lints clean.
+NOTES (2026-09-16): validation goes a little past the item's list where the schema makes a value meaningless: `frame.width`/`fps` ≥1, `max_colors` 2..256, `align.scene_threshold` in (0,1], `first_prompt_at` >0, durations ≥0, regions exactly four fractions in [0,1], `zoom.factor` ≥1, `expect.stage` only `dirty`, an expect asserting at least one of contains/before/after; an unknown session `kind` is rejected against `internal/session`'s EntryKind* constants.
+NOTES (2026-09-16): `Framing.Speed` is `*float64` (nil = default 1×, `Rate()` reads it) so an explicit `speed: 0` is a named error instead of a silent default; `TakeExpect` is the top-level `expect: {stage: dirty}` type, beside the per-beat `Expect`.
+NOTES (2026-09-16): consequential edit — docs/manual/building.md: made necessary by the new `demorig` Makefile target (the manual's Make-targets table enumerates every target).
+NOTES (2026-09-16): `storyboard.go` is ~510 lines (the coding-standards ~400 soft limit) because the item names it as the one module owning schema + validation; a later item may split validation into its own file if it grows further.
 
 **What:** Recast at the regression check (2026-09-16). New dev tool `cmd/demorig` (package `main`, subcommand dispatch like `cmd/stubllm`). This item ships the storyboard types (`Storyboard`, `Beat`, `Anchor`, `Framing`, `Expect`) with a `Load(path) (*Storyboard, error)` that decodes the item-1 schema with `yaml.v3` strict (`KnownFields(true)`), parses durations, and validates: ids unique and ascending, exactly one `first-paint` and one `end` anchor (first and last), every `tape:` header present in the tape file (`# beat N`), every `zoom.region` declared, `nth` ≥1 or `last`, `speed` >0, `frame.scale` ≥1. `demorig lint <storyboard>` prints the errors and exits 1. One deep module: `storyboard.go` owns the schema and validation; `main.go` only dispatches. Add `Makefile` target `demorig` mirroring `stubllm` (dev tool, never a release asset).
 
