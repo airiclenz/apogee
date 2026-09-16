@@ -3,7 +3,9 @@ package main
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -87,6 +89,65 @@ func TestDelegationNamerBuildsTheCallOnTheChildsUpstream(t *testing.T) {
 	}
 	if !strings.Contains(sessionGot.Messages[1].Content, "report the flaky one") {
 		t.Errorf("user message = %q; want the delegated task", sessionGot.Messages[1].Content)
+	}
+}
+
+// anthropicTitleServer is a naming upstream on the anthropic wire: it answers POST /v1/messages
+// with a Messages-shaped reply and records the path and headers of what it saw, so a test can
+// prove which PROTOCOL the naming client spoke — an openai-wired client would POST
+// /v1/chat/completions under a bearer token and be answered 404 here.
+func anthropicTitleServer(t *testing.T, reply string) (*httptest.Server, *anthropicUpstream) {
+	t.Helper()
+	up := &anthropicUpstream{}
+	up.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		up.mu.Lock()
+		up.paths = append(up.paths, r.URL.Path)
+		up.seen = append(up.seen, r.Header.Clone())
+		up.mu.Unlock()
+		if r.URL.Path != "/v1/messages" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"type":"message","role":"assistant","content":[{"type":"text","text":"`+reply+`"}],"stop_reason":"end_turn"}`)
+	}))
+	t.Cleanup(up.Close)
+	return up.Server, up
+}
+
+// The naming client speaks the binding's WIRE (ADR 0078): a child routed to an anthropic entry is
+// named over the Messages API — POST /v1/messages under `x-api-key`, no bearer — because the
+// binding the delegation wiring recorded carries that entry's `wire:` and namingCall dials with it.
+// Without the wire on the binding the call would go out as chat-completions to a server that does
+// not serve it, and every routed child on such a box would fall back to the session's name.
+func TestNamingCallSpeaksTheBindingsWire(t *testing.T) {
+	t.Parallel()
+
+	targetSrv, target := anthropicTitleServer(t, "grep the config keys")
+	sessionSrv, sessionGot := titleServer(t, "read the parser tests")
+	namer := namerOn(
+		constUpstream(upstreamBinding{Endpoint: sessionSrv.URL, Model: "smart-70b", APIKey: "sk-session"}, provider.EffortDialectNone),
+		constUpstream(upstreamBinding{Endpoint: targetSrv.URL, Model: "claude-grunt", APIKey: "sk-target", Wire: "anthropic"}, provider.EffortDialectNone))
+
+	got, err := namer.NameDelegation(context.Background(), domain.DelegationNaming{
+		Task: "search the config package for every editable key", Routed: true})
+	if err != nil {
+		t.Fatalf("NameDelegation for a child routed to an anthropic entry: %v", err)
+	}
+	if want := "grep the config keys"; got != want {
+		t.Errorf("routed name = %q; want %q — the anthropic target's answer", got, want)
+	}
+	target.mu.Lock()
+	defer target.mu.Unlock()
+	if len(target.paths) != 1 || target.paths[0] != "/v1/messages" {
+		t.Fatalf("the anthropic target saw %v; want exactly one POST /v1/messages", target.paths)
+	}
+	if h := target.seen[0]; h.Get("x-api-key") != "sk-target" || h.Get("Authorization") != "" {
+		t.Errorf("naming call carried x-api-key=%q Authorization=%q; want the anthropic wire's key header and no bearer",
+			h.Get("x-api-key"), h.Get("Authorization"))
+	}
+	if sessionGot.Model != "" {
+		t.Errorf("the session server saw a naming call for a ROUTED child (model %q); want it untouched", sessionGot.Model)
 	}
 }
 
@@ -267,6 +328,7 @@ func TestDelegationWiringRecordsTheTargetsBindingForNaming(t *testing.T) {
 	wiring.land(wiring.generation, "grunt", &apogee.DelegationTarget{
 		Endpoint:      "http://127.0.0.1:2222/v1",
 		APIKey:        "sk-grunt",
+		Wire:          "anthropic",
 		Model:         "cheap-7b",
 		EffortDialect: provider.EffortDialectReasoning,
 	}, nil)
@@ -275,7 +337,7 @@ func TestDelegationWiringRecordsTheTargetsBindingForNaming(t *testing.T) {
 	if !ok {
 		t.Fatal("routedBinding reports no target after a landing; a routed child would be named on the wrong box")
 	}
-	want := upstreamBinding{Endpoint: "http://127.0.0.1:2222/v1", Model: "cheap-7b", APIKey: "sk-grunt"}
+	want := upstreamBinding{Endpoint: "http://127.0.0.1:2222/v1", Model: "cheap-7b", APIKey: "sk-grunt", Wire: "anthropic"}
 	if binding != want {
 		t.Errorf("routedBinding = %+v; want the landed target's own dial facts %+v", binding, want)
 	}

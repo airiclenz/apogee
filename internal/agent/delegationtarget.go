@@ -42,6 +42,12 @@ type DelegationTarget struct {
 	Endpoint string
 	// APIKey is that endpoint's bearer token, empty for a server that needs none.
 	APIKey string
+	// Wire is the protocol family the target server speaks — the flagged entry's `wire:` key,
+	// "openai" or "anthropic" (ADR 0078; domain.Config.Wire's spelling, converted at the dial). A
+	// routed child dials with the TARGET's own value and never falls back to the parent's: the
+	// child is on another server, and a wire is a fact about the server, so "" here means the
+	// target names none and folds to openai — the parent's wire says nothing about this box.
+	Wire string
 	// Model is the model id a routed child sends on the wire — the entry's `model:` pin, else the
 	// model its heartbeat observed bound there. Required for the same reason Endpoint is: a
 	// delegation that cannot name a model is not a usable target, it is the fallback.

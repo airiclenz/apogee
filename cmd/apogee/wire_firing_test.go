@@ -670,7 +670,10 @@ func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
 // The entry's wire reaches both beat seams (ADR 0078): the Firing's own server is observed
 // under the wire its entry names, and the `sub-agents-server:` entry under ITS wire — a mixed
 // pair, so an anthropic entry cannot be observed as an openai one by either seam, and the
-// fold of an unnamed wire onto openai is asserted rather than assumed.
+// fold of an unnamed wire onto openai is asserted rather than assumed. And the same two values
+// ride past the beats onto what the engine dials with: the Config carries the bound entry's wire
+// as written, the routed target the grunt entry's own — so the run's session client and its
+// routed children each open the connection a session on that entry would.
 func TestFiringConfigBeatsCarryEachEntrysWire(t *testing.T) {
 	primary := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}
 	delegation := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 2}}
@@ -679,7 +682,7 @@ func TestFiringConfigBeatsCarryEachEntrysWire(t *testing.T) {
 	t.Cleanup(func() { discoverBeat, discoverDelegationBeat = prevPrimary, prevDelegation })
 
 	grunt := config.ServerEntry{Name: "grunt", Endpoint: "http://grunt.example/v1", Model: "grunt-model", APIKey: "sk-grunt"}
-	if _, _, _, err := firingConfig(context.Background(), firingInputs{
+	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
 		opts: config.Options{
 			Bypass:          true,
 			Servers:         []config.ServerEntry{grunt},
@@ -692,10 +695,20 @@ func TestFiringConfigBeatsCarryEachEntrysWire(t *testing.T) {
 		confiner: fenceableHost,
 		mode:     domain.ModePlan,
 		recordID: "2026-09-16T10-00-00-firing",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("firingConfig: %v", err)
 	}
 
+	if cfg.Wire != "anthropic" {
+		t.Errorf("Config.Wire = %q; want the bound entry's %q — an unattended run must dial the wire a session on this entry dials", cfg.Wire, "anthropic")
+	}
+	if routing.target == nil {
+		t.Fatal("no routed target resolved from the reachable grunt entry")
+	}
+	if routing.target.Wire != "" {
+		t.Errorf("routed target Wire = %q; want the grunt entry's own unnamed wire carried as written, never the session entry's", routing.target.Wire)
+	}
 	if want := []apiprovider.Wire{apiprovider.WireAnthropic}; !slices.Equal(primary.wires, want) {
 		t.Errorf("discoverBeat was dialled with %v; want the entry's own %v", primary.wires, want)
 	}

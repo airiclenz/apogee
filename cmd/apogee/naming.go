@@ -90,7 +90,7 @@ func newFiringNamer(
 	var routedUpstream func() (upstreamBinding, provider.EffortDialect, bool)
 	if routed != nil {
 		routedUpstream = func() (upstreamBinding, provider.EffortDialect, bool) {
-			return upstreamBinding{Endpoint: routed.Endpoint, Model: routed.Model, APIKey: routed.APIKey},
+			return upstreamBinding{Endpoint: routed.Endpoint, Model: routed.Model, APIKey: routed.APIKey, Wire: routed.Wire},
 				routed.EffortDialect, true
 		}
 	}

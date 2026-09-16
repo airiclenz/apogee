@@ -17,9 +17,11 @@ import (
 
 // dialRecord is what the fake Dialer noted about one dial: the three facts a constructor, a switch
 // or a routed spawn has to hand the seam TOGETHER — the wire target, the model bound on it and the
-// key it carries.
+// key it carries — and the wire the Options asked the client to speak, read back off a Client built
+// from those Options (provider.Option is opaque, and Client.Wire is its one accessor).
 type dialRecord struct {
 	endpoint, model, apiKey string
+	wire                    provider.Wire
 }
 
 // fakeDialer is the test double behind WithDialer. It records every dial in order and answers each
@@ -43,11 +45,13 @@ func dialerTo(up provider.Responder) *fakeDialer {
 	return dialerAnswering(func(string) provider.Responder { return up })
 }
 
-// dial is the Dialer the fake is installed as (WithDialer(d.dial)). The provider Options are
-// ignored: an in-process Responder has no client to arm.
-func (d *fakeDialer) dial(endpoint, model, apiKey string, _ ...provider.Option) provider.Responder {
+// dial is the Dialer the fake is installed as (WithDialer(d.dial)). The provider Options arm no
+// client — an in-process Responder has none — but they are applied to a throwaway one so the wire
+// they carry is recorded: that is the only way to observe what a real dial would have spoken.
+func (d *fakeDialer) dial(endpoint, model, apiKey string, opts ...provider.Option) provider.Responder {
+	wire := provider.NewClient("", "", opts...).Wire()
 	d.mu.Lock()
-	d.dials = append(d.dials, dialRecord{endpoint: endpoint, model: model, apiKey: apiKey})
+	d.dials = append(d.dials, dialRecord{endpoint: endpoint, model: model, apiKey: apiKey, wire: wire})
 	d.mu.Unlock()
 	return d.answer(endpoint)
 }
@@ -62,8 +66,13 @@ func (d *fakeDialer) dialled() []dialRecord {
 // TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn walks every dial site through one injected
 // Dialer: New dials the session's client through it, a routed spawn dials the child's client through
 // it and hands the child the same seam (the grandchild's dial proves the inheritance), and a switch
-// dials the replacement through it — each dial carrying the endpoint, model and key of the seat it
-// binds, and each Agent left speaking over exactly the Responder the fake answered with.
+// dials the replacement through it — each dial carrying the endpoint, model, key and wire of the
+// seat it binds, and each Agent left speaking over exactly the Responder the fake answered with.
+//
+// The wire is a per-server fact (ADR 0078), so the three seats deliberately differ: the session
+// starts on an anthropic entry, the routed target names NO wire — and the child dials openai, the
+// target's own folded answer, never the parent's anthropic — and the switch arrives on an
+// anthropic server again, the spec's value replacing whatever the retired client spoke.
 func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +98,7 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	cfg.Endpoint = sessionEndpoint
 	cfg.APIKey = "session-key"
 	cfg.Model = "smart-70b"
+	cfg.Wire = "anthropic"
 	cfg.Delegation.MaxDepth = 2 // room for the grandchild below
 	a, err := New(cfg, WithDialer(dialer.dial))
 	if err != nil {
@@ -117,18 +127,21 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 		t.Errorf("routed grandchild Upstream = %T, want the inherited Dialer's answer", grandchild.upstream)
 	}
 
-	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: switchedEndpoint, APIKey: "new-key"}); err != nil {
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: switchedEndpoint, APIKey: "new-key", Wire: "anthropic"}); err != nil {
 		t.Fatalf("SwitchUpstream: %v", err)
 	}
 	if a.upstream != switched {
 		t.Errorf("Upstream after the switch = %T, want the Responder the Dialer answered the switch with", a.upstream)
 	}
+	if a.cfg.Wire != "anthropic" {
+		t.Errorf("Config.Wire after the switch = %q, want the spec's %q mirrored, so a later dial speaks it", a.cfg.Wire, "anthropic")
+	}
 
 	want := []dialRecord{
-		{endpoint: sessionEndpoint, model: "smart-70b", apiKey: "session-key"},
-		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey},
-		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey},
-		{endpoint: switchedEndpoint, model: "", apiKey: "new-key"}, // a switch binds NO model (ADR 0024)
+		{endpoint: sessionEndpoint, model: "smart-70b", apiKey: "session-key", wire: provider.WireAnthropic},
+		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI}, // the target's own unnamed wire, not the parent's
+		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI},
+		{endpoint: switchedEndpoint, model: "", apiKey: "new-key", wire: provider.WireAnthropic}, // a switch binds NO model (ADR 0024)
 	}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
 		t.Errorf("dials through the seam = %+v, want %+v", got, want)
@@ -163,7 +176,7 @@ func TestResumeDialsThroughTheDialer(t *testing.T) {
 	if b.upstream != resumed {
 		t.Errorf("Resume bound %T as the Upstream, want the Dialer's answer", b.upstream)
 	}
-	want := []dialRecord{{endpoint: cfg.Endpoint, model: cfg.Model, apiKey: "resumed-key"}}
+	want := []dialRecord{{endpoint: cfg.Endpoint, model: cfg.Model, apiKey: "resumed-key", wire: provider.WireOpenAI}}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
 		t.Errorf("dials through the seam = %+v, want %+v", got, want)
 	}

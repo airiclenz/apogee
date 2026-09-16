@@ -142,7 +142,7 @@ func TestSwitchUpstreamSwapsTheProviderClient(t *testing.T) {
 	if len(dials) != 2 {
 		t.Fatalf("dials through the seam = %+v, want the session's and the switch's", dials)
 	}
-	if want := (dialRecord{endpoint: newEndpoint, model: "", apiKey: "new-key"}); dials[1] != want {
+	if want := (dialRecord{endpoint: newEndpoint, model: "", apiKey: "new-key", wire: provider.WireOpenAI}); dials[1] != want {
 		t.Errorf("the switch dialled %+v, want %+v — endpoint and key move together, with no model bound", dials[1], want)
 	}
 	if !slices.Equal(fresh.bound, []string{"new-model"}) {

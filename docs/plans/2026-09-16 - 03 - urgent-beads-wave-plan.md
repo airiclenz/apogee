@@ -279,7 +279,12 @@ NOTES (2026-09-16): consequential edit — cmd/apogee/probe.go: made necessary b
 
 **Commit:** `feat(provider): discovery on the anthropic wire; every Monitor is dialled with its server's wire`
 
-## 12. Thread the wire through the engine dial seam (apogee-6fp)
+## 12. Thread the wire through the engine dial seam (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the wire option is composed in one engine helper, `dialOptions` (construct.go), which wraps the existing `armWireCapture` — New, Resume, SwitchUpstream and the routed spawn all call it, so no dial site builds `provider.WithWire` by hand; `armWireCapture` itself is unchanged.
+NOTES (2026-09-16): `upstreamHolder.Bind`/`Swap` gained a `wire string` parameter (as the plan's guard states); the eight existing test call sites in keysource_test.go, upstream_test.go and wire_server_test.go were updated to pass "" — consequential to the signature change, no behaviour asserted there changed.
+NOTES (2026-09-16): the naming-client wire test (`TestNamingCallSpeaksTheBindingsWire`) uses a small httptest Messages responder in naming_test.go, matching the file's existing `titleServer` pattern, because stubllm's `/v1/messages` route lands only at item 13.
+NOTES (2026-09-16): fix-retry — `serverBinder.bind` (wire_server.go) now sets `cfg.Wire = entry.Wire` beside `cfg.APIKey`, so a session that STARTS on an anthropic entry is constructed under its wire, not only rebound to it; `TestServerBindHandsTheEntrysBoundsToTheEngine` gained a `wantWire` column asserting `handed.Wire` (verified to fail without the assignment).
 
 **What:** Depends on items 7, 8, 11. Producers and consumers of the per-server wire value (enumerated): `domain.Config` gains `Wire string` (`internal/domain/config.go`, beside `EffortDialect`); `internal/agent/agent.go` New/Resume dial with `provider.WithWire(provider.WireFor(cfg.Wire))`; `rebind.go` `UpstreamSpec.Wire` → `SwitchUpstream` dial; `delegationtarget.go` `DelegationTarget.Wire` → `subagent.go` routed-child dial (no parent fallback: a target's own value, zero = openai); `construct.go` carries it; `cmd/apogee/wire_firing.go` firingConfig → `domain.Config.Wire`; `cmd/apogee/delegation.go` target builder; `cmd/apogee/naming.go`/`title.go` `upstreamBinding` gains `Wire` and `namingCall`'s `provider.NewClient` passes it; `cmd/apogee/probemodel.go` and `internal/judge` clients likewise; `cmd/apogee/wire_settings.go` `/server` switch builds the spec with the wire. Binding standard: the value is copied at each seam as a string (`domain` never imports `provider`).
 

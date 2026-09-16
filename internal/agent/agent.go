@@ -573,8 +573,10 @@ func (t *usageTally) record(base domain.EventBase, model, served string, window,
 //
 // A Dialer never fails — construction cannot, so neither can a switch or a spawn (rebind.go's
 // commit point relies on it): a malformed endpoint surfaces at request time, matching the real
-// client. opts is the Inspector's wire observer when cfg.Inspector asks for it (armWireCapture),
-// and nothing else today; a fake that speaks no wire may ignore it.
+// client. opts is what dialOptions composes for the Config of the Agent that will speak over the
+// connection: the wire that server's entry names (provider.WithWire — ADR 0078) and, when
+// cfg.Inspector asks for it, the Inspector's wire observer (armWireCapture); a fake that speaks no
+// wire may ignore it.
 type Dialer func(endpoint, model, apiKey string, opts ...provider.Option) provider.Responder
 
 // dialProvider is the default Dialer: the real OpenAI-compatible provider client at endpoint,
@@ -620,11 +622,11 @@ func resolveOptions(opts []Option) constructOptions {
 // silently degrading a misconfigured surface. The root facade forwards apogee.New
 // here, dialling the session's client at cfg.Endpoint through the Dialer (P1.1; the real
 // OpenAI-compatible client unless WithDialer says otherwise) carrying cfg.APIKey —
-// unconditionally, since an empty key sends no auth header — and, only when cfg.Inspector
-// asks for it, the Inspector's wire observer (wireTap).
+// unconditionally, since an empty key sends no auth header — under the wire cfg.Wire names
+// (dialOptions) and, only when cfg.Inspector asks for it, the Inspector's wire observer (wireTap).
 func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 	o := resolveOptions(opts)
-	wire, tap := armWireCapture(cfg)
+	wire, tap := dialOptions(cfg)
 	a, err := newAgent(cfg, o.dial(cfg.Endpoint, cfg.Model, cfg.APIKey, wire...))
 	if err != nil {
 		return nil, err
@@ -642,7 +644,7 @@ func New(cfg domain.Config, opts ...Option) (*Agent, error) {
 // same Options as New: a resumed session dials its own client, through the same seam.
 func Resume(cfg domain.Config, snap domain.Session, opts ...Option) (*Agent, error) {
 	o := resolveOptions(opts)
-	wire, tap := armWireCapture(cfg)
+	wire, tap := dialOptions(cfg)
 	a, err := resumeAgent(cfg, snap, o.dial(cfg.Endpoint, cfg.Model, cfg.APIKey, wire...))
 	if err != nil {
 		return nil, err

@@ -1095,6 +1095,9 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	if target != nil {
 		childCfg.Endpoint = target.Endpoint
 		childCfg.APIKey = target.APIKey
+		// The target's own wire, unconditionally — never the parent's: the child is on another
+		// server, and "" is that server's own answer (folded to openai at the dial, ADR 0078).
+		childCfg.Wire = target.Wire
 		childCfg.Model = target.Model
 		// The window is the one target field that may name NOTHING: a flagged entry with no
 		// `context-window:` pin, on a server whose beat observed no per-slot window either, resolves
@@ -1134,7 +1137,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 			childCfg.Bypass = *target.Bypass
 		}
 		var opts []provider.Option
-		opts, tap = armWireCapture(childCfg)
+		opts, tap = dialOptions(childCfg)
 		upstream = a.dial(target.Endpoint, target.Model, target.APIKey, opts...)
 		ownsUpstream = true
 	}

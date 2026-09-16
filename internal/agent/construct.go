@@ -426,6 +426,19 @@ type wireTap struct {
 	a *Agent
 }
 
+// dialOptions composes the provider Options every dial in the engine crosses with: the wire the
+// Config names for the server about to be dialled (provider.WithWire over provider.WireFor, so an
+// unnamed wire folds to openai and the Client never speaks a protocol it does not have — ADR 0078),
+// and, only when cfg.Inspector asks for it, the Inspector's wire observer (armWireCapture). It is
+// called at every dial site — New, Resume, SwitchUpstream and the routed spawn — with the Config of
+// the Agent that will speak over the connection, which is what keeps the wire a per-server fact:
+// a switch dials the arrived-at server's wire, a routed child its target's, and neither inherits
+// the departed or parent server's protocol.
+func dialOptions(cfg domain.Config) ([]provider.Option, *wireTap) {
+	capture, tap := armWireCapture(cfg)
+	return append([]provider.Option{provider.WithWire(provider.WireFor(cfg.Wire))}, capture...), tap
+}
+
 // armWireCapture returns the provider Options that arm the Inspector for an Agent about to be
 // constructed from cfg, together with the tap the caller must bind to it. A cfg that does not ask
 // for the Inspector arms nothing and returns (nil, nil): no observer reaches the Client, so its

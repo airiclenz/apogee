@@ -64,6 +64,17 @@ type Config struct {
 	// so a caller that names no dialect sends exactly the bytes it sent before this field existed.
 	EffortDialect EffortDialect
 
+	// Wire names the outbound protocol family the client at Endpoint speaks (CONTEXT: Wire; ADR
+	// 0078): "openai" — chat-completions, the historical default — or "anthropic", the Messages
+	// API. It is the bound `servers:` entry's `wire:` key, a per-server fact like EffortDialect
+	// above and stated on the same construction surface for the same reason: a Driver that never
+	// rebinds still dials with the wire its entry names (ADR 0031's Driver parity). The zero value
+	// folds to "openai" at the dial (provider.WireFor), so a caller that names no wire opens
+	// exactly the connection it opened before this field existed. Spelled as a string rather than
+	// as provider.Wire because this package holds no provider import (ADR 0010); the conversion
+	// happens once, at the dial seam.
+	Wire string
+
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006/0076 D9: armed advise and shape Reactions off, structure on (the hard-constraint floor)

@@ -101,6 +101,7 @@ func TestResolveDelegationTargetPinsOutrankTheBeat(t *testing.T) {
 		Model:          "pinned-model",
 		ContextWindow:  32768,
 		ParallelAgents: 3,
+		Wire:           "anthropic",
 	}
 	observed := heartbeat.Beat{
 		Reachable:     true,
@@ -127,6 +128,9 @@ func TestResolveDelegationTargetPinsOutrankTheBeat(t *testing.T) {
 	}
 	if target.ParallelAgents != 3 {
 		t.Errorf("ParallelAgents = %d; want the entry's 3 pin to outrank the observed 8 slots", target.ParallelAgents)
+	}
+	if target.Wire != "anthropic" {
+		t.Errorf("Wire = %q; want the entry's `wire:` carried as written, so a routed child dials this box's protocol", target.Wire)
 	}
 }
 

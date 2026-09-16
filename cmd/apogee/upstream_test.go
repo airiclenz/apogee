@@ -59,7 +59,7 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 	second := upstreamServer(t, "model-b", 8192)
 
 	holder := newUpstreamHolder()
-	holder.Bind(first.URL, "key-a", "model-a", heartbeat.NewMonitor(first.URL, "", ""))
+	holder.Bind(first.URL, "key-a", "model-a", "", heartbeat.NewMonitor(first.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-a" {
 		t.Fatalf("first beat = %+v; want a reachable model-a from the seeded Monitor", beat)
@@ -74,7 +74,7 @@ func TestUpstreamHolderBeatFollowsTheSwap(t *testing.T) {
 		t.Errorf("Binding before the swap = %+v; want the seeded %+v", got, want)
 	}
 
-	holder.Swap(second.URL, "key-b", heartbeat.NewMonitor(second.URL, "", ""))
+	holder.Swap(second.URL, "key-b", "", heartbeat.NewMonitor(second.URL, "", ""))
 
 	if beat := holder.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "model-b" {
 		t.Errorf("beat after Swap = %+v; want a reachable model-b — the holder still observes the old server", beat)
@@ -1001,6 +1001,57 @@ func TestParallelAgentsCapCurrentReadsWithoutInstalling(t *testing.T) {
 	}
 }
 
+// A `/server` switch onto an anthropic entry hands the engine that entry's wire (ADR 0078): the
+// UpstreamSpec the move builds carries `Wire` beside the endpoint and key, so the replacement client
+// the engine dials speaks the Messages API — and the holder's binding moves with it, so the naming
+// call the next delegation makes dials the same protocol. The startup bind is the other writer of
+// the binding, and it carries the wire for the same reason.
+func TestMoveCarriesTheEntrysWireToTheEngineAndTheBinding(t *testing.T) {
+	t.Parallel()
+
+	holder := newUpstreamHolder()
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "anthropic",
+		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
+	if got := holder.Binding().Wire; got != "anthropic" {
+		t.Fatalf("Binding().Wire after the bind = %q; want the bound entry's %q", got, "anthropic")
+	}
+	switcher := &fakeSwitcher{}
+	mover := sessionMover{
+		agent: switcher, holder: holder, host: &fakeStamper{},
+		live: newLiveSettings(config.Options{}), keys: config.NewKeyResolver(""), caps: newParallelAgentsCap(&parallelAgentsSpy{}),
+	}
+
+	entry := config.ServerEntry{Name: "claude", Endpoint: "http://claude.invalid:2222", APIKey: "sk-claude", Wire: "anthropic"}
+	if _, err := mover.move(entry); err != nil {
+		t.Fatalf("move onto the anthropic entry: %v", err)
+	}
+
+	if len(switcher.specs) != 1 {
+		t.Fatalf("the engine saw %d switches; want exactly one", len(switcher.specs))
+	}
+	if spec := switcher.specs[0]; spec.Wire != "anthropic" || spec.Endpoint != entry.Endpoint || spec.APIKey != "sk-claude" {
+		t.Errorf("UpstreamSpec = {Endpoint:%q APIKey:%q Wire:%q}; want the entry's endpoint, its resolved key and its wire %q together",
+			spec.Endpoint, spec.APIKey, spec.Wire, "anthropic")
+	}
+	want := upstreamBinding{Endpoint: entry.Endpoint, APIKey: "sk-claude", Wire: "anthropic"}
+	if got := holder.Binding(); got != want {
+		t.Errorf("Binding() after the move = %+v; want %+v — the wire moves with the endpoint and key, the model unbound", got, want)
+	}
+
+	// Moving back onto an entry that names no wire clears it: "" is that server's own answer
+	// (folded to openai at the dial), never the departed anthropic server's.
+	plain := config.ServerEntry{Name: "box", Endpoint: "http://box.invalid:3333"}
+	if _, err := mover.move(plain); err != nil {
+		t.Fatalf("move onto the unnamed-wire entry: %v", err)
+	}
+	if spec := switcher.specs[1]; spec.Wire != "" {
+		t.Errorf("UpstreamSpec.Wire after moving to an entry that names none = %q; want the empty value, not the departed server's", spec.Wire)
+	}
+	if got := holder.Binding().Wire; got != "" {
+		t.Errorf("Binding().Wire after the second move = %q; want it cleared with the endpoint", got)
+	}
+}
+
 // A move is an arrival too (ADR 0039), and the shared fold is where every arrival that is not a bind
 // makes the cap follow: the entry the session lands on supplies the pin, and that written pin outranks
 // whatever the new server's beats go on to observe.
@@ -1010,7 +1061,7 @@ func TestMoveReFollowsTheParallelAgentsCap(t *testing.T) {
 	spy := &parallelAgentsSpy{}
 	caps := newParallelAgentsCap(spy)
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	mover := sessionMover{
 		agent: &fakeSwitcher{}, holder: holder, host: &fakeStamper{},

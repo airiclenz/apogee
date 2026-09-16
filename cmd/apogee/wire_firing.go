@@ -330,6 +330,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// the same five words on this side of the boundary (internal/agent's toProviderDialect
 	// converts them back at the wire seam, where the provider package holds no domain import).
 	cfg.EffortDialect = domain.EffortDialect(effortDialect)
+	// And the protocol the bound entry speaks — its `wire:` key as written (ADR 0078), the same
+	// value the beat above was dialled under, so an unattended run opens the connection a session
+	// on this entry opens (ADR 0031's Driver parity).
+	cfg.Wire = in.entry.Wire
 	// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
 	// rather than off opts, so the run reads responses in the same shape a session on the same
 	// model would, and a built-in match has already narrated itself through the notices.

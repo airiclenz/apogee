@@ -499,7 +499,7 @@ func (d *delegationWiring) land(generation int, name string, target *apogee.Dele
 		// recorded beside the push rather than derived from it later because the target the engine
 		// holds is behind the latch, and the latch is the ENGINE's — reading it back out to build a
 		// host-side request would be the wire-silent engine handing the host its wiring back.
-		d.targetBinding = upstreamBinding{Endpoint: target.Endpoint, Model: target.Model, APIKey: target.APIKey}
+		d.targetBinding = upstreamBinding{Endpoint: target.Endpoint, Model: target.Model, APIKey: target.APIKey, Wire: target.Wire}
 		d.targetDialect = target.EffortDialect
 		d.targetBound = true
 	}
@@ -864,7 +864,11 @@ func resolveDelegationTarget(
 		// The key the beat above just authenticated with, resolved from the entry's key source by
 		// the caller: the child talks to the same server, with the same credential, and cannot be
 		// handed a source it would have to run again for itself.
-		APIKey:        apiKey,
+		APIKey: apiKey,
+		// The protocol that server speaks — the entry's `wire:` key as written (ADR 0078), the
+		// same value the beat above was dialled under; a routed child dials with it and never with
+		// the session server's.
+		Wire:          entry.Wire,
 		Model:         model,
 		ContextWindow: window,
 		// The entry's `working-window:` bound, carried as written and NOT resolved over the top-level

@@ -509,7 +509,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	agent := &fakeSwitcher{}
 	host := &fakeStamper{}
 	holder := newUpstreamHolder()
-	holder.Bind(endpoint, "", "", heartbeat.NewMonitor(endpoint, "", ""))
+	holder.Bind(endpoint, "", "", "", heartbeat.NewMonitor(endpoint, "", ""))
 	widths := &parallelAgentsSpy{}
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
@@ -1367,7 +1367,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	agent := &fakeSwitcher{}
 	host := &fakeStamper{}
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384})
 	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
@@ -1457,7 +1457,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 
 	agent := &fakeSwitcher{}
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model",
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2})
 	mover := sessionMover{
@@ -1586,16 +1586,18 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 		wantWindow   int
 		wantOutput   int
 		wantParallel int
+		wantWire     string
 	}{
 		{
 			name: "the entry's own pins outrank what the session arrived with",
 			entry: config.ServerEntry{
 				Name: "workstation", Endpoint: "http://127.0.0.1:1111", Model: "pinned-model",
-				ContextWindow: 65536, MaxOutputTokens: 4096, ParallelAgents: 3,
+				ContextWindow: 65536, MaxOutputTokens: 4096, ParallelAgents: 3, Wire: "anthropic",
 			},
 			wantWindow:   65536,
 			wantOutput:   4096,
 			wantParallel: 3,
+			wantWire:     "anthropic",
 		},
 		{
 			name:         "an entry pinning nothing keeps the top-level window, derives the cap and runs serial",
@@ -1603,6 +1605,7 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 			wantWindow:   topLevelWindow,
 			wantOutput:   0,
 			wantParallel: 1,
+			wantWire:     "",
 		},
 	}
 	for _, tt := range tests {
@@ -1647,6 +1650,10 @@ func TestServerBindHandsTheEntrysBoundsToTheEngine(t *testing.T) {
 				t.Errorf("Config.ParallelAgents = %d; want %d — the width this session's very first "+
 					"fan-out may reach, never the retired server's %d",
 					handed.ParallelAgents, tt.wantParallel, retiredWidth)
+			}
+			if handed.Wire != tt.wantWire {
+				t.Errorf("Config.Wire = %q; want %q — the wire this session's very first Turn dials "+
+					"with (ADR 0078), read from the entry and nowhere else", handed.Wire, tt.wantWire)
 			}
 		})
 	}

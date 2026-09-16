@@ -109,6 +109,9 @@ func probeModelCommand() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// And the wire both clients speak — the startup entry's `wire:` key (ADR 0078), so the
+			// battery dials the server the way a session on that entry would.
+			wire := provider.WireFor(opts.StartupEntry.Wire)
 
 			// Said BEFORE the first call, per ADR 0021 §4: a command that spends tokens and
 			// switches automatism on announces both in advance, not in its epilogue.
@@ -120,7 +123,7 @@ func probeModelCommand() *cobra.Command {
 			label := opts.Model
 			if label == "" {
 				info, derr := provider.NewClient(opts.Endpoint, "",
-					provider.WithAPIKey(apiKey)).Discover(cmd.Context())
+					provider.WithAPIKey(apiKey), provider.WithWire(wire)).Discover(cmd.Context())
 				if derr != nil {
 					return derr
 				}
@@ -140,7 +143,8 @@ func probeModelCommand() *cobra.Command {
 			// Both of this command's clients are keyed, so a keyed
 			// Upstream cannot refuse the probe while a session against it works.
 			client := provider.NewClient(opts.Endpoint, label,
-				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(apiKey))
+				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(apiKey),
+				provider.WithWire(wire))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
 				Endpoint: opts.Endpoint,
 				Model:    label,

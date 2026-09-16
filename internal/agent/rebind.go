@@ -258,6 +258,12 @@ type UpstreamSpec struct {
 	// APIKey is the new server's bearer token; "" sends no auth header. Keys are per-server, so
 	// this replaces the old one outright rather than being carried over.
 	APIKey string
+	// Wire is the protocol family the new server speaks — the entry's `wire:` key, "openai" or
+	// "anthropic" (ADR 0078; domain.Config.Wire's spelling, converted at the dial). It rides the
+	// switch for the key's reason: a wire is a fact about the server being dialled, so the
+	// replacement client speaks the arrived-at server's protocol and never the retired one's. ""
+	// folds to openai, which is what every entry that names no wire has always been served.
+	Wire string
 	// ServerName and ServerDescription are the new Upstream in the HUMAN's words — the `servers:`
 	// entry being switched to and its free-text `description:` (ADR 0069, domain.Config's pair of
 	// the same name). They ride the switch rather than being pushed separately because they
@@ -349,7 +355,12 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	// client it was built with: without this a `/server` switch would silently disarm a session
 	// that started with `ui.inspector` on. The tap binds to THIS Agent, which is the one that will
 	// speak over the new connection.
-	opts, tap := armWireCapture(a.cfg)
+	// The replacement is dialled under the NEW server's wire (ADR 0078) — read off the Config as it
+	// will stand after the mirror below, since dialOptions composes from the Config of the Agent
+	// that speaks over the connection, and that Agent is about to be on spec's server.
+	arrived := a.cfg
+	arrived.Wire = spec.Wire
+	opts, tap := dialOptions(arrived)
 	tap.bind(a)
 	// The retired client goes down with the server it dialled: a switch is the one moment where a
 	// client this session OWNS stops being reachable, so skipping the teardown would strand its
@@ -362,6 +373,7 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	a.ownsUpstream = true
 	a.cfg.Endpoint = spec.Endpoint
 	a.cfg.APIKey = spec.APIKey
+	a.cfg.Wire = spec.Wire
 	// The human's words for the box just dialled, moving WITH it (ADR 0069): the orientation
 	// block's Delegations line describes the session seat from these, and an empty spec field
 	// clears rather than keeps — the retired server's name describes a machine this session no
