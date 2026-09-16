@@ -105,9 +105,7 @@ and Windows SmartScreen may warn about an unrecognised publisher. `SHA256SUMS` i
 check actually worth making.
 
 **From source:** a clone plus `make build` — see
-[Building from source](docs/manual/building.md). One warning: `go install …@main` works,
-but **never `@latest`** — proxy.golang.org immutably retains retired `v1.x` versions, so
-`@latest` resolves to a stale build.
+[Building from source](docs/manual/building.md). `go install …@latest`, `@main` and `@<sha>` all work.
 
 ## Quick start
 

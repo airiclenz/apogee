@@ -2,6 +2,13 @@ module github.com/airiclenz/apogee
 
 go 1.26.3
 
+// v1.x was an accidental pre-production series; the project restarted at v0.x
+// (2026-07-23). proxy.golang.org retains the deleted v1.x tags immutably and
+// resolves `@latest` (and pkg.go.dev's "Latest") from the highest one, so the
+// retraction has to travel in a version above v1.7.0 — v1.8.0 exists only to
+// carry this block and retracts itself.
+retract [v1.0.0, v1.8.0]
+
 require (
 	charm.land/bubbles/v2 v2.1.0
 	charm.land/bubbletea/v2 v2.0.8

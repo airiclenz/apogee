@@ -39,9 +39,10 @@ either `sudo install -m 0755 ./apogee /usr/local/bin/apogee` or an explicit
 `PATH`. `PREFIX` overrides the search entirely.
 
 No clone at all? `go install github.com/airiclenz/apogee/cmd/apogee@main` builds and
-installs straight from the tip of `main` into your Go bin dir (pin a commit with
-`@<sha>` instead). Only `@latest` is off-limits — proxy.golang.org immutably retains
-the retired `v1.x` module versions, so `@latest` resolves to stale `v1.7.0`.
+installs straight from the tip of `main` into your Go bin dir; `@latest` installs the
+current release, and `@<sha>` pins a commit. (The retired `v1.x` module versions that
+proxy.golang.org retains immutably are retracted in `go.mod`, so `@latest` no longer
+resolves to them.)
 
 **Versions and tags.** The top-level `VERSION` file is the single source of truth for the
 release version — one line, carrying the leading `v` (`v0.16.8`); `make dist` strips that
