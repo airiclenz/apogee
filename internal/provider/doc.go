@@ -9,7 +9,8 @@
 // The Client speaks one Wire per server entry, selected by WithWire: the protocol-specific
 // half of a round-trip — request path and key header, body encoding, whole-reply decode,
 // SSE parsing — is an unexported wireCodec, one deep module per wire (openaiCodec in
-// wire_openai.go is the default and the historical chat-completions behaviour), while
+// wire_openai.go is the default and the historical chat-completions behaviour; anthropicCodec
+// in wire_anthropic.go speaks the Messages API, ADR 0078), while
 // retries, timeouts, redirect refusal, fault classification, sanitising and wire capture
 // stay in the Client and are shared by every wire. Nothing outside a codec's file branches
 // on its dialect.
