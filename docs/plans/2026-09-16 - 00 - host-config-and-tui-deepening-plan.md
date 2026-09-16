@@ -114,7 +114,9 @@ fake's side effect file). Existing cases unchanged.
 
 **Commit:** `fix(cmd): resolve the boot go probe through the argv[0] fence`
 
-## 2. A live re-read never folds the retired top-level keys
+## 2. A live re-read never folds the retired top-level keys — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the live refusal is `legacyRefusal` with a "session is running" reason (new helper `liveLegacyRefusal`), so the wording is the startup pass's own; `TestLoadFileConfigLeavesTheRetiredKeysToStartup` became a `{given, wantRefusal}` table pinning the sentence whole, no sibling test added.
 
 **What.** Recast at the regression check (2026-09-16). Defect (confirmed): `internal/config/configmigrate.go` `migrateLegacyConfig(…,
 mayFoldReactions=false)` refuses `hooks:` but still folds, backs up and rewrites a file carrying the

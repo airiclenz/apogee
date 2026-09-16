@@ -81,13 +81,14 @@ const backupStampLayout = "20060102-150405"
 // `llama-launcher:` and `model-profile:` keys, refused before a single byte is read for the fold,
 // so a config that carries more than one retired shape is stopped rather than half-rewritten.
 //
-// mayFoldReactions says whether this read is the STARTUP one, which may rewrite the file, or a live
+// mayMigrate says whether this read is the STARTUP one, which may rewrite the file, or a live
 // re-read under a running session, which may not: apogee never mutates a config file out from under
-// a session, so a live re-read of a file still carrying `hooks:` refuses instead of folding it
-// (ADR 0076 A6, the stage-2 plan's item 9 decision).
+// a session, so a live re-read of a file still carrying `hooks:` (ADR 0076 A6, the stage-2 plan's
+// item 9 decision) or the retired top-level quadruple refuses instead of folding it — bytes
+// untouched, no backup, the same refusal the startup pass gives when a fold cannot be made.
 //
 // now dates the backup and is injected so a test can name the file it expects.
-func migrateLegacyConfig(path string, data []byte, now time.Time, mayFoldReactions bool) ([]byte, string, error) {
+func migrateLegacyConfig(path string, data []byte, now time.Time, mayMigrate bool) ([]byte, string, error) {
 	if err := refuseRetiredLauncherKey(path, data); err != nil {
 		return nil, "", err
 	}
@@ -105,9 +106,12 @@ func migrateLegacyConfig(path string, data []byte, now time.Time, mayFoldReactio
 	if rc.hasHooks && rc.hasReactions {
 		return nil, "", bothListsRefusal(path)
 	}
-	if !mayFoldReactions {
+	if !mayMigrate {
 		if rc.hasHooks {
 			return nil, "", liveReactionsRefusal(path)
+		}
+		if !lc.isEmpty() {
+			return nil, "", liveLegacyRefusal(path, lc)
 		}
 		// The retired `mechanisms:` and `validated-sets:` keys are left exactly where they are on a
 		// live re-read: the strip is a WRITE, and the only thing a session gains by it is a
@@ -466,6 +470,16 @@ func legacyRefusal(path string, lc legacyFileConfig, why error) error {
 		"keys — the servers: list is now the single definition of the servers you run models on.\n\n"+
 		"apogee did not fold them in for you because %v.\n\n"+
 		"Delete those keys and put this in their place:\n\n%s", path, why, lc.block())
+}
+
+// liveLegacyRefusal is what a LIVE re-read of a file still carrying the retired quadruple gets: the
+// startup refusal (legacyRefusal), with "a session is running" as the reason the fold was not made.
+// The fold is a startup act and only a startup act — apogee does not rewrite a config file out from
+// under a running session — so the re-read refuses, writes nothing, and the session keeps the
+// servers it resolved at launch.
+func liveLegacyRefusal(path string, lc legacyFileConfig) error {
+	return legacyRefusal(path, lc, errors.New("apogee does not rewrite a config file while a "+
+		"session is running — the fold happens at startup, so restarting apogee makes it for you"))
 }
 
 // ----------------------------------------------------------------------------

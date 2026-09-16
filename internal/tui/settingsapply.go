@@ -320,8 +320,8 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 
 // parseStallAfter reads the `ui.stall-after` row's value as the quiet threshold the status line
 // waits out, and refuses what a threshold cannot be. It restates the parse internal/config makes at
-// startup rather than calling it, because the dependency runs the other way — internal/config
-// imports this package — and the whole of the contract is two lines of time.ParseDuration.
+// startup rather than calling it: neither package imports the other (ADR 0043, the 2026-08-21
+// amendment), and the whole of the contract is two lines of time.ParseDuration.
 //
 // The refusal is worded for the row it is rendered on: the key, what the key takes, and the text
 // that was offered, with no path in front of it.

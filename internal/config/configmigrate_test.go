@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -1263,25 +1264,49 @@ func TestLoadFileConfigRefusesTheHooksBlockWithoutRewritingIt(t *testing.T) {
 	assertMigrationWroteNothing(t, path, given)
 }
 
-// A live re-read leaves a `mechanisms:` or `validated-sets:` key exactly where it is rather than
-// refusing over it: neither key is read by anything either way, and the strip is a write a running
-// session may not make.
+// A live re-read never writes, whichever retired shape the file carries. A `mechanisms:` or
+// `validated-sets:` key is left exactly where it is rather than refused over: neither key is read by
+// anything either way, and the strip is a write a running session may not make. The retired
+// top-level quadruple is REFUSED — with the startup refusal and its paste-able replacement, plus
+// "a session is running" as the reason — because a working `endpoint:` that silently stopped being
+// read is the one outcome the sniff exists to prevent; and the refusal, like the `hooks:` one,
+// leaves the file and the apogee home exactly as it found them. The sentence is pinned whole
+// because it is the one the user meets on a `/settings` apply.
 func TestLoadFileConfigLeavesTheRetiredKeysToStartup(t *testing.T) {
 	t.Parallel()
-	for _, given := range []string{
-		"mechanisms:\n  grammar: true\n",
-		"validated-sets:\n  enable: false\n",
-	} {
-		t.Run(given, func(t *testing.T) {
+	tests := []struct {
+		given       string
+		wantRefusal string
+	}{
+		{given: "mechanisms:\n  grammar: true\n"},
+		{given: "validated-sets:\n  enable: false\n"},
+		{
+			given: "endpoint: http://x\n",
+			wantRefusal: "apogee: %s still uses the retired top-level endpoint:/api-key:/host-alias:/model: " +
+				"keys — the servers: list is now the single definition of the servers you run models on.\n\n" +
+				"apogee did not fold them in for you because apogee does not rewrite a config file while a " +
+				"session is running — the fold happens at startup, so restarting apogee makes it for you.\n\n" +
+				"Delete those keys and put this in their place:\n\n" +
+				"servers:\n  - name: x\n    endpoint: http://x\n\nserver: x\n",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.given, func(t *testing.T) {
 			t.Parallel()
-			path := writeMigrationConfig(t, given)
+			path := writeMigrationConfig(t, tt.given)
 
-			if _, err := LoadFileConfig(path, os.ReadFile, noNotify); err != nil {
+			_, err := LoadFileConfig(path, os.ReadFile, noNotify)
+
+			switch {
+			case tt.wantRefusal == "" && err != nil:
 				t.Fatalf("LoadFileConfig: %v — a live re-read must not refuse over a key "+
 					"it may not strip", err)
+			case tt.wantRefusal != "" && err == nil:
+				t.Fatal("a live re-read folded the retired quadruple; want a refusal that writes nothing")
+			case tt.wantRefusal != "" && err.Error() != fmt.Sprintf(tt.wantRefusal, path):
+				t.Errorf("refusal =\n%q\nwant\n%q", err, fmt.Sprintf(tt.wantRefusal, path))
 			}
-
-			assertMigrationWroteNothing(t, path, given)
+			assertMigrationWroteNothing(t, path, tt.given)
 		})
 	}
 }

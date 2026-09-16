@@ -2743,13 +2743,14 @@ func applyFile(o *Options, fc fileConfig) {
 // re-reads ONE block of the file — the /settings applies, which re-resolve the block they just
 // wrote — resolve it exactly as startup did, without a second reading of the schema.
 //
-// A config still written in the retired schema is migrated here, before anything is projected: the
+// A config still written in the retired schema is REFUSED here, before anything is projected: the
 // decoder ignores keys the struct no longer has, so without the sniff a working `endpoint:` would
 // simply stop being read and the session would report no server configured, with nothing pointing
-// at the four lines that ARE the configuration. This is the one place the loader can WRITE — the
-// one-time fold of ADR 0036 decision 9, which rewrites path itself and announces the change through
-// notify; a file already in the new schema is never touched, so the write happens at most once per
-// config and the injected readFile stays the only reader on every other launch.
+// at the four lines that ARE the configuration. This reader never writes: it is the live re-read —
+// every `/settings` apply comes through it under a running session — and apogee does not rewrite a
+// config file out from under a session, so the refusal spells the replacement out instead. The one
+// migrating read is `parseConfigFile(…, true)` under ResolveOptions, the startup pass, which
+// performs the one-time fold of ADR 0036 decision 9 and announces it through notify.
 func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify func(string)) (Options, error) {
 	fc, err := parseConfigFile(path, readFile, notify, false)
 	if err != nil {
@@ -3103,8 +3104,9 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 // ApplyConfig is [ResolveOptions] on the live machine plus the step that needs its result: which of
 // the resolved `servers:` entries this session starts on. notify receives resolution's soft notices
 // — a malformed acknowledgement is reported and skipped, never fatal — on stderr, like the other
-// pre-TUI startup lines. The one-time legacy migration announces itself the same way
-// (LoadFileConfig): a file apogee rewrote on the user's behalf must say so where they will see it.
+// pre-TUI startup lines. The one-time legacy migration announces itself the same way — it is made
+// by the `parseConfigFile(…, true)` call under ResolveOptions, the one migrating read: a file apogee
+// rewrote on the user's behalf must say so where they will see it.
 //
 // One error is deliberately returned LAST, after every value has been written back:
 // [StartupUndetermined], the refusal that says the config could not name a startup server. Every
