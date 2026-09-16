@@ -257,7 +257,7 @@ func TestRebindInputsOverlayTheBoundUpstream(t *testing.T) {
 	live := newLiveSettings(launchOpts)
 	bound := upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model", APIKey: "bound-key"}
 
-	base, _, _ := live.rebindInputs(launchOpts, bound)
+	base, _, _ := live.rebindInputs(bound)
 
 	if base.Endpoint != bound.Endpoint {
 		t.Errorf("endpoint = %q; want the bound %q, not the launch snapshot's", base.Endpoint, bound.Endpoint)
@@ -1408,13 +1408,13 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	// The pin outlives the move by more than one beat: the rebind that the new server's first
 	// observation drives resolves its window through this same holder, so it binds the entry's 65,536
 	// rather than the top-level 16,384 or whatever that server happens to advertise.
-	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, pin, _ := live.rebindInputs(upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the moved-to entry's 65536", pin)
 	}
 	// And so does the ceiling beside it, for the same span and the same reason: a rebind now re-states
 	// the reply cap on its spec, so a latch left behind on the retired entry's number would have the
 	// first beat after a move un-bound — or wrongly bound — a reply on the server just arrived at.
-	if _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 8192 {
+	if _, _, outputCap := live.rebindInputs(upstreamBinding{}); outputCap != 8192 {
 		t.Errorf("the next rebind's ceiling = %d; want the moved-to entry's 8192", outputCap)
 	}
 
@@ -1433,12 +1433,12 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	if want := (tui.ServerSwitchResult{Endpoint: bare.Endpoint, HostAlias: "laptop", ContextWindow: 16384}); result != want {
 		t.Errorf("move = %+v; want %+v — the top-level pin survives a move", result, want)
 	}
-	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+	if _, pin, _ := live.rebindInputs(upstreamBinding{}); pin != 16384 {
 		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back", pin)
 	}
 	// The ceiling has no top-level key to fall back to (ADR 0046), so an entry that pins none hands
 	// the next rebind the 0 that means "derive it" — never the retired entry's 8,192.
-	if _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != 0 {
+	if _, _, outputCap := live.rebindInputs(upstreamBinding{}); outputCap != 0 {
 		t.Errorf("the next rebind's ceiling = %d; want 0 — the retired entry's pin must not follow", outputCap)
 	}
 }
@@ -1476,7 +1476,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 		t.Errorf("SwitchUpstream specs = %+v; want the first to carry the entry's own 0.35 share",
 			agent.specs)
 	}
-	if base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.35 {
+	if base, _, _ := live.rebindInputs(upstreamBinding{}); base.ResponseReserve != 0.35 {
 		t.Errorf("the next re-resolution's share = %v; want the moved-to entry's 0.35 — the latch went stale",
 			base.ResponseReserve)
 	}
@@ -1489,7 +1489,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 		t.Errorf("SwitchUpstream specs = %+v; want the second to fall back to the top-level 0.2, "+
 			"never the retired entry's 0.35", agent.specs)
 	}
-	if base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); base.ResponseReserve != 0.2 {
+	if base, _, _ := live.rebindInputs(upstreamBinding{}); base.ResponseReserve != 0.2 {
 		t.Errorf("the next re-resolution's share = %v; want the top-level 0.2 back once the entry states none",
 			base.ResponseReserve)
 	}

@@ -214,7 +214,12 @@ green; a new test asserts `generation()` after `setBypass` + `setFloorGuard` equ
 
 **Commit:** `refactor(cmd): derive the engine Generation from the live overlay`
 
-## 5. Firings and rebinds read the overlay; every live key is asserted through `options()`
+## 5. Firings and rebinds read the overlay; every live key is asserted through `options()` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `firingBinding` already read `cloneOptions(s.now)` after item 3, and the holder's doc comment was already rewritten to the boot + overlay model there (no "exception list" sentence survives — the only `exception` left is the `contextFilesOn`/`contextFileNames` field comment naming the pair as the one key kept beside `now`); this item's production change is therefore `rebindInputs` alone.
+NOTES (2026-09-16): `rebindInputs` drops the four per-key overlays it used to write onto the launch copy (`Servers`, `SystemPrompt`, `UseDefaultPrompt`, `ModelProfiles`) — they were `now`'s fields and are on the cloned overlay already; the wire, the resolved pin and the resolved reserve stay written onto the copy, the cap handed back beside it.
+NOTES (2026-09-16): `cmd/apogee/schedule_test.go` (in the item's Files) needed no edit — no test there calls `rebindInputs`, and `TestScheduleFiringKeepsTheBootFenceAfterConfineOff` / `TestScheduleFiringCarriesTheSessionsSyncLane` pass unchanged.
+NOTES (2026-09-16): the new test is `TestRebindInputsCarriesTheToggledToolRoster` (wire_settings_test.go) — apogee has no `/tools` command; the "`/tools` toggle" is the `tools.disabled` apply through `applySettingFor`, the swap-door route a `/settings` commit takes.
 
 **What.** Depends on items 3–4. `firingBinding` and `rebindInputs` take `now`. **Behaviour change
 (ratified):** `rebindInputs` today starts from the boot `w.opts`; it now starts from the overlay,

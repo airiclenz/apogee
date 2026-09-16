@@ -1135,17 +1135,21 @@ func seatChoiceOffered(t *testing.T, registry *apogee.ToolRegistry) bool {
 // The holder is the session's live configuration, not just its exception list: a Firing raised
 // inside the session composes its whole Config from options(), so every key a `/settings` commit
 // applies has to be visible there (ADR 0037's promise carried into the runs a session raises).
-// The eleven keys below are the ones whose apply moves something OUTSIDE the holder — the tool set's
-// five, the engine's two toggles, the start-up-only inspector, the context-file pair and the
+// The first eleven keys below are the ones whose apply moves something OUTSIDE the holder — the tool
+// set's five, the engine's two toggles, the start-up-only inspector, the context-file pair and the
 // `servers:` list an unattended run's secret-env union is read off — which is exactly the set that
-// used to leave the projection describing the launch snapshot.
+// used to leave the projection describing the launch snapshot. The six after the inspector are the
+// keys whose apply is the WRITE ALONE for this session (the three delegation bounds, the delegate
+// timeout, the working window, the undo switch): nothing outside the holder moves, so the overlay is
+// the only place the edit can be seen at all, and a Firing composed off it is the only thing that
+// ever acts on it.
 //
 // Each case is asserted twice: once on the projection, and once more after a caller has mauled every
 // list and map it was handed. A holder that returned its own backing arrays would come back changed.
 func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 	t.Parallel()
 
-	// The boot snapshot every case starts from, with each of the eleven keys set to something its edit
+	// The boot snapshot every case starts from, with each of the edited keys set to something its edit
 	// moves OFF: a value that came back unchanged would be the launch snapshot showing through rather
 	// than the apply landing.
 	boot := config.Options{
@@ -1158,6 +1162,12 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		PruneToolResults:  true,
 		ContextFillNotice: true,
 		StepBudgetNotice:  true,
+		DelegateMaxSteps:  40,
+		DelegateMaxDepth:  2,
+		DelegateMaxTokens: 100_000,
+		DelegateTimeout:   10 * time.Minute,
+		WorkingWindow:     8192,
+		UndoSnapshots:     true,
 		ContextFiles:      []string{"AGENTS.md"},
 		Servers:           []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
 		// The `reactions:` list is the one key here that NO case below edits, and it is in the snapshot
@@ -1294,6 +1304,60 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 			},
 		},
 		{
+			name: "delegate-max-steps", key: "delegate-max-steps", value: "80",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.DelegateMaxSteps; got != 80 {
+					t.Errorf("DelegateMaxSteps = %d, want the bound the session set (80)", got)
+				}
+			},
+		},
+		{
+			name: "delegate-max-depth", key: "delegate-max-depth", value: "4",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.DelegateMaxDepth; got != 4 {
+					t.Errorf("DelegateMaxDepth = %d, want the bound the session set (4)", got)
+				}
+			},
+		},
+		{
+			name: "delegate-max-tokens", key: "delegate-max-tokens", value: "250000",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.DelegateMaxTokens; got != 250_000 {
+					t.Errorf("DelegateMaxTokens = %d, want the budget the session set (250000)", got)
+				}
+			},
+		},
+		{
+			name: "delegate-timeout", key: "delegate-timeout", value: "30m",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.DelegateTimeout; got != 30*time.Minute {
+					t.Errorf("DelegateTimeout = %v, want the limit the session set (30m)", got)
+				}
+			},
+		},
+		{
+			name: "working-window", key: "working-window", value: "16384",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.WorkingWindow; got != 16384 {
+					t.Errorf("WorkingWindow = %d, want the room the session set (16384)", got)
+				}
+			},
+		},
+		{
+			name: "undo-snapshots", key: "undo-snapshots", value: "false",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if opts.UndoSnapshots {
+					t.Error("UndoSnapshots = true, want the switch the session turned off")
+				}
+			},
+		},
+		{
 			// The block is two keys and ONE resolved list, so switching it off is the empty list a
 			// start-up with `enable: false` resolves — not the names left standing behind the switch.
 			name: "context-files.enable", key: "context-files.enable", value: "false",
@@ -1387,6 +1451,40 @@ func clobberOptions(opts config.Options) {
 		opts.Reactions[i] = domain.Reaction{ID: "clobbered"}
 	}
 	clear(opts.SystemPrompt.Models)
+}
+
+// A rebind sees what the session sees. rebindInputs starts from the overlay rather than the launch
+// snapshot, so the `tools.disabled:` roster a `/settings` commit swapped the session onto — one of
+// the keys that used to be left behind on the boot value — is what the next per-model resolution
+// is handed, exactly as a Firing composed off options() would read it (ratified 2026-09-16). The
+// projection keeps its own overlay on top: the bound wire and the resolved pins still land on the
+// copy, so a `/server` move and a roster edit are both in force at once.
+func TestRebindInputsCarriesTheToggledToolRoster(t *testing.T) {
+	t.Parallel()
+	boot := config.Options{ToolsDisabled: []string{"python_exec"}}
+	live := newLiveSettings(boot)
+	set := newLiveTools(apogee.NewToolRegistry(), toolSetSpec{disabled: boot.ToolsDisabled},
+		func(toolSetSpec) *apogee.ToolRegistry { return apogee.NewToolRegistry() })
+	apply := applySettingFor(settingsApplier{engine: &applySettingSpy{}, live: live, tools: set})
+
+	if _, err := apply("tools.disabled", "[grep, view_diff]"); err != nil {
+		t.Fatalf("apply tools.disabled: %v", err)
+	}
+	bound := upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model", APIKey: "bound-key"}
+	base, _, _ := live.rebindInputs(bound)
+
+	if want := []string{"grep", "view_diff"}; !slices.Equal(base.ToolsDisabled, want) {
+		t.Errorf("rebindInputs hands ToolsDisabled = %v, want the toggled %v — a rebind that read the "+
+			"launch snapshot would re-resolve against a roster the session has left", base.ToolsDisabled, want)
+	}
+	if base.Endpoint != bound.Endpoint || base.APIKey != bound.APIKey {
+		t.Errorf("rebindInputs hands wire %q/%q, want the bound %q/%q written over the overlay",
+			base.Endpoint, base.APIKey, bound.Endpoint, bound.APIKey)
+	}
+	base.ToolsDisabled[0] = "clobbered"
+	if got := live.options().ToolsDisabled; got[0] != "grep" {
+		t.Errorf("the copy rebindInputs handed out shares the holder's roster: options() now reads %v", got)
+	}
 }
 
 // The overlay's `context-files:` list is the RESOLVED one — the names while the switch is on, nothing
@@ -1581,7 +1679,7 @@ func TestApplySettingSystemPromptReResolvesFromTheFile(t *testing.T) {
 	// dispatcher installed there is what the spec carries.
 	var spec apogee.RebindSpec
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
-		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: "bound-model"})
+		base, pinnedWindow, outputCap := live.rebindInputs(upstreamBinding{Model: "bound-model"})
 		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
@@ -2523,7 +2621,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers: %v", err)
 	}
-	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, pin, _ := live.rebindInputs(upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the edited 65536 — the latch went stale", pin)
 	}
 
@@ -2531,7 +2629,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers with the pin removed: %v", err)
 	}
-	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 16384 {
+	if _, pin, _ := live.rebindInputs(upstreamBinding{}); pin != 16384 {
 		t.Errorf("the next rebind's pin = %d; want the top-level 16384 back once the entry pins nothing", pin)
 	}
 
@@ -2544,7 +2642,7 @@ func TestApplySettingServersReResolvesTheBoundEntrysContextWindow(t *testing.T) 
 	if _, err := apply("servers", ""); err != nil {
 		t.Fatalf("apply servers naming another entry: %v", err)
 	}
-	if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != 65536 {
+	if _, pin, _ := live.rebindInputs(upstreamBinding{}); pin != 65536 {
 		t.Errorf("the next rebind's pin = %d; want the bound entry's 65536 kept", pin)
 	}
 }
@@ -2587,7 +2685,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysWindow(t *testing.T) 
 	drives := 0
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
-		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		base, pinnedWindow, outputCap := live.rebindInputs(upstreamBinding{Model: model})
 		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
@@ -2702,7 +2800,7 @@ func TestApplySettingServersDoesNotRebindForAnEditThatMovesNoWindow(t *testing.T
 				t.Errorf("installed list = %v, want %v: the list applies whether or not a ride does",
 					names, tt.wantNames)
 			}
-			if _, pin, _ := live.rebindInputs(config.Options{}, upstreamBinding{}); pin != tt.wantPin {
+			if _, pin, _ := live.rebindInputs(upstreamBinding{}); pin != tt.wantPin {
 				t.Errorf("the next rebind's pin = %d; want the unchanged %d", pin, tt.wantPin)
 			}
 		})
@@ -2748,7 +2846,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysReplyCap(t *testing.T
 	drives := 0
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
-		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		base, pinnedWindow, outputCap := live.rebindInputs(upstreamBinding{Model: model})
 		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
@@ -2863,7 +2961,7 @@ func TestApplySettingServersDoesNotRebindForACapEditThatMovesNothing(t *testing.
 			if len(live.serverList()) == 0 {
 				t.Error("the re-read list was not installed: the list applies whether or not a ride does")
 			}
-			if _, _, outputCap := live.rebindInputs(config.Options{}, upstreamBinding{}); outputCap != tt.wantCap {
+			if _, _, outputCap := live.rebindInputs(upstreamBinding{}); outputCap != tt.wantCap {
 				t.Errorf("the next rebind's ceiling = %d; want the unchanged %d", outputCap, tt.wantCap)
 			}
 		})
@@ -2909,7 +3007,7 @@ func TestApplySettingServersRidesTheRebindForTheBoundEntrysResponseReserve(t *te
 	drives := 0
 	rebind := func(model string, window int, dialect provider.EffortDialect) (tui.RebindResult, error) {
 		drives++
-		base, pinnedWindow, outputCap := live.rebindInputs(launchOpts, upstreamBinding{Model: model})
+		base, pinnedWindow, outputCap := live.rebindInputs(upstreamBinding{Model: model})
 		got, _, err := rebindSpecFor(base, roots, model, window, pinnedWindow, outputCap)
 		if err != nil {
 			return tui.RebindResult{}, err
@@ -3026,7 +3124,7 @@ func TestApplySettingServersDoesNotRebindForAReserveEditThatMovesNothing(t *test
 			if len(live.serverList()) == 0 {
 				t.Error("the re-read list was not installed: the list applies whether or not a ride does")
 			}
-			base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+			base, _, _ := live.rebindInputs(upstreamBinding{})
 			if base.ResponseReserve != tt.wantReserve {
 				t.Errorf("the next rebind's share = %v; want the unchanged %v",
 					base.ResponseReserve, tt.wantReserve)
@@ -3076,7 +3174,7 @@ func TestApplySettingSavesTheTopLevelResponseReserveWithoutMovingTheSession(t *t
 	if spy.drove() != 0 {
 		t.Errorf("a start-up-only key still drove an engine seam: %+v", spy)
 	}
-	base, _, _ := live.rebindInputs(config.Options{}, upstreamBinding{})
+	base, _, _ := live.rebindInputs(upstreamBinding{})
 	if base.ResponseReserve != 0.25 {
 		t.Errorf("the next rebind's share = %v; want the launch share 0.25, which no write can move",
 			base.ResponseReserve)

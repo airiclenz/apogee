@@ -781,12 +781,20 @@ func (s *liveSettings) firingBinding(bound upstreamBinding) (config.Options, con
 	return cloneOptions(s.now), entry
 }
 
-// rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the
-// arguments rebindSpecFor takes them as. It is the one place the overlay is spelled out, so a caller
-// cannot re-resolve half from the holder and half from the launch: every re-resolution — the rebind
-// closure, a scheduled Firing — opens with this call. The two token bounds come back beside the copy
-// for that same reason rather than through accessors of their own: read under ONE lock, they cannot
-// describe two different instants of a `servers:` list that is being installed as they are read.
+// rebindInputs hands back the arguments rebindSpecFor takes: the session's live configuration
+// (options above — the overlay, never the launch snapshot, so a rebind after a `/tools` or `/servers`
+// commit re-resolves against the lists the session is running on) with the WIRE and the bound
+// entry's own two bounds written onto the copy, plus the two token bounds beside it. It is the one
+// place that projection is spelled out, so a caller cannot re-resolve half from the holder and half
+// from the launch: every re-resolution — the rebind closure, a scheduled Firing — opens with this
+// call. The bounds come back beside the copy for that same reason rather than through accessors of
+// their own: read under ONE lock, they cannot describe two different instants of a `servers:` list
+// that is being installed as they are read.
+//
+// It stays a projection of its own beside firingBinding rather than a re-read of options() because
+// the two answer different questions of the same overlay: a Firing composes a whole run and takes
+// the bound entry whole, while a rebind resolves ONE model against the server the session is on and
+// wants that entry's pins already applied over the top-level keys (the window, the reserve).
 //
 // The charter covers the WIRE too, which this settings holder deliberately does not own: bound is the
 // upstreamHolder's snapshot, and it is overlaid unconditionally because the holder — not the launch
@@ -795,32 +803,29 @@ func (s *liveSettings) firingBinding(bound upstreamBinding) (config.Options, con
 // input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung —
 // would be resolved against a server the session left.
 // Both live callers run only after the startup bind, so the snapshot is always a real binding.
-func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) (config.Options, int, int) {
+func (s *liveSettings) rebindInputs(bound upstreamBinding) (config.Options, int, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	base.Endpoint = bound.Endpoint
-	base.APIKey = bound.APIKey
+	now := cloneOptions(s.now)
+	now.Endpoint = bound.Endpoint
+	now.APIKey = bound.APIKey
 	// The pin the resolution applies is the one in force for the server the session is on NOW: the
 	// bound entry's `context-window:` when it names one, else the top-level key — the precedence
 	// config.ResolveContextWindow spells, called inline because the read lock is already held here.
 	// Resolved once, so the copy and the returned pin cannot disagree.
 	pin := config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow)
-	base.ContextWindow = pin
+	now.ContextWindow = pin
 	// And how that window is split on the server the session is on NOW: the bound entry's
 	// `response-reserve:` over the top-level key (config.ResolveResponseReserve, the ranks the
 	// window's own resolution spells). It is written ONTO the copy rather than handed back beside the
 	// two bounds because `config.Options` spells this number as a session-wide share, which is
 	// exactly what a caller reading the copy needs — a Firing composes its Config from it.
-	base.ResponseReserve = config.ResolveResponseReserve(s.entryReserve, s.now.ResponseReserve)
-	base.Servers = s.now.Servers
-	base.SystemPrompt = s.now.SystemPrompt
-	base.UseDefaultPrompt = s.now.UseDefaultPrompt
-	base.ModelProfiles = s.now.ModelProfiles
+	now.ResponseReserve = config.ResolveResponseReserve(s.entryReserve, s.now.ResponseReserve)
 	// And the other bound the server states: the reply ceiling the bound entry pins (ADR 0046). It
 	// travels beside the window because the spec the caller builds carries it beside the window, and
 	// it is handed back rather than written onto the copy because `config.Options` spells this number
 	// as the STARTUP entry's — a session that has moved since is bound to the entry it is on now.
-	return base, pin, s.entryCap
+	return now, pin, s.entryCap
 }
 
 // settingsApplier is everything a committed key can have to reach, in one value rather than in a
