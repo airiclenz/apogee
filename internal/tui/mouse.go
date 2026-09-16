@@ -1016,11 +1016,15 @@ func (m Model) settingsPaint() (settingsPaint, bool) {
 		return settingsPaint{}, false
 	}
 	rows := m.settingRows()
-	if _, sub := m.settingsEnumTarget(rows); sub {
-		return settingsPaint{}, false // the value sub-list is a menu of its own; no pointer names it
-	}
-	if _, text := m.settingsTextTarget(rows); text {
-		return settingsPaint{}, false // the multi-line field replaced the list: settingsTextPaint answers there
+	// A step that paints for itself has replaced the key list — the value sub-list is a menu of its
+	// own, and the multi-line field is answered by settingsTextPaint — so no pointer names a key row
+	// there. Which steps those are is the step table's to say ([settingsStep.paint]), asked through
+	// the same target the painter re-derives: a step whose row is gone has fallen back to the list, and
+	// the list is what the pointer is over.
+	if step, ok := settingsSteps[m.settings.kind]; ok && step.paint != nil {
+		if _, own := step.target(m, rows); own {
+			return settingsPaint{}, false
+		}
 	}
 	spec, display, seated := m.settingsKeyListSpec(rows)
 	if !seated {

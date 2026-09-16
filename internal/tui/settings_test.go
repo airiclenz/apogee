@@ -3744,3 +3744,45 @@ func TestSettingsStepsCoverEveryKind(t *testing.T) {
 		t.Errorf("settingsSteps has %d rows, want one per second step (%d)", n, settingsTextEditor)
 	}
 }
+
+// The two steps that REPLACE the key list paint through their own arm of the table, and the two that
+// substitute one row of it carry none: renderSettings asks the table which, and the mouse reads the
+// same column as "no pointer names a key row here" (settingsPaint). A step whose row is gone from
+// under it paints the key list it fell back to rather than a menu about nothing.
+func TestSettingsStepsPaintThroughTheTable(t *testing.T) {
+	own := map[settingsKind]bool{
+		settingsEnumList: true, settingsTextEditor: true,
+		settingsValueBuffer: false, settingsResetArmed: false,
+	}
+	for kind, want := range own {
+		if got := settingsSteps[kind].paint != nil; got != want {
+			t.Errorf("kind %d carries a paint arm = %v, want %v", kind, got, want)
+		}
+	}
+
+	rows := []SettingRow{settingsEnumRow()}
+	live := rows // what the host answers; swapped under the open step below
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return live }}
+	opened := step(t, openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts)), keyEnter())
+	if opened.settings.kind != settingsEnumList {
+		t.Fatalf("pane = %+v, want the sub-list open", opened.settings)
+	}
+
+	if got, want := opened.renderSettings(), opened.renderSettingsEnum(rows[0]); got != want {
+		t.Errorf("renderSettings under the enum step is not the step's own painter:\n%s", strip(got))
+	}
+	if _, ok := opened.settingsPaint(); ok {
+		t.Error("settingsPaint answers under a step that paints for itself; no pointer names a key row there")
+	}
+
+	// The row under the step turns into one the step cannot hold: the painter and the pointer both
+	// fall back to the key list on the same predicate the router does.
+	live = []SettingRow{{Path: rows[0].Path, Section: rows[0].Section, Kind: SettingString, Editable: true}}
+	if got := strip(opened.renderSettings()); !strings.Contains(got, settingsHint) {
+		t.Errorf("a step whose row is gone does not paint the key list it fell back to:\n%s", got)
+	}
+	if _, ok := opened.settingsPaint(); !ok {
+		t.Error("settingsPaint answers nothing while the key list is what is on the screen")
+	}
+}

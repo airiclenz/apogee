@@ -819,7 +819,7 @@ announced text pinned by goldens — unchanged.
 
 **Commit:** `refactor(tui): the /settings second step is one table keyed by kind`
 
-## 23. The `/settings` renderer dispatches through the table
+## 23. The `/settings` renderer dispatches through the table — ✅ DONE (2026-09-16)
 
 **What.** Depends on item 22. `renderSettings` and `settingsPaint`'s two target probes read the
 step table (`paint(m) []string` column, nil for kinds painted as a row substitution); geometry

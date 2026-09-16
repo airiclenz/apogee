@@ -396,12 +396,22 @@ func (m Model) settingRows() []SettingRow {
 // the reset's on nothing — the table routes, it never walks a list. The steps share the pane's
 // EXISTING two slots for what they hold (sub, editor — [settingsPane], decision 9); no step carries
 // state of its own here.
+//
+// paint is the step's OWN renderer, where it has one: the composed pane the step draws INSTEAD of the
+// key list (the enum's menu, the text field), returning "" where the frame cannot seat it, exactly as
+// renderSettings does. It is nil for the steps painted as a substitution of ONE ROW of the key list —
+// the buffer and the armed reset are drawn by the key list's own painter, on the selected row
+// (settingsEditing) — and that nil is what the mouse reads as "the key list is on the screen, a
+// pointer can name a row" (settingsPaint): a step that paints for itself takes no pointer through the
+// list it replaced. The renderers keep their own signatures (renderSettingsEnum takes the row,
+// renderSettingsText the rows), so the column takes both and each arm spends the one it needs.
 type settingsStep struct {
 	target    func(m Model, rows []SettingRow) (SettingRow, bool)
 	key       func(m Model, msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd)
 	hint      string
 	editing   func(m Model, row SettingRow) bool
 	editorMsg func(m Model, msg tea.Msg) (Model, tea.Cmd, bool)
+	paint     func(m Model, row SettingRow, rows []SettingRow) string
 }
 
 // settingsSteps is the pane's second steps, keyed by the [settingsKind] that names each. The key list
@@ -410,9 +420,9 @@ type settingsStep struct {
 //
 // It is filled in by init rather than by its declaration because the rows name Model methods that
 // reach the painter (settingsEnumKey → the server switch → layout → renderSettings), and the painter
-// reads the table (settingsEditing) — a reference loop the compiler refuses as an initialization
-// cycle for a variable's initializer and permits for an init function, which runs after every
-// declaration has been initialized. The table is written once, here, and never again.
+// reads the table (renderSettings, settingsEditing) — a reference loop the compiler refuses as an
+// initialization cycle for a variable's initializer and permits for an init function, which runs after
+// every declaration has been initialized. The table is written once, here, and never again.
 var settingsSteps map[settingsKind]settingsStep
 
 func init() {
@@ -423,6 +433,7 @@ func init() {
 			editing: func(m Model, row SettingRow) bool {
 				return settingsPickable(row) && len(m.settingsVocabulary(row)) > 0
 			},
+			paint: func(m Model, row SettingRow, _ []SettingRow) string { return m.renderSettingsEnum(row) },
 		},
 		settingsValueBuffer: {
 			target:    Model.settingsBufferTarget,
@@ -437,6 +448,7 @@ func init() {
 			hint:      settingsTextHint,
 			editing:   func(_ Model, row SettingRow) bool { return settingsWritable(row) },
 			editorMsg: Model.settingsFieldMsg,
+			paint:     func(m Model, _ SettingRow, rows []SettingRow) string { return m.renderSettingsText(rows) },
 		},
 		settingsResetArmed: {
 			target: Model.settingsResetTarget,
@@ -1554,16 +1566,21 @@ func (m Model) settingsBody(rows []SettingRow) string {
 // the whole transcript budget (frameRowPlan). That is the one thing that differs from the picker's
 // eight-row window — the browser and the picker cap themselves because they crowd a conversation
 // they are read BESIDE, and this pane is read INSTEAD of one.
+//
+// A second step that paints for itself is asked FIRST, through its row of [settingsSteps]
+// ([settingsStep.paint]): its target is re-derived with the rows of this frame, so a step whose row
+// is gone paints the key list it fell back to rather than a menu about nothing — the same predicate
+// the key router falls back on (settingsKey). A step with no paint arm is drawn as the key list with
+// its selected row substituted (settingsEditing), and so falls through here.
 func (m Model) renderSettings() string {
 	if !m.settings.open {
 		return ""
 	}
 	rows := m.settingRows()
-	if row, ok := m.settingsEnumTarget(rows); ok {
-		return m.renderSettingsEnum(row)
-	}
-	if _, ok := m.settingsTextTarget(rows); ok {
-		return m.renderSettingsText(rows)
+	if step, ok := settingsSteps[m.settings.kind]; ok && step.paint != nil {
+		if row, ok := step.target(m, rows); ok {
+			return step.paint(m, row, rows)
+		}
 	}
 	spec, display, ok := m.settingsKeyListSpec(rows)
 	if !ok {
