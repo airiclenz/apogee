@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Record one take. Resets the stage first, then runs the named tape in the work dir.
+# Record one take. Resets the stage first, then runs the named tape in the work dir, and — when
+# the clip has a storyboard — judges the take against it, exiting with `demorig check`'s status
+# so a retake loop can key off it.
 #
-#   ./record.sh hero          # runs tapes/hero.tape -> <work>/hero.mp4
+#   ./record.sh hero          # runs tapes/hero.tape -> <work>/hero.mp4, then checks the take
 #
 # The tape is generated into the work dir before running — `gen.sh` writes the copy, expanding
 # the hero tape's typed lines into humanized typing on the way through. It has to be a work-dir
@@ -12,9 +14,13 @@ set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORK="${APOGEE_DEMO_WORK:-$HOME/.cache/apogee-demo}"
+DEMO_HOME="$WORK/home"
+STAGE="$DEMO_HOME/Repos/taskman"
+REPO="$HERE/../.."
 
 TAPE="${1:-hero}"
 SRC="$HERE/tapes/$TAPE.tape"
+STORYBOARD="$HERE/storyboards/$TAPE.yaml"
 
 [ -f "$SRC" ] || { echo "no such tape: $SRC" >&2; ls "$HERE/tapes/" >&2; exit 1; }
 [ -f "$WORK/env.sh" ] || { echo "no rig at $WORK — run setup.sh first" >&2; exit 1; }
@@ -39,3 +45,19 @@ time vhs "$TAPE.tape"
 echo
 echo "raw take: $WORK/$TAPE.mp4"
 echo "post-process with: $HERE/render.sh $WORK/$TAPE.mp4 <out.gif> [speed] [start]"
+
+# Judge the take against the clip's storyboard. reset.sh wiped the sessions dir before the
+# take, so the newest session there is this take's. A clip without a storyboard (a new tape
+# still being drafted) records fine and is simply not checked.
+if [ -f "$STORYBOARD" ]; then
+  SESSION="$(ls -t "$DEMO_HOME/.apogee/sessions/"*.json 2>/dev/null | head -n 1 || true)"
+  if [ -z "$SESSION" ]; then
+    echo "no session saved under $DEMO_HOME/.apogee/sessions — take not checked" >&2
+    exit 1
+  fi
+  echo
+  echo "checking the take against $STORYBOARD …"
+  go run -C "$REPO" ./cmd/demorig check "$STORYBOARD" "$SESSION" --stage "$STAGE"
+else
+  echo "no storyboard for $TAPE — take not checked"
+fi

@@ -140,7 +140,11 @@ internal/tui/toolview.go — diffCounts (U+2212); internal/tui/interject.go — 
 
 Depends on item 2.
 
-## 4. `demorig check` — take validation, wired into `record.sh`
+## 4. `demorig check` — take validation, wired into `record.sh` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — cmd/demorig/main.go: made necessary by the new subcommand (registered `newCheckCommand`; the package doc's usage block gains the `check` line).
+NOTES (2026-09-16): an unresolvable anchor (e.g. no `Tests` card at all) is reported as the resolver's own error naming the beat (`demorig: beat 3: no entry matches …`, exit 1) rather than a table row — resolveBeats is all-or-nothing and an ordering expect cannot be judged without every beat placed; a missed expect (the `interjected` → `user` case) is a FAIL row as the plan specifies.
+NOTES (2026-09-16): record.sh exits 1 with `no session saved under … — take not checked` when a storyboard exists but the sessions dir holds no `*.json` (a take cancelled before the first save); the plan did not name this case and a silent pass would mislead the retake loop.
 
 **What:** Recast at the regression check (2026-09-16). `demorig check <storyboard> <session.json> [--stage <dir>]` resolves every anchor (item 3's resolver; no video needed) and evaluates the expects: `contains` on the anchored entry's `Text`, `Tool.Label` or `Tool.Stat`; `before`/`after` on entry list order; top-level `stage: dirty` runs `git -C <stage> status --porcelain` and requires output. Prints a `beat | PASS/FAIL | detail` table, exits 1 on any FAIL. `record.sh` runs it after `vhs` returns, against the newest `$WORK/home/.apogee/sessions/*.json` and `--stage $WORK/home/Repos/taskman`, via `go run ./cmd/demorig` from the repo root (`$HERE/../..`), and exits with its status so a retake loop can key off it; the storyboard path is `$HERE/storyboards/$TAPE.yaml`. Document the loop in `README.md` (`Quick start` and a **Checking a take** paragraph replacing the python one-liner as the first resort — keep the one-liner as the deep-dive).
 

@@ -14,9 +14,13 @@ careful hand performance.
 brew install vhs gifsicle        # vhs pulls ttyd + ffmpeg and fetches its own headless Chromium
 export OPENROUTER_API_KEY=…      # the rig's default server is OpenRouter; the key is read from here
 ./setup.sh                       # build the rig (idempotent)
-./record.sh hero                 # reset the stage, record tapes/hero.tape
+./record.sh hero                 # reset the stage, record tapes/hero.tape, check the take — exit 1 = retake
 ./render.sh ~/.cache/apogee-demo/hero.mp4 ../demo.gif 1.25 3.8
 ```
+
+`record.sh` ends by judging the take against `storyboards/hero.yaml` (`demorig check`, see
+**Checking a take** below) and exits with its status, so a retake loop is `until ./record.sh hero;
+do :; done` — budget the takes first (**Things that are settled**).
 
 **The server alias and the model id are on camera** in the footer for the whole clip, so pick
 both deliberately. The defaults are the `openrouter` alias with `~deepseek/deepseek-v4-flash-latest`
@@ -31,7 +35,7 @@ which refuses to start a take while it is unset.
 | path | what it is |
 |---|---|
 | `setup.sh` | builds the rig: isolated apogee home, stage repo, generated `env.sh`, warm Go cache |
-| `record.sh <tape>` | resets the stage, then records `tapes/<tape>.tape` |
+| `record.sh <tape>` | resets the stage, records `tapes/<tape>.tape`, then judges the take with `demorig check` when `storyboards/<tape>.yaml` exists (exit 1 on a FAIL) |
 | `render.sh` | raw take → shipping GIF (head trim, time-compression, palette encode) |
 | `reset.sh` | restores the planted bug + CHANGELOG stub, wipes session state |
 | `gen.sh <src> <dst>` | writes the work-dir copy of a tape, expanding the hero tape's typed lines into humanized typing |
@@ -156,19 +160,32 @@ beats — the keeper was take 2, and no later take beat it. Measured hit rates o
 the model reproduces the failure with a red `go test` before fixing in roughly 3 of 8 runs
 (beat 3), the interjection lands mid-run rather than as a fresh turn in about 6 of 8 (beat 4),
 and knob 3 opens the right card in about 1 of 7 (beat 5). Judge every take on all three before
-rendering. Check the outcome before judging a take by its video:
+rendering — `record.sh` does, through `demorig check`.
+
+**Checking a take.** `record.sh` runs `demorig check` the moment `vhs` returns: it resolves every
+anchor of `storyboards/<tape>.yaml` against the take's saved session (the newest
+`~/.cache/apogee-demo/home/.apogee/sessions/*.json`), evaluates each beat's `expect` — `contains`
+on the entry's text, tool label or stat, `before`/`after` on the entry order — and judges the
+top-level `expect: {stage: dirty}` against the stage repo. One `beat N | PASS/FAIL | detail` row
+per expect, then a `stage` row, and exit 1 on any FAIL, which `record.sh` passes through. The
+video is never read, so the verdict is instant. To re-judge a take by hand, from the repo root:
 
 ```sh
-cd ~/.cache/apogee-demo/home/Repos/taskman && git diff && go test ./...
+go run ./cmd/demorig check graphics/demo/storyboards/hero.yaml \
+  ~/.cache/apogee-demo/home/.apogee/sessions/*.json --stage ~/.cache/apogee-demo/home/Repos/taskman
 ```
 
-The saved session is the fastest way to see what really happened, including exactly where
-the interjection landed in the tool sequence:
+Without `--stage` the stage row reads `SKIP` and does not affect the exit status. A missed
+interjection fails beat 4 with `no entry matches {kind: interjected}` (the entry was saved as
+`user`); a fix-on-sight take fails beat 3 (`does not contain "FAIL"`); a clean stage fails the
+`stage` row. For the deep dive — exactly where the interjection landed in the tool sequence, and
+what the stage looks like — read the session and the stage directly:
 
 ```sh
 python3 -c "import json,sys; e=json.load(open(sys.argv[1]))['transcript']['entries']; \
 [print(i, x.get('kind'), (x.get('tool') or {}).get('label',''), str(x.get('text',''))[:70]) \
  for i,x in enumerate(e)]" ~/.cache/apogee-demo/home/.apogee/sessions/*.json
+cd ~/.cache/apogee-demo/home/Repos/taskman && git diff && go test ./...
 ```
 
 **VHS pitfalls already paid for.** Its parser has been seen to reject very long `Output`
