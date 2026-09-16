@@ -88,6 +88,13 @@ const deleteConfirmCell = "delete? y/n"
 // column exactly what it looks like it costs, whatever measure the painter is on.
 const scheduleTagGlyph = "⟳"
 
+// forkTagGlyph leads the tag a row carries when its record was cut from another by /fork
+// (Meta.ParentID set): a branching line, for the history the two records share up to the point
+// they part. Like scheduleTagGlyph it is one terminal cell wide in either width method and
+// carries no variation selector (ADR 0030), so a tagged title costs the column exactly what it
+// looks like it costs.
+const forkTagGlyph = "⑂"
+
 // interruptedNote is the transcript note appended when a resumed session was interrupted
 // mid-task (the engine reports InExchange after the restore). It tells the human how to pick the
 // work back up; the step-only /continue drive that actually resumes it is item 8's work.
@@ -228,9 +235,26 @@ func (b sessionBrowser) unfilteredRows(workspace string, now time.Time) ([]popup
 	visible := b.visible(workspace)
 	rows := make([]popupRow, 0, len(visible))
 	for _, meta := range visible {
-		rows = append(rows, sessionRowCells(meta, workspace, b.allWorkspaces, now))
+		rows = append(rows, sessionRowCells(meta, b.parentTitle(meta), workspace, b.allWorkspaces, now))
 	}
 	return rows, visible
+}
+
+// parentTitle is the title of the record a fork was cut from — the name its row's fork tag
+// carries — or "" when meta is no fork or its parent is no longer in the store (a deleted parent;
+// the tag then falls back to the id, sessionRowCells). It is looked up in the FULL list rather
+// than the workspace view: a fork answers to its parent whichever workspace the two are browsed
+// from, and the current view is a fact about the pane, not about the record.
+func (b sessionBrowser) parentTitle(meta session.Meta) string {
+	if meta.ParentID == "" {
+		return ""
+	}
+	for _, candidate := range b.metas {
+		if candidate.ID == meta.ParentID {
+			return candidate.Title
+		}
+	}
+	return ""
 }
 
 // record is the session the highlight NAMES inside a row set the surface has already been clamped
@@ -726,20 +750,35 @@ func sessionRows(b sessionBrowser, workspace string, now time.Time) []popupRow {
 // the row moves: a Firing orders, resumes, renames and deletes like any other record, and a record
 // with no schedule identity renders exactly as it did before there were Schedules.
 //
-// Every fact the Meta supplies — the title, the workspace path behind its base, and a Firing's
-// schedule name — is escape-stripped here, exactly as the pickers strip every cell they build from
+// A record /fork cut from another (Meta.ParentID set) carries its PARENT's title as a tag in the
+// same slot, after the schedule tag, for the same reason: it says which history this session
+// branched off, which is what tells two rows wearing the same title apart — a fork starts out
+// named for its parent. The parent's title is not on this Meta, so the caller resolves it from
+// the browser's own list (parentTitle) and hands it in; a parent the store no longer holds, or
+// one saved without a title, is named by its id instead, so the fact that this is a fork never
+// goes unstated.
+//
+// Every fact the Meta supplies — the title, the workspace path behind its base, a Firing's
+// schedule name and a fork's parent name — is escape-stripped here, exactly as the pickers strip every cell they build from
 // launcher text (launchProfileRows). A Meta is untrusted DISK input: List() reads session files
 // that no codec has sanitized (the transcript codec in internal/session strips the record's
 // transcript on the way back in, never its Meta), so a title carrying "\x1bc" would otherwise reach the pane as a live RIS
 // terminal reset — the popup module strips nothing and truncates ANSI-preservingly — and would also
 // lie to the column math, since an ESC byte occupies no display cell but does occupy the string.
-func sessionRowCells(meta session.Meta, currentWorkspace string, all bool, now time.Time) popupRow {
+func sessionRowCells(meta session.Meta, parentTitle string, currentWorkspace string, all bool, now time.Time) popupRow {
 	title := stripEscapes(meta.Title)
 	if all && meta.Workspace != currentWorkspace {
 		title += " · " + stripEscapes(workspaceBase(meta.Workspace))
 	}
 	if meta.ScheduleName != "" {
 		title += " · " + scheduleTagGlyph + " " + stripEscapes(meta.ScheduleName)
+	}
+	if meta.ParentID != "" {
+		parent := parentTitle
+		if parent == "" {
+			parent = meta.ParentID
+		}
+		title += " · " + forkTagGlyph + " " + stripEscapes(parent)
 	}
 	row := popupRow{
 		title,

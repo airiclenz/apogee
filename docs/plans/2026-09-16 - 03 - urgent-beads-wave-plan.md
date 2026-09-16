@@ -453,7 +453,10 @@ NOTES (2026-09-16): consequential edit — internal/tui/command_test.go: made ne
 
 **Commit:** `feat(tui): /fork branches a new session from a chosen prompt and switches to it`
 
-## 21. Session browser shows the fork relationship (apogee-zci)
+## 21. Session browser shows the fork relationship (apogee-zci) — ✅ DONE (2026-09-16)
+NOTES (2026-09-16): `sessionRowCells` gained one `parentTitle string` parameter (second position, after the Meta), resolved by the new `sessionBrowser.parentTitle` lookup in `unfilteredRows`; the nine existing test calls pass `""`.
+NOTES (2026-09-16): layout.md (the TUI rendering spec) gained a "A fork says whose history it branched off" paragraph beside the firing-tag paragraph — a doc the change affects, not listed in the item's Files.
+NOTES (2026-09-16): the `⑂` (U+2442) glyph was verified to measure one cell under both `ansi.WcWidth` and `ansi.GraphemeWidth` (ADR 0030), which the new `forkTagGlyph` doc comment states.
 
 **What:** Depends on item 16. `internal/tui/sessions.go` `sessionRowCells`: when `meta.ParentID != ""` the title cell gains ` · ⑂ <parent title>` (parent title looked up in the browser's `metas`; missing parent → `⑂ <parent id>`), in the slot after the `⟳ <schedule>` tag and escape-stripped like every Meta string. Column alignment unchanged. `docs/manual/sessions.md` gains one bullet describing `/fork` and the tag.
 

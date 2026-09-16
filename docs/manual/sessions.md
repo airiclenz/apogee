@@ -53,6 +53,12 @@ still remembers.
   the browser tags it `⟳ <schedule>` beside its title, so a run reads as one of a
   series rather than as a session nobody remembers starting. Ordering, resume,
   rename and delete treat it exactly like a session you held yourself.
+- `/fork` branches a new session off this one: a picker lists the session's prompts,
+  `⏎` keeps the history through the chosen one and switches you to the new session,
+  which starts under its parent's title. The session you were in stays saved as it
+  was, and the browser tags the fork `⑂ <parent title>` beside its title — by the
+  parent's id once the parent has been deleted — so the two rows, both named for the
+  same task, still read as one history and the branch that left it.
 - Every tool card in a record keeps a bounded copy of the arguments the model sent
   with that call — the main agent's and every sub-agent's alike — so a finished
   run's tool use can still be read back off the file. It stays a summary and not a

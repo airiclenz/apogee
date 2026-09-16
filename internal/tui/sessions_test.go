@@ -860,19 +860,19 @@ func TestSessionRowCells(t *testing.T) {
 
 	// Same-workspace row in the current view: three cells, each separator leading its own cell.
 	want := popupRow{"a task", "· 5m ago", "· 3 msgs"}
-	if got := sessionRowCells(meta, "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(meta, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("current-view cells = %v, want %v", got, want)
 	}
 	// Foreign row in the all view: the workspace base qualifies the TITLE, inside the title cell, so
 	// the time and count columns stay where every other row put them.
 	want = popupRow{"a task · proj", "· 5m ago", "· 3 msgs"}
-	if got := sessionRowCells(meta, "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(meta, "", "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("foreign all-view cells = %v, want the workspace base inside the title cell (%v)", got, want)
 	}
 	// A legacy record with no workspace reads a friendly base rather than filepath.Base's ".".
 	legacy := session.Meta{Title: "old", UpdatedAt: now.Add(-time.Hour), UserMsgs: 1}
 	want = popupRow{"old · unknown workspace", "· 1h ago", "· 1 msg"}
-	if got := sessionRowCells(legacy, "/home/me/proj", true, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(legacy, "", "/home/me/proj", true, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("legacy all-view cells = %v, want %v", got, want)
 	}
 }
@@ -890,20 +890,20 @@ func TestSessionRowCellsSpendIsTheSessionTotal(t *testing.T) {
 	}
 
 	want := popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(1_000_000)}
-	if got := sessionRowCells(meta, "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(meta, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("cells = %v, want the session total in a cell of its own (%v)", got, want)
 	}
 
 	main := meta
 	main.DelegateUsage = session.Usage{}
 	want = popupRow{"a task", "· 5m ago", "· 3 msgs", "· " + format.Tokens(64000)}
-	if got := sessionRowCells(main, "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(main, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("cells with no delegate spend = %v, want the main agent's own total (%v)", got, want)
 	}
 
 	silent := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/a"}
 	want = popupRow{"a task", "· 5m ago", "· 3 msgs"}
-	if got := sessionRowCells(silent, "/ws/a", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(silent, "", "/ws/a", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("cells for a record that reported nothing = %v, want no spend cell (%v)", got, want)
 	}
 }
@@ -926,19 +926,19 @@ func TestSessionRowCellsScheduleTag(t *testing.T) {
 	}
 
 	want := popupRow{"nightly sweep — 03:00 · ⟳ nightly sweep", "· 5m ago", "· 1 msg"}
-	if got := sessionRowCells(firing, "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(firing, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("firing cells = %v, want the schedule tag in the title cell (%v)", got, want)
 	}
 	// The foreign-workspace view states both qualifiers, in the order the title is read for: which
 	// workspace, then which standing instruction.
 	want = popupRow{"nightly sweep — 03:00 · proj · ⟳ nightly sweep", "· 5m ago", "· 1 msg"}
-	if got := sessionRowCells(firing, "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(firing, "", "/home/me/other", true, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("foreign firing cells = %v, want %v", got, want)
 	}
 	// A plain record has no identity to state, so it states none — no tag, no empty tier.
 	plain := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 1, Workspace: "/home/me/proj"}
 	want = popupRow{"a task", "· 5m ago", "· 1 msg"}
-	if got := sessionRowCells(plain, "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
+	if got := sessionRowCells(plain, "", "/home/me/proj", false, now); !reflect.DeepEqual(got, want) {
 		t.Errorf("plain cells = %v, want the row unchanged by schedules (%v)", got, want)
 	}
 }
@@ -970,6 +970,59 @@ func TestSessionRowCellsScheduleTagStripsEscapes(t *testing.T) {
 		if strings.ContainsRune(ln, 0x1b) {
 			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
 		}
+	}
+}
+
+// A fork says whose history it branched off: its row carries `⑂ <parent title>` in the title
+// cell, the parent resolved through unfilteredRows from the browser's FULL list — so a parent in
+// another workspace still names its child under the current-workspace view — and escape-stripped
+// like every other Meta string. A parent the store no longer holds is named by id, so the fact
+// of the fork survives its parent's deletion; and a fork of a Firing wears both tags, workspace
+// base, schedule, then parent, in the order the title is read for.
+func TestSessionRowsTagForkedSessions(t *testing.T) {
+	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
+	b := sessionBrowser{
+		open: true,
+		metas: []session.Meta{
+			{ID: "child-1", Title: "fix the parser", UpdatedAt: now.Add(-time.Minute), UserMsgs: 2, Workspace: "/ws/a", ParentID: "parent-1"},
+			{ID: "orphan", Title: "orphaned fork", UpdatedAt: now.Add(-2 * time.Minute), UserMsgs: 1, Workspace: "/ws/a", ParentID: "gone-9"},
+			{ID: "child-2", Title: "over there", UpdatedAt: now.Add(-3 * time.Minute), UserMsgs: 1, Workspace: "/ws/a", ParentID: "parent-b"},
+			{ID: "child-3", Title: "escaped", UpdatedAt: now.Add(-4 * time.Minute), UserMsgs: 1, Workspace: "/ws/a", ParentID: "parent-esc"},
+			{ID: "child-4", Title: "sweep — 03:00", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 1, Workspace: "/ws/a", ParentID: "parent-1", ScheduleID: "sch-1", ScheduleName: "sweep"},
+			{ID: "parent-1", Title: "fix the parser", UpdatedAt: now.Add(-time.Hour), UserMsgs: 4, Workspace: "/ws/a"},
+			{ID: "parent-esc", Title: "reset \x1bc me", UpdatedAt: now.Add(-time.Hour), UserMsgs: 1, Workspace: "/ws/a"},
+			{ID: "parent-b", Title: "elsewhere", UpdatedAt: now.Add(-time.Hour), UserMsgs: 1, Workspace: "/ws/b"},
+		},
+	}
+
+	rows := sessionRows(b, "/ws/a", now)
+	want := []popupRow{
+		{"fix the parser · ⑂ fix the parser", "· 1m ago", "· 2 msgs"},
+		{"orphaned fork · ⑂ gone-9", "· 2m ago", "· 1 msg"},
+		{"over there · ⑂ elsewhere", "· 3m ago", "· 1 msg"},
+		{"escaped · ⑂ reset c me", "· 4m ago", "· 1 msg"},
+		{"sweep — 03:00 · ⟳ sweep · ⑂ fix the parser", "· 5m ago", "· 1 msg"},
+		{"fix the parser", "· 1h ago", "· 4 msgs"},
+		{"reset c me", "· 1h ago", "· 1 msg"},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows = %v, want the fork tags resolved through the full list (%v)", rows, want)
+	}
+	// The tag is a title-cell qualifier, so the columns after it stay put: each row's time cell
+	// opens where the widest tagged title ends, tag and all — and no ESC reaches the pane.
+	wantTime := ansi.StringWidth("sweep — 03:00 · ⟳ sweep · ⑂ fix the parser") + len(popupGutter)
+	for i, ln := range layoutPopupRows(newTheme(scheme.Default()), rows) {
+		if strings.ContainsRune(ln, 0x1b) {
+			t.Errorf("rendered row %d = %q carries a raw ESC into the pane", i, ln)
+		}
+		if got := popupCellOffset(t, ln, want[i][1]); got != wantTime {
+			t.Errorf("row %d starts its time column at %d, want %d: %q", i, got, wantTime, ln)
+		}
+	}
+	// The all-workspaces view states the foreign base before the parent, as it does before a
+	// schedule: which workspace, then whose history.
+	if got := sessionRowCells(b.metas[2], b.parentTitle(b.metas[2]), "/ws/b", true, now); got[0] != "over there · a · ⑂ elsewhere" {
+		t.Errorf("foreign fork title = %q, want the base before the parent tag", got[0])
 	}
 }
 

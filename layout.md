@@ -2204,6 +2204,14 @@ the fact that survives a rename out of the `<schedule> — <HH:MM>` title a firi
 Nothing else about the row moves — it orders, resumes, renames and deletes like every other record,
 and a record with no schedule identity renders exactly as it did before there were schedules.
 
+**A fork says whose history it branched off.** A record `/fork` cut from another wears its parent's
+title as a second qualifier in the same slot, after the schedule tag: `· ⑂ <parent title>`, resolved
+from the browser's full list rather than the workspace view, so a parent browsed under another
+workspace still names its child. A parent the store no longer holds is named by its id instead —
+the fact of the fork outlives the parent. Like `⟳`, `⑂` is one cell wide under either width method
+and carries no variation selector, so the tag costs the title column exactly what it looks like it
+costs.
+
 **The Column contract.** Every one of those grammars is a row of **cells**, and the pop-up module —
 not the code that produced the row — owns the alignment, alongside its marker, highlight, windowing
 and truncation. A column is as wide as its widest cell measured in painted display cells (the width
