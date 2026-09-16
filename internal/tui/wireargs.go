@@ -17,25 +17,14 @@ const wireArgsFieldCap = 1024
 // transport, and one pathological call must not be able to dominate a session file.
 const wireArgsCap = 4096
 
-// contentArgs names, per write/edit tool, the argument keys whose value is file content, patch
-// text or replacement pairs — read off those tools' own schemas in internal/tools. Those values
-// are dropped from the stored arguments entirely rather than elided, because the card's Regions
-// and Details already carry what the edit did (ADR 0052): a second copy on the wire would double
-// the record of an edit and say nothing new about it.
-var contentArgs = map[string][]string{
-	"write_file":              {"content"},
-	"edit_existing_file":      {"content"},
-	"single_find_and_replace": {"oldText", "newText"},
-	"multi_find_and_replace":  {"replacements"},
-}
-
 // wireArgs returns the bounded, compact JSON a saved transcript keeps as one tool call's
 // arguments, or nil where there is nothing worth keeping. It is a pure function of the tool's
 // name and the raw arguments the model sent, applying four rules in order:
 //
 //  1. Arguments that are empty, that are not a JSON object, or that do not parse at all yield
 //     nil — as does an object left with no keys once rule 2 has run.
-//  2. For the write/edit tools the content-carrying keys ([contentArgs]) are dropped.
+//  2. The content-carrying keys the tool's registry row names ([toolPresenter.wireDropped] — the
+//     write/edit tools') are dropped; a tool with no row drops nothing.
 //  3. Every remaining string value longer than [wireArgsFieldCap], at any nesting depth, becomes
 //     "…[N bytes]" — the size it had, in place of the bytes it spent.
 //  4. A result still longer than [wireArgsCap] once encoded becomes {"elided":"N bytes"}, N being
@@ -52,7 +41,7 @@ var contentArgs = map[string][]string{
 // must strip it, the way every other card field is stripped at [toolView.finishDisplay].
 func wireArgs(tool string, raw json.RawMessage) json.RawMessage {
 	args := decodeArgsPreservingNumbers(raw)
-	for _, key := range contentArgs[tool] {
+	for _, key := range toolRegistry[tool].wireDropped {
 		delete(args, key)
 	}
 	if len(args) == 0 {

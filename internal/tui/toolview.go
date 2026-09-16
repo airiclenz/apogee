@@ -803,16 +803,15 @@ func presentToolCall(call domain.ToolCall, resolved string, ws workspaceRoot) to
 	// that shape keys on the run's span, which is not the same question — a delegation refused at
 	// the depth bound (executeRefuse, internal/agent) leaves a head with no span at all, and the
 	// shape rule alone would read two refusals in a row as one "Sub-Agent (2)". So the fact is
-	// stated here, where the call is recognised, against the same constant the span rule matches on
-	// (subAgentToolName) so the two cannot drift apart.
-	// A skill fetch is the second call that never joins a Tools super-group, for the other half of
-	// the same reason: it groups with its OWN kind (loadSkillToolName), and a mixed umbrella would
-	// bury the instructions the run just took on among the reads around them.
-	tv.solo = call.Tool == subAgentToolName || call.Tool == loadSkillToolName
+	// stated on the registry row (toolPresenter.solo) and copied here, where the call is
+	// recognised. A skill fetch is the second row that says it, for the other half of the same
+	// reason: it groups with its OWN kind (loadSkillToolName), and a mixed umbrella would bury the
+	// instructions the run just took on among the reads around them.
+	tv.solo = p.solo
 	// A block that folds to its header is the presenter's word too, and a fact about the tool
 	// rather than about anything the result will say, so it is settled here where the call is
-	// recognised (toolView.collapsesToHeader). The decoder copies the same entry field off the same
-	// name (fromWireToolView), so a replayed record cannot come back with a shape the live one
+	// recognised (toolView.collapsesToHeader). The decoder copies the same entry fields off the
+	// same name (fromWireToolView), so a replayed record cannot come back with a shape the live one
 	// never had.
 	tv.collapsesToHeader = p.collapsesToHeader
 	args := parseArgs(call.Arguments)

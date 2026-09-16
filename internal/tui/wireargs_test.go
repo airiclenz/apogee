@@ -175,28 +175,28 @@ func TestWireArgsSurvivesTheTranscriptEncoder(t *testing.T) {
 	}
 }
 
-// TestContentArgsMatchToolSchemas cross-checks [contentArgs] against the schemas the write/edit
-// tools actually publish. The map spells those content keys a second time and keys them by tool
-// NAME, so a rename in internal/tools — of a tool or of one of its arguments — would leave this
-// side silently matching nothing and quietly push file bodies onto the wire. The registry is the
-// same one the engine gives an Agent, so the check reads the shipped schemas rather than a copy
-// of them.
-func TestContentArgsMatchToolSchemas(t *testing.T) {
+// TestWireDroppedMatchToolSchemas cross-checks every registry row's [toolPresenter.wireDropped]
+// against the schemas the write/edit tools actually publish. The column spells those content keys
+// a second time, on a row keyed by tool NAME, so a rename in internal/tools — of a tool or of one
+// of its arguments — would leave this side silently matching nothing and quietly push file bodies
+// onto the wire. The registry is the same one the engine gives an Agent, so the check reads the
+// shipped schemas rather than a copy of them.
+func TestWireDroppedMatchToolSchemas(t *testing.T) {
 	t.Parallel()
 
 	registry := tools.NewDefaultRegistry(t.TempDir())
 
-	problems := contentArgsProblems(registry, checkedContentArgs())
+	problems := wireDroppedProblems(registry, checkedWireDropped())
 
 	for _, problem := range problems {
 		t.Error(problem)
 	}
 }
 
-// TestContentArgsProblemsReportsBothHalves pins that the cross-check above can actually fail: a
-// tool name no registry resolves and a key no schema carries are the two ways the map drifts, and
+// TestWireDroppedProblemsReportsBothHalves pins that the cross-check above can actually fail: a
+// tool name no registry resolves and a key no schema carries are the two ways a row drifts, and
 // each must be reported rather than passed over.
-func TestContentArgsProblemsReportsBothHalves(t *testing.T) {
+func TestWireDroppedProblemsReportsBothHalves(t *testing.T) {
 	t.Parallel()
 
 	registry := tools.NewDefaultRegistry(t.TempDir())
@@ -226,43 +226,47 @@ func TestContentArgsProblemsReportsBothHalves(t *testing.T) {
 		t.Run(testCase.name, func(t *testing.T) {
 			t.Parallel()
 
-			problems := contentArgsProblems(registry, testCase.args)
+			problems := wireDroppedProblems(registry, testCase.args)
 
 			if len(problems) != 1 || !strings.Contains(problems[0], testCase.want) {
-				t.Errorf("contentArgsProblems = %q, want one problem naming %q", problems, testCase.want)
+				t.Errorf("wireDroppedProblems = %q, want one problem naming %q", problems, testCase.want)
 			}
 		})
 	}
 }
 
-// checkedContentArgs returns [contentArgs] with the two keys that live one level down added to it:
-// multi_find_and_replace drops its whole replacements array, but the bytes that array carries are
-// the oldText/newText pair inside its items, and a rename there drifts exactly as a top-level one
-// does. A dotted key is a path through the schema — see [contentArgsProblems].
-func checkedContentArgs() map[string][]string {
+// checkedWireDropped returns every registry row's [toolPresenter.wireDropped], keyed by tool name,
+// with the two keys that live one level down added to it: multi_find_and_replace drops its whole
+// replacements array, but the bytes that array carries are the oldText/newText pair inside its
+// items, and a rename there drifts exactly as a top-level one does. A dotted key is a path through
+// the schema — see [wireDroppedProblems].
+func checkedWireDropped() map[string][]string {
 	checked := map[string][]string{
 		"multi_find_and_replace": {"replacements.oldText", "replacements.newText"},
 	}
-	for tool, keys := range contentArgs {
-		checked[tool] = append(checked[tool], keys...)
+	for tool, row := range toolRegistry {
+		if len(row.wireDropped) > 0 {
+			checked[tool] = append(checked[tool], row.wireDropped...)
+		}
 	}
 	return checked
 }
 
-// contentArgsProblems returns one line per mismatch between args — a [contentArgs]-shaped map of
-// tool name to the argument keys whose value is file content — and the schemas registry's tools
-// publish: a name the registry does not resolve, a schema that will not decode, or a key the
-// schema has no property for. An empty result means every name and key still lands.
+// wireDroppedProblems returns one line per mismatch between args — a map of tool name to the
+// argument keys whose value is file content, the shape [checkedWireDropped] reads off the rows —
+// and the schemas registry's tools publish: a name the registry does not resolve, a schema that
+// will not decode, or a key the schema has no property for. An empty result means every name and
+// key still lands.
 //
 // A key spelled with dots is a path: each segment is read from the enclosing schema's "properties"
 // object, descending through an array schema's "items" on the way, so "replacements.oldText"
 // resolves at properties.replacements.items.properties.oldText.
-func contentArgsProblems(registry *domain.ToolRegistry, args map[string][]string) []string {
+func wireDroppedProblems(registry *domain.ToolRegistry, args map[string][]string) []string {
 	var problems []string
 	for _, name := range slices.Sorted(maps.Keys(args)) {
 		tool, ok := registry.Lookup(name)
 		if !ok {
-			problems = append(problems, fmt.Sprintf("contentArgs names %q, which no tool in the default registry answers to", name))
+			problems = append(problems, fmt.Sprintf("wireDropped names %q, which no tool in the default registry answers to", name))
 			continue
 		}
 		var schema map[string]any
@@ -272,7 +276,7 @@ func contentArgsProblems(registry *domain.ToolRegistry, args map[string][]string
 		}
 		for _, key := range args[name] {
 			if !schemaHasProperty(schema, strings.Split(key, ".")) {
-				problems = append(problems, fmt.Sprintf("contentArgs drops %q from %s, whose schema has no such property", key, name))
+				problems = append(problems, fmt.Sprintf("wireDropped drops %q from %s, whose schema has no such property", key, name))
 			}
 		}
 	}

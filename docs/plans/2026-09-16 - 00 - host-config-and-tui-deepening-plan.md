@@ -842,7 +842,10 @@ at HEAD.
 
 **Commit:** `refactor(tui): the /settings renderer reads the step table`
 
-## 24. A card's name-keyed facts live on the registry row
+## 24. A card's name-keyed facts live on the registry row — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `toolregistry.go`'s `loadSkillToolName` doc comment reworded — it said the codec re-derives solo "off this same constant", which the row read makes false; the constant stays as the own-kind grouping key (`ownGroupAt`).
+NOTES (2026-09-16): `transcriptbridge_test.go`'s only change is the `TestTranscriptCodecReDerivesSkillFetchSolo` doc comment ("solo BY NAME" → by its registry row); the three codec tests the item names pass unchanged.
 
 **What.** `internal/tui/toolregistry.go`: `toolPresenter` rows gain `solo bool` and `wireDropped
 []string`; rows for `sub_agent`, `load_skill` and the write/edit tools carry them.

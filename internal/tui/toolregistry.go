@@ -179,6 +179,28 @@ type toolPresenter struct {
 	// result grows, no token is spent). It reads the same map the target extractor reads, so a
 	// call whose arguments are absent or malformed yields no body rather than a guess.
 	argBody func(args map[string]any) []detailLine
+
+	// solo marks a tool whose block must never be folded into a grouped block, however well it
+	// matches its neighbours — the presenter's word about what the block MEANS, copied onto the
+	// view the moment the call is recognised (toolView.solo, presentToolCall). Two rows say it:
+	// sub_agent, whose block heads a whole run and frames the work beneath it — a fact about the
+	// call, so it holds even for a delegation refused at the depth bound that never produced a run
+	// to frame — and load_skill, which groups with its OWN kind under "✦ Skill (N)" (ownGroup) and
+	// so must not be folded into the mixed umbrella first. It is a fact about the TOOL, knowable
+	// from the retained name alone, which is what lets a decoded record re-derive it off this same
+	// row rather than trust a mark the wire may predate (fromWireToolView). The answered ask_user
+	// record is the one solo this column cannot state: it becomes true when the RESULT lands
+	// (askUserAnswerRecord, toolOutcome.Solo), so it stays a result-time rule in both producers.
+	solo bool
+
+	// wireDropped names the argument keys whose value is file content, patch text or replacement
+	// pairs — read off the tool's own schema in internal/tools and cross-checked against it
+	// (TestWireDroppedMatchToolSchemas). Those values are dropped from the stored arguments
+	// entirely rather than elided (wireArgs), because the card's Regions and Details already carry
+	// what the edit did (ADR 0052): a second copy on the wire would double the record of an edit
+	// and say nothing new about it. The four write/edit rows set it; a row without it — and a tool
+	// with no row at all — keeps its full arguments, bounded.
+	wireDropped []string
 }
 
 // askUserToolName is the raw tool id whose ANSWERED record stands alone: the block keeps the
@@ -190,11 +212,12 @@ type toolPresenter struct {
 const askUserToolName = "ask_user"
 
 // loadSkillToolName is the raw tool id of the second call that never joins a Tools super-group. A
-// skill fetch groups with its OWN kind — one `✦ Skill (N)` umbrella over one row per fetch — and a
-// presenter that marks a call solo is how that is said (toolView.solo, presentToolCall); folding
-// one into a mixed umbrella beside the reads and greps around it would bury the instructions the
-// run just took on. The transcript codec re-derives the same verdict off this same constant
-// (fromWireToolView), so a session recorded before the mark existed replays never-group.
+// skill fetch groups with its OWN kind — one `✦ Skill (N)` umbrella over one row per fetch — and
+// the row's solo column is how that is said (toolPresenter.solo, copied by presentToolCall);
+// folding one into a mixed umbrella beside the reads and greps around it would bury the
+// instructions the run just took on. The transcript codec re-derives the same verdict off the same
+// row (fromWireToolView), so a session recorded before the mark existed replays never-group; the
+// constant is what the own-kind grouping keys on (ownGroupAt, render.go).
 const loadSkillToolName = "load_skill"
 
 // toolRegistry is the open, name-keyed catalogue. Each later tool adds one entry here; the
@@ -243,12 +266,13 @@ var toolRegistry = map[string]toolPresenter{
 		body:   readFileBody, // the located line numbers, when a term was asked for
 	},
 	"write_file": {
-		label:   "Write",
-		verb:    "writing",
-		target:  stringArg("path"),
-		detail:  firstLineDetail,  // floor; the tool's own "+N bytes" header
-		argStat: writtenLinesStat, // the lines the REQUEST writes — the result reports bytes
-		argBody: writtenLines,     // the content the call writes, as + lines
+		label:       "Write",
+		verb:        "writing",
+		target:      stringArg("path"),
+		detail:      firstLineDetail,     // floor; the tool's own "+N bytes" header
+		argStat:     writtenLinesStat,    // the lines the REQUEST writes — the result reports bytes
+		argBody:     writtenLines,        // the content the call writes, as + lines
+		wireDropped: []string{"content"}, // the file body: the card's + lines already carry it
 	},
 	"list_dir": {
 		label:  "List",
@@ -272,31 +296,34 @@ var toolRegistry = map[string]toolPresenter{
 		stat:   foundFilesStat,
 	},
 	"single_find_and_replace": {
-		label:   "Replace",
-		verb:    "editing",
-		target:  stringArg("path"),
-		detail:  firstLineDetail,       // "replaced text in <path>"
-		stat:    editRegionsStat,       // "+A −R" off the regions the apply recorded, once they land
-		argStat: singleReplacementStat, // "+A −R", counted off the pair the call asks for
-		argBody: singleReplacementBody, // the one oldText → newText pair, as -/+ lines
+		label:       "Replace",
+		verb:        "editing",
+		target:      stringArg("path"),
+		detail:      firstLineDetail,                // "replaced text in <path>"
+		stat:        editRegionsStat,                // "+A −R" off the regions the apply recorded, once they land
+		argStat:     singleReplacementStat,          // "+A −R", counted off the pair the call asks for
+		argBody:     singleReplacementBody,          // the one oldText → newText pair, as -/+ lines
+		wireDropped: []string{"oldText", "newText"}, // the pair: the card's -/+ lines already carry it
 	},
 	"multi_find_and_replace": {
-		label:   "Replace",
-		verb:    "editing",
-		target:  stringArg("path"),
-		detail:  firstLineDetail,      // "applied N replacements to <path>"
-		stat:    editRegionsStat,      // "+A −R" off the regions the apply recorded, once they land
-		argStat: multiReplacementStat, // "N changes" — one per replacement the call lists
-		argBody: multiReplacementBody, // one -/+ pair per replacement, in argument order
+		label:       "Replace",
+		verb:        "editing",
+		target:      stringArg("path"),
+		detail:      firstLineDetail,          // "applied N replacements to <path>"
+		stat:        editRegionsStat,          // "+A −R" off the regions the apply recorded, once they land
+		argStat:     multiReplacementStat,     // "N changes" — one per replacement the call lists
+		argBody:     multiReplacementBody,     // one -/+ pair per replacement, in argument order
+		wireDropped: []string{"replacements"}, // the pairs: the card's -/+ lines already carry them
 	},
 	"edit_existing_file": {
-		label:   "Edit",
-		verb:    "editing",
-		target:  stringArg("path"),
-		detail:  firstLineDetail, // "applied patch to <path> (N hunks)" / "updated <path>"
-		stat:    editRegionsStat, // "+A −R" off the regions the apply recorded, once they land
-		argStat: fileEditStat,    // "+A −R", counted off the patch (or content) the call sends
-		argBody: fileEditBody,    // a patch's hunks, or full replacement content as + lines
+		label:       "Edit",
+		verb:        "editing",
+		target:      stringArg("path"),
+		detail:      firstLineDetail,     // "applied patch to <path> (N hunks)" / "updated <path>"
+		stat:        editRegionsStat,     // "+A −R" off the regions the apply recorded, once they land
+		argStat:     fileEditStat,        // "+A −R", counted off the patch (or content) the call sends
+		argBody:     fileEditBody,        // a patch's hunks, or full replacement content as + lines
+		wireDropped: []string{"content"}, // the patch or body: the card's -/+ lines already carry it
 	},
 	"view_diff": {
 		label:   "Diff Preview",
@@ -459,11 +486,12 @@ var toolRegistry = map[string]toolPresenter{
 		detail:  outputDetail,      // the report's gist; the nested run already rendered railed
 		stat:    delegationStat,    // the engine's own result envelope: done, capped, steered
 		failure: delegationFailure, // a failed delegation reads red, and still says it was steered
+		solo:    true,              // heads a run, never a row in a list — even a refused delegation
 	},
 	// task_list is the model's own checklist, held as engine session state (ADR 0072). No target:
 	// its one argument IS the list, so the list is the target — the same reason git_status carries
 	// none — and the rendered list the tool echoes back is both the branch row and the body under
-	// it. No contentArgs row either: the tasks array is the call's whole point, and repeating it
+	// it. No wireDropped either: the tasks array is the call's whole point, and repeating it
 	// above the result it produced would say the same thing twice; the session record keeps it.
 	"task_list": {
 		label:             "Task List",
@@ -492,6 +520,7 @@ var toolRegistry = map[string]toolPresenter{
 		target:  stringArg("query"), // the words the model searched by, until a skill answers to them
 		outcome: loadSkillOutcome,   // the loaded skill's own name, retargeting the row
 		stat:    blankStat,          // the table's `—`: the target already says which skill loaded
+		solo:    true,               // groups with its own kind (ownGroup), never the mixed umbrella
 	},
 }
 

@@ -2040,8 +2040,9 @@ func TestTranscriptCodecReplaysAFinishedDelegationGreen(t *testing.T) {
 }
 
 // TestTranscriptCodecReDerivesSkillFetchSolo proves the third verdict decode does not take from the
-// file. A skill fetch is solo BY NAME, the way a delegation head is (presentToolCall): it groups
-// with its own kind, never with the reads and greps around it. So a blob written before the mark
+// file. A skill fetch is solo by its REGISTRY ROW, the way a delegation head is (toolPresenter.solo,
+// copied by presentToolCall): it groups with its own kind, never with the reads and greps around
+// it. So a blob written before the mark
 // existed — every session recorded up to now, where load_skill had no registry entry at all — must
 // still replay refusing that fold, or a reload would bury the instructions the run took on inside a
 // mixed "✦ Tools (2 calls)" umbrella the live paint never showed.
