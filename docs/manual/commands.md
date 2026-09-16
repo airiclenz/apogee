@@ -262,7 +262,13 @@ however large. Two ranges are refused rather than answered with nothing: an `end
 file's last line (`read_file: start_line (500) is past the end of the file (120 lines)`). A
 `locate` with no range no longer returns the whole file beneath its `Located …` line: the content
 is the ten lines around each hit, windows that overlap merged, and a lone `…` line between windows
-that do not meet — a term that occurs nowhere renders the bounded body as a plain read would. A
+that do not meet — a term that occurs nowhere renders the bounded body as a plain read would. Those
+windows are bounded the same way: as many as fit the 400-line / 40 KiB cap come back, in file
+order and never cut in the middle, and when some were dropped the body ends with
+`[showing the windows around 18 of 80 hits — pass start_line/end_line for the rest]`; a single
+window that alone runs past the cap (hits every twenty lines or fewer merge into one) is cut like a
+plain read, with the plain read's tail. The `Located …` line itself spells out the first 40 line
+numbers and counts the rest (`… and 40 more`). A
 file whose leading bytes hold a NUL — an executable, an archive, an image — is refused in one line
 (`read_file: build/apogee is a binary file (10094249 bytes)`) rather than served as text; `grep`
 walks past such a file on the same test. A PDF is the one exception: it is detected by its content

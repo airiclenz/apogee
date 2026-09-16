@@ -3,9 +3,11 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1252,6 +1254,179 @@ func TestReadFile_Execute_WindowsALocateWithNoRange(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestReadFile_Execute_CapsALocateWithManyHits pins the locate bound: with no range on the call
+// the windows are kept in file order only while the joined body stays within the default cap
+// (400 lines / 40 KiB, separators counted), a window is never cut in the middle, the body then
+// ends with the tail naming how many hits the shown windows surround, the span ends at the last
+// shown window, and the "Located …" line spells out the first 40 hits and counts the rest. The one
+// exception is a lone first window that alone exceeds the cap — hits every ten lines merge into a
+// single window running the whole file — which is cut like an open-ended read, with the
+// plain-read tail. The byte bound bites the same way on wide lines.
+func TestReadFile_Execute_CapsALocateWithManyHits(t *testing.T) {
+	t.Parallel()
+
+	root := tempRoot(t)
+	files := map[string]string{
+		"every25.txt": hitEvery(2000, 25, 0),
+		"every10.txt": hitEvery(2000, 10, 0),
+		// Sixty lines of 1,400 bytes with hits on 25 and 50: windows 15-35 and 40-60 are 21 lines
+		// each, 29,420 bytes joined — one fits the 40 KiB bound, two do not.
+		"wide.txt": hitEvery(60, 25, 1400),
+		// Forty-nine lines of 2,000 bytes with one hit on 25: the lone window 15-35 is 42,020 bytes
+		// joined, over the bound on its own — capDefault keeps 20 of its 21 lines.
+		"wider.txt": hitEvery(49, 25, 2000),
+	}
+	for name, content := range files {
+		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("setup: %v", err)
+		}
+	}
+
+	tool := NewReadFile(root, ReadMounts{})
+
+	cases := []struct {
+		name          string
+		path          string
+		wantHeader    string
+		wantReport    string // the exact "Located …" line
+		wantBodyLines int    // body lines before any tail, separators included
+		wantFirst     string // the first body line
+		wantLast      string // the last body line before the tail
+		wantTail      string
+		wantSpan      domain.ReadSpan
+	}{
+		{
+			// 80 hits, 80 disjoint 21-line windows: 18 windows plus 17 separators is 395 lines,
+			// the nineteenth would run past 400.
+			name:          "windows past the line cap are dropped and the tail counts the hits shown",
+			path:          "every25.txt",
+			wantHeader:    "[File: every25.txt, 2000 lines total, showing lines 15-460]",
+			wantReport:    "Located \"hit\" on lines: " + hitList(40, 25) + " … and 40 more",
+			wantBodyLines: 395,
+			wantFirst:     "line 15",
+			wantLast:      "line 460",
+			wantTail:      "[showing the windows around 18 of 80 hits — pass start_line/end_line for the rest]",
+			wantSpan:      domain.ReadSpan{Start: 15, End: 460, Total: 2000, Locate: "hit", LocatedOn: hitLines(2000, 25)},
+		},
+		{
+			// 200 hits whose windows all touch merge into ONE window over the whole file.
+			name:          "a lone window over the cap is cut like a plain read",
+			path:          "every10.txt",
+			wantHeader:    "[File: every10.txt, 2000 lines total, showing lines 1-400]",
+			wantReport:    "Located \"hit\" on lines: " + hitList(40, 10) + " … and 160 more",
+			wantBodyLines: 400,
+			wantFirst:     "line 1",
+			wantLast:      "line 400 hit",
+			wantTail:      "[showing lines 1-400 of 2000 — pass start_line/end_line for the rest]",
+			wantSpan:      domain.ReadSpan{Start: 1, End: 400, Total: 2000, Locate: "hit", LocatedOn: hitLines(2000, 10)},
+		},
+		{
+			name:          "the byte bound drops a window the line bound would keep",
+			path:          "wide.txt",
+			wantHeader:    "[File: wide.txt, 60 lines total, showing lines 15-35]",
+			wantReport:    "Located \"hit\" on lines: 25, 50",
+			wantBodyLines: 21,
+			wantFirst:     padLine("line 15", 1400),
+			wantLast:      padLine("line 35", 1400),
+			wantTail:      "[showing the windows around 1 of 2 hits — pass start_line/end_line for the rest]",
+			wantSpan:      domain.ReadSpan{Start: 15, End: 35, Total: 60, Locate: "hit", LocatedOn: []int{25, 50}},
+		},
+		{
+			name:          "the byte bound cuts a lone window like a plain read",
+			path:          "wider.txt",
+			wantHeader:    "[File: wider.txt, 49 lines total, showing lines 15-34]",
+			wantReport:    "Located \"hit\" on lines: 25",
+			wantBodyLines: 20,
+			wantFirst:     padLine("line 15", 2000),
+			wantLast:      padLine("line 34", 2000),
+			wantTail:      "[showing lines 15-34 of 49 — pass start_line/end_line for the rest]",
+			wantSpan:      domain.ReadSpan{Start: 15, End: 34, Total: 49, Locate: "hit", LocatedOn: []int{25}},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			result, err := tool.Execute(context.Background(), callWith(t, "c1", map[string]any{"path": tc.path, "locate": "hit"}))
+
+			if err != nil {
+				t.Fatalf("Execute returned a Go error: %v", err)
+			}
+			if result.IsError {
+				t.Fatalf("IsError = true (content: %q)", result.Content)
+			}
+			lines := strings.Split(result.Content, "\n")
+			if lines[0] != tc.wantHeader {
+				t.Errorf("header = %q, want %q", lines[0], tc.wantHeader)
+			}
+			if lines[1] != tc.wantReport {
+				t.Errorf("report = %q, want %q", lines[1], tc.wantReport)
+			}
+			body := lines[2:]
+			if tc.wantTail != "" {
+				if got := body[len(body)-1]; got != tc.wantTail {
+					t.Errorf("tail = %q, want %q", got, tc.wantTail)
+				}
+				body = body[:len(body)-1]
+			}
+			if len(body) != tc.wantBodyLines {
+				t.Errorf("body holds %d lines, want %d", len(body), tc.wantBodyLines)
+			}
+			if body[0] != tc.wantFirst || body[len(body)-1] != tc.wantLast {
+				t.Errorf("body runs %.20q..%.20q, want %.20q..%.20q", body[0], body[len(body)-1], tc.wantFirst, tc.wantLast)
+			}
+			span, ok := result.Summary.(domain.ReadSpan)
+			if !ok {
+				t.Fatalf("Summary = %#v, want a domain.ReadSpan", result.Summary)
+			}
+			if !reflect.DeepEqual(span, tc.wantSpan) {
+				t.Errorf("Summary = %+v, want %+v", span, tc.wantSpan)
+			}
+		})
+	}
+}
+
+// hitEvery builds a count-line file of "line N" lines where every every-th line carries the
+// word "hit"; a non-zero width pads each line with "w" to exactly that many bytes.
+func hitEvery(count, every, width int) string {
+	lines := make([]string, 0, count)
+	for i := 1; i <= count; i++ {
+		line := fmt.Sprintf("line %d", i)
+		if i%every == 0 {
+			line += " hit"
+		}
+		lines = append(lines, padLine(line, width))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// padLine pads line with "w" to width bytes; a zero width leaves it as it is.
+func padLine(line string, width int) string {
+	if width == 0 {
+		return line
+	}
+	return line + strings.Repeat("w", width-len(line))
+}
+
+// hitLines is every line number up to count that hitEvery marks: the multiples of every.
+func hitLines(count, every int) []int {
+	var hits []int
+	for n := every; n <= count; n += every {
+		hits = append(hits, n)
+	}
+	return hits
+}
+
+// hitList words the first n hits of a file marked every every-th line as the "Located …" line does.
+func hitList(n, every int) string {
+	numbers := make([]string, n)
+	for i := range numbers {
+		numbers[i] = strconv.Itoa((i + 1) * every)
+	}
+	return strings.Join(numbers, ", ")
 }
 
 // TestReadFile_Execute_RefusesABinaryFile pins the binary refusal: a NUL in the file's head is an

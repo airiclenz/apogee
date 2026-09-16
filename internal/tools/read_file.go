@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -13,7 +14,7 @@ import (
 
 var readFileSpec = toolSpec{
 	name:        "read_file",
-	description: "Read the contents of a file by path, optionally restricted to a line range, and optionally locating the line numbers where a substring occurs; absolute paths under a configured read-only root (such as the skills library) are also readable. Without a range the first 400 lines (or 40 KiB) come back and the tail says how to get the rest. PDF files are detected by content and returned as extracted plain text with [Page N] markers; other binary files are refused.",
+	description: "Read the contents of a file by path, optionally restricted to a line range, and optionally locating the line numbers where a substring occurs; absolute paths under a configured read-only root (such as the skills library) are also readable. Without a range the first 400 lines (or 40 KiB) come back — for a locate, as many of the windows around its hits as fit that bound — and the tail says how to get the rest. PDF files are detected by content and returned as extracted plain text with [Page N] markers; other binary files are refused.",
 	schema: json.RawMessage(`{
   "type": "object",
   "required": ["path"],
@@ -22,7 +23,7 @@ var readFileSpec = toolSpec{
     "start_line": {"type": "integer", "description": "Optional 1-based start line"},
     "end_line": {"type": "integer", "description": "Optional 1-based end line (inclusive)"},
     "max_lines": {"type": "integer", "description": "Maximum number of lines to return"},
-    "locate": {"type": "string", "description": "Optional substring to locate; the result reports the absolute 1-based line numbers where it occurs. The whole file is always scanned, even when a line range narrows the returned content. Without a range the content is a window of 10 lines around each hit rather than the whole file."}
+    "locate": {"type": "string", "description": "Optional substring to locate; the result reports the absolute 1-based line numbers where it occurs. The whole file is always scanned, even when a line range narrows the returned content. Without a range the content is a window of 10 lines around each hit rather than the whole file, bounded like a plain read."}
   }
 }`),
 }
@@ -48,7 +49,13 @@ const (
 	// locateWindowLines is the context on either side of a locate hit when no range narrows the
 	// read — the same ±10 a grep with context_lines: 10 shows.
 	locateWindowLines = 10
+	// locateReportHits is the most line numbers the "Located …" line spells out; the rest are
+	// counted, not listed, so a term with hundreds of hits does not spend a line per hit.
+	locateReportHits = 40
 )
+
+// locateSeparator is the lone line between two locate windows that do not meet.
+const locateSeparator = "…"
 
 // ReadFile reads a file's contents, optionally restricted to a line range and optionally
 // reporting where a substring occurs. It is a read-only tool scoped to a sandbox root plus
@@ -104,7 +111,7 @@ func (t *ReadFile) ReadOnly() bool { return true }
 // What comes back is bounded by the CALL before it is bounded by the file: an open-ended read
 // stops at defaultReadLines / defaultReadBytes and says so in its tail, an inverted or past-the-end
 // range is an IsError result rather than an empty success, and a locate with no range returns
-// windows around the hits rather than the whole file (renderFile).
+// windows around the hits rather than the whole file, bounded by the same cap (renderFile).
 func (t *ReadFile) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -204,9 +211,9 @@ func pdfDisplayPath(path string, pages int) string {
 // single "Located …" line naming the absolute 1-based line numbers is emitted between the
 // header and the content, so a match outside a narrowed span is still reported. The span
 // carries those same numbers as data. With no range on the call, the content beneath that line is
-// the ±locateWindowLines window around each hit rather than the file (locateWindows): a miss
-// renders the plain capped body. An empty Locate means none was requested and the output is
-// byte-identical to a plain read.
+// the ±locateWindowLines window around each hit rather than the file, bounded by the same default
+// cap as a plain read (locateWindows): a miss renders the plain capped body. An empty Locate means
+// none was requested and the output is byte-identical to a plain read.
 func renderFile(displayPath, content string, args readFileArgs) (text string, span domain.ReadSpan, failMessage string) {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
@@ -315,36 +322,87 @@ func capDefault(selected []string) []string {
 
 // locateWindows renders the ±locateWindowLines window around each located line, merged where
 // they overlap or touch (mergeLineWindows, the same merge grep's context uses) and clipped to
-// the file, with a lone "…" line between windows that do not meet. A union that covers the whole
-// file is byte-identical to the plain read. The span is the union's first Start and last End —
-// the lines the body reaches across, not a count of the lines it holds.
+// the file, with a lone locateSeparator line between windows that do not meet. The body is
+// bounded like a plain read: windows are kept in file order only while the joined body — windows
+// plus separators — stays within defaultReadLines / defaultReadBytes, a window is never cut in
+// the middle, and when windows were dropped the body ends with a tail naming how many of the
+// hits the shown windows surround. The one window that IS cut is a first window that alone
+// exceeds the bound — hits every twenty lines or fewer merge into ONE window that can run the
+// whole file — which is capped like an open-ended read (capDefault) with the plain-read tail. A
+// union that covers the whole file within the bound is byte-identical to the plain read. The
+// span is the shown union's first Start and last End — the lines the body reaches across, not a
+// count of the lines it holds.
 func locateWindows(lines []string, locatedOn []int) (string, domain.ReadSpan) {
 	windows := mergeLineWindows(locatedOn, locateWindowLines)
-	parts := make([]string, 0, len(windows))
-	for _, w := range windows {
-		if w.to > len(lines) {
-			w.to = len(lines)
-		}
-		parts = append(parts, strings.Join(lines[w.from-1:w.to], "\n"))
+	for i := range windows {
+		windows[i].to = min(windows[i].to, len(lines))
 	}
-	first, last := windows[0], windows[len(windows)-1]
-	span := domain.ReadSpan{Start: first.from, End: min(last.to, len(lines))}
-	return strings.Join(parts, "\n…\n"), span
+
+	first := windows[0]
+	if shown := capDefault(lines[first.from-1 : first.to]); len(shown) < first.to-first.from+1 {
+		end := first.from + len(shown) - 1
+		body := strings.Join(shown, "\n") + fmt.Sprintf(
+			"\n[showing lines %d-%d of %d — pass start_line/end_line for the rest]",
+			first.from, end, len(lines))
+		return body, domain.ReadSpan{Start: first.from, End: end}
+	}
+
+	parts := windowsWithinCap(lines, windows)
+	last := windows[len(parts)-1]
+	body := strings.Join(parts, "\n"+locateSeparator+"\n")
+	if len(parts) < len(windows) {
+		shownHits := sort.SearchInts(locatedOn, last.to+1)
+		body += fmt.Sprintf(
+			"\n[showing the windows around %d of %d hits — pass start_line/end_line for the rest]",
+			shownHits, len(locatedOn))
+	}
+	return body, domain.ReadSpan{Start: first.from, End: last.to}
+}
+
+// windowsWithinCap renders the longest prefix of windows whose joined body — each window's lines,
+// a locateSeparator line between windows — stays within defaultReadLines and defaultReadBytes.
+// The first window is always rendered: the caller has already cut one that alone exceeds the
+// bound, so what arrives here fits.
+func windowsWithinCap(lines []string, windows []lineSpan) []string {
+	parts := make([]string, 0, len(windows))
+	shownLines, shownBytes := 0, 0
+	for _, w := range windows {
+		part := strings.Join(lines[w.from-1:w.to], "\n")
+		addLines, addBytes := w.to-w.from+1, len(part)
+		if len(parts) > 0 {
+			addLines++ // the separator line
+			addBytes += len("\n" + locateSeparator + "\n")
+			if shownLines+addLines > defaultReadLines || shownBytes+addBytes > defaultReadBytes {
+				break
+			}
+		}
+		parts = append(parts, part)
+		shownLines += addLines
+		shownBytes += addBytes
+	}
+	return parts
 }
 
 // locateReport words the one-line locate result: the 1-based line numbers the term was
 // found on, or "on no lines" when it occurs nowhere. The sentence is BUILT from the same
-// numbers the summary carries, so the two can never disagree.
+// numbers the summary carries, so the two can never disagree; past locateReportHits of them it
+// spells out the first that many and counts the rest ("… and N more") — the summary still holds
+// every number.
 func locateReport(locate string, locatedOn []int) string {
 	if len(locatedOn) == 0 {
 		return fmt.Sprintf("Located %q on no lines", locate)
 	}
 
-	numbers := make([]string, len(locatedOn))
-	for i, n := range locatedOn {
+	listed, more := locatedOn, ""
+	if len(listed) > locateReportHits {
+		listed = listed[:locateReportHits]
+		more = fmt.Sprintf(" … and %d more", len(locatedOn)-locateReportHits)
+	}
+	numbers := make([]string, len(listed))
+	for i, n := range listed {
 		numbers[i] = strconv.Itoa(n)
 	}
-	return fmt.Sprintf("Located %q on lines: %s", locate, strings.Join(numbers, ", "))
+	return fmt.Sprintf("Located %q on lines: %s%s", locate, strings.Join(numbers, ", "), more)
 }
 
 // Ensure ReadFile satisfies the domain.Tool contract at compile time. The same guard

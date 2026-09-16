@@ -124,7 +124,11 @@ NOTES (2026-09-16): bead close is the verifier's at commit time — `bd close ap
 
 **Commit:** `fix(agent): the wrap-up keeps one write_file to the output path, not every one`
 
-## 5. read_file locate windows honour the default cap (apogee-8as)
+## 5. read_file locate windows honour the default cap (apogee-8as) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the `locate` schema property's own sentence gained "bounded like a plain read" alongside the description sentence the item names — both are the model-facing promise; `git_show`'s description ("takes the same range arguments as read_file") left as is, it inherits the cap through renderFile.
+NOTES (2026-09-16): the many-hits test carries four rows — the two the item names plus a byte-bound row that drops a wide window and one that cuts a lone wide window — so the "wide-line byte-bound variant" lives in the same table rather than a second test.
+NOTES (2026-09-16): `docs/manual/commands.md` "How much a read returns" passage extended to state the locate bound and the bounded `Located …` line (user-facing behaviour).
 
 **What:** Fix: `internal/tools/read_file.go` `renderFile`'s locate branch bypasses `capDefault`, so a range-less `locate` with hundreds of hits renders every merged ±10-line window, and `locateReport`'s `Located %q on lines: …` line is unbounded too. In `locateWindows` accumulate merged windows only while the joined body (windows plus `…` separators) stays within `defaultReadLines`/`defaultReadBytes`, always keeping at least one window, never cutting inside a window; when windows were dropped append the tail `\n[showing the windows around %d of %d hits — pass start_line/end_line for the rest]` and set `span.End` to the last shown window. Bound `locateReport` to the first 40 line numbers plus `… and %d more`. Update the tool description sentence that promises the cap so it covers locate.
 
