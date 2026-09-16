@@ -1339,27 +1339,27 @@ func TestApprovalAndAskKeysUnchanged(t *testing.T) {
 	})
 }
 
-// The prompt's placeholder tells the truth about what ⏎ will do: it swaps to the queue legend when
-// an Exchange opens, back to the send legend while the box is borrowed for an ask_user answer, and
-// back again at the terminal fold.
+// The prompt's legend tells the truth about what ⏎ will do: derived from the state at paint, it
+// reads as the queue legend once an Exchange opens, the send legend while the box is borrowed for
+// an ask_user answer, and the idle legend again at the terminal fold.
 func TestPlaceholderFollowsTheExchange(t *testing.T) {
 	m := runningModel(t)
-	if got := m.input.Placeholder; got != runningPlaceholder {
+	if got := m.legend(); got != runningPlaceholder {
 		t.Errorf("placeholder = %q; want the running legend", got)
 	}
 
 	reply := make(chan domain.AskAnswer, 1)
 	m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: reply})
-	if got := m.input.Placeholder; got != idlePlaceholder {
+	if got := m.legend(); got != idlePlaceholder {
 		t.Errorf("placeholder = %q; want the send legend while the box holds an answer", got)
 	}
 	m = step(t, m, keyEnter()) // answer away; the box is the human's own again
-	if got := m.input.Placeholder; got != runningPlaceholder {
+	if got := m.legend(); got != runningPlaceholder {
 		t.Errorf("placeholder = %q; want the running legend once the answer is away", got)
 	}
 
 	m = step(t, m, exchangeDoneMsg{})
-	if got := m.input.Placeholder; got != idlePlaceholder {
+	if got := m.legend(); got != idlePlaceholder {
 		t.Errorf("placeholder = %q; want the idle legend once the worker returned", got)
 	}
 }

@@ -1919,13 +1919,12 @@ func (m *Model) resumeRunning() tea.Cmd {
 	return m.spin.arm(m.worker.gen)
 }
 
-// markRunning is the tail the two launch verbs share and the ONLY writer of stateRunning: the
-// state flip, and in the same breath the legend the emptied box invites with — ⏎ queues a message
-// now, it does not send one (runningPlaceholder, routed through legendFor so a box addressing a
-// delegate keeps its own invitation).
+// markRunning is the tail the two launch verbs share and the ONLY writer of stateRunning. The
+// legend the emptied box invites with follows from the flip at paint — ⏎ queues a message now, it
+// does not send one (runningPlaceholder, through [Model.legend], which lets a box addressing a
+// delegate keep its own invitation).
 func (m *Model) markRunning() {
 	m.state = stateRunning
-	m.setPlaceholder(m.legendFor(runningPlaceholder))
 }
 
 // stopWorker cancels the in-flight worker. The worker honours the cancel at the next
@@ -1995,12 +1994,9 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// stop" on an already-idle status line for the rest of the window (handleKey's esc case).
 	m.lastEsc = time.Time{}
 	m.state = next
-	// The box invites again — asked AFTER the flip above, because the legend it lands on is the
-	// state's to decide: a question that died with its Exchange has just let go of the box, and
-	// legendFor yields for as long as the state still says a pane is standing over it (runview.go).
-	// Resolved a line earlier, a stop or a fault under an ask or an approval pane would hand the
-	// conversation's own invitation to a box the run view behind that pane takes back right here.
-	m.setPlaceholder(m.legendFor(m.idleLegend())) // nothing is running: ⏎ sends again
+	// The box invites again from the next frame — nothing is running, so ⏎ sends — by the same
+	// derivation as every other state ([Model.legend]): a question that died with its Exchange has
+	// just let go of the box, and a run view still open behind it takes the box back right here.
 	// The prompt cleared above may have been clamping a multi-line draft to leave itself its four
 	// rows (draftRowsCeiling); with it gone the box grows back to what the draft asks for.
 	m.layout()
@@ -2988,8 +2984,14 @@ func (m Model) renderScrollbar(vp viewport.Model) string {
 // A third pass writes the elision marker onto the box's own TOP BORDER when the frame could not pay
 // for every row the draft wraps to (inputElisionEdge). It is last because it addresses the BORDER
 // row, which the two content overlays never touch.
+//
+// The legend the empty box invites with is derived here, per frame ([Model.legend]), and set on a
+// LOCAL copy of the widget exactly as View sizes its local viewport: View stays a value receiver
+// (ADR 0011), so the Model's own textarea never carries a placeholder.
 func (m Model) inputView() string {
-	box := m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.accentTokens(m.input.View())))
+	in := m.input
+	in.Placeholder = m.legend()
+	box := m.th.inputBorder.Width(m.width).Render(m.highlightInput(m.accentTokens(in.View())))
 	edge := m.inputElisionEdge(m.hiddenDraftRows())
 	if edge == "" {
 		return box

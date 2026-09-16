@@ -594,7 +594,7 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := modelViewingChild(t, &fakeEngine{}, tc.phase)
 
-			if got := m.input.Placeholder; got != tc.want {
+			if got := m.legend(); got != tc.want {
 				t.Errorf("placeholder = %q; want %q", got, tc.want)
 			}
 		})
@@ -608,7 +608,7 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 		if m.inRunView() {
 			t.Fatal("setup: esc did not leave the view")
 		}
-		if got := m.input.Placeholder; got != runningPlaceholder {
+		if got := m.legend(); got != runningPlaceholder {
 			t.Errorf("placeholder = %q; want the running legend back at the top level", got)
 		}
 	})
@@ -622,7 +622,7 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 		}})
 
 		want := "repo-scout has finished · esc back"
-		if got := m.input.Placeholder; got != want {
+		if got := m.legend(); got != want {
 			t.Errorf("placeholder = %q; want %q — the invitation must not outlive the run it names", got, want)
 		}
 	})
@@ -632,7 +632,7 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 
 		m = step(t, m, exchangeDoneMsg{})
 
-		if got := m.input.Placeholder; got == idlePlaceholder || got == idleShiftPlaceholder {
+		if got := m.legend(); got == idlePlaceholder || got == idleShiftPlaceholder {
 			t.Errorf("placeholder = %q; the conversation's own legend took a box that addresses a child", got)
 		}
 	})
@@ -786,18 +786,18 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 
 	t.Run("an ask hands the box the answering legend", func(t *testing.T) {
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
-		if got := m.input.Placeholder; got != childLegendText {
+		if got := m.legend(); got != childLegendText {
 			t.Fatalf("setup: placeholder = %q; want the child legend", got)
 		}
 		reply := make(chan domain.AskAnswer, 1)
 
 		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: reply})
 
-		if got := m.input.Placeholder; got != m.idleLegend() {
+		if got := m.legend(); got != m.idleLegend() {
 			t.Errorf("placeholder = %q; want the answering legend %q — the box belongs to the question", got, m.idleLegend())
 		}
-		if strings.Contains(m.input.Placeholder, "esc back") {
-			t.Errorf("placeholder = %q; esc cancels the question here, so the box must not advertise it as the way back", m.input.Placeholder)
+		if strings.Contains(m.legend(), "esc back") {
+			t.Errorf("placeholder = %q; esc cancels the question here, so the box must not advertise it as the way back", m.legend())
 		}
 
 		// An event arriving under the open pane must not put the child's invitation back either.
@@ -805,7 +805,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
 			Phase:     domain.SubAgentFinished,
 		}})
-		if got := m.input.Placeholder; got != m.idleLegend() {
+		if got := m.legend(); got != m.idleLegend() {
 			t.Errorf("placeholder = %q after an event under the pane; want the answering legend to stand", got)
 		}
 
@@ -814,7 +814,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 		}
 		m = step(t, m, keyEnter())
 
-		if got := m.input.Placeholder; got != "repo-scout has finished · esc back" {
+		if got := m.legend(); got != "repo-scout has finished · esc back" {
 			t.Errorf("placeholder = %q; the answered question gives the box back to the run on screen", got)
 		}
 	})
@@ -825,26 +825,25 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 
 		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: reply})
 
-		if got := m.input.Placeholder; got != runningPlaceholder {
+		if got := m.legend(); got != runningPlaceholder {
 			t.Errorf("placeholder = %q; want %q — the pane's Cancel row owns esc, not the view", got, runningPlaceholder)
 		}
-		if strings.Contains(m.input.Placeholder, "esc back") {
-			t.Errorf("placeholder = %q; esc cancels the approval here, so the box must not advertise it as the way back", m.input.Placeholder)
+		if strings.Contains(m.legend(), "esc back") {
+			t.Errorf("placeholder = %q; esc cancels the approval here, so the box must not advertise it as the way back", m.legend())
 		}
 
 		m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
 		m = step(t, m, keyEnter())
 
-		if got := m.input.Placeholder; got != childLegendText {
+		if got := m.legend(); got != childLegendText {
 			t.Errorf("placeholder = %q; want the child legend back once the decision is away", got)
 		}
 	})
 
 	// A pane does not always end in an answer: a stop or a fault takes the whole Exchange, question
 	// and all, and the box it borrowed goes back to the run STILL OPEN behind it rather than to the
-	// conversation below. finishWorker resolves the legend after its own state flip for exactly
-	// this — while the state still named the pane, legendFor would yield and the top level's
-	// invitation would land on a box that is addressing a child.
+	// conversation below — the legend is derived from the state finishWorker leaves behind, and
+	// that state no longer names the pane.
 	for _, tc := range []struct {
 		name string
 		open tea.Msg
@@ -858,7 +857,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 
 			m = step(t, m, cancelledMsg{})
 
-			if got := m.input.Placeholder; got != childLegendText {
+			if got := m.legend(); got != childLegendText {
 				t.Errorf("placeholder = %q; want the child legend %q — the view outlived the question", got, childLegendText)
 			}
 		})
@@ -872,7 +871,7 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 
 		// Errored is not a borrowed box: esc still walks one level up there (runViewOwnsEsc), so
 		// the legend goes on naming it.
-		if got := m.input.Placeholder; got != childLegendText {
+		if got := m.legend(); got != childLegendText {
 			t.Errorf("placeholder = %q; want the child legend %q — esc still leaves the view at errored", got, childLegendText)
 		}
 	})

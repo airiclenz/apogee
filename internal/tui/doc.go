@@ -325,8 +325,8 @@
 // boundary ([Model.reseatViewStack]: a view stands exactly as long as the entries it names do, so
 // /clear closes every one and a restore that replays the same spawn id keeps its own). It also holds
 // what the box needs to ADDRESS the run on screen: the head that answers for it ([Model.viewedChild]),
-// that run's life as the box needs it ([childPhase], [childPhaseOf]) and the legend funnel every
-// setPlaceholder site routes through ([Model.legendFor]). Because the
+// that run's life as the box needs it ([childPhase], [childPhaseOf]) and the legend derivation the
+// paint reads ([Model.legend], with [Model.legendFor] as its view-aware half). Because the
 // claimant swallows esc, the double-tap stop is unreachable from inside a view — the status line
 // says "esc back" where it would otherwise offer the stop, and backing out first is the way to it.
 //
@@ -355,26 +355,30 @@
 // it (the filter line's ▌, the rename row's and the value row's ▏). The Model stays the
 // coordinator that owns the lifecycle state machine, the transcript + render cache, the
 // stats/gauge, the theme, and the layout; the editor never touches the engine. The empty box's
-// invitation is state the Model SETS, not a render-time choice: setPlaceholder swaps the idle legend
-// ("⏎ send") for runningPlaceholder ("⏎ queue · esc×2 stop") on the lifecycle transitions that open and
-// close an Exchange, so the chrome names what ⏎ will actually do — which is also why the ask
-// rendezvous swaps BACK to the idle legend while it borrows the box for an answer. Inside a run view
-// there is a third invitation, and it outranks both: the box addresses the child on screen (ADR 0063),
-// so childLegend names that run and names esc as the way back — and only a RUNNING child is invited
-// to, the other two lifecycles saying instead why they are not ([childPhaseOf]). Every setPlaceholder
-// call site routes its legend through [Model.legendFor], which is what keeps a transition in the
-// conversation below a view from re-labelling a box that is addressing a delegate. That third
-// invitation yields to a BORROWED box, though: while an ask or an approval pane stands the box is
-// the question's, and esc cancels the question rather than leaving the view
-// ([Model.runViewOwnsEsc] steps aside for both states), so legendFor hands back the conversation's
-// own legend until the question is away — answered, or dead with its Exchange. The idle side of
-// that swap is two constants rather than one, because a key it names is not on every terminal: ⇧⏎
+// invitation is DERIVED at paint, never stored: [Model.legend] (runview.go) reads the lifecycle
+// state, the view stack and the keyboard flag every frame, and inputView sets its answer on the
+// frame's local copy of the textarea (a value receiver's move, as View sizes its local viewport —
+// ADR 0011), so the Model's own widget carries no placeholder and no transition has a legend to
+// forget. The derivation: the idle legend ("⏎ send") at idle and errored, runningPlaceholder
+// ("⏎ queue · esc×2 stop") while a worker runs, so the chrome names what ⏎ will actually do — and
+// the idle legend again while an ask borrows the box for an answer. Inside a run view there is a
+// third invitation, and it outranks both: the box addresses the child on screen (ADR 0063), so
+// childLegend names that run and names esc as the way back — and only a RUNNING child is invited
+// to, the other two lifecycles saying instead why they are not ([childPhaseOf]). [Model.legendFor]
+// is the half that lets the view outrank the state's own legend, which is what keeps a transition
+// in the conversation below a view from re-labelling a box that is addressing a delegate — and a
+// child renamed or moved on by an Event is named as it stands now, because the head is read at
+// paint. That third invitation yields to a BORROWED box, though: while an ask or an approval pane
+// stands the box is the question's, and esc cancels the question rather than leaving the view
+// ([Model.runViewOwnsEsc] steps aside for both states), so legend answers those two states without
+// consulting the view until the question is away — answered, or dead with its Exchange. The idle
+// side is two constants rather than one, because a key it names is not on every terminal: ⇧⏎
 // reaches the program only where the enhanced keyboard protocol's key disambiguation was negotiated,
 // and everywhere else the terminal folds the chord into a plain ⏎ — which is a SEND, so advertising
 // it unconditionally promises a newline and delivers a sent message. idlePlaceholder therefore names
 // ⌥⏎ alone and idleShiftPlaceholder names ⇧⏎/⌥⏎, idleLegend() picks between them off the editor's own
 // keyDisambiguation flag, and the tea.KeyboardEnhancementsMsg fold in prompteditor.go sets that flag when the
-// terminal answers bubbletea's query — repainting an already-drawn idle legend in place, since capable
+// terminal answers bubbletea's query — the next frame's legend reflects it, since capable
 // terminals answer a few frames after the first one is on screen. The startup default is the
 // pessimistic form: a terminal that never answers keeps the ⌥⏎-only legend, which is the honest
 // reading rather than a guess.

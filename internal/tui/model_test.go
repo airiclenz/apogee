@@ -560,7 +560,7 @@ func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
 	m := newTestModel(t)
 
 	// No answer yet — the start-up default names only the chord every terminal delivers.
-	if got := m.input.Placeholder; got != idlePlaceholder {
+	if got := m.legend(); got != idlePlaceholder {
 		t.Fatalf("start-up legend = %q, want the ⌥⏎-only %q", got, idlePlaceholder)
 	}
 	if got := plain(m.View()); !strings.Contains(got, idlePlaceholder) {
@@ -569,7 +569,7 @@ func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
 
 	// The terminal answers with key disambiguation on: the chord now arrives, so the legend names it.
 	on := step(t, m, tea.KeyboardEnhancementsMsg{Flags: ansi.KittyDisambiguateEscapeCodes})
-	if got := on.input.Placeholder; got != idleShiftPlaceholder {
+	if got := on.legend(); got != idleShiftPlaceholder {
 		t.Errorf("legend after the enhanced answer = %q, want %q", got, idleShiftPlaceholder)
 	}
 	if got := plain(on.View()); !strings.Contains(got, idleShiftPlaceholder) {
@@ -578,8 +578,11 @@ func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
 
 	// And back: an answer carrying no enhancements returns the box to the honest legend.
 	off := step(t, on, tea.KeyboardEnhancementsMsg{})
-	if got := off.input.Placeholder; got != idlePlaceholder {
+	if got := off.legend(); got != idlePlaceholder {
 		t.Errorf("legend after a bare answer = %q, want %q back", got, idlePlaceholder)
+	}
+	if got := plain(off.View()); !strings.Contains(got, idlePlaceholder) {
+		t.Errorf("the frame does not paint the legend %q back", idlePlaceholder)
 	}
 }
 
@@ -1933,8 +1936,9 @@ func TestModelApprovalLongArgsCapsBody(t *testing.T) {
 	if !strings.Contains(view, "more lines)") {
 		t.Errorf("oversized args did not show the overflow marker:\n%s", view)
 	}
-	if !strings.Contains(view, "Send a message") {
-		t.Errorf("input box (placeholder) clipped from the View by the oversized args:\n%s", view)
+	// The probe is the legend the approval state derives at paint (Model.legend), whatever it is.
+	if legend := m.legend(); !strings.Contains(view, legend) {
+		t.Errorf("input box (placeholder %q) clipped from the View by the oversized args:\n%s", legend, view)
 	}
 }
 

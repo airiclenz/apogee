@@ -33,9 +33,9 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	// without that stash discarded an unsent message outright.
 	m.askDraft = m.input.Value()
 	m.input.Reset()
-	// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend must say so
-	// for as long as the question stands (submitAnswer swaps it back when the answer is away).
-	m.setPlaceholder(m.legendFor(m.idleLegend()))
+	// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend says so for as
+	// long as the question stands, derived from the state at paint ([Model.legend]) — and hands the
+	// box back the moment submitAnswer moves the state on.
 	m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
 	m.dropRecall()      // and any walk in progress: the box now belongs to the question
 	m.layout()

@@ -96,40 +96,46 @@ func (m Model) runLabel(spawn string) string {
 	return usageAgentFallback
 }
 
-// legendFor picks what the empty box invites: the viewed child's own invitation while a run view is
-// open, and top — the legend the caller's lifecycle transition names — everywhere else. Every
-// setPlaceholder call site routes through it, which is what keeps a transition in the conversation
-// BELOW a view (an Exchange completing, an ask being answered) from re-labelling a box that is
-// addressing a child.
+// legend is what the empty box invites, derived from the Model as it stands at paint (inputView
+// sets it on the frame's local copy of the widget — ADR 0011). Nothing stores it: the lifecycle
+// transitions, the two view moves and the events that move a child's phase or name all change what
+// the box should say, and a value set on one of them was one transition away from being stale —
+// the three-event re-derivation fold.go used to carry existed to chase exactly that. Read per
+// frame, the legend can never be a phase behind the run it names or a transition behind the state.
 //
-// It yields to a BORROWED box. While an ask or an approval pane stands, the box belongs to that
-// question (ask.go, approval.go) and the keys mean what the pane says they mean: esc CANCELS there,
-// because the view's claimant deliberately steps aside for both states ([Model.runViewOwnsEsc]), so
-// the child legend's "esc back" would contradict the pane's own row one line above it. The yield is
-// that claimant's gate read back — the two DECISION states, not "everything that is not live": at
-// errored esc still walks up, so the box there goes on naming it. The view is still open behind the
-// pane and takes the box back the moment the question is answered ([Model.submitAnswer],
-// [Model.sendApproval]) — or dies with its Exchange ([Model.finishWorker]).
-func (m Model) legendFor(top string) string {
-	if m.state.decisionPending() {
-		return top
+// The state decides first, because two of them BORROW the box. While an ask stands the box is the
+// question's and ⏎ SENDS the answer (ask.go), so it wears the idle legend; while an approval stands
+// the pane's rows own the keys and the worker is still in flight, so it keeps the running legend.
+// Neither consults the view: the keys mean what the pane says they mean — esc CANCELS there,
+// because the view's claimant deliberately steps aside for both states ([Model.runViewOwnsEsc]),
+// and the child legend's "esc back" would contradict the pane's own row one line above it. The
+// yield is that claimant's gate read back — the two DECISION states, not "everything that is not
+// live": at errored esc still walks up, so the box there goes on naming the child. The other three
+// states hand their own invitation — ⏎ queues while a worker runs, sends at idle and errored — to
+// [Model.legendFor], which lets an open run view outrank it.
+func (m Model) legend() string {
+	switch m.state {
+	case stateAwaitingAsk:
+		return m.idleLegend()
+	case stateAwaitingApproval:
+		return runningPlaceholder
+	case stateRunning:
+		return m.legendFor(runningPlaceholder)
+	default:
+		return m.legendFor(m.idleLegend())
 	}
+}
+
+// legendFor picks between top — the legend the conversation's own state earns — and the viewed
+// child's own invitation: while a run view is open the box addresses the child on screen
+// (ADR 0063), so it names that run, by that run's lifecycle and under the name it wears in THIS
+// frame. Only [Model.legend] calls it, and only from the states in which the view owns the box.
+func (m Model) legendFor(top string) string {
 	head, ok := m.viewedChild()
 	if !ok {
 		return top
 	}
 	return childLegend(usageAgentName(head), childPhaseOf(head))
-}
-
-// topLegend is the invitation the human's own conversation carries as the Model stands right now.
-// It is what the two view moves hand [Model.legendFor] as their fallback: opening and closing a
-// view is not a lifecycle transition, so there is no legend riding in with the call and the state
-// has to be asked.
-func (m Model) topLegend() string {
-	if m.busy() {
-		return runningPlaceholder
-	}
-	return m.idleLegend()
 }
 
 // openRunAt opens the run view for the delegation headed by entries[index], reporting whether that
@@ -192,11 +198,9 @@ func (m Model) openRun(ref runRef) Model {
 	m.cursor = blockCursor{}
 	m.transcript.setRoot(ref)
 	m.detached = false
-	// The box now addresses the child rather than the conversation, so it says so: the run's own
-	// invitation, by its own lifecycle (legendFor). Set on the move in, exactly as the two
-	// lifecycle transitions set theirs — the placeholder is Model state, never a render-time branch
-	// (doc.go).
-	m.setPlaceholder(m.legendFor(m.topLegend()))
+	// The box now addresses the child rather than the conversation, and the next frame says so on
+	// its own: the legend is derived at paint from the stack this just pushed ([Model.legend]), so
+	// the move sets nothing.
 	m.refreshViewport()
 	return m
 }
@@ -229,8 +233,7 @@ func (m Model) upRun() Model {
 	m.transcript.setRoot(m.viewedRun())
 	m.detached = left.detached
 	// Whatever the box is addressing now — the level below's own child, or the conversation itself
-	// at the top — says so, by the same rule the move in used (openRun).
-	m.setPlaceholder(m.legendFor(m.topLegend()))
+	// at the top — the next frame says so, by the same derivation the move in relies on (openRun).
 	m.refreshViewport()
 	if left.detached {
 		m.viewport.SetYOffset(left.yOffset)

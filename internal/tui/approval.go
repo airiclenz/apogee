@@ -118,10 +118,6 @@ func approvalMenuKeys(menu []approvalOption) map[string]domain.ApprovalDecision 
 // nothing (Update's approvalArmedMsg case) — the counter lives on the Model, not on the question,
 // so it is never reset back onto a number a tick still in flight already carries.
 func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
-	// What the conversation itself invites, read while the state still describes the conversation:
-	// the pane is about to borrow the box, and the legend it hands it is the one the box would be
-	// wearing with no view open (below).
-	top := m.topLegend()
 	m.state = stateAwaitingApproval
 	m.pending = &msg
 	m.approvalSel = listCursor{} // the menu opens on Allow for every request (docs/layout/user-questions-layout.md)
@@ -130,10 +126,9 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	seq := m.approvalSeq
 	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
 	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
-	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts
-	// (legendFor yields for as long as the question stands). At the top level the legend it lands
-	// on is the one already showing, so this is a no-op there.
-	m.setPlaceholder(m.legendFor(top))
+	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts.
+	// The state flip above is all it takes — the legend is derived from it at paint and yields to
+	// the pane for as long as the question stands ([Model.legend]).
 	m.layout() // the pane the decision turns on outranks the draft's extra rows
 	return m, tea.Tick(approvalArmDelay, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} })
 }

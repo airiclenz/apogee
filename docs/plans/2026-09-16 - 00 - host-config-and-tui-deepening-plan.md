@@ -602,7 +602,11 @@ across finish→start), the whole `internal/tui` suite unchanged in outcome.
 
 **Commit:** `refactor(tui): the in-flight worker is one value with three verbs`
 
-## 17. The prompt legend is derived at paint
+## 17. The prompt legend is derived at paint — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `topLegend` deleted as well — its only callers were the two view moves and the approval fold, all of which the derivation replaced; `legendFor` keeps its name but loses the decisionPending yield, which `legend()` now expresses by answering the two decision states without consulting the view.
+NOTES (2026-09-16): `TestModelApprovalLongArgsCapsBody` (model_test.go) probed the input box through the literal "Send a message" after opening an approval from an idle test model; the ratified derivation (awaitingApproval → the running legend) paints "queue a message…" on that test-only path (a real approval arrives while running, where the box already wore it), so the probe now reads `m.legend()`.
+NOTES (2026-09-16): the two fold tests keep their names (`…ReResolvesThePlaceholder`, `…LeavesABorrowedBoxAlone`) so the acceptance `-run` filter and the plan's references still match; their bodies and docs are the derivation tests the item asks for.
 
 **What.** `internal/tui`: `legend() string` in `runview.go` derives the legend from state —
 awaitingAsk → `idleLegend`; awaitingApproval → the running legend; running →

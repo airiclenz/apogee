@@ -712,48 +712,49 @@ func TestFoldStatsSubFloorWindowReadsUnmeasured(t *testing.T) {
 	}
 }
 
-// TestFoldSubAgentNamedEventReResolvesThePlaceholder pins the third arm of foldEvent's placeholder
-// switch. Inside a run view the empty box invites a message to the child BY NAME, so a delegation
-// renamed out of band (ADR 0068) would otherwise leave the invitation addressing a name the run no
-// longer wears until some other event happened to re-resolve it. The box is scrambled first so the
-// assertion is that the fold PUT the legend back, not that it was never disturbed — and the legend
-// it puts back is the one the RENAMED run earns, because the same fold has already moved the head's
-// name (transcript.addSubAgentName): the arm exists precisely so the box stops naming what the run
-// was called a moment ago.
+// TestFoldSubAgentNamedEventReResolvesThePlaceholder pins that the legend follows a rename. Inside
+// a run view the empty box invites a message to the child BY NAME, and the legend is derived at
+// paint off the head the fold updates (Model.legend), so a delegation renamed out of band
+// (ADR 0068) is named as it stands now in the very next frame — the fold moves the head's name
+// (transcript.addSubAgentName) and nothing stored is left addressing what the run was called a
+// moment ago. The frame is asserted as well as the derivation: the painted box is what the human
+// reads.
 func TestFoldSubAgentNamedEventReResolvesThePlaceholder(t *testing.T) {
 	const want = "Message repo scout…  ⏎ send · ↑ recall · esc back"
 
 	m := modelViewingChild(t, &fakeEngine{}, childRunning)
-	if m.input.Placeholder == "" {
-		t.Fatal("setup: the run view left the box with no legend to re-resolve")
+	if got := m.legend(); got == want {
+		t.Fatalf("setup: the legend %q already names the run by the name it is about to be given", got)
 	}
 
-	m.setPlaceholder("stale")
 	m = m.foldEvent(domain.SubAgentNamedEvent{
 		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
 		Name:      "repo scout",
 	})
 
-	if got := m.input.Placeholder; got != want {
-		t.Errorf("placeholder = %q; want %q — the rename left the box addressing a stale name", got, want)
+	if got := m.legend(); got != want {
+		t.Errorf("legend = %q; want %q — the rename left the box addressing a stale name", got, want)
+	}
+	if got := plain(m.View()); !strings.Contains(got, want) {
+		t.Errorf("the frame does not paint the renamed legend %q", want)
 	}
 }
 
 // TestFoldSubAgentNamedEventLeavesABorrowedBoxAlone is the same fold under an open question: a
 // pane that has borrowed the box keeps it, so a rename arriving while the human is answering must
-// not put the child's invitation back on the box they are typing into.
+// not put the child's invitation on the box they are typing into — the derivation answers the
+// ask state without consulting the view.
 func TestFoldSubAgentNamedEventLeavesABorrowedBoxAlone(t *testing.T) {
 	m := modelViewingChild(t, &fakeEngine{}, childRunning)
 
-	m.setPlaceholder("answering")
 	m.state = stateAwaitingAsk
 	m = m.foldEvent(domain.SubAgentNamedEvent{
 		EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
 		Name:      "repo scout",
 	})
 
-	if got := m.input.Placeholder; got != "answering" {
-		t.Errorf("placeholder = %q; want the borrowed box left alone", got)
+	if got, want := m.legend(), m.idleLegend(); got != want {
+		t.Errorf("legend = %q; want the answering legend %q — the borrowed box is the question's", got, want)
 	}
 }
 

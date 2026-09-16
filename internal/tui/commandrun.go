@@ -98,8 +98,8 @@ func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 
 // launchExchange starts the worker over one Exchange and moves the Model into stateRunning
 // through the one launch verb (enterRunning, model.go): a fresh mailbox for what the human types
-// while it runs, the worker Cmd and the CancelFunc the stop key calls (C4), the queue legend on
-// the emptied box, the opening "thinking" phrase, and the spinner tick — batched as the one Cmd
+// while it runs, the worker Cmd and the CancelFunc the stop key calls (C4), the state the emptied
+// box derives its queue legend from, the opening "thinking" phrase, and the spinner tick — batched as the one Cmd
 // the caller returns.
 //
 // It is the tail the two send paths share — a typed submit and an interjection flush — so a
@@ -460,8 +460,9 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// staged while it runs stays on the display queue and goes out at the terminal fold. The
 		// Bridge is told the same (the nil box enterRunning installs): there is no Exchange for the
 		// seam to pre-empt in. Typing is live through a compaction too — the row simply waits for
-		// the terminal fold — so the legend says "queue" here as well; and compaction emits no
-		// Events until it lands, so the phrase the verb sets is the one that stands until then.
+		// the terminal fold — so the legend, derived from stateRunning at paint, says "queue" here
+		// as well; and compaction emits no Events until it lands, so the phrase the verb sets is the
+		// one that stands until then.
 		cmd, cancel := startCompact(m.parent, m.eng)
 		batch := m.enterRunning(cmd, cancel, nil, actCompacting)
 		return m, batch

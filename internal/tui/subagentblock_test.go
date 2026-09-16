@@ -1770,7 +1770,7 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		if got, want := m.runLabel("s1"), name; got != want {
 			t.Errorf("runLabel = %q, want %q", got, want)
 		}
-		if got := m.input.Placeholder; !strings.Contains(got, name) {
+		if got := m.legend(); !strings.Contains(got, name) {
 			t.Errorf("placeholder = %q, want it inviting a message to %q", got, name)
 		}
 	})

@@ -95,10 +95,10 @@ type promptEditor struct {
 // model works it is queued as an interjection and delivered at the next boundary (ADR 0025), so
 // the legend says what ⏎ will actually do and keeps esc's meaning visible.
 //
-// They are swapped on the lifecycle transitions that open and close an Exchange (setPlaceholder,
-// called from the launch paths and finishWorker), never derived per frame: View renders the
-// widget as it stands, so the placeholder is state the Model sets once rather than a render-time
-// branch.
+// Neither is ever stored on the widget: the legend is DERIVED at paint from the Model's state
+// ([Model.legend], runview.go) and set on the frame's local copy of the textarea (inputView), so a
+// transition that changes what ⏎ does changes what the box says in the same frame, with no site to
+// forget.
 // Both legends advertise ↑ recall, and both earn it: the placeholder is drawn only on an EMPTY box,
 // which is exactly the box where ↑ starts a walk through what this workspace has sent (recall.go),
 // and the walk is live at idle and while a worker runs alike.
@@ -133,8 +133,8 @@ const (
 )
 
 // childLegend is what the empty box invites while the run view of the delegation named name is
-// open, chosen by that run's own lifecycle ([childPhaseOf]). Callers hand its result to
-// setPlaceholder exactly as they hand it idleLegend's.
+// open, chosen by that run's own lifecycle ([childPhaseOf]). [Model.legendFor] derives it per
+// frame exactly as it derives idleLegend's.
 func childLegend(name string, phase childPhase) string {
 	switch phase {
 	case childRunning:
@@ -192,7 +192,8 @@ func ParseCursorShape(s string) (tea.CursorShape, error) {
 // is nothing for textWithCaret to draw.
 func newPromptEditor(shape tea.CursorShape, surface color.Color) promptEditor {
 	e := newLineEditor(shape, surface, "")
-	e.input.Placeholder = idlePlaceholder // the not-yet-negotiated legend; idleLegend upgrades it if the terminal answers
+	// No placeholder is seeded: the legend is derived at every paint ([Model.legend]), so the
+	// widget the Model holds never carries one.
 	// Plain Enter submits (intercepted in handleKey), so the textarea's newline binding is
 	// repurposed: shift+enter works on terminals that support the Kitty keyboard protocol,
 	// and alt+enter / ctrl+j are byte-distinct fallbacks that insert a newline everywhere.
@@ -213,21 +214,14 @@ func (e promptEditor) submitParse(known func(string) bool) parsedInput {
 	return parseInput(e.input.Value(), known)
 }
 
-// setPlaceholder swaps what the empty box invites (idleLegend / runningPlaceholder). It is
-// called on the lifecycle transitions that open and close an Exchange, not per frame, so the
-// legend is one assignment rather than a branch in the renderer.
-func (e *promptEditor) setPlaceholder(text string) {
-	e.input.Placeholder = text
-}
-
 // idleLegend is the idle invitation as it stands for THIS terminal: the ⇧⏎ form once key
-// disambiguation was negotiated, the ⌥⏎-only form until then. Callers hand its result to
-// setPlaceholder rather than naming a constant, so there is one place that decides which chords
-// the box may claim.
+// disambiguation was negotiated, the ⌥⏎-only form until then. [Model.legend] reads it per frame
+// rather than naming a constant, so there is one place that decides which chords the box may
+// claim.
 //
 // The default is the pessimistic one on purpose: a terminal that supports the protocol confirms it
-// within the first frames and the legend catches up (setKeyDisambiguation), while one that never
-// will keeps a legend naming only keys it actually delivers. ⌥⏎ is byte-distinct and works
+// within the first frames and the next frame's legend reflects it (setKeyDisambiguation), while one
+// that never will keeps a legend naming only keys it actually delivers. ⌥⏎ is byte-distinct and works
 // everywhere; ctrl+j remains a working, undocumented third fallback.
 func (e promptEditor) idleLegend() string {
 	if e.keyDisambiguation {
@@ -236,17 +230,12 @@ func (e promptEditor) idleLegend() string {
 	return idlePlaceholder
 }
 
-// setKeyDisambiguation records the terminal's answer to the keyboard-protocol query and re-resolves
-// the legend in place when the box is currently showing an idle one — the answer lands a few frames
-// after start-up, by which time the idle placeholder has already been set from the pessimistic
-// default, and nothing else would revisit it until the next lifecycle transition. A box showing the
-// running invitation is left alone: that legend names no newline chord, and the transition back to
-// idle re-resolves it anyway.
+// setKeyDisambiguation records the terminal's answer to the keyboard-protocol query. The answer
+// lands a few frames after start-up, by which time the pessimistic idle legend is already on
+// screen; nothing is re-resolved here because nothing was stored — the next frame derives the
+// legend afresh and reads the flag (idleLegend).
 func (e *promptEditor) setKeyDisambiguation(ok bool) {
 	e.keyDisambiguation = ok
-	if e.input.Placeholder == idlePlaceholder || e.input.Placeholder == idleShiftPlaceholder {
-		e.input.Placeholder = e.idleLegend()
-	}
 }
 
 // reset clears the editor back to empty after a message is sent: it empties the textarea, closes
