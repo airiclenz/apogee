@@ -936,12 +936,14 @@ func mustParseDuration(text string) time.Duration {
 	return d
 }
 
-// parseDelegateTimeout reads a `delegate-timeout:` value into the duration it bounds: the empty
+// ParseDelegateTimeout reads a `delegate-timeout:` value into the duration it bounds: the empty
 // value is the default (an absent key's reading), `0` is off, and text no duration can be made of
 // — or a negative one — is refused with the key named. It is the ONE reading of the key: the
-// loader's accessor resolves through it and the registry's validate hook judges through it, so
-// what startup accepts and what the settings pane writes are one answer.
-func parseDelegateTimeout(value string) (time.Duration, error) {
+// loader's accessor resolves through it, the registry's validate hook judges through it and the
+// live apply a Driver runs after a write lands through it, so what startup accepts, what the
+// settings pane writes and what the running session then holds are one answer. Exported for that
+// third caller, which lives outside this package.
+func ParseDelegateTimeout(value string) (time.Duration, error) {
 	text := strings.TrimSpace(value)
 	if text == "" {
 		return defaultDelegateTimeout, nil
@@ -959,9 +961,9 @@ func parseDelegateTimeout(value string) (time.Duration, error) {
 }
 
 // validateDelegateTimeout refuses a `delegate-timeout:` that is not a length of time to allow,
-// through the loader's own reading (parseDelegateTimeout) rather than a second time.ParseDuration.
+// through the loader's own reading (ParseDelegateTimeout) rather than a second time.ParseDuration.
 func validateDelegateTimeout(value string) error {
-	_, err := parseDelegateTimeout(value)
+	_, err := ParseDelegateTimeout(value)
 	return err
 }
 

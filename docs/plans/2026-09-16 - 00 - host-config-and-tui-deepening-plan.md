@@ -397,7 +397,11 @@ internal/undo/persist.go — Load, Index; cmd/apogee/undo_test.go — TestUndoVe
 
 **Commit:** `refactor(snapshot): a stored-session opener; the undo verb loses the index layout`
 
-## 11. One delegate-timeout parser and a registry-wide defaults pin
+## 11. One delegate-timeout parser and a registry-wide defaults pin — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — internal/config/config.go: made necessary by exporting parseDelegateTimeout as ParseDelegateTimeout (the `fromFile` accessor call and the `fileConfig.DelegateTimeout` doc comment name it).
+NOTES (2026-09-16): `applyDelegateTimeout`'s `key` parameter is now unused (the parser names the key itself) and is spelled `_`; the settingsTable's apply signature is unchanged.
+NOTES (2026-09-16): the pin compares through `renderSettingValue`'s canonical value for the kind and `time.ParseDuration` for the `KindString` durations (`readsAlike` helper); `cmd/apogee/wire_settings_test.go` gains `TestApplyDelegateTimeoutReadsThroughTheOneParser` (empty = default, 0, a limit, the two refusals leave the holder untouched).
 
 **What.** `internal/config/registry.go`: export `ParseDelegateTimeout` (today unexported, shared by
 the accessor and the validator); `cmd/apogee/wire_settings.go` `applyDelegateTimeout` calls it

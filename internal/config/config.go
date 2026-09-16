@@ -786,7 +786,7 @@ var keyAccessors = []keyAccessor{
 		fromFile: func(o *Options, fc fileConfig) {
 			o.DelegateTimeout = defaultDelegateTimeout
 			if fc.DelegateTimeout != nil {
-				if d, err := parseDelegateTimeout(*fc.DelegateTimeout); err == nil {
+				if d, err := ParseDelegateTimeout(*fc.DelegateTimeout); err == nil {
 					o.DelegateTimeout = d
 				}
 			}
@@ -1435,7 +1435,7 @@ type fileConfig struct {
 	// DelegateTimeout bounds how long a CHILD agent's one Exchange may run on the wall clock, from
 	// its first request, as time.ParseDuration spells one (`2h`, `30m`; default 2h; `0` = unbounded).
 	// File-only (no flag/env), and a string pointer for `ui.stall-after`'s reason: the text is
-	// resolved to a duration by the accessor (parseDelegateTimeout) and refused, quoted as written,
+	// resolved to a duration by the accessor (ParseDelegateTimeout) and refused, quoted as written,
 	// by the startup pass when no duration can be made of it. It feeds
 	// domain.Config.Delegation.Timeout.
 	DelegateTimeout *string `yaml:"delegate-timeout"`

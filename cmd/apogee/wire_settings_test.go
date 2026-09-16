@@ -815,6 +815,63 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 	}
 }
 
+// `delegate-timeout` has ONE reading — config.ParseDelegateTimeout — and the live apply reads through
+// it rather than a duration parse of its own: an empty value resolves to the built-in default the
+// registry row declares, exactly as an absent key does at startup (unreachable from the pane, which
+// hands a reset key its Default, but one rule all the same), `0` is unbounded, and a value the parser
+// refuses is refused here in the parser's own words — the sentence the row's validator already uses —
+// with the live holder left where it was.
+func TestApplyDelegateTimeoutReadsThroughTheOneParser(t *testing.T) {
+	t.Parallel()
+	row, ok := config.LookupKey("delegate-timeout")
+	if !ok {
+		t.Fatal("no registry row for delegate-timeout")
+	}
+	declared, err := time.ParseDuration(row.Default)
+	if err != nil {
+		t.Fatalf("the registry default %q is no duration: %v", row.Default, err)
+	}
+
+	tests := []struct {
+		name, value string
+		want        time.Duration
+		wantErr     string
+	}{
+		{name: "an empty value is the built-in default", value: "", want: declared},
+		{name: "0 is unbounded", value: "0", want: 0},
+		{name: "a stated limit", value: "30m", want: 30 * time.Minute},
+		{name: "text that is no duration is refused", value: "soon", wantErr: `invalid delegate-timeout "soon"`},
+		{name: "a negative limit is refused", value: "-5m", wantErr: "invalid delegate-timeout -5m0s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			live := newLiveSettings(config.Options{DelegateTimeout: 10 * time.Minute})
+
+			note, err := applyDelegateTimeout(settingsApplier{live: live}, "delegate-timeout", tt.value)
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("apply delegate-timeout=%q: err = %v, want it to contain %q", tt.value, err, tt.wantErr)
+				}
+				if got := live.options().DelegateTimeout; got != 10*time.Minute {
+					t.Errorf("DelegateTimeout = %v after a refusal, want the 10m the session held", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("apply delegate-timeout=%q: %v", tt.value, err)
+			}
+			if note != "" {
+				t.Errorf("note = %q, want none", note)
+			}
+			if got := live.options().DelegateTimeout; got != tt.want {
+				t.Errorf("DelegateTimeout = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 // settingKeysAppliedByTheRenderer are the Editable keys the TUI applies to ITSELF and never routes
 // out to the binary, because nothing behind [tui.Options.ApplySetting] would have anything to do
 // with them — their whole effect is a field on the Model. The list is hardcoded because that switch

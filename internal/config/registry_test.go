@@ -1,12 +1,14 @@
 package config
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -631,4 +633,74 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 			t.Errorf("registry row %q now has a validate hook; take it out of the unchecked set", k.Path)
 		}
 	}
+}
+
+// TestRegistryDefaultsReadBackFromAnEmptyFile pins every row's declared Default to the value a
+// config that states nothing actually resolves to: LoadFileConfig over an ABSENT file, read back
+// through the row's own Read, has to agree with the Default the row advertises — for the plain
+// scalars, the block-mapped keys and the enums alike. The comparison runs through the row's own
+// parse (renderSettingValue's canonical value for the kind; time.ParseDuration for the duration
+// strings) rather than on the text, because Read spells a duration the way a resolved Duration
+// prints itself — `1m30s` for `ui.stall-after`'s declared "90s", `2h0m0s` for `delegate-timeout`'s
+// "2h" — and two spellings of one bound are not a drift.
+//
+// `cursor-shape` is exempt on purpose. Its row declares "block", but Read returns o.CursorShape,
+// which an absent file leaves EMPTY (config_test.go: "cursor-shape and editor are file-only
+// (default empty)"; wantDefaults sets no CursorShape): the renderer applies the default itself
+// (internal/tui/prompteditor.go) and the settings pane's fallback rule — an empty value shows the
+// declared Default — is what shows "block" (cmd/apogee/settingsrows.go, pinned in
+// settingsrows_test.go). Defaulting it in fromFile would take that fallback rule's only subject
+// away, so the gap stays and is named here rather than closed.
+func TestRegistryDefaultsReadBackFromAnEmptyFile(t *testing.T) {
+	t.Parallel()
+
+	absent := func(string) ([]byte, error) { return nil, fs.ErrNotExist }
+	resolved, err := LoadFileConfig("config.yaml", absent, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig over an absent file: %v", err)
+	}
+
+	exempt := map[string]string{
+		"cursor-shape": "Read returns the file's own (empty) value; the pane's fallback rule shows the default",
+	}
+	for _, k := range KeyRegistry {
+		if k.Default == "" {
+			continue
+		}
+		t.Run(k.Path, func(t *testing.T) {
+			t.Parallel()
+			if reason, ok := exempt[k.Path]; ok {
+				t.Skipf("exempt: %s", reason)
+			}
+			got, want := k.Read(resolved), k.Default
+			if !readsAlike(t, k, got, want) {
+				t.Errorf("registry row %q reads %q from an absent file, want its declared default %q", k.Path, got, want)
+			}
+		})
+	}
+}
+
+// readsAlike compares two spellings of a row's value through the row's own parse: the canonical
+// value renderSettingValue makes of each for the kind, and — for a string the row holds as a
+// duration — the time.Duration both resolve to.
+func readsAlike(t *testing.T, k Key, got, want string) bool {
+	t.Helper()
+	if k.Kind == KindString {
+		if gotDuration, err := time.ParseDuration(got); err == nil {
+			wantDuration, err := time.ParseDuration(want)
+			if err != nil {
+				t.Fatalf("registry row %q reads a duration (%s) but declares a default (%q) that is none", k.Path, gotDuration, want)
+			}
+			return gotDuration == wantDuration
+		}
+	}
+	_, gotCanonical, err := renderSettingValue(k, got)
+	if err != nil {
+		t.Fatalf("registry row %q reads a value its own kind refuses: %v", k.Path, err)
+	}
+	_, wantCanonical, err := renderSettingValue(k, want)
+	if err != nil {
+		t.Fatalf("registry row %q declares a default its own kind refuses: %v", k.Path, err)
+	}
+	return gotCanonical == wantCanonical
 }

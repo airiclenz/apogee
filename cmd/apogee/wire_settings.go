@@ -17,7 +17,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
@@ -1695,13 +1694,16 @@ func applyDelegateMaxTokens(a settingsApplier, key, value string) (string, error
 	return "", nil
 }
 
-// applyDelegateTimeout is `delegate-timeout:`, on the same footing, read as the length of time the
-// registry's own validator accepted (`0` is unbounded); a negative one is refused here too rather
-// than trusted from the file, settingInt's reason.
-func applyDelegateTimeout(a settingsApplier, key, value string) (string, error) {
-	limit, err := time.ParseDuration(strings.TrimSpace(value))
-	if err != nil || limit < 0 {
-		return "", fmt.Errorf("apogee: %s is a length of time of 0 or more, not %q", key, value)
+// applyDelegateTimeout is `delegate-timeout:`, on the same footing, read through the ONE parser
+// of the key (config.ParseDelegateTimeout) — the reading startup resolves by and the registry's
+// validator judges by — rather than a second duration parse with an empty-value rule of its
+// own: an empty value is the built-in default there, as it is for an absent key, and `0` is
+// unbounded. A negative one is refused here too rather than trusted from the file, settingInt's
+// reason, in the parser's own words.
+func applyDelegateTimeout(a settingsApplier, _, value string) (string, error) {
+	limit, err := config.ParseDelegateTimeout(value)
+	if err != nil {
+		return "", err
 	}
 	if a.live != nil {
 		a.live.update(func(o *config.Options) { o.DelegateTimeout = limit })
