@@ -470,7 +470,9 @@ func newHeadlessCommand() *cobra.Command {
 			"event, bracketed by a run_started/run_finished pair. Exit codes: 0 the run\n" +
 			"completed, 1 the run started and failed (model or tool error, cancellation, a\n" +
 			"record that would not save), 2 the run never started (usage, configuration, a\n" +
-			"refused mode).",
+			"refused mode, a server that did not answer), 3 the run started but its final\n" +
+			"turn was abandoned (stdout holds its last text, not an answer; the record is\n" +
+			"saved).",
 		Args:          headlessArgs,
 		SilenceUsage:  true,
 		SilenceErrors: true,

@@ -77,7 +77,7 @@ NOTES (2026-09-16): bead close is the verifier's at commit time — `bd close ap
 
 **Commit:** `test(cmd/apogee): guard that no parallel test swaps a package-level seam`
 
-## 2. headless --help names exit code 3 (apogee-o4w)
+## 2. headless --help names exit code 3 (apogee-o4w) — ✅ DONE (2026-09-16)
 
 **What:** Fix: `cmd/apogee/headless.go` `newHeadlessCommand` Long text lists exit codes 0/1/2 and omits `exitRunFaulted = 3`. Extend the sentence with `3 the run started but its final turn was abandoned (stdout holds its last text, not an answer; the record is saved)` and add `a server that did not answer` to the exit-2 clause so help and `docs/manual/headless.md` agree. Add `TestHeadlessHelpNamesEveryExitCode` in `cmd/apogee/headless_help_test.go`: one `N the run` phrase per exit const, and the manual's exit table carries the same four rows (shape of `docs_env_test.go`'s manual-vs-code tests).
 
