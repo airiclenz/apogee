@@ -49,7 +49,9 @@
 
 **Out of scope:** the internal/tools `execHost` seam (apogee-11s NOTES — its own bead); provenance in `probe config`; a persistent startup banner; `apogee-7ui` (owned by the archived `2026-09-13 - 00` plan); every bead not named above.
 
-## 1. Verify plan 2026-09-16 - 03 is archived
+## 1. Verify plan 2026-09-16 - 03 is archived — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): verified on the tree — `docs/plans/archived/2026-09-16 - 03 - urgent-beads-wave-plan.md` exists (archived at 81c14792), the live `docs/plans/2026-09-16 - 03 - urgent-beads-wave-plan.md` is absent, `git status --porcelain | grep -v '^??'` is empty, and `internal/tui/picker.go` carries twelve `pickerKind` values ending in `pickerFork` (line 93) — the fork wave is on the tree.
 
 **What:** This plan's tree assumes the urgent-beads wave (Anthropic wire, session fork) has landed on `main`: items 12–14 and 16–20 edit `internal/tui/tui.go`, `messages.go`, `sessionsave.go` and `cmd/apogee/wire_session.go`, all of which that run changes. Confirm `docs/plans/archived/2026-09-16 - 03 - urgent-beads-wave-plan.md` exists and `docs/plans/2026-09-16 - 03 - urgent-beads-wave-plan.md` does not; if either check fails, stop the run — do not proceed onto a half-landed tree. The popup goldens and `pickerFork` items 16–17 quote are read against the tree this item gates on (post-03), not BASE.
 
