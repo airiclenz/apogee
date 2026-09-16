@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // containsUser reports whether the conversation holds a user-role message whose content contains
@@ -35,7 +35,7 @@ func containsUser(conv *domain.Conversation, want string) bool {
 // snapshot's again — then a fresh Exchange still drives to completion, proving the Agent is live
 // (no rebuild).
 func TestRestoreSession_RoundTripsAtIdle(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "first"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "first"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -102,7 +102,7 @@ func TestRestoreSession_RoundTripsAtIdle(t *testing.T) {
 func TestRestoreSession_RefusesMidExchange(t *testing.T) {
 	// A valid snapshot from a fresh (idle, empty) Agent — the payload the refused restore must
 	// NOT apply.
-	fresh, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "x"})
+	fresh, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "x"))
 	if err != nil {
 		t.Fatalf("newAgent (fresh): %v", err)
 	}
@@ -113,10 +113,10 @@ func TestRestoreSession_RefusesMidExchange(t *testing.T) {
 
 	// Drive one tool-call Turn so the Exchange stays open (StatusTurnComplete, inExchange true).
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", "{}"),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "lookup", "{}"),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -180,10 +180,10 @@ func TestRestoreSession_RejectsCorruptPayloadUntouched(t *testing.T) {
 func TestInExchange_TrueForRestoredMidExchange_FalseAfterAbort(t *testing.T) {
 	// Snapshot mid-Exchange (one tool-call Turn done, Exchange still open).
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", "{}"),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "lookup", "{}"),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -200,7 +200,7 @@ func TestInExchange_TrueForRestoredMidExchange_FalseAfterAbort(t *testing.T) {
 	}
 
 	// Restore into a fresh, idle Agent and confirm the flag round-tripped.
-	b, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "x"})
+	b, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "x"))
 	if err != nil {
 		t.Fatalf("newAgent (b): %v", err)
 	}
@@ -225,7 +225,7 @@ func TestInExchange_TrueForRestoredMidExchange_FalseAfterAbort(t *testing.T) {
 // mutate against.
 func idleAgentWithHistory(t *testing.T) *Agent {
 	t.Helper()
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "reply"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -284,10 +284,10 @@ func TestRestoreSession_ResetsTheUsageTally(t *testing.T) {
 	t.Parallel()
 
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), &scriptedResponder{scripts: [][]provider.Delta{
-		usageScript("first", provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19}),
-		usageScript("second", provider.Usage{PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35}),
-	}})
+	a, err := newAgent(baseConfig(sink), scriptedResponder(t,
+		usageScript("first", stubllm.Usage{Prompt: 12, Completion: 7}),
+		usageScript("second", stubllm.Usage{Prompt: 30, Completion: 5}),
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestRestoreSession_ResetsTheUsageTally(t *testing.T) {
 func TestRestoreSession_RefusalLeavesConsolesAndTallyStanding(t *testing.T) {
 	t.Parallel()
 
-	spent := provider.Usage{PromptTokens: 10, CompletionTokens: 2, TotalTokens: 12}
+	spent := stubllm.Usage{Prompt: 10, Completion: 2}
 	sink := &recordingSink{}
 	a, opener := consoleUsageAgent(t, sink,
 		usageToolCallScript("c0", "open_console", `{}`, spent),
@@ -348,7 +348,7 @@ func TestRestoreSession_RefusalLeavesConsolesAndTallyStanding(t *testing.T) {
 	)
 
 	// A valid snapshot from a fresh, idle Agent — the payload NEITHER refusal may apply.
-	fresh, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "x"})
+	fresh, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "x"))
 	if err != nil {
 		t.Fatalf("newAgent (fresh): %v", err)
 	}
@@ -410,14 +410,14 @@ func TestRestoreSession_RefusalLeavesConsolesAndTallyStanding(t *testing.T) {
 // of the restore boundary — the Consoles and the usage tally — in a single Exchange sequence.
 // Like newConsoleAgent it needs a pseudo-terminal and registers the teardown for whatever shells
 // the test leaves running.
-func consoleUsageAgent(t *testing.T, sink *recordingSink, scripts ...[]provider.Delta) (*Agent, *consoleOpener) {
+func consoleUsageAgent(t *testing.T, sink *recordingSink, scripts ...stubllm.Turn) (*Agent, *consoleOpener) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("a Console needs a pseudo-terminal; Windows is a later plan (ADR 0059)")
 	}
 
 	opener := &consoleOpener{}
-	a, err := newAgent(configWithTools(sink, opener.tool()), &scriptedResponder{scripts: scripts})
+	a, err := newAgent(configWithTools(sink, opener.tool()), scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

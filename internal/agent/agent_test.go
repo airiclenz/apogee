@@ -14,6 +14,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // TestEffortOverrideLayersOverTheProfile is the door's own contract: the two layers are reported
@@ -24,7 +25,7 @@ func TestEffortOverrideLayersOverTheProfile(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.Profile.Thinking.Effort = domain.EffortLow
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -65,7 +66,7 @@ func TestChildDoesNotInheritTheEffortOverride(t *testing.T) {
 
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "w"})
 	cfg.Profile.Thinking.Effort = domain.EffortLow
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestEffortOverrideSurvivesARebind(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.Profile.Thinking.Effort = domain.EffortLow
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
 	cfg.EffortDialect = domain.EffortDialectReasoning
 	cfg.Profile.Thinking.Effort = domain.EffortMedium
 
-	up := &recordingResponder{reply: "done"}
+	up := &recordingResponder{reply: "done"} // an effort assertion: the stubllm log does not carry it yet
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -189,7 +190,7 @@ func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
 func TestRebindCarriesTheEffortDialectOntoTheRequest(t *testing.T) {
 	t.Parallel()
 
-	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -279,10 +280,10 @@ func TestTurnEventReportsEveryBoundaryToStepAndRunHostsAlike(t *testing.T) {
 
 			sink := &recordingSink{}
 			cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "the answer is 42"})
-			a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
-				toolCallScript("c1", "lookup", `{"q":"meaning"}`),
-				contentScript("all done"),
-			}})
+			a, err := newAgent(cfg, scriptedResponder(t,
+				toolCallTurn("c1", "lookup", `{"q":"meaning"}`),
+				contentTurn("all done"),
+			))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -316,9 +317,9 @@ func TestTurnEventMarksTheStepCappedChildBoundary(t *testing.T) {
 
 	cases := []struct {
 		name   string
-		wrapUp []provider.Delta
+		wrapUp stubllm.Turn
 	}{
-		{"the wrap-up Turn completes", contentScript("here is what I found")},
+		{"the wrap-up Turn completes", contentTurn("here is what I found")},
 		{"the wrap-up Turn faults", errorScript("upstream exploded on the wrap-up")},
 	}
 
@@ -331,11 +332,11 @@ func TestTurnEventMarksTheStepCappedChildBoundary(t *testing.T) {
 			cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 			cfg.Delegation.MaxSteps = 3
 
-			scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
-			scripts = append(scripts, cappedChildTurns(3)...)
-			scripts = append(scripts, tc.wrapUp, contentScript("parent done"))
+			scripts := []stubllm.Turn{subAgentCallTurn("c1", "trawl the repo")}
+			scripts = append(scripts, narratedChildTurns(3)...)
+			scripts = append(scripts, tc.wrapUp, contentTurn("parent done"))
 
-			a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+			a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}

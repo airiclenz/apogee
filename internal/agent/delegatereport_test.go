@@ -32,7 +32,7 @@ func delegateReportConfig(t *testing.T) domain.Config {
 // delegateOn builds a parent on cfg and spawns one delegate from it, returning both.
 func delegateOn(t *testing.T, cfg domain.Config) (parent, child *Agent) {
 	t.Helper()
-	parent = newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	parent = newProfileAgent(t, cfg, echoResponder(t, "All done."))
 	child, err := parent.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {
 		t.Fatalf("newChildAgent: %v", err)
@@ -102,7 +102,7 @@ func TestDelegateReport_RidesAlongAndNeverSeedsAlone(t *testing.T) {
 	cfg.WorkspaceDir = orientationWorkspaceDir
 	cfg.ScratchDir = orientationScratchDir
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	parent := newProfileAgent(t, cfg, responder)
 	child, err := parent.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {
@@ -120,8 +120,8 @@ func TestDelegateReport_RidesAlongAndNeverSeedsAlone(t *testing.T) {
 	if _, err := child.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if n := countSystemMessages(responder.last.Messages); n != 0 {
-		t.Errorf("a delegate's wire request has %d system messages, want none: %+v", n, responder.last.Messages)
+	if n := countSystemMessages(responder.last().Messages); n != 0 {
+		t.Errorf("a delegate's wire request has %d system messages, want none: %+v", n, responder.last().Messages)
 	}
 }
 
@@ -153,7 +153,7 @@ func TestDelegateReport_RoutedAndUnroutedChildrenAlike(t *testing.T) {
 	t.Parallel()
 
 	cfg := delegateReportConfig(t)
-	parent := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	parent := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 	unrouted, err := parent.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {
@@ -188,7 +188,7 @@ func TestDelegateReport_DoesNotContradictTheWrapUpDirective(t *testing.T) {
 	t.Parallel()
 
 	cfg := delegateReportConfig(t)
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	parent := newProfileAgent(t, cfg, responder)
 	child, err := parent.newChildAgent("call_sub", "the delegated task", "")
 	if err != nil {

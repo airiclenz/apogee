@@ -17,11 +17,11 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // wireUserCountContaining counts the user wire messages whose content contains substr.
-func wireUserCountContaining(msgs []provider.Message, substr string) int {
+func wireUserCountContaining(msgs []stubllm.Message, substr string) int {
 	n := 0
 	for _, m := range msgs {
 		if m.Role == "user" && strings.Contains(m.Content, substr) {
@@ -89,11 +89,11 @@ func TestRetryView_ReadRepeatIgnoresSupersededRead(t *testing.T) {
 	}
 	cfg := configWithTools(sink, readFile)
 	cfg.Reactions = []domain.Reaction{repeatReadProbe("lab_repeat_read")}
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "read_file", `{"path":"a.go"}`),                 // missing max_lines — the repair guard retries; reads a.go
-		toolCallScript("c2", "read_file", `{"path":"a.go","max_lines":100}`), // corrected — must dispatch, not re-fire the probe
-		contentScript("done"), // next turn's final
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "read_file", `{"path":"a.go"}`),                 // missing max_lines — the repair guard retries; reads a.go
+		toolCallTurn("c2", "read_file", `{"path":"a.go","max_lines":100}`), // corrected — must dispatch, not re-fire the probe
+		contentTurn("done"), // next turn's final
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -101,8 +101,8 @@ func TestRetryView_ReadRepeatIgnoresSupersededRead(t *testing.T) {
 	}
 	runExchange(t, a, "edit a.go")
 
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3 (draft, repair retry, next-turn final)", len(responder.got))
+	if len(responder.requests()) != 3 {
+		t.Fatalf("provider was called %d times, want 3 (draft, repair retry, next-turn final)", len(responder.requests()))
 	}
 	// The superseded read must not be counted: the probe never fires this Exchange.
 	if n := fireCountFor(sink.events, "lab_repeat_read"); n != 0 {
@@ -134,11 +134,11 @@ func TestRetryView_RepeatedRepairFailGetsCorrectionNotToolLoop(t *testing.T) {
 		schema:   `{"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"]}`,
 	}
 	cfg := configWithTools(sink, writeFile)
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_file", `{"path":"a.go"}`), // missing content — the repair guard retries
-		toolCallScript("c2", "write_file", `{"path":"a.go"}`), // identical repeat — must get the repair correction, not the loop directive
-		contentScript("giving up"),                            // final
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_file", `{"path":"a.go"}`), // missing content — the repair guard retries
+		toolCallTurn("c2", "write_file", `{"path":"a.go"}`), // identical repeat — must get the repair correction, not the loop directive
+		contentTurn("giving up"),                            // final
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -146,8 +146,8 @@ func TestRetryView_RepeatedRepairFailGetsCorrectionNotToolLoop(t *testing.T) {
 	}
 	runExchange(t, a, "write a.go")
 
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3 (draft, repair retry, final)", len(responder.got))
+	if len(responder.requests()) != 3 {
+		t.Fatalf("provider was called %d times, want 3 (draft, repair retry, final)", len(responder.requests()))
 	}
 	// The repeat matches only the superseded attempt, so the loop breaker must not fire.
 	if n := guardFireCountFor(sink.events, guardToolLoopBreaker); n != 0 {
@@ -160,7 +160,7 @@ func TestRetryView_RepeatedRepairFailGetsCorrectionNotToolLoop(t *testing.T) {
 	}
 	// The third (last) request carries the accumulated appendage; both corrections must be the
 	// repair wording, and the loop directive must never have reached the model.
-	third := responder.got[2].Messages
+	third := responder.requests()[2].Messages
 	if c := wireUserCountContaining(third, "Your previous tool call had errors"); c != 2 {
 		t.Errorf("the retried request carries %d repair corrections, want 2: %+v", c, third)
 	}
@@ -240,10 +240,10 @@ func TestRetryView_EmptySupersededExchangeOpeningKeepsRealUserAsk(t *testing.T) 
 	var views []domain.ConversationView
 	cfg := emptyRecoveryWithCapture(t, sink, &views,
 		fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		emptyScript(),              // Exchange-opening empty reply — the recovery guard retries
-		contentScript("recovered"), // the retry pass; its bounded View() is what the capture observes
-	}}
+	responder := scriptedResponder(t,
+		emptyScript(),            // Exchange-opening empty reply — the recovery guard retries
+		contentTurn("recovered"), // the retry pass; its bounded View() is what the capture observes
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -251,8 +251,8 @@ func TestRetryView_EmptySupersededExchangeOpeningKeepsRealUserAsk(t *testing.T) 
 	}
 	runExchange(t, a, "please implement the parser")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("provider was called %d times, want 2 (empty draft, retry)", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("provider was called %d times, want 2 (empty draft, retry)", len(responder.requests()))
 	}
 	if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
 		t.Fatal("the empty-response recovery guard did not retry — the empty-superseded path was never exercised")
@@ -279,11 +279,11 @@ func TestRetryView_EmptySupersededExchangeOpeningKeepsRealUserAsk(t *testing.T) 
 
 	// State() byte-identical: the retried request carries the nudge then the real ask, unchanged
 	// by the View-only committedLen fix (native profile ⇒ wire messages == State().Messages).
-	want := []provider.Message{
+	want := []stubllm.Message{
 		{Role: "user", Content: wave1Nudge},
 		{Role: "user", Content: "please implement the parser"},
 	}
-	if got := responder.got[1].Messages; !reflect.DeepEqual(got, want) {
+	if got := responder.requests()[1].Messages; !reflect.DeepEqual(got, want) {
 		t.Errorf("retried request messages = %+v, want %+v", got, want)
 	}
 }
@@ -299,11 +299,11 @@ func TestRetryView_EmptySupersededToolContinuationKeepsToolResult(t *testing.T) 
 	ran := 0
 	cfg := emptyRecoveryWithCapture(t, sink, &views,
 		fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "package a\nfunc F() {}"})
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "read_file", `{"path":"a.go"}`), // turn 0: a tool call commits assistant + tool result
-		emptyScript(),              // turn 1: empty reply — the recovery guard retries
-		contentScript("recovered"), // the retry pass; its bounded View() is what the capture observes
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "read_file", `{"path":"a.go"}`), // turn 0: a tool call commits assistant + tool result
+		emptyScript(),            // turn 1: empty reply — the recovery guard retries
+		contentTurn("recovered"), // the retry pass; its bounded View() is what the capture observes
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -311,8 +311,8 @@ func TestRetryView_EmptySupersededToolContinuationKeepsToolResult(t *testing.T) 
 	}
 	runExchange(t, a, "read a.go")
 
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3 (tool call, empty draft, retry)", len(responder.got))
+	if len(responder.requests()) != 3 {
+		t.Fatalf("provider was called %d times, want 3 (tool call, empty draft, retry)", len(responder.requests()))
 	}
 	if ran != 1 {
 		t.Errorf("read_file ran %d times, want 1", ran)
@@ -337,7 +337,7 @@ func TestRetryView_EmptySupersededToolContinuationKeepsToolResult(t *testing.T) 
 
 	// State() unchanged: the retried request leads with the prepended nudge, then the real ask,
 	// the superseded assistant call and its tool result — in order.
-	retried := responder.got[2].Messages
+	retried := responder.requests()[2].Messages
 	gotRoles := make([]string, len(retried))
 	for j, m := range retried {
 		gotRoles[j] = m.Role
@@ -367,11 +367,11 @@ func TestRetryView_DoubleEmptyRetryKeepsBoundary(t *testing.T) {
 	var views []domain.ConversationView
 	cfg := emptyRecoveryWithCapture(t, sink, &views,
 		fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		emptyScript(),              // attempt 0 empty → retry
-		emptyScript(),              // attempt 1 empty → retry
-		contentScript("recovered"), // attempt 2 stands
-	}}
+	responder := scriptedResponder(t,
+		emptyScript(),            // attempt 0 empty → retry
+		emptyScript(),            // attempt 1 empty → retry
+		contentTurn("recovered"), // attempt 2 stands
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -379,8 +379,8 @@ func TestRetryView_DoubleEmptyRetryKeepsBoundary(t *testing.T) {
 	}
 	runExchange(t, a, "please implement the parser")
 
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3 (two empty retries + recovery)", len(responder.got))
+	if len(responder.requests()) != 3 {
+		t.Fatalf("provider was called %d times, want 3 (two empty retries + recovery)", len(responder.requests()))
 	}
 	if n := guardFireCountFor(sink.events, guardEmptyResponseRecovery); n != 2 {
 		t.Errorf("the empty-response recovery guard fired %d times, want 2 (both empty replies retried)", n)

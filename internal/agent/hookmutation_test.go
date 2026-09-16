@@ -16,8 +16,10 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// capturingResponder records the request it is asked to send, then replies with a
-// canned message, so a test can assert what a pre-request Reaction shaped onto the wire.
+// capturingResponder records the request it is asked to send, as the provider sees it, then
+// replies with a canned message. Its remaining users assert the request's Sampling — a field the
+// stubllm request log does not yet carry; what a Reaction shaped onto the wire is read off the
+// scripted upstream's log.
 type capturingResponder struct {
 	got   provider.Request
 	reply string
@@ -64,13 +66,13 @@ func TestPreRequestReactionMutationsReachProvider(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.Reactions = []domain.Reaction{shapingReaction()}
-	resp := &capturingResponder{reply: "ok"}
+	resp := echoResponder(t, "ok")
 	driveOneStep(t, cfg, resp)
 
 	// The Reaction ran against the real outgoing request: the provider must now see a
 	// system message carrying the nudge and an injected user message placed before the
 	// user's actual input — neither of which exists in the bare conversation.
-	msgs := resp.got.Messages
+	msgs := resp.last().Messages
 	if len(msgs) != 3 {
 		t.Fatalf("provider saw %d messages, want 3 (system nudge + injected context + input): %+v", len(msgs), msgs)
 	}
@@ -88,10 +90,10 @@ func TestPreRequestReactionMutationsReachProvider(t *testing.T) {
 // TestNoHookLeavesRequestBare is the control: with no pre-request hook, the provider
 // sees only the bare conversation — so the mutations above are attributable to the hook.
 func TestNoHookLeavesRequestBare(t *testing.T) {
-	resp := &capturingResponder{reply: "ok"}
+	resp := echoResponder(t, "ok")
 	driveOneStep(t, baseConfig(&recordingSink{}), resp)
 
-	if got := resp.got.Messages; len(got) != 1 || got[0].Content != "do the thing" {
+	if got := resp.last().Messages; len(got) != 1 || got[0].Content != "do the thing" {
 		t.Errorf("bare request = %+v, want the single user message unchanged", got)
 	}
 }

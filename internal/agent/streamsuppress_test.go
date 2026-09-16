@@ -10,38 +10,21 @@ package agent
 
 import (
 	"context"
-	"iter"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// chunkedResponder streams a fixed sequence of native reasoning chunks (one DeltaThinking each,
-// the way a reasoning model front-loads reasoning_content) followed by the content chunks (one
-// DeltaContent each) and a terminal Done — the fake for exercising incremental token emission
-// across delta boundaries. It mirrors the provider's own contract of never yielding an empty
-// content or thinking chunk (stream.go).
-type chunkedResponder struct {
-	thinking []string
-	chunks   []string
-}
-
-func (r chunkedResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
-	return func(yield func(provider.Delta) bool) {
-		for _, th := range r.thinking {
-			if th != "" && !yield(provider.Delta{Kind: provider.DeltaThinking, Thinking: th}) {
-				return
-			}
-		}
-		for _, c := range r.chunks {
-			if c != "" && !yield(provider.Delta{Kind: provider.DeltaContent, Content: c}) {
-				return
-			}
-		}
-		yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: "stop"})
-	}
+// chunkedResponder streams a fixed sequence of native reasoning deltas (the way a reasoning model
+// front-loads reasoning_content) followed by the content deltas at the boundaries the test placed
+// by hand — the upstream for exercising incremental token emission across delta boundaries. The
+// stub refuses an empty chunk, the provider's own contract of never yielding an empty content or
+// thinking chunk (stream.go).
+func chunkedResponder(t testing.TB, thinking, chunks []string) *scriptedUpstream {
+	t.Helper()
+	return scriptedResponder(t, stubllm.Turn{ReasoningChunks: thinking, Chunks: chunks})
 }
 
 // tokenTexts returns the Text of every TokenEvent in order — the live stream a UI would render.
@@ -101,7 +84,7 @@ func TestStream_NativeIsByteIdentical(t *testing.T) {
 	chunks := []string{"Hello, ", "world", "!"}
 	thinking := []string{"Weighing ", "the greeting."}
 
-	a := newProfileAgent(t, cfg, chunkedResponder{thinking: thinking, chunks: chunks})
+	a := newProfileAgent(t, cfg, chunkedResponder(t, thinking, chunks))
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -148,7 +131,7 @@ func TestStream_DelimitedThinkingHeldOffLiveStream(t *testing.T) {
 	// The channel tokens (<think>, </think>) each arrive as their own WHOLE chunk.
 	chunks := []string{"Let me check. ", "<think>", "The user said hi.", "</think>", "Hello there!"}
 
-	a := newProfileAgent(t, cfg, chunkedResponder{chunks: chunks})
+	a := newProfileAgent(t, cfg, chunkedResponder(t, nil, chunks))
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -194,7 +177,7 @@ func TestStream_HarmonyChannelsHeldOffLiveStream(t *testing.T) {
 		"<|channel|>final<|message|>", "The answer is 42.", "<|end|>",
 	}
 
-	a := newProfileAgent(t, cfg, chunkedResponder{chunks: chunks})
+	a := newProfileAgent(t, cfg, chunkedResponder(t, nil, chunks))
 	if err := a.Submit(domain.UserInput{Text: "answer?"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -258,7 +241,7 @@ func TestStream_ReasoningSurvivesSplitChannelTokens(t *testing.T) {
 				Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
 			}
 
-			a := newProfileAgent(t, cfg, chunkedResponder{chunks: tc.chunks})
+			a := newProfileAgent(t, cfg, chunkedResponder(t, nil, tc.chunks))
 			if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 				t.Fatalf("Submit: %v", err)
 			}

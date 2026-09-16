@@ -6,7 +6,7 @@ import (
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // TestBudgetIsHonestBeforeCalibration pins the uncalibrated view: a fresh Agent that has seen no
@@ -15,7 +15,7 @@ import (
 func TestBudgetIsHonestBeforeCalibration(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 8192
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -44,10 +44,7 @@ func TestBudgetIsHonestBeforeCalibration(t *testing.T) {
 func TestBudgetViewReflectsCalibratedUsage(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 8192
-	a, err := newAgent(cfg, usageResponder{
-		content: "hello",
-		usage:   provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19},
-	})
+	a, err := newAgent(cfg, scriptedResponder(t, usageScript("hello", stubllm.Usage{Prompt: 12, Completion: 7})))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -77,10 +74,7 @@ func TestBudgetViewReflectsCalibratedUsage(t *testing.T) {
 func TestBudgetDoesNotReshapeRequests(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 16 // absurdly small on purpose
-	a, err := newAgent(cfg, usageResponder{
-		content: "the assistant reply",
-		usage:   provider.Usage{PromptTokens: 9, CompletionTokens: 4, TotalTokens: 13},
-	})
+	a, err := newAgent(cfg, scriptedResponder(t, usageScript("the assistant reply", stubllm.Usage{Prompt: 9, Completion: 4})))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -130,7 +124,7 @@ func TestMaxOutputTokensDerivesFromTheReplyBudget(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})
 			cfg.Context.MaxContextTokens = tc.window
 			cfg.Context.MaxOutputTokens = tc.pin
-			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			a, err := newAgent(cfg, echoResponder(t, "unused"))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -237,7 +231,7 @@ func TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})
 			cfg.Context.MaxContextTokens = tc.window
 			cfg.Context.WorkingWindow = tc.working
-			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			a, err := newAgent(cfg, echoResponder(t, "unused"))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -290,7 +284,7 @@ func TestMaxOutputTokensDerivesFromTheWorkingRoom(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})
 			cfg.Context.MaxContextTokens = advertised
 			cfg.Context.WorkingWindow = tc.working
-			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			a, err := newAgent(cfg, echoResponder(t, "unused"))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -320,7 +314,7 @@ func TestUnroutedChildInheritsTheParentsOutputPin(t *testing.T) {
 	cfg.Context.MaxOutputTokens = 16384
 	cfg.Context.MaxContextTokens = 98304
 	cfg.Context.WorkingWindow = 32768
-	parent, err := newAgent(cfg, echoResponder{reply: "unused"})
+	parent, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

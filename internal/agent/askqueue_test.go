@@ -9,6 +9,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -50,9 +51,15 @@ func (a *askProbeAsker) Ask(_ context.Context, req domain.AskRequest) (domain.As
 	return domain.AskAnswer{Text: a.answer(req)}, nil
 }
 
-// askUserCallScript emits one ask_user call putting question to the human.
+// askUserCallScript emits one ask_user call putting question to the human — the Delta script a
+// routedResponder plays; askUserCallTurn is its stubllm twin.
 func askUserCallScript(id, question string) []provider.Delta {
 	return toolCallScript(id, "ask_user", `{"question":"`+question+`"}`)
+}
+
+// askUserCallTurn is a turn that emits one ask_user call putting question to the human.
+func askUserCallTurn(id, question string) stubllm.Turn {
+	return toolCallTurn(id, "ask_user", `{"question":"`+question+`"}`)
 }
 
 // TestSubAgent_ChildQuestionIsRefusedAndNeverReachesTheHuman is the retired fan-out case turned
@@ -104,10 +111,10 @@ func TestAskRequest_TopLevelNamesNoSubAgent(t *testing.T) {
 	asker := &askProbeAsker{answer: func(domain.AskRequest) string { return "yes" }}
 	cfg := configWithTools(sink, tools.NewAskUser(asker))
 
-	up := &scriptedResponder{scripts: [][]provider.Delta{
-		askUserCallScript("q1", "shall I?"),
-		contentScript("done"),
-	}}
+	up := scriptedResponder(t,
+		askUserCallTurn("q1", "shall I?"),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

@@ -139,6 +139,12 @@ func (t Turn) expand(r Request) (Turn, error) {
 
 	expanded := t
 	expanded.Text = replacer.Replace(t.Text)
+	if len(t.Chunks) > 0 {
+		expanded.Chunks = make([]string, len(t.Chunks))
+		for i := range t.Chunks {
+			expanded.Chunks[i] = replacer.Replace(t.Chunks[i])
+		}
+	}
 	if len(t.ToolCalls) > 0 {
 		expanded.ToolCalls = make([]ToolCall, len(t.ToolCalls))
 		copy(expanded.ToolCalls, t.ToolCalls)

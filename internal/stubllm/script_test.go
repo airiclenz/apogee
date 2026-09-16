@@ -41,6 +41,11 @@ func TestScriptRoundTripsThroughYAML(t *testing.T) {
 			{Hang: 250 * time.Millisecond},
 			{},
 			{
+				ReasoningChunks: []string{"Weighing ", "the greeting."},
+				Chunks:          []string{"Let me check. ", "<think>", "hidden", "</think>", "Hello!"},
+				ToolCalls:       []ToolCall{{Name: "list_dir"}},
+			},
+			{
 				Captures:  []Capture{{Name: "scratch", From: "system", Pattern: `scratch directory: (/\S+)`}},
 				ToolCalls: []ToolCall{{Name: "terminal", Arguments: `{"command":"ls {{scratch}}"}`}},
 			},
@@ -74,7 +79,27 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 		{
 			name: "text and http together",
 			yaml: "turns:\n  - text: hello\n    http: {status: 500}\n",
-			want: "more than one of text, tool_calls, http and hang",
+			want: "more than one of a completion (text, chunks and/or tool_calls), http and hang",
+		},
+		{
+			name: "chunks beside text",
+			yaml: "turns:\n  - text: hello\n    chunks: [hel, lo]\n",
+			want: "sets both text and chunks",
+		},
+		{
+			name: "chunks beside chunk_runes",
+			yaml: "turns:\n  - chunks: [hel, lo]\n    chunk_runes: 2\n",
+			want: "sets both chunks and chunk_runes",
+		},
+		{
+			name: "reasoning_chunks beside reasoning",
+			yaml: "turns:\n  - reasoning: hmm\n    reasoning_chunks: [hm, m]\n",
+			want: "sets both reasoning and reasoning_chunks",
+		},
+		{
+			name: "an empty chunk",
+			yaml: "turns:\n  - chunks: [hel, \"\", lo]\n",
+			want: "chunks[1] is empty",
 		},
 		{
 			name: "http without a status",
@@ -271,6 +296,57 @@ func TestTerminatorRidesAnOrdinaryTurn(t *testing.T) {
 			t.Errorf("code = %d, want 502", got)
 		}
 	})
+}
+
+// TestNarratingToolCallTurnIsOneCompletion pins the shape a narrating model sends: text and
+// tool calls on ONE turn are one completion, not two kinds, and the turn ends on tool_calls
+// exactly as a call without narration does.
+func TestNarratingToolCallTurnIsOneCompletion(t *testing.T) {
+	t.Parallel()
+
+	script, err := Parse([]byte("turns:\n  - text: let me look\n    tool_calls: [{name: list_dir}]\n"))
+	if err != nil {
+		t.Fatalf("parse refused a narrating tool-call turn: %v", err)
+	}
+
+	turn := script.Turns[0]
+	if turn.kindCount() != 1 {
+		t.Errorf("kindCount = %d, want 1 — text and tool calls are one completion", turn.kindCount())
+	}
+	if got := turn.finishReason(); got != "tool_calls" {
+		t.Errorf("finish reason = %q, want tool_calls", got)
+	}
+}
+
+// TestChunksPlaceTheStreamBoundaries pins the hand-placed split: a chunks list streams one delta
+// per element, in order, and reads back as their concatenation wherever the whole content is
+// wanted — the non-streamed reply, the cut point, the kind rule.
+func TestChunksPlaceTheStreamBoundaries(t *testing.T) {
+	t.Parallel()
+
+	script, err := Parse([]byte("turns:\n  - chunks: [\"Let me check. \", \"<think>\", \"hidden\", \"</think>\", \"Hello!\"]\n    reasoning_chunks: [\"Weighing \", \"the greeting.\"]\n"))
+	if err != nil {
+		t.Fatalf("parse refused a chunks turn: %v", err)
+	}
+
+	turn := script.Turns[0]
+	if !turn.isCompletion() {
+		t.Error("a chunks turn is not a completion — chunks IS the text")
+	}
+	wantContent := []string{"Let me check. ", "<think>", "hidden", "</think>", "Hello!"}
+	if got := turn.contentDeltas(); !reflect.DeepEqual(got, wantContent) {
+		t.Errorf("content deltas = %q, want the hand-placed %q", got, wantContent)
+	}
+	if got := turn.content(); got != "Let me check. <think>hidden</think>Hello!" {
+		t.Errorf("content = %q, want the chunks joined", got)
+	}
+	wantReasoning := []string{"Weighing ", "the greeting."}
+	if got := turn.reasoningDeltas(); !reflect.DeepEqual(got, wantReasoning) {
+		t.Errorf("reasoning deltas = %q, want the hand-placed %q", got, wantReasoning)
+	}
+	if got := turn.reasoning(); got != "Weighing the greeting." {
+		t.Errorf("reasoning = %q, want the reasoning chunks joined", got)
+	}
 }
 
 // TestEmptyReplyTurnIsLegal pins the one turn that looks like a mistake and is not: a turn with

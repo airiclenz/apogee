@@ -47,7 +47,11 @@ server := stubllm.New(t, stubllm.Script{
 
 `stubllm.New(t, script, opts...)` starts the server on a loopback port and closes it on
 `t.Cleanup`; `stubllm.Serve(ctx, addr, script, opts...)` is the same server for a binary (see
-[`cmd/stubllm`](#the-binary-cmdstubllm)). Options: `WithRequestLog(bool)` (on by default), `WithAPIKey(key)` (401s a
+[`cmd/stubllm`](#the-binary-cmdstubllm)); `stubllm.InProcess(t, script, opts...)` is the same
+server on no port at all — its `Handler()` served over a pipe by `Transport()`, which a test
+hands the real provider client as `provider.WithHTTPClient(&http.Client{Transport:
+server.Transport()})`. That is how `internal/agent`'s engine tests play a Script: one decoder,
+the same bytes a listening stub would send, and no loopback socket per fake. Options: `WithRequestLog(bool)` (on by default), `WithAPIKey(key)` (401s a
 request without `Authorization: Bearer key`), `WithLatency(d)` (time-to-first-token for every
 reply).
 
@@ -81,28 +85,32 @@ the format it documents.
 
 ### Turn kinds
 
-A Turn is **exactly one** kind. Setting two is a validation error; setting none is the
-**empty-reply** turn — the thing a real model produces when it abandons a reply mid-flight, and
-the only way to script it.
+A Turn is **exactly one** kind — a completion, `http` or `hang`. Setting two is a validation
+error; setting none is the **empty-reply** turn — the thing a real model produces when it
+abandons a reply mid-flight, and the only way to script it. A completion is `text` (or `chunks`),
+`tool_calls`, or both together: a model that narrates before it calls a tool streams its content
+deltas first and the call's head/tail fragments after them, ending on `tool_calls`, and one turn
+scripts that shape.
 
 | Key | What it plays |
 | --- | --- |
 | `text` | assistant content, streamed in `chunk_runes` (default 4) rune deltas with `token_delay` between them |
-| `tool_calls` | one or more calls, each split into the id-bearing head and an argument tail real servers send |
+| `chunks` | the content with its stream boundaries placed BY HAND — one delta per element, in order; set instead of `text` and `chunk_runes`, no element empty. For a test about what happens AT a boundary (a `<think>` tag in a delta of its own). `reasoning_chunks` is the same for the thinking channel |
+| `tool_calls` | one or more calls, each split into the id-bearing head and an argument tail real servers send; with `text` on the same turn, streamed after the content |
 | `http` | a raw HTTP reply — `status` (required), `body`, `location`, `content_type` — and not one SSE event |
 | `hang` | stalls for the duration, then answers as the empty-reply turn does; a cancelled request context releases it at once |
 | *(none of the above)* | the empty-reply turn |
 | `cut: {after_runes: N}` | *terminator* — streams the reasoning and the first N runes of the `text`, then KILLS the TCP connection without a terminal chunk, so the client reads `io.ErrUnexpectedEOF` (never a handler return, whose clean EOF the provider would commit as a finished reply); N at or past the end of the text streams every delta, tool-call fragments included, and kills in the terminator's place |
 | `error: {code, message}` | *terminator* — streams the leading deltas, then an in-band `{"error": {"code": N, "message": "..."}}` object on the 200 response in the terminator's place (then `[DONE]`); `code` defaults to 502, the retryable class; on the non-streamed path the object is a member of the JSON body |
 
-`cut` and `error` are **terminators, not kinds**: each rides a text, tool-call or empty turn and only
+`cut` and `error` are **terminators, not kinds**: each rides a completion or empty turn and only
 changes how its stream ends, so the one-kind rule above is untouched. A turn sets at most one of
 them; either with `http` or `hang` — which never start a stream — is a parse error, as is `usage` or
 `finish_reason` on such a turn, which never reaches the terminator that would carry them. A
 non-streamed `cut` turn kills the connection after the 200 header, before any body.
 
 `reasoning` (the thinking channel, streamed before the content) and `usage` accompany a
-text or tool-call turn; they are refused on an `http` or `hang` turn, which never reach the
+completion turn; they are refused on an `http` or `hang` turn, which never reach the
 completion shape at all. `reasoning_field` names the WIRE SPELLING that channel goes out in —
 either `reasoning_content`, which is what llama.cpp, vLLM and LM Studio send and what an unset key
 means, or the bare `reasoning` that Ollama and OpenRouter send for the very same channel. Exactly

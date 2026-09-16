@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // allSeamMoments is the complete seam vocabulary the dispatch matrix spans, in loop order.
@@ -106,10 +105,10 @@ func countsByMoment() (map[domain.Moment]int, func(domain.Moment)) {
 // second closes with text — so every one of the five seam Moments is exercised at least once.
 func driveToolExchange(t *testing.T, cfg domain.Config) {
 	t.Helper()
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("call-1", "probe", `{}`),
-		contentScript("done"),
-	}})
+	a, err := newAgent(cfg, scriptedResponder(t,
+		toolCallTurn("call-1", "probe", `{}`),
+		contentTurn("done"),
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -160,7 +159,7 @@ func TestArmedReactionFiresUnderItsOwnID(t *testing.T) {
 	fired := 0
 	cfg.Reactions = []domain.Reaction{recordingReaction("greet", domain.ClassShapeView, &fired)}
 
-	driveOneStep(t, cfg, echoResponder{reply: "ok"})
+	driveOneStep(t, cfg, echoResponder(t, "ok"))
 
 	if fired != 1 {
 		t.Errorf("armed reaction fired %d times, want 1", fired)
@@ -282,7 +281,7 @@ func TestPanickingReactionContained(t *testing.T) {
 	cfg := baseConfig(sink)
 	cfg.Reactions = []domain.Reaction{panicReaction("boom")}
 
-	a, err := newAgent(cfg, echoResponder{reply: "still answered"})
+	a, err := newAgent(cfg, echoResponder(t, "still answered"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

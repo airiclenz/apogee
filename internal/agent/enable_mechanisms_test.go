@@ -31,7 +31,7 @@ func TestReactions_IllFormedEntryFailsConstruction(t *testing.T) {
 		}),
 	}}
 
-	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	_, err := newAgent(cfg, echoResponder(t, "unreached"))
 	if !errors.Is(err, domain.ErrInvalidReaction) {
 		t.Errorf("newAgent err = %v, want it to wrap domain.ErrInvalidReaction", err)
 	}
@@ -47,7 +47,7 @@ func TestReactions_ShadowedIDRejectionCarriesOnePrefix(t *testing.T) {
 	fired := false
 	cfg.Reactions = []domain.Reaction{firingReaction("tool-loop-breaker", &fired)}
 
-	_, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	_, err := newAgent(cfg, echoResponder(t, "unreached"))
 	if err == nil {
 		t.Fatal("newAgent accepted a Reaction shadowing a builtin's ID; want a refusal")
 	}
@@ -73,7 +73,7 @@ func TestReactions_SurviveConstructionAndFire(t *testing.T) {
 	fired := false
 	cfg.Reactions = []domain.Reaction{firingReaction("provided_probe", &fired)}
 
-	a, err := newAgent(cfg, echoResponder{reply: "done"})
+	a, err := newAgent(cfg, echoResponder(t, "done"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestReactions_NilAndEmptyArmNothing(t *testing.T) {
 			cfg := baseConfig(sink)
 			cfg.Reactions = reactions
 
-			a, err := newAgent(cfg, echoResponder{reply: "hi"})
+			a, err := newAgent(cfg, echoResponder(t, "hi"))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -124,7 +124,7 @@ func TestReactions_ResumeArmsIdentically(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "write_file", result: "ok"})
 
-	a, err := newAgent(cfg, echoResponder{reply: "done"})
+	a, err := newAgent(cfg, echoResponder(t, "done"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestReactions_ResumeArmsIdentically(t *testing.T) {
 	cfg2 := configWithTools(&recordingSink{}, fakeTool{name: "write_file", result: "ok"})
 	shadowFired := false
 	cfg2.Reactions = []domain.Reaction{firingReaction("tool-loop-breaker", &shadowFired)}
-	if _, err := resumeAgent(cfg2, snap, echoResponder{reply: "unreached"}); !errors.Is(err, domain.ErrInvalidReaction) {
+	if _, err := resumeAgent(cfg2, snap, echoResponder(t, "unreached")); !errors.Is(err, domain.ErrInvalidReaction) {
 		t.Errorf("resumeAgent err = %v, want ErrInvalidReaction; Reactions must be re-armed from Config, not session state", err)
 	}
 }

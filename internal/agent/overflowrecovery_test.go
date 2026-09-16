@@ -450,7 +450,7 @@ func TestOverflowRecoveryCancelDuringFoldIsResumable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot after cancel: %v", err)
 	}
-	b, err := resumeAgent(autoCompactConfig(&recordingSink{}), snap, echoResponder{reply: "resumed reply"})
+	b, err := resumeAgent(autoCompactConfig(&recordingSink{}), snap, echoResponder(t, "resumed reply"))
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}

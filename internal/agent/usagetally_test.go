@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -13,32 +13,30 @@ import (
 // Cumulative usage accounting (agent.go usageTally → domain.UsageEvent)
 // ----------------------------------------------------------------------------
 
-// usageScript is a stream that emits one content chunk then a terminal Done carrying the
-// server's token accounting — the scripted counterpart of usageResponder, so a multi-Turn
-// script can vary the usage per call.
-func usageScript(text string, u provider.Usage) []provider.Delta {
-	return []provider.Delta{
-		{Kind: provider.DeltaContent, Content: text},
-		{Kind: provider.DeltaDone, FinishReason: "stop", Usage: &u, Model: servedModelID},
-	}
+// usageScript is a turn that replies with text and reports the server's token accounting on its
+// terminal chunk, so a multi-Turn script can vary the usage per call.
+func usageScript(text string, u stubllm.Usage) stubllm.Turn {
+	return stubllm.Turn{Text: text, Usage: &u}
 }
 
-// servedModelID is the id every usageScript reply names as the model that answered — deliberately
-// not the id baseConfig binds, so a reading that stamped the bound model where the served one
-// belongs would show.
+// servedModelID is the id a served-model script advertises, and so the id every reply names as
+// the model that answered — deliberately not the id baseConfig binds, so a reading that stamped
+// the bound model where the served one belongs would show.
 const servedModelID = "served-by-x"
 
-// usageToolCallScript is toolCallScript with the same terminal usage report attached, so a
+// servedResponder is scriptedResponder for a script whose replies name servedModelID as the
+// model that answered.
+func servedResponder(t testing.TB, turns ...stubllm.Turn) *scriptedUpstream {
+	t.Helper()
+	return scriptResponder(t, stubllm.Script{Model: servedModelID, Turns: turns})
+}
+
+// usageToolCallScript is toolCallTurn with the same terminal usage report attached, so a
 // Turn that ends in a tool call still accounts for the tokens it spent.
-func usageToolCallScript(id, name, args string, u provider.Usage) []provider.Delta {
-	return []provider.Delta{
-		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
-			ID:       id,
-			Type:     "function",
-			Function: provider.FunctionCall{Name: name, Arguments: args},
-		}},
-		{Kind: provider.DeltaDone, FinishReason: "tool_calls", Usage: &u},
-	}
+func usageToolCallScript(id, name, args string, u stubllm.Usage) stubllm.Turn {
+	turn := toolCallTurn(id, name, args)
+	turn.Usage = &u
+	return turn
 }
 
 // usageEvents collects every UsageEvent from a recorded stream, in emission order.
@@ -58,14 +56,10 @@ func usageEvents(events []domain.Event) []domain.UsageEvent {
 // call's own counts. Neither is a maintenance event.
 func TestUsageEventsCarryCumulativeTotals(t *testing.T) {
 	sink := &recordingSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		usageScript("first", provider.Usage{
-			PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19, CachedPromptTokens: 4,
-		}),
-		usageScript("second", provider.Usage{
-			PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35, CachedPromptTokens: 11,
-		}),
-	}}
+	responder := scriptedResponder(t,
+		usageScript("first", stubllm.Usage{Prompt: 12, Completion: 7, Cached: 4}),
+		usageScript("second", stubllm.Usage{Prompt: 30, Completion: 5, Cached: 11}),
+	)
 	a, err := newAgent(baseConfig(sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -136,16 +130,12 @@ func TestSubAgentUsageIsChildLocal(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
+	responder := scriptedResponder(t,
 		usageToolCallScript("c1", tools.SubAgentToolName, subAgentArgs("summarise the repo"),
-			provider.Usage{PromptTokens: 100, CompletionTokens: 10, TotalTokens: 110, CachedPromptTokens: 50}),
-		usageScript("child reply", provider.Usage{
-			PromptTokens: 40, CompletionTokens: 4, TotalTokens: 44, CachedPromptTokens: 9,
-		}),
-		usageScript("parent done", provider.Usage{
-			PromptTokens: 200, CompletionTokens: 20, TotalTokens: 220, CachedPromptTokens: 90,
-		}),
-	}}
+			stubllm.Usage{Prompt: 100, Completion: 10, Cached: 50}),
+		usageScript("child reply", stubllm.Usage{Prompt: 40, Completion: 4, Cached: 9}),
+		usageScript("parent done", stubllm.Usage{Prompt: 200, Completion: 20, Cached: 90}),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -204,12 +194,12 @@ func TestSubAgentUsageIsChildLocal(t *testing.T) {
 // makes /usage right immediately after /compact.
 func TestCompactionUsageRidesFlaggedMaintenanceEvent(t *testing.T) {
 	sink := &recordingSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		usageScript("first", provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19}),
-		usageScript("second", provider.Usage{PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35}),
-		usageScript("FOLDED-SUMMARY", provider.Usage{PromptTokens: 500, CompletionTokens: 60, TotalTokens: 560}),
-		usageScript("after the fold", provider.Usage{PromptTokens: 8, CompletionTokens: 3, TotalTokens: 11}),
-	}}
+	responder := servedResponder(t,
+		usageScript("first", stubllm.Usage{Prompt: 12, Completion: 7}),
+		usageScript("second", stubllm.Usage{Prompt: 30, Completion: 5}),
+		usageScript("FOLDED-SUMMARY", stubllm.Usage{Prompt: 500, Completion: 60}),
+		usageScript("after the fold", stubllm.Usage{Prompt: 8, Completion: 3}),
+	)
 	a, err := newAgent(baseConfig(sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

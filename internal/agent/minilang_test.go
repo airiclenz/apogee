@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // ----------------------------------------------------------------------------
@@ -17,7 +17,7 @@ import (
 // ----------------------------------------------------------------------------
 
 func TestClearContextEmptiesConversationKeepsTurnIndex(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "hi there"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "hi there"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -51,10 +51,10 @@ func TestClearContextResetsTheUsageTally(t *testing.T) {
 	t.Parallel()
 
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), &scriptedResponder{scripts: [][]provider.Delta{
-		usageScript("first", provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19}),
-		usageScript("second", provider.Usage{PromptTokens: 30, CompletionTokens: 5, TotalTokens: 35}),
-	}})
+	a, err := newAgent(baseConfig(sink), scriptedResponder(t,
+		usageScript("first", stubllm.Usage{Prompt: 12, Completion: 7}),
+		usageScript("second", stubllm.Usage{Prompt: 30, Completion: 5}),
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestClearContextResetsTheUsageTally(t *testing.T) {
 }
 
 func TestClearContextRefusedMidExchange(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "x"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "x"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -108,7 +108,7 @@ func TestClearContextRefusedMidExchange(t *testing.T) {
 }
 
 func TestCompactSummarizesAndReplacesHistoryKeepingPrefix(t *testing.T) {
-	up := &recordingResponder{reply: "COMPACTED-SUMMARY"}
+	up := echoResponder(t, "COMPACTED-SUMMARY")
 	a, err := newAgent(baseConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -144,7 +144,7 @@ func TestCompactSummarizesAndReplacesHistoryKeepingPrefix(t *testing.T) {
 		t.Errorf("summary message wrong: %+v", sum)
 	}
 	// The summary call carried the summarizer system prompt + the rendered transcript.
-	last := up.last
+	last := up.last()
 	if len(last.Messages) == 0 || last.Messages[0].Role != "system" {
 		t.Fatalf("summary request did not lead with a system prompt: %+v", last.Messages)
 	}
@@ -157,7 +157,7 @@ func TestCompactSummarizesAndReplacesHistoryKeepingPrefix(t *testing.T) {
 }
 
 func TestCompactRefusedMidExchange(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "x"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "x"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -176,7 +176,7 @@ func TestResolveFileRefsInjectsContent(t *testing.T) {
 	writeWorkspaceFile(t, dir, "data.txt", "SECRET CONTENT 123")
 	cfg := baseConfig(&recordingSink{})
 	cfg.WorkspaceDir = dir
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestResolveFileRefsMissingRefEmitsErrorAndProceeds(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.WorkspaceDir = dir
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestResolveFileRefsEscapeRefused(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.WorkspaceDir = dir
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -270,7 +270,7 @@ func TestResolveSkillRefsInjectsBodyBeforeText(t *testing.T) {
 	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
 		"review": {ID: "review", DisplayName: "Code Review", Body: "REVIEW INSTRUCTIONS"},
 	}}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -303,7 +303,7 @@ func TestResolveSkillRefsNamesTheSkillFolder(t *testing.T) {
 	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
 		"review": {ID: "review", DisplayName: "Code Review", Body: "REVIEW INSTRUCTIONS", Dir: "/home/u/.apogee/skills/review"},
 	}}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestResolveSkillRefsWithoutDirOmitsTheFilesLine(t *testing.T) {
 	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
 		"review": {ID: "review", DisplayName: "Code Review", Body: "REVIEW INSTRUCTIONS"},
 	}}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -368,7 +368,7 @@ func TestResolveSkillRefsExpandsSkillDirToken(t *testing.T) {
 			Dir:         "/home/u/.apogee/skills/review",
 		},
 	}}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestResolveSkillRefsWithoutDirLeavesSkillDirTokenLiteral(t *testing.T) {
 			Body:        "read {{SKILL_DIR}}/prompts/recon.md then copy {{SKILL_DIR}}/prompts/report.md",
 		},
 	}}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -428,7 +428,7 @@ func TestResolveSkillRefsUnknownIDNoted(t *testing.T) {
 	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
 		"known": {ID: "known", DisplayName: "Known", Body: "KNOWN BODY"},
 	}}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestResolveSkillRefsUnknownIDNoted(t *testing.T) {
 
 func TestResolveSkillRefsNilResolverGracefulDrop(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), echoResponder{reply: "ok"}) // no Config.Skills
+	a, err := newAgent(baseConfig(sink), echoResponder(t, "ok")) // no Config.Skills
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

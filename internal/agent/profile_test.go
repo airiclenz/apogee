@@ -10,7 +10,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"iter"
 	"strings"
 	"testing"
 
@@ -21,25 +20,6 @@ import (
 // customRegexToolPattern mirrors the apogee-code custom-regex oracle vector (JS named groups,
 // which the parser rewrites to Go's (?P<name>…)).
 const customRegexToolPattern = `<tool_call>(?<name>\w+)\((?<args>\{.*?\})\)</tool_call>`
-
-// profileResponder streams one content chunk and, optionally, one out-of-band native tool call —
-// the fake for exercising the native-vs-text precedence at the seam (D5).
-type profileResponder struct {
-	content string
-	call    *provider.ToolCall
-}
-
-func (r profileResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
-	return func(yield func(provider.Delta) bool) {
-		if r.content != "" && !yield(provider.Delta{Kind: provider.DeltaContent, Content: r.content}) {
-			return
-		}
-		if r.call != nil && !yield(provider.Delta{Kind: provider.DeltaToolCall, ToolCall: r.call}) {
-			return
-		}
-		yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: "stop"})
-	}
-}
 
 // lastAssistantMessage returns the most recent committed assistant message — the one the seam
 // wrote the stripped content and merged tool calls onto.
@@ -73,7 +53,7 @@ func TestProfile_MarkdownFencedCallParsedAndStripped(t *testing.T) {
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
 
 	content := "Let me read that file.\n\n```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nmain.go\n```"
-	a := newProfileAgent(t, cfg, echoResponder{reply: content})
+	a := newProfileAgent(t, cfg, echoResponder(t, content))
 	if err := a.Submit(domain.UserInput{Text: "read main.go"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -117,7 +97,7 @@ func TestProfile_CustomRegexCallParsedAndStripped(t *testing.T) {
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatCustomRegex, Pattern: customRegexToolPattern}
 
 	content := `Done. <tool_call>list_dir({"path":"."})</tool_call>`
-	a := newProfileAgent(t, cfg, echoResponder{reply: content})
+	a := newProfileAgent(t, cfg, echoResponder(t, content))
 	if err := a.Submit(domain.UserInput{Text: "list"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -155,7 +135,7 @@ func TestProfile_DelimitedThinkingStrippedAndPreserved(t *testing.T) {
 	}
 
 	content := "<think>The user wants a greeting.</think>Hello there!"
-	a := newProfileAgent(t, cfg, echoResponder{reply: content})
+	a := newProfileAgent(t, cfg, echoResponder(t, content))
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -186,7 +166,7 @@ func TestProfile_HarmonyThinkingStrippedAndPreserved(t *testing.T) {
 	cfg.Profile = domain.ModelProfile{Thinking: domain.ThinkingProfile{Style: domain.ThinkingHarmony}}
 
 	content := "<|channel|>analysis<|message|>They asked for the time.<|end|><|channel|>final<|message|>It is noon.<|end|>"
-	a := newProfileAgent(t, cfg, echoResponder{reply: content})
+	a := newProfileAgent(t, cfg, echoResponder(t, content))
 	if err := a.Submit(domain.UserInput{Text: "time?"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}
@@ -217,12 +197,9 @@ func TestProfile_NativeCallWinsOverText(t *testing.T) {
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
 
 	content := "Working.\n\n```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nmain.go\n```"
-	nativeCall := &provider.ToolCall{
-		ID:       "call_native_1",
-		Type:     "function",
-		Function: provider.FunctionCall{Name: "list_dir", Arguments: `{"path":"."}`},
-	}
-	responder := profileResponder{content: content, call: nativeCall}
+	// One turn carrying the fenced text AND a native call — the narrating shape a real server
+	// frames as content deltas followed by the call's fragments.
+	responder := scriptedResponder(t, narratedToolCallTurn("call_native_1", "list_dir", `{"path":"."}`, content))
 	a := newProfileAgent(t, cfg, responder)
 	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -254,7 +231,7 @@ func TestProfile_NativeProfileIsByteIdentical(t *testing.T) {
 	cfg := baseConfig(sink) // zero Profile
 
 	content := "```tool\nTOOL_NAME\nread_file\nBEGIN_ARG\npath\nEND_ARG\nmain.go\n```"
-	a := newProfileAgent(t, cfg, echoResponder{reply: content})
+	a := newProfileAgent(t, cfg, echoResponder(t, content))
 	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
 		t.Fatalf("Submit: %v", err)
 	}

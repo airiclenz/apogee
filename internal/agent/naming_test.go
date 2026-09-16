@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ----------------------------------------------------------------------------
@@ -313,17 +312,17 @@ func TestDelegationNaming_ARoutedChildIsNamedAsRouted(t *testing.T) {
 	namer := &stubNamer{reply: "Config Loader Audit"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 	cfg.Namer = namer
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
-		namedDelegationScript("c1", namingChildTask, ""),
-		contentScript("parent done"),
-	}})
+	a, err := newAgent(cfg, scriptedResponder(t,
+		namedDelegationTurn("c1", namingChildTask, ""),
+		contentTurn("parent done"),
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
 	// The routed spawn's whole difference: the child dials its own client on the target — through
 	// the Dialer, answered here by an in-process grunt — and owns it (routedspawn_test.go's
 	// routingParent shape), which is the fact Routed reports.
-	a.dial = dialerTo(echoResponder{reply: "child done"}).dial
+	a.dial = dialerTo(echoResponder(t, "child done")).dial
 	a.SetDelegationTarget(routedTarget())
 
 	runNamingParent(t, a)

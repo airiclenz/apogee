@@ -71,9 +71,9 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 		sessionEndpoint  = "http://session.local:9999"
 		switchedEndpoint = "http://elsewhere.local:1234"
 	)
-	session := &scriptedResponder{}
-	grunt := echoResponder{reply: "grunt done"}
-	switched := echoResponder{reply: "from the new server"}
+	session := scriptedResponder(t)
+	grunt := echoResponder(t, "grunt done")
+	switched := echoResponder(t, "from the new server")
 	dialer := dialerAnswering(func(endpoint string) provider.Responder {
 		switch endpoint {
 		case sessionEndpoint:
@@ -143,7 +143,7 @@ func TestResumeDialsThroughTheDialer(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.APIKey = "resumed-key"
-	seed, err := newAgent(cfg, echoResponder{reply: "hello"})
+	seed, err := newAgent(cfg, echoResponder(t, "hello"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestResumeDialsThroughTheDialer(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	resumed := echoResponder{reply: "resumed"}
+	resumed := echoResponder(t, "resumed")
 	dialer := dialerTo(resumed)
 	b, err := Resume(cfg, snap, WithDialer(dialer.dial))
 	if err != nil {

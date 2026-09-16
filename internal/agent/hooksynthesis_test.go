@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -60,10 +59,10 @@ func TestSynthesizedToolCall_DispatchesLikeModelEmitted(t *testing.T) {
 
 	// The model itself emits NO tool call (plain text); the Reaction synthesizes the sub_agent
 	// delegation. The child (Depth 1) then replies with its final message.
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		contentScript("here is my plan"), // parent Turn: text only, no native tool call
-		contentScript("child summary"),   // the synthesized sub-agent's only Turn
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("here is my plan"), // parent Turn: text only, no native tool call
+		contentTurn("child summary"),   // the synthesized sub-agent's only Turn
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -119,10 +118,10 @@ func TestSynthesizedToolCall_MutateAndDeferBothLand(t *testing.T) {
 		synthesizeCallReaction("first subtask", "text_call_0", remaining, &appended),
 	}
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		contentScript("plan text"), // parent Turn: text only; the Reaction appends + defers
-		contentScript("child one"), // the synthesized child
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("plan text"), // parent Turn: text only; the Reaction appends + defers
+		contentTurn("child one"), // the synthesized child
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

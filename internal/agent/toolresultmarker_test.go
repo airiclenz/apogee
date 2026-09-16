@@ -11,7 +11,7 @@ import (
 // explicitly: a history scanner must be able to tell "this succeeded" from "nothing was recorded",
 // which is the whole reason the marker is a tri-state rather than a bool.
 func TestAppendToolResultCommitsTheOutcomeMarker(t *testing.T) {
-	a, err := newAgent(configWithTools(&recordingSink{}), echoResponder{reply: "unused"})
+	a, err := newAgent(configWithTools(&recordingSink{}), echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -39,7 +39,7 @@ func TestAppendToolResultCommitsTheOutcomeMarker(t *testing.T) {
 // session's history reads the SAME fact the live loop recorded. It rides the conversation's own
 // marshal as an omitempty sibling, so this round-trip needs no SessionVersion bump.
 func TestToolOutcomeMarkerSurvivesSnapshotResume(t *testing.T) {
-	a, err := newAgent(configWithTools(&recordingSink{}), echoResponder{reply: "unused"})
+	a, err := newAgent(configWithTools(&recordingSink{}), echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestToolOutcomeMarkerSurvivesSnapshotResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	restored, err := newAgent(configWithTools(&recordingSink{}), echoResponder{reply: "unused"})
+	restored, err := newAgent(configWithTools(&recordingSink{}), echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent (restore target): %v", err)
 	}

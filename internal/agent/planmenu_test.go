@@ -68,7 +68,7 @@ func planMenuAgent(t *testing.T, mode domain.Mode, toolset []domain.Tool) *Agent
 	// Auto refuses to construct without fs-write confinement (ADR 0012), so every mode gets a
 	// fully-capable fake Confiner — the menu itself never consults it.
 	cfg.Confiner = &fakeConfiner{caps: capsBoth()}
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

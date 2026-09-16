@@ -317,7 +317,7 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 	cfg.Tools = toolReg
 	// One main model call this Turn (the tool call keeps the Exchange open); compaction is off, so no
 	// summarizer call — a single script suffices.
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{toolCallScript("c9", "probe", "{}")}})
+	a, err := newAgent(cfg, scriptedResponder(t, toolCallTurn("c9", "probe", "{}")))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

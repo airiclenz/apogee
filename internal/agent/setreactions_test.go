@@ -45,7 +45,7 @@ func mustSetReactions(t *testing.T, a *Agent, gen domain.Generation) {
 func TestSetReactionsRefusesAMalformedGeneration(t *testing.T) {
 	t.Parallel()
 
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "reply"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestSetReactionsRefusesAReservedBuiltinID(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.Floor = domain.FloorConfig{DisableToolLoopBreaker: true}
-	a, err := newAgent(cfg, echoResponder{reply: "reply"})
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

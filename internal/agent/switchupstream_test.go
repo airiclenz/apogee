@@ -42,7 +42,7 @@ func (r *modelBindingResponder) SetModel(model string) { r.bound = append(r.boun
 func TestSwitchUpstreamUnbindsTheModelAndKeepsTheSession(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.APIKey = "old-key"
-	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("kept")}}
+	responder := scriptedResponder(t, contentTurn("kept"))
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -195,7 +195,7 @@ func TestSwitchUpstreamRefusesAnEmptyEndpoint(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.APIKey = "old-key"
 
-	a, err := newAgent(cfg, echoResponder{reply: "unreached"})
+	a, err := newAgent(cfg, echoResponder(t, "unreached"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

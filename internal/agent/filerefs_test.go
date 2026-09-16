@@ -42,7 +42,7 @@ func refAgentInWorkspace(t *testing.T, dir string) (*Agent, *recordingSink) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.WorkspaceDir = dir
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -249,7 +249,7 @@ func refAgentWithWindow(t *testing.T, dir string, window int, opts ...func(*doma
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

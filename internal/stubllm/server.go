@@ -91,7 +91,7 @@ func New(t testing.TB, s Script, opts ...Option) *Server {
 	if err != nil {
 		t.Fatalf("%v", err)
 	}
-	httpServer := httptest.NewServer(server.handler())
+	httpServer := httptest.NewServer(server.Handler())
 	server.URL = httpServer.URL
 	server.closer = httpServer.Close
 	t.Cleanup(server.Close)
@@ -111,7 +111,7 @@ func Serve(ctx context.Context, addr string, s Script, opts ...Option) (*Server,
 		return nil, fmt.Errorf("stubllm: listen on %s: %w", addr, err)
 	}
 
-	httpServer := &http.Server{Handler: server.handler(), ReadHeaderTimeout: 10 * time.Second}
+	httpServer := &http.Server{Handler: server.Handler(), ReadHeaderTimeout: 10 * time.Second}
 	server.URL = "http://" + listener.Addr().String()
 
 	stopped := make(chan struct{})
@@ -136,6 +136,32 @@ func Serve(ctx context.Context, addr string, s Script, opts ...Option) (*Server,
 		}
 	}()
 	return server, nil
+}
+
+// InProcess builds a scripted upstream that listens on nothing: a client reaches it through
+// [Server.Transport] — the same Handler as [New] and [Serve], minus the socket — so an engine
+// test plays a Script without a loopback port per fake and the bytes it decodes are the bytes
+// a listening stub would have sent. URL is empty; the transport answers any host. The script
+// is validated first, so an unplayable fixture fails here and names the turn.
+func InProcess(t testing.TB, s Script, opts ...Option) *Server {
+	t.Helper()
+
+	server, err := newServer(s, opts...)
+	if err != nil {
+		t.Fatalf("%v", err)
+	}
+	t.Cleanup(server.Close)
+	return server
+}
+
+// Transport is an [http.RoundTripper] that serves every request from [Server.Handler] in
+// process, over a pipe rather than a socket. The reply streams: each Flush the handler makes
+// is readable at once, so a `token_delay` or an `await:` gate is observable exactly as it is
+// through a listener, and a `cut` turn's kill — which aborts the handler where nothing can be
+// hijacked — closes the pipe with io.ErrUnexpectedEOF, the read error a dropped TCP connection
+// produces. Hand it to the provider client as `&http.Client{Transport: server.Transport()}`.
+func (s *Server) Transport() http.RoundTripper {
+	return pipeTransport{handler: s.Handler()}
 }
 
 // Close stops the server. It is idempotent, and [New] already registers it on t.Cleanup.
@@ -194,10 +220,12 @@ func (s *Server) gate(label string) chan struct{} {
 	return made
 }
 
-// handler is the routing surface: the two endpoints the provider client uses, behind the
+// Handler is the routing surface: the two endpoints the provider client uses, behind the
 // optional api-key gate. Everything else 404s, which is what a real server does for the
-// llama.cpp-only paths (/props) the client probes and tolerates.
-func (s *Server) handler() http.Handler {
+// llama.cpp-only paths (/props) the client probes and tolerates. [New] and [Serve] put it
+// behind a listener; [InProcess] hands it out bare, for a test that reaches it through
+// [Server.Transport] or mounts it under a mux of its own.
+func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/models", s.handleModels)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleChat)
@@ -412,20 +440,23 @@ func writeStream(ctx context.Context, w http.ResponseWriter, t Turn, model strin
 	flusher.Flush()
 }
 
-// beforeCut is the Turn as far as its `cut` lets it stream: the Text truncated to the cut
-// point and, when the cut lands inside the Text, the tool calls that would have followed it
-// dropped. A turn without a cut, or one cut at or past the end of its Text, is returned whole
-// — every delta streams and the kill takes the terminator's place.
+// beforeCut is the Turn as far as its `cut` lets it stream: the content truncated to the cut
+// point and, when the cut lands inside the content, the tool calls that would have followed it
+// dropped. A turn without a cut, or one cut at or past the end of its content, is returned
+// whole — every delta streams and the kill takes the terminator's place. A cut inside a
+// hand-chunked content falls back to the even split for what remains: the boundaries past the
+// cut are never reached, and the ones before it are not what such a test is about.
 func (t Turn) beforeCut() Turn {
 	if t.Cut == nil {
 		return t
 	}
-	runes := []rune(t.Text)
+	runes := []rune(t.content())
 	if t.Cut.AfterRunes >= len(runes) {
 		return t
 	}
 	cut := t
 	cut.Text = string(runes[:t.Cut.AfterRunes])
+	cut.Chunks = nil
 	cut.ToolCalls = nil
 	return cut
 }
@@ -457,10 +488,10 @@ func (e InBandError) wire() *wireError {
 // empty-reply turn yields none, which is exactly what a model abandoning a reply sends.
 func streamDeltas(t Turn) []sseDelta {
 	var deltas []sseDelta
-	for _, part := range splitRunes(t.Reasoning, t.chunkRunes()) {
+	for _, part := range t.reasoningDeltas() {
 		deltas = append(deltas, reasoningDelta(t, part))
 	}
-	for _, part := range splitRunes(t.Text, t.chunkRunes()) {
+	for _, part := range t.contentDeltas() {
 		deltas = append(deltas, sseDelta{Content: part})
 	}
 	for i, call := range t.ToolCalls {
@@ -518,15 +549,15 @@ func writeWhole(w http.ResponseWriter, t Turn, model string) {
 		Object: "chat.completion",
 		Model:  model,
 		Choices: []wholeChoice{{
-			Message:      wholeMessage{Role: "assistant", Content: t.Text},
+			Message:      wholeMessage{Role: "assistant", Content: t.content()},
 			FinishReason: t.finishReason(),
 		}},
 	}
 	// The same one-of-two rule the streamed path follows, on the whole reply's message.
 	if t.spellsBareReasoning() {
-		reply.Choices[0].Message.Reasoning = t.Reasoning
+		reply.Choices[0].Message.Reasoning = t.reasoning()
 	} else {
-		reply.Choices[0].Message.ReasoningContent = t.Reasoning
+		reply.Choices[0].Message.ReasoningContent = t.reasoning()
 	}
 	for i, call := range t.ToolCalls {
 		reply.Choices[0].Message.ToolCalls = append(reply.Choices[0].Message.ToolCalls, wireToolCall{

@@ -15,11 +15,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -139,7 +141,7 @@ func deferConfig(t *testing.T, sink domain.EventSink) domain.Config {
 }
 
 // deferRequestContains reports whether any message content of req contains substr.
-func deferRequestContains(req provider.Request, substr string) bool {
+func deferRequestContains(req stubllm.Request, substr string) bool {
 	for _, m := range req.Messages {
 		if strings.Contains(m.Content, substr) {
 			return true
@@ -148,10 +150,12 @@ func deferRequestContains(req provider.Request, substr string) bool {
 	return false
 }
 
-// errorScript is a stream that surfaces one terminal fault — the loop treats it as turnFailed and
-// degrades the Turn to a clean Exchange-complete boundary (abandonTurn) with no assistant message.
-func errorScript(msg string) []provider.Delta {
-	return []provider.Delta{{Kind: provider.DeltaError, Err: msg}}
+// errorScript is a turn that answers with an HTTP 500 carrying msg — one terminal, non-retryable
+// fault, which the loop treats as turnFailed and degrades to a clean Exchange-complete boundary
+// (abandonTurn) with no assistant message. The provider renders it "apogee: upstream HTTP 500:
+// msg", so an assertion on the fault's text looks for msg within it.
+func errorScript(msg string) stubllm.Turn {
+	return stubllm.Turn{HTTP: &stubllm.HTTPReply{Status: http.StatusInternalServerError, Body: msg}}
 }
 
 // blockAtResponder replays scripts like scriptedResponder, but the stream for call index blockAt
@@ -189,7 +193,7 @@ func (r *blockAtResponder) Stream(ctx context.Context, _ provider.Request) iter.
 
 // deferDirectiveCount reports how many message contents of req carry the remaining-items directive
 // marker — 1 for a single queued directive, 2 for two contradictory copies (the pre-fix defect).
-func deferDirectiveCount(req provider.Request) int {
+func deferDirectiveCount(req stubllm.Request) int {
 	n := 0
 	for _, m := range req.Messages {
 		n += strings.Count(m.Content, deferDirectiveMarker)
@@ -205,12 +209,12 @@ func deferDirectiveCount(req provider.Request) int {
 func TestDeferredAction_FaultMidFanOutExpiresDirective(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := deferConfig(t, sink)
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript("Here is the plan."),                 // parent T0: tool-less reply → synthesized delegation of subtask 1
-		contentScript("report A: entry points catalogued"), // child A (delegated subtask 1)
-		errorScript("upstream boom mid-fan-out"),           // parent T1: a terminal fault ends the Exchange
-		contentScript("Fresh answer to the follow-up ask"), // Exchange 2 T0: the new ask's answer
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("Here is the plan."),                 // parent T0: tool-less reply → synthesized delegation of subtask 1
+		contentTurn("report A: entry points catalogued"), // child A (delegated subtask 1)
+		errorScript("upstream boom mid-fan-out"),         // parent T1: a terminal fault ends the Exchange
+		contentTurn("Fresh answer to the follow-up ask"), // Exchange 2 T0: the new ask's answer
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -228,7 +232,7 @@ func TestDeferredAction_FaultMidFanOutExpiresDirective(t *testing.T) {
 	}
 
 	// Exchange 2: a fresh ask carrying no fan-out cue of its own.
-	beforeNew := len(responder.got)
+	beforeNew := len(responder.requests())
 	const followUp = "What is the capital of France?"
 	if err := a.Submit(domain.UserInput{Text: followUp}); err != nil {
 		t.Fatalf("Submit (Exchange 2): %v", err)
@@ -241,7 +245,7 @@ func TestDeferredAction_FaultMidFanOutExpiresDirective(t *testing.T) {
 		t.Fatalf("Exchange 2 status = %q, want it to complete on the new ask", res2.Status)
 	}
 
-	newReqs := responder.got[beforeNew:]
+	newReqs := responder.requests()[beforeNew:]
 	if len(newReqs) == 0 {
 		t.Fatal("Exchange 2 sent no request")
 	}
@@ -262,11 +266,11 @@ func TestDeferredAction_FaultMidFanOutExpiresDirective(t *testing.T) {
 func TestDeferredAction_AbortExchangeMidFanOutExpiresDirective(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := deferConfig(t, sink)
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript("Here is the plan."),                 // parent T0: tool-less reply → synthesized delegation of subtask 1
-		contentScript("report A: entry points catalogued"), // child A (delegated subtask 1)
-		contentScript("Fresh answer after the abort"),      // Exchange 2 T0: the new ask's answer
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("Here is the plan."),                 // parent T0: tool-less reply → synthesized delegation of subtask 1
+		contentTurn("report A: entry points catalogued"), // child A (delegated subtask 1)
+		contentTurn("Fresh answer after the abort"),      // Exchange 2 T0: the new ask's answer
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -287,7 +291,7 @@ func TestDeferredAction_AbortExchangeMidFanOutExpiresDirective(t *testing.T) {
 
 	a.AbortExchange() // Esc: scrap the Exchange and, per F6, expire the queued directive
 
-	beforeNew := len(responder.got)
+	beforeNew := len(responder.requests())
 	const followUp = "Give me a one-line summary of Go's goroutines."
 	if err := a.Submit(domain.UserInput{Text: followUp}); err != nil {
 		t.Fatalf("Submit (Exchange 2): %v", err)
@@ -300,7 +304,7 @@ func TestDeferredAction_AbortExchangeMidFanOutExpiresDirective(t *testing.T) {
 		t.Fatalf("Exchange 2 status = %q, want it to complete on the new ask", res2.Status)
 	}
 
-	newReqs := responder.got[beforeNew:]
+	newReqs := responder.requests()[beforeNew:]
 	if len(newReqs) == 0 {
 		t.Fatal("Exchange 2 sent no request")
 	}
@@ -379,13 +383,13 @@ func TestDeferredAction_CancelDuringDelegationRestoresSingleDirective(t *testing
 	// Resume and re-attempt the Turn: the first resumed request drains the ONE restored directive.
 	sink2 := &recordingSink{}
 	cfg2 := deferConfig(t, sink2)
-	resumeResponder := &captureAllResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("m2b", deferSubtasks[1]),      // re-attempt T1: re-delegate subtask 2
-		contentScript("report B: endpoint spec drafted"), // child B
-		subAgentCallScript("m3", deferSubtasks[2]),       // delegate subtask 3
-		contentScript("report C: tests written"),         // child C
-		contentScript("Synthesis: resumed fan-out done"), // final no-tool answer
-	}}
+	resumeResponder := scriptedResponder(t,
+		subAgentCallTurn("m2b", deferSubtasks[1]),      // re-attempt T1: re-delegate subtask 2
+		contentTurn("report B: endpoint spec drafted"), // child B
+		subAgentCallTurn("m3", deferSubtasks[2]),       // delegate subtask 3
+		contentTurn("report C: tests written"),         // child C
+		contentTurn("Synthesis: resumed fan-out done"), // final no-tool answer
+	)
 	b, err := resumeAgent(cfg2, snap, resumeResponder)
 	if err != nil {
 		t.Fatalf("resumeAgent after cancel: %v", err)
@@ -397,13 +401,13 @@ func TestDeferredAction_CancelDuringDelegationRestoresSingleDirective(t *testing
 	if res2.Status != domain.StatusExchangeComplete {
 		t.Fatalf("resumed status = %q, want the Exchange to complete", res2.Status)
 	}
-	if len(resumeResponder.got) == 0 {
+	if len(resumeResponder.requests()) == 0 {
 		t.Fatal("the resumed run sent no request")
 	}
-	if n := deferDirectiveCount(resumeResponder.got[0]); n != 1 {
+	if n := deferDirectiveCount(resumeResponder.requests()[0]); n != 1 {
 		t.Errorf("the re-attempted request carried %d directives, want exactly 1 (no contradictory copies)", n)
 	}
-	if !deferRequestContains(resumeResponder.got[0], deferDirectiveMarker+" (2 left)") {
+	if !deferRequestContains(resumeResponder.requests()[0], deferDirectiveMarker+" (2 left)") {
 		t.Error("the re-attempted request did not carry the restored (2 left) directive")
 	}
 }

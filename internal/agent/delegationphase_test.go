@@ -235,11 +235,11 @@ func assertPhasesSitBetweenTheBursts(t *testing.T, events []domain.Event) {
 // may never look queued just because nothing else was delegated with it.
 func TestDelegationPhases_SerialDelegationEmitsThePair(t *testing.T) {
 	sink := &recordingSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "summarise the repo"),
-		contentScript("the repo is a Go TUI agent"),
-		contentScript("done — delegated and summarised"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "summarise the repo"),
+		contentTurn("the repo is a Go TUI agent"),
+		contentTurn("done — delegated and summarised"),
+	)
 	a, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

@@ -15,7 +15,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // wave1Nudge is the sim's first-attempt completion-check nudge (empty_recovery.go @pin),
@@ -62,9 +62,9 @@ type schemaTool struct {
 
 func (t schemaTool) Schema() json.RawMessage { return json.RawMessage(t.schema) }
 
-// emptyScript is a stream that finishes with no content and no tool calls — the empty reply.
-func emptyScript() []provider.Delta {
-	return []provider.Delta{{Kind: provider.DeltaDone, FinishReason: "stop"}}
+// emptyScript is a turn that finishes with no content and no tool calls — the empty reply.
+func emptyScript() stubllm.Turn {
+	return stubllm.Turn{}
 }
 
 // runExchange submits text and drives the Exchange to completion on an existing Agent.
@@ -81,7 +81,7 @@ func runExchange(t *testing.T, a *Agent, text string) domain.StepResult {
 }
 
 // wireUserIndexContaining returns the index of the first user wire message containing substr, or -1.
-func wireUserIndexContaining(msgs []provider.Message, substr string) int {
+func wireUserIndexContaining(msgs []stubllm.Message, substr string) int {
 	for i, m := range msgs {
 		if m.Role == "user" && strings.Contains(m.Content, substr) {
 			return i
@@ -139,12 +139,12 @@ func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 	}
 	cfg := configWithTools(sink, writeTool)
 	cfg.Reactions = wave1Reactions("lab_content_repair", "lab_formatter_repair")
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
+	responder := scriptedResponder(t,
 		// Missing the required "mode" argument, which the repair guard rejects; the call itself is
 		// what would also trip both armed reactions.
-		toolCallScript("c1", "write_file", `{"path":"main.go","content":"package main\nfunc main() {"}`),
-		contentScript("stopping here"),
-	}}
+		toolCallTurn("c1", "write_file", `{"path":"main.go","content":"package main\nfunc main() {"}`),
+		contentTurn("stopping here"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -164,7 +164,7 @@ func TestWave1_RepairGuardShortCircuitsTheCascade(t *testing.T) {
 
 // wireMessageContaining returns the index of the first wire message of ANY role containing substr,
 // or -1 — the tool-result and refusal counterpart to wireUserIndexContaining.
-func wireMessageContaining(msgs []provider.Message, substr string) int {
+func wireMessageContaining(msgs []stubllm.Message, substr string) int {
 	for i, m := range msgs {
 		if strings.Contains(m.Content, substr) {
 			return i

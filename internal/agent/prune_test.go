@@ -15,7 +15,7 @@ import (
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // pruneConfig is baseConfig with a discovered window and Pruning armed. Generative Compaction is
@@ -82,7 +82,7 @@ func pruneEvents(events []domain.Event) []domain.PruneEvent {
 // carries the stubs rather than the dumps.
 func TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow(t *testing.T) {
 	sink := &recordingSink{}
-	up := &recordingResponder{reply: "reply"}
+	up := echoResponder(t, "reply")
 	a, err := newAgent(pruneConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -122,7 +122,7 @@ func TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow(t *testing.T) {
 		t.Errorf("PruneEvent = %+v, want %+v", events[0], want)
 	}
 
-	sent := renderedRequest(up.last.Messages)
+	sent := renderedRequest(up.last().Messages)
 	if !strings.Contains(sent, "[pruned:") {
 		t.Error("the request built after the prune carries no stub")
 	}
@@ -133,7 +133,7 @@ func TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow(t *testing.T) {
 
 // renderedRequest joins a provider request's message contents, so an assertion about what the model
 // was shown reads over one string rather than a loop.
-func renderedRequest(msgs []provider.Message) string {
+func renderedRequest(msgs []stubllm.Message) string {
 	var b strings.Builder
 	for _, m := range msgs {
 		b.WriteString(m.Content)
@@ -148,7 +148,7 @@ func TestAutoPruneOptOutRespected(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := pruneConfig(sink)
 	cfg.Context.PruneToolResults = false
-	a, err := newAgent(cfg, &recordingResponder{reply: "reply"})
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestAutoPruneSkipsUnknownWindow(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := pruneConfig(sink)
 	cfg.Context.MaxContextTokens = 0
-	a, err := newAgent(cfg, &recordingResponder{reply: "reply"})
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -205,7 +205,7 @@ func TestAutoPruneSkipsUnknownWindow(t *testing.T) {
 func TestAutoPruneGateIsLiveAndInherited(t *testing.T) {
 	cfg := pruneConfig(&recordingSink{})
 	cfg.Context.PruneToolResults = false
-	parent, err := newAgent(cfg, &recordingResponder{reply: "reply"})
+	parent, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

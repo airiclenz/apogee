@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // stepNoticeConfig is a config with the notice switched on and a read-only tool for a scripted
@@ -28,7 +27,7 @@ func stepNoticeConfig(sink domain.EventSink) domain.Config {
 func stepNoticeChild(t *testing.T, cfg domain.Config, stepCap int) *Agent {
 	t.Helper()
 
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -251,7 +250,7 @@ func TestStepNoticeSwitchReachesAChildAtSpawn(t *testing.T) {
 	for _, on := range []bool{true, false} {
 		t.Run(fmt.Sprintf("switch %v", on), func(t *testing.T) {
 			sink := &recordingSink{}
-			parent, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), &scriptedResponder{scripts: [][]provider.Delta{contentScript("unused")}})
+			parent, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), scriptedResponder(t, contentTurn("unused")))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}

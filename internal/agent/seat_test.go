@@ -19,7 +19,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -338,7 +337,7 @@ func TestSeat_ChildRosterDropsTheRunOnArgument(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Tools = seatChoiceRegistry(t)
 	cfg.Delegation.MaxDepth = 2 // the child keeps sub_agent only under a bound above the default
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -376,7 +375,7 @@ func TestSeat_PlainParentRosterIsInheritedUnchanged(t *testing.T) {
 
 	cfg := configWithTools(&recordingSink{}, tools.NewSubAgent(), fakeTool{name: "w"})
 	cfg.Delegation.MaxDepth = 2 // the child keeps sub_agent only under a bound above the default
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -406,11 +405,11 @@ func TestSeat_RunOnIsIgnoredWhereItWasNeverPublished(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal the call arguments: %v", err)
 	}
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", tools.SubAgentToolName, string(args)),
-		contentScript("the repo is a Go TUI agent"),
-		contentScript("done — delegated and summarised"),
-	}})
+	a, err := newAgent(cfg, scriptedResponder(t,
+		toolCallTurn("c1", tools.SubAgentToolName, string(args)),
+		contentTurn("the repo is a Go TUI agent"),
+		contentTurn("done — delegated and summarised"),
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

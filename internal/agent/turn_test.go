@@ -426,7 +426,7 @@ func TestGrowthBounds_WorkingWindowKeepsReaderNumbers(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = advertised
 	cfg.Context.WorkingWindow = working
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestGrowthBounds_WorkingWindowKeepsReaderNumbers(t *testing.T) {
 func TestGrowthBounds_SwitchUpstreamIsReadLive(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 32768
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

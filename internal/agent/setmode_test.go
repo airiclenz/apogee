@@ -16,7 +16,7 @@ func TestAgentSetModeAffectsDispatch(t *testing.T) {
 	write := fakeTool{name: "w"} // readOnly:false, no markers ⇒ third-party write class
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModePlan
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestNewChildAgentInheritsLiveMode(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "w"})
 	cfg.Mode = domain.ModeAskBefore
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestSubAgentSeesParentTighteningMidRun(t *testing.T) {
 	cfg.Mode = domain.ModeAuto
 	cfg.Confiner = eligibleConfiner{} // Auto needs a Confiner at construction (ADR 0012)
 	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (resolveRun)
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestSubAgentTighteningComposesToGrandchild(t *testing.T) {
 	cfg.Mode = domain.ModeAuto
 	cfg.Confiner = eligibleConfiner{} // Auto needs a Confiner at construction (ADR 0012)
 	cfg.ConfineToWorkspace = false    // "I am the sandbox": Auto auto-runs the write (resolveRun)
-	top, err := newAgent(cfg, &scriptedResponder{})
+	top, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -149,7 +149,7 @@ func TestSubAgentGrandchildLooseningStaysImpossible(t *testing.T) {
 	write := fakeTool{name: "w"}
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModePlan
-	top, err := newAgent(cfg, &scriptedResponder{})
+	top, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -180,7 +180,7 @@ func TestSubAgentParentLooseningCannotLoosenChild(t *testing.T) {
 	write := fakeTool{name: "w"}
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModePlan
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -211,7 +211,7 @@ func TestSubAgentEffectiveModeConcurrent(t *testing.T) {
 	write := fakeTool{name: "w"}
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModeAskBefore
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestAgentSetModeConcurrent(t *testing.T) {
 	write := fakeTool{name: "w"}
 	cfg := configWithTools(sink, write)
 	cfg.Mode = domain.ModeAskBefore
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

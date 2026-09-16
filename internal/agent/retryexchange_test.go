@@ -15,10 +15,13 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// captureAllResponder yields a pre-scripted stream per call and records EVERY request it
-// was handed, so a test can assert what the retried (second, third, …) request carried.
+// captureAllResponder yields a pre-scripted stream per call and records EVERY request it was
+// handed as the provider sees it. Its remaining user asserts a request's Sampling — a field the
+// stubllm request log does not yet carry; every assertion on the messages sent reads the
+// scripted upstream's log instead.
 type captureAllResponder struct {
 	scripts [][]provider.Delta
 	got     []provider.Request
@@ -72,18 +75,12 @@ func postResponseReaction(id string, fn domain.PostResponseFunc) domain.Reaction
 	}
 }
 
-// draftWithToolCall is a stream that emits narration content plus one native tool call —
+// draftWithToolCall is a turn that emits narration content plus one native tool call —
 // the superseded draft whose text AND calls must ride the retried request.
-func draftWithToolCall(text, id, name, args string) []provider.Delta {
-	return []provider.Delta{
-		{Kind: provider.DeltaContent, Content: text},
-		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
-			ID:       id,
-			Type:     "function",
-			Function: provider.FunctionCall{Name: name, Arguments: args},
-		}},
-		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
-	}
+func draftWithToolCall(text, id, name, args string) stubllm.Turn {
+	turn := toolCallTurn(id, name, args)
+	turn.Text = text
+	return turn
 }
 
 // retryReactionConfig arms one post-response Reaction on a base Config.
@@ -111,7 +108,7 @@ func driveExchange(t *testing.T, cfg domain.Config, responder provider.Responder
 }
 
 // wireMessageIndex returns the index of the first wire message with role and content, or -1.
-func wireMessageIndex(msgs []provider.Message, role, content string) int {
+func wireMessageIndex(msgs []stubllm.Message, role, content string) int {
 	for i, m := range msgs {
 		if m.Role == role && m.Content == content {
 			return i
@@ -121,7 +118,7 @@ func wireMessageIndex(msgs []provider.Message, role, content string) int {
 }
 
 // wireRoleCount counts the wire messages carrying role.
-func wireRoleCount(msgs []provider.Message, role string) int {
+func wireRoleCount(msgs []stubllm.Message, role string) int {
 	n := 0
 	for _, m := range msgs {
 		if m.Role == role {
@@ -134,28 +131,31 @@ func wireRoleCount(msgs []provider.Message, role string) int {
 // TestRetryExchange_CarriesSupersededAssistantAndCorrection: a draft with narration + a
 // tool call is retried with a correction → the second provider request carries the
 // superseded assistant message (content + tool calls) followed immediately by the
-// user-role correction, and the committed history carries neither.
+// user-role correction, and the committed history carries neither. The lookup tool is on the
+// menu because the wire is what is read: the provider projects an assistant message's tool
+// calls onto a request only when the request offers native tools (formatMessage).
 func TestRetryExchange_CarriesSupersededAssistantAndCorrection(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
 	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "use the tool correctly"))
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
+	cfg.Tools = configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "42"}).Tools
+	responder := scriptedResponder(t,
 		draftWithToolCall("narration first", "c1", "lookup", `{"q":"x"}`),
-		contentScript("fixed"),
-	}}
+		contentTurn("fixed"),
+	)
 
 	a := driveExchange(t, cfg, responder, "go")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("provider was called %d times, want 2", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("provider was called %d times, want 2", len(responder.requests()))
 	}
-	second := responder.got[1].Messages
+	second := responder.requests()[1].Messages
 	ai := wireMessageIndex(second, "assistant", "narration first")
 	if ai < 0 {
 		t.Fatalf("retried request carries no superseded assistant message: %+v", second)
 	}
 	tc := second[ai].ToolCalls
-	if len(tc) != 1 || tc[0].ID != "c1" || tc[0].Function.Name != "lookup" || tc[0].Function.Arguments != `{"q":"x"}` {
+	if len(tc) != 1 || tc[0].ID != "c1" || tc[0].Name != "lookup" || tc[0].Arguments != `{"q":"x"}` {
 		t.Errorf("superseded assistant tool calls = %+v, want the draft's lookup call", tc)
 	}
 	if ci := wireMessageIndex(second, "user", "use the tool correctly"); ci != ai+1 {
@@ -179,17 +179,17 @@ func TestRetryExchange_EmptySupersededAppendsOnlyCorrection(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
 	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "say something"))
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		{{Kind: provider.DeltaDone, FinishReason: "stop"}}, // the wholly empty draft
-		contentScript("recovered"),
-	}}
+	responder := scriptedResponder(t,
+		stubllm.Turn{}, // the wholly empty draft
+		contentTurn("recovered"),
+	)
 
 	driveExchange(t, cfg, responder, "go")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("provider was called %d times, want 2", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("provider was called %d times, want 2", len(responder.requests()))
 	}
-	second := responder.got[1].Messages
+	second := responder.requests()[1].Messages
 	if n := wireRoleCount(second, "assistant"); n != 0 {
 		t.Errorf("retried request carries %d assistant messages, want 0 (empty superseded response)", n)
 	}
@@ -204,19 +204,19 @@ func TestRetryExchange_EmptyInjectIsBareRestream(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
 	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, ""))
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript("draft"),
-		contentScript("final"),
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("draft"),
+		contentTurn("final"),
+	)
 
 	driveExchange(t, cfg, responder, "go")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("provider was called %d times, want 2", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("provider was called %d times, want 2", len(responder.requests()))
 	}
-	if !reflect.DeepEqual(responder.got[0], responder.got[1]) {
-		t.Errorf("an Inject-less retry altered the request:\nfirst:  %+v\nsecond: %+v",
-			responder.got[0], responder.got[1])
+	first, second := responder.requests()[0], responder.requests()[1]
+	if !reflect.DeepEqual(first.Messages, second.Messages) || !reflect.DeepEqual(first.Tools, second.Tools) {
+		t.Errorf("an Inject-less retry altered the request:\nfirst:  %+v\nsecond: %+v", first, second)
 	}
 }
 
@@ -227,18 +227,18 @@ func TestRetryExchange_CorrectionsAccumulateAcrossRetries(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
 	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "fix one", "fix two"))
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript("draft one"),
-		contentScript("draft two"),
-		contentScript("final"),
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("draft one"),
+		contentTurn("draft two"),
+		contentTurn("final"),
+	)
 
 	driveExchange(t, cfg, responder, "go")
 
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3", len(responder.got))
+	if len(responder.requests()) != 3 {
+		t.Fatalf("provider was called %d times, want 3", len(responder.requests()))
 	}
-	third := responder.got[2].Messages
+	third := responder.requests()[2].Messages
 	d1 := wireMessageIndex(third, "assistant", "draft one")
 	f1 := wireMessageIndex(third, "user", "fix one")
 	d2 := wireMessageIndex(third, "assistant", "draft two")
@@ -259,20 +259,20 @@ func TestRetryExchange_CorrectionsAccumulateAcrossRetries(t *testing.T) {
 func TestRetryExchange_CapPassesLastResponseThrough(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := retryReactionConfig(t, sink, alwaysRetryReaction("try again"))
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript("r1"),
-		contentScript("r2"),
-		contentScript("r3"),
-		contentScript("r4"),
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("r1"),
+		contentTurn("r2"),
+		contentTurn("r3"),
+		contentTurn("r4"),
+	)
 
 	a := driveExchange(t, cfg, responder, "go")
 
-	if len(responder.got) != maxPostResponseRetries+1 {
+	if len(responder.requests()) != maxPostResponseRetries+1 {
 		t.Fatalf("provider was called %d times, want %d (the retry cap)",
-			len(responder.got), maxPostResponseRetries+1)
+			len(responder.requests()), maxPostResponseRetries+1)
 	}
-	last := responder.got[maxPostResponseRetries].Messages
+	last := responder.requests()[maxPostResponseRetries].Messages
 	if n := wireRoleCount(last, "assistant"); n != maxPostResponseRetries {
 		t.Errorf("last request carries %d superseded assistant messages, want %d (no append past the cap)",
 			n, maxPostResponseRetries)

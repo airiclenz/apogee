@@ -53,7 +53,7 @@ func routingParent(t *testing.T) *Agent {
 	cfg.APIKey = "session-key"
 	cfg.Model = "smart-70b"
 	cfg.Context.MaxContextTokens = 131072
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -101,8 +101,8 @@ func TestRoutedSpawnBuildsFromTheTarget(t *testing.T) {
 	if child.upstream == parent.upstream {
 		t.Error("routed child reuses the parent's Upstream responder, want its own client on the target")
 	}
-	if _, ok := parent.upstream.(*scriptedResponder); !ok {
-		t.Errorf("parent Upstream = %T after a routed spawn, want its own scriptedResponder untouched", parent.upstream)
+	if _, ok := parent.upstream.(*scriptedUpstream); !ok {
+		t.Errorf("parent Upstream = %T after a routed spawn, want its own scripted upstream untouched", parent.upstream)
 	}
 	// The profile rides the routing (ADR 0044/0045): the child's stripper is the target model's,
 	// so a delimited thinking channel leaves the visible content in the CHILD even though the

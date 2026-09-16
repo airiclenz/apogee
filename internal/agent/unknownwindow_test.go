@@ -39,7 +39,7 @@ func linesOfExactly(n int) string {
 // unknownWindowAgent is an Agent whose window is unknown, with its assumed ceiling in characters.
 func unknownWindowAgent(t *testing.T, sink domain.EventSink) (*Agent, int) {
 	t.Helper()
-	a, err := newAgent(baseConfig(sink), echoResponder{reply: "unused"})
+	a, err := newAgent(baseConfig(sink), echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestUnknownWindowBoundsShareOneCeiling(t *testing.T) {
 	})
 
 	t.Run("the boundary compaction trigger", func(t *testing.T) {
-		over, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "unused"})
+		over, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "unused"))
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
 		}

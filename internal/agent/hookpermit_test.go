@@ -60,7 +60,7 @@ func runTurnWithPermitProbe(t *testing.T, cfg domain.Config, tighten func() doma
 	probe := &permitProbe{}
 	cfg.Reactions = []domain.Reaction{probe.reaction()}
 
-	a, err := newAgent(cfg, echoResponder{reply: "reply"})
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

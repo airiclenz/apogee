@@ -16,7 +16,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // The arm under test is ONE Reaction that acts on every request, so a fire booked at Depth 1
@@ -53,12 +53,12 @@ func reactionSubAgentConfig(t *testing.T, sink domain.EventSink) domain.Config {
 // AND its one child: the parent delegates unprompted on a modest opening ask, and the child writes
 // a Go file before the child and then the parent each answer. Every request the child makes runs
 // the inherited set, so the armed Reaction acts — and books a fire — at Depth 1.
-func reactionSubAgentScripts() [][]provider.Delta {
-	return [][]provider.Delta{
-		subAgentCallScript("s1", "investigate the auth module and report the entry points"), // parent T0: unprompted delegation
-		toolCallScript("w0", "write_file", `{"path":"auth.go","content":"package auth\n"}`), // child T0: a write
-		contentScript("child: entry points catalogued"),                                     // child T1: final report
-		contentScript("parent: synthesized the delegated investigation"),                    // parent T1: final answer
+func reactionSubAgentScripts() []stubllm.Turn {
+	return []stubllm.Turn{
+		subAgentCallTurn("s1", "investigate the auth module and report the entry points"), // parent T0: unprompted delegation
+		toolCallTurn("w0", "write_file", `{"path":"auth.go","content":"package auth\n"}`), // child T0: a write
+		contentTurn("child: entry points catalogued"),                                     // child T1: final report
+		contentTurn("parent: synthesized the delegated investigation"),                    // parent T1: final answer
 	}
 }
 
@@ -66,7 +66,7 @@ func reactionSubAgentScripts() [][]provider.Delta {
 // the spawn succeeds, the child nests at Depth 1, and the child fires the Reaction it inherited.
 func TestReactions_SubAgentSpawnInheritsArmedSet(t *testing.T) {
 	sink := &recordingSink{}
-	responder := &captureAllResponder{scripts: reactionSubAgentScripts()}
+	responder := scriptedResponder(t, reactionSubAgentScripts()...)
 
 	a, err := newAgent(reactionSubAgentConfig(t, sink), responder)
 	if err != nil {
@@ -88,7 +88,7 @@ func TestReactions_SubAgentSpawnInheritsArmedSet(t *testing.T) {
 // re-arms the same set and a spawned child inherits it identically. A fresh armed Agent seeds a
 // snapshot; Resume re-arms from Config and drives the same delegation.
 func TestReactions_SubAgentSpawnInheritsArmedSetOnResume(t *testing.T) {
-	seed, err := newAgent(reactionSubAgentConfig(t, &recordingSink{}), echoResponder{reply: "seed"})
+	seed, err := newAgent(reactionSubAgentConfig(t, &recordingSink{}), echoResponder(t, "seed"))
 	if err != nil {
 		t.Fatalf("newAgent (seed): %v", err)
 	}
@@ -98,7 +98,7 @@ func TestReactions_SubAgentSpawnInheritsArmedSetOnResume(t *testing.T) {
 	}
 
 	sink := &recordingSink{}
-	responder := &captureAllResponder{scripts: reactionSubAgentScripts()}
+	responder := scriptedResponder(t, reactionSubAgentScripts()...)
 	b, err := resumeAgent(reactionSubAgentConfig(t, sink), snap, responder)
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
@@ -181,7 +181,7 @@ func hasFireAtDepth(events []domain.Event, id string, depth int) bool {
 // reading is the flag.
 func TestReactions_TopLevelOnlyStaysAtDepthZero(t *testing.T) {
 	sink := &recordingSink{}
-	responder := &captureAllResponder{scripts: reactionSubAgentScripts()}
+	responder := scriptedResponder(t, reactionSubAgentScripts()...)
 
 	cfg := reactionSubAgentConfig(t, sink)
 	topOnlyFired := 0

@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // floorWindow is the discovered context window these tests budget against: 8192 tokens ⇒ a
@@ -39,7 +38,7 @@ func floorAgent(t *testing.T, sink domain.EventSink, tools ...domain.Tool) (*Age
 	t.Helper()
 	cfg := configWithTools(sink, tools...)
 	cfg.Context.MaxContextTokens = floorWindow
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -77,10 +76,10 @@ func TestOversizedToolResultIsClampedByTheStructuralFloor(t *testing.T) {
 	if len(huge) <= floorChars {
 		t.Fatalf("payload of %d chars does not exceed the floor of %d chars; the test proves nothing", len(huge), floorChars)
 	}
-	a.upstream = &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", `{"q":"everything"}`),
-		contentScript("all done"),
-	}}
+	a.upstream = scriptedResponder(t,
+		toolCallTurn("c1", "lookup", `{"q":"everything"}`),
+		contentTurn("all done"),
+	)
 
 	runExchange(t, a, "read the whole world")
 
@@ -159,7 +158,7 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink)
 	cfg.Context.MaxContextTokens = floorWindow
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -210,7 +209,7 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 	cfg := configWithTools(sink)
 	cfg.Context.MaxContextTokens = floorWindow
 	cfg.Floor.DisableToolResultCap = true
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

@@ -66,7 +66,7 @@ func childInterjections(events []domain.Event) []domain.ChildInterjectionEvent {
 // have: an id naming no running sub-agent is answered with ErrNoSuchChild rather than queued
 // somewhere nothing drains.
 func TestInterjectChild_UnknownCallIDIsRefused(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -165,10 +165,10 @@ func TestInterjectChild_LandsAtTheChildsNextStep(t *testing.T) {
 // call between the Steps it drives.
 func TestInterjectChild_TopLevelRunNeverDrains(t *testing.T) {
 	sink := &recordingSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("t1", "look", `{}`),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("t1", "look", `{}`),
+		contentTurn("done"),
+	)
 	looked := 0
 	cfg := baseConfig(sink)
 	reg := domain.NewToolRegistry()

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // incapableConfiner is a present-but-incapable Confiner: it reports {false, false}, so it
@@ -80,10 +80,10 @@ func driveToolCall(t *testing.T, cfg domain.Config, sink *recordingSink, callID,
 	// them is about what the DISPOSITION does with a call that reaches the tool path, not about the
 	// floor. The guard has its own proofs in floorguards_test.go.
 	cfg.Floor.DisableToolCallRepair = true
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript(callID, tool, args),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn(callID, tool, args),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -233,13 +233,13 @@ func TestGuardrails_CircuitBreakerTrips(t *testing.T) {
 	// re-stream every Turn before the breaker ever counted one. This test is about the breaker, so
 	// the guard is off for it; the guard's own repeat proof lives in floorguards_test.go.
 	cfg.Floor.DisableToolLoopBreaker = true
-	scripts := make([][]provider.Delta, 0, calls+1)
+	scripts := make([]stubllm.Turn, 0, calls+1)
 	for i := 0; i < calls; i++ {
-		scripts = append(scripts, toolCallScript("c", "flaky", `{"x":"same"}`))
+		scripts = append(scripts, toolCallTurn("c", "flaky", `{"x":"same"}`))
 	}
-	scripts = append(scripts, contentScript("giving up"))
+	scripts = append(scripts, contentTurn("giving up"))
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

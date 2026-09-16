@@ -30,7 +30,7 @@ func syncAgent(t *testing.T, sink domain.EventSink, conf domain.Confiner, confin
 	cfg.Confiner = conf
 	cfg.ConfineToWorkspace = confine
 
-	a, err := newAgent(cfg, echoResponder{reply: "reply"})
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

@@ -35,7 +35,7 @@ func TestRebindSwapsRequestBindings(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.SystemPrompt = "you are bound to the old model"
 	cfg.Context.MaxContextTokens = 8192
-	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("first"), contentScript("second")}}
+	responder := scriptedResponder(t, contentTurn("first"), contentTurn("second"))
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -52,10 +52,10 @@ func TestRebindSwapsRequestBindings(t *testing.T) {
 	}
 	runExchange(t, a, "after the switch")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("responder saw %d requests, want 2", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("responder saw %d requests, want 2", len(responder.requests()))
 	}
-	before, after := responder.got[0], responder.got[1]
+	before, after := responder.requests()[0], responder.requests()[1]
 
 	if before.Model != "test-model" {
 		t.Errorf("pre-rebind request model = %q, want %q", before.Model, "test-model")
@@ -125,7 +125,7 @@ func TestRebindKeepsTheReactionsItWasBuiltWith(t *testing.T) {
 	fired := false
 	cfg.Reactions = []domain.Reaction{firingReaction("rebind_probe", &fired)}
 
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -155,7 +155,7 @@ func TestRebindKeepsTheReactionsItWasBuiltWith(t *testing.T) {
 // TestRebindKeepsConversation: the conversation is session state, not a per-model binding — a
 // model switch mid-session must not cost the user their history.
 func TestRebindKeepsConversation(t *testing.T) {
-	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("kept")}}
+	responder := scriptedResponder(t, contentTurn("kept"))
 	a, err := newAgent(baseConfig(&recordingSink{}), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -183,7 +183,7 @@ func TestRebindKeepsConversation(t *testing.T) {
 // It exists to run under -race: the boundary — not a lock on cfg — is what makes the loop's
 // un-mutexed cfg reads safe against Rebind's writes (ADR 0024).
 func TestRebindBetweenExchangesRaceClean(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -216,7 +216,7 @@ func TestNewAllowsEmptyModelSubmitRefuses(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Model = ""
 
-	a, err := newAgent(cfg, echoResponder{reply: "late"})
+	a, err := newAgent(cfg, echoResponder(t, "late"))
 	if err != nil {
 		t.Fatalf("newAgent with an empty Model: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestNewAllowsEmptyModelSubmitRefuses(t *testing.T) {
 // translate.
 func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 	t.Run("empty model", func(t *testing.T) {
-		a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "unreached"})
+		a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "unreached"))
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
 		}
@@ -256,7 +256,7 @@ func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 		cfg := baseConfig(&recordingSink{})
 		cfg.Profile = live
 
-		a, err := newAgent(cfg, echoResponder{reply: "unreached"})
+		a, err := newAgent(cfg, echoResponder(t, "unreached"))
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
 		}
@@ -286,7 +286,7 @@ func TestRebindRefusesUnbuildableSpecs(t *testing.T) {
 // with the collaborators so the emit half follows.
 func TestRebindSwapsTheModelProfile(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
-	a := newProfileAgent(t, cfg, echoResponder{reply: "<mm:think>weighing it up</mm:think>The answer is 42."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "<mm:think>weighing it up</mm:think>The answer is 42."))
 
 	before := answerOnce(t, a, "think about it")
 	if !strings.Contains(before.Content, "weighing it up") {
@@ -329,7 +329,7 @@ func TestRebindToZeroProfileResetsTheParsers(t *testing.T) {
 			End:   "</think>",
 		},
 	}
-	a := newProfileAgent(t, cfg, echoResponder{reply: "<think>weighing it up</think>The answer is 42."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "<think>weighing it up</think>The answer is 42."))
 
 	before := answerOnce(t, a, "think about it")
 	if strings.Contains(before.Content, "weighing it up") {
@@ -365,7 +365,7 @@ func TestRebindCarriesTheReplyCeiling(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 98304
 	cfg.Context.MaxOutputTokens = 2048
-	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("bounded")}}
+	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("bounded")}} // a Sampling assertion: the stubllm log does not carry it yet
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -481,7 +481,7 @@ func TestRebindCarriesTheResponseReserveShare(t *testing.T) {
 func TestRebindMovesTheDialectAndClearsTheStandDownLatch(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.EffortDialect = domain.EffortDialectKwargs
-	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("first")}}
+	responder := scriptedResponder(t, contentTurn("first"))
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -514,7 +514,7 @@ func TestRebindMovesTheDialectAndClearsTheStandDownLatch(t *testing.T) {
 // outside the named dialects lands on the Config as the zero — a value the enum still recognises
 // (EffortDialect.Valid) — rather than as a shape no reader of the Config can interpret.
 func TestRebindToAnUnknownDialectDegradesTheConfigToNone(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), &captureAllResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

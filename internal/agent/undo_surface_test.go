@@ -35,7 +35,7 @@ func journalledAgent(t *testing.T, pre, post string) (*Agent, string) {
 
 	cfg := configWithTools(&recordingSink{})
 	cfg.WorkspaceDir = root
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // toolRegistry builds a registry over tools, failing the test on a registration the domain type
@@ -47,10 +46,10 @@ func toolNames(reg *domain.ToolRegistry) []string {
 func TestSwapToolsMovesTheNextDispatchToTheNewSet(t *testing.T) {
 	oldRan, newRan := 0, 0
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "old_tool", readOnly: true, ran: &oldRan, result: "old"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "new_tool", `{}`),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "new_tool", `{}`),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -130,7 +129,7 @@ func TestSwapToolsRefusesANilRegistry(t *testing.T) {
 	t.Parallel()
 
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "old_tool", readOnly: true, result: "old"})
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -157,7 +156,7 @@ func TestSwapToolsIsSeenByTheNextSubAgentSpawn(t *testing.T) {
 	t.Parallel()
 
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "old_tool", readOnly: true, result: "old"})
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

@@ -19,7 +19,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/processing"
 	"github.com/airiclenz/apogee/internal/prompt"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // readOnlyTool is a minimal read-only fake Tool used to build a deterministic wire tool menu for
@@ -71,7 +71,7 @@ func TestPromptSeam_NonNativeInjectsMenuAndSuppressesTools(t *testing.T) {
 	cfg := menuConfig(t, sink)
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -80,7 +80,7 @@ func TestPromptSeam_NonNativeInjectsMenuAndSuppressesTools(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	got := responder.last
+	got := responder.last()
 	if got.Tools != nil {
 		t.Errorf("Tools = %+v, want nil (native array suppressed for a non-native format)", got.Tools)
 	}
@@ -111,7 +111,7 @@ func TestPromptSeam_NativeProfileByteIdentical(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := menuConfig(t, sink) // zero Profile
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -120,8 +120,8 @@ func TestPromptSeam_NativeProfileByteIdentical(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	got := responder.last
-	if len(got.Tools) != 1 || got.Tools[0].Name != "read_file" {
+	got := responder.last()
+	if len(got.Tools) != 1 || got.Tools[0] != "read_file" {
 		t.Errorf("Tools = %+v, want the native read_file spec (no suppression for a native profile)", got.Tools)
 	}
 	if _, ok := firstSystemMessage(wireToDomain(got.Messages)); ok {
@@ -142,7 +142,7 @@ func TestPromptSeam_AppendsToSeededSystemMessage(t *testing.T) {
 	const seed = "You are a helpful assistant. [seed]"
 	cfg.Reactions = []domain.Reaction{seedingReaction(seed)}
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -151,7 +151,7 @@ func TestPromptSeam_AppendsToSeededSystemMessage(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	got := responder.last
+	got := responder.last()
 	systems := 0
 	for _, m := range got.Messages {
 		if m.Role == string(domain.RoleSystem) {
@@ -183,7 +183,7 @@ func TestPromptSeam_NextTurnReflectsMenuChange(t *testing.T) {
 	}
 	cfg.Mode = domain.ModeAskBefore
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	// Turn 1 (Ask-Before): the full menu, so write_file is offered in the text block.
@@ -193,7 +193,7 @@ func TestPromptSeam_NextTurnReflectsMenuChange(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step 1: %v", err)
 	}
-	if sys, ok := firstSystemMessage(wireToDomain(responder.last.Messages)); !ok || !strings.Contains(sys.Content, "write_file") {
+	if sys, ok := firstSystemMessage(wireToDomain(responder.last().Messages)); !ok || !strings.Contains(sys.Content, "write_file") {
 		t.Fatalf("Turn 1 block should offer write_file: %q", sys.Content)
 	}
 
@@ -206,7 +206,7 @@ func TestPromptSeam_NextTurnReflectsMenuChange(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step 2: %v", err)
 	}
-	sys, ok := firstSystemMessage(wireToDomain(responder.last.Messages))
+	sys, ok := firstSystemMessage(wireToDomain(responder.last().Messages))
 	if !ok {
 		t.Fatal("Turn 2 wire request has no system message")
 	}
@@ -225,7 +225,7 @@ func TestPromptSeam_InjectedTextNeverEntersHistoryOrSnapshot(t *testing.T) {
 	cfg := menuConfig(t, sink)
 	cfg.Profile = domain.ModelProfile{ToolCallFormat: domain.FormatMarkdownFenced}
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -274,7 +274,7 @@ func seedingReaction(text string) domain.Reaction {
 
 // wireToDomain reduces provider messages to the role/content the emit-seam assertions read, so the
 // system-message helpers can be shared across the domain-history and wire-projection checks.
-func wireToDomain(msgs []provider.Message) []domain.Message {
+func wireToDomain(msgs []stubllm.Message) []domain.Message {
 	out := make([]domain.Message, len(msgs))
 	for i, m := range msgs {
 		out[i] = domain.Message{Role: domain.Role(m.Role), Content: m.Content}
@@ -306,7 +306,7 @@ var promptNow = time.Date(2026, 7, 26, 23, 59, 30, 0, time.UTC)
 
 // countSystemMessages counts the wire request's system messages — the "exactly one merged
 // system message" property every seeding assertion below rests on.
-func countSystemMessages(msgs []provider.Message) int {
+func countSystemMessages(msgs []stubllm.Message) int {
 	n := 0
 	for _, m := range msgs {
 		if m.Role == string(domain.RoleSystem) {
@@ -327,7 +327,7 @@ func TestPromptSeam_ConfiguredPromptNativeSingleSystemMessage(t *testing.T) {
 	cfg.WorkspaceDir = promptWorkspace
 	cfg.SystemPrompt = promptTemplate
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
@@ -337,7 +337,7 @@ func TestPromptSeam_ConfiguredPromptNativeSingleSystemMessage(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	got := responder.last
+	got := responder.last()
 	if n := countSystemMessages(got.Messages); n != 1 {
 		t.Fatalf("wire request has %d system messages, want exactly 1 (the seeded prompt)", n)
 	}
@@ -349,7 +349,7 @@ func TestPromptSeam_ConfiguredPromptNativeSingleSystemMessage(t *testing.T) {
 	if got.Messages[0].Role != string(domain.RoleSystem) || got.Messages[0].Content != want {
 		t.Errorf("first wire message = %+v\nwant a system message %q", got.Messages[0], want)
 	}
-	if len(got.Tools) != 1 || got.Tools[0].Name != "read_file" {
+	if len(got.Tools) != 1 || got.Tools[0] != "read_file" {
 		t.Errorf("Tools = %+v, want the native read_file spec (a prompt must not suppress the native array)", got.Tools)
 	}
 }
@@ -369,7 +369,7 @@ func TestPromptSeam_ConfiguredPromptMergesDirectivesAndToolBlock(t *testing.T) {
 	const directive = "Always cite the files you read. [seed]"
 	cfg.Reactions = []domain.Reaction{seedingReaction(directive)}
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
@@ -379,7 +379,7 @@ func TestPromptSeam_ConfiguredPromptMergesDirectivesAndToolBlock(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	got := responder.last
+	got := responder.last()
 	if n := countSystemMessages(got.Messages); n != 1 {
 		t.Fatalf("wire request has %d system messages, want exactly 1 (prompt, directive and tool block merged)", n)
 	}
@@ -408,7 +408,7 @@ func TestPromptSeam_ConfiguredPromptRendersFreshPerRequest(t *testing.T) {
 	cfg.WorkspaceDir = promptWorkspace
 	cfg.SystemPrompt = promptTemplate
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 	if err := a.Submit(domain.UserInput{Text: "one"}); err != nil {
@@ -417,7 +417,7 @@ func TestPromptSeam_ConfiguredPromptRendersFreshPerRequest(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step 1: %v", err)
 	}
-	turn1 := responder.last.Messages[0].Content
+	turn1 := responder.last().Messages[0].Content
 	if !strings.Contains(turn1, "2026-07-26") || !strings.Contains(turn1, string(domain.ModeAskBefore)) {
 		t.Fatalf("Turn 1 prompt = %q, want the fixed date and the ask-before mode", turn1)
 	}
@@ -432,7 +432,7 @@ func TestPromptSeam_ConfiguredPromptRendersFreshPerRequest(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step 2: %v", err)
 	}
-	turn2 := responder.last.Messages[0].Content
+	turn2 := responder.last().Messages[0].Content
 	if !strings.Contains(turn2, "2026-07-27") {
 		t.Errorf("Turn 2 prompt = %q, want the rolled-over date 2026-07-27", turn2)
 	}
@@ -452,7 +452,7 @@ func TestPromptSeam_ConfiguredPromptNeverEntersHistoryOrSnapshot(t *testing.T) {
 	cfg.WorkspaceDir = promptWorkspace
 	cfg.SystemPrompt = "Remember " + marker + " while working in {{workspace}}."
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
 		t.Fatalf("Submit: %v", err)
@@ -460,8 +460,8 @@ func TestPromptSeam_ConfiguredPromptNeverEntersHistoryOrSnapshot(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if !strings.Contains(responder.last.Messages[0].Content, marker) {
-		t.Fatalf("the wire request never carried the prompt: %+v", responder.last.Messages)
+	if !strings.Contains(responder.last().Messages[0].Content, marker) {
+		t.Fatalf("the wire request never carried the prompt: %+v", responder.last().Messages)
 	}
 
 	for i, m := range a.conv.Messages() {
@@ -493,7 +493,7 @@ func TestNewAgentRejectsUnknownPromptPlaceholder(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.SystemPrompt = "hi {{foo}}"
 
-	_, err := newAgent(cfg, &recordingResponder{reply: "unused"})
+	_, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err == nil {
 		t.Fatal("newAgent accepted an unknown placeholder; a bad template must fail construction")
 	}
@@ -517,7 +517,7 @@ func TestPromptSeam_ScratchPlaceholderRendersSessionScratchDir(t *testing.T) {
 	cfg.SystemPrompt = "Workspace {{workspace}}. Scratch and test files go in {{scratch}}."
 	cfg.ScratchDir = scratch
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 
@@ -561,7 +561,7 @@ func contextBlock(name, content string) string {
 
 // seedSystemMessage drives one Turn and returns the wire request's leading system message,
 // failing when the request does not open with exactly one.
-func seedSystemMessage(t *testing.T, a *Agent, responder *recordingResponder, text string) string {
+func seedSystemMessage(t *testing.T, a *Agent, responder *scriptedUpstream, text string) string {
 	t.Helper()
 	if err := a.Submit(domain.UserInput{Text: text}); err != nil {
 		t.Fatalf("Submit(%q): %v", text, err)
@@ -569,7 +569,7 @@ func seedSystemMessage(t *testing.T, a *Agent, responder *recordingResponder, te
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step(%q): %v", text, err)
 	}
-	got := responder.last
+	got := responder.last()
 	if n := countSystemMessages(got.Messages); n != 1 {
 		t.Fatalf("wire request has %d system messages, want exactly 1: %+v", n, got.Messages)
 	}
@@ -587,7 +587,7 @@ func TestContextSeam_FilesSeedWithoutAPrompt(t *testing.T) {
 	writeWorkspaceFile(t, dir, "AGENTS.md", "Run make check before committing.\n")
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md") // zero Profile, no SystemPrompt
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	got := seedSystemMessage(t, a, responder, "hi")
@@ -609,7 +609,7 @@ func TestContextSeam_PromptThenBlocksInListOrder(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	cfg.SystemPrompt = promptTemplate
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 
@@ -638,7 +638,7 @@ func TestContextSeam_UnreadableFileNeverReachesTheModel(t *testing.T) {
 	writeWorkspaceFile(t, dir, "CONVENTIONS.md", "conventions guidance")
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md", "CONVENTIONS.md")
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	got := seedSystemMessage(t, a, responder, "hi")
@@ -659,7 +659,7 @@ func TestContextSeam_EscapingSymlinkNeverReachesTheModel(t *testing.T) {
 	dir, marker := escapingContextWorkspace(t, "file")
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md", "CONVENTIONS.md")
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	got := seedSystemMessage(t, a, responder, "hi")
@@ -693,7 +693,7 @@ func TestContextSeam_MergesDirectivesAndToolBlock(t *testing.T) {
 	const directive = "Always cite the files you read. [seed]"
 	cfg.Reactions = []domain.Reaction{seedingReaction(directive)}
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 
@@ -726,7 +726,7 @@ func TestContextSeam_ContentIsDataNotTemplate(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	cfg.SystemPrompt = promptTemplate // renders {{workspace}} twice
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 
@@ -764,7 +764,7 @@ func TestContextSeam_ContentCannotForgeAHeaderOrTheOrientation(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	cfg.SystemPrompt = promptTemplate
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 
@@ -804,7 +804,7 @@ func TestContextSeam_ContentStableWithinASession(t *testing.T) {
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	turn1 := seedSystemMessage(t, a, responder, "one")
@@ -826,7 +826,7 @@ func TestContextSeam_NewSessionCarriesTheNewBytes(t *testing.T) {
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	seedSystemMessage(t, a, responder, "one")
 
@@ -850,7 +850,7 @@ func TestContextSeam_SubAgentRequestCarriesParentBlocks(t *testing.T) {
 	writeWorkspaceFile(t, dir, "AGENTS.md", "parent bytes")
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	if err := os.Remove(filepath.Join(dir, "AGENTS.md")); err != nil {
 		t.Fatalf("Remove: %v", err)
@@ -903,7 +903,7 @@ func TestRestoreSeam_StoredSystemMessageDroppedAndNotDoubledOnTheWire(t *testing
 	cfg.WorkspaceDir = promptWorkspace
 	cfg.SystemPrompt = promptTemplate
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 	a.now = func() time.Time { return promptNow }
 
@@ -949,7 +949,7 @@ func TestRestoreSeam_StoredSystemMessageDroppedAndNotDoubledOnTheWire(t *testing
 // on a restored mid-Exchange snapshot still rolls back to that Exchange's own opening message
 // rather than one message too far into the answered history.
 func TestRestoreSeam_ExchangeBoundaryShiftsWithTheDroppedPrefix(t *testing.T) {
-	a := newProfileAgent(t, baseConfig(&recordingSink{}), &recordingResponder{reply: "unused"})
+	a := newProfileAgent(t, baseConfig(&recordingSink{}), echoResponder(t, "unused"))
 
 	// Stored: [0] system, [1] user "done", [2] assistant "ok", [3] user "open" — the Exchange
 	// still in flight opened at index 3.

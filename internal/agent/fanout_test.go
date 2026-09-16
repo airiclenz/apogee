@@ -848,7 +848,7 @@ func TestRoutedWidthReachesTheHookView(t *testing.T) {
 
 	cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore)
 	cfg.ParallelAgents = 1
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

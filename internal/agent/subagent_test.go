@@ -16,6 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -35,9 +36,15 @@ func subAgentArgs(task string) string {
 	return string(b)
 }
 
-// subAgentCallScript emits a single sub_agent tool call delegating task.
+// subAgentCallScript emits a single sub_agent tool call delegating task — the Delta script the
+// surviving hand-written fakes play; subAgentCallTurn is its stubllm twin.
 func subAgentCallScript(id, task string) []provider.Delta {
 	return toolCallScript(id, tools.SubAgentToolName, subAgentArgs(task))
+}
+
+// subAgentCallTurn is a turn that emits a single sub_agent tool call delegating task.
+func subAgentCallTurn(id, task string) stubllm.Turn {
+	return toolCallTurn(id, tools.SubAgentToolName, subAgentArgs(task))
 }
 
 // subAgentConfig builds a Config wired with the sub_agent tool plus the given extra tools,
@@ -62,11 +69,11 @@ func TestSubAgent_DelegatesAndReportsBack(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "summarise the repo"),
-		contentScript("the repo is a Go TUI agent"), // the sub-agent's only Turn (final)
-		contentScript("done — delegated and summarised"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "summarise the repo"),
+		contentTurn("the repo is a Go TUI agent"), // the sub-agent's only Turn (final)
+		contentTurn("done — delegated and summarised"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -98,11 +105,11 @@ func TestSubAgent_EventsNestAtDepthOne(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "do the thing"),
-		contentScript("child reply"),
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "do the thing"),
+		contentTurn("child reply"),
+		contentTurn("parent done"),
+	)
 	a, _ := newAgent(cfg, responder)
 	_ = a.Submit(domain.UserInput{Text: "go"})
 	if _, err := a.Run(context.Background()); err != nil {
@@ -141,13 +148,13 @@ func TestSubAgent_EventsCarryTheSpawningCallID(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "first task"),
-		contentScript("first child reply"),
-		subAgentCallScript("c2", "second task"),
-		contentScript("second child reply"),
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "first task"),
+		contentTurn("first child reply"),
+		subAgentCallTurn("c2", "second task"),
+		contentTurn("second child reply"),
+		contentTurn("parent done"),
+	)
 	a, _ := newAgent(cfg, responder)
 	_ = a.Submit(domain.UserInput{Text: "go"})
 	if _, err := a.Run(context.Background()); err != nil {
@@ -253,12 +260,12 @@ func TestSubAgent_InheritsPlanModeCannotWrite(t *testing.T) {
 	// answer the call as "not in the tool set" before dispatch saw it. This test is about the
 	// Plan-mode refusal at dispatch, so the guard is off for it (its own proofs: floorguards_test.go).
 	cfg.Floor.DisableToolCallRepair = true
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "write a file"),
-		toolCallScript("c2", "write_thing", `{}`), // the child attempts a write
-		contentScript("child could not write"),    // child finishes after the refusal result
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "write a file"),
+		toolCallTurn("c2", "write_thing", `{}`), // the child attempts a write
+		contentTurn("child could not write"),    // child finishes after the refusal result
+		contentTurn("parent done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -294,12 +301,12 @@ func TestSubAgent_SubsetCannotCallOmittedTool(t *testing.T) {
 	// The omitted tool is absent from the child's MENU too, so the tool-call repair Floor guard
 	// would answer it before the unknown-tool result this test is about; the guard is off here.
 	cfg.Floor.DisableToolCallRepair = true
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "use the writer"),
-		toolCallScript("c2", "write_thing", `{}`), // child calls a tool not in its subset
-		contentScript("child saw unknown tool"),
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "use the writer"),
+		toolCallTurn("c2", "write_thing", `{}`), // child calls a tool not in its subset
+		contentTurn("child saw unknown tool"),
+		contentTurn("parent done"),
+	)
 	a, _ := newAgent(cfg, responder)
 	_ = a.Submit(domain.UserInput{Text: "go"})
 	if _, err := a.Run(context.Background()); err != nil {
@@ -325,14 +332,14 @@ func TestSubAgent_MaxDepthRefusesAndWithholdsTool(t *testing.T) {
 
 	// Drive: parent (d0) spawns d1, d1 spawns d2, d2 attempts to spawn d3 (refused at the
 	// bound), d2 finishes, d1 finishes, parent finishes.
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "level 1"), // parent → d1
-		subAgentCallScript("c2", "level 2"), // d1 → d2
-		subAgentCallScript("c3", "level 3"), // d2 → (refused: would be d3, past the bound)
-		contentScript("d2 done after refusal"),
-		contentScript("d1 done"),
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "level 1"), // parent → d1
+		subAgentCallTurn("c2", "level 2"), // d1 → d2
+		subAgentCallTurn("c3", "level 3"), // d2 → (refused: would be d3, past the bound)
+		contentTurn("d2 done after refusal"),
+		contentTurn("d1 done"),
+		contentTurn("parent done"),
+	)
 	a, _ := newAgent(cfg, responder)
 	_ = a.Submit(domain.UserInput{Text: "go"})
 	if _, err := a.Run(context.Background()); err != nil {
@@ -469,7 +476,7 @@ func humanSeatRegistry(extra ...domain.Tool) *domain.ToolRegistry {
 func TestSubAgent_ChildNeverHoldsTheHumanSeatTools(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Tools = humanSeatRegistry(fakeTool{name: "read_thing", readOnly: true, result: "read"})
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -628,7 +635,7 @@ func TestSubAgent_ToolsListNarrowsToExactlyThoseTools(t *testing.T) {
 func TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "read_thing", readOnly: true, result: "read"})
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -672,15 +679,15 @@ func TestSubAgent_BreakerIsolatedFromParent(t *testing.T) {
 	// tool-loop breaker Floor guard answers that identical repeat first, so it is off for this
 	// test — the subject is the child's own circuit-breaker and its isolation from the parent's.
 	cfg.Floor.DisableToolLoopBreaker = true
-	childScripts := [][]provider.Delta{}
+	childScripts := []stubllm.Turn{}
 	for i := 0; i < 4; i++ {
-		childScripts = append(childScripts, toolCallScript("k", "flaky", `{}`))
+		childScripts = append(childScripts, toolCallTurn("k", "flaky", `{}`))
 	}
-	childScripts = append(childScripts, contentScript("child gives up"))
-	scripts := append([][]provider.Delta{subAgentCallScript("c1", "retry flaky")}, childScripts...)
-	scripts = append(scripts, contentScript("parent done"))
+	childScripts = append(childScripts, contentTurn("child gives up"))
+	scripts := append([]stubllm.Turn{subAgentCallTurn("c1", "retry flaky")}, childScripts...)
+	scripts = append(scripts, contentTurn("parent done"))
 
-	a, _ := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	a, _ := newAgent(cfg, scriptedResponder(t, scripts...))
 	parentBreaker := a.guards.Breaker
 	_ = a.Submit(domain.UserInput{Text: "go"})
 	if _, err := a.Run(context.Background()); err != nil {
@@ -708,13 +715,13 @@ func TestSubAgent_DangerousFloorSharedReadOnly(t *testing.T) {
 	danger := fakeTool{name: "terminal", readOnly: false, result: "ran"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, danger)
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "clean up"),
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "clean up"),
 		// The child attempts a Tier-1 dangerous action; the shared floor must hard-refuse it.
-		toolCallScript("c2", "terminal", `{"command":"rm -rf /"}`),
-		contentScript("child blocked"),
-		contentScript("parent done"),
-	}}
+		toolCallTurn("c2", "terminal", `{"command":"rm -rf /"}`),
+		contentTurn("child blocked"),
+		contentTurn("parent done"),
+	)
 	a, _ := newAgent(cfg, responder)
 	_ = a.Submit(domain.UserInput{Text: "go"})
 	if _, err := a.Run(context.Background()); err != nil {
@@ -747,12 +754,12 @@ func TestSubAgent_ChildPanicRecoversAtParentBoundary(t *testing.T) {
 	}}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, panicker)
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "trigger a panic"),
-		toolCallScript("c2", "boom", `{}`), // child tool panics (recovered into an ErrorEvent)
-		contentScript("child recovered"),
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "trigger a panic"),
+		toolCallTurn("c2", "boom", `{}`), // child tool panics (recovered into an ErrorEvent)
+		contentTurn("child recovered"),
+		contentTurn("parent done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -780,23 +787,15 @@ func TestSubAgent_ChildPanicRecoversAtParentBoundary(t *testing.T) {
 // delegated result that was never produced.
 const staleChildText = "starting on it — reading the entry point first"
 
-// contentThenToolCallScript emits one content chunk AND one tool call in the same stream: the
-// shape of a model that narrates before acting, so the committed assistant message carries
-// mid-task text.
-func contentThenToolCallScript(text, id, name, args string) []provider.Delta {
-	return append([]provider.Delta{{Kind: provider.DeltaContent, Content: text}},
-		toolCallScript(id, name, args)...)
-}
-
 // faultedDelegationScripts drives one delegation whose child narrates, calls a tool, and then
 // hits an Upstream fault on its next Turn — the child's Exchange is ABANDONED, which closes on
 // the same StatusExchangeComplete a real completion returns. The parent then finishes.
-func faultedDelegationScripts() [][]provider.Delta {
-	return [][]provider.Delta{
-		subAgentCallScript("c1", "summarise the repo"),
-		contentThenToolCallScript(staleChildText, "c2", "read_thing", `{}`),
-		errorScript("upstream: connection reset by peer"), // the child's next Turn faults
-		contentScript("parent done"),
+func faultedDelegationScripts() []stubllm.Turn {
+	return []stubllm.Turn{
+		subAgentCallTurn("c1", "summarise the repo"),
+		narratedToolCallTurn("c2", "read_thing", `{}`, staleChildText), // a model that narrates before acting
+		errorScript("upstream: connection reset by peer"),              // the child's next Turn faults
+		contentTurn("parent done"),
 	}
 }
 
@@ -809,7 +808,7 @@ func TestSubAgent_FaultedDelegationReportsAsError(t *testing.T) {
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: faultedDelegationScripts()})
+	a, err := newAgent(cfg, scriptedResponder(t, faultedDelegationScripts()...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -857,12 +856,12 @@ func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "summarise the repo"),
-		retryableErrorScript(transientFaultMsg), // the child's only Turn hits a transient blip
-		contentScript(childAnswer),              // ... and its one re-stream lands
-		contentScript("parent done"),
-	}})
+	a, err := newAgent(cfg, scriptedResponder(t,
+		subAgentCallTurn("c1", "summarise the repo"),
+		retryableErrorTurn(transientFaultMsg), // the child's only Turn hits a transient blip
+		contentTurn(childAnswer),              // ... and its one re-stream lands
+		contentTurn("parent done"),
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -911,10 +910,10 @@ func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
 	}}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, interrupted)
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "summarise the repo"),
-		toolCallScript("c2", "read_thing", `{}`), // the child's call is cancelled mid-flight
-	}})
+	a, err := newAgent(cfg, scriptedResponder(t,
+		subAgentCallTurn("c1", "summarise the repo"),
+		toolCallTurn("c2", "read_thing", `{}`), // the child's call is cancelled mid-flight
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -942,7 +941,7 @@ func TestSubAgent_CancelledChildRollsTheParentTurnBack(t *testing.T) {
 // and one flipped back off is not.
 func TestSubAgent_ChildInheritsTheLiveNoticeSwitch(t *testing.T) {
 	sink := &recordingSink{}
-	parent, err := newAgent(subAgentConfig(sink, domain.ModeAllowEdits), &scriptedResponder{scripts: [][]provider.Delta{contentScript("done")}})
+	parent, err := newAgent(subAgentConfig(sink, domain.ModeAllowEdits), scriptedResponder(t, contentTurn("done")))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -989,12 +988,12 @@ func TestSubAgent_DepthZeroReadsAsOne(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 	cfg.Delegation.MaxDepth = 0
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		subAgentCallScript("c1", "level 1"), // parent → d1
-		subAgentCallScript("c2", "level 2"), // d1 → (withheld: d2 would be past the default bound)
-		contentScript("d1 done after refusal"),
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		subAgentCallTurn("c1", "level 1"), // parent → d1
+		subAgentCallTurn("c2", "level 2"), // d1 → (withheld: d2 would be past the default bound)
+		contentTurn("d1 done after refusal"),
+		contentTurn("parent done"),
+	)
 	a, _ := newAgent(cfg, responder)
 	_ = a.Submit(domain.UserInput{Text: "go"})
 	if _, err := a.Run(context.Background()); err != nil {
@@ -1094,7 +1093,7 @@ func TestSubAgentInheritsSystemPrompt(t *testing.T) {
 	cfg := subAgentConfig(&recordingSink{}, domain.ModeAskBefore)
 	cfg.SystemPrompt = "You are apogee in {{workspace}} on {{datetime}} in {{mode}} mode."
 
-	a, err := newAgent(cfg, &recordingResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -1153,7 +1152,7 @@ func TestSubAgent_ChildCarriesTheDelegationName(t *testing.T) {
 	t.Parallel()
 
 	sink := &recordingSink{}
-	a, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), &scriptedResponder{})
+	a, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -1188,11 +1187,11 @@ func TestSubAgent_NamedDelegationStillReportsBack(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", tools.SubAgentToolName, subAgentNamedArgs("summarise the repo", "  repo-scout\nignored prose")),
-		contentScript("the repo is a Go TUI agent"),
-		contentScript("done — delegated and summarised"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", tools.SubAgentToolName, subAgentNamedArgs("summarise the repo", "  repo-scout\nignored prose")),
+		contentTurn("the repo is a Go TUI agent"),
+		contentTurn("done — delegated and summarised"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -1265,6 +1264,28 @@ func TestUnroutedChildNeverClosesTheParentsClient(t *testing.T) {
 // ends its Exchange at the cap, cleanly rather than faulted, and the parent receives a NON-error
 // partial result. These tests drive the bound end to end through the same scripted responder the
 // tests above share (scripts[N] is consumed in run order across BOTH loops).
+
+// narratedToolCallTurn is a turn that emits visible text AND a tool call in one reply — a
+// delegate narrating as it works, the shape narratedToolCallScript plays for the surviving
+// hand-written fakes.
+func narratedToolCallTurn(id, name, args, text string) stubllm.Turn {
+	turn := toolCallTurn(id, name, args)
+	turn.Text = text
+	return turn
+}
+
+// narratedChildTurns returns n turns of a child that reads a file and narrates each time — the
+// shape the step cap exists for; it is cappedChildTurns for a scripted upstream.
+func narratedChildTurns(n int) []stubllm.Turn {
+	out := make([]stubllm.Turn, 0, n)
+	for i := 0; i < n; i++ {
+		// The arguments carry the Turn index so consecutive child Turns are not an identical
+		// repeat, which the tool-loop breaker Floor guard would answer instead of spending a step.
+		out = append(out, narratedToolCallTurn(
+			fmt.Sprintf("t%d", i), "read_thing", fmt.Sprintf(`{"n":%d}`, i), fmt.Sprintf("reading file %d", i)))
+	}
+	return out
+}
 
 // narratedToolCallScript is a stream that emits visible text AND a tool call in one reply — a
 // delegate narrating as it works. It is what makes a step-capped child's "last visible text"
@@ -1453,12 +1474,12 @@ func TestSubAgent_StepCapFallsBackWhenTheWrapUpFaults(t *testing.T) {
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 	cfg.Delegation.MaxSteps = 3
 
-	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
-	scripts = append(scripts, cappedChildTurns(3)...)
+	scripts := []stubllm.Turn{subAgentCallTurn("c1", "trawl the repo")}
+	scripts = append(scripts, narratedChildTurns(3)...)
 	scripts = append(scripts, errorScript("upstream exploded on the wrap-up"))
-	scripts = append(scripts, contentScript("parent done"))
+	scripts = append(scripts, contentTurn("parent done"))
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -1498,17 +1519,17 @@ func TestSubAgent_StepCapMarksAWordlessDelegate(t *testing.T) {
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 	cfg.Delegation.MaxSteps = 2
 
-	scripts := [][]provider.Delta{
-		subAgentCallScript("c1", "trawl the repo"),
-		toolCallScript("t0", "read_thing", `{"n":0}`), // no visible text on either child Turn
-		toolCallScript("t1", "read_thing", `{"n":1}`), // (arguments differ per Turn so the tool-loop
+	scripts := []stubllm.Turn{
+		subAgentCallTurn("c1", "trawl the repo"),
+		toolCallTurn("t0", "read_thing", `{"n":0}`), // no visible text on either child Turn
+		toolCallTurn("t1", "read_thing", `{"n":1}`), // (arguments differ per Turn so the tool-loop
 		//                                                breaker guard reads no identical repeat)
 		// …and none on the wrap-up either: a child that answers its closing request with nothing
 		// but another tool call commits no assistant message, so there is still nothing to show.
-		toolCallScript("t2", "read_thing", `{"n":2}`),
-		contentScript("parent done"),
+		toolCallTurn("t2", "read_thing", `{"n":2}`),
+		contentTurn("parent done"),
 	}
-	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -1539,12 +1560,12 @@ func TestSubAgent_StepCapZeroIsUnbounded(t *testing.T) {
 
 	// The call asks for a cap of its own: against an UNBOUNDED cap the ask is ignored and — the
 	// exact Content below is the pin — no clamp note is written for it either.
-	scripts := [][]provider.Delta{
-		toolCallScript("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", 2)),
+	scripts := []stubllm.Turn{
+		toolCallTurn("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", 2)),
 	}
-	scripts = append(scripts, cappedChildTurns(4)...)
-	scripts = append(scripts, contentScript("the child's own final answer"), contentScript("parent done"))
-	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	scripts = append(scripts, narratedChildTurns(4)...)
+	scripts = append(scripts, contentTurn("the child's own final answer"), contentTurn("parent done"))
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -1774,14 +1795,14 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 			cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 			cfg.Delegation.MaxSteps = tc.configured
 
-			scripts := [][]provider.Delta{
-				toolCallScript("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", tc.requested)),
+			scripts := []stubllm.Turn{
+				toolCallTurn("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", tc.requested)),
 			}
 			// wantSteps working Turns plus the one tool-less wrap-up Turn the cap spends: the
 			// bound governs the WORK, and the closing report is extra however low it is set.
-			scripts = append(scripts, cappedChildTurns(tc.wantSteps+1)...)
-			scripts = append(scripts, contentScript("parent done"))
-			responder := &scriptedResponder{scripts: scripts}
+			scripts = append(scripts, narratedChildTurns(tc.wantSteps+1)...)
+			scripts = append(scripts, contentTurn("parent done"))
+			responder := scriptedResponder(t, scripts...)
 
 			a, err := newAgent(cfg, responder)
 			if err != nil {
@@ -1792,9 +1813,9 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 				t.Fatalf("Run: %v", err)
 			}
 
-			if responder.calls != len(scripts) {
+			if responder.calls() != len(scripts) {
 				t.Errorf("upstream calls = %d, want %d — the child ran a different number of Turns than the effective cap plus its wrap-up",
-					responder.calls, len(scripts))
+					responder.calls(), len(scripts))
 			}
 			sub, ok := lastSubAgentResult(sink.events)
 			if !ok {
@@ -1829,9 +1850,9 @@ func TestStepCapNeverBoundsTheMainAgent(t *testing.T) {
 	cfg.Tools = reg
 	cfg.Delegation.MaxSteps = 1
 
-	scripts := cappedChildTurns(3)
-	scripts = append(scripts, contentScript("the main agent's own final answer"))
-	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	scripts := narratedChildTurns(3)
+	scripts = append(scripts, contentTurn("the main agent's own final answer"))
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -1986,7 +2007,7 @@ func TestSubAgent_ChildNeverFoldsWithAutoCompactOff(t *testing.T) {
 func TestNewChildAgent_CompactsMidExchange(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -2019,7 +2040,7 @@ func TestNewChildAgent_IsBuiltFromOneDelegationValue(t *testing.T) {
 	cfg.Delegation.MaxSteps = 7
 	cfg.Delegation.MaxTokens = 9000
 	cfg.Delegation.Timeout = 3 * time.Minute
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -2091,7 +2112,7 @@ func TestNewChildAgent_IsBuiltFromOneDelegationValue(t *testing.T) {
 func TestNewChildAgentOn_SessionSeatGetsAnEmptyLatch(t *testing.T) {
 	t.Parallel()
 
-	parent, err := newAgent(subAgentConfig(&recordingSink{}, domain.ModeAskBefore), &scriptedResponder{})
+	parent, err := newAgent(subAgentConfig(&recordingSink{}, domain.ModeAskBefore), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -2120,14 +2141,11 @@ const truncatedChildText = "the parser mishandles nested quotes; the second find
 // cappedChildScripts drives one delegation whose child answers at LENGTH, with no tool call, and is
 // cut off at the engine's own output cap (ADR 0046) — the 2026-08-25 shape. The parent then
 // finishes.
-func cappedChildScripts() [][]provider.Delta {
-	return [][]provider.Delta{
-		subAgentCallScript("c1", "audit the parser"),
-		{
-			{Kind: provider.DeltaContent, Content: truncatedChildText},
-			{Kind: provider.DeltaDone, FinishReason: "length"},
-		},
-		contentScript("parent done"),
+func cappedChildScripts() []stubllm.Turn {
+	return []stubllm.Turn{
+		subAgentCallTurn("c1", "audit the parser"),
+		{Text: truncatedChildText, FinishReason: "length"},
+		contentTurn("parent done"),
 	}
 }
 
@@ -2139,7 +2157,7 @@ func TestSubAgent_CappedChildReplyReportsAsErrorNamingTheCause(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: cappedChildScripts()})
+	a, err := newAgent(cfg, scriptedResponder(t, cappedChildScripts()...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -2188,22 +2206,16 @@ func TestSubAgent_CappedChildReplyWithToolCallContinues(t *testing.T) {
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main", ran: &reads}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 
-	scripts := [][]provider.Delta{
-		subAgentCallScript("c1", "audit the parser"),
-		{
-			{Kind: provider.DeltaContent, Content: "reading the entry point first"},
-			{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
-				ID:       "c2",
-				Type:     "function",
-				Function: provider.FunctionCall{Name: "read_thing", Arguments: `{}`},
-			}},
-			{Kind: provider.DeltaDone, FinishReason: "length"},
-		},
-		contentScript("the parser is fine"), // the child's next Turn answers normally
-		contentScript("parent done"),
+	cutOffCall := narratedToolCallTurn("c2", "read_thing", `{}`, "reading the entry point first")
+	cutOffCall.FinishReason = "length"
+	scripts := []stubllm.Turn{
+		subAgentCallTurn("c1", "audit the parser"),
+		cutOffCall,
+		contentTurn("the parser is fine"), // the child's next Turn answers normally
+		contentTurn("parent done"),
 	}
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -2808,7 +2820,7 @@ func TestSubAgent_CappedChildWithoutItsOutputCarriesTheNote(t *testing.T) {
 // write_file tool, whose one delegation names out/report.md and whose child runs to COMPLETION
 // (no cap) through the given scripts before the parent closes. It returns the parent, the sink
 // and the workspace root.
-func completedOutputPathAgent(t *testing.T, child ...[]provider.Delta) (*Agent, *recordingSink, string) {
+func completedOutputPathAgent(t *testing.T, child ...stubllm.Turn) (*Agent, *recordingSink, string) {
 	t.Helper()
 
 	ws := t.TempDir()
@@ -2820,11 +2832,11 @@ func completedOutputPathAgent(t *testing.T, child ...[]provider.Delta) (*Agent, 
 	if err != nil {
 		t.Fatalf("marshal sub_agent args: %v", err)
 	}
-	scripts := [][]provider.Delta{toolCallScript("c1", tools.SubAgentToolName, string(call))}
+	scripts := []stubllm.Turn{toolCallTurn("c1", tools.SubAgentToolName, string(call))}
 	scripts = append(scripts, child...)
-	scripts = append(scripts, contentScript("parent done"))
+	scripts = append(scripts, contentTurn("parent done"))
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: scripts})
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -2839,7 +2851,7 @@ func TestSubAgent_CompletedChildWithoutItsOutputIsAFault(t *testing.T) {
 	const answer = "I surveyed the repo; the findings are in the report."
 
 	t.Run("the output is absent", func(t *testing.T) {
-		a, sink, _ := completedOutputPathAgent(t, contentScript(answer))
+		a, sink, _ := completedOutputPathAgent(t, contentTurn(answer))
 
 		runExchange(t, a, "please research")
 
@@ -2852,8 +2864,8 @@ func TestSubAgent_CompletedChildWithoutItsOutputIsAFault(t *testing.T) {
 
 	t.Run("the output was written", func(t *testing.T) {
 		a, sink, ws := completedOutputPathAgent(t,
-			narratedToolCallScript("w0", tools.WriteFileToolName, `{"path":"out/report.md","content":"the survey"}`, "writing"),
-			contentScript(answer))
+			narratedToolCallTurn("w0", tools.WriteFileToolName, `{"path":"out/report.md","content":"the survey"}`, "writing"),
+			contentTurn(answer))
 
 		runExchange(t, a, "please research")
 

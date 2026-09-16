@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -53,16 +54,19 @@ type Script struct {
 	Turns []Turn `yaml:"turns"`
 }
 
-// Turn is one scripted reply. A Turn is exactly ONE kind — text, tool calls, an HTTP reply or
-// a hang — with the empty Turn (no text, no tool calls, no http, no hang) meaning the
-// EMPTY-REPLY turn a real model produces when it abandons a reply mid-flight. Reasoning and
-// Usage accompany a text or tool-call turn; they are refused on an http or hang turn, which
+// Turn is one scripted reply. A Turn is exactly ONE kind — a completion, an HTTP reply or a
+// hang — with the empty Turn (no text, no tool calls, no http, no hang) meaning the EMPTY-REPLY
+// turn a real model produces when it abandons a reply mid-flight. A completion is text, tool
+// calls, or BOTH: a model that narrates before it calls a tool streams its content deltas first
+// and the tool-call fragments after them, framed head and tail exactly as a call without
+// narration is, so one Turn scripts that shape rather than two fakes stitched together.
+// Reasoning and Usage accompany a completion; they are refused on an http or hang turn, which
 // never reach the completion wire shape at all.
 //
-// Cut and Error are TERMINATORS, not kinds: each rides a text, tool-call or empty turn and
-// replaces the stream's ordinary ending — the finish_reason, the usage chunk and [DONE] — with
-// a failure a real upstream produces. A turn sets at most one of them, and neither on an http
-// or hang turn, which never start a stream to end.
+// Cut and Error are TERMINATORS, not kinds: each rides a completion or empty turn and replaces
+// the stream's ordinary ending — the finish_reason, the usage chunk and [DONE] — with a failure
+// a real upstream produces. A turn sets at most one of them, and neither on an http or hang
+// turn, which never start a stream to end.
 type Turn struct {
 	// When, when set, makes this Turn answer only the requests it matches — and makes it
 	// beat the ordered turns for those requests. A nil When is an ordered turn.
@@ -96,6 +100,17 @@ type Turn struct {
 	TokenDelay time.Duration `yaml:"token_delay,omitempty"`
 	// ChunkRunes is how many runes one delta carries; zero means defaultChunkRunes.
 	ChunkRunes int `yaml:"chunk_runes,omitempty"`
+	// Chunks places the content's stream boundaries BY HAND: each element is one delta, in
+	// order, and the Turn's content is their concatenation. It is for a test about what happens
+	// AT a boundary — a `<think>` tag arriving in a delta of its own, a suppressed span split
+	// across two — where ChunkRunes' even split lands nowhere useful. It is set INSTEAD of Text
+	// and ChunkRunes, never alongside them, and no element is empty: a real server never sends
+	// an empty content delta, and a stub that did would prove a decoder against a shape it
+	// never meets.
+	Chunks []string `yaml:"chunks,omitempty"`
+	// ReasoningChunks is Chunks for the reasoning channel: the deltas the thinking streams in,
+	// set instead of Reasoning under the same rules.
+	ReasoningChunks []string `yaml:"reasoning_chunks,omitempty"`
 	// Reasoning is the chain-of-thought channel, streamed BEFORE the content, exactly as the
 	// servers that emit it do. ReasoningField names the wire spelling it goes out in.
 	Reasoning string `yaml:"reasoning,omitempty"`
@@ -290,22 +305,22 @@ func (s Script) Validate() error {
 func (t Turn) validate() error {
 	if kinds := t.kindCount(); kinds > 1 {
 		return errors.New(
-			"sets more than one of text, tool_calls, http and hang — a turn is exactly one kind " +
-				"(a turn with none of them is the empty-reply turn)",
+			"sets more than one of a completion (text, chunks and/or tool_calls), http and hang — " +
+				"a turn is exactly one kind (a turn with none of them is the empty-reply turn)",
 		)
 	}
 	if t.HTTP != nil {
 		if t.HTTP.Status == 0 {
 			return errors.New("an http turn needs a status")
 		}
-		if t.Reasoning != "" || t.Usage != nil {
+		if t.hasReasoning() || t.Usage != nil {
 			return errors.New("an http turn carries no reasoning or usage")
 		}
 		if len(t.Captures) > 0 {
 			return errors.New("an http turn carries no captures")
 		}
 	}
-	if t.Hang > 0 && (t.Reasoning != "" || t.Usage != nil) {
+	if t.Hang > 0 && (t.hasReasoning() || t.Usage != nil) {
 		return errors.New("a hang turn carries no reasoning or usage")
 	}
 	if t.Hang > 0 && len(t.Captures) > 0 {
@@ -313,6 +328,9 @@ func (t Turn) validate() error {
 	}
 	if t.ChunkRunes < 0 {
 		return errors.New("chunk_runes cannot be negative")
+	}
+	if err := t.validateChunks(); err != nil {
+		return err
 	}
 	for i := range t.ToolCalls {
 		if t.ToolCalls[i].Name == "" {
@@ -331,6 +349,40 @@ func (t Turn) validate() error {
 		return err
 	}
 	return t.validateCaptures()
+}
+
+// validateChunks reports the first thing wrong with a Turn's hand-placed boundaries. Each list
+// stands in for the member it chunks, so the member and the list are refused together, and a
+// chunk_runes beside a chunks list would describe a split the list already made. An empty
+// element is refused for the wire's sake: no real server sends an empty delta.
+func (t Turn) validateChunks() error {
+	if len(t.Chunks) > 0 {
+		if t.Text != "" {
+			return errors.New("sets both text and chunks — chunks IS the text, placed delta by delta")
+		}
+		if t.ChunkRunes != 0 {
+			return errors.New("sets both chunks and chunk_runes — chunks already places every boundary")
+		}
+	}
+	if len(t.ReasoningChunks) > 0 {
+		if t.Reasoning != "" {
+			return errors.New("sets both reasoning and reasoning_chunks — reasoning_chunks IS the reasoning, placed delta by delta")
+		}
+		if t.ChunkRunes != 0 {
+			return errors.New("sets both reasoning_chunks and chunk_runes — reasoning_chunks already places every boundary")
+		}
+	}
+	for i, chunk := range t.Chunks {
+		if chunk == "" {
+			return fmt.Errorf("chunks[%d] is empty — no server sends an empty delta", i)
+		}
+	}
+	for i, chunk := range t.ReasoningChunks {
+		if chunk == "" {
+			return fmt.Errorf("reasoning_chunks[%d] is empty — no server sends an empty delta", i)
+		}
+	}
+	return nil
 }
 
 // validateTerminators reports the first thing wrong with a Turn's `cut` or `error`. They are
@@ -403,7 +455,7 @@ func (t Turn) validateReasoningField() error {
 	if t.Hang > 0 {
 		return errors.New("a hang turn carries no reasoning, so it carries no reasoning_field")
 	}
-	if t.Reasoning == "" {
+	if !t.hasReasoning() {
 		return errors.New("reasoning_field spells a turn's reasoning, and this turn has none")
 	}
 	return nil
@@ -434,11 +486,12 @@ func (t Turn) validateCaptures() error {
 	return nil
 }
 
-// templated is every string of this Turn that captures substitute into: the assistant text and
-// each tool call's arguments.
+// templated is every string of this Turn that captures substitute into: the assistant text —
+// whole or chunk by chunk — and each tool call's arguments.
 func (t Turn) templated() []string {
-	out := make([]string, 0, 1+len(t.ToolCalls))
+	out := make([]string, 0, 1+len(t.Chunks)+len(t.ToolCalls))
 	out = append(out, t.Text)
+	out = append(out, t.Chunks...)
 	for i := range t.ToolCalls {
 		out = append(out, t.ToolCalls[i].Arguments)
 	}
@@ -468,15 +521,61 @@ func placeholder(name string) string {
 	return "{{" + name + "}}"
 }
 
-// kindCount is how many of the four mutually exclusive reply kinds the Turn sets.
+// kindCount is how many of the three mutually exclusive reply kinds the Turn sets. Text, chunks
+// and tool calls are ONE kind between them — the completion — because a narrating model sends
+// all of them in one reply.
 func (t Turn) kindCount() int {
 	kinds := 0
-	for _, set := range []bool{t.Text != "", len(t.ToolCalls) > 0, t.HTTP != nil, t.Hang > 0} {
+	for _, set := range []bool{t.isCompletion(), t.HTTP != nil, t.Hang > 0} {
 		if set {
 			kinds++
 		}
 	}
 	return kinds
+}
+
+// isCompletion reports whether the Turn carries any completion content: text, chunks or tool
+// calls.
+func (t Turn) isCompletion() bool {
+	return t.Text != "" || len(t.Chunks) > 0 || len(t.ToolCalls) > 0
+}
+
+// hasReasoning reports whether the Turn carries a thinking channel, whole or chunked.
+func (t Turn) hasReasoning() bool {
+	return t.Reasoning != "" || len(t.ReasoningChunks) > 0
+}
+
+// content is the Turn's whole assistant text: Text, or the Chunks joined.
+func (t Turn) content() string {
+	if len(t.Chunks) > 0 {
+		return strings.Join(t.Chunks, "")
+	}
+	return t.Text
+}
+
+// reasoning is the Turn's whole thinking channel: Reasoning, or the ReasoningChunks joined.
+func (t Turn) reasoning() string {
+	if len(t.ReasoningChunks) > 0 {
+		return strings.Join(t.ReasoningChunks, "")
+	}
+	return t.Reasoning
+}
+
+// contentDeltas is the content as it streams: the hand-placed Chunks when the Turn has them,
+// the Text split every chunkRunes otherwise.
+func (t Turn) contentDeltas() []string {
+	if len(t.Chunks) > 0 {
+		return t.Chunks
+	}
+	return splitRunes(t.Text, t.chunkRunes())
+}
+
+// reasoningDeltas is the thinking channel as it streams, under the same rule as contentDeltas.
+func (t Turn) reasoningDeltas() []string {
+	if len(t.ReasoningChunks) > 0 {
+		return t.ReasoningChunks
+	}
+	return splitRunes(t.Reasoning, t.chunkRunes())
 }
 
 // chunkRunes is the number of runes one streamed delta of this Turn carries.

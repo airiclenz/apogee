@@ -1,11 +1,18 @@
 package agent
 
 // White-box capstone harness (P0.6e, re-homed to internal/agent by P1.0). It lives in
-// package agent so it can inject a deterministic fake Responder through the unexported
+// package agent so it can inject a deterministic upstream through the unexported
 // newAgent/resumeAgent seam — the provider seam stays internal (Decision C), so there
-// is no public way to supply a fake, and the full Turn cannot be driven black-box. The
+// is no public way to supply one, and the full Turn cannot be driven black-box. The
 // public-API validation paths that need no fake live in the black-box apogee_test
 // package (../../apogee_test.go).
+//
+// The upstream a test scripts here is a stubllm Script played IN PROCESS: the real provider
+// client decodes what the stub's handler writes, over a pipe rather than a socket, so an engine
+// test and a driver test exercise one decoder against one wire shape (ADR 0062). The pure Delta
+// fakes that used to stand in for the client are gone; what remains as a hand-written Responder
+// is the handful of behaviours no Script expresses (a stream that blocks until cancelled, a
+// window-sized overflow, a Close counter).
 
 import (
 	"context"
@@ -17,7 +24,82 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
+
+// testModel is the model id every scripted upstream advertises and every request names — the
+// same id baseConfig binds, so the wire the stub logs is the wire a configured session sends.
+const testModel = "test-model"
+
+// scriptedUpstream is a stubllm Script played in process: the real provider client the engine
+// streams from, over the stub's pipe transport, and the Server whose request log a test reads
+// back where a fake used to capture requests itself. It IS the provider client — Stream, Close
+// and SetModel are the client's own — so the engine cannot tell it from a configured one.
+type scriptedUpstream struct {
+	*provider.Client
+	server *stubllm.Server
+}
+
+// scriptResponder plays script through the real provider client over stubllm's in-process
+// transport: parity with the HTTP path by construction, one decoder. Retries are off, so an
+// unanticipated request's 500 — or a scripted `http: 500` turn — faults on the spot instead
+// of being retried three times with backoff. A script that names no model plays as testModel.
+func scriptResponder(t testing.TB, script stubllm.Script) *scriptedUpstream {
+	t.Helper()
+	if script.Model == "" {
+		script.Model = testModel
+	}
+	server := stubllm.InProcess(t, script)
+	client := provider.NewClient("http://stubllm", script.Model,
+		provider.WithHTTPClient(&http.Client{Transport: server.Transport()}),
+		provider.WithMaxRetries(0),
+	)
+	return &scriptedUpstream{Client: client, server: server}
+}
+
+// scriptedResponder plays turns in order — request N is answered by turn N — the multi-Turn
+// driver a test scripts "ask for a tool" then "finish" with. A request past the last turn is
+// the stub's 500 naming it, which the client surfaces as a terminal fault.
+func scriptedResponder(t testing.TB, turns ...stubllm.Turn) *scriptedUpstream {
+	t.Helper()
+	if len(turns) == 0 {
+		turns = []stubllm.Turn{{HTTP: &stubllm.HTTPReply{Status: http.StatusInternalServerError, Body: "scriptedResponder: out of scripts"}, Repeat: true}}
+	}
+	return scriptResponder(t, stubllm.Script{Turns: turns})
+}
+
+// echoResponder answers every request with one fixed assistant message — the canned-reply
+// upstream, and a repeating turn so the count of requests is never the test's concern.
+func echoResponder(t testing.TB, reply string) *scriptedUpstream {
+	t.Helper()
+	return scriptedResponder(t, stubllm.Turn{Text: reply, Repeat: true})
+}
+
+// requests is every request the upstream received, in order — what a test asserts the loop
+// actually sent, message by message.
+func (u *scriptedUpstream) requests() []stubllm.Request { return u.server.Requests() }
+
+// calls is how many requests the upstream received.
+func (u *scriptedUpstream) calls() int { return len(u.server.Requests()) }
+
+// last is the most recent request the upstream received, or the zero Request when none has.
+func (u *scriptedUpstream) last() stubllm.Request {
+	requests := u.server.Requests()
+	if len(requests) == 0 {
+		return stubllm.Request{}
+	}
+	return requests[len(requests)-1]
+}
+
+// contentTurn is a turn that replies with text and ends on stop.
+func contentTurn(text string) stubllm.Turn {
+	return stubllm.Turn{Text: text}
+}
+
+// toolCallTurn is a turn that emits one native tool call and ends on tool_calls.
+func toolCallTurn(id, name, args string) stubllm.Turn {
+	return stubllm.Turn{ToolCalls: []stubllm.ToolCall{{ID: id, Name: name, Arguments: args}}}
+}
 
 // recordingSink captures every emitted Event for assertion. It is written only by the
 // goroutine driving Step, so it is race-safe under the single-goroutine Agent contract.
@@ -38,19 +120,10 @@ func streamReply(content string) iter.Seq[provider.Delta] {
 	}
 }
 
-// echoResponder is the canned-reply fake: it answers every request with a fixed
-// assistant message, the stand-in for the real HTTP provider on the streaming seam.
-type echoResponder struct {
-	reply string
-}
-
-func (r echoResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
-	return streamReply(r.reply)
-}
-
-// recordingResponder is echoResponder that also captures the last request it was handed — the
-// fake the compaction test uses to assert the summary call carried the summarizer prompt and
-// the rendered transcript. A pointer receiver so last survives across calls.
+// recordingResponder is the canned-reply fake that also captures the last request it was handed,
+// as the provider sees it — the fields a stubllm request log does not yet carry (the effort
+// dialect, the thinking effort) are what its remaining users assert. A pointer receiver so last
+// survives across calls.
 type recordingResponder struct {
 	reply string
 	last  provider.Request
@@ -129,7 +202,7 @@ func panickingReaction(id string) domain.Reaction {
 func baseConfig(sink domain.EventSink) domain.Config {
 	return domain.Config{
 		Endpoint: "http://localhost:0",
-		Model:    "test-model",
+		Model:    testModel,
 		Events:   sink,
 	}
 }
@@ -180,7 +253,7 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	fired := false
 	cfg.Reactions = []domain.Reaction{firingReaction("capstone_probe", &fired)}
 
-	a, err := newAgent(cfg, echoResponder{reply: "hello from model"})
+	a, err := newAgent(cfg, echoResponder(t, "hello from model"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -221,7 +294,7 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 	sink2 := &recordingSink{}
 	cfg2 := baseConfig(sink2)
 	cfg2.Reactions = cfg.Reactions
-	b, err := resumeAgent(cfg2, snap, echoResponder{reply: "second reply"})
+	b, err := resumeAgent(cfg2, snap, echoResponder(t, "second reply"))
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
@@ -282,7 +355,7 @@ func TestHarness_RealProviderWirePath(t *testing.T) {
 
 // TestHarness_SubmitMidExchange rejects a second Submit before the first is consumed.
 func TestHarness_SubmitMidExchange(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -328,7 +401,7 @@ func TestHarness_CancellationIsResumable(t *testing.T) {
 
 	// The snapshot is valid: resume against a working responder and complete the Turn.
 	sink2 := &recordingSink{}
-	b, err := resumeAgent(baseConfig(sink2), snap, echoResponder{reply: "recovered"})
+	b, err := resumeAgent(baseConfig(sink2), snap, echoResponder(t, "recovered"))
 	if err != nil {
 		t.Fatalf("resumeAgent after cancel: %v", err)
 	}
@@ -354,7 +427,7 @@ func TestHarness_PanicRecovery(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.Reactions = []domain.Reaction{panickingReaction("panic_probe")}
-	a, err := newAgent(cfg, echoResponder{reply: "answered anyway"})
+	a, err := newAgent(cfg, echoResponder(t, "answered anyway"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

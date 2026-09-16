@@ -8,6 +8,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -24,9 +25,16 @@ import (
 // carriers the tool read (WithSubAgentTask/Name/Depth, WithSpawnCallID) still ride every child
 // call; only the two requests that used to be built under them are gone.
 
-// namedDelegationScript emits one sub_agent call delegating task under the optional short name.
+// namedDelegationScript emits one sub_agent call delegating task under the optional short name —
+// the Delta script a routedResponder plays; namedDelegationTurn is its stubllm twin.
 func namedDelegationScript(id, task, name string) []provider.Delta {
 	return toolCallScript(id, tools.SubAgentToolName, subAgentNamedArgs(task, name))
+}
+
+// namedDelegationTurn is a turn that emits one sub_agent call delegating task under the optional
+// short name.
+func namedDelegationTurn(id, task, name string) stubllm.Turn {
+	return toolCallTurn(id, tools.SubAgentToolName, subAgentNamedArgs(task, name))
 }
 
 // TestDelegationName_RidesApprovalAndAsk drives one named child through the Approval prompt: it

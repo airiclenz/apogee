@@ -84,7 +84,7 @@ func newWorkspaceAgent(t *testing.T, dir string) *Agent {
 	t.Helper()
 	cfg := baseConfig(&recordingSink{})
 	cfg.WorkspaceDir = dir
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestTreeSnapshot_ConfinedCallSnapshotsOutsideTheBox(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.WorkspaceDir = root
 	cfg.Confiner = conf
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

@@ -18,7 +18,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
@@ -52,13 +51,13 @@ func TestUndoGroupsFollowTheExchange(t *testing.T) {
 	cfg.Mode = domain.ModeAllowEdits // auto-approves Apogee's own workspace-scoped writes
 	cfg.WorkspaceDir = root
 
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_file", `{"path":"a.txt","content":"a"}`),
-		toolCallScript("c2", "write_file", `{"path":"b.txt","content":"b"}`),
-		contentScript("first instruction done"),
-		toolCallScript("c3", "write_file", `{"path":"c.txt","content":"c"}`),
-		contentScript("second instruction done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_file", `{"path":"a.txt","content":"a"}`),
+		toolCallTurn("c2", "write_file", `{"path":"b.txt","content":"b"}`),
+		contentTurn("first instruction done"),
+		toolCallTurn("c3", "write_file", `{"path":"c.txt","content":"c"}`),
+		contentTurn("second instruction done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -138,13 +137,13 @@ func TestDelegationWritesJoinTheParentGroup(t *testing.T) {
 	cfg.Mode = domain.ModeAllowEdits // auto-approves the workspace-scoped writes at both depths
 	cfg.WorkspaceDir = root
 
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_file", `{"path":"parent.txt","content":"p"}`),
-		toolCallScript("c2", tools.SubAgentToolName, subAgentArgs("write the child's file")),
-		toolCallScript("c3", "write_file", `{"path":"child.txt","content":"c"}`), // the child's Turn 0
-		contentScript("child done"), // the child's Turn 1, its final message
-		contentScript("parent done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_file", `{"path":"parent.txt","content":"p"}`),
+		toolCallTurn("c2", tools.SubAgentToolName, subAgentArgs("write the child's file")),
+		toolCallTurn("c3", "write_file", `{"path":"child.txt","content":"c"}`), // the child's Turn 0
+		contentTurn("child done"), // the child's Turn 1, its final message
+		contentTurn("parent done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -415,7 +414,7 @@ func TestACaptureFailureIsReportedAndNeverFailsTheExchange(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := baseConfig(sink)
 			cfg.WorkspaceDir = root
-			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			a, err := newAgent(cfg, echoResponder(t, "unused"))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}

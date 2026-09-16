@@ -17,8 +17,8 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/security"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -1014,10 +1014,10 @@ func driveScratchToolCall(t *testing.T, cfg domain.Config, scratch, command stri
 // tool with args, with the scratch move landed between construction and the Step.
 func driveScratchCall(t *testing.T, cfg domain.Config, scratch, tool, args string) *Agent {
 	t.Helper()
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", tool, args),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", tool, args),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -2359,10 +2359,10 @@ func TestDispatch_ApprovalIsAnnouncedRequestedThenDecided(t *testing.T) {
 	cfg := configWithTools(sink, fakeTool{name: "write_it", readOnly: false, result: "wrote"})
 	cfg.Mode = domain.ModeAskBefore
 	cfg.Approver = &fakeApprover{decision: domain.ApprovalAllow}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_it", "{}"),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_it", "{}"),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -2407,11 +2407,11 @@ func TestDispatch_RememberedAllowAnnouncesNoApproval(t *testing.T) {
 	// The remembered allow keys on the call as the model wrote it, so the second call must be the
 	// SAME call; the tool-loop breaker is off for the same reason as TestDispatch_ApprovalAllowForSession.
 	cfg.Floor.DisableToolLoopBreaker = true
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_it", "{}"),
-		toolCallScript("c2", "write_it", "{}"),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_it", "{}"),
+		toolCallTurn("c2", "write_it", "{}"),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -2473,10 +2473,10 @@ type toolReq struct {
 // driveTwoToolCalls runs a single Turn that issues two tool calls (then a final reply).
 func driveTwoToolCalls(t *testing.T, cfg domain.Config, _ *recordingSink, a, b toolReq) {
 	t.Helper()
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
+	responder := scriptedResponder(t,
 		twoToolCallScript(a, b),
-		contentScript("done"),
-	}}
+		contentTurn("done"),
+	)
 	ag, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -2489,17 +2489,12 @@ func driveTwoToolCalls(t *testing.T, cfg domain.Config, _ *recordingSink, a, b t
 	}
 }
 
-// twoToolCallScript emits two native tool calls then a tool_calls finish.
-func twoToolCallScript(a, b toolReq) []provider.Delta {
-	return []provider.Delta{
-		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
-			ID: a.id, Type: "function", Function: provider.FunctionCall{Name: a.tool, Arguments: a.args},
-		}},
-		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
-			ID: b.id, Type: "function", Function: provider.FunctionCall{Name: b.tool, Arguments: b.args},
-		}},
-		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
-	}
+// twoToolCallScript is a turn that emits two native tool calls then a tool_calls finish.
+func twoToolCallScript(a, b toolReq) stubllm.Turn {
+	return stubllm.Turn{ToolCalls: []stubllm.ToolCall{
+		{ID: a.id, Name: a.tool, Arguments: a.args},
+		{ID: b.id, Name: b.tool, Arguments: b.args},
+	}}
 }
 
 // ----------------------------------------------------------------------------

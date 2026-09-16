@@ -15,26 +15,33 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// overflowResponder is the fake for the "prompt too long" path: it answers every stream with a
-// single terminal DeltaContextOverflow, the 400 the server sends when the request itself exceeds
-// the context window — unconditionally, regardless of prompt size. It stands for the unbudgetable
-// case: a server that rejects even a minimal prompt, where no transcript budget can help (item 6's
-// window-derived one or the unknown-window default), so the fault must still surface cleanly and
-// leave the conversation untouched.
-type overflowResponder struct{}
-
-func (overflowResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
-	return func(yield func(provider.Delta) bool) {
-		yield(provider.Delta{Kind: provider.DeltaContextOverflow, Err: "apogee: context window exceeded"})
-	}
+// overflowResponder is the upstream for the "prompt too long" path: it answers every request with
+// the 400 a server sends when the request itself exceeds the context window — unconditionally,
+// regardless of prompt size — which the provider classes DeltaContextOverflow. It stands for the
+// unbudgetable case: a server that rejects even a minimal prompt, where no transcript budget can
+// help (item 6's window-derived one or the unknown-window default), so the fault must still
+// surface cleanly and leave the conversation untouched.
+func overflowResponder(t testing.TB) *scriptedUpstream {
+	t.Helper()
+	return scriptedResponder(t, stubllm.Turn{Repeat: true, HTTP: &stubllm.HTTPReply{
+		Status:      http.StatusBadRequest,
+		Body:        overflowBody,
+		ContentType: "application/json",
+	}})
 }
+
+// overflowBody is the llama.cpp 400 body for a prompt past the window, carrying the marker the
+// provider's classifier reads (isContextOverflow).
+const overflowBody = `{"error":{"message":"request (57546 tokens) exceeds the available context size (32768 tokens)"}}`
 
 // windowResponder models a real server's context limit: it overflows (the 400 a server sends when
 // the prompt itself exceeds the window) exactly when the request's estimated prompt tokens exceed
@@ -82,7 +89,7 @@ func seedFoldable(a *Agent) {
 // conversation untouched. This is the "budget can't save it" backstop; the survivable high-fill
 // case is TestCompactSurvivesHighFillViaTranscriptBudget below.
 func TestCompactUnbudgetableOverflowErrorsAndLeavesConvUntouched(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), overflowResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), overflowResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -211,7 +218,7 @@ func TestCompactTranscriptCharsIsAlwaysBounded(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})
 			cfg.Context.MaxContextTokens = tc.window
-			a, err := newAgent(cfg, echoResponder{reply: "unused"})
+			a, err := newAgent(cfg, echoResponder(t, "unused"))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -279,7 +286,7 @@ func TestCompactCancelMidSummaryLeavesConvUntouched(t *testing.T) {
 // asserted on.
 func TestCompactEmitsNoTokenEventAndNoUsageWithoutServerReport(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), echoResponder{reply: "reply"})
+	a, err := newAgent(baseConfig(sink), echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -334,7 +341,7 @@ func seedToolCallConv(a *Agent) {
 // (calls rendered inline), and the folded Agent stays snapshot-safe: Snapshot → Resume → Submit
 // → Step runs to completion.
 func TestCompactFoldsToolCallTurnsWithoutDanglingResults(t *testing.T) {
-	up := &recordingResponder{reply: "FOLDED-SUMMARY"}
+	up := echoResponder(t, "FOLDED-SUMMARY")
 	a, err := newAgent(baseConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -367,7 +374,7 @@ func TestCompactFoldsToolCallTurnsWithoutDanglingResults(t *testing.T) {
 	}
 
 	// The summarizer saw the tool work, not just prose (renderTranscript inlines the calls).
-	body := up.last.Messages[len(up.last.Messages)-1].Content
+	body := up.last().Messages[len(up.last().Messages)-1].Content
 	for _, want := range []string{"read_file", "write_file"} {
 		if !strings.Contains(body, want) {
 			t.Errorf("summary request missing tool %q:\n%s", want, body)
@@ -380,7 +387,7 @@ func TestCompactFoldsToolCallTurnsWithoutDanglingResults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, echoResponder{reply: "resumed reply"})
+	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, echoResponder(t, "resumed reply"))
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
@@ -406,7 +413,7 @@ func TestCompactSummaryRequestOmitsSystemPrompt(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.SystemPrompt = "Remember " + marker + " while working in {{workspace}}."
 
-	up := &recordingResponder{reply: "FOLDED-SUMMARY"}
+	up := echoResponder(t, "FOLDED-SUMMARY")
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -421,7 +428,7 @@ func TestCompactSummaryRequestOmitsSystemPrompt(t *testing.T) {
 		t.Fatal("Compact skipped a foldable conversation; want a fold so a summary request was made")
 	}
 
-	got := up.last
+	got := up.last()
 	if len(got.Messages) == 0 || got.Messages[0].Role != string(domain.RoleSystem) {
 		t.Fatalf("summary request messages = %+v, want the summariser's own system message first", got.Messages)
 	}
@@ -594,11 +601,18 @@ func TestChildSummarizerFollowsTheParentsReboundDialect(t *testing.T) {
 	}
 }
 
-// cappedSummaryResponder scripts one summary stream by its three observable parts: the reasoning
-// channel the server splits out (reasoning_content), the visible content, and the finish reason it
-// ends on. It is the fake for the 2026-08-29 incident — a thinking model that spends the whole
+// cappedSummaryTurn scripts one summary reply by its three observable parts: the reasoning channel
+// the server splits out (reasoning_content), the visible content, and the finish reason it ends
+// on. It is the turn for the 2026-08-29 incident — a thinking model that spends the whole
 // compactMaxTokens cap reasoning and ends on "length" with nothing visible — and, with content and
 // no separate channel, for the inline-<think> shape a delimited profile emits.
+func cappedSummaryTurn(thinking, content, finish string) stubllm.Turn {
+	return stubllm.Turn{Reasoning: thinking, Text: content, FinishReason: finish}
+}
+
+// cappedSummaryResponder is cappedSummaryTurn as a hand-written fake. Its one remaining user is
+// maxTokRecordingResponder, which reads the summariser request's Sampling — a field the stubllm
+// request log does not yet carry.
 type cappedSummaryResponder struct {
 	thinking string
 	content  string
@@ -631,24 +645,24 @@ func TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut(t *testing.T) {
 
 	cases := []struct {
 		name      string
-		up        cappedSummaryResponder
+		up        stubllm.Turn
 		capped    bool
 		wantSpend bool
 	}{
 		{
 			name:      "reasoning-only reply cut at the cap",
-			up:        cappedSummaryResponder{thinking: reasoning, finish: "length"},
+			up:        cappedSummaryTurn(reasoning, "", "length"),
 			capped:    true,
 			wantSpend: true,
 		},
 		{
 			name:   "reply cut at the cap with no reasoning channel",
-			up:     cappedSummaryResponder{finish: "length"},
+			up:     cappedSummaryTurn("", "", "length"),
 			capped: true,
 		},
 		{
 			name: "blank reply the server called finished",
-			up:   cappedSummaryResponder{finish: "stop"},
+			up:   cappedSummaryTurn("", "", "stop"),
 		},
 	}
 
@@ -656,7 +670,7 @@ func TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			a, err := newAgent(baseConfig(&recordingSink{}), tc.up)
+			a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t, tc.up))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -732,7 +746,7 @@ func TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})
 			cfg.EffortDialect = tc.dialect
 			cfg.Profile.Thinking.Effort = tc.effort
-			a, err := newAgent(cfg, cappedSummaryResponder{thinking: reasoning, finish: "length"})
+			a, err := newAgent(cfg, scriptedResponder(t, cappedSummaryTurn(reasoning, "", "length")))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -814,7 +828,7 @@ func TestCompactStripsInlineThinkingFromTheSummary(t *testing.T) {
 	cfg.Profile = domain.ModelProfile{
 		Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
 	}
-	up := cappedSummaryResponder{content: "<think>plan</think>Summary text", finish: "stop"}
+	up := scriptedResponder(t, cappedSummaryTurn("", "<think>plan</think>Summary text", "stop"))
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -866,7 +880,7 @@ func TestCompactKeepsASummaryCutAtTheCapAndMarksIt(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			up := cappedSummaryResponder{content: "partial summary", finish: tc.finish}
+			up := scriptedResponder(t, cappedSummaryTurn("", "partial summary", tc.finish))
 			a, err := newAgent(baseConfig(&recordingSink{}), up)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -1096,7 +1110,7 @@ func TestFoldTable(t *testing.T) {
 		for _, f := range faults {
 			t.Run(f.name, func(t *testing.T) {
 				sink := &recordingSink{}
-				a, err := newAgent(autoCompactConfig(sink), overflowResponder{}) // every summary call faults
+				a, err := newAgent(autoCompactConfig(sink), overflowResponder(t)) // every summary call faults
 				if err != nil {
 					t.Fatalf("newAgent: %v", err)
 				}

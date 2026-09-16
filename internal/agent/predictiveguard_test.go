@@ -384,7 +384,7 @@ func TestPredictiveGuardMeasuresTheAdvertisedWindow(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 1310720
 	cfg.Context.WorkingWindow = 200000
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

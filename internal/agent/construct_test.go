@@ -27,7 +27,7 @@ func TestNewAgentBuildsATopLevelAgent(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.EffortDialect = domain.EffortDialectKwargs
 	cfg.Delegation.MaxSteps = 5
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

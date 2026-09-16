@@ -21,7 +21,7 @@ import (
 func rosterAgent(t *testing.T, cfg domain.Config) *Agent {
 	t.Helper()
 	cfg.WorkspaceDir = t.TempDir()
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestRebindLeavesAnInjectedToolSetAlone(t *testing.T) {
 	cfg.Profile = domain.ModelProfile{Tools: domain.ToolRosterDelta{Disabled: []string{"host_tool"}}}
 
 	injected := cfg.Tools
-	a, err := newAgent(cfg, &scriptedResponder{})
+	a, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

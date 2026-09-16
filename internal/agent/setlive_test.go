@@ -52,7 +52,7 @@ func TestAgentSetBypassFlipsTheGateBetweenEvaluations(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.title, func(t *testing.T) {
 			t.Parallel()
-			a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+			a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "ok"))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -88,7 +88,7 @@ func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 		recordingReaction("nudge", domain.ClassShapeView, &nudged),
 		countingReaction("offramp", domain.ClassObserve, &offRamped),
 	}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -117,7 +117,7 @@ func TestAgentSetBypassObservedByTheNextHookFire(t *testing.T) {
 // asserts nothing beyond "no data race and every switch lands": that is the whole point of a
 // swap that must never be observed half applied.
 func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -220,7 +220,7 @@ func TestAgentSetContextFilesLandsAtTheNextSessionBoundary(t *testing.T) {
 	writeContextFile(t, dir, "A.md", "alpha conventions")
 	writeContextFile(t, dir, "B.md", "beta conventions")
 
-	a, err := newAgent(contextConfig(&recordingSink{}, dir, "A.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "A.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -271,7 +271,7 @@ func writeContextFile(t *testing.T, dir, name, content string) {
 // worker-side live reads under the race detector, proving each lock covers its field. It asserts
 // nothing beyond "no data race" — that is the whole point of a setter that lands mid-Step.
 func TestAgentAnytimeSettersConcurrent(t *testing.T) {
-	a, err := newAgent(contextConfig(&recordingSink{}, t.TempDir(), "A.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, t.TempDir(), "A.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

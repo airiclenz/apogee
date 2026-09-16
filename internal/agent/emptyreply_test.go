@@ -20,16 +20,13 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // thinkingOnlyScript is a stream that reasons and then stops without emitting one visible token —
 // the shape a reasoning model produces when it thinks itself into silence.
-func thinkingOnlyScript() []provider.Delta {
-	return []provider.Delta{
-		{Kind: provider.DeltaThinking, Thinking: "the user asked for a summary; I should start by..."},
-		{Kind: provider.DeltaDone, FinishReason: "stop"},
-	}
+func thinkingOnlyScript() stubllm.Turn {
+	return stubllm.Turn{Reasoning: "the user asked for a summary; I should start by..."}
 }
 
 // TestEmptyReplyFailsTheTurn is the regression test for the observed silent turn (owner session
@@ -40,7 +37,7 @@ func thinkingOnlyScript() []provider.Delta {
 func TestEmptyReplyFailsTheTurn(t *testing.T) {
 	tests := []struct {
 		name    string
-		script  []provider.Delta
+		script  stubllm.Turn
 		wantErr string
 	}{
 		{
@@ -55,7 +52,7 @@ func TestEmptyReplyFailsTheTurn(t *testing.T) {
 		},
 		{
 			name:    "the finish reason rides along for diagnosis",
-			script:  []provider.Delta{{Kind: provider.DeltaDone, FinishReason: "content_filter"}},
+			script:  stubllm.Turn{FinishReason: "content_filter"},
 			wantErr: "upstream returned an empty reply (finish: content_filter)",
 		},
 	}
@@ -63,7 +60,7 @@ func TestEmptyReplyFailsTheTurn(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			responder := &captureAllResponder{scripts: [][]provider.Delta{tc.script}}
+			responder := scriptedResponder(t, tc.script)
 			a, err := newAgent(baseConfig(sink), responder)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -96,7 +93,7 @@ func TestEmptyReplyFailsTheTurn(t *testing.T) {
 				t.Errorf("conv.Len() = %d, want 1 — only the user message survives a faulted Turn", got)
 			}
 			// The guard is terminal, not a retry: the Upstream was called exactly once.
-			if got := len(responder.got); got != 1 {
+			if got := len(responder.requests()); got != 1 {
 				t.Errorf("provider was called %d times, want 1 (the guard re-requests nothing)", got)
 			}
 		})
@@ -112,10 +109,10 @@ func TestEmptyReplyGuardYieldsToRecoveredRetry(t *testing.T) {
 	sink := &recordingSink{}
 	calls := 0
 	cfg := retryReactionConfig(t, sink, scriptedRetryReaction(&calls, "say something"))
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
+	responder := scriptedResponder(t,
 		emptyScript(),
-		contentScript("recovered answer"),
-	}}
+		contentTurn("recovered answer"),
+	)
 
 	a := driveExchange(t, cfg, responder, "please implement the parser")
 
@@ -133,10 +130,10 @@ func TestEmptyReplyGuardYieldsToRecoveredRetry(t *testing.T) {
 // cutOffScript is a stream that reasons and is then cut off mid-thought — the shape the 2026-08-12
 // incident produces now that the engine states a ceiling: reasoning, not one visible token, and a
 // finish reason of "length".
-func cutOffScript() []provider.Delta {
-	return []provider.Delta{
-		{Kind: provider.DeltaThinking, Thinking: "let me enumerate every file in the repository before I answer..."},
-		{Kind: provider.DeltaDone, FinishReason: "length"},
+func cutOffScript() stubllm.Turn {
+	return stubllm.Turn{
+		Reasoning:    "let me enumerate every file in the repository before I answer...",
+		FinishReason: "length",
 	}
 }
 
@@ -151,7 +148,7 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 	tests := []struct {
 		name          string
 		depth         int
-		script        []provider.Delta
+		script        stubllm.Turn
 		wantReasoning bool
 	}{
 		{
@@ -161,7 +158,7 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 		},
 		{
 			name:          "a cut-off reply with no reasoning at all still names the cap",
-			script:        []provider.Delta{{Kind: provider.DeltaDone, FinishReason: "length"}},
+			script:        stubllm.Turn{FinishReason: "length"},
 			wantReasoning: false,
 		},
 		{
@@ -177,7 +174,7 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := baseConfig(sink)
 			cfg.Context.MaxContextTokens = 98304 // the incident's window: a 19,660-token derived cap
-			responder := &captureAllResponder{scripts: [][]provider.Delta{tc.script}}
+			responder := scriptedResponder(t, tc.script)
 			a, err := newAgent(cfg, responder)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -228,7 +225,7 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 				t.Errorf("conv.Len() = %d, want 1 — only the user message survives a faulted Turn", got)
 			}
 			// Naming the cap changes the message, not the control flow: still no retry.
-			if got := len(responder.got); got != 1 {
+			if got := len(responder.requests()); got != 1 {
 				t.Errorf("provider was called %d times, want 1 (the branch re-requests nothing)", got)
 			}
 		})
@@ -238,10 +235,10 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 // cappedWithTextScript is a stream that answers at length and is cut off mid-sentence: visible
 // text present, no tool call, finish reason "length". It is the shape the 2026-08-25 delegate
 // incident produced — an answer that LOOKS complete to whoever reads only the tokens.
-func cappedWithTextScript() []provider.Delta {
-	return []provider.Delta{
-		{Kind: provider.DeltaContent, Content: "the audit found 14 issues; the first is that the parser"},
-		{Kind: provider.DeltaDone, FinishReason: "length"},
+func cappedWithTextScript() stubllm.Turn {
+	return stubllm.Turn{
+		Text:         "the audit found 14 issues; the first is that the parser",
+		FinishReason: "length",
 	}
 }
 
@@ -265,7 +262,7 @@ func TestCappedReplyWithTextFaultsOnlyOnADelegate(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := baseConfig(sink)
 			cfg.Context.MaxContextTokens = 98304 // the incident's window: a 19,660-token derived cap
-			responder := &captureAllResponder{scripts: [][]provider.Delta{cappedWithTextScript()}}
+			responder := scriptedResponder(t, cappedWithTextScript())
 			a, err := newAgent(cfg, responder)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -306,7 +303,7 @@ func TestCappedReplyWithTextFaultsOnlyOnADelegate(t *testing.T) {
 				t.Errorf("conv.Len() = %d, want 1 — the truncated text is discarded, never committed", got)
 			}
 			// The rule changes what is JUDGED, not what a fault does: still no retry.
-			if got := len(responder.got); got != 1 {
+			if got := len(responder.requests()); got != 1 {
 				t.Errorf("provider was called %d times, want 1 (the rule re-requests nothing)", got)
 			}
 		})

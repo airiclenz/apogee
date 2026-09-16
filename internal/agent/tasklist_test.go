@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
@@ -54,14 +54,14 @@ func (w *taskWriter) execute(ctx context.Context, call domain.ToolCall) (domain.
 // writeTaskScripts returns the scripted stream pairs for n Exchanges that each ask for one
 // write_tasks call and then finish. One scriptedResponder serves a whole tree — a child speaks
 // over its parent's Upstream — so the scripts of every Agent in a test come from this one list.
-func writeTaskScripts(n int) [][]provider.Delta {
-	scripts := make([][]provider.Delta, 0, 2*n)
+func writeTaskScripts(n int) []stubllm.Turn {
+	scripts := make([]stubllm.Turn, 0, 2*n)
 	for i := range n {
 		scripts = append(scripts,
 			// The arguments carry the iteration so two consecutive Exchanges are not an identical
 			// repeat, which the tool-loop breaker Floor guard would answer instead of dispatching.
-			toolCallScript(fmt.Sprintf("t%d", i), "write_tasks", fmt.Sprintf(`{"n":%d}`, i)),
-			contentScript("noted"))
+			toolCallTurn(fmt.Sprintf("t%d", i), "write_tasks", fmt.Sprintf(`{"n":%d}`, i)),
+			contentTurn("noted"))
 	}
 	return scripts
 }
@@ -72,7 +72,7 @@ func newTaskListAgent(t *testing.T, n int) (*Agent, *taskWriter) {
 
 	writer := &taskWriter{}
 	a, err := newAgent(configWithTools(&recordingSink{}, writer.tool()),
-		&scriptedResponder{scripts: writeTaskScripts(n)})
+		scriptedResponder(t, writeTaskScripts(n)...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestDispatchCarriesTheTaskList(t *testing.T) {
 func TestChildGetsItsOwnEmptyTaskList(t *testing.T) {
 	t.Parallel()
 
-	parent, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	parent, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -172,7 +172,7 @@ func TestChildGetsItsOwnEmptyTaskList(t *testing.T) {
 func TestClearContextEmptiesTheTaskList(t *testing.T) {
 	t.Parallel()
 
-	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

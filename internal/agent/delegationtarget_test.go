@@ -13,7 +13,7 @@ import (
 func TestDelegationTargetUnsetSnapshotIsNil(t *testing.T) {
 	t.Parallel()
 
-	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestDelegationTargetUnsetSnapshotIsNil(t *testing.T) {
 func TestSetDelegationTargetStoresAndClears(t *testing.T) {
 	t.Parallel()
 
-	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestSetDelegationTargetStoresAndClears(t *testing.T) {
 func TestDelegationTargetConcurrentSetAndSnapshot(t *testing.T) {
 	t.Parallel()
 
-	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestChildSharesTheParentsDelegationLatch(t *testing.T) {
 	t.Parallel()
 
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "w"})
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

@@ -38,7 +38,7 @@ func adviseAgent(t *testing.T, sink *recordingSink, bypass bool, reactions ...do
 	cfg := configWithTools(sink)
 	cfg.Reactions = reactions
 	cfg.Bypass = bypass
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -257,7 +257,7 @@ func TestAdviseNeverSurvivesASnapshotResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	restored, err := newAgent(configWithTools(&recordingSink{}), echoResponder{reply: "unused"})
+	restored, err := newAgent(configWithTools(&recordingSink{}), echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent (restore target): %v", err)
 	}

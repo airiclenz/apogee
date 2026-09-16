@@ -41,7 +41,7 @@ func answerOnce(t *testing.T, a *Agent, text string) domain.Message {
 func TestSetProfileMovesTheNextResponseToTheNewParser(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	a := newProfileAgent(t, cfg, echoResponder{reply: fencedReadFileCall})
+	a := newProfileAgent(t, cfg, echoResponder(t, fencedReadFileCall))
 
 	before := answerOnce(t, a, "read main.go")
 	if len(before.ToolCalls) != 0 {
@@ -82,7 +82,7 @@ func TestSetProfileMovesTheNextResponseToTheNewParser(t *testing.T) {
 func TestSetProfileMovesTheStripperToo(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	a := newProfileAgent(t, cfg, echoResponder{reply: "<think>weighing it up</think>The answer is 42."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "<think>weighing it up</think>The answer is 42."))
 
 	before := answerOnce(t, a, "think about it")
 	if !strings.Contains(before.Content, "weighing it up") {
@@ -175,7 +175,7 @@ func TestSetProfileKeepsTheOldParserOnAnInvalidProfile(t *testing.T) {
 
 			cfg := baseConfig(&recordingSink{})
 			cfg.Profile = live
-			a := newProfileAgent(t, cfg, echoResponder{reply: "ok"})
+			a := newProfileAgent(t, cfg, echoResponder(t, "ok"))
 
 			if err := a.SetProfile(tc.profile); err == nil {
 				t.Fatal("SetProfile accepted a profile processing.ParserFor refuses")

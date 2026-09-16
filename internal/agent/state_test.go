@@ -13,7 +13,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tasklist"
 )
 
@@ -25,10 +25,10 @@ func TestSnapshot_RestoresTurnIndex(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "42"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", "{}"),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "lookup", "{}"),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -54,7 +54,7 @@ func TestSnapshot_RestoresTurnIndex(t *testing.T) {
 	// Resume into a fresh Agent whose responder continues from the finish reply.
 	sink2 := &recordingSink{}
 	cfg2 := configWithTools(sink2, fakeTool{name: "lookup", readOnly: true, result: "42"})
-	resumed := &scriptedResponder{scripts: [][]provider.Delta{contentScript("done")}}
+	resumed := scriptedResponder(t, contentTurn("done"))
 	b, err := resumeAgent(cfg2, snap, resumed)
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
@@ -82,7 +82,7 @@ func TestSnapshot_RestoresTurnIndex(t *testing.T) {
 // between) does not silently drop the queued input: the resumed Agent's first Step consumes
 // it and sends it upstream.
 func TestSnapshot_RestoresPendingInput(t *testing.T) {
-	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ack"})
+	a, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "ack"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -96,7 +96,7 @@ func TestSnapshot_RestoresPendingInput(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	capt := &capturingResponder{reply: "ack"}
+	capt := echoResponder(t, "ack")
 	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, capt)
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
@@ -108,19 +108,15 @@ func TestSnapshot_RestoresPendingInput(t *testing.T) {
 	if _, err := b.Step(context.Background()); err != nil {
 		t.Fatalf("Step (resumed): %v", err)
 	}
-	if !containsContent(capt.got.Messages, "queued task") {
-		t.Errorf("resumed Step did not consume the pending input: %+v", capt.got.Messages)
+	if !containsContent(capt.last().Messages, "queued task") {
+		t.Errorf("resumed Step did not consume the pending input: %+v", capt.last().Messages)
 	}
 }
 
 // TestSnapshot_PreservesReasoningContent proves the model's reasoning channel is recorded on
 // the committed assistant message as reasoning_content Extra and survives snapshot/resume.
 func TestSnapshot_PreservesReasoningContent(t *testing.T) {
-	responder := &scriptedResponder{scripts: [][]provider.Delta{{
-		{Kind: provider.DeltaThinking, Thinking: "let me think"},
-		{Kind: provider.DeltaContent, Content: "the answer"},
-		{Kind: provider.DeltaDone, FinishReason: "stop"},
-	}}}
+	responder := scriptedResponder(t, stubllm.Turn{Reasoning: "let me think", Text: "the answer"})
 	a, err := newAgent(baseConfig(&recordingSink{}), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -146,7 +142,7 @@ func TestSnapshot_PreservesReasoningContent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, echoResponder{reply: "x"})
+	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, echoResponder(t, "x"))
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
@@ -160,7 +156,7 @@ func TestSnapshot_PreservesReasoningContent(t *testing.T) {
 // exactly the boundary the snapshotting Agent cached, then accepts a fresh Submit.
 func TestSnapshot_RoundTripsExchangeBoundaryForAbort(t *testing.T) {
 	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{toolCallScript("c1", "lookup", "{}")}}
+	responder := scriptedResponder(t, toolCallTurn("c1", "lookup", "{}"))
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -201,7 +197,7 @@ func TestSnapshot_RoundTripsExchangeBoundaryForAbort(t *testing.T) {
 	}
 
 	cfg2 := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
-	b, err := resumeAgent(cfg2, snap, echoResponder{reply: "unused"})
+	b, err := resumeAgent(cfg2, snap, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
@@ -248,7 +244,7 @@ func TestAgentState_EncodesStableKeyNames(t *testing.T) {
 // understands before touching its state.
 func TestResume_RejectsFutureVersion(t *testing.T) {
 	future := domain.Session{Version: domain.SessionVersion + 1}
-	if _, err := resumeAgent(baseConfig(&recordingSink{}), future, echoResponder{}); !errors.Is(err, domain.ErrSessionVersion) {
+	if _, err := resumeAgent(baseConfig(&recordingSink{}), future, echoResponder(t, "")); !errors.Is(err, domain.ErrSessionVersion) {
 		t.Errorf("resume of a future-version snapshot err = %v, want ErrSessionVersion", err)
 	}
 }
@@ -262,7 +258,7 @@ func TestResume_RejectsFutureVersion(t *testing.T) {
 func newSnapshotAgent(t *testing.T) *Agent {
 	t.Helper()
 
-	a, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	a, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -287,7 +283,7 @@ func TestSnapshot_RoundTripsTheTaskList(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, &scriptedResponder{})
+	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}

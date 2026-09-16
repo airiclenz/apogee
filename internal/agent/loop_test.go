@@ -35,7 +35,7 @@ func TestCutOffReplyLeavesTheRetryToTheReader(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.Context.MaxContextTokens = 98304
-	responder := &captureAllResponder{scripts: [][]provider.Delta{cutOffScript()}}
+	responder := scriptedResponder(t, cutOffScript())
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -73,10 +73,10 @@ func TestCutOffReplyLeavesTheRetryToTheReader(t *testing.T) {
 // pre-request boundary and resume, exactly as a cancel mid-stream does.
 func TestCancelInsideRestreamHoldOffStaysResumable(t *testing.T) {
 	sink := &cancelOnResetSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		retryableErrorScript(transientFaultMsg), // the blip that arms the re-stream
-		contentScript("resumed"),                // reached only by the re-attempt after the cancel
-	}}
+	responder := scriptedResponder(t,
+		retryableErrorTurn(transientFaultMsg), // the blip that arms the re-stream
+		contentTurn("resumed"),                // reached only by the re-attempt after the cancel
+	)
 	a, err := newAgent(baseConfig(sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -109,8 +109,8 @@ func TestCancelInsideRestreamHoldOffStaysResumable(t *testing.T) {
 	if got := countEvents[domain.StreamResetEvent](sink.events); got != 1 {
 		t.Errorf("StreamResetEvents = %d, want 1 — the reset is consistent with the rolled-back Turn", got)
 	}
-	if responder.calls != 1 {
-		t.Errorf("Upstream calls = %d, want 1 — the hold-off must not re-stream into a dead context", responder.calls)
+	if responder.calls() != 1 {
+		t.Errorf("Upstream calls = %d, want 1 — the hold-off must not re-stream into a dead context", responder.calls())
 	}
 	// Rolled back to a serializable boundary: the committed user message survives, this Turn's
 	// work does not, and the drained correction is back on the queue for the re-attempt (F6).
@@ -151,10 +151,10 @@ func TestRespondAndReviewReStreamsAMidStreamEOFOnce(t *testing.T) {
 	shortRestreamHoldoff(t)
 
 	sink := &recordingSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		retryableErrorScript(eofFaultMsg), // the connection drops mid-reply
-		contentScript("after the cut"),    // the re-stream's answer
-	}}
+	responder := scriptedResponder(t,
+		retryableErrorTurn(eofFaultMsg), // the connection drops mid-reply
+		contentTurn("after the cut"),    // the re-stream's answer
+	)
 	a, err := newAgent(baseConfig(sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -173,8 +173,8 @@ func TestRespondAndReviewReStreamsAMidStreamEOFOnce(t *testing.T) {
 	if resp == nil || resp.Text() != "after the cut" {
 		t.Errorf("resp = %+v, want the re-streamed reply %q committed", resp, "after the cut")
 	}
-	if responder.calls != 2 {
-		t.Errorf("Upstream calls = %d, want 2 — one cut stream, one re-stream", responder.calls)
+	if responder.calls() != 2 {
+		t.Errorf("Upstream calls = %d, want 2 — one cut stream, one re-stream", responder.calls())
 	}
 	if !run.restreamSpent {
 		t.Error("restreamSpent = false, want true — the EOF spends the Turn's one re-stream")
@@ -194,10 +194,10 @@ func TestRestreamHoldOffThatElapsesStillReStreams(t *testing.T) {
 	shortRestreamHoldoff(t)
 
 	sink := &recordingSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		retryableErrorScript(transientFaultMsg),
-		contentScript("recovered"),
-	}}
+	responder := scriptedResponder(t,
+		retryableErrorTurn(transientFaultMsg),
+		contentTurn("recovered"),
+	)
 	a, err := newAgent(baseConfig(sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -213,8 +213,8 @@ func TestRestreamHoldOffThatElapsesStillReStreams(t *testing.T) {
 	if res.Status != domain.StatusExchangeComplete || res.Faulted {
 		t.Fatalf("Step result = %+v, want a clean exchange-complete", res)
 	}
-	if responder.calls != 2 {
-		t.Errorf("Upstream calls = %d, want 2 — an elapsed hold-off re-streams the same request", responder.calls)
+	if responder.calls() != 2 {
+		t.Errorf("Upstream calls = %d, want 2 — an elapsed hold-off re-streams the same request", responder.calls())
 	}
 	if errs := errorEvents(sink.events); len(errs) != 0 {
 		t.Errorf("ErrorEvents = %v, want none — a recovered re-stream stays silent", errs)
@@ -250,17 +250,16 @@ func TestIDLessNativeCallIsDroppedWhileItsSiblingDispatches(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "the answer is 42"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		{
-			{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
-				ID: "c1", Type: "function",
-				Function: provider.FunctionCall{Name: "lookup", Arguments: `{"q":"meaning"}`},
-			}},
-			idLessCall("lookup", `{"q":"unusable"}`),
-			{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
-		},
-		contentScript("all done"),
-	}}
+	// A Delta script rather than a stubllm Turn: the stub numbers an id-less call by position, so
+	// the very shape under test — a call with NO id — cannot reach the loop from the wire.
+	responder := scriptedDeltas{
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c1", Type: "function",
+			Function: provider.FunctionCall{Name: "lookup", Arguments: `{"q":"meaning"}`},
+		}},
+		idLessCall("lookup", `{"q":"unusable"}`),
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -316,16 +315,14 @@ func TestAReplyWhoseOnlyNativeCallLacksAnIDFaults(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "never reached"})
-	idLessReply := []provider.Delta{
+	// A Delta script rather than a stubllm Turn: the stub numbers an id-less call by position, so
+	// the shape under test — a call with NO id — cannot reach the loop from the wire. scriptedDeltas
+	// plays it on every request, which covers the first call and its three retries alike.
+	responder := scriptedDeltas{
 		idLessCall("lookup", "{}"),
 		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
 	}
 	attempts := 1 + maxPostResponseRetries
-	scripts := make([][]provider.Delta, 0, attempts)
-	for range attempts {
-		scripts = append(scripts, idLessReply)
-	}
-	responder := &scriptedResponder{scripts: scripts}
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {

@@ -2,7 +2,8 @@
 // (ADR 0062).
 //
 // A test names the replies it wants as a [Script] — an ordered list of [Turn]s — and gets an
-// HTTP server that plays them back through the wire shapes a real llama.cpp or OpenRouter
+// HTTP server ([New], [Serve]) or an in-process handler ([InProcess], reached through
+// [Server.Transport]) that plays them back through the wire shapes a real llama.cpp or OpenRouter
 // endpoint uses: SSE content deltas, a reasoning channel, streamed tool-call fragments, a
 // terminal usage object with the cached-prompt breakdown, plain HTTP failures, a stall, a
 // mid-stream connection loss and an in-band upstream error.
@@ -32,6 +33,8 @@
 //     and what that Turn's captures lift out of the request before it is played.
 //   - server.go — the HTTP surface: /v1/models, /v1/chat/completions, SSE and whole replies,
 //     and the `await:` gate a test opens to order one turn's reply behind something apogee did.
+//   - transport.go — the in-process transport: the same Handler served over a pipe instead of
+//     a socket, for an engine test that plays a Script without listening.
 //   - wire.go — the literal OpenAI request/reply JSON the server reads and writes.
 //   - log.go — the request log every served request lands in, and the assertions over it.
 //   - record.go — the recording proxy that turns a real server's traffic into a Script.

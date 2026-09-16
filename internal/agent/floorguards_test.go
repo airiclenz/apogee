@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // hasGuardFire reports whether a ReactionFiredEvent for guard with action was emitted.
@@ -55,11 +55,11 @@ func TestFloorGuard_ToolCallRepairRetriesUnderBypass(t *testing.T) {
 	lookup := fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "42"}
 	cfg := configWithTools(sink, lookup)
 	cfg.Bypass = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "frobnicate", `{}`),  // not in the menu — the guard repairs
-		toolCallScript("c2", "lookup", `{"q":1}`), // the corrected call — dispatches
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "frobnicate", `{}`),  // not in the menu — the guard repairs
+		toolCallTurn("c2", "lookup", `{"q":1}`), // the corrected call — dispatches
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -67,10 +67,10 @@ func TestFloorGuard_ToolCallRepairRetriesUnderBypass(t *testing.T) {
 	}
 	runExchange(t, a, "look it up")
 
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3 (draft, guard retry, final)", len(responder.got))
+	if len(responder.requests()) != 3 {
+		t.Fatalf("provider was called %d times, want 3 (draft, guard retry, final)", len(responder.requests()))
 	}
-	second := responder.got[1].Messages
+	second := responder.requests()[1].Messages
 	ai := wireMessageIndex(second, "assistant", "")
 	if ai < 0 {
 		t.Fatalf("retried request carries no superseded assistant message: %+v", second)
@@ -111,10 +111,10 @@ func TestFloorGuard_DisableToolCallRepairLetsTheBadCallThrough(t *testing.T) {
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "42"})
 	cfg.Bypass = true
 	cfg.Floor.DisableToolCallRepair = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "frobnicate", `{}`), // unknown — but the guard is off
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "frobnicate", `{}`), // unknown — but the guard is off
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -122,8 +122,8 @@ func TestFloorGuard_DisableToolCallRepairLetsTheBadCallThrough(t *testing.T) {
 	}
 	runExchange(t, a, "look it up")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("provider was called %d times, want 2 (no retry with the guard off)", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("provider was called %d times, want 2 (no retry with the guard off)", len(responder.requests()))
 	}
 	if n := guardFireCountFor(sink.events, guardToolCallRepair); n != 0 {
 		t.Errorf("the repair guard fired %d times with DisableToolCallRepair set", n)
@@ -151,11 +151,11 @@ func TestFloorGuard_ToolLoopBreakerOnAnIdenticalRepeat(t *testing.T) {
 			cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "package a"})
 			cfg.Bypass = true
 			cfg.Floor.DisableToolLoopBreaker = tc.disabled
-			responder := &captureAllResponder{scripts: [][]provider.Delta{
-				toolCallScript("c1", "read_file", `{"path":"a.go"}`),
-				toolCallScript("c2", "read_file", `{"path":"a.go"}`), // the identical repeat
-				contentScript("done"),
-			}}
+			responder := scriptedResponder(t,
+				toolCallTurn("c1", "read_file", `{"path":"a.go"}`),
+				toolCallTurn("c2", "read_file", `{"path":"a.go"}`), // the identical repeat
+				contentTurn("done"),
+			)
 
 			a, err := newAgent(cfg, responder)
 			if err != nil {
@@ -165,8 +165,8 @@ func TestFloorGuard_ToolLoopBreakerOnAnIdenticalRepeat(t *testing.T) {
 
 			// Three upstream calls either way — the difference is what the THIRD request carries:
 			// the loop directive when the guard is on, the repeat's own tool result when it is off.
-			if len(responder.got) != tc.wantCalls {
-				t.Fatalf("provider was called %d times, want %d", len(responder.got), tc.wantCalls)
+			if len(responder.requests()) != tc.wantCalls {
+				t.Fatalf("provider was called %d times, want %d", len(responder.requests()), tc.wantCalls)
 			}
 			if n := guardFireCountFor(sink.events, guardToolLoopBreaker); n != tc.wantFires {
 				t.Fatalf("the loop breaker fired %d times, want %d", n, tc.wantFires)
@@ -174,7 +174,7 @@ func TestFloorGuard_ToolLoopBreakerOnAnIdenticalRepeat(t *testing.T) {
 			if tc.disabled {
 				return
 			}
-			retried := responder.got[2].Messages
+			retried := responder.requests()[2].Messages
 			if wireUserIndexContaining(retried, "read_file") < 0 {
 				t.Errorf("the loop directive does not name the repeated tool: %+v", retried)
 			}
@@ -197,13 +197,13 @@ func TestFloorGuard_ToolLoopBreakerOnAnAlternatingRepeat(t *testing.T) {
 		fakeTool{name: "poke", readOnly: true, result: "nothing to do"},
 	)
 	cfg.Bypass = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "status", `{}`),
-		toolCallScript("c2", "poke", `{"task":"noop"}`),
-		toolCallScript("c3", "status", `{}`),
-		toolCallScript("c4", "poke", `{"task":"noop"}`), // closes A-B-A-B on the same status result
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "status", `{}`),
+		toolCallTurn("c2", "poke", `{"task":"noop"}`),
+		toolCallTurn("c3", "status", `{}`),
+		toolCallTurn("c4", "poke", `{"task":"noop"}`), // closes A-B-A-B on the same status result
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -211,13 +211,13 @@ func TestFloorGuard_ToolLoopBreakerOnAnAlternatingRepeat(t *testing.T) {
 	}
 	runExchange(t, a, "finish the task")
 
-	if len(responder.got) != 5 {
-		t.Fatalf("provider was called %d times, want 5 (the fourth call re-streamed once)", len(responder.got))
+	if len(responder.requests()) != 5 {
+		t.Fatalf("provider was called %d times, want 5 (the fourth call re-streamed once)", len(responder.requests()))
 	}
 	if n := guardFireCountFor(sink.events, guardToolLoopBreaker); n != 1 {
 		t.Fatalf("the loop breaker fired %d times, want 1", n)
 	}
-	if retried := responder.got[4].Messages; wireUserIndexContaining(retried, "poke") < 0 {
+	if retried := responder.requests()[4].Messages; wireUserIndexContaining(retried, "poke") < 0 {
 		t.Errorf("the loop directive does not name the repeated tool: %+v", retried)
 	}
 }
@@ -236,11 +236,11 @@ func TestFloorGuard_LoopBreakerWinsOverRepair(t *testing.T) {
 	// The first call is well formed and commits; the second repeats it verbatim AND is malformed
 	// only in the sense the repair guard would also flag — so make the first call the malformed one
 	// after it commits by giving both calls identical, complete arguments and repeating them.
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_file", `{"path":"a.go","content":"package a"}`),
-		toolCallScript("c2", "write_file", `{"path":"a.go","content":"package a"}`),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_file", `{"path":"a.go","content":"package a"}`),
+		toolCallTurn("c2", "write_file", `{"path":"a.go","content":"package a"}`),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -263,7 +263,7 @@ func TestFloorGuard_LoopBreakerWinsOverRepair(t *testing.T) {
 func TestFloorGuard_ChildInheritsTheLiveFloor(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	parent, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{contentScript("done")}})
+	parent, err := newAgent(cfg, scriptedResponder(t, contentTurn("done")))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -292,10 +292,10 @@ func TestFloorGuard_ChildInheritsTheLiveFloor(t *testing.T) {
 func TestFloorGuard_CleanTurnBooksNoFiring(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "read_file", `{"path":"a.go"}`),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "read_file", `{"path":"a.go"}`),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -335,13 +335,13 @@ func TestFloorGuard_ToolUseEnforcerRetriesUnderBypass(t *testing.T) {
 		fakeTool{name: "write_file", result: "ok"},
 	)
 	cfg.Bypass = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript("I'll implement feature X."),
-		contentScript("Here is my plan."),
-		contentScript("I would edit main.go to add the parser."), // narration #3 — the guard retries
-		toolCallScript("c1", "read_file", `{"path":"main.go"}`),  // the corrected, acting response
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("I'll implement feature X."),
+		contentTurn("Here is my plan."),
+		contentTurn("I would edit main.go to add the parser."), // narration #3 — the guard retries
+		toolCallTurn("c1", "read_file", `{"path":"main.go"}`),  // the corrected, acting response
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -351,10 +351,10 @@ func TestFloorGuard_ToolUseEnforcerRetriesUnderBypass(t *testing.T) {
 	runExchange(t, a, "continue")
 	runExchange(t, a, "please implement feature X now")
 
-	if len(responder.got) != 5 {
-		t.Fatalf("provider was called %d times, want 5", len(responder.got))
+	if len(responder.requests()) != 5 {
+		t.Fatalf("provider was called %d times, want 5", len(responder.requests()))
 	}
-	retried := responder.got[3].Messages
+	retried := responder.requests()[3].Messages
 	ai := wireMessageIndex(retried, "assistant", "I would edit main.go to add the parser.")
 	if ai < 0 {
 		t.Fatalf("retried request carries no superseded narration: %+v", retried)
@@ -383,11 +383,11 @@ func TestFloorGuard_DisableToolUseEnforcerLeavesProseAlone(t *testing.T) {
 		fakeTool{name: "write_file", result: "ok"},
 	)
 	cfg.Floor.DisableToolUseEnforcer = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript("I'll implement feature X."),
-		contentScript("Here is my plan."),
-		contentScript("I would edit main.go to add the parser."),
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("I'll implement feature X."),
+		contentTurn("Here is my plan."),
+		contentTurn("I would edit main.go to add the parser."),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -397,8 +397,8 @@ func TestFloorGuard_DisableToolUseEnforcerLeavesProseAlone(t *testing.T) {
 	runExchange(t, a, "continue")
 	runExchange(t, a, "please implement feature X now")
 
-	if len(responder.got) != 3 {
-		t.Fatalf("provider was called %d times, want 3 (no retry)", len(responder.got))
+	if len(responder.requests()) != 3 {
+		t.Fatalf("provider was called %d times, want 3 (no retry)", len(responder.requests()))
 	}
 	if guardFireCountFor(sink.events, guardToolUseEnforcer) != 0 {
 		t.Error("the tool-use enforcer fired with Floor.DisableToolUseEnforcer set")
@@ -415,10 +415,10 @@ func TestFloorGuard_EmptyReplyDrawsTheCompletionCheckNudge(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
 	cfg.Bypass = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
+	responder := scriptedResponder(t,
 		emptyScript(),
-		contentScript("recovered"),
-	}}
+		contentTurn("recovered"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -426,10 +426,10 @@ func TestFloorGuard_EmptyReplyDrawsTheCompletionCheckNudge(t *testing.T) {
 	}
 	runExchange(t, a, "please implement the parser")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("provider was called %d times, want 2", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("provider was called %d times, want 2", len(responder.requests()))
 	}
-	second := responder.got[1].Messages
+	second := responder.requests()[1].Messages
 	if n := wireRoleCount(second, "assistant"); n != 0 {
 		t.Errorf("retried request carries %d assistant messages, want 0 (empty superseded reply)", n)
 	}
@@ -451,9 +451,9 @@ func TestFloorGuard_EmptyReplyDrawsTheCompletionCheckNudge(t *testing.T) {
 func TestFloorGuard_AlwaysEmptyTerminatesAtCap(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
+	responder := scriptedResponder(t,
 		emptyScript(), emptyScript(), emptyScript(), emptyScript(),
-	}}
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -465,9 +465,9 @@ func TestFloorGuard_AlwaysEmptyTerminatesAtCap(t *testing.T) {
 		t.Errorf("StepResult = {Status:%q Faulted:%v}, want {Status:%q Faulted:true} (the exhausted guard faults)",
 			res.Status, res.Faulted, domain.StatusExchangeComplete)
 	}
-	if len(responder.got) != maxPostResponseRetries+1 {
+	if len(responder.requests()) != maxPostResponseRetries+1 {
 		t.Errorf("provider was called %d times, want %d (the retry cap)",
-			len(responder.got), maxPostResponseRetries+1)
+			len(responder.requests()), maxPostResponseRetries+1)
 	}
 	if _, ok := lastMessageEvent(sink.events); ok {
 		t.Error("a MessageEvent was emitted for a Turn that never produced a reply")
@@ -487,10 +487,10 @@ func TestFloorGuard_RecoveriesFireUnderBypass(t *testing.T) {
 		cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "contents"})
 		cfg.Bypass = true
 		cfg.Reactions = wave1Reactions("lab_content_repair")
-		responder := &captureAllResponder{scripts: [][]provider.Delta{
+		responder := scriptedResponder(t,
 			emptyScript(),
-			contentScript("recovered"),
-		}}
+			contentTurn("recovered"),
+		)
 
 		a, err := newAgent(cfg, responder)
 		if err != nil {
@@ -498,11 +498,11 @@ func TestFloorGuard_RecoveriesFireUnderBypass(t *testing.T) {
 		}
 		runExchange(t, a, "please implement the parser")
 
-		if len(responder.got) != 2 {
-			t.Fatalf("provider was called %d times, want 2 (the guard must retry through the gates)", len(responder.got))
+		if len(responder.requests()) != 2 {
+			t.Fatalf("provider was called %d times, want 2 (the guard must retry through the gates)", len(responder.requests()))
 		}
-		if wireMessageIndex(responder.got[1].Messages, "user", wave1Nudge) < 0 {
-			t.Errorf("retried request does not carry the nudge: %+v", responder.got[1].Messages)
+		if wireMessageIndex(responder.requests()[1].Messages, "user", wave1Nudge) < 0 {
+			t.Errorf("retried request does not carry the nudge: %+v", responder.requests()[1].Messages)
 		}
 		if !hasGuardFire(sink.events, guardEmptyResponseRecovery, guardActionRetry) {
 			t.Error("no ReactionFiredEvent for the empty-response recovery with the retry action")
@@ -520,13 +520,13 @@ func TestFloorGuard_RecoveriesFireUnderBypass(t *testing.T) {
 		)
 		cfg.Bypass = true
 		cfg.Reactions = wave1Reactions("lab_content_repair")
-		responder := &captureAllResponder{scripts: [][]provider.Delta{
-			contentScript("I'll implement feature X."),
-			contentScript("Here is my plan."),
-			contentScript("I would edit main.go to add the parser."),
-			toolCallScript("c1", "read_file", `{"path":"main.go"}`),
-			contentScript("done"),
-		}}
+		responder := scriptedResponder(t,
+			contentTurn("I'll implement feature X."),
+			contentTurn("Here is my plan."),
+			contentTurn("I would edit main.go to add the parser."),
+			toolCallTurn("c1", "read_file", `{"path":"main.go"}`),
+			contentTurn("done"),
+		)
 
 		a, err := newAgent(cfg, responder)
 		if err != nil {
@@ -536,10 +536,10 @@ func TestFloorGuard_RecoveriesFireUnderBypass(t *testing.T) {
 		runExchange(t, a, "continue")
 		runExchange(t, a, "please implement feature X now")
 
-		if len(responder.got) != 5 {
-			t.Fatalf("provider was called %d times, want 5 (the guard must retry through the gates)", len(responder.got))
+		if len(responder.requests()) != 5 {
+			t.Fatalf("provider was called %d times, want 5 (the guard must retry through the gates)", len(responder.requests()))
 		}
-		retried := responder.got[3].Messages
+		retried := responder.requests()[3].Messages
 		if wireMessageIndex(retried, "assistant", "I would edit main.go to add the parser.") < 0 {
 			t.Errorf("retried request carries no superseded narration: %+v", retried)
 		}
@@ -609,12 +609,12 @@ func TestFloorGuard_ReadCacheCapsAnUnchangedReRead(t *testing.T) {
 			cfg := configWithTools(sink, readFileRecorder(readFileSchemaWithMaxLines, &seen))
 			cfg.Bypass = true
 			cfg.Floor.DisableReadCache = tc.disabled
-			responder := &captureAllResponder{scripts: [][]provider.Delta{
-				toolCallScript("r1", "read_file", `{"path":"a.go"}`),
-				toolCallScript("r2", "read_file", `{"path":"b.go"}`),
-				toolCallScript("r3", "read_file", `{"path":"a.go"}`),
-				contentScript("done"),
-			}}
+			responder := scriptedResponder(t,
+				toolCallTurn("r1", "read_file", `{"path":"a.go"}`),
+				toolCallTurn("r2", "read_file", `{"path":"b.go"}`),
+				toolCallTurn("r3", "read_file", `{"path":"a.go"}`),
+				contentTurn("done"),
+			)
 
 			a, err := newAgent(cfg, responder)
 			if err != nil {
@@ -658,12 +658,12 @@ func TestFloorGuard_ReadCacheLeavesAReadAfterAWriteUntouched(t *testing.T) {
 		fakeTool{name: "write_file", result: "ok"},
 	)
 	cfg.Bypass = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("r1", "read_file", `{"path":"a.go"}`),
-		toolCallScript("w1", "write_file", `{"path":"a.go","content":"package a"}`),
-		toolCallScript("r2", "read_file", `{"path":"a.go"}`),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("r1", "read_file", `{"path":"a.go"}`),
+		toolCallTurn("w1", "write_file", `{"path":"a.go","content":"package a"}`),
+		toolCallTurn("r2", "read_file", `{"path":"a.go"}`),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -690,12 +690,12 @@ func TestFloorGuard_ReadCacheSkipsAToolWithoutAMaxLinesSchema(t *testing.T) {
 	var seen []string
 	cfg := configWithTools(sink, readFileRecorder(readFileSchemaWithoutMaxLines, &seen))
 	cfg.Bypass = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("r1", "read_file", `{"path":"a.go"}`),
-		toolCallScript("r2", "read_file", `{"path":"b.go"}`),
-		toolCallScript("r3", "read_file", `{"path":"a.go"}`),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("r1", "read_file", `{"path":"a.go"}`),
+		toolCallTurn("r2", "read_file", `{"path":"b.go"}`),
+		toolCallTurn("r3", "read_file", `{"path":"a.go"}`),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -739,11 +739,11 @@ func TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass(t *testing.T) {
 			cfg.Context.MaxContextTokens = floorWindow
 			cfg.Bypass = true
 			cfg.Floor.DisableToolResultCap = tc.disabled
-			responder := &captureAllResponder{scripts: [][]provider.Delta{
-				toolCallScript("c1", "lookup", `{"q":"one"}`),
-				toolCallScript("c2", "lookup", `{"q":"two"}`),
-				contentScript("done"),
-			}}
+			responder := scriptedResponder(t,
+				toolCallTurn("c1", "lookup", `{"q":"one"}`),
+				toolCallTurn("c2", "lookup", `{"q":"two"}`),
+				contentTurn("done"),
+			)
 
 			a, err := newAgent(cfg, responder)
 			if err != nil {
@@ -751,12 +751,12 @@ func TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass(t *testing.T) {
 			}
 			runExchange(t, a, "look things up")
 
-			if len(responder.got) != 3 {
-				t.Fatalf("the model was called %d times, want 3", len(responder.got))
+			if len(responder.requests()) != 3 {
+				t.Fatalf("the model was called %d times, want 3", len(responder.requests()))
 			}
 			// The third request carries both results: c1's is now an OLDER result (c2's Turn is the
 			// most recent tool-call Turn), c2's is protected.
-			older, fresh := capturedToolResults(t, responder.got[2])
+			older, fresh := capturedToolResults(t, responder.requests()[2])
 			if fresh != big {
 				t.Errorf("the freshest result was reshaped: %d chars, want the whole %d", len(fresh), len(big))
 			}
@@ -789,7 +789,7 @@ func TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass(t *testing.T) {
 
 // capturedToolResults returns the two tool-result message contents of a captured wire request
 // carrying exactly two, in conversation order.
-func capturedToolResults(t *testing.T, req provider.Request) (older, fresh string) {
+func capturedToolResults(t *testing.T, req stubllm.Request) (older, fresh string) {
 	t.Helper()
 	var got []string
 	for _, m := range req.Messages {
@@ -816,10 +816,10 @@ func TestFloorGuard_RepairLeavesAWithdrawnToolToTheMode(t *testing.T) {
 	)
 	cfg.Bypass = true
 	cfg.Mode = domain.ModePlan
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_file", `{"path":"a.go","content":"package a"}`),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_file", `{"path":"a.go","content":"package a"}`),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -827,14 +827,14 @@ func TestFloorGuard_RepairLeavesAWithdrawnToolToTheMode(t *testing.T) {
 	}
 	runExchange(t, a, "write a.go")
 
-	if len(responder.got) != 2 {
-		t.Fatalf("provider was called %d times, want 2 (no guard retry on a withdrawn tool)", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("provider was called %d times, want 2 (no guard retry on a withdrawn tool)", len(responder.requests()))
 	}
 	if n := guardFireCountFor(sink.events, guardToolCallRepair); n != 0 {
 		t.Errorf("the repair guard fired %d times on a tool the mode withdrew, want 0", n)
 	}
-	if wireMessageContaining(responder.got[1].Messages, planRefusalReason) < 0 {
-		t.Errorf("the mode's refusal never reached the model: %+v", responder.got[1].Messages)
+	if wireMessageContaining(responder.requests()[1].Messages, planRefusalReason) < 0 {
+		t.Errorf("the mode's refusal never reached the model: %+v", responder.requests()[1].Messages)
 	}
 	if ran != 0 {
 		t.Errorf("the withdrawn tool ran %d times, want 0 (Plan refuses it)", ran)
@@ -849,12 +849,12 @@ func TestFloorGuard_LoopBreakerDoesNotFireOnARepeatedRequest(t *testing.T) {
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "package a"})
 	cfg.Bypass = true
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "read_file", `{"path":"a.go"}`),
-		contentScript("done"),
-		toolCallScript("c2", "read_file", `{"path":"a.go"}`), // the same call, a NEW Exchange
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "read_file", `{"path":"a.go"}`),
+		contentTurn("done"),
+		toolCallTurn("c2", "read_file", `{"path":"a.go"}`), // the same call, a NEW Exchange
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -863,8 +863,8 @@ func TestFloorGuard_LoopBreakerDoesNotFireOnARepeatedRequest(t *testing.T) {
 	runExchange(t, a, "read a.go")
 	runExchange(t, a, "read a.go again")
 
-	if len(responder.got) != 4 {
-		t.Fatalf("provider was called %d times, want 4 (two clean Exchanges, no retry)", len(responder.got))
+	if len(responder.requests()) != 4 {
+		t.Fatalf("provider was called %d times, want 4 (two clean Exchanges, no retry)", len(responder.requests()))
 	}
 	if n := guardFireCountFor(sink.events, guardToolLoopBreaker); n != 0 {
 		t.Errorf("the loop breaker fired %d times on a re-asked request, want 0", n)
@@ -916,10 +916,10 @@ func TestFloorGuard_ToolCallSalvageRunsAFencedCallWrittenInText(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, ran: &ran, result: "hello"})
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		contentScript(fencedCallReply("read_file", `{"path": "a.txt"}`)),
-		contentScript("the file says hello"),
-	}}
+	responder := scriptedResponder(t,
+		contentTurn(fencedCallReply("read_file", `{"path": "a.txt"}`)),
+		contentTurn("the file says hello"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -930,9 +930,9 @@ func TestFloorGuard_ToolCallSalvageRunsAFencedCallWrittenInText(t *testing.T) {
 	if res.Status != domain.StatusExchangeComplete {
 		t.Fatalf("status = %q, want exchange-complete", res.Status)
 	}
-	if len(responder.got) != 2 {
+	if len(responder.requests()) != 2 {
 		t.Fatalf("provider was called %d times, want 2 (draft, answer to the tool result): salvage must not re-stream",
-			len(responder.got))
+			len(responder.requests()))
 	}
 	if ran != 1 {
 		t.Errorf("read_file ran %d times, want 1 (the salvaged call dispatches)", ran)
@@ -1009,9 +1009,9 @@ func TestFloorGuard_ToolCallSalvageStaysOutWhereItMust(t *testing.T) {
 			cfg.Floor.DisableToolUseEnforcer = true
 			cfg.Floor.DisableEmptyResponseRecovery = true
 			tc.shape(&cfg)
-			responder := &captureAllResponder{scripts: [][]provider.Delta{
-				contentScript(fencedCallReply(tc.written, `{"path": "a.txt"}`)),
-			}}
+			responder := scriptedResponder(t,
+				contentTurn(fencedCallReply(tc.written, `{"path": "a.txt"}`)),
+			)
 
 			a, err := newAgent(cfg, responder)
 			if err != nil {

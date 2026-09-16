@@ -78,7 +78,7 @@ func TestAuditEvent_SubAgentRecordReachesParentObserver(t *testing.T) {
 	// Build a parent agent and synthesise a child the same way newChildAgent does, then
 	// drive a tool call on the child: its AuditEvent must carry the child's depth and land
 	// on the shared sink.
-	a, err := newAgent(cfg, &echoResponder{reply: "ignored"})
+	a, err := newAgent(cfg, echoResponder(t, "ignored"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

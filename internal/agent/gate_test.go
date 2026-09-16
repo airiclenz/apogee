@@ -90,7 +90,7 @@ func gateAgent(
 ) *Agent {
 	t.Helper()
 
-	a, err := newAgent(gateConfig(t, sink, approver, ran, reactions...), echoResponder{reply: "unused"})
+	a, err := newAgent(gateConfig(t, sink, approver, ran, reactions...), echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestGateDenyStillDeniesUnderBypass(t *testing.T) {
 	cfg := gateConfig(t, sink, &fakeApprover{decision: domain.ApprovalAllow}, &ran,
 		goGate("warden", domain.GateDecision{Verdict: domain.GateDeny}))
 	cfg.Bypass = true
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

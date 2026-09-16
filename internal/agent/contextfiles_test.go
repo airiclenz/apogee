@@ -262,7 +262,7 @@ func TestNewAgentRejectsBadContextFileName(t *testing.T) {
 			t.Parallel()
 			cfg := contextConfig(&recordingSink{}, workspace, "AGENTS.md", tc.name)
 
-			_, err := newAgent(cfg, &recordingResponder{reply: "unused"})
+			_, err := newAgent(cfg, echoResponder(t, "unused"))
 
 			if err == nil {
 				t.Fatalf("newAgent accepted the context-file name %q; a bad name must fail construction", tc.name)
@@ -287,7 +287,7 @@ func TestContextFilesLoadedAtConstruction(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
 
-	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestContextFilesRereadOnClearContext(t *testing.T) {
 
 	dir := t.TempDir()
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
-	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -329,7 +329,7 @@ func TestContextFilesUntouchedByRefusedClearContext(t *testing.T) {
 
 	dir := t.TempDir()
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
-	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -353,7 +353,7 @@ func TestContextFilesRereadOnRestoreSession(t *testing.T) {
 
 	dir := t.TempDir()
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
-	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestSubAgentInheritsParentContextFiles(t *testing.T) {
 
 	dir := t.TempDir()
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
-	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -420,7 +420,7 @@ func TestSubAgentInheritsParentContextFiles(t *testing.T) {
 func TestDelegateConstructionReadsNoContextFile(t *testing.T) {
 	dir := t.TempDir()
 	writeWorkspaceFile(t, dir, "AGENTS.md", "first")
-	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder{reply: "ok"})
+	a, err := newAgent(contextConfig(&recordingSink{}, dir, "AGENTS.md"), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -471,7 +471,7 @@ func TestContextFilesReportMirrorsTheCache(t *testing.T) {
 		t.Fatalf("MkdirAll: %v", err)
 	}
 	cfg := contextConfig(&recordingSink{}, dir, "BROKEN.md", "MISSING.md", "AGENTS.md")
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -504,7 +504,7 @@ func TestContextFilesReportMeasuresStandingContent(t *testing.T) {
 	cfg := contextConfig(&recordingSink{}, dir, "AGENTS.md")
 	cfg.SystemPrompt = systemPrompt
 	cfg.Context.MaxContextTokens = 8192
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -539,7 +539,7 @@ func TestContextFilesReportWithoutWindowOrFiles(t *testing.T) {
 	writeWorkspaceFile(t, dir, "AGENTS.md", strings.Repeat("conventions. ", 500))
 	cfg := contextConfig(&recordingSink{}, dir, "AGENTS.md")
 	cfg.SystemPrompt = "You are a test agent." // no MaxContextTokens: the window is unknown
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestContextFilesReportWithoutWindowOrFiles(t *testing.T) {
 		t.Error("an unknown window reported an overrun; there is no share to overrun")
 	}
 
-	bare, err := newAgent(baseConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	bare, err := newAgent(baseConfig(&recordingSink{}), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

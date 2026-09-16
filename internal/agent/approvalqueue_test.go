@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ----------------------------------------------------------------------------
@@ -157,10 +156,10 @@ func TestApprovalRequest_TopLevelNamesNoSubAgent(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	cfg.Approver = approver
 
-	up := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("t1", "touch_thing", `{}`),
-		contentScript("done"),
-	}}
+	up := scriptedResponder(t,
+		toolCallTurn("t1", "touch_thing", `{}`),
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -261,7 +260,7 @@ func TestQueuedApprovals_OneSlotPerAgentTree(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore)
 	cfg.Approver = inner
-	parent, err := newAgent(cfg, &scriptedResponder{})
+	parent, err := newAgent(cfg, scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -279,7 +278,7 @@ func TestQueuedApprovals_OneSlotPerAgentTree(t *testing.T) {
 		t.Errorf("child.task = %q, want the delegated task the prompt names it by", child.task)
 	}
 
-	bare, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), &scriptedResponder{})
+	bare, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent (no Approver): %v", err)
 	}

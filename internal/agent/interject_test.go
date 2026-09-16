@@ -23,12 +23,12 @@ import (
 // with the Exchange still open — exactly where the worker drains its interjection mailbox.
 // The returned responder has captured every request so far and is scripted to finish the
 // Exchange on the next Step.
-func interjectAgentAtBoundary(t *testing.T, cfg domain.Config) (*Agent, *captureAllResponder) {
+func interjectAgentAtBoundary(t *testing.T, cfg domain.Config) (*Agent, *scriptedUpstream) {
 	t.Helper()
-	responder := &captureAllResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", `{"q":"meaning"}`),
-		contentScript("all done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "lookup", `{"q":"meaning"}`),
+		contentTurn("all done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -91,10 +91,10 @@ func TestInterjectAppendsMarkedUserMessage(t *testing.T) {
 		t.Errorf("Turn 1 status = %q, want %q", res.Status, domain.StatusExchangeComplete)
 	}
 
-	if len(responder.got) != 2 {
-		t.Fatalf("responder saw %d requests, want 2", len(responder.got))
+	if len(responder.requests()) != 2 {
+		t.Fatalf("responder saw %d requests, want 2", len(responder.requests()))
 	}
-	msgs := responder.got[1].Messages
+	msgs := responder.requests()[1].Messages
 	if len(msgs) < 3 {
 		t.Fatalf("second request carries %d messages, want at least 3", len(msgs))
 	}
@@ -114,7 +114,7 @@ func TestInterjectAppendsMarkedUserMessage(t *testing.T) {
 // flight there is nothing to interject into, so the call is refused loudly rather than
 // silently promoted to a Submit — and history is left untouched.
 func TestInterjectRefusedWhenIdle(t *testing.T) {
-	a, err := newAgent(interjectConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	a, err := newAgent(interjectConfig(&recordingSink{}), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestInterjectPersistsAcrossSnapshotRestore(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	b, err := newAgent(interjectConfig(&recordingSink{}), echoResponder{reply: "ok"})
+	b, err := newAgent(interjectConfig(&recordingSink{}), echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent (restore target): %v", err)
 	}

@@ -16,7 +16,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/console"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // ---------------------------------------------------------------------------
@@ -65,14 +65,14 @@ func (o *consoleOpener) execute(ctx context.Context, call domain.ToolCall) (doma
 // openConsoleScripts returns the scripted stream pairs for n Exchanges that each ask for one
 // open_console call and then finish. One scriptedResponder serves a whole tree — a child speaks
 // over its parent's Upstream — so the scripts of every Agent in a test come from this one list.
-func openConsoleScripts(n int) [][]provider.Delta {
-	scripts := make([][]provider.Delta, 0, 2*n)
+func openConsoleScripts(n int) []stubllm.Turn {
+	scripts := make([]stubllm.Turn, 0, 2*n)
 	for i := range n {
 		scripts = append(scripts,
 			// The arguments carry the iteration so two consecutive Exchanges are not an identical
 			// repeat, which the tool-loop breaker Floor guard would answer instead of opening a shell.
-			toolCallScript(fmt.Sprintf("c%d", i), "open_console", fmt.Sprintf(`{"n":%d}`, i)),
-			contentScript("opened"))
+			toolCallTurn(fmt.Sprintf("c%d", i), "open_console", fmt.Sprintf(`{"n":%d}`, i)),
+			contentTurn("opened"))
 	}
 	return scripts
 }
@@ -102,7 +102,7 @@ func newConsoleAgent(t *testing.T, n int) (*Agent, *consoleOpener) {
 
 	opener := &consoleOpener{}
 	a, err := newAgent(configWithTools(&recordingSink{}, opener.tool()),
-		&scriptedResponder{scripts: openConsoleScripts(n)})
+		scriptedResponder(t, openConsoleScripts(n)...))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -179,7 +179,7 @@ func TestDispatchCarriesTheConsoleRegistryAndTheOwner(t *testing.T) {
 func TestChildSharesTheParentsConsoleRegistry(t *testing.T) {
 	t.Parallel()
 
-	parent, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	parent, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -274,7 +274,7 @@ func TestSiblingDelegationsSharingACallIDReapOnlyTheirOwnConsoles(t *testing.T) 
 func TestDelegationOwnerKeysAreDistinctDownTheTree(t *testing.T) {
 	t.Parallel()
 
-	parent, err := newAgent(baseConfig(&recordingSink{}), &scriptedResponder{})
+	parent, err := newAgent(baseConfig(&recordingSink{}), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

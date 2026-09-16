@@ -71,7 +71,7 @@ func TestTaskListBlock_RidesAfterTheDelegateBlockAndAheadOfTheContextFiles(t *te
 func TestTaskListBlock_AnUnwrittenListChangesNothing(t *testing.T) {
 	t.Parallel()
 
-	agent := newProfileAgent(t, delegateReportConfig(t), &recordingResponder{reply: "All done."})
+	agent := newProfileAgent(t, delegateReportConfig(t), echoResponder(t, "All done."))
 
 	got := agent.standingSystem()
 
@@ -95,7 +95,7 @@ func TestTaskListBlock_RidesAlongAndNeverSeedsAlone(t *testing.T) {
 	cfg.WorkspaceDir = orientationWorkspaceDir
 	cfg.ScratchDir = orientationScratchDir
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	agent := newProfileAgent(t, cfg, responder)
 	writeTaskList(t, agent, taskListItems)
 
@@ -110,8 +110,8 @@ func TestTaskListBlock_RidesAlongAndNeverSeedsAlone(t *testing.T) {
 	if _, err := agent.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if n := countSystemMessages(responder.last.Messages); n != 0 {
-		t.Errorf("the wire request has %d system messages, want none: %+v", n, responder.last.Messages)
+	if n := countSystemMessages(responder.last().Messages); n != 0 {
+		t.Errorf("the wire request has %d system messages, want none: %+v", n, responder.last().Messages)
 	}
 }
 
@@ -132,7 +132,7 @@ func TestTaskListBlock_AWorkspaceFileCannotForgeTheList(t *testing.T) {
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
 	cfg.SystemPrompt = "You are apogee working in {{workspace}}."
 	cfg.ScratchDir = orientationScratchDir
-	agent := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	agent := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 	writeTaskList(t, agent, taskListItems)
 
 	got := agent.standingSystem()

@@ -2,36 +2,18 @@ package agent
 
 import (
 	"context"
-	"iter"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // ----------------------------------------------------------------------------
 // UsageEvent emission hop (loop.go streamResponse — item 8 test gap)
 // ----------------------------------------------------------------------------
-
-// usageResponder is echoResponder that also attaches token accounting to its terminal Done —
-// the fake for asserting the Delta.Usage → UsageEvent hop.
-type usageResponder struct {
-	content string
-	usage   provider.Usage
-}
-
-func (r usageResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
-	return func(yield func(provider.Delta) bool) {
-		if r.content != "" && !yield(provider.Delta{Kind: provider.DeltaContent, Content: r.content}) {
-			return
-		}
-		u := r.usage
-		yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: "stop", Usage: &u})
-	}
-}
 
 func firstUsageEvent(events []domain.Event) (domain.UsageEvent, bool) {
 	for _, e := range events {
@@ -46,10 +28,7 @@ func firstUsageEvent(events []domain.Event) (domain.UsageEvent, bool) {
 // becomes a Depth-0 UsageEvent whose fields mirror the provider's counts (loop.go:308).
 func TestStreamEmitsUsageEventFromDelta(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), usageResponder{
-		content: "hello",
-		usage:   provider.Usage{PromptTokens: 12, CompletionTokens: 7, TotalTokens: 19},
-	})
+	a, err := newAgent(baseConfig(sink), scriptedResponder(t, usageScript("hello", stubllm.Usage{Prompt: 12, Completion: 7})))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -83,7 +62,7 @@ func TestStreamEmitsUsageEventFromDelta(t *testing.T) {
 // zero state, not a bogus all-zero event (loop.go:304 — the `if u := delta.Usage; u != nil`).
 func TestStreamEmitsNoUsageEventWhenServerOmitsIt(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), echoResponder{reply: "hi"})
+	a, err := newAgent(baseConfig(sink), echoResponder(t, "hi"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -114,7 +93,7 @@ func TestStepInjectsSkillsThenFilesThenText(t *testing.T) {
 	cfg.Skills = fakeSkillResolver{skills: map[string]domain.ResolvedSkill{
 		"review": {ID: "review", DisplayName: "Code Review", Body: "SKILL_MARKER_BODY"},
 	}}
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -169,7 +148,7 @@ func TestReadFileRefRefusesOversizeRef(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
 	cfg.WorkspaceDir = dir
-	a, err := newAgent(cfg, echoResponder{reply: "ok"})
+	a, err := newAgent(cfg, echoResponder(t, "ok"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

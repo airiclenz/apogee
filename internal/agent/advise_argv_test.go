@@ -68,7 +68,7 @@ func adviseArgvAgent(
 	cfg.Bypass = bypass
 	cfg.Report = func(msg string) { *reported = append(*reported, msg) }
 
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

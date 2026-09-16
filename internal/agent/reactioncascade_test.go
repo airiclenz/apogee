@@ -19,7 +19,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // cascadeReactionID is the ID every cell arms its probe under.
@@ -160,10 +159,10 @@ func driveCascade(t *testing.T, spec cascadeSpec) cascadeRun {
 		cascadeReaction(spec.at, spec.behavior, spec.class, func(m domain.Moment) { seen[m]++ }),
 	}
 
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("call-1", "probe", `{}`),
-		contentScript("done"),
-	}})
+	a, err := newAgent(cfg, scriptedResponder(t,
+		toolCallTurn("call-1", "probe", `{}`),
+		contentTurn("done"),
+	))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -340,7 +339,7 @@ func TestFireBookedOutsideRecoverBoundary(t *testing.T) {
 			cascadeReaction(domain.MomentPreRequest, probeActs, domain.ClassShapeView, func(domain.Moment) {}),
 		}
 
-		a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{contentScript("done")}})
+		a, err := newAgent(cfg, scriptedResponder(t, contentTurn("done")))
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
 		}

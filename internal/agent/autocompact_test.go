@@ -137,7 +137,7 @@ func TestAutoCompactOptOutRespected(t *testing.T) {
 func TestOnDemandCompactIgnoresAutoGate(t *testing.T) {
 	cfg := autoCompactConfig(&recordingSink{})
 	cfg.Context.CompactionEnabled = false // auto-compaction off …
-	a, err := newAgent(cfg, echoResponder{reply: "ON-DEMAND-SUMMARY"})
+	a, err := newAgent(cfg, echoResponder(t, "ON-DEMAND-SUMMARY"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // TestAgentSetConfineToWorkspaceAffectsResolution proves a runtime SetConfineToWorkspace changes
@@ -16,7 +15,7 @@ import (
 func TestAgentSetConfineToWorkspaceAffectsResolution(t *testing.T) {
 	sink := &recordingSink{}
 	write := fakeTool{name: "w"} // readOnly:false, no markers ⇒ third-party write class
-	a, err := newAgent(autoConfig(sink, eligibleConfiner{}, true, write), &scriptedResponder{})
+	a, err := newAgent(autoConfig(sink, eligibleConfiner{}, true, write), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -58,13 +57,13 @@ func TestAgentSetConfineToWorkspaceObservedByNextToolCall(t *testing.T) {
 	approver := &fakeApprover{decision: domain.ApprovalAllow}
 	cfg := autoConfig(sink, eligibleConfiner{}, true, write)
 	cfg.Approver = approver
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "w", `{"n":1}`),
-		contentScript("done"),
-		toolCallScript("c2", "w", `{"n":2}`), // different arguments: not the identical repeat the
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "w", `{"n":1}`),
+		contentTurn("done"),
+		toolCallTurn("c2", "w", `{"n":2}`), // different arguments: not the identical repeat the
 		//                                       tool-loop breaker guard answers
-		contentScript("done"),
-	}}
+		contentTurn("done"),
+	)
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -96,7 +95,7 @@ func TestAgentSetConfineToWorkspaceObservedByNextToolCall(t *testing.T) {
 func TestNewChildAgentInheritsLiveConfineToWorkspace(t *testing.T) {
 	sink := &recordingSink{}
 	write := fakeTool{name: "w"}
-	a, err := newAgent(autoConfig(sink, eligibleConfiner{}, true, write), &scriptedResponder{})
+	a, err := newAgent(autoConfig(sink, eligibleConfiner{}, true, write), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -134,7 +133,7 @@ func TestNewChildAgentInheritsLiveConfineToWorkspace(t *testing.T) {
 func TestAgentSetConfineToWorkspaceConcurrent(t *testing.T) {
 	sink := &recordingSink{}
 	write := fakeTool{name: "w"}
-	a, err := newAgent(autoConfig(sink, eligibleConfiner{}, true, write), &scriptedResponder{})
+	a, err := newAgent(autoConfig(sink, eligibleConfiner{}, true, write), scriptedResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

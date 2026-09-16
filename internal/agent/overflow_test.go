@@ -12,34 +12,30 @@ package agent
 
 import (
 	"context"
-	"iter"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// faultResponder answers every stream with one terminal fault Delta of the given kind — the fake
-// for both halves of the split (DeltaContextOverflow vs DeltaError) with everything else held
-// equal, so a difference in the assertion is a difference in classification and nothing else.
-type faultResponder struct {
-	kind provider.DeltaKind
-	msg  string
-}
-
-func (r faultResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
-	return func(yield func(provider.Delta) bool) {
-		yield(provider.Delta{Kind: r.kind, Err: r.msg})
-	}
+// faultResponder answers every request with one raw HTTP reply — the upstream for both halves of
+// the split with everything else held equal, so a difference in the assertion is a difference in
+// the provider's classification and nothing else: an overflow is a 400 carrying the window marker
+// (overflowBody, classed DeltaContextOverflow), a plain fault the 500 a server sends for anything
+// else (classed DeltaError).
+func faultResponder(t testing.TB, status int, body string) *scriptedUpstream {
+	t.Helper()
+	return scriptedResponder(t, stubllm.Turn{Repeat: true, HTTP: &stubllm.HTTPReply{Status: status, Body: body}})
 }
 
 // overflowFaultMsg is the sanitized message the provider builds for a llama.cpp 400 whose body
 // matches an overflow marker (statusDelta, internal/provider/stream.go) — the real shape of the
 // text the loop must carry through the seam unchanged.
-const overflowFaultMsg = "apogee: context window exceeded: " +
-	`{"error":{"message":"request (57546 tokens) exceeds the available context size (32768 tokens)"}}`
+const overflowFaultMsg = "apogee: context window exceeded: " + overflowBody
 
 // errorEvents returns every ErrorEvent among events, in order.
 func errorEvents(events []domain.Event) []domain.ErrorEvent {
@@ -59,15 +55,17 @@ func errorEvents(events []domain.Event) []domain.ErrorEvent {
 func TestRespondAndReviewSplitsOverflowFromPlainFault(t *testing.T) {
 	tests := []struct {
 		name        string
-		kind        provider.DeltaKind
-		msg         string
+		status      int
+		body        string
+		msg         string // the text the provider renders the reply as
 		wantOutcome turnOutcome
 		wantCarried string
 		wantEvents  int
 	}{
 		{
 			name:        "overflow is its own outcome and surfaces nothing",
-			kind:        provider.DeltaContextOverflow,
+			status:      http.StatusBadRequest,
+			body:        overflowBody,
 			msg:         overflowFaultMsg,
 			wantOutcome: turnOverflowed,
 			wantCarried: overflowFaultMsg,
@@ -75,7 +73,8 @@ func TestRespondAndReviewSplitsOverflowFromPlainFault(t *testing.T) {
 		},
 		{
 			name:        "a plain fault still fails loudly",
-			kind:        provider.DeltaError,
+			status:      http.StatusInternalServerError,
+			body:        "boom",
 			msg:         "apogee: upstream HTTP 500: boom",
 			wantOutcome: turnFailed,
 			wantCarried: "",
@@ -86,7 +85,7 @@ func TestRespondAndReviewSplitsOverflowFromPlainFault(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			a, err := newAgent(baseConfig(sink), faultResponder{kind: tc.kind, msg: tc.msg})
+			a, err := newAgent(baseConfig(sink), faultResponder(t, tc.status, tc.body))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -131,7 +130,7 @@ func TestRespondAndReviewSplitsOverflowFromPlainFault(t *testing.T) {
 // TestOverflowGiveUpNamesTheWindowRemedy below.
 func TestStepOverflowStillAbandonsTheTurnUnchanged(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), faultResponder{kind: provider.DeltaContextOverflow, msg: overflowFaultMsg})
+	a, err := newAgent(baseConfig(sink), faultResponder(t, http.StatusBadRequest, overflowBody))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -192,7 +191,7 @@ func TestOverflowGiveUpNamesTheWindowRemedy(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := baseConfig(sink)
 			cfg.Context.MaxContextTokens = tc.window // 0 ⇒ neither discovery nor `context-window:` reported one
-			a, err := newAgent(cfg, faultResponder{kind: provider.DeltaContextOverflow, msg: overflowFaultMsg})
+			a, err := newAgent(cfg, faultResponder(t, http.StatusBadRequest, overflowBody))
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
 			}
@@ -233,11 +232,19 @@ const transientFaultMsg = `apogee: upstream in-band error 502: ` +
 	`{"error":{"code":502,"message":"Provider returned error","metadata":{"raw":"upstream timed out"}},` +
 	`"error_type":"provider_unavailable"}`
 
-// retryableErrorScript is a stream that faults with a TRANSIENT in-band error — the classification
-// the provider attaches (Delta.Retryable) when the fault's class is one it would have retried at
-// the HTTP layer. errorScript is its non-retryable twin, everything else held equal.
+// retryableErrorScript is a Delta stream that faults with a TRANSIENT in-band error — the
+// classification the provider attaches (Delta.Retryable) when the fault's class is one it would
+// have retried at the HTTP layer. It is what the surviving hand-written fakes play;
+// retryableErrorTurn is its stubllm twin, and errorScript the non-retryable turn.
 func retryableErrorScript(msg string) []provider.Delta {
 	return []provider.Delta{{Kind: provider.DeltaError, Err: msg, Retryable: true}}
+}
+
+// retryableErrorTurn is a turn that ends its stream with an in-band 502 carrying msg — the
+// aggregator fault the provider classes TRANSIENT (Delta.Retryable), rendered "apogee: upstream
+// in-band error 502: {…msg…}", so an assertion on the fault's text looks for msg within it.
+func retryableErrorTurn(msg string) stubllm.Turn {
+	return stubllm.Turn{Error: &stubllm.InBandError{Code: http.StatusBadGateway, Message: msg}}
 }
 
 // shortRestreamHoldoff shrinks the loop's re-stream hold-off for the duration of one test, so a
@@ -261,15 +268,18 @@ func countEvents[T domain.Event](events []domain.Event) int {
 	return n
 }
 
-// lastFaultMsg returns the Err of the last fault Delta in scripts — the message the give-up path
-// must surface, which for a re-streamed Turn is the SECOND attempt's fault, not the first's.
-func lastFaultMsg(scripts [][]provider.Delta) string {
+// lastFaultMsg returns the message the last faulting turn in scripts carries — the text the
+// give-up path must surface, which for a re-streamed Turn is the SECOND attempt's fault, not the
+// first's. The provider renders the turn's message inside its own wording (the in-band envelope,
+// the HTTP status line), so the assertion is that the surfaced text carries it.
+func lastFaultMsg(scripts []stubllm.Turn) string {
 	msg := ""
-	for _, script := range scripts {
-		for _, d := range script {
-			if d.Kind == provider.DeltaError {
-				msg = d.Err
-			}
+	for _, turn := range scripts {
+		switch {
+		case turn.Error != nil:
+			msg = turn.Error.Message
+		case turn.HTTP != nil:
+			msg = turn.HTTP.Body
 		}
 	}
 	return msg
@@ -286,7 +296,7 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		scripts     [][]provider.Delta
+		scripts     []stubllm.Turn
 		wantOutcome turnOutcome
 		wantText    string
 		wantCalls   int
@@ -295,7 +305,7 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 	}{
 		{
 			name:        "a transient fault re-streams and the recovered Turn stays quiet",
-			scripts:     [][]provider.Delta{retryableErrorScript(transientFaultMsg), contentScript("recovered")},
+			scripts:     []stubllm.Turn{retryableErrorTurn(transientFaultMsg), contentTurn("recovered")},
 			wantOutcome: turnOK,
 			wantText:    "recovered",
 			wantCalls:   2,
@@ -304,7 +314,7 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 		},
 		{
 			name:        "a second transient fault gives up exactly as today",
-			scripts:     [][]provider.Delta{retryableErrorScript(transientFaultMsg), retryableErrorScript(transientFaultMsg)},
+			scripts:     []stubllm.Turn{retryableErrorTurn("first blip"), retryableErrorTurn("second blip")},
 			wantOutcome: turnFailed,
 			wantCalls:   2,
 			wantResets:  1,
@@ -312,7 +322,7 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 		},
 		{
 			name:        "a fault that is not transient fails on the spot",
-			scripts:     [][]provider.Delta{errorScript("apogee: upstream in-band error 400: bad request"), contentScript("unreached")},
+			scripts:     []stubllm.Turn{errorScript("bad request"), contentTurn("unreached")},
 			wantOutcome: turnFailed,
 			wantCalls:   1,
 			wantResets:  0,
@@ -323,7 +333,7 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			responder := &scriptedResponder{scripts: tc.scripts}
+			responder := scriptedResponder(t, tc.scripts...)
 			a, err := newAgent(baseConfig(sink), responder)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -346,8 +356,8 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 			} else if resp == nil || resp.Text() != tc.wantText {
 				t.Errorf("resp = %+v, want the re-streamed reply %q", resp, tc.wantText)
 			}
-			if responder.calls != tc.wantCalls {
-				t.Errorf("Upstream calls = %d, want %d — the Turn re-streams at most once", responder.calls, tc.wantCalls)
+			if responder.calls() != tc.wantCalls {
+				t.Errorf("Upstream calls = %d, want %d — the Turn re-streams at most once", responder.calls(), tc.wantCalls)
 			}
 			if got := countEvents[domain.StreamResetEvent](sink.events); got != tc.wantResets {
 				t.Errorf("StreamResetEvents = %d, want %d", got, tc.wantResets)
@@ -356,8 +366,8 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 			if len(errs) != tc.wantErrors {
 				t.Fatalf("ErrorEvents = %d (%v), want %d", len(errs), errs, tc.wantErrors)
 			}
-			if tc.wantErrors == 1 && (errs[0].Source != "loop" || errs[0].Err != lastFaultMsg(tc.scripts)) {
-				t.Errorf("ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:%q}",
+			if tc.wantErrors == 1 && (errs[0].Source != "loop" || !strings.Contains(errs[0].Err, lastFaultMsg(tc.scripts))) {
+				t.Errorf("ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:…%q…} — the last attempt's fault",
 					errs[0].Source, errs[0].Err, "loop", lastFaultMsg(tc.scripts))
 			}
 			if wantSpent := tc.wantResets == 1; run.restreamSpent != wantSpent {
@@ -374,10 +384,10 @@ func TestReStreamLatchIsPerTurn(t *testing.T) {
 	shortRestreamHoldoff(t)
 
 	sink := &recordingSink{}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		retryableErrorScript(transientFaultMsg), contentScript("first"), // Turn 0: a blip, then the answer
-		retryableErrorScript(transientFaultMsg), contentScript("second"), // Turn 1: its own blip, its own recovery
-	}}
+	responder := scriptedResponder(t,
+		retryableErrorTurn(transientFaultMsg), contentTurn("first"), // Turn 0: a blip, then the answer
+		retryableErrorTurn(transientFaultMsg), contentTurn("second"), // Turn 1: its own blip, its own recovery
+	)
 	a, err := newAgent(baseConfig(sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

@@ -208,7 +208,7 @@ func TestEmergencyFoldRespectsCompactionOptOut(t *testing.T) {
 // history and the Turn still gives up cleanly.
 func TestEmergencyFoldFaultSurfacesOnceAndKeepsHistory(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(autoCompactConfig(sink), overflowResponder{})
+	a, err := newAgent(autoCompactConfig(sink), overflowResponder(t))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

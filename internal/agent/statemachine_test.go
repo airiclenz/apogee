@@ -12,42 +12,21 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"iter"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // ---------------------------------------------------------------------------
 // Fakes
 // ---------------------------------------------------------------------------
 
-// scriptedResponder yields a pre-scripted stream per call — the multi-Turn driver: call N
-// returns scripts[N], so a test scripts "ask for a tool" then "finish".
-type scriptedResponder struct {
-	scripts [][]provider.Delta
-	calls   int
-}
-
-func (r *scriptedResponder) Stream(_ context.Context, _ provider.Request) iter.Seq[provider.Delta] {
-	i := r.calls
-	r.calls++
-	return func(yield func(provider.Delta) bool) {
-		if i >= len(r.scripts) {
-			yield(provider.Delta{Kind: provider.DeltaError, Err: "scriptedResponder: out of scripts"})
-			return
-		}
-		for _, d := range r.scripts[i] {
-			if !yield(d) {
-				return
-			}
-		}
-	}
-}
-
-// toolCallScript is a stream that emits one native tool call then a tool_calls finish.
+// toolCallScript is a Delta stream that emits one native tool call then a tool_calls finish —
+// the script shape the surviving hand-written fakes (requestLogResponder, routedResponder, …)
+// still play; toolCallTurn is its stubllm twin for a scripted upstream.
 func toolCallScript(id, name, args string) []provider.Delta {
 	return []provider.Delta{
 		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
@@ -59,7 +38,8 @@ func toolCallScript(id, name, args string) []provider.Delta {
 	}
 }
 
-// contentScript is a stream that emits one content chunk then a stop finish.
+// contentScript is a Delta stream that emits one content chunk then a stop finish; contentTurn
+// is its stubllm twin.
 func contentScript(text string) []provider.Delta {
 	return []provider.Delta{
 		{Kind: provider.DeltaContent, Content: text},
@@ -135,10 +115,10 @@ func TestStep_MultiTurnToolExchange(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "the answer is 42"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", `{"q":"meaning"}`),
-		contentScript("all done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "lookup", `{"q":"meaning"}`),
+		contentTurn("all done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -188,10 +168,10 @@ func TestRun_DrivesExchangeToCompletion(t *testing.T) {
 	sink := &recordingSink{}
 	ran := 0
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "ok"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "lookup", "{}"),
-		contentScript("finished"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "lookup", "{}"),
+		contentTurn("finished"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -240,10 +220,10 @@ func TestDispatch_ApprovalAskBefore(t *testing.T) {
 			cfg.Mode = domain.ModeAskBefore
 			approver := &fakeApprover{decision: tc.decision}
 			cfg.Approver = approver
-			responder := &scriptedResponder{scripts: [][]provider.Delta{
-				toolCallScript("c1", "write_it", "{}"),
-				contentScript("done"),
-			}}
+			responder := scriptedResponder(t,
+				toolCallTurn("c1", "write_it", "{}"),
+				contentTurn("done"),
+			)
 
 			a, err := newAgent(cfg, responder)
 			if err != nil {
@@ -286,11 +266,11 @@ func TestDispatch_ApprovalAllowForSession(t *testing.T) {
 	// off for this test: it is about the approval cache, and the guard has its own repeat proof in
 	// floorguards_test.go.
 	cfg.Floor.DisableToolLoopBreaker = true
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "write_it", "{}"),
-		toolCallScript("c2", "write_it", "{}"),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "write_it", "{}"),
+		toolCallTurn("c2", "write_it", "{}"),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -324,11 +304,11 @@ func TestDispatch_ForcedApprovalNeverCachesAllowForSession(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	approver := &seamApprover{decision: domain.ApprovalAllowForSession}
 	cfg.Approver = approver
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "terminal", `{"command":"sudo apt-get install jq"}`), // Tier-2 → forced gate
-		toolCallScript("c2", "terminal", `{"command":"ls"}`),                      // ordinary gate
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "terminal", `{"command":"sudo apt-get install jq"}`), // Tier-2 → forced gate
+		toolCallTurn("c2", "terminal", `{"command":"ls"}`),                      // ordinary gate
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -371,10 +351,10 @@ func TestDispatch_PlanBypassesApproval(t *testing.T) {
 	cfg.Mode = domain.ModePlan
 	approver := &fakeApprover{decision: domain.ApprovalAllow}
 	cfg.Approver = approver
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "read_it", "{}"),
-		contentScript("done"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "read_it", "{}"),
+		contentTurn("done"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -432,9 +412,9 @@ func TestStep_CancelMidTool(t *testing.T) {
 	sink := &recordingSink{}
 	started := make(chan struct{})
 	cfg := configWithTools(sink, blockingTool{name: "block", started: started})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "block", "{}"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "block", "{}"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -470,7 +450,7 @@ func TestStep_CancelMidTool(t *testing.T) {
 	}
 	sink2 := &recordingSink{}
 	cfg2 := configWithTools(sink2, fakeTool{name: "block", readOnly: true, result: "ok"})
-	b, err := resumeAgent(cfg2, snap, &scriptedResponder{scripts: [][]provider.Delta{contentScript("recovered")}})
+	b, err := resumeAgent(cfg2, snap, scriptedResponder(t, contentTurn("recovered")))
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
@@ -501,9 +481,9 @@ func TestAbortExchange_AfterCancelUnwedges(t *testing.T) {
 	sink := &recordingSink{}
 	started := make(chan struct{})
 	cfg := configWithTools(sink, blockingTool{name: "block", started: started})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "block", "{}"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "block", "{}"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -548,7 +528,7 @@ func TestAbortExchange_AfterCancelUnwedges(t *testing.T) {
 
 	// A fresh message runs to completion against a working responder — a clean user→assistant
 	// Exchange with no interleaved/orphaned message from the scrapped one.
-	a.upstream = &scriptedResponder{scripts: [][]provider.Delta{contentScript("hello")}}
+	a.upstream = scriptedResponder(t, contentTurn("hello"))
 	if err := a.Submit(domain.UserInput{Text: "start over"}); err != nil {
 		t.Fatalf("Submit after AbortExchange: %v", err)
 	}
@@ -569,7 +549,7 @@ func TestAbortExchange_AfterCancelUnwedges(t *testing.T) {
 func TestAbortExchange_NoExchangeIsNoop(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, fakeTool{name: "noop", readOnly: true, result: "ok"})
-	a, err := newAgent(cfg, &scriptedResponder{scripts: [][]provider.Delta{contentScript("hi")}})
+	a, err := newAgent(cfg, scriptedResponder(t, contentTurn("hi")))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -604,10 +584,10 @@ func (t panickingTool) Execute(context.Context, domain.ToolCall) (domain.ToolRes
 func TestDispatch_ToolPanicSurvives(t *testing.T) {
 	sink := &recordingSink{}
 	cfg := configWithTools(sink, panickingTool{name: "boom"})
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "boom", "{}"),
-		contentScript("recovered and finished"),
-	}}
+	responder := scriptedResponder(t,
+		toolCallTurn("c1", "boom", "{}"),
+		contentTurn("recovered and finished"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -639,7 +619,7 @@ func TestDispatch_ToolPanicSurvives(t *testing.T) {
 // they took effect), while the Text is still consumed and the Exchange completes normally.
 func TestStep_FileRefsAreSurfacedNotSilentlyDropped(t *testing.T) {
 	sink := &recordingSink{}
-	capt := &capturingResponder{reply: "done"}
+	capt := echoResponder(t, "done")
 	a, err := newAgent(baseConfig(sink), capt)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -654,8 +634,8 @@ func TestStep_FileRefsAreSurfacedNotSilentlyDropped(t *testing.T) {
 	if !hasEvent[domain.ErrorEvent](sink.events) {
 		t.Error("FileRefs were dropped without surfacing a loop ErrorEvent")
 	}
-	if !containsContent(capt.got.Messages, "use these") {
-		t.Errorf("the Text was not consumed despite the unresolved FileRefs: %+v", capt.got.Messages)
+	if !containsContent(capt.last().Messages, "use these") {
+		t.Errorf("the Text was not consumed despite the unresolved FileRefs: %+v", capt.last().Messages)
 	}
 }
 
@@ -678,7 +658,7 @@ func TestStep_PostResponseIntercept(t *testing.T) {
 	cfg := baseConfig(sink)
 	cfg.Reactions = []domain.Reaction{interceptReaction("intercepted")}
 
-	a, err := newAgent(cfg, echoResponder{reply: "original"})
+	a, err := newAgent(cfg, echoResponder(t, "original"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -714,10 +694,10 @@ func TestStep_RetryEmitsStreamReset(t *testing.T) {
 	cfg := baseConfig(sink)
 	done := false
 	cfg.Reactions = []domain.Reaction{retryOnceReaction(&done)}
-	responder := &scriptedResponder{scripts: [][]provider.Delta{
-		contentScript("draft"),
-		contentScript("final"),
-	}}
+	responder := scriptedResponder(t,
+		contentTurn("draft"),
+		contentTurn("final"),
+	)
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -763,7 +743,7 @@ func TestStep_DeferredCorrectionExpiresAtExchangeEnd(t *testing.T) {
 	done := false
 	cfg.Reactions = []domain.Reaction{deferOnceReaction(&done, "remember the constraint")}
 
-	a, err := newAgent(cfg, echoResponder{reply: "first answer"})
+	a, err := newAgent(cfg, echoResponder(t, "first answer"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -789,7 +769,7 @@ func TestStep_DeferredCorrectionExpiresAtExchangeEnd(t *testing.T) {
 	sink2 := &recordingSink{}
 	cfg2 := baseConfig(sink2)
 	cfg2.Reactions = cfg.Reactions
-	capt := &capturingResponder{reply: "second answer"}
+	capt := echoResponder(t, "second answer")
 	b, err := resumeAgent(cfg2, snap, capt)
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
@@ -801,8 +781,8 @@ func TestStep_DeferredCorrectionExpiresAtExchangeEnd(t *testing.T) {
 		t.Fatalf("Run (exchange 2): %v", err)
 	}
 
-	if containsContent(capt.got.Messages, "remember the constraint") {
-		t.Errorf("the resumed next-Exchange request carried an expired deferred correction: %+v", capt.got.Messages)
+	if containsContent(capt.last().Messages, "remember the constraint") {
+		t.Errorf("the resumed next-Exchange request carried an expired deferred correction: %+v", capt.last().Messages)
 	}
 }
 
@@ -819,7 +799,7 @@ func toolResultIsError(events []domain.Event) bool {
 	return false
 }
 
-func containsContent(msgs []provider.Message, want string) bool {
+func containsContent(msgs []stubllm.Message, want string) bool {
 	for _, m := range msgs {
 		if strings.Contains(m.Content, want) {
 			return true

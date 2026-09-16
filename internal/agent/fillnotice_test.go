@@ -32,7 +32,7 @@ func fillConfig(sink domain.EventSink) domain.Config {
 func fillAgent(t *testing.T, cfg domain.Config) *Agent {
 	t.Helper()
 
-	a, err := newAgent(cfg, echoResponder{reply: "unused"})
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -93,12 +93,12 @@ func sizedTool(sizes ...int) fakeTool {
 // rendered line, and the firing books rung and percent, not the text.
 func TestContextFillNoticeFiresOncePerRungOnTheClosingToolResult(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "probe", `{"n":1}`), // distinct arguments: a verbatim repeat is the
-		toolCallScript("c2", "probe", `{"n":2}`), // tool-loop breaker's cue, not a climb
-		toolCallScript("c3", "probe", `{"n":3}`),
-		contentScript("done"),
-	}}
+	up := scriptedResponder(t,
+		toolCallTurn("c1", "probe", `{"n":1}`), // distinct arguments: a verbatim repeat is the
+		toolCallTurn("c2", "probe", `{"n":2}`), // tool-loop breaker's cue, not a climb
+		toolCallTurn("c3", "probe", `{"n":3}`),
+		contentTurn("done"),
+	)
 	cfg := fillConfig(sink)
 	// "start" (5) + three calls (12 each) + each fence's own text ride beside the bodies: the
 	// first lands at 8,277 chars = 2,070 tokens = 52% of 3,933; the second near 78%; the third
@@ -280,11 +280,11 @@ func TestContextFillNoticeFirstPostFoldResultFiresItsOwnRung(t *testing.T) {
 // the model no longer sees.
 func TestContextFillNoticeReArmsAfterAnAbortedExchange(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedResponder{scripts: [][]provider.Delta{
-		toolCallScript("c1", "probe", `{"n":1}`), // Exchange 1: one Turn onto the 50 rung, then Esc
-		toolCallScript("c2", "probe", `{"n":2}`), // Exchange 2: straight back onto the 50 rung
-		contentScript("second done"),
-	}}
+	up := scriptedResponder(t,
+		toolCallTurn("c1", "probe", `{"n":1}`), // Exchange 1: one Turn onto the 50 rung, then Esc
+		toolCallTurn("c2", "probe", `{"n":2}`), // Exchange 2: straight back onto the 50 rung
+		contentTurn("second done"),
+	)
 	cfg := fillConfig(sink)
 	cfg.Tools = domain.NewToolRegistry()
 	if err := cfg.Tools.Register(sizedTool(8300, 8300)); err != nil {
@@ -339,13 +339,13 @@ func TestContextFillNoticeReArmsAfterAnAbortedExchange(t *testing.T) {
 func TestContextFillNoticeReArmsAfterACancelledTurnRollsBack(t *testing.T) {
 	sink := &recordingSink{}
 	started := make(chan struct{})
-	up := &scriptedResponder{scripts: [][]provider.Delta{
+	up := scriptedResponder(t,
 		// Turn 1: the probe result fires the 50 rung, then the blocking tool is cancelled and
 		// the Turn rolls back over both.
 		twoToolCallScript(toolReq{"c1", "probe", `{"n":1}`}, toolReq{"c2", "block", "{}"}),
-		toolCallScript("c3", "probe", `{"n":2}`), // the re-attempt: straight back onto the 50 rung
-		contentScript("done"),
-	}}
+		toolCallTurn("c3", "probe", `{"n":2}`), // the re-attempt: straight back onto the 50 rung
+		contentTurn("done"),
+	)
 	cfg := fillConfig(sink)
 	cfg.Tools = domain.NewToolRegistry()
 	if err := cfg.Tools.Register(sizedTool(8300, 8300)); err != nil {
@@ -535,7 +535,7 @@ func TestContextFillNoticeNeverSurvivesASnapshotResume(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-	restored, err := newAgent(fillConfig(&recordingSink{}), echoResponder{reply: "unused"})
+	restored, err := newAgent(fillConfig(&recordingSink{}), echoResponder(t, "unused"))
 	if err != nil {
 		t.Fatalf("newAgent (restore target): %v", err)
 	}

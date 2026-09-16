@@ -14,7 +14,6 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/domain/domaintest"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // ---------------------------------------------------------------------------
@@ -64,7 +63,7 @@ func ladderAgent(t *testing.T, builtins, armed []domain.Reaction) (*Agent, *reco
 	t.Helper()
 
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), echoResponder{reply: "reply"})
+	a, err := newAgent(baseConfig(sink), echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -456,7 +455,7 @@ func TestFirePostResponseInstallsNoSubprocessPermit(t *testing.T) {
 	cfg := permitConfig(domain.ModeAuto, &fakeConfiner{caps: capsBoth()}, false)
 	cfg.Events = sink
 	cfg.Reactions = []domain.Reaction{reaction}
-	a, err := newAgent(cfg, echoResponder{reply: "reply"})
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -522,7 +521,7 @@ func TestNewRejectsReactionsItCannotArm(t *testing.T) {
 			cfg := baseConfig(&recordingSink{})
 			cfg.Reactions = tc.reactions
 
-			_, err := newAgent(cfg, echoResponder{reply: "reply"})
+			_, err := newAgent(cfg, echoResponder(t, "reply"))
 
 			if !errors.Is(err, domain.ErrInvalidReaction) {
 				t.Errorf("newAgent = %v, want ErrInvalidReaction", err)
@@ -540,7 +539,7 @@ func TestNewArmsConfigReactionsInRegistrationOrder(t *testing.T) {
 		probe(log, "second", domain.ClassObserve, nil),
 	}
 
-	a, err := newAgent(cfg, echoResponder{reply: "reply"})
+	a, err := newAgent(cfg, echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -712,7 +711,7 @@ func TestBuiltinEnableSetDropsAGuardWhoseBooleanIsOff(t *testing.T) {
 		}),
 	}}
 
-	if _, err := newAgent(cfg, echoResponder{reply: "reply"}); !errors.Is(err, domain.ErrInvalidReaction) {
+	if _, err := newAgent(cfg, echoResponder(t, "reply")); !errors.Is(err, domain.ErrInvalidReaction) {
 		t.Errorf("newAgent = %v, want ErrInvalidReaction — an off guard still owns its id", err)
 	}
 }
@@ -789,7 +788,7 @@ func TestSetReactionsRebuildsTheLadderWhenOnlyTheNoticeSwitchMoves(t *testing.T)
 // dispatcher on the conversation shape floor/tooluse.go describes, and books a retry.
 func TestBuiltinToolUseEnforcer(t *testing.T) {
 	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), echoResponder{reply: "reply"})
+	a, err := newAgent(baseConfig(sink), echoResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -1041,10 +1040,10 @@ func TestPostResponseSeamClosesOncePerAttemptAcrossARetry(t *testing.T) {
 		sink := &recordingSink{}
 		cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "42"})
 		cfg.Reactions = []domain.Reaction{armedSeamWatcher("watcher")}
-		responder := &captureAllResponder{scripts: [][]provider.Delta{
-			toolCallScript("c1", "frobnicate", `{}`), // not in the menu — the repair guard re-streams
-			contentScript("done"),                    // the retried attempt, which stands
-		}}
+		responder := scriptedResponder(t,
+			toolCallTurn("c1", "frobnicate", `{}`), // not in the menu — the repair guard re-streams
+			contentTurn("done"),                    // the retried attempt, which stands
+		)
 
 		a, err := newAgent(cfg, responder)
 		if err != nil {
@@ -1065,9 +1064,9 @@ func TestPostResponseSeamClosesOncePerAttemptAcrossARetry(t *testing.T) {
 		sink := &recordingSink{}
 		cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: "42"})
 		cfg.Reactions = []domain.Reaction{armedSeamWatcher("watcher")}
-		responder := &captureAllResponder{scripts: [][]provider.Delta{
-			contentScript("done"), // no guard trips — one attempt, one closure
-		}}
+		responder := scriptedResponder(t,
+			contentTurn("done"), // no guard trips — one attempt, one closure
+		)
 
 		a, err := newAgent(cfg, responder)
 		if err != nil {

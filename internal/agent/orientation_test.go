@@ -56,7 +56,7 @@ func TestOrientation_RidesDirectlyAfterThePrompt(t *testing.T) {
 	cfg.ScratchDir = orientationScratchDir
 	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot, orientationSecondRoot} }
 
-	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 	got := a.standingSystem()
 
@@ -87,7 +87,7 @@ func TestOrientation_ReachesTheWire(t *testing.T) {
 	cfg := orientationConfig(t)
 	cfg.ScratchDir = orientationScratchDir
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	got := seedSystemMessage(t, a, responder, "hi")
@@ -102,7 +102,7 @@ func TestOrientation_ReachesTheWire(t *testing.T) {
 func TestOrientation_OmitsFactsTheSessionDoesNotHave(t *testing.T) {
 	cfg := orientationConfig(t) // no ScratchDir, nil ExtraReadRoots
 
-	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 	block := a.orientationBlock()
 
@@ -125,7 +125,7 @@ func TestOrientation_EmptyReadRootsOmitTheLine(t *testing.T) {
 	cfg := orientationConfig(t)
 	cfg.ExtraReadRoots = func() []string { return nil }
 
-	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 	if block := a.orientationBlock(); strings.Contains(block, "Read-only library roots:") {
 		t.Errorf("block states read roots the host mounts none of: %q", block)
@@ -146,7 +146,7 @@ func TestOrientation_NoTemplateAndNoContextFilesSeedsNothing(t *testing.T) {
 	cfg.WorkspaceDir = orientationWorkspaceDir
 	cfg.ScratchDir = orientationScratchDir
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	if got := a.standingSystem(); got != "" {
@@ -161,8 +161,8 @@ func TestOrientation_NoTemplateAndNoContextFilesSeedsNothing(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if n := countSystemMessages(responder.last.Messages); n != 0 {
-		t.Errorf("wire request has %d system messages, want none: %+v", n, responder.last.Messages)
+	if n := countSystemMessages(responder.last().Messages); n != 0 {
+		t.Errorf("wire request has %d system messages, want none: %+v", n, responder.last().Messages)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestOrientation_RidesOnContextFilesAlone(t *testing.T) {
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md") // no SystemPrompt
 	cfg.ScratchDir = orientationScratchDir
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	got := seedSystemMessage(t, a, responder, "hi")
@@ -202,8 +202,8 @@ func TestOrientation_NamesTheContextFilesOnlyWhenTheyExist(t *testing.T) {
 	withFiles := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
 	withFiles.SystemPrompt = "You are apogee working in {{workspace}}."
 
-	loaded := newProfileAgent(t, withFiles, &recordingResponder{reply: "All done."})
-	none := newProfileAgent(t, orientationConfig(t), &recordingResponder{reply: "All done."})
+	loaded := newProfileAgent(t, withFiles, echoResponder(t, "All done."))
+	none := newProfileAgent(t, orientationConfig(t), echoResponder(t, "All done."))
 
 	if block := loaded.orientationBlock(); !strings.Contains(block, bullet) {
 		t.Errorf("a session holding AGENTS.md does not name the context files: %q", block)
@@ -222,7 +222,7 @@ func TestOrientation_SubAgentInheritsTheBlock(t *testing.T) {
 	cfg := seatOrientationConfig(t)
 	cfg.ScratchDir = orientationScratchDir
 
-	parent := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	parent := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 	parent.SetDelegationSeat(fullSeat())
 	child, err := parent.newChildAgent("call_sub", "a delegated task", "")
 	if err != nil {
@@ -252,7 +252,7 @@ func TestOrientation_FollowsAScratchDirMove(t *testing.T) {
 	cfg := orientationConfig(t)
 	cfg.ScratchDir = orientationScratchDir
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	first := seedSystemMessage(t, a, responder, "hi")
@@ -345,7 +345,7 @@ func TestOrientation_EveryModeStatesTheScratchDir(t *testing.T) {
 			cfg.ScratchDir = orientationScratchDir
 			cfg.Confiner = &fakeConfiner{caps: capsBoth()}
 
-			a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+			a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 			block := a.orientationBlock()
 			lines := strings.Split(block, "\n")
@@ -375,7 +375,7 @@ func TestOrientation_WritingModesStateTheScratchDir(t *testing.T) {
 			cfg.ScratchDir = orientationScratchDir
 			cfg.Confiner = &fakeConfiner{caps: capsBoth()}
 
-			a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+			a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 			if block := a.orientationBlock(); !strings.Contains(block, scratchLine(orientationScratchDir)) {
 				t.Errorf("%s omits the scratch line %q:\n%q", mode, scratchLine(orientationScratchDir), block)
@@ -420,7 +420,7 @@ func TestOrientation_PlanStatesWhatItWithholds(t *testing.T) {
 		cfg.Mode = domain.ModePlan
 		cfg.ScratchDir = orientationScratchDir
 
-		a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+		a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 		block := a.orientationBlock()
 		if got := modeLine(block); got != planModeBullet {
@@ -438,7 +438,7 @@ func TestOrientation_PlanStatesWhatItWithholds(t *testing.T) {
 		cfg := orientationConfig(t) // no ScratchDir
 		cfg.Mode = domain.ModePlan
 
-		a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+		a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 		block := a.orientationBlock()
 		if got := modeLine(block); got != planModeBulletNoScratch {
@@ -460,7 +460,7 @@ func TestOrientation_WritingModesStateNoModeBullet(t *testing.T) {
 			cfg.ScratchDir = orientationScratchDir
 			cfg.Confiner = &fakeConfiner{caps: capsBoth()}
 
-			a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+			a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 			if block := a.orientationBlock(); modeLine(block) != "" {
 				t.Errorf("%s renders a Mode bullet it has no use for:\n%q", mode, block)
@@ -476,7 +476,7 @@ func TestOrientation_PlanBulletFollowsAModeFlip(t *testing.T) {
 	cfg.Mode = domain.ModeAskBefore
 	cfg.ScratchDir = orientationScratchDir
 
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, cfg, responder)
 
 	before := seedSystemMessage(t, a, responder, "hi")
@@ -584,7 +584,7 @@ func seatOrientationConfig(t *testing.T) domain.Config {
 // session seat, and no Sub-agent server installed until a test installs one.
 func seatOrientationAgent(t *testing.T) *Agent {
 	t.Helper()
-	return newProfileAgent(t, seatOrientationConfig(t), &recordingResponder{reply: "All done."})
+	return newProfileAgent(t, seatOrientationConfig(t), echoResponder(t, "All done."))
 }
 
 // fullSeat is a Sub-agent server described in all three parts — the shape a host builds from an
@@ -610,7 +610,7 @@ func TestOrientation_PlainToolStatesNoDelegationsBullet(t *testing.T) {
 	cfg.ScratchDir = orientationScratchDir
 	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot} }
 
-	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 	want := strings.Join([]string{
 		orientationTemplate[orientationHeaderLine],
@@ -708,7 +708,7 @@ func TestOrientation_NoSeatFactsAtAllOmitTheBullet(t *testing.T) {
 	cfg.Tools = seatChoiceRegistry(t)
 	cfg.Model = "" // no bound model, no server name, no description: nothing describes the near seat
 
-	a := newProfileAgent(t, cfg, &recordingResponder{reply: "All done."})
+	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
 	if block := a.orientationBlock(); strings.Contains(block, delegationsLabel) {
 		t.Errorf("block states a Delegations bullet with no seat to name:\n%q", block)
@@ -776,7 +776,7 @@ func TestOrientation_DelegationsBulletIsConstantAcrossABeat(t *testing.T) {
 // it travels in the position-0 system message the provider actually receives, which is the only
 // place it can do the model any good.
 func TestOrientation_DelegationsBulletReachesTheWire(t *testing.T) {
-	responder := &recordingResponder{reply: "All done."}
+	responder := echoResponder(t, "All done.")
 	a := newProfileAgent(t, seatOrientationConfig(t), responder)
 	a.SetDelegationSeat(fullSeat())
 
