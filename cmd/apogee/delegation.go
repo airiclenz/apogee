@@ -184,12 +184,6 @@ type delegationWiring struct {
 	// `effort-dialect:` — a fact about the ENTRY rather than about the routing state, so it is said
 	// once and not again each time the box goes down and comes back (dialectAdvice).
 	dialectAdvised bool
-	// base is the session's own Config, carried so a re-read `servers:` list assembles a new entry
-	// out of exactly what startup assembled the old one from. Nothing reads it today: the per-seat
-	// posture it used to build — the entry's own catalogue of rows — retired with the catalogue
-	// itself (ADR 0076 decision 11), and stage 2's per-seat `reactions:` resolver is what needs it
-	// back.
-	base apogee.Config
 	// userProfiles reads the `model-profiles:` user tier as it stands NOW, so a profile committed
 	// mid-session reaches the next beat's resolution rather than the next launch.
 	userProfiles func() []profiles.Entry
@@ -229,53 +223,46 @@ type delegationWiring struct {
 // session whose config says nothing about delegation routing behaves exactly as it did before
 // (ADR 0045 §4's floor, and the default) until an edit says otherwise.
 //
-// The name is a parameter rather than something read back off base, which is the session's own
-// apogee.Config and carries no such field: the key lives in the config file's own schema, so the
-// composition root that resolved it passes it in — and item by item, that is the SINGLE place routing
-// consults the key, which is what a future per-call parameter slots into without touching this
-// recursion path.
+// The name is a parameter rather than something read off the session's own apogee.Config, which
+// carries no such field: the key lives in the config file's own schema, so the composition root that
+// resolved it passes it in — and item by item, that is the SINGLE place routing consults the key,
+// which is what a future per-call parameter slots into without touching this recursion path.
 //
 // A name matching no entry is not a refusal: the wiring holds no server, delegations fall back to the
 // session's upstream, and the notice missingNameNotice renders is said on the first observe.
 //
-// base is the session's own Config, carried for the entry-assembly step (see the field): it reads
-// nothing today, because the per-seat catalogue it used to build retired with the catalogue itself
-// (ADR 0071), and the `mechanisms:` key that named it left the schema with ADR 0076 A6.
-//
-// Nothing about a named entry can be refused here any more: the entry was validated as a `servers:`
-// row before this seam ever saw it, and the seat's whole posture is the `bypass:` pointer. The error
-// return is the seam's contract with its live siblings (relist, Retarget), which install a re-read
-// list validate-then-commit.
+// Nothing about a named entry can be refused here: the entry was validated as a `servers:` row
+// before this seam ever saw it, and the seat's whole posture is the `bypass:` pointer — so the
+// constructor cannot fail. The live siblings that install a re-read list (relist, Retarget) still
+// answer an error, because a NAME can be wrong there in ways it cannot be here.
 func newDelegationWiring(
 	name string,
 	servers func() []config.ServerEntry,
-	base apogee.Config,
 	engine delegationSetter,
 	userProfiles func() []profiles.Entry,
 	notify func(string),
 	keys *config.KeyResolver,
-) (*delegationWiring, error) {
+) *delegationWiring {
 	entries := servers()
 	wiring := &delegationWiring{
 		target:        name,
 		configured:    name,
 		servers:       servers,
 		missingNotice: missingNameNotice(name, entries),
-		base:          base,
 		userProfiles:  userProfiles,
 		notify:        notify,
 		keys:          keys,
 		engine:        engine,
 	}
 	if entry, ok := config.SubAgentsServerTarget(entries, name); ok {
-		wiring.server = newSubAgentServer(entry, base)
+		wiring.server = newSubAgentServer(entry)
 	}
 	// What the MODEL is told the far seat is (ADR 0069), installed here and not on a beat: these are
 	// the human's own words for the box, so they are known the moment the entry is resolved and they
 	// do not move again until the human moves the key. A name matching nothing installs nil — the
 	// same as no key at all — because there is no entry whose description to relay.
 	engine.SetDelegationSeat(delegationSeatOf(wiring.server))
-	return wiring, nil
+	return wiring
 }
 
 // delegationSeatOf renders the installed Sub-agent server as the facts the orientation block names
@@ -329,12 +316,14 @@ func missingNameNotice(name string, entries []config.ServerEntry) string {
 // reload share, so a Sub-agent server that arrives hours into a session is assembled exactly as one
 // named at launch.
 //
-// It cannot fail. It could, while a seat carried a `mechanisms:` map of its own to validate; that
-// key went with the catalogue it named (ADR 0076 A6), and the seat's whole posture is now the
-// `bypass:` pointer, whose nil-ness is an instruction rather than a value that can be wrong. The
-// entry itself was already validated as a `servers:` row (config.ValidateServers) long before it
-// reaches here, so the assembly has nothing left to refuse.
-func newSubAgentServer(entry config.ServerEntry, base apogee.Config) *subAgentServer {
+// It cannot fail, and it reads nothing but the entry. It could fail while a seat carried a
+// `mechanisms:` map of its own to validate; that key went with the catalogue it named (ADR 0076
+// A6), and the seat's whole posture is now the `bypass:` pointer, whose nil-ness is an instruction
+// rather than a value that can be wrong. The entry itself was already validated as a `servers:` row
+// (config.ValidateServers) long before it reaches here, so the assembly has nothing left to refuse —
+// and nothing to read off the session's own Config either, since ADR 0076 A2 ships the global
+// reactions file only.
+func newSubAgentServer(entry config.ServerEntry) *subAgentServer {
 	return &subAgentServer{
 		entry: entry,
 		beat:  subAgentBeat(entry),
@@ -706,7 +695,7 @@ func (d *delegationWiring) relist(name string, entries []config.ServerEntry) err
 
 	var next *subAgentServer
 	if found {
-		next = newSubAgentServer(entry, d.base)
+		next = newSubAgentServer(entry)
 	}
 	// Whether what is LATCHED still describes the named server. An entry edited in place still
 	// does — same name, same endpoint, so the delegations in flight are going to the right box and
@@ -791,7 +780,7 @@ func (d *delegationWiring) Retarget(name string) error {
 		if !found {
 			return fmt.Errorf("no servers entry named %q", name)
 		}
-		next = newSubAgentServer(entry, d.base)
+		next = newSubAgentServer(entry)
 	}
 
 	d.mu.Lock()

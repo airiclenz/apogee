@@ -3353,12 +3353,9 @@ func TestFiringBindingCarriesTheLiveSubAgentsServer(t *testing.T) {
 		{Name: "other-grunt", Endpoint: "http://127.0.0.1:3333"},
 	}
 	live := newLiveSettings(config.Options{Servers: entries, SubAgentsServer: "grunt"})
-	wiring, err := newDelegationWiring(
-		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil,
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil,
 		config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring: %v", err)
-	}
 	host := delegationHost{w: &rootWiring{live: live, delegation: wiring}}
 
 	if opts, _ := live.firingBinding(upstreamBinding{}); opts.SubAgentsServer != "grunt" {

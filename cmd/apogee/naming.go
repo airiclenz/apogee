@@ -17,7 +17,6 @@ package main
 
 import (
 	"context"
-	"strings"
 	"sync/atomic"
 	"time"
 
@@ -115,11 +114,9 @@ func (n *delegationNamer) setEnabled(on bool) { n.enabled.Store(on) }
 // same silence every other failure takes (ADR 0068 decision 8), which is why the gate needs no
 // error of its own.
 //
-// The client is built per call and retries are OFF, both for titleWiring.generate's reasons: the
-// binding moves under a running session, and a cosmetic call that failed must not re-POST twice
-// onto a single-slot server ahead of the child's own next Turn. [title.ErrTruncated] is the one
-// error synthesised here rather than passed on — a reply the server cut off at the token cap with
-// nothing in it is a REPORTABLE cause rather than the generic "nothing came back".
+// The call itself — the per-call client with retries OFF, the thinking-off fallback and the
+// [title.ErrTruncated] verdict — is namingCall's, shared with the session's namer; only the Upstream
+// picked and the prompt rendered are this method's.
 //
 // One honest looseness: the binding is read WHEN THE NAME IS ASKED FOR, not when the child was
 // spawned. A `/server` switch or a `/sub-agents-server` retarget landing in the seconds between the
@@ -132,18 +129,7 @@ func (n *delegationNamer) NameDelegation(ctx context.Context, req domain.Delegat
 	}
 
 	binding, dialect := n.upstream(req.Routed)
-	client := provider.NewClient(binding.Endpoint, binding.Model,
-		provider.WithRequestTimeout(n.requestTimeout), provider.WithAPIKey(binding.APIKey),
-		provider.WithMaxRetries(0))
-
-	resp, err := respondDroppingThinkingOff(ctx, client, title.DelegationPrompt(req.Task, dialect))
-	if err != nil {
-		return "", err
-	}
-	if resp.FinishReason == finishReasonLength && strings.TrimSpace(resp.Content) == "" {
-		return "", title.ErrTruncated
-	}
-	return resp.Content, nil
+	return namingCall(ctx, binding, n.requestTimeout, title.DelegationPrompt(req.Task, dialect))
 }
 
 // upstream picks the Upstream this call is built on: the Sub-agent server for a routed child, this

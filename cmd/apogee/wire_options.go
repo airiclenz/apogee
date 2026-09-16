@@ -65,7 +65,6 @@ func (w *rootWiring) options() tui.Options {
 		Model:     w.opts.Model,
 		Endpoint:  w.opts.Endpoint,
 		Mode:      w.mode,
-		Bypass:    w.opts.Bypass,
 		Workspace: w.roots.workspace,
 		// The apogee home THIS run resolved (--config / APOGEE_CONFIG included), so a report that
 		// names a path — /skills telling an empty catalog where discovery looked — names the folder

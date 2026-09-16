@@ -257,11 +257,8 @@ func TestDelegationWiringRecordsTheTargetsBindingForNaming(t *testing.T) {
 	t.Parallel()
 
 	entries := []config.ServerEntry{{Name: "grunt", Endpoint: "http://127.0.0.1:2222", Model: "cheap-7b"}}
-	wiring, err := newDelegationWiring(
-		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring: %v", err)
-	}
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
 
 	if _, _, ok := wiring.routedBinding(); ok {
 		t.Error("routedBinding reports a target before the first beat landed one")

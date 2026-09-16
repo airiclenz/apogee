@@ -279,7 +279,7 @@ keys.
 
 **Commit:** `refactor(cmd): one projectConfig fills the keys both Drivers share`
 
-## 7. Host trims: delegation `base`, the namers, the dead TUI seam
+## 7. Host trims: delegation `base`, the namers, the dead TUI seam — ✅ DONE (2026-09-16)
 
 **What.** (a) `cmd/apogee/delegation.go`: drop `delegationWiring.base`, `newSubAgentServer`'s
 unread `base`, the never-produced error return of `newDelegationWiring`, and the `base` parameter

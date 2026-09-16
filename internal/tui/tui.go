@@ -777,8 +777,6 @@ type Engine interface {
 	// replaced by it.
 	// Goroutine-safe like ConfineToWorkspace.
 	ThinkingEffort() (override, profile domain.ThinkingEffort)
-	// Close releases the Agent's resources.
-	Close() error
 }
 
 // ----------------------------------------------------------------------------
@@ -787,13 +785,11 @@ type Engine interface {
 
 // Options carries the wiring the binary resolves (the composition root, cmd/apogee) and
 // hands the TUI: the display values it renders in its status line but cannot read off the
-// Engine (model, endpoint, autonomy mode, bypass flag, workspace root), plus the session
-// saver seam.
+// Engine (model, endpoint, autonomy mode, workspace root), plus the session saver seam.
 type Options struct {
 	Model     string
 	Endpoint  string
 	Mode      domain.Mode
-	Bypass    bool
 	Workspace string
 
 	// ConfigHome is the resolved apogee home directory — `~/.apogee` by default, or whatever

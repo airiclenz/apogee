@@ -80,24 +80,43 @@ func newTitleWiring(binding func() upstreamBinding, dialect func() provider.Effo
 // passes on: a reply the server cut off at the token cap with nothing in it is a REPORTABLE cause,
 // not the generic "nothing usable came back" a caller would otherwise be left to guess at.
 func (w titleWiring) generate(ctx context.Context, prompts []string) (string, error) {
-	binding := w.binding()
-	// Retries OFF, unlike every other client the binary builds. The Client's default policy re-POSTs
-	// a faulted attempt twice, and here each attempt is bounded by requestTimeout — so one naming call
-	// could occupy a single-slot server's queue three times over, for a cosmetic result that is dropped
-	// on the first failure anyway. "One out-of-band call" is the contract; a title nobody asked twice
-	// for is not worth a second slot ahead of the user's next Exchange.
+	return namingCall(ctx, w.binding(), w.requestTimeout,
+		title.Prompt(prompts, w.workspaceBase, w.now(), w.dialect()))
+}
+
+// namingCall is the ONE out-of-band naming completion both namers make — the session's
+// (titleWiring.generate) and the delegation's (delegationNamer.NameDelegation): it dials binding
+// with the client policy a naming call takes, sends req through the thinking-off fallback, and
+// answers the model's RAW reply. The two namers differ only in which Upstream they pick and which
+// prompt they render, so everything the CALL is made of lives here and nowhere else.
+//
+// Retries OFF, unlike every other client the binary builds. The Client's default policy re-POSTs
+// a faulted attempt twice, and here each attempt is bounded by timeout — so one naming call could
+// occupy a single-slot server's queue three times over, for a cosmetic result that is dropped on the
+// first failure anyway. "One out-of-band call" is the contract; a name nobody asked twice for is not
+// worth a second slot ahead of the user's next Exchange. The client is built per call rather than
+// held because the binding moves under a running session (a `/server` switch, a rebind, a retarget),
+// and reading it at call time is the whole of following it.
+//
+// [title.ErrTruncated] is the one error synthesised here rather than passed on: a thinking model on
+// a server whose template ignored the switch burns the entire cap on reasoning and returns
+// finish_reason "length" with no content. Passing that back as ("", nil) makes it indistinguishable
+// from a garbage reply, so it is named instead. A cut-off reply that still carries text is NOT this
+// case — a truncated title is a title.
+func namingCall(
+	ctx context.Context,
+	binding upstreamBinding,
+	timeout time.Duration,
+	req provider.Request,
+) (string, error) {
 	client := provider.NewClient(binding.Endpoint, binding.Model,
-		provider.WithRequestTimeout(w.requestTimeout), provider.WithAPIKey(binding.APIKey),
+		provider.WithRequestTimeout(timeout), provider.WithAPIKey(binding.APIKey),
 		provider.WithMaxRetries(0))
 
-	resp, err := respondDroppingThinkingOff(ctx, client, title.Prompt(prompts, w.workspaceBase, w.now(), w.dialect()))
+	resp, err := respondDroppingThinkingOff(ctx, client, req)
 	if err != nil {
 		return "", err
 	}
-	// The failure this plan exists for: a thinking model on a server whose template ignored the switch
-	// burns the entire cap on reasoning and returns finish_reason "length" with no content. Passing
-	// that back as ("", nil) makes it indistinguishable from a garbage reply, so it is named instead. A
-	// cut-off reply that still carries text is NOT this case — a truncated title is a title.
 	if resp.FinishReason == finishReasonLength && strings.TrimSpace(resp.Content) == "" {
 		return "", title.ErrTruncated
 	}
@@ -127,7 +146,7 @@ func (w titleWiring) generate(ctx context.Context, prompts []string) (string, er
 // such a rejection escapes on the first POST instead. `title.Prompt` is the only namer today and it
 // asks for off, so the narrower guard is behaviour-preserving — it just says what it means.
 //
-// It does not soften the retries-OFF contract in [titleWiring.generate]. That policy is about queue
+// It does not soften the retries-OFF contract in [namingCall]. That policy is about queue
 // time, and a 4xx comes back before the server generates a token — the second POST costs the user's
 // next Exchange nothing, where a re-POST of a faulted attempt would have cost it a whole generation.
 func respondDroppingThinkingOff(ctx context.Context, client *provider.Client, req provider.Request) (provider.RawResponse, error) {

@@ -315,11 +315,8 @@ func TestNewDelegationWiringWithoutATargetObservesNothing(t *testing.T) {
 	}
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
-	wiring, err := newDelegationWiring(
-		"", staticServerList(entries), validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring with no target named: %v", err)
-	}
+	wiring := newDelegationWiring(
+		"", staticServerList(entries), spy, noProfiles, notices.add, config.NewKeyResolver(""))
 	if wiring.server != nil {
 		t.Error("a monitor was constructed for a config that named no Sub-agent server")
 	}
@@ -342,11 +339,8 @@ func TestNewDelegationWiringBuildsTheNamedEntry(t *testing.T) {
 		{Name: "grunt", Endpoint: "http://127.0.0.1:2222", Model: "qwen3-4b"},
 		{Name: "other-grunt", Endpoint: "http://127.0.0.1:3333"},
 	}
-	wiring, err := newDelegationWiring(
-		"grunt", staticServerList(entries), validCfg(t), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring: %v", err)
-	}
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
 	if wiring.server == nil || wiring.server.entry.Name != "grunt" {
 		t.Fatalf("wired server = %+v; want the entry the key names", wiring.server)
 	}
@@ -371,11 +365,8 @@ func TestNewDelegationWiringSaysWhichNameWentMissing(t *testing.T) {
 	}
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
-	wiring, err := newDelegationWiring(
-		"grunt", staticServerList(entries), validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring with a stale name: %v", err)
-	}
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), spy, noProfiles, notices.add, config.NewKeyResolver(""))
 	if wiring.server != nil {
 		t.Error("a monitor was constructed for a name no entry carries")
 	}
@@ -429,7 +420,6 @@ func TestDelegationWiringObservePushesWhatTheBeatResolvedTo(t *testing.T) {
 func TestNewDelegationWiringTakesThePostureOfTheNamedEntry(t *testing.T) {
 	t.Parallel()
 
-	base := validCfg(t)
 	off, on := false, true
 	entries := []config.ServerEntry{
 		{Name: "here", Endpoint: "http://127.0.0.1:1111", Bypass: &off},
@@ -439,11 +429,8 @@ func TestNewDelegationWiringTakesThePostureOfTheNamedEntry(t *testing.T) {
 		t.Fatalf("posture on an entry the key does not name: %v; want the list accepted", err)
 	}
 
-	wiring, err := newDelegationWiring(
-		"grunt", staticServerList(entries), base, &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring: %v", err)
-	}
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), &delegationSpy{}, noProfiles, nil, config.NewKeyResolver(""))
 	if wiring.server == nil || wiring.server.entry.Bypass == nil || !*wiring.server.entry.Bypass {
 		t.Fatalf("wired posture = %+v; want the named entry's own bypass", wiring.server)
 	}
@@ -848,12 +835,9 @@ func TestDelegationRelistNamesATarget(t *testing.T) {
 
 	spy := &delegationSpy{}
 	notices := &noticeSpy{}
-	wiring, err := newDelegationWiring("",
+	wiring := newDelegationWiring("",
 		staticServerList([]config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}}),
-		validCfg(t), spy, noProfiles, notices.add, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring: %v", err)
-	}
+		spy, noProfiles, notices.add, config.NewKeyResolver(""))
 
 	added := []config.ServerEntry{
 		{Name: "here", Endpoint: "http://127.0.0.1:1111"},
@@ -1066,7 +1050,6 @@ func retargetableWiring(
 	wiring := testDelegationWiring(entry, observed, engine, notices)
 	wiring.target, wiring.configured = entry.Name, entry.Name
 	wiring.servers = staticServerList(entries)
-	wiring.base = validCfg(t)
 	return wiring
 }
 
@@ -1534,11 +1517,8 @@ func TestDelegationSeatFactsFollowTheHumanDoors(t *testing.T) {
 	entries := []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}, grunt}
 
 	spy := &delegationSpy{}
-	wiring, err := newDelegationWiring(
-		"grunt", staticServerList(entries), validCfg(t), spy, noProfiles, nil, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring: %v", err)
-	}
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), spy, noProfiles, nil, config.NewKeyResolver(""))
 	want := &apogee.DelegationSeat{
 		Name: "grunt", Description: "fast local 4B — search and edits", Model: "qwen3-4b",
 	}
@@ -1583,20 +1563,15 @@ func TestDelegationSeatIsNilWithoutAnEntryToDescribe(t *testing.T) {
 	entries := []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}}
 
 	unset := &delegationSpy{}
-	if _, err := newDelegationWiring(
-		"", staticServerList(entries), validCfg(t), unset, noProfiles, nil, config.NewKeyResolver("")); err != nil {
-		t.Fatalf("newDelegationWiring with no key: %v", err)
-	}
+	newDelegationWiring(
+		"", staticServerList(entries), unset, noProfiles, nil, config.NewKeyResolver(""))
 	if len(unset.seats) != 1 || unset.seats[0] != nil {
 		t.Errorf("seats with the key unset = %+v; want exactly one nil", unset.seats)
 	}
 
 	stale := &delegationSpy{}
-	wiring, err := newDelegationWiring(
-		"grunt", staticServerList(entries), validCfg(t), stale, noProfiles, nil, config.NewKeyResolver(""))
-	if err != nil {
-		t.Fatalf("newDelegationWiring with a stale name: %v", err)
-	}
+	wiring := newDelegationWiring(
+		"grunt", staticServerList(entries), stale, noProfiles, nil, config.NewKeyResolver(""))
 	if len(stale.seats) != 1 || stale.seats[0] != nil {
 		t.Errorf("seats for a name no entry carries = %+v; want exactly one nil", stale.seats)
 	}

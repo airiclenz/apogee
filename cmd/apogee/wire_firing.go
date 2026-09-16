@@ -366,10 +366,9 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	}
 
 	// Where this run's delegations go, resolved off the same `sub-agents-server:` key a session
-	// resolves and handed back for the Driver to latch through run.Spec. It is resolved AFTER the
-	// Config above because the named entry's server is built against it (newSubAgentServer),
-	// and every way it can fail leaves the run unrouted with a notice — never an error.
-	routing, routingNotice := resolveFiringRouting(ctx, in, keys, cfg)
+	// resolves and handed back for the Driver to latch through run.Spec. Every way it can fail
+	// leaves the run unrouted with a notice — never an error.
+	routing, routingNotice := resolveFiringRouting(ctx, in, keys)
 	if routingNotice != "" {
 		notices = append(notices, routingNotice)
 	}
@@ -468,15 +467,10 @@ type firingRouting struct {
 // visible degrade a session takes (ADR 0042), and the reason is stronger here: a Firing runs while
 // nobody is watching, so refusing to start over a grunt box that is merely down would turn a
 // scheduled run into a silent gap in the record.
-//
-// base is the run's own composed Config, carried for the reason the session's delegation holder
-// carries it: the per-seat posture it used to build retired with the catalogue itself
-// (ADR 0076 decision 11), and stage 2's per-seat `reactions:` resolver is what needs it back.
 func resolveFiringRouting(
 	ctx context.Context,
 	in firingInputs,
 	keys *config.KeyResolver,
-	base apogee.Config,
 ) (firingRouting, string) {
 	name := in.opts.SubAgentsServer
 	if name == "" {
@@ -492,7 +486,7 @@ func resolveFiringRouting(
 
 	// The same build a session's startup and its config reloads go through, so a routed Firing
 	// assembles its seat exactly as a session does.
-	server := newSubAgentServer(entry, base)
+	server := newSubAgentServer(entry)
 	// The far seat, installed on the ENTRY rather than on the observation below: the words are the
 	// human's and they do not move when the box does (ADR 0069, delegationSeatOf).
 	seat := delegationSeatOf(server)
