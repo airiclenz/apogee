@@ -1,0 +1,43 @@
+# The upstream the wire tests talk to (ADR 0078): the shortest tool-use loop, so the same script
+# can be played over EITHER wire and the assertion is about the route it travelled, not the
+# conversation. A read of the workspace's only file, the answer once the result is back, and usage
+# on both calls — with a cached share on each, because the Messages wire carries that share OUTSIDE
+# its input count (cache_read_input_tokens) and the numbers the headless `usage` line reports are
+# only right if the provider adds it back (ADR 0075 D10: prompt_tokens, completion_tokens,
+# cached_prompt_tokens — the same names whichever wire answered).
+#
+# The `when:` turns are matched before the ordered ones, first match wins: the title turn answers
+# what the TUI asks on its own account off the first prompt, the two in the middle are the loop,
+# and the catch-all takes anything a Mechanism asks. AssertConsumed proves the loop actually ran.
+model: wire-model
+turns:
+    # The session title. The TUI asks for one off the first prompt, so this has to be matched
+    # BEFORE the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Wire tool loop
+    # Turn 1 — the read. On the anthropic wire this is a tool_use block; on the chat wire, a
+    # tool_calls entry. The call id is left unset, so the server numbers it `call_1` by position.
+    - when:
+        last_message: ^Read the workspace file
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+      usage:
+        prompt: 420
+        completion: 18
+        cached: 100
+    # Turn 2 — the answer, once the result is back: a tool_result block on the anthropic wire, a
+    # role-tool message on the chat wire. Chunked so the reply streams rather than lands whole.
+    - when:
+        tool_result: read_file
+      text: The file says hello.
+      chunk_runes: 5
+      usage:
+        prompt: 470
+        completion: 9
+        cached: 300
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: OK.

@@ -318,7 +318,11 @@ NOTES (2026-09-16): in-band error codes render as Messages class slugs (429 → 
 
 **Commit:** `feat(stubllm): a /v1/messages route serves the same scripts on the Anthropic wire`
 
-## 14. End-to-end: a tool-use loop over the anthropic wire (apogee-6fp)
+## 14. End-to-end: a tool-use loop over the anthropic wire (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the bead close (`bd close apogee-6fp --reason="test(cmd/apogee): a full tool-use loop completes over the anthropic wire"`) belongs to the commit step per the plan's standing requirement; the implementer does not commit, so it is left to the verifier.
+NOTES (2026-09-16): the second case (default entry → chat completions) is driven through the TUI on the same helper as the first, so both wires are judged from the same run shape; the headless usage half runs only on the anthropic case, where the wire's cache accounting differs.
+NOTES (2026-09-16): `TestE2EAnthropicWireCompletesAToolLoop` is not parallel — its headless half swaps the package-level `runOnce` seam through `headlessEventLines`, which `TestNoParallelTestSwapsAPackageSeam` (item 1) forbids under `t.Parallel()`, mirroring 52e0d677; `TestE2EDefaultWireStaysChatCompletions` swaps nothing and keeps `t.Parallel()`.
 
 **What:** Depends on items 12, 13. The bead's acceptance. `cmd/apogee/e2e_wire_anthropic_test.go`: launch the TUI (`launchTUI`, `e2e_support_test.go`) against a stubllm script with a `wire: anthropic` server entry in the config, drive a prompt that triggers a `read_file` tool call and a final answer, and judge: the stub's request log shows `/v1/messages` requests only, the tool result arrived as a `tool_result` block, the final frame shows the answer, the headless `usage` line (run the same script via `apogee headless --format json`) carries `prompt_tokens`/`completion_tokens`/`cached_prompt_tokens` mapped from the Anthropic usage (ADR 0075 D10 names unchanged). Second case: the default entry still hits `/v1/chat/completions`. CHANGELOG sidecar for the whole feature lands here; close apogee-6fp.
 
