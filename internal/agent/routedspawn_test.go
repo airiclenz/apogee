@@ -14,15 +14,11 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
-	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // routedTarget is the usable Sub-agent server these tests route to: another box, another model,
@@ -519,21 +515,7 @@ func TestRoutedSpawnWithoutATargetDialectKeepsTheParents(t *testing.T) {
 func TestRoutedChildSummarizerSpeaksTheTargetsDialectOnTheWire(t *testing.T) {
 	t.Parallel()
 
-	var (
-		mu     sync.Mutex
-		bodies [][]byte
-	)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		raw, _ := io.ReadAll(r.Body)
-		mu.Lock()
-		bodies = append(bodies, raw)
-		mu.Unlock()
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"FOLDED\"},\"finish_reason\":null}]}\n\n")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	t.Cleanup(srv.Close)
+	srv := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Text: "FOLDED"}}})
 
 	parent := routingParent(t)
 	parent.effortDialect = provider.EffortDialectReasoning // the ORCHESTRATOR's server's shape
@@ -549,24 +531,17 @@ func TestRoutedChildSummarizerSpeaksTheTargetsDialectOnTheWire(t *testing.T) {
 		t.Fatalf("routed child Compact: %v", err)
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if len(bodies) != 1 {
-		t.Fatalf("requests to the Sub-agent server = %d, want exactly the child's one summary call", len(bodies))
+	requests := srv.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("requests to the Sub-agent server = %d, want exactly the child's one summary call", len(requests))
 	}
-	var sent struct {
-		ChatTemplateKwargs map[string]any  `json:"chat_template_kwargs"`
-		Reasoning          json.RawMessage `json:"reasoning"`
-	}
-	if err := json.Unmarshal(bodies[0], &sent); err != nil {
-		t.Fatalf("summary request body: %v", err)
-	}
+	sent := requests[0].Effort
 	if enabled, ok := sent.ChatTemplateKwargs["enable_thinking"].(bool); !ok || enabled {
 		t.Errorf("summary request chat_template_kwargs = %v, want enable_thinking false in the target's shape",
 			sent.ChatTemplateKwargs)
 	}
 	if sent.Reasoning != nil {
-		t.Errorf("summary request carries reasoning %s — the parent's shape reached the routed server",
+		t.Errorf("summary request carries reasoning %v — the parent's shape reached the routed server",
 			sent.Reasoning)
 	}
 }

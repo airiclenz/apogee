@@ -15,6 +15,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // TestNewAgentBuildsATopLevelAgent pins the other side of the split construction path: newAgent
@@ -56,25 +57,26 @@ func TestNewAgentBuildsATopLevelAgent(t *testing.T) {
 // The Inspector's arming seam (Config.Inspector → provider wire observer → WireEvent)
 // ---------------------------------------------------------------------------
 
-// wireUpstream is a hermetic Upstream that answers with a two-chunk streamed completion and
-// records the body it was posted, so a test can hold the WireEvent's payload against the bytes
-// that actually went out. The mutex is load-bearing for the reason authRecorder's is: the handler
-// runs on the server's goroutine while the test reads afterwards.
+// wireUpstream records the body posted to a stubllm upstream, so a test can hold the WireEvent's
+// payload against the bytes that actually went out — a byte-for-byte comparison the stub's own
+// request log (a decoded Request, not bytes) cannot make. The mutex is load-bearing for the
+// reason authRecorder's is: the handler runs on the server's goroutine while the test reads
+// afterwards.
 type wireUpstream struct {
 	mu   sync.Mutex
 	body string
 }
 
-func (u *wireUpstream) serve(w http.ResponseWriter, r *http.Request) {
-	posted, _ := io.ReadAll(r.Body)
-	u.mu.Lock()
-	u.body = string(posted)
-	u.mu.Unlock()
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"seen\"},\"finish_reason\":null}]}\n\n")
-	_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
+// record is the body-recording middleware in front of the stub's handler.
+func (u *wireUpstream) record(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posted, _ := io.ReadAll(r.Body)
+		u.mu.Lock()
+		u.body = string(posted)
+		u.mu.Unlock()
+		r.Body = io.NopCloser(strings.NewReader(u.body))
+		next.ServeHTTP(w, r)
+	})
 }
 
 // posted returns the recorded request body under the recorder's lock.
@@ -85,11 +87,19 @@ func (u *wireUpstream) posted(t *testing.T) string {
 	return u.body
 }
 
-// newWireUpstream starts the recording Upstream and returns it with its URL.
+// seenScript is the one-word reply the Inspector tests stream: short enough to arrive in one
+// delta, so the response record's payload lines are known.
+func seenScript() stubllm.Script {
+	return stubllm.Script{Turns: []stubllm.Turn{{Text: "seen", Repeat: true}}}
+}
+
+// newWireUpstream starts the recording Upstream — the recorder in front of seenScript — and
+// returns it with its URL.
 func newWireUpstream(t *testing.T) (*wireUpstream, string) {
 	t.Helper()
 	up := &wireUpstream{}
-	srv := httptest.NewServer(http.HandlerFunc(up.serve))
+	stub := stubllm.InProcess(t, seenScript())
+	srv := httptest.NewServer(up.record(stub.Handler()))
 	t.Cleanup(srv.Close)
 	return up, srv.URL
 }
@@ -187,10 +197,9 @@ func TestInspectorArmsWireEventsThroughTheSink(t *testing.T) {
 func TestInspectorOffEmitsNoWireEvents(t *testing.T) {
 	t.Parallel()
 
-	_, url := newWireUpstream(t)
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Endpoint = url // cfg.Inspector stays false
+	cfg.Endpoint = stubllm.New(t, seenScript()).URL // cfg.Inspector stays false
 
 	a, err := New(cfg)
 	if err != nil {
@@ -209,18 +218,17 @@ func TestInspectorOffEmitsNoWireEvents(t *testing.T) {
 func TestInspectorSurvivesASwitchUpstream(t *testing.T) {
 	t.Parallel()
 
-	_, first := newWireUpstream(t)
-	_, second := newWireUpstream(t)
+	second := stubllm.New(t, seenScript())
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)
-	cfg.Endpoint = first
+	cfg.Endpoint = stubllm.New(t, seenScript()).URL
 	cfg.Inspector = true
 
 	a, err := New(cfg)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
-	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: second}); err != nil {
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: second.URL}); err != nil {
 		t.Fatalf("SwitchUpstream: %v", err)
 	}
 	if err := a.Rebind(RebindSpec{Model: "test-model"}); err != nil {

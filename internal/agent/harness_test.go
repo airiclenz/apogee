@@ -16,10 +16,8 @@ package agent
 
 import (
 	"context"
-	"io"
 	"iter"
 	"net/http"
-	"net/http/httptest"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -317,17 +315,10 @@ func TestHarness_FullCapstonePath(t *testing.T) {
 
 // TestHarness_RealProviderWirePath exercises the P1.1 wire path hermetically: the public
 // New binds the real OpenAI-compatible provider client at cfg.Endpoint (no longer the
-// Placeholder), and a Step drives a full non-streaming round-trip against an httptest
+// Placeholder), and a Step drives a full streamed round-trip against a listening stubllm
 // Upstream, surfacing the server's reply as a MessageEvent at the quiescent boundary.
 func TestHarness_RealProviderWirePath(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The loop streams (the §6 #6 path): answer with SSE, not a whole JSON body.
-		w.Header().Set("Content-Type", "text/event-stream")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{\"content\":\"from the wire\"},\"finish_reason\":null}]}\n\n")
-		_, _ = io.WriteString(w, "data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"stop\"}]}\n\n")
-		_, _ = io.WriteString(w, "data: [DONE]\n\n")
-	}))
-	defer srv.Close()
+	srv := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Text: "from the wire"}}})
 
 	sink := &recordingSink{}
 	cfg := baseConfig(sink)

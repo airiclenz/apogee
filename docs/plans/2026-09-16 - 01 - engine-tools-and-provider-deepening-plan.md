@@ -483,7 +483,10 @@ Migrate `summaryEffortResponder`, `scriptedCompactResponder`, `recoveryResponder
 
 **Commit:** `test(agent): compaction fakes read effort and sampling from the stubllm request log`
 
-## 14. `internal/agent`'s four listening upstreams script stubllm
+## 14. `internal/agent`'s four listening upstreams script stubllm — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `TestNewWiresAPIKeyToUpstream`/`TestResumeWiresAPIKeyToUpstream` no longer read the header value back — with `WithAPIKey` the stub 401s a keyless request before its log, so `assertAuthenticated` checks the log holds the one request and the "authed" reply arrived (probed: a wrong key fails both with "logged 0 requests"); outcome unchanged.
+NOTES (2026-09-16): `TestInspectorOffEmitsNoWireEvents` and `TestInspectorSurvivesASwitchUpstream` dial `stubllm.New` directly — they never read the posted body, so the `wireUpstream` middleware stays only where the byte comparison is made.
 
 **What.** Depends on items 12–13. `apikey_test.go`, `construct_test.go`, `harness_test.go`,
 `routedspawn_test.go`: every `httptest.NewServer` + hand-rolled `text/event-stream` handler that
