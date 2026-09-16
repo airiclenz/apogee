@@ -835,6 +835,10 @@
 // a const row and its table row, then a case in [renderEntryLines]; and transcriptbridge.go the
 // projection between that scrollback and the neutral wire form a saved session record carries
 // ([session.Entry] and its views, versioned in internal/session); sessions.go the /sessions history browser;
+// fork.go the /fork verb — the picker over the prompts a session may be forked at, the cut it makes
+// (the engine's state from the end, the scrollback prefix from the front) as one queued fork write
+// behind the parent's idle Save, and the switch to the child through the browser's own resume fold
+// when that write lands;
 // schedule.go the /schedule surface — the status note, the cycle/mode/stop pickers and the notices
 // the scheduler's own Events become, with every when-and-how decision left to internal/schedule,
 // plus one of the two things this package publishes rather than renders: [Options.ReportActivity],

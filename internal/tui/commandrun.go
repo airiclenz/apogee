@@ -343,6 +343,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// pane above the input (sessions.go). Synchronous and idle-safe like /clear — no worker.
 		return m.openSessionBrowser()
 
+	case "fork":
+		// Open the fork picker over this session's prompts (fork.go): ⏎ cuts a child record at the
+		// chosen one through the record write queue and switches to it when the write lands.
+		// Idle-only for the cut's sake — CutSnapshot reads the engine, which is the Model's own only
+		// at idle (C1) — and synchronous here like /sessions: no worker, no host call on this path.
+		return m.runFork()
+
 	case "settings":
 		// Open the configuration pane over the binary's key registry (settings.go). Synchronous and
 		// idle-safe like /sessions: it reads one display seam ([SettingsHost.Rows]) and drives no

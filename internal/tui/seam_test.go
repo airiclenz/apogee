@@ -130,6 +130,7 @@ type fakeEngine struct {
 	compactCalls int // records Compact calls (the /compact command)
 
 	restoreCalls []domain.Session // records RestoreSession calls (the in-TUI resume primitive), in order
+	cutCalls     []int            // records CutSnapshot's drop counts (the /fork cut), in order
 	inExchange   bool             // the value InExchange reports; a test sets it to model a mid-Exchange restore
 
 	contextReport  domain.ContextFilesReport // the value ContextFilesReport returns (the zero value: no context files)
@@ -248,8 +249,13 @@ func (f *fakeEngine) Snapshot() (domain.Session, error) {
 }
 
 // CutSnapshot answers the Snapshot script: the fake keeps no message history to cut, so the count
-// is not interpreted.
-func (f *fakeEngine) CutSnapshot(int) (domain.Session, error) { return f.Snapshot() }
+// is recorded (cutCalls) rather than interpreted.
+func (f *fakeEngine) CutSnapshot(dropExchanges int) (domain.Session, error) {
+	f.mu.Lock()
+	f.cutCalls = append(f.cutCalls, dropExchanges)
+	f.mu.Unlock()
+	return f.Snapshot()
+}
 func (f *fakeEngine) ClearContext() error {
 	f.mu.Lock()
 	f.clearCalls++

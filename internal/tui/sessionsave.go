@@ -429,9 +429,10 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 
 // foldRecordWrite folds a finished Rename, Delete, Rotate, Activate or Fork: it releases the
 // single-flight latch, dispatches whatever waited behind it, and re-lists for the browser verbs that
-// asked to repaint over the result. All of them are best-effort — a rename that did not stick leaves
-// the old title on the re-list, a delete that did not leaves the row, and neither retarget can fail
-// — so nothing is said about a failure.
+// asked to repaint over the result. All but the fork are best-effort — a rename that did not stick
+// leaves the old title on the re-list, a delete that did not leaves the row, and neither retarget
+// can fail — so nothing is said about their failure; a fork is the one the human is waiting on,
+// and its own fold speaks (foldFork, fork.go).
 //
 // The one failure that is NOT simply swallowed is a quiet title write. Its apply path branches on
 // ActiveID(), which the host mints at the START of the first Save, before the atomic write has put
@@ -448,8 +449,16 @@ func (m *Model) foldRecordWrite(msg recordWriteDoneMsg) tea.Cmd {
 	if msg.write.relist {
 		m.foldSessionList(msg.list) // repaint the overlay over the store as the write left it
 	}
+	var switched tea.Cmd
+	if msg.write.kind == writeFork {
+		// The one write whose landing MOVES the session: the child record is adopted through the
+		// resume fold, which queues its Activate behind the latch still held here (fork.go). The
+		// Cmd it returns is nil on this path — the pump below is what dispatches the Activate — and
+		// is carried anyway so the fold owns no knowledge of that.
+		switched = m.foldFork(msg)
+	}
 	m.writeBusy = false
-	return m.pumpOrQuit()
+	return tea.Batch(switched, m.pumpOrQuit())
 }
 
 // pumpOrQuit ends every fold that finished a record write: it dispatches the next write, and when

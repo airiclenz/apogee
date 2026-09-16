@@ -90,6 +90,7 @@ const (
 	pickerSubAgentsServer                      // the servers a delegation may run on — /sub-agents-server
 	pickerSubAgentsMigration                   // what to do about a retired sub-agents: flag — the start-up offer
 	pickerMode                                 // the autonomy rungs this session may run at — the footer's mode marker
+	pickerFork                                 // the prompts this session may be forked at — /fork
 )
 
 // picker is the overlay's inline state on the Model. Its zero value is "closed", so it lives inline
@@ -144,8 +145,8 @@ const pickerHint = "type to filter · ↑/↓ select · ⏎ switch · esc close"
 // pickerHintFor names what ⏎ does on the open kind. /schedule's two popups answer a question rather
 // than move anything (the Schedule is created after the LAST of them), /effort's ⏎ chooses a level
 // for a dial this session already has rather than re-pointing the session at anything, and
-// /schedule-stop's ⏎ ends something — three verbs, because a legend that promised a switch would be
-// wrong on every kind that is not one.
+// /schedule-stop's ⏎ ends something and /fork's ⏎ makes something (fork.go) — four verbs, because a
+// legend that promised a switch would be wrong on every kind that is not one.
 func pickerHintFor(k pickerKind) string {
 	switch k {
 	case pickerCycle, pickerScheduleMode, pickerEffort, pickerSubAgentsServer, pickerMode:
@@ -156,6 +157,8 @@ func pickerHintFor(k pickerKind) string {
 		return "type to filter · ↑/↓ select · ⏎ stop · esc close"
 	case pickerKeyMigration:
 		return keyMigrationHint
+	case pickerFork:
+		return forkPickerHint
 	}
 	return pickerHint
 }
@@ -937,6 +940,8 @@ func (m Model) acceptPicker() (tea.Model, tea.Cmd) {
 		return m.acceptSubAgentsMigration(offered)
 	case pickerMode:
 		return m.acceptMode(offered)
+	case pickerFork:
+		return m.acceptFork(offered)
 	}
 	return m, nil
 }
@@ -1148,6 +1153,8 @@ func (m Model) pickerTitle() string {
 		return m.subAgentsMigrationTitle()
 	case pickerMode:
 		return modePickerTitle
+	case pickerFork:
+		return forkPickerTitle
 	}
 	return ""
 }
@@ -1189,6 +1196,8 @@ func (m Model) pickerOfferingRows() []popupRow {
 		return subAgentsMigrationRows(m.opts.SubAgentsMigration)
 	case pickerMode:
 		return modeRows()
+	case pickerFork:
+		return forkRows(m.transcript.forkPoints())
 	}
 	return nil
 }

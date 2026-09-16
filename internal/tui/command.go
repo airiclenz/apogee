@@ -261,6 +261,7 @@ var commandSpecs = []commandSpec{
 	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseConfine)},
 	{name: "continue", summary: "ask the model to keep going", opensExchange: true},
 	{name: "effort", summary: "set how hard the model thinks — a picker of this model's levels", whileRunning: true, gatedByEffort: true},
+	{name: "fork", summary: "branch a new session from one of this session's prompts"},
 	{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},

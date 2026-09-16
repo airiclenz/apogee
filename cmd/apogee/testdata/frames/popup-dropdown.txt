@@ -17,9 +17,9 @@
 │   /compact                     summarise the conversation to reclaim context                   │ │
 │   /confine                     report or change auto mode's blast radius                       │ │
 │   /continue                    ask the model to keep going                                     │ │
+│   /fork                        branch a new session from one of this session's prompts         │ │
 │   /inspect                     the recent wire traffic, readable — ctrl+r for the raw bytes    │ │
 │   /model                       switch model — the launcher's profiles, or what the server serv…│ │
-│   /new                         start a fresh conversation (same as /clear)                     │ │
 │                                                                                                  │
 │ ↑/↓ select · ⏎/tab accept · esc dismiss                                                          │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

@@ -2251,7 +2251,7 @@ func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
 func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 	kinds := []pickerKind{
 		pickerModel, pickerServer, pickerLoad, pickerCycle, pickerScheduleMode, pickerScheduleStop,
-		pickerEffort, pickerMode,
+		pickerEffort, pickerMode, pickerFork,
 	}
 	for _, kind := range kinds {
 		if got := pickerHintFor(kind); !strings.HasPrefix(got, "type to filter · ") {

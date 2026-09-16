@@ -594,11 +594,21 @@ func TestQueuedForkWaitsForTheSaveAndCarriesTheChild(t *testing.T) {
 		t.Errorf("record transcript holds %d entries (%d user); want the %d-entry prefix with %d user entries",
 			len(entries), session.UserMessageCount(entries), len(prefix), wantMsgs)
 	}
-	m = step(t, m, done) // the fold releases the latch and the queue is dry
-	if m.writeBusy || len(m.pendingWrites) != 0 {
-		t.Errorf("after the fork folded: busy=%v pending=%d; want the latch released and nothing waiting", m.writeBusy, len(m.pendingWrites))
-	}
 	if host.ActiveID() != saves[0].id {
-		t.Errorf("the fork moved the active session to %q; want the parent %q still active", host.ActiveID(), saves[0].id)
+		t.Errorf("the fork moved the active session to %q; want the parent %q still active until the fold switches", host.ActiveID(), saves[0].id)
+	}
+	// The fold is where the switch happens (/fork, fork.go): the child is adopted through the
+	// resume fold, whose Activate is the one write the fork's landing queues behind the latch.
+	m, next = stepCmd(t, m, done)
+	activate, isDone := cmdMsg(next).(recordWriteDoneMsg)
+	if !isDone || activate.write.kind != writeActivate || activate.write.meta.ID != done.fork.child.ID {
+		t.Fatalf("the fork's fold dispatched %T (%+v); want the child's Activate", cmdMsg(next), activate.write)
+	}
+	m = step(t, m, activate) // the Activate folds, the latch is released and the queue is dry
+	if m.writeBusy || len(m.pendingWrites) != 0 {
+		t.Errorf("after the switch folded: busy=%v pending=%d; want the latch released and nothing waiting", m.writeBusy, len(m.pendingWrites))
+	}
+	if host.ActiveID() != done.fork.child.ID {
+		t.Errorf("active session = %q; want the child %q once its Activate landed", host.ActiveID(), done.fork.child.ID)
 	}
 }

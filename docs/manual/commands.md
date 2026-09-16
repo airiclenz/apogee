@@ -42,6 +42,7 @@ a typo is visible before you send.
 | `/undo` | Put back what the last exchange changed — every write to your workspace, apogee's own file tools and a `terminal`, Python or MCP write alike; bare previews it, `/undo confirm` applies it, and the record survives a relaunch — see [below](#undoing-the-agents-file-writes--undo-and-redo) | ⧖ |
 | `/redo` | Put back what the last `/undo confirm` took away — same two steps, bare previews, `/redo confirm` applies it — see [below](#undoing-the-agents-file-writes--undo-and-redo) | ⧖ |
 | `/sessions` | Browse saved sessions — resume, rename, or delete | ⧖ |
+| `/fork` | Branch a new session from one of this session's prompts — a picker lists them, ⏎ keeps the history through the chosen one and switches to the new session (the one you were in stays saved, and the browser tags the fork with its parent) | ⧖ |
 | `/rename` | Rename this session — `/rename <name>` sets it, bare `/rename` asks the model for one | ⧖ |
 | `/model` | Switch model — the Launch profiles [llama-launcher](configuration.md#local-servers--llama-launcher) defines when one is configured, what this server serves when not; picker, or `/model <name>` | ⧖ |
 | `/server` | Move this session to another server you configured — picker, or `/server <name>` | ⧖ |

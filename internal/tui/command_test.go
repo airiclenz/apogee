@@ -60,7 +60,7 @@ func TestCommandTableDrivesParserAndMenu(t *testing.T) {
 		parsed = append(parsed, spec.name)
 	}
 	wantParsed := []string{
-		"clear", "color-scheme", "compact", "confine", "continue", "effort", "inspect", "model",
+		"clear", "color-scheme", "compact", "confine", "continue", "effort", "fork", "inspect", "model",
 		"new", "redo", "rename", "schedule", "schedule-stop", "server", "sessions", "settings", "skills",
 		"stop-server", "sub-agents-server", "thinking", "undo", "unload-model", "usage", "version"}
 	if !reflect.DeepEqual(parsed, wantParsed) {
