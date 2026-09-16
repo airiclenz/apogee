@@ -472,6 +472,7 @@ func (t *transcript) enrichFiring(ev schedule.Event) bool {
 		if e.kind == entrySchedule && !e.done && e.callID == ev.ScheduleID {
 			e.tool.enrichWithFiring(ev)
 			e.done = true
+			t.touch()
 			return true
 		}
 	}

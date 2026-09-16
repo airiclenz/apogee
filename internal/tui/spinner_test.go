@@ -731,9 +731,12 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	}
 
 	// A call open, but on a tick INSIDE a half-period (frame 0 → 1): the star paints identically
-	// either side of it, so this repaint would be work for its own sake.
+	// either side of it, so this repaint would be work for its own sake. The open call is painted
+	// first: the Update tail repaints any transcript write that has not reached the screen yet
+	// ([Model.settle]), and that is not the tick's doing — the tick has to be the only thing here.
 	steady := running
 	openCall(&steady, "c1", "go test ./...")
+	steady.refreshViewport()
 	steady.lines = []string{sentinel}
 	steady = step(t, steady, spinnerTickMsg{gen: steady.worker.gen})
 	if got := strings.Join(steady.lines, "\n"); got != sentinel {
@@ -744,6 +747,7 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	// has.
 	live := running
 	openCall(&live, "c1", "go test ./...")
+	live.refreshViewport()
 	live.spin.frame = boundary
 	live.lines = []string{sentinel}
 	live = step(t, live, spinnerTickMsg{gen: live.worker.gen})

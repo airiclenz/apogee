@@ -5295,6 +5295,29 @@ func assertClampFresh(t *testing.T, m Model, when string) {
 	}
 }
 
+// assertPaintFresh checks the Update tail's other invariant ([Model.settle]): the lines on screen are
+// the lines a fresh composition of the Model as it stands would produce — no transcript write, root
+// move or fold sweep is waiting for a repaint nobody asked for. The oracle is renderView itself,
+// which is what refreshViewport stashes from.
+func assertPaintFresh(t *testing.T, m Model, when string) {
+	t.Helper()
+	fresh := m.transcript.renderView(m.th, m.transcriptWidth(), m.spin.blink(), m.backHint()).
+		reserveWidgetCells(m.viewport.Width()).lines
+	if !reflect.DeepEqual(m.lines, fresh) {
+		t.Fatalf("%s: the lines on screen are not the lines the model composes now — the paint is stale", when)
+	}
+}
+
+// sameLines reports whether two line stashes are the SAME slice — identity, not equality: a
+// repaint that composed byte-identical lines still replaced the slice, and identity is what says
+// no repaint happened at all.
+func sameLines(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	return len(a) == 0 || &a[0] == &b[0]
+}
+
 // wireSummaries is an offering of n models the /model picker draws a row each from, named so a
 // filter can prune them apart.
 func wireSummaries(names ...string) []heartbeat.ModelSummary {
@@ -5323,6 +5346,12 @@ func browserMetas(workspace string, titles ...string) []session.Meta {
 // the scroll clamp measuring the frame that came before it. Each case opens a pane over a transcript
 // deeper than the window, moves that pane's height by a route that is not an open/close edge, and
 // asserts the widget followed.
+//
+// Since the Update tail settles the frame ([Model.settle]) the same cases also pin its second
+// half — the paint on screen is the paint of the Model that left Update — and two more routes join
+// them that move the PAINT rather than a pane: a click that folds every task-list card, and the
+// `/settings` apply that does the same sweep. The premise loosens to match: the act must have moved
+// a pane's height or the paint's input, so a case that does neither is a broken fixture, not a pass.
 func TestPaneHeightChangeReachesLayout(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -5461,20 +5490,59 @@ func TestPaneHeightChangeReachesLayout(t *testing.T) {
 			t.Helper()
 			return step(t, m, keyRune('g'))
 		},
+	}, {
+		// mouse.go — a click on a task-list card folds every card (toggleTaskListFold): the paint's
+		// input moved, and the transcript is shorter by two bodies.
+		name: "a click folds every task-list card",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			m := modelWithTaskListBlock(t, testOpts)
+			addTaskListCard(&m, "2")
+			m.refreshViewport()
+			return m
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			cards := taskListEntries(m)
+			if len(cards) != 2 {
+				t.Fatalf("premise: %d task-list cards, want 2", len(cards))
+			}
+			return clickCell(t, m, 2, screenRow(t, m, headerLineOf(t, m, cards[1])))
+		},
+	}, {
+		// settingsapply.go — ⏎ on `ui.task-list-open` runs the same sweep through the pane.
+		name: "a /settings apply folds every task-list card",
+		arrange: func(t *testing.T) Model {
+			t.Helper()
+			rows := []SettingRow{settingsTaskListOpenRow()}
+			opts := testOpts
+			opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return rows }, write: (&settingsWriteLog{}).write}
+			m := modelWithTaskListBlock(t, opts)
+			addTaskListCard(&m, "2")
+			m.refreshViewport()
+			return openSettingsPane(t, m)
+		},
+		act: func(t *testing.T, m Model) Model {
+			t.Helper()
+			return step(t, m, keyEnter())
+		},
 	}}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.arrange(t)
 			assertClampFresh(t, m, "setup")
+			assertPaintFresh(t, m, "setup")
 			before := m.frameOverlays().height()
+			generation := m.transcript.generation
 
 			m = tc.act(t, m)
 
-			if after := m.frameOverlays().height(); after == before {
-				t.Fatalf("premise: the overlays still measure %d rows — the act moved no pane height", after)
+			if after := m.frameOverlays().height(); after == before && m.transcript.generation == generation {
+				t.Fatalf("premise: the overlays still measure %d rows and the transcript did not move — the act changed nothing the frame depends on", after)
 			}
 			assertClampFresh(t, m, "after the act")
+			assertPaintFresh(t, m, "after the act")
 		})
 	}
 }
@@ -5514,6 +5582,112 @@ func TestANewPaneClaimingAKeyStillReachesLayout(t *testing.T) {
 		t.Fatalf("premise: the overlays still measure %d rows — the surface moved no pane height", after)
 	}
 	assertClampFresh(t, m, "after a key claimed by a pane that never lays out")
+
+	// The same omission one level up, on a Msg no claimant walk sees at all: a surface that redraws
+	// itself taller AND a transcript written without a repaint, both left standing when the arm
+	// returns. The Update tail settles both ([Model.settle]) — the clamp through its height half, the
+	// paint through the key miss — so nothing an arm forgets stays forgotten past its own Update.
+	stale := m
+	stale.hb.models = wireSummaries("alpha")
+	stale.transcript.addNote("written by an arm that never repainted")
+	if stale.frameOverlays().height() == m.frameOverlays().height() {
+		t.Fatal("premise: pruning the offering to one row moved no pane height")
+	}
+
+	stale = step(t, stale, ctrlCResetMsg{})
+
+	assertClampFresh(t, stale, "after a Msg whose arm left a pane redrawn and lays out nothing")
+	assertPaintFresh(t, stale, "after a Msg whose arm left a transcript write and repaints nothing")
+}
+
+// TestMouseMotionNeverRepaints is the invariant the strip items stand on (plan "2026-09-16 - 00",
+// items 18–21, ratified): the Update tail never repaints on a tea.MouseMotionMsg. Motion arrives at
+// the terminal's sampling rate and moves a selection's head and nothing else — View overlays the
+// shade — so a repaint there would put the whole scrollback, and the keep-if-unchanged judgment
+// every held drag-selection is subject to (refreshViewport), between the human and every drag.
+//
+// It is an invariant PIN rather than a regression test: at HEAD the motion arm itself repaints
+// nothing, so its bite is the INJECTED key miss — a transcript write left unpainted before the
+// motion starts, exactly what the tail would repaint on any other Msg. A thousand motions with the
+// settings pane open leave m.lines the same slice (identity, not equality) and the widget's height
+// where it was; the very next non-motion Msg then repaints, which is what says the miss was real
+// and the exemption was the only thing holding it back.
+func TestMouseMotionNeverRepaints(t *testing.T) {
+	m := openSettingsPane(t, modelWithOverlayRoomAt(t, 80, 24, settingsOpts(settingsTestRows(6))))
+	m.transcript.addNote("a key miss the motion must not settle")
+	if m.frameKey() == m.painted {
+		t.Fatal("premise: the injected write did not miss the key")
+	}
+	lines, height := m.lines, m.viewport.Height()
+
+	for i := range 1000 {
+		m = step(t, m, leftDrag(i%80, i%24))
+	}
+
+	if !sameLines(m.lines, lines) {
+		t.Error("motion repainted the transcript: m.lines is a different slice")
+	}
+	if m.viewport.Height() != height {
+		t.Errorf("motion laid the frame out: viewport height %d → %d", height, m.viewport.Height())
+	}
+
+	m = step(t, m, ctrlCResetMsg{})
+
+	if sameLines(m.lines, lines) {
+		t.Error("the first non-motion Msg did not repaint — the injected miss was never a miss, and the pin bites nothing")
+	}
+	assertPaintFresh(t, m, "after the first non-motion Msg")
+}
+
+// TestSettleWaitsForTheFirstWindowSize is the tail's other exemption: it is a no-op until a
+// WindowSizeMsg has sized the frame. bubbletea v2 sends the first size as `go p.Send(resizeMsg)`,
+// racing Init's Cmd and the terminal's mode reports, so a Msg CAN land first — and a tail that laid
+// out then would find the widget's zero height ≠ its one-row floor and compose the whole transcript
+// at width 0. The first sized frame lays out and stores the key itself (the WindowSizeMsg arm), and
+// the write the unsized Msg left standing is painted there.
+func TestSettleWaitsForTheFirstWindowSize(t *testing.T) {
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+	m.transcript.addNote("written before the terminal said its size")
+	lines, height := m.lines, m.viewport.Height()
+
+	m = step(t, m, ctrlCResetMsg{})
+
+	if !sameLines(m.lines, lines) {
+		t.Error("a Msg before the first WindowSizeMsg repainted the transcript — at width 0")
+	}
+	if m.viewport.Height() != height {
+		t.Errorf("a Msg before the first WindowSizeMsg laid the frame out: viewport height %d → %d", height, m.viewport.Height())
+	}
+
+	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
+
+	if !m.ready {
+		t.Fatal("premise: the WindowSizeMsg did not size the frame")
+	}
+	assertPaintFresh(t, m, "after the first WindowSizeMsg")
+	if !strings.Contains(strings.Join(m.lines, "\n"), "before the terminal said its size") {
+		t.Error("the first sized frame does not show the note written before it")
+	}
+}
+
+// settingsOpts is testOpts with a settings seam that serves rows — what `/settings` needs to open
+// the pane at all.
+func settingsOpts(rows []SettingRow) Options {
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return rows }}
+	return opts
+}
+
+// BenchmarkUpdateMotionWithSettingsOpen prices the Update tail on the Msg that arrives most often:
+// motion with the settings pane open, where the tail must cost a type switch and nothing more.
+func BenchmarkUpdateMotionWithSettingsOpen(b *testing.B) {
+	var t testing.T // the fixtures take a *testing.T only to fail on a broken premise, which a fixed fixture never does
+	m := openSettingsPane(&t, modelWithOverlayRoomAt(&t, 80, 24, settingsOpts(settingsTestRows(6))))
+	var next tea.Model = m
+	b.ResetTimer()
+	for i := range b.N {
+		next, _ = next.(Model).Update(leftDrag(i%80, i%24))
+	}
 }
 
 // A scroll that lands mid-history holds exactly there: content appended below does not move the

@@ -151,6 +151,10 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 // the same reason blink is: whether esc leaves the view or answers a pane standing inside it is a
 // fact about the frame ([Model.backHint]), not about the scrollback. A caller with no frame hands
 // the plain [breadcrumbHint]; empty paints the trail with no hint at all (breadcrumbRow).
+//
+// What this reads of the transcript — entries, the live buffer, root — is under
+// [transcript.generation]: every writer of those fields bumps it, and the Update tail repaints on
+// the bump ([Model.settle], [frameKey]). A new field read here is a field whose writers must touch.
 func (t *transcript) renderView(th theme, width int, blink bool, backHint string) renderedTranscript {
 	if width < 1 {
 		width = 1

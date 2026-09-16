@@ -518,6 +518,12 @@ type Model struct {
 	lines       []string
 	userBlocks  []userBlock
 	lineTargets []lineTarget
+	// painted is the frame key the lines above were rendered under ([frameKey], paintcache.go):
+	// every input of renderView, stashed by refreshViewport beside its output. The end of every
+	// Update compares it against the key the model now stands at ([Model.settle]) and lays out on a
+	// miss, which is what makes a repaint a CONSEQUENCE of a fold rather than a call each arm has
+	// to remember. A comparable struct, so the compare is one `!=`.
+	painted frameKey
 	// header is the sticky header the PAINT owns rather than the scrollback: the breadcrumb row of a
 	// transcript rooted at one run and the blank spacer beneath it
 	// (renderedTranscript.header, render.go), and the zero value while
@@ -935,7 +941,12 @@ func (m Model) Init() tea.Cmd {
 // remember to extend (schedule.go). It is pure bookkeeping: it reads the folded model, calls the
 // seam only when the value moved, and returns the model carrying the new high-water mark.
 func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
-	defer func() { next = reportActivity(next) }()
+	// Two deferred consequences of whatever the arm below did, in this order: the frame settles
+	// (a paint whose input moved is repainted, a widget whose height went stale is laid out —
+	// settleFrame), and then the activity is reported. Both are pure bookkeeping over the folded
+	// model, and both are TOTAL for the same reason: a fold that forgot to ask for either still
+	// gets it here.
+	defer func() { next = reportActivity(settleFrame(msg, next)) }()
 
 	// The --tui-diag observation point (diagnostics.go). It consumes nothing — every message it
 	// recognises still reaches the switch below — so a session with the flag on behaves exactly
@@ -2261,18 +2272,63 @@ func (m Model) transcriptWidgetRows() int {
 
 // freshenTranscriptClamp lays out again when the viewport widget's height no longer matches the rows
 // the transcript is drawn on — the state a pane redrawn at a new height leaves behind when its own
-// path did not lay out. layout() stays the single setter of that height (design call 3): this asks
-// only whether the last set still holds, and hands the setting back to layout() when it does not.
+// path did not lay out — or when the input box's height no longer matches the rows its draft wants
+// ([Model.inputRows]) — the state an editor write leaves behind when its own path did not lay out.
+// layout() stays the single setter of both heights (design call 3): this asks only whether the last
+// set still holds, and hands the setting back to layout() when it does not.
 //
 // The question is asked rather than the answer simply re-applied because layout() re-renders the whole
 // transcript: a pane key that moved no rows — a selection step in the browser, a scroll in /usage —
 // pays one overlay composition, the same one View performs each frame, instead of a second full
 // repaint of the history.
 func (m *Model) freshenTranscriptClamp() {
-	if m.viewport.Height() == m.transcriptWidgetRows() {
+	if m.viewport.Height() == m.transcriptWidgetRows() && m.input.Height() == m.inputRows() {
 		return
 	}
 	m.layout()
+}
+
+// settle is the repaint tail of every Update ([Model.Update]'s deferred settleFrame): the two
+// questions a fold may have left unanswered, asked once in the order that makes the second one
+// cheap. Has the paint's INPUT moved — the frame key the lines were rendered under against the one
+// the model stands at now ([Model.frameKey])? Then layout() ALONE: it ends in refreshViewport, which
+// stores the key, and it sizes both heights on the way, so nothing is left for the second question.
+// Otherwise, has a HEIGHT gone stale under an unchanged paint — a pane redrawn taller, a draft that
+// grew ([Model.freshenTranscriptClamp])?
+//
+// It is a no-op while no WindowSizeMsg has sized the frame (m.ready): bubbletea v2 sends the first
+// size as `go p.Send(resizeMsg)`, racing Init's Cmd and the terminal's mode reports, and a Msg that
+// lands first must not find the widget's zero height ≠ its one-row floor and lay out at width 0 —
+// the WindowSizeMsg arm lays out and stores the key on the first sized frame (foldModeReport's
+// guard, width.go). The one Msg exempt from it is tea.MouseMotionMsg, which settleFrame filters
+// before calling: motion moves a selection's head and nothing else, View overlays the shade, and a
+// key miss that motion happens to be the first Update after waits for the next Msg rather than
+// repainting the scrollback at the mouse's sampling rate (TestMouseMotionNeverRepaints).
+func (m *Model) settle() {
+	if !m.ready {
+		return
+	}
+	if m.frameKey() != m.painted {
+		m.layout()
+		return
+	}
+	m.freshenTranscriptClamp()
+}
+
+// settleFrame is [Model.settle] as Update's deferred rewrite of its return value sees it, the shape
+// reportActivity takes (schedule.go): anything that is not a Model is handed straight back, and so is
+// a Model after a tea.MouseMotionMsg — the one Msg the tail never repaints on (ratified, plan
+// "2026-09-16 - 00" item 18).
+func settleFrame(msg tea.Msg, next tea.Model) tea.Model {
+	m, ok := next.(Model)
+	if !ok {
+		return next
+	}
+	if _, motion := msg.(tea.MouseMotionMsg); motion {
+		return next
+	}
+	m.settle()
+	return m
 }
 
 // inputBoxRows is the screen rows the input box occupies: its content rows and the two border rows
@@ -2396,6 +2452,7 @@ func (m *Model) refreshViewport() {
 		m.transcriptSel = transcriptSel{} // the ground under the span moved: let go (mouse.go)
 	}
 	m.lines = rendered.lines // stashed for the sticky-header overlay (View)
+	m.painted = m.frameKey() // the key these lines answer to: what settle compares against (paintcache.go)
 	m.userBlocks = rendered.userBlocks
 	m.header = rendered.header       // a rooted paint's breadcrumb, and nothing at all otherwise
 	m.lineTargets = rendered.targets // the paint's own click surface, for the mouse (render.go)

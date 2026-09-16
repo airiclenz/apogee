@@ -85,6 +85,23 @@ type transcript struct {
 	// transcripts in one test can run on two clocks, and it is preserved across reset for ws's
 	// reason: a clock is a fact about the run, not about the conversation.
 	now func() time.Time
+	// generation counts the writes to what [transcript.renderView] reads — entries, pending (with
+	// its streaming and pendingRun halves), root and taskListOpen. Every `func (t *transcript)` that
+	// writes one of those fields bumps it ([transcript.touch]), so "has the paint's input moved since
+	// the last repaint?" is one integer compare at the end of every Update ([Model.settle]) rather
+	// than a repaint every arm has to remember to ask for. It is a plain counter riding the
+	// value-copied Model (ADR 0011): a copy that is discarded takes its bump with it, exactly as it
+	// takes the write. parked is deliberately outside it — the painter reads the live buffer alone —
+	// and so is the paint cache, which is a memo of the paint and not an input to it.
+	generation uint64
+}
+
+// touch marks the paint's input as moved: the one bump every writer of a field renderView reads
+// makes, so the rule "a write is a repaint" is stated by the counter and not by the call sites. It
+// is called only from the writers, and only where something actually moved — a setter refused by
+// its own guard does not touch — so the compare that reads it never repaints for nothing.
+func (t *transcript) touch() {
+	t.generation++
 }
 
 // streamChunkBytes is how large a [streamBuf] chunk grows before the next append starts a new one.
@@ -423,6 +440,7 @@ func (t *transcript) place(e entry) {
 	if at >= len(t.entries) {
 		at = t.tailBeforeHostNotes(e)
 	}
+	t.touch()
 	if at >= len(t.entries) {
 		t.entries = append(t.entries, e)
 		return
@@ -458,6 +476,7 @@ func (t *transcript) stamp(e entry) entry {
 // own contract), and routing them through the run-placement rule would change where they land.
 func (t *transcript) commit(e entry) {
 	t.entries = append(t.entries, t.stamp(e))
+	t.touch()
 }
 
 // runEnd is the index one past the last entry of the run that the sub_agent call spawn opened —
@@ -589,6 +608,7 @@ func (t *transcript) runName(spawn string) string {
 // picture, rebased to the root's depth and wrapped to the wider column that leaves.
 func (t *transcript) setRoot(r runRef) {
 	t.root = r
+	t.touch()
 }
 
 // displace empties the live buffer slot for the run whose event is arriving. It is the one place
@@ -628,6 +648,7 @@ func (t *transcript) park() {
 	t.streaming = false
 	t.pending = streamBuf{}
 	t.pendingRun = runRef{}
+	t.touch()
 }
 
 // stash grows the run's parked text, opening a slot for a run that has none. It rebuilds the slice
@@ -675,6 +696,7 @@ func (t *transcript) takePending(run runRef) string {
 		t.streaming = false
 		t.pending = streamBuf{}
 		t.pendingRun = runRef{}
+		t.touch()
 	}
 	return text.String()
 }
@@ -820,6 +842,7 @@ func (t *transcript) addStartup(v startupView) {
 	v.Host = stripEscapes(v.Host)
 	v.Model = stripEscapes(v.Model)
 	t.entries = append(t.entries, entry{kind: entryStartup, startup: v})
+	t.touch()
 }
 
 // refreshStartup re-states the one-time start-up box's facts in place, leaving it exactly where it
@@ -840,6 +863,7 @@ func (t *transcript) refreshStartup(v startupView) {
 	for i := range t.entries {
 		if t.entries[i].kind == entryStartup {
 			t.entries[i].startup = v
+			t.touch()
 			return
 		}
 	}
@@ -863,6 +887,7 @@ func (t *transcript) reset() {
 	// scrollback) before anything renders again, so pruning against the entry count at the next
 	// render would find index 3 occupied and hand back the previous session's paint (paintcache.go).
 	t.paints.clear()
+	t.touch()
 	// t.debug, t.ws, t.taskListOpen and t.now are deliberately preserved across a session reset.
 }
 
@@ -878,6 +903,7 @@ func (t *transcript) reset() {
 func (t *transcript) replay(entries []entry) {
 	at := len(t.entries)
 	t.entries = append(t.entries, entries...)
+	t.touch()
 	for i := at; i < len(t.entries); i++ {
 		if t.entries[i].tool.collapsesToHeader {
 			t.setExpanded(i, t.taskListOpen)
@@ -1092,6 +1118,7 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	if head == nil {
 		return
 	}
+	t.touch() // head is a pointer into entries, and at least one of the two readings writes through it
 	if fills {
 		head.ctxUsed, head.ctxLimit = total, childWindow(usage, window)
 	}
@@ -1165,6 +1192,7 @@ func (t *transcript) appendToken(text string, run runRef) {
 	t.streaming = true
 	t.pendingRun = run
 	t.pending.append(stripEscapes(text))
+	t.touch()
 }
 
 // discardPending drops the in-progress assistant buffer when the agent at depth re-streams its
@@ -1186,6 +1214,7 @@ func (t *transcript) discardPending(run runRef) {
 	t.streaming = false
 	t.pending = streamBuf{}
 	t.pendingRun = runRef{}
+	t.touch()
 }
 
 // commitAssistant finalises the streamed buffer into a committed assistant entry on a
@@ -1332,6 +1361,7 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		e := &t.entries[i]
 		if e.kind == entryToolCall && !e.done && e.callID == result.CallID {
+			t.touch()
 			// The size of what came back is read off the result itself, before any presenter shapes
 			// it, and on every pairing — a delegation's report included, whatever its phase already
 			// folded: the number is the record's (toolView.chars), not the card's.
@@ -1415,6 +1445,7 @@ func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 		if !en.headsRunFor(e.CallID) {
 			continue
 		}
+		t.touch()
 		en.phase = e.Phase
 		if e.Phase == domain.SubAgentFinished && !en.done {
 			en.tool.enrichWithResult(e.Result, t.ws)
@@ -1451,6 +1482,7 @@ func (t *transcript) addSubAgentName(e domain.SubAgentNamedEvent) {
 			continue
 		}
 		en.tool.rename(stripEscapes(e.Name))
+		t.touch()
 		return
 	}
 }
@@ -1547,6 +1579,7 @@ func (t *transcript) setExpanded(index int, expanded bool) bool {
 		return false
 	}
 	t.entries[index].expanded = expanded
+	t.touch()
 	return true
 }
 
@@ -1587,6 +1620,7 @@ func (t *transcript) foldsWithTaskLists(index int) bool {
 // had to fold by itself.
 func (t *transcript) setTaskListOpen(open bool) bool {
 	t.taskListOpen = open
+	t.touch()
 	changed := false
 	for i := range t.entries {
 		if t.entries[i].tool.collapsesToHeader && t.entries[i].expanded != open {
@@ -1613,6 +1647,7 @@ func (t *transcript) setTypeExpanded(index int, expanded bool) bool {
 		return false
 	}
 	t.entries[index].typeExpanded = expanded
+	t.touch()
 	return true
 }
 
@@ -1648,6 +1683,7 @@ func (t *transcript) setTaskExpanded(index int, expanded bool) bool {
 		return false
 	}
 	t.entries[index].taskExpanded = expanded
+	t.touch()
 	return true
 }
 
@@ -1685,6 +1721,9 @@ func (t *transcript) closeSuperGroup(head int) bool {
 				changed = true
 			}
 		}
+	}
+	if changed {
+		t.touch()
 	}
 	return changed
 }

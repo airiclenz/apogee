@@ -924,7 +924,10 @@
 // and out of nothing it QUOTES; paintcache.go the per-block paint memo that makes a streaming
 // repaint cost the live tail instead of the whole scrollback — a VALIDATION cache nothing
 // invalidates, safe exactly as long as [paintKey] keeps naming every input — which is why the
-// painters take a stated record of what they may read ([paintInput]) and the key is derived from it;
+// painters take a stated record of what they may read ([paintInput]) and the key is derived from it,
+// and beside it the [frameKey] — every input of the WHOLE paint, stashed by refreshViewport and
+// compared at the end of every Update ([Model.settle]) so a repaint is a consequence of a fold
+// rather than a call each arm remembers;
 // diagnostics.go the two hidden rendering-diagnostic seams (`--tui-trace`, which tees the
 // renderer's exact bytes to a file as quoted strings a virtual terminal can replay, and
 // `--tui-diag`, the log of what the terminal told the program about itself) — portable rather than

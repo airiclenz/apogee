@@ -3694,3 +3694,107 @@ func TestPruneNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+// The generation — every writer of what renderView reads bumps it
+// ----------------------------------------------------------------------------
+
+// TestTranscriptWritersBumpTheGeneration pins the rule the Update tail repaints by ([Model.settle]):
+// every `func (t *transcript)` that writes a field renderView reads — entries, the live buffer, the
+// root, the fold seed — moves [transcript.generation], and a write refused by its own guard, or a
+// plain read, does not. The counter is what turns "did a fold change the paint?" into one compare,
+// so a writer that forgets it is a stale frame that no arm will ever ask to repaint.
+func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
+	t.Parallel()
+
+	// A transcript with something for every writer to act on: a start-up box, a prompt, an open
+	// delegation head and a live buffer streaming under it, and an open firing block.
+	seed := func() *transcript {
+		tr := &transcript{}
+		tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
+		tr.addUser("plan the work", nil)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"scout","task":"audit"}`)}})
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
+			ID: "t1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
+		tr.addFiring(schedule.Event{Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly"})
+		tr.appendToken("half a sent", runRef{})
+		return tr
+	}
+
+	writes := []struct {
+		name string
+		act  func(*transcript)
+	}{
+		{"addUser", func(tr *transcript) { tr.addUser("again", nil) }},
+		{"addNote", func(tr *transcript) { tr.addNote("a host note") }},
+		{"addStartup", func(tr *transcript) { tr.addStartup(startupView{}) }},
+		{"refreshStartup", func(tr *transcript) { tr.refreshStartup(startupView{Host: "elsewhere"}) }},
+		{"appendToken", func(tr *transcript) { tr.appendToken("ence", runRef{}) }},
+		{"discardPending", func(tr *transcript) { tr.discardPending(runRef{}) }},
+		{"commitAssistant", func(tr *transcript) { tr.commitAssistant("the whole sentence", runRef{}) }},
+		{"finalizeNarration", func(tr *transcript) { tr.finalizeNarration(runRef{}) }},
+		{"commitCancelled", func(tr *transcript) { tr.commitCancelled() }},
+		{"park", func(tr *transcript) { tr.park() }},
+		{"addToolCall", func(tr *transcript) {
+			tr.addToolCall(domain.ToolCall{ID: "t2", Tool: "terminal", Arguments: []byte(`{"command":"ls"}`)}, "", runRef{})
+		}},
+		{"addToolResult", func(tr *transcript) {
+			tr.addToolResult(domain.ToolResult{CallID: "t1", Content: "ok"}, runRef{})
+		}},
+		{"addSubAgentPhase", func(tr *transcript) { subAgentStarted(tr, "s1", 1) }},
+		{"addSubAgentName", func(tr *transcript) {
+			tr.addSubAgentName(domain.SubAgentNamedEvent{EventBase: domain.EventBase{CallID: "s1"}, Name: "repo-scout"})
+		}},
+		{"applyUsage", func(tr *transcript) { subAgentUsage(tr, 1, 1200, 32768) }},
+		{"enrichFiring", func(tr *transcript) {
+			tr.enrichFiring(schedule.Event{Kind: schedule.EventCompleted, ScheduleID: "sch-1", ScheduleName: "nightly"})
+		}},
+		{"setRoot", func(tr *transcript) { tr.setRoot(runRef{depth: 1, spawn: "s1"}) }},
+		{"setTaskListOpen", func(tr *transcript) { tr.setTaskListOpen(true) }},
+		{"setExpanded", func(tr *transcript) { tr.setExpanded(3, true) }},
+		{"toggleExpanded", func(tr *transcript) { tr.toggleExpanded(3) }},
+		{"setTypeExpanded", func(tr *transcript) { tr.setTypeExpanded(3, true) }},
+		{"setTaskExpanded", func(tr *transcript) { tr.setTaskExpanded(2, true) }},
+		{"replay", func(tr *transcript) { tr.replay([]entry{{kind: entryAssistant, text: "stored"}}) }},
+		{"reset", func(tr *transcript) { tr.reset() }},
+	}
+	for _, tc := range writes {
+		t.Run("write: "+tc.name, func(t *testing.T) {
+			tr := seed()
+			before := tr.generation
+
+			tc.act(tr)
+
+			if tr.generation == before {
+				t.Errorf("%s left the generation at %d: the paint's input moved and no repaint will follow", tc.name, before)
+			}
+		})
+	}
+
+	holds := []struct {
+		name string
+		act  func(*transcript)
+	}{
+		{"hasOpenToolCall", func(tr *transcript) { tr.hasOpenToolCall() }},
+		{"renderView", func(tr *transcript) { tr.renderView(newTheme(scheme.Default()), 80, false, "") }},
+		{"setExpanded refused out of range", func(tr *transcript) { tr.setExpanded(99, true) }},
+		{"setExpanded refused on an open run head", func(tr *transcript) { tr.setExpanded(2, true) }},
+		{"setTaskExpanded refused on a plain call", func(tr *transcript) { tr.setTaskExpanded(3, true) }},
+		{"enrichFiring with no open block", func(tr *transcript) {
+			tr.enrichFiring(schedule.Event{Kind: schedule.EventCompleted, ScheduleID: "other"})
+		}},
+	}
+	for _, tc := range holds {
+		t.Run("holds: "+tc.name, func(t *testing.T) {
+			tr := seed()
+			before := tr.generation
+
+			tc.act(tr)
+
+			if tr.generation != before {
+				t.Errorf("%s moved the generation %d → %d without writing what the paint reads", tc.name, before, tr.generation)
+			}
+		})
+	}
+}

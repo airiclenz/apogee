@@ -636,7 +636,13 @@ recast as derivation tests (scrambling a stored value no longer means anything);
 
 **Commit:** `refactor(tui): the prompt legend is one derivation at paint`
 
-## 18. Repaint is a consequence of `Update`: the dirty mark and the tail
+## 18. Repaint is a consequence of `Update`: the dirty mark and the tail — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `BenchmarkUpdateMotionWithSettingsOpen` — 100001 ns/op at `-benchtime 1000x` (113081 ns/op at 20000x); a throwaway baseline of the same loop at the pre-item tree measured 105383 ns/op at 20000x, so the tail is within noise — the Model's value copy dominates.
+NOTES (2026-09-16): `internal/tui/schedule.go` joins Files beyond the item's list — `enrichFiring` is a `func (t *transcript)` writing `entries` in place (the generation rule is stated over every such method, and the item's enumeration is a floor); `addStartup` in transcript.go likewise appends directly and bumps.
+NOTES (2026-09-16): `internal/tui/spinner_test.go` — `TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen` arrangement only: its `steady`/`live` fixtures fold an open call and never paint it, so the settle tail repainted the unpainted write on the non-flipping tick; the fixtures now `refreshViewport()` after `openCall` so the tick is the only thing under test. Its assertion is unchanged and holds.
+NOTES (2026-09-16): the theme's identity in the key is `opts.ColorSchemeName` + `th.measure` (the theme carries no id of its own; `applyColorScheme` is the only mid-session rebuild and sets the name). `TestPaneHeightChangeReachesLayout`'s premise loosened to "moved a pane height OR the transcript generation" so the click and `/settings` cases (which move the paint, not a pane) fit; every case now also asserts `assertPaintFresh`. `TestANewPaneClaimingAKeyStillReachesLayout` gains an Update-level second half (a pane redrawn taller plus an unpainted transcript write settled by a `ctrlCResetMsg`).
+NOTES (2026-09-16): consequential edit — internal/tui/doc.go: made necessary by the `frameKey` added to paintcache.go (the package map's paintcache.go row names it).
 
 **What.** Recast at the regression check (2026-09-16). `internal/tui`: a transcript generation
 counter bumped by every `func (t *transcript)` that writes any field `renderView` reads — entries,

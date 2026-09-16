@@ -373,6 +373,47 @@ func (c *paintCache) clear() {
 	clear(c.rows)
 }
 
+// frameKey is [paintKey]'s twin one level up: everything the whole transcript paint depends on —
+// every input of [transcript.renderView] and of the widget measure refreshViewport hands it —
+// named as one comparable struct, so "is the paint on screen still the paint of this model?" is one
+// `!=` at the end of every Update ([Model.settle]). Two models that compute the same key would
+// render the same lines; a field missing here is a stale frame, so the list follows renderView's
+// signature term for term rather than trusting a fold to have asked for its own repaint.
+type frameKey struct {
+	// generation is the transcript's write counter ([transcript.generation]): the entries, the live
+	// buffer, the root and the fold seed, folded into one integer by the writers themselves.
+	generation uint64
+	// scheme and measure are the theme's identity: the palette is rebuilt whole on a scheme switch
+	// (applyColorScheme) and the measure moves on the terminal's mode-2027 answer (foldModeReport),
+	// and nothing else about a theme changes mid-session.
+	scheme  string
+	measure widthAuthority
+	// width and hideScrollbar are the column budget: the window's columns less the gutter the bar
+	// reserves (layout()), which is the width renderView wraps to and the widget measures at.
+	width         int
+	hideScrollbar bool
+	// blink is the live star's phase, and only while a block still holds an open call: a settled
+	// transcript paints identically at either phase, so folding the bare phase in would repaint the
+	// scrollback on every flip of an idle session's clock (foldSpinnerTick's decision, spinner.go).
+	blink bool
+	// backHint is the wording a rooted paint's breadcrumb advertises for esc ([Model.backHint]).
+	backHint string
+}
+
+// frameKey reads the key the model stands at now — the value refreshViewport stashes beside the
+// lines it just rendered (Model.painted), and the one settle compares it against.
+func (m Model) frameKey() frameKey {
+	return frameKey{
+		generation:    m.transcript.generation,
+		scheme:        m.opts.ColorSchemeName,
+		measure:       m.th.measure,
+		width:         m.width,
+		hideScrollbar: m.opts.HideScrollbar,
+		blink:         m.spin.blink() && m.transcript.hasOpenToolCall(),
+		backHint:      m.backHint(),
+	}
+}
+
 // blockKey builds the key for the block these records are the input of — ins[0] alone for an
 // ordinary entry, the whole folded run or the head plus its sub-agent span otherwise. It takes the
 // very value the painter is handed ([paintInputs]) and reads nothing else about the transcript,
