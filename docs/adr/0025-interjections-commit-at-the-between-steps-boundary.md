@@ -342,6 +342,8 @@ the feature.
   **none** (it drives no Exchange) and `finishWorker` clears it. So `m.box` is non-nil exactly while
   a worker that can deliver is running, and a nil box is a documented, usable state — push is a
   no-op, drain yields nothing, and the row reaches the model at the terminal boundary instead.
+  *(Amended 2026-09-16: the box rides the Model's in-flight `worker` value — `m.worker.box`, written
+  by `worker.start` and dropped by `worker.finish` — under the same non-nil-while-running contract.)*
 - **A delivered interjection is a transcript entry of its own kind** (`entryInterjected`, a `⧖`-marked
   user-styled block) and deliberately does **not** join the sticky-header set: the Exchange's
   *opening* prompt stays the pinned context. The kind is additive within the existing transcript

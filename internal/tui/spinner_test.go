@@ -620,12 +620,12 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 	running := newTestModel(t)
 	running.input.SetValue("hello")
 	running = step(t, running, keyEnter()) // submit armed the chain
-	if running.spin.gen == 0 {
+	if running.worker.gen == 0 {
 		t.Fatal("submit did not arm the tick chain")
 	}
 
 	// The live generation's tick advances exactly one frame and keeps the chain alive.
-	advanced, cmd := stepCmd(t, running, spinnerTickMsg{gen: running.spin.gen})
+	advanced, cmd := stepCmd(t, running, spinnerTickMsg{gen: running.worker.gen})
 	if cmd == nil {
 		t.Error("a live tick did not re-arm the chain — the spinner would freeze mid-turn")
 	}
@@ -633,17 +633,20 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 		t.Errorf("frame after a live tick = %d, want %d", got, want)
 	}
 
-	// A re-arm opens a new generation, back at frame 0.
+	// A re-arm — the resume a decision unblocks — opens a new generation, back at frame 0.
 	rearmed := running
-	if tick := rearmed.spin.arm(); tick == nil {
-		t.Fatal("arm scheduled no tick")
+	if tick := rearmed.resumeRunning(); tick == nil {
+		t.Fatal("resume scheduled no tick")
 	}
-	if rearmed.spin.gen == running.spin.gen {
-		t.Fatalf("arm reused generation %d instead of opening a new one", rearmed.spin.gen)
+	if rearmed.worker.gen == running.worker.gen {
+		t.Fatalf("resume reused generation %d instead of opening a new one", rearmed.worker.gen)
+	}
+	if rearmed.spin.frame != 0 {
+		t.Errorf("resume re-armed at frame %d, want 0", rearmed.spin.frame)
 	}
 
 	// A tick left over from the retired chain is inert: no advance, no re-arm.
-	stale, cmd := stepCmd(t, rearmed, spinnerTickMsg{gen: running.spin.gen})
+	stale, cmd := stepCmd(t, rearmed, spinnerTickMsg{gen: running.worker.gen})
 	if cmd != nil {
 		t.Error("a tick from a retired generation re-armed the chain — two chains would run at 2x")
 	}
@@ -654,8 +657,30 @@ func TestSpinnerTickChainGeneration(t *testing.T) {
 	// Off the running state the chain dies even for the live generation.
 	idle := rearmed
 	idle.state = stateIdle
-	if _, cmd := stepCmd(t, idle, spinnerTickMsg{gen: idle.spin.gen}); cmd != nil {
+	if _, cmd := stepCmd(t, idle, spinnerTickMsg{gen: idle.worker.gen}); cmd != nil {
 		t.Error("the tick chain outlived the run instead of dying at idle")
+	}
+
+	// The generation is Model-lifetime monotonic: a finish→start pair — the Exchange completing
+	// and the next one launching — opens a generation the finished chain never carried, so a tick
+	// of that chain still in flight is as inert as the resume's leftover above. A finish that
+	// reset the counter would re-open the retired chain's number here, and the stale tick would
+	// advance the new chain: two chains, 2× spin.
+	finished := step(t, rearmed, exchangeDoneMsg{})
+	if finished.state != stateIdle {
+		t.Fatalf("state after the Exchange completed = %v, want idle", finished.state)
+	}
+	finished.input.SetValue("again")
+	relaunched := step(t, finished, keyEnter())
+	if relaunched.state != stateRunning {
+		t.Fatalf("state after the second submit = %v, want running", relaunched.state)
+	}
+	if relaunched.worker.gen <= rearmed.worker.gen {
+		t.Fatalf("generation after finish→start = %d, want above the finished chain's %d — finish reset the counter",
+			relaunched.worker.gen, rearmed.worker.gen)
+	}
+	if _, cmd := stepCmd(t, relaunched, spinnerTickMsg{gen: rearmed.worker.gen}); cmd != nil {
+		t.Error("the finished chain's leftover tick re-armed the relaunched chain — two chains would run at 2x")
 	}
 }
 
@@ -700,7 +725,7 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	idle := running
 	idle.spin.frame = boundary
 	idle.lines = []string{sentinel}
-	idle = step(t, idle, spinnerTickMsg{gen: idle.spin.gen})
+	idle = step(t, idle, spinnerTickMsg{gen: idle.worker.gen})
 	if got := strings.Join(idle.lines, "\n"); got != sentinel {
 		t.Errorf("a flipping tick with no call open repainted the transcript:\n%s", got)
 	}
@@ -710,7 +735,7 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	steady := running
 	openCall(&steady, "c1", "go test ./...")
 	steady.lines = []string{sentinel}
-	steady = step(t, steady, spinnerTickMsg{gen: steady.spin.gen})
+	steady = step(t, steady, spinnerTickMsg{gen: steady.worker.gen})
 	if got := strings.Join(steady.lines, "\n"); got != sentinel {
 		t.Errorf("a non-flipping tick repainted the transcript for an identical frame:\n%s", got)
 	}
@@ -721,7 +746,7 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 	openCall(&live, "c1", "go test ./...")
 	live.spin.frame = boundary
 	live.lines = []string{sentinel}
-	live = step(t, live, spinnerTickMsg{gen: live.spin.gen})
+	live = step(t, live, spinnerTickMsg{gen: live.worker.gen})
 	if got := strings.Join(live.lines, "\n"); got == sentinel {
 		t.Error("the flipping tick with a call open did not repaint — the live star would never flip")
 	}
@@ -751,7 +776,7 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 	}
 
 	m.spin.frame = m.spin.framesPerBlinkHalf() - 1 // the next tick is the one that crosses the phase
-	m = step(t, m, spinnerTickMsg{gen: m.spin.gen})
+	m = step(t, m, spinnerTickMsg{gen: m.worker.gen})
 
 	if !m.detached {
 		t.Error("the tick's repaint re-attached a scrolled-up view")
@@ -784,7 +809,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 
 	// Row 0 IS the live header: the flip rewrites the very line the span covers.
 	spanning := live(t, func(*Model) {})
-	spanning = step(t, spanning, spinnerTickMsg{gen: spanning.spin.gen})
+	spanning = step(t, spanning, spinnerTickMsg{gen: spanning.worker.gen})
 	if spanning.transcriptSel.active {
 		t.Error("a selection spanning the flipping header survived the flip")
 	}
@@ -792,7 +817,7 @@ func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
 	// Row 0 is a settled user block and the live header sits below it: the flip is none of the
 	// span's business.
 	elsewhere := live(t, func(m *Model) { m.transcript.addUser("run the tests", nil) })
-	elsewhere = step(t, elsewhere, spinnerTickMsg{gen: elsewhere.spin.gen})
+	elsewhere = step(t, elsewhere, spinnerTickMsg{gen: elsewhere.worker.gen})
 	if !elsewhere.transcriptSel.active {
 		t.Error("the star's flip dropped a selection over settled lines it never touched")
 	}

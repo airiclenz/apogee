@@ -431,9 +431,7 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 
 	t.Run("esc inside a view never arms the stop", func(t *testing.T) {
 		m := modelWithRun(t)
-		cancelled := false
-		m.cancel = func() { cancelled = true }
-		m.state = stateRunning
+		cancelled := startStubWorker(t, &m)
 		m = enterOnLastBlock(t, m)
 
 		m = step(t, m, keyEsc())
@@ -441,7 +439,7 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 		if !m.lastEsc.IsZero() {
 			t.Error("esc inside a view armed the stop gesture; the claimant swallows it")
 		}
-		if cancelled {
+		if cancelled() {
 			t.Error("esc inside a view cancelled the worker")
 		}
 		if m.inRunView() {
@@ -459,7 +457,7 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				m := modelWithRun(t)
-				m.cancel = func() {}
+				startStubWorker(t, &m)
 				m = enterOnLastBlock(t, m)
 				m.state = tc.state
 
@@ -475,7 +473,7 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 
 func TestRunViewStatusSlotOffersTheWayBack(t *testing.T) {
 	m := modelWithRun(t)
-	m.state = stateRunning
+	startStubWorker(t, &m)
 	if got := plainSlot(m.statusRight()); got != "esc×2 stop" {
 		t.Fatalf("setup: the top level's right slot is %q; want the stop gesture", got)
 	}

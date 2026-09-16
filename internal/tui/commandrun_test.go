@@ -64,8 +64,8 @@ func TestQueuedDrainStopsAtCompactAndResumesAfterItsFold(t *testing.T) {
 
 	next, cmd := stepCmd(t, m, exchangeDoneMsg{})
 
-	if next.state != stateRunning || next.box != nil {
-		t.Fatalf("state = %v, box = %v; want the compaction worker running with no mailbox", next.state, next.box)
+	if next.state != stateRunning || next.worker.box != nil {
+		t.Fatalf("state = %v, box = %v; want the compaction worker running with no mailbox", next.state, next.worker.box)
 	}
 	if got := commandLines(next); !reflect.DeepEqual(got, []string{"/clear"}) {
 		t.Fatalf("queued commands after the compaction started = %v; want /clear still waiting", got)

@@ -666,7 +666,7 @@ func TestPresentedEntrySanitizesModelText(t *testing.T) {
 func TestUpdateFoldsPresentedMsg(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
-	m.state = stateRunning
+	startStubWorker(t, &m)
 
 	m = step(t, m, presentedMsg{
 		Path:        "docs/review.html",

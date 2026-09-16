@@ -88,10 +88,10 @@ type Model struct {
 	flushEvents func()
 
 	// registerBox tells the Bridge which mailbox the engine's pre-emption seam reads
-	// (Bridge.setMailbox), called with every box the Model installs and with nil when the Exchange
-	// ends — see installBox, the ONE place a box is put on the Model. Only Build can wire it, for
-	// flushEvents' reason: the Bridge is the composition root's. It stays nil in the model tests
-	// that never ask the seam, and installBox skips a nil registrar.
+	// (Bridge.setMailbox), called with every box the worker value takes and with nil when the
+	// Exchange ends — see installBox, the ONE place the worker's box reaches the Bridge. Only Build
+	// can wire it, for flushEvents' reason: the Bridge is the composition root's. It stays nil in
+	// the model tests that never ask the seam, and installBox skips a nil registrar.
 	registerBox func(*interjectBox)
 
 	// diag is the --tui-diag log (diagnostics.go), or nil — which is the normal state, the flag
@@ -257,10 +257,10 @@ type Model struct {
 	// Sub-models (Bubbles widgets). The input textarea lives on the embedded promptEditor above.
 	viewport viewport.Model
 
-	// spin is the status-line spinner's animation state — the style, the colour flag, the frame
-	// counter, and the tick-chain generation (spinner.go). Plain ints in a plain value, so it is
-	// safe inside the value-copied Model, and every frame is a pure function of the counter rather
-	// than of an RNG handle a copy would share (ADR 0011).
+	// spin is the status-line spinner's animation state — the style, the colour flag and the frame
+	// counter (spinner.go); the tick chain's generation is the worker's (worker.gen). Plain ints in
+	// a plain value, so it is safe inside the value-copied Model, and every frame is a pure
+	// function of the counter rather than of an RNG handle a copy would share (ADR 0011).
 	spin spinnerAnim
 
 	// hb is the upstream heartbeat's state — the tick chain's generation, the offline debounce,
@@ -270,8 +270,13 @@ type Model struct {
 	hb heartbeatState
 
 	// Lifecycle.
-	state  uiState
-	cancel context.CancelFunc // non-nil while a worker runs; the stop key calls it (C4)
+	state uiState
+	// worker is the in-flight worker as one value (worker.go): the CancelFunc the stop key calls
+	// (C4), the running Exchange's interjection mailbox, and the spinner tick chain's generation,
+	// written by its three verbs — start (enterRunning), resume (resumeRunning), finish
+	// (finishWorker). The state above stays here: it is the machine the keys route on, and the
+	// worker exists in three of its four states.
+	worker worker
 	// pendingDecision is the question this Exchange is blocked on and the payload that rides with
 	// it. It is EMBEDDED anonymously like liveStats above, so m.pending, m.pendingAsk and
 	// m.askChecked read exactly as they always did while the three of them gain one owner — and
@@ -320,8 +325,8 @@ type Model struct {
 	// The interjection queue — what the human typed while the model worked (ADR 0025). It is
 	// kept in two reconciled copies, which is what lets one goroutine own each half:
 	//
-	// box is the running Exchange's mailbox, held BY POINTER because it carries a mutex and the
-	// Model is value-copied on every Update (doc.go's no-copy invariant). It is created fresh
+	// worker.box is the running Exchange's mailbox, held BY POINTER because it carries a mutex and
+	// the Model is value-copied on every Update (doc.go's no-copy invariant). It is created fresh
 	// per Exchange, handed to that Exchange's worker, and cleared at the terminal fold: non-nil
 	// means "a worker is draining this", nil means there is nothing to deliver into right now
 	// (idle, or the /compact worker, which drives no Exchange).
@@ -337,7 +342,6 @@ type Model struct {
 	// interjectSeq mints those ids — a plain counter, incremented on the Update goroutine and
 	// never reset, so an id names one row for the life of the session and a delivery report can
 	// never be reconciled against a row that merely reused a number.
-	box                  *interjectBox
 	pendingInterjections []queuedInterjection
 	interjectSeq         int
 
@@ -1868,15 +1872,16 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 // (launchExchange), both /continue arms and /compact (commandrun.go) — enters "an Exchange is in
 // flight" through it, so the writes that state is made of are spelled once, in their load-bearing
 // order: the boundary (cacheBoundaryAtIdle — the last one the Model can see before the worker owns
-// the engine), the mailbox (installBox: the Exchange's own box, or nil for a /compact nothing can
-// be interjected into), the CancelFunc the stop key calls (C4), the state flip and the queue legend
-// (markRunning), the opening activity phrase (the caller's: actThinking for a request in flight,
-// actCompacting for a summary call — set here because nothing has come back yet; the first Event
-// re-derives it, activity.go), the thinking board's commit (the last Exchange's thinking is
-// finished, not inherited — thinking.go; every launch commits, which is what keeps a /continue or
-// /compact from leaning on finishWorker to close a board it never opened), and the spinner tick
-// (spin.arm). It returns the batched Cmd the caller hands back from Update: the worker and the
-// first tick.
+// the engine), the worker value (worker.start: the CancelFunc the stop key calls (C4), the
+// mailbox — the Exchange's own box, or nil for a /compact nothing can be interjected into — and a
+// new tick-chain generation), the Bridge's copy of that mailbox (installBox), the state flip and
+// the queue legend (markRunning), the opening activity phrase (the caller's: actThinking for a
+// request in flight, actCompacting for a summary call — set here because nothing has come back
+// yet; the first Event re-derives it, activity.go), the thinking board's commit (the last
+// Exchange's thinking is finished, not inherited — thinking.go; every launch commits, which is
+// what keeps a /continue or /compact from leaning on finishWorker to close a board it never
+// opened), and the spinner tick (spin.arm, on the generation the worker just opened). It returns
+// the batched Cmd the caller hands back from Update: the worker and the first tick.
 //
 // cmd and cancel arrive already built (startExchange, startResume, startCompact — worker.go), and
 // the boundary is still the pre-Submit one: a tea.Cmd is inert until the program runs it after
@@ -1885,17 +1890,17 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 // upstream and InExchange guards, the transcript block, the layout — and the box that reaches
 // this verb is the same one the worker was built over, so the two readers of the mailbox agree.
 //
-// It takes a pointer because the spinner generation bump must land on the Model copy the caller
-// returns — so a caller binds the Cmd in a statement of its own, never `return m, m.enterRunning(…)`
-// (spinnerAnim.arm).
+// It takes a pointer because the generation bump and the frame reset must land on the Model copy
+// the caller returns — so a caller binds the Cmd in a statement of its own, never
+// `return m, m.enterRunning(…)` (spinnerAnim.arm).
 func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelFunc, box *interjectBox, kind activityKind) tea.Cmd {
 	m.cacheBoundaryAtIdle()
-	m.installBox(box)
-	m.cancel = cancel
+	m.worker.start(cancel, box)
+	m.installBox()
 	m.markRunning()
 	m.setActivity(runRef{}, kind, "")
 	m.thinking.commitAll()
-	tick := m.spin.arm()
+	tick := m.spin.arm(m.worker.gen)
 	return tea.Batch(cmd, tick)
 }
 
@@ -1904,12 +1909,14 @@ func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelFunc, box *interj
 // running WITHOUT a launch. The worker never died, so there is no boundary to cache, no box to
 // install and no CancelFunc to store; what the pane's departure changes is the state flip and the
 // legend (markRunning), the layout — the pane is gone, so a draft it had clamped grows back
-// (draftRowsCeiling) — and the spinner, re-armed because the tick chain died when the prompt went
-// up. It returns that tick; the same pointer rule as enterRunning applies (bind it, then return).
+// (draftRowsCeiling) — and the spinner, re-armed on a new generation (worker.resume) because the
+// tick chain died when the prompt went up. It returns that tick; the same pointer rule as
+// enterRunning applies (bind it, then return).
 func (m *Model) resumeRunning() tea.Cmd {
 	m.markRunning()
 	m.layout()
-	return m.spin.arm()
+	m.worker.resume()
+	return m.spin.arm(m.worker.gen)
 }
 
 // markRunning is the tail the two launch verbs share and the ONLY writer of stateRunning: the
@@ -1933,15 +1940,16 @@ func (m *Model) markRunning() {
 // deliberately left standing rather than dropped here — the worker has not unwound yet, and
 // finishWorker is what closes the board.
 func (m *Model) stopWorker() {
-	if m.cancel != nil {
-		m.cancel()
+	if m.worker.cancel != nil {
+		m.worker.cancel()
 	}
 	m.setActivity(runRef{}, actStopping, "")
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
-// arrives — the inverse of the launch verb (enterRunning): it cancels and clears the CancelFunc,
-// any pending Approval or ask_user question, and the Exchange's interjection mailbox. The new
+// arrives — the inverse of the launch verb (enterRunning): it releases the worker value
+// (worker.finish — the CancelFunc called and cleared, the Exchange's interjection mailbox dropped)
+// and clears any pending Approval or ask_user question. The new
 // state is idle for a completed or cancelled Exchange, errored for a loop fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit); otherwise, when
 // the Exchange settled at idle, it is the final per-session save (saveAtIdle) — the Model owns
 // the engine again at this boundary, so it takes its own Snapshot — else nil.
@@ -1950,20 +1958,21 @@ func (m *Model) stopWorker() {
 // (applyPendingRebind): the Model owning the engine again is exactly the precondition
 // Agent.Rebind states, so the deferred apply and the idle Snapshot share one boundary.
 //
-// It CALLS the CancelFunc before clearing it: a completed Exchange leaves its worker's
-// cancellable child context un-cancelled otherwise, leaking one context (and its goroutine's
-// timer resources) per completed exchange for the life of the session. Cancelling a context
-// whose work already finished is the documented, idempotent way to release it.
-//
 // It also clears the generation clock: a cancelled or faulted stream emits no terminal
 // UsageEvent, so foldStats never zeroes genStart, and a stale start would time the *next*
 // turn's tok/s from the dead one. A normal completion has already zeroed it in foldStats, so
 // this is a harmless no-op there and the safety net for every abnormal terminal path.
 func (m *Model) finishWorker(next uiState) tea.Cmd {
-	if m.cancel != nil {
-		m.cancel() // release the worker's child context — un-cancelled it leaks per exchange
-	}
-	m.cancel = nil
+	// The worker has unwound: its child context is released (called before it is cleared — the
+	// per-exchange leak worker.finish's doc names) and its mailbox has no reader left, so it goes
+	// too, with any row the worker had not drained by the time it unwound. Nothing is lost — the
+	// display queue (pendingInterjections) is the queue of record and still holds every undelivered
+	// row. What happens to those rows next is the CALLER's ruling, not this one's: a natural
+	// completion flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds
+	// them for the next ⏎ (noteHeldQueue) — ADR 0025. The Bridge lets go of the box in the same
+	// breath (installBox), so the engine's pre-emption seam can never read a box no worker drains.
+	m.worker.finish()
+	m.installBox()
 	// The question this Exchange was blocked on dies with it — the Approval, the ask_user request,
 	// and the ticked set that rides with the latter: no path leaves a dead request or a dead checked
 	// set standing (pendingDecision.reset).
@@ -1971,14 +1980,6 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// A question that dies with its Exchange — a stop, a fault — lets go of the box exactly as an
 	// answered one does, so the message it borrowed the box from comes back here too.
 	m.restoreAskDraft()
-	// The Exchange is over, so its mailbox has no reader left: drop it, and with it any row the
-	// worker had not drained by the time it unwound. Nothing is lost — the display queue
-	// (pendingInterjections) is the queue of record and still holds every undelivered row. What
-	// happens to those rows next is the CALLER's ruling, not this one's: a natural completion
-	// flushes them into a new Exchange (flushAfterCompletion), a stop or a fault holds them for
-	// the next ⏎ (noteHeldQueue) — ADR 0025. The Bridge lets go of it in the same breath
-	// (installBox), so the engine's pre-emption seam can never read a box no worker drains.
-	m.installBox(nil)
 	m.genStart = time.Time{}
 	// The worker has unwound, so every run's activity is over — the whole board goes, including a
 	// sticky "stopping", which only this path clears, and any delegate slot whose child never got

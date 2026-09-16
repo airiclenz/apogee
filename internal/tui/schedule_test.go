@@ -464,7 +464,7 @@ func TestScheduleWithoutASchedulerReportsIt(t *testing.T) {
 func TestScheduleRunsWhileTheWorkerWorks(t *testing.T) {
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "")
-	m.state = stateRunning
+	startStubWorker(t, &m)
 
 	m, _ = typeCommand(t, m, "/schedule tidy the logs")
 	if !m.picker.open {

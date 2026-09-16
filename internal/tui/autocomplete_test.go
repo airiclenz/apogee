@@ -223,7 +223,7 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 		for _, d := range drafts {
 			t.Run(a.name+"/"+d.name, func(t *testing.T) {
 				m := modelWithOverlayRoomAt(t, 80, 30, Options{Workspace: "."})
-				m.state = stateRunning
+				startStubWorker(t, &m)
 				m.input.SetValue(d.value)
 				m, _ = m.recomputeAutocomplete()
 				m.layout()

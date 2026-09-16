@@ -771,7 +771,8 @@
 // uses — rendezvous, mailbox ([interjectBox]), fire-and-forget ([uiPresenter],
 // [Bridge.NotifySchedule], [Bridge.NotifyRouting]) — and separates them from ADR 0011's three
 // legality classes for touching the ENGINE; worker.go the
-// cancellable engine driver; model.go the [Model] itself — the lifecycle state machine, the
+// cancellable engine driver and the in-flight [worker] value the Model holds it as (the CancelFunc,
+// the mailbox and the tick-chain generation behind three verbs); model.go the [Model] itself — the lifecycle state machine, the
 // layout, the frame's one stacking order and the block spans View publishes while walking it
 // ([frameSpans], read by every pane rectangle), the status line and the footer; footerfit.go the
 // footer's FIT beside it — the pure composer ([footerFit]) that spends a window on the row's six

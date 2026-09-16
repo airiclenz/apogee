@@ -750,7 +750,7 @@ func TestSessionBrowserRefusesToOpenWhileBusy(t *testing.T) {
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "a session", "/ws/a", time.Now(), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
-	m.state = stateRunning
+	startStubWorker(t, &m)
 	m.input.SetValue("/sessions")
 
 	m, cmd := stepCmd(t, m, keyEnter())
@@ -1863,7 +1863,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 	}{
 		{"approval prompt", "Approve write_file?", func(t *testing.T, m Model, draft int) Model {
 			t.Helper()
-			m.state = stateRunning
+			startStubWorker(t, &m)
 			m = withDraft(t, m, draft)
 			return step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{
 				Tool:      "write_file",
@@ -1880,7 +1880,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 		// what the live ⏎ would answer.
 		{"ask prompt", "a long explanation", func(t *testing.T, m Model, draft int) Model {
 			t.Helper()
-			m.state = stateRunning
+			startStubWorker(t, &m)
 			m = step(t, m, askReqMsg{Request: domain.AskRequest{
 				Question: longProse,
 				Choices:  []string{"yes, go ahead", "no", "ask me again later"},

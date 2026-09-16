@@ -490,8 +490,7 @@ func TestContinueCarriesNoSkills(t *testing.T) {
 // UserInput — the silent drop the chip flow left behind (interject.go's discarded parse).
 func TestStagedInterjectionCarriesSkillIDs(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.state = stateRunning
-	m.box = newInterjectBox()
+	startStubWorker(t, &m)
 	m.input.SetValue("/review this diff too")
 	m = step(t, m, keyEnter())
 
@@ -508,8 +507,7 @@ func TestStagedInterjectionCarriesSkillIDs(t *testing.T) {
 // The delivery fold used to drop the ids on the floor (addInterjected took text alone).
 func TestDeliveredInterjectionAccentsTheSkillToken(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
-	m.state = stateRunning
-	m.box = newInterjectBox()
+	startStubWorker(t, &m)
 	m.input.SetValue("/review this diff too")
 	m = step(t, m, keyEnter())
 
@@ -534,8 +532,7 @@ func TestDeliveredInterjectionAccentsTheSkillToken(t *testing.T) {
 func TestFlushUnionsSkillIDs(t *testing.T) {
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
-	m.state = stateRunning
-	m.box = newInterjectBox()
+	startStubWorker(t, &m)
 	m.input.SetValue("/review the parser")
 	m = step(t, m, keyEnter())
 	m.input.SetValue("/review the tests too /clean-code")

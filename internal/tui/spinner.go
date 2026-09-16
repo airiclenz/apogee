@@ -29,10 +29,11 @@ import (
 // matter how often View runs, and testable without a clock.
 //
 // What the widget gave for free and this file must replace: its TickMsg carried an id and a tag,
-// so re-arming while a tick was still in flight could not leave two chains running. [spinnerAnim]
-// reproduces that as a generation counter — [spinnerAnim.arm] opens a new generation and the
-// Update loop drops a tick from any older one, which is what keeps the frame rate from doubling
-// after an approval prompt or an ask_user question re-arms the chain.
+// so re-arming while a tick was still in flight could not leave two chains running. The in-flight
+// worker value reproduces that as a generation counter ([worker.gen]) — every worker start and
+// resume opens a new generation, [spinnerAnim.arm] schedules the first tick of it, and the Update
+// loop drops a tick from any older one, which is what keeps the frame rate from doubling after an
+// approval prompt or an ask_user question re-arms the chain.
 
 // SpinnerStyle names a status-line animation. The vocabulary itself — the names, the default and
 // the parse — lives in [domain] (uivocab.go), so internal/config can validate a `ui.spinner:`
@@ -288,13 +289,14 @@ func (th theme) spinnerColor(frame, framesPerLoop int) color.Color {
 }
 
 // spinnerAnim is the animation state carried on the value-copied Model (ADR 0011): plain ints,
-// no RNG handle, no self-referential type. It is the whole spinner — the widget it replaced held
-// its frame counter and its chain bookkeeping the same way.
+// no RNG handle, no self-referential type. It is the whole animation — the widget it replaced held
+// its frame counter the same way; the chain bookkeeping (the generation a tick must carry to be
+// live) is the in-flight worker's ([worker.gen]), because a chain is opened exactly when a worker
+// starts or resumes.
 type spinnerAnim struct {
 	style SpinnerStyle // which animation paints the glyph
 	color bool         // the colour loop runs; false renders the glyph on the bare status field
 	frame int          // frames elapsed since the chain was armed
-	gen   int          // chain generation — drops a tick left over from a previous arm
 }
 
 // newSpinnerAnim builds the still, unarmed animation for a style. It schedules nothing: the
@@ -364,22 +366,21 @@ func (s spinnerAnim) view(th theme) string {
 	return th.spinnerBase.Foreground(th.spinnerColor(s.frame, s.framesPerColorLoop())).Render(s.glyph())
 }
 
-// arm opens a fresh tick chain: a new generation, back at frame 0, with the first tick
-// scheduled. Every return to stateRunning calls it — a submit, an approval decision, an answered
-// question — and the new generation is what makes a tick still in flight from the previous chain
-// inert, so the frame rate cannot double. It takes a pointer because the generation bump must
-// land on the Model copy the caller returns — which is also why every caller arms in a statement
-// of its own: in `return m, m.spin.arm()` the order of the bump and the copy of m is unspecified.
-func (s *spinnerAnim) arm() tea.Cmd {
-	s.gen++
+// arm opens a fresh tick chain on generation gen: back at frame 0, with the first tick scheduled.
+// Every return to stateRunning calls it — a submit, an approval decision, an answered question —
+// with the generation the worker value just opened (worker.start, worker.resume), and that new
+// generation is what makes a tick still in flight from the previous chain inert, so the frame
+// rate cannot double. It takes a pointer because the frame reset must land on the Model copy the
+// caller returns — which is also why every caller arms in a statement of its own: in
+// `return m, m.spin.arm(…)` the order of the reset and the copy of m is unspecified.
+func (s *spinnerAnim) arm(gen int) tea.Cmd {
 	s.frame = 0
-	return s.tick()
+	return s.tick(gen)
 }
 
-// tick schedules the next frame of the CURRENT generation, snapshotting it into the Msg so a
-// chain the Update loop has since retired identifies itself.
-func (s spinnerAnim) tick() tea.Cmd {
-	gen := s.gen
+// tick schedules the next frame of generation gen — the CURRENT one, worker.gen, at every caller
+// — snapshotting it into the Msg so a chain the Update loop has since retired identifies itself.
+func (s spinnerAnim) tick(gen int) tea.Cmd {
 	return tea.Tick(s.interval(), func(time.Time) tea.Msg { return spinnerTickMsg{gen: gen} })
 }
 
@@ -394,7 +395,7 @@ type spinnerTickMsg struct{ gen int }
 // when idle lets the chain die naturally, and dropping a tick from a previous arm means a re-arm (an
 // approval answered, an ask replied to) cannot leave two chains running and double the frame rate.
 func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
-	if m.state != stateRunning || msg.gen != m.spin.gen {
+	if m.state != stateRunning || msg.gen != m.worker.gen {
 		return m, nil
 	}
 	wasBlink := m.spin.blink()
@@ -411,5 +412,5 @@ func (m Model) foldSpinnerTick(msg spinnerTickMsg) (tea.Model, tea.Cmd) {
 		// dropped, which is that same rule doing its ordinary job on a line that changed.
 		m.refreshViewport()
 	}
-	return m, m.spin.tick()
+	return m, m.spin.tick(m.worker.gen)
 }

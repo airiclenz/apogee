@@ -329,10 +329,26 @@ func runningModel(t *testing.T) Model {
 	if m.state != stateRunning {
 		t.Fatalf("precondition: state = %v, want running", m.state)
 	}
-	if m.box == nil {
+	if m.worker.box == nil {
 		t.Fatal("precondition: no mailbox for the running Exchange")
 	}
 	return m
+}
+
+// startStubWorker stands a worker on m without launching one — the poke every test that needs
+// "a worker is in flight" without an engine to drive makes, through the value the real launch
+// writes (worker.start): a CancelFunc the stop key can reach, a fresh mailbox, and the running
+// state. Under a pane the Model is already busy — the question came from a worker — so the pane's
+// state is kept and only the worker value is stood in. It returns a probe reporting whether the
+// stub's CancelFunc has been called, for the tests whose subject is the stop key.
+func startStubWorker(t *testing.T, m *Model) (cancelled func() bool) {
+	t.Helper()
+	fired := false
+	m.worker.start(func() { fired = true }, newInterjectBox())
+	if !m.state.busy() {
+		m.state = stateRunning
+	}
+	return func() bool { return fired }
 }
 
 // stageRow types text and presses ⏎ at whatever state the model is in.
@@ -359,7 +375,7 @@ func TestTypingWhileRunningEditsInput(t *testing.T) {
 // queue AND in the Exchange's mailbox — and the editor is cleared for the next one.
 func TestEnterWhileRunningStagesRow(t *testing.T) {
 	m := runningModel(t)
-	box := m.box
+	box := m.worker.box
 
 	m.input.SetValue("also check the tests")
 	next, cmd := stepCmd(t, m, keyEnter())
@@ -427,7 +443,7 @@ func TestEnterWhileRunningRaisesThePendingSeam(t *testing.T) {
 	// the Bridge with it, so the row held for the next ⏎ is not read as pending for it.
 	m = stageRow(t, m, "held for the next send")
 	m.finishWorker(stateIdle)
-	if m.box != nil {
+	if m.worker.box != nil {
 		t.Fatal("finishWorker left the mailbox on the Model")
 	}
 	if br.InterjectionPending() {
@@ -543,8 +559,8 @@ func TestQueuedCommandRunsAtIdle(t *testing.T) {
 	if n := len(next.deferredCommands); n != 0 {
 		t.Fatalf("queued commands = %d; want the queue drained at idle", n)
 	}
-	if next.state != stateRunning || next.box != nil {
-		t.Fatalf("state = %v, box = %v; want the compaction worker running with no mailbox", next.state, next.box)
+	if next.state != stateRunning || next.worker.box != nil {
+		t.Fatalf("state = %v, box = %v; want the compaction worker running with no mailbox", next.state, next.worker.box)
 	}
 	drainCmd(t, next, cmd)
 	if eng.compactCalls != 1 {
@@ -590,7 +606,7 @@ func TestStopRunsTheQueuedCommandAndHoldsTheMessage(t *testing.T) {
 // row taken back can never still be delivered.
 func TestBackspaceEmptyPopsNewestIntoEditor(t *testing.T) {
 	m := runningModel(t)
-	box := m.box
+	box := m.worker.box
 	m = stageRow(t, m, "first remark")
 	m = stageRow(t, m, "second remark")
 
@@ -613,7 +629,7 @@ func TestBackspaceEmptyPopsNewestIntoEditor(t *testing.T) {
 func TestBackspaceDoesNotPopADrainedRow(t *testing.T) {
 	m := runningModel(t)
 	m = stageRow(t, m, "in flight")
-	m.box.drainAll() // the worker took it at a between-Steps boundary
+	m.worker.box.drainAll() // the worker took it at a between-Steps boundary
 
 	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 
@@ -905,13 +921,13 @@ func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
 	}{
 		{"running, a / menu open", func(t *testing.T, m Model) Model {
 			t.Helper()
-			m.state = stateRunning
+			startStubWorker(t, &m)
 			m.setActivity(runRef{}, actTool, "reading")
 			return dropdown(m)
 		}},
 		{"awaiting approval", func(t *testing.T, m Model) Model {
 			t.Helper()
-			m.state = stateRunning
+			startStubWorker(t, &m)
 			return step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", CacheKey: ordinaryGateKey}})
 		}},
 		{"idle, held over a stop", func(t *testing.T, m Model) Model { return dropdown(m) }},
@@ -1425,8 +1441,8 @@ func TestCompactDoneFlushes(t *testing.T) {
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/compact")
 	m, _ = stepCmd(t, m, keyEnter())
-	if m.state != stateRunning || m.box != nil {
-		t.Fatalf("precondition: state = %v, box = %v; want a running compaction with no mailbox", m.state, m.box)
+	if m.state != stateRunning || m.worker.box != nil {
+		t.Fatalf("precondition: state = %v, box = %v; want a running compaction with no mailbox", m.state, m.worker.box)
 	}
 	m = stageRow(t, m, "now the tests")
 
@@ -1840,7 +1856,7 @@ func TestInterjectBoxRaceClean(t *testing.T) {
 func TestRunViewInterjectsIntoTheViewedChild(t *testing.T) {
 	eng := &fakeEngine{}
 	m := modelViewingChild(t, eng, childRunning)
-	box := m.box
+	box := m.worker.box
 
 	m.input.SetValue("check the tests too")
 	next, cmd := stepCmd(t, m, keyEnter())

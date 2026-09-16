@@ -392,8 +392,8 @@ func TestStagedInterjectionSpendsTheBand(t *testing.T) {
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
 	m = step(t, typeDraft(t, m, "go on"), keyEnter()) // open the Exchange with nothing on the row
-	if m.state != stateRunning || m.box == nil {
-		t.Fatalf("precondition: state = %v, mailbox %v — want a running Exchange", m.state, m.box != nil)
+	if m.state != stateRunning || m.worker.box == nil {
+		t.Fatalf("precondition: state = %v, mailbox %v — want a running Exchange", m.state, m.worker.box != nil)
 	}
 
 	m = typeDraft(t, m, "audit the parser")

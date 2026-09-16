@@ -243,7 +243,7 @@ func TestModelExchangeLifecycle(t *testing.T) {
 	if m.state != stateRunning {
 		t.Fatalf("after submit state = %v, want running", m.state)
 	}
-	if m.cancel == nil {
+	if m.worker.cancel == nil {
 		t.Error("after submit cancel func is nil; the stop key would have nothing to cancel")
 	}
 	if cmd == nil {
@@ -280,7 +280,7 @@ func TestModelExchangeLifecycle(t *testing.T) {
 	if m.state != stateIdle {
 		t.Errorf("after exchangeDoneMsg state = %v, want idle", m.state)
 	}
-	if m.cancel != nil {
+	if m.worker.cancel != nil {
 		t.Error("CancelFunc not cleared after the exchange completed")
 	}
 }
@@ -426,13 +426,12 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 
 	t.Run("cancelledMsg → idle with a note", func(t *testing.T) {
 		m := newTestModel(t)
-		m.cancel = func() {} // stand in for a live worker
-		m.state = stateRunning
+		startStubWorker(t, &m)
 		m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
 		if m.state != stateIdle {
 			t.Fatalf("state = %v, want idle", m.state)
 		}
-		if m.cancel != nil || m.pending != nil {
+		if m.worker.cancel != nil || m.pending != nil {
 			t.Error("cancel/pending not cleared after cancellation")
 		}
 		if got := plain(m.View()); !strings.Contains(got, "cancelled") {
@@ -447,8 +446,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		eng := &fakeEngine{}
 		m := newModel(context.Background(), eng, testOpts, nil)
 		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-		m.cancel = func() {} // stand in for a live worker
-		m.state = stateRunning
+		startStubWorker(t, &m)
 		m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
 		if m.state != stateIdle {
 			t.Fatalf("state = %v, want idle", m.state)
@@ -460,7 +458,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 
 	t.Run("errMsg → errored", func(t *testing.T) {
 		m := newTestModel(t)
-		m.state = stateRunning
+		startStubWorker(t, &m)
 		m = step(t, m, errMsg{Err: errors.New("upstream unreachable")})
 		if m.state != stateErrored {
 			t.Fatalf("state = %v, want errored", m.state)
@@ -481,8 +479,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		eng := &fakeEngine{}
 		m := newModel(context.Background(), eng, testOpts, nil)
 		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
-		m.cancel = func() {} // stand in for a live worker
-		m.state = stateRunning
+		startStubWorker(t, &m)
 		m = step(t, m, errMsg{Err: errors.New("loop fault mid-exchange")})
 		if m.state != stateErrored {
 			t.Fatalf("state = %v, want errored", m.state)
@@ -593,11 +590,9 @@ func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
 func TestModelStopKeys(t *testing.T) {
 	t.Run("a single esc while running arms the gesture but cancels nothing", func(t *testing.T) {
 		m := newTestModel(t)
-		cancelled := false
-		m.cancel = func() { cancelled = true }
-		m.state = stateRunning
+		cancelled := startStubWorker(t, &m)
 		next, cmd := stepCmd(t, m, keyEsc())
-		if cancelled {
+		if cancelled() {
 			t.Error("a single esc cancelled the in-flight worker; it must only arm the gesture")
 		}
 		if next.lastEsc.IsZero() {
@@ -613,12 +608,10 @@ func TestModelStopKeys(t *testing.T) {
 
 	t.Run("esc twice while running cancels but does not quit", func(t *testing.T) {
 		m := newTestModel(t)
-		cancelled := false
-		m.cancel = func() { cancelled = true }
-		m.state = stateRunning
+		cancelled := startStubWorker(t, &m)
 		m = step(t, m, keyEsc())
 		next, cmd := stepCmd(t, m, keyEsc())
-		if !cancelled {
+		if !cancelled() {
 			t.Error("esc×2 did not cancel the in-flight worker")
 		}
 		if next.state != stateRunning {
@@ -638,15 +631,13 @@ func TestModelStopKeys(t *testing.T) {
 
 	t.Run("a second esc after the window only re-arms", func(t *testing.T) {
 		m := newTestModel(t)
-		cancelled := false
-		m.cancel = func() { cancelled = true }
-		m.state = stateRunning
+		cancelled := startStubWorker(t, &m)
 		m = step(t, m, keyEsc())
 		m.lastEsc = m.lastEsc.Add(-2 * escStopWindow) // pretend the window lapsed
 		// Re-arming refreshes lastEsc to ~now; the stop path zeroes it. A refreshed, non-zero
 		// stamp therefore proves the press took the arm branch, not the stop branch.
 		next, _ := stepCmd(t, m, keyEsc())
-		if cancelled {
+		if cancelled() {
 			t.Error("esc after the window cancelled the worker instead of only re-arming")
 		}
 		if next.lastEsc.IsZero() || !next.lastEsc.After(m.lastEsc) {
@@ -656,8 +647,7 @@ func TestModelStopKeys(t *testing.T) {
 
 	t.Run("a worker that finishes mid-window takes the arm with it", func(t *testing.T) {
 		m := newTestModel(t)
-		m.cancel = func() {}
-		m.state = stateRunning
+		startStubWorker(t, &m)
 		armed := step(t, m, keyEsc())
 		if got := plain(armed.View()); !strings.Contains(got, "press esc again to stop") {
 			t.Fatalf("the arm hint is not shown while the worker is still busy:\n%s", got)
@@ -717,11 +707,9 @@ func TestModelStopKeys(t *testing.T) {
 
 	t.Run("ctrl+c twice while busy defers the quit until the worker returns", func(t *testing.T) {
 		m := newTestModel(t)
-		cancelled := false
-		m.cancel = func() { cancelled = true }
-		m.state = stateRunning
+		cancelled := startStubWorker(t, &m)
 		next, cmd := ctrlCQuit(t, m)
-		if !cancelled {
+		if !cancelled() {
 			t.Error("ctrl+c×2 did not cancel the in-flight worker")
 		}
 		// The exit is DEFERRED: returning tea.Quit here would race runRoot's Close() teardown
@@ -883,7 +871,7 @@ func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
 	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "first"})
 	stale := m.approvalSeq
 
-	m.cancel = func() {}
+	startStubWorker(t, &m)
 	m = step(t, m, keyEsc())
 	m = step(t, m, keyEsc())
 	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
@@ -925,11 +913,10 @@ func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
 // worker runs (the frame's `case "esc"` covers the pane), and neither press waits on the arm.
 func TestModelApprovalEscapeIsLiveBeforeArming(t *testing.T) {
 	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
-	cancelled := false
-	m.cancel = func() { cancelled = true }
+	cancelled := startStubWorker(t, &m)
 
 	m = step(t, m, keyEsc())
-	if cancelled {
+	if cancelled() {
 		t.Error("a single esc before the arm cancelled the worker; it must only arm the gesture")
 	}
 	if m.lastEsc.IsZero() {
@@ -938,7 +925,7 @@ func TestModelApprovalEscapeIsLiveBeforeArming(t *testing.T) {
 
 	m = step(t, m, keyEsc())
 
-	if !cancelled {
+	if !cancelled() {
 		t.Error("esc×2 before the arm did not cancel the in-flight worker")
 	}
 	if m.state != stateAwaitingApproval {
@@ -1009,15 +996,14 @@ func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
 // (the cancel path is structural — esc×2 → stopWorker → cancelledMsg → finishWorker).
 func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
-	cancelled := false
-	m.cancel = func() { cancelled = true }
+	cancelled := startStubWorker(t, &m)
 
 	m = step(t, m, keyEsc())
-	if cancelled {
+	if cancelled() {
 		t.Error("a single esc at the pane cancelled the worker; it must only arm the gesture")
 	}
 	m = step(t, m, keyEsc())
-	if !cancelled {
+	if !cancelled() {
 		t.Error("esc×2 did not cancel the in-flight worker")
 	}
 	if m.state != stateAwaitingApproval {
@@ -1140,15 +1126,14 @@ func TestModelApprovalEnterTakesTheSelectedRow(t *testing.T) {
 // always taken here (TestModelApprovalCancelClearsPrompt), because no fourth ApprovalDecision exists.
 func TestModelApprovalEnterOnCancelStopsTheWorker(t *testing.T) {
 	m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
-	cancelled := false
-	m.cancel = func() { cancelled = true }
+	cancelled := startStubWorker(t, &m)
 
 	for range len(approvalMenu) - 1 { // walk to the last row: Cancel
 		m = step(t, m, keyDown())
 	}
 	m = step(t, m, keyEnter())
 
-	if !cancelled {
+	if !cancelled() {
 		t.Error("⏎ on the Cancel row did not cancel the in-flight worker")
 	}
 	select {
@@ -2082,11 +2067,10 @@ func TestModelAskPromptRender(t *testing.T) {
 // worker reports back (the same structural cancel path as the Approval gate).
 func TestModelAskCancelClearsPrompt(t *testing.T) {
 	m, _ := newAskModel(t, domain.AskRequest{Question: "q?"})
-	cancelled := false
-	m.cancel = func() { cancelled = true }
+	cancelled := startStubWorker(t, &m)
 
 	m = step(t, m, keyEsc())
-	if !cancelled {
+	if !cancelled() {
 		t.Error("esc did not cancel the in-flight worker")
 	}
 
@@ -2141,7 +2125,7 @@ func TestAskGivesTheBorrowedDraftBack(t *testing.T) {
 
 	t.Run("the exchange dies under the question", func(t *testing.T) {
 		m, _ := raise(t, draft)
-		m.cancel = func() {}
+		startStubWorker(t, &m)
 
 		m = typeInput(t, m, "tea")
 		m = step(t, m, keyEsc())
@@ -2842,7 +2826,7 @@ func TestModelAskMultiSelectCancelClearsTheChecks(t *testing.T) {
 		Choices:     []string{"alpha", "beta"},
 		MultiSelect: true,
 	}, Reply: reply})
-	m.cancel = func() {}
+	startStubWorker(t, &m)
 
 	m = step(t, m, keySpace())
 	if !m.askChecked[0] {
@@ -3354,7 +3338,7 @@ func TestContinueOnInterruptedResumesStepOnly(t *testing.T) {
 	if cmd == nil {
 		t.Error("interrupted /continue launched no worker Cmd")
 	}
-	if m.cancel == nil {
+	if m.worker.cancel == nil {
 		t.Error("interrupted /continue did not store the worker CancelFunc")
 	}
 	if hasEntry(m, entryUser, "/continue") {
@@ -3443,8 +3427,7 @@ func TestResumedMidExchangeShowsInterruptedNote(t *testing.T) {
 func TestContinueAfterLiveCancelStaysCanned(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
-	m.cancel = func() {} // stand in for a live worker
-	m.state = stateRunning
+	startStubWorker(t, &m)
 	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
 
 	if eng.InExchange() {
@@ -3602,8 +3585,7 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, eng, host)
 	m.transcript.addUser("hi", nil)
-	m.state = stateRunning
-	m.cancel = func() {}
+	startStubWorker(t, &m)
 
 	next, cmd := ctrlCQuit(t, m)
 	if snapshotted || len(host.savedCalls()) != 0 {
@@ -3692,8 +3674,7 @@ func TestModelSavesAtIdleOnExchangeDone(t *testing.T) {
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, eng, host)
 	m.transcript.addUser("hello", nil)
-	m.state = stateRunning
-	m.cancel = func() {}
+	startStubWorker(t, &m)
 
 	_, cmd := stepCmd(t, m, exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete}})
 	if cmd == nil {

@@ -81,15 +81,16 @@ func newInterjectBox() *interjectBox {
 	return &interjectBox{}
 }
 
-// installBox puts box on the Model and registers it with the Bridge in the same step, so the two
-// readers of the mailbox — the worker that drains it and the engine's pre-emption seam that asks
-// whether it holds anything (Bridge.InterjectionPending) — always see the SAME box: the live
-// Exchange's, or nil when there is none (finishWorker, the /compact worker). It is the one place a
-// box reaches m.box, which is what keeps the seam from ever reading a box no worker drains.
-func (m *Model) installBox(box *interjectBox) {
-	m.box = box
+// installBox registers the worker value's mailbox with the Bridge, called in the same step as each
+// worker verb that changes it (worker.start in enterRunning, worker.finish in finishWorker), so the
+// two readers of the mailbox — the worker that drains it and the engine's pre-emption seam that
+// asks whether it holds anything (Bridge.InterjectionPending) — always see the SAME box: the live
+// Exchange's, or nil when there is none (finishWorker, the /compact worker). It is the one place
+// the worker's box reaches the Bridge, which is what keeps the seam from ever reading a box no
+// worker drains.
+func (m *Model) installBox() {
 	if m.registerBox != nil {
-		m.registerBox(box)
+		m.registerBox(m.worker.box)
 	}
 }
 
@@ -218,7 +219,7 @@ func (m Model) stageInterjection() (tea.Model, tea.Cmd) {
 	// The display copy and the mailbox are written together, which is what makes the two halves
 	// reconcilable: the row exists for the human the moment it exists for the worker.
 	m.pendingInterjections = append(m.pendingInterjections, row)
-	m.box.push(row)
+	m.worker.box.push(row)
 	// A staged row is a send from the human's side — the line has left their hands and the worker
 	// delivers it — so the suggestion band is spent exactly as it is at idle (spendSkillHints).
 	m.spendSkillHints()
@@ -364,7 +365,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 		return m.refuseChildMessage(childGoneNote(usageAgentName(head)))
 	}
 	m.interjectSeq++
-	// The display copy alone: nothing is pushed into m.box, because the child's own mailbox is
+	// The display copy alone: nothing is pushed into m.worker.box, because the child's own mailbox is
 	// already holding this message and a second queue would deliver it to the parent as well.
 	m.pendingInterjections = append(m.pendingInterjections, queuedInterjection{
 		id:         m.interjectSeq,
@@ -454,7 +455,7 @@ func (m Model) popInterjection() (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	row := m.pendingInterjections[n-1]
-	if !m.box.withdraw(row.id) {
+	if !m.worker.box.withdraw(row.id) {
 		return m, nil, false
 	}
 	m.pendingInterjections = m.pendingInterjections[:n-1]

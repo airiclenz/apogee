@@ -458,7 +458,7 @@ func TestClickOffFieldDeselects(t *testing.T) {
 // "select at any point in time" (ADR 0025; the plan's decision 9).
 func TestClickPositionsCaretWhileRunning(t *testing.T) {
 	m := modelWithInput(t, "hello world")
-	m.state = stateRunning
+	startStubWorker(t, &m)
 	m.input.MoveToEnd()
 
 	m = step(t, m, leftClick(2+0, 24-bottomRuleHeight-footerHeight-inputBorderRows)) // column 0 of the single content row
@@ -549,7 +549,7 @@ func TestSelectionDeleteCutsRunes(t *testing.T) {
 // 0025) — so the selection delete lands there exactly as it does at idle.
 func TestSelectionDeleteWhileRunning(t *testing.T) {
 	m := modelWithInput(t, "hello world")
-	m.state = stateRunning
+	startStubWorker(t, &m)
 
 	m = dragSelect(t, m, 0, 5)
 	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
@@ -1800,8 +1800,8 @@ func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
 
 	m = step(t, m, leftClick(2, row))
 	painted := m.lines[header]
-	m.spin.frame = m.spin.framesPerBlinkHalf() - 1  // …so the next tick is the one that crosses the phase
-	m = step(t, m, spinnerTickMsg{gen: m.spin.gen}) // the star flips: the pressed line is rewritten
+	m.spin.frame = m.spin.framesPerBlinkHalf() - 1    // …so the next tick is the one that crosses the phase
+	m = step(t, m, spinnerTickMsg{gen: m.worker.gen}) // the star flips: the pressed line is rewritten
 	if m.lines[header] == painted {
 		t.Fatal("setup: the tick left the header line alone, so this case tests nothing")
 	}
@@ -2424,7 +2424,7 @@ func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
 // while a worker owns the exchange and the staged interjection is still being written.
 func TestPromptDragSelectsWhileRunning(t *testing.T) {
 	m := modelWithInput(t, "hello world")
-	m.state = stateRunning
+	startStubWorker(t, &m)
 	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
 	m = step(t, m, leftClick(2+0, y)) // anchor at column 0
@@ -4947,19 +4947,18 @@ func TestApprovalClickBeforeTheLatchRulesNothing(t *testing.T) {
 func TestApprovalClickOnCancelStopsTheWorker(t *testing.T) {
 	m, reply := approvalClickModel(t)
 	m = armApproval(t, m)
-	cancelled := false
-	m.cancel = func() { cancelled = true }
+	cancelled := startStubWorker(t, &m)
 	x, y := frameCell(t, m, "Cancel")
 
 	m = step(t, m, leftClick(x, y))
 
-	if cancelled {
+	if cancelled() {
 		t.Fatal("the FIRST click on Cancel stopped the worker; it may only move the highlight")
 	}
 
 	m = step(t, m, leftClick(x, y))
 
-	if !cancelled {
+	if !cancelled() {
 		t.Error("the second click on Cancel did not stop the worker")
 	}
 	if d, sent := sentDecision(t, reply); sent {

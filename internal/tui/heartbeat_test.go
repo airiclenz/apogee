@@ -358,7 +358,7 @@ func TestBusyFailureNeverFlipsOffline(t *testing.T) {
 			if tc.everOnline {
 				m = foldBeatMsg(t, m, upBeat("test-model", 32768))
 			}
-			m.state = stateRunning
+			startStubWorker(t, &m)
 
 			busy, cmd := stepCmd(t, m, beatMsg{gen: m.hb.gen, beat: downBeat("timeout")})
 			if cmd == nil {
@@ -413,7 +413,7 @@ func TestReportUpstreamPublishesTheThreeCrossingsOnly(t *testing.T) {
 		t.Fatalf("reports after a first contact and one debounced failure = %+v, want none", reports)
 	}
 
-	m.state = stateRunning
+	startStubWorker(t, &m)
 	m = step(t, m, beatMsg{gen: m.hb.gen, beat: downBeat("timeout")}) // busy: ignored
 	m.state = stateIdle
 	if len(reports) != 0 {
@@ -1094,7 +1094,7 @@ func TestRebindDeferredWhileBusy(t *testing.T) {
 	rb := &fakeRebind{}
 	m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
 	m = foldBeatMsg(t, m, upBeat("test-model", 32768)) // the baseline binding, at idle
-	m.state = stateRunning
+	startStubWorker(t, &m)
 
 	m = foldBeatMsg(t, m, upBeat("model-a", 32768))
 	m = foldBeatMsg(t, m, upBeat("model-b", 16384))

@@ -569,7 +569,14 @@ suite, approval/ask "back to running" tests, `TestE2E*` goldens unchanged.
 
 **Commit:** `refactor(tui): one launch verb writes the in-flight worker`
 
-## 16. The in-flight worker is one value
+## 16. The in-flight worker is one value — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `installBox` keeps its name and its "one place the Bridge learns the box" role but takes no argument — it registers `m.worker.box`, called right after `worker.start` (enterRunning) and `worker.finish` (finishWorker); the box itself is written by the worker verbs, so `bridge.go`'s two `installBox` cross-references stay true.
+NOTES (2026-09-16): `startStubWorker(t, &m)` takes the Model by pointer (the plan's `(t, m)` shape cannot write a value-copied Model) and returns a `func() bool` probe for the ten tests whose subject is whether the stop key fired the cancel; under a pane it keeps the pane's state (the Model is already busy) and only stands the worker in — the four cancel-only pokes under an approval/ask pane use the same helper.
+NOTES (2026-09-16): `e2e_test.go`'s `runExchange` harness launches a REAL worker, so it writes `m.worker.start(cancel, nil)` with the real CancelFunc rather than the stub helper; its `m.state = stateRunning` line stays.
+NOTES (2026-09-16): `TestSpinnerTickChainGeneration` re-arms through `resumeRunning` (the verb that owns the bump now) and gains the guard's finish→start case (exchangeDoneMsg then a second submit: generation strictly above the finished chain's, the finished chain's leftover tick inert).
+NOTES (2026-09-16): consequential edit — internal/tui/doc.go: made necessary by the `worker` value landing in worker.go (the package map's half-line role for worker.go names it).
+NOTES (2026-09-16): consequential edit — docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md: made necessary by `m.box` moving to `m.worker.box` (dated in-place amendment under the mailbox bullet, per the plan's ADR-text call).
 
 **What.** Depends on item 15. `internal/tui`: `cancel`, `box` and the spinner generation move under
 one `worker` value on `Model` (held by value — the Model is value-copied on every `Update`; no

@@ -384,7 +384,7 @@ func TestCompactCommandLaunchesWorker(t *testing.T) {
 
 func TestCompactDoneAddsNoteAndResetsGauge(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
-	m.state = stateRunning // the /compact worker is in flight
+	startStubWorker(t, &m) // the /compact worker is in flight
 	m.ctxUsed = 4200       // the gauge is lit from before compaction
 
 	m = step(t, m, compactDoneMsg{Err: nil})
@@ -402,7 +402,7 @@ func TestCompactDoneAddsNoteAndResetsGauge(t *testing.T) {
 
 func TestCompactDoneSurfacesError(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
-	m.state = stateRunning
+	startStubWorker(t, &m)
 	m.ctxUsed = 4200
 
 	m = step(t, m, compactDoneMsg{Err: errors.New("upstream boom")})
@@ -423,7 +423,7 @@ func TestCompactDoneSurfacesError(t *testing.T) {
 // claiming a compaction. This pins the 2b truthfulness fix at the TUI seam.
 func TestCompactDoneSkippedLeavesGaugeAndSaysNothing(t *testing.T) {
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
-	m.state = stateRunning // the /compact worker is in flight
+	startStubWorker(t, &m) // the /compact worker is in flight
 	m.ctxUsed = 4200       // the gauge is lit from before; a skip must leave it alone
 
 	m = step(t, m, compactDoneMsg{Skipped: true})
@@ -451,9 +451,9 @@ func TestCompactDoneSkippedLeavesGaugeAndSaysNothing(t *testing.T) {
 func TestCancelledCompactLeavesGaugeUntouched(t *testing.T) {
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
-	m.state = stateRunning // the /compact worker is in flight
+	startStubWorker(t, &m) // the /compact worker is in flight
 	m.ctxUsed = 4200       // the gauge is lit from before compaction
-	m.cancel = func() {}   // stand in for the live worker
+	startStubWorker(t, &m)
 
 	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
 
