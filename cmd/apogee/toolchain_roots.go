@@ -17,7 +17,6 @@ package main
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -82,8 +81,14 @@ var toolchainProbeEnvKeys = append(
 // with those pins over a PATH scoped out of workspace, and it is silent: no `go` on PATH, a
 // failing or timed-out run, and an unusable answer all yield fewer roots, never an error. A tree
 // the model cannot read is a smaller library, not a broken session.
+//
+// The program itself is resolved through the argv[0] fence every other exec site takes
+// (security.ResolveProgram): the HOST's PATH — not the scoped one the child gets — is what names
+// the `go` that runs at boot, and a PATH carrying an activated `.venv/bin` or any other directory
+// inside the workspace would hand the model's writable tree a program spawned before the session
+// starts. A `go` that resolves inside the workspace is refused, silently, like a missing one.
 func probeToolchainRoots(ctx context.Context, workspace string) []string {
-	goBinary, err := exec.LookPath("go")
+	goBinary, err := security.ResolveProgram(nil, "go", workspace, nil)
 	if err != nil {
 		return nil
 	}

@@ -26,13 +26,22 @@ type fakeGoRecord struct {
 // installFakeGo puts a `go` on PATH — a shell script, so these tests are POSIX-only — that logs
 // every invocation and prints the answers given, one per line, with the exit status given. Only
 // that directory is on PATH afterwards, so the real toolchain is out of reach for the duration.
+// The fake lives in its own t.TempDir, outside any workspace a test names: the ordinary case,
+// where the argv[0] fence lets the probe through.
 func installFakeGo(t *testing.T, answers []string, exit int) (log string) {
+	t.Helper()
+
+	return installFakeGoIn(t, t.TempDir(), answers, exit)
+}
+
+// installFakeGoIn is installFakeGo with the directory chosen by the caller — the inside-workspace
+// case plants the fake beneath the workspace the probe is fenced against. dir must exist.
+func installFakeGoIn(t *testing.T, dir string, answers []string, exit int) (log string) {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the fake go is a shell script")
 	}
 
-	dir := t.TempDir()
 	log = filepath.Join(dir, "go.log")
 	var body strings.Builder
 	body.WriteString("#!/bin/sh\n")
@@ -156,6 +165,29 @@ func TestProbeToolchainRootsRunsInTheTempRootWithThePins(t *testing.T) {
 	}
 	if !rec.homeVisible {
 		t.Error("the probe ran without HOME; the module cache's default location could not be answered")
+	}
+}
+
+// TestProbeToolchainRootsRefusesAGoInsideTheWorkspace: a `go` that PATH resolves inside the
+// workspace — an activated `.venv/bin`, the shape of the defect — is refused by the argv[0] fence
+// like every other exec site's program: nil roots, and the fake is never spawned (no log is
+// written), because the host's own PATH is what names the program and the tree the model writes
+// to may not supply one that runs at boot.
+func TestProbeToolchainRootsRefusesAGoInsideTheWorkspace(t *testing.T) {
+	workspace := t.TempDir()
+	bin := filepath.Join(workspace, ".venv", "bin")
+	if err := os.MkdirAll(bin, 0o700); err != nil {
+		t.Fatalf("mkdir the workspace's bin: %v", err)
+	}
+	log := installFakeGoIn(t, bin, []string{t.TempDir()}, 0)
+
+	got := probeToolchainRoots(context.Background(), workspace)
+
+	if got != nil {
+		t.Errorf("probeToolchainRoots() = %v with go inside the workspace; want nil", got)
+	}
+	if _, err := os.Stat(log); !os.IsNotExist(err) {
+		t.Errorf("the fake go inside the workspace was spawned (log stat: %v); want it refused before it ran", err)
 	}
 }
 

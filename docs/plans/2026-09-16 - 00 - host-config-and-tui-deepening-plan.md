@@ -89,7 +89,9 @@ engine, tools and provider half and is gated on this plan archiving.
 
 ---
 
-## 1. `probeToolchainRoots` resolves `go` through the argv[0] fence
+## 1. `probeToolchainRoots` resolves `go` through the argv[0] fence — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the test helper gained `installFakeGoIn(t, dir, answers, exit)` with `installFakeGo` kept as its `t.TempDir()` wrapper, so the six existing cases read unchanged and only the new inside-workspace case names a directory.
 
 **What.** Defect (security, confirmed): `cmd/apogee/toolchain_roots.go` resolves `go` with bare
 `exec.LookPath` and spawns it at boot — the one production exec site outside the fence every other
