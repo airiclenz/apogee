@@ -618,7 +618,10 @@ quoting "wrote 31 bytes to main.go" unchanged; new `write_target_test.go` for ea
 
 **Commit:** `refactor(tools): a write-target value mirrors readScope; write_file and edit adopt it`
 
-## 19. The find/replace pair and `delete_file` adopt `writeTarget`
+## 19. The find/replace pair and `delete_file` adopt `writeTarget` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `find_replace_test.go` and `delete_file_test.go` needed no edit — no test names `checkDeletePath` or the free functions, and every existing assertion (23 + 10) passes unchanged — so they are not in FILES though the plan listed them.
+NOTES (2026-09-16): `docs/design/confinement-execution-contract.md`'s ADR 0049 addendum quotes `readWriteTarget`/`statWriteTarget` with `path_safety.go:139`/`:153` line anchors that predate item 18 (the shims now sit lower and the verbs reach the fence through `writeTarget.read`/`stat`); a dated-addendum quote, left as-is — pre-existing doc drift, not this item's.
 
 **What.** Depends on item 18. `find_replace.go` (both tools) and `delete_file.go` (its
 `checkDeletePath` folds into `target()`) take their target from the value; each Execute reads the

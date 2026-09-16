@@ -226,13 +226,12 @@ func writeEscapeTarget(ctx context.Context) string {
 }
 
 // readWriteTarget and statWriteTarget are the free-function spellings of writeTarget.read and
-// writeTarget.stat (write_target.go), kept for the verbs that still reach the fence by argument
-// and root rather than through the value — the find/replace pair, delete_file and the
-// file-operation tools — and for the undo capture below, which takes its pre-image the same way.
-// Each is one line over the method; the method's doc is the contract, and the permit pin both go
-// through is writeTarget.pin. An empty argument answers as the method's own refusal
-// (errPathRequired), which no caller reaches: every verb refuses an empty path before it asks the
-// fence anything.
+// writeTarget.stat (write_target.go), kept for what still reaches the fence by argument and root
+// rather than through the value — the file-operation tools' destination stat, and the undo
+// capture below, which takes its pre-image the same way. Each is one line over the method; the
+// method's doc is the contract, and the permit pin both go through is writeTarget.pin. An empty
+// argument answers as the method's own refusal (errPathRequired), which no caller reaches: every
+// verb refuses an empty path before it asks the fence anything.
 
 func readWriteTarget(ctx context.Context, input, root string) ([]byte, error) {
 	target, err := writeScopeOf(ctx, root).target(input)

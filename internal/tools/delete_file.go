@@ -85,29 +85,46 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	if !ok {
 		return fail, nil
 	}
-	if refusal := checkDeletePath(ctx, args.Path, t.root); refusal != "" {
-		return errorResult(call.ID, refusal), nil
+	// The one resolution of this call's path (writeScope.target): the pre-flight stat, the
+	// disclosure and the journaled removal below all go through this value, so they describe
+	// the same file as the one dispatch classified. An empty path is its refusal.
+	target, err := writeScopeOf(ctx, t.root).target(args.Path)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
+	}
+	// The name must exist inside the fence and must not be a directory, because directory
+	// removal is a different blast radius and a different tool. The stat goes through the
+	// workspace fence, so an escaping path is refused here with the uniform escape wording
+	// rather than reported as an ordinary absence. Like checkFileOpsPaths this is for the
+	// MESSAGE first — SafeRemove re-decides containment at operation time — but the directory
+	// refusal also carries weight of its own, since os.Remove would happily unlink an EMPTY
+	// directory. A name swapped between the two steps can therefore cost at most one empty
+	// directory inside the workspace: still within the blast radius the call already declared,
+	// and not worth a second fenced primitive to close.
+	info, err := target.stat()
+	if err != nil {
+		return errorResult(call.ID, target.notFound(err, "file not found: ")), nil
+	}
+	if info.IsDir() {
+		return errorResult(call.ID, "not a file: "+args.Path+" (directories are not supported)"), nil
 	}
 	// Read before the removal: afterwards the name is gone and resolves to itself through its
 	// parent, so the one delete worth disclosing — a name that pointed somewhere else — would
 	// report nothing. SafeRemove unlinks THE NAME, so this discloses more than the call touches
 	// (the link's target survives), which is the direction a security surface errs in and the one
-	// the gate already took (resolvedTargetNote, ResolvedWriteTarget).
-	resolved := resolvedTargetNote(args.Path, t.root)
+	// the gate already took (writeTarget.note, ResolvedWriteTarget).
+	resolved := target.note()
 	// The funnel reads the bytes before the unlink, for the plainest reason in the family:
-	// afterwards there are none. That pre-image IS the file (journaledMutation, ADR 0051) — the
-	// journal's copy is the only one left once SafeRemove returns, and it is what `/undo` writes
-	// back, with the mode the file carried rather than a default one. The path goes post-absent,
-	// which is what makes the undo a restore rather than a rewrite.
-	err := journaledMutation(
-		ctx,
-		[]mutationPath{{input: args.Path, root: t.root, post: postAbsent}},
-		func(escape string) ([]bool, error) {
-			if err := security.SafeRemove(t.root, args.Path, escape); err != nil {
-				return nil, err
-			}
-			return []bool{true}, nil
-		})
+	// afterwards there are none. That pre-image IS the file (writeTarget.journaled, ADR 0051) —
+	// the journal's copy is the only one left once SafeRemove returns, and it is what `/undo`
+	// writes back, with the mode the file carried rather than a default one. The path goes
+	// post-absent, which is what makes the undo a restore rather than a rewrite.
+	err = target.journaled(postAbsent, func(escape string) (bool, error) {
+		if err := security.SafeRemove(t.root, args.Path, escape); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
@@ -115,32 +132,6 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// probe reads the INDEX, so the path it takes is the one that was just removed from disk.
 	staged := stageGitPaths(ctx, t.root, " (deletion staged in git)", args.Path)
 	return okResult(call.ID, "deleted "+args.Path+resolved+staged), nil
-}
-
-// checkDeletePath validates the one path delete_file takes and returns the model-facing refusal
-// (empty when the removal may proceed): the name must exist inside the fence and must not be a
-// directory, because directory removal is a different blast radius and a different tool.
-//
-// The stat goes through the workspace fence, so an escaping path is refused here with the uniform
-// escape wording rather than reported as an ordinary absence. Like checkFileOpsPaths this is for
-// the MESSAGE first — SafeRemove re-decides containment at operation time — but the directory
-// refusal also carries weight of its own, since os.Remove would happily unlink an EMPTY directory.
-// A name swapped between the two steps can therefore cost at most one empty directory inside the
-// workspace: still within the blast radius the call already declared, and not worth a second
-// fenced primitive to close.
-func checkDeletePath(ctx context.Context, path, root string) string {
-	if path == "" {
-		return "path is required"
-	}
-
-	info, err := statWriteTarget(ctx, path, root)
-	if err != nil {
-		return notFoundOrRefusal(err, "file not found: ", root, workspaceRelative(path, root), path)
-	}
-	if info.IsDir() {
-		return "not a file: " + path + " (directories are not supported)"
-	}
-	return ""
 }
 
 var (

@@ -94,8 +94,12 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	if !ok {
 		return fail, nil
 	}
-	if args.Path == "" {
-		return errorResult(call.ID, "path is required"), nil
+	// The one resolution of this call's path (writeScope.target): the read, the disclosure and
+	// the write below all go through this value, so they describe the same file as the one
+	// dispatch classified. An empty path is its refusal.
+	target, err := writeScopeOf(ctx, t.root).target(args.Path)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
 	}
 	if args.OldText == "" {
 		return errorResult(call.ID, "oldText is required"), nil
@@ -107,16 +111,16 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	// TOCTOU-safe read+write: both operations resolve through an os.Root pinned at
 	// t.root, so an escaping-symlink component (including one swapped in between the read
 	// and the write by a confined subprocess) is refused rather than followed (H1).
-	content, err := readWriteTarget(ctx, args.Path, t.root)
+	content, err := target.read()
 	if err != nil {
-		return errorResult(call.ID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(args.Path, t.root), args.Path)), nil
+		return errorResult(call.ID, target.notFound(err, "file not found: ")), nil
 	}
 
 	// Which file those bytes came from, read BEFORE the write replaces a symlinked name with
 	// a regular file: an in-root symlinked final NAME is the one link a read still follows
 	// (a symlinked parent is refused by the write), and echoing the argument alone would let
 	// this call disclose and overwrite somewhere else under the name the operator approved.
-	resolved := resolvedTargetNote(args.Path, t.root)
+	resolved := target.note()
 
 	// Every refusal from here on is prefixed nothingWritten: the edit is atomic, and a model
 	// reading "old text not found" without it has to guess whether anything landed.
@@ -130,7 +134,7 @@ func (t *SingleFindReplace) Execute(ctx context.Context, call domain.ToolCall) (
 	}
 
 	updated := strings.Replace(string(content), args.OldText, args.NewText, 1)
-	if err := safeWriteFile(ctx, args.Path, t.root, []byte(updated), 0o644); err != nil {
+	if err := target.write([]byte(updated), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 
@@ -222,8 +226,11 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	if !ok {
 		return fail, nil
 	}
-	if args.Path == "" {
-		return errorResult(call.ID, "path is required"), nil
+	// The one resolution of this call's path, for the reason single_find_and_replace states
+	// above. An empty path is its refusal.
+	target, err := writeScopeOf(ctx, t.root).target(args.Path)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
 	}
 	if len(args.Replacements) == 0 {
 		return errorResult(call.ID, "replacements must be a non-empty array"), nil
@@ -238,16 +245,16 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 	}
 
 	// TOCTOU-safe read+write through an os.Root pinned at t.root (H1).
-	raw, err := readWriteTarget(ctx, args.Path, t.root)
+	raw, err := target.read()
 	if err != nil {
-		return errorResult(call.ID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(args.Path, t.root), args.Path)), nil
+		return errorResult(call.ID, target.notFound(err, "file not found: ")), nil
 	}
 
 	// Read before the write, for the reason single_find_and_replace states above: the
 	// disclosure has to survive the write that destroys the symlink it describes. The sibling
 	// tool carries it, so this one must too — otherwise the same edit dodges the disclosure by
 	// arriving as a one-element array.
-	resolved := resolvedTargetNote(args.Path, t.root)
+	resolved := target.note()
 
 	// Every refusal inside the loop is prefixed nothingWritten: the replacements land together or
 	// not at all, and a failure at #2 must not read as though #1 had been applied.
@@ -269,7 +276,7 @@ func (t *MultiFindReplace) Execute(ctx context.Context, call domain.ToolCall) (d
 		}
 	}
 
-	if err := safeWriteFile(ctx, args.Path, t.root, []byte(content), 0o644); err != nil {
+	if err := target.write([]byte(content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 
