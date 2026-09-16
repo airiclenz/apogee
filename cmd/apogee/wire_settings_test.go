@@ -1027,7 +1027,7 @@ func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	apply := applySettingFor(settingsApplier{engine: spy, live: live})
 
 	if live.remember() {
-		t.Fatal("the holder opened with remembering on; the key's default is off")
+		t.Fatal("the holder opened with remembering on; a zero Options carries the toggle off")
 	}
 	note, err := apply("remember-model", "true")
 	if err != nil {
@@ -1059,6 +1059,30 @@ func TestApplySettingRememberModelFlipsTheLiveToggle(t *testing.T) {
 	}
 	if live.remember() {
 		t.Error("a refused value moved the toggle")
+	}
+}
+
+// The two defaults the starter template used to override are the built-in defaults themselves
+// (ADR 0048, amended 2026-09-16): a config that omits both `remember-model:` and `ui.stall-after:`
+// resolves through the startup pass to exactly what a first-run seeded config resolves to — on,
+// and two minutes — so a hand-written config and a seeded one start the same session. Asserted
+// here, at the composition root's own startup seam (config.ApplyConfig is what every command
+// runs), rather than only on the registry rows, because it is the resolved Options the Drivers
+// carry.
+func TestStartupDefaultsRememberModelAndStallAfterFollowTheTemplate(t *testing.T) {
+	t.Parallel()
+	opts := config.Options{ConfigDir: testConfigHome(t, "")}
+	if err := config.ApplyConfig(&opts, func(string) bool { return false },
+		func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+		t.Fatalf("ApplyConfig: %v", err)
+	}
+
+	if !opts.RememberModel {
+		t.Error("a config that omits remember-model resolves it off; want on, the starter template's value")
+	}
+	if opts.UI.StallAfter != 120*time.Second {
+		t.Errorf("a config that omits ui.stall-after resolves it to %s; want 2m0s, the starter template's value",
+			opts.UI.StallAfter)
 	}
 }
 

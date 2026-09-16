@@ -538,7 +538,7 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		{"present.port", "8080"},
 		{"mode", string(domain.ModeAuto)},
 		{"ui.spinner", "glitter"},
-		{"ui.stall-after", "90s"},
+		{"ui.stall-after", "120s"}, // the shipped default, which the settings surface has to be able to write back
 		{"ui.stall-after", "2m"},
 		{"ui.stall-after", "0"}, // the documented spelling of "off" — a zero that is not a refusal
 		{"ui.stall-after", ""},  // and the empty field, which is the key's way of saying "the default"
@@ -641,7 +641,7 @@ func TestRegistryValidateHooksSitOnEditableKeys(t *testing.T) {
 // scalars, the block-mapped keys and the enums alike. The comparison runs through the row's own
 // parse (renderSettingValue's canonical value for the kind; time.ParseDuration for the duration
 // strings) rather than on the text, because Read spells a duration the way a resolved Duration
-// prints itself — `1m30s` for `ui.stall-after`'s declared "90s", `2h0m0s` for `delegate-timeout`'s
+// prints itself — `2m0s` for `ui.stall-after`'s declared "120s", `2h0m0s` for `delegate-timeout`'s
 // "2h" — and two spellings of one bound are not a drift.
 //
 // `cursor-shape` is exempt on purpose. Its row declares "block", but Read returns o.CursorShape,
@@ -675,6 +675,32 @@ func TestRegistryDefaultsReadBackFromAnEmptyFile(t *testing.T) {
 			got, want := k.Read(resolved), k.Default
 			if !readsAlike(t, k, got, want) {
 				t.Errorf("registry row %q reads %q from an absent file, want its declared default %q", k.Path, got, want)
+			}
+		})
+	}
+}
+
+// TestRegistryDefaultsFollowTheStarterTemplate pins the two rows whose declared default the starter
+// template used to override with an active line of its own — `remember-model: true` and
+// `ui.stall-after: 120s` — to those very values (ADR 0048, amended 2026-09-16): the row's Default,
+// the value an absent file resolves to (the test above), and the template's line are one value, so a
+// change to any of the three without the others is what fails here. The template is read as text
+// because that is what a first run seeds: an active line at column one for the top-level key, the
+// indented one under `ui:` for the block key.
+func TestRegistryDefaultsFollowTheStarterTemplate(t *testing.T) {
+	t.Parallel()
+	template := string(defaultConfigYAML)
+	for _, tt := range []struct{ path, want, line string }{
+		{"remember-model", "true", "\nremember-model: true\n"},
+		{"ui.stall-after", "120s", "\n  stall-after: 120s"},
+	} {
+		t.Run(tt.path, func(t *testing.T) {
+			t.Parallel()
+			if got := mustKey(tt.path).Default; got != tt.want {
+				t.Errorf("registry row %q declares Default %q; want %q, the starter template's value", tt.path, got, tt.want)
+			}
+			if !strings.Contains(template, tt.line) {
+				t.Errorf("the starter template no longer ships the active line %q; the registry row %q declares %q", strings.TrimSpace(tt.line), tt.path, tt.want)
 			}
 		})
 	}

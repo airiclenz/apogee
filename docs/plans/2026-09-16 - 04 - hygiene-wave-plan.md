@@ -190,7 +190,14 @@ NOTES (2026-09-16): `settingsTable` already had `reactions` directly after `bypa
 
 commit: `refactor(config): KeyRegistry rows follow the starter template's order, pinned by test`
 
-## 10. Registry defaults follow the starter template (apogee-lq4)
+## 10. Registry defaults follow the starter template (apogee-lq4) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `defaultStallAfter` became a var resolved from a new `defaultStallAfterText = "120s"` const (delegate-timeout's shape) so the registry row's `Default` and the code default read one constant, as the item asks.
+NOTES (2026-09-16): consequential edit — internal/config/options.go: made necessary by the remember-model default flip (its field comment said "default false").
+NOTES (2026-09-16): consequential edit — cmd/apogee/wire_verbs.go: made necessary by the remember-model default flip (a skip-ladder comment called "off" the default).
+NOTES (2026-09-16): consequential edit — layout.md: made necessary by the stall-after default move (the layout spec named `90s` as the default).
+NOTES (2026-09-16): consequential edit — cmd/apogee/upstream_test.go: made necessary by the remember-model default flip (a fixture comment called `false` "the default"; the assertion is unchanged).
+NOTES (2026-09-16): `internal/config/defaults_test.go` dropped its two template-override lines (and the `time` import) because the template's active values now equal `wantDefaults()`; the comment says why. The `internal/tui` fixtures naming `90s` (activity_test.go, model_test.go, settings_test.go) and the two refusal sentences' "like 90s or 2m" are examples, left as the plan says.
 
 **What:** Closes apogee-lq4 under the ratified call. Depends on item 9. `remember-model` row `Default: "true"`; `ui.stall-after` row `Default: "120s"` and the code default that `uiConfig.toUISettings` / `UISettings.StallAfter` falls back to (`internal/config/config.go`) becomes 120s — one constant, read by both. Template: delete the `# Default: false.` line above `remember-model: true`. Manual `docs/manual/configuration.md`: `remember-model` reads "on by default"; `ui.stall-after` reads "default `120s`"; drop both "though the starter file…" clauses. Every test that pins `90s` or the remember-model default `false` moves to the new values (`grep -rn '90s\|remember-model' internal/config/*_test.go internal/tui/*_test.go cmd/apogee/*_test.go`).
 

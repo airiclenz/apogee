@@ -42,7 +42,9 @@ new per-entry `launch-profile:` pointer on a launcher-fronted one — gated by a
 `remember-model` toggle that is OFF by default, and restores the profile at the next interactive
 start-up through the existing actuation latch, yielding to anything already serving.**
 
-**1 — One toggle, off by default, gating both halves.** `remember-model:` is a file-only depth-1 bool
+**1 — One toggle, off by default, gating both halves.** *(Amended 2026-09-16 — the default is now ON,
+matching the starter template's active `remember-model: true` line; see the Amendment section
+below.)* `remember-model:` is a file-only depth-1 bool
 (`*bool`, nil = off) with a key-registry row and a `/settings` row, live-applied through the session's
 settings holder ([ADR 0037](0037-every-settings-edit-applies-to-the-running-session.md)) so a flip
 governs the very next pick and the next boot without a restart. Off is the default because the feature
@@ -164,3 +166,19 @@ deeper into a list entry, the same shape
   restore's whole decision ladder in the composition root (`cmd/apogee/wire_verbs.go`,
   `cmd/apogee/launcher.go`, `cmd/apogee/wire_live.go`, `cmd/apogee/wire_options.go`), with the live
   toggle held in `cmd/apogee/wire_settings.go`.
+
+## Amendment (2026-09-16) — the default follows the starter template: on
+
+Decision 1 shipped the toggle off by default, with the starter template seeding it on as an active
+line — so a config apogee wrote on first run remembered the model, and a config a user wrote by hand
+that omitted the key did not. That split left three answers to "what does an absent key mean": the
+registry row's declared default (`false`), the template's line (`true`) and the manual's caveat
+naming both. Ratified 2026-09-16 (hygiene wave, apogee-lq4): the built-in default becomes **on** —
+the registry row declares `true`, the file projection resolves an absent key the way auto-title's
+does (`nil ⇒ on`), and the template's line is now the default said out loud rather than an
+override. The reasoning of decision 1 stands narrowed to the opt-out: `remember-model: false` is
+the explicit act that keeps apogee out of a hand-edited file, and nothing else in this ADR moves —
+only an explicit pick or a committed load records, and the write is still one key on one entry.
+`ui.stall-after` moved the same way in the same commit (`90s` → `120s`, the template's value), for
+the same reason: the registry's declared default and the starter template's active line are one
+value, not two.

@@ -574,7 +574,7 @@ var KeyRegistry = bindSetters([]Key{
 		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.AutoTitle }),
 	},
 	{
-		Path: "remember-model", Kind: KindBool, Default: "false",
+		Path: "remember-model", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Record the model you pick into its servers: entry and come back on it next start.",
 		Read:     func(o Options) string { return boolValue(o.RememberModel) },
@@ -683,7 +683,7 @@ var KeyRegistry = bindSetters([]Key{
 		// A length of time, which this table has no kind for — and one key is not a vocabulary, so it
 		// is the writer's plain string with a hook that parses it, the posture present.port takes with
 		// its range: the kind carries the shape, and the hook carries the contract the kind cannot.
-		Path: "ui.stall-after", Kind: KindString, Default: "90s",
+		Path: "ui.stall-after", Kind: KindString, Default: defaultStallAfterText,
 		Editable: true,
 		Validate: validateStallAfter,
 		Desc:     "Engine silence after which a running turn is marked quiet on the status line; 0 turns it off.",

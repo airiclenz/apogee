@@ -1419,7 +1419,7 @@ in the scheme's amber `warning` role. The row keeps ONE clock, and it is the act
 this was built for nothing arrived after the request went out, so the silence and the phrase are the
 same span and a second duration behind the word would state that one fact twice — and the clock
 never jumps backwards when the word appears or clears. `ui.stall-after` is the threshold the silence
-has to cross — `90s` by default, `0` turns it off — and what it measures is the time since the last
+has to cross — `120s` by default, `0` turns it off — and what it measures is the time since the last
 engine event of any kind arrived, so the word appears by itself and disappears by itself the moment
 one does. It is a fact and not a verdict: a large prompt is legitimately silent for a minute or two,
 so the row reports the silence and says nothing about what it means. Only `thinking` and

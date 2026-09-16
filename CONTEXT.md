@@ -554,7 +554,7 @@ profile changes what runs; the Model profile only says how apogee speaks to what
 is re-resolved for that model when the load lands. See
 [ADR 0029](docs/adr/0029-the-launcher-actuates-local-servers-and-the-beat-completes-every-move.md).
 **remember-model** is what makes such a choice outlive the session. With that top-level toggle on
-(off by default), an *explicit* choice — a `/model` pick that bound, or a Launch profile load that
+(on by default), an *explicit* choice — a `/model` pick that bound, or a Launch profile load that
 **committed** — is recorded into apogee's own `servers:` entry: a wire model id into a plain server's
 existing `model:` key, a profile name into a launcher-fronted entry's `launch-profile:` pointer. The
 pointer's home is the **actuating entry**, the one whose `llama-launcher:` key the session's launcher

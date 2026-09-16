@@ -282,7 +282,7 @@ type Options struct {
 	// regenerate a title on demand when this is false.
 	AutoTitle bool
 
-	// rememberModel gates remembering the model choice (default false), loaded from the config file
+	// rememberModel gates remembering the model choice (default true), loaded from the config file
 	// only: with it on, an explicit model pick is written back into the session's `servers:` entry —
 	// `model:` on a plain server, `launch-profile:` on a launcher-fronted one — and the interactive
 	// TUI restores what was recorded at the next startup. ApplyConfig sets it from settings.

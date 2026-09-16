@@ -915,8 +915,7 @@ error naming the entry and the key. See
 [ADR 0060](../adr/0060-effort-is-detected-passively-dialected-per-server-and-picked.md).
 
 A model that thinks for a long time can also go silent. `ui.stall-after` — a duration
-written the way Go spells one (`90s`, `2m`), default `90s` though the starter file apogee seeds
-on first run sets it to `120s`, `0` turns it off — sets how
+written the way Go spells one (`90s`, `2m`), default `120s`, `0` turns it off — sets how
 long the engine may say nothing before the status line adds a warning-tinted `quiet`
 qualifier to its running phrase: `thinking · quiet · 12m`. It reports a fact, not a
 verdict — nothing has arrived in that long — and any engine event clears it.
@@ -1239,9 +1238,8 @@ untouched — so your next start begins where you left off. A move onto a server
 list does not name (an `--endpoint` URL, a llama-launcher profile) has no name to
 record and writes nothing.
 
-**And it can remember the model too.** `remember-model:` (a file-only key, off by
-default, though the starter file apogee seeds on first run switches it on) set to `true`
-makes an explicit `/model` pick write itself into that entry's
+**And it can remember the model too.** `remember-model:` (a file-only key, on by
+default; set it to `false` to opt out) makes an explicit `/model` pick write itself into that entry's
 `model:` key, so your next session on that server starts bound to it. A
 launcher-fronted entry records the Launch profile name in `launch-profile:`
 instead, and an interactive session that starts there loads that profile again —

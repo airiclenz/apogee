@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/airiclenz/apogee/internal/prompt"
 )
@@ -128,16 +127,14 @@ func TestEmbeddedDefaultConfigSetsOnlyTheSystemPrompt(t *testing.T) {
 		t.Errorf("the embedded default system prompt fails prompt.Validate: %v", err)
 	}
 
-	// Every other key still resolves to its built-in default, except the settings the template
-	// ships active with a value of their own. Each line here mirrors one template line and names
-	// it: the template is the ground truth, so a deliberate change there is meant to be echoed
-	// here, and an unannounced one is what this fails on. The system prompt no longer needs
-	// clearing before the comparison — the template states none, so it already IS the default.
-	want := wantDefaults()
-	want.RememberModel = true              // `remember-model: true`
-	want.UI.StallAfter = 120 * time.Second // `ui.stall-after: 120s`
-
-	if diffs := structDiff(file, want); len(diffs) != 0 {
+	// Every other key resolves to its built-in default — the two lines the template ships active
+	// with a value of their own (`remember-model: true`, `ui.stall-after: 120s`) ARE the built-in
+	// defaults since 2026-09-16 (ADR 0048's amendment), so the comparison runs against the plain
+	// defaults: the template is the ground truth, and a template line that drifts from the
+	// registry's declared default, or a default that drifts from the template, fails here. The
+	// system prompt needs no clearing before the comparison — the template states none, so it
+	// already IS the default.
+	if diffs := structDiff(file, wantDefaults()); len(diffs) != 0 {
 		t.Errorf("embedded default config moves keys beyond the settings it ships active:\n%s",
 			strings.Join(diffs, "\n"))
 	}

@@ -715,7 +715,6 @@ auto-title: true
 # not, and neither are the one-shot --model / APOGEE_MODEL overrides. llama-launcher's own config is
 # never written — the pointer lives here, in apogee's file. /unload-model and /stop-server leave it
 # alone: they free the GPU, they do not forget what you were on. Config-file only (no flag or env).
-# Default: false.
 remember-model: true
 
 # =============================================================================

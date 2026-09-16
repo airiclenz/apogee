@@ -292,7 +292,7 @@ type UISettings struct {
 	// stallAfter is how long the ENGINE may go silent mid-turn before the status line says so: past
 	// it the running phrase gains a bare `quiet` qualifier in front of its clock, which is the honest
 	// fact rather than a verdict — a slow turn and a dead one look identical from out here, and only
-	// the human can tell them apart. Default 90s, which clears the ingestion of a large prompt
+	// the human can tell them apart. Default 120s, which clears the ingestion of a large prompt
 	// (legitimately silent for a minute or two on a local model); 0 turns it off. It is resolved to a
 	// DURATION here, unlike spinner beside it, because the renderer takes a duration and nothing
 	// downstream would gain from a second parse of the same text.
@@ -325,10 +325,14 @@ type UISettings struct {
 	unparsedStallAfter string
 }
 
-// defaultStallAfter is how long the engine may stay silent before the status line reports the
-// quiet: long enough that ingesting a large prompt never trips it, short enough that a turn which
-// really has died is named while the human is still at the screen.
-const defaultStallAfter = 90 * time.Second
+// defaultStallAfterText is how long the engine may stay silent before the status line reports the
+// quiet, as the config file spells it — the value the starter template ships, so a config that
+// omits the key and one seeded on first run agree; defaultStallAfter is the same threshold
+// resolved. Long enough that ingesting a large prompt never trips it, short enough that a turn
+// which really has died is named while the human is still at the screen.
+const defaultStallAfterText = "120s"
+
+var defaultStallAfter = mustParseDuration(defaultStallAfterText)
 
 // defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
 // style, with the colour loop on, the scroll bar shown, the default colour scheme, the shipped
@@ -845,11 +849,12 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// The one switch of this run that defaults OFF: writing back into the human's own config is
-		// opted into, never assumed.
+		// auto-title's shape: on unless the file says otherwise, the value the starter template
+		// ships as an active line — so a config that omits the key and one seeded on first run
+		// come back the same way.
 		row: mustKey("remember-model"),
 		fromFile: func(o *Options, fc fileConfig) error {
-			o.RememberModel = fc.RememberModel != nil && *fc.RememberModel
+			o.RememberModel = fc.RememberModel == nil || *fc.RememberModel
 			return nil
 		},
 	},
@@ -1531,11 +1536,11 @@ type fileConfig struct {
 	// into THIS file when the user picks a model explicitly — the picked id into the session's
 	// `servers:` entry's `model:` on a plain server, the loaded profile's name into that entry's
 	// `launch-profile:` on a launcher-fronted one — and the TUI's startup RESTORE of what was
-	// recorded. File-only (no flag/env), and a pointer for the reason auto-title is one; the default
-	// is the other way round though: absent ⇒ OFF, because writing a session's choices back into a
-	// hand-written config is a thing to ask for rather than to discover. Only an explicit pick
-	// records — a rebind the heartbeat merely observed, and the one-shot `--model`/`APOGEE_MODEL`
-	// overrides, never do.
+	// recorded. File-only (no flag/env), and a pointer for the reason auto-title is one, with the
+	// same default: absent ⇒ ON, the value the starter template ships as an active line, so an
+	// explicit `remember-model: false` is what opts a hand-written config out of the write-back.
+	// Only an explicit pick records — a rebind the heartbeat merely observed, and the one-shot
+	// `--model`/`APOGEE_MODEL` overrides, never do.
 	RememberModel *bool `yaml:"remember-model"`
 	// ContextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env),
 	// like auto-compact. Absent or ≤ 0 ⇒ unpinned, so the window follows what the ten-second
@@ -2400,7 +2405,7 @@ type uiConfig struct {
 	// length of time as `time.ParseDuration` spells it (`90s`, `2m`), or `0` to turn the qualifier off.
 	// A pointer for ShowScrollbar's reason turned inside out: here it is the explicit `0` — the
 	// documented spelling of "off" — that must be distinguishable from an absent key, which keeps
-	// the 90s default. It stays a raw string at this seam because the parse can FAIL, and a ui block
+	// the 120s default. It stays a raw string at this seam because the parse can FAIL, and a ui block
 	// is refused in one place (UISettings.Validate), never at the yaml boundary.
 	StallAfter *string `yaml:"stall-after"`
 	// Inspector arms the raw-protocol capture `/inspect` shows. A pointer for ShowScrollbar's

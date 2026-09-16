@@ -760,7 +760,7 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 			Workspace:     t.TempDir(),
 			ConfigDir:     configHome,
 			AutoCompact:   true,
-			RememberModel: false, // the default, and what the flip below has to be able to overrule
+			RememberModel: false, // opted out, and what the flip below has to be able to overrule
 			Servers:       []config.ServerEntry{entry},
 			StartupEntry:  startup,
 		}

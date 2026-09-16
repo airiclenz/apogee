@@ -25,11 +25,11 @@ func intptr(n int) *int       { return &n }
 
 // wantUIDefault is the resolved `ui:` block a config that configures none must produce: the
 // default spinner style with its colour loop on, the transcript's scroll bar shown, the stall
-// guard waiting 90 seconds of engine silence out, the skill-suggestion band painting and the task-list cards open. It is spelled out rather than taken from
+// guard waiting 120 seconds of engine silence out, the skill-suggestion band painting and the task-list cards open. It is spelled out rather than taken from
 // defaultUISettings, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
-	ColorScheme: "dark", StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: true}
+	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true}
 
 // testHostID is the machine identity injected into resolution so the Host acknowledgement
 // ladder is pinned off whatever host the tests happen to run on.
@@ -178,9 +178,9 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{AutoTitle: boolptr(true)},
 		},
 		{
-			name: "remember-model is file-only and defaults false",
-			file: fileConfig{RememberModel: boolptr(true)},
-			want: func(o *Options) { o.RememberModel = true },
+			name: "remember-model is file-only and defaults true",
+			file: fileConfig{RememberModel: boolptr(false)},
+			want: func(o *Options) { o.RememberModel = false },
 		},
 		{
 			name: "context-window is file-only (default 0 ⇒ discover)",
@@ -234,7 +234,7 @@ func TestResolvePrecedence(t *testing.T) {
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}},
 			want: func(o *Options) {
 				o.UI = UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
-					ColorScheme: "dark", StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: true}
+					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true}
 			},
 		},
 		{
@@ -343,7 +343,7 @@ func wantDefaults() Options {
 		DelegateMaxDepth:  defaultDelegateMaxDepth,
 		DelegateMaxTokens: defaultDelegateMaxTokens,
 		DelegateTimeout:   defaultDelegateTimeout,
-		AutoTitle:         true, ContextFiles: []string{"AGENTS.md"},
+		AutoTitle:         true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
 }
@@ -641,7 +641,7 @@ func everyKeyFileConfig() fileConfig {
 		DelegateMaxDepth:  2,
 		DelegateMaxTokens: intptr(5_000_000),
 		DelegateTimeout:   strptr("30m"),
-		RememberModel:     boolptr(true),
+		RememberModel:     boolptr(false),
 		ContextWindow:     64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
@@ -1819,12 +1819,12 @@ func TestApplyConfigAutoTitle(t *testing.T) {
 	}
 }
 
-// The remember-model config block parses into opts.rememberModel: a file-only key like auto-title,
-// with the BUILT-IN default the other way round — absent ⇒ OFF, so a config that says nothing has
-// apogee write nothing back into it. The seeded template is in the table for the same reason it is
-// in auto-title's, but it now answers differently: the template ships `remember-model: true` as an
-// active line, so a first run comes back ON, and that case is what pins the shipped line reaching
-// opts rather than being read past.
+// The remember-model config block parses into opts.rememberModel: a file-only key in auto-title's
+// shape, BUILT-IN default ON — absent ⇒ on, the value the starter template ships as an active line
+// (ADR 0048, amended 2026-09-16), so a hand-written config that omits the key and a seeded one come
+// back the same way, and an explicit `false` is the opt-out. The seeded template is in the table
+// for the same reason it is in auto-title's: its active line has to reach opts rather than be read
+// past, and a template that ever flipped the line away from the default would fail here first.
 func TestApplyConfigRememberModel(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1832,9 +1832,9 @@ func TestApplyConfigRememberModel(t *testing.T) {
 		fileYAML string
 		want     bool
 	}{
-		{name: "absent key ⇒ off", want: false},
-		{name: "an explicit true opts in", fileYAML: "remember-model: true\n", want: true},
-		{name: "an explicit false is the default, said out loud", fileYAML: "remember-model: false\n", want: false},
+		{name: "absent key ⇒ on", want: true},
+		{name: "an explicit true is the default, said out loud", fileYAML: "remember-model: true\n", want: true},
+		{name: "an explicit false opts out", fileYAML: "remember-model: false\n", want: false},
 		{name: "the seeded template ships it on", fileYAML: string(defaultConfigYAML), want: true},
 	}
 	for _, tt := range tests {
@@ -1855,8 +1855,8 @@ func TestApplyConfigRememberModel(t *testing.T) {
 	}
 }
 
-// `context-fill-notice` is remember-model's shape again — a file-only pointer whose built-in default
-// is OFF — for ADR 0077's reason: the notice steers the model rather than correcting it, so it is
+// `context-fill-notice` is a file-only pointer whose built-in default is OFF — auto-title's shape
+// turned round — for ADR 0077's reason: the notice steers the model rather than correcting it, so it is
 // not a Floor guard and ships off until bench evidence turns it on. The seeded template is in the
 // table because it carries the key as an ACTIVE `false` line: a first run must come back off with
 // the line read rather than read past, and a template that ever flipped the line would fail here
@@ -4635,12 +4635,12 @@ func TestApplyConfigStallAfter(t *testing.T) {
 		want    time.Duration
 		wantErr string
 	}{
-		{name: "the shipped default, said out loud", yaml: "ui:\n  stall-after: 90s\n", want: 90 * time.Second},
+		{name: "the shipped default, said out loud", yaml: "ui:\n  stall-after: 120s\n", want: 120 * time.Second},
 		{name: "minutes", yaml: "ui:\n  stall-after: 2m\n", want: 2 * time.Minute},
 		{name: "a compound duration", yaml: "ui:\n  stall-after: 1m30s\n", want: 90 * time.Second},
 		{name: "a bare 0 turns the guard off", yaml: "ui:\n  stall-after: 0\n", want: 0},
-		{name: "no ui block at all keeps the default", yaml: "", want: 90 * time.Second},
-		{name: "the block without the key keeps the default", yaml: "ui:\n  spinner: classic\n", want: 90 * time.Second},
+		{name: "no ui block at all keeps the default", yaml: "", want: 120 * time.Second},
+		{name: "the block without the key keeps the default", yaml: "ui:\n  spinner: classic\n", want: 120 * time.Second},
 		{
 			name:    "a negative wait is refused",
 			yaml:    "ui:\n  stall-after: -5s\n",
@@ -4837,19 +4837,19 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
 			want: UISettings{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
-				StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true},
 		},
 		{
 			// The explicit `true` and the absent key resolve alike — pinned so the pointer's
@@ -4857,13 +4857,13 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
-				StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true},
 		},
 		{
 			// The band's key, the one whose default is TRUE: an explicit false takes the band away and
@@ -4871,7 +4871,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only skill-suggestions: false → the band goes and the look is untouched",
 			yaml: "ui:\n  skill-suggestions: false\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second, SkillSuggestions: false, TaskListOpen: true},
+				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true},
 		},
 		{
 			// The task-list fold key, the other default-TRUE bool: an explicit false starts the cards
@@ -4879,7 +4879,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			name: "only task-list-open: false → the cards start folded and nothing else moves",
 			yaml: "ui:\n  task-list-open: false\n",
 			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
-				StallAfter: 90 * time.Second, SkillSuggestions: true, TaskListOpen: false},
+				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false},
 		},
 		{
 			// And the newest key is independent in both directions: turning the stall guard off says

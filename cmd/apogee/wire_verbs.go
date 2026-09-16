@@ -216,7 +216,7 @@ func (w *rootWiring) recordSubAgentsServerChoice(name string) (bool, error) {
 //
 // Three skips and no fourth, every one of them SILENT (false, nil), because none is a failure:
 //
-//   - `remember-model:` is off, which is the default. The toggle gates the write as well as the boot
+//   - `remember-model:` is off (an explicit `false`). The toggle gates the write as well as the boot
 //     restore, so a session nobody asked to be remembered writes nothing at all — asked of the LIVE
 //     holder rather than of the launch snapshot, so a flip in `/settings` governs the very next pick.
 //   - the session is on no configured entry (boundEntry). That is the synthesized ephemeral
