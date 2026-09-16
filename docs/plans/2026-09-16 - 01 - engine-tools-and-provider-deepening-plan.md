@@ -559,7 +559,10 @@ suites unchanged in outcome.
 
 **Commit:** `test(tui): the e2e upstreams script stubllm; framing goldens regenerated`
 
-## 17. The bench-readiness test scripts stubllm
+## 17. The bench-readiness test scripts stubllm — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — example_test.go: made necessary by `benchModel` taking a `*testing.T` (stubllm.New); the shared Script moved to `benchScript()`, and `Example_armReaction`, which has no `testing.T`, serves it through `stubllm.Serve(context.Background(), "127.0.0.1:0", …)` with the same `defer upstream.Close()`. Adds the `internal/stubllm` import there.
+NOTES (2026-09-16): `stubTool.Execute` now returns `ToolResult{CallID: call.ID}` instead of a zero result — the Example's list_dir stand-in put a tool message with an empty `tool_call_id` on the wire, which the `tool_result:` selector cannot resolve to a name (the retired responder branched on the role alone). A well-formed tool always names its call; the bench arms never call a stub, so their assertions are untouched.
 
 **What.** Depends on item 12. Root-package `benchreadiness_test.go`: its `writeFinal`/`writeToolCall`
 pair and request-tail branching become a `stubllm.Script` with `when:` selectors. This closes ADR

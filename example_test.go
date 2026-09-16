@@ -18,6 +18,7 @@ import (
 	"fmt"
 
 	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // Type aliases — one zero-valued declaration per exported type. A dropped alias makes
@@ -234,7 +235,11 @@ func (s *reactionSink) Emit(e apogee.Event) {
 // handlers — and a Reaction that ACTS books exactly one ReactionFiredEvent, which is what the
 // host's EventSink observes here.
 func Example_armReaction() {
-	upstream := benchModel()
+	upstream, err := stubllm.Serve(context.Background(), "127.0.0.1:0", benchScript())
+	if err != nil {
+		fmt.Println("upstream:", err)
+		return
+	}
 	defer upstream.Close()
 
 	menu := apogee.NewToolRegistry()

@@ -3,26 +3,24 @@ package apogee_test
 // Bench-readiness proof (the ADR 0001 embedding contract, exercised in-repo). This is the
 // executable definition of "benchable": it drives the real Agent exactly the way apogee-sim
 // will — the public New / Resume / Submit / Step / Snapshot / Close surface over the real
-// provider client dialing a scripted OpenAI-compatible httptest model, engine-origin Reactions
+// provider client dialing a stubllm-scripted OpenAI-compatible upstream, engine-origin Reactions
 // armed at all five seam Moments through Config.Reactions, isolated temp state roots — and
 // asserts the contract holds. If a future change breaks the way the bench drives apogee, this
 // test breaks first.
 //
 // It is the ADR 0031 invariant-4 proof ("benchable all the way up") over the Reaction core (ADR
 // 0076): a Driver that cannot import internal/* arms its instruments through Config.Reactions
-// alone and reads what they did off the ReactionFiredEvent stream. The two internal imports
-// that remain — internal/session and internal/tools — are a separate concern: they inspect the
-// on-disk session schema and stock the tool menu, not the arming path, and neither is the bare
-// root module path, so ADR-0010's "internal never imports root" invariant is untouched.
+// alone and reads what they did off the ReactionFiredEvent stream. The three internal imports
+// that remain — internal/session, internal/tools and internal/stubllm — are a separate concern:
+// they inspect the on-disk session schema, stock the tool menu and script the upstream, not the
+// arming path, and none is the bare root module path, so ADR-0010's "internal never imports
+// root" invariant is untouched.
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -30,6 +28,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -66,96 +65,36 @@ func probeID(m apogee.Moment) string { return "bench-probe-" + string(m) }
 const adviceProbeID = "bench-probe-advice"
 
 // ----------------------------------------------------------------------------
-// The scripted OpenAI-compatible streaming model (one responder, both arms)
+// The scripted OpenAI-compatible streaming model (one Script, both arms)
 // ----------------------------------------------------------------------------
 
-// benchModel returns an httptest server speaking the SSE wire the provider dials. It is
-// stateless across requests and decides each reply from the request's own messages, so one
-// server drives every Agent (both arms and every fork) without cross-talk: a fresh task asks
-// for a directory listing, a request whose history ends in a tool result closes the Exchange
-// echoing the task, and a user turn carrying the close marker closes immediately.
-func benchModel() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		lastRole, lastUser := requestTail(r)
-		w.Header().Set("Content-Type", "text/event-stream")
-		switch {
-		case lastRole == string(apogee.RoleTool):
-			writeFinal(w, "completed: "+lastUser)
-		case lastRole == string(apogee.RoleUser) && strings.Contains(lastUser, closeMarker):
-			writeFinal(w, "completed: "+lastUser)
-		default:
-			writeToolCall(w, "call_1", "list_dir", `{"path":"."}`)
-		}
-	}))
+// benchScript is the Script the stubllm upstream plays, speaking the SSE wire the provider
+// dials. Every Turn repeats and each is selected by the request's own shape, so one Script
+// drives every Agent (both arms and every fork) without cross-talk: a request whose history ends
+// in the list_dir result closes the Exchange, a user turn carrying the close marker closes
+// immediately echoing the token beside the marker, and whatever else is asked — a fresh task —
+// gets a directory listing request. The `when:` Turns beat the ordered one for the requests they
+// recognise, so the ordered list_dir call is the fallback, not the first reply.
+func benchScript() stubllm.Script {
+	return stubllm.Script{Model: benchModelName, Turns: []stubllm.Turn{
+		// The previous Turn ran list_dir; commit the final assistant message.
+		{When: &stubllm.Match{ToolResult: "list_dir"}, Repeat: true, Text: "completed: the task"},
+		// A fork continuation: close at once, echoing the token that follows the marker.
+		{
+			When:     &stubllm.Match{LastMessage: closeMarker},
+			Repeat:   true,
+			Captures: []stubllm.Capture{{Name: "token", From: "last_message", Pattern: closeMarker + `\s+(\S+)`}},
+			Text:     "completed: {{token}}",
+		},
+		// A fresh task: ask for a directory listing.
+		{Repeat: true, ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "list_dir", Arguments: `{"path":"."}`}}},
+	}}
 }
 
-// requestTail decodes the role of the final message and the text of the last user message —
-// the only facts the scripted model branches on.
-func requestTail(r *http.Request) (lastRole, lastUser string) {
-	body, _ := io.ReadAll(r.Body)
-	var req struct {
-		Messages []struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
-		} `json:"messages"`
-	}
-	_ = json.Unmarshal(body, &req)
-	for _, m := range req.Messages {
-		if m.Role == string(apogee.RoleUser) {
-			lastUser = m.Content
-		}
-	}
-	if n := len(req.Messages); n > 0 {
-		lastRole = req.Messages[n-1].Role
-	}
-	return lastRole, lastUser
-}
-
-// writeToolCall streams one native tool call then a tool_calls finish and the terminator.
-func writeToolCall(w http.ResponseWriter, id, name, args string) {
-	sseData(w, sseChunk{Choices: []sseChoice{{Delta: sseDelta{ToolCalls: []sseTC{{
-		ID: id, Type: "function", Function: sseFunc{Name: name, Arguments: args},
-	}}}}}})
-	sseData(w, sseChunk{Choices: []sseChoice{{FinishReason: "tool_calls"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-// writeFinal streams one content chunk then a stop finish and the terminator.
-func writeFinal(w http.ResponseWriter, text string) {
-	sseData(w, sseChunk{Choices: []sseChoice{{Delta: sseDelta{Content: text}}}})
-	sseData(w, sseChunk{Choices: []sseChoice{{FinishReason: "stop"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-func sseData(w io.Writer, v any) {
-	b, _ := json.Marshal(v)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
-}
-
-// The on-the-wire SSE chunk shape the provider parses (the subset this model sets).
-type sseChunk struct {
-	Choices []sseChoice `json:"choices"`
-}
-
-type sseChoice struct {
-	Delta        sseDelta `json:"delta"`
-	FinishReason string   `json:"finish_reason,omitempty"`
-}
-
-type sseDelta struct {
-	Content   string  `json:"content,omitempty"`
-	ToolCalls []sseTC `json:"tool_calls,omitempty"`
-}
-
-type sseTC struct {
-	ID       string  `json:"id"`
-	Type     string  `json:"type"`
-	Function sseFunc `json:"function"`
-}
-
-type sseFunc struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+// benchModel starts the scripted upstream on a loopback port for the duration of the test.
+func benchModel(t *testing.T) *stubllm.Server {
+	t.Helper()
+	return stubllm.New(t, benchScript())
 }
 
 // ----------------------------------------------------------------------------
@@ -178,15 +117,17 @@ func (allowAll) Approve(context.Context, apogee.ApprovalRequest) (apogee.Approva
 
 // stubTool is an inert read-only tool that pads the menu to a realistic size for the arms. It
 // declares ReadOnly so it survives every mode's menu; the arms never call one, while the root
-// package's Example arms a Reaction over a stub standing in for list_dir.
+// package's Example arms a Reaction over a stub standing in for list_dir. Its empty result
+// still names the call it answers, as every tool's does: that id is what lets the scripted
+// upstream recognise the request whose history ends in this tool's result.
 type stubTool struct{ name string }
 
 func (s stubTool) Name() string          { return s.name }
 func (stubTool) Description() string     { return "inert menu-padding tool" }
 func (stubTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object","properties":{}}`) }
 func (stubTool) ReadOnly() bool          { return true }
-func (stubTool) Execute(context.Context, apogee.ToolCall) (apogee.ToolResult, error) {
-	return apogee.ToolResult{}, nil
+func (stubTool) Execute(_ context.Context, call apogee.ToolCall) (apogee.ToolResult, error) {
+	return apogee.ToolResult{CallID: call.ID}, nil
 }
 
 // fiveSeamProbe is the bench's own instrument: one shared counter behind five engine-origin
@@ -381,12 +322,11 @@ func messageText(events []apogee.Event) string {
 // ----------------------------------------------------------------------------
 
 // TestBenchReadinessContract is the permanent regression proving apogee is drivable the way
-// apogee-sim will drive it: two arms from one scripted responder against isolated roots,
+// apogee-sim will drive it: two arms from one scripted upstream against isolated roots,
 // engine-origin Reactions armed at all five seam Moments through Config.Reactions,
 // snapshot/resume forks, the Bypass floor, and no state bleeding across arms or forks.
 func TestBenchReadinessContract(t *testing.T) {
-	srv := benchModel()
-	defer srv.Close()
+	srv := benchModel(t)
 
 	// --- Arm A: Reactions armed ------------------------------------------------
 	armedRoots := newRoots(t)
