@@ -120,7 +120,9 @@ commit: `test(cmd/apogee): an empty int value lands the registry row's Default t
 
 commit: `test(config): the file pass pins every refusal row's full sentence`
 
-## 6. demorig check judges an unreadable stage as a FAIL row (apogee-vf1)
+## 6. demorig check judges an unreadable stage as a FAIL row (apogee-vf1) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the "missing stage" case builds its expected `beat N |` rows from the loaded hero storyboard rather than a hand-typed list, so the assertion tracks the fixture; the git-refusal detail carries the first stderr line (`fatal: …`), falling back to the exec error only when stderr is empty.
 
 **What:** Fix apogee-vf1. `judgeStage` in `cmd/demorig/check.go` returns an error when `git -C <stage> status --porcelain` fails (nonexistent or non-git dir), so the table aborts before any beat row prints. Make it a row instead: `{Subject: stageSubject, Verdict: verdictFail, Detail: "stage: " + <one-line reason>}` where the reason is `<stage> is not a git work tree (git status: exit status 128)`-shaped — the first line of git's stderr, or the exec error, after the path. `checkTake` keeps printing every beat row; `countFailed` then returns the error and the exit stays `exitRunFailed`. A missing `git` binary stays a hard error (the rig cannot judge anything).
 

@@ -248,34 +248,67 @@ func TestJudgeStage(t *testing.T) {
 	}
 }
 
-func TestJudgeStage_NotARepoIsAnError(t *testing.T) {
+// TestJudgeStage_NotARepoIsAFailRow pins that a stage git refuses to judge — a directory with
+// no .git, or none at all — is a FAIL row naming the path and git's reason, never an error:
+// the beat rows before it must still print.
+func TestJudgeStage_NotARepoIsAFailRow(t *testing.T) {
 	t.Parallel()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not on PATH")
 	}
+	cases := map[string]string{
+		"no .git":     t.TempDir(),
+		"nonexistent": filepath.Join(t.TempDir(), "missing"),
+	}
+	for name, stage := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	_, err := judgeStage(context.Background(), t.TempDir())
+			row, err := judgeStage(context.Background(), stage)
 
-	if err == nil || !strings.HasPrefix(err.Error(), "stage: git -C") {
-		t.Fatalf("want a git error, got %v", err)
+			if err != nil {
+				t.Fatalf("want a row, got error %v", err)
+			}
+			if row.Subject != stageSubject || row.Verdict != verdictFail {
+				t.Fatalf("want a %s FAIL row, got %+v", stageSubject, row)
+			}
+			wantPrefix := "stage: " + stage + " is not a git work tree (git status: "
+			if !strings.HasPrefix(row.Detail, wantPrefix) || !strings.HasSuffix(row.Detail, ")") {
+				t.Errorf("want detail %q…%q, got %q", wantPrefix, ")", row.Detail)
+			}
+			if strings.Contains(row.Detail, "\n") {
+				t.Errorf("want a one-line detail, got %q", row.Detail)
+			}
+		})
 	}
 }
 
 // TestCheckCommand_ExitStatus drives the subcommand: the fixture passes with exit 0 and the
-// stage row SKIP when no --stage is given, and a clean stage fails the run with exit 1.
+// stage row SKIP when no --stage is given, a clean stage fails the run with exit 1, and a
+// --stage dir git cannot judge fails the same way with every beat row still printed.
 func TestCheckCommand_ExitStatus(t *testing.T) {
 	t.Parallel()
 	clean := stageRepo(t)
+	board, err := Load(heroStoryboard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var beatRows []string
+	for _, beat := range board.Beats {
+		beatRows = append(beatRows, fmt.Sprintf("beat %d |", beat.ID))
+	}
 	cases := []struct {
 		name     string
 		args     []string
 		exitCode int
-		want     string
+		want     []string
 	}{
 		{name: "no stage", args: []string{"check", heroStoryboard, heroFixture},
-			exitCode: 0, want: "stage  | SKIP |"},
+			exitCode: 0, want: []string{"stage  | SKIP |"}},
 		{name: "clean stage", args: []string{"check", heroStoryboard, heroFixture, "--stage", clean},
-			exitCode: exitRunFailed, want: "stage  | FAIL |"},
+			exitCode: exitRunFailed, want: []string{"stage  | FAIL |"}},
+		{name: "missing stage", args: []string{"check", heroStoryboard, heroFixture, "--stage", filepath.Join(clean, "missing")},
+			exitCode: exitRunFailed, want: append(beatRows, "stage  | FAIL |")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -287,8 +320,10 @@ func TestCheckCommand_ExitStatus(t *testing.T) {
 
 			err := root.ExecuteContext(context.Background())
 
-			if !strings.Contains(out.String(), tc.want) {
-				t.Errorf("want the table to carry %q, got:\n%s", tc.want, out.String())
+			for _, want := range tc.want {
+				if !strings.Contains(out.String(), want) {
+					t.Errorf("want the table to carry %q, got:\n%s", want, out.String())
+				}
 			}
 			if tc.exitCode == 0 {
 				if err != nil {

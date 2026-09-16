@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -85,7 +86,8 @@ func (noVideo) FirstPaint(context.Context) (time.Duration, error) { return 0, ni
 // checkTake resolves the storyboard against the session and judges every expect, in storyboard
 // order, with the stage row last when the storyboard declares expect.stage. An anchor that
 // resolves to nothing is an error naming its beat, the resolver's own: without every anchor
-// resolved, no ordering can be judged. The stage row is SKIP when stage is empty.
+// resolved, no ordering can be judged. The stage row is SKIP when stage is empty and FAIL when
+// git cannot judge the directory it names.
 func checkTake(ctx context.Context, board *Storyboard, entries []session.Entry, stage string) ([]checkRow, error) {
 	times, err := resolveBeats(ctx, board, entries, noVideo{}, 0)
 	if err != nil {
@@ -244,8 +246,10 @@ func headOf(text string) string {
 }
 
 // judgeStage evaluates expect.stage: `dirty` holds when `git status --porcelain` in the stage
-// repo prints anything. Without a stage directory the row is SKIP. A git failure is an error,
-// not a verdict — the stage could not be judged at all.
+// repo prints anything. Without a stage directory the row is SKIP. A stage git refuses to
+// judge — a directory that is not a work tree, or none at all — is a FAIL row naming git's
+// reason, so the beat rows before it still print; only a missing git binary is an error, since
+// the rig can then judge nothing.
 func judgeStage(ctx context.Context, stage string) (checkRow, error) {
 	row := checkRow{Subject: stageSubject}
 	if stage == "" {
@@ -256,8 +260,16 @@ func judgeStage(ctx context.Context, stage string) (checkRow, error) {
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
+	if errors.Is(err, exec.ErrNotFound) {
+		return row, fmt.Errorf("stage: git -C %s status --porcelain: %w", stage, err)
+	}
 	if err != nil {
-		return row, fmt.Errorf("stage: git -C %s status --porcelain: %w\n%s", stage, err, strings.TrimSpace(stderr.String()))
+		reason := err.Error()
+		if line, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n"); line != "" {
+			reason = line
+		}
+		row.Verdict, row.Detail = verdictFail, fmt.Sprintf("stage: %s is not a git work tree (git status: %s)", stage, reason)
+		return row, nil
 	}
 	changed := countLines(out)
 	if changed == 0 {
