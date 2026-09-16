@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/fs"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -935,6 +936,48 @@ type ResolvedSkill struct {
 // the two failed to expand would hand the model a literal `{{SKILL_DIR}}/file` path every read
 // tool refuses.
 const SkillDirToken = "{{SKILL_DIR}}"
+
+// skillFilesLine is the fixed sentence a skill block carries directly after its opener when the
+// skill has a Dir: it names the folder, the tools that can read or copy from it, and warns the
+// model off the terminal (a shell command naming the home skill library trips the dangerous-action
+// guard's ~/.apogee write rule, the dedicated reads do not). It is hard-wired harness text, never
+// the user-definable system prompt: the address is only useful together with the read-only tools'
+// extra-roots mount (tools.HostTools.ExtraReadRoots), which the same harness wires.
+const skillFilesLine = "files: %s — this skill's bundled files; read one (read_file, " +
+	"list_dir, grep or find_files) or copy one out (copy_file) only when these " +
+	"instructions call for it — use these tools, never terminal commands, to " +
+	"touch this folder\n"
+
+// Expand replaces every literal SkillDirToken in body with the skill's Dir — a plain replace, no
+// other tokens, no escaping. A skill with no Dir leaves the token literal, by design: an
+// unexpandable token is the skill author's portability problem, other hosts leave it untouched
+// too, so a cross-host skill carries its own fallback text. It is separate from Block because the
+// loop bounds a body against the text the model actually reads (the expanded one) and clamps it
+// BEFORE wrapping; a body Expand already touched passes through unchanged.
+func (s ResolvedSkill) Expand(body string) string {
+	if s.Dir == "" {
+		return body
+	}
+	return strings.ReplaceAll(body, SkillDirToken, s.Dir)
+}
+
+// Block renders the one skill block every door onto the catalog hands the model — the loop for an
+// attached "/id", the load_skill tool for a query — so a body means the same thing whichever door
+// it came through: the `<skill: DisplayName>` opener on its own first line (the TUI reads the
+// display name back out of it), the files: sentence when the skill has a Dir, the Expand-ed body,
+// and the closing `</skill>` plus one newline. A skill without a Dir omits the files: line and
+// leaves the body's tokens literal, so its block is exactly what it was before the field existed.
+// body is passed rather than read from s so a caller may hand over a clamped copy.
+func (s ResolvedSkill) Block(body string) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "<skill: %s>\n", s.DisplayName)
+	if s.Dir != "" {
+		fmt.Fprintf(&b, skillFilesLine, s.Dir)
+	}
+	b.WriteString(s.Expand(body))
+	b.WriteString("\n</skill>\n")
+	return b.String()
+}
 
 // SkillLookup searches the skill catalog on the MODEL's behalf — the load_skill door of
 // [ADR 0065]. It is the second seam onto the same catalog SkillResolver resolves against, and it

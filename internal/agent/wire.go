@@ -15,28 +15,31 @@ import (
 // no carrier for SetExtra fields yet (response_format is a Phase-4 concern).
 func (a *Agent) toProviderRequest(req *domain.Request) provider.Request {
 	st := req.State()
-	messages := make([]provider.Message, 0, len(st.Messages))
-	for _, m := range st.Messages {
+	msgs := st.Messages
+	tools := toProviderTools(st.Tools)
+
+	// A non-native tool-call format learns its tools from a text menu + emission instructions,
+	// not the wire tools array (D2/D3/D4): render the block over THIS request's (mode-filtered)
+	// menu, fold it into the system channel (domain.MergeSystem — one merged system message, the
+	// same shape the Request's own injections take), and suppress the native array — sending both
+	// would double-tell the model in two formats, and a template without tool support can error
+	// on the array. The block is wire-only: it never enters domain history, the snapshot, or any
+	// event — the merge runs on State()'s copy of the messages, ahead of the projection below, and
+	// the Request itself is untouched. A native/zero profile renders "" (processing.InstructionsFor),
+	// so the request is byte-identical — no injection, no suppression.
+	if block := a.toolInstructions(st.Tools); block != "" {
+		msgs = domain.MergeSystem(msgs, block)
+		tools = nil
+	}
+
+	messages := make([]provider.Message, 0, len(msgs))
+	for _, m := range msgs {
 		messages = append(messages, provider.Message{
 			Role:       string(m.Role),
 			Content:    m.Content,
 			ToolCalls:  toProviderToolCalls(m.ToolCalls),
 			ToolCallID: m.ToolCallID,
 		})
-	}
-
-	tools := toProviderTools(st.Tools)
-
-	// A non-native tool-call format learns its tools from a text menu + emission instructions,
-	// not the wire tools array (D2/D3/D4): render the block over THIS request's (mode-filtered)
-	// menu, fold it into the wire system channel, and suppress the native array — sending both
-	// would double-tell the model in two formats, and a template without tool support can error
-	// on the array. The block is wire-only: it never enters domain history, the snapshot, or any
-	// event. A native/zero profile renders "" (processing.InstructionsFor), so the request is
-	// byte-identical — no injection, no suppression.
-	if block := a.toolInstructions(st.Tools); block != "" {
-		messages = injectSystemInstructions(messages, block)
-		tools = nil
 	}
 
 	return provider.Request{
@@ -131,28 +134,6 @@ func (a *Agent) toolInstructions(menu []domain.ToolDef) string {
 		return ""
 	}
 	return block
-}
-
-// injectSystemInstructions folds the rendered tool menu + format instructions into the wire
-// request's system channel (D3): it appends block to the FIRST system message when the wire
-// projection already carries one (an embedder can seed one via a hook), else prepends a new sole
-// system message at position 0. One merged system message is the shape llama.cpp chat templates
-// reliably render — the domain.Request.appendOrCreateSystem semantics applied at the wire seam.
-// messages is freshly built by the caller, so the in-place edit is local to this request.
-func injectSystemInstructions(messages []provider.Message, block string) []provider.Message {
-	for i := range messages {
-		if messages[i].Role != string(domain.RoleSystem) {
-			continue
-		}
-		if messages[i].Content == "" {
-			messages[i].Content = block
-		} else {
-			messages[i].Content += "\n\n" + block
-		}
-		return messages
-	}
-	sys := provider.Message{Role: string(domain.RoleSystem), Content: block}
-	return append([]provider.Message{sys}, messages...)
 }
 
 // toProviderToolCalls maps domain tool calls onto the provider's "function" wire shape so

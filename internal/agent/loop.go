@@ -97,16 +97,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		if a.journal != nil && !a.isDelegate() {
 			a.journal.BeginGroup()
 		}
-		// Order: attached-skill blocks → @file-ref blocks → the user's text. Skills are
-		// per-turn instructions, so prepending them scopes them to this one message (the right
-		// semantics; it avoids a skill leaking into every later turn as a system-prompt edit).
-		// One structural bound for the whole message (refBound), computed from BOTH reference
-		// counts and handed to both resolvers: the blocks land in one message and split one
-		// allocation between them.
-		bound := a.refBound(len(in.SkillIDs) + len(in.FileRefs))
-		skillBlocks := a.resolveSkillRefs(turn, in.SkillIDs, bound)
-		refs := a.resolveFileRefs(ctx, turn, in.FileRefs, bound)
-		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: skillBlocks + refs + in.Text})
+		// The message itself — skill blocks, @file blocks, then the text — is composed by the
+		// helper an interjection shares (composeUserMessage), so both doors read identically.
+		a.conv.Append(a.composeUserMessage(ctx, turn, *in, false))
 	}
 
 	// The history-rewrite Moment: reactions edit conversation state before it is projected
@@ -1192,13 +1185,6 @@ func (a *Agent) readFileRef(ref string) ([]byte, error) {
 	return data, nil
 }
 
-// skillDirToken is the placeholder a skill author may write anywhere in a SKILL.md body to
-// mean "this skill's absolute directory". resolveSkillRefs expands it only when the resolver
-// handed over a Dir; without one the token travels literal, by design.
-// It is domain's constant rather than a literal here because the load_skill tool expands the SAME
-// token in the bodies IT returns (internal/tools): one spelling, two consumers, no drift.
-const skillDirToken = domain.SkillDirToken
-
 // resolveSkillRefs resolves each attached skill ID through Config.Skills and returns the
 // labeled instruction blocks to prepend to the user message — mirroring resolveFileRefs. The
 // blocks are emitted in the order the IDs were attached. An unknown ID (or any ID at all when
@@ -1206,20 +1192,11 @@ const skillDirToken = domain.SkillDirToken
 // never silently ignored — the same "report-and-proceed" contract the @file path keeps. The
 // IDs round-trip through a snapshot on UserInput, so a resumed session re-resolves them.
 //
-// A skill that carries a Dir gets one further fixed line directly after the opening tag, naming
-// the folder, the tools that can read or copy from it, and a warning off the terminal (a shell
-// command naming the home skill library trips the dangerous-action guard's ~/.apogee write
-// rule, dedicated reads do not). It is hard-wired harness text, never the user-definable
-// system prompt: the address is only useful together with the read-only tools' extra-roots
-// mount (tools.HostTools.ExtraReadRoots), which the same harness wires, so the two halves of
-// the promise stay in one place. The same Dir also expands every literal {{SKILL_DIR}} token
-// in the body (skillDirToken — a plain replace, no other tokens, no escaping), so a skill's
-// instructions can name exact bundled-file paths instead of sending the model off to derive
-// them from the files: line; the expansion lives here, beside that line, for the same reason.
-// A resolver with no Dir omits the line entirely, leaves the token literal — an unexpandable
-// token is the skill author's portability problem, and other hosts leave it untouched too, so
-// a cross-host skill carries its own fallback text — and the block is byte-identical to what
-// it was before.
+// Each block is domain.ResolvedSkill.Block's — the one renderer the load_skill tool shares, so a
+// skill reads the same whichever door it came through: the opener, the files: line naming the
+// folder its bundled resources live under (when the resolver handed over a Dir), the body with
+// every {{SKILL_DIR}} expanded to that Dir (ResolvedSkill.Expand), and the closer. The blank line
+// separating one block from the next is this function's.
 //
 // A body meets the same STRUCTURAL floor an @file block does (clampToBound, dispatch.go): content
 // past its share of the History allocation is elided to the shared head/tail-plus-marker shape
@@ -1231,7 +1208,7 @@ const skillDirToken = domain.SkillDirToken
 // caller (refBound), shared with the @file blocks of the same message and capped at
 // fileRefMaxTokens like them; a clipped body is reported as the same note (clampRef).
 // {{SKILL_DIR}} is expanded BEFORE the clamp measures the body: the model is bounded against the
-// text it actually reads.
+// text it actually reads (Block's own expansion then passes the clamped text through unchanged).
 func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 	if len(ids) == 0 {
 		return ""
@@ -1263,18 +1240,33 @@ func (a *Agent) resolveSkillRefs(turn int, ids []string, bound int) string {
 			})
 			continue
 		}
-		fmt.Fprintf(&b, "<skill: %s>\n", s.DisplayName)
-		body := s.Body
-		if s.Dir != "" {
-			fmt.Fprintf(&b, "files: %s — this skill's bundled files; read one (read_file, "+
-				"list_dir, grep or find_files) or copy one out (copy_file) only when these "+
-				"instructions call for it — use these tools, never terminal commands, to "+
-				"touch this folder\n", s.Dir)
-			body = strings.ReplaceAll(body, skillDirToken, s.Dir)
-		}
-		fmt.Fprintf(&b, "%s\n</skill>\n\n", a.clampRef(turn, "/"+id, body, bound))
+		body := a.clampRef(turn, "/"+id, s.Expand(s.Body), bound)
+		b.WriteString(s.Block(body))
+		b.WriteString("\n")
 	}
 	return b.String()
+}
+
+// composeUserMessage builds the ONE user message a submitted or interjected input lands as, in
+// the fixed block order attached-skill blocks → @file-ref blocks → the human's text. Skills are
+// per-turn instructions, so prepending them scopes them to this one message (the right
+// semantics; it avoids a skill leaking into every later turn as a system-prompt edit). One
+// structural bound for the whole message (refBound), computed from BOTH reference counts and
+// handed to both resolvers: the blocks land in one message and split one allocation between
+// them rather than each list getting the whole floor. ctx bounds only the @file resolution (a
+// cancelled Step stops a document extraction mid-walk — resolveFileRefs); an unresolvable
+// reference of either kind is reported as an ErrorEvent and skipped, never a refusal.
+// interjected marks the message as committed inside a running Exchange (Interject) so the
+// derived Exchange opening does not move (domain.Message.Interjected).
+func (a *Agent) composeUserMessage(ctx context.Context, turn int, in domain.UserInput, interjected bool) domain.Message {
+	bound := a.refBound(len(in.SkillIDs) + len(in.FileRefs))
+	skillBlocks := a.resolveSkillRefs(turn, in.SkillIDs, bound)
+	refs := a.resolveFileRefs(ctx, turn, in.FileRefs, bound)
+	return domain.Message{
+		Role:        domain.RoleUser,
+		Content:     skillBlocks + refs + in.Text,
+		Interjected: interjected,
+	}
 }
 
 // budget reports the model's context Budget: the discovered window (n_ctx), the token accounting

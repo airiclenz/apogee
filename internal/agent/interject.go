@@ -69,23 +69,12 @@ func (a *Agent) Interject(ctx context.Context, in domain.UserInput) error {
 		return errEmptyInterjection
 	}
 
-	// Mirrors step()'s pending-input consumption (loop.go) minus openExchange — the Exchange
-	// is already open and its cached boundary must not move. Same block order, so an
-	// interjection reads identically to an opening message: skills → @file refs → the text.
-	turn := a.turns.index
-	// One structural bound across the interjection's whole reference set, exactly as step() does
-	// (refBound): an interjection carrying one skill and one @file splits the allocation between
-	// them rather than handing each list the whole floor.
-	bound := a.refBound(len(in.SkillIDs) + len(in.FileRefs))
-	skillBlocks := a.resolveSkillRefs(turn, in.SkillIDs, bound)
-	// The caller's ctx — the Step's — bounds the extraction exactly as it does for a Submitted
-	// message, so the one cancel the host holds reaches both paths. A cancelled ctx here only
-	// skips the document (refIgnored); the commit below is unconditional either way.
-	refs := a.resolveFileRefs(ctx, turn, in.FileRefs, bound)
-	a.conv.Append(domain.Message{
-		Role:        domain.RoleUser,
-		Content:     skillBlocks + refs + in.Text,
-		Interjected: true,
-	})
+	// The same composition step()'s pending-input consumption uses (composeUserMessage, loop.go)
+	// minus openExchange — the Exchange is already open and its cached boundary must not move —
+	// so an interjection reads identically to an opening message, splits one structural bound
+	// across its whole reference set the same way, and is bounded by the same ctx: the caller's,
+	// the Step's, so the one cancel the host holds reaches both paths. A cancelled ctx here only
+	// skips the document (refIgnored); the commit is unconditional either way.
+	a.conv.Append(a.composeUserMessage(ctx, a.turns.index, in, true))
 	return nil
 }

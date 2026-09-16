@@ -208,7 +208,12 @@ equality unchanged.
 
 **Commit:** `refactor(agent): standing system blocks are one ordered table`
 
-## 5. One skill-block renderer and two composition twins
+## 5. One skill-block renderer and two composition twins — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `Block` is joined by an exported `ResolvedSkill.Expand` — the "no Dir ⇒ token stays literal" rule needs one spelling, and the loop must expand before `clampRef` measures (the plan's "expansion BEFORE the clamp") while `Block` expands for `load_skill`; `Block` re-expanding a clamped body is a no-op, pinned by the table test.
+NOTES (2026-09-16): `MergeSystem` copies the slice on the append branch too (pure as the plan words it); `appendOrCreateSystem` derives its `committedLen` bump from the length change.
+NOTES (2026-09-16): consequential edit — docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md: made necessary by retiring `injectSystemInstructions` (two dated in-place amendments naming `domain.MergeSystem`).
+NOTES (2026-09-16): `load_skill.go`'s doc comment now says "the same <skill> wrapper" so the acceptance grep `grep -n '<skill: ' internal/agent/*.go internal/tools/*.go | grep -v _test` reports no hit outside the domain renderer.
 
 **What.** `internal/domain/config.go` `ResolvedSkill.Block(body string) string` renders the
 `<skill: …>` header, the `files:` sentence, the `{{SKILL_DIR}}`-expanded body and `</skill>\n`

@@ -245,3 +245,76 @@ func TestFloorConfigZeroValueKeepsEveryGuardOn(t *testing.T) {
 		t.Errorf("opting out the read cache moved another guard: %+v", one.Floor)
 	}
 }
+
+// TestResolvedSkillBlock pins the one skill block both doors onto the catalog hand the model —
+// the loop for an attached "/id", load_skill for a query: the `<skill: name>` opener alone on the
+// first line (the TUI reads the display name back out of it), the files: sentence only when the
+// skill has a Dir, every {{SKILL_DIR}} expanded to that Dir and left literal without one, and the
+// `</skill>` closer followed by exactly one newline. The body is the caller's: a clamped copy
+// renders in place of the skill's own, and a body Expand already touched passes through unchanged.
+func TestResolvedSkillBlock(t *testing.T) {
+	t.Parallel()
+
+	const filesLine = "files: /lib/debugging — this skill's bundled files; read one (read_file, " +
+		"list_dir, grep or find_files) or copy one out (copy_file) only when these " +
+		"instructions call for it — use these tools, never terminal commands, to " +
+		"touch this folder\n"
+
+	cases := []struct {
+		name  string
+		skill domain.ResolvedSkill
+		body  string
+		want  string
+	}{
+		{
+			name:  "no Dir: no files line, token stays literal",
+			skill: domain.ResolvedSkill{ID: "debugging", DisplayName: "Debugging"},
+			body:  "Read {{SKILL_DIR}}/refs/a.md first.",
+			want:  "<skill: Debugging>\nRead {{SKILL_DIR}}/refs/a.md first.\n</skill>\n",
+		},
+		{
+			name:  "Dir: files line and every token expanded",
+			skill: domain.ResolvedSkill{ID: "debugging", DisplayName: "Debugging", Dir: "/lib/debugging"},
+			body:  "Read {{SKILL_DIR}}/refs/a.md, then {{SKILL_DIR}}/refs/b.md.",
+			want: "<skill: Debugging>\n" + filesLine +
+				"Read /lib/debugging/refs/a.md, then /lib/debugging/refs/b.md.\n</skill>\n",
+		},
+		{
+			name:  "the body is the caller's, not the skill's",
+			skill: domain.ResolvedSkill{ID: "debugging", DisplayName: "Debugging", Body: "the whole body"},
+			body:  "a clamped copy",
+			want:  "<skill: Debugging>\na clamped copy\n</skill>\n",
+		},
+		{
+			name:  "an already-expanded body passes through unchanged",
+			skill: domain.ResolvedSkill{ID: "debugging", DisplayName: "Debugging", Dir: "/lib/debugging"},
+			body:  "Read /lib/debugging/refs/a.md first.",
+			want:  "<skill: Debugging>\n" + filesLine + "Read /lib/debugging/refs/a.md first.\n</skill>\n",
+		},
+		{
+			name:  "empty body still closes",
+			skill: domain.ResolvedSkill{ID: "empty", DisplayName: "Empty"},
+			body:  "",
+			want:  "<skill: Empty>\n\n</skill>\n",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := tc.skill.Block(tc.body); got != tc.want {
+				t.Errorf("Block(%q) =\n%q\nwant\n%q", tc.body, got, tc.want)
+			}
+		})
+	}
+
+	// Expand on its own follows the same Dir rule, so the loop can bound a body against the text
+	// the model actually reads before it hands Block the clamped copy.
+	withDir := domain.ResolvedSkill{Dir: "/lib/x"}
+	if got := withDir.Expand("{{SKILL_DIR}}/f"); got != "/lib/x/f" {
+		t.Errorf("Expand with Dir = %q, want %q", got, "/lib/x/f")
+	}
+	var noDir domain.ResolvedSkill
+	if got := noDir.Expand("{{SKILL_DIR}}/f"); got != "{{SKILL_DIR}}/f" {
+		t.Errorf("Expand without Dir = %q, want the token left literal", got)
+	}
+}

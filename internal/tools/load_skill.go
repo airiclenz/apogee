@@ -91,11 +91,11 @@ func (t *LoadSkill) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 
 // renderSkillLookup turns one lookup answer into the text the model reads.
 //
-// A found skill is rendered the way the loop renders an ATTACHED one (internal/agent's
-// resolveSkillRefs): the same <skill: …> wrapper, the same files: line naming the folder its
-// bundled resources live under, and the same {{SKILL_DIR}} expansion — so a body means the same
-// thing whichever door it came through, and an instruction pointing at a bundled file names an
-// address the read tools accept rather than a literal placeholder they refuse.
+// A found skill is rendered by the one renderer the loop uses for an ATTACHED one
+// (domain.ResolvedSkill.Block): the same <skill> wrapper, the same files: line naming the
+// folder its bundled resources live under, and the same {{SKILL_DIR}} expansion — so a body means
+// the same thing whichever door it came through, and an instruction pointing at a bundled file
+// names an address the read tools accept rather than a literal placeholder they refuse.
 //
 // The "also matched" line and the candidates rung sit OUTSIDE that wrapper: they are this tool
 // answering, not the skill speaking, and a model that treats everything inside <skill> as
@@ -104,16 +104,7 @@ func renderSkillLookup(query string, res domain.SkillLookupResult) string {
 	var b strings.Builder
 	if res.Found {
 		s := res.Skill
-		fmt.Fprintf(&b, "<skill: %s>\n", s.DisplayName)
-		body := s.Body
-		if s.Dir != "" {
-			fmt.Fprintf(&b, "files: %s — this skill's bundled files; read one (read_file, "+
-				"list_dir, grep or find_files) or copy one out (copy_file) only when these "+
-				"instructions call for it — use these tools, never terminal commands, to "+
-				"touch this folder\n", s.Dir)
-			body = strings.ReplaceAll(body, domain.SkillDirToken, s.Dir)
-		}
-		fmt.Fprintf(&b, "%s\n</skill>\n", body)
+		b.WriteString(s.Block(s.Body))
 		if len(res.Also) > 0 {
 			fmt.Fprintf(&b, "\nalso matched, not loaded: %s — call load_skill again with one of "+
 				"these ids if this was not the skill you wanted.\n", strings.Join(res.Also, ", "))

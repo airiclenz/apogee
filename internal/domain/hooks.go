@@ -625,18 +625,35 @@ func (r *Request) SetSampling(p SamplingParams) {
 	r.revision++
 }
 
-// appendOrCreateSystem appends text to the first system message, creating one at the
-// front of the conversation if none exists.
-func (r *Request) appendOrCreateSystem(text string) {
-	if i := firstIndex(r.messages, RoleSystem); i >= 0 {
-		if r.messages[i].Content == "" {
-			r.messages[i].Content = text
+// MergeSystem folds text into the system channel of msgs the one way llama.cpp chat templates
+// reliably render — ONE merged system message: appended (after a blank line) to the first system
+// message when there is one, else prepended as a new sole system message at position 0. It is
+// pure: msgs is never written to, the result is a fresh slice, and only that slice's length tells a
+// caller which branch ran. Both injection seams route through it — the Request's own mutators here
+// (appendOrCreateSystem) and the wire projection's tool-block merge (internal/agent) — so the merge
+// shape is spelled once.
+func MergeSystem(msgs []Message, text string) []Message {
+	if i := firstIndex(msgs, RoleSystem); i >= 0 {
+		out := append([]Message(nil), msgs...)
+		if out[i].Content == "" {
+			out[i].Content = text
 		} else {
-			r.messages[i].Content += "\n\n" + text
+			out[i].Content += "\n\n" + text
 		}
+		return out
+	}
+	return append([]Message{{Role: RoleSystem, Content: text}}, msgs...)
+}
+
+// appendOrCreateSystem appends text to the first system message, creating one at the
+// front of the conversation if none exists (MergeSystem), and maintains the retry boundary
+// when the second branch ran.
+func (r *Request) appendOrCreateSystem(text string) {
+	before := len(r.messages)
+	r.messages = MergeSystem(r.messages, text)
+	if len(r.messages) == before {
 		return
 	}
-	r.messages = append([]Message{{Role: RoleSystem, Content: text}}, r.messages...)
 	// Boundary maintenance (F2): committedLen tracks the same logical message across
 	// request-scoped structural mutations. A prepended system message shifts every committed
 	// message right by one, so the boundary advances to keep View() pinned to the same

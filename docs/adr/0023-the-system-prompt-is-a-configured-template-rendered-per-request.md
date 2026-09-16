@@ -115,6 +115,9 @@ buys every required property at once:
   `injectSystemInstructions` appends the tool block after **that**. The wire therefore carries
   **one** system message reading **prompt → mechanism directives → tool block** — the merge shape
   `TestPromptSeam_AppendsToSeededSystemMessage` already pinned, now the default path.
+  *(Amended 2026-09-16: `injectSystemInstructions` is retired; both merges are the one pure
+  `domain.MergeSystem`, which `toProviderRequest` applies to the Request's `State()` copy ahead of
+  the wire projection — the shape and the order are unchanged.)*
 - The projection is **per-request**, so the prompt is re-rendered on every request (`armRequest`,
   and `refold` after an emergency fold —
   [ADR 0018](0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md)) and
@@ -249,7 +252,8 @@ from before this ADR, or a hand-edited snapshot, whose stored conversation alrea
 system message. `restoreState` installed such a conversation wholesale, `buildRequest` then
 prepended the freshly rendered standing content unconditionally, and the wire carried **two** system
 messages — with the profile's tool block folded into the first (the stale stored one), because
-`injectSystemInstructions` merges into the first system message only.
+`injectSystemInstructions` merges into the first system message only *(since 2026-09-16 that
+merge is `domain.MergeSystem`, with the same first-system-message rule)*.
 
 `restoreState` (`internal/agent/state.go`) now drops the restored conversation's **leading run** of
 `RoleSystem` messages before installing it. The invariant §6 maintained is therefore *enforced* at
