@@ -9,9 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -33,6 +30,7 @@ import (
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
@@ -41,44 +39,26 @@ import (
 // a channel — so it buys only the negative claim, and buys it cheaply.
 const gateSettleWindow = 50 * time.Millisecond
 
-// firingUpstream starts a server that answers every request with one final, no-tool reply and
-// records what each request carried: the tool menu it offered — which is how the "a Firing carries
-// the library's own registry, never the session's" prescription is asserted from the wire rather
-// than from the Config — and its system prompt, which is where an enabled request-shaping Mechanism
-// leaves its mark, and so where the wire says which enable set the Firing resolved.
-func firingUpstream(t *testing.T, reply string) (url string, menus func() [][]string) {
+// firingUpstream starts a stubllm upstream that answers every request with one final, no-tool
+// reply. Its request log is what each request carried — the tool menu it offered, which is how the
+// "a Firing carries the library's own registry, never the session's" prescription is asserted from
+// the wire rather than from the Config.
+func firingUpstream(t *testing.T, reply string) *stubllm.Server {
 	t.Helper()
-	var seen [][]string
-	done := make(chan struct{}, 32)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, _ := io.ReadAll(r.Body)
-		var decoded struct {
-			Messages []struct {
-				Role    string `json:"role"`
-				Content string `json:"content"`
-			} `json:"messages"`
-			Tools []struct {
-				Function struct {
-					Name string `json:"name"`
-				} `json:"function"`
-			} `json:"tools"`
+	return stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Repeat: true, Text: reply}}})
+}
+
+// awaitRequest waits until the upstream has logged at least one request, or fails the test. The
+// log is polled rather than hooked because the log is the stub's own word that a request landed.
+func awaitRequest(t *testing.T, up *stubllm.Server) {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for len(up.Requests()) == 0 {
+		select {
+		case <-deadline:
+			t.Fatal("the firing never reached the upstream")
+		case <-time.After(time.Millisecond):
 		}
-		_ = json.Unmarshal(body, &decoded)
-		menu := make([]string, 0, len(decoded.Tools))
-		for _, tl := range decoded.Tools {
-			menu = append(menu, tl.Function.Name)
-		}
-		seen = append(seen, menu)
-		w.Header().Set("Content-Type", "text/event-stream")
-		e2eWriteFinal(w, reply)
-		done <- struct{}{}
-	}))
-	t.Cleanup(srv.Close)
-	// The handler appends without a lock, so the reader waits for the request it asked for rather
-	// than racing the server goroutine. A Firing makes exactly one call in these tests.
-	return srv.URL, func() [][]string {
-		<-done
-		return seen
 	}
 }
 
@@ -115,7 +95,7 @@ const firingStepPrompt = "Build a full parser pipeline.\n" +
 // The run really reaches the stubbed upstream, which is the dialling half; the record's model is the
 // other. It does not call t.Parallel: sibling tests here replace the package-level runner seam.
 func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
-	url, menus := firingUpstream(t, "the build is green")
+	up := firingUpstream(t, "the build is green")
 
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
@@ -131,7 +111,7 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		live:  newLiveSettings(launchOpts),
 		// The binding the session has MOVED to since launch (a /server switch, a rebind). The Firing
 		// must follow it rather than the launch values the holder was seeded with.
-		binding: func() upstreamBinding { return upstreamBinding{Endpoint: url, Model: "bound-model"} },
+		binding: func() upstreamBinding { return upstreamBinding{Endpoint: up.URL, Model: "bound-model"} },
 		width:   func() int { return 1 },
 		store:   store,
 	}
@@ -172,14 +152,15 @@ func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 		t.Errorf("record title = %q, want the reported %q", meta.Title, out.Title)
 	}
 
-	menu := menus()
-	if len(menu) != 1 {
-		t.Fatalf("the upstream answered %d requests, want 1", len(menu))
+	reqs := up.Requests()
+	if len(reqs) != 1 {
+		t.Fatalf("the upstream answered %d requests, want 1", len(reqs))
 	}
-	if len(menu[0]) == 0 {
+	menu := reqs[0].Tools
+	if len(menu) == 0 {
 		t.Error("the firing offered no tools at all; it should carry the library's own registry")
 	}
-	for _, name := range menu[0] {
+	for _, name := range menu {
 		if name == (sessionOnlyTool{}).Name() {
 			t.Errorf("the firing offered %q — it inherited the session's registry, MCP tools and all",
 				name)
@@ -951,8 +932,8 @@ func (h *scheduleHarness) await(t *testing.T, want schedule.EventKind) schedule.
 func TestAFiringsAnswerAndStatsCrossTheFireSeam(t *testing.T) {
 	t.Parallel()
 
-	url, _ := firingUpstream(t, "the build is green")
-	h := newScheduleHarness(t, url)
+	up := firingUpstream(t, "the build is green")
+	h := newScheduleHarness(t, up.URL)
 
 	h.fire(t)
 	ev := h.await(t, schedule.EventCompleted)
@@ -979,30 +960,14 @@ func TestAFailedFiringStillCarriesWhatItSalvaged(t *testing.T) {
 	t.Parallel()
 
 	// The failure a Firing actually dies of: its Driver going away mid-run (ADR 0033 — a Schedule
-	// dies with the TUI). An upstream that never answers holds the run open until Close cancels it,
-	// and run.Once words that cancellation as the error while still saving what it had.
-	requested := make(chan struct{}, 1)
-	release := make(chan struct{})
-	srv := httptest.NewServer(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		select {
-		case requested <- struct{}{}:
-		default:
-		}
-		select {
-		case <-r.Context().Done(): // the firing's context died; the request dies with it
-		case <-release: // and the handler never outlives the test, whatever the server noticed
-		}
-	}))
-	t.Cleanup(srv.Close)
-	defer close(release)
+	// dies with the TUI). An upstream that never answers — a hang turn, which writes nothing once
+	// the firing's context dies and the request dies with it — holds the run open until Close
+	// cancels it, and run.Once words that cancellation as the error while still saving what it had.
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Hang: time.Minute}}})
 
-	h := newScheduleHarness(t, srv.URL)
+	h := newScheduleHarness(t, up.URL)
 	h.fire(t)
-	select {
-	case <-requested:
-	case <-time.After(10 * time.Second):
-		t.Fatal("the firing never reached the upstream")
-	}
+	awaitRequest(t, up)
 	h.scheduler.Close() // the Driver going away, which cancels the run in flight
 
 	ev := h.await(t, schedule.EventFailed)

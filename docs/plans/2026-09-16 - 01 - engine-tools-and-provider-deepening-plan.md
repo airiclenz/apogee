@@ -532,7 +532,11 @@ anticipate is a 500 — fix the Script, never loosen it).
 
 **Commit:** `test(run): the runner harness scripts stubllm`
 
-## 16. The TUI, confinement and schedule e2e files script stubllm
+## 16. The TUI, confinement and schedule e2e files script stubllm — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `TestE2EColdStartHeartbeat` took the thin-front option — 404 while down, `/v1/models` with `context_length` — but its chat path mounts a `stubllm.InProcess` server's `Handler()` directly (the mount `Handler`'s doc names) rather than reverse-proxying to a listening `stubllm.New`; `wireModel` is read off `stub.Requests()`. The `text/event-stream` grep now reads 0 for `internal/tui/e2e_test.go`, not the 1 the kept-handler branch allowed.
+NOTES (2026-09-16): no `cmd/apogee/testdata/frames/` golden changed (none of the three files feeds one), so the commit message's "framing goldens regenerated" clause was dropped as inaccurate.
+NOTES (2026-09-16): `cmd/apogee/schedule_test.go`'s `firingUpstream` returns the `*stubllm.Server` and the menu is read from `Requests()[0].Tools`; the never-answering upstream of `TestAFailedFiringStillCarriesWhatItSalvaged` is a `Hang: time.Minute` turn awaited through a small `awaitRequest` poll on the request log (the shape `internal/run`'s `cancelWhen` uses).
 
 **What.** Depends on item 12. `internal/tui/e2e_test.go` (its `writeFinal`/`writeToolCall` pair
 and one-fragment framing go), `cmd/apogee/confinement_e2e_test.go`, `cmd/apogee/schedule_test.go`:

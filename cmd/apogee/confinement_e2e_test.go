@@ -25,11 +25,7 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,11 +37,12 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
-// The scripted conversation's canonical strings, shared by the fake model and the assertions.
+// The scripted conversation's canonical strings, shared by the scripted model and the assertions.
 // The command's output is what proves the subprocess really ran rather than being refused.
 const (
 	e2eEcho            = "apogee-confinement-e2e"
@@ -63,8 +60,7 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	srv := scriptedTerminalModel()
-	defer srv.Close()
+	srv := scriptedTerminalModel(t)
 
 	workspace := t.TempDir()
 	// A config that already names a server: since ADR 0036 startup selects one out of `servers:`,
@@ -376,87 +372,17 @@ func (s *e2eSink) reset() {
 // A scripted OpenAI-compatible streaming model
 // ----------------------------------------------------------------------------
 
-// scriptedTerminalModel returns an httptest server speaking the SSE wire the provider dials. It
-// is stateless and decides each reply from the request's own history, as a real model does: a
-// request that does not yet end in a tool result asks for one `terminal` call; one that does
-// commits the final message that ends the Exchange. Two Exchanges therefore run the same shape
-// twice, which is what lets the journey compare a gated call with an ungated one.
-func scriptedTerminalModel() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/event-stream")
-		if lastMessageIsToolResult(r) {
-			e2eWriteFinal(w, e2eFinalMessage)
-			return
-		}
-		e2eWriteToolCall(w, e2eNarration, "terminal", fmt.Sprintf(`{"command":%q}`, e2eTerminalCommand))
-	}))
-}
-
-// lastMessageIsToolResult reports whether the request's final message carries the tool role —
-// the signal that the previous Turn ran the tool and the model should now close the Exchange.
-// Only the roles matter here, so the rest of the OpenAI request shape is ignored.
-func lastMessageIsToolResult(r *http.Request) bool {
-	body, _ := io.ReadAll(r.Body)
-	var req struct {
-		Messages []struct {
-			Role string `json:"role"`
-		} `json:"messages"`
-	}
-	_ = json.Unmarshal(body, &req)
-	if len(req.Messages) == 0 {
-		return false
-	}
-	return req.Messages[len(req.Messages)-1].Role == "tool"
-}
-
-// e2eWriteToolCall streams a narration chunk, one native tool call, a tool_calls finish and the
-// SSE terminator — the wire shape of a Turn that asks for a tool.
-func e2eWriteToolCall(w http.ResponseWriter, narration, name, args string) {
-	e2eSSE(w, e2eChunk{Choices: []e2eChoice{{Delta: e2eDelta{Content: narration}}}})
-	e2eSSE(w, e2eChunk{Choices: []e2eChoice{{Delta: e2eDelta{ToolCalls: []e2eToolCall{{
-		ID: "call_1", Type: "function", Function: e2eFunc{Name: name, Arguments: args},
-	}}}}}})
-	e2eSSE(w, e2eChunk{Choices: []e2eChoice{{FinishReason: "tool_calls"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-// e2eWriteFinal streams one content chunk, a stop finish and the terminator — the wire shape of
-// a final no-tool Turn that ends the Exchange.
-func e2eWriteFinal(w http.ResponseWriter, text string) {
-	e2eSSE(w, e2eChunk{Choices: []e2eChoice{{Delta: e2eDelta{Content: text}}}})
-	e2eSSE(w, e2eChunk{Choices: []e2eChoice{{FinishReason: "stop"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-// e2eSSE writes v as one SSE data event. Writes are best-effort: the handler runs on the server
-// goroutine, where a test-failure call is not permitted, and the fixed structs never fail to marshal.
-func e2eSSE(w io.Writer, v any) {
-	b, _ := json.Marshal(v)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
-}
-
-// The on-the-wire SSE chunk shape the provider parses — only the fields this scripted model sets.
-type e2eChunk struct {
-	Choices []e2eChoice `json:"choices"`
-}
-
-type e2eChoice struct {
-	Delta        e2eDelta `json:"delta"`
-	FinishReason string   `json:"finish_reason,omitempty"`
-}
-
-type e2eDelta struct {
-	Content   string        `json:"content,omitempty"`
-	ToolCalls []e2eToolCall `json:"tool_calls,omitempty"`
-}
-
-type e2eToolCall struct {
-	ID       string  `json:"id"`
-	Type     string  `json:"type"`
-	Function e2eFunc `json:"function"`
-}
-
-type e2eFunc struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+// scriptedTerminalModel starts a stubllm upstream that decides each reply from the request's
+// own history, as a real model does: a request that does not yet end in a tool result asks for
+// one `terminal` call; one that does commits the final message that ends the Exchange. Both
+// turns repeat, so two Exchanges run the same shape twice, which is what lets the journey
+// compare a gated call with an ungated one.
+func scriptedTerminalModel(t *testing.T) *stubllm.Server {
+	t.Helper()
+	return stubllm.New(t, stubllm.Script{Model: "fake", Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "terminal"}, Repeat: true, Text: e2eFinalMessage},
+		{Repeat: true, Text: e2eNarration, ToolCalls: []stubllm.ToolCall{{
+			ID: "call_1", Name: "terminal", Arguments: fmt.Sprintf(`{"command":%q}`, e2eTerminalCommand),
+		}}},
+	}})
 }

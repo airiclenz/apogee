@@ -2,9 +2,7 @@ package tui
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -26,8 +25,8 @@ import (
 // The hermetic end-to-end proof (phase-2 detail plan §4 P2.6)
 // ----------------------------------------------------------------------------
 //
-// These tests drive the *real* Agent — the real provider client over a scripted
-// OpenAI-compatible httptest model, the real default tools, the real concurrency seam
+// These tests drive the *real* Agent — the real provider client over a stubllm Script, the
+// real default tools, the real concurrency seam
 // (teaSink + uiApprover + the worker), and the real Model.Update folding the event stream —
 // with no terminal in the loop. They are the deliverable proof the broad plan asks for: hold
 // a coding conversation, watch tokens stream, watch a tool call, approve the write, see the
@@ -60,127 +59,22 @@ const (
 // A scripted OpenAI-compatible streaming model
 // ----------------------------------------------------------------------------
 
-// scriptedModel returns an httptest server speaking the SSE wire the provider dials
-// (provider/stream.go). It is stateless across requests and decides each reply from the
-// request's own message history, exactly as a real model does: a fresh task narrates and
-// requests write_file; a request whose history ends in a tool result answers with the final
-// message that closes the Exchange; a later user turn (the conversation already wrote the
-// file) gets a plain closing reply with no tool. Those three branches drive, in order, a
-// tool Turn, a final Turn, and — after resume — the continuation Turn.
-func scriptedModel() *httptest.Server {
-	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		roles := requestRoles(r)
-		w.Header().Set("Content-Type", "text/event-stream")
-		switch {
-		case lastRoleIs(roles, string(domain.RoleTool)):
-			// The previous Turn ran the tool; commit the final assistant message.
-			writeFinal(w, finalMessageText)
-		case countRole(roles, string(domain.RoleUser)) >= 2:
-			// A second user turn after the file task — a plain closing reply, no tool.
-			writeFinal(w, followUpMessageText)
-		default:
-			// A fresh task: narrate, then ask to write the file.
-			writeToolCall(w, narrationText, "call_1", "write_file", writeFileArgs)
-		}
-	}))
-}
-
-// requestRoles decodes the role of each message in the request body. Only the roles are
-// needed to choose a reply, so the rest of the OpenAI request shape is ignored.
-func requestRoles(r *http.Request) []string {
-	body, _ := io.ReadAll(r.Body)
-	var req struct {
-		Messages []struct {
-			Role string `json:"role"`
-		} `json:"messages"`
-	}
-	_ = json.Unmarshal(body, &req)
-	roles := make([]string, len(req.Messages))
-	for i, m := range req.Messages {
-		roles[i] = m.Role
-	}
-	return roles
-}
-
-// requestModel decodes the model id the request asked for — what the provider client actually put
-// on the wire, which is the only place a rebind can be proven to have reached.
-func requestModel(r *http.Request) string {
-	body, _ := io.ReadAll(r.Body)
-	var req struct {
-		Model string `json:"model"`
-	}
-	_ = json.Unmarshal(body, &req)
-	return req.Model
-}
-
-// lastRoleIs reports whether the final message in the request carries role want.
-func lastRoleIs(roles []string, want string) bool {
-	return len(roles) > 0 && roles[len(roles)-1] == want
-}
-
-// countRole counts messages with the given role.
-func countRole(roles []string, want string) int {
-	n := 0
-	for _, r := range roles {
-		if r == want {
-			n++
-		}
-	}
-	return n
-}
-
-// writeToolCall streams a narration chunk, then one native tool call, then a tool_calls
-// finish and the SSE terminator — the wire shape of a Turn that asks for a tool.
-func writeToolCall(w http.ResponseWriter, narration, id, name, args string) {
-	sseData(w, sseChunkBody{Choices: []sseChoiceBody{{Delta: sseDeltaBody{Content: narration}}}})
-	sseData(w, sseChunkBody{Choices: []sseChoiceBody{{Delta: sseDeltaBody{ToolCalls: []sseToolCallBody{{
-		ID: id, Type: "function", Function: sseFuncBody{Name: name, Arguments: args},
-	}}}}}})
-	sseData(w, sseChunkBody{Choices: []sseChoiceBody{{FinishReason: "tool_calls"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-// writeFinal streams one content chunk then a stop finish and the terminator — the wire
-// shape of a final no-tool Turn that ends the Exchange.
-func writeFinal(w http.ResponseWriter, text string) {
-	sseData(w, sseChunkBody{Choices: []sseChoiceBody{{Delta: sseDeltaBody{Content: text}}}})
-	sseData(w, sseChunkBody{Choices: []sseChoiceBody{{FinishReason: "stop"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-// sseData writes v as one SSE data event. Writes are best-effort (the handler runs on the
-// server goroutine, where a test-failure call is not permitted); the fixed chunk structs
-// never fail to marshal.
-func sseData(w io.Writer, v any) {
-	b, _ := json.Marshal(v)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
-}
-
-// The on-the-wire SSE chunk shape the provider parses (a subset of provider/stream.go's
-// sseChunk — only the fields this scripted model sets).
-type sseChunkBody struct {
-	Choices []sseChoiceBody `json:"choices"`
-}
-
-type sseChoiceBody struct {
-	Delta        sseDeltaBody `json:"delta"`
-	FinishReason string       `json:"finish_reason,omitempty"`
-}
-
-type sseDeltaBody struct {
-	Content   string            `json:"content,omitempty"`
-	ToolCalls []sseToolCallBody `json:"tool_calls,omitempty"`
-}
-
-type sseToolCallBody struct {
-	ID       string      `json:"id"`
-	Type     string      `json:"type"`
-	Function sseFuncBody `json:"function"`
-}
-
-type sseFuncBody struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
+// scriptedModel starts a stubllm upstream playing the three replies the conversation asks for:
+// a fresh task narrates and requests write_file; the request whose history ends in that tool's
+// result — matched on the result, as a real model would read it, rather than taken by position —
+// answers with the final message that closes the Exchange; a later user turn (the conversation
+// already wrote the file) gets a plain closing reply with no tool. Those three drive, in order,
+// a tool Turn, a final Turn, and — after resume — the continuation Turn.
+func scriptedModel(t *testing.T) *stubllm.Server {
+	t.Helper()
+	return stubllm.New(t, stubllm.Script{Model: "test-model", Turns: []stubllm.Turn{
+		// A fresh task: narrate, then ask to write the file.
+		{Text: narrationText, ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "write_file", Arguments: writeFileArgs}}},
+		// The previous Turn ran the tool; commit the final assistant message.
+		{When: &stubllm.Match{ToolResult: "write_file"}, Text: finalMessageText},
+		// A second user turn after the file task — a plain closing reply, no tool.
+		{Text: followUpMessageText},
+	}})
 }
 
 // ----------------------------------------------------------------------------
@@ -318,8 +212,7 @@ func plainTranscript(m Model) string {
 // → result → final message — all with no terminal.
 func TestE2EConversationThroughTUI(t *testing.T) {
 	t.Parallel()
-	srv := scriptedModel()
-	defer srv.Close()
+	srv := scriptedModel(t)
 
 	workspace := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
@@ -389,9 +282,12 @@ func TestE2EColdStartHeartbeat(t *testing.T) {
 	t.Parallel()
 
 	var up atomic.Bool // the server starts out answering nothing
-	var wireModel atomic.Value
-	wireModel.Store("")
 
+	// The chat half is a stubllm Script; the front in front of it is what stubllm cannot script —
+	// a server that is DOWN until the test brings it up, and a /v1/models that advertises the
+	// model's context window — so the completion bytes and the request log are the stub's own.
+	stub := stubllm.InProcess(t, stubllm.Script{Model: coldStartModel, Turns: []stubllm.Turn{{Text: finalMessageText}}})
+	chat := stub.Handler()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !up.Load() {
 			w.WriteHeader(http.StatusNotFound)
@@ -404,9 +300,7 @@ func TestE2EColdStartHeartbeat(t *testing.T) {
 		case "/props":
 			w.WriteHeader(http.StatusNotFound) // best-effort; a non-llama.cpp server has none
 		default:
-			wireModel.Store(requestModel(r))
-			w.Header().Set("Content-Type", "text/event-stream")
-			writeFinal(w, finalMessageText)
+			chat.ServeHTTP(w, r)
 		}
 	}))
 	defer srv.Close()
@@ -482,7 +376,13 @@ func TestE2EColdStartHeartbeat(t *testing.T) {
 	} else if done.Result.Status != domain.StatusExchangeComplete {
 		t.Errorf("terminal status = %q, want %q", done.Result.Status, domain.StatusExchangeComplete)
 	}
-	if got := wireModel.Load().(string); got != coldStartModel {
+	// What the provider client actually put on the wire is the only place a rebind can be proven
+	// to have reached, and the stub's request log is its record of it.
+	reqs := stub.Requests()
+	if len(reqs) == 0 {
+		t.Fatal("no completion request reached the upstream")
+	}
+	if got := reqs[len(reqs)-1].Model; got != coldStartModel {
 		t.Errorf("the request went out for model %q; want the rebound %q — the rebind never reached the wire",
 			got, coldStartModel)
 	}
@@ -502,8 +402,7 @@ func TestE2EColdStartHeartbeat(t *testing.T) {
 // P2.5 save↔resume acceptance end to end through the product surface.
 func TestE2ESnapshotResumeContinues(t *testing.T) {
 	t.Parallel()
-	srv := scriptedModel()
-	defer srv.Close()
+	srv := scriptedModel(t)
 
 	workspace := t.TempDir()
 	ctx, cancel := context.WithCancel(context.Background())
