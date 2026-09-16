@@ -784,7 +784,14 @@ internal/tui/sessions_test.go — TestDecisionSurfaceStaysOnTheFrame, withDraft;
 
 **Commit:** `refactor(tui): input arms stop calling layout by hand; the repaint rule is stated once`
 
-## 22. The `/settings` second step is one table in `settings.go`
+## 22. The `/settings` second step is one table in `settings.go` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `settings.kind ==` count in settings.go 5 → 1 (the one left is settingsDisplayRows' buffer-cell pick, not a step arm).
+NOTES (2026-09-16): `hint` is a string column, not a `hint()` func — every step's legend is a constant, and the key list's row-dependent legend stays after the lookup in settingsPaneHint as before.
+NOTES (2026-09-16): the table is filled in an `init()` rather than by its declaration: its rows name Model methods that reach the painter (settingsEnumKey → server switch → layout → renderSettings), and the painter reads the table (settingsEditing), which the compiler refuses as an initialization cycle on a var initializer; the first `init()` in the module, reason stated on the var.
+NOTES (2026-09-16): the enum sub-list's row-gone fallback now goes through settingsAbandonStep like the other three (one fallback, stated once on the table's doc) — behaviour-identical, since the editor slot it additionally clears is already zero under the sub-list (every exit from a field clears it: settingsEditKey, settingsCommitEdit, settingsAbandonStep).
+NOTES (2026-09-16): the two identical editorMsg arms (buffer, text) are one method, settingsFieldMsg, referenced from both rows; its doc drops the stale "only the multi-line field lays the frame out" sentence (settle carries that since item 18).
+NOTES (2026-09-16): settings_test.go gains one structural test (TestSettingsStepsCoverEveryKind: every non-list kind has a row with target+key, the key list none); the 93 existing tests are untouched.
 
 **What.** `internal/tui/settings.go`: a package-level `settingsSteps` table keyed by `settingsKind`
 with `target(row) bool`, `key(m, msg)`, `hint()`, `editing() bool`, `editorMsg(m, msg)` — nil where

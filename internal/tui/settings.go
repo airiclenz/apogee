@@ -375,6 +375,77 @@ func (m Model) settingRows() []SettingRow {
 	return m.opts.Settings.Rows()
 }
 
+// settingsStep is one second step's arms — everything the pane does differently while that step is
+// open, so that the router, the painter, the legend and the paste route each ask ONE table which
+// step they are in rather than each carrying a switch over [settingsKind] that has to agree with the
+// others. A column a step has no arm for is nil (or "" for the hint): the armed reset has no field to
+// paste into, and the enum sub-list's legend is its own renderer's (renderSettingsEnum), not the
+// pane's.
+//
+// target is the row the step is ABOUT, and whether there still is one. It is re-asked of the SELECTED
+// row on every key and every frame rather than cached at the step's opening, because the rows are
+// re-derived under an open step (settingsKey): a row that can no longer hold the step it opened — a
+// list that shrank, a kind that changed, leave the registry withdrew — has nothing to edit, and the
+// step abandons rather than act on whatever now sits at that index. That fallback is stated here
+// ONCE for all four steps: the pane drops back to the key list and SWALLOWS the keypress that found
+// the row gone (settingsAbandonStep) — a ⏎ aimed at a value must not land on a key, and the human's
+// next press is aimed at a list they can see.
+//
+// key answers a keypress the target vouched for, and each step's spends its own verdict on its own
+// cursor ([listCursor.key], ADR 0053 decision 3): the sub-list's on sub, the fields' on the editor,
+// the reset's on nothing — the table routes, it never walks a list. The steps share the pane's
+// EXISTING two slots for what they hold (sub, editor — [settingsPane], decision 9); no step carries
+// state of its own here.
+type settingsStep struct {
+	target    func(m Model, rows []SettingRow) (SettingRow, bool)
+	key       func(m Model, msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd)
+	hint      string
+	editing   func(m Model, row SettingRow) bool
+	editorMsg func(m Model, msg tea.Msg) (Model, tea.Cmd, bool)
+}
+
+// settingsSteps is the pane's second steps, keyed by the [settingsKind] that names each. The key list
+// is deliberately absent: it is the pane's own screen, and "no row" is what tells settingsKey the keys
+// are the list's rather than a step's.
+//
+// It is filled in by init rather than by its declaration because the rows name Model methods that
+// reach the painter (settingsEnumKey → the server switch → layout → renderSettings), and the painter
+// reads the table (settingsEditing) — a reference loop the compiler refuses as an initialization
+// cycle for a variable's initializer and permits for an init function, which runs after every
+// declaration has been initialized. The table is written once, here, and never again.
+var settingsSteps map[settingsKind]settingsStep
+
+func init() {
+	settingsSteps = map[settingsKind]settingsStep{
+		settingsEnumList: {
+			target: Model.settingsEnumTarget,
+			key:    Model.settingsEnumKey,
+			editing: func(m Model, row SettingRow) bool {
+				return settingsPickable(row) && len(m.settingsVocabulary(row)) > 0
+			},
+		},
+		settingsValueBuffer: {
+			target:    Model.settingsBufferTarget,
+			key:       Model.settingsBufferKey,
+			hint:      settingsBufferHint,
+			editing:   func(_ Model, row SettingRow) bool { return settingsBufferable(row) },
+			editorMsg: Model.settingsFieldMsg,
+		},
+		settingsTextEditor: {
+			target:    Model.settingsTextTarget,
+			key:       Model.settingsTextKey,
+			hint:      settingsTextHint,
+			editing:   func(_ Model, row SettingRow) bool { return settingsWritable(row) },
+			editorMsg: Model.settingsFieldMsg,
+		},
+		settingsResetArmed: {
+			target: Model.settingsResetTarget,
+			key:    Model.settingsResetKey,
+			hint:   settingsResetHint,
+		},
+	}
+}
+
 // settingsKey routes a keypress while the pane is open (idle only, the verb's own policy): ↑/↓ move
 // the highlight, wrapping at both ends (the pickerKey idiom), ⏎ opens the selected row's edit idiom,
 // backspace arms its reset and esc closes. Every other key is SWALLOWED, because the pane is modal: a
@@ -386,10 +457,10 @@ func (m Model) settingRows() []SettingRow {
 // legitimately change under an open pane (a persisted edit is exactly that), and a selection left
 // pointing past the end of a shorter list would be an index panic one keypress later.
 //
-// A second step — a value sub-list, an edit buffer, an armed reset — claims the keys FIRST and its
-// target row is re-derived with them, so the step is always about a row that is still there: a step
-// whose key went away under it falls back to the key list rather than committing a value to whatever
-// now sits at that index.
+// A second step — a value sub-list, an edit buffer, an armed reset, a prose field — claims the keys
+// FIRST, through its row of [settingsSteps]: its target row is re-derived with them, so the step is
+// always about a row that is still there, and a step whose key went away under it falls back to the
+// key list rather than committing a value to whatever now sits at that index.
 func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Any keypress drops a drag-selection in the edit field, for handleKey's own reason one surface
 	// down (model.go): typing past a span, committing it or walking away from it all move on from what
@@ -399,31 +470,9 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	rows := m.settingRows()
 	n := len(rows)
 	m.settings.clampSelection(n)
-	if m.settings.kind == settingsEnumList {
-		if row, ok := m.settingsEnumTarget(rows); ok {
-			return m.settingsEnumKey(msg, row)
-		}
-		// The sub-list's key went away under it. Drop back to the key list and SWALLOW this keypress
-		// rather than let it through: a ⏎ aimed at a value must not land on whatever key now sits at
-		// that index, and the human's next press is aimed at a list they can see.
-		m.settings.kind, m.settings.sub = settingsKeyList, listCursor{}
-		return m, nil
-	}
-	if m.settings.kind == settingsValueBuffer {
-		if row, ok := m.settingsBufferTarget(rows); ok {
-			return m.settingsBufferKey(msg, row)
-		}
-		return m.settingsAbandonStep() // the buffered key went away — same fallback, same reason
-	}
-	if m.settings.kind == settingsTextEditor {
-		if row, ok := m.settingsTextTarget(rows); ok {
-			return m.settingsTextKey(msg, row)
-		}
-		return m.settingsAbandonStep() // the key being written went away — same fallback, same reason
-	}
-	if m.settings.kind == settingsResetArmed {
-		if row, ok := m.settingsResetTarget(rows); ok {
-			return m.settingsResetKey(msg, row)
+	if step, ok := settingsSteps[m.settings.kind]; ok {
+		if row, ok := step.target(m, rows); ok {
+			return step.key(m, msg, row)
 		}
 		return m.settingsAbandonStep()
 	}
@@ -475,34 +524,36 @@ func (m Model) settingsPaste(msg tea.PasteMsg) (Model, tea.Cmd, bool) {
 // bracketed paste, and the clipboard reply the widget's own ctrl+v asks for, which is a Msg of the
 // widget package's own unexported type and can therefore be recognised by nothing but the route it
 // took ([lineEditor.editMsg]). claimed is false wherever there is no field to type into, which leaves
-// the chat box's own messages to the chat box.
-//
-// The value buffer flattens what arrives and the multi-line field does not — the field's own
-// invariant, imposed where the text enters it (lineEditor.editMsg) — and only the multi-line field
-// lays the frame out again, for settingsTextKey's reason: it IS the pane's row list, so a pasted line
-// changes how many rows the pane measures, while a value buffer is one cell of one row.
+// the chat box's own messages to the chat box. Which steps have a field is the table's to say
+// ([settingsSteps]); this is the one route in.
 func (m Model) settingsEditorMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 	if !m.settingsOwnsInput() {
 		return m, nil, false
 	}
-	switch m.settings.kind {
-	case settingsValueBuffer:
-		// The value is about to change under the highlight, so the span goes first — settingsKey's
-		// chokepoint rule for the edits that arrive as keystrokes, and the same one here.
-		m.settings.sel = promptSel{}
-		return m, m.settings.editor.editMsg(msg), true
-	case settingsTextEditor:
-		m.settings.sel = promptSel{}
-		cmd := m.settings.editor.editMsg(msg)
-		return m, cmd, true
+	if step, ok := settingsSteps[m.settings.kind]; ok && step.editorMsg != nil {
+		return step.editorMsg(m, msg)
 	}
 	return m, nil, false
 }
 
+// settingsFieldMsg is the editorMsg arm of both steps that type into the pane's field — the value
+// buffer and the multi-line prose. The two differ in what the field keeps of what arrives — the buffer
+// flattens it and the prose field does not — and that is the field's own invariant, imposed where the
+// text enters it (lineEditor.editMsg), so nothing about the route distinguishes them.
+//
+// The value is about to change under the highlight, so the span goes first — settingsKey's chokepoint
+// rule for the edits that arrive as keystrokes, and the same one here.
+func (m Model) settingsFieldMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
+	m.settings.sel = promptSel{}
+	return m, m.settings.editor.editMsg(msg), true
+}
+
 // settingsAbandonStep drops a second step whose row went away and swallows the keypress that found
-// it gone — the enum sub-list's fallback, shared by the buffer and the armed reset. Nothing is
-// written and nothing is kept: a buffer whose key is no longer there has nothing to save, and a
-// confirmation for a row that left cannot be confirmed.
+// it gone — the fallback every row of [settingsSteps] shares. Nothing is written and nothing is kept:
+// a buffer whose key is no longer there has nothing to save, a confirmation for a row that left
+// cannot be confirmed, and a sub-list asks about no row. The editor slot is cleared along with the
+// rest, which under the sub-list and the armed reset it already is — every exit from a field clears
+// it — so one verb serves all four.
 func (m Model) settingsAbandonStep() (tea.Model, tea.Cmd) {
 	m.settings.kind, m.settings.sub, m.settings.editor = settingsKeyList, listCursor{}, lineEditor{}
 	return m, nil
@@ -1181,17 +1232,13 @@ func (d settingsDisplay) settingKeyAt(i int) (int, bool) {
 // there is the pane's STATE rather than a row currently on the screen — the predicate is about which
 // row is being edited, not about which renderer is up.
 //
-// The kind's own conditions are re-asked here (settingsBufferable, the enum's vocabulary) for the
-// reason the two targets re-ask them: the rows are re-derived under an open step, and a row that can
-// no longer hold the step it opened is not being edited whatever the pane's field still says.
+// The step's own conditions are re-asked here ([settingsStep.editing]: settingsBufferable, the enum's
+// vocabulary) for the reason the targets re-ask them: the rows are re-derived under an open step, and
+// a row that can no longer hold the step it opened is not being edited whatever the pane's field
+// still says. The armed reset edits nothing, and says so by having no arm.
 func (m Model) settingsEditing(row SettingRow) bool {
-	switch m.settings.kind {
-	case settingsValueBuffer:
-		return settingsBufferable(row)
-	case settingsEnumList:
-		return settingsPickable(row) && len(m.settingsVocabulary(row)) > 0
-	case settingsTextEditor:
-		return settingsWritable(row)
+	if step, ok := settingsSteps[m.settings.kind]; ok && step.editing != nil {
+		return step.editing(m, row)
 	}
 	return false
 }
@@ -1227,21 +1274,17 @@ func (m Model) settingsEditText() string {
 	return stripEscapes(m.settings.editor.textWithCaret())
 }
 
-// settingsPaneHint is the legend at the pane's foot: one per step, because the keys mean different
-// things in each — and the armed reset's is the one that ASKS, which is what makes backspace safe to
-// give a destructive act (settingsResetHint). The enum sub-list has its own renderer and its own hint.
+// settingsPaneHint is the legend at the pane's foot: one per step ([settingsStep.hint]), because the
+// keys mean different things in each — and the armed reset's is the one that ASKS, which is what
+// makes backspace safe to give a destructive act (settingsResetHint). The enum sub-list has its own
+// renderer and its own hint, so its row of the table carries none.
 //
 // In the key list the legend is the SELECTED row's: the one row this pane never resets drops the key
 // that would do nothing on it (settingsResetKind), and rows is passed rather than re-derived so the
 // legend is about the row the frame is highlighting.
 func (m Model) settingsPaneHint(rows []SettingRow) string {
-	switch m.settings.kind {
-	case settingsValueBuffer:
-		return settingsBufferHint
-	case settingsResetArmed:
-		return settingsResetHint
-	case settingsTextEditor:
-		return settingsTextHint
+	if step, ok := settingsSteps[m.settings.kind]; ok && step.hint != "" {
+		return step.hint
 	}
 	if row, ok := m.settingsSelectedRow(rows); ok && !settingsResetKind(row) {
 		return settingsNoResetHint

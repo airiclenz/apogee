@@ -3722,3 +3722,25 @@ func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
 		t.Errorf("note = %q, want the saved-but-not-applied sentence", got)
 	}
 }
+
+// Every second step is one row of the table and the key list is none: a kind added without a row
+// would be routed as the key list's own keys — swallowed, never answered — with nothing to say so.
+// The two arms every step must carry are the ones settingsKey cannot route without.
+func TestSettingsStepsCoverEveryKind(t *testing.T) {
+	for kind := settingsKeyList + 1; kind <= settingsTextEditor; kind++ {
+		step, ok := settingsSteps[kind]
+		if !ok {
+			t.Errorf("kind %d has no row in settingsSteps", kind)
+			continue
+		}
+		if step.target == nil || step.key == nil {
+			t.Errorf("kind %d's row lacks a target or a key arm", kind)
+		}
+	}
+	if _, ok := settingsSteps[settingsKeyList]; ok {
+		t.Error("the key list has a row in settingsSteps; it is the pane's own screen, not a step")
+	}
+	if n := len(settingsSteps); n != int(settingsTextEditor) {
+		t.Errorf("settingsSteps has %d rows, want one per second step (%d)", n, settingsTextEditor)
+	}
+}
