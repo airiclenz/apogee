@@ -77,7 +77,7 @@ commit: none — verification only.
 
 commit: `fix(tui): a queued command holds a Schedule's Firing like a staged interjection`
 
-## 3. grep transcript slot names a `paths` scope (apogee-1kv)
+## 3. grep transcript slot names a `paths` scope (apogee-1kv) — ✅ DONE (2026-09-16)
 
 **What:** Fix apogee-1kv. `searchScopeArg` in `internal/tui/toolregistry.go` reads `path` only, so a grep call scoped through the tool's `paths` array (see `grepArgs` in `internal/tools/grep.go`) shows no scope qualifier. Extend `searchScopeArg`: when `paths` carries entries, the qualifier is the entries joined by `, ` (a `path` other than `.` is listed first); the existing `path`-only spellings are unchanged. `findFilesTarget` shares the helper and gains the same behaviour — pin it too.
 

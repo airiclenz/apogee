@@ -1270,15 +1270,27 @@ func listDirTarget(args map[string]any) string {
 	return qualifiedTarget(stringArg("path")(args), recursive)
 }
 
-// searchScopeArg reads the path a search was SCOPED to as a target should spell it — the empty
-// string when the call named none, or named the workspace itself ("."), because a whole-workspace
-// search is the search every search is until it says otherwise and a row gains nothing by saying
-// so. Both search tools word the scope the same way, so they read it through one function.
+// searchScopeArg reads the paths a search was SCOPED to as a target should spell them — the empty
+// string when the call named none, or named only the workspace itself ("."), because a
+// whole-workspace search is the search every search is until it says otherwise and a row gains
+// nothing by saying so. A call naming several — grep's `path` beside its `paths` array — lists
+// them `path` first and ", "-joined, the spelling grep's own scope header uses
+// (tools.searchScopeAll), with blank and "." entries dropped. Both search tools word the scope
+// the same way, so they read it through one function; find_files takes no `paths` argument, so
+// for it the array is simply never there.
 func searchScopeArg(args map[string]any) string {
-	if path := stringArg("path")(args); path != "." {
-		return path
+	var names []string
+	if path := stringArg("path")(args); strings.TrimSpace(path) != "" && path != "." {
+		names = append(names, path)
 	}
-	return ""
+	if list, ok := args["paths"].([]any); ok {
+		for _, item := range list {
+			if p, ok := item.(string); ok && strings.TrimSpace(p) != "" && p != "." {
+				names = append(names, p)
+			}
+		}
+	}
+	return strings.Join(names, ", ")
 }
 
 // grepTarget leads grep's branch with the pattern, then the path the call scoped the search to and

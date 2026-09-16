@@ -17,7 +17,9 @@ import (
 // workspace and one file — differ in nothing else, so the path the call scoped itself to and the
 // include glob that narrowed it ride the target as qualifiers, in that order. A path of "." is the
 // search every grep is until it says otherwise: it is dropped rather than spelled, and dropping it
-// must not leave the glob orphaned behind a stray separator.
+// must not leave the glob orphaned behind a stray separator. A call scoped through the tool's
+// `paths` array is scoped all the same: its entries are the qualifier, ", "-joined the way grep's
+// own scope header spells them, with a `path` listed first when the call gave both.
 func TestGrepTarget(t *testing.T) {
 	t.Parallel()
 
@@ -56,6 +58,26 @@ func TestGrepTarget(t *testing.T) {
 			args: map[string]any{"pattern": "KeyMsg", "path": ".", "include": "*.go"},
 			want: "KeyMsg · *.go",
 		},
+		{
+			name: "a paths-scoped search names every path, joined",
+			args: map[string]any{"pattern": "KeyMsg", "paths": []any{"internal/tui", "cmd/apogee"}},
+			want: "KeyMsg · internal/tui, cmd/apogee",
+		},
+		{
+			name: "path and paths together list the path first",
+			args: map[string]any{"pattern": "KeyMsg", "path": "internal/tui", "paths": []any{"cmd/apogee", "docs"}},
+			want: "KeyMsg · internal/tui, cmd/apogee, docs",
+		},
+		{
+			name: "paths and glob chain in that order",
+			args: map[string]any{"pattern": "KeyMsg", "paths": []any{"internal/tui", "cmd/apogee"}, "include": "*.go"},
+			want: "KeyMsg · internal/tui, cmd/apogee · *.go",
+		},
+		{
+			name: "a paths array naming only the workspace root adds nothing",
+			args: map[string]any{"pattern": "KeyMsg", "paths": []any{".", ""}, "include": "*.go"},
+			want: "KeyMsg · *.go",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -71,7 +93,9 @@ func TestGrepTarget(t *testing.T) {
 // TestFindFilesTarget pins the same shape for the other search tool: the name pattern leads, the
 // path the walk was scoped to qualifies it, and "." — the walk the tool does by default — is left
 // unsaid. find_files has no include glob; a call that gives only a path is the path alone rather
-// than a row opening on a separator.
+// than a row opening on a separator. The `paths` case pins the SHARED helper only — find_files
+// itself has no paths parameter (internal/tools/find_files.go carries `path` alone), so it is the
+// scope reader both search tools share that is under test there, never the tool's schema.
 func TestFindFilesTarget(t *testing.T) {
 	t.Parallel()
 
@@ -100,6 +124,11 @@ func TestFindFilesTarget(t *testing.T) {
 			args: map[string]any{"path": "internal/tui"},
 			want: "internal/tui",
 		},
+		{
+			name: "a paths array reads through the shared scope helper (find_files itself has no paths parameter)",
+			args: map[string]any{"pattern": "*.go", "path": "internal/tui", "paths": []any{"cmd/apogee"}},
+			want: "*.go · internal/tui, cmd/apogee",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -114,18 +143,41 @@ func TestFindFilesTarget(t *testing.T) {
 
 // The target extractor is only half the claim: what the human reads is the painted branch. This
 // folds one scoped grep call into a transcript and asserts the scope survives the whole presenting
-// path — registry lookup, sanitize and the display seam — onto the row itself.
+// path — registry lookup, sanitize and the display seam — onto the row itself; a call scoped
+// through `paths` alone reaches the row with its joined qualifier by the same path.
 func TestGrepBranchRowShowsTheSearchedPath(t *testing.T) {
 	t.Parallel()
 
-	tr := &transcript{}
-	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "grep",
-		Arguments: []byte(`{"pattern":"KeyMsg","path":"internal/tui/model.go"}`)}})
+	tests := []struct {
+		name string
+		call string
+		want string
+	}{
+		{
+			name: "a path-scoped call",
+			call: `{"pattern":"KeyMsg","path":"internal/tui/model.go"}`,
+			want: "KeyMsg · internal/tui/model.go",
+		},
+		{
+			name: "a paths-scoped call",
+			call: `{"pattern":"KeyMsg","paths":["internal/tui","cmd/apogee"]}`,
+			want: "KeyMsg · internal/tui, cmd/apogee",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	got := renderPlain(tr, 80)
+			tr := &transcript{}
+			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "grep",
+				Arguments: []byte(tt.call)}})
 
-	if !strings.Contains(got, "KeyMsg · internal/tui/model.go") {
-		t.Errorf("grep row does not name the searched path:\n--- got ---\n%s", got)
+			got := renderPlain(tr, 80)
+
+			if !strings.Contains(got, tt.want) {
+				t.Errorf("grep row does not name the searched scope %q:\n--- got ---\n%s", tt.want, got)
+			}
+		})
 	}
 }
 
