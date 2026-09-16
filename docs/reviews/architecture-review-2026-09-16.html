@@ -1,0 +1,1067 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Architecture review — apogee — 2026-09-16</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: true, theme: "neutral", securityLevel: "loose", flowchart: { htmlLabels: true, curve: "basis" } });
+</script>
+<style>
+  .seam { stroke-dasharray: 4 4; }
+  .deep { background: linear-gradient(135deg, #0f172a, #1e293b); color: #f8fafc; }
+  .mod { border: 1.5px solid #64748b; border-radius: .375rem; padding: .35rem .5rem; font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; background: #fff; text-align:center; }
+  .mod.shallow { border-style: dashed; color:#64748b; }
+  .mod.leaky { border-color:#dc2626; color:#b91c1c; }
+  .mod.deep { border: 3px solid #0f172a; }
+  .mod.faded { opacity:.45; border-style: dashed; }
+  .mod.inner { font-size:.6rem; border:1px dashed #94a3b8; color:#64748b; background:#f8fafc; text-transform:none; letter-spacing:0; }
+  .band { border-left: 4px solid #94a3b8; padding: .35rem .6rem; font-size:.68rem; letter-spacing:.06em; text-transform:uppercase; background:#fff; }
+  .band.thin { color:#64748b; border-left-color:#cbd5e1; border-left-style: dashed; }
+  .band.thick { border-left: 6px solid #0f172a; background:#0f172a; color:#f8fafc; }
+  .band.red { border-left-color:#dc2626; color:#b91c1c; }
+  .mass { display:flex; gap:.5rem; align-items:flex-end; }
+  .mass .iface { background:#fde68a; border:1px solid #d97706; }
+  .mass .impl { background:#c7d2fe; border:1px solid #4f46e5; }
+  .mass div { width:3.4rem; font-size:.58rem; text-align:center; display:flex; align-items:flex-end; justify-content:center; padding-bottom:.15rem; }
+  pre.mermaid { font-size: 12px; }
+  .diag { min-height: 280px; }
+  .cap { font-size:.65rem; text-transform:uppercase; letter-spacing:.1em; color:#64748b; margin-bottom:.4rem; }
+  .k { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.8rem; }
+  .files { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:.74rem; color:#334155; line-height:1.5; }
+  .copy { font-size:.62rem; color:#b91c1c; border:1px dashed #dc2626; border-radius:.25rem; padding:.15rem .35rem; background:#fef2f2; text-align:center; }
+  .wins li::before { content:"▸ "; color:#059669; }
+</style>
+</head>
+<body class="bg-stone-50 text-slate-900 font-sans">
+<main class="max-w-6xl mx-auto px-6 py-12 space-y-14">
+
+<header class="space-y-4">
+  <h1 class="font-serif text-4xl">Architecture review — <span class="font-mono">apogee</span></h1>
+  <p class="text-slate-600">2026-09-16 · main @ <span class="font-mono">1da6d6fb</span> · six read-only explorers over TUI, config/settings, Drivers, engine, tools/safety, provider/probe/support. Fourth review. Every candidate of the 2026-09-14 review landed on 2026-09-15/16 (plans <span class="k">2026-09-15 - 00/01</span>) or was denied/deferred; none is repeated here. Denied shapes (Posture value, mailbox Step loop, effort dialect in the Client, session-record fold, <span class="k">hostBoot</span>, tui sub-packages) are not re-raised.</p>
+  <div class="flex flex-wrap gap-4 text-xs text-slate-600 items-center">
+    <span class="mod">module</span>
+    <span class="mod shallow">shallow module</span>
+    <span class="mod deep">deep module</span>
+    <span class="mod leaky">leaks across seam</span>
+    <span class="inline-flex items-center gap-1"><svg width="40" height="10"><line x1="0" y1="5" x2="40" y2="5" stroke="#334155" stroke-width="1.5" class="seam"/></svg> seam</span>
+    <span class="inline-flex items-center gap-1"><svg width="40" height="10"><line x1="0" y1="5" x2="40" y2="5" stroke="#dc2626" stroke-width="2"/></svg> leakage</span>
+    <span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span>
+    <span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span>
+    <span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span>
+  </div>
+  <nav class="text-sm text-slate-600 grid md:grid-cols-3 gap-x-8 gap-y-2">
+    <div><b class="text-slate-800">Strong</b>
+      <ol class="list-decimal ml-5">
+        <li><a class="underline" href="#c1"><span class="k">liveSettings</span> holds one live <span class="k">Options</span></a></li>
+        <li><a class="underline" href="#c2">One <span class="k">Options</span>→<span class="k">Config</span> projection for every Driver</a></li>
+        <li><a class="underline" href="#c3">The write side gets its <span class="k">readScope</span></a></li>
+        <li><a class="underline" href="#c4">One confinement handoff for both spawners</a></li>
+        <li><a class="underline" href="#c5">One worker launch in the TUI</a></li>
+        <li><a class="underline" href="#c6">One fold from Delta stream to reply</a></li>
+        <li><a class="underline" href="#c7">One account of a finished Firing</a></li>
+        <li><a class="underline" href="#c8">The fingerprint ladder has no reader</a></li>
+      </ol></div>
+    <div><b class="text-slate-800">Worth exploring</b>
+      <ol class="list-decimal ml-5" start="9">
+        <li><a class="underline" href="#c9">The registry row gains <span class="k">Set</span></a></li>
+        <li><a class="underline" href="#c10">Repaint is a consequence of Update</a></li>
+        <li><a class="underline" href="#c11">/settings second step is one adapter set</a></li>
+        <li><a class="underline" href="#c12">The prompt legend is derived at paint</a></li>
+        <li><a class="underline" href="#c13">Standing system blocks are one table</a></li>
+        <li><a class="underline" href="#c14">One text tool-call grammar seam</a></li>
+        <li><a class="underline" href="#c15"><span class="k">FloorConfig</span> is a keyed off-set</a></li>
+        <li><a class="underline" href="#c16">One fold aftermath</a></li>
+        <li><a class="underline" href="#c17">The git family over one <span class="k">gitRead</span>/<span class="k">gitWrite</span></a></li>
+        <li><a class="underline" href="#c18">One syntax engine</a></li>
+        <li><a class="underline" href="#c19">One <span class="k">domain.Usage</span> value</a></li>
+        <li><a class="underline" href="#c20">The engine's test upstream is scripted</a></li>
+        <li><a class="underline" href="#c21"><span class="k">apogee undo</span> stops reading <span class="k">journal.json</span></a></li>
+        <li><a class="underline" href="#c22">One skill-block renderer</a></li>
+      </ol></div>
+    <div><b class="text-slate-800">Speculative</b>
+      <ol class="list-decimal ml-5" start="23">
+        <li><a class="underline" href="#c23">The run tree is one index</a></li>
+        <li><a class="underline" href="#c24">A card's name-keyed facts are one row</a></li>
+        <li><a class="underline" href="#c25">One upstream fault classifier</a></li>
+        <li><a class="underline" href="#c26">A delegate's runtime state is one value</a></li>
+        <li><a class="underline" href="#c27">Retirements are one migration table</a></li>
+        <li><a class="underline" href="#c28">One out-of-band completion for the namers</a></li>
+        <li><a class="underline" href="#c29">Small interface trims</a></li>
+      </ol>
+      <b class="text-slate-800 block mt-2"><a class="underline" href="#defects">In-passing defects</a> · <a class="underline" href="#deep">Already deep</a> · <a class="underline" href="#top">Top recommendation</a></b>
+    </div>
+  </nav>
+</header>
+
+<section id="candidates" class="space-y-12">
+
+<!-- ============================ STRONG ============================ -->
+<h2 class="font-serif text-3xl pt-4 border-t border-slate-200">Strong</h2>
+
+<!-- C1 -->
+<article id="c1" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">1. <span class="k">liveSettings</span> holds one live <span class="k">config.Options</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">cmd/apogee</span></div>
+  <p class="files">cmd/apogee/wire_settings.go:56-259 (<span class="k">liveSettings</span>: 25 mirror fields, one per <span class="k">config.Options</span> field, + <span class="k">gen apogee.Generation</span> mirroring 11 more) · :266-326 <span class="k">newLiveSettings</span> re-seeds all · :330-948 24 locked setters · :829-894 <span class="k">floorGuardFields</span>/<span class="k">floorFromOptions</span>/<span class="k">optionsFromFloor</span> · :978-1046 <span class="k">optionsLocked</span> (35 assignments back onto <span class="k">boot</span>) · :1945-2062 seven near-identical write-alone applies · readers :1068 <span class="k">firingBinding</span>, :1093 <span class="k">rebindInputs</span> · trace: <span class="k">delegate-timeout</span> (941f22de, 24 files) touched this file in four places before its apply was written · <span class="k">entry*</span> latches untouched (bead)</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — the "exception list" became a second configuration path</div>
+      <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-center text-center">
+        <div class="space-y-1">
+          <div class="mod">boot config.Options</div>
+          <div class="text-[.6rem] text-slate-500">immutable launch snapshot</div>
+        </div>
+        <div class="text-slate-400">→ re-seed ×36 →</div>
+        <div class="space-y-1">
+          <div class="mod shallow leaky">liveSettings</div>
+          <div class="text-[.6rem] text-slate-500">25 mirror fields · 24 setters · 11 gen fields</div>
+        </div>
+      </div>
+      <div class="mt-3 grid grid-cols-4 gap-1">
+        <div class="copy">setPin</div><div class="copy">setServers</div><div class="copy">setToolSet</div><div class="copy">setBypass</div>
+        <div class="copy">setDelegate×4</div><div class="copy">setInspector</div><div class="copy">setFloorGuard</div><div class="copy">…×24</div>
+      </div>
+      <div class="mt-3 grid grid-cols-[1fr_auto_1fr] gap-2 items-center text-center">
+        <div class="mod shallow">optionsFromFloor ⇄ floorFromOptions</div>
+        <div class="text-slate-400">inverse pair</div>
+        <div class="mod shallow">floorGuardFields (name→field)</div>
+      </div>
+      <div class="mt-3 text-center"><div class="mod shallow inline-block">optionsLocked — 35 assignments → boot copy</div></div>
+      <p class="text-[.62rem] text-slate-500 mt-2">A new live key = field + seed + setter + projection line, then the apply. Six mirrors are never asserted through <span class="k">options()</span>.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — boot + one live overlay, one door, one projection</div>
+      <div class="grid grid-cols-[1fr_auto_1fr] gap-2 items-center text-center">
+        <div class="mod">boot config.Options</div>
+        <div class="text-slate-400">clone once</div>
+        <div class="mod deep">now config.Options</div>
+      </div>
+      <div class="mt-3 text-center">
+        <div class="mod deep inline-block">update(func(*Options)) · options() → clone(now)</div>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-1">
+        <div class="mod inner">apply writes the field it moved</div>
+        <div class="mod inner">Generation derived at push: floorFromOptions(now), SplitLanes(now.Reactions)</div>
+        <div class="mod inner">context-files pair-collapse: named exception inside</div>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-1 opacity-50">
+        <div class="mod faded">24 setters</div><div class="mod faded">optionsFromFloor</div><div class="mod faded">optionsLocked</div>
+      </div>
+      <p class="text-[.62rem] text-slate-500 mt-2">Readers (<span class="k">firingBinding</span>, <span class="k">rebindInputs</span>) take one value. "Which fields are mirrored" stops being a fact to know.</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> The holder's own doc (<span class="k">:44-45</span>) says it is "the exception list, not a second configuration path"; it is now exactly that — every Options field a <span class="k">/settings</span> apply can move is re-declared, re-seeded, given a 5-line locked setter and re-projected by hand, and the Floor gates are held in the engine's negative spelling so the holder carries the negation <em>and</em> its inverse.</p>
+  <p><b>Solution.</b> <span class="k">liveSettings</span> keeps <span class="k">boot</span> (immutable) and <span class="k">now</span> (the live overlay) under one lock with one <span class="k">update</span> door; the engine's Generation is derived from <span class="k">now</span> at push time; the mirror fields, setters, inverse pair and <span class="k">optionsLocked</span> go.</p>
+  <ul class="wins text-sm space-y-0.5"><li>Zero holder edits per new key</li><li>One projection, no inverse</li><li>Firing parity: one table test</li><li>Interface = boot + overlay</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0037 amendment 2026-08-24 ("<span class="k">options()</span> is the launch snapshot with every applied key written over it — recorded at the apply, never re-read") and ADR 0076 A8 (one Generation per swap) are kept exactly; the Generation is derived, not stored. No conflict.</div>
+</article>
+
+<!-- C2 -->
+<article id="c2" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">2. One <span class="k">Options</span>→<span class="k">apogee.Config</span> projection for every Driver</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">cmd/apogee</span></div>
+  <p class="files">cmd/apogee/wire_boot.go:131-380 <span class="k">resolveConfig</span> (literal :208-378) · cmd/apogee/wire_firing.go:128-482 <span class="k">firingConfig</span> (literal :293-418) · 38 keys in both; 27 derived by the same expression (<span class="k">SecretEnvVars</span> :276/:350, <span class="k">ExtraReadRoots</span> :314/:372, <span class="k">Floor</span> :369/:411, <span class="k">Delegation{…}</span> :359-364/:402-407, <span class="k">Context.*</span> :348-349/:392-395 …) · 7 boot-only (Approver/Asker/Presenter/InterjectionPending/Namer/Events/Report) · 7 firing-only (EffortDialect, ParallelAgents, ScratchDir, ScratchReadRoot, ServerName/Description, UndoSnapshots) · Generation seed spelled again at wire_live.go:205-212 and wire_settings.go:312-319 · <span class="k">domain.SplitLanes</span> called at 5 sites · five paired tests: wire_boot_test.go:766/801/831/734/969 ↔ wire_firing_test.go:252/298/335/67</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">Before — two literals held equal by five paired tests</div>
+      <pre class="mermaid">
+flowchart LR
+  O[config.Options]
+  O --> RC["resolveConfig<br/>38-key literal"]
+  O --> FC["firingConfig<br/>38-key literal"]
+  O --> G1["Generation seed<br/>wire_live"]
+  O --> G2["Generation seed<br/>wire_settings"]
+  RC --> A1[apogee.Config · session]
+  FC --> A2[apogee.Config · Firing]
+  T{{"5 paired tests<br/>pin RC ≡ FC"}} -.-> RC
+  T -.-> FC
+  classDef sh stroke-dasharray:4 4,color:#64748b;
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class RC,FC,G1,G2 sh
+  class T leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">After — one projection, two overlays</div>
+      <pre class="mermaid">
+flowchart LR
+  O[config.Options]
+  O --> P["<b>projectConfig</b><br/>27 shared keys + Generation<br/>SplitLanes once"]
+  P --> B["boot overlay<br/>7 human delegates"]
+  P --> F["firing overlay<br/>7 unattended facts"]
+  B --> A1[apogee.Config · session]
+  F --> A2[apogee.Config · Firing]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class P deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> Every engine-reaching key is folded twice (the <span class="k">delegate-timeout</span> and <span class="k">step-budget-notice</span> commits each touched both literals); the ADR 0031 parity promise "a Firing sees what the session sees" is enforced by test pairs rather than by construction, and the Generation is seeded at three sites.</p>
+  <p><b>Solution.</b> One <span class="k">cmd/apogee</span> module projects <span class="k">(Options, stateRoots, confiner, skills, mode)</span> onto the shared core of <span class="k">apogee.Config</span> and the matching <span class="k">Generation</span>; <span class="k">resolveConfig</span> and <span class="k">firingConfig</span> overlay only what differs. With candidate 1 the Firing calls it on <span class="k">live.options()</span>.</p>
+  <ul class="wins text-sm space-y-0.5"><li>New key lands once</li><li>Parity by construction</li><li>Five paired tests → one</li><li>Generation seeded once</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">Adjacent to the DENIED <span class="k">hostBoot</span> (review 2026-09-14 candidate 18) — that verdict covered the boot <em>sequence</em> (roots, store, keys, confiner, sweeps: "sentences differ in kind"). This is the Config <em>value</em>, whose 27 shared lines are identical in kind; two explorers raised it independently. ADR 0044 D8 (binding resolution stays a separate step) unaffected.</div>
+</article>
+
+<!-- C3 -->
+<article id="c3" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">3. The write side gets its <span class="k">readScope</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tools</span></div>
+  <p class="files">model: internal/tools/path_read.go:223 <span class="k">readScope</span> (resolve/locate/open/readBounded/searchTarget) · the write ritual: path_safety.go (<span class="k">resolveInRoot</span> :30, <span class="k">safeWriteFile</span> :68, <span class="k">journaledMutation</span> :130, <span class="k">writeEscapeTarget</span> :219, <span class="k">readWriteTarget</span> :239, <span class="k">statWriteTarget</span> :253, <span class="k">escapeTargetPin</span> :278, <span class="k">capturePreImage</span> :340, <span class="k">currentPerm</span> :373, <span class="k">journalTarget</span> :440) · workspace_scoped.go (<span class="k">resolvedTargetNote</span> :106, <span class="k">pathArgWriteTarget</span> :144, <span class="k">destinationArgWriteTarget</span> :166; 7 <span class="k">workspaceWriteTarget</span> impls) · path_suggest.go (:41, :93, :117) · path_read.go (<span class="k">workspaceRelative</span> :28 — 15 sites, <span class="k">readWorkspaceFileBounded</span> :39 returns prose, <span class="k">withSiblingSuggestions</span> :368, :433) · list_dir.go:134 · path_virtual.go:189 · ritual sites: write_file.go:106-112, file_edit.go:89-97, find_replace.go:110-119 and :241-250 · <span class="k">(args.Path, t.root)</span> re-passed 4×/5×/8× · aliases over <span class="k">internal/security</span>: <span class="k">resolveInRoot</span> 13 sites, <span class="k">safeOpen</span> 10, <span class="k">ErrPathEscape</span> 19</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — one path argument, a five-file ritual, three reads</div>
+      <div class="space-y-1">
+        <div class="band thin">write_file.Execute — readWriteTarget (read #1, edit regions)</div>
+        <div class="band thin">notFoundOrRefusal(err, prefix, root, workspaceRelative(path, root), path)</div>
+        <div class="band thin">resolvedTargetNote(path, root) — resolveTargetUnbounded again</div>
+        <div class="band thin">safeWriteFile → refuseVirtualWrite → capturePreImage → journalTarget → readWriteTarget (read #2)</div>
+        <div class="band thin">currentPerm(path, root) — stat #3</div>
+        <div class="band red">"did you mean" rendered 4 ways at 12 sites; absence detected by comparing a rendered message</div>
+      </div>
+      <p class="text-[.62rem] text-slate-500 mt-2">Same shape in file_edit, find_replace ×2, delete_file, copy/move. <span class="k">TestUndoCaptureHasExactlyTwoCallers</span> scans package source because the invariant is a convention.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one write-target value per call, the read side's shape</div>
+      <div class="space-y-1">
+        <div class="band thin">writer.Execute — target := scope.writeTarget(args)</div>
+        <div class="band thick">writeTarget · input · root · Named/Real · permit pin · bytes (read once) · perm · virtual refusal · notFound(prefix) with siblings · "→ resolves to" note · write() · journaled() · workspaceWriteTarget answer</div>
+        <div class="band thin">writer renders its result</div>
+      </div>
+      <div class="mt-3 grid grid-cols-3 gap-1 opacity-50">
+        <div class="mod faded">security aliases</div><div class="mod faded">4 not-found renderers</div><div class="mod faded">source-scan test</div>
+      </div>
+      <p class="text-[.62rem] text-slate-500 mt-2"><span class="k">readWorkspaceFileBounded</span> returns an absence error; one suggestion rule reads <span class="k">fs.ErrNotExist</span>.</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> The read side already has one deep value (<span class="k">readScope</span>); the write side is the same concept spelled as a ritual across five files — each writer resolves the same argument three times, the not-found courtesy has four renderers, and "only the funnel captures undo" is a convention a test enforces by grepping source.</p>
+  <p><b>Solution.</b> One write-target value mirroring <span class="k">readScope</span>: asked once per call for the argument the marker names, it owns the fenced read, stat, virtual refusal, suggestion, disclosure note, <span class="k">safeWriteFile</span>/<span class="k">journaledMutation</span> as methods and the ladder's <span class="k">workspaceWriteTarget</span> answer. The one-line <span class="k">security.*</span> aliases go.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One read per write, not three</li><li>One "did you mean" rule</li><li>Undo capture structural, not grepped</li><li>Tests target the value, not nine tools</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0049 (permit pinned to the disclosed target) — the value holds the pin. ADR 0051 (undo capture at the funnel) — the funnels become methods. Confinement contract §3 (<span class="k">workspaceScopedWriter</span> unexported) untouched. No conflict.</div>
+</article>
+
+<!-- C4 -->
+<article id="c4" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">4. One confinement handoff for both spawners</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/subprocess · internal/console</span></div>
+  <p class="files">internal/subprocess/subprocess.go:255-281 (<span class="k">run</span>: nil-Confiner fail-closed :259-261, <span class="k">Confine</span> :263, <span class="k">ScratchEnv</span> seed :274-279), :293-299 denial watch · internal/tools/console_open.go:216-244 <span class="k">consolePrepare</span> — the same three steps as a <span class="k">Prepare</span> hook, byte-identical error sentence at :222 vs subprocess.go:260 ("confine %s: %w: the installed handle carries no Confiner") · internal/console/process.go:106-160 <span class="k">Start</span> (Prepare :121-126, watch :137-142) · internal/console/registry.go:96-101 (<span class="k">Confined</span>, <span class="k">Prepare</span> on <span class="k">OpenSpec</span>) · internal/tools/exec_common.go:125-166 labels · duplicated test pairs: subprocess_test.go:50/215/108/144 ↔ console_open_test.go:242/292/262, console_confine_linux_test.go:61</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">Before — one policy, two adapters, two spellings</div>
+      <pre class="mermaid">
+flowchart TB
+  CTX[(Confinement handle on ctx)]
+  subgraph OneShot[subprocess.run]
+    R1["absent ⇒ unconfined<br/>nil Confiner ⇒ refuse<br/>Confine · seed ScratchEnv after<br/>box → denial labels"]
+  end
+  subgraph Console[tools.consolePrepare → console.Start]
+    R2["absent ⇒ unconfined<br/>nil Confiner ⇒ refuse<br/>Confine · seed ScratchEnv after<br/>Confined bool + Prepare hook"]
+  end
+  CTX --> R1
+  CTX --> R2
+  R1 -. "same error text" .- R2
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class R1,R2 leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">After — one handoff over <span class="k">*exec.Cmd</span>; both spawners call it</div>
+      <pre class="mermaid">
+flowchart TB
+  CTX[(Confinement handle on ctx)]
+  H["<b>subprocess.confinementHandoff</b>(ctx, cmd)<br/>→ confined?, box"]
+  CTX --> H
+  H --> R1[run · capped buffer watch]
+  H --> R2[console.Start · ring watch]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class H deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> "What a Confinement handle on ctx means" is implemented twice in two packages with a byte-identical error string; the Console rightly owns its own process lifetime but re-implements the handoff instead of calling it, and four tests exist twice.</p>
+  <p><b>Solution.</b> <span class="k">internal/subprocess</span> owns one handoff; <span class="k">console.OpenSpec</span> takes ctx and <span class="k">Start</span> calls the same handoff instead of a caller-supplied <span class="k">Prepare</span> hook (<span class="k">Confined bool</span> goes — it is the handoff's answer). Denial-watch wiring stays per spawner; "watch iff confined" is read off the one answer.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One fail-closed rule, one sentence</li><li>Console tests shrink to lifetime</li><li>ADR 0059 D5 holds by construction</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">Confinement contract §2.2 (prepare-in-place over <span class="k">*exec.Cmd</span>) — the handoff <em>is</em> the prepare. ADR 0059 D5 "rejected a divergent rule for one funnel" — supports. ADR 0056 unaffected.</div>
+</article>
+
+<!-- C5 -->
+<article id="c5" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">5. One worker launch: "an Exchange is in flight" is written once</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tui</span></div>
+  <p class="files">internal/tui/commandrun.go:115-129 <span class="k">launchExchange</span> ("the tail the two send paths share") · :331-345 and :346-362 the two <span class="k">/continue</span> branches · :474-493 <span class="k">/compact</span> · approval.go:272-280 <span class="k">sendApproval</span>, ask.go:98-130 <span class="k">submitAnswer</span> (the two "back to running" copies) · model.go:1905-1996 <span class="k">finishWorker</span>, :1878 <span class="k">stopWorker</span>; fields <span class="k">state</span>/<span class="k">cancel</span> :273-274, <span class="k">box</span> :340, <span class="k">spin</span> :264 · worker.go:33/51/73 · tests: 36 write <span class="k">m.state = stateRunning</span>, 23 write <span class="k">m.cancel = func(){}</span>; <span class="k">runningModel</span> (interject_test.go:324) used 29×</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — eight writes in lockstep, spelled four (+2) times</div>
+      <div class="grid grid-cols-4 gap-1 text-center">
+        <div class="mod shallow">launchExchange</div><div class="mod shallow">/continue resume</div><div class="mod shallow">/continue canned</div><div class="mod shallow">/compact</div>
+      </div>
+      <div class="grid grid-cols-4 gap-1 mt-1">
+        <div class="copy">boundary·box·cancel·state·placeholder·activity·<b>commitAll</b>·spin</div>
+        <div class="copy">boundary·box·cancel·state·placeholder·activity·spin</div>
+        <div class="copy">boundary·box·cancel·state·placeholder·activity·spin</div>
+        <div class="copy">box(nil)·boundary·cancel·state·placeholder·activity·spin</div>
+      </div>
+      <div class="grid grid-cols-2 gap-1 mt-2 text-center">
+        <div class="mod shallow">sendApproval — state·placeholder·layout·spin</div><div class="mod shallow">submitAnswer — state·placeholder·layout·spin</div>
+      </div>
+      <div class="band red mt-3">59 tests enter "running" by poking m.state / m.cancel — past every invariant</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one module owns the in-flight worker</div>
+      <div class="mod deep">worker · start(kind, activity, mailbox?) · resumeAfterDecision() · finish()</div>
+      <div class="grid grid-cols-3 gap-1 mt-2">
+        <div class="mod inner">cancel · box · spin generation — internal</div>
+        <div class="mod inner">C1/C4 invariants (ADR 0011) local</div>
+        <div class="mod inner">tests: start with a stub Cmd</div>
+      </div>
+      <div class="grid grid-cols-4 gap-1 mt-3 text-center">
+        <div class="mod faded">launchExchange</div><div class="mod faded">continue ×2</div><div class="mod faded">compact</div><div class="mod faded">2 decision returns</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The interface of "running" is eight fields written in lockstep; the copies already drifted (<span class="k">launchExchange</span> commits the thinking board, the <span class="k">/continue</span> and <span class="k">/compact</span> launches do not — masked because <span class="k">finishWorker</span> also commits), and the test surface proves the shape: 59 field pokes beside a real-submit helper.</p>
+  <p><b>Solution.</b> One module with three verbs — start (which worker, opening activity, mailbox or not), resume-after-decision, finish — performing every write; <span class="k">cancel</span>, <span class="k">box</span> and the spinner generation become internal.</p>
+  <ul class="wins text-sm space-y-0.5"><li>Launch spelled once</li><li>59 test field-writes → one verb</li><li>Drift impossible</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0011 (single worker, four-state machine) — concentrates C1/C4 rather than reopening them. Plan 2026-08-19 item 28 grouped <span class="k">pendingDecision</span>/<span class="k">liveStats</span> and left the launch alone. No conflict.</div>
+</article>
+
+<!-- C6 -->
+<article id="c6" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">6. One fold from <span class="k">provider.Delta</span> stream to reply</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/agent</span></div>
+  <p class="files">internal/agent/loop.go:712-732 <span class="k">reply</span>, :736-794 <span class="k">streamResponse</span>, :814/:843 emit deltas, :621-633 <span class="k">emptyReplyFault</span>, :642 <span class="k">assembleResponse</span>, :700 <span class="k">joinThinking</span> · internal/agent/compact.go:539-630 <span class="k">compactCompleter.Complete</span> — second delta loop :564-576, strip+join :595-596, its own capped-reply fault :614-621 (same <span class="k">EstimateTokens(len(thinking))</span> sentence as loop.go:627) · the only two <span class="k">Responder.Stream</span> consumers in the repo (compact.go:564, loop.go:741)</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">Before — the seam is deep, the fold behind it lives in two callers</div>
+      <pre class="mermaid">
+flowchart LR
+  S[/Responder.Stream/]
+  S --> A["streamResponse<br/>content·thinking·calls·finish·usage<br/>served model·<b>overflow·retryable</b>"]
+  S --> B["compactCompleter.Complete<br/>content·thinking·usage·finish<br/>served model·errMsg<br/><i>drops overflow, retryable</i>"]
+  A --> A2[strip · joinThinking · capped-empty fault]
+  B --> B2[strip · joinThinking · capped-empty fault]
+  classDef sh stroke-dasharray:4 4,color:#64748b;
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class A,B sh
+  class B leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">After — one collector; live emission is an observer</div>
+      <pre class="mermaid">
+flowchart LR
+  S[/Responder.Stream/]
+  S --> C["<b>collectCompletion</b>(deltas, observer?)<br/>→ reply · fault kind · retryable<br/>owns strip · joinThinking · capped-empty"]
+  C --> T[Turn: observer emits Token/Reasoning]
+  C --> K[compaction: silent, then account]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class C deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> "Deltas → (content, thinking, tool calls, finish, usage, served model, fault, retryable)" is spelled twice with field-sets that already drifted: the compaction copy drops <span class="k">Retryable</span> and <span class="k">overflow</span> and stringifies the fault, so a transient in-band 502 during a summary is a hard fold failure where the same delta in a Turn is re-streamed.</p>
+  <p><b>Solution.</b> One engine-internal collector taking the Delta iterator and an optional live observer, returning the one <span class="k">reply</span> value with fault classification; <span class="k">streamResponse</span> becomes "collect with emission", <span class="k">Complete</span> becomes "collect silently, then account".</p>
+  <ul class="wins text-sm space-y-0.5"><li>One fold, one fault vocabulary</li><li>Summary gains retryable for free</li><li>Table-testable with scripted Deltas</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0001 (Responder seam), ADR 0011, ADR 0046 (output cap) — no conflict.</div>
+</article>
+
+<!-- C7 -->
+<article id="c7" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">7. One account of a finished Firing — the tail after <span class="k">raise</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">cmd/apogee · internal/schedule</span></div>
+  <p class="files">cmd/apogee/headless.go:984-1115 (notices :984-986; <span class="k">errNotStarted</span> → exit 2 :996-999; all <span class="k">ContextFileNotices</span> :1013; <span class="k">writtenFilesLines</span>+<span class="k">undoVerbLine</span> :1071-1078; "(partial run saved as %s)" :1099 and :1111) · cmd/apogee/daemonfire.go:359-451 (<span class="k">WindowUnknown</span> latch :359-364; <span class="k">errNotStarted</span> stage map :385-392; anomaly-only notices :407-412; <span class="k">firingOutcome</span> :421; written/undo :432-440; partial :446-447) · cmd/apogee/schedule.go:181-217 (stage map :191-197 byte-identical modulo prefix; <span class="k">firingOutcome</span> :206; partial :212-213; <span class="k">contextAnomalies</span> :243-251 a third walk) · cmd/apogee/wire_firing.go:767-780 <span class="k">firingOutcome</span> · internal/schedule/schedule.go:78-122 <span class="k">Outcome</span> — no <span class="k">Wrote</span>, no undo verb · internal/tui/schedule.go:512-531 renders anomalies only</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — <span class="k">raise</span> made the front one act; the back is three hand-spelled tails</div>
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div class="mod shallow">headless tail</div><div class="mod shallow">daemon tail</div><div class="mod shallow">/schedule tail</div>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-1">
+        <div class="copy">notices (all)<br/>errNotStarted→exit 2<br/>written+undo<br/>partial ×2</div>
+        <div class="copy">notices (anomaly)<br/>errNotStarted→stage<br/>firingOutcome<br/>written+undo<br/>partial</div>
+        <div class="copy">contextAnomalies (3rd walk)<br/>errNotStarted→stage (same)<br/>firingOutcome<br/><b>no written, no undo</b><br/>partial</div>
+      </div>
+      <div class="band red mt-3">schedule.Outcome never gained Wrote/undo → the in-session Firing block cannot say what an Auto Firing changed</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one account; each Driver filters and renders in its voice</div>
+      <div class="mod deep">firingAccount · composition notices · context-file notices tagged anomaly-or-not · changed paths · undo verb (gated) · salvaged record id · refusal(prefix) stage map · Outcome projection incl. Wrote</div>
+      <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+        <div class="mod">headless: everything</div><div class="mod">daemon: anomalies + WindowUnknown latch</div><div class="mod">TUI block: + changed files</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> Counted: the partial-record suffix ×4, the <span class="k">errNotStarted</span> stage mapping ×3, <span class="k">ContextFileNotices</span> walked ×3 with two filters, written-files+undo ×2, <span class="k">firingOutcome</span> ×2 — and the third copy drifted by omission (no <span class="k">Wrote</span> on <span class="k">Outcome</span>). Plan 2026-09-15 - 01 item 9's NOTES explicitly deferred "the Outcome fold".</p>
+  <p><b>Solution.</b> <span class="k">raise</span> (or a sibling beside <span class="k">firingOutcome</span>) returns one Firing account carrying the five facts every Driver owes, tagged; Drivers filter and render. <span class="k">Outcome</span> gains changed paths and the undo verb.</p>
+  <ul class="wins text-sm space-y-0.5"><li>Three tails → one</li><li>TUI gains changed-files</li><li>Refusal mapping once</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0033 D6 (<span class="k">Outcome</span> stays flat data the library never reads — two more fields take the posture <span class="k">ContextAnomalies</span> took), ADR 0074 (undo verb gate), ADR 0034 D10 (daemon log filtering stays the Driver's). No conflict.</div>
+</article>
+
+<!-- C8 -->
+<article id="c8" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">8. The fingerprint ladder has no reader — retire <span class="k">library.Resolver</span>, home the probe record beside its writer</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-emerald-100 text-emerald-800">Strong</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">deletion</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/library · internal/probe</span></div>
+  <p class="files">internal/library/fingerprint.go:44-131 (<span class="k">Sources</span>, <span class="k">ResolveFingerprint</span>, <span class="k">ResolveFingerprintFrom</span>, <span class="k">Resolver</span>, <span class="k">weightsSignature</span>) · internal/domain/fingerprint.go:70-75 <span class="k">FingerprintResolver</span> seam · internal/library/proberecord.go:30-36 <span class="k">ProbeBatteryVersion</span> mirrored at internal/probe/battery.go:22 · internal/library/doc.go:10-14 (the dependency-direction argument) · non-test callers of <span class="k">ResolveFingerprint*</span>/<span class="k">Resolver</span>/<span class="k">FingerprintResolver</span>: <b>zero</b> (verified: grep over internal, cmd, root) · only production reader of a probe record: cmd/apogee/probemodel.go:202/214/230 (drift comparison, not identity) · claims that depend on the ladder: internal/probe/model.go:196, :239-251 ("now resolves at medium confidence"), CONTEXT.md L1898-1900, docs/manual/probe.md:38-40</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">Before — a seam with zero adapters in production, a package split for a direction nobody exercises</div>
+      <pre class="mermaid">
+flowchart LR
+  P[internal/probe<br/>writes the record] --> L[internal/library<br/>reads the record]
+  L --> R["Resolver<br/>weights-hash → record → label"]
+  R -. satisfies .-> D[domain.FingerprintResolver]
+  D -. "0 callers" .-> X((nothing))
+  PM[cmd/apogee/probemodel] --> L
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  classDef sh stroke-dasharray:4 4,color:#64748b;
+  class R,D,X leak
+  class L sh
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">After — one module owns the battery and its record</div>
+      <pre class="mermaid">
+flowchart LR
+  P["<b>internal/probe</b><br/>RunBattery · BehaviorSignature<br/>Save/Load/ProbeRecordPath · one BatteryVersion"]
+  PM[cmd/apogee/probemodel] --> P
+  P --> F[domain.ModelFingerprint<br/>stays as the report value]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class P deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> ADR 0076 A9 deleted Validated sets on 2026-09-08 — the ladder's only reader. Since then the High→Medium→Low resolution runs nowhere, yet the package split, mirrored version constant, domain seam and the report's "now resolves at medium confidence" line all exist to serve it.</p>
+  <p><b>Solution.</b> <span class="k">internal/probe</span> owns battery and record; <span class="k">internal/library</span> and <span class="k">domain.FingerprintResolver</span> go; the report line and CONTEXT.md sentence are rewritten to what the record buys today (a stored signature the next probe compares against).</p>
+  <ul class="wins text-sm space-y-0.5"><li>Dead seam deleted</li><li>One version constant</li><li>Docs match code</li></ul>
+  <div class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"><b>Contradicts ADR 0021 §3</b> (the three-tier ladder; "a Medium tier that is never written down can never be observed") — worth reopening because the fact §3 rested on (a resolver consults the record) is no longer true, and §3's own argument now cuts against the code: an unread Medium tier is exactly "a capability whose value never reaches users". ADR 0071's "serve Validated sets" clause is already stale.</div>
+</article>
+
+<!-- ============================ WORTH EXPLORING ============================ -->
+<h2 class="font-serif text-3xl pt-4 border-t border-slate-200">Worth exploring</h2>
+
+<!-- C9 -->
+<article id="c9" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">9. The registry row gains the inverse of <span class="k">Read</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/config · cmd/apogee</span></div>
+  <p class="files">internal/config/registry.go:138-153 <span class="k">Key</span> (<span class="k">Read func(Options) string</span>, <span class="k">Validate</span>, no landing) · config.go:478-483 <span class="k">keyAccessor</span> + three hand-written <span class="k">fromEnv</span> closures :509-513, :544-548, :932-939 · config.go:3032-3099 <span class="k">ResolveOptions</span>: nine validation branches, three calling registry validators (:3053, :3061-3065, :3089) while registry.go:113-116 claims "Startup resolution does not call it" · cmd/apogee/wire_settings.go:2411-2428 <span class="k">settingInt</span>/<span class="k">settingBool</span> (16 sites), <span class="k">applyDelegateTimeout</span> :1991-2000 (own <span class="k">time.ParseDuration</span>; <span class="k">config.parseDelegateTimeout</span> :944-959 is unexported) · configwrite_scalar.go:235-300 <span class="k">renderSettingValue</span> (the kind switch the writer already owns) · counts: KeyRegistry 62 rows; keyAccessors 62; settingsTable 47; 22 re-parse sites in wire_settings.go</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — one file-spelled value read four ways (<span class="k">delegate-timeout</span>: three parsers, two empty-value rules)</div>
+      <div class="space-y-1">
+        <div class="band thin">yaml → fileConfig → fromFile closure (keyAccessors)</div>
+        <div class="band thin">Key.Validate via renderSettingValue — before the write</div>
+        <div class="band thin">apply: settingBool / settingInt / own ParseDuration — after the write</div>
+        <div class="band thin">fromEnv closure ×3 — the env pass</div>
+        <div class="band red">"" = default in parseDelegateTimeout; "" refused in applyDelegateTimeout</div>
+      </div>
+      <div class="mass mt-3"><div class="iface" style="height:5.2rem">Key<br/>interface</div><div class="impl" style="height:5.6rem">landing spelled by callers</div></div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — the row carries the one parse from spelling onto <span class="k">Options</span></div>
+      <div class="mod deep">Key · Read · Text · Structure · Validate · <b>Set(string) → Options edit</b> (built from the kind switch)</div>
+      <div class="grid grid-cols-3 gap-1 mt-3">
+        <div class="mod inner">env pass = row.Set for the three env keys</div>
+        <div class="mod inner">ResolveOptions' registry branches fold into the file pass</div>
+        <div class="mod inner">apply = live.update(row.Set(value)) (with candidate 1)</div>
+      </div>
+      <div class="mass mt-3"><div class="iface" style="height:1.8rem">Key</div><div class="impl" style="height:6rem">parse · validate · land · read back</div></div>
+      <p class="text-[.62rem] text-slate-500 mt-2">The renderer's <span class="k">settingsApplyLocal</span> parses stay local — <span class="k">internal/tui</span> may not import <span class="k">internal/config</span> (ADR 0043).</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> The registry describes what a key <em>is</em> and how it <em>reads back</em>, but not how a string <em>lands</em> — so the landing is spelled by every caller; the registry's "startup does not call Validate" claim is already false at three sites.</p>
+  <p><b>Solution.</b> The row carries <span class="k">Set</span>, the inverse of <span class="k">Read</span>; env pass, startup file pass and live apply all land through it. One registry-wide round-trip test (<span class="k">Set(Read(o))</span> is identity; <span class="k">Set</span> refuses what <span class="k">Validate</span> refuses) replaces the per-key validator tables.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One parse per key</li><li>Env, startup, apply agree by construction</li><li>Registry comment true again</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0035 D4 deferred exactly this ("the rewrite into full table-driven resolution … is its own effort") — it was deferred, not rejected. ADR 0043 keeps the renderer's parses local. No conflict.</div>
+</article>
+
+<!-- C10 -->
+<article id="c10" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">10. Repaint is a consequence of Update, not an obligation of every arm</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tui</span></div>
+  <p class="files">internal/tui/model.go:2169-2198 <span class="k">layout</span>, :2338-2367 <span class="k">refreshViewport</span>, :2389 <span class="k">refreshViewportAnchored</span>, :2208-2222 <span class="k">freshenTranscriptClamp</span>, :1448-1469 <span class="k">claimKey</span> (the one chokepoint that repairs — keys only), :933-1243 <span class="k">Update</span> with its deferred <span class="k">reportActivity</span> at :934 · 132 <span class="k">m.layout()</span> sites (settings.go 15, picker.go 13, commandrun.go 11, settingsapply.go 9, sessions.go 9, model.go 9, colorscheme.go 8, autotitle.go 7 …) + 93 <span class="k">m.refreshViewport()</span> sites · history: 43f42446 added 12 <span class="k">layout()</span> calls across 6 files; 906ead1a made the rule structural for keys only · transcript mutators already funnel through <span class="k">place</span>/<span class="k">commit</span>/<span class="k">setExpanded</span>/<span class="k">reset</span>/<span class="k">replay</span>/<span class="k">setRoot</span></p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — 225 arms each know they moved a pane</div>
+      <div class="grid grid-cols-6 gap-1">
+        <div class="copy">settings ×15</div><div class="copy">picker ×13</div><div class="copy">commandrun ×11</div><div class="copy">sessions ×9</div><div class="copy">colorscheme ×8</div><div class="copy">autotitle ×7</div>
+        <div class="copy">schedule ×6</div><div class="copy">interject ×6</div><div class="copy">watcher ×5</div><div class="copy">mouse ×4</div><div class="copy">actuation ×5</div><div class="copy">… 225</div>
+      </div>
+      <div class="mt-3 space-y-1">
+        <div class="band thick">claimKey → freshenTranscriptClamp (keys: structural since 906ead1a)</div>
+        <div class="band red">mouse handlers, every non-key Msg arm, every command verb: by hand — a new one starts with the obligation unmet</div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one deferred tail beside <span class="k">reportActivity</span></div>
+      <div class="space-y-1">
+        <div class="band thin">Update: arm mutates (transcript funnels set a dirty mark)</div>
+        <div class="band thick">deferred: if dirty ∨ pane height moved → layout · refreshViewport; renderView clears the mark</div>
+        <div class="band thin">refreshViewportAnchored stays the one explicit override (it positions, not paints)</div>
+      </div>
+      <div class="mt-3 text-center"><div class="mod faded inline-block">225 explicit calls</div></div>
+      <p class="text-[.62rem] text-slate-500 mt-2">Cost gate: the paint cache makes a repaint the live tail's price; the dirty mark, not the tail, must gate motion-Msg repaints. Measure before stripping arms.</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> The layout invariant belongs to Update, but every arm carries it; the history shows the bug class (43f42446) and a half-structural fix (906ead1a) that covers keys only.</p>
+  <p><b>Solution.</b> A dirty mark set by the transcript's mutators plus the height check <span class="k">freshenTranscriptClamp</span> already makes, run as one deferred tail in <span class="k">Update</span>; arms drop their calls.</p>
+  <ul class="wins text-sm space-y-0.5"><li>225 sites → 0</li><li>New pane inherits repaint</li><li>One invariant test over a Msg table</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0011 — View stays pure; the tail runs in Update. No conflict.</div>
+</article>
+
+<!-- C11 -->
+<article id="c11" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">11. The <span class="k">/settings</span> second step is one adapter set keyed by <span class="k">settingsKind</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tui</span></div>
+  <p class="files">internal/tui/settings.go:92-100 <span class="k">settingsKind</span>, :395-455 <span class="k">settingsKey</span> (four <span class="k">kind ==</span> branches), :488-505 <span class="k">settingsEditorMsg</span>, :511 <span class="k">settingsAbandonStep</span>, :531-577 <span class="k">settingsEnter</span>, :590/:720/:777/:853 the four key handlers, the four target predicates :828-837/:922-935/:1019-1028/:1033-1042, :1202 <span class="k">settingsEditing</span>, :1252 <span class="k">settingsPaneHint</span>, :1529/:1613/:1728 renderers · settingsapply.go:48/61/81 reset · mouse.go:1012-1034 <span class="k">settingsPaint</span>, :1146 <span class="k">settingsTextPaint</span>, :1303-1405 click/motion/wheel, :657 release · <span class="k">m.settings.kind</span>: 34 references, 21 comparisons across settings.go (12) and mouse.go (9) · not the deferred boxedPane bead (that is the pointer axis; this is key/render/target)</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — four steps × seven hand-written sites</div>
+      <table class="w-full text-[.6rem] text-center border-collapse">
+        <tr class="text-slate-500"><td></td><td>target</td><td>key</td><td>commit</td><td>hint</td><td>paint</td><td>editorMsg</td><td>abandon</td></tr>
+        <tr><td class="text-left k">enum</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td></tr>
+        <tr><td class="text-left k">buffer</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td></tr>
+        <tr><td class="text-left k">text</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td></tr>
+        <tr><td class="text-left k">reset</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td><td class="copy">·</td></tr>
+      </table>
+      <p class="text-[.62rem] text-slate-500 mt-2">Each column is a switch on <span class="k">kind</span> — 21 of them — re-asking "which row is this step about".</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one adapter per kind; each consumer is one lookup</div>
+      <div class="mod deep">settingsStep · eligible(row) · open(seed) · key contract · commit · hint · row/geometry (painter and pointer share it)</div>
+      <div class="grid grid-cols-4 gap-1 mt-3 text-center">
+        <div class="mod">enum</div><div class="mod">buffer</div><div class="mod">text</div><div class="mod">reset</div>
+      </div>
+      <div class="grid grid-cols-5 gap-1 mt-3">
+        <div class="mod inner">settingsKey → step.key</div><div class="mod inner">renderSettings → step.paint</div><div class="mod inner">settingsPaneHint → step.hint</div><div class="mod inner">settingsEditing → step != nil</div><div class="mod inner">mouse → step.geometry</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> Four second steps each hand-write a target predicate, key handler, commit, hint arm, geometry, editorMsg arm and abandon path; the pane is the largest single surface in the package (1833 + 515 + ~500 mouse lines).</p>
+  <p><b>Solution.</b> One step adapter per <span class="k">settingsKind</span>; <span class="k">settingsKey</span>, <span class="k">renderSettings</span>, <span class="k">settingsPaneHint</span>, <span class="k">settingsEditing</span> and the mouse family become one lookup each.</p>
+  <ul class="wins text-sm space-y-0.5"><li>Fifth step = one declaration</li><li>21 kind switches → 1</li><li>Painter and pointer share geometry</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0053 D3 (key verdicts stay the step's) and D9 (named sub-surfaces) kept. ADR 0035/0037 untouched. No conflict.</div>
+</article>
+
+<!-- C12 -->
+<article id="c12" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">12. The prompt box's legend is one derivation at paint, not thirteen transitions</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tui</span></div>
+  <p class="files">internal/tui/prompteditor.go:219-221 <span class="k">setPlaceholder</span>, :232-237 <span class="k">idleLegend</span>, :245-250 <span class="k">setKeyDisambiguation</span> (compares the stored string to two constants to decide whether to re-derive) · runview.go:113-122 <span class="k">legendFor</span>, :128-133 <span class="k">topLegend</span> — the derivation already exists · 13 write sites: approval.go:136/:277, ask.go:38/:126, fold.go:80 (re-derives on three Event variants), model.go:1945, commandrun.go:124/:341/:359/:489, runview.go:199/:233, prompteditor.go:248 · model.go:2933-2942 <span class="k">inputView</span> (View already sets a field on a local viewport copy at :2716)</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">Before — stored widget state, rewritten at every transition</div>
+      <pre class="mermaid">
+flowchart LR
+  A[approval ×2] --> P((placeholder<br/>stored))
+  B[ask ×2] --> P
+  C[commandrun ×4] --> P
+  D[runview ×2] --> P
+  E[finishWorker] --> P
+  F["fold.go:80<br/>3 Event variants"] --> P
+  G["setKeyDisambiguation<br/>reads P back"] --> P
+  P --> V[inputView]
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class F,G leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">After — a pure function of state, evaluated where the widget is painted</div>
+      <pre class="mermaid">
+flowchart LR
+  S["state · decisionPending · viewed child<br/>busy · keyDisambiguation"] --> L["<b>legendFor(topLegend())</b>"]
+  L --> V[inputView: set on the local copy]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class L deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> The legend is a pure function the code already has (<span class="k">topLegend</span>/<span class="k">legendFor</span>/<span class="k">idleLegend</span>), yet it is stored and re-written at 13 sites; the transition model has leaked twice (an Event-time re-derivation for three variants; a read-back-and-compare).</p>
+  <p><b>Solution.</b> <span class="k">inputView</span> sets the placeholder on its local textarea copy from the derivation; the 13 writes and fold.go's hook go.</p>
+  <ul class="wins text-sm space-y-0.5"><li>13 sites → 1</li><li>No Event list to extend</li><li>Seven legend tests stay as View assertions</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0011 (View is a value receiver) — setting a field on the local copy is what View does for the viewport today. Reopens only a doc.go stance ("state the Model SETS"), not an ADR.</div>
+</article>
+
+<!-- C13 -->
+<article id="c13" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">13. The standing system message is one block table</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/agent</span></div>
+  <p class="files">internal/agent/loop.go:965-989 <span class="k">standingSystem</span> (prompt → orientation → delegate report → task list → context files) · :890-938 <span class="k">buildRequest</span> — seeds it at position 0, then appends a sixth engine-owned block by a different door (<span class="k">req.AppendToSystem(wrapUpMarker, …)</span> :928-930) · contextfiles.go:197-206 <span class="k">forgesStandingStructure</span> (the CLOSED fence list naming every block's header), :175-182 <span class="k">hasContextBlocks</span>, :246-261 <span class="k">contextBlocks</span> · orientation.go:85/:137-170 · delegatereport.go:50/:68-73 · tasklistblock.go:47/:49-51 · ADR 0023 addenda 2026-08-25, 09-02, 09-03 — three block additions in ten days; the fifth touched four files</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — a block is a bare <span class="k">func() string</span>; three facts about it live elsewhere</div>
+      <div class="grid grid-cols-5 gap-1 text-center">
+        <div class="mod shallow">prompt</div><div class="mod shallow">orientation</div><div class="mod shallow">delegate report</div><div class="mod shallow">task list</div><div class="mod shallow">context files</div>
+      </div>
+      <div class="mt-3 space-y-1">
+        <div class="band thin">position — an if-chain in standingSystem</div>
+        <div class="band thin">forgery fence — a line in forgesStandingStructure</div>
+        <div class="band thin">ride-along rule — prose repeated in four files</div>
+        <div class="band red">wrap-up directive — a sixth block via AppendToSystem, outside both lists</div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one table in wire order, like the <span class="k">floorGuards</span> table that landed 09-15</div>
+      <div class="mod deep">standingBlocks[] · render · fence prefix · rides-along | stands-alone</div>
+      <div class="grid grid-cols-3 gap-1 mt-3">
+        <div class="mod inner">standingSystem walks the table</div>
+        <div class="mod inner">forgesStandingStructure derives its prefix set from the fence column</div>
+        <div class="mod inner">buildRequest places the wrap-up row; AppendToSystem call goes</div>
+      </div>
+      <p class="text-[.62rem] text-slate-500 mt-2">One table-driven forgery test: for every row, a context file spelling its fence is prefixed and the row renders at its index.</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> "A standing block" is a concept with no module; adding one touches the composer, the fence list, the block file and the ADR, and the wrap-up directive already bypasses both lists.</p>
+  <p><b>Solution.</b> One ordered table of standing blocks; composer and fence derive from it.</p>
+  <ul class="wins text-sm space-y-0.5"><li>Order declared once</li><li>Fence derived, not retyped</li><li>Forgery test covers every row</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0023 §6 fixes the order — the table encodes it. ADR 0026 §3 (content is data; the fence is the one rewrite) unchanged. No conflict.</div>
+</article>
+
+<!-- C14 -->
+<article id="c14" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">14. One text tool-call grammar seam: salvage's container grammar joins <span class="k">processing</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">ports &amp; adapters</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/processing · internal/floor</span></div>
+  <p class="files">internal/processing/parser.go:17 <span class="k">ToolCallParser</span> (two-call interface, one call max, no menu check) · markdown_fenced.go:71-93, custom_regex.go:68-101, factory.go:55-74 (<span class="k">nativeTextParser</span>, <span class="k">IsNative</span>) · toolcall.go:90-102 <span class="k">normalizeArguments</span>, args.go · internal/floor/salvage.go:89-241 (<span class="k">SalvageToolCall</span>, three container patterns :22-32, <span class="k">normalizeSalvagedArguments</span> :217-241, <span class="k">HasToolCallMarkup</span> :47-58) · internal/agent/builtins.go:258-279 <span class="k">salvageToolCall</span> — gated on <span class="k">processing.IsNative(a.textParser)</span>, ids <span class="k">text_call_&lt;turn&gt;_&lt;i&gt;</span>, menu-checked via :307-314 · loop.go:642-658 <span class="k">assembleResponse</span> (ids <span class="k">text_call_&lt;turn&gt;</span>) · second consumers of the floor grammar: internal/probe/battery.go:184, internal/agent/subagent.go:1377</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">Before — two homes, two seams, three normalisers, two id schemes</div>
+      <pre class="mermaid">
+flowchart TB
+  subgraph processing
+    F[fenced] --- R[regex] --- N[native no-op]
+    NA1[normalizeArguments]
+    NA2[coerceArgs + args.go]
+  end
+  subgraph floor
+    S["salvage: fenced JSON · &lt;tool_call&gt; · DSML<br/>N calls · menu check"]
+    NA3[normalizeSalvagedArguments]
+  end
+  L[loop.assembleResponse] --> F
+  G[salvage guard] -- "IsNative?" --> N
+  G --> S
+  PB[probe.battery] --> S
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class NA1,NA2,NA3 leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">After — one call-shaped seam, three adapters; the guard stays where ADR 0071 put it</div>
+      <pre class="mermaid">
+flowchart TB
+  subgraph processing
+    P["<b>textCalls</b>(text, menu) → calls · stripped · read?<br/>one normaliser · one id scheme"]
+    P --> F[fenced]
+    P --> R[regex]
+    P --> C[container grammar]
+  end
+  L[loop.assembleResponse] --> P
+  G["salvage guard (post-response, first, books)"] --> P
+  PB[probe.battery] --> P
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class P deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> "Read a tool call out of visible text" has two homes; the "guard" grammar has a second, non-guard consumer (the probe), argument normalisation is written three times and ids minted two ways.</p>
+  <p><b>Solution.</b> <span class="k">processing</span> owns every text grammar behind one seam (text + menu → calls, stripped text, read?); the salvage Floor guard keeps its seat, ordering, key and booking but its body becomes one call, like the <span class="k">retryGuard</span> rows.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One grammar home</li><li>One arg normaliser, one id scheme</li><li>Guard test asserts gating + booking only</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0071 amendment 2026-09-07 fixes <em>where salvage fires</em> and that it "leaves the native parse seam alone" — both kept; only the grammar's package moves. Read the amendment's last paragraph against this before planning. ADR 0044 selection stays in <span class="k">ParserFor</span>.</div>
+</article>
+
+<!-- C15 -->
+<article id="c15" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">15. A Floor guard is one row: <span class="k">FloorConfig</span> becomes a keyed off-set</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">domain · agent · config · cmd/apogee</span></div>
+  <p class="files">one guard (<span class="k">tool-use-enforcer</span>) spelled in 10 non-test files: internal/agent/builtins.go:80-146 <span class="k">floorGuards</span> (row carries a <span class="k">gate func(FloorConfig) bool</span> only to map key → struct field), :151-157 <span class="k">FloorGuardKeys</span> · floorguards.go:9-17, :38 · internal/domain/config.go:449-481 <span class="k">FloorConfig</span> seven <span class="k">Disable…</span> bools · internal/config/reactions.go:54-62 <span class="k">floorGuardKeys</span> (a second hand-kept list, "a test pins every name") · options.go:213, config.go:695/:1387, registry.go:414, configmigrate.go:969 · cmd/apogee/wire_settings.go:812-894 (<span class="k">setFloorGuard</span>, <span class="k">floorGuardFields</span>, <span class="k">floorFromOptions</span>, <span class="k">optionsFromFloor</span>), :1012 · drift test: <span class="k">TestFloorGuardTableMatchesTheConfigKeys</span></p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — the table landed, but the seven names are still re-spelled by every consumer</div>
+      <div class="grid grid-cols-5 gap-1">
+        <div class="copy">floorGuards.gate ×7</div><div class="copy">floorguards.go consts</div><div class="copy">FloorConfig bools ×7</div><div class="copy">config floorGuardKeys</div><div class="copy">registry rows</div>
+        <div class="copy">options bools</div><div class="copy">yaml fields</div><div class="copy">migration map</div><div class="copy">floorGuardFields</div><div class="copy">inverse pair</div>
+      </div>
+      <div class="band red mt-3">three lists held equal by a test, not by derivation</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — a set of disabled keys; zero value = full floor (ADR 0071 D5's guarantee holds by construction)</div>
+      <div class="mod deep">FloorConfig{ Disabled set[key] } · Disabled(key)</div>
+      <div class="grid grid-cols-3 gap-1 mt-3">
+        <div class="mod inner">gate column deleted; buildBuiltins asks Disabled(row.key)</div>
+        <div class="mod inner">config/settings lists derive from agent.FloorGuardKeys() via the facade</div>
+        <div class="mod inner">negation seam = "key present ⇔ off"; yaml keys unchanged</div>
+      </div>
+      <div class="mt-3 text-center"><div class="mod faded inline-block">TestFloorGuardTableMatchesTheConfigKeys — nothing left to match</div></div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The engine cannot say "which guards are off" without a per-guard field, so each consumer (load, registry, settings pane, negation seam, migration) re-spells the seven names.</p>
+  <p><b>Solution.</b> <span class="k">FloorConfig</span> holds a set of disabled guard keys; every list derives from the one table.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One key list</li><li>Gate column deleted</li><li>Drift test becomes derivation</li></ul>
+  <div class="rounded border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900"><b>Touches ADR 0071 D5's literal text</b> ("<span class="k">domain.FloorConfig</span> holds … <span class="k">Disable…</span> booleans, so its zero value keeps every guard on") — conflict on the <em>shape</em>, none on the <em>property</em>: the keyed set preserves the zero-value guarantee D5 exists for. A dated in-place amendment suffices.</div>
+</article>
+
+<!-- C16 -->
+<article id="c16" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">16. One fold aftermath: the three compaction triggers stop re-deriving guard, cancel and bridge</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/agent</span></div>
+  <p class="files">internal/agent/compact.go:156-162 <span class="k">fold</span> (the one call all three make) · :141-147 <span class="k">Compact</span> (on-demand) · :197-279 <span class="k">autoCompact</span> (re-entrancy guard :198-202, cancel-masquerade :205-206, fault → <span class="k">foldFaulted</span> + ErrorEvent :216-222, bridge + <span class="k">anchorAtBridge</span> :253-256 with a long comment explaining it must do what <span class="k">emergencyFold</span> does, saturation :269-278) · :434-456 <span class="k">emergencyFold</span> (guard :435-439, cancel :443-444, ErrorEvent :446, bridge :453-454) · loop.go:303-322 <span class="k">refold</span> turns a bool + <span class="k">ctx.Err()</span> into <span class="k">foldOutcome</span> · turn.go:365/:370/:380-394/:483 latches</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — <span class="k">fold</span> is deep; everything a fold that ran must leave behind is decided per trigger</div>
+      <div class="grid grid-cols-3 gap-2 text-center">
+        <div class="mod shallow">Compact</div><div class="mod shallow">autoCompact</div><div class="mod shallow">emergencyFold + refold</div>
+      </div>
+      <div class="grid grid-cols-3 gap-2 mt-1">
+        <div class="copy">no guard<br/>error to caller</div>
+        <div class="copy">guard · cancel-vs-fault · ErrorEvent · bridge+anchor · saturation</div>
+        <div class="copy">guard · cancel · ErrorEvent · bridge+anchor · bool→outcome in refold</div>
+      </div>
+      <div class="mt-3 text-center"><div class="mod deep inline-block">fold — one Replace</div></div>
+      <p class="text-[.62rem] text-slate-500 mt-2">Guard ×2 · cancel rule ×2 · "compaction" ErrorEvent ×3 · bridge ×2 · latch policy documented in three prose comments. The 2026-08-29 runaway lived here.</p>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one entry taking the trigger kind, returning one outcome</div>
+      <div class="mod deep">foldFor(kind: on-demand | estimate | overflow) → folded · declined · cancelled · faulted(text) — owns guard, cancel-vs-fault, ErrorEvent, bridge+anchor inside an open Exchange, latch table</div>
+      <div class="grid grid-cols-3 gap-2 mt-3 text-center">
+        <div class="mod">Compact: gate, call, return</div><div class="mod">autoCompact: gate, call, route</div><div class="mod">refold: read outcome</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> <span class="k">emergencyFold</span> and <span class="k">autoCompact</span>'s mid-Exchange branch are already one procedure with different latch policies, held equal by a comment.</p>
+  <p><b>Solution.</b> One fold entry parameterised by trigger kind, with the latch policy as a table instead of three prose comments; the 42 existing tests drive through <span class="k">step()</span>/<span class="k">Compact()</span> and stay valid.</p>
+  <ul class="wins text-sm space-y-0.5"><li>Bridge rule in one place</li><li>Latch policy one table</li><li><span class="k">refold</span> reads an outcome, not a bool</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0018 and CONTEXT.md's "one fold, two automatic triggers" — the proposal is that sentence. Plan item 14 (<span class="k">growthBounds</span>) untouched. No conflict.</div>
+</article>
+
+<!-- C17 -->
+<article id="c17" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">17. The git family: six argv builders over one <span class="k">gitRead</span>/<span class="k">gitWrite</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tools · internal/gitexec</span></div>
+  <p class="files">internal/tools/git.go: <span class="k">lookGit</span> :65, <span class="k">runGit</span> :73, <span class="k">runGitUnchecked</span> :80, <span class="k">RunGitQuery</span> :103-113 (pass-through over <span class="k">gitexec.Resolve+Query</span> for treesnapshot.go:116), <span class="k">gitResultText</span> :116 · six Execute bodies :178/:372/:550/:677/:940/:1109 + git_stage.go:62-97 — the sequence <span class="k">Program → runGit → ExitCode → gitResultText</span> written 7× · ref guard <span class="k">!validRef.MatchString(x) || looksLikeOption(x)</span> at :568/:571/:957/:1125 · two path→pathspec rules: absolute at :413/:588, workspace-relative <span class="k">workspacePathspec</span> :1020 (whose comment says the absolute form "would name the wrong tree" through a symlinked root) · readonly_subprocess.go:28-40 four hand-kept mint conditions, pinned by argv-recording tests git_test.go:1084/:2222 · two lookup seams: <span class="k">tools.lookGit</span> vs <span class="k">gitexec.LookPath</span> (the snapshot store uses the second; a test planting a git for the tools reaches treesnapshot but not the store)</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — the runner is deep; the tools above it repeat a ritual</div>
+      <div class="grid grid-cols-7 gap-1 text-center text-[.55rem]">
+        <div class="mod shallow">branch</div><div class="mod shallow">commit</div><div class="mod shallow">diff</div><div class="mod shallow">status</div><div class="mod shallow">log</div><div class="mod shallow">show</div><div class="mod shallow">stage</div>
+      </div>
+      <div class="grid grid-cols-7 gap-1 mt-1"><div class="copy col-span-7">Program → runGit → ExitCode≠0 → gitResultText — ×7 · ref guard ×4 · two pathspec rules · DiffHardeningArgs by hand</div></div>
+      <div class="mt-3 grid grid-cols-2 gap-2 text-center">
+        <div class="mod">gitexec (deep)</div><div class="mod shallow leaky">lookGit ≠ gitexec.LookPath</div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — a validated ref type only the guard can mint; one read call, one write call</div>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="mod deep">gitRead(ref, pathspecs, sub, flags, failWording, fallback) — always DiffHardeningArgs · one pathspec rule · Capture · render</div>
+        <div class="mod deep">gitWrite(…)</div>
+      </div>
+      <div class="grid grid-cols-3 gap-1 mt-3">
+        <div class="mod inner">Execute = decode → validate → build → one call → parse</div>
+        <div class="mod inner">RO-subproc mint condition = "only calls gitRead" — true by type</div>
+        <div class="mod inner">lookGit collapses onto gitexec.LookPath; RunGitQuery deleted</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The RO-subproc marker's four mint conditions are conventions each carrier keeps by hand; two pathspec rules coexist; one program has two lookup seams.</p>
+  <p><b>Solution.</b> One <span class="k">gitRead</span>/<span class="k">gitWrite</span> owning hardening, ref guard, pathspec and rendering; the argv-recording tests become tests of <span class="k">gitRead</span>.</p>
+  <ul class="wins text-sm space-y-0.5"><li>Mint conditions enforced by the type</li><li>One ref guard, one pathspec rule</li><li>One git lookup seam</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">Confinement contract §4 amendment 2026-09-06 (RO-subproc) and ADR 0012 — strengthened. Plan 2026-09-15 - 01 item 16 (re-exports) not re-suggested. No conflict.</div>
+</article>
+
+<!-- C18 -->
+<article id="c18" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">18. One syntax engine: <span class="k">diagnostics</span> reads <span class="k">internal/syntaxcheck</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tools · internal/syntaxcheck</span></div>
+  <p class="files">internal/tools/diagnostics.go:172-229 <span class="k">diagnoseGo</span>, :232-246 <span class="k">goSyntaxDiagnostics</span> (its own <span class="k">go/parser</span> call rendered as <span class="k">err.Error()</span>), :383, :400-411 <span class="k">detectLanguage</span> (Go only) · internal/syntaxcheck/syntaxcheck.go:44 <span class="k">Check</span>, :58 <span class="k">Language</span> (go, python, js, ts …), :122 <span class="k">checkGoSyntax</span> (the second <span class="k">go/parser</span> call), :178, :416 · internal/tools/syntaxtrailer.go:28 — the ONLY consumer of <span class="k">syntaxcheck</span> outside its tests</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — two verdicts on one file in one Turn</div>
+      <div class="grid grid-cols-2 gap-2 text-center">
+        <div><div class="mod shallow">write_file → syntaxTrailer</div><div class="mod inner mt-1">syntaxcheck.Check · go/py/js/ts · "syntax check: … line N"</div></div>
+        <div><div class="mod shallow">diagnostics</div><div class="mod inner mt-1">own go/parser · Go only · "file:line:col: msg" · .py ⇒ "no diagnostics available"</div></div>
+      </div>
+      <div class="band red mt-3">internal/syntaxcheck: a package with one adapter — a hypothetical seam</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one parser, one wording, both doors</div>
+      <div class="mod deep">syntax verdict → lines (shared renderer over syntaxcheck.Check)</div>
+      <div class="grid grid-cols-2 gap-2 mt-3 text-center">
+        <div class="mod">syntaxTrailer</div><div class="mod">diagnostics (syntax half; vet half unchanged)</div>
+      </div>
+      <p class="text-[.62rem] text-slate-500 mt-2">Heuristic languages surface as an ok result with findings, worded "heuristic" as the trailer already does. Whether <span class="k">syntaxcheck</span> folds into <span class="k">tools</span> is a file-map question (ADR 0043), not a seam one.</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> The same engine says two different things about one file depending on which tool asked; ADR 0043 moved <span class="k">syntaxcheck</span> out for "a consumer elsewhere" that never arrived.</p>
+  <p><b>Solution.</b> <span class="k">diagnostics</span>' syntax half becomes <span class="k">syntaxcheck.Check</span> plus the trailer's renderer.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One parser, one wording</li><li>Non-Go files get a verdict at both doors</li><li>One fewer hypothetical seam</li></ul>
+</article>
+
+<!-- C19 -->
+<article id="c19" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">19. One <span class="k">domain.Usage</span> value; two latest-wins folds become one</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process · additive</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">domain · run · tui · eventjson · session</span></div>
+  <p class="files">the five counters (Calls, Prompt, Completion, Total, CachedPrompt) are a struct nine times: internal/domain/events.go:465-486 <span class="k">UsageEvent</span> (ten loose ints) · internal/run/run.go:195-213 <span class="k">Usage</span>, :219-267 <span class="k">SubAgentUsage</span> · internal/session/store.go:145-151 · internal/eventjson/writer.go:275-297, encode.go:297-313 · internal/tui/fold.go:97-107 <span class="k">usageTotals</span> · (provider/wire.go:162 — wire, legitimately separate) · conversions: run.go:451-478 (<span class="k">sessionUsage</span> "written out field by field on purpose: a positional literal would transpose them silently"), headless.go:632-662, :1271-1277, tui/fold.go:113-121 · the fold rule ("latest wins; <span class="k">Calls==0</span> never overwrites; Maintenance counts in totals not fill") implemented twice: run.go:676-726 and tui/fold.go:113-135; delegate sum twice: run.go:461 and tui/usage.go:266/:333 · tests: run_test.go:1319 ≡ fold_test.go:523</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">Before — the counters never got a name; every crossing is a hand mapping</div>
+      <pre class="mermaid">
+flowchart LR
+  E["UsageEvent<br/>10 loose ints"] --> R[run.Usage] --> S[session.Usage]
+  E --> T[tui.usageTotals]
+  R --> J[eventjson.Usage]
+  R --> SA[run.SubAgentUsage] --> JA[eventjson.SubAgentUsage]
+  SA --> H[headless re-pack]
+  R -. "fold rule" .- T
+  classDef leak stroke:#dc2626,stroke-width:2px;
+  class R,T leak
+      </pre>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-white p-4 diag">
+      <div class="cap">After — one value with the fold rule as a method</div>
+      <pre class="mermaid">
+flowchart LR
+  U["<b>domain.Usage</b><br/>5 counters · Adopt(reading) · Sum"]
+  E[UsageEvent embeds ×2] --> U
+  U --> R[run.Result] & S[session.Meta] & T[tui] & J[eventjson frame · keys unchanged]
+  classDef deep fill:#0f172a,color:#f8fafc,stroke:#0f172a,stroke-width:3px;
+  class U deep
+      </pre>
+    </div>
+  </div>
+  <p><b>Problem.</b> Seven structs and four mapping functions exist because <span class="k">domain</span> never named the five counters; the fold rule and the delegate sum are each tested twice.</p>
+  <p><b>Solution.</b> One <span class="k">domain.Usage</span> value that <span class="k">UsageEvent</span> embeds twice (call, cumulative), with <span class="k">Adopt</span> and <span class="k">Sum</span> as methods; the JSON-tagged shapes keep their key names.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One fold rule, one test</li><li>No field-order mappings</li><li>Seven structs deleted</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0010 (a value type in <span class="k">domain</span>), ADR 0011 (a struct of ints in the value-copied Model), ADR 0075 D3 (eventjson keeps its key names). No conflict.</div>
+</article>
+
+<!-- C20 -->
+<article id="c20" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">20. The engine's test upstream is scripted: one in-process Responder over the stubllm <span class="k">Script</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">mock</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/stubllm · internal/provider · tests</span></div>
+  <p class="files">26 distinct fake <span class="k">Responder</span> types across 17 <span class="k">internal/agent/*_test.go</span> files (<span class="k">scriptedResponder</span> statemachine_test.go:34, <span class="k">echoResponder</span> harness_test.go:47, <span class="k">faultResponder</span> overflow_test.go:32, <span class="k">chunkedResponder</span> streamsuppress_test.go:31 …) · <span class="k">httptest.NewServer</span>: 125 occurrences in 35 test files · hand-rolled <span class="k">text/event-stream</span> outside provider/stubllm: 9 files, 4 duplicate <span class="k">writeFinal</span>/<span class="k">writeToolCall</span> pairs (benchreadiness_test.go:78-131, cmd/apogee/confinement_e2e_test.go:384-433, schedule_test.go:53-75, internal/tui/e2e_test.go:70-152, internal/run/harness_test.go:93-190, agent/harness_test.go:250, routedspawn_test.go:526, apikey_test.go:37, construct_test.go:74) · the sanctioned upstream: internal/stubllm (<span class="k">Script</span>/<span class="k">Turn</span>/<span class="k">Match</span>, "imports nothing about apogee") used by 38 e2e files · framing drift: tui/e2e_test.go's <span class="k">writeToolCall</span> streams the call as one fragment; stubllm splits head/tail as real servers do</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — one script vocabulary at the wire seam; none at the Responder seam</div>
+      <div class="grid grid-cols-2 gap-2 text-center">
+        <div><div class="mod deep">stubllm (HTTP adapter)</div><div class="text-[.6rem] text-slate-500 mt-1">38 e2e files script it</div></div>
+        <div><div class="mod shallow leaky">Responder seam: 26 bespoke fakes</div><div class="text-[.6rem] text-slate-500 mt-1">"yield these deltas, record the request" ×26</div></div>
+      </div>
+      <div class="band red mt-3">9 files still hand-roll SSE with 4 duplicate writer pairs — the drift ADR 0062 §2 was written to end</div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — the same Script plays at both seams</div>
+      <div class="mod deep">stubllm.Script → provider.Delta player (in-process Responder) · same strictness · request log</div>
+      <div class="grid grid-cols-2 gap-2 mt-3 text-center">
+        <div class="mod">HTTP adapter (e2e)</div><div class="mod">in-process adapter (engine units)</div>
+      </div>
+      <p class="text-[.62rem] text-slate-500 mt-2">Parity test: one Script yields the same Delta sequence through both adapters — a real drift guard. Home: provider-side or a small sub-package importing both (stubllm stays apogee-free).</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> ADR 0062 D2 ("a new test scripts stubllm; it does not write another handler") never reached the seam the engine's unit tests inject at, so each test re-invents the vocabulary.</p>
+  <p><b>Solution.</b> One in-process adapter that plays a stubllm <span class="k">Script</span> as Deltas; the 26 fakes collapse onto it, the 9 SSE files move onto <span class="k">stubllm.New</span>.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One script vocabulary at both seams</li><li>Framing cannot drift</li><li>Interface = test surface (Script per case)</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0062 D1–D2, ADR 0001 — completes them. No conflict.</div>
+</article>
+
+<!-- C21 -->
+<article id="c21" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">21. <span class="k">apogee undo</span> stops reading <span class="k">journal.json</span> for itself</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">cmd/apogee · internal/snapshot</span></div>
+  <p class="files">cmd/apogee/undo.go:44-50 <span class="k">undoIndexFile = "journal.json"</span> (second spelling of internal/snapshot/journal.go:17 <span class="k">journalFileName</span>, unexported) · undo.go:234-264 <span class="k">undoIndexWorkspace</span> decodes <span class="k">undo.Index</span> itself, :132-149 hands the workspace to <span class="k">snapshot.OpenJournal</span> which re-reads the same file and re-checks it · journal.go:58-90 <span class="k">OpenJournal(ctx, home, id, workspace, enabled)</span> · store.go:106-149 <span class="k">Open</span> runs <span class="k">git init</span> when no HEAD (why the verb pre-reads) · the "error → funnel + reason" fallback duplicated at wire_live.go:455-458 and run/run.go:353-357 · <span class="k">TestUndoVerbReadsTheWorkspaceFromTheIndex</span> (undo_test.go:294) pins the duplicate constant</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — three packages know the index layout</div>
+      <div class="space-y-1">
+        <div class="band thin">cmd/apogee/undo.go: name the file · decode Index · read workspace</div>
+        <div class="band thin">snapshot.OpenJournal(…, workspace, …): read the same file · check workspace matches</div>
+        <div class="band thin">internal/undo: writes and loads it</div>
+        <div class="band red">wire_live.go and run.go: identical fallback "journal, reason = undo.New(), err.Error()"</div>
+      </div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — one owner of the index; a stored-session opener</div>
+      <div class="mod deep">snapshot · OpenJournal (live: workspace supplied) · OpenStored(home, id) — no init, reads its own recorded workspace · OpenOrFunnel (never errors)</div>
+      <div class="grid grid-cols-2 gap-2 mt-3 text-center">
+        <div class="mod">undo verb: preview/confirm/exit only</div><div class="mod">wire_live · run: one fallback call</div>
+      </div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The verb knows the file layout only because <span class="k">OpenJournal</span> demands the workspace as an input while the store already records it as output.</p>
+  <p><b>Solution.</b> <span class="k">internal/snapshot</span> grows a stored-session opener and the funnel fallback; the verb loses filesystem knowledge.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One owner of the index layout</li><li>Fallback once</li><li>Index tests live in snapshot alone</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0074 D5/D7 satisfied trivially (the stored opener's workspace <em>is</em> the recorded one). The denied "session-record rules into internal/session" concerns the session store, not the snapshot index; <span class="k">validateUndoID</span> is left alone.</div>
+</article>
+
+<!-- C22 -->
+<article id="c22" class="rounded-xl border border-slate-200 bg-white p-6 space-y-5 shadow-sm">
+  <h2 class="font-serif text-2xl">22. One skill-block renderer on <span class="k">domain.ResolvedSkill</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-amber-100 text-amber-800">Worth exploring</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">in-process</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">domain · agent · tools</span></div>
+  <p class="files">internal/agent/loop.go:1343-1352 (in <span class="k">resolveSkillRefs</span>): <span class="k">&lt;skill: %s&gt;</span> header, the <span class="k">files: …</span> sentence, <span class="k">{{SKILL_DIR}}</span> expansion, trailer · internal/tools/load_skill.go:104-117 <span class="k">renderSkillLookup</span>: the same four steps, byte-identical, with a comment (:93-98) promising it matches the loop · internal/domain/config.go:911-919 <span class="k">ResolvedSkill</span>, <span class="k">domain.SkillDirToken</span> · tests pin one copy each (agent/minilang_test.go:320, tui/toolpresent_test.go:3690); nothing pins the two to each other · only difference: the loop clamps the body first</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">Before — model-facing text kept equal by a comment</div>
+      <div class="grid grid-cols-2 gap-2 text-center">
+        <div class="mod shallow">loop.resolveSkillRefs (attached)</div><div class="mod shallow">tools.renderSkillLookup (load_skill door)</div>
+      </div>
+      <div class="grid grid-cols-2 gap-2 mt-1"><div class="copy">header · files: sentence · token · trailer</div><div class="copy">header · files: sentence · token · trailer</div></div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4 diag">
+      <div class="cap">After — the contract rendered once</div>
+      <div class="mod deep">ResolvedSkill.Block(body) → the block the model reads</div>
+      <div class="grid grid-cols-2 gap-2 mt-3 text-center"><div class="mod">loop: clampRef, then Block</div><div class="mod">load_skill: Block</div></div>
+    </div>
+  </div>
+  <p><b>Problem.</b> The block a model reads is the contract; it is spelled in two packages.</p>
+  <p><b>Solution.</b> <span class="k">domain.ResolvedSkill</span> gains one renderer; both callers call it; one table test.</p>
+  <ul class="wins text-sm space-y-0.5"><li>One model-facing wording</li><li>Drift impossible</li></ul>
+  <div class="rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">ADR 0065 §6-7 — no conflict.</div>
+</article>
+
+<!-- ============================ SPECULATIVE ============================ -->
+<h2 class="font-serif text-3xl pt-4 border-t border-slate-200">Speculative</h2>
+
+<!-- C23 -->
+<article id="c23" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+  <h2 class="font-serif text-2xl">23. The run tree is one index, not nine reverse scans</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tui</span></div>
+  <p class="files">internal/tui/transcript.go: <span class="k">runEnd</span> :471-481, <span class="k">runName</span> :570-580, <span class="k">openSubAgentHead</span> :1131-1148, :1332 scan, <span class="k">addSubAgentPhase</span> :1413-1422, <span class="k">addSubAgentName</span> :1448-1455, <span class="k">place</span> :420-434, :499-553 · subagentblock.go: <span class="k">subAgentSpan</span> :28-38 (6 callers), <span class="k">runHead</span>/<span class="k">runHeadAt</span> :132-150, :90-129, :177-189, :224-238 · render.go:496-524, runview.go:54-58/:92/:252</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+      <div class="cap">Before</div>
+      <div class="mod shallow">entries[] flat · depth + spawnCallID</div>
+      <div class="grid grid-cols-3 gap-1 mt-2"><div class="copy">6 reverse scans for a head</div><div class="copy">3 parent-chain walks, scan per hop</div><div class="copy">forward span scan on every place() and paint</div></div>
+    </div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4">
+      <div class="cap">After</div>
+      <div class="mod deep">runIndex · spawn → head · parent · span end — maintained at place/commit/reset/replay</div>
+      <p class="text-[.62rem] text-slate-500 mt-2">Held by pointer or as a map, following the <span class="k">paints</span>/<span class="k">acts</span> posture (ADR 0011).</p>
+    </div>
+  </div>
+  <p><b>Problem.</b> "A run" (head, span, parent) has no home; reading the concept took four files, and every delegated Event's placement is O(N). <b>Solution.</b> One index maintained at the transcript's mutation funnels. <b>Why speculative:</b> the win is locality and cost; the value-copy hazard needs a stated posture.</p>
+</article>
+
+<!-- C24 -->
+<article id="c24" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+  <h2 class="font-serif text-2xl">24. A card's name-keyed facts are one registry row, applied by one builder</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/tui</span></div>
+  <p class="files">internal/tui/toolregistry.go:236-500 <span class="k">toolRegistry</span> (31 rows, deep) · toolview.go:787-865 <span class="k">presentToolCall</span> (solo :811, <span class="k">collapsesToHeader</span> :817, sub_agent name/task :826-829) · transcriptbridge.go:342-467 <span class="k">fromWireToolView</span> (solo re-derived :406-409 with an extra four-condition heuristic for ask_user, :416, :435-446) · wireargs.go:26-30 <span class="k">contentArgs</span> — a second name-keyed table · <span class="k">subAgentToolName</span> read at 9 sites in 6 files</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">Before</div><div class="grid grid-cols-3 gap-1"><div class="mod shallow">presentToolCall: solo rule A</div><div class="mod shallow">fromWireToolView: solo rule B</div><div class="mod shallow">contentArgs satellite</div></div></div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">After</div><div class="mod deep">registry row + solo-by-name + wire-dropped keys · one "apply the row" step for live and replayed cards</div></div>
+  </div>
+  <p><b>Problem.</b> The facts knowable from the name alone are applied by two producers with two spellings, one load-bearing (replayed records would regroup across a restart). <b>Solution.</b> The row carries them; one builder. ADR 0052 kept.</p>
+</article>
+
+<!-- C25 -->
+<article id="c25" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+  <h2 class="font-serif text-2xl">25. One upstream fault classifier in <span class="k">provider</span></h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/provider</span></div>
+  <p class="files">client.go:511-524 <span class="k">statusError</span>, :532-546 <span class="k">inBandError</span> · stream.go:120-132 <span class="k">statusDelta</span>, :147-160 <span class="k">inBandErrorDelta</span> — four copies of "400 overflow? sanitise; effort hint unless overflow; retryable?", kept equal by prose ("mirroring statusError", "exactly as statusDelta does"); retryable decided only in the fourth · 12 tests assert the same three rules on four paths</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">Before</div><table class="w-full text-[.6rem] text-center"><tr><td></td><td>status</td><td>in-band</td></tr><tr><td class="k">Respond</td><td class="copy">error</td><td class="copy">error</td></tr><tr><td class="k">Stream</td><td class="copy">Delta</td><td class="copy">Delta + retryable</td></tr></table></div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">After</div><div class="mod deep">classify(status, slug, body, msg, effort) → fault{overflow, code, text, retryable, hinted}</div><div class="grid grid-cols-2 gap-1 mt-2 text-center"><div class="mod">render as error</div><div class="mod">render as Delta</div></div></div>
+  </div>
+  <p><b>Why speculative.</b> Small and safe; leverage arrives when a second dialect (bead apogee-6fp) adds one classifier arm instead of four.</p>
+</article>
+
+<!-- C26 -->
+<article id="c26" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+  <h2 class="font-serif text-2xl">26. A delegate's runtime state is one value (follow-on to plan item 8)</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/agent</span></div>
+  <p class="files">internal/agent/agent.go — 19 delegate-only fields (:251, :360-433: depth, callID, consoleOwner, task, seatFallback, capRequested, name, mailbox, steered, stepCap, token/time caps, outputPath/Target, midExchangeCompaction, stepNoticeAt, liveMode) · subagent.go:889 <span class="k">delegation</span> (construction input), :769-874 <span class="k">delegationResult</span> reads 8 of them · agent.go:1333 <span class="k">isDelegate</span> = <span class="k">depth &gt; 0</span> · 10 test files fake a child by poking fields · plan 2026-09-15 - 00 item 8's regression guard kept the fields flat "so the tests that fake a child by poking a field keep compiling"</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">Before</div><div class="mod shallow">delegation value → construction copies once → 19 flat fields</div><div class="band red mt-2">tests reach past the constructor to fake a child</div></div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">After</div><div class="mod deep">Agent.delegate *delegateState (nil at depth 0) · isDelegate = set · Run/finishAtStepCap/delegationResult read it whole</div></div>
+  </div>
+  <p><b>Why speculative.</b> The owner deferred this knowingly on 09-15 for test-churn reasons. Not the denied Posture value: nothing here is a live setter (only <span class="k">name</span> keeps its lock, inside the value). Raise only if the test-surface argument outweighs the churn.</p>
+</article>
+
+<!-- C27 -->
+<article id="c27" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+  <h2 class="font-serif text-2xl">27. Retirements are one ordered migration table</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">internal/config</span></div>
+  <p class="files">internal/config/configmigrate.go:90-164 <span class="k">migrateLegacyConfig</span> — hand-ordered (refuse launcher, refuse profile, sniff, fold, fold, backup, write, notes) · five retirements each with their own sniff type, locate, refusal/splice, verify and note (:178-488, :490-587, :606-709, :732-963, :965-1600) · <span class="k">retiredLauncherSetting</span> :546-564 ≡ <span class="k">retiredProfileSetting</span> :654-672 (19 lines twice) · the ordering invariant ("refused FIRST", :41-43) and the startup-vs-live rule (<span class="k">mayFoldReactions</span>) kept by hand — and the second already leaks (defect below) · shared machinery underneath (<span class="k">Document</span>, <span class="k">rootMapping</span>, <span class="k">verifiedEdit</span>) is deep</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">Before</div><div class="grid grid-cols-5 gap-1"><div class="copy">quadruple</div><div class="copy">launcher</div><div class="copy">profile</div><div class="copy">sub-agents</div><div class="copy">hooks/mechanisms/sets</div></div><div class="band thin mt-2">migrateLegacyConfig sequences them by hand</div></div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">After</div><div class="mod deep">retirements[] · key · refuse | fold · live-ok? · locate · fix/splice · note — walked: refusals first, one backup, one write, one note</div></div>
+  </div>
+  <p><b>Why speculative.</b> Five retirements in four months is real growth, but each is a one-off and the splice machinery underneath is already deep.</p>
+</article>
+
+<!-- C28 -->
+<article id="c28" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+  <h2 class="font-serif text-2xl">28. One out-of-band completion for the two namers</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span><span class="px-2 py-0.5 rounded bg-slate-100 text-slate-700">cmd/apogee</span></div>
+  <p class="files">cmd/apogee/title.go:82-105 <span class="k">titleWiring.generate</span>, :133-149 <span class="k">respondDroppingThinkingOff</span> · naming.go:129-150 <span class="k">delegationNamer.NameDelegation</span>, :153-178 upstream choosers · both: <span class="k">provider.NewClient(…, WithRequestTimeout, WithAPIKey, WithMaxRetries(0))</span> (the only two <span class="k">WithMaxRetries(0)</span> in the tree), the effort-off re-send, <span class="k">FinishReason=="length" &amp;&amp; Content==""</span> ⇒ <span class="k">title.ErrTruncated</span> · raised independently by two explorers</p>
+  <div class="grid md:grid-cols-2 gap-6">
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">Before</div><div class="grid grid-cols-2 gap-1"><div class="copy">title: binding → client → drop-thinking → truncation → text</div><div class="copy">delegation: binding → client → drop-thinking → truncation → text</div></div></div>
+    <div class="rounded-lg border border-slate-200 bg-stone-50 p-4"><div class="cap">After</div><div class="mod deep">namingCall(ctx, binding, dialect, req, timeout) — client policy · effort-off rule · ErrTruncated</div><div class="grid grid-cols-2 gap-1 mt-2 text-center"><div class="mod">title: pick binding + Prompt</div><div class="mod">delegation: pick binding + DelegationPrompt</div></div></div>
+  </div>
+  <p>ADR 0022, 0060, 0068 — no conflict. ~12 duplicated lines; do it when already in these files.</p>
+</article>
+
+<!-- C29 -->
+<article id="c29" class="rounded-xl border border-slate-200 bg-white p-6 space-y-4 shadow-sm">
+  <h2 class="font-serif text-2xl">29. Small interface trims (no diagram warranted)</h2>
+  <div class="flex gap-2 text-xs"><span class="px-2 py-0.5 rounded bg-slate-200 text-slate-700">Speculative</span></div>
+  <ul class="text-sm space-y-2">
+    <li><b><span class="k">delegation.go</span> keeps an interface for a retired stage.</b> cmd/apogee/delegation.go:187-192 <span class="k">delegationWiring.base apogee.Config</span> ("Nothing reads it today"); :249-278 <span class="k">newDelegationWiring</span> returns an <span class="k">error</span> no path produces; :337-342 <span class="k">newSubAgentServer(entry, base)</span> ignores <span class="k">base</span>; threaded through wire_firing.go:547-567 <span class="k">resolveFiringRouting</span> and checked at wire_live.go:309-313. ADR 0076 A6 retired the per-seat catalogue it fed. Drop the parameter and the error return; <span class="k">delegation_test.go</span>'s Config literals shrink.</li>
+    <li><b><span class="k">probe.observeThinking</span> re-derives the thinking-style markers <span class="k">processing</span> owns.</b> internal/probe/battery.go:348-368, :415-420 vs internal/processing/harmony.go:65/:130, thinking.go — two recognisers of "what a thinking channel looks like" can diverge (an unclosed <span class="k">&lt;think&gt;</span> is "none" here, mid-channel there). <span class="k">processing</span> offers "which style would parse this"; the probe asks it. ADR 0021/0044 unaffected.</li>
+    <li><b>Twins the engine explorer noted, not candidates:</b> loop.go:909-919 <span class="k">buildRequest</span> and :1518-1525 <span class="k">loopView</span> stamp the same four facts on a fresh <span class="k">Request</span>; wire.go:142-155 <span class="k">injectSystemInstructions</span> re-implements <span class="k">domain.Request.appendOrCreateSystem</span> (:630-651) on <span class="k">provider.Message</span>; interject.go:79-90 re-composes the user message as loop.go:106-109 does ("Mirrors step()'s…"); python_exec.go:277 <span class="k">resolveWorkdir</span> is a private copy of exec_common.go:172; dispatch.go:1097 reads past <span class="k">domain.Approver</span> by type-asserting the approval cache.</li>
+  </ul>
+</article>
+
+<!-- adjudicated -->
+<article class="rounded-xl border border-slate-200 bg-stone-100 p-6 space-y-2">
+  <h2 class="font-serif text-xl text-slate-800">Adjudicated earlier — mentioned, not re-raised</h2>
+  <p class="text-sm text-slate-700"><b>The per-entry ranking ladder at every arrival.</b> internal/config/config.go:2079-2170 (four two-argument <span class="k">Resolve*</span> ladders) is still called at 14 sites in 5 files — <span class="k">serverBinder.bind</span> (wire_server.go:72-146), <span class="k">sessionMover.move</span> (upstream.go:246-310), <span class="k">firingConfig</span>, <span class="k">rebindInputs</span> — and the engine takes the same nine facts under two names (<span class="k">apogee.Config</span> vs <span class="k">agent.UpstreamSpec</span>, rebind.go:255-300). The 2026-09-14 review's candidate 7 was ratified "IN, reduced — <span class="k">Options.StartupEntry</span>; the three ladders are NOT changed; <span class="k">liveSettings.entry*</span> untouched (bead)". The residue is real and measured; it is listed here so the owner can say whether the reduction stands, not as a new candidate.</p>
+</article>
+
+</section>
+
+<!-- ============================ DEFECTS ============================ -->
+<section id="defects" class="space-y-4">
+  <h2 class="font-serif text-3xl pt-4 border-t border-slate-200">In-passing defects — for <span class="k">/code-audit</span>, not this review</h2>
+  <p class="text-sm text-slate-600">Noted while exploring; unverified beyond a read. Two look like real bugs, the rest are drift.</p>
+  <ol class="list-decimal ml-6 text-sm space-y-1.5 text-slate-800">
+    <li><b>Security.</b> cmd/apogee/toolchain_roots.go:86 resolves <span class="k">go</span> with bare <span class="k">exec.LookPath</span> and spawns it (:90) without <span class="k">security.ResolveProgram</span> — the one production exec site outside the argv[0] fence (every other site refuses a program resolving inside the workspace). A workspace-resident absolute PATH entry (an activated <span class="k">.venv/bin</span>) would run a planted <span class="k">go</span> at boot, before any session fence.</li>
+    <li><b>Config.</b> internal/config/configmigrate.go:125-154: on a live re-read (<span class="k">mayMigrate=false</span>) a file still carrying the retired top-level quadruple is folded, backed up and rewritten — the <span class="k">mayFoldReactions</span> gate covers only the <span class="k">hooks:</span> fold, contradicting config.go:3006-3008 ("every live re-read … refuses rather than rewriting"). <span class="k">TestLoadFileConfigLeavesTheRetiredKeysToStartup</span> covers <span class="k">mechanisms:</span>/<span class="k">validated-sets:</span> only.</li>
+    <li>internal/agent/compact.go:564-580 drops <span class="k">Delta.Retryable</span>: a transient in-band fault during a summary fails the fold outright where a Turn would re-stream (candidate 6).</li>
+    <li>internal/schedule <span class="k">Outcome</span> carries no <span class="k">Wrote</span>/undo verb; the in-session Firing block cannot show what an Auto <span class="k">/schedule</span> Firing changed on disk while headless and the daemon do (candidate 7).</li>
+    <li>internal/tui/commandrun.go:126 commits the thinking board on launch; the <span class="k">/continue</span> (:331-362) and <span class="k">/compact</span> (:474-493) launches do not — masked by <span class="k">finishWorker</span> (candidate 5).</li>
+    <li>Dead interface: <span class="k">tui.Options.Bypass</span> (tui.go:796) set by wire_options.go:68, read nowhere in <span class="k">internal/tui</span>; <span class="k">Engine.Close</span> (tui.go:781) never called by the package (the binary closes at wire.go:277) — widens the seam and <span class="k">fakeEngine</span> for no caller; <span class="k">newDelegationWiring</span>'s never-produced error and unread <span class="k">base apogee.Config</span> (candidate 29).</li>
+    <li>Test gap: the six write-alone mirrors (<span class="k">delegate-max-steps/depth/tokens</span>, <span class="k">delegate-timeout</span>, <span class="k">working-window</span>, <span class="k">undo-snapshots</span>) are never asserted through <span class="k">liveSettings.options()</span> — wire_settings_test.go:754 applies with no <span class="k">live</span>; :1124 lists 14 other keys.</li>
+    <li>Doc/claim drift: internal/probe/model.go:251 "now resolves at medium confidence" and CONTEXT.md L1898 "identity is resolved offline at startup" describe a resolution no code performs since ADR 0076 A9 (candidate 8); internal/config/registry.go:113-116 "Startup resolution does not call [Validate]" is false at config.go:3053/:3061/:3089; internal/tui/settingsapply.go:322-324 "internal/config imports this package" is stale; stale symbol references in comments at internal/agent/agent.go:674 (<span class="k">library.Store.Close</span>), internal/tools/web_fetch.go:148 and internal/sanitize/sanitize.go:78 (<span class="k">library.SanitizeContent</span>), docs/adr/0071:204 ("serve Validated sets"); internal/tools/doc.go:207/:292 count 33+15=48 files, the package has 47.</li>
+    <li>Two spellings of one default with no pin: registry.go <span class="k">ui.stall-after</span> <span class="k">Default: "90s"</span> vs config.go:331 <span class="k">defaultStallAfter = 90 * time.Second</span> (the pattern holds for every block-mapped key; only <span class="k">mode</span> is pinned).</li>
+    <li><span class="k">apogee.Config.UndoSnapshots</span> is set only by <span class="k">firingConfig</span> (wire_firing.go:344); the TUI leaves it false and opens the journal itself (wire_live.go:454-460) — one Config key with Driver-dependent meaning, documented but easy to misread.</li>
+  </ol>
+</section>
+
+<!-- ============================ ALREADY DEEP ============================ -->
+<section id="deep" class="space-y-3">
+  <h2 class="font-serif text-xl text-slate-800 pt-4 border-t border-slate-200">Already deep — leave alone</h2>
+  <div class="grid md:grid-cols-2 gap-x-8 text-sm text-slate-700">
+    <ul class="list-disc ml-5 space-y-1">
+      <li><b>Engine:</b> <span class="k">loop.go:step</span> + <span class="k">turnLifecycle</span> (one body over one exit table); <span class="k">fireCascade</span>/<span class="k">fireLeg</span>/<span class="k">seamPayload</span>; the four rebind doors (<span class="k">Rebind</span>/<span class="k">SwitchUpstream</span>/<span class="k">SetProfile</span>→<span class="k">applyProfile</span>/<span class="k">SwapTools</span>, each ADR-backed); <span class="k">internal/context</span> reducers; <span class="k">internal/reactions</span> Runner; <span class="k">syncexec.runSyncArgv</span>; <span class="k">children.go</span>, <span class="k">treesnapshot.go</span>, <span class="k">gate.go</span>; <span class="k">domain/hooks.go</span> (domain working values — only the file name is stale).</li>
+      <li><b>Provider / processing:</b> <span class="k">Client</span> (one <span class="k">buildBody</span>, two parsers over shared helpers); <span class="k">processing.ParserFor</span> (3+3 adapters selected once); <span class="k">streamResponse</span> is the one delta→Event door.</li>
+      <li><b>Probe / support:</b> <span class="k">GatherTerminal</span>/<span class="k">GatherHost</span>/<span class="k">GatherModel</span>; <span class="k">internal/stubllm</span>, <span class="k">tuitest</span>, <span class="k">judge</span>; <span class="k">profiles.Resolve</span>; <span class="k">internal/prompt</span>; <span class="k">refs</span>; <span class="k">notice</span> (passes the deletion test: 10 callers); <span class="k">format</span>, <span class="k">present</span>, <span class="k">doctext</span>, <span class="k">sanitize</span>; <span class="k">keystore</span> (own runner ratified).</li>
+    </ul>
+    <ul class="list-disc ml-5 space-y-1">
+      <li><b>Drivers:</b> <span class="k">raise</span>/<span class="k">firingInputs</span>/<span class="k">firingConfig</span>; <span class="k">internal/schedule</span> (two real adapters); <span class="k">heartbeat.Beat</span>; <span class="k">launcher.go</span>; <span class="k">delegation.go</span>'s state machine; <span class="k">eventjson</span>; <span class="k">run/transcript.go</span> (divergence ratified); <span class="k">undo.Journal</span> + <span class="k">snapshot.Store</span>; <span class="k">internal/daemon</span>; <span class="k">sessionHost</span>.</li>
+      <li><b>Config:</b> <span class="k">configedit.verifiedEdit</span> (the one write transaction); <span class="k">renderSettingValue</span>, <span class="k">entryEdit</span>; <span class="k">KeyResolver</span> (8 callers, none past it); <span class="k">settingsRows</span>; <span class="k">externalEdit.projection</span>; <span class="k">Key.Read/Text/Structure</span> + bijection guard; <span class="k">scheme</span>.</li>
+      <li><b>Tools:</b> <span class="k">readScope</span> + <span class="k">ReadMounts</span> (the model for candidate 3); <span class="k">networkTool.do</span>; <span class="k">mcp.serverTool</span> (first-class at the registry seam); <span class="k">subprocess.run</span>; <span class="k">gitexec</span>; <span class="k">platform</span>; <span class="k">security.Guards.PreExecute</span> (once per call, dispatch.go:426); <span class="k">tools.Classify</span>; roster ladder; <span class="k">regions</span>/<span class="k">nearmatch</span>/<span class="k">nearname</span>; console collector/ring.</li>
+      <li><b>TUI:</b> <span class="k">keyClaimOrder</span> + <span class="k">claimKey</span>; <span class="k">foldEvent</span>; <span class="k">toolRegistry</span>/<span class="k">toolView</span> (one declaration per tool, 31 rows); <span class="k">resolveBlock</span> + paint cache (one shape decision); <span class="k">listSurface</span>, <span class="k">reportPane</span>; <span class="k">frameSpans</span>/<span class="k">popupPaneHit</span>; <span class="k">toggleBlockAt</span>; <span class="k">footerFit</span>; <span class="k">interjectBox</span>/<span class="k">parkCall</span>.</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ============================ TOP ============================ -->
+<section id="top" class="rounded-xl border-2 border-slate-900 bg-white p-8 space-y-3 shadow">
+  <div class="cap">Top recommendation</div>
+  <h2 class="font-serif text-3xl"><a class="underline" href="#c1">1. <span class="k">liveSettings</span> holds one live <span class="k">Options</span></a> — then <a class="underline" href="#c2">2. one <span class="k">Options</span>→<span class="k">Config</span> projection</a> on top of it</h2>
+  <p class="text-slate-700">The friction was measured on a two-day-old commit: <span class="k">delegate-timeout</span> crossed ten code tables, four of them in <span class="k">wire_settings.go</span> alone, and six live keys are already untested through the interface that Firings read. Candidate 1 turns the holder into boot + overlay with one door; candidate 2 then makes "a Firing sees what the session sees" one function applied to two inputs instead of five paired tests. Together they close the largest per-key ritual in the host and set up candidate 9 (the registry row's <span class="k">Set</span>), which is bounded until they land. Runner-up on evidence: <a class="underline" href="#c3">3. the write-side scope value</a> — the read side already proved the shape, and a source-scanning test is the tell.</p>
+</section>
+
+</main>
+</body>
+</html>
