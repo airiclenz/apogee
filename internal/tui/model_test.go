@@ -101,6 +101,7 @@ func cmdMsg(cmd tea.Cmd) tea.Msg {
 // /version is synchronous like /clear: it records the resolved build version (Options.Version)
 // as a transcript note and launches no worker.
 func TestVersionCommandPrintsVersionNote(t *testing.T) {
+	t.Parallel()
 	opts := testOpts
 	opts.Version = "v1.2.3"
 	m := newTestModelEng(t, &fakeEngine{}, opts)
@@ -139,6 +140,7 @@ func TestVersionCommandPrintsVersionNote(t *testing.T) {
 // provenance), and it is not a user block (so the sticky header never treats it as a prompt). The
 // box reads BaseVersion, never the full Version that /version and --version show.
 func TestNewModelSeedsStartupBox(t *testing.T) {
+	t.Parallel()
 	opts := Options{
 		Model:         "/models/gpt-oss-20b.gguf", // displayModel strips the path + weight extension
 		Endpoint:      "http://localhost:1234",
@@ -183,6 +185,7 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 // (testOpts leaves both version fields empty, so a local opts with distinct Version/BaseVersion is
 // used to prove the box drops the build provenance.)
 func TestNewStartupViewMatchesSeed(t *testing.T) {
+	t.Parallel()
 	opts := Options{
 		Model:         "/models/gpt-oss-20b.gguf",
 		Endpoint:      "http://localhost:1234",
@@ -209,6 +212,7 @@ func TestNewStartupViewMatchesSeed(t *testing.T) {
 // so the view is identical to a fresh launch. This inverts the prior "the box survives /clear"
 // contract — the owner now wants /clear (and /new) to reprint the box and drop everything else.
 func TestClearResetsToStartupBox(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	seedConversation(&m)
 
@@ -231,6 +235,7 @@ func TestClearResetsToStartupBox(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelExchangeLifecycle(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	if m.state != stateIdle {
 		t.Fatalf("fresh model state = %v, want idle", m.state)
@@ -290,6 +295,7 @@ func TestModelExchangeLifecycle(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // ContextWindow 32768
 
 	// The gauge is dark until the first turn reports usage.
@@ -342,6 +348,7 @@ func TestUsageEventDrivesGaugeAndThroughput(t *testing.T) {
 // A re-streamed Turn (StreamResetEvent) restarts the throughput clock, so the next usage times
 // only the accepted generation.
 func TestUsageThroughputClockResetsOnReStream(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "draft"}})
 	m = step(t, m, eventMsg{Event: domain.StreamResetEvent{}})
@@ -354,6 +361,7 @@ func TestUsageThroughputClockResetsOnReStream(t *testing.T) {
 // cells, an eighth-block partial cell for sub-cell granularity, and a solid track for the
 // rest — with a min-sliver floor and a clamp at the window limit.
 func TestContextGaugeBarRendering(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 
 	// 50% of a 10-cell bar lands on a whole-cell boundary: 5 full blocks, no partial.
@@ -388,6 +396,7 @@ func TestContextGaugeBarRendering(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelMessageEventIsCanonical(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "draft"}})
 	// The MessageEvent text is canonical and supersedes the streamed preview.
@@ -406,7 +415,9 @@ func TestModelMessageEventIsCanonical(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelSeamMessageTransitions(t *testing.T) {
+	t.Parallel()
 	t.Run("approvalReqMsg → awaitingApproval", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		req := approvalReqMsg{
 			Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write", CacheKey: ordinaryGateKey},
@@ -425,6 +436,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 	})
 
 	t.Run("cancelledMsg → idle with a note", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		startStubWorker(t, &m)
 		m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
@@ -440,6 +452,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 	})
 
 	t.Run("cancelledMsg discards the Exchange so the next input is accepted", func(t *testing.T) {
+		t.Parallel()
 		// The post-Esc wedge regression: a cancel must tell the engine to abort the open
 		// Exchange, otherwise the engine stays inExchange and the next /clear or message is
 		// rejected with ErrInputPending.
@@ -457,6 +470,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 	})
 
 	t.Run("errMsg → errored", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		startStubWorker(t, &m)
 		m = step(t, m, errMsg{Err: errors.New("upstream unreachable")})
@@ -472,6 +486,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 	})
 
 	t.Run("errMsg discards the open Exchange so the next input is accepted", func(t *testing.T) {
+		t.Parallel()
 		// The error flavour of the post-Esc wedge: a loop fault must abort the open Exchange the
 		// same way a cancel does, otherwise a mid-Exchange Step error would leave the engine
 		// inExchange and the next /clear or message would be rejected with ErrInputPending. Latent
@@ -490,6 +505,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 	})
 
 	t.Run("errored → enter dismisses to idle", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m.state = stateErrored
 		m.lastErr = errors.New("boom")
@@ -510,6 +526,7 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 // the wire, stays unmarked and still counts; a cancelled /compact drives no Exchange and marks
 // nothing.
 func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		msg  tea.Msg
@@ -521,6 +538,7 @@ func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := newTestModel(t)
 			m.transcript.addUser("first", nil)
 			m.transcript.commitAssistant("done", runRef{})
@@ -555,6 +573,7 @@ func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 	}
 
 	t.Run("a cancelled /compact marks nothing", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m.transcript.addUser("first", nil)
 		m.transcript.commitAssistant("done", runRef{})
@@ -580,6 +599,7 @@ func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 
 // blank submit is also refused (no worker, stays idle).
 func TestModelBlankSubmitIsIgnored(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("   ")
 	next, cmd := stepCmd(t, m, keyEnter())
@@ -594,6 +614,7 @@ func TestModelBlankSubmitIsIgnored(t *testing.T) {
 // The newline keys insert a line break into the input instead of submitting: shift+enter on
 // Kitty-capable terminals, alt+enter and ctrl+j everywhere. Plain enter still submits.
 func TestModelNewlineKeysInsertLineBreak(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		key  tea.KeyPressMsg
@@ -604,6 +625,7 @@ func TestModelNewlineKeysInsertLineBreak(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := newTestModel(t)
 			m.input.SetValue("line one")
 			m.input.MoveToEnd()
@@ -623,6 +645,7 @@ func TestModelNewlineKeysInsertLineBreak(t *testing.T) {
 // The empty box advertises ⇧⏎ only on a terminal that negotiated the enhanced keyboard protocol:
 // the model starts pessimistic and follows bubbletea's KeyboardEnhancementsMsg, in both directions.
 func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 
 	// No answer yet — the start-up default names only the chord every terminal delivers.
@@ -657,7 +680,9 @@ func TestModelNewlineLegendFollowsKeyboardProtocol(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelStopKeys(t *testing.T) {
+	t.Parallel()
 	t.Run("a single esc while running arms the gesture but cancels nothing", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		cancelled := startStubWorker(t, &m)
 		next, cmd := stepCmd(t, m, keyEsc())
@@ -676,6 +701,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("esc twice while running cancels but does not quit", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		cancelled := startStubWorker(t, &m)
 		m = step(t, m, keyEsc())
@@ -699,6 +725,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("a second esc after the window only re-arms", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		cancelled := startStubWorker(t, &m)
 		m = step(t, m, keyEsc())
@@ -715,6 +742,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("a worker that finishes mid-window takes the arm with it", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		startStubWorker(t, &m)
 		armed := step(t, m, keyEsc())
@@ -733,6 +761,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("esc while idle does not quit", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		next, cmd := stepCmd(t, m, keyEsc())
 		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
@@ -744,6 +773,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("esc while errored does not quit", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m.state = stateErrored
 		next, cmd := stepCmd(t, m, keyEsc())
@@ -756,6 +786,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("a single ctrl+c arms the gesture but does not quit", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		next, _ := stepCmd(t, m, keyCtrlC())
 		if next.lastCtrlC.IsZero() {
@@ -767,6 +798,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("ctrl+c twice at idle quits immediately", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		_, cmd := ctrlCQuit(t, m)
 		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
@@ -775,6 +807,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("ctrl+c twice while busy defers the quit until the worker returns", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		cancelled := startStubWorker(t, &m)
 		next, cmd := ctrlCQuit(t, m)
@@ -797,6 +830,7 @@ func TestModelStopKeys(t *testing.T) {
 	})
 
 	t.Run("a second ctrl+c after the window only re-arms", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m = step(t, m, keyCtrlC())
 		m.lastCtrlC = m.lastCtrlC.Add(-2 * ctrlCQuitWindow) // pretend the window lapsed
@@ -862,6 +896,7 @@ func armApproval(t *testing.T, m Model) Model {
 // Each decision key yields the matching ApprovalDecision on the reply channel, clears the
 // prompt, and returns to running so the worker's blocked Step resumes.
 func TestModelApprovalDecisionKeys(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		key  tea.KeyPressMsg
@@ -873,6 +908,7 @@ func TestModelApprovalDecisionKeys(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 
 			m, cmd := stepCmd(t, m, tc.key)
@@ -902,6 +938,7 @@ func TestModelApprovalDecisionKeys(t *testing.T) {
 // input buffer when the prompt appeared — a/s/d, or the ⏎ that takes the highlighted Allow row —
 // must not answer a call the human has not read. Once the arm arrives the same key rules as always.
 func TestModelApprovalKeysAreDeadUntilArmed(t *testing.T) {
+	t.Parallel()
 	m, reply := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 
 	for _, key := range []tea.KeyPressMsg{
@@ -937,6 +974,7 @@ func TestModelApprovalKeysAreDeadUntilArmed(t *testing.T) {
 // The arm names the pane it was scheduled for: a tick left over from a prompt that has since been
 // cancelled arms nothing, so the NEXT prompt still gets its own full look-at-it window.
 func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
+	t.Parallel()
 	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "first"})
 	stale := m.approvalSeq
 
@@ -981,6 +1019,7 @@ func TestModelApprovalStaleArmDoesNotArmTheNextPane(t *testing.T) {
 // path, so it is never the key made harder to reach. It is the double-tap it is everywhere else a
 // worker runs (the frame's `case "esc"` covers the pane), and neither press waits on the arm.
 func TestModelApprovalEscapeIsLiveBeforeArming(t *testing.T) {
+	t.Parallel()
 	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 	cancelled := startStubWorker(t, &m)
 
@@ -1005,6 +1044,7 @@ func TestModelApprovalEscapeIsLiveBeforeArming(t *testing.T) {
 // The fold that opens the prompt is what schedules its own arm: without that Cmd the keys would
 // never come alive at all.
 func TestModelApprovalFoldReturnsTheArmTick(t *testing.T) {
+	t.Parallel()
 	reply := make(chan domain.ApprovalDecision, 1)
 	m := newTestModel(t)
 
@@ -1023,6 +1063,7 @@ func TestModelApprovalFoldReturnsTheArmTick(t *testing.T) {
 
 // The pending request renders into the View: the tool, its Reason, and the arguments.
 func TestModelApprovalPromptRender(t *testing.T) {
+	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
 		Tool:      "write_file",
 		Reason:    "write",
@@ -1041,6 +1082,7 @@ func TestModelApprovalPromptRender(t *testing.T) {
 // here: the menu claims those three and nothing else, so an unrelated letter must still leave the
 // gate, the pointer and the state exactly where they were.
 func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
+	t.Parallel()
 	m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 
 	m = step(t, m, tea.KeyPressMsg{Code: 'x'})
@@ -1064,6 +1106,7 @@ func TestModelApprovalIgnoresOtherKeys(t *testing.T) {
 // A stop key while pending cancels the worker; the prompt clears when the worker reports back
 // (the cancel path is structural — esc×2 → stopWorker → cancelledMsg → finishWorker).
 func TestModelApprovalCancelClearsPrompt(t *testing.T) {
+	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 	cancelled := startStubWorker(t, &m)
 
@@ -1093,6 +1136,7 @@ func TestModelApprovalCancelClearsPrompt(t *testing.T) {
 // letters aligned in a second column, the labelled args still in the body — and no legend row at
 // all, the letters now being written beside the options they take.
 func TestModelApprovalPromptPopupChrome(t *testing.T) {
+	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
 		Tool:      "write_file",
 		Reason:    "write",
@@ -1151,6 +1195,7 @@ func TestModelApprovalPromptPopupChrome(t *testing.T) {
 // This is the way in for a human who has not learnt the letters — the legend that used to teach them
 // is gone, so the menu itself has to be operable.
 func TestModelApprovalEnterTakesTheSelectedRow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		down int
@@ -1162,6 +1207,7 @@ func TestModelApprovalEnterTakesTheSelectedRow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 			for range tc.down {
 				m = step(t, m, keyDown())
@@ -1194,6 +1240,7 @@ func TestModelApprovalEnterTakesTheSelectedRow(t *testing.T) {
 // decision, and the prompt stands until the worker reports back — the same structural path Esc has
 // always taken here (TestModelApprovalCancelClearsPrompt), because no fourth ApprovalDecision exists.
 func TestModelApprovalEnterOnCancelStopsTheWorker(t *testing.T) {
+	t.Parallel()
 	m, reply := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 	cancelled := startStubWorker(t, &m)
 
@@ -1224,6 +1271,7 @@ func TestModelApprovalEnterOnCancelStopsTheWorker(t *testing.T) {
 // Allow rather than jumping to Cancel, which on a security surface is the difference between a
 // stray keypress and a stopped run.
 func TestModelApprovalArrowsClampWithoutWrapping(t *testing.T) {
+	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
 
 	m = step(t, m, keyUp())
@@ -1250,6 +1298,7 @@ func TestModelApprovalArrowsClampWithoutWrapping(t *testing.T) {
 // A Reason far longer than the window width wraps across body lines IN FULL — no word is lost to
 // an ellipsis on this security surface (D7). Every word survives and no overflow marker appears.
 func TestModelApprovalReasonWrapsInFull(t *testing.T) {
+	t.Parallel()
 	words := []string{
 		"alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf", "hotel", "india",
 		"juliet", "kilo", "lima", "mike", "november", "oscar", "papa", "quebec", "romeo",
@@ -1277,6 +1326,7 @@ func TestModelApprovalReasonWrapsInFull(t *testing.T) {
 // is exactly the proof the strip happened at the call site (had the ESC survived, plain() would
 // have swallowed the whole SGR sequence and the literal would be gone).
 func TestModelApprovalEscapeStrips(t *testing.T) {
+	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
 		Tool:      "write\x1b[31mfile",
 		Reason:    "be\x1b[32mcareful",
@@ -1302,6 +1352,7 @@ func TestModelApprovalEscapeStrips(t *testing.T) {
 // safe: a value's lines sit under a label that can no longer be forged, so nothing they say reads
 // as a row of the surface's own.
 func TestModelApprovalArgsKeepIndentation(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
 	m = step(t, m, approvalReqMsg{
@@ -1335,6 +1386,7 @@ func TestModelApprovalArgsKeepIndentation(t *testing.T) {
 // column zero — the column the pane's own `Reason:` and labels live in — so model-authored bytes read
 // as pane furniture on the surface the decision is taken off (popupBodySegmentWrapped).
 func TestModelApprovalLongArgumentNeverPaintsFlushLeft(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 50, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
 	args, err := json.Marshal(map[string]string{"command": strings.Repeat("a", 300)})
@@ -1380,6 +1432,7 @@ func TestModelApprovalLongArgumentNeverPaintsFlushLeft(t *testing.T) {
 // the pane after the fix — folded into the row that legitimately carries it — so a substring check
 // passes on the forgery it exists to catch.
 func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		req  domain.ApprovalRequest
@@ -1444,6 +1497,7 @@ func TestModelApprovalFlattensFieldsThatCouldForgeRows(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 			m = step(t, m, approvalReqMsg{Request: tc.req, Reply: make(chan domain.ApprovalDecision, 1)})
 			view := plain(m.View())
@@ -1478,6 +1532,7 @@ func approvalBodyRows(view, prefix string) []string {
 // because it is the fact the rest of the pane cannot supply: the tool and the arguments read the
 // same whichever child sent them.
 func TestModelApprovalNamesTheAskingSubAgent(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:         "write_file",
@@ -1506,6 +1561,7 @@ func TestModelApprovalNamesTheAskingSubAgent(t *testing.T) {
 // name is what a human recognises the asker by across a queue of siblings, and the task is still the
 // sentence saying what is being authorised on its behalf (subAgentPromptLine).
 func TestModelApprovalNamesTheAskingSubAgentByName(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:         "write_file",
@@ -1536,6 +1592,7 @@ func TestSubAgentPromptLineComposition(t *testing.T) {
 		{name: "a named one leads with the name", agent: "repo-scout", task: "audit the loader", want: "Sub-agent: repo-scout — audit the loader"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := subAgentPromptLine(tc.agent, tc.task); got != tc.want {
 				t.Errorf("subAgentPromptLine(%q, %q) = %q, want %q", tc.agent, tc.task, got, tc.want)
 			}
@@ -1543,6 +1600,7 @@ func TestSubAgentPromptLineComposition(t *testing.T) {
 	}
 
 	t.Run("an escape in the name never reaches the pane", func(t *testing.T) {
+		t.Parallel()
 		got := subAgentPromptLine("repo\x1b]52;c;cGF5bG9hZA==\x07scout", "audit")
 		if strings.ContainsAny(got, "\x1b\x07") {
 			t.Errorf("a control character survived into the prompt line: %q", got)
@@ -1550,6 +1608,7 @@ func TestSubAgentPromptLineComposition(t *testing.T) {
 	})
 
 	t.Run("the clip is spent on the whole line", func(t *testing.T) {
+		t.Parallel()
 		got := subAgentPromptLine(strings.Repeat("n", approvalTaskClipRunes), "audit the loader")
 		if body := strings.TrimPrefix(got, "Sub-agent: "); len([]rune(body)) != approvalTaskClipRunes+1 {
 			t.Errorf("named line spends %d runes, want the %d-rune bound plus its ellipsis",
@@ -1592,6 +1651,7 @@ func TestSubAgentTargetFallsBackWhenTheNameStripsToNothing(t *testing.T) {
 // The top-level agent's own request carries no task, and its pane is unchanged to the byte — the
 // serial floor for a session that never delegates.
 func TestModelApprovalTopLevelDrawsNoSubAgentLine(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites", CacheKey: ordinaryGateKey}
 	m = step(t, m, approvalReqMsg{Request: req, Reply: make(chan domain.ApprovalDecision, 1)})
@@ -1605,6 +1665,7 @@ func TestModelApprovalTopLevelDrawsNoSubAgentLine(t *testing.T) {
 // is asking, and who is asking must never push what is being decided off the screen. The clip is
 // marked by its ellipsis, and the reason below it survives whole.
 func TestModelApprovalClipsAnEssayLengthSubAgentTask(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	task := strings.Repeat("sprawl ", approvalTaskClipRunes) // far past the bound
 	req := domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites", SubAgentTask: task, CacheKey: ordinaryGateKey}
@@ -1624,6 +1685,7 @@ func TestModelApprovalClipsAnEssayLengthSubAgentTask(t *testing.T) {
 // envelope that carries it. The argument braces and the quoted key are gone: this is a rendering of
 // the same one fact, not an extra view beside it.
 func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.ApprovalDecision, 1)
 	m = step(t, m, approvalReqMsg{
@@ -1659,6 +1721,7 @@ func TestModelApprovalTerminalShowsCommandBlock(t *testing.T) {
 // make. Panes for the gates the autonomy rung itself asked for carry no Remedy and draw no Fix
 // line at all, which is most of them.
 func TestModelApprovalDrawsRemedyUnderReason(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:      "terminal",
@@ -1701,6 +1764,7 @@ func TestModelApprovalDrawsRemedyUnderReason(t *testing.T) {
 // it would paint rows of its own in the pane's own body style — a second `Reason:` above the real
 // one, which is the forgery this pane's fields are flattened to prevent.
 func TestModelApprovalNamesTheResolvedPath(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:         "write_file",
@@ -1752,6 +1816,7 @@ func TestModelApprovalNamesTheResolvedPath(t *testing.T) {
 // The order case is the security-relevant one: a workdir naming where a command runs is exactly the
 // fact a body that showed the command alone would hide.
 func TestModelApprovalArgsReadAsLabelledLines(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		args string
@@ -1785,6 +1850,7 @@ func TestModelApprovalArgsReadAsLabelledLines(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 			reply := make(chan domain.ApprovalDecision, 1)
 			m = step(t, m, approvalReqMsg{
@@ -1820,6 +1886,7 @@ func TestModelApprovalArgsReadAsLabelledLines(t *testing.T) {
 // of the pane rather than as a substring anywhere in it, because a blank line in the wrong place is
 // exactly what a substring check cannot see and what the eye reads as a second block.
 func TestModelApprovalMenuSpacing(t *testing.T) {
+	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
 		Tool:      "terminal",
 		Reason:    "subprocess execution (confinement unavailable on this host)",
@@ -1855,6 +1922,7 @@ func TestModelApprovalMenuSpacing(t *testing.T) {
 // nothing means. A part that WRAPS is still ONE part, which is why the cases include a remedy long
 // enough to run several lines at this width: the blank belongs after its LAST line, not after each.
 func TestModelApprovalPartsAreParagraphs(t *testing.T) {
+	t.Parallel()
 	longRemedy := "a terminal command naming ~/.apogee needs approval, even for a read; list, " +
 		"read or copy from there with the dedicated tools instead (list_dir, read_file, grep, " +
 		"find_files, or copy_file's source argument)"
@@ -1895,6 +1963,7 @@ func TestModelApprovalPartsAreParagraphs(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 			m = step(t, m, approvalReqMsg{Request: tc.req, Reply: make(chan domain.ApprovalDecision, 1)})
 			rows := strings.Split(ansiPattern.ReplaceAllString(m.approvalPrompt(tc.req), ""), "\n")
@@ -1942,6 +2011,7 @@ func paneRowIsBlank(row string) bool {
 // arrived is the honest rendering — half a labelled body would be a claim about the call that the
 // bytes do not support.
 func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		req  domain.ApprovalRequest
@@ -1965,6 +2035,7 @@ func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 			reply := make(chan domain.ApprovalDecision, 1)
 			m = step(t, m, approvalReqMsg{Request: tc.req, Reply: reply})
@@ -1982,6 +2053,7 @@ func TestModelApprovalArgsFallBackToJSON(t *testing.T) {
 // An args body far taller than the screen caps with the explicit overflow marker and never pushes
 // the input box off-screen (D2, the never-clip guarantee — the same as the ask long-question case).
 func TestModelApprovalLongArgsCapsBody(t *testing.T) {
+	t.Parallel()
 	vals := make([]string, 200)
 	for i := range vals {
 		vals[i] = "value"
@@ -2023,6 +2095,7 @@ func TestModelApprovalLongArgsCapsBody(t *testing.T) {
 // dropped the count off its end at 42 columns and below, so a terminal that was short AND narrow —
 // the same split pane — silently went back to the state this test exists to forbid.
 func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
+	t.Parallel()
 	req := domain.ApprovalRequest{
 		Tool:      "write_file",
 		Reason:    strings.Repeat("this write needs explaining at some length. ", 8),
@@ -2033,6 +2106,7 @@ func TestModelApprovalNamesTheProseItCannotShow(t *testing.T) {
 	for _, width := range []int{80, narrowOverlayWindow} {
 		for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16, 20, 24} {
 			t.Run(fmt.Sprintf("%d×%d", width, height), func(t *testing.T) {
+				t.Parallel()
 				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 				pane := m.approvalPrompt(req)
 				rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
@@ -2100,6 +2174,7 @@ func typeInput(t *testing.T, m Model, s string) Model {
 // An ask question switches to awaitingAsk; typing then enter sends the answer on the reply
 // channel, clears the pending question, and returns to running so the worker resumes.
 func TestModelAskRoundTrip(t *testing.T) {
+	t.Parallel()
 	m, reply := newAskModel(t, domain.AskRequest{Question: "what colour?"})
 
 	m = typeInput(t, m, "teal")
@@ -2126,6 +2201,7 @@ func TestModelAskRoundTrip(t *testing.T) {
 
 // The pending question renders into the View.
 func TestModelAskPromptRender(t *testing.T) {
+	t.Parallel()
 	m, _ := newAskModel(t, domain.AskRequest{Question: "pick a port number"})
 	got := plain(m.View())
 	if !strings.Contains(got, "pick a port number") {
@@ -2136,6 +2212,7 @@ func TestModelAskPromptRender(t *testing.T) {
 // A stop key while a question is pending cancels the worker; the question clears when the
 // worker reports back (the same structural cancel path as the Approval gate).
 func TestModelAskCancelClearsPrompt(t *testing.T) {
+	t.Parallel()
 	m, _ := newAskModel(t, domain.AskRequest{Question: "q?"})
 	cancelled := startStubWorker(t, &m)
 
@@ -2163,6 +2240,7 @@ func TestModelAskCancelClearsPrompt(t *testing.T) {
 // Exchange dies under it (Esc). On that second path the half-typed ANSWER is the human's too, so it
 // is kept rather than clobbered — the draft goes back above it.
 func TestAskGivesTheBorrowedDraftBack(t *testing.T) {
+	t.Parallel()
 	const draft = "the message the question interrupted"
 
 	raise := func(t *testing.T, typed string) (Model, chan domain.AskAnswer) {
@@ -2180,6 +2258,7 @@ func TestAskGivesTheBorrowedDraftBack(t *testing.T) {
 	}
 
 	t.Run("the answer goes out", func(t *testing.T) {
+		t.Parallel()
 		m, reply := raise(t, draft)
 
 		m = typeInput(t, m, "teal")
@@ -2194,6 +2273,7 @@ func TestAskGivesTheBorrowedDraftBack(t *testing.T) {
 	})
 
 	t.Run("the exchange dies under the question", func(t *testing.T) {
+		t.Parallel()
 		m, _ := raise(t, draft)
 		startStubWorker(t, &m)
 
@@ -2210,6 +2290,7 @@ func TestAskGivesTheBorrowedDraftBack(t *testing.T) {
 	// A question that borrowed an EMPTY box owes it nothing back: no phantom text, and the answer
 	// path is byte-identical to what it always was.
 	t.Run("nothing was borrowed", func(t *testing.T) {
+		t.Parallel()
 		m, reply := raise(t, "")
 
 		m = typeInput(t, m, "teal")
@@ -2239,6 +2320,7 @@ func takeAnswer(t *testing.T, reply chan domain.AskAnswer) string {
 // With choices offered, the popup renders the question body and every choice as a row with the
 // first pre-selected; ↓ moves the highlight and ⏎ sends the highlighted label (D5/D9).
 func TestModelAskChoicesRoundTrip(t *testing.T) {
+	t.Parallel()
 	m, reply := newAskModel(t, domain.AskRequest{
 		Question: "which one?",
 		Choices:  []string{"alpha", "beta", "gamma"},
@@ -2294,6 +2376,7 @@ func askModelPaneLines(t *testing.T, m Model) []string {
 // reading "the assistant is asking:" over a question the human is already reading said nothing the
 // question did not, and on a twelve-row terminal it cost a row of the question itself.
 func TestModelAskPromptMenuChrome(t *testing.T) {
+	t.Parallel()
 	rows := askPaneLines(t, 60, domain.AskRequest{
 		Question: "which way?",
 		Choices:  []string{"left", "right"},
@@ -2342,6 +2425,7 @@ func TestModelAskPromptMenuChrome(t *testing.T) {
 // under a question with no blank between them, rather than a pane that dropped a line of the
 // question to keep its breathing room.
 func TestModelAskFreeTextBreathesAboveTheHint(t *testing.T) {
+	t.Parallel()
 	const question, hintLead = "which way?", "type your answer below"
 	m, _ := newAskModel(t, domain.AskRequest{Question: question})
 
@@ -2374,6 +2458,7 @@ func TestModelAskFreeTextBreathesAboveTheHint(t *testing.T) {
 	// pane paints one row less than the frame granted it while the transcript keeps the row nobody
 	// spent.
 	t.Run("an overflowing question spends every granted row", func(t *testing.T) {
+		t.Parallel()
 		long := "how should I continue with the implementation of the feature? " +
 			strings.Repeat("Here is another sentence of context that pushes the question onto more lines. ", 6)
 		m := modelWithOverlayRoomAt(t, 80, 20, Options{Workspace: "/ws/a"})
@@ -2396,6 +2481,7 @@ func TestModelAskFreeTextBreathesAboveTheHint(t *testing.T) {
 // in an order nothing on the screen predicts, so the question's own words no longer say whose work
 // it serves.
 func TestModelAskPromptNamesTheAskingSubAgent(t *testing.T) {
+	t.Parallel()
 	lines := askPaneLines(t, 100, domain.AskRequest{
 		Question:     "should I rewrite the loader or patch it?",
 		SubAgentTask: "audit the config loader for drift",
@@ -2418,6 +2504,7 @@ func TestModelAskPromptNamesTheAskingSubAgent(t *testing.T) {
 // And a named delegation leads it with its name, in the approval pane's words to the byte — the two
 // decision surfaces share one composition (subAgentPromptLine), so they cannot drift into dialects.
 func TestModelAskPromptNamesTheAskingSubAgentByName(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(askPaneLines(t, 100, domain.AskRequest{
 		Question:     "should I rewrite the loader or patch it?",
 		SubAgentTask: "audit the config loader for drift",
@@ -2432,6 +2519,7 @@ func TestModelAskPromptNamesTheAskingSubAgentByName(t *testing.T) {
 // The top-level agent's own question carries no task, and its pane is unchanged to the byte — the
 // serial floor for a session that never delegates.
 func TestModelAskPromptTopLevelDrawsNoSubAgentLine(t *testing.T) {
+	t.Parallel()
 	req := domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}}
 	plainPane := strings.Join(askPaneLines(t, 100, req), "\n")
 	if strings.Contains(plainPane, "Sub-agent") {
@@ -2448,6 +2536,7 @@ func TestModelAskPromptTopLevelDrawsNoSubAgentLine(t *testing.T) {
 // The task is CLIPPED rather than wrapped, under the approval pane's own bound: it says who is
 // asking, and who is asking must never push what is being asked off the screen.
 func TestModelAskPromptClipsAnEssayLengthSubAgentTask(t *testing.T) {
+	t.Parallel()
 	got := strings.Join(askPaneLines(t, 100, domain.AskRequest{
 		Question:     "shall I proceed?",
 		SubAgentTask: strings.Repeat("sprawl ", approvalTaskClipRunes), // far past the bound
@@ -2470,6 +2559,7 @@ func TestModelAskPromptClipsAnEssayLengthSubAgentTask(t *testing.T) {
 // there: with any line of the question on a content row the border is the unbroken one the mockup
 // draws (TestModelAskPromptMenuChrome), which the last subtest pins at a window with room to spare.
 func TestModelAskNamesItselfWhereTheQuestionHasNoRow(t *testing.T) {
+	t.Parallel()
 	const lead = "which way should I take"
 	req := domain.AskRequest{
 		Question: lead + " this refactor of the resolution pipeline, now that the gate has moved?",
@@ -2479,6 +2569,7 @@ func TestModelAskNamesItselfWhereTheQuestionHasNoRow(t *testing.T) {
 	for _, width := range []int{80, narrowOverlayWindow} {
 		for _, height := range []int{smallestOverlayWindow, 13, 14, 15} {
 			t.Run(fmt.Sprintf("%d×%d", width, height), func(t *testing.T) {
+				t.Parallel()
 				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 				rows := strings.Split(ansiPattern.ReplaceAllString(m.askPrompt(req), ""), "\n")
 				got := strings.Join(rows, "\n")
@@ -2504,6 +2595,7 @@ func TestModelAskNamesItselfWhereTheQuestionHasNoRow(t *testing.T) {
 	// …and nothing changes at a height with room: the border is unbroken and the question is the
 	// pane's lead line, which is the appearance the mockup pins.
 	t.Run("a window with room", func(t *testing.T) {
+		t.Parallel()
 		rows := askPaneLines(t, 80, req)
 		got := strings.Join(rows, "\n")
 		if trimmed := strings.Trim(rows[0], "╭─╮"); trimmed != "" {
@@ -2543,6 +2635,7 @@ func askAnswerLines(rows []string) int {
 // booked three lines whatever the prose measured would cost the mockup's own spacing on the very
 // windows that can afford it.
 func TestModelAskQuestionKeepsItsFloorOnARoomyWindow(t *testing.T) {
+	t.Parallel()
 	const lead = "how should I continue"
 	req := domain.AskRequest{
 		Question: lead + ` with the implementation of the feature "The best. Feature in the world"? ` +
@@ -2552,6 +2645,7 @@ func TestModelAskQuestionKeepsItsFloorOnARoomyWindow(t *testing.T) {
 
 	for _, height := range []int{24, 26, 28} {
 		t.Run(fmt.Sprintf("80×%d", height), func(t *testing.T) {
+			t.Parallel()
 			m := modelWithOverlayRoomAt(t, 80, height, Options{Workspace: "/ws/a"})
 			pane := m.askPrompt(req)
 			rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
@@ -2588,6 +2682,7 @@ func TestModelAskQuestionKeepsItsFloorOnARoomyWindow(t *testing.T) {
 	}
 
 	t.Run("a one-line question claims one line", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a"})
 		short := domain.AskRequest{Question: "which way?", Choices: req.Choices}
 		rows := strings.Split(ansiPattern.ReplaceAllString(m.askPrompt(short), ""), "\n")
@@ -2614,6 +2709,7 @@ func TestModelAskQuestionKeepsItsFloorOnARoomyWindow(t *testing.T) {
 // body's line still set aside. Where even that could not seat one, the pane owes its identity to the
 // border instead (popupRowStyle.titleFromBody), and the floor does not change which case a height is in.
 func TestModelAskQuestionFloorGivesWayToTheAnswers(t *testing.T) {
+	t.Parallel()
 	const lead = "how should I continue"
 	// One long answer, so the offering's irreducible claim is three lines rather than one — the case
 	// where a floor taken off the top could have left the pane with no seatable answer at all.
@@ -2629,6 +2725,7 @@ func TestModelAskQuestionFloorGivesWayToTheAnswers(t *testing.T) {
 
 	for height := smallestOverlayWindow; height <= 24; height++ {
 		t.Run(fmt.Sprintf("80×%d", height), func(t *testing.T) {
+			t.Parallel()
 			m := modelWithOverlayRoomAt(t, 80, height, Options{Workspace: "/ws/a"})
 			pane := m.askPrompt(req)
 			rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")
@@ -2666,6 +2763,7 @@ func TestModelAskQuestionFloorGivesWayToTheAnswers(t *testing.T) {
 // against "implement the config redesign first, commit it, then do the …" is a decision taken
 // against half a sentence.
 func TestModelAskLongChoiceWrapsUnderItsMarker(t *testing.T) {
+	t.Parallel()
 	const long = "implement the config redesign first, commit it, then do the TUI part in a separate commit"
 	rows := askPaneLines(t, 50, domain.AskRequest{
 		Question: "how to continue?",
@@ -2710,6 +2808,7 @@ func paneRowIndex(t *testing.T, rows []string, want string) int {
 // Typing a custom answer drops the choice highlight (selected −1) and ⏎ sends the typed text;
 // deleting back to empty restores the highlight and ⏎ then picks it (D5).
 func TestModelAskTypedTextOverridesChoices(t *testing.T) {
+	t.Parallel()
 	m, reply := newAskModel(t, domain.AskRequest{
 		Question: "which one?",
 		Choices:  []string{"alpha", "beta"},
@@ -2736,6 +2835,7 @@ func TestModelAskTypedTextOverridesChoices(t *testing.T) {
 // ↑/↓ with text in the input drive the textarea cursor, not the choice highlight — the multi-line
 // free-text answer must not be stolen from (D5).
 func TestModelAskArrowsWithTextKeepSelection(t *testing.T) {
+	t.Parallel()
 	m, _ := newAskModel(t, domain.AskRequest{
 		Question: "which one?",
 		Choices:  []string{"alpha", "beta", "gamma"},
@@ -2767,6 +2867,7 @@ func newMultiAskModel(t *testing.T) (Model, chan domain.AskAnswer) {
 // ␣ ticks the highlighted row and ticks it back off, follows the ↑/↓ highlight, and — the part
 // that makes it a KEY rather than a character — never reaches the answer box.
 func TestModelAskMultiSelectSpaceToggles(t *testing.T) {
+	t.Parallel()
 	m, _ := newMultiAskModel(t)
 	if len(m.askChecked) != 3 {
 		t.Fatalf("askChecked = %v, want one slot per offered choice", m.askChecked)
@@ -2796,6 +2897,7 @@ func TestModelAskMultiSelectSpaceToggles(t *testing.T) {
 // ticking them out of order (gamma first, then alpha), because ticking order is exactly what a
 // naive append-as-you-go implementation would leak into the wire format.
 func TestModelAskMultiSelectSendsCheckedLabelsInChoiceOrder(t *testing.T) {
+	t.Parallel()
 	m, reply := newMultiAskModel(t)
 
 	m = step(t, m, keyDown())
@@ -2817,6 +2919,7 @@ func TestModelAskMultiSelectSendsCheckedLabelsInChoiceOrder(t *testing.T) {
 // ⏎ with NOTHING ticked keeps today's single-select fast path as the degenerate case: the
 // highlighted row alone, byte-identical to the reply a single-select question would have sent.
 func TestModelAskMultiSelectWithNothingCheckedSendsTheHighlightedRow(t *testing.T) {
+	t.Parallel()
 	m, reply := newMultiAskModel(t)
 
 	m = step(t, m, keyDown())
@@ -2830,7 +2933,9 @@ func TestModelAskMultiSelectWithNothingCheckedSendsTheHighlightedRow(t *testing.
 // text. Deleting back to empty restores the offering with the checked set intact, so a stray
 // keystroke never costs the human the ticks they had already made.
 func TestModelAskMultiSelectFreeTextReplacesTheChecks(t *testing.T) {
+	t.Parallel()
 	t.Run("typed text is the whole answer", func(t *testing.T) {
+		t.Parallel()
 		m, reply := newMultiAskModel(t)
 		m = step(t, m, keySpace()) // alpha ticked, then abandoned for free text
 		m = typeInput(t, m, "neither")
@@ -2842,6 +2947,7 @@ func TestModelAskMultiSelectFreeTextReplacesTheChecks(t *testing.T) {
 	})
 
 	t.Run("deleting back to empty keeps the ticks", func(t *testing.T) {
+		t.Parallel()
 		m, reply := newMultiAskModel(t)
 		m = step(t, m, keySpace()) // alpha
 		m = typeInput(t, m, "hmm")
@@ -2863,6 +2969,7 @@ func TestModelAskMultiSelectFreeTextReplacesTheChecks(t *testing.T) {
 // still a character, so it falls through to the borrowed box and opens a free-text answer, and no
 // checked set is allocated at all.
 func TestModelAskSingleSelectSpaceStillTypes(t *testing.T) {
+	t.Parallel()
 	m, reply := newAskModel(t, domain.AskRequest{
 		Question: "which one?",
 		Choices:  []string{"alpha", "beta"},
@@ -2887,6 +2994,7 @@ func TestModelAskSingleSelectSpaceStillTypes(t *testing.T) {
 // is left for the next question to inherit — and still hands the borrowed draft back (finishWorker
 // owns both, and the second must not have been traded for the first).
 func TestModelAskMultiSelectCancelClearsTheChecks(t *testing.T) {
+	t.Parallel()
 	const draft = "the message the question interrupted"
 
 	m := typeInput(t, newTestModel(t), draft)
@@ -2935,6 +3043,7 @@ func askChoiceLines(rows []string) []string {
 // boxes start at one offset down the pane whichever row is pointed at, and the pointer/dot marker,
 // the labels and the spacing around them are the menu style's unchanged.
 func TestModelAskMultiSelectRendersACheckboxColumn(t *testing.T) {
+	t.Parallel()
 	rows := askPaneLines(t, 60, domain.AskRequest{
 		Question:    "which ones?",
 		Choices:     []string{"alpha", "beta", "gamma"},
@@ -2971,6 +3080,7 @@ func TestModelAskMultiSelectRendersACheckboxColumn(t *testing.T) {
 // ␣ repaints the marker of the row it ticked and leaves every other cell of the pane where it was:
 // the checked set is state the rendering reads, not a second layout.
 func TestModelAskMultiSelectToggleRepaintsTheMarker(t *testing.T) {
+	t.Parallel()
 	m, _ := newMultiAskModel(t)
 	before := askModelPaneLines(t, m)
 
@@ -3000,6 +3110,7 @@ func TestModelAskMultiSelectToggleRepaintsTheMarker(t *testing.T) {
 // and the accent says what ⏎ and ␣ act on — two different facts, and the second must not be lost to
 // the first.
 func TestModelAskMultiSelectKeepsTheMenuStyling(t *testing.T) {
+	t.Parallel()
 	m, _ := newMultiAskModel(t)
 	if !colorActive(m.th) {
 		t.Skip("no ANSI styling in this environment")
@@ -3028,6 +3139,7 @@ func TestModelAskMultiSelectKeepsTheMenuStyling(t *testing.T) {
 // checkbox column stays a column, and one option still reads as one block of text. This is the
 // columned half of TestModelAskLongChoiceWrapsUnderItsMarker.
 func TestModelAskMultiSelectLongChoiceWrapsUnderItsLabel(t *testing.T) {
+	t.Parallel()
 	const long = "implement the config redesign first, commit it, then do the TUI part in a separate commit"
 	rows := askPaneLines(t, 50, domain.AskRequest{
 		Question:    "which ones?",
@@ -3062,6 +3174,7 @@ func TestModelAskMultiSelectLongChoiceWrapsUnderItsLabel(t *testing.T) {
 // word for word otherwise; on a pane too narrow to seat it, it elides through the same truncation
 // every other pane line takes rather than wrapping the box.
 func TestModelAskMultiSelectHintNamesTheToggle(t *testing.T) {
+	t.Parallel()
 	const want = "↑↓ select · ␣ toggle · ⏎ send · type for a custom answer · esc cancel"
 	req := domain.AskRequest{
 		Question:    "which ones?",
@@ -3096,6 +3209,7 @@ func TestModelAskMultiSelectHintNamesTheToggle(t *testing.T) {
 // the very rows it was composed of before multi-select existed (singleCellRows), so its pane is the
 // byte-identical one — no marker column, no checkbox anywhere in it.
 func TestModelAskSingleSelectRenderIsUnchanged(t *testing.T) {
+	t.Parallel()
 	labels := []string{"alpha", "beta", "gamma"}
 	if got, want := askChoiceRows(labels, false, []bool{true, true, true}), singleCellRows(labels); !reflect.DeepEqual(got, want) {
 		t.Errorf("single-select rows = %v, want the plain one-cell labels %v", got, want)
@@ -3124,6 +3238,7 @@ func TestModelAskSingleSelectRenderIsUnchanged(t *testing.T) {
 // real SGR sequence and the literal would be gone — so its presence in the stripped View is
 // exactly the proof the strip happened at the call site.
 func TestModelAskEscapeStrips(t *testing.T) {
+	t.Parallel()
 	m, _ := newAskModel(t, domain.AskRequest{
 		Question: "pick\x1b[31mred",
 		Choices:  []string{"al\x1b[32mpha"},
@@ -3140,6 +3255,7 @@ func TestModelAskEscapeStrips(t *testing.T) {
 // A question far taller than the screen caps its body with the explicit overflow marker and never
 // pushes the input box off-screen (D2, the never-clip guarantee).
 func TestModelAskLongQuestionCapsBody(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	reply := make(chan domain.AskAnswer, 1)
 	m = step(t, m, askReqMsg{
@@ -3396,6 +3512,7 @@ func hasEntry(m Model, kind entryKind, want string) bool {
 // already stands and the transcript is left untouched. Contrast the canned path in
 // TestContinueAfterLiveCancelStaysCanned, which DOES add the block.
 func TestContinueOnInterruptedResumesStepOnly(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{inExchange: true} // a snapshot restored mid-Exchange
 	m := newTestModelEng(t, eng, testOpts)
 
@@ -3423,6 +3540,7 @@ func TestContinueOnInterruptedResumesStepOnly(t *testing.T) {
 // aborts the open Exchange first (synchronously, so a later Submit is accepted) and notes the
 // discard, then records the message and launches the normal worker.
 func TestSubmitOnInterruptedAbortsWithNote(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{inExchange: true}
 	m := newTestModelEng(t, eng, testOpts)
 
@@ -3451,6 +3569,7 @@ func TestSubmitOnInterruptedAbortsWithNote(t *testing.T) {
 // /clear on an interrupted session scraps the open Exchange before clearing — ClearContext refuses
 // mid-Exchange, so startNewSession aborts first — then resets the view to the re-seeded start-up box.
 func TestClearOnInterruptedAbortsThenClears(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{inExchange: true}
 	m := newTestModelEng(t, eng, testOpts)
 	seedConversation(&m)
@@ -3476,6 +3595,7 @@ func TestClearOnInterruptedAbortsThenClears(t *testing.T) {
 // interrupted note at construction, so the human sees how to pick the work back up; a cleanly-closed
 // resume gets no such note.
 func TestResumedMidExchangeShowsInterruptedNote(t *testing.T) {
+	t.Parallel()
 	opts := testOpts
 	opts.Resumed = &ResumedSession{Title: "big task", InExchange: true}
 	m := newTestModelEng(t, &fakeEngine{}, opts)
@@ -3495,6 +3615,7 @@ func TestResumedMidExchangeShowsInterruptedNote(t *testing.T) {
 // so InExchange is false and /continue stays the canned "Please continue" submit — it adds the
 // /continue user block, the tell-tale of the canned path the interrupted path omits.
 func TestContinueAfterLiveCancelStaysCanned(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	startStubWorker(t, &m)
@@ -3515,6 +3636,7 @@ func TestContinueAfterLiveCancelStaysCanned(t *testing.T) {
 // metadata through the SessionHost seam, then quits. The flush is a queued record write like any
 // other, so the exit fires from the fold that finds the queue drained rather than from the keypress.
 func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {
+	t.Parallel()
 	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"saved":true}`)}
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
 	host := &fakeSessionHost{}
@@ -3552,6 +3674,7 @@ func TestModelFlushesThroughSeamOnCleanQuit(t *testing.T) {
 // mutex, so it cannot see the collision — by proving the flush WAITS for the rename rather than
 // going out beside it, and that the exit waits for both.
 func TestQuitFlushWaitsForAnInFlightRename(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "s1", "old title", "/ws", time.Now(), 0, nil)
 	m := newSessionModel(t, &fakeEngine{}, host)
@@ -3592,6 +3715,7 @@ func TestQuitFlushWaitsForAnInFlightRename(t *testing.T) {
 // An empty conversation is not worth a record — a per-Turn snapshot and a clean quit both save
 // nothing when the transcript holds only the seeded start-up box.
 func TestModelEmptyTranscriptNeverSaves(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 
@@ -3612,6 +3736,7 @@ func TestModelEmptyTranscriptNeverSaves(t *testing.T) {
 // an idle boundary (both saveAtIdle) may file a record, or the history fills with "Session <date>"
 // entries reading 0 messages. Sending a prompt opens both boundaries.
 func TestModelPrePromptNoteNeverSaves(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 	m.transcript.addNote("confinement: workspace (fs-fenced)") // e.g. the /confine status note
@@ -3647,6 +3772,7 @@ func TestModelPrePromptNoteNeverSaves(t *testing.T) {
 // goes out from the terminal fold, once the goroutine has unwound and the engine is the Update
 // loop's again.
 func TestModelDoesNotSaveWhileBusy(t *testing.T) {
+	t.Parallel()
 	snapshotted := false
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) {
 		snapshotted = true
@@ -3684,6 +3810,7 @@ func TestModelDoesNotSaveWhileBusy(t *testing.T) {
 
 // A nil host (session saving disabled) must not break the quit path.
 func TestModelQuitWithoutSaver(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // testOpts carries no Sessions
 	m.transcript.addUser("hi", nil)
 	_, cmd := ctrlCQuit(t, m)
@@ -3695,6 +3822,7 @@ func TestModelQuitWithoutSaver(t *testing.T) {
 // A completed per-Turn snapshot persists the engine snapshot, the encoded scrollback, and the
 // derived metadata through the seam.
 func TestModelPerTurnSaveEncodesTranscript(t *testing.T) {
+	t.Parallel()
 	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"turn":1}`)}
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
@@ -3739,6 +3867,7 @@ func TestModelPerTurnSaveEncodesTranscript(t *testing.T) {
 // A completed Exchange takes the Model's OWN snapshot at idle (finishWorker → saveAtIdle) and
 // persists it — the closing-boundary save that catches state after the last per-Turn snapshot.
 func TestModelSavesAtIdleOnExchangeDone(t *testing.T) {
+	t.Parallel()
 	marker := domain.Session{State: json.RawMessage(`{"idle":true}`)}
 	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
 	host := &fakeSessionHost{}
@@ -3760,6 +3889,7 @@ func TestModelSavesAtIdleOnExchangeDone(t *testing.T) {
 // Single-flight: snapshots that arrive while a save is in flight coalesce (latest-wins), so
 // exactly one is dispatched when the running save reports back — the older intermediate is dropped.
 func TestModelSaveSingleFlightCoalesces(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 	m.transcript.addUser("hi", nil)
@@ -3805,6 +3935,7 @@ func TestModelSaveSingleFlightCoalesces(t *testing.T) {
 // asserted at the FOLD layer — which Cmd was dispatched and what is still waiting — because the
 // recording host serialises every call under one mutex of its own and so cannot see the collision.
 func TestSessionBrowserWritesQueueBehindAnInFlightSave(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "s1", "old title", "/ws", time.Now(), 0, nil)
 	m := newSessionModel(t, &fakeEngine{}, host)
@@ -3858,6 +3989,7 @@ func TestSessionBrowserWritesQueueBehindAnInFlightSave(t *testing.T) {
 // into the outgoing record and drop the outgoing conversation's own last state entirely (audit
 // 2026-08-01 follow-up). Within one segment the coalescing is exactly as it was.
 func TestSavesDoNotCoalesceAcrossARetarget(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 	m.transcript.addUser("hi", nil)
@@ -3910,6 +4042,7 @@ func TestSavesDoNotCoalesceAcrossARetarget(t *testing.T) {
 // A save failure is soft: the ok→fail edge and the fail→ok recovery each note exactly once, and
 // nothing else interrupts the conversation.
 func TestModelSaveFailureNotesTransitions(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 	m.transcript.addUser("hi", nil)
@@ -3938,6 +4071,7 @@ func TestModelSaveFailureNotesTransitions(t *testing.T) {
 // a word boundary with an ellipsis when it does not, and a dated fallback for an empty message or
 // one that opens a code fence.
 func TestSessionTitle(t *testing.T) {
+	t.Parallel()
 	long := "The quick brown fox jumps over the lazy dog and then keeps running"
 	cases := []struct {
 		name, in, want string
@@ -3951,6 +4085,7 @@ func TestSessionTitle(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := sessionTitle(tc.in)
 			if tc.prefix {
 				if !strings.HasPrefix(got, tc.want) {
@@ -3975,6 +4110,7 @@ func TestSessionTitle(t *testing.T) {
 // footer's last segment is the local directory the session is rooted in. (The status line's own
 // left slot is the live activity, covered by TestModelStatusLineActivity; at idle it is empty.)
 func TestModelStatusLine(t *testing.T) {
+	t.Parallel()
 	opts := testOpts
 	opts.Workspace = "/ws/proj"
 	m := step(t, newModel(context.Background(), &fakeEngine{}, opts, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -4008,6 +4144,7 @@ func TestModelStatusLine(t *testing.T) {
 // clear of the literal glyph: it was the retired mixed-weight rule rune, and "no border glyphs at
 // all" is the stronger form of the thin-rule property this test used to hold.
 func TestFooterViewIsOneFramelessLine(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	view := m.footerView()
 
@@ -4045,6 +4182,7 @@ func TestFooterViewIsOneFramelessLine(t *testing.T) {
 // user text, so it has no name to wear (sessionRuleName). What the row looks like once a session HAS
 // a name is TestTopRuleCarriesSessionName's business; this test is about the row's position.
 func TestTopRuleHairlineRow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 
 	if got, want := ansi.Strip(m.topRule()), strings.Repeat("▔", m.width); got != want {
@@ -4115,6 +4253,7 @@ func frameRule(t *testing.T, m Model) ([]string, int) {
 // The frame's total height is asserted with it: this is a stacking reorder and nothing else, so the
 // frame still fills the window exactly (D2) and the row arithmetic behind it is untouched.
 func TestOverlayPaneSitsFlushOnBottomChrome(t *testing.T) {
+	t.Parallel()
 	servers := []ServerChoice{
 		{Name: "host-a", Endpoint: "http://192.168.64.1:1111"},
 		{Name: "host-b", Endpoint: "http://192.168.64.2:1111"},
@@ -4153,6 +4292,7 @@ func TestOverlayPaneSitsFlushOnBottomChrome(t *testing.T) {
 
 	for _, pane := range panes {
 		t.Run(pane.name, func(t *testing.T) {
+			t.Parallel()
 			m := pane.open(t)
 			rows, ruleRow := frameRule(t, m)
 
@@ -4194,6 +4334,7 @@ func TestOverlayPaneSitsFlushOnBottomChrome(t *testing.T) {
 // transcript-side slot the frame is exactly what it always was — one blank row directly above the
 // ▔ hairline — so moving the gap above the slot changed the idle frame not at all.
 func TestFrameGapRowWithoutOverlay(t *testing.T) {
+	t.Parallel()
 	m := modelWithOverlayRoomAt(t, 80, 24, Options{Workspace: "/ws/a"})
 
 	rows, ruleRow := frameRule(t, m)
@@ -4214,6 +4355,7 @@ func TestFrameGapRowWithoutOverlay(t *testing.T) {
 // role and are asserted as one: the same recessive style, the same full width, and the frame's
 // LAST row is the bottom one, with the footer directly above it and no border glyph between them.
 func TestBottomRuleHairlineRow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 
 	if got, want := ansi.Strip(m.bottomRule()), strings.Repeat("▁", m.width); got != want {
@@ -4256,6 +4398,7 @@ func statusText(t *testing.T, m Model) string {
 // level: idle leaves the left slot empty (the input box below already invites a message), and a
 // running worker shows the live phrase with an elapsed clock, re-derived from each Event.
 func TestModelStatusLineActivity(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	if got := statusText(t, m); got != "" {
 		t.Errorf("idle status line is not empty: %q", got)
@@ -4333,11 +4476,13 @@ func silentFor(m Model, quiet time.Duration) Model {
 // HUMAN never show it: the silence there is the human's own, and telling them the engine is quiet
 // while it waits for their answer is the same lie in the other direction.
 func TestStatusLineQuietSuffix(t *testing.T) {
+	t.Parallel()
 	const after = 90 * time.Second
 	// A gap that renders unambiguously either side of a second's slack: "3m 10s".
 	const quiet = 190*time.Second + 500*time.Millisecond
 
 	t.Run("below the threshold the row says nothing about it", func(t *testing.T) {
+		t.Parallel()
 		m := silentFor(guardedRunningModel(t, after), 89*time.Second)
 		got := statusText(t, m)
 		if strings.Contains(got, "quiet") {
@@ -4349,6 +4494,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("past the threshold the phrase gains the qualifier", func(t *testing.T) {
+		t.Parallel()
 		m := silentFor(guardedRunningModel(t, after), quiet)
 		got := statusText(t, m)
 		if want := "thinking · quiet · 3m 10s"; !strings.Contains(got, want) {
@@ -4371,6 +4517,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("an arriving event takes it straight back off", func(t *testing.T) {
+		t.Parallel()
 		for _, tc := range []struct {
 			name  string
 			event domain.Event
@@ -4384,6 +4531,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 			{name: "a sub-agent's token", event: domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "sub"}},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				m := silentFor(guardedRunningModel(t, after), quiet)
 				if got := statusText(t, m); !strings.Contains(got, "quiet") {
 					t.Fatalf("status line = %q, want the qualifier before the event lands", got)
@@ -4406,6 +4554,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	// sustained case, where the row's single clock counts far past the threshold while the
 	// qualifier never appears at all, because no single gap between chunks ever crosses it.
 	t.Run("a streaming reasoning channel never surfaces it", func(t *testing.T) {
+		t.Parallel()
 		// Chunks a shade under the threshold apart: the tightest stream that still never trips the
 		// guard, over a turn eight of those gaps long (~11m 52s, near eight times `after`).
 		const gap = after - time.Second
@@ -4440,6 +4589,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("a running tool call never shows it", func(t *testing.T) {
+		t.Parallel()
 		m := guardedRunningModel(t, after)
 		m = step(t, m, eventMsg{Event: domain.ToolCallEvent{
 			Call: domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)},
@@ -4456,6 +4606,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("a stopping worker never shows it", func(t *testing.T) {
+		t.Parallel()
 		m := step(t, step(t, guardedRunningModel(t, after), keyEsc()), keyEsc()) // esc×2 fired the cancel; the worker unwinds
 		m = silentFor(m, quiet)
 
@@ -4469,6 +4620,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("a state waiting on the human never shows it", func(t *testing.T) {
+		t.Parallel()
 		for _, tc := range []struct {
 			name  string
 			state uiState
@@ -4478,6 +4630,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 			{name: "an open approval", state: stateAwaitingApproval, want: "approval needed"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				m := guardedRunningModel(t, after)
 				// The gate is an open tool call the human has not answered — the incident's corrected
 				// shape: it completed into a question nobody was at the screen for.
@@ -4499,6 +4652,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("a fresh exchange never inherits the last one's silence", func(t *testing.T) {
+		t.Parallel()
 		m := silentFor(guardedRunningModel(t, after), quiet)
 		if got := statusText(t, m); !strings.Contains(got, "quiet") {
 			t.Fatalf("status line = %q, want the qualifier on the exchange that went quiet", got)
@@ -4514,6 +4668,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 	})
 
 	t.Run("the guard turned off never shows it", func(t *testing.T) {
+		t.Parallel()
 		m := silentFor(guardedRunningModel(t, 0), 20*time.Minute)
 		if got := statusText(t, m); strings.Contains(got, "quiet") {
 			t.Errorf("status line = %q, want nothing at all with ui.stall-after: 0", got)
@@ -4526,6 +4681,7 @@ func TestStatusLineQuietSuffix(t *testing.T) {
 // narrow for both keeps the phrase and its clock whole and drops the word rather than truncating it
 // into "· quie…", which would report neither the silence nor its own word (layout.md).
 func TestStatusLineQuietSuffixGivesWayFirst(t *testing.T) {
+	t.Parallel()
 	m := silentFor(guardedRunningModel(t, 90*time.Second), 190*time.Second+500*time.Millisecond)
 	if got := statusText(t, m); !strings.Contains(got, "thinking · quiet · 3m 10s") {
 		t.Fatalf("status line = %q, want the qualifier painted at a full-width window", got)
@@ -4562,6 +4718,7 @@ func leadingColumns(t *testing.T, line string) int {
 // it (layout.md). Measured against a really-rendered block, not against the constant, so a
 // change to the marker or the hanging indent fails here rather than drifting silently.
 func TestStatusLineAlignsWithTranscriptText(t *testing.T) {
+	t.Parallel()
 	const wrapWidth = 8 // narrow enough that "alpha beta" wraps onto a continuation line
 	body := renderEntryLines(newTheme(scheme.Default()), paintInput{kind: entryAssistant, text: "alpha beta"}, wrapWidth, false).lines
 	if len(body) < 2 {
@@ -4581,6 +4738,7 @@ func TestStatusLineAlignsWithTranscriptText(t *testing.T) {
 // The indent is part of the status line's width budget, not an overhang: a window too narrow
 // for the line clips it to the window rather than wrapping onto a second row.
 func TestStatusLineIndentFitsNarrowWindow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("hello")
 	m = step(t, m, keyEnter())
@@ -4613,6 +4771,7 @@ func statusCells(t *testing.T, m Model) string {
 // marker's last character instead of against the terminal edge — and the margin comes out of the
 // row's width budget, which is still exactly one window.
 func TestStatusLineGaugeEndsShortOfEdge(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("hello")
 	m = step(t, m, keyEnter()) // running, so the gauge displaces a hint that would otherwise show
@@ -4641,6 +4800,7 @@ var gaugeMarks = "%\u2588" + string(gaugeEighths)
 // by the frame with the terminal's default background and the band broke exactly where the gauge
 // would have sat — contradicting layout.md's "the black field runs past it to the edge regardless".
 func TestStatusLineDroppedRightSlotKeepsTheField(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("hello")
 	m = step(t, m, keyEnter()) // running, so the gauge displaces a hint that would otherwise show
@@ -4705,7 +4865,9 @@ func assertStatusRightTail(t *testing.T, m Model, want string) {
 // printed there" asks for. An empty slot keeps no phantom margin: the justify gap already paints
 // the black band to the last column.
 func TestStatusLineRightSlotOccupantsShareTheMargin(t *testing.T) {
+	t.Parallel()
 	t.Run("running hint", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m.input.SetValue("hello")
 		m = step(t, m, keyEnter()) // no usage yet, so the hint holds the slot
@@ -4713,6 +4875,7 @@ func TestStatusLineRightSlotOccupantsShareTheMargin(t *testing.T) {
 	})
 
 	t.Run("errored hint", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m.state = stateErrored
 		m.lastErr = errors.New("boom")
@@ -4720,12 +4883,14 @@ func TestStatusLineRightSlotOccupantsShareTheMargin(t *testing.T) {
 	})
 
 	t.Run("copy flash", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m.flash = "copied 5 chars"
 		assertStatusRightTail(t, m, m.flash+bodyIndent)
 	})
 
 	t.Run("empty slot", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t) // idle, no usage: the slot has no occupant to inset
 		if got := statusCells(t, m); strings.TrimSpace(got) != "" {
 			t.Errorf("idle status line = %q, want nothing but the black band's fill", got)
@@ -4753,6 +4918,7 @@ func transcriptRows(t *testing.T, m Model) []string {
 // is blank. Measured on the really-composed View (not on the renderer alone) so the wrap width
 // and the reserved scroll-bar column are pinned together, mirroring bodyIndent on the left.
 func TestTranscriptBodyLeavesRightGutter(t *testing.T) {
+	t.Parallel()
 	const width = 80
 	m := newTestModel(t)
 	// Single-character words pack every wrapped line flush to the wrap limit, so the widest row
@@ -4782,6 +4948,7 @@ func TestTranscriptBodyLeavesRightGutter(t *testing.T) {
 // overflows its viewport, so the shown state would certainly paint a track and a thumb here — and
 // hiding the bar hides the BAR, not the scrolling, which the wheel at the end proves.
 func TestHiddenScrollbarYieldsTheColumn(t *testing.T) {
+	t.Parallel()
 	const width = 80
 	opts := testOpts
 	opts.HideScrollbar = true
@@ -4822,6 +4989,7 @@ func TestHiddenScrollbarYieldsTheColumn(t *testing.T) {
 // here would stay green while the bar stopped saying where the view sits. This pins the contrast
 // itself, on a really-composed frame: the bar's column carries exactly the two glyphs, both of them.
 func TestScrollbarThumbReadsAgainstItsTrack(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	// Single-character words wrap flush to the limit, and this many of them overflow the viewport
 	// several times over — so the bar is painted rather than blank.
@@ -4856,6 +5024,7 @@ func TestScrollbarThumbReadsAgainstItsTrack(t *testing.T) {
 // still wraps to at least one column, and the transcript rows stay inside the viewport plus its
 // reserved scroll-bar column (both floored at one, so a 0/1-column window still draws two).
 func TestTranscriptBodyWidthAtTinyWindows(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m = step(t, m, eventMsg{Event: domain.MessageEvent{Text: "a message long enough to wrap hard at a tiny width"}})
 
@@ -4884,6 +5053,7 @@ func TestTranscriptBodyWidthAtTinyWindows(t *testing.T) {
 }
 
 func TestModelResizeDoesNotPanic(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	for _, size := range []struct{ w, h int }{{80, 24}, {120, 40}, {200, 60}, {20, 6}, {5, 2}, {1, 1}} {
 		m = step(t, m, tea.WindowSizeMsg{Width: size.w, Height: size.h})
@@ -4899,6 +5069,7 @@ func TestModelResizeDoesNotPanic(t *testing.T) {
 
 // Before the first WindowSizeMsg the view is a placeholder, not a panic.
 func TestModelViewBeforeReady(t *testing.T) {
+	t.Parallel()
 	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 	if m.ready {
 		t.Fatal("model ready before any WindowSizeMsg")
@@ -4912,6 +5083,7 @@ func TestModelViewBeforeReady(t *testing.T) {
 // laid-out one. A frame that left AltScreen unset would paint on the primary screen, push its lines
 // into the terminal's scrollback and keep the terminal's own scrollbar visible for the whole run.
 func TestViewStaysOnAltScreen(t *testing.T) {
+	t.Parallel()
 	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 	if m.ready {
 		t.Fatal("model ready before any WindowSizeMsg")
@@ -4934,6 +5106,7 @@ func TestViewStaysOnAltScreen(t *testing.T) {
 // are pinned here, exactly, because nothing downstream can observe it: the sequences leave for a
 // real terminal and no test can watch what Terminal.app does with them.
 func TestClaimAltScreenErasesTheScrollbackAfterTheSwitch(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	if err := claimAltScreen(&buf); err != nil {
 		t.Fatalf("claimAltScreen: %v", err)
@@ -4948,6 +5121,7 @@ func TestClaimAltScreenErasesTheScrollbackAfterTheSwitch(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelRendersNestedDepth(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m = step(t, m, eventMsg{Event: domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "nested"}})
 	got := plain(m.View())
@@ -4974,6 +5148,7 @@ func TestModelRendersNestedDepth(t *testing.T) {
 // slice, or map is fine — only the header is copied — so the walk descends through value
 // composites (structs, arrays) only.
 func TestModelNoBuilderByValue(t *testing.T) {
+	t.Parallel()
 	builderType := reflect.TypeOf(strings.Builder{})
 	seen := map[reflect.Type]bool{}
 
@@ -5013,6 +5188,7 @@ func TestModelNoBuilderByValue(t *testing.T) {
 // generated output — with the prompt it belongs to overlaid at the top row as the sticky header.
 // This is the reported bug: the reply used to stream out of sight below a prompt pinned to the top.
 func TestFollowsTailOfLongStreamedReply(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.input.SetValue("FOLLOW-PROMPT")
 	m = step(t, m, keyEnter()) // the real submit path: records the prompt and re-arms follow
@@ -5038,6 +5214,7 @@ func TestFollowsTailOfLongStreamedReply(t *testing.T) {
 // A human who scrolled away is not yanked back: while detached, a repaint that appends content
 // leaves the scroll offset exactly where they put it.
 func TestDetachedRepaintHoldsPosition(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("first question", nil)
 	m.transcript.commitAssistant(strings.Repeat("filler above. ", 80), runRef{})
@@ -5065,6 +5242,7 @@ func TestDetachedRepaintHoldsPosition(t *testing.T) {
 // Content shrinking under a held offset is clamped back to the bottom by SetContentLines, so
 // following resumes — the invariant "detached ⇔ off the bottom" stays total.
 func TestShrinkingContentReattachesFollow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("a question", nil)
 	for i := 0; i < 30; i++ {
@@ -5091,6 +5269,7 @@ func TestShrinkingContentReattachesFollow(t *testing.T) {
 
 // Submitting re-arms follow: sending a prompt means the human is done reading history.
 func TestSubmitReattachesFollow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("old question", nil)
 	for i := 0; i < 30; i++ {
@@ -5117,6 +5296,7 @@ func TestSubmitReattachesFollow(t *testing.T) {
 // finished reply could not be scrolled back — the "scrolling only works intermittently" bug. A
 // wheel-up that leaves the bottom detaches: new content must not yank the history back.
 func TestMouseWheelScrollsWhileIdle(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24, stateIdle
 	m.transcript.addUser("question", nil)
 	for i := 0; i < 40; i++ {
@@ -5148,6 +5328,7 @@ func TestMouseWheelScrollsWhileIdle(t *testing.T) {
 // Detach is positional, not a latch: wheeling back down to the very bottom resumes following, and
 // the token streamed next lands in view.
 func TestWheelBackToBottomReattachesFollow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.input.SetValue("a question")
 	m = step(t, m, keyEnter())
@@ -5184,6 +5365,7 @@ func TestWheelBackToBottomReattachesFollow(t *testing.T) {
 // The keyboard funnel carries the same policy: PgDn back to the bottom re-attaches, PgUp off it
 // detaches. PgUp/PgDn are intercepted in every state, idle included.
 func TestPageDownToBottomReattachesFollow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("a question", nil)
 	for i := 0; i < 40; i++ {
@@ -5215,6 +5397,7 @@ func TestPageDownToBottomReattachesFollow(t *testing.T) {
 // the bottom" over content nobody could see. The widget now carries the DRAWN height
 // ([Model.transcriptRows]), which puts the clamp and the paint on the same row.
 func TestTranscriptTailReachableWithAPaneOpen(t *testing.T) {
+	t.Parallel()
 	m, _ := newAskModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}})
 	m.transcript.addUser("a question", nil)
 	for i := range 40 { // deeper than the drawn rows, so there is a tail to strand
@@ -5297,6 +5480,7 @@ func paneOverTailModel(t *testing.T) Model {
 // the bar said "there is more below" over a transcript with nothing left to give. Nothing in
 // renderScrollbar changed for it — the seat falls out of the clamp, and this pins that it does.
 func TestScrollbarThumbSeatsAtTheBottomWithAPaneOpen(t *testing.T) {
+	t.Parallel()
 	m := paneOverTailModel(t)
 	if m.opts.HideScrollbar {
 		t.Fatal("setup: the scroll bar is switched off, so there is no thumb to place")
@@ -5320,6 +5504,7 @@ func TestScrollbarThumbSeatsAtTheBottomWithAPaneOpen(t *testing.T) {
 // pane and jumped clean over the lines in between — a page key that skips what it never showed. The
 // step is now exactly the rows the frame draws, which is what makes one press one screenful.
 func TestPageDownAdvancesOneDrawnScreenfulWithAPaneOpen(t *testing.T) {
+	t.Parallel()
 	m := paneOverTailModel(t)
 	drawn, total := m.transcriptRows(), m.viewport.TotalLineCount()
 
@@ -5419,6 +5604,7 @@ func browserMetas(workspace string, titles ...string) []session.Meta {
 // `/settings` apply that does the same sweep. The premise loosens to match: the act must have moved
 // a pane's height or the paint's input, so a case that does neither is a broken fixture, not a pass.
 func TestPaneHeightChangeReachesLayout(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		arrange func(*testing.T) Model
@@ -5596,6 +5782,7 @@ func TestPaneHeightChangeReachesLayout(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := tc.arrange(t)
 			assertClampFresh(t, m, "setup")
 			assertPaintFresh(t, m, "setup")
@@ -5621,6 +5808,7 @@ func TestPaneHeightChangeReachesLayout(t *testing.T) {
 // the scroll clamp honest for a surface no enumerated case knows about, so dropping that call fails
 // this test while every case above still passes.
 func TestANewPaneClaimingAKeyStillReachesLayout(t *testing.T) {
+	t.Parallel()
 	m := modelWithOverlayRoomAt(t, 80, 24, testOpts)
 	m.hb.models = wireSummaries("alpha", "beta")
 	m.picker = picker{open: true, kind: pickerModel}
@@ -5679,6 +5867,7 @@ func TestANewPaneClaimingAKeyStillReachesLayout(t *testing.T) {
 // where it was; the very next non-motion Msg then repaints, which is what says the miss was real
 // and the exemption was the only thing holding it back.
 func TestMouseMotionNeverRepaints(t *testing.T) {
+	t.Parallel()
 	m := openSettingsPane(t, modelWithOverlayRoomAt(t, 80, 24, settingsOpts(settingsTestRows(6))))
 	m.transcript.addNote("a key miss the motion must not settle")
 	if m.frameKey() == m.painted {
@@ -5712,6 +5901,7 @@ func TestMouseMotionNeverRepaints(t *testing.T) {
 // at width 0. The first sized frame lays out and stores the key itself (the WindowSizeMsg arm), and
 // the write the unsized Msg left standing is painted there.
 func TestSettleWaitsForTheFirstWindowSize(t *testing.T) {
+	t.Parallel()
 	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 	m.transcript.addNote("written before the terminal said its size")
 	lines, height := m.lines, m.viewport.Height()
@@ -5759,6 +5949,7 @@ func BenchmarkUpdateMotionWithSettingsOpen(b *testing.B) {
 // A scroll that lands mid-history holds exactly there: content appended below does not move the
 // view, and does not re-attach it either.
 func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("a question", nil)
 	for i := 0; i < 60; i++ {
@@ -5789,6 +5980,7 @@ func TestScrollMidHistoryHoldsPositionOnAppend(t *testing.T) {
 // A transcript shorter than the window has no bottom to scroll off, so a wheel event over it can
 // never detach — the old offset-delta latch could be tripped by any stray offset jiggle.
 func TestWheelOnShortTranscriptDoesNotDetach(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24; the start-up box alone, far shorter than the window
 	m.refreshViewport()
 	if !m.viewport.AtBottom() {
@@ -5814,6 +6006,7 @@ func firstViewLine(m Model) string {
 // screen, so the earlier turn is still on screen and no blank padding was appended below the
 // reply. The prompt reaches the top row only naturally, once a reply has grown a screenful.
 func TestShortReplyKeepsTheExchangeAtTheTail(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("FIRST-QUESTION", nil)
 	m.transcript.commitAssistant("a prior short answer", runRef{})
@@ -5837,6 +6030,7 @@ func TestShortReplyKeepsTheExchangeAtTheTail(t *testing.T) {
 // at the true tail — no blank padding below it, the prompt on the last content rows — with the
 // history still one page-up away, rather than opening alone at the top of an emptied screen.
 func TestSubmitAppendsAtTheTailWithoutJumping(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("OLDEST-PROMPT", nil)
 	for i := 0; i < 40; i++ {
@@ -5869,6 +6063,7 @@ func TestSubmitAppendsAtTheTailWithoutJumping(t *testing.T) {
 // While scrolled, the prompt that owns the on-screen replies is frozen at the top as a sticky
 // header, and the next prompt takes over only once it is the natural top line (position: sticky).
 func TestStickyHeaderHandoffOnScroll(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.addUser("PROMPT-ONE", nil)
 	for i := 0; i < 20; i++ {
@@ -5910,6 +6105,7 @@ func TestStickyHeaderHandoffOnScroll(t *testing.T) {
 // those three rows, hidden body and all, and one deliberately expanded sticks expanded — the
 // overlay simply paints the block's own lines, however many the painter made.
 func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
 	m.transcript.addUser("alpha\nbravo\ncharlie\ndelta\necho\nfoxtrot", nil)
@@ -5952,6 +6148,7 @@ func TestStickyHeaderShowsTheCollapsedPromptShape(t *testing.T) {
 // The input box grows with its content and the viewport shrinks by the same number of rows,
 // keeping the layout balanced as a multi-line message is typed.
 func TestInputAutoGrowReflowsViewport(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	if r := m.input.Height(); r != 1 {
 		t.Fatalf("empty input height = %d, want 1 row", r)
@@ -5986,6 +6183,7 @@ func typeText(t *testing.T, m Model, s string) Model {
 // grows through several rows, including the exact-width fill points where the widget's own wrap
 // adds a trailing row.
 func TestPromptScrollClampedWhileGrowing(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	iw := m.inputInnerWidth()
 	maxHeightSeen := 1
@@ -6015,6 +6213,7 @@ func TestPromptScrollClampedWhileGrowing(t *testing.T) {
 // the box stops growing and the textarea scrolls internally, so the offset is exactly
 // contentRows - maxInputRows — keeping the caret (at the end) on the bottom visible row.
 func TestPromptScrollClampAtMaxHeight(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	iw := m.inputInnerWidth()
 	m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows of content, well past the 10-row cap
@@ -6041,6 +6240,7 @@ func TestPromptScrollClampAtMaxHeight(t *testing.T) {
 // The two caps are both here because they are one rule: the box shows what the frame lets it and
 // says how much it is not showing, whether the bound came from the window or from maxInputRows.
 func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		width      int
@@ -6065,6 +6265,7 @@ func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m := withDraft(t, modelWithOverlayRoomAt(t, c.width, c.height, testOpts), c.draft)
 
 			if got := m.hiddenDraftRows(); got != c.wantHidden {
@@ -6106,8 +6307,10 @@ func TestInputBoxCountsTheDraftRowsItCannotShow(t *testing.T) {
 // the assertion meaningful: the widget re-clamps its own scroll on each edit, and layout's re-seat
 // (reseatInput, ISSUES #2) re-clamps it whenever the cap changes the box's height under it.
 func TestInputBoxWindowFollowsTheCaret(t *testing.T) {
+	t.Parallel()
 	for _, height := range []int{frameFloorRows, 10, smallestOverlayWindow, 16, 24} {
 		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			t.Parallel()
 			m := modelWithOverlayRoomAt(t, 80, height, testOpts)
 			iw := m.inputInnerWidth()
 			m = typeText(t, m, strings.Repeat("a", iw*12)) // ~12 rows: past every cap these windows allow
@@ -6139,6 +6342,7 @@ func TestInputBoxWindowFollowsTheCaret(t *testing.T) {
 // so under the width even "… +N" needs it stays a plain border rather than drawing a clipped count —
 // "… +1" of "… +19" is not a quieter statement of the fact, it is a false one.
 func TestInputBoxTooNarrowForTheCountKeepsAPlainBorder(t *testing.T) {
+	t.Parallel()
 	m := withDraft(t, modelWithOverlayRoomAt(t, 9, 12, testOpts), 8)
 
 	if m.hiddenDraftRows() == 0 {
@@ -6153,6 +6357,7 @@ func TestInputBoxTooNarrowForTheCountKeepsAPlainBorder(t *testing.T) {
 // TestPromptScrollShrinkBack deletes a grown box back to a single line: the box shrinks and the
 // re-seat clamps the offset back to 0 (a shrink must not strand a downward offset either).
 func TestPromptScrollShrinkBack(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	iw := m.inputInnerWidth()
 	m = typeText(t, m, strings.Repeat("a", iw*3))
@@ -6171,6 +6376,7 @@ func TestPromptScrollShrinkBack(t *testing.T) {
 // leaves the scroll clamped to 0 with the first pasted line visible — the paste path runs the same
 // layout re-seat a keystroke does.
 func TestPromptScrollMultiLinePaste(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m = step(t, m, tea.PasteMsg{Content: "alpha\nbravo\ncharlie\ndelta"})
 	if m.input.Height() < 4 {
@@ -6203,6 +6409,7 @@ const reseatDeadline = 10 * time.Second
 // rather than hanging `go test`; the caret must also come back where it was, since a walk that
 // merely terminated early would strand it on the wrong line.
 func TestPromptScrollReseatCannotSpin(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80 columns ⇒ a 76-column text area
 	iw := m.inputInnerWidth()
 	middle := strings.Repeat("aaa ", 19) // 76 chars: fills one row exactly, ends with a space
@@ -6255,6 +6462,7 @@ func TestPromptScrollReseatCannotSpin(t *testing.T) {
 // textarea's remembered goal column. Moving down through a short line and on to a long one lands
 // the caret back near the original column — proof the gate left the widget's sticky column intact.
 func TestReseatPreservesStickyColumn(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("aaaaaaaaaa\nbb\ncccccccccc")
 	m.layout()
@@ -6277,6 +6485,7 @@ func TestReseatPreservesStickyColumn(t *testing.T) {
 // "never reached in practice" row here, now a real state at every cold start — has its own test,
 // TestDisplayModelEmpty (heartbeat_test.go).
 func TestDisplayModel(t *testing.T) {
+	t.Parallel()
 	cases := []struct{ in, want string }{
 		{"/Users/me/models/qwen2.5-coder-7b-instruct.gguf", "qwen2.5-coder-7b-instruct"},
 		{"/opt/models/Llama-3.1-8B.GGUF", "Llama-3.1-8B"},
@@ -6336,6 +6545,7 @@ func TestFooterContentStripsEscapes(t *testing.T) {
 // Auto says so, that turning the fence off changes the word (in the error tone, the one state where
 // Auto runs with their full privileges), and that a rung which never reads the flag stays silent.
 func TestFooterMarkerSaysWhetherAutoIsConfined(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{confine: true}
 	m := newTestModelEng(t, eng, confineOpts(capableHost, domain.ModeAuto))
 
@@ -6370,8 +6580,10 @@ func TestFooterMarkerSaysWhetherAutoIsConfined(t *testing.T) {
 // they gate every subprocess call through Approval whatever the flag says, so there is no blast
 // radius to name — and the word must not leak in from a confined engine underneath them.
 func TestFooterMarkerCarriesNoConfinementWordBelowAuto(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits} {
 		t.Run(string(mode), func(t *testing.T) {
+			t.Parallel()
 			m := newTestModelEng(t, &fakeEngine{confine: true}, confineOpts(capableHost, mode))
 			flat := ansiPattern.ReplaceAllString(m.footerContent(120), "")
 			if want := modeMarker(mode) + bodyIndent; !strings.HasSuffix(flat, want) {
@@ -6413,6 +6625,7 @@ func footerFactsModel(t *testing.T) Model {
 // (and narrower than the lead margin itself), windows where the ladder has dropped segments to seat
 // it, and roomy ones where nothing is given up.
 func TestFooterFitsTheWindowExactly(t *testing.T) {
+	t.Parallel()
 	m := footerFactsModel(t)
 
 	for _, w := range []int{0, 1, 2, 3, 10, 20, 40, 80} {
@@ -6430,6 +6643,7 @@ func TestFooterFitsTheWindowExactly(t *testing.T) {
 // word its error tone at exactly the width the row is most cramped; the layout hands it its own run
 // at every width instead.
 func TestFooterOfflineKeepsItsErrorToneAtEveryWidth(t *testing.T) {
+	t.Parallel()
 	m := footerFactsModel(t)
 	m.hb.offline = true
 
@@ -6455,6 +6669,7 @@ func TestFooterOfflineKeepsItsErrorToneAtEveryWidth(t *testing.T) {
 // The claim is made twice — on the field and on the painted row — because either alone would pass a
 // fix that sanitised only the other.
 func TestFooterWorkdirIsEscapeStripped(t *testing.T) {
+	t.Parallel()
 	opts := testOpts
 	opts.Workspace = "/ws/proj\x1b[31mRED"
 	m := newTestModelEng(t, &fakeEngine{}, opts)
@@ -6484,6 +6699,7 @@ func TestFooterWorkdirIsEscapeStripped(t *testing.T) {
 // shortest window a pane fits in at all while the row-only browser fitted. Both floors are zero
 // now, so a short window's budget shrinks to nothing and the transcript is what gives way.
 func TestPopupBudgetShrinksToNothing(t *testing.T) {
+	t.Parallel()
 	// The body's forty wrapped lines always exceed the granted budget, so a body-bearing pane is
 	// exactly as tall as its budget allows and the arithmetic below is an equality, not a bound.
 	bodyLines := make([]string, 40)
@@ -6507,6 +6723,7 @@ func TestPopupBudgetShrinksToNothing(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(fmt.Sprintf("%d rows", c.height), func(t *testing.T) {
+			t.Parallel()
 			m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 80, Height: c.height})
 			body, rows, _ := m.popupBudget(paneBrowser, 8, maxSessionRows, popupChrome, popupFloor{})
 			if rows != c.wantRows {
@@ -6609,6 +6826,7 @@ func wideAssistantLine(t *testing.T, m Model) int {
 // addressed the wrong line: a click on the NEXT block's header toggled whatever sat one row up.
 // With SoftWrap off the widget's rows ARE the stored lines, so the count matches and the click lands.
 func TestViewportRowsStayOneForOneWithStoredLines(t *testing.T) {
+	t.Parallel()
 	m := vs16WideModel(t)
 	wide := wideAssistantLine(t, m)
 
@@ -6659,6 +6877,7 @@ func drawnRow(t *testing.T, m Model, want string) int {
 // so every glyph is still drawn, no drawn row is over the viewport's width in the widget's measure,
 // and the clip finds nothing to cut.
 func TestPainterReservesTheCellsTheWidgetMeasuresOver(t *testing.T) {
+	t.Parallel()
 	m := vs16WideModel(t)
 	wide := wideAssistantLine(t, m)
 
@@ -6691,6 +6910,7 @@ func TestPainterReservesTheCellsTheWidgetMeasuresOver(t *testing.T) {
 // glyph still on it. It is the case the reserve must NOT spend a row on, the row-map invariant and
 // the trailing glyph in one.
 func TestFullWidthLineKeepsItsTrailingWideMeasuredGlyph(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
 	m.transcript.addUser("go", nil)
@@ -6741,6 +6961,7 @@ func TestFullWidthLineKeepsItsTrailingWideMeasuredGlyph(t *testing.T) {
 // nothing but padding is dropped rather than given a row of its own — the reserve is here to keep
 // glyphs on the screen, not the spaces a squared line was filled out with.
 func TestReserveWidgetCellsMovesTargetsAndSpansWithTheRows(t *testing.T) {
+	t.Parallel()
 	const limit = 6
 	in := renderedTranscript{
 		lines: []string{
@@ -6780,6 +7001,7 @@ func TestReserveWidgetCellsMovesTargetsAndSpansWithTheRows(t *testing.T) {
 // gestures the widget binds are all asked: a wheel-left notch, a shift-modified wheel, and the
 // left/right keys in an inert state, where keys scroll the transcript.
 func TestTranscriptNeverScrollsSideways(t *testing.T) {
+	t.Parallel()
 	base := vs16WideModel(t)
 	wide := wideAssistantLine(t, base)
 	row := screenRow(t, base, wide)
@@ -6815,6 +7037,7 @@ func TestTranscriptNeverScrollsSideways(t *testing.T) {
 // rendered footer. Auto is the case that matters, because its blast-radius word is part of the same
 // marker and is painted in two tones.
 func TestFooterModeMarkerSpanAgreesWithThePaintedCells(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		eng  *fakeEngine
@@ -6826,6 +7049,7 @@ func TestFooterModeMarkerSpanAgreesWithThePaintedCells(t *testing.T) {
 		{"auto unconfined", &fakeEngine{confine: false}, domain.ModeAuto, modeMarker(domain.ModeAuto) + " · " + unconfinedWord},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := newTestModelEng(t, tc.eng, confineOpts(capableHost, tc.mode))
 
 			// Thirty columns is the case the fit changed: the marker used to drop whole there, and
@@ -6856,7 +7080,9 @@ func TestFooterModeMarkerSpanAgreesWithThePaintedCells(t *testing.T) {
 // prompt used to render above it and a resumed session showed the note with nothing before it.
 // Committed, the three land in the order the screen shows: partial, `· cancelled`, next message.
 func TestCancelCommitsThePartialBeforeTheNote(t *testing.T) {
+	t.Parallel()
 	t.Run("the streamed partial becomes the entry the note stands behind", func(t *testing.T) {
+		t.Parallel()
 		m := runningModel(t)
 		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "Item 1.\n"}})
 		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "Item 2."}})
@@ -6890,6 +7116,7 @@ func TestCancelCommitsThePartialBeforeTheNote(t *testing.T) {
 	})
 
 	t.Run("a whitespace-only buffer commits nothing", func(t *testing.T) {
+		t.Parallel()
 		m := runningModel(t)
 		m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "  \n\n"}})
 

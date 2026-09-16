@@ -62,6 +62,7 @@ const pinFileBody = "package main\n\nfunc main() {}"
 // TestChangedFilesStatReadsTheTypedCountsNotTheProse and
 // TestGitStatusReportSurvivesItsTypedSummary (toolpresent_test.go).
 func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	writePinFile(t, filepath.Join(root, "main.go"), pinFileBody)
 	if err := os.Mkdir(filepath.Join(root, "sub"), 0o755); err != nil {
@@ -176,6 +177,7 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 // too — the one summary-bearing tool the pin above cannot execute still has to be spelled the way
 // the registry keys it.
 func TestToolSummaryPinUsesRegisteredToolNames(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{
 		"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search",
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",

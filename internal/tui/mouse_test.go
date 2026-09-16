@@ -49,6 +49,7 @@ func noneMotion(x, y int) tea.MouseMotionMsg {
 }
 
 func TestCaretOffset(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		value      string
@@ -63,6 +64,7 @@ func TestCaretOffset(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			if got := caretOffset(c.value, c.row, c.col); got != c.wantOffset {
 				t.Fatalf("caretOffset(%q,%d,%d) = %d, want %d", c.value, c.row, c.col, got, c.wantOffset)
 			}
@@ -79,6 +81,7 @@ func TestCaretOffset(t *testing.T) {
 // only drive the widget by row and column, so a single off-by-one there would drop the caret inside
 // a rune. The byte↔rune bridge the mini-language crosses to reach those offsets is pinned with it.
 func TestCaretOffsetRoundTrips(t *testing.T) {
+	t.Parallel()
 	values := []string{
 		"",
 		"hello world",
@@ -89,6 +92,7 @@ func TestCaretOffsetRoundTrips(t *testing.T) {
 	}
 	for _, v := range values {
 		t.Run(v, func(t *testing.T) {
+			t.Parallel()
 			for off := 0; off <= len([]rune(v)); off++ {
 				row, col := offsetToLineCol(v, off)
 				if got := caretOffset(v, row, col); got != off {
@@ -110,6 +114,7 @@ func TestCaretOffsetRoundTrips(t *testing.T) {
 }
 
 func TestSelectionText(t *testing.T) {
+	t.Parallel()
 	v := "hello\nworld"
 	cases := []struct {
 		name string
@@ -125,6 +130,7 @@ func TestSelectionText(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			if got := selectionText(v, c.a, c.b); got != c.want {
 				t.Fatalf("selectionText(%q,%d,%d) = %q, want %q", v, c.a, c.b, got, c.want)
 			}
@@ -138,6 +144,7 @@ func TestSelectionText(t *testing.T) {
 // y = height - bottomRuleHeight - footerHeight - inputBorderRows = 20 — the box's own bottom
 // border, the footer's single line and the ▁ hairline are what stand below it.
 func TestClickPositionsCaret(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	const textRowY = 24 - bottomRuleHeight - footerHeight - inputBorderRows // single content row, bottom-anchored above the footer
 
@@ -156,6 +163,7 @@ func TestClickPositionsCaret(t *testing.T) {
 // TestClickPositionsCaretMultiline checks row mapping (and the +1-per-newline offset) on a
 // two-row prompt.
 func TestClickPositionsCaretMultiline(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "ab\ncd")
 	// Two content rows, bottom-anchored: the LAST one ("cd") sits at
 	// y = height - bottomRuleHeight - footerHeight - inputBorderRows, whatever the box's height.
@@ -199,6 +207,7 @@ func fillsTheInputWidth(t *testing.T, m Model, r rune) string {
 // The CJK case is the same geometry with wide runes, which shift the fill point: the line reaches
 // the width in half as many runes, so a walk that counted runes rather than cells would miss it.
 func TestClickBelowPhantomWrappedLineSeatsCaret(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		fill rune
@@ -207,6 +216,7 @@ func TestClickBelowPhantomWrappedLineSeatsCaret(t *testing.T) {
 		{"wide runes", '日'},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			fill := fillsTheInputWidth(t, modelWithInput(t, ""), tc.fill)
 			m := modelWithInput(t, fill+"\nsecond")
 
@@ -254,6 +264,7 @@ func TestClickBelowPhantomWrappedLineSeatsCaret(t *testing.T) {
 // TestDragSelectsAndCopies drives press → drag → release and checks the selection span, the
 // copy Cmd, and the confirmation flash.
 func TestDragSelectsAndCopies(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
@@ -311,6 +322,8 @@ func fireBatch(t *testing.T, cmd tea.Cmd) {
 // a drag-release produces hands the SAME text to the host's clipboard program, so a terminal that
 // silently drops OSC 52 still ends up holding the selection. OSC 52 stays in the batch beside it —
 // this asserts the addition, not a replacement.
+//
+// serial: recordSystemClipboard swaps the package-level writeSystemClipboard seam.
 func TestDragCopyAlsoWritesTheSystemClipboard(t *testing.T) {
 	wrote := recordSystemClipboard(t, nil)
 
@@ -338,6 +351,8 @@ func TestDragCopyAlsoWritesTheSystemClipboard(t *testing.T) {
 // TestSystemClipboardFailureStillConfirmsTheCopy pins the fallback as BEST-EFFORT: on a machine
 // with no clipboard program the copy must degrade to exactly the old OSC-52-only behaviour — the
 // confirmation flash stands, the error surfaces nowhere, and nothing panics.
+//
+// serial: recordSystemClipboard swaps the package-level writeSystemClipboard seam.
 func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 	wrote := recordSystemClipboard(t, errors.New("no clipboard program on this host"))
 
@@ -369,6 +384,7 @@ func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 // TestBareClickReleaseDoesNotCopy ensures a click without a drag leaves the caret but copies
 // nothing (no flash, no Cmd) and collapses the selection.
 func TestBareClickReleaseDoesNotCopy(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
@@ -397,6 +413,7 @@ func TestBareClickReleaseDoesNotCopy(t *testing.T) {
 // and the run below them is asserted CONTIGUOUS down to the terminal's last row — which is what
 // makes this catch a row the frame gains or loses rather than only the rows it has today.
 func TestClickOnBottomChromeSelectsNothing(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	m.input.MoveToEnd()
 	wantCol := m.input.Column()
@@ -443,6 +460,7 @@ func TestClickOnBottomChromeSelectsNothing(t *testing.T) {
 
 // TestClickOffFieldDeselects checks that clicking outside the text rows clears a selection.
 func TestClickOffFieldDeselects(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	m.sel = promptSel{active: true, anchorOff: 0, headOff: 5}
 
@@ -457,6 +475,7 @@ func TestClickOffFieldDeselects(t *testing.T) {
 // positions the caret and arms a prompt selection exactly as it does at idle — the prompt half of
 // "select at any point in time" (ADR 0025; the plan's decision 9).
 func TestClickPositionsCaretWhileRunning(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	startStubWorker(t, &m)
 	m.input.MoveToEnd()
@@ -476,6 +495,7 @@ func TestClickPositionsCaretWhileRunning(t *testing.T) {
 // (TestSelectionDeleteKeys) — which is a different fate, not an exception to the clear: the
 // chokepoint drops the stale coordinates either way.
 func TestKeypressClearsSelection(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	m.sel = promptSel{active: true, anchorOff: 0, headOff: 5}
 
@@ -502,6 +522,7 @@ func dragSelect(t *testing.T, m Model, fromCol, toCol int) Model {
 // where the span began — whichever direction the drag ran, since a right-to-left drag names the
 // same text.
 func TestSelectionDeleteKeys(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name           string
 		fromCol, toCol int
@@ -513,6 +534,7 @@ func TestSelectionDeleteKeys(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m := dragSelect(t, modelWithInput(t, "hello world"), c.fromCol, c.toCol)
 			if !m.sel.active || m.sel.anchorOff == m.sel.headOff {
 				t.Fatalf("the drag armed no selection to delete: %+v", m.sel)
@@ -536,6 +558,7 @@ func TestSelectionDeleteKeys(t *testing.T) {
 // The cut is by RUNE, not by byte: a span over multi-byte text loses whole characters, never half
 // of one. The difference is invisible in ASCII and corrupts the draft in Japanese.
 func TestSelectionDeleteCutsRunes(t *testing.T) {
+	t.Parallel()
 	m := dragSelect(t, modelWithInput(t, "日本語のテキスト"), 0, 4) // 4 cells = the two double-width glyphs
 
 	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
@@ -548,6 +571,7 @@ func TestSelectionDeleteCutsRunes(t *testing.T) {
 // The prompt is editable while a worker runs — the human is typing an interjection into it (ADR
 // 0025) — so the selection delete lands there exactly as it does at idle.
 func TestSelectionDeleteWhileRunning(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	startStubWorker(t, &m)
 
@@ -563,7 +587,9 @@ func TestSelectionDeleteWhileRunning(t *testing.T) {
 // front of them and must stay out of their way. A bare click is among the "nothing highlighted"
 // cases: it leaves a COLLAPSED span, which is a caret, not a selection.
 func TestBackspaceWithoutSelectionIsUnchanged(t *testing.T) {
+	t.Parallel()
 	t.Run("non-empty box deletes one rune", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithInput(t, "hello")
 		m.input.MoveToEnd()
 
@@ -573,6 +599,7 @@ func TestBackspaceWithoutSelectionIsUnchanged(t *testing.T) {
 		}
 	})
 	t.Run("a bare click deletes one rune", func(t *testing.T) {
+		t.Parallel()
 		m := dragSelect(t, modelWithInput(t, "hello"), 5, 5) // press and release on the same cell
 
 		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
@@ -581,6 +608,7 @@ func TestBackspaceWithoutSelectionIsUnchanged(t *testing.T) {
 		}
 	})
 	t.Run("empty box pops the queued interjection", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModel(t)
 		m.pendingInterjections = []queuedInterjection{staged(1, "held row")}
 
@@ -594,6 +622,7 @@ func TestBackspaceWithoutSelectionIsUnchanged(t *testing.T) {
 // TestShadeCellsPreservesGlyphs checks that shading a cell range neither adds nor drops visible
 // characters — only styling changes.
 func TestShadeCellsPreservesGlyphs(t *testing.T) {
+	t.Parallel()
 	const line = "hello world"
 	th := newTestModel(t).th
 	out := shadeCells(th.measure, line, 2, 5, th.selection)
@@ -605,6 +634,7 @@ func TestShadeCellsPreservesGlyphs(t *testing.T) {
 // TestHighlightInputPreservesGlyphs checks the rendered prompt block keeps its text when a
 // selection is overlaid (the highlight is styling-only).
 func TestHighlightInputPreservesGlyphs(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	m.sel = promptSel{
 		active:    true,
@@ -630,6 +660,7 @@ var selectionBg = func() string {
 // TestViewRendersSelectionHighlight drives a full drag through Update and confirms the
 // selection background appears in the whole-screen View — end-to-end, not just the helper.
 func TestViewRendersSelectionHighlight(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 	m = step(t, m, leftClick(2+0, y))
@@ -651,6 +682,7 @@ func TestViewRendersSelectionHighlight(t *testing.T) {
 // maps to a rune offset, a column inside a wide rune resolves to that rune's left edge, and a
 // column past the run clamps to the rune count (not the cell count).
 func TestCellToRuneOffset(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		value string
@@ -676,6 +708,7 @@ func TestCellToRuneOffset(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			if got := cellToRuneOffset([]rune(c.value), c.cells); got != c.want {
 				t.Fatalf("cellToRuneOffset(%q, %d) = %d, want %d", c.value, c.cells, got, c.want)
 			}
@@ -695,6 +728,7 @@ func TestCellToRuneOffset(t *testing.T) {
 // short. The invariant holds only for prefixes whose width strictly grows, so the fixtures avoid
 // combining marks.
 func TestCellToRuneOffsetInvertsWidth(t *testing.T) {
+	t.Parallel()
 	for _, s := range []string{"hello", "日本語 text", "aあb🙂c", "a⚠️b ⚠️", ""} {
 		runes := []rune(s)
 		for k := 0; k <= len(runes); k++ {
@@ -711,6 +745,7 @@ func TestCellToRuneOffsetInvertsWidth(t *testing.T) {
 // click near the wrap point cannot read into the next visual row, and clamps out-of-range inputs
 // to an empty slice.
 func TestVisualSubline(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name              string
 		value             string
@@ -726,6 +761,7 @@ func TestVisualSubline(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			if got := string(visualSubline(c.value, c.row, c.start, c.width)); got != c.want {
 				t.Fatalf("visualSubline(%q, %d, %d, %d) = %q, want %q", c.value, c.row, c.start, c.width, got, c.want)
 			}
@@ -737,6 +773,7 @@ func TestVisualSubline(t *testing.T) {
 // column on a line of wide glyphs lands the caret on the rune under that column, not the rune at
 // that column's numeric value (offset 4 = 't' under the buggy cell-as-rune path).
 func TestClickPositionsCaretCJK(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "日本語 text")
 	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
@@ -754,6 +791,7 @@ func TestClickPositionsCaretCJK(t *testing.T) {
 // "日本語 text" highlights the three Han glyphs, so the clipboard must hold exactly "日本語" —
 // the buggy path copied "日本語 te" (six runes, treating the cell span as a rune span).
 func TestDragCopyCJKMatchesHighlight(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "日本語 text")
 	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
 
@@ -780,6 +818,7 @@ func TestDragCopyCJKMatchesHighlight(t *testing.T) {
 // discovered at runtime (a max-x click lands the caret at the end of row 0), so the test does not
 // hard-code the textarea's wrap column.
 func TestDragCopyAcrossSoftWrap(t *testing.T) {
+	t.Parallel()
 	// One logical line (no '\n') long enough to wrap; a distinctive tail makes the copied slice
 	// unambiguous.
 	value := strings.Repeat("a", 90) + "0123456789tail"
@@ -824,6 +863,7 @@ func TestDragCopyAcrossSoftWrap(t *testing.T) {
 // and runs layout() — the box grows to fit a multi-line paste, which the buggy default-case path
 // deferred until the next keypress.
 func TestPasteInsertsAndRefreshes(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "")
 	before := m.input.Height()
 	m.sel = promptSel{active: true, anchorOff: 0, headOff: 3} // a stale selection to be dropped
@@ -844,6 +884,7 @@ func TestPasteInsertsAndRefreshes(t *testing.T) {
 // TestPasteRecomputesAutocomplete checks the paste path re-derives the autocomplete overlay: a
 // pasted "/comp" opens the command overlay exactly as typing it would.
 func TestPasteRecomputesAutocomplete(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "")
 	m = step(t, m, tea.PasteMsg{Content: "/comp"})
 	if !m.autocomplete.active || m.autocomplete.kind != acCommand {
@@ -856,6 +897,7 @@ func TestPasteRecomputesAutocomplete(t *testing.T) {
 // state is deliberately NOT among them any more: TestPasteWhileRunningTypes (interject_test.go)
 // replaced TestPasteIgnoredWhileRunning when typing while the model works landed (ADR 0025).
 func TestPasteIgnoredWhereInputIsInert(t *testing.T) {
+	t.Parallel()
 	for _, state := range []uiState{stateAwaitingApproval, stateErrored} {
 		m := modelWithInput(t, "keep")
 		m.state = state
@@ -884,6 +926,7 @@ func modelWithTranscript(t *testing.T, prompt string) Model {
 // rendered lines (ANSI-styled, wide glyphs, a blank between-blocks line, trailing pad) and checks
 // the plain text copied — trailing pad trimmed, styling stripped, reading order normalised.
 func TestTranscriptSelectionText(t *testing.T) {
+	t.Parallel()
 	sty := lipgloss.NewStyle().Foreground(lipgloss.Color("5"))
 	lines := []string{
 		sty.Render("hello world") + "     ", // ANSI-styled content with 5 cells of trailing pad
@@ -910,6 +953,7 @@ func TestTranscriptSelectionText(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := transcriptSelectionText(measure, lines, c.a, c.b)
 			if got != c.want {
 				t.Fatalf("transcriptSelectionText(%+v,%+v) = %q, want %q", c.a, c.b, got, c.want)
@@ -924,6 +968,7 @@ func TestTranscriptSelectionText(t *testing.T) {
 // TestTranscriptDragSelectsAndCopies drives a click → drag → release over the rendered prompt row
 // and checks the extracted plain text, the copy Cmd, and the confirmation flash.
 func TestTranscriptDragSelectsAndCopies(t *testing.T) {
+	t.Parallel()
 	m := modelWithTranscript(t, "hello world")
 	w := m.viewport.Width()
 	row := promptRow(t, m)
@@ -952,6 +997,7 @@ func TestTranscriptDragSelectsAndCopies(t *testing.T) {
 // block's header too: a motionless click there toggles the block (its own tests below), and
 // toggling is not copying — nothing reaches the clipboard and no confirmation is flashed.
 func TestTranscriptBareClickCopiesNothing(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		build func(t *testing.T) (Model, int, int) // the model and the screen cell the click lands on
@@ -966,6 +1012,7 @@ func TestTranscriptBareClickCopiesNothing(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m, x, y := c.build(t)
 
 			m = step(t, m, leftClick(x, y))
@@ -1040,9 +1087,11 @@ func clickCell(t *testing.T, m Model, x, y int) Model {
 // Every row means the one thing now that the `+N more lines` count rides the leader row's outcome
 // slot instead of a line of its own (collapsedRemainder).
 func TestTranscriptClickTogglesTheBlock(t *testing.T) {
+	t.Parallel()
 	const output = "ok   a\nok   b\nok   c\nPASS"
 
 	t.Run("a header toggles, and toggles back", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		if blockExpanded(t, m, header) {
@@ -1070,6 +1119,7 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 	// other: the click that used to land on a marker beneath it lands here and TOGGLES, so the same
 	// spot closes the block again (collapsedRemainder).
 	t.Run("the leader row carrying the count toggles", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		leader := header + 1
@@ -1094,6 +1144,7 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 	// output is where the pointer already is when a reader has finished with it, and the whole
 	// block is the click surface (render.go, renderToolBlock).
 	t.Run("a body line closes the block", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		m = clickCell(t, m, 2, screenRow(t, m, header))
@@ -1121,6 +1172,7 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 	// (seeLessFooter, render.go): it is where the pointer of a reader who has just read to the end
 	// of the output already is.
 	t.Run("the see-less footer closes the block", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		m = clickCell(t, m, 2, screenRow(t, m, header))
@@ -1149,6 +1201,7 @@ func TestTranscriptClickTogglesTheBlock(t *testing.T) {
 	// back. What the row says changes: the open block hides nothing, so its slot gives up the
 	// "+N more lines" it was counting (collapsedRemainder) and the target takes the cells back.
 	t.Run("a clipped target row toggles the block", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithClippedToolBlock(t)
 		rows := markedRows(t, m, targetHeader)
 		if len(rows) != 2 {
@@ -1229,6 +1282,7 @@ func markedRows(t *testing.T, m Model, kind targetKind) []int {
 // on a header line is a drag-select like any other — it copies the text it ran over and the block
 // it started on keeps its state — because a toggle is a click that never moved.
 func TestTranscriptDragFromHeaderStillSelects(t *testing.T) {
+	t.Parallel()
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
 	header := markedLine(t, m, targetHeader)
 	row := screenRow(t, m, header)
@@ -1252,9 +1306,11 @@ func TestTranscriptDragFromHeaderStillSelects(t *testing.T) {
 // release belongs, so while the press latch is armed that motion IS the release — a motionless one
 // toggles, a moved one copies — and with nothing armed it stays the no-op it reads as.
 func TestButtonlessMotionIsTheRelease(t *testing.T) {
+	t.Parallel()
 	const output = "ok   a\nok   b\nok   c\nPASS"
 
 	t.Run("a motionless press ended by it toggles the block", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		row := screenRow(t, m, header)
@@ -1279,6 +1335,7 @@ func TestButtonlessMotionIsTheRelease(t *testing.T) {
 	})
 
 	t.Run("with nothing armed it is a no-op", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		row := screenRow(t, m, header)
@@ -1302,6 +1359,7 @@ func TestButtonlessMotionIsTheRelease(t *testing.T) {
 	})
 
 	t.Run("a drag ended by it copies instead of toggling", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		row := screenRow(t, m, header)
@@ -1325,6 +1383,7 @@ func TestButtonlessMotionIsTheRelease(t *testing.T) {
 	})
 
 	t.Run("after the copy a later motion is a no-op", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolBlock(t, output)
 		header := markedLine(t, m, targetHeader)
 		row := screenRow(t, m, header)
@@ -1356,6 +1415,7 @@ func TestButtonlessMotionIsTheRelease(t *testing.T) {
 // the same screen row after the toggle as before it — in both directions, whether the view was
 // following the tail or parked where the human scrolled it.
 func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
+	t.Parallel()
 	const output = "ok   a\nok   b\nok   c\nPASS"
 	cases := []struct {
 		name  string
@@ -1408,6 +1468,7 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m := c.build(t)
 			header := markedLine(t, m, targetHeader)
 			row := screenRow(t, m, header)
@@ -1437,6 +1498,7 @@ func TestTranscriptToggleKeepsTheClickedHeaderRow(t *testing.T) {
 // (refreshViewportAnchored), and because a block shrinks BELOW its header, everything above the
 // pointer holds still with it — so the header is on the row it was on before the click.
 func TestTranscriptBodyClickKeepsTheAnchorRow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.transcript.reset()
 	m.transcript.addUser("run the tests", nil)
@@ -1480,6 +1542,7 @@ func TestTranscriptBodyClickKeepsTheAnchorRow(t *testing.T) {
 // header always has (TestTranscriptDragFromHeaderStillSelects) — a toggle is a click that never
 // moved, whichever row it started on.
 func TestTranscriptDragAcrossBodyRowsStillSelects(t *testing.T) {
+	t.Parallel()
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
 	header := markedLine(t, m, targetHeader)
 	m = clickCell(t, m, 2, screenRow(t, m, header))
@@ -1558,6 +1621,7 @@ func modelWithTwoToolBlocks(t *testing.T) Model {
 // the press anchor (content coordinates, which do not move when the view does) is what makes the
 // click land: same press, same intent, same answer at any stream rate.
 func TestTranscriptClickTogglesWhileStreaming(t *testing.T) {
+	t.Parallel()
 	m := modelWithToolBlock(t, "ok   a\nok   b\nok   c\nPASS")
 	header := markedLine(t, m, targetHeader)
 	entry := m.lineTargets[header].entry
@@ -1586,6 +1650,7 @@ func TestTranscriptClickTogglesWhileStreaming(t *testing.T) {
 // point names some OTHER block's rows once the stream has scrolled, and none of them may flip. The
 // press decides, alone.
 func TestTranscriptStreamingClickTogglesOnlyThePressedBlock(t *testing.T) {
+	t.Parallel()
 	m := modelWithTwoToolBlocks(t)
 	header := markedLine(t, m, targetHeader)
 	pressed := m.lineTargets[header].entry
@@ -1672,6 +1737,7 @@ func typeRow(t *testing.T, m Model) int {
 // the whole member is its own click surface. Reaching a member takes the two clicks any umbrella
 // member takes: the type row, then the member.
 func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
+	t.Parallel()
 	// entries[0] is the prompt, so the run's three calls are entries 1..3 and the sketch's "middle
 	// one expanded" (docs/layout/tool-layout.md) is entry 2.
 	const groupHead, middle = 1, 2
@@ -1696,6 +1762,7 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 	}
 
 	t.Run("a click opens the member it landed on, alone", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolGroup(t)
 		before := strings.Join(m.lines, "\n")
 		m = open(t, m)
@@ -1713,6 +1780,7 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 	// Every row of the open member — its first row, its body, and the see-less row closing it —
 	// is the same click surface, so the human closes it wherever the pointer happens to be.
 	t.Run("any row of the open member closes it", func(t *testing.T) {
+		t.Parallel()
 		rows := memberRows(t, open(t, modelWithToolGroup(t)), middle)
 		if len(rows) < 3 {
 			t.Fatalf("the open member paints %d rows; the case needs a first row, a body and a see-less row", len(rows))
@@ -1731,6 +1799,7 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 	})
 
 	t.Run("the siblings and the header stay put", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithToolGroup(t)
 		before := expandedFlags(m)
 		m = open(t, m)
@@ -1790,6 +1859,7 @@ func modelWithLiveToolBlock(t *testing.T) Model {
 // block it lands on here heads a live delegation, so what the release opens is that run's view
 // (ADR 0063).
 func TestTranscriptClickTogglesALiveBlockAcrossTheBlink(t *testing.T) {
+	t.Parallel()
 	m := modelWithLiveToolBlock(t)
 	header := markedLine(t, m, targetHeader)
 	entry := m.lineTargets[header].entry
@@ -1852,12 +1922,14 @@ func promptBlockLine(t *testing.T, m Model, offset int) int {
 // rows — the first, the truncated row carrying the see-more marker — opens the prompt, and a second
 // click on that same row closes it again.
 func TestTranscriptClickTogglesThePromptBlock(t *testing.T) {
+	t.Parallel()
 	rows := map[string]int{
 		"the block's first row": 0,
 		"the marker row":        promptCollapsedRows - 1,
 	}
 	for name, offset := range rows {
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			m := modelWithHugePrompt(t)
 			line := promptBlockLine(t, m, offset)
 			if blockExpanded(t, m, line) {
@@ -1890,6 +1962,7 @@ func TestTranscriptClickTogglesThePromptBlock(t *testing.T) {
 // there exactly as it does on a tool header. A drag across a prompt row copies the text it ran over
 // and leaves the block's state alone — a toggle is a click that never moved.
 func TestTranscriptDragFromAPromptRowStillSelects(t *testing.T) {
+	t.Parallel()
 	m := modelWithHugePrompt(t)
 	line := promptBlockLine(t, m, 0)
 	row := screenRow(t, m, line)
@@ -1913,6 +1986,7 @@ func TestTranscriptDragFromAPromptRowStillSelects(t *testing.T) {
 // surface. The block paints its skill accent as it renders; the drag-selection shades the composed
 // frame afterwards, so a selected token reads as SELECTED rather than keeping its violet.
 func TestTranscriptSelectionWinsOverTheSkillAccent(t *testing.T) {
+	t.Parallel()
 	const text = "/review this diff"
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
@@ -1938,6 +2012,7 @@ func TestTranscriptSelectionWinsOverTheSkillAccent(t *testing.T) {
 // toggle as before it — in both directions, with the view following a tail deep enough that the
 // attached repaint would otherwise slide the block by every line the expansion added.
 func TestTranscriptPromptToggleKeepsTheClickedRow(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t) // 80x24
 	m.transcript.reset()
 	for i := range 20 { // scrollback above the prompt, so the tail is a real scroll position
@@ -1977,6 +2052,7 @@ func TestTranscriptPromptToggleKeepsTheClickedRow(t *testing.T) {
 // a mid-drag wheel scroll: the anchor names a content line, not a screen row, so scrolling moves
 // what is on screen without moving (or clearing) the selection.
 func TestTranscriptSelectionSurvivesWheelScroll(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.transcript.addUser("top prompt", nil)
 	for i := 0; i < 40; i++ {
@@ -2043,9 +2119,11 @@ func vs16TranscriptRow(t *testing.T, method ansi.Method, target string) (m Model
 // WcWidth painter — every terminal that does not answer mode 2027 — the ⚠️ ate a column the
 // terminal never drew, and every column past it named the glyph one cell to its left.
 func TestTranscriptClickSelectsThePaintedGlyph(t *testing.T) {
+	t.Parallel()
 	const target = "zebra" // one occurrence on the row, so the painted column is unambiguous
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m, row, col := vs16TranscriptRow(t, tc.method, target)
 
 			m = step(t, m, leftClick(col, row))
@@ -2065,9 +2143,11 @@ func TestTranscriptClickSelectsThePaintedGlyph(t *testing.T) {
 // old failure mode, where highlight and clipboard agreed with each other and disagreed with the
 // pointer — fails here.
 func TestTranscriptHighlightExtentMatchesTheCopy(t *testing.T) {
+	t.Parallel()
 	const target = "zebra"
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m, row, col := vs16TranscriptRow(t, tc.method, target)
 			end := col + paintedWidth(target, tc.method) // drag the whole row up to the target's end
 
@@ -2156,6 +2236,7 @@ func armPromptSelection(t *testing.T, m Model) Model {
 // replaces TestTranscriptSelectionClearsOnStreamToken, which pinned the old clear-on-every-repaint
 // behaviour a drag could not survive.
 func TestTranscriptSelectionSurvivesStreamAppend(t *testing.T) {
+	t.Parallel()
 	m := modelWithTranscript(t, "hello world")
 	m = armTranscriptSelection(t, m, promptRow(t, m))
 
@@ -2181,6 +2262,7 @@ func TestTranscriptSelectionSurvivesStreamAppend(t *testing.T) {
 // still-moving streaming tail drops the moment the next token rewrites those lines — no highlight
 // left behind, and the release copies nothing.
 func TestTranscriptSelectionDropsWhenSpanChanges(t *testing.T) {
+	t.Parallel()
 	m := modelWithTranscript(t, "hello world")
 	m = step(t, m, eventMsg{Event: domain.TokenEvent{Text: "half a"}})
 	row := screenRow(t, m, len(m.lines)-1) // the in-progress assistant buffer's last line
@@ -2212,6 +2294,7 @@ func TestTranscriptSelectionDropsWhenSpanChanges(t *testing.T) {
 // a streamed token folded mid-drag, more motion, release — and the copy is the settled span, so
 // the drag never died and never lost its anchor.
 func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
+	t.Parallel()
 	m := modelWithTranscript(t, "hello world")
 	w := m.viewport.Width()
 	row := promptRow(t, m)
@@ -2239,7 +2322,9 @@ func TestTranscriptMidDragSurvivesRepaint(t *testing.T) {
 // lines, so it is kept. It replaces TestTranscriptSelectionClearsOnResize, which could not tell
 // the two apart because every repaint cleared.
 func TestTranscriptSelectionResize(t *testing.T) {
+	t.Parallel()
 	t.Run("a width change rewraps and drops it", func(t *testing.T) {
+		t.Parallel()
 		m := armPromptSelection(t, modelWithTranscript(t, "hello world"))
 		m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 24})
 		if m.transcriptSel.active {
@@ -2247,6 +2332,7 @@ func TestTranscriptSelectionResize(t *testing.T) {
 		}
 	})
 	t.Run("a height-only change keeps it", func(t *testing.T) {
+		t.Parallel()
 		m := armPromptSelection(t, modelWithTranscript(t, "hello world"))
 		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 30})
 		if !m.transcriptSel.active {
@@ -2258,6 +2344,7 @@ func TestTranscriptSelectionResize(t *testing.T) {
 // TestTranscriptHighlightPersistsWhileStreaming checks the lingering post-copy highlight obeys the
 // same rule as a live drag: what was copied stays visibly marked while the reply streams below it.
 func TestTranscriptHighlightPersistsWhileStreaming(t *testing.T) {
+	t.Parallel()
 	m := modelWithTranscript(t, "hello world")
 	row := promptRow(t, m)
 	m = armTranscriptSelection(t, m, row)
@@ -2282,6 +2369,7 @@ func TestTranscriptHighlightPersistsWhileStreaming(t *testing.T) {
 // selection over the settled lines above it is untouched. The beat fold's repaint guard is economy
 // from here on, not what keeps a drag alive.
 func TestNotedBeatRepaintKeepsSelection(t *testing.T) {
+	t.Parallel()
 	m := wireHeartbeat(t, testOpts, &fakeHeartbeat{})
 	m.transcript.addUser("hello world", nil)
 	m.refreshViewport()
@@ -2300,6 +2388,7 @@ func TestNotedBeatRepaintKeepsSelection(t *testing.T) {
 // TestSpanUnchangedTable is the predicate itself: what "the ground did not move" means, line by
 // line, independent of any repaint that consults it.
 func TestSpanUnchangedTable(t *testing.T) {
+	t.Parallel()
 	span := func(a, b contentCell) transcriptSel {
 		return transcriptSel{active: true, anchor: a, head: b}
 	}
@@ -2362,6 +2451,7 @@ func TestSpanUnchangedTable(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			if got := c.sel.spanUnchanged(c.oldLines, c.nextLines); got != c.want {
 				t.Fatalf("spanUnchanged(%q, %q) = %v, want %v", c.oldLines, c.nextLines, got, c.want)
 			}
@@ -2372,6 +2462,7 @@ func TestSpanUnchangedTable(t *testing.T) {
 // TestPromptAndTranscriptSelectionsAreExclusive checks the region arbitration: starting one
 // selection clears the other, so the prompt and transcript selections never coexist.
 func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.transcript.addUser("hello world", nil)
 	m.input.SetValue("prompt text")
@@ -2423,6 +2514,7 @@ func TestPromptAndTranscriptSelectionsAreExclusive(t *testing.T) {
 // the box while the model works selects and copies there exactly as it does at idle — the drag runs
 // while a worker owns the exchange and the staged interjection is still being written.
 func TestPromptDragSelectsWhileRunning(t *testing.T) {
+	t.Parallel()
 	m := modelWithInput(t, "hello world")
 	startStubWorker(t, &m)
 	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
@@ -2452,6 +2544,7 @@ func TestPromptDragSelectsWhileRunning(t *testing.T) {
 // conversation copies in all five states — including the running one, where the issue this pin
 // answers used to lose the selection to the next streamed token.
 func TestTranscriptDragCopiesInEveryState(t *testing.T) {
+	t.Parallel()
 	states := []struct {
 		name  string
 		state uiState
@@ -2464,6 +2557,7 @@ func TestTranscriptDragCopiesInEveryState(t *testing.T) {
 	}
 	for _, s := range states {
 		t.Run(s.name, func(t *testing.T) {
+			t.Parallel()
 			m := modelWithTranscript(t, "hello world")
 			m.state = s.state
 			w := m.viewport.Width()
@@ -2495,6 +2589,7 @@ func TestTranscriptDragCopiesInEveryState(t *testing.T) {
 // swallowed either; it goes on to the region arbitration exactly as a click on any other cell does,
 // which is what keeps the transcript copyable in those states (the test above).
 func TestPromptClickRefusedAtApprovalAndErrored(t *testing.T) {
+	t.Parallel()
 	for _, state := range []uiState{stateAwaitingApproval, stateErrored} {
 		m := modelWithInput(t, "hello world")
 		m.state = state
@@ -2527,6 +2622,7 @@ func TestPromptClickRefusedAtApprovalAndErrored(t *testing.T) {
 // where the overlay is a visual no-op, and following the tail of a reply taller than the screen,
 // where the overlay genuinely covers a different content line (the default for a long reply).
 func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
+	t.Parallel()
 	base := func(t *testing.T) Model {
 		t.Helper()
 		m := newTestModel(t)
@@ -2554,6 +2650,7 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m := base(t)
 			c.park(&m)
 
@@ -2582,6 +2679,7 @@ func TestTranscriptSelectionOnStickyHeaderRow(t *testing.T) {
 // nobody could see on the system clipboard over OSC 52. Every screen row an overlay occupies must
 // map to no transcript position at all.
 func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
+	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write the notes file"})
 	for i := range 40 { // a transcript deep enough that the covered rows all name real content
 		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
@@ -2630,6 +2728,7 @@ func TestMouseClickOnOverlayRowsArmsNoSelection(t *testing.T) {
 // further down. The gap row belongs to neither side — it maps to no content line, exactly as the
 // pane rows do — so the seam is unmoved by where it falls.
 func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
+	t.Parallel()
 	deepTranscript := func(m *Model) {
 		for i := range 60 {
 			m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
@@ -2676,6 +2775,7 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m, overlay := c.build(t)
 			drawn := m.transcriptRows()
 
@@ -2721,6 +2821,7 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 // test that read the rect first would put the pointer inside a box that is no longer there — claiming,
 // or dismissing, on somebody else's frame. Nothing is named, and the pane is never even composed.
 func TestPopupPaneHitAnswersNothingWithThePaneShut(t *testing.T) {
+	t.Parallel()
 	m := settingsFrameModel(t, 80, 30, 8)
 	paint, ok := m.settingsPaint()
 	if !ok {
@@ -2759,6 +2860,7 @@ func TestPopupPaneHitAnswersNothingWithThePaneShut(t *testing.T) {
 // carry the concrete Model on down the chain — with the Cmd the accept handed back, which is the whole
 // reason the chain has a Cmd currency at all.
 func TestAcceptedModelNarrowsAnAcceptsAnswer(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.flash = "the accept ran"
 	accept := func() (tea.Model, tea.Cmd) { return m, tea.Quit }
@@ -2778,6 +2880,7 @@ func TestAcceptedModelNarrowsAnAcceptsAnswer(t *testing.T) {
 // any keypress, and any wheel notch. Both drops live in one place each — handleKey (model.go) and
 // foldMouseWheel — so a pane added later inherits them without knowing they exist.
 func TestClickArmClearsOnKeyAndWheel(t *testing.T) {
+	t.Parallel()
 	armed := func(t *testing.T) Model {
 		t.Helper()
 		m := newTestModel(t)
@@ -2800,6 +2903,7 @@ func TestClickArmClearsOnKeyAndWheel(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m := step(t, armed(t), c.msg)
 
 			if m.clickArmed.ok || m.clickArmed.holds(panePrompt, 2) {
@@ -2836,8 +2940,10 @@ func frameCell(t *testing.T, m Model, want string) (x, y int) {
 // the spacer above it or on the pane's own chrome selects nothing: they are rows no keypress can put
 // the ❯ on either.
 func TestSettingsClickSelectsTheRowUnderThePointer(t *testing.T) {
+	t.Parallel()
 	for _, height := range []int{24, 30, 40} {
 		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			t.Parallel()
 			m := settingsFrameModel(t, 80, height, 8)
 			x, y := frameCell(t, m, "key-02")
 
@@ -2868,6 +2974,7 @@ func TestSettingsClickSelectsTheRowUnderThePointer(t *testing.T) {
 // is display cells and the caret is a rune offset, so a value of two-cell glyphs is where a mapping
 // that counted runes would land one glyph out.
 func TestSettingsClickSeatsTheCaretInTheEditField(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		value   string
@@ -2879,6 +2986,7 @@ func TestSettingsClickSeatsTheCaretInTheEditField(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			row := settingsStringRow()
 			row.Value = c.value
 			m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
@@ -2909,6 +3017,7 @@ func TestSettingsClickSeatsTheCaretInTheEditField(t *testing.T) {
 // behind, because the caret glyph stands in the painted cell and moves the text under it: what the
 // human aims at is what is on the screen at the moment they aim.
 func TestSettingsDragSelectsAndCopies(t *testing.T) {
+	t.Parallel()
 	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
 	m = step(t, m, keyEnter())
 
@@ -2951,6 +3060,7 @@ func TestSettingsDragSelectsAndCopies(t *testing.T) {
 // arrows wrap — a scroll gesture must not land the human on the far end of the list. A notch outside
 // the pane is the transcript's, which is what keeps the conversation above a short pane scrollable.
 func TestSettingsWheelWalksTheKeyList(t *testing.T) {
+	t.Parallel()
 	m := settingsFrameModel(t, 80, 30, 8)
 	_, y := frameCell(t, m, "key-00")
 	wheel := func(m Model, button tea.MouseButton, y int) Model {
@@ -3005,6 +3115,7 @@ func settingsTextEditModel(t *testing.T, prose string) Model {
 // the break dropped a blank that is still in the value — and a line of two-cell glyphs, where a mapping
 // that counted runes rather than display cells would land one glyph out.
 func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		prose   string
@@ -3018,6 +3129,7 @@ func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m := settingsTextEditModel(t, c.prose)
 			paint, ok := m.settingsTextPaint()
 			if !ok {
@@ -3050,6 +3162,7 @@ func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
 // that is what the value holds — the span is shaded on every line it covers, and the release copies
 // exactly those runes.
 func TestSettingsTextDragSelectsAcrossLines(t *testing.T) {
+	t.Parallel()
 	m := settingsTextEditModel(t, "You are apogee.\nWork step by step.")
 
 	x, y := frameCell(t, m, "You are apogee.")
@@ -3085,6 +3198,7 @@ func TestSettingsTextDragSelectsAcrossLines(t *testing.T) {
 // follows, so moving the caret IS the scroll — and clamps at the first and last lines, where a wheel
 // must not roll round. A notch above the pane is still the transcript's.
 func TestSettingsTextWheelWalksTheProse(t *testing.T) {
+	t.Parallel()
 	lines := make([]string, 12)
 	for i := range lines {
 		lines[i] = fmt.Sprintf("line-%02d", i)
@@ -3136,6 +3250,7 @@ func TestSettingsTextWheelWalksTheProse(t *testing.T) {
 // prompt's are dropped when another surface takes a click. Without that, a drag over the conversation
 // moves nothing and its release copies the field's stale runes.
 func TestTranscriptDragOutlivesASettingsHighlight(t *testing.T) {
+	t.Parallel()
 	m := settingsFrameModel(t, 80, 30, 8)
 	m = step(t, m, keyEnter()) // the buffer opens on key-00, seeded with its value
 
@@ -3225,6 +3340,7 @@ func umbrellaHeaderLine(t *testing.T, m Model) int {
 // a click on the umbrella header — which toggles nothing, its floor being the type rows — closes
 // every open child at once.
 func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
+	t.Parallel()
 	// entries[0] is the prompt, so the two reads are entries 1..2 and the two Runs 3..4: one umbrella
 	// of two runs, headed at 1 and 3.
 	const readRun, runRun = 1, 3
@@ -3235,6 +3351,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 	}
 
 	t.Run("a click on a type row lists the calls behind it", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithSuperGroup(t)
 		m = clickLine(t, m, typeRowLine(t, m, readRun))
 		if !m.transcript.entries[readRun].typeExpanded {
@@ -3255,6 +3372,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 	})
 
 	t.Run("a click on a member row opens that call alone", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithSuperGroup(t)
 		m = clickLine(t, m, typeRowLine(t, m, runRun))
 		m = clickLine(t, m, memberRows(t, m, runRun)[0])
@@ -3273,6 +3391,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 	})
 
 	t.Run("the header closes every open child", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithSuperGroup(t)
 		m = clickLine(t, m, typeRowLine(t, m, readRun))
 		m = clickLine(t, m, typeRowLine(t, m, runRun))
@@ -3288,6 +3407,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 	})
 
 	t.Run("the header offers nothing while nothing is open", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithSuperGroup(t)
 		header := umbrellaHeaderLine(t, m)
 		if kind := m.lineTargets[header].kind; kind != targetNone {
@@ -3327,6 +3447,7 @@ func modelWithSubAgentGroup(t *testing.T) Model {
 // brings the list back. The group header itself toggles nothing — a collapsed list has no state of
 // its own to flip.
 func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
+	t.Parallel()
 	// The prompt is entries[0], so the three delegations head at 1, 3 and 5.
 	const first, middle, last = 1, 3, 5
 
@@ -3336,6 +3457,7 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 	}
 
 	t.Run("a click opens the delegation it landed on, alone", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithSubAgentGroup(t)
 		m = clickLine(t, m, memberRows(t, m, middle)[0])
 		if got := m.viewedRun().spawn; got != "s2" {
@@ -3351,6 +3473,7 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 	})
 
 	t.Run("the breadcrumb brings the list back", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithSubAgentGroup(t)
 		m = clickLine(t, m, memberRows(t, m, middle)[0])
 		m = clickLine(t, m, markedLine(t, m, targetBreadcrumb))
@@ -3363,6 +3486,7 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 	})
 
 	t.Run("the group header toggles nothing", func(t *testing.T) {
+		t.Parallel()
 		m := modelWithSubAgentGroup(t)
 		line := memberRows(t, m, first)[0] - 1 // the header sits directly above the first row
 		if got := strip(m.lines[line]); !strings.Contains(got, "Sub-Agent (3)") {
@@ -3399,6 +3523,7 @@ func usageReportModel(t *testing.T, delegates int) Model {
 // second click still does what it was aimed at: the pane is not modal (layout.md), so the caret is
 // seated in the prompt exactly as it would have been with no report up.
 func TestUsageReportUnderTheClick(t *testing.T) {
+	t.Parallel()
 	m := usageReportModel(t, 20)
 	paneTop, h, ok := m.usagePaneRect()
 	if !ok {
@@ -3429,6 +3554,7 @@ func TestUsageReportUnderTheClick(t *testing.T) {
 // reaches is a FULL one, the end of the list against the bottom of the pane. A notch outside the pane
 // is the transcript's, which is what keeps the conversation behind the report scrollable.
 func TestUsageWheelScrollsTheReport(t *testing.T) {
+	t.Parallel()
 	m := usageReportModel(t, 20)
 	paneTop, h, ok := m.usagePaneRect()
 	if !ok {
@@ -3505,6 +3631,7 @@ func inspectorPaneModel(t *testing.T, records int) Model {
 // click still does what it was aimed at: the pane is not modal (layout.md), so the caret is seated in
 // the prompt exactly as it would have been with no pane up.
 func TestInspectorPaneUnderTheClick(t *testing.T) {
+	t.Parallel()
 	m := inspectorPaneModel(t, 12)
 	paneTop, h, ok := m.inspectorPaneRect()
 	if !ok {
@@ -3535,6 +3662,7 @@ func TestInspectorPaneUnderTheClick(t *testing.T) {
 // reaches is a FULL one, the end of the list against the bottom of the pane. A notch outside the pane
 // is the transcript's, which is what keeps the conversation behind the pane scrollable.
 func TestInspectorWheelScrollsTheRecords(t *testing.T) {
+	t.Parallel()
 	m := inspectorPaneModel(t, 12)
 	paneTop, h, ok := m.inspectorPaneRect()
 	if !ok {
@@ -3597,6 +3725,7 @@ func TestInspectorWheelScrollsTheRecords(t *testing.T) {
 // pane is not modal (layout.md), so the caret is seated in the prompt exactly as it would have been
 // with no pane up.
 func TestThinkingPaneUnderTheClick(t *testing.T) {
+	t.Parallel()
 	m := thinkingPaneModel(t, 12)
 	paneTop, h, ok := m.thinkingPaneRect()
 	if !ok {
@@ -3628,6 +3757,7 @@ func TestThinkingPaneUnderTheClick(t *testing.T) {
 // notch outside the pane is the transcript's, which is what keeps the conversation behind the pane
 // scrollable while the reader is in it.
 func TestThinkingWheelScrollsTheRows(t *testing.T) {
+	t.Parallel()
 	m := thinkingPaneModel(t, 40)
 	paneTop, h, ok := m.thinkingPaneRect()
 	if !ok {
@@ -3710,6 +3840,7 @@ func bothPanesModel(t *testing.T, records int) Model {
 // than the model the dismissal left: the blank gap row above the report is neither the regrown box's
 // nor the transcript's.
 func TestClickInTheBandTheInspectorGrowsIntoFallsThrough(t *testing.T) {
+	t.Parallel()
 	m := bothPanesModel(t, 30)
 	usageTop, _, ok := m.usagePaneRect()
 	if !ok {
@@ -3750,6 +3881,7 @@ func TestClickInTheBandTheInspectorGrowsIntoFallsThrough(t *testing.T) {
 // dismissed under the same press — a click outside the report always dismisses it — and the box that
 // answers is the one the human aimed at.
 func TestClickInsideTheInspectorSurvivesTheReportDismissal(t *testing.T) {
+	t.Parallel()
 	m := bothPanesModel(t, 30)
 	paneTop, h, ok := m.inspectorPaneRect()
 	if !ok {
@@ -3776,6 +3908,7 @@ func TestClickInsideTheInspectorSurvivesTheReportDismissal(t *testing.T) {
 // model the rest of the chain runs on, and selecting there would copy a line the human never saw at
 // that Y.
 func TestClickOnAVacatedRowSelectsNoTranscriptLine(t *testing.T) {
+	t.Parallel()
 	m := bothPanesModel(t, 1)
 	usageTop, _, ok := m.usagePaneRect()
 	if !ok {
@@ -3809,6 +3942,7 @@ func TestClickOnAVacatedRowSelectsNoTranscriptLine(t *testing.T) {
 // rectangle exactly as the same Model composing one on demand does — otherwise the saving would have
 // bought a click a frame of its own.
 func TestPublishedFrameSpansMatchAFreshComposition(t *testing.T) {
+	t.Parallel()
 	m := bothPanesModel(t, 30)
 
 	published := m.withFrameSpans()
@@ -3827,6 +3961,7 @@ func TestPublishedFrameSpansMatchAFreshComposition(t *testing.T) {
 // snapshot and nothing else: a model that carried them back to Bubble Tea would answer the NEXT click
 // with the geometry of a frame the human is no longer looking at.
 func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
+	t.Parallel()
 	m := bothPanesModel(t, 30)
 	usageTop, _, ok := m.usagePaneRect()
 	if !ok {
@@ -3860,6 +3995,7 @@ func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 // click on a lower report dismisses the one above it before it reaches it, and no pane is entered
 // twice: a pane asked twice would be dismissed by its own first answer.
 func TestPointerPanesWalkInTheClickChainOrder(t *testing.T) {
+	t.Parallel()
 	want := []framePane{paneSettings, paneUsage, paneInspector, paneThinking, paneBrowser, panePicker, panePrompt, paneDropdown}
 
 	if len(pointerPanes) != len(want) {
@@ -3886,6 +4022,7 @@ func TestPointerPanesWalkInTheClickChainOrder(t *testing.T) {
 // pinned where it lives rather than inferred from what the transcript did next
 // (TestTranscriptDragOutlivesASettingsHighlight covers that end).
 func TestSettingsEntryDropsTheHighlightOnAClickItDoesNotClaim(t *testing.T) {
+	t.Parallel()
 	m := settingsFrameModel(t, 80, 30, 8)
 	m = step(t, m, keyEnter()) // the buffer opens on key-00, seeded with its value
 	fieldX, fieldY := frameCell(t, m, "value-00")
@@ -3948,6 +4085,7 @@ func wheelAt(t *testing.T, m Model, button tea.MouseButton, y int) Model {
 // A notch over the pane walks the session list one row, which is the whole of the reported defect:
 // before this the browser was one of the overlays a wheel fell straight through.
 func TestBrowserWheelWalksTheSessionList(t *testing.T) {
+	t.Parallel()
 	m := browserPaneModel(t, 12)
 	_, y := browserRect(t, m)
 
@@ -3967,6 +4105,7 @@ func TestBrowserWheelWalksTheSessionList(t *testing.T) {
 // human somewhere they did not aim. Both answers are asserted at both ends, so neither can drift
 // into the other unnoticed.
 func TestBrowserWheelClampsWhereTheKeysWrap(t *testing.T) {
+	t.Parallel()
 	m := browserPaneModel(t, 12)
 	_, y := browserRect(t, m)
 	last := len(m.sessionBrowserView().rows) - 1
@@ -3997,6 +4136,7 @@ func TestBrowserWheelClampsWhereTheKeysWrap(t *testing.T) {
 // Above the pane the transcript still owns the wheel: the browser claims the notches inside its
 // rectangle and no others.
 func TestBrowserWheelAboveThePaneScrollsTheTranscript(t *testing.T) {
+	t.Parallel()
 	m := browserPaneModel(t, 12)
 	paneTop, y := browserRect(t, m)
 	if paneTop == 0 {
@@ -4019,6 +4159,7 @@ func TestBrowserWheelAboveThePaneScrollsTheTranscript(t *testing.T) {
 // it is answered, so a notch over it moves NOTHING — and, the browser being modal, still never
 // reaches the transcript behind it.
 func TestBrowserWheelIsSwallowedByARenameOrAConfirm(t *testing.T) {
+	t.Parallel()
 	base := browserPaneModel(t, 12)
 	_, y := browserRect(t, base)
 	base = wheelAt(t, base, tea.MouseWheelDown, y) // off the first row, so a stray move would show
@@ -4051,6 +4192,7 @@ func TestBrowserWheelIsSwallowedByARenameOrAConfirm(t *testing.T) {
 // — so a wheel and an ↑ can never disagree about which record is highlighted, and the clamp is the
 // filtered list's length rather than the store's.
 func TestBrowserWheelWalksTheFilteredList(t *testing.T) {
+	t.Parallel()
 	m := browserPaneModel(t, 12)
 	for _, r := range "number 1" {
 		m = step(t, m, keyRune(r))
@@ -4100,6 +4242,7 @@ func pickerRect(t *testing.T, m Model) (paneTop, inside int) {
 // A notch over the pane walks the offering one row, which is the reported defect one pane along:
 // before this the picker was one of the overlays a wheel fell straight through.
 func TestPickerWheelWalksTheOffering(t *testing.T) {
+	t.Parallel()
 	m := pickerPaneModel(t, pickerCycle)
 	_, y := pickerRect(t, m)
 
@@ -4118,6 +4261,7 @@ func TestPickerWheelWalksTheOffering(t *testing.T) {
 // (ratified 2026-08-22). Both answers are asserted at both ends, so neither can drift into the other
 // unnoticed.
 func TestPickerWheelClampsWhereTheKeysWrap(t *testing.T) {
+	t.Parallel()
 	m := pickerPaneModel(t, pickerCycle)
 	_, y := pickerRect(t, m)
 	last := m.pickerCount() - 1
@@ -4148,6 +4292,7 @@ func TestPickerWheelClampsWhereTheKeysWrap(t *testing.T) {
 // Above the pane the transcript still owns the wheel: the picker claims the notches inside its
 // rectangle and no others.
 func TestPickerWheelAboveThePaneScrollsTheTranscript(t *testing.T) {
+	t.Parallel()
 	m := pickerPaneModel(t, pickerCycle)
 	paneTop, y := pickerRect(t, m)
 	if paneTop == 0 {
@@ -4170,6 +4315,7 @@ func TestPickerWheelAboveThePaneScrollsTheTranscript(t *testing.T) {
 // a wheel and an ↑ can never disagree about which row is highlighted, and the clamp is the filtered
 // offering's length rather than the kind's whole list.
 func TestPickerWheelWalksTheFilteredOffering(t *testing.T) {
+	t.Parallel()
 	m := pickerPaneModel(t, pickerCycle)
 	for _, r := range "hour" {
 		m = step(t, m, keyRune(r))
@@ -4194,6 +4340,7 @@ func TestPickerWheelWalksTheFilteredOffering(t *testing.T) {
 // half-built Schedule the two popups carry between them is untouched — the wheel moves a highlight
 // and nothing else.
 func TestPickerWheelWalksAScheduleStep(t *testing.T) {
+	t.Parallel()
 	m := streamOneScreen(t, newTestModel(t))
 	draft := scheduleDraft{prompt: "tidy the logs", cycle: 15 * time.Minute}
 	m.picker = picker{open: true, kind: pickerScheduleMode, draft: draft}
@@ -4218,6 +4365,7 @@ func TestPickerWheelWalksAScheduleStep(t *testing.T) {
 // on that same row is the ⏎ — here the cycle question's accept, which carries the draft on to the
 // mode question.
 func TestPickerClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
+	t.Parallel()
 	m := pickerPaneModel(t, pickerCycle)
 	m.picker.draft.prompt = "tidy the logs"
 	x, y := frameCell(t, m, "15m")
@@ -4251,6 +4399,7 @@ func TestPickerClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
 // "hour" typed the pane paints 1h and 4h, and a click on the first painted row takes 1h — not the
 // 1m that stands first in the unfiltered offering.
 func TestPickerClickTakesTheFilteredRow(t *testing.T) {
+	t.Parallel()
 	m := pickerPaneModel(t, pickerCycle)
 	m.picker.draft.prompt = "tidy the logs"
 	for _, r := range "hour" {
@@ -4277,6 +4426,7 @@ func TestPickerClickTakesTheFilteredRow(t *testing.T) {
 // call ⏎ makes (sessions.go), whose loadSession Cmd has to survive the click or the pane closes over
 // a session that never loads.
 func TestBrowserClickHighlightsThenTheSecondClickResumes(t *testing.T) {
+	t.Parallel()
 	m := browserPaneModel(t, 12)
 	x, y := frameCell(t, m, "session number 03")
 
@@ -4310,6 +4460,7 @@ func TestBrowserClickHighlightsThenTheSecondClickResumes(t *testing.T) {
 // it is answered, so a click over it moves nothing, resumes nothing and — the browser being modal —
 // never reaches the transcript behind it.
 func TestBrowserClickIsSwallowedByARenameOrAConfirm(t *testing.T) {
+	t.Parallel()
 	base := browserPaneModel(t, 12)
 	x, y := frameCell(t, base, "session number 03")
 
@@ -4346,6 +4497,7 @@ func TestBrowserClickIsSwallowedByARenameOrAConfirm(t *testing.T) {
 // C as the owner amended it): the pane goes, and nothing underneath — no transcript selection, no
 // caret seat — hears the click that dismissed it.
 func TestListPaneClickOutsideTheBoxClosesItAndReachesNothing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		pane framePane
@@ -4366,6 +4518,7 @@ func TestListPaneClickOutsideTheBoxClosesItAndReachesNothing(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := tc.make(t)
 			paneTop, _, ok := m.frameSpans().pane(tc.pane)
 			if !ok {
@@ -4394,6 +4547,7 @@ func TestListPaneClickOutsideTheBoxClosesItAndReachesNothing(t *testing.T) {
 // open gate is asked before the rectangle, so a handler cannot dismiss a pane that is not there or
 // swallow a click using a rectangle belonging to whatever the slot is holding instead.
 func TestClickWhereAClosedListPaneWouldStandFallsThrough(t *testing.T) {
+	t.Parallel()
 	open := browserPaneModel(t, 12)
 	paneTop, h, ok := open.frameSpans().pane(paneBrowser)
 	if !ok {
@@ -4450,6 +4604,7 @@ func promptRect(t *testing.T, m Model) (paneTop, inside int) {
 // is what its ↑/↓ already do (listStopsAtEnds), so on this security surface the wheel and the arrows
 // agree at the ends rather than offering two answers.
 func TestPromptWheelWalksTheApprovalMenu(t *testing.T) {
+	t.Parallel()
 	m := approvalPaneModel(t)
 	_, y := promptRect(t, m)
 	last := len(approvalMenu) - 1
@@ -4480,6 +4635,7 @@ func TestPromptWheelWalksTheApprovalMenu(t *testing.T) {
 
 // The same for the ask offering, which shares the rectangle and the handler with the menu above.
 func TestPromptWheelWalksTheAskOffering(t *testing.T) {
+	t.Parallel()
 	choices := []string{"left", "middle", "right"}
 	m := askPaneModel(t, domain.AskRequest{Question: "which way?", Choices: choices})
 	_, y := promptRect(t, m)
@@ -4510,6 +4666,7 @@ func TestPromptWheelWalksTheAskOffering(t *testing.T) {
 // those keys double as the textarea's cursor keys — a wheel has no such second duty, so the notch
 // walks the choices whether or not the box holds a draft.
 func TestPromptWheelWalksTheOfferingWithADraftTyped(t *testing.T) {
+	t.Parallel()
 	m := askPaneModel(t, domain.AskRequest{Question: "which way?", Choices: []string{"left", "middle", "right"}})
 	m = typeInput(t, m, "neither, actually")
 	if m.input.Value() == "" {
@@ -4535,6 +4692,7 @@ func TestPromptWheelWalksTheOfferingWithADraftTyped(t *testing.T) {
 // highlight, which is what makes "the pane under the pointer owns the notch" compatible with these
 // two panes leaving the surface beneath them alive.
 func TestPromptWheelOutsideTheBoxScrollsTheTranscript(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		build func(t *testing.T) Model
@@ -4558,6 +4716,7 @@ func TestPromptWheelOutsideTheBoxScrollsTheTranscript(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := tc.build(t)
 			paneTop, inside := promptRect(t, m)
 			if paneTop == 0 {
@@ -4584,6 +4743,7 @@ func TestPromptWheelOutsideTheBoxScrollsTheTranscript(t *testing.T) {
 // The wheel walks and ␣ ticks: a notch over a multi-select question moves the highlight and leaves
 // the checked set exactly as the human left it.
 func TestPromptWheelLeavesTheCheckedSetAlone(t *testing.T) {
+	t.Parallel()
 	m := askPaneModel(t, domain.AskRequest{
 		Question:    "which files?",
 		Choices:     []string{"one", "two", "three"},
@@ -4611,6 +4771,7 @@ func TestPromptWheelLeavesTheCheckedSetAlone(t *testing.T) {
 // A question offering no choices has no highlight to walk, and the notch is still the pane's: it is
 // swallowed, moves nothing, panics on nothing, and never reaches the transcript behind the box.
 func TestPromptWheelOverAChoicelessQuestion(t *testing.T) {
+	t.Parallel()
 	m := askPaneModel(t, domain.AskRequest{Question: "what colour?"})
 	_, y := promptRect(t, m)
 
@@ -4658,6 +4819,7 @@ func sentAnswer(t *testing.T, reply chan domain.AskAnswer) (string, bool) {
 // (call J, owner 2026-09-06): a click on an offered answer seats the ❯ on it and arms it, and the
 // SECOND click on that same row is the ⏎ — the label reaches the blocked worker.
 func TestAskClickHighlightsThenTheSecondClickSends(t *testing.T) {
+	t.Parallel()
 	m, reply := askClickModel(t, domain.AskRequest{
 		Question: "which way?",
 		Choices:  []string{"left", "middle", "right"},
@@ -4703,6 +4865,7 @@ func TestAskClickHighlightsThenTheSecondClickSends(t *testing.T) {
 // — the one the ❯ already sits on — arms it and sends nothing. It is the whole point of the arm: two
 // clicks always, whatever the keyboard or the pane left highlighted (call J).
 func TestAskClickOnTheDefaultHighlightArmsAndSendsNothing(t *testing.T) {
+	t.Parallel()
 	m, reply := askClickModel(t, domain.AskRequest{
 		Question: "which way?",
 		Choices:  []string{"left", "middle", "right"},
@@ -4732,6 +4895,7 @@ func TestAskClickOnTheDefaultHighlightArmsAndSendsNothing(t *testing.T) {
 // row it highlights. The second click on that row sends the TICKED SET, which is submitAnswer's own
 // rule rather than a second one written for the pointer.
 func TestAskClickTicksAMultiSelectRowThenSendsTheSet(t *testing.T) {
+	t.Parallel()
 	m, reply := askClickModel(t, domain.AskRequest{
 		Question:    "which findings?",
 		Choices:     []string{"the nil check", "the missing layout call", "the empty path"},
@@ -4769,6 +4933,7 @@ func TestAskClickTicksAMultiSelectRowThenSendsTheSet(t *testing.T) {
 // human types, the offering is no longer what ⏎ would send, so a click on a choice row is swallowed —
 // the highlight stays dropped and the draft in the box is untouched.
 func TestAskClickIsSwallowedWhileTheBoxHoldsText(t *testing.T) {
+	t.Parallel()
 	m, reply := askClickModel(t, domain.AskRequest{
 		Question: "which way?",
 		Choices:  []string{"left", "middle", "right"},
@@ -4792,6 +4957,7 @@ func TestAskClickIsSwallowedWhileTheBoxHoldsText(t *testing.T) {
 // A question offering no choices has no row to name, and a click inside its box does nothing at all —
 // it is still the pane's, so nothing under it is selected either.
 func TestAskClickOnAChoicelessQuestionDoesNothing(t *testing.T) {
+	t.Parallel()
 	m, reply := askClickModel(t, domain.AskRequest{Question: "what should it be called?"})
 	_, y := promptRect(t, m)
 
@@ -4813,6 +4979,7 @@ func TestAskClickOnAChoicelessQuestionDoesNothing(t *testing.T) {
 // rectangles the human always has stay reachable for as long as a question stands: the transcript
 // takes a drag, and the answer box takes a caret seat, which is what inputEditable promises at an ask.
 func TestAskClickOutsideTheBoxReachesTheTranscriptAndThePrompt(t *testing.T) {
+	t.Parallel()
 	reply := make(chan domain.AskAnswer, 1)
 	m := step(t, modelWithTranscript(t, "hello world"), askReqMsg{
 		Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "middle", "right"}},
@@ -4905,6 +5072,7 @@ func sentDecision(t *testing.T, reply chan domain.ApprovalDecision) (domain.Appr
 // owner 2026-09-06): a click on Deny seats the ❯ on it and arms it, and the SECOND click on that same
 // row is the ⏎ — the decision reaches the blocked tool.
 func TestApprovalClickHighlightsThenTheSecondClickRules(t *testing.T) {
+	t.Parallel()
 	m, reply := approvalClickModel(t)
 	m = armApproval(t, m)
 	const denyRow = 2
@@ -4949,6 +5117,7 @@ func TestApprovalClickHighlightsThenTheSecondClickRules(t *testing.T) {
 // ❯ already sits on when the pane opens — arms it and grants nothing. On this surface that is the
 // whole point of the arm: one click can never run a tool call, whatever the highlight was left on.
 func TestApprovalClickOnTheDefaultHighlightArmsAndGrantsNothing(t *testing.T) {
+	t.Parallel()
 	m, reply := approvalClickModel(t)
 	m = armApproval(t, m)
 	if m.approvalSel.highlight(len(approvalMenu)) != 0 {
@@ -4977,6 +5146,7 @@ func TestApprovalClickOnTheDefaultHighlightArmsAndGrantsNothing(t *testing.T) {
 // but the second click on the armed row rules nothing. The arm survives it, so the first click after
 // the tick takes the row rather than a third one.
 func TestApprovalClickBeforeTheLatchRulesNothing(t *testing.T) {
+	t.Parallel()
 	m, reply := approvalClickModel(t)
 	if m.approvalArmed {
 		t.Fatal("setup: the pane armed itself; there is no latch left to assert against")
@@ -5009,6 +5179,7 @@ func TestApprovalClickBeforeTheLatchRulesNothing(t *testing.T) {
 // The Cancel row stops the in-flight worker, which is what ⏎ on it already does (resolveApproval) —
 // and it takes two clicks like every other row. The prompt stays up until the worker reports back.
 func TestApprovalClickOnCancelStopsTheWorker(t *testing.T) {
+	t.Parallel()
 	m, reply := approvalClickModel(t)
 	m = armApproval(t, m)
 	cancelled := startStubWorker(t, &m)
@@ -5037,6 +5208,7 @@ func TestApprovalClickOnCancelStopsTheWorker(t *testing.T) {
 // cancel the call — that stays esc's — but it is otherwise the frame's own click, so the transcript
 // the human reads the call's context in keeps taking a drag for as long as the pane stands.
 func TestApprovalClickOutsideTheBoxLeavesTheCallStanding(t *testing.T) {
+	t.Parallel()
 	m, reply := approvalClickModel(t)
 	m = armApproval(t, m)
 	paneTop, _ := promptRect(t, m)
@@ -5110,6 +5282,7 @@ func dropdownRect(t *testing.T, m Model) (paneTop, inside int) {
 // WRAP (listWrapsAround, autocompleteKey). Both answers are asserted at both ends, so the deliberate
 // difference between the gestures cannot drift into an accident.
 func TestDropdownWheelWalksTheSlashMenu(t *testing.T) {
+	t.Parallel()
 	m := dropdownPaneModel(t, testOpts, "/")
 	_, y := dropdownRect(t, m)
 	last := len(m.autocomplete.items) - 1
@@ -5145,6 +5318,7 @@ func TestDropdownWheelWalksTheSlashMenu(t *testing.T) {
 // The "@" file menu is the same overlay over a different namespace, and it answers the notch the same
 // way — the handler branches on neither kind, and this is what says so.
 func TestDropdownWheelWalksTheFileMenu(t *testing.T) {
+	t.Parallel()
 	m := dropdownPaneModel(t, fileDropdownOpts(t), "@")
 	if m.autocomplete.kind != acFile {
 		t.Fatalf("the draft opened the %v menu, want the file menu", m.autocomplete.kind)
@@ -5174,6 +5348,7 @@ func TestDropdownWheelWalksTheFileMenu(t *testing.T) {
 // posture unchanged: it is the one overlay the human is still typing underneath, so it claims the
 // notches inside its own rectangle and gives every other one up to the surface behind it.
 func TestDropdownWheelAboveTheMenuScrollsTheTranscript(t *testing.T) {
+	t.Parallel()
 	m := dropdownPaneModel(t, testOpts, "/")
 	paneTop, inside := dropdownRect(t, m)
 	if paneTop == 0 {
@@ -5198,6 +5373,7 @@ func TestDropdownWheelAboveTheMenuScrollsTheTranscript(t *testing.T) {
 // (recomputeAutocomplete), so a wheel that filtered, spliced or dismissed would be undoing work the
 // human never asked for.
 func TestDropdownWheelLeavesTheMenuAndTheDraftAlone(t *testing.T) {
+	t.Parallel()
 	m := dropdownPaneModel(t, testOpts, "/c")
 	_, y := dropdownRect(t, m)
 
@@ -5224,6 +5400,7 @@ func TestDropdownWheelLeavesTheMenuAndTheDraftAlone(t *testing.T) {
 // outright (dismissAutocomplete) — so this asserts the routing itself, against a frame assembled by
 // hand, rather than leaving the order resting on that clearing.
 func TestDropdownWheelYieldsToAModalPrompt(t *testing.T) {
+	t.Parallel()
 	open := dropdownPaneModel(t, testOpts, "/")
 	m := step(t, open, approvalReqMsg{
 		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "it overwrites a tracked file", CacheKey: ordinaryGateKey},
@@ -5265,6 +5442,7 @@ func dropdownItemRow(t *testing.T, m Model, value string) int {
 // the answer can be read. It is also why an unconditional accept on the first press would be a
 // defect rather than a shortcut: the menu opens on /clear, whose accept throws the session away.
 func TestDropdownClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
+	t.Parallel()
 	m := dropdownPaneModel(t, testOpts, "/")
 	want := dropdownItemRow(t, m, "confine")
 	if want == m.autocomplete.selected {
@@ -5305,6 +5483,7 @@ func TestDropdownClickHighlightsThenTheSecondClickAccepts(t *testing.T) {
 // ⏎ hands the draft to the box; the pointer, which has no other way to accept the row it is aiming
 // at, splices it.
 func TestDropdownClickAcceptsThroughAnExactMatchTheEnterKeyWouldDecline(t *testing.T) {
+	t.Parallel()
 	m := modelWithOverlayRoomAt(t, 100, 30, testOpts)
 	m.input.SetValue("/confine")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -5329,6 +5508,7 @@ func TestDropdownClickAcceptsThroughAnExactMatchTheEnterKeyWouldDecline(t *testi
 // nothing: no highlight moves, no arm is taken, and the menu stays exactly as it stood. Dismissal is
 // reserved for a click OUTSIDE the rectangle, which is a different click entirely.
 func TestDropdownClickOnTheHintRowDoesNothing(t *testing.T) {
+	t.Parallel()
 	m := dropdownPaneModel(t, testOpts, "/")
 	x, y := frameCell(t, m, "esc dismiss")
 
@@ -5354,6 +5534,7 @@ func TestDropdownClickOnTheHintRowDoesNothing(t *testing.T) {
 // chat box the menu hangs over. The menu closes AND the caret seats where they pointed — a
 // dismiss-and-claim would have cost them the seat and left them clicking twice for it.
 func TestDropdownClickInTheBoxDismissesTheMenuAndSeatsTheCaret(t *testing.T) {
+	t.Parallel()
 	m := dropdownPaneModel(t, testOpts, "/c")
 	x0, y0, _, _ := m.inputContentRect()
 	if _, _, ok := m.frameSpans().pane(paneDropdown); !ok {
@@ -5384,6 +5565,7 @@ func TestDropdownClickInTheBoxDismissesTheMenuAndSeatsTheCaret(t *testing.T) {
 // menu that is not there — the skillRegion edge-trigger a dismissal clears survives untouched — or
 // pay a layout() on every click in the program.
 func TestClickWhereAClosedDropdownWouldStandDismissesNothing(t *testing.T) {
+	t.Parallel()
 	open := dropdownPaneModel(t, testOpts, "/")
 	paneTop, h, ok := open.frameSpans().pane(paneDropdown)
 	if !ok {
@@ -5426,6 +5608,7 @@ func footerMarkerCells(t *testing.T, m Model) (y, first, middle, last int) {
 // it opens the mode picker, the cell beside it does not, and a window whose margins cannot seat the
 // marker at all leaves the whole footer row naming nothing.
 func TestClickOnTheFooterModeMarkerOpensTheModePicker(t *testing.T) {
+	t.Parallel()
 	base := newTestModel(t)
 	y, first, middle, last := footerMarkerCells(t, base)
 
@@ -5477,6 +5660,7 @@ func TestClickOnTheFooterModeMarkerOpensTheModePicker(t *testing.T) {
 // (keyClaimOrder, model.go), so a marker that opened the overlay from under one of those — or with a
 // call awaiting approval — would put up a modal the human can neither answer nor close.
 func TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered(t *testing.T) {
+	t.Parallel()
 	base := newTestModel(t)
 	y, _, middle, _ := footerMarkerCells(t, base)
 

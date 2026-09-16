@@ -31,6 +31,7 @@ func queuedRun(t *testing.T, lines ...string) (Model, *fakeEngine) {
 // before the message is flushed, so the message opens the next Exchange in the fresh session rather
 // than being cleared away with the old one.
 func TestQueuedClearRunsBeforeTheQueuedMessage(t *testing.T) {
+	t.Parallel()
 	m, eng := queuedRun(t, "a message", "/clear")
 
 	next, cmd := stepCmd(t, m, exchangeDoneMsg{})
@@ -60,6 +61,7 @@ func TestQueuedClearRunsBeforeTheQueuedMessage(t *testing.T) {
 // alone at the completion, and the /clear waits for the compaction's own fold — never two workers
 // on one Agent, and still FIFO.
 func TestQueuedDrainStopsAtCompactAndResumesAfterItsFold(t *testing.T) {
+	t.Parallel()
 	m, eng := queuedRun(t, "/compact", "/clear")
 
 	next, cmd := stepCmd(t, m, exchangeDoneMsg{})
@@ -95,6 +97,7 @@ func TestQueuedDrainStopsAtCompactAndResumesAfterItsFold(t *testing.T) {
 // dismisses it — after the error is cleared, before any held message is sent, which stays the
 // NEXT ⏎'s.
 func TestCommandsQueuedBeforeALoopErrorDrainAtTheDismissal(t *testing.T) {
+	t.Parallel()
 	m, eng := queuedRun(t, "still worth sending", "/clear")
 
 	m, _ = stepCmd(t, m, errMsg{Err: errors.New("upstream fell over")})

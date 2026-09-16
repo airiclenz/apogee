@@ -348,7 +348,10 @@ NOTES (2026-09-17): two named legends added (`pickerChooseHint`, `pickerStopHint
 
 commit: `refactor(tui): pickerOffering folds the four pickerKind switches into one table`
 
-## 18. internal/tui `t.Parallel` sweep — group A (apogee-11s)
+## 18. internal/tui `t.Parallel` sweep — group A (apogee-11s) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): no test proved non-deterministic under `-race -count=3`, so no `// serial:` beyond the two clipboard-seam tests; those two carry the comment inside their doc block, directly above the func line.
+NOTES (2026-09-17): ten `t.Run` literals stay serial under a parallel parent per the guard — `TestTranscriptNeverScrollsSideways` (copies the parent's `base` Model), `TestClickOnBottomChromeSelectsNothing`, `TestTheClickChainKeepsItsFrameToItself`, `TestBrowserWheelIsSwallowedByARenameOrAConfirm`, `TestBrowserClickIsSwallowedByARenameOrAConfirm`, `TestClickOnTheFooterModeMarkerOpensTheModePicker` (3), `TestClickOnTheFooterModeMarkerIsRefusedWhereThePickerCannotBeAnswered` (all share a parent Model by value, one unlocked `*paintCache`), and `TestToolSummariesRenderThroughThePresenter` (parent `defer srv.Close()` kept as written).
 
 **What:** First of three sweeps (bead closes at item 21). Depends on item 17. Files: `model_test.go`, `mouse_test.go`, `settings_test.go`, `sessions_test.go`, `keyclaim_test.go`, `commandrun_test.go`, `clearscreen_test.go`, `toolsummary_pin_test.go`, `startupbox_test.go`. Rule: `t.Parallel()` becomes the first statement of every top-level test (and every `t.Run` literal) that does not — itself or through a helper — call `t.Setenv`/`t.Chdir`/`os.Setenv`/`os.Chdir` or assign a package-level var of `internal/tui`. The only seam is `writeSystemClipboard` (swapped by `recordSystemClipboard`): `TestDragCopyAlsoWritesTheSystemClipboard` and `TestSystemClipboardFailureStillConfirmsTheCopy` stay serial. A test that proves non-deterministic under `-count=3` is fixed at its cause (a shared path, an order-dependent fixture) or stays serial with a one-line `// serial: <reason>` comment directly above it — never a `t.Parallel()` that flakes.
 

@@ -100,6 +100,7 @@ func openSettingsPane(t *testing.T, m Model) Model {
 // /settings is synchronous and idle-safe like /sessions: it opens the pane, launches no worker, and
 // empties the box the verb was typed into.
 func TestSettingsCommandOpensThePane(t *testing.T) {
+	t.Parallel()
 	typed := settingsModel(t, settingsTestRows(6))
 	typed.input.SetValue("/settings")
 	m, cmd := stepCmd(t, typed, keyEnter())
@@ -128,6 +129,7 @@ func TestSettingsCommandOpensThePane(t *testing.T) {
 // and NO overlay. A modal pane with nothing in it would be worse than the sentence explaining it —
 // and it would swallow every key while saying nothing.
 func TestSettingsCommandWithoutRowsNotesAndOpensNothing(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		rows []SettingRow // nil provider when unwired below
@@ -137,6 +139,7 @@ func TestSettingsCommandWithoutRowsNotesAndOpensNothing(t *testing.T) {
 		{"provider with no rows", []SettingRow{}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			opts := testOpts
 			if tc.wire {
 				opts.Settings = fakeSettingsHost{
@@ -164,6 +167,7 @@ func TestSettingsCommandWithoutRowsNotesAndOpensNothing(t *testing.T) {
 // on is swallowed: the pane is modal, and the input box behind a full-height pane is a box the human
 // cannot read.
 func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
+	t.Parallel()
 	rows := settingsTestRows(4)
 	m := openSettingsPane(t, settingsModel(t, rows))
 
@@ -198,6 +202,7 @@ func TestSettingsPaneNavigationWrapsAndSwallowsEveryOtherKey(t *testing.T) {
 
 // esc is the way out, and it closes the pane whole: the next frame is the conversation again.
 func TestSettingsPaneEscCloses(t *testing.T) {
+	t.Parallel()
 	m := step(t, openSettingsPane(t, settingsModel(t, settingsTestRows(6))), keyEsc())
 
 	// DeepEqual rather than ==: the pane carries the edit field's widget now, which is not a
@@ -217,6 +222,7 @@ func TestSettingsPaneEscCloses(t *testing.T) {
 // clamps the selection instead of indexing past its end — the picker's own posture, and here the
 // list is the binary's live resolution (item 7 persists edits under this very pane).
 func TestSettingsPaneClampsSelectionToRowsThatShrank(t *testing.T) {
+	t.Parallel()
 	rows := settingsTestRows(6)
 	opts := testOpts
 	opts.Settings = fakeSettingsHost{
@@ -250,6 +256,7 @@ func TestSettingsPaneClampsSelectionToRowsThatShrank(t *testing.T) {
 // The FIRST section takes no spacer: the description header above the list closes with a blank line
 // of its own (settingsBody), and a second would open the pane on a gap.
 func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		{Path: "endpoint", Section: "Upstream", Value: "http://h:1111", Editable: true},
 		{Path: "mode", Section: "Upstream", Value: "auto", Editable: true,
@@ -296,6 +303,7 @@ func TestSettingsDisplayRowsInterleaveSectionHeaders(t *testing.T) {
 // list moves the highlight and nothing else (ADR 0037 decision 9). What a long description loses is
 // its tail, to an ellipsis, rather than the list losing a row to it.
 func TestSettingsPaneDescriptionHeaderNamesTheSelectedRowAtAFixedHeight(t *testing.T) {
+	t.Parallel()
 	rows := settingsTestRows(4)
 	rows[0].Desc = "Short."
 	rows[1].Desc = strings.Repeat("a description with plenty to say for itself ", 6)
@@ -342,6 +350,7 @@ func TestSettingsPaneDescriptionHeaderNamesTheSelectedRowAtAFixedHeight(t *testi
 // through anything of its own. That is the point of pinning it here: a requirement met by the module
 // is one this pane cannot drift away from, and the guard says which style carries it.
 func TestSettingsPaneTitleIsPaintedBold(t *testing.T) {
+	t.Parallel()
 	m := settingsFrameModel(t, 80, 30, 6)
 
 	if !colorActive(m.th) {
@@ -358,6 +367,7 @@ func TestSettingsPaneTitleIsPaintedBold(t *testing.T) {
 // 4). The spacer is a display row like any other — it scrolls with the list — and no keypress can
 // land the selection on either.
 func TestSettingsPaneSectionsAreSpacedAndLabelledInWhite(t *testing.T) {
+	t.Parallel()
 	m := settingsFrameModel(t, 80, 40, 8)
 
 	lines := popupLines(m.renderSettings())
@@ -390,6 +400,7 @@ func TestSettingsPaneSectionsAreSpacedAndLabelledInWhite(t *testing.T) {
 // editing whichever second step holds a row — the buffer typed into on the row, or the enum
 // sub-list answering about it.
 func TestSettingsPaneLightsTheRowItIsEditing(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStringRow(), settingsEnumRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -432,8 +443,10 @@ func TestSettingsPaneLightsTheRowItIsEditing(t *testing.T) {
 // rows — and where the frame is too short to seat the whole region, what it dropped is counted
 // (popupElisionMarker) rather than dropped quietly.
 func TestSettingsPaneSeatsItsHeaderAndLegendAtEveryHeight(t *testing.T) {
+	t.Parallel()
 	for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
 		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
+			t.Parallel()
 			pane := strip(settingsFrameModel(t, 80, height, 40).frameOverlays().settings)
 			if pane == "" {
 				return // the pane gave way whole; the status line carries that fact (its own test)
@@ -464,6 +477,7 @@ func TestSettingsPaneSeatsItsHeaderAndLegendAtEveryHeight(t *testing.T) {
 // config value is a FILE's text, and a file on this machine is no more trusted than a model's reply
 // (doc.go). One unterminated OSC 8 opener would otherwise turn the rest of the frame into a link.
 func TestSettingsRowCellsStripEscapes(t *testing.T) {
+	t.Parallel()
 	row := SettingRow{
 		Path:        "host\x1b]8;;http://evil\x1b\\-alias",
 		Value:       "one\x1bctwo",
@@ -483,6 +497,7 @@ func TestSettingsRowCellsStripEscapes(t *testing.T) {
 // the region still closes on exactly the two blanks it always did — while the list stands one blank
 // clear of the key legend below it (popupRowStyle.padBelow), like every other boxed pane.
 func TestSettingsPaneBreathesAboveItsHint(t *testing.T) {
+	t.Parallel()
 	m := settingsFrameModel(t, 80, 24, 40)
 	lines := popupLines(m.frameOverlays().settings)
 
@@ -519,6 +534,7 @@ func TestSettingsPaneBreathesAboveItsHint(t *testing.T) {
 // as tall as the whole budget the frame had to give — not the eight-row window the picker and the
 // browser cap themselves at (ratified call 1 of the settings-screen plan).
 func TestSettingsPaneClaimsTheWholeTranscriptBudget(t *testing.T) {
+	t.Parallel()
 	// Two rows taller than the package's usual 24-row fixture: the pane now spends one of its lines
 	// on the blank over its key legend (settingsKeyListSpec), and at 24 rows the budget left it
 	// exactly the picker's eight — a tie the claim below cannot be read off.
@@ -547,10 +563,12 @@ func TestSettingsPaneClaimsTheWholeTranscriptBudget(t *testing.T) {
 // takes the transcript's reserve, and NOTHING else moves — the band keeps its shape, the box keeps
 // its rows, and the composed frame fits every window the pane can be drawn in at all.
 func TestSettingsPaneFitsEveryWindowItIsDrawnIn(t *testing.T) {
+	t.Parallel()
 	for _, staged := range []int{0, 5} {
 		for _, width := range []int{80, narrowOverlayWindow} {
 			for _, height := range []int{8, 10, 11, smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
 				t.Run(fmt.Sprintf("%d staged/%d×%d", staged, width, height), func(t *testing.T) {
+					t.Parallel()
 					m := withStagedRows(settingsFrameModel(t, width, height, 40), staged)
 
 					plainFrame := strip(m.View().Content)
@@ -587,6 +605,7 @@ func TestSettingsPaneFitsEveryWindowItIsDrawnIn(t *testing.T) {
 // the fact has to carry the way OUT: it is swallowing every key on a window that is showing none of
 // it, so a frame that looked idle would leave the human with a dead keyboard.
 func TestSettingsGiveWayLeavesItsFactOnTheStatusLine(t *testing.T) {
+	t.Parallel()
 	// Eleven rows: three of transcript budget, one short of the four an honest pane needs.
 	m := settingsFrameModel(t, 80, 11, 40)
 
@@ -739,6 +758,7 @@ func settingsEnumRow() SettingRow {
 // row shows it with the ` *` that says this session changed it; a second ⏎ toggles back from what was
 // WRITTEN, not from the resolution the pane opened over.
 func TestSettingsPaneTogglesABoolAndPersistsIt(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsBoolRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -774,6 +794,7 @@ func TestSettingsPaneTogglesABoolAndPersistsIt(t *testing.T) {
 // backs out having written nothing. The sub-list opens on the value the key already holds, so a human
 // who presses ⏎ twice confirms what was set instead of silently changing it.
 func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsEnumRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -834,6 +855,7 @@ func TestSettingsPaneEnumSubListCommitsAndBacksOut(t *testing.T) {
 // line being typed — so the blank is the ROW block's, exactly as on a pane with no body at all
 // (apogee-7ur); without it the values read as more of the sentence above them.
 func TestSettingsEnumSubListBreathesUnderItsQuestion(t *testing.T) {
+	t.Parallel()
 	row := settingsEnumRow()
 	m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
 
@@ -887,6 +909,7 @@ func settingsServerModel(t *testing.T, servers func() []ServerChoice, sw *fakeSw
 // list is the PROVIDER's answer at the moment the question is asked, so a `servers:` block that
 // gained an entry mid-session offers it the next time the row is opened.
 func TestSettingsServerRowPicksFromTheLiveList(t *testing.T) {
+	t.Parallel()
 	servers := twoServers
 	m := settingsServerModel(t, func() []ServerChoice { return servers }, &fakeSwitch{}, &settingsWriteLog{})
 
@@ -921,6 +944,7 @@ func TestSettingsServerRowPicksFromTheLiveList(t *testing.T) {
 // this session changed it. Nothing is written through the settings writer — the recorded choice IS
 // this key's persistence (ADR 0036 decision 2), which the seam's own half performs.
 func TestSettingsServerRowSwitchesTheSession(t *testing.T) {
+	t.Parallel()
 	sw, log := &fakeSwitch{}, &settingsWriteLog{}
 	m := settingsServerModel(t, staticServers(twoServers), sw, log)
 
@@ -955,6 +979,7 @@ func TestSettingsServerRowSwitchesTheSession(t *testing.T) {
 // than in a transcript this full-height pane is covering. Nothing is journaled: the row still shows
 // the server the session is on, with no marker claiming a change.
 func TestSettingsServerRowRefusalLandsOnTheRow(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{answer: func(string) (ServerSwitchResult, error) {
 		return ServerSwitchResult{}, errors.New("dial tcp: refused")
 	}}
@@ -986,6 +1011,7 @@ func TestSettingsServerRowRefusalLandsOnTheRow(t *testing.T) {
 // running against the server it named — the file and the wire disagreeing, with nothing journaled. The
 // legend says so too, naming no key that would do nothing here.
 func TestSettingsServerRowTakesNoReset(t *testing.T) {
+	t.Parallel()
 	sw, log := &fakeSwitch{}, &settingsWriteLog{}
 	m := settingsServerModel(t, staticServers(twoServers), sw, log)
 
@@ -1025,6 +1051,7 @@ func TestSettingsServerRowTakesNoReset(t *testing.T) {
 // it, so a ⏎ nobody could see the effect of would read as a keypress that did nothing. Nothing is
 // switched and nothing is journaled — no marker claims a change that did not happen.
 func TestSettingsServerRowSaysWhenItIsAlreadyOnTheChosenServer(t *testing.T) {
+	t.Parallel()
 	sw, log := &fakeSwitch{}, &settingsWriteLog{}
 	m := settingsServerModel(t, staticServers(twoServers), sw, log)
 
@@ -1061,6 +1088,7 @@ func TestSettingsServerRowSaysWhenItIsAlreadyOnTheChosenServer(t *testing.T) {
 // two entries sharing one endpoint are two rows here as well: "(current)" stays on the bound one, and
 // choosing its sibling is a move the seam is asked to make and the row journals (ADR 0036 decision 1).
 func TestSettingsServerRowTellsSiblingEntriesApartByName(t *testing.T) {
+	t.Parallel()
 	sw, log := siblingSwitch(), &settingsWriteLog{}
 	m := settingsServerModel(t, staticServers(siblingServers), sw, log)
 
@@ -1088,6 +1116,7 @@ func TestSettingsServerRowTellsSiblingEntriesApartByName(t *testing.T) {
 // MIRRORS, because the footer renders the mode from opts.Mode — so the row shows the new value with no
 // caveat, because there is nothing left to wait for.
 func TestSettingsPaneModeEditAppliesLiveAndMarksNothing(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	m, _ := settingsModeModel(t, log, domain.ModeAskBefore)
 	m = openSettingsPane(t, m)
@@ -1188,6 +1217,7 @@ func settingsModeRowOf(t *testing.T, m Model) SettingRow {
 // stopped being that the moment the chord was pressed (F-14). No marker either — the marker says
 // this session wrote the key through this surface, and nothing was written.
 func TestSettingsModeRowReadsTheLiveRungAfterShiftTab(t *testing.T) {
+	t.Parallel()
 	m, eng := settingsModeModel(t, &settingsWriteLog{}, domain.ModeAskBefore)
 
 	m = openSettingsPane(t, step(t, m, keyShiftTab()))
@@ -1211,6 +1241,7 @@ func TestSettingsModeRowReadsTheLiveRungAfterShiftTab(t *testing.T) {
 // decides only the marker: a session that wrote `mode` here once and then cycled the chord reads the
 // chord's rung, still marked as a key this session wrote.
 func TestSettingsModeRowFollowsAShiftTabAfterAnInPaneWrite(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	m, eng := settingsModeModel(t, log, domain.ModeAskBefore)
 
@@ -1237,6 +1268,7 @@ func TestSettingsModeRowFollowsAShiftTabAfterAnInPaneWrite(t *testing.T) {
 // rung, so confirming it re-applies what the session is already running rather than the rung the
 // boot resolution left in the journal (F-31 — the stale re-apply).
 func TestSettingsModeSubListAppliesTheLiveRung(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	m, _ := settingsModeModel(t, log, domain.ModeAskBefore)
 
@@ -1260,6 +1292,7 @@ func TestSettingsModeSubListAppliesTheLiveRung(t *testing.T) {
 // rung a session is running). Defence in depth: settingsCurrentValue answers `mode` before this is
 // reached today, and this is what a caller that ever did reach it would get.
 func TestSettingsPersistedValueAnswersModeFromTheEngine(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	m, eng := settingsModeModel(t, log, domain.ModeAskBefore)
 
@@ -1335,6 +1368,7 @@ func settingsEnumRowLine(t *testing.T, rendered, rung string) string {
 // states the blast radius itself, in /confine's own words, and the pane paints it. Both fence states,
 // because "unfenced, with your full privileges" and "fenced to the workspace" are different claims.
 func TestSettingsPaneModeEscalationToAutoStatesTheBlastRadius(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		info    ConfinementInfo
@@ -1345,6 +1379,7 @@ func TestSettingsPaneModeEscalationToAutoStatesTheBlastRadius(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			log := &settingsWriteLog{}
 			m := settingsModeEditModel(t, log, c.info, c.confine, 160)
 
@@ -1367,6 +1402,7 @@ func TestSettingsPaneModeEscalationToAutoStatesTheBlastRadius(t *testing.T) {
 // The same sentence is on the screen BEFORE the ⏎ that takes the rung: the `auto` value carries it in
 // the sub-list's own column, and no other rung does — the three below it all still ask.
 func TestSettingsEnumAutoRowCarriesTheBlastRadiusCell(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	m := settingsModeEditModel(t, log, capableHost, true, 160)
 
@@ -1391,6 +1427,7 @@ func TestSettingsEnumAutoRowCarriesTheBlastRadiusCell(t *testing.T) {
 // on the key row makes the same trade in its own column: the sentence's first clause, which
 // finishes, rather than the whole of it cut off mid-word.
 func TestSettingsEnumCurrentMarkerSurvivesANarrowColumn(t *testing.T) {
+	t.Parallel()
 	sentence := autoBlastRadiusLine(capableHost, true)
 	cases := []struct {
 		name   string
@@ -1408,6 +1445,7 @@ func TestSettingsEnumCurrentMarkerSurvivesANarrowColumn(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			log := &settingsWriteLog{}
 			m := settingsModeEditModel(t, log, capableHost, true, c.width)
 
@@ -1454,6 +1492,7 @@ func TestSettingsEnumCurrentMarkerSurvivesANarrowColumn(t *testing.T) {
 // only one: the sentence measures 87 cells, the column leaves the note 86 once the marker is on the
 // row and 88 before it. 80 and 160 never showed it, which is why the cases above stayed green.
 func TestSettingsAutoNoteIsMeasuredAgainstTheMarkedValueColumn(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	m := settingsModeEditModel(t, log, capableHost, true, 108)
 
@@ -1492,6 +1531,7 @@ func settingsLiveBoolRow() SettingRow {
 // first, and only what the file accepted is handed to the dispatcher (ADR 0037 decision 1). A refused
 // write reaches the apply seam not at all — the session must never run what the file does not say.
 func TestSettingsPaneToggleAppliesWhatItPersisted(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsLiveBoolRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -1524,6 +1564,7 @@ func TestSettingsPaneToggleAppliesWhatItPersisted(t *testing.T) {
 // (ADR 0037 decision 3). The note comes from the apply seam — the renderer holds no idea of what any
 // key's boundary is — and it is the only deferral wording the surface has.
 func TestSettingsPaneShowsTheApplyBoundaryNote(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{{
 		Path: "context-files.enable", Section: "Prompt", Kind: SettingBool, Value: "false", Default: "true",
 		Editable: true, Desc: "Fold the workspace context files into the system prompt.",
@@ -1549,6 +1590,7 @@ func TestSettingsPaneShowsTheApplyBoundaryNote(t *testing.T) {
 // happen. The wording is its own — "saved — live apply failed" is a different sentence from a refused
 // write, and has to read like one.
 func TestSettingsPaneApplyFailureKeepsTheWriteAndSaysSo(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsLiveBoolRow()}
 	log := &settingsWriteLog{applyErr: errors.New("no server is bound yet")}
 	m, _ := settingsEditModel(t, rows, log)
@@ -1582,6 +1624,7 @@ func TestSettingsPaneApplyFailureKeepsTheWriteAndSaysSo(t *testing.T) {
 // there is no engine on the other side of a spinner style, and routing one out to the binary and back
 // would only be a longer way to reach the Model's own fields.
 func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		row  SettingRow
@@ -1702,6 +1745,7 @@ func settingsTaskListOpenRow() SettingRow {
 // same sweep a click on a card takes, and the very next frame paints them so through the cached
 // paint path. The row shows the toggled value with the pane's own ` *` marker, as any edit does.
 func TestSettingsTaskListOpenAppliesToEveryCard(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsTaskListOpenRow()}
 	log := &settingsWriteLog{}
 	opts := testOpts
@@ -1762,6 +1806,7 @@ func TestSettingsTaskListOpenAppliesToEveryCard(t *testing.T) {
 // reads back: it restates the textarea's cursor styles, which is what the terminal draws the caret
 // from. A value this build's vocabulary does not know is reported rather than silently ignored.
 func TestSettingsPaneCursorShapeAppliesAndRefusesTheUnknown(t *testing.T) {
+	t.Parallel()
 	row := SettingRow{
 		Path: "cursor-shape", Section: "Interface", Kind: SettingEnum, Value: "block", Default: "block",
 		EnumValues: []string{"block", "underline", "bar"}, Editable: true,
@@ -1845,6 +1890,7 @@ func TestSettingsPaneStallAfterAppliesAndRefusesWhatIsNotADuration(t *testing.T)
 // is not obvious from that: the override wins again at the next start. Without the note, an edit whose
 // effect vanished on the next launch would look like an edit that had never landed.
 func TestSettingsPaneOverriddenRowSaysTheOverrideOutranksItAtTheNextStart(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{{
 		Path: "bypass", Section: "Mechanisms", Kind: SettingBool, Value: "true", Default: "false",
 		Source: SettingFromEnv, SourceName: "APOGEE_BYPASS", Editable: true,
@@ -1880,6 +1926,7 @@ func TestSettingsPaneOverriddenRowSaysTheOverrideOutranksItAtTheNextStart(t *tes
 // with a ` *` beside it. The old "(next launch)" markers described a state that cannot happen, so no
 // row, note or frame may still produce one.
 func TestSettingsPaneNeverDefersToTheNextLaunch(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		settingsBoolRow(),   // renderer-owned: applied without the seam
 		settingsStringRow(), // the buffered string
@@ -1924,6 +1971,7 @@ func TestSettingsPaneNeverDefersToTheNextLaunch(t *testing.T) {
 // with the value THIS RUN resolved (`true`), so a reopened pane that had forgotten the edit would tell
 // a session running `false` that it was running `true` — the one lie the marker exists to prevent.
 func TestSettingsPaneEditMarkerSurvivesAReopen(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsBoolRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -1954,6 +2002,7 @@ func TestSettingsPaneEditMarkerSurvivesAReopen(t *testing.T) {
 // reason on the row — where the human can read it, which the transcript behind a full-height pane is
 // not. A write that lands afterwards clears it.
 func TestSettingsPaneWriteErrorStaysOnTheRowAndChangesNothing(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsBoolRow()}
 	log := &settingsWriteLog{err: errors.New("config.yaml is read-only")}
 	m, _ := settingsEditModel(t, rows, log)
@@ -1990,6 +2039,7 @@ func TestSettingsPaneWriteErrorStaysOnTheRowAndChangesNothing(t *testing.T) {
 // The nil-seam degrade, on the row: a build (or a Driver, ADR 0031) that composed Options without the
 // write seam has an honest sentence to say and nothing to write.
 func TestSettingsPaneWithoutAWriterSaysSoOnTheRow(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsBoolRow()}
 	opts := testOpts
 	opts.Settings = fakeSettingsHost{
@@ -2012,6 +2062,7 @@ func TestSettingsPaneWithoutAWriterSaysSoOnTheRow(t *testing.T) {
 // already says where each one IS edited. Backspace is refused on the same rows for the same reason —
 // nothing here may remove their lines.
 func TestSettingsPaneEnterNeverWritesARowItMayNotEdit(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
 			EditPointer: "⏎ opens $EDITOR", ExternalEdit: true, Desc: "The named server list."},
@@ -2042,6 +2093,7 @@ func TestSettingsPaneEnterNeverWritesARowItMayNotEdit(t *testing.T) {
 // went away takes its question with it: the pane falls back to its list rather than committing a value
 // to whatever now sits at that index.
 func TestSettingsEnumSubListFallsBackWhenItsKeyGoesAway(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsBoolRow(), settingsEnumRow()}
 	log := &settingsWriteLog{}
 	opts := testOpts
@@ -2099,6 +2151,7 @@ func settingsIntRow() SettingRow {
 // caret are painted in the value's own column, and the legend switches to the two keys that end the
 // edit.
 func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStringRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2151,6 +2204,7 @@ func TestSettingsPaneBufferEditsAStringAndPersistsIt(t *testing.T) {
 // file's spelling and into the engine's list, and this renderer parses nothing. The boundary note the
 // apply answers with lands on the row, because a name list moves at the next session boundary.
 func TestSettingsPaneEditsANameListAsOneLine(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{{
 		Path: "context-files.names", Section: "System prompt", Kind: SettingString,
 		Value: "[AGENTS.md]", Default: "[AGENTS.md]", Editable: true,
@@ -2302,6 +2356,7 @@ func TestSettingsPaneValueFieldEditsAtTheCaret(t *testing.T) {
 // whole and writes nothing. The field goes with either ending — a pane back in its key list is not
 // holding a half-typed value.
 func TestSettingsPaneValueFieldCommitsAndCancelsAMidStringEdit(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStringRow()} // http://box:1111
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2339,6 +2394,7 @@ func TestSettingsPaneValueFieldCommitsAndCancelsAMidStringEdit(t *testing.T) {
 // in its column. An empty buffer commits nothing either — ⏎ on a cleared field is an abandoned edit far
 // more often than a request to persist emptiness, and taking a value away is what the reset below is.
 func TestSettingsPaneBufferCancelAndEmptyCommitWriteNothing(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsIntRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2377,6 +2433,7 @@ func TestSettingsPaneBufferCancelAndEmptyCommitWriteNothing(t *testing.T) {
 // half of a validation failure is to leave the human's own text in front of them to correct. A value
 // that lands afterwards closes the buffer and clears the refusal.
 func TestSettingsPaneBufferKeepsARefusedValueForCorrection(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsIntRow()}
 	log := &settingsWriteLog{err: errors.New("apogee: invalid present.port \"99999\": want a TCP port in 0-65535")}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2421,6 +2478,7 @@ func TestSettingsPaneBufferKeepsARefusedValueForCorrection(t *testing.T) {
 // An abandoned edit takes its refusal with it: the ✗ described THAT buffer, and a row nobody is editing
 // must not go on reporting a failure the human walked away from.
 func TestSettingsPaneBufferCancelClearsTheRefusal(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsIntRow()}
 	log := &settingsWriteLog{err: errors.New("not a port")}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2443,6 +2501,7 @@ func TestSettingsPaneBufferCancelClearsTheRefusal(t *testing.T) {
 // check a token they cannot see — and what the row shows afterwards is the MASK with the session-edit
 // marker beside it: the ` *` says the key was changed here, and nothing on the row repeats the secret.
 func TestSettingsPaneMaskedRowBuffersVisiblyAndKeepsItsMask(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{{
 		Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
 		Editable: true, Masked: true, Desc: "Bearer token sent on every request.",
@@ -2479,6 +2538,7 @@ func TestSettingsPaneMaskedRowBuffersVisiblyAndKeepsItsMask(t *testing.T) {
 // What lands is [SettingsHost.Reset] — the key's line removed — and the row then reports the default it went back
 // to, on the same terms a write reports its value.
 func TestSettingsPaneResetArmsConfirmsAndCancels(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{{
 		Path: "auto-title", Section: "Session", Kind: SettingBool, Value: "false", Default: "true",
 		Editable: true, Desc: "Name a new session from its first prompt.",
@@ -2527,12 +2587,14 @@ func TestSettingsPaneResetArmsConfirmsAndCancels(t *testing.T) {
 // the one thing a row must not do after a deliberate act. The masked key is that case too — a removed
 // line left no secret to keep quiet about, so it reads like every other emptied key.
 func TestSettingsPaneResetOfAnUnsetDefaultSaysUnset(t *testing.T) {
+	t.Parallel()
 	for _, row := range []SettingRow{
 		settingsStringRow(),
 		{Path: "api-key", Section: "Upstream", Kind: SettingString, Value: "••••",
 			Editable: true, Masked: true, Desc: "Bearer token."},
 	} {
 		t.Run(row.Path, func(t *testing.T) {
+			t.Parallel()
 			log := &settingsWriteLog{}
 			m, _ := settingsEditModel(t, []SettingRow{row}, log)
 
@@ -2552,6 +2614,7 @@ func TestSettingsPaneResetOfAnUnsetDefaultSaysUnset(t *testing.T) {
 // confirmation prompt for a no-op is worse than a keypress that does nothing. Nor is a reset offered on
 // a row this surface may not write.
 func TestSettingsPaneResetIsANoOpOnADefaultValuedRow(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		settingsIntRow(), // value "0" == default "0"
 		{Path: "servers", Section: "Upstream", Kind: SettingStructured, Value: "3 servers",
@@ -2585,6 +2648,7 @@ func TestSettingsPaneResetIsANoOpOnADefaultValuedRow(t *testing.T) {
 // A RESET applies exactly as a write does, through the same dispatcher: the session drops back to the
 // ladder's default now, and the row shows it with no caveat.
 func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	m, _ := settingsModeModel(t, log, domain.ModeAuto)
 	m = openSettingsPane(t, m)
@@ -2615,6 +2679,7 @@ func TestSettingsPaneResetOfModeAppliesTheDefaultLive(t *testing.T) {
 // value the file has stopped carrying, which no watcher would then heal (the reset refreshes the
 // binary's self-write baseline).
 func TestSettingsPaneResetOfAnEmptyDefaultKeyAppliesLive(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{{
 		Path: "editor", Section: "Interface", Kind: SettingString, Value: "code -w",
 		Editable: true, Desc: "The command that opens a file for editing.",
@@ -2639,6 +2704,7 @@ func TestSettingsPaneResetOfAnEmptyDefaultKeyAppliesLive(t *testing.T) {
 // emptied buffer commits nothing at all — so the only source is a re-read that found a key gone from
 // the file, and that key is journaled on its row without being dispatched, exactly as before.
 func TestSettingsPaneEmptyValueFromTheEditorIsNotApplied(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow(), {
 		Path: "editor", Section: "Interface", Kind: SettingString, Value: "code -w",
 		Editable: true, Desc: "The command that opens a file for editing.",
@@ -2661,6 +2727,7 @@ func TestSettingsPaneEmptyValueFromTheEditorIsNotApplied(t *testing.T) {
 // went away takes its buffer (or its armed reset) with it rather than letting a ⏎ land on whatever now
 // sits at that index — the enum sub-list's contract, on the same predicate.
 func TestSettingsSecondStepsFallBackWhenTheirKeyGoesAway(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		open tea.KeyPressMsg
@@ -2670,6 +2737,7 @@ func TestSettingsSecondStepsFallBackWhenTheirKeyGoesAway(t *testing.T) {
 		{"an armed reset", keyBackspace(), settingsResetArmed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			rows := []SettingRow{settingsBoolRow(), settingsStringRow()}
 			log := &settingsWriteLog{}
 			opts := testOpts
@@ -2723,6 +2791,7 @@ func settingsTextRow() SettingRow {
 // ⏎ inside it inserts a newline; ctrl+s persists and applies what was written, and the row goes back
 // to a summary of it with the session-edit marker.
 func TestSettingsPaneTextEditorWritesTheProseOnCtrlS(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsTextRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2779,6 +2848,7 @@ func TestSettingsPaneTextEditorWritesTheProseOnCtrlS(t *testing.T) {
 // persists it — and a field cleared to nothing writes nothing either: taking the prompt away is the
 // reset backspace arms, which is what the binary's own validator says in as many words.
 func TestSettingsPaneTextEditorDiscardsOnEsc(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsTextRow()}
 	log := &settingsWriteLog{}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2816,6 +2886,7 @@ func TestSettingsPaneTextEditorDiscardsOnEsc(t *testing.T) {
 // buffer's contract, for its reason: the human fixes the placeholder they mistyped rather than writing
 // the prompt again.
 func TestSettingsPaneTextEditorKeepsARefusedPrompt(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsTextRow()}
 	log := &settingsWriteLog{err: errors.New(`apogee: invalid system-prompt-text: prompt: unknown placeholder "{{bogus}}"`)}
 	m, _ := settingsEditModel(t, rows, log)
@@ -2839,6 +2910,7 @@ func TestSettingsPaneTextEditorKeepsARefusedPrompt(t *testing.T) {
 // The field is a FIELD: the caret moves through the prose and the glyph says where the next keystroke
 // lands, on the line it stands on rather than always on the last one.
 func TestSettingsPaneTextEditorPaintsTheCaretWhereItStands(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsTextRow()}
 	m, _ := settingsEditModel(t, rows, &settingsWriteLog{})
 
@@ -2866,6 +2938,7 @@ func TestSettingsPaneTextEditorPaintsTheCaretWhereItStands(t *testing.T) {
 // pasted CRLF as two spaces — either way no control rune reaches the row. The caret then stands
 // where the rune count of the flattened value says it does: at its end, where the insertion left it.
 func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		row     SettingRow
@@ -2883,6 +2956,7 @@ func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m, _ := settingsEditModel(t, []SettingRow{c.row}, &settingsWriteLog{})
 			m = step(t, m, keyEnter()) // the field opens seeded with the value, caret at its end
 
@@ -2904,6 +2978,7 @@ func TestSettingsPasteLandsInTheOpenField(t *testing.T) {
 // With no field open the pane still SWALLOWS a paste, exactly as it swallows every key it does not act
 // on: the box it would otherwise land in is one the human cannot read past a full-height pane.
 func TestSettingsPasteIsSwallowedWithNoFieldOpen(t *testing.T) {
+	t.Parallel()
 	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
 
 	m = step(t, m, tea.PasteMsg{Content: "stray"})
@@ -2919,6 +2994,7 @@ func TestSettingsPasteIsSwallowedWithNoFieldOpen(t *testing.T) {
 // A paste is an EDIT, so it drops the field's drag-selection for handleKey's own reason: the value is
 // about to change under a span whose offsets would then name other runes.
 func TestSettingsPasteDropsTheFieldSelection(t *testing.T) {
+	t.Parallel()
 	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
 	m = step(t, m, keyEnter())
 	m.settings.sel = promptSel{active: true, anchorOff: 0, headOff: 4}
@@ -2933,11 +3009,13 @@ func TestSettingsPasteDropsTheFieldSelection(t *testing.T) {
 // unexported, is delivered by the route rather than by its type (settingsEditorMsg, the arm
 // [Model.Update] ends on).
 func TestSettingsFieldTakesCtrlVAndItsReplyIsRoutable(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		name string
 		row  SettingRow
 	}{{"value buffer", settingsStringRow()}, {"multi-line field", settingsTextRow()}} {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			m, _ := settingsEditModel(t, []SettingRow{c.row}, &settingsWriteLog{})
 			m = step(t, m, keyEnter())
 
@@ -3019,6 +3097,7 @@ func externalEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, e
 // and nothing is journaled yet — the file is the human's to change, and the journal is the return
 // trip's business.
 func TestSettingsPaneStructuredRowOpensTheExternalEditor(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	log, edit := &settingsWriteLog{}, &externalEditLog{argv: []string{"vi", "+7", "/tmp/config.yaml"}}
 	m := externalEditModel(t, rows, log, edit)
@@ -3045,6 +3124,7 @@ func TestSettingsPaneStructuredRowOpensTheExternalEditor(t *testing.T) {
 // launcher actuation is the in-flight state a human can actually press ⏎ during — a streaming Step
 // leaves this pane's keys unrouted altogether (the overlay is idle-only).
 func TestSettingsPaneRefusesTheExternalEditMidRun(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	edit := &externalEditLog{argv: []string{"vi", "/tmp/config.yaml"}}
 	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
@@ -3064,6 +3144,7 @@ func TestSettingsPaneRefusesTheExternalEditMidRun(t *testing.T) {
 // A build with no spec seam says so on the row, the nil-seam degrade every other act in this pane
 // takes — and launches nothing.
 func TestSettingsPaneSaysWhenThereIsNoExternalEditor(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	opts := testOpts
 	opts.Settings = fakeSettingsHost{
@@ -3086,6 +3167,7 @@ func TestSettingsPaneSaysWhenThereIsNoExternalEditor(t *testing.T) {
 // with the ` *` that says this session changed it — and applied through the same seam an in-pane
 // commit applies through, boundary note and all.
 func TestSettingsPaneAppliesWhatTheEditorChanged(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		settingsStructuredRow(),
 		{Path: "context-files.names", Section: "System prompt", Kind: SettingString,
@@ -3123,6 +3205,7 @@ func TestSettingsPaneAppliesWhatTheEditorChanged(t *testing.T) {
 // A renderer-owned key changed in the file reaches its live home too: those keys ARE this Model's
 // own fields, so nothing behind the dispatcher would have anything to do with them.
 func TestSettingsPaneAppliesItsOwnKeysFromTheEditor(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow(), settingsBoolRow()}
 	log := &settingsWriteLog{}
 	edit := &externalEditLog{applied: []AppliedSetting{{Path: "auto-title", Value: "false"}}}
@@ -3144,6 +3227,7 @@ func TestSettingsPaneAppliesItsOwnKeysFromTheEditor(t *testing.T) {
 // A reload that could not parse or validate the file applies nothing and says why, on the row the
 // human launched from — which is where they go back in from.
 func TestSettingsPaneReportsAReloadItCouldNotMake(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	edit := &externalEditLog{reloadErr: errors.New("apogee: parse config: line 4")}
 	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
@@ -3161,6 +3245,7 @@ func TestSettingsPaneReportsAReloadItCouldNotMake(t *testing.T) {
 // An editor that could not run — or that exited non-zero, which is how an editor SAYS to discard
 // (`:cq`) — ends the round trip without a re-read.
 func TestSettingsPaneDoesNotReReadAfterAFailedEditor(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	edit := &externalEditLog{applied: []AppliedSetting{{Path: "servers", Value: "9 servers"}}}
 	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
@@ -3179,6 +3264,7 @@ func TestSettingsPaneDoesNotReReadAfterAFailedEditor(t *testing.T) {
 // terminal can run at all: the alternate screen goes, the editor gets the tty, and its exit comes
 // back as the round trip's own message (ADR 0041 decision 6).
 func TestSettingsPaneForegroundEditorTakesTheTerminal(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	edit := &externalEditLog{argv: []string{"vi", "+7", "/tmp/config.yaml"}} // detached is false
 	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
@@ -3200,6 +3286,7 @@ func TestSettingsPaneForegroundEditorTakesTheTerminal(t *testing.T) {
 // the pane is still the screen when the launch reports back. Nothing is journaled and nothing is
 // re-read — the editor is still open, and what gets saved out there arrives through the watcher.
 func TestSettingsPaneDetachedEditorLeavesThePaneUp(t *testing.T) {
+	t.Parallel()
 	program := detachableProgram(t)
 	rows := []SettingRow{settingsStructuredRow()}
 	log := &settingsWriteLog{}
@@ -3251,6 +3338,7 @@ func detachableProgram(t *testing.T) string {
 // spec's own refusal lands in. There is no exit to wait for, so the start is the only chance this
 // path has to report anything at all.
 func TestSettingsPaneDetachedEditorReportsAStartItCouldNotMake(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	edit := &externalEditLog{argv: []string{"apogee-no-such-editor"}, detached: true}
 	m := externalEditModel(t, rows, &settingsWriteLog{}, edit)
@@ -3304,6 +3392,7 @@ func configWatchModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, ed
 // it. And because the pane is very likely not open, the transcript gets one line naming every key
 // that landed.
 func TestConfigWatchAppliesASavedFileWithNoKeyPress(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		settingsStructuredRow(),
 		{Path: "context-files.names", Section: "System prompt", Kind: SettingString,
@@ -3344,6 +3433,7 @@ func TestConfigWatchAppliesASavedFileWithNoKeyPress(t *testing.T) {
 // changed says nothing at all: apogee's own writes come back through this watcher as no change
 // (ADR 0041 decision 8), and a line per pane commit would be the program narrating itself.
 func TestConfigWatchNamesEveryAppliedKeyOnceAndIsSilentOnNoChange(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		{Path: "ui.spinner", Section: "Presentation", Kind: SettingString, Value: "dots", Editable: true},
 		{Path: "auto-title", Section: "Presentation", Kind: SettingBool, Value: settingFalse, Editable: true},
@@ -3380,6 +3470,7 @@ func TestConfigWatchNamesEveryAppliedKeyOnceAndIsSilentOnNoChange(t *testing.T) 
 // re-read that carries no notice adds no line: the binary already diffed them against its baseline,
 // so what arrives here is exactly what is new.
 func TestConfigWatchPostsEveryLoaderNotice(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		{Path: "ui.spinner", Section: "Presentation", Kind: SettingString, Value: "dots", Editable: true},
 	}
@@ -3420,6 +3511,7 @@ func TestConfigWatchPostsEveryLoaderNotice(t *testing.T) {
 // The editor's exit is the round trip's other trigger, and a notice earned there lands the same way:
 // in the transcript, not on the row the edit was launched from, since an unknown key has no row.
 func TestSettingsEditExitPostsTheLoaderNotices(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	notice := `apogee: config /home/x/.apogee/config.yaml: unknown key "servrs" at line 2 is ignored`
 	edit := &externalEditLog{argv: []string{"vi", "/tmp/config.yaml"}, notices: []string{notice}}
@@ -3445,6 +3537,7 @@ func TestSettingsEditExitPostsTheLoaderNotices(t *testing.T) {
 // pane a key a save on disk had moved gets the row back to ` *`. Nothing but the marker changes —
 // the value is the one that was written either way.
 func TestConfigWatchMarkerYieldsToALaterInPaneEdit(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{
 		{Path: "ui.spinner", Section: "Presentation", Kind: SettingString, Value: "dots", Editable: true},
 	}
@@ -3478,6 +3571,7 @@ func appliedNotes(m Model) []string {
 // second save is seen — and a watch that ENDED opens nothing, because there is nothing left to wait
 // for and a chain re-armed over a closed watch would spin.
 func TestConfigWatchReArmsUntilTheWatchEnds(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	edit := &externalEditLog{}
 	m := configWatchModel(t, rows, &settingsWriteLog{}, edit)
@@ -3503,6 +3597,7 @@ func TestConfigWatchReArmsUntilTheWatchEnds(t *testing.T) {
 // is halfway through writing. Then it says so ONCE, however many more failures follow, and the file
 // parsing again is what re-arms the sentence.
 func TestConfigWatchNotesAFileThatKeepsFailingToParseExactlyOnce(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsStructuredRow()}
 	log := &settingsWriteLog{}
 	edit := &externalEditLog{reloadErr: errors.New("parse config: line 4")}
@@ -3551,6 +3646,7 @@ func TestConfigWatchNotesAFileThatKeepsFailingToParseExactlyOnce(t *testing.T) {
 // A Driver that wired no watcher is a Driver whose config file is never re-read on its own — and
 // nothing about the session changes for it (ADR 0031's nil-seam degrade).
 func TestConfigWatchIsNotArmedWithoutTheSeam(t *testing.T) {
+	t.Parallel()
 	opts := testOpts
 	opts.Settings = fakeSettingsHost{
 		rows: func() []SettingRow { return []SettingRow{settingsStructuredRow()} },
@@ -3608,6 +3704,7 @@ func settingsSchemeModel(t *testing.T, log *settingsWriteLog, list []string,
 // human's schemes folder, which is a list that changes while the program runs and therefore cannot
 // come from the registry (ADR 0040 design call 6). The scheme in force wears "(current)".
 func TestSettingsPaneOffersTheSchemesTheSessionDiscovers(t *testing.T) {
+	t.Parallel()
 	m := settingsSchemeModel(t, &settingsWriteLog{}, []string{"dark", "light", "mine"},
 		func(string) (scheme.Scheme, []string) { return scheme.Default(), nil })
 
@@ -3632,6 +3729,7 @@ func TestSettingsPaneOffersTheSchemesTheSessionDiscovers(t *testing.T) {
 // empty vocabulary is a pane asking a question with no answers: ⏎ opens nothing at all, the same
 // degrade a `servers:` block that names nothing takes.
 func TestSettingsPaneSchemeRowOpensNothingWithoutADiscoverySeam(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsSchemeRow()}
 	opts := testOpts
 	opts.Settings = fakeSettingsHost{
@@ -3650,6 +3748,7 @@ func TestSettingsPaneSchemeRowOpensNothingWithoutADiscoverySeam(t *testing.T) {
 // them is in the palette that just stopped being the one on screen (paintcache.go), and a
 // tea.ClearScreen asked for, because the terminal still holds the old one outside the frame.
 func TestSettingsPaneAppliesAColorSchemeLive(t *testing.T) {
+	t.Parallel()
 	log := &settingsWriteLog{}
 	var asked []string
 	m := settingsSchemeModel(t, log, []string{"dark", "light"}, func(name string) (scheme.Scheme, []string) {
@@ -3741,6 +3840,7 @@ func TestSettingsPaneKeepsTheWidthAuthorityAcrossASchemeSwitch(t *testing.T) {
 // pane is drawn over that transcript, so without the row's own sentence they would answer the
 // picker and see nothing at all.
 func TestSettingsPaneNotesWhatALiveSchemeSwitchWarnedAbout(t *testing.T) {
+	t.Parallel()
 	const first = `color-scheme "mine.yaml": key "error": bad hex "#zz0000" — using default`
 	const second = `color-scheme "mine.yaml": unknown key "backdrop" — ignored`
 	rows := []SettingRow{settingsSchemeRow()}
@@ -3772,6 +3872,7 @@ func TestSettingsPaneNotesWhatALiveSchemeSwitchWarnedAbout(t *testing.T) {
 // gives every apply that could not happen: the key is in the file, so the next start is drawn in it.
 // The write is not unwound (ADR 0037 decision 1).
 func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
+	t.Parallel()
 	rows := []SettingRow{settingsSchemeRow()}
 	log := &settingsWriteLog{}
 	opts := testOpts
@@ -3796,6 +3897,7 @@ func TestSettingsPaneSaysASchemeSwitchNeedsAResolver(t *testing.T) {
 // would be routed as the key list's own keys — swallowed, never answered — with nothing to say so.
 // The two arms every step must carry are the ones settingsKey cannot route without.
 func TestSettingsStepsCoverEveryKind(t *testing.T) {
+	t.Parallel()
 	for kind := settingsKeyList + 1; kind <= settingsTextEditor; kind++ {
 		step, ok := settingsSteps[kind]
 		if !ok {
@@ -3819,6 +3921,7 @@ func TestSettingsStepsCoverEveryKind(t *testing.T) {
 // same column as "no pointer names a key row here" (settingsPaint). A step whose row is gone from
 // under it paints the key list it fell back to rather than a menu about nothing.
 func TestSettingsStepsPaintThroughTheTable(t *testing.T) {
+	t.Parallel()
 	own := map[settingsKind]bool{
 		settingsEnumList: true, settingsTextEditor: true,
 		settingsValueBuffer: false, settingsResetArmed: false,

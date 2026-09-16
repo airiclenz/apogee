@@ -56,6 +56,7 @@ func snapshotRepaint(m Model) repaintSnapshot {
 // worker runs, because the repair is worth least when the screen is still and most when it is
 // streaming.
 func TestCtrlLKeyReturnsClearScreen(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		build func(*testing.T) Model
@@ -65,6 +66,7 @@ func TestCtrlLKeyReturnsClearScreen(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := tc.build(t)
 			m.input.SetValue("half a thought") // a draft the repaint must not eat
 			before := snapshotRepaint(m)
@@ -91,6 +93,7 @@ func TestCtrlLKeyReturnsClearScreen(t *testing.T) {
 // only — the running status line carries an elapsed clock, so two renders of it are equal only
 // until the second ticks over.
 func TestCtrlLKeyLeavesTheFrameIdentical(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("half a thought")
 	before := m.View().Content
@@ -108,6 +111,7 @@ func TestCtrlLKeyLeavesTheFrameIdentical(t *testing.T) {
 // against the handful of bindings this package sets, so a future bubbles release that DID bind the
 // chord fails here instead of quietly losing it.
 func TestCtrlLKeyStealsNothingFromThePromptEditor(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	km := reflect.ValueOf(m.input.KeyMap)
 	bindingType := reflect.TypeOf(key.Binding{})
@@ -140,6 +144,7 @@ func TestCtrlLKeyStealsNothingFromThePromptEditor(t *testing.T) {
 // panes share — the human's keyboard is the overlay's for as long as it is open — so the escape
 // hatch waits for esc like everything else.
 func TestCtrlLKeySwallowedByModalOverlay(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		open func(Model) Model
@@ -163,6 +168,7 @@ func TestCtrlLKeySwallowedByModalOverlay(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := tc.open(newTestModel(t))
 
 			next, cmd := stepCmd(t, m, keyCtrlL())

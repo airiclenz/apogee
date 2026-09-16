@@ -37,6 +37,7 @@ func lineWithLogoAnd(lines []string, sub string) bool {
 // carries none of the black-background SGR the input box emits, and (g) every line spans the full
 // content width, top and bottom closing on the rounded corner at that edge.
 func TestRenderStartupBox(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	v := startupView{
 		Logo:    strings.TrimRight(apogeeLogo, "\n"),
@@ -110,6 +111,7 @@ func TestRenderStartupBox(t *testing.T) {
 // and the facts are on SEPARATE rows (stacked, not side by side), (d) the card still spans the full
 // content width with rounded corners.
 func TestRenderStartupBoxStackedFallback(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	v := startupView{
 		Logo:    strings.TrimRight(apogeeLogo, "\n"),

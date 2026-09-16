@@ -10,6 +10,7 @@ import "testing"
 // It reads the names rather than calling the claims: every entry's claim is exercised by its own
 // pane's suite, and what this test is about is the sequence they are asked in.
 func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
+	t.Parallel()
 	want := []string{
 		"sessions browser",
 		"settings pane",
@@ -46,6 +47,7 @@ func TestKeyClaimOrderMatchesTheDocumentedPrecedence(t *testing.T) {
 // the walk on — nothing about the frame depends on the answer, and the fall-through past a claimant
 // that did not answer is what every rung below the first relies on.
 func TestTheFirstClaimantThatWantsAKeyAnswersIt(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.usagePane = usagePane{open: true}
 	m.inspector = inspectorPane{open: true}
@@ -65,6 +67,7 @@ func TestTheFirstClaimantThatWantsAKeyAnswersIt(t *testing.T) {
 // claimant above it the tab it already had — the dropdown's second accept key most of all. What this
 // pins is the fall-through: with no surface open, tab is claimed by nobody and reaches that verb.
 func TestTabAtIdleWithHintsReachesTheFramesOwnVerb(t *testing.T) {
+	t.Parallel()
 	var rec suggestCall
 	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "audit the parser")
 

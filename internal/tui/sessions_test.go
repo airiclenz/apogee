@@ -90,6 +90,7 @@ func storeMeta(h *fakeSessionHost, id, title, workspace string, updated time.Tim
 // Opening /sessions lists the stored metas filtered to the current workspace, newest first; the
 // ^a toggle widens the view to every workspace.
 func TestSessionBrowserListsAndTogglesWorkspace(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	now := time.Now()
 	storeMeta(host, "a-old", "older here", "/ws/a", now.Add(-2*time.Hour), 0, nil)
@@ -123,6 +124,7 @@ func TestSessionBrowserListsAndTogglesWorkspace(t *testing.T) {
 // The open overlay renders above the input: its title, the scope, a session row, and the key
 // legend all appear in the View (a smoke test that the pane composes without panicking).
 func TestSessionBrowserRendersPane(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "render me", "/ws/a", time.Now().Add(-5*time.Minute), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -138,6 +140,7 @@ func TestSessionBrowserRendersPane(t *testing.T) {
 
 // A completely empty store opens no overlay and notes it instead.
 func TestSessionBrowserEmptyStoreNotesNoOverlay(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	m = openBrowser(t, m)
@@ -158,6 +161,7 @@ func TestSessionBrowserEmptyStoreNotesNoOverlay(t *testing.T) {
 // (handleBrowserClick, mouse.go): this is the binding that a click and an ⏎ resume the same record
 // the same way, so the extraction cannot quietly grow a second reading of it.
 func TestSessionBrowserResumeHappyPath(t *testing.T) {
+	t.Parallel()
 	var src transcript
 	src.addUser("what is the capital of france", nil)
 	src.apply(domain.MessageEvent{Text: "Paris."})
@@ -229,6 +233,7 @@ func TestSessionBrowserResumeHappyPath(t *testing.T) {
 // "context: …" notice the restore reprints is re-derived exactly as the resume line is and must
 // compound no more than it.
 func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
+	t.Parallel()
 	var src transcript
 	src.addUser("what is the capital of france", nil)
 	src.apply(domain.MessageEvent{Text: "Paris."})
@@ -281,6 +286,7 @@ func TestSessionBrowserResumeNotesDoNotAccumulate(t *testing.T) {
 // A resumed record whose stored snapshot is a mid-Exchange session (InExchange true after the
 // restore) gets the interrupted note appended.
 func TestSessionBrowserResumeInterruptedNote(t *testing.T) {
+	t.Parallel()
 	var src transcript
 	src.addUser("start a long task", nil)
 	blob, err := encodeTranscript(&src)
@@ -322,6 +328,7 @@ func noteIndexes(m Model, want string) []int {
 // open call (a cancel between two Turns), so the two notices are pinned independently — and where
 // both apply, the scrollback's own note leads and the engine's follows.
 func TestSessionBrowserResumeProgressSavedNote(t *testing.T) {
+	t.Parallel()
 	blobFor := func(t *testing.T, openDelegation bool) []byte {
 		t.Helper()
 		var src transcript
@@ -353,6 +360,7 @@ func TestSessionBrowserResumeProgressSavedNote(t *testing.T) {
 		{name: "nothing left open", openDelegation: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			host := &fakeSessionHost{}
 			storeMeta(host, "sess-1", "long task", "/ws/a", time.Now(), 0, blobFor(t, tc.openDelegation))
 			m := newBrowserModel(t, &fakeEngine{inExchange: tc.inExchange}, host, "/ws/a")
@@ -389,6 +397,7 @@ func boolToCount(present bool) int {
 // the outgoing conversation stays painted, no start-up box is re-seeded, and only an honest
 // failure note is added.
 func TestSessionBrowserResumeErrorLeavesViewUntouched(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "corrupt one", "/ws/a", time.Now(), 0, nil)
 	eng := &fakeEngine{restoreFn: func(domain.Session) error { return errors.New("bad snapshot") }}
@@ -419,6 +428,7 @@ func TestSessionBrowserResumeErrorLeavesViewUntouched(t *testing.T) {
 // subsequent per-Turn saves keep targeting the original session's file rather than the just-loaded
 // one. Load reads the record without activating; only a confirmed restore activates it.
 func TestSessionBrowserResumeErrorLeavesActiveSessionUntouched(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	host.activeID = "current" // the live conversation's file, the one saves must keep targeting
 	storeMeta(host, "sess-1", "corrupt one", "/ws/a", time.Now(), 0, nil)
@@ -445,6 +455,7 @@ func TestSessionBrowserResumeErrorLeavesActiveSessionUntouched(t *testing.T) {
 // d arms an inline confirm and y deletes; deleting the ACTIVE session rotates the host and notes
 // that the live conversation lives on.
 func TestSessionBrowserDeleteActiveRotates(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	now := time.Now()
 	storeMeta(host, "sess-1", "the active one", "/ws/a", now, 0, nil)
@@ -485,6 +496,7 @@ func TestSessionBrowserDeleteActiveRotates(t *testing.T) {
 // serialises its own calls under one mutex and so cannot see the collision: the rotate must WAIT for
 // the in-flight save and still precede the delete.
 func TestSessionBrowserDeleteActiveQueuesTheRotate(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	now := time.Now()
 	storeMeta(host, "sess-1", "the active one", "/ws/a", now, 0, nil)
@@ -542,6 +554,7 @@ func TestSessionBrowserDeleteActiveQueuesTheRotate(t *testing.T) {
 // action item 1). The queued save must land in the OUTGOING file, and only then may the loaded id
 // become the one saves resolve against.
 func TestSessionBrowserResumeQueuesTheActivate(t *testing.T) {
+	t.Parallel()
 	var src transcript
 	src.addUser("what is the capital of france", nil)
 	blob, err := encodeTranscript(&src)
@@ -602,6 +615,7 @@ func TestSessionBrowserResumeQueuesTheActivate(t *testing.T) {
 // ^r opens an inline rename edit; typing then enter commits the new title through Sessions.Rename
 // and the re-list repaints it.
 func TestSessionBrowserRenameCommits(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "old title", "/ws/a", time.Now(), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -642,7 +656,9 @@ func TestSessionBrowserRenameCommits(t *testing.T) {
 // The failed restore is the same rule read backwards — nothing was restored, so the conversation that
 // is still live is still the one the frame is naming.
 func TestSessionNameFollowsResume(t *testing.T) {
+	t.Parallel()
 	t.Run("the --resume start", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeSessionHost{}
 		opts := Options{Sessions: host, Workspace: "/ws/a", Resumed: &ResumedSession{Title: "an older task"}}
 		m := newModel(context.Background(), &fakeEngine{}, opts, nil)
@@ -653,6 +669,7 @@ func TestSessionNameFollowsResume(t *testing.T) {
 	})
 
 	t.Run("the /sessions restore", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeSessionHost{}
 		storeMeta(host, "sess-1", "france question", "/ws/a", time.Now(), 0, nil)
 		m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -670,6 +687,7 @@ func TestSessionNameFollowsResume(t *testing.T) {
 	})
 
 	t.Run("a restore that failed", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeSessionHost{}
 		host.activeID = "live" // the conversation that stays live when the restore fails
 		storeMeta(host, "sess-1", "corrupt one", "/ws/a", time.Now(), 0, nil)
@@ -698,6 +716,7 @@ func TestSessionNameFollowsResume(t *testing.T) {
 // Renaming a stored one is a change to the store and nothing more: the live conversation keeps its
 // own name, because the frame says which session THIS is, not which one was last edited.
 func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	host.activeID = "live" // the live conversation's record, which the browser is not listing
 	storeMeta(host, "stored-1", "an older task", "/ws/a", time.Now(), 0, nil)
@@ -725,6 +744,7 @@ func TestBrowserRenameOfInactiveRowLeavesSessionName(t *testing.T) {
 
 // esc peels the modal one layer at a time: a live rename edit → the plain row → the overlay closed.
 func TestSessionBrowserEscLayers(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "a session", "/ws/a", time.Now(), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -747,6 +767,7 @@ func TestSessionBrowserEscLayers(t *testing.T) {
 // The overlay is idle-only: an enter while a worker runs never opens it (submit is unreachable, so
 // no List Cmd is dispatched).
 func TestSessionBrowserRefusesToOpenWhileBusy(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "a session", "/ws/a", time.Now(), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -770,6 +791,7 @@ func TestSessionBrowserRefusesToOpenWhileBusy(t *testing.T) {
 // the 100×30 harness window) — flush with the input box below it — so the box spans the whole
 // terminal rather than stopping at the transcript's right edge or the old 72-column ceiling.
 func TestSessionBrowserPaneSpansFullWidth(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "render me", "/ws/a", time.Now().Add(-5*time.Minute), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -787,6 +809,7 @@ func TestSessionBrowserPaneSpansFullWidth(t *testing.T) {
 // 2 borders + title + the row block's blank + one session row + its blank + hint physical lines, and
 // the over-wide row ends in an ellipsis.
 func TestSessionBrowserLongTitleDoesNotWrap(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", strings.Repeat("verylongtitle ", 12), "/ws/a", time.Now(), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -807,6 +830,7 @@ func TestSessionBrowserLongTitleDoesNotWrap(t *testing.T) {
 // physical line count is capped at 2 borders + title + the row block (its two blanks and
 // maxSessionRows rows) + hint, never the full list.
 func TestSessionBrowserWindowsLongList(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	now := time.Now()
 	for i := 0; i < maxSessionRows+5; i++ {
@@ -829,6 +853,7 @@ func TestSessionBrowserWindowsLongList(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestRelativeTime(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	cases := []struct {
 		name string
@@ -847,6 +872,7 @@ func TestRelativeTime(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			if got := relativeTime(c.when, now); got != c.want {
 				t.Errorf("relativeTime = %q, want %q", got, c.want)
 			}
@@ -855,6 +881,7 @@ func TestRelativeTime(t *testing.T) {
 }
 
 func TestSessionRowCells(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	meta := session.Meta{Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/home/me/proj"}
 
@@ -882,6 +909,7 @@ func TestSessionRowCells(t *testing.T) {
 // spent. A record that reported no tokens grows no cell at all, which is what a session written
 // before the accounting existed, and one whose server never reported usage, both are.
 func TestSessionRowCellsSpendIsTheSessionTotal(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	meta := session.Meta{
 		Title: "a task", UpdatedAt: now.Add(-5 * time.Minute), UserMsgs: 3, Workspace: "/ws/a",
@@ -914,6 +942,7 @@ func TestSessionRowCellsSpendIsTheSessionTotal(t *testing.T) {
 // two qualify the same title. A record with no schedule identity is untouched: three cells, no tag,
 // exactly what the browser rendered before there were Schedules.
 func TestSessionRowCellsScheduleTag(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	firing := session.Meta{
 		ID:           "sess-1",
@@ -947,6 +976,7 @@ func TestSessionRowCellsScheduleTag(t *testing.T) {
 // sanitizes a Meta on the way back in — so it is escape-stripped with it, and no ESC survives into
 // the laid-out line.
 func TestSessionRowCellsScheduleTagStripsEscapes(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
 	b := sessionBrowser{
 		open: true,
@@ -980,6 +1010,7 @@ func TestSessionRowCellsScheduleTagStripsEscapes(t *testing.T) {
 // of the fork survives its parent's deletion; and a fork of a Firing wears both tags, workspace
 // base, schedule, then parent, in the order the title is read for.
 func TestSessionRowsTagForkedSessions(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 16, 12, 0, 0, 0, time.UTC)
 	b := sessionBrowser{
 		open: true,
@@ -1032,8 +1063,10 @@ func TestSessionRowsTagForkedSessions(t *testing.T) {
 // and the plain row beside it keeps its own facts. ⟳ measures one cell either way, so the tag
 // itself can never be the thing the two measures disagree about (ADR 0030).
 func TestSessionBrowserScheduleTagHoldsTheWidthContract(t *testing.T) {
+	t.Parallel()
 	for _, pm := range paintMethods {
 		t.Run(pm.name, func(t *testing.T) {
+			t.Parallel()
 			now := time.Now()
 			host := &fakeSessionHost{}
 			host.seed(session.Record{Meta: session.Meta{
@@ -1080,6 +1113,7 @@ func TestSessionBrowserScheduleTagHoldsTheWidthContract(t *testing.T) {
 // byte taking string length but no display cell. The all-workspaces view's workspace base comes off
 // the same untrusted record, so it is stripped with it.
 func TestSessionRowCellsStripEscapes(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	b := sessionBrowser{
 		open:          true,
@@ -1107,6 +1141,7 @@ func TestSessionRowCellsStripEscapes(t *testing.T) {
 // buffer: the rename row paints that buffer verbatim, and an ESC that vanished only at commit would
 // show the human one title while saving another.
 func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	storeMeta(host, "sess-1", "reset \x1bc me", "/ws/a", time.Now(), 0, nil)
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
@@ -1127,6 +1162,7 @@ func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
 // time at one shared display column and its message count at another, so the browser reads as a
 // table rather than as a ragged list.
 func TestSessionRowsAlignTheColumns(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	b := sessionBrowser{ // nothing armed, so every row is its plain three cells
 		open: true,
@@ -1158,6 +1194,7 @@ func TestSessionRowsAlignTheColumns(t *testing.T) {
 // An armed delete confirm is a CELL past the counts, not a suffix on the last one: it lands in its
 // own column and leaves the three columns before it exactly where they were unarmed.
 func TestSessionRowsConfirmIsItsOwnCell(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	b := sessionBrowser{
 		open:  true,
@@ -1186,6 +1223,7 @@ func renamedField(text string) lineEditor {
 // An armed rename replaces the whole row with the single cell holding the edit buffer — the row
 // stops describing a session, so it keeps none of its columns.
 func TestSessionRowsRenameIsOneCell(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 7, 24, 12, 0, 0, 0, time.UTC)
 	b := sessionBrowser{
 		open:      true,
@@ -1224,6 +1262,7 @@ func filterableBrowser(t *testing.T) (Model, *fakeSessionHost) {
 // matters most — a letter that deletes must not be reachable from the keyboard the filter is typed
 // on — so a word carrying all three letters is typed and nothing at all happens but filtering.
 func TestSessionBrowserLettersTypeRatherThanAct(t *testing.T) {
+	t.Parallel()
 	m, host := filterableBrowser(t)
 
 	for _, r := range "draft" { // d, r and a, the three verbs that were letters
@@ -1266,6 +1305,7 @@ func TestSessionBrowserLettersTypeRatherThanAct(t *testing.T) {
 // point of resolving every verb through one filtered view. Here the filter leaves the third-newest
 // record standing, so a highlight read against the store would have loaded the newest one.
 func TestSessionBrowserFilteredResumeOpensTheRowShown(t *testing.T) {
+	t.Parallel()
 	m, _ := filterableBrowser(t)
 
 	m = typeIntoBrowser(t, m, "confinement")
@@ -1292,7 +1332,9 @@ func TestSessionBrowserFilteredResumeOpensTheRowShown(t *testing.T) {
 // Delete and rename act on the filtered selection for the same reason ⏎ does: the highlight names a
 // painted row, and resolving it against the whole store would act on a record the human never saw.
 func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
+	t.Parallel()
 	t.Run("^d deletes the filtered row", func(t *testing.T) {
+		t.Parallel()
 		m, host := filterableBrowser(t)
 		m = typeIntoBrowser(t, m, "parser")
 
@@ -1312,6 +1354,7 @@ func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
 	})
 
 	t.Run("^r renames the filtered row", func(t *testing.T) {
+		t.Parallel()
 		m, host := filterableBrowser(t)
 		m = typeIntoBrowser(t, m, "parser")
 
@@ -1335,6 +1378,7 @@ func TestSessionBrowserFilteredVerbsActOnTheRowShown(t *testing.T) {
 // A filter matching nothing keeps the pane open over no rows: ⏎ takes nothing, no verb has a target,
 // and backspace is the way back. The visible filter over an empty list is the whole message.
 func TestSessionBrowserZeroMatchesTakeNothing(t *testing.T) {
+	t.Parallel()
 	m, host := filterableBrowser(t)
 
 	m = typeIntoBrowser(t, m, "no-such-session")
@@ -1368,6 +1412,7 @@ func TestSessionBrowserZeroMatchesTakeNothing(t *testing.T) {
 // The toggle re-derives the FILTERED view over the other scope rather than the raw one: a filter
 // matching only a foreign session shows nothing here and that session there, and ⏎ then resumes it.
 func TestSessionBrowserToggleRederivesTheFilteredView(t *testing.T) {
+	t.Parallel()
 	m, _ := filterableBrowser(t)
 
 	m = typeIntoBrowser(t, m, "another project")
@@ -1413,6 +1458,7 @@ func browserPaneLines(t *testing.T, m Model) []string {
 // below, and nothing at all while the filter is empty — the two blanks an unfiltered pane still
 // shows are the row block's own house pads, not the filter's. The legend says the verbs are chords now.
 func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
+	t.Parallel()
 	m, _ := filterableBrowser(t)
 
 	unfiltered := browserPaneLines(t, m)
@@ -1466,6 +1512,7 @@ func TestSessionBrowserPaintsTheFilterLine(t *testing.T) {
 // highlight — rather than falling back on the "no sessions in this workspace" note, which is a fact
 // about the STORE and would be a lie about a list the filter emptied.
 func TestSessionBrowserZeroMatchPaintsTheFilterOverNoRows(t *testing.T) {
+	t.Parallel()
 	m, _ := filterableBrowser(t)
 
 	m = typeIntoBrowser(t, m, "zzz")
@@ -1627,6 +1674,7 @@ func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model
 // the SHORT window only to go silent on a narrow one — and the terminal these panes shrink for is
 // generally both.
 func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
+	t.Parallel()
 	servers := make([]ServerChoice, 0, 12)
 	for i := range 12 {
 		servers = append(servers, ServerChoice{
@@ -1726,6 +1774,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 				for _, width := range []int{80, narrowOverlayWindow} {
 					for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
 						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", ov.name, staged, draft, width, height), func(t *testing.T) {
+							t.Parallel()
 							m := withStagedRows(ov.open(t, width, height, draft), staged)
 
 							content := m.View().Content
@@ -1798,6 +1847,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 //     the frame must not do is go on GROWING under a window it already does not fit, which is what a
 //     draft, a queue or a pane did before the allocation reached them.
 func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
+	t.Parallel()
 	openers := []struct {
 		name string
 		open func(Model) Model
@@ -1823,6 +1873,7 @@ func TestFrameFitsEveryHeightDownToItsFloor(t *testing.T) {
 				for _, width := range []int{80, narrowOverlayWindow} {
 					for _, height := range []int{1, 4, 6, 7, frameFloorRows, 9, 10, 11, smallestOverlayWindow} {
 						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", o.name, staged, draft, width, height), func(t *testing.T) {
+							t.Parallel()
 							m := withStagedRows(modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), staged)
 							m = withDraft(t, o.open(m), draft)
 
@@ -1907,6 +1958,7 @@ func assertBandAccountsForItsQueue(t *testing.T, m Model, staged int, plainFrame
 // it, so its draft is the answer being typed INTO it — the question pane has to survive the box it
 // is being answered in.
 func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
+	t.Parallel()
 	longProse := strings.Repeat("a long explanation the pane cannot possibly seat in full. ", 12)
 
 	prompts := []struct {
@@ -1948,6 +2000,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 				for _, width := range []int{80, narrowOverlayWindow} {
 					for _, height := range []int{smallestOverlayWindow, 13, 14, 15, 16, 20, 24} {
 						t.Run(fmt.Sprintf("%s+%d staged+%d draft/%d×%d", p.name, staged, draft, width, height), func(t *testing.T) {
+							t.Parallel()
 							m := withStagedRows(modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), staged)
 							m = p.raise(t, m, draft)
 
@@ -2000,6 +2053,7 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 // flags have not opened (popupBudget), so the arbitration has to be right whether or not today's
 // folds can produce the pair.
 func TestFrameSurfacesGiveWayInOrder(t *testing.T) {
+	t.Parallel()
 	askPrompt := func(m Model) Model {
 		m.state = stateAwaitingAsk
 		m.pendingAsk = &askReqMsg{Request: domain.AskRequest{Question: "which way?", Choices: []string{"left", "right"}}}
@@ -2040,6 +2094,7 @@ func TestFrameSurfacesGiveWayInOrder(t *testing.T) {
 	for _, c := range cases {
 		for _, width := range []int{80, narrowOverlayWindow} {
 			t.Run(fmt.Sprintf("%s/%d×%d", c.name, width, c.height), func(t *testing.T) {
+				t.Parallel()
 				m := c.open(withStagedRows(modelWithOverlayRoomAt(t, width, c.height, testOpts), c.staged))
 
 				content := m.View().Content
@@ -2078,6 +2133,7 @@ func TestFrameSurfacesGiveWayInOrder(t *testing.T) {
 // the top BORDER (askPrompt draws no title of its own) — same marker, same accounting, one row
 // higher — so where the count is stated is per-pane and only where it is stated differs.
 func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
+	t.Parallel()
 	choices := []string{"yes, go ahead", "no", "ask me again later", "stop and let me drive"}
 
 	panes := []struct {
@@ -2119,6 +2175,7 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 		for _, width := range []int{80, narrowOverlayWindow} {
 			for _, height := range p.windows {
 				t.Run(fmt.Sprintf("%s/%d×%d", p.name, width, height), func(t *testing.T) {
+					t.Parallel()
 					m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 					pane := p.render(m)
 					flat := ansiPattern.ReplaceAllString(pane, "")
@@ -2161,9 +2218,11 @@ func TestOverlayNamesTheRowsItCannotShow(t *testing.T) {
 // record's base (Model.usageBase) rather than replacing it — which is the round trip through the
 // SessionHost seam.
 func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
+	t.Parallel()
 	want := session.Usage{Calls: 3, PromptTokens: 21000, CompletionTokens: 1500, TotalTokens: 22500}
 
 	t.Run("a startup resume reopens the stored accounting", func(t *testing.T) {
+		t.Parallel()
 		m := newModel(context.Background(), &fakeEngine{}, Options{
 			Resumed: &ResumedSession{Title: "france question", CtxUsed: 4096, Usage: want},
 		}, nil)
@@ -2174,6 +2233,7 @@ func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
 	})
 
 	t.Run("a browser resume reopens it and the next save carries it back", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeSessionHost{}
 		host.seed(session.Record{
 			Meta: session.Meta{
