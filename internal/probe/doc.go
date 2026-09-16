@@ -8,8 +8,8 @@
 //
 // The HOST half is either pure (the report and its wording — table-testable on any host) or a
 // read-only observation of facts the machine already has: the Confiner's capability matrix, and
-// the Upstream's GET /v1/models + llama.cpp GET /props discovery outcome. Nothing on that path
-// writes, executes, or calls a model.
+// the Upstream's GET /v1/models + (on the openai wire) llama.cpp GET /props discovery outcome.
+// Nothing on that path writes, executes, or calls a model.
 //
 // The MODEL half — RunBattery and GatherModel — is the other kind of thing entirely, and the
 // package keeps the two textually apart for that reason. It spends real tokens on a live
@@ -35,8 +35,9 @@
 // The host half. host.go is that report: the injected Inputs the composition root has already
 // resolved, GatherHost, and the rendering of every line it states — the Auto verdict, the
 // confined-roots line, the upstream lines, the API-key line. discovery.go is the one thing this
-// half asks the network, and it asks read-only: GET /v1/models plus llama.cpp's GET /props, with a
-// zero Discovery meaning "no endpoint was configured", which is a report and not a failure.
+// half asks the network, and it asks read-only: GET /v1/models plus, on the openai wire only,
+// llama.cpp's GET /props, with a zero Discovery meaning "no endpoint was configured", which is a
+// report and not a failure.
 // confinement.go is the shared confinement wording — BackendName, CapabilityLine,
 // DegradedNotice, ResidualNotice, AutoUnattendedBlocked — rendered once here and quoted by the CLI
 // report, the TUI's /confine status and startup, and the two unattended surfaces that refuse Auto

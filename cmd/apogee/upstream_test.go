@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -325,6 +326,106 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 		t.Errorf("Meta.Model = %q; want empty — a Save in the unbound gap must not claim the old server's model",
 			metas[0].Model)
 	}
+}
+
+// anthropicUpstream serves the Messages API's GET /v1/models — the one probe the anthropic wire
+// makes — and records, per request, the headers a wire is told apart by. Every other path 404s,
+// so a /props probe made by mistake shows up in the recorded paths rather than passing silently.
+type anthropicUpstream struct {
+	*httptest.Server
+	mu    sync.Mutex
+	paths []string
+	seen  []http.Header
+}
+
+func newAnthropicUpstream(t *testing.T, modelID string) *anthropicUpstream {
+	t.Helper()
+	up := &anthropicUpstream{}
+	up.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		up.mu.Lock()
+		up.paths = append(up.paths, r.URL.Path)
+		up.seen = append(up.seen, r.Header.Clone())
+		up.mu.Unlock()
+		if r.URL.Path != "/v1/models" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		_, _ = io.WriteString(w, `{"data":[{"type":"model","id":"`+modelID+`","display_name":"`+modelID+`"}],"has_more":false}`)
+	}))
+	t.Cleanup(up.Close)
+	return up
+}
+
+// assertAnthropicRequests checks that every request the fake saw carried the anthropic wire's
+// headers under the given key, no bearer token, and asked only for /v1/models.
+func (up *anthropicUpstream) assertAnthropicRequests(t *testing.T, apiKey string) {
+	t.Helper()
+	up.mu.Lock()
+	defer up.mu.Unlock()
+	if len(up.seen) == 0 {
+		t.Fatal("the fake server saw no request at all")
+	}
+	for i, h := range up.seen {
+		if up.paths[i] != "/v1/models" {
+			t.Errorf("request %d asked %q; an anthropic Monitor asks only GET /v1/models", i, up.paths[i])
+		}
+		if h.Get("x-api-key") != apiKey || h.Get("anthropic-version") == "" || h.Get("Authorization") != "" {
+			t.Errorf("request %d carried x-api-key=%q anthropic-version=%q Authorization=%q; want the anthropic headers under %q and no bearer",
+				i, h.Get("x-api-key"), h.Get("anthropic-version"), h.Get("Authorization"), apiKey)
+		}
+	}
+}
+
+// Every Monitor is dialled with its server's wire (ADR 0078): the startup bind, the Monitor a
+// `/server` switch swaps in, and the Sub-agent server's beat. A `wire: anthropic` entry is
+// observed under the Messages API's headers — `x-api-key`, `anthropic-version`, no bearer — and
+// is never asked for a /props, so the same fake that answers the beat would catch an openai-shaped
+// probe by its recorded paths. Without the wire on the Monitor the beat would carry a bearer token
+// to a server that reads none and report the entry offline.
+func TestMonitorsAreDialledWithTheEntrysWire(t *testing.T) {
+	t.Parallel()
+
+	first := newAnthropicUpstream(t, "claude-a")
+	second := newAnthropicUpstream(t, "claude-b")
+	grunt := newAnthropicUpstream(t, "claude-grunt")
+
+	rec := &recordingLauncher{}
+	opts := config.Options{
+		Endpoint:     first.URL,
+		Model:        "claude-a",
+		Mode:         "ask-before",
+		HostAlias:    "first",
+		StartupEntry: config.ServerEntry{Name: "first", Endpoint: first.URL, Model: "claude-a", APIKey: "key-a", Wire: "anthropic"},
+		Workspace:    t.TempDir(),
+		ConfigDir:    t.TempDir(),
+		Servers: []config.ServerEntry{
+			{Name: "first", Endpoint: first.URL, Model: "claude-a", APIKey: "key-a", Wire: "anthropic"},
+			{Name: "second", Endpoint: second.URL, Model: "claude-b", APIKey: "key-b", Wire: "anthropic"},
+		},
+	}
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+
+	if beat := rec.opts.Server.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "claude-a" {
+		t.Fatalf("beat on the startup server = %+v; want a reachable claude-a", beat)
+	}
+	first.assertAnthropicRequests(t, "key-a")
+
+	if _, err := rec.opts.Server.Switch("second"); err != nil {
+		t.Fatalf("Switch: %v", err)
+	}
+	if beat := rec.opts.Server.Beat(context.Background()); !beat.Reachable || beat.ActiveModel != "claude-b" {
+		t.Fatalf("beat after the switch = %+v; want a reachable claude-b", beat)
+	}
+	second.assertAnthropicRequests(t, "key-b")
+
+	// The Sub-agent server's Monitor is built from ITS entry, so its wire is that entry's too.
+	beat := subAgentBeat(config.ServerEntry{Name: "grunt", Endpoint: grunt.URL, Model: "claude-grunt", Wire: "anthropic"})
+	if observed := beat(context.Background(), "key-grunt"); !observed.Reachable || observed.ActiveModel != "claude-grunt" {
+		t.Fatalf("sub-agent beat = %+v; want a reachable claude-grunt", observed)
+	}
+	grunt.assertAnthropicRequests(t, "key-grunt")
 }
 
 // The recording seam, end to end through runRoot (ADR 0036 decision 2): a name the `servers:` list

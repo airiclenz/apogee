@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // Inputs are the facts the composition root has already resolved and the host report merely
@@ -23,11 +24,15 @@ type Inputs struct {
 	ConfigHome         string
 	Endpoint           string
 	ConfineToWorkspace bool
-	// APIKey is the resolved upstream bearer token, "" when none is configured. It is used to
+	// APIKey is the resolved upstream API key, "" when none is configured. It is used to
 	// reach the endpoint exactly as a session would and is never carried into the Host: the
 	// report states only THAT a key exists, because "is my key even loaded?" is the first
 	// question behind a 401 and the answer must not print the secret to a terminal.
 	APIKey string
+	// Wire is the startup entry's protocol (ADR 0078), already folded by provider.WireFor. The
+	// discovery is dialled with it, as a session's Monitor is, and the report names the header
+	// the key travelled in and which probes that wire makes.
+	Wire provider.Wire
 	// Residue is the backend's outstanding disk mutation, "" when there is none — today
 	// only the Windows token backend has one to report (mandatory labels a killed run did
 	// not revert; ADR 0020 §2). It is injected like every other fact here: the report
@@ -81,7 +86,7 @@ func GatherHost(ctx context.Context, in Inputs) Host {
 		ConfigHome:         in.ConfigHome,
 		Residue:            in.Residue,
 		APIKeyConfigured:   in.APIKey != "",
-		Discovery:          Discover(ctx, in.Endpoint, in.APIKey),
+		Discovery:          Discover(ctx, in.Endpoint, in.APIKey, in.Wire),
 	}
 }
 
@@ -152,7 +157,8 @@ func (h Host) confinedLine() string {
 // upstreamLines render the endpoint block: the URL, whether an api key is configured, whether
 // GET /v1/models answered, what it advertised, and whether llama.cpp's GET /props supplied a
 // runtime context window. Each probe reports its own outcome, so "the server is down" and "the
-// server is not llama.cpp" cannot be confused for one another.
+// server is not llama.cpp" cannot be confused for one another — and on the anthropic wire, where
+// no /props is asked at all, the line says so rather than reporting a probe that never ran.
 //
 // The no-endpoint shape is no longer reachable through `apogee probe` — startup selection refuses
 // before the report is gathered when no server is determinable (ADR 0036 decision 8) — but it stays
@@ -176,7 +182,7 @@ func (h Host) upstreamLines() []string {
 			field("endpoint", d.Endpoint),
 			field("api key", h.apiKeyLine()),
 			field("reachable", "NO — GET /v1/models did not complete: "+d.Failure),
-			field("/props", "not probed (the model probe failed first)"),
+			field("/props", d.propsLine("not probed (the model probe failed first)")),
 		}
 	}
 
@@ -197,18 +203,36 @@ func (h Host) upstreamLines() []string {
 		field("api key", h.apiKeyLine()),
 		field("reachable", "yes — GET /v1/models answered"),
 		field("models", models),
-		field("/props", props),
+		field("/props", d.propsLine(props)),
 	}
 }
 
-// apiKeyLine states whether an upstream bearer token was resolved — never which one. "none" is
-// the ordinary local-server answer rather than a fault, so it names the two places a key comes
-// from instead of reading as a missing setting.
-func (h Host) apiKeyLine() string {
-	if h.APIKeyConfigured {
-		return "configured (sent as a bearer token)"
+// propsNotOnAnthropicWire is the /props line on the anthropic wire, whatever the models probe did:
+// the probe is not made there, so neither "the model probe failed first" nor "no runtime window
+// reported" would be true.
+const propsNotOnAnthropicWire = "not probed (the anthropic wire has no /props; the context-window: pin supplies the window)"
+
+// propsLine is the /props line: the openai-wire outcome the caller rendered, unless the wire is
+// the anthropic one — where the probe is never made and the line says so instead.
+func (d Discovery) propsLine(openAIOutcome string) string {
+	if d.Wire == provider.WireAnthropic {
+		return propsNotOnAnthropicWire
 	}
-	return "none — no api-key on the servers: entry and no APOGEE_API_KEY (a local server needs none)"
+	return openAIOutcome
+}
+
+// apiKeyLine states whether an upstream api key was resolved — never which one — and the header
+// it travelled in, which is the wire's: a bearer token on the openai wire, `x-api-key` on the
+// anthropic one. "none" is the ordinary local-server answer rather than a fault, so it names the
+// two places a key comes from instead of reading as a missing setting.
+func (h Host) apiKeyLine() string {
+	if !h.APIKeyConfigured {
+		return "none — no api-key on the servers: entry and no APOGEE_API_KEY (a local server needs none)"
+	}
+	if h.Discovery.Wire == provider.WireAnthropic {
+		return "configured (sent as x-api-key)"
+	}
+	return "configured (sent as a bearer token)"
 }
 
 // field renders one "  label:        value" line, padded so the values align in a terminal.

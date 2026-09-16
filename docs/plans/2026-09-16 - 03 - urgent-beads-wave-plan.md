@@ -256,7 +256,14 @@ NOTES (2026-09-16): the "server closed without message_stop" path keeps the stop
 
 **Commit:** `feat(provider): Anthropic SSE parser and the second wire's fault arms`
 
-## 11. Discovery on the anthropic wire; Monitors carry the wire (apogee-6fp)
+## 11. Discovery on the anthropic wire; Monitors carry the wire (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `anthropicEffortSupport` (the wire-implied dial) lives in internal/provider/wire_anthropic.go beside `anthropicEffort`, whose vocabulary it must match — a file the item did not list; discovery.go calls it.
+NOTES (2026-09-16): the anthropic model list decodes through the shared `modelsResponse` (gained `display_name`, read when `name` is empty) rather than a second type — the `{data:[{id,…}]}` shape is common to both wires and the missing window/reasoning fields fall out as zero.
+NOTES (2026-09-16): `Discovery.Wire` and `probe.Inputs.Wire` added so the report can qualify its lines; the api-key line now says `sent as x-api-key` on the anthropic wire (the bearer-token wording was false there) — docs/manual/configuration.md's quote of that line and its `wire:` paragraph (heartbeat asks only `/v1/models`; pin `context-window:`) updated to match.
+NOTES (2026-09-16): the cmd/apogee Monitor-headers test lives in cmd/apogee/upstream_test.go (runRoot bind, `/server` switch, `subAgentBeat`) — the file with the holder/switch fixtures, not one the item listed.
+NOTES (2026-09-16): consequential edit — cmd/apogee/naming_test.go: made necessary by the `provider.Wire` parameter on `firingInputs.beat` (two beat literals updated).
+NOTES (2026-09-16): consequential edit — cmd/apogee/probe.go: made necessary by `probe.Inputs.Wire` (passes `provider.WireFor(opts.StartupEntry.Wire)`; the regression guard's wire-less `apogee probe` dial).
 
 **What:** Depends on item 8. `internal/provider/discovery.go`: under `WireAnthropic`, `Discover` issues `GET /v1/models` with the codec's headers, decodes `{data:[{id,display_name}]}` into `ModelInfo` (no window, no slots, no effort tell; `resolveHint` grades as today), skips `/props`, and reports `EffortSupport` only from `forceEffortDialect`. `internal/heartbeat/heartbeat.go` `NewMonitor` needs no signature change (opts...); the four call sites — `cmd/apogee/wire_server.go`, `cmd/apogee/upstream.go`, `cmd/apogee/headless.go` (two), `cmd/apogee/delegation.go` — pass `provider.WithWire(provider.WireFor(entry.Wire))`. `docs/manual/probe.md` and `internal/probe/host.go`/`doc.go` report text: `GET /v1/models` stays literal (true on both wires) but the `/props` line is qualified as openai-only.
 

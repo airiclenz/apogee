@@ -353,7 +353,8 @@ func subAgentBeat(entry config.ServerEntry) func(context.Context, string) heartb
 	return func(ctx context.Context, apiKey string) heartbeat.Beat {
 		mu.Lock()
 		if monitor == nil || built != apiKey {
-			monitor, built = heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey), apiKey
+			monitor, built = heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
+				provider.WithWire(provider.WireFor(entry.Wire))), apiKey
 		}
 		current := monitor
 		mu.Unlock()

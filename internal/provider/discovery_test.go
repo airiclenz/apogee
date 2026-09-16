@@ -1025,3 +1025,71 @@ func TestDiscoverDeadlineIsATransportError(t *testing.T) {
 		t.Errorf("error %v does not wrap context.DeadlineExceeded; the deadline must stay reachable through the chain", err)
 	}
 }
+
+// On the anthropic wire discovery is ONE probe: GET /v1/models under the codec's headers, no
+// /props (nothing on that wire serves one), and the dial is implied by the wire rather than
+// detected — the Messages API advertises no tell, so every model reports the five levels the
+// encoder passes through. A forced dialect is not consulted: the config loader refuses the key
+// on an anthropic entry.
+func TestDiscover_AnthropicWireListsModelsWithoutProps(t *testing.T) {
+	t.Parallel()
+
+	type seen struct {
+		xAPIKey, version, bearer string
+		sawProps                 bool
+	}
+	rec := &seen{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case modelsPath:
+			rec.xAPIKey = r.Header.Get("x-api-key")
+			rec.version = r.Header.Get("anthropic-version")
+			rec.bearer = r.Header.Get("Authorization")
+			_, _ = io.WriteString(w, `{"data":[`+
+				`{"type":"model","id":"claude-a","display_name":"Claude A","created_at":"2026-01-01T00:00:00Z"},`+
+				`{"type":"model","id":"claude-b","display_name":"Claude B","created_at":"2026-01-01T00:00:00Z"}`+
+				`],"has_more":false,"first_id":"claude-a","last_id":"claude-b"}`)
+		case propsPath:
+			rec.sawProps = true
+			_, _ = io.WriteString(w, `{"default_generation_settings":{"n_ctx":4096},"total_slots":4}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer srv.Close()
+
+	info, err := NewClient(srv.URL, "claude-b",
+		WithAPIKey("tok"), WithWire(WireAnthropic), WithEffortDialect(EffortDialectOff),
+	).Discover(context.Background())
+	if err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+
+	if rec.xAPIKey != "tok" || rec.version != anthropicVersion || rec.bearer != "" {
+		t.Errorf("headers x-api-key=%q anthropic-version=%q Authorization=%q; want the codec's own (tok, %s, none)",
+			rec.xAPIKey, rec.version, rec.bearer, anthropicVersion)
+	}
+	if rec.sawProps {
+		t.Error("/props was probed on the anthropic wire; nothing there serves one")
+	}
+	if info.ActiveModel != "claude-b" || info.Resolution != HintExact {
+		t.Errorf("active = %q (%s), want claude-b resolved exact", info.ActiveModel, info.Resolution)
+	}
+	if info.ContextWindow != 0 || info.RuntimeContextWindow != 0 || info.TotalSlots != 0 {
+		t.Errorf("window/runtime/slots = %d/%d/%d, want all 0 (no window on this wire; the pin supplies it)",
+			info.ContextWindow, info.RuntimeContextWindow, info.TotalSlots)
+	}
+	implied := EffortSupport{Supported: true, Efforts: []string{"low", "medium", "high", "xhigh", "max"}}
+	want := []DiscoveredModel{
+		{ID: "claude-a", DisplayName: "Claude A", EffortSupport: implied},
+		{ID: "claude-b", DisplayName: "Claude B", EffortSupport: implied},
+	}
+	if !reflect.DeepEqual(info.AvailableModels, want) {
+		t.Errorf("AvailableModels = %+v, want every entry carrying the wire-implied dial %+v",
+			info.AvailableModels, want)
+	}
+	if !reflect.DeepEqual(info.EffortSupport, implied) {
+		t.Errorf("EffortSupport = %+v, want the wire-implied dial %+v (a forced dialect is not consulted)",
+			info.EffortSupport, implied)
+	}
+}

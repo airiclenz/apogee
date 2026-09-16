@@ -63,7 +63,7 @@ func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness 
 
 	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
 	runOnce = harness.runner.once
-	discoverBeat = func(_ context.Context, endpoint, _, _ string) heartbeat.Beat {
+	discoverBeat = func(_ context.Context, endpoint, _, _ string, _ provider.Wire) heartbeat.Beat {
 		harness.probed = endpoint
 		return harness.beat
 	}

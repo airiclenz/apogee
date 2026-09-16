@@ -6,16 +6,21 @@ import (
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// Discovery is the outcome of the two read-only probes the host report makes against the
-// configured Upstream: GET /v1/models (the authoritative model list) and llama.cpp's GET
-// /props (the runtime context window). No model is called and nothing is generated — this is
-// the same discovery the binary already performs at startup, reported instead of consumed.
+// Discovery is the outcome of the read-only probes the host report makes against the
+// configured Upstream: GET /v1/models (the authoritative model list, on every wire) and, on the
+// openai wire only, llama.cpp's GET /props (the runtime context window). No model is called and
+// nothing is generated — this is the same discovery the binary already performs at startup,
+// reported instead of consumed.
 //
 // The zero value is "no endpoint was configured, so nothing was asked" (Attempted false), which
 // is a legitimate report on an offline machine rather than a failure.
 type Discovery struct {
 	// Endpoint is the resolved Upstream URL the probes were sent to ("" when none is set).
 	Endpoint string
+	// Wire is the protocol the probes spoke (ADR 0078) — the startup entry's `wire:`, folded
+	// by provider.WireFor. The report reads it to say which probes a wire makes: the anthropic
+	// wire has no /props to ask.
+	Wire provider.Wire
 	// Attempted reports whether an endpoint was configured at all, distinguishing "nothing to
 	// ask" from "asked and got nothing".
 	Attempted bool
@@ -47,18 +52,25 @@ type Discovery struct {
 // package's discovery timeout), so the report cannot describe a discovery the binary would not
 // actually perform.
 //
-// apiKey is the upstream bearer token ("" ⇒ no Authorization header, the keyless local
-// default). It is carried for the same reason the session and the heartbeat carry it: a keyed
-// server rejects an unauthenticated GET /v1/models, so a probe that omitted the key would
-// report a 401 the binary itself would never have hit. The value is used and never kept —
-// Discovery has no field for it; only the host report's presence line says it exists.
-func Discover(ctx context.Context, endpoint, apiKey string) Discovery {
+// apiKey is the upstream API key ("" ⇒ no key header, the keyless local default), sent in the
+// wire's own spelling — a bearer token on the openai wire, `x-api-key` on the anthropic one. It
+// is carried for the same reason the session and the heartbeat carry it: a keyed server rejects
+// an unauthenticated GET /v1/models, so a probe that omitted the key would report a 401 the
+// binary itself would never have hit. The value is used and never kept — Discovery has no
+// field for it; only the host report's presence line says it exists.
+//
+// wire is the entry's protocol, and it decides the probes as well as the headers: the client
+// is dialled with it exactly as a session's Monitor is, so the report cannot describe a
+// discovery the binary would not perform — an anthropic entry is asked under its own headers
+// and never for a /props.
+func Discover(ctx context.Context, endpoint, apiKey string, wire provider.Wire) Discovery {
 	if endpoint == "" {
 		return Discovery{}
 	}
-	d := Discovery{Endpoint: endpoint, Attempted: true}
+	d := Discovery{Endpoint: endpoint, Wire: wire, Attempted: true}
 
-	info, err := provider.NewClient(endpoint, "", provider.WithAPIKey(apiKey)).Discover(ctx)
+	info, err := provider.NewClient(endpoint, "",
+		provider.WithAPIKey(apiKey), provider.WithWire(wire)).Discover(ctx)
 	if err != nil {
 		d.Failure = err.Error()
 		return d

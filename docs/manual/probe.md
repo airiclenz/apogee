@@ -5,7 +5,9 @@ It reads `config.yaml` and the `APOGEE_*` environment exactly as a session would
 reports the OS/arch, the confinement backend and what it can *actually* enforce here,
 the Auto verdict, the effective `confine-to-workspace` after any host acknowledgement,
 the workspace root and config home, and whether the configured endpoint answers
-(`/v1/models`, plus llama.cpp's `/props`). It is free, offline and **read-only** — no
+(`/v1/models`, plus llama.cpp's `/props` on the `openai` wire; an entry with
+`wire: anthropic` is asked only `/v1/models`, under that wire's own headers, and the
+`/props` line says so). It is free, offline and **read-only** — no
 model is called, no starter config is seeded, nothing is written. `apogee probe host`
 is the same report under a named child, for scripts. Both take `--endpoint`, `--workspace`
 and `--config`, so the report can describe a server, a tree or a home other than the ones the

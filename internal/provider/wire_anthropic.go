@@ -145,6 +145,22 @@ func anthropicEffort(e Effort) (string, bool) {
 	}
 }
 
+// anthropicEffortSupport is the thinking-effort dial the Messages wire IMPLIES: the Messages API
+// advertises no tell — its model list names no vocabulary and it serves no /props — so on this
+// wire the dial is a property of the protocol rather than a detected fact, and discovery reports
+// it for every model (discoverAnthropic). The vocabulary is exactly the set anthropicEffort passes
+// through, so the picker can never offer a level the encoder would drop. Dialect stays the zero
+// value: the codec reads no EffortDialect — the wire is the dialect — and no default is stated
+// because the API names none. A fresh slice per call, so no two ModelInfo entries share one.
+func anthropicEffortSupport() EffortSupport {
+	return EffortSupport{
+		Supported: true,
+		Efforts: []string{
+			string(EffortLow), string(EffortMedium), string(EffortHigh), string(EffortXHigh), string(EffortMax),
+		},
+	}
+}
+
 // anthropicMessages renders the seam messages onto the wire: system messages are lifted out
 // into the returned system text; a run of consecutive tool-result messages folds into ONE user
 // message of tool_result blocks (the API wants every result of a parallel call in a single

@@ -1102,7 +1102,9 @@ thinking-effort dial, described above) and `wire` (which protocol family the
 server speaks: `openai`, the chat-completions wire and the default, or
 `anthropic`, the Messages wire — `/v1/messages`, the key sent as `x-api-key`,
 and the effort dial spelled by the wire itself, so an `anthropic` entry names
-no `effort-dialect`) are optional, as are `description` — free
+no `effort-dialect`; the heartbeat asks such a server only `/v1/models`, which
+advertises no context window, so pin one with `context-window:`) are optional, as
+are `description` — free
 text saying what that server is **for**, which the `/sub-agents-server` picker
 shows and which the model reads when you let it pick the seat
 ([below](#letting-the-model-pick-the-seat)) — and `llama-launcher`,
@@ -1377,7 +1379,8 @@ key out — the local default — and no `Authorization` header is sent at all, 
 as before this key existed.
 
 The value is never displayed: `apogee probe` reports only *whether* a key was
-resolved (`api key: configured (sent as a bearer token)`), the settings screen
+resolved (`api key: configured (sent as a bearer token)` — or `sent as x-api-key`
+on an `anthropic` entry), the settings screen
 summarizes the whole `servers:` block rather than rendering it, and the provider
 client redacts the key from any error text the server echoes back. One caveat is
 yours to weigh: `config.yaml` is plain text, so on a shared machine prefer the

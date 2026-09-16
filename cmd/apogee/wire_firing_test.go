@@ -55,7 +55,7 @@ func firingRoots(t *testing.T) stateRoots {
 // nothing. It exists because one beat per Firing is unconditional — the round trip is the liveness
 // gate, not an optimisable probe — so a composition test about anything else would otherwise dial
 // `box.example` for real and wait out the discovery timeout.
-func firingBeat(context.Context, string, string, string) heartbeat.Beat {
+func firingBeat(context.Context, string, string, string, apiprovider.Wire) heartbeat.Beat {
 	return heartbeat.Beat{Reachable: true, Answered: true}
 }
 
@@ -667,6 +667,44 @@ func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
 	}
 }
 
+// The entry's wire reaches both beat seams (ADR 0078): the Firing's own server is observed
+// under the wire its entry names, and the `sub-agents-server:` entry under ITS wire — a mixed
+// pair, so an anthropic entry cannot be observed as an openai one by either seam, and the
+// fold of an unnamed wire onto openai is asserted rather than assumed.
+func TestFiringConfigBeatsCarryEachEntrysWire(t *testing.T) {
+	primary := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}
+	delegation := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 2}}
+	prevPrimary, prevDelegation := discoverBeat, discoverDelegationBeat
+	discoverBeat, discoverDelegationBeat = primary.discover, delegation.discover
+	t.Cleanup(func() { discoverBeat, discoverDelegationBeat = prevPrimary, prevDelegation })
+
+	grunt := config.ServerEntry{Name: "grunt", Endpoint: "http://grunt.example/v1", Model: "grunt-model", APIKey: "sk-grunt"}
+	if _, _, _, err := firingConfig(context.Background(), firingInputs{
+		opts: config.Options{
+			Bypass:          true,
+			Servers:         []config.ServerEntry{grunt},
+			SubAgentsServer: "grunt",
+		},
+		entry: config.ServerEntry{
+			Name: "box", Endpoint: "http://box.example/v1", Model: "claude", APIKey: "sk-test", Wire: "anthropic",
+		},
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		recordID: "2026-09-16T10-00-00-firing",
+	}); err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+
+	if want := []apiprovider.Wire{apiprovider.WireAnthropic}; !slices.Equal(primary.wires, want) {
+		t.Errorf("discoverBeat was dialled with %v; want the entry's own %v", primary.wires, want)
+	}
+	if want := []apiprovider.Wire{apiprovider.WireOpenAI}; !slices.Equal(delegation.wires, want) {
+		t.Errorf("discoverDelegationBeat was dialled with %v; want the grunt entry's unnamed wire folded to %v",
+			delegation.wires, want)
+	}
+}
+
 // A host with no scratch root names no scratch dir at all. The Config carries "" rather than a
 // half-formed path, because the dir named here is a path the confinement box then advertises as
 // writable: an unnamed one would be fenced writable and not be there when the first tool call
@@ -708,13 +746,17 @@ type stubBeat struct {
 	called    bool
 	calls     int
 	endpoints []string
-	beat      heartbeat.Beat
+	// wires records the wire each call was asked to dial with, beside its endpoint: the entry's
+	// protocol must reach the beat, or an anthropic entry would be observed as an openai one.
+	wires []apiprovider.Wire
+	beat  heartbeat.Beat
 }
 
-func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string) heartbeat.Beat {
+func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string, wire apiprovider.Wire) heartbeat.Beat {
 	s.called = true
 	s.calls++
 	s.endpoints = append(s.endpoints, endpoint)
+	s.wires = append(s.wires, wire)
 	return s.beat
 }
 

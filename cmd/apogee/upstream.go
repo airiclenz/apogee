@@ -284,10 +284,12 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	}); err != nil {
 		return tui.ServerSwitchResult{}, err
 	}
-	// The replacement Monitor carries the new entry's forced effort dialect, the way the first
-	// bind's does: the dial is a per-server fact, so it moves with the server (ADR 0060 decision 3).
+	// The replacement Monitor carries the new entry's forced effort dialect and its wire, the way
+	// the first bind's does: both are per-server facts, so they move with the server (ADR 0060
+	// decision 3, ADR 0078).
 	m.holder.Swap(entry.Endpoint, apiKey, heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
-		provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect))))
+		provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect)),
+		provider.WithWire(provider.WireFor(entry.Wire))))
 	m.host.SetModel("")
 	m.live.followEntry(entry)
 	// And how wide the session may fan out on the server it has just arrived on (ADR 0039): the new

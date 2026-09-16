@@ -27,6 +27,7 @@ import (
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -393,8 +394,12 @@ func firstStringArgument(arguments json.RawMessage) string {
 // with no signal has always had and whose dialect is the historical `chat_template_kwargs` shape
 // every unattended run spoke before the seam existed. What the failure MEANS is on the Beat itself
 // (Failure, Answered, Throttled) for the Driver that gates on it.
-var discoverBeat = func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat {
-	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx)
+//
+// wire is the entry's protocol (ADR 0078), carried because the beat IS a discovery and discovery
+// differs per wire: the Monitor is dialled with it so an anthropic entry is asked under its own
+// headers and never for a /props it does not serve.
+var discoverBeat = func(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat {
+	return heartbeat.NewMonitor(endpoint, model, apiKey, provider.WithWire(wire)).Beat(ctx)
 }
 
 // discoverDelegationBeat is the seam onto the ONE observation an unattended run takes of its
@@ -410,9 +415,10 @@ var discoverBeat = func(ctx context.Context, endpoint, model, apiKey string) hea
 // every Firing took before this seam existed (ADR 0045 §4's floor).
 //
 // It fires ONLY when `sub-agents-server:` names an entry. A run that delegates to its own server
-// asks nothing here, so the default composition path costs no third round trip.
-var discoverDelegationBeat = func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat {
-	return heartbeat.NewMonitor(endpoint, model, apiKey).Beat(ctx)
+// asks nothing here, so the default composition path costs no third round trip. wire is that
+// entry's own protocol, for discoverBeat's reason.
+var discoverDelegationBeat = func(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat {
+	return heartbeat.NewMonitor(endpoint, model, apiKey, provider.WithWire(wire)).Beat(ctx)
 }
 
 // The two values `--format` accepts, and the whole of what this command offers a caller who is not

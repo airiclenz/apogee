@@ -77,7 +77,10 @@ type firingInputs struct {
 	// heartbeat already observed, and the liveness its footer last published (the upstream latch,
 	// schedule.go) — because it is holding the answer, and a Firing must not spend a round trip
 	// re-asking the server the session is talking to (design call 4).
-	beat func(ctx context.Context, endpoint, model, apiKey string) heartbeat.Beat
+	//
+	// The wire is the entry's protocol (ADR 0078), passed so the one-shot beat dials the server
+	// the way a session's Monitor does; a session's own beat has nothing to dial and ignores it.
+	beat func(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat
 	// recordID is the id this run's record is filed under. The run's scratch dir is created under
 	// it, so a saved run and the working files its model left behind are one thing to find and one
 	// thing to sweep. A Driver that goes through raise leaves it empty — raise mints it, so the id
@@ -227,7 +230,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	if observe == nil {
 		observe = discoverBeat
 	}
-	beat := observe(ctx, in.entry.Endpoint, spec.Model, apiKey)
+	beat := observe(ctx, in.entry.Endpoint, spec.Model, apiKey, provider.WireFor(in.entry.Wire))
 
 	// The one thing only that observation can say about the binding above: whether the server this run
 	// is about to prompt advertises the model it just bound. A session says it at its rebind seam out of
@@ -501,7 +504,7 @@ func resolveFiringRouting(
 
 	// One beat, no retry: the composition happens once and there is no later beat to widen on, which
 	// is the contract discoverBeat already set for an unattended run's own server.
-	observed := discoverDelegationBeat(ctx, entry.Endpoint, entry.Model, apiKey)
+	observed := discoverDelegationBeat(ctx, entry.Endpoint, entry.Model, apiKey, provider.WireFor(entry.Wire))
 	// And the one resolution the session's own beat lands, reused whole rather than re-derived: the
 	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends
 	// up routing to a window the other would not.

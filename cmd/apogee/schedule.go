@@ -165,7 +165,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		// be, and one whose footer says offline has every reason raise needs to refuse the Firing
 		// before a prompt is spent on it (the gate is Beat.Answered, wire_firing.go). No verdict yet
 		// reads as online, so a session that has never heard from its monitor fires as it always did.
-		beat: func(context.Context, string, string, string) heartbeat.Beat {
+		beat: func(context.Context, string, string, string, provider.Wire) heartbeat.Beat {
 			offline, failure := w.upstream.verdict()
 			return heartbeat.Beat{
 				Reachable:     !offline,

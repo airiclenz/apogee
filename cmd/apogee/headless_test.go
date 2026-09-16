@@ -131,7 +131,7 @@ var beatDictated bool
 // the production seam afterwards. Every test that has an opinion about the beat — the width, the
 // effort dialect, the offline gate — goes through here rather than assigning discoverBeat directly,
 // so the harness above can tell a dictated observation from an absent one.
-func swapBeat(t *testing.T, discover func(context.Context, string, string, string) heartbeat.Beat) {
+func swapBeat(t *testing.T, discover func(context.Context, string, string, string, provider.Wire) heartbeat.Beat) {
 	t.Helper()
 	prev := discoverBeat
 	discoverBeat, beatDictated = discover, true
@@ -3105,7 +3105,7 @@ func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
 	// The beat stands in for a Monitor whose dial was cut short: the interrupt lands while it runs,
 	// and what it reports is what the real one reports for a cancelled ctx — no answer, and the
 	// ctx's own reason as the failure.
-	swapBeat(t, func(beatCtx context.Context, _, _, _ string) heartbeat.Beat {
+	swapBeat(t, func(beatCtx context.Context, _, _, _ string, _ provider.Wire) heartbeat.Beat {
 		cancel()
 		<-beatCtx.Done()
 		return heartbeat.Beat{Failure: beatCtx.Err().Error()}

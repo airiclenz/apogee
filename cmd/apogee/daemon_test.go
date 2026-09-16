@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
@@ -82,7 +83,7 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 	// A server that is THERE: the daemon refuses a Firing whose beat answered nothing at all
 	// (daemonfire.go), so a fixture observing nothing would refuse every Firing this file drives
 	// rather than run the one each test is about.
-	discoverBeat = func(context.Context, string, string, string) heartbeat.Beat {
+	discoverBeat = func(context.Context, string, string, string, provider.Wire) heartbeat.Beat {
 		return heartbeat.Beat{Reachable: true, Answered: true}
 	}
 	newConfiner = func() apogee.Confiner { return fenceableHost }

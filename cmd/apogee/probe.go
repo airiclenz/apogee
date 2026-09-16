@@ -10,6 +10,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
@@ -115,12 +116,16 @@ func probeHostCommand(use, short, long string) *cobra.Command {
 				Workspace:  roots.workspace,
 				ConfigHome: roots.config,
 				Endpoint:   opts.Endpoint,
-				// The bearer token resolved above (the startup `servers:` entry's own key
+				// The api key resolved above (the startup `servers:` entry's own key
 				// source, which APOGEE_API_KEY overlays; no flag): the
 				// probe must authenticate exactly as a session would, or a keyed server
 				// would be reported unreachable here and perfectly fine in a session. The
 				// report states its PRESENCE only; the value never reaches Host.
-				APIKey:             apiKey,
+				APIKey: apiKey,
+				// And the entry's wire (ADR 0078), so the probe dials the server the way a
+				// session's Monitor would: under that wire's headers, asking only the probes
+				// that wire has.
+				Wire:               provider.WireFor(opts.StartupEntry.Wire),
 				ConfineToWorkspace: opts.ConfineToWorkspace,
 				Residue:            residue,
 			})

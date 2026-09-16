@@ -146,6 +146,8 @@ type EffortSupport struct {
 // also reports how many generation slots the server was launched with (ModelInfo.TotalSlots).
 // Both payloads are read once more for the thinking-effort tell described on EffortSupport, and a
 // dialect this Client was built with (WithEffortDialect) overrides whatever they said.
+//
+// On the anthropic wire (WithWire) only the first probe runs — see discoverAnthropic.
 func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	deadline := c.discoveryDeadline
 	if deadline <= 0 {
@@ -153,6 +155,10 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	}
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
+
+	if c.wire == WireAnthropic {
+		return c.discoverAnthropic(ctx)
+	}
 
 	info, err := c.discoverModels(ctx)
 	if err != nil {
@@ -179,6 +185,27 @@ func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	for i := range info.AvailableModels {
 		info.AvailableModels[i].EffortSupport =
 			forceEffortDialect(c.effortDialect, info.AvailableModels[i].EffortSupport)
+	}
+	return info, nil
+}
+
+// discoverAnthropic is Discover on the Messages wire: the one probe GET /v1/models, sent under the
+// codec's own headers (`x-api-key`, `anthropic-version`) and read for the list and the active model
+// exactly as the openai wire reads it — resolveHint grades the hint the same way. There is no
+// /props probe, because nothing on this wire serves one: the runtime window and the slot count
+// stay 0, and the context window is the `context-window:` pin's to supply one layer up. The
+// payload carries no window and no effort tell either, so nothing is detected — the dial is
+// IMPLIED by the wire instead (anthropicEffortSupport), on the active model and on every entry, and
+// a forced `effort-dialect:` is deliberately not consulted: the config loader refuses the key on an
+// anthropic entry, so there is never one to apply.
+func (c *Client) discoverAnthropic(ctx context.Context) (ModelInfo, error) {
+	info, err := c.discoverModels(ctx)
+	if err != nil {
+		return ModelInfo{}, err
+	}
+	info.EffortSupport = anthropicEffortSupport()
+	for i := range info.AvailableModels {
+		info.AvailableModels[i].EffortSupport = anthropicEffortSupport()
 	}
 	return info, nil
 }
@@ -280,7 +307,10 @@ func (e *TransportError) Error() string { return e.err.Error() }
 // Unwrap keeps the underlying transport failure reachable by errors.Is and errors.As.
 func (e *TransportError) Unwrap() error { return e.err }
 
-// discoverModels probes GET /v1/models and resolves the model list plus the active model.
+// discoverModels probes GET /v1/models and resolves the model list plus the active model. It is
+// the one probe both wires make: the request carries the selected codec's headers (setAuth), and
+// the list shape — `{data:[{id,…}]}` — is the same on both, differing only in the fields the
+// entries carry (see modelsResponse).
 func (c *Client) discoverModels(ctx context.Context) (ModelInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+modelsPath, nil)
 	if err != nil {
@@ -405,11 +435,15 @@ func (info *ModelInfo) setRuntimeContextWindow(n int) {
 }
 
 // modelsResponse is the /v1/models payload. context_length wins over meta.n_ctx_train for
-// the context window, matching the oracle.
+// the context window, matching the oracle. The Messages API lists its models under the same
+// `data` array with `display_name` where the OpenAI shape says `name`, and none of the window or
+// reasoning fields — so an anthropic list decodes through this one type and reads as models with
+// no window and no tell, which on that wire is the truth (see discoverAnthropic).
 type modelsResponse struct {
 	Data []struct {
 		ID            string `json:"id"`
 		Name          string `json:"name"`
+		DisplayName   string `json:"display_name"`
 		ContextLength int    `json:"context_length"`
 		Meta          struct {
 			NCtxTrain int `json:"n_ctx_train"`
@@ -451,9 +485,13 @@ func (r modelsResponse) toModelInfo(hint string) ModelInfo {
 		if contextWindow == 0 {
 			contextWindow = m.Meta.NCtxTrain
 		}
+		displayName := m.Name
+		if displayName == "" {
+			displayName = m.DisplayName
+		}
 		models = append(models, DiscoveredModel{
 			ID:            m.ID,
-			DisplayName:   m.Name,
+			DisplayName:   displayName,
 			ContextWindow: contextWindow,
 			EffortSupport: r.effortSupport(m.ID),
 		})
