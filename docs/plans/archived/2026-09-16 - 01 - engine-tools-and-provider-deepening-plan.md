@@ -367,6 +367,7 @@ codec goldens (`TestTranscriptCodecGoldenV1`) unchanged.
 
 NOTES (2026-09-16): consequential edit — internal/domain/usage.go: made necessary by the Cumulative field (its doc named "UsageEvent's Cumulative* fields").
 NOTES (2026-09-16): consequential edit — internal/session/store.go: made necessary by the Cumulative field (session.Usage's doc named "the Cumulative* fields an engine UsageEvent stamps").
+NOTES (2026-09-16): deferred fix D10 — the Acceptance regex gained `Tap`: `Usage|EventLines|Encode` matched no test in `internal/run` ("no tests to run"), so the `eventTap.noteUsage` reader the item changed went unexercised; the amended command runs the eleven `TestEventTap*` tests (verified: all pass).
 
 **What.** Depends on items 8–9. `internal/domain/events.go` `UsageEvent`: the five cumulative ints
 become one embedded `Cumulative domain.Usage` (the per-call half has no `Calls`, so it stays as
@@ -383,7 +384,7 @@ across the seven test files follow (keyed fields).
 `run_test.go`, `fold_test.go` unchanged in outcome.
 
 **Acceptance.**
-- `go build ./... && go test ./internal/domain ./internal/agent ./internal/eventjson ./internal/run ./internal/tui ./cmd/apogee -run 'Usage|EventLines|Encode'`
+- `go build ./... && go test ./internal/domain ./internal/agent ./internal/eventjson ./internal/run ./internal/tui ./cmd/apogee -run 'Usage|EventLines|Encode|Tap'`
 - `git diff --exit-code -- cmd/apogee/testdata/eventlines/`
 
 **Commit:** `refactor(domain): UsageEvent carries one cumulative Usage`
