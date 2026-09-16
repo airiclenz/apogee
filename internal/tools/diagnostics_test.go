@@ -212,6 +212,63 @@ func TestDiagnostics_GoSyntaxErrorReportedInProcess(t *testing.T) {
 	}
 }
 
+// TestDiagnostics_BlankGoFileStaysASyntaxError pins the door's entry into the shared engine:
+// diagnostics asks syntaxcheck.CheckGo, which has no blank-content rule, so an empty or
+// whitespace-only .go file is the error the parser reports — a Go file with no package
+// clause — exactly as it was when the tool parsed for itself. Check's "nothing to break" rule
+// is the trailer's, not this tool's.
+func TestDiagnostics_BlankGoFileStaysASyntaxError(t *testing.T) {
+	// Not parallel: withFakeGo swaps the package-level lookGo var.
+	withFakeGo(t, false, "")
+	cases := []struct {
+		name    string
+		content string
+	}{
+		{"empty", ""},
+		{"whitespace only", "  \n\t\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := tempRoot(t)
+			writeGoFile(t, dir, "blank.go", tc.content)
+			d := NewDiagnostics(dir)
+			res, err := d.Execute(context.Background(), diagnosticsCall("c1", "blank.go"))
+			if err != nil {
+				t.Fatalf("Execute err = %v, want nil", err)
+			}
+			if !res.IsError {
+				t.Fatalf("a blank .go file must stay an error result, got clean: %q", res.Content)
+			}
+			if !strings.Contains(res.Content, "blank.go:") || !strings.Contains(res.Content, "found 'EOF'") {
+				t.Errorf("result = %q, want the parser's located EOF error", res.Content)
+			}
+		})
+	}
+}
+
+// TestDiagnostics_SyntaxDoorSpellsTheFirstErrorAndCountsTheRest pins the door's wording shape
+// now that the verdict comes from the shared engine: the FIRST error as `abs:line:col: msg`,
+// then "(and N more errors)" for the rest — the shape go/parser's own error list spelled when
+// the tool parsed for itself, so the string the model reads did not move with the engine.
+func TestDiagnostics_SyntaxDoorSpellsTheFirstErrorAndCountsTheRest(t *testing.T) {
+	t.Parallel()
+
+	// Two dangling `:=` lines: the parser reports three errors for this shape.
+	got := goSyntaxDiagnostics("/w/broken.go", []byte("package main\n\nfunc main() {\n\tx :=\n\ty :=\n}\n"))
+	want := "/w/broken.go:5:4: expected ';', found ':=' (and 2 more errors)"
+	if got != want {
+		t.Errorf("goSyntaxDiagnostics = %q, want %q", got, want)
+	}
+	if got := goSyntaxDiagnostics("/w/clean.go", []byte("package main\n\nfunc main() {}\n")); got != "" {
+		t.Errorf("goSyntaxDiagnostics(clean) = %q, want \"\"", got)
+	}
+	// A lone error carries no count.
+	got = goSyntaxDiagnostics("/w/one.go", []byte("package main\n\nfunc main() {}\n}\n"))
+	if !strings.HasPrefix(got, "/w/one.go:4:1: ") || strings.Contains(got, "more errors") {
+		t.Errorf("goSyntaxDiagnostics(one error) = %q, want a lone located error with no count", got)
+	}
+}
+
 func TestDiagnostics_CleanGoFileWithVetSkipNote(t *testing.T) {
 	// Not parallel: withFakeGo swaps lookGo (force the toolchain-absent branch so the
 	// result is deterministic regardless of the host).

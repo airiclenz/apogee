@@ -4,8 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"go/parser"
-	"go/token"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
+	"github.com/airiclenz/apogee/internal/syntaxcheck"
 )
 
 // ----------------------------------------------------------------------------
@@ -23,10 +23,11 @@ import (
 // ----------------------------------------------------------------------------
 //
 // diagnostics reports compile/lint-level problems in a source file. For Go it is
-// fully in-process and dependency-free: go/parser catches syntax errors and the
-// go vet that ships with the toolchain catches the common semantic mistakes — the
-// parser half NEVER needs an external program, so a Go syntax error is always
-// reported even on a host with no `go` on PATH. For other languages it probes for
+// fully in-process and dependency-free: the one syntax engine (internal/syntaxcheck,
+// go/parser underneath — the same checker the writing tools' syntax trailer runs)
+// catches syntax errors and the go vet that ships with the toolchain catches the
+// common semantic mistakes — the parser half NEVER needs an external program, so a
+// Go syntax error is always reported even on a host with no `go` on PATH. For other languages it probes for
 // an optional, detected linter (tsc for TS/JS, …) and degrades gracefully to a
 // clear "no diagnostics available" result when none is present (§3a — an
 // enhancement, never a hard dependency, never an error).
@@ -76,7 +77,7 @@ type diagnosticsArgs struct {
 }
 
 // Diagnostics inspects a source file for compile/lint-level problems, scoped to a
-// workspace root. Go files are checked in-process (go/parser for syntax) plus an
+// workspace root. Go files are checked in-process (syntaxcheck.CheckGo for syntax) plus an
 // optional go vet; other languages probe for a detected linter and degrade
 // gracefully when none is available. It is read-only.
 type Diagnostics struct {
@@ -164,7 +165,7 @@ func (t *Diagnostics) Execute(ctx context.Context, call domain.ToolCall) (domain
 func (a diagnosticsArgs) runVet() bool { return a.Vet == nil || *a.Vet }
 
 // diagnoseGo runs the Go diagnostics: the always-available in-process syntax check
-// (go/parser) and, when requested and the toolchain is present, go vet on the
+// (syntaxcheck.CheckGo) and, when requested and the toolchain is present, go vet on the
 // file's package. A syntax error or a vet finding produces an error result the
 // model can react to; a clean file produces a success result. name is the path the
 // model asked for (what an "absent file" message names), abs its resolved form. The Go
@@ -174,7 +175,7 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 	// are handed to the parser below: parsing by path would re-walk that path, following a
 	// component swapped to point outside the workspace after resolveInRoot checked it. A
 	// refusal is reported as a refusal, never as an absent file. No size bound is added —
-	// go/parser read the whole file before this fence too, and a cap would stop a large but
+	// the parser read the whole file before this fence too, and a cap would stop a large but
 	// legitimate source file from being diagnosable at all.
 	src, err := safeReadFile(workspaceRelative(abs, t.root), t.root)
 	if err != nil {
@@ -223,19 +224,36 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 	return okResult(callID, cleanGoMessage(abs)+"\n\n"+vettedPackageLine(abs, t.root)), nil
 }
 
-// goSyntaxDiagnostics parses src in-process and returns the formatted syntax errors, or ""
-// when it parses cleanly. src is the file's already-read content — the caller read it
-// through the workspace fence, and passing the bytes rather than the path is what keeps
-// the parser from re-walking (and re-following) that path. abs names the file only for the
-// positions in the reported diagnostics. parser.AllErrors surfaces all syntax errors in one
-// pass (not just the first) so the model sees the whole list.
+// goSyntaxDiagnostics runs the syntax engine over src and returns the formatted syntax
+// errors, or "" when it parses cleanly. src is the file's already-read content — the caller
+// read it through the workspace fence, and passing the bytes rather than the path is what
+// keeps the parser from re-walking (and re-following) that path. abs names the file only
+// for the positions in the reported diagnostics.
+//
+// The verdict is syntaxcheck.CheckGo's — the same parser the writing tools' syntax trailer
+// runs — taken by the Go-only entry rather than Check so an empty or whitespace-only file
+// stays the error the parser reports (a missing package clause), not the trailer's
+// "nothing to break". The engine collects every error in one pass (parser.AllErrors); this
+// door renders the FIRST as `abs:line:col: msg` and counts the rest as "(and N more errors)",
+// the shape go/parser's own error list spelled before the engine was shared, so the string
+// the model reads is unchanged. The trailer keeps its own `line N: msg` rendering: the two
+// share the parser, never a renderer.
 func goSyntaxDiagnostics(abs string, src []byte) string {
-	fset := token.NewFileSet()
-	_, err := parser.ParseFile(fset, abs, src, parser.ParseComments|parser.AllErrors)
-	if err == nil {
+	res := syntaxcheck.CheckGo(string(src))
+	if res.Valid || len(res.Errors) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(err.Error())
+	first := res.Errors[0]
+	var out string
+	if first.Column > 0 {
+		out = fmt.Sprintf("%s:%d:%d: %s", abs, first.Line, first.Column, first.Message)
+	} else {
+		out = fmt.Sprintf("%s:%d: %s", abs, first.Line, first.Message)
+	}
+	if more := len(res.Errors) - 1; more > 0 {
+		out += fmt.Sprintf(" (and %d more errors)", more)
+	}
+	return strings.TrimSpace(out)
 }
 
 // runGoVet runs `go vet` on the package containing abs, under the vet timeout and the

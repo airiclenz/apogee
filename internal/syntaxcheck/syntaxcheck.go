@@ -40,7 +40,8 @@ type Error struct {
 
 // Check validates content by the language its path implies. Empty content is treated as
 // valid (there is nothing to break); an unrecognised extension yields an empty language and a
-// valid result, so the caller skips it.
+// valid result, so the caller skips it. A caller that already knows the file is Go and wants
+// the parser's own verdict on blank content too goes through CheckGo directly.
 func Check(path, content string) Result {
 	lang := Language(path)
 	if strings.TrimSpace(content) == "" {
@@ -48,7 +49,7 @@ func Check(path, content string) Result {
 	}
 	switch lang {
 	case "go":
-		return checkGoSyntax(content)
+		return CheckGo(content)
 	default:
 		return checkBrackets(content, lang)
 	}
@@ -118,8 +119,13 @@ func hasHashComments(lang string) bool {
 	}
 }
 
-// checkGoSyntax parses Go source with the standard parser and reports exact syntax errors.
-func checkGoSyntax(content string) Result {
+// CheckGo parses Go source with the standard parser and reports exact syntax errors, every
+// error in one pass (parser.AllErrors) with its line and column. Unlike Check it has no
+// blank-content rule: an empty or whitespace-only file is what the parser says it is (a
+// missing package clause), because a caller asking for a Go verdict by name — the
+// diagnostics tool — reports that as the error it is, where the write trailer has nothing
+// to say about bytes that were never code.
+func CheckGo(content string) Result {
 	fset := token.NewFileSet()
 	if _, err := parser.ParseFile(fset, "check.go", content, parser.AllErrors); err == nil {
 		return Result{Valid: true, Language: "go"}

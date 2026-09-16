@@ -1698,7 +1698,9 @@ whose outcome the view used to re-derive carry one (`read_file`, `list_dir`,
 carries the locate facts too, the substring asked for and the absolute line numbers it fell
 on. The model-facing complement is the **syntax trailer**: the four writing tools append their
 in-process syntax verdict on the bytes they just wrote to the prose half of the same success result
-(`internal/tools/syntaxtrailer.go` over `internal/syntaxcheck`), so the model reads what its edit
+(`internal/tools/syntaxtrailer.go` over `internal/syntaxcheck` — the one syntax engine, whose
+Go-only entry `syntaxcheck.CheckGo` also gives the `diagnostics` tool its syntax verdict; the two
+share the parser and keep their own renderings), so the model reads what its edit
 did to the file while the host's card still shows only the tool's own first line — the write always
 lands, and the trailer is feedback, never a refusal.
 A summary is **never sent to the model** — it is display data a host consumes, and the

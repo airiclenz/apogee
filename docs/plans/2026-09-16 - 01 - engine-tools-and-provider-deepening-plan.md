@@ -796,7 +796,7 @@ other wording unchanged.
 
 **Commit:** `refactor(tools): gitWrite — branch, commit and stage over one write call`
 
-## 25. One syntax engine for the Go half of `diagnostics`
+## 25. One syntax engine for the Go half of `diagnostics` — ✅ DONE (2026-09-16)
 
 **What.** Recast at the regression check (2026-09-16). `internal/tools/diagnostics.go`:
 `goSyntaxDiagnostics`' own `go/parser` call is replaced by `syntaxcheck.Check`;

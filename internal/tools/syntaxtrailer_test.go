@@ -21,6 +21,7 @@ func TestSyntaxTrailerSaysNothingWhereThereIsNothingToSay(t *testing.T) {
 		{"valid go", "main.go", "package main\n\nfunc main() {}\n"},
 		{"valid javascript", "app.js", "function f() { return 1; }\n"},
 		{"empty content", "main.go", ""},
+		{"whitespace-only content", "main.go", "  \n\t\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

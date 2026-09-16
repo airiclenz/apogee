@@ -50,7 +50,7 @@
 // freely in every mode, Plan included.
 //
 // Phase 3 (P3.10) adds the diagnostics tool — a read-only SubprocessTool that checks Go
-// in-process (go/parser for syntax, always available) plus an optional go vet, and
+// in-process (internal/syntaxcheck for syntax, always available) plus an optional go vet, and
 // degrades gracefully to a clear "no diagnostics available" for languages with no
 // provider (§3a).
 //
@@ -230,8 +230,10 @@
 // Execution. terminal.go is terminal, the one-shot shell command through platform.Shell.
 // python_exec.go is python_exec, the one-shot interpreter run. run_tests.go is run_tests: the
 // runner detection (go.mod / pytest config / package.json), the failure parsing per runner,
-// and the 8 KiB condensed verdict. diagnostics.go is diagnostics — go/parser in process, an
-// optional go vet, and the graceful "no provider" for every other language. git.go is the
+// and the 8 KiB condensed verdict. diagnostics.go is diagnostics — the Go syntax verdict in
+// process from internal/syntaxcheck (syntaxcheck.CheckGo, the one syntax engine the syntax
+// trailer below also runs; the door renders its own `abs:line:col: msg` line), an optional
+// go vet, and the graceful "no provider" for every other language. git.go is the
 // whole git family: git_branch, git_commit, git_diff_range, git_status, git_log and git_show, with the
 // ref guards and porcelain-v2 parsing they share and gitRead, the one read call the four
 // RO-subproc tools spawn through (a gitRef, minted by the guard alone, is the only revision it

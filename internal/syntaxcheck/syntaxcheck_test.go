@@ -282,6 +282,11 @@ func TestCheckSyntaxAcceptsValidCode(t *testing.T) {
 			path:    "empty.py",
 			content: "   \n\n",
 		},
+		{
+			name:    "blank go content has nothing to break either",
+			path:    "empty.go",
+			content: "   \n\n",
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -408,6 +413,26 @@ func TestCheckSyntaxReportsEachBrokenShape(t *testing.T) {
 				t.Errorf("errors = %v, want one containing %q on line %d", formatErrors(got.Errors), tt.want, tt.line)
 			}
 		})
+	}
+}
+
+// CheckGo is the Go-only entry with NO blank rule: an empty or whitespace-only payload is what
+// the parser says it is — a file missing its package clause — with a located error on it.
+// Check keeps its blank rule (pinned above) for the callers that mean "nothing to break"; the
+// diagnostics tool takes this door so a blank .go file stays an error result.
+func TestCheckGoHasNoBlankRule(t *testing.T) {
+	t.Parallel()
+	for _, content := range []string{"", "  \n\t\n"} {
+		got := CheckGo(content)
+		if got.Valid || got.Language != "go" || len(got.Errors) == 0 {
+			t.Fatalf("CheckGo(%q) = %+v, want an invalid go result with errors", content, got)
+		}
+		if e := got.Errors[0]; e.Line < 1 || e.Column < 1 || !strings.Contains(e.Message, "EOF") {
+			t.Errorf("CheckGo(%q).Errors[0] = %+v, want a located EOF error", content, e)
+		}
+	}
+	if got := CheckGo("package main\n\nfunc main() {}\n"); !got.Valid || got.Language != "go" {
+		t.Errorf("CheckGo(valid) = %+v, want Valid go", got)
 	}
 }
 
