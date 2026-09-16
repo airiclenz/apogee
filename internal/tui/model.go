@@ -412,11 +412,11 @@ type Model struct {
 	liveStats
 
 	// usage is the MAIN agent's cumulative token accounting for the session — the latest reading
-	// its Depth-0 UsageEvents carried (usageTotals, fold.go), including the maintenance events the
+	// its Depth-0 UsageEvents carried (domain.Usage, read by usageReading), including the maintenance events the
 	// gauge above skips. It is persisted with the session record and restored on reopen, so a
 	// resumed session reports what it has already spent. A sub-agent's totals live on its own run
 	// head instead (transcript.applyUsage), which is where the per-agent grouping already is.
-	usage usageTotals
+	usage domain.Usage
 
 	// usageBase is the accounting the session record carried when this session was (re)opened: the
 	// main agent's stored totals on either resume path (replayResumed, resumeLoaded), and the zero
@@ -427,7 +427,7 @@ type Model struct {
 	// carried in (foldStats). Without it a resumed session's spend collapses to whatever the first
 	// post-resume reading says. The offset is the renderer's own because it is the Driver that seeds
 	// a view from a record: the engine never sees one.
-	usageBase usageTotals
+	usageBase domain.Usage
 
 	// servedModels is every distinct model id the upstream has answered with in this session, in
 	// the order first seen — the ServedModel each UsageEvent carries, at EVERY depth (a routed
@@ -443,7 +443,7 @@ type Model struct {
 	// are never added together (delegateUsageTotal). It exists for the record whose scrollback did
 	// not come back — a legacy or undecodable blob replays no run blocks — where the sum the record
 	// stored is the only thing left that knows a delegate spent anything at all.
-	delegateUsage usageTotals
+	delegateUsage domain.Usage
 
 	// transcriptSel is the transcript viewport's screen-space drag-selection (mouse.go), anchored
 	// in content coordinates into m.lines; the zero value is "no selection". A re-render keeps it
@@ -762,10 +762,10 @@ func (m *Model) replayResumed(r *ResumedSession) {
 	// …and reopen the accounting where the record left it: the totals are the reading this session
 	// last took, so a resumed session reports its spend instead of starting from nothing. A record
 	// written before the feature carries zeros, which is exactly the nothing-reported state.
-	m.usageBase = usageTotals(r.Usage)
-	m.usage = m.usageBase                          // the engine counts from zero; the fold adds its reading on top
-	m.delegateUsage = usageTotals(r.DelegateUsage) // …and the delegate half beside it, until a head reports
-	m.servedModels = slices.Clone(r.ServedModels)  // …and the models that answered it, so the first save keeps them
+	m.usageBase = domain.Usage(r.Usage)
+	m.usage = m.usageBase                           // the engine counts from zero; the fold adds its reading on top
+	m.delegateUsage = domain.Usage(r.DelegateUsage) // …and the delegate half beside it, until a head reports
+	m.servedModels = slices.Clone(r.ServedModels)   // …and the models that answered it, so the first save keeps them
 	m.replayScrollback(r.Transcript, r.Title, r.InExchange)
 }
 

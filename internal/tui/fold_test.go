@@ -530,7 +530,7 @@ func TestFoldStatsTracksTheMainAgentsCumulativeTotals(t *testing.T) {
 		m = m.foldEvent(mainUsage(1000, 200, 1200, 1000, 200, 1200, 1))
 		m = m.foldEvent(mainUsage(2400, 300, 2700, 3400, 500, 3900, 2))
 
-		want := usageTotals{Calls: 2, PromptTokens: 3400, CompletionTokens: 500, TotalTokens: 3900}
+		want := domain.Usage{Calls: 2, PromptTokens: 3400, CompletionTokens: 500, TotalTokens: 3900}
 		if m.usage != want {
 			t.Errorf("totals = %+v, want %+v (the agent's own running sum, not a fold-side sum)", m.usage, want)
 		}
@@ -545,7 +545,7 @@ func TestFoldStatsTracksTheMainAgentsCumulativeTotals(t *testing.T) {
 		child.Depth = 1
 		m = m.foldEvent(child)
 
-		want := usageTotals{Calls: 1, PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}
+		want := domain.Usage{Calls: 1, PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}
 		if m.usage != want {
 			t.Errorf("totals = %+v, want %+v — a child counts on its own run head", m.usage, want)
 		}
@@ -558,7 +558,7 @@ func TestFoldStatsTracksTheMainAgentsCumulativeTotals(t *testing.T) {
 		m = m.foldEvent(mainUsage(1000, 200, 1200, 1000, 200, 1200, 1))
 		m = m.foldEvent(domain.UsageEvent{PromptTokens: 900, CompletionTokens: 100, TotalTokens: 1000})
 
-		want := usageTotals{Calls: 1, PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}
+		want := domain.Usage{Calls: 1, PromptTokens: 1000, CompletionTokens: 200, TotalTokens: 1200}
 		if m.usage != want {
 			t.Errorf("totals = %+v, want %+v (an uncounted event blanks nothing)", m.usage, want)
 		}
@@ -630,7 +630,7 @@ func TestFoldStatsSkipsAMaintenanceReadingForTheGaugeAndClock(t *testing.T) {
 	maintenance.Maintenance = true
 	m = m.foldEvent(maintenance)
 
-	want := usageTotals{Calls: 2, PromptTokens: 9000, CompletionTokens: 600, TotalTokens: 9600}
+	want := domain.Usage{Calls: 2, PromptTokens: 9000, CompletionTokens: 600, TotalTokens: 9600}
 	if m.usage != want {
 		t.Errorf("totals = %+v, want %+v — a maintenance call's tokens were really spent", m.usage, want)
 	}

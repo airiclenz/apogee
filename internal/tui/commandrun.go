@@ -223,9 +223,9 @@ func (m *Model) resetSessionView() {
 	// run heads it stood in for went with the transcript above, and a restored record's sum was the
 	// closed session's. Until 2026-09-15 the three stood across this boundary, so a fresh session
 	// inherited the closed one's spend (the 2026-08-20 deferred defect this closes).
-	m.usage = usageTotals{}
-	m.usageBase = usageTotals{}
-	m.delegateUsage = usageTotals{}
+	m.usage = domain.Usage{}
+	m.usageBase = domain.Usage{}
+	m.delegateUsage = domain.Usage{}
 	// The models that answered fall with the tallies they qualify: they were the closed session's
 	// answerers, and its record took them with the same saveAtIdle above.
 	m.servedModels = nil

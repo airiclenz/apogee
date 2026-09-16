@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 	"github.com/airiclenz/apogee/internal/session"
 )
@@ -590,13 +591,13 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// gauge is relit from the record — the same one call /clear makes, differing only in having a
 	// stored fill to reopen at (liveStats.reset).
 	m.liveStats.reset()
-	m.ctxUsed = msg.rec.Meta.CtxUsed              // relight the gauge near the resumed session's last fill
-	m.usageBase = usageTotals(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
-	m.usage = m.usageBase                         // RestoreSession zeroed the engine's tally; the fold adds onto the base
+	m.ctxUsed = msg.rec.Meta.CtxUsed               // relight the gauge near the resumed session's last fill
+	m.usageBase = domain.Usage(msg.rec.Meta.Usage) // …and reopen its accounting where the record left it
+	m.usage = m.usageBase                          // RestoreSession zeroed the engine's tally; the fold adds onto the base
 	// The delegate half is restored beside it as the fallback it is: the replayed scrollback below
 	// brings back the run heads that carry their own readings, and those replace this the moment
 	// one reports (delegateUsageTotal). A record whose blob no longer decodes keeps it instead.
-	m.delegateUsage = usageTotals(msg.rec.Meta.DelegateUsage)
+	m.delegateUsage = domain.Usage(msg.rec.Meta.DelegateUsage)
 	// The models that answered the resumed session come back with its tallies, for the same reason
 	// the base does: the host rebuilds Meta from what the renderer hands it on every save, so a set
 	// not carried in here would be dropped by the reopened session's first save.

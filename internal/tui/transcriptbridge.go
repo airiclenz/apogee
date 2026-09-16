@@ -280,7 +280,7 @@ func fromWireEntry(w *session.Entry) (entry, bool) {
 		ctxUsed:     w.CtxUsed,
 		ctxLimit:    w.CtxLimit,
 		ctxModel:    w.CtxModel,
-		usage: usageTotals{
+		usage: domain.Usage{
 			Calls:              w.UsageCalls,
 			PromptTokens:       w.UsagePromptTokens,
 			CachedPromptTokens: w.UsageCachedPromptTokens,

@@ -332,10 +332,10 @@ type entry struct {
 	// rebind, or a resume into a differently-bound session cannot rewrite a finished run's history.
 	ctxModel string
 	// the head of a sub-agent run only: the CHILD's cumulative token accounting for the whole run
-	// (usageTotals, fold.go), folded latest-wins from the same readings — including the maintenance
+	// (domain.Usage, read by usageReading), folded latest-wins from the same readings — including the maintenance
 	// ones the fill above skips. It is what makes a delegate's spend reportable per agent long after
 	// its run closed, where ctxUsed only ever says how full its window was at the end.
-	usage usageTotals
+	usage domain.Usage
 	// at is the wall clock at which the entry was committed (UTC, [transcript.stamp]), so the
 	// record can say WHEN each thing happened. It is persisted (session.Entry.At) and never
 	// painted: the list order is run order, which is what the scrollback and every grouping rule
@@ -1110,7 +1110,8 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	// gauge: a maintenance call's prompt is the summarizer's own, so it says nothing about how full
 	// the child's window stands — but its tokens were really spent, so the totals take it.
 	fills := total > 0 && !usage.Maintenance
-	totals, counted := usageReading(usage)
+	reading := usageReading(usage)
+	counted := reading.Calls > 0
 	if !fills && !counted {
 		return
 	}
@@ -1122,9 +1123,7 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	if fills {
 		head.ctxUsed, head.ctxLimit = total, childWindow(usage, window)
 	}
-	if counted {
-		head.usage = totals
-	}
+	head.usage.Adopt(reading) // latest-wins; an uncounted reading leaves the standing total alone
 	// Taken from every reading this fold accepts that names a model, whether or not it moved the
 	// fill: a maintenance reading was still produced by the child's own model. An event naming none
 	// — an agent bound before its first heartbeat — leaves whatever was established standing rather

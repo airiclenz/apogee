@@ -2115,7 +2115,7 @@ func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
 			Resumed: &ResumedSession{Title: "france question", CtxUsed: 4096, Usage: want},
 		}, nil)
 
-		if got := m.usage; got != usageTotals(want) {
+		if got := m.usage; got != domain.Usage(want) {
 			t.Errorf("totals after a startup resume = %+v, want the stored %+v", got, want)
 		}
 	})
@@ -2138,7 +2138,7 @@ func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
 		}
 		m = foldResume(t, m, cmd)
 
-		if got := m.usage; got != usageTotals(want) {
+		if got := m.usage; got != domain.Usage(want) {
 			t.Errorf("totals after a browser resume = %+v, want the stored %+v", got, want)
 		}
 

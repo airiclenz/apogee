@@ -6,6 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
 )
 
@@ -224,7 +225,7 @@ func (m Model) usageRows() []popupRow {
 	// outlived its blocks is summed here with no row of its own to point at (delegateUsageTotal),
 	// which is the honest reading: the tokens were spent by this session, and the runs that spent
 	// them are no longer on the pane to be asked.
-	return append(rows, usageRow(usageSessionLabel, usageSum(m.usage, delegates), 0, 0, cached))
+	return append(rows, usageRow(usageSessionLabel, domain.Sum(m.usage, delegates), 0, 0, cached))
 }
 
 // usageSubAgentRows composes one row per delegate that reported a count, in transcript order — the
@@ -263,10 +264,10 @@ func (m Model) delegateUsageHeads() []entry {
 // (Model.delegateUsage), which is the only reading left when a record's scrollback could not be
 // repainted — a legacy or undecodable blob replays no run blocks at all. A live head replaces it
 // the moment one reports, so the fallback never adds to the runs it is standing in for.
-func (m Model) delegateUsageTotal() usageTotals {
-	var total usageTotals
+func (m Model) delegateUsageTotal() domain.Usage {
+	var total domain.Usage
 	for _, head := range m.delegateUsageHeads() {
-		total = usageSum(total, head.usage)
+		total = domain.Sum(total, head.usage)
 	}
 	if total.Calls <= 0 {
 		return m.delegateUsage
@@ -293,7 +294,7 @@ func usageAgentName(head entry) string {
 // status gauge and a run's own reading are already spelled in — so the three readings on screen are
 // read in one language, and a zero leaves its cell empty rather than printing a 0 the column would
 // have to be scanned past.
-func usageRow(name string, totals usageTotals, used, limit int, cached bool) popupRow {
+func usageRow(name string, totals domain.Usage, used, limit int, cached bool) popupRow {
 	calls := ""
 	if totals.Calls > 0 {
 		calls = strconv.Itoa(totals.Calls)
@@ -326,16 +327,4 @@ func usageFillCell(used, limit int) string {
 		return ""
 	}
 	return strconv.Itoa(min(used*100/limit, 100)) + "%"
-}
-
-// usageSum adds two agents' totals. Summing across AGENTS is sound where summing across events is
-// not: each agent's reading is its own running total, so the parts never overlap.
-func usageSum(a, b usageTotals) usageTotals {
-	return usageTotals{
-		Calls:              a.Calls + b.Calls,
-		PromptTokens:       a.PromptTokens + b.PromptTokens,
-		CachedPromptTokens: a.CachedPromptTokens + b.CachedPromptTokens,
-		CompletionTokens:   a.CompletionTokens + b.CompletionTokens,
-		TotalTokens:        a.TotalTokens + b.TotalTokens,
-	}
 }

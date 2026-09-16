@@ -385,7 +385,7 @@ func TestSaveCarriesBothHalvesOfTheSessionsSpend(t *testing.T) {
 	if got, want := calls[0].usage, session.Usage(mainTotals); got != want {
 		t.Errorf("saved usage = %+v, want the MAIN agent's own %+v", got, want)
 	}
-	if got, want := calls[0].delegateUsage, session.Usage(usageSum(childTotals, childTotals)); got != want {
+	if got, want := calls[0].delegateUsage, session.Usage(domain.Sum(childTotals, childTotals)); got != want {
 		t.Errorf("saved delegate usage = %+v, want the two heads' readings summed %+v", got, want)
 	}
 }

@@ -336,7 +336,11 @@ keep their shapes and keys (ADR 0075 D4/D10; byte-compared goldens).
 
 **Commit:** `refactor(domain): one Usage value with the latest-wins fold as a method`
 
-## 9. The TUI counts through `domain.Usage`
+## 9. The TUI counts through `domain.Usage` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — internal/tui/sessionsave_test.go: made necessary by retiring `usageSum` (the test summed two delegate readings through it; now `domain.Sum`).
+NOTES (2026-09-16): `usageReading` now returns one `domain.Usage` (zero `Calls` is the uncounted signal, per the domain doc) instead of `(usageTotals, bool)`; `transcript.applyUsage` adopts it via `Usage.Adopt`, while `foldStats` keeps an explicit `Calls > 0` guard around `domain.Sum(usageBase, reading)` — an Adopt onto `m.usage` would let an uncounted event collapse base+previous reading back to the base (comment added at the site).
+NOTES (2026-09-16): `internal/tui/sessionsave.go` and `cmd/apogee/e2e_usage_test.go` needed no edit — the `session.Usage(m.usage)` conversion and the e2e never named `usageTotals`.
 
 **What.** Depends on item 8. `internal/tui`: `usageTotals` → `domain.Usage`; `usageSum` → `Sum`,
 `usageReading`'s latest-wins clause → `Adopt` (the gauge + `usageBase` offset stay the TUI's

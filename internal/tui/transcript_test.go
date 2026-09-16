@@ -3232,7 +3232,7 @@ func callEntry(tr *transcript, id string) *entry {
 // childUsage is one reading a delegate reported: the fill its Turn measured, plus the running
 // totals the CHILD stamped it with — its own calls, counted from zero, carried on the event its
 // spawning call (callID) identifies.
-func childUsage(callID string, depth, total int, cum usageTotals) domain.UsageEvent {
+func childUsage(callID string, depth, total int, cum domain.Usage) domain.UsageEvent {
 	return domain.UsageEvent{
 		EventBase:                    domain.EventBase{Depth: depth, CallID: callID},
 		TotalTokens:                  total,
@@ -3256,13 +3256,13 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentCall(tr, "s2", "survey the docs", 0)
 
-		want := usageTotals{Calls: 2, PromptTokens: 4000, CompletionTokens: 300, TotalTokens: 4300}
+		want := domain.Usage{Calls: 2, PromptTokens: 4000, CompletionTokens: 300, TotalTokens: 4300}
 		tr.applyUsage(childUsage("s1", 1, 2200, want), window, "")
 
 		if got := tr.entries[0].usage; got != want {
 			t.Errorf("first run totals = %+v, want %+v", got, want)
 		}
-		if got := tr.entries[1].usage; got != (usageTotals{}) {
+		if got := tr.entries[1].usage; got != (domain.Usage{}) {
 			t.Errorf("the sibling took totals it never reported: %+v", got)
 		}
 	})
@@ -3271,8 +3271,8 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
-		tr.applyUsage(childUsage("s1", 1, 2200, usageTotals{Calls: 1, PromptTokens: 2000, CompletionTokens: 200, TotalTokens: 2200}), window, "")
-		want := usageTotals{Calls: 2, PromptTokens: 5000, CompletionTokens: 400, TotalTokens: 5400}
+		tr.applyUsage(childUsage("s1", 1, 2200, domain.Usage{Calls: 1, PromptTokens: 2000, CompletionTokens: 200, TotalTokens: 2200}), window, "")
+		want := domain.Usage{Calls: 2, PromptTokens: 5000, CompletionTokens: 400, TotalTokens: 5400}
 		tr.applyUsage(childUsage("s1", 1, 3200, want), window, "")
 
 		if got := tr.entries[0].usage; got != want {
@@ -3283,9 +3283,9 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 	t.Run("a maintenance reading counts and leaves the fill standing", func(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
-		tr.applyUsage(childUsage("s1", 1, 12000, usageTotals{Calls: 1, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}), window, "")
+		tr.applyUsage(childUsage("s1", 1, 12000, domain.Usage{Calls: 1, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}), window, "")
 
-		want := usageTotals{Calls: 2, PromptTokens: 19000, CompletionTokens: 1400, TotalTokens: 20400}
+		want := domain.Usage{Calls: 2, PromptTokens: 19000, CompletionTokens: 1400, TotalTokens: 20400}
 		maintenance := childUsage("s1", 1, 8400, want)
 		maintenance.Maintenance = true
 		tr.applyUsage(maintenance, window/2, "")

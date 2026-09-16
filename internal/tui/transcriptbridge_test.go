@@ -1695,7 +1695,7 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 
 	t.Run("a reported run carries its totals through the record", func(t *testing.T) {
 		t.Parallel()
-		totals := usageTotals{
+		totals := domain.Usage{
 			Calls: 2, PromptTokens: 11000, CachedPromptTokens: 300, CompletionTokens: 1000, TotalTokens: 12000,
 		}
 		tr := &transcript{}
@@ -1756,7 +1756,7 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("decoded %d entries; want the one run head", len(got))
 		}
-		want := usageTotals{Calls: 2, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}
+		want := domain.Usage{Calls: 2, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}
 		if got[0].usage != want {
 			t.Errorf("a blob predating the share decoded totals %+v, want %+v — no share, the rest intact",
 				got[0].usage, want)
@@ -1775,7 +1775,7 @@ func TestTranscriptCodecRoundTripsASubAgentsTotals(t *testing.T) {
 		if len(got) != 1 {
 			t.Fatalf("decoded %d entries; want the one run head", len(got))
 		}
-		if got[0].usage != (usageTotals{}) {
+		if got[0].usage != (domain.Usage{}) {
 			t.Errorf("a blob predating the members decoded totals %+v; want zeros", got[0].usage)
 		}
 	})

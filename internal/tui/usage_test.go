@@ -19,7 +19,7 @@ import (
 
 // usageModel builds a ready model with the main agent's totals and fill already folded and the
 // report open, which is the state every assertion below is about.
-func usageModel(t *testing.T, totals usageTotals, used int) Model {
+func usageModel(t *testing.T, totals domain.Usage, used int) Model {
 	t.Helper()
 	m := newTestModel(t)
 	m.usage = totals
@@ -29,7 +29,7 @@ func usageModel(t *testing.T, totals usageTotals, used int) Model {
 }
 
 // delegate adds a sub-agent run to the transcript with the totals and fill its child reported.
-func delegate(t *testing.T, m Model, id, task string, totals usageTotals, used int) Model {
+func delegate(t *testing.T, m Model, id, task string, totals domain.Usage, used int) Model {
 	t.Helper()
 	subAgentCall(&m.transcript, id, task, 0)
 	head := &m.transcript.entries[len(m.transcript.entries)-1]
@@ -41,8 +41,8 @@ func delegate(t *testing.T, m Model, id, task string, totals usageTotals, used i
 }
 
 var (
-	mainTotals  = usageTotals{Calls: 3, PromptTokens: 20000, CompletionTokens: 1500, TotalTokens: 21500}
-	childTotals = usageTotals{Calls: 2, PromptTokens: 4000, CompletionTokens: 500, TotalTokens: 4500}
+	mainTotals  = domain.Usage{Calls: 3, PromptTokens: 20000, CompletionTokens: 1500, TotalTokens: 21500}
+	childTotals = domain.Usage{Calls: 2, PromptTokens: 4000, CompletionTokens: 500, TotalTokens: 4500}
 )
 
 // TestReportPaneBreathes pins the house blanks on a REPORT pane, over the family's own painter
@@ -166,7 +166,7 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 			t.Errorf("second delegate fill = %q, want no cell — it reported no fill", got)
 		}
 
-		sum := usageSum(usageSum(mainTotals, childTotals), childTotals)
+		sum := domain.Sum(mainTotals, childTotals, childTotals)
 		want := popupRow{usageSessionLabel, "7",
 			format.Tokens(sum.PromptTokens), format.Tokens(sum.CompletionTokens), format.Tokens(sum.TotalTokens), ""}
 		if !equalRow(rows[4], want) {
@@ -176,7 +176,7 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 
 	t.Run("a delegate that reported nothing is left out", func(t *testing.T) {
 		m := usageModel(t, mainTotals, 8192)
-		m = delegate(t, m, "s1", "survey the tests", usageTotals{}, 0)
+		m = delegate(t, m, "s1", "survey the tests", domain.Usage{}, 0)
 
 		if rows := m.usageRows(); len(rows) != 2 {
 			t.Errorf("rows = %q, want the header and the main agent — a run with no count is not a spend", rows)
@@ -184,7 +184,7 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 	})
 
 	t.Run("nothing reported at all is no rows", func(t *testing.T) {
-		if rows := usageModel(t, usageTotals{}, 0).usageRows(); rows != nil {
+		if rows := usageModel(t, domain.Usage{}, 0).usageRows(); rows != nil {
 			t.Errorf("rows = %q, want none — the pane says so in prose instead", rows)
 		}
 	})
@@ -218,7 +218,7 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 		}
 	}
 
-	empty := strip(usageModel(t, usageTotals{}, 0).renderUsage())
+	empty := strip(usageModel(t, domain.Usage{}, 0).renderUsage())
 	if !strings.Contains(empty, usageEmptyBody) {
 		t.Errorf("the empty pane does not say why it is empty:\n%s", empty)
 	}
@@ -528,7 +528,7 @@ func TestUsageAccumulatesOverAResumedReading(t *testing.T) {
 
 		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
 
-		want := usageTotals{Calls: 41, PromptTokens: 485000, CompletionTokens: 20300, TotalTokens: 505300}
+		want := domain.Usage{Calls: 41, PromptTokens: 485000, CompletionTokens: 20300, TotalTokens: 505300}
 		if m.usage != want {
 			t.Errorf("totals = %+v, want %+v — the engine's reading rides on the resumed base", m.usage, want)
 		}
@@ -548,7 +548,7 @@ func TestUsageAccumulatesOverAResumedReading(t *testing.T) {
 		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
 		m = m.foldEvent(mainUsage(4000, 400, 4400, 9000, 700, 9700, 2))
 
-		want := usageTotals{Calls: 42, PromptTokens: 489000, CompletionTokens: 20700, TotalTokens: 509700}
+		want := domain.Usage{Calls: 42, PromptTokens: 489000, CompletionTokens: 20700, TotalTokens: 509700}
 		if m.usage != want {
 			t.Errorf("totals = %+v, want %+v — a latest-wins reading plus one fixed offset", m.usage, want)
 		}
@@ -560,7 +560,7 @@ func TestUsageAccumulatesOverAResumedReading(t *testing.T) {
 
 		m = m.foldEvent(mainUsage(5000, 300, 5300, 5000, 300, 5300, 1))
 
-		want := usageTotals{Calls: 1, PromptTokens: 5000, CompletionTokens: 300, TotalTokens: 5300}
+		want := domain.Usage{Calls: 1, PromptTokens: 5000, CompletionTokens: 300, TotalTokens: 5300}
 		if m.usage != want {
 			t.Errorf("totals = %+v, want exactly the event's reading %+v — a fresh launch has no base", m.usage, want)
 		}
@@ -593,7 +593,7 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 		m.input.SetValue("/clear")
 		m = step(t, m, keyEnter())
 
-		if m.usage != (usageTotals{}) || m.usageBase != (usageTotals{}) {
+		if m.usage != (domain.Usage{}) || m.usageBase != (domain.Usage{}) {
 			t.Fatalf("after /clear usage = %+v, base = %+v, want both zero — the spend went with the closed session",
 				m.usage, m.usageBase)
 		}
@@ -602,7 +602,7 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 		}
 		m = m.foldEvent(mainUsage(700, 40, 740, 700, 40, 740, 1))
 
-		want := usageTotals{Calls: 1, PromptTokens: 700, CompletionTokens: 40, TotalTokens: 740}
+		want := domain.Usage{Calls: 1, PromptTokens: 700, CompletionTokens: 40, TotalTokens: 740}
 		if m.usage != want {
 			t.Errorf("totals = %+v, want exactly the reply's own %+v — nothing of the closed session is added", m.usage, want)
 		}
@@ -634,10 +634,10 @@ func TestClearResetsTheUsageTallies(t *testing.T) {
 		m.input.SetValue("/new")
 		m = step(t, m, keyEnter())
 
-		if m.delegateUsage != (usageTotals{}) {
+		if m.delegateUsage != (domain.Usage{}) {
 			t.Errorf("delegateUsage after /new = %+v, want zero — the closed session's delegates spent it", m.delegateUsage)
 		}
-		if got := m.delegateUsageTotal(); got != (usageTotals{}) {
+		if got := m.delegateUsageTotal(); got != (domain.Usage{}) {
 			t.Errorf("delegateUsageTotal after /new = %+v, want zero — no run of the fresh session has reported", got)
 		}
 		payload, ok := m.snapshotPayload(domain.Session{})

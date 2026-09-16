@@ -74,41 +74,24 @@ func (m Model) foldEvent(e domain.Event) Model {
 	return m.foldActivity(e, m.transcript.hasOpenToolCall())
 }
 
-// usageTotals is one agent's cumulative token accounting as the view holds it: the completions
-// accounted for and the tokens they carried. It is read LATEST-WINS off the emitting agent's own
-// running sum (domain.UsageEvent's Cumulative* fields) — the view never adds events up, so a fold
-// that joined the stream late, or dropped an event, still reports the same totals as one that saw
-// every one. The Model keeps the main agent's (foldStats) and each sub-agent run head keeps its
-// own (transcript.applyUsage); plain ints throughout, so it rides safely in the value-copied
-// Model (ADR 0011). Its field set matches session.Usage exactly, which is what lets the
-// save/restore boundary convert between the two instead of mapping them member by member.
-type usageTotals struct {
-	Calls        int
-	PromptTokens int
-	// CachedPromptTokens is the share of PromptTokens the server answered from its own cache
-	// (domain.UsageEvent). It is INFORMATIONAL and inside the prompt count, never beside it: the
-	// pane reports it because it is what a repeated prompt actually costs, and nothing subtracts
-	// it from a total.
-	CachedPromptTokens int
-	CompletionTokens   int
-	TotalTokens        int
-}
-
-// usageReading projects the cumulative half of a UsageEvent onto the view's own shape, and says
-// whether the event carried one at all: an event stamped by an agent that has accounted for no
-// call — a hand-built stream, or a record from before the engine counted — reports ok=false so
-// its zeros never blank a reading that already stands.
-func usageReading(e domain.UsageEvent) (usageTotals, bool) {
+// usageReading is the cumulative half of a UsageEvent as one domain.Usage: the emitting agent's
+// own running sum (the Cumulative* fields), which the view reads LATEST-WINS rather than adding
+// events up — so a fold that joined the stream late, or dropped an event, still reports the same
+// totals as one that saw every one. An event stamped by an agent that has accounted for no call —
+// a hand-built stream, or a record from before the engine counted — reads as the zero Usage, whose
+// zero Calls is the absence of accounting (domain.Usage) rather than a spend of zero, so it never
+// blanks a reading that already stands (Adopt refuses it; foldStats checks the same counter).
+func usageReading(e domain.UsageEvent) domain.Usage {
 	if e.CumulativeCalls <= 0 {
-		return usageTotals{}, false
+		return domain.Usage{}
 	}
-	return usageTotals{
+	return domain.Usage{
 		Calls:              e.CumulativeCalls,
 		PromptTokens:       e.CumulativePromptTokens,
 		CachedPromptTokens: e.CumulativeCachedPromptTokens,
 		CompletionTokens:   e.CumulativeCompletionTokens,
 		TotalTokens:        e.CumulativeTotalTokens,
-	}, true
+	}
 }
 
 // foldStats updates the live token stats from one engine Event (the eventMsg fold). Only the
@@ -173,14 +156,16 @@ func (m Model) foldStats(e domain.Event) Model {
 		if e.Depth != 0 {
 			break // a delegate's fill, which is its run block's business and not the gauge's
 		}
-		if totals, ok := usageReading(e); ok {
+		if reading := usageReading(e); reading.Calls > 0 {
 			// The reading is the ENGINE's own running sum since THIS session was opened — latest-wins,
 			// maintenance included — and the base is what the record carried into it (Model.usageBase,
 			// zero on a fresh launch). Adding the two is the only sum here: a resume restarts the
 			// engine's count at zero, so replacing rather than offsetting would drop everything the
 			// reopened record had already spent. The base is a fixed offset, so adding it to each
-			// latest reading adds it once, not once per event.
-			m.usage = usageSum(m.usageBase, totals)
+			// latest reading adds it once, not once per event. The offset is why this is not a plain
+			// Adopt onto m.usage: what stands there is base plus the PREVIOUS reading, and an uncounted
+			// event must leave that whole sum alone, not fall back to the base.
+			m.usage = domain.Sum(m.usageBase, reading)
 		}
 		if e.Maintenance {
 			break // accounted for above; the gauge and the generation clock skip it
