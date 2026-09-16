@@ -1094,9 +1094,9 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	if runErr != nil {
 		// A failed run still reports what it salvaged: run.Once saves whatever completed before
 		// it stopped, and naming that record is what lets a human open the interrupted run rather
-		// than guess at it (the wording scheduleWiring.fire uses for the same partial).
+		// than guess at it (partialRunSuffix, the wording every Driver's failure carries).
 		if res.SessionID != "" {
-			return res, runFailed(fmt.Errorf("%w (partial run saved as %s)", runErr, res.SessionID))
+			return res, runFailed(fmt.Errorf("%w %s", runErr, partialRunSuffix(res.SessionID)))
 		}
 		return res, runFailed(runErr)
 	}
@@ -1108,7 +1108,7 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	if res.Faulted {
 		err := fmt.Errorf("apogee headless: the run's final turn was abandoned — %s", res.Fault)
 		if res.SessionID != "" {
-			err = fmt.Errorf("%w (partial run saved as %s)", err, res.SessionID)
+			err = fmt.Errorf("%w %s", err, partialRunSuffix(res.SessionID))
 		}
 		return res, exitError{code: exitRunFaulted, err: err}
 	}
@@ -1206,16 +1206,34 @@ func writtenFilesLines(paths []string) []string {
 // it is composed once here for the same reason the block above it is: the daemon's log and the
 // headless stderr must name one command, not two spellings of it.
 //
-// Three conditions, all of them necessary. There is a block to hang it under (the run changed
-// something), a record to name (an unsaved run's store is nameless and was swept), and
-// run.Result.UndoNote is EMPTY — the note is why the journal was the in-memory funnel one, whose
-// records this process alone ever held, so offering a verb against it would send a human to a
-// command that answers "nothing to undo". Any one of the three missing composes nothing at all.
+// The command it names, and the gate that decides whether there is one, are undoCommand's — this
+// line is that command dressed for a report, escape-stripped to one line because the id is the
+// record's own and both sinks are one-line-per-entry.
 func undoVerbLine(res run.Result) string {
+	command := undoCommand(res)
+	if command == "" {
+		return ""
+	}
+	return "  undo with: " + sanitize.StripEscapesToLine(command)
+}
+
+// undoCommand is the exact `apogee undo <session-id>` that reverts this Firing's writes, or empty
+// when there is no revert to offer. It is the ONE gate behind every offer of the verb — the line
+// both unattended Drivers print (undoVerbLine) and the Outcome every Firing reports
+// (firingOutcome, wire_firing.go) — so a surface never names a command the report would not.
+//
+// Three conditions, all of them necessary. There is a change to revert (the run wrote something),
+// a record to name (an unsaved run's store is nameless and was swept), and run.Result.UndoNote is
+// EMPTY — the note is why the journal was the in-memory funnel one, whose records this process
+// alone ever held, so offering a verb against it would send a human to a command that answers
+// "nothing to undo". Any one of the three missing composes nothing at all.
+//
+// RAW: the id crosses as the record carries it, and each surface strips at its own render seam.
+func undoCommand(res run.Result) string {
 	if len(res.Wrote) == 0 || res.SessionID == "" || res.UndoNote != "" {
 		return ""
 	}
-	return "  undo with: apogee undo " + sanitize.StripEscapesToLine(res.SessionID)
+	return "apogee undo " + res.SessionID
 }
 
 // headlessSubAgentLines renders what each delegated run did to its own context: one line per

@@ -307,7 +307,11 @@ cmd/apogee/title.go — titleWiring.generate, respondDroppingThinkingOff; cmd/ap
 
 **Commit:** `refactor(cmd): drop the stale delegation base, fold the two namers, retire the dead TUI seam`
 
-## 8. One Firing account: `Outcome` gains `Wrote` and the undo verb
+## 8. One Firing account: `Outcome` gains `Wrote` and the undo verb — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `firingRefusal(prefix, errNotStarted)` returns `error`, not the `string` the item spells — a string would drop the `%w` that keeps the composer's error reachable through the daemon's and the session's wrapped compose refusal (the behaviour both fire comments document); sentences stay byte-identical.
+NOTES (2026-09-16): the new `firingOutcome` tests live in `cmd/apogee/wire_firing_test.go` (the symbol's own `{source}_test.go`, not in the item's Files list); `headless_test.go` and `schedule_test.go` needed no edit — their partial-run and Outcome assertions pass unchanged.
+NOTES (2026-09-16): the undo gate moved into a new `undoCommand(res)` in headless.go (returns the raw `apogee undo <id>`); `undoVerbLine` composes its line from it, so the Outcome and the printed offer share one gate by construction.
 
 **What.** `internal/schedule/schedule.go` `Outcome` gains `Wrote []string` and `UndoCommand string`
 (ADR 0033 D6 — passed-through data, same posture as `ContextAnomalies`). `cmd/apogee/wire_firing.go`

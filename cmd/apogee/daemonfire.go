@@ -373,22 +373,16 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	// schedule's own retry and next-fire behaviour is untouched.
 	//
 	// The two stages are told apart by raise's typed refusal (errNotStarted) rather than by the
-	// sentence. A composition refusal is wrapped under this Driver's own schedule-named line, `%w`
-	// keeping the composer's error reachable, so a supervisor reading the journal days later sees
-	// which entry would not compose. The gate's refusal passes bare: its sentence is the same one
-	// the TUI shows (internal/tui/heartbeat.go's upstreamBlockNote) and the headless pre-send gate
-	// returns (headless.go), because all three now read it from one composer, notice.ServerOffline —
-	// raise carries the gate's whole reasoning (Beat.Answered false only for a transport-level
-	// failure, never for a 401, a 500 or a 429). Each Driver keeps its own delivery — this one's is
-	// a failed Firing — and takes only the words, so an edit to the wording belongs in
-	// internal/notice and nowhere else.
+	// sentence, and mapped by the one helper both Firing-landing Drivers share (firingRefusal,
+	// wire_firing.go): a composition refusal is wrapped under this Driver's own schedule-named
+	// clause, so a supervisor reading the journal days later sees which entry would not compose,
+	// and the gate's refusal passes bare — raise carries the gate's whole reasoning (Beat.Answered
+	// false only for a transport-level failure, never for a 401, a 500 or a 429). Each Driver keeps
+	// its own delivery — this one's is a failed Firing — and takes only the words.
 	var refused errNotStarted
 	if errors.As(err, &refused) {
-		if refused.Stage == stageCompose {
-			return schedule.Outcome{}, fmt.Errorf("apogee: daemon: resolve the %q schedule's reactions/bindings: %w",
-				entry.Name, refused.Err)
-		}
-		return schedule.Outcome{}, err
+		return schedule.Outcome{}, firingRefusal(
+			fmt.Sprintf("apogee: daemon: resolve the %q schedule's", entry.Name), refused)
 	}
 
 	// What the run found WRONG with the workspace's context files, and only that: a file present
@@ -442,9 +436,9 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 	if err != nil {
 		// A failed Firing still reports what it salvaged: run.Once saves whatever completed before
 		// it stopped, and naming that record is what lets a human open the interrupted run rather
-		// than guess at it (the wording scheduleWiring.fire and runHeadless both use).
+		// than guess at it (partialRunSuffix, the wording every Driver's failure carries).
 		if res.SessionID != "" {
-			return out, fmt.Errorf("%w (partial run saved as %s)", err, res.SessionID)
+			return out, fmt.Errorf("%w %s", err, partialRunSuffix(res.SessionID))
 		}
 		return out, err
 	}

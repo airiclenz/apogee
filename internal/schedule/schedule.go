@@ -117,6 +117,20 @@ type Outcome struct {
 	// is 0 on a Firing that delegated nothing, omitted by a surface for the same reason
 	// TotalTokens is.
 	SubAgents int
+	// Wrote is every path the Firing's write funnel journalled, in the order the run first wrote
+	// each — a deletion's target and a move's SOURCE ride in it as well as a creation, so it is
+	// what the run CHANGED rather than what it wrote. Nil on a Firing that recorded no write, which
+	// is what lets a surface show nothing rather than a "0 files" header. Like ContextAnomalies it
+	// is RAW text — a path traces to a model-chosen tool argument — so a surface escape-strips it
+	// at its own render seam and this library does not; the library reads none of it either (ADR
+	// 0033, runner-agnostic).
+	Wrote []string
+	// UndoCommand is the exact command that reverts those writes — `apogee undo <record-id>` — or
+	// empty when there is no revert to offer: the run changed nothing, persisted no record to name,
+	// or journalled into a store this process alone ever held. The runner decides the gate and
+	// composes the command; the library carries it through so every Driver offers one spelling of
+	// it. RAW like RecordID, stripped by the surface that renders it.
+	UndoCommand string
 }
 
 // Status is one live Schedule as a surface displays it.

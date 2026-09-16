@@ -182,18 +182,15 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 	// that says the server is offline — is this function's ERROR rather than an Outcome: the library
 	// lands it as schedule.EventFailed and the transcript's Firing block renders the sentence. It
 	// records no Outcome, because nothing was sent and there is nothing to report. The two stages
-	// are told apart by raise's typed refusal (errNotStarted) rather than by the sentence, on the
-	// daemon's terms (daemonfire.go): a composition refusal is wrapped under this Driver's own line,
-	// `%w` keeping the composer's error reachable, and the gate's refusal passes BARE — its sentence
-	// is the one a send earns at the prompt (internal/tui/heartbeat.go's upstreamBlockNote) and the
-	// one `apogee headless` prints, because all three read it from one composer, notice.ServerOffline,
-	// and a human who has just seen the footer refuse a send reads the same words from the Firing.
+	// are told apart by raise's typed refusal (errNotStarted) rather than by the sentence, and
+	// mapped by the one helper this Driver and the daemon share (firingRefusal, wire_firing.go): a
+	// composition refusal is wrapped under this Driver's own clause, and the gate's refusal passes
+	// BARE — its sentence is the one a send earns at the prompt (internal/tui/heartbeat.go's
+	// upstreamBlockNote), and a human who has just seen the footer refuse a send reads the same
+	// words from the Firing.
 	var refused errNotStarted
 	if errors.As(err, &refused) {
-		if refused.Stage == stageCompose {
-			return schedule.Outcome{}, fmt.Errorf("apogee: resolve the firing's reactions/bindings: %w", refused.Err)
-		}
-		return schedule.Outcome{}, err
+		return schedule.Outcome{}, firingRefusal("apogee: resolve the firing's", refused)
 	}
 
 	// Everything the run learned about itself, mapped onto the scheduler's report by the one
@@ -210,7 +207,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		// point a human at the partial record rather than at nothing. The id ALSO stays in the
 		// error text — that is what a Driver reading only the failure's wording has to go on.
 		if res.SessionID != "" {
-			return out, fmt.Errorf("%w (partial run saved as %s)", err, res.SessionID)
+			return out, fmt.Errorf("%w %s", err, partialRunSuffix(res.SessionID))
 		}
 		return out, err
 	}

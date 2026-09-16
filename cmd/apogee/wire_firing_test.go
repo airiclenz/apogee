@@ -1569,3 +1569,54 @@ func TestRaiseNotStartedIsTyped(t *testing.T) {
 		}
 	})
 }
+
+// TestFiringOutcomeCarriesWhatTheFiringWroteAndHowToUndoIt: the Outcome every Driver's Firing
+// reports carries what the run CHANGED and the exact revert those changes can still have, under
+// the SAME gate the printed offer applies (undoCommand) — so a surface that renders the Outcome
+// offers the verb exactly when the daemon's log and the headless stderr do, and never a command
+// the report would not name.
+func TestFiringOutcomeCarriesWhatTheFiringWroteAndHowToUndoIt(t *testing.T) {
+	tests := []struct {
+		name     string
+		res      run.Result
+		wantUndo string
+	}{
+		{
+			name:     "a saved run that wrote offers the verb against its record",
+			res:      run.Result{SessionID: "s-7", Turns: 1, Wrote: []string{"/ws/new.go", "/ws/old.go"}},
+			wantUndo: "apogee undo s-7",
+		},
+		{
+			name: "an UndoNote withholds the verb — the journal was the in-memory one",
+			res: run.Result{
+				SessionID: "s-8", Turns: 1, Wrote: []string{"/ws/new.go"},
+				UndoNote: "undo journal unavailable — the store would not open",
+			},
+		},
+		{
+			name: "an unsaved run has no record to name",
+			res:  run.Result{Turns: 1, Wrote: []string{"/ws/new.go"}},
+		},
+		{
+			name: "a run that wrote nothing has nothing to revert",
+			res:  run.Result{SessionID: "s-9", Turns: 1},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			out := firingOutcome(tc.res)
+
+			if !slices.Equal(out.Wrote, tc.res.Wrote) {
+				t.Errorf("Outcome.Wrote = %q; want the run's own %q", out.Wrote, tc.res.Wrote)
+			}
+			if out.UndoCommand != tc.wantUndo {
+				t.Errorf("Outcome.UndoCommand = %q; want %q", out.UndoCommand, tc.wantUndo)
+			}
+			// The line the unattended Drivers print is this command dressed for a report, so the
+			// two can never disagree on whether there is a revert to offer.
+			if line := undoVerbLine(tc.res); (line == "") != (out.UndoCommand == "") {
+				t.Errorf("undoVerbLine = %q while Outcome.UndoCommand = %q; the gate is one", line, out.UndoCommand)
+			}
+		})
+	}
+}

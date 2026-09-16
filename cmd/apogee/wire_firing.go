@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/airiclenz/apogee"
@@ -567,6 +568,35 @@ func (e errNotStarted) Error() string { return e.Err.Error() }
 // Unwrap exposes the wrapped refusal so errors.Is/As see straight through the stage.
 func (e errNotStarted) Unwrap() error { return e.Err }
 
+// firingRefusal is what a Driver that lands a refused Firing as a FAILED one reports: the one
+// stage map the daemon's fire and a session's fire share, so the two Drivers tell one refusal in
+// one shape. A composition refusal is wrapped under the Driver's own prefix — the daemon names the
+// schedule that would not compose, a session names the firing — with `%w` keeping the composer's
+// error reachable, so a supervisor reading a journal days later sees which entry failed and a
+// caller can still errors.Is through it. The gate's refusal passes BARE: its sentence is the one
+// the TUI shows (internal/tui/heartbeat.go's upstreamBlockNote) and the one `apogee headless`
+// prints, because all three read it from one composer, notice.ServerOffline — so an edit to the
+// wording belongs in internal/notice and nowhere else.
+//
+// prefix is the Driver's clause up to the noun the refusal is about ("apogee: resolve the
+// firing's"); the helper supplies the rest so the two Drivers cannot drift apart on it.
+func firingRefusal(prefix string, refused errNotStarted) error {
+	if refused.Stage == stageCompose {
+		return fmt.Errorf("%s reactions/bindings: %w", prefix, refused.Err)
+	}
+	return refused
+}
+
+// partialRunSuffix names the record a FAILED Firing salvaged, in the one wording every Driver's
+// failure carries: run.Once saves whatever completed before it stopped, and naming that record
+// is what lets a human open the interrupted run rather than guess at it. Callers append it to
+// the failure with a space (`fmt.Errorf("%w %s", err, partialRunSuffix(id))`), so the error
+// chain stays reachable and the sentence reads identically on the daemon's journal, a session's
+// Firing block and the headless stderr.
+func partialRunSuffix(id string) string {
+	return fmt.Sprintf("(partial run saved as %s)", id)
+}
+
 // raise is the ONE act every unattended Firing is: it takes what a Driver decided (firingInputs, the
 // prompt, the Schedule the run belongs to, the store its record lands in) and does, in this order,
 // everything the three Drivers used to spell out for themselves — divides the `reactions:` list
@@ -683,9 +713,12 @@ func raise(
 // content past its Budget share — because the plain loaded-files line is a launch's narration and a
 // Firing's narration is the record it leaves behind (contextAnomalies, schedule.go). The text
 // crosses as plain data: internal/notice composes, the surface that renders it strips at its own
-// seam. On a failure that still produced a Result the fields are the salvage; on a failure carrying
-// a ZERO run.Result they are all empty, which is the shape a refusal-free failure with nothing to
-// report has always had.
+// seam. What the run CHANGED on disk crosses whole (run.Result.Wrote, the list writtenFilesLines
+// renders), and beside it the revert those changes can still have — the exact command, under the
+// exact gate the printed offer applies (undoCommand, headless.go), so a surface that renders the
+// Outcome offers the same verb the daemon's log and the headless stderr do. On a failure that
+// still produced a Result the fields are the salvage; on a failure carrying a ZERO run.Result they
+// are all empty, which is the shape a refusal-free failure with nothing to report has always had.
 func firingOutcome(res run.Result) schedule.Outcome {
 	return schedule.Outcome{
 		RecordID:         res.SessionID,
@@ -698,5 +731,7 @@ func firingOutcome(res run.Result) schedule.Outcome {
 		ContextAnomalies: contextAnomalies(res.ContextFiles),
 		TotalTokens:      firingSpend(res),
 		SubAgents:        len(res.SubAgents),
+		Wrote:            res.Wrote,
+		UndoCommand:      undoCommand(res),
 	}
 }

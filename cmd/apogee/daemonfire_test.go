@@ -351,6 +351,10 @@ func TestDaemonFireReportsWhatTheRunDid(t *testing.T) {
 		// shows — and the delegations as a COUNT, which is all the report line says of them.
 		TotalTokens: 41984,
 		SubAgents:   2,
+		// A run that recorded no write changed nothing and has nothing to revert: the list stays
+		// nil and no verb is offered, which is exactly what the daemon's log prints for it.
+		Wrote:       nil,
+		UndoCommand: "",
 	}
 	if !reflect.DeepEqual(out, want) {
 		t.Errorf("the firing reports %+v, want the run's own %+v", out, want)
