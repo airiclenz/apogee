@@ -203,7 +203,9 @@ rejected. Six booleans are cheap, and they keep the floor an opinion rather than
   rather than an unknown-ID failure.
 - `~/.apogee/library` on disk is never touched, and `internal/library`'s fingerprint and
   probe-record halves stay: they serve Validated sets and `probe model`, not the retired `library`
-  Mechanism.
+  Mechanism. *(Note 2026-09-16: Validated sets went with ADR 0076 A9 and `internal/library` with its
+  last reader — the `ModelFingerprint` type lives in `internal/domain`, the probe record in
+  `internal/probe`, serving `probe model`'s drift check alone; ADR 0021 §3 carries the amendment.)*
 - Guard firings surface as `domain.FloorGuardEvent`s keyed by config key, reaching every Driver;
   `MechanismFiredEvent` stays for lab hooks. A Driver that only knew about Mechanism firings would
   otherwise have gone quiet the moment the catalogue emptied.

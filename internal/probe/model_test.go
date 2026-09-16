@@ -102,7 +102,7 @@ func TestModelReportRecordSection(t *testing.T) {
 			want: []string{
 				"/home/.apogee/probe/abc.json",
 				"yes — delete the file above to undo",
-				"this model now resolves at medium confidence",
+				"this record is the stored signature the next probe of this model compares against",
 			},
 		},
 		{
@@ -111,9 +111,9 @@ func TestModelReportRecordSection(t *testing.T) {
 			want: []string{"NO — --no-save was given", "none — with no record stored"},
 		},
 		{
-			// --no-save while an earlier saved record survives on disk: claiming the identity
-			// "stays at the label tier" would be false in exactly the drift-check scenario
-			// --no-save serves — the surviving record keeps resolving this model at medium.
+			// --no-save while an earlier saved record survives on disk: claiming "no record
+			// stored" would be false in exactly the drift-check scenario --no-save serves — the
+			// surviving record is still what the next probe compares against.
 			name: "--no-save with a surviving record",
 			save: SaveOutcome{Requested: false, Path: "/p.json", Previous: "2026-01-02T03:04:05Z"},
 			want: []string{

@@ -272,7 +272,13 @@ path/perm assertions) unchanged in outcome.
 
 **Commit:** `refactor(probe): the probe record lives beside its writer; the unread fingerprint resolver goes`
 
-## 7. The words match: what a probe record buys today
+## 7. The words match: what a probe record buys today — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — internal/domain/fingerprint.go: made necessary by rewriting every claim that rested on the deleted resolver — `ConfidenceMedium`'s doc said the record is "a dated claim the resolver then reads back"; now "the next probe compares against". No other change to the type (Out of scope: High/Low tiers stay).
+NOTES (2026-09-16): CONTEXT.md's pre-existing "medium confidence switches no automatism on" sentence (true, but a hit for the acceptance grep) is respelled "the medium tier switches no automatism on" — same claim, grep-clean.
+NOTES (2026-09-16): `fingerprintLines`' unpinned incomplete-battery confidence line "n/a (identity resolves as it did before: weights-hash if reachable, else the model label)" is respelled "n/a (nothing is recorded; an earlier record, if any, stands unchanged)" — the old text described the deleted ladder; no test pinned it.
+NOTES (2026-09-16): the `wire_firing.go`/`wire_settings.go` endpoint-overlay comments named the probe record as the endpoint-keyed input that justified the overlay; with its startup reader gone they now cite the Config a Firing composes from the copy, and record the probe record as the historical input. The overlay code is untouched.
+NOTES (2026-09-16): pre-existing debt, not touched — `internal/domain/fingerprint.go`'s section header and `FingerprintConfidence`/`ModelFingerprint` docs still describe the retired Library keying observations on the fingerprint (Out of scope: the type stays; the Library wording predates this run).
 
 **What.** Depends on item 6. Rewrite every claim that rested on the deleted resolver: the probe
 report's `effectLine` "now resolves at medium confidence" and `fingerprintLines` "identity resolves

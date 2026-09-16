@@ -43,7 +43,8 @@ var errProbeModelNeedsLabel = errors.New(
 
 // probeModelCommand builds `apogee probe model` — the capability battery and the behavioral
 // fingerprint (ADR 0021 §3). It is the expensive, explicit half of `probe`: it spends real
-// tokens on a live Upstream and, unless --no-save, records a Medium-confidence identity. Both
+// tokens on a live Upstream and, unless --no-save, records the behavioral signature it observed
+// for the next probe to compare against. Both
 // costs are stated before the first call and again in the report, and the record's path is
 // printed so deleting it is a supported undo.
 //
@@ -61,11 +62,12 @@ func probeModelCommand() *cobra.Command {
 			"reports what it observed, an ordinal capability tier, and the `model-profiles:` entry\n" +
 			"the findings suggest, keyed by the model it probed (printed for you to paste;\n" +
 			"config.yaml is never touched).\n\n" +
-			"It costs live model calls. It also WRITES: the behavioral fingerprint it derives is\n" +
-			"recorded under the apogee home at medium confidence.\n" +
+			"It costs live model calls. It also WRITES: the behavioral signature it observes is\n" +
+			"recorded under the apogee home, and the next probe of the same server and model\n" +
+			"compares against it — a signature that differs reports that the model behind the\n" +
+			"label changed since the earlier record's date.\n" +
 			"Probing does NOT rename your model: the identity stays the advertised label, so\n" +
-			"Library observations keyed on it keep matching — only the confidence rises, from\n" +
-			"low to medium.\n\n" +
+			"model-profile overrides keyed on it keep matching.\n\n" +
 			"Pass --no-save to run the full battery and write nothing; the record's path is\n" +
 			"printed either way, so deleting that file undoes it.\n\n" +
 			"Note (2026-07-22): probe records written by an earlier build use a record format\n" +

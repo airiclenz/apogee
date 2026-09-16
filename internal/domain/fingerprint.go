@@ -23,9 +23,9 @@ const (
 	// — a fuzzy feature match, never a hash of a response, which sampling alone would move. The
 	// tier moves and the Label does not, deliberately: the Label is the key the Library and every
 	// per-model setting are filed under (ADR 0021, Amendment 2026-07-22). It is produced only
-	// by a human running `apogee probe model`, which records a dated claim the resolver then
-	// reads back (ADR 0021 §3); nothing auto-probes, so no startup path can manufacture this
-	// tier as a side effect.
+	// by a human running `apogee probe model`, which records a dated claim the next probe
+	// compares against (ADR 0021 §3, amended 2026-09-16); nothing auto-probes, so no startup
+	// path can manufacture this tier as a side effect.
 	ConfidenceMedium
 
 	// ConfidenceHigh is a weights-hash: a digest derived from the reachable model file, so

@@ -89,6 +89,18 @@ recorded as a named `ISSUES.md` follow-on with the design intact. Validated, not
 best-available ladder (**High** weights-hash → **Medium** stored probe record → **Low**
 metadata label) exactly as `fingerprint.go:40` reserves.
 
+> **Amendment (2026-09-16, plan `2026-09-16 - 01` item 7).** The middle rung had exactly one
+> reader — the Validated-set match, which [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md)
+> A9 deleted with `validated-sets:` — so `library`'s resolver, and with it `internal/library`, is
+> gone and nothing resolves identity at startup any more; `ConfidenceMedium` survives as the tier
+> the battery stamps on its claim, not as a rung anything climbs. Persistence stays, and its reason
+> has narrowed to what this section already carried: the record is the stored behavioral signature
+> the next `probe model` of the same `endpoint + label` compares against, and drift — "the model
+> behind this label changed since &lt;date&gt;" — is what it buys. The record lives in
+> `internal/probe`, beside the battery that writes it. The "identity is resolved by a pure offline
+> function at startup" argument below described the reader that is gone; it is left as the
+> reasoning of its day.
+
 Print-only was considered and rejected on the evidence of the code: identity is resolved by a
 pure offline function at startup, so a Medium tier that is never written down can never be
 observed by anything, and `ConfidenceMedium` stays a constant no code path can produce — a

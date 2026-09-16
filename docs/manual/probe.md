@@ -38,8 +38,11 @@ output, and a multi-step tool chain — then prints what it observed, an ordinal
 capability tier, and the `model-profiles:` entry the findings suggest — keyed by the
 model it probed, and paste-ready as YAML
 (your `config.yaml` is never edited). It also records a **behavioral fingerprint**: the
-model keeps its advertised name — probing never renames it, so aliases keyed on that
-name keep matching — but its identity rises from *low* to *medium* confidence.
+model keeps its advertised name — probing never renames it, so `model-profiles:` overrides
+keyed on that name keep matching — and the signature it observed is stored so the next
+`probe model` of the same server and model can compare against it; a signature that differs
+reports that the model behind the label changed since the earlier record's date. That
+comparison is all the record buys — nothing reads it at startup and it switches nothing on.
 `--no-save` runs the whole battery and records nothing; when the battery completed, the
 record's path is printed either way, so deleting that file undoes it. A battery that did not
 complete derives no identity, records nothing and prints no path — its `record` block reads

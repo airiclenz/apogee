@@ -46,9 +46,10 @@ type Model struct {
 }
 
 // SaveOutcome is what happened to the fingerprint record, and it exists because ADR 0021 §4
-// makes the write the reason `probe model` is an ACT rather than a report: writing a Medium
-// fingerprint promotes the model's identity from name-only to observed, for every per-model
-// setting keyed on it. Every field here is something the report must say out loud.
+// makes the write the reason `probe model` is an ACT rather than a report: the record is the
+// stored, dated behavioral signature the next probe of the same endpoint + label compares
+// against, so a model swapped behind an unchanged label is detectable (ADR 0021 §3, amended
+// 2026-09-16). Every field here is something the report must say out loud.
 //
 // Changed and Previous are DISPLAY strings the caller has already spelled, and it spells them in
 // the machine's LOCAL zone like every other instant this report prints. The record they describe
@@ -70,9 +71,9 @@ type SaveOutcome struct {
 	Changed string
 	// Previous is the date of a usable earlier record for this same endpoint + advertised label
 	// that is STILL on disk because this run recorded nothing (--no-save, a failed write). The
-	// no-record effect line names it instead of claiming the identity fell back to the label
-	// tier — the surviving record keeps resolving this model at medium confidence, which is
-	// exactly the drift-check scenario --no-save serves. Empty when no usable record preceded
+	// no-record effect line names it instead of claiming nothing is stored — the surviving
+	// record is still the signature the next probe compares against, which is exactly the
+	// drift-check scenario --no-save serves. Empty when no usable record preceded
 	// this run, or when this run's write replaced it.
 	Previous string
 }
@@ -187,13 +188,13 @@ func (m Model) candidateLine() string {
 //
 // The label line says out loud that the identity is UNCHANGED — the same string the model was
 // already known by — because a reader who expected a new opaque identity should learn here that
-// their aliases and Library observations keep matching (ADR 0021, Amendment 2026-07-22).
+// their aliases and Model profile overrides keep matching (ADR 0021, Amendment 2026-07-22).
 func (m Model) fingerprintLines() []string {
 	if m.Fingerprint.IsZero() {
 		return []string{
 			field("label", "none — the battery did not complete, so no identity was derived"),
 			field("behavior", "not signed — an incomplete run is not an observation"),
-			field("confidence", "n/a (identity resolves as it did before: weights-hash if reachable, else the model label)"),
+			field("confidence", "n/a (nothing is recorded; an earlier record, if any, stands unchanged)"),
 		}
 	}
 	return []string{
@@ -203,9 +204,9 @@ func (m Model) fingerprintLines() []string {
 	}
 }
 
-// recordSection is the consequence block: what was written, where, what it now enables, and how
-// to undo it. It is the part of the output ADR 0021 §4 makes binding — a command that switches
-// automatism on must read like one.
+// recordSection is the consequence block: what was written, where, what it buys, and how to
+// undo it. It is the part of the output ADR 0021 §4 makes binding — a command that writes state
+// under the apogee home must read like one.
 func (m Model) recordSection() string {
 	if m.Fingerprint.IsZero() {
 		return "record\n" + field("written", "no — an incomplete battery derives no identity to record")
@@ -231,22 +232,22 @@ func (m Model) recordSection() string {
 	return strings.Join(lines, "\n")
 }
 
-// effectLine names what this record changes about the reader's machine: the confidence the
-// model's identity resolves at on the next session start.
+// effectLine names what this record changes about the reader's machine: what the next probe of
+// this endpoint + label will be compared against.
 //
 // Every branch here is a claim about that machine, so each is narrowed until it is true of it —
 // "no record stored" means stored by anyone, not merely by this run.
 func (m Model) effectLine() string {
 	if !m.Save.Requested || !m.Save.Written {
 		// "No record stored" must mean stored by ANYONE: an earlier run's record survives a
-		// --no-save (or a failed write) untouched and keeps resolving this model at medium,
-		// so denying it here would be false in exactly the drift-check scenario --no-save
-		// serves.
+		// --no-save (or a failed write) untouched and is still what the next probe compares
+		// against, so denying it here would be false in exactly the drift-check scenario
+		// --no-save serves.
 		if m.Save.Previous != "" {
 			return "none new — the record from " + m.Save.Previous +
 				" continues to apply; this run recorded nothing"
 		}
-		return "none — with no record stored, this model's identity stays at the label tier (low confidence)"
+		return "none — with no record stored, the next probe has no signature to compare against"
 	}
-	return "this model now resolves at medium confidence"
+	return "this record is the stored signature the next probe of this model compares against"
 }

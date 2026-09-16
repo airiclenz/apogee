@@ -207,8 +207,9 @@ type Config struct {
 
 	// ConfigDir is the injected apogee home — no implicit ~/.apogee (ADR 0001). The bench points
 	// it at an ephemeral dir so a sim run never touches the user's own state. The probe records
-	// the identity ladder reads live under it. Its sibling LibraryDir went with the retired
-	// `library` lab row and the observation store only that row read (v0.20.0, ADR 0071).
+	// `apogee probe model` writes and compares against live under it. Its sibling LibraryDir
+	// went with the retired `library` lab row and the observation store only that row read
+	// (v0.20.0, ADR 0071).
 	ConfigDir string
 
 	// WorkspaceDir is the sandbox root the built-in file tools are scoped to when

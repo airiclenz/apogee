@@ -305,9 +305,9 @@ func TestProbeModelNoSaveWritesNothing(t *testing.T) {
 }
 
 // --no-save with a record an earlier run already stored: the effect line must not deny the
-// surviving record — it stays on disk untouched and keeps resolving this model at medium
-// confidence, which is exactly the drift-check scenario --no-save serves. "With no record
-// stored, identity stays at the label tier" would be a false claim about this machine.
+// surviving record — it stays on disk untouched and is still what the next probe compares
+// against, which is exactly the drift-check scenario --no-save serves. "With no record stored,
+// the next probe has no signature to compare against" would be a false claim about this machine.
 func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 	t.Parallel()
 	srv := modelUpstream(t)
@@ -337,7 +337,7 @@ func TestProbeModelNoSaveNamesTheSurvivingRecord(t *testing.T) {
 	if foreign := probedAt.Format(time.RFC3339); strings.Contains(report, foreign) {
 		t.Errorf("the effect line carries the stored zone's spelling %q:\n%s", foreign, report)
 	}
-	if strings.Contains(report, "identity stays at the label tier") {
+	if strings.Contains(report, "with no record stored") {
 		t.Errorf("the report denies a record that is still on disk:\n%s", report)
 	}
 	rec, warning, ok := probe.LoadProbeRecord(dir, srv.URL, "battery-model")

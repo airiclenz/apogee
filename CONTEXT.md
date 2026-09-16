@@ -1905,15 +1905,18 @@ The model identity a completed **model battery** earns — the model's own adver
 **medium** confidence. The battery raises an identity's *tier*; it never re-spells it (ADR 0021,
 Amendment 2026-07-22), because that label is the key **Model profile** overrides and user aliases
 are filed under, and a probe that renamed the model would orphan every one of them. It is the
-middle rung of the `ModelFingerprint`'s own best-available ladder — weights-hash (**high**) →
-behavioral fingerprint (**medium**) → metadata label (**low**) — and the *only* source of `ConfidenceMedium`, because identity is
-resolved offline at startup: it reaches later sessions **through a persisted probe record**
-(versioned, owner-private, keyed on endpoint + advertised label + probe timestamp; any defect is
-skipped with a warning, never a blocked startup). Since
-[Validated sets](#retired-terms) retired, medium confidence switches **no automatism** on — the one
-it used to (a matching set auto-applying instead of being offered) went with them; what the record
-buys is a stable identity across sessions, and deleting it (or `--no-save`) drops that. What the
-battery observed is recorded beside the claim as the **behavioral signature** — a **fuzzy feature
+*only* source of `ConfidenceMedium`: the `ModelFingerprint` tiers keep their names, but nothing
+resolves identity at startup any more — the offline resolver that read the record as the middle
+rung of a weights-hash → probe → label ladder had one reader, the Validated-set match, and went
+with it ([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) A9;
+ADR 0021 §3 amended 2026-09-16). The claim is kept **as a persisted probe record** (versioned,
+owner-private, keyed on endpoint + advertised label + probe timestamp; any defect is skipped with
+a warning), and what the record buys is **drift detection**: the next `probe model` of the same
+endpoint + label compares its signature against the stored one and names the date the model
+behind the label changed. Since [Validated sets](#retired-terms) retired, the medium tier
+switches **no automatism** on — the one it used to (a matching set auto-applying instead of being
+offered) went with them; deleting the record (or `--no-save`) drops the comparison, nothing else.
+What the battery observed is recorded beside the claim as the **behavioral signature** — a **fuzzy feature
 match over battery outcomes** (which capabilities were observed; logprobs preferred where the Upstream exposes them), **never a
 hash of response text**, so sampling noise or a re-worded prompt does not move it. The signature
 is *evidence*, never a match key: comparing it across probes is what makes a swapped model behind
@@ -2028,10 +2031,12 @@ rather than earning an unknown-id failure, and the archived
 - **Library** (the cross-session, per-model **learning store** that observed completed Turns and
   injected qualifying observations through a pre-request Mechanism) → retired with the `library`
   Mechanism: nothing observes Turns or injects learned text any more, and `~/.apogee/library/` on
-  disk is never touched. `internal/library`'s other half stays and is not this term — the
-  confidence-tagged `ModelFingerprint` and the persisted probe record, which serve `probe model` and
-  the identity a **Model profile** and its aliases are keyed on. The **Failure library** was always
-  the bench's own term and is unaffected.
+  disk is never touched. `internal/library` itself went too (2026-09-16), once its fingerprint
+  resolver lost its last reader: the confidence-tagged `ModelFingerprint` lives in `internal/domain`
+  and the persisted probe record beside its writer in `internal/probe`, serving `probe model`'s
+  drift check alone — a **Model profile** and its aliases are keyed on the advertised label string,
+  never on a resolved identity. The **Failure library** was always the bench's own term and is
+  unaffected.
 - **History truncation** (`truncate_history`) → retired unshipped: the cheap alternative to
   Compaction, mechanically dropping the middle of the conversation and keeping the last N
   exchanges. [Compaction](#context-and-history) is the conversation-level reducer, with

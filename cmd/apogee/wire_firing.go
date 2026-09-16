@@ -163,9 +163,10 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	//
 	// The overlay onto the copy is rebindInputs' own (wire_settings.go), spelled here because two of
 	// the three Drivers have no live settings holder to spell it: the endpoint a run RESOLVES
-	// against and the endpoint it DIALS must be one value, or every input keyed on the endpoint —
-	// the probe record behind the identity ladder, and so the model name resolved off it —
-	// would be resolved against the startup server while the run talked to another one. The
+	// against and the endpoint it DIALS must be one value — the Config composed below takes its
+	// endpoint off this copy, and any input keyed on the endpoint (the probe record was one, until
+	// its startup reader went on 2026-09-16) would otherwise be resolved against the startup
+	// server while the run talked to another one. The
 	// `response-reserve:` half is the same rule for the share: without it the spec would state the
 	// TOP-LEVEL share while the Config below divided the window by the entry's, and one
 	// configuration would mean two splits of one window.

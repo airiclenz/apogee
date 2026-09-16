@@ -807,9 +807,9 @@ func (s *liveSettings) firingBinding(bound upstreamBinding) (config.Options, con
 // The charter covers the WIRE too, which this settings holder deliberately does not own: bound is the
 // upstreamHolder's snapshot, and it is overlaid unconditionally because the holder — not the launch
 // snapshot — is the authority on where this session is pointed (ADR 0036: one upstream definition).
-// Without it a `/server` switch would leave the resolution keyed on the LAUNCH endpoint, and every
-// input that is keyed on the endpoint — the probe record behind the identity ladder's middle rung —
-// would be resolved against a server the session left.
+// Without it a `/server` switch would leave the copy naming the LAUNCH endpoint, and anything keyed
+// on the endpoint — a Firing composes its Config from this copy; the probe record was such an input
+// until its startup reader went on 2026-09-16 — would be resolved against a server the session left.
 // Both live callers run only after the startup bind, so the snapshot is always a real binding.
 func (s *liveSettings) rebindInputs(bound upstreamBinding) (config.Options, int, int) {
 	s.mu.RLock()
