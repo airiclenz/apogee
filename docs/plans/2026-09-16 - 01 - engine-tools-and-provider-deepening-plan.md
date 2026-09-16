@@ -506,7 +506,11 @@ something other than an upstream (`authRecorder`, `wireUpstream` — see the gua
 
 **Commit:** `test(agent): the package's listening upstreams script stubllm`
 
-## 15. `internal/run`'s harness scripts stubllm
+## 15. `internal/run`'s harness scripts stubllm — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the two sites whose handler called `cancel()` on arrival (`TestOnceReportsNoAnswerWhenCancelled`, `TestOnceIgnoresASubAgentsAnswer`) script a `Hang` turn and cancel through a new `cancelWhen` harness helper that polls the request log for the request in question — the stub has no on-request hook, and a Hang whose context dies writes nothing, which is the shape the old handler produced.
+NOTES (2026-09-16): `writeToolCallWithText`'s one site scripts item 12's narration+tool-call Turn (`Text` + `ToolCalls` on one Turn) — no kept fixture, no grep exemption needed.
+NOTES (2026-09-16): the diff runs to ~650 lines (219+/437-) across the two files, past the plan's ~400-line checkpoint mark, but the migration converged in one pass with the suite green, so it lands as one dispatch rather than a midpoint checkpoint.
 
 **What.** Depends on item 12. `internal/run/harness_test.go` `newUpstream` + its
 `writeFinal`/`writeToolCall` pair go; the 34 `newUpstream` sites in `run_test.go` take a

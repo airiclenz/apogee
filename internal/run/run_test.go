@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"path/filepath"
 	"reflect"
 	"regexp"
 	"slices"
 	"strings"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,11 +29,11 @@ import (
 func TestOncePersistsAFiringUnderItsScheduleIdentity(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("the build is green"))
+	up := stubllm.New(t, finalScript("the build is green"))
 	store := session.NewStore(t.TempDir())
 	fired := time.Date(2026, 8, 4, 9, 30, 0, 0, time.Local)
 
-	spec := planSpec(up.url, "check the build")
+	spec := planSpec(up.URL, "check the build")
 	spec.Config.WorkspaceDir = t.TempDir()
 	spec.ScheduleID = "sch-1"
 	spec.ScheduleName = "Nightly build"
@@ -121,8 +119,8 @@ func TestOncePersistsAFiringUnderItsScheduleIdentity(t *testing.T) {
 func TestOnceConstructsAFreshAgentPerFiring(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("done"))
-	spec := planSpec(up.url, "summarise the day")
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Text: "done"}, {Text: "done"}}})
+	spec := planSpec(up.URL, "summarise the day")
 
 	for i := range 2 {
 		if _, err := Once(context.Background(), spec); err != nil {
@@ -130,12 +128,12 @@ func TestOnceConstructsAFreshAgentPerFiring(t *testing.T) {
 		}
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the Upstream saw %d requests, want 2", len(reqs))
 	}
 	for i, req := range reqs {
-		if got := req.userMsgs(); got != 1 {
+		if got := roleCount(req, domain.RoleUser); got != 1 {
 			t.Errorf("request #%d carried %d user messages, want 1 (state bled between firings)", i+1, got)
 		}
 	}
@@ -146,8 +144,8 @@ func TestOnceConstructsAFreshAgentPerFiring(t *testing.T) {
 func TestOnceWithoutAStorePersistsNothing(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("nothing to save"))
-	spec := planSpec(up.url, "just think about it")
+	up := stubllm.New(t, finalScript("nothing to save"))
+	spec := planSpec(up.URL, "just think about it")
 	spec.Now = at(time.Date(2026, 8, 4, 11, 0, 0, 0, time.Local))
 
 	res, err := Once(context.Background(), spec)
@@ -160,8 +158,8 @@ func TestOnceWithoutAStorePersistsNothing(t *testing.T) {
 	if want := "just think about it"; res.Title != want {
 		t.Errorf("Result.Title = %q, want the first-prompt heuristic %q", res.Title, want)
 	}
-	if up.calls() != 1 {
-		t.Errorf("the Upstream saw %d requests, want 1", up.calls())
+	if len(up.Requests()) != 1 {
+		t.Errorf("the Upstream saw %d requests, want 1", len(up.Requests()))
 	}
 }
 
@@ -175,10 +173,10 @@ const callerRecordID = "2026-08-24-090000-firing"
 func TestOnceFilesTheRecordUnderTheCallersRecordID(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("filed where I asked"))
+	up := stubllm.New(t, finalScript("filed where I asked"))
 	store := session.NewStore(t.TempDir())
 
-	spec := planSpec(up.url, "run under a name I chose")
+	spec := planSpec(up.URL, "run under a name I chose")
 	spec.Store = store
 	spec.RecordID = callerRecordID
 	spec.Now = at(time.Date(2026, 8, 24, 9, 0, 0, 0, time.Local))
@@ -207,10 +205,10 @@ func TestOnceFilesTheRecordUnderTheCallersRecordID(t *testing.T) {
 func TestOnceReportsARecordIDThatCannotNameAFile(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("the run itself was fine"))
+	up := stubllm.New(t, finalScript("the run itself was fine"))
 	store := session.NewStore(t.TempDir())
 
-	spec := planSpec(up.url, "file me outside the store")
+	spec := planSpec(up.URL, "file me outside the store")
 	spec.Store = store
 	spec.RecordID = "../escape"
 
@@ -249,15 +247,12 @@ func TestOnceDeniesAGatedActionWithoutParking(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		if req.lastRoleIs(domain.RoleTool) {
-			writeFinal(w, "I could not write the file")
-			return
-		}
-		writeToolCall(w, "call_1", tool.Name(), `{"path":"out.txt"}`)
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: tool.Name()}, Text: "I could not write the file"},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: tool.Name(), Arguments: `{"path":"out.txt"}`}}},
+	}})
 
-	spec := planSpec(up.url, "write the report")
+	spec := planSpec(up.URL, "write the report")
 	spec.Config.Mode = domain.ModeAuto
 	spec.Config.ConfineToWorkspace = true
 	spec.Config.Confiner = stubConfiner{}
@@ -302,15 +297,12 @@ func TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		if req.lastRoleIs(domain.RoleTool) {
-			writeFinal(w, "I could not note it")
-			return
-		}
-		writeToolCall(w, "call_1", "note_something", `{"note":"hello"}`)
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "note_something"}, Text: "I could not note it"},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "note_something", Arguments: `{"note":"hello"}`}}},
+	}})
 
-	spec := planSpec(up.url, "note something for me")
+	spec := planSpec(up.URL, "note something for me")
 	spec.Config.Tools = registry
 	spec.Sync = []domain.Reaction{denyingGate("warden")}
 
@@ -324,13 +316,12 @@ func TestOnceArmsTheSpecsSyncLaneBeforeTheFirstStep(t *testing.T) {
 		t.Fatalf("Once: %v", err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the server answered %d requests, want 2 (the refused tool Turn, then the final Turn)", len(reqs))
 	}
-	if !reqs[1].lastTextHas("tool call denied by reaction warden") {
-		t.Errorf("the tool result read %q; want the gate's refusal — Spec.Sync never reached the Agent",
-			reqs[1].Texts[len(reqs[1].Texts)-1])
+	if got := up.LastMessage(2); !strings.Contains(got, "tool call denied by reaction warden") {
+		t.Errorf("the tool result read %q; want the gate's refusal — Spec.Sync never reached the Agent", got)
 	}
 	if res.FinalText != "I could not note it" {
 		t.Errorf("Result.FinalText = %q, want the answer the refused call led to", res.FinalText)
@@ -348,15 +339,12 @@ func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		if req.lastRoleIs(domain.RoleTool) {
-			writeFinal(w, "noted")
-			return
-		}
-		writeToolCall(w, "call_1", "note_something", `{"note":"hello"}`)
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "note_something"}, Text: "noted"},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "note_something", Arguments: `{"note":"hello"}`}}},
+	}})
 
-	spec := planSpec(up.url, "note something for me")
+	spec := planSpec(up.URL, "note something for me")
 	spec.Config.Tools = registry
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -367,13 +355,12 @@ func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
 		t.Fatalf("Once: %v", err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 2 {
 		t.Fatalf("the server answered %d requests, want 2 (the tool Turn, then the final Turn)", len(reqs))
 	}
-	if !reqs[1].lastTextHas("noted: hello") {
-		t.Errorf("the tool result read %q; want the tool's own outcome — an unarmed lane gated a call",
-			reqs[1].Texts[len(reqs[1].Texts)-1])
+	if got := up.LastMessage(2); !strings.Contains(got, "noted: hello") {
+		t.Errorf("the tool result read %q; want the tool's own outcome — an unarmed lane gated a call", got)
 	}
 	if res.FinalText != "noted" {
 		t.Errorf("Result.FinalText = %q, want the answer the executed call led to", res.FinalText)
@@ -386,8 +373,8 @@ func TestOnceWithoutASyncLaneGatesNothing(t *testing.T) {
 func TestOncePinsAskerAndPresenterOff(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("no questions asked"))
-	spec := planSpec(up.url, "look around")
+	up := stubllm.New(t, finalScript("no questions asked"))
+	spec := planSpec(up.URL, "look around")
 	spec.Config.Mode = domain.ModeAuto // Auto offers the whole menu; Plan filters it to reads
 	spec.Config.Confiner = stubConfiner{}
 	spec.Config.WorkspaceDir = t.TempDir() // wires the built-in registry, where the two delegates land
@@ -398,7 +385,7 @@ func TestOncePinsAskerAndPresenterOff(t *testing.T) {
 		t.Fatalf("Once: %v", err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
 	}
@@ -407,7 +394,7 @@ func TestOncePinsAskerAndPresenterOff(t *testing.T) {
 		t.Fatal("the request offered no tools at all; the default registry was not wired")
 	}
 	for _, name := range []string{"ask_user", "present_document"} {
-		if menu.offers(name) {
+		if slices.Contains(menu.Tools, name) {
 			t.Errorf("the firing offered %q; Once must leave the human-facing delegates unregistered", name)
 		}
 	}
@@ -422,8 +409,8 @@ func TestOnceRejectsModesThatNeedAHuman(t *testing.T) {
 		t.Run(string(mode), func(t *testing.T) {
 			t.Parallel()
 
-			up := newUpstream(t, alwaysFinal("unreached"))
-			spec := planSpec(up.url, "do the thing")
+			up := stubllm.New(t, finalScript("unreached"))
+			spec := planSpec(up.URL, "do the thing")
 			spec.Config.Mode = mode
 
 			res, err := Once(context.Background(), spec)
@@ -434,8 +421,8 @@ func TestOnceRejectsModesThatNeedAHuman(t *testing.T) {
 			if !reflect.DeepEqual(res, Result{}) {
 				t.Errorf("Result = %+v, want the zero Result on a rejected spec", res)
 			}
-			if up.calls() != 0 {
-				t.Errorf("the Upstream saw %d requests; a rejected mode must error before any request", up.calls())
+			if len(up.Requests()) != 0 {
+				t.Errorf("the Upstream saw %d requests; a rejected mode must error before any request", len(up.Requests()))
 			}
 		})
 	}
@@ -461,8 +448,8 @@ func TestOnceReportsTheFinalAnswer(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			up := newUpstream(t, alwaysFinal(answer))
-			spec := planSpec(up.url, "check the build")
+			up := stubllm.New(t, finalScript(answer))
+			spec := planSpec(up.URL, "check the build")
 			if tt.store {
 				spec.Store = session.NewStore(t.TempDir())
 			}
@@ -499,15 +486,14 @@ func TestOnceReportsTheLastMessageNotTheFirst(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		if req.lastRoleIs(domain.RoleTool) {
-			writeFinal(w, answer)
-			return
-		}
-		writeToolCallWithText(w, narration, "call_1", tool.Name(), `{"path":"out.txt"}`)
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: tool.Name()}, Text: answer},
+		// One Turn that narrates and then calls: the shape a model takes when it says what it
+		// is about to do before it does it.
+		{Text: narration, ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: tool.Name(), Arguments: `{"path":"out.txt"}`}}},
+	}})
 
-	spec := planSpec(up.url, "write the report")
+	spec := planSpec(up.URL, "write the report")
 	spec.Config.Mode = domain.ModeAuto
 	spec.Config.ConfineToWorkspace = true
 	spec.Config.Confiner = stubConfiner{}
@@ -541,18 +527,19 @@ func TestOnceReportsAnAbandonedFinalTurn(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		reply       func(http.ResponseWriter, request)
+		script      stubllm.Script
 		wantFaulted bool
 	}{
-		{"an abandoned turn", func(w http.ResponseWriter, _ request) { writeFinal(w, "") }, true},
-		{"a clean run", alwaysFinal("the build is green"), false},
+		// The empty Turn is stubllm's empty-reply turn: a stop-finished reply with no text.
+		{"an abandoned turn", stubllm.Script{Turns: []stubllm.Turn{{}}}, true},
+		{"a clean run", finalScript("the build is green"), false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			up := newUpstream(t, tt.reply)
-			spec := planSpec(up.url, "check the build")
+			up := stubllm.New(t, tt.script)
+			spec := planSpec(up.URL, "check the build")
 			spec.Store = session.NewStore(t.TempDir())
 
 			res, err := Once(context.Background(), spec)
@@ -590,9 +577,10 @@ func TestOnceReportsNoAnswerWhenCancelled(t *testing.T) {
 
 	// The Firing is cancelled the moment its first request lands, so the Upstream never
 	// answers and no assistant message is ever committed.
-	up := newUpstream(t, func(http.ResponseWriter, request) { cancel() })
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Hang: time.Minute}}})
+	cancelWhen(t, up, cancel, func(stubllm.Request) bool { return true })
 
-	res, err := Once(ctx, planSpec(up.url, "think about it"))
+	res, err := Once(ctx, planSpec(up.URL, "think about it"))
 	if err == nil {
 		t.Fatal("Once returned no error; a cancelled firing must report one")
 	}
@@ -622,21 +610,18 @@ func TestOnceIgnoresASubAgentsAnswer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		switch {
-		case req.lastRoleIs(domain.RoleTool):
-			// The parent is back with the delegated result. Stop it here, before it can
-			// answer: the sub-agent's message must be the only one on the stream.
-			cancel()
-		case req.lastTextHas(delegated):
-			writeFinal(w, subAnswer) // the sub-agent's own fresh conversation
-		default:
-			writeToolCall(w, "call_1", tools.SubAgentToolName, `{"task":"`+delegated+`"}`)
-		}
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		// The parent is back with the delegated result. Stop it here, before it can answer:
+		// the sub-agent's message must be the only one on the stream.
+		{When: &stubllm.Match{ToolResult: tools.SubAgentToolName}, Hang: time.Minute},
+		// The sub-agent's own fresh conversation.
+		{When: &stubllm.Match{LastMessage: regexp.QuoteMeta(delegated)}, Text: subAnswer},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: tools.SubAgentToolName, Arguments: `{"task":"` + delegated + `"}`}}},
+	}})
+	cancelWhen(t, up, cancel, answersATool)
 
 	events := &recordingSink{}
-	spec := planSpec(up.url, "summarise the day")
+	spec := planSpec(up.URL, "summarise the day")
 	spec.Config.Tools = registry
 	spec.Config.Events = events
 
@@ -837,24 +822,19 @@ func TestOnceReportsEachSubAgentsContextFill(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		switch {
-		case req.lastRoleIs(domain.RoleTool):
-			// The parent is back with the delegated result and answers for itself.
-			writeUsage(w, 800, 100, 900)
-			writeFinal(w, "four issues are open")
-		case req.lastTextHas(taskLine):
-			// The sub-agent's own fresh conversation — and its own, far fuller window.
-			writeUsage(w, 11800, 200, 12000)
-			writeFinal(w, "the sub-agent found four open issues")
-		default:
-			writeUsage(w, 600, 100, 700)
-			writeToolCall(w, "call_1", tools.SubAgentToolName, taskArgs)
-		}
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		// The parent is back with the delegated result and answers for itself.
+		{When: &stubllm.Match{ToolResult: tools.SubAgentToolName}, Text: "four issues are open",
+			Usage: &stubllm.Usage{Prompt: 800, Completion: 100}},
+		// The sub-agent's own fresh conversation — and its own, far fuller window.
+		{When: &stubllm.Match{LastMessage: regexp.QuoteMeta(taskLine)}, Text: "the sub-agent found four open issues",
+			Usage: &stubllm.Usage{Prompt: 11800, Completion: 200}},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: tools.SubAgentToolName, Arguments: taskArgs}},
+			Usage: &stubllm.Usage{Prompt: 600, Completion: 100}},
+	}})
 
 	store := session.NewStore(t.TempDir())
-	spec := planSpec(up.url, "summarise the day")
+	spec := planSpec(up.URL, "summarise the day")
 	spec.Config.Tools = registry
 	spec.Config.Context.MaxContextTokens = window
 	spec.Store = store
@@ -1379,21 +1359,16 @@ func TestOnceReportsWhatTheFiringSpent(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		switch {
-		case req.lastRoleIs(domain.RoleTool):
-			writeUsage(w, 800, 100, 900)
-			writeFinal(w, "four issues are open")
-		case req.lastTextHas(taskLine):
-			writeUsage(w, 11800, 200, 12000)
-			writeFinal(w, "the sub-agent found four open issues")
-		default:
-			writeUsage(w, 600, 100, 700)
-			writeToolCall(w, "call_1", tools.SubAgentToolName, taskArgs)
-		}
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: tools.SubAgentToolName}, Text: "four issues are open",
+			Usage: &stubllm.Usage{Prompt: 800, Completion: 100}},
+		{When: &stubllm.Match{LastMessage: regexp.QuoteMeta(taskLine)}, Text: "the sub-agent found four open issues",
+			Usage: &stubllm.Usage{Prompt: 11800, Completion: 200}},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: tools.SubAgentToolName, Arguments: taskArgs}},
+			Usage: &stubllm.Usage{Prompt: 600, Completion: 100}},
+	}})
 
-	spec := planSpec(up.url, "summarise the day")
+	spec := planSpec(up.URL, "summarise the day")
 	spec.Config.Tools = registry
 	spec.Config.Context.MaxContextTokens = 32000
 
@@ -1436,30 +1411,25 @@ func TestOnceRecordsWhatTheFiringAndItsDelegatesSpent(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		switch {
-		case req.lastRoleIs(domain.RoleTool) && req.toolMsgs() == 1:
-			// The first delegation is back; the parent spends again and delegates once more.
-			writeUsage(w, 800, 100, 900)
-			writeToolCall(w, "call_2", tools.SubAgentToolName, secondArgs)
-		case req.lastRoleIs(domain.RoleTool):
-			// The second is back too; the parent answers for itself.
-			writeUsage(w, 900, 100, 1000)
-			writeFinal(w, "both audits are done")
-		case req.lastTextHas(firstTask):
-			writeUsage(w, 5000, 50, 5050)
-			writeFinal(w, "four issues are open")
-		case req.lastTextHas(secondTask):
-			writeUsage(w, 3000, 30, 3030)
-			writeFinal(w, "the notes are ready")
-		default:
-			writeUsage(w, 600, 100, 700)
-			writeToolCall(w, "call_1", tools.SubAgentToolName, firstArgs)
-		}
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		// The first delegation is back; the parent spends again and delegates once more. Two
+		// matching turns on the same tool result play in script order, one per return.
+		{When: &stubllm.Match{ToolResult: tools.SubAgentToolName},
+			ToolCalls: []stubllm.ToolCall{{ID: "call_2", Name: tools.SubAgentToolName, Arguments: secondArgs}},
+			Usage:     &stubllm.Usage{Prompt: 800, Completion: 100}},
+		// The second is back too; the parent answers for itself.
+		{When: &stubllm.Match{ToolResult: tools.SubAgentToolName}, Text: "both audits are done",
+			Usage: &stubllm.Usage{Prompt: 900, Completion: 100}},
+		{When: &stubllm.Match{LastMessage: regexp.QuoteMeta(firstTask)}, Text: "four issues are open",
+			Usage: &stubllm.Usage{Prompt: 5000, Completion: 50}},
+		{When: &stubllm.Match{LastMessage: regexp.QuoteMeta(secondTask)}, Text: "the notes are ready",
+			Usage: &stubllm.Usage{Prompt: 3000, Completion: 30}},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: tools.SubAgentToolName, Arguments: firstArgs}},
+			Usage: &stubllm.Usage{Prompt: 600, Completion: 100}},
+	}})
 
 	store := session.NewStore(t.TempDir())
-	spec := planSpec(up.url, "close out the day")
+	spec := planSpec(up.URL, "close out the day")
 	spec.Config.Tools = registry
 	spec.Config.Context.MaxContextTokens = 32000
 	spec.Store = store
@@ -1507,21 +1477,16 @@ func TestOnceRecordsTheRunsScrollback(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		switch {
-		case req.lastTextHas(delegated):
-			writeFinal(w, "the notes are short")
-		case req.lastRoleIs(domain.RoleTool) && req.toolMsgs() == 1:
-			writeToolCall(w, "call_2", tools.SubAgentToolName, `{"task":"`+delegated+`"}`)
-		case req.lastRoleIs(domain.RoleTool):
-			writeFinal(w, "all done")
-		default:
-			writeToolCall(w, "call_1", "note_something", `{"note":"hello"}`)
-		}
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{LastMessage: regexp.QuoteMeta(delegated)}, Text: "the notes are short"},
+		{When: &stubllm.Match{ToolResult: "note_something"},
+			ToolCalls: []stubllm.ToolCall{{ID: "call_2", Name: tools.SubAgentToolName, Arguments: `{"task":"` + delegated + `"}`}}},
+		{When: &stubllm.Match{ToolResult: tools.SubAgentToolName}, Text: "all done"},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "note_something", Arguments: `{"note":"hello"}`}}},
+	}})
 
 	store := session.NewStore(t.TempDir())
-	spec := planSpec(up.url, "close out the day")
+	spec := planSpec(up.URL, "close out the day")
 	spec.Config.Tools = registry
 	spec.Store = store
 
@@ -1568,20 +1533,17 @@ func TestOnceBoundsTheStoredToolArguments(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		if req.lastRoleIs(domain.RoleTool) {
-			writeFinal(w, "noted")
-			return
-		}
-		args, err := json.Marshal(map[string]string{"note": oversized})
-		if err != nil {
-			return // the handler runs on the server goroutine; a fixed literal never fails
-		}
-		writeToolCall(w, "call_1", "note_something", string(args))
-	})
+	args, err := json.Marshal(map[string]string{"note": oversized})
+	if err != nil {
+		t.Fatalf("marshal the oversized arguments: %v", err)
+	}
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "note_something"}, Text: "noted"},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "note_something", Arguments: string(args)}}},
+	}})
 
 	store := session.NewStore(t.TempDir())
-	spec := planSpec(up.url, "write a long note")
+	spec := planSpec(up.URL, "write a long note")
 	spec.Config.Tools = registry
 	spec.Store = store
 
@@ -1645,14 +1607,13 @@ func foldedEntries(entries []session.Entry) []foldedEntry {
 func TestOnceRecordsNoDelegateSpendWhenNothingWasDelegated(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, func(w http.ResponseWriter, _ request) {
-		writeUsage(w, 600, 100, 700)
-		writeFinal(w, "the build is green")
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{Text: "the build is green", Usage: &stubllm.Usage{Prompt: 600, Completion: 100}},
+	}})
 
 	dir := t.TempDir()
 	store := session.NewStore(dir)
-	spec := planSpec(up.url, "check the build")
+	spec := planSpec(up.URL, "check the build")
 	spec.Store = store
 
 	res, err := Once(context.Background(), spec)
@@ -1781,19 +1742,19 @@ func TestOnceResolvesTheFiringsFileRefs(t *testing.T) {
 		t.Fatalf("write go.mod: %v", err)
 	}
 
-	up := newUpstream(t, alwaysFinal("it declares the module"))
-	spec := planSpec(up.url, "summarise @go.mod")
+	up := stubllm.New(t, finalScript("it declares the module"))
+	spec := planSpec(up.URL, "summarise @go.mod")
 	spec.Config.WorkspaceDir = ws
 
 	if _, err := Once(context.Background(), spec); err != nil {
 		t.Fatalf("Once: %v", err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
 	}
-	got := reqs[0].Texts[len(reqs[0].Texts)-1]
+	got := up.LastMessage(1)
 	if !strings.Contains(got, "Referenced file `go.mod`:\n") {
 		t.Errorf("the firing's user message carries no file-context block for @go.mod:\n%s", got)
 	}
@@ -1814,8 +1775,8 @@ func TestOnceSkipsAMissingFileRefWithoutNotice(t *testing.T) {
 
 	const prompt = `summarise @"no such.md"`
 
-	up := newUpstream(t, alwaysFinal("there was nothing to read"))
-	spec := planSpec(up.url, prompt)
+	up := stubllm.New(t, finalScript("there was nothing to read"))
+	spec := planSpec(up.URL, prompt)
 	spec.Config.WorkspaceDir = t.TempDir()
 
 	res, err := Once(context.Background(), spec)
@@ -1826,11 +1787,11 @@ func TestOnceSkipsAMissingFileRefWithoutNotice(t *testing.T) {
 		t.Errorf("Result.Err = %v, want nil; a missing ref is skipped, never fatal", res.Err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
 	}
-	if got := reqs[0].Texts[len(reqs[0].Texts)-1]; got != prompt {
+	if got := up.LastMessage(1); got != prompt {
 		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
 	}
 }
@@ -1879,8 +1840,8 @@ func TestOnceResolvesTheFiringsSkillRefs(t *testing.T) {
 		Body:        "Review correctness first, then report.",
 	}
 
-	up := newUpstream(t, alwaysFinal("audited"))
-	spec := planSpec(up.url, prompt)
+	up := stubllm.New(t, finalScript("audited"))
+	spec := planSpec(up.URL, prompt)
 	spec.Config.WorkspaceDir = t.TempDir()
 	spec.Config.Skills = newStubSkills(skill)
 
@@ -1888,11 +1849,11 @@ func TestOnceResolvesTheFiringsSkillRefs(t *testing.T) {
 		t.Fatalf("Once: %v", err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
 	}
-	got := reqs[0].Texts[len(reqs[0].Texts)-1]
+	got := up.LastMessage(1)
 	want := "<skill: " + skill.DisplayName + ">\n" + skill.Body + "\n</skill>\n\n" + prompt
 	if got != want {
 		t.Errorf("the firing's user message =\n%q\nwant\n%q", got, want)
@@ -1907,8 +1868,8 @@ func TestOnceLeavesAnUnknownSkillTokenAsProse(t *testing.T) {
 
 	const prompt = "/code-adit internal/tui"
 
-	up := newUpstream(t, alwaysFinal("nothing to audit"))
-	spec := planSpec(up.url, prompt)
+	up := stubllm.New(t, finalScript("nothing to audit"))
+	spec := planSpec(up.URL, prompt)
 	spec.Config.WorkspaceDir = t.TempDir()
 	spec.Config.Skills = newStubSkills(domain.ResolvedSkill{
 		ID:          "code-audit",
@@ -1920,11 +1881,11 @@ func TestOnceLeavesAnUnknownSkillTokenAsProse(t *testing.T) {
 		t.Fatalf("Once: %v", err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
 	}
-	if got := reqs[0].Texts[len(reqs[0].Texts)-1]; got != prompt {
+	if got := up.LastMessage(1); got != prompt {
 		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
 	}
 }
@@ -1937,19 +1898,19 @@ func TestOnceWithoutASkillCatalogSendsTheTokenVerbatim(t *testing.T) {
 
 	const prompt = "/code-audit internal/tui"
 
-	up := newUpstream(t, alwaysFinal("audited"))
-	spec := planSpec(up.url, prompt)
+	up := stubllm.New(t, finalScript("audited"))
+	spec := planSpec(up.URL, prompt)
 	spec.Config.WorkspaceDir = t.TempDir()
 
 	if _, err := Once(context.Background(), spec); err != nil {
 		t.Fatalf("Once: %v", err)
 	}
 
-	reqs := up.requests()
+	reqs := up.Requests()
 	if len(reqs) != 1 {
 		t.Fatalf("the Upstream saw %d requests, want 1", len(reqs))
 	}
-	if got := reqs[0].Texts[len(reqs[0].Texts)-1]; got != prompt {
+	if got := up.LastMessage(1); got != prompt {
 		t.Errorf("the firing's user message = %q, want the prompt verbatim %q", got, prompt)
 	}
 }
@@ -1968,8 +1929,8 @@ func TestOnceReportsTheWorkspaceContextFiles(t *testing.T) {
 		t.Fatalf("seed the context file: %v", err)
 	}
 
-	up := newUpstream(t, alwaysFinal("read it"))
-	spec := planSpec(up.url, "do the thing")
+	up := stubllm.New(t, finalScript("read it"))
+	spec := planSpec(up.URL, "do the thing")
 	spec.Config.WorkspaceDir = dir
 	spec.Config.ContextFiles = []string{"AGENTS.md"}
 
@@ -1990,8 +1951,8 @@ func TestOnceReportsTheWorkspaceContextFiles(t *testing.T) {
 func TestOnceReportsNoContextFilesWhenTheWorkspaceHasNone(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("nothing to read"))
-	spec := planSpec(up.url, "do the thing")
+	up := stubllm.New(t, finalScript("nothing to read"))
+	spec := planSpec(up.URL, "do the thing")
 	spec.Config.WorkspaceDir = t.TempDir()
 	spec.Config.ContextFiles = []string{"AGENTS.md"}
 
@@ -2019,8 +1980,8 @@ func TestOnceReportsTheContextFilesWhenSubmitFails(t *testing.T) {
 		t.Fatalf("seed the context file: %v", err)
 	}
 
-	up := newUpstream(t, alwaysFinal("unreached"))
-	spec := planSpec(up.url, "do the thing")
+	up := stubllm.New(t, finalScript("unreached"))
+	spec := planSpec(up.URL, "do the thing")
 	spec.Config.Model = "" // no model bound: construction succeeds, Submit refuses
 	spec.Config.WorkspaceDir = dir
 	spec.Config.ContextFiles = []string{"AGENTS.md"}
@@ -2037,8 +1998,8 @@ func TestOnceReportsTheContextFilesWhenSubmitFails(t *testing.T) {
 	if !reflect.DeepEqual(res.ContextFiles.Files, want) {
 		t.Errorf("Result.ContextFiles.Files = %+v, want %+v", res.ContextFiles.Files, want)
 	}
-	if up.calls() != 0 {
-		t.Errorf("the Upstream saw %d requests; a refused submit must never reach the wire", up.calls())
+	if len(up.Requests()) != 0 {
+		t.Errorf("the Upstream saw %d requests; a refused submit must never reach the wire", len(up.Requests()))
 	}
 }
 
@@ -2053,20 +2014,14 @@ func TestOnceReportsTheContextFilesWhenSubmitFails(t *testing.T) {
 func TestOnceReportsTheFilesTheFiringWrote(t *testing.T) {
 	t.Parallel()
 
-	var turns atomic.Int32
-	up := newUpstream(t, func(w http.ResponseWriter, _ request) {
-		switch turns.Add(1) {
-		case 1:
-			writeToolCall(w, "call_1", "write_file", `{"path":"first.txt","content":"one"}`)
-		case 2:
-			writeToolCall(w, "call_2", "write_file", `{"path":"second.txt","content":"two"}`)
-		default:
-			writeFinal(w, "both files are written")
-		}
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "write_file", Arguments: `{"path":"first.txt","content":"one"}`}}},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_2", Name: "write_file", Arguments: `{"path":"second.txt","content":"two"}`}}},
+		{Text: "both files are written"},
+	}})
 
 	dir := t.TempDir()
-	spec := planSpec(up.url, "write the two files")
+	spec := planSpec(up.URL, "write the two files")
 	spec.Config.Mode = domain.ModeAuto
 	spec.Config.Confiner = stubConfiner{}
 	spec.Config.WorkspaceDir = dir
@@ -2095,8 +2050,8 @@ func TestOnceReportsTheFilesTheFiringWrote(t *testing.T) {
 func TestOnceReportsNoWrittenFilesForAReadOnlyRun(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, alwaysFinal("nothing needed changing"))
-	spec := planSpec(up.url, "look around")
+	up := stubllm.New(t, finalScript("nothing needed changing"))
+	spec := planSpec(up.URL, "look around")
 
 	res, err := Once(context.Background(), spec)
 
@@ -2114,16 +2069,14 @@ func TestOnceReportsNoWrittenFilesForAReadOnlyRun(t *testing.T) {
 func TestOnceReportsTheFilesAFaultedFiringWrote(t *testing.T) {
 	t.Parallel()
 
-	up := newUpstream(t, func(w http.ResponseWriter, req request) {
-		if req.lastRoleIs(domain.RoleTool) {
-			writeFinal(w, "") // an empty reply: the fault the engine raises for an abandoned turn
-			return
-		}
-		writeToolCall(w, "call_1", "write_file", `{"path":"half-done.txt","content":"partial"}`)
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		// The empty Turn: an empty reply, the fault the engine raises for an abandoned turn.
+		{When: &stubllm.Match{ToolResult: "write_file"}},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "write_file", Arguments: `{"path":"half-done.txt","content":"partial"}`}}},
+	}})
 
 	dir := t.TempDir()
-	spec := planSpec(up.url, "write the file")
+	spec := planSpec(up.URL, "write the file")
 	spec.Config.Mode = domain.ModeAuto
 	spec.Config.Confiner = stubConfiner{}
 	spec.Config.WorkspaceDir = dir
@@ -2154,17 +2107,13 @@ func TestOnceImagesTheWorkspaceIntoTheRecordsSnapshotStore(t *testing.T) {
 	t.Parallel()
 	requireSnapshots(t)
 
-	var turns atomic.Int32
-	up := newUpstream(t, func(w http.ResponseWriter, _ request) {
-		if turns.Add(1) == 1 {
-			writeToolCall(w, "call_1", "write_file", `{"path":"note.txt","content":"written"}`)
-			return
-		}
-		writeFinal(w, "the file is written")
-	})
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "write_file", Arguments: `{"path":"note.txt","content":"written"}`}}},
+		{Text: "the file is written"},
+	}})
 
 	home := t.TempDir()
-	spec := planSpec(up.url, "write the note")
+	spec := planSpec(up.URL, "write the note")
 	spec.Config.Mode = domain.ModeAuto
 	spec.Config.Confiner = stubConfiner{}
 	spec.Config.WorkspaceDir = t.TempDir()
@@ -2221,8 +2170,8 @@ func TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal(t *testing.T) {
 		t.Fatalf("make the workspace: %v", err)
 	}
 
-	up := newUpstream(t, alwaysFinal("nothing to do"))
-	spec := planSpec(up.url, "look around")
+	up := stubllm.New(t, finalScript("nothing to do"))
+	spec := planSpec(up.URL, "look around")
 	spec.Config.WorkspaceDir = workspace
 	spec.Config.UndoSnapshots = true
 	spec.RecordID = "firing-2"

@@ -2,240 +2,73 @@ package run
 
 // The hermetic Upstream every internal/run test drives. internal/run reaches the engine
 // through the PUBLIC agent.New, which binds the real provider client, so there is no fake
-// responder seam to inject here — the fake has to be a real OpenAI-compatible server. This
-// is the httptest SSE shape internal/agent, internal/tui and cmd/apogee already script
-// their Upstreams with (internal/tui/e2e_test.go), narrowed to what a Firing exercises.
+// responder seam to inject here — the Upstream has to be a real OpenAI-compatible server.
+// That server is stubllm: each test scripts a stubllm.Script, stubllm.New serves it on a
+// loopback port, and the request log is what a test reads to assert what actually reached
+// the wire — the message history (the fresh-context proof), the offered tool menu (the
+// unregistered-delegate proof). A request the Script did not anticipate is a 500, which the
+// run reports as an error: fix the Script, never loosen it.
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os/exec"
-	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// upstream is a scripted OpenAI-compatible server that records every request it answered,
-// so a test can assert what actually reached the wire — the message history (the fresh-
-// context proof) and the offered tool menu (the unregistered-delegate proof).
-type upstream struct {
-	url string
-
-	mu   sync.Mutex
-	reqs []request
+// finalScript is the simplest Script: one final, no-tool reply, and nothing for a second
+// request. A test that fires twice against one server scripts two turns.
+func finalScript(text string) stubllm.Script {
+	return stubllm.Script{Turns: []stubllm.Turn{{Text: text}}}
 }
 
-// request is the decoded subset of one chat-completions body the tests assert on.
-type request struct {
-	Roles []string // the role of each message, in order
-	Texts []string // the content of each message, in order (a null content reads as "")
-	Tools []string // the names of the tools offered on the menu
-}
-
-// userMsgs counts the user-role messages the request carried.
-func (r request) userMsgs() int {
+// roleCount counts the messages of a request that carry role.
+func roleCount(r stubllm.Request, role domain.Role) int {
 	n := 0
-	for _, role := range r.Roles {
-		if role == string(domain.RoleUser) {
+	for _, m := range r.Messages {
+		if m.Role == string(role) {
 			n++
 		}
 	}
 	return n
 }
 
-// toolMsgs counts the tool-role messages the request carried — how many tool calls have already
-// come back in this conversation, which is how a script tells a parent's FIRST return from its
-// second and branches to a different reply for each.
-func (r request) toolMsgs() int {
-	n := 0
-	for _, role := range r.Roles {
-		if role == string(domain.RoleTool) {
-			n++
-		}
-	}
-	return n
+// answersATool reports whether a request's last message is a tool result — the shape a
+// conversation has when the model is back with what its call returned.
+func answersATool(r stubllm.Request) bool {
+	return len(r.Messages) > 0 && r.Messages[len(r.Messages)-1].Role == string(domain.RoleTool)
 }
 
-// lastRoleIs reports whether the request's final message carries role want.
-func (r request) lastRoleIs(want domain.Role) bool {
-	return len(r.Roles) > 0 && r.Roles[len(r.Roles)-1] == string(want)
-}
-
-// lastTextHas reports whether the request's final message contains want. It is how a script
-// tells a SUB-AGENT's fresh conversation from its parent's: the two look identical by role
-// (one user message), but the sub-agent's carries the delegated task.
-func (r request) lastTextHas(want string) bool {
-	return len(r.Texts) > 0 && strings.Contains(r.Texts[len(r.Texts)-1], want)
-}
-
-// offers reports whether name is on the request's tool menu.
-func (r request) offers(name string) bool {
-	for _, t := range r.Tools {
-		if t == name {
-			return true
-		}
-	}
-	return false
-}
-
-// newUpstream starts a server that answers each request through reply, which receives the
-// decoded request so it can branch on the conversation exactly as a real model would.
-func newUpstream(t *testing.T, reply func(w http.ResponseWriter, req request)) *upstream {
+// cancelWhen cancels a Firing the moment the stub logs a request that want selects. It is how
+// a test stops a run at a precise point in its conversation: the Turn scripted for that request
+// is a hang, so the stub writes nothing once the request context dies and the client sees only
+// its own cancellation, never an assistant message. The log is polled rather than hooked
+// because the log is the stub's own word that a request has landed.
+func cancelWhen(t *testing.T, up *stubllm.Server, cancel context.CancelFunc, want func(stubllm.Request) bool) {
 	t.Helper()
-	up := &upstream{}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		req := decodeRequest(r)
-		up.mu.Lock()
-		up.reqs = append(up.reqs, req)
-		up.mu.Unlock()
-		w.Header().Set("Content-Type", "text/event-stream")
-		reply(w, req)
-	}))
-	t.Cleanup(srv.Close)
-	up.url = srv.URL
-	return up
-}
-
-// alwaysFinal is the simplest script: every request gets one final, no-tool reply.
-func alwaysFinal(text string) func(http.ResponseWriter, request) {
-	return func(w http.ResponseWriter, _ request) { writeFinal(w, text) }
-}
-
-// requests returns what the server saw, under its lock.
-func (u *upstream) requests() []request {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return append([]request(nil), u.reqs...)
-}
-
-// calls reports how many requests reached the server.
-func (u *upstream) calls() int {
-	u.mu.Lock()
-	defer u.mu.Unlock()
-	return len(u.reqs)
-}
-
-// decodeRequest pulls the roles and the tool menu off one chat-completions body. Decoding
-// is best-effort: the handler runs on the server goroutine, where a test-failure call is
-// not permitted, and a body this fake cannot read simply records as empty.
-func decodeRequest(r *http.Request) request {
-	body, _ := io.ReadAll(r.Body)
-	var decoded struct {
-		Messages []struct {
-			Role string `json:"role"`
-			// A pointer, exactly as the provider marshals it: a tool-call-only assistant
-			// message serialises its content as JSON null.
-			Content *string `json:"content"`
-		} `json:"messages"`
-		Tools []struct {
-			Function struct {
-				Name string `json:"name"`
-			} `json:"function"`
-		} `json:"tools"`
-	}
-	_ = json.Unmarshal(body, &decoded)
-
-	req := request{
-		Roles: make([]string, len(decoded.Messages)),
-		Texts: make([]string, len(decoded.Messages)),
-		Tools: make([]string, len(decoded.Tools)),
-	}
-	for i, m := range decoded.Messages {
-		req.Roles[i] = m.Role
-		if m.Content != nil {
-			req.Texts[i] = *m.Content
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done) })
+	go func() {
+		for {
+			for _, r := range up.Requests() {
+				if want(r) {
+					cancel()
+					return
+				}
+			}
+			select {
+			case <-done:
+				return
+			case <-time.After(time.Millisecond):
+			}
 		}
-	}
-	for i, tl := range decoded.Tools {
-		req.Tools[i] = tl.Function.Name
-	}
-	return req
+	}()
 }
-
-// writeFinal streams one content chunk, a stop finish and the terminator — the wire shape
-// of a final no-tool Turn that ends the Exchange.
-func writeFinal(w http.ResponseWriter, text string) {
-	sseData(w, sseChunk{Choices: []sseChoice{{Delta: sseDelta{Content: text}}}})
-	sseData(w, sseChunk{Choices: []sseChoice{{FinishReason: "stop"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-// writeToolCall streams one native tool call, a tool_calls finish and the terminator — the
-// wire shape of a Turn that asks for a tool.
-func writeToolCall(w http.ResponseWriter, id, name, args string) {
-	sseData(w, sseChunk{Choices: []sseChoice{{Delta: sseDelta{ToolCalls: []sseToolCall{{
-		ID: id, Type: "function", Function: sseFunc{Name: name, Arguments: args},
-	}}}}}})
-	sseData(w, sseChunk{Choices: []sseChoice{{FinishReason: "tool_calls"}}})
-	_, _ = io.WriteString(w, "data: [DONE]\n\n")
-}
-
-// writeToolCallWithText streams one Turn that both SAYS something and asks for a tool — the
-// shape a model takes when it narrates before it calls. The prose is committed on the
-// assistant message but ends no Exchange, so this Turn is not the run's final answer.
-func writeToolCallWithText(w http.ResponseWriter, text, id, name, args string) {
-	sseData(w, sseChunk{Choices: []sseChoice{{Delta: sseDelta{Content: text}}}})
-	writeToolCall(w, id, name, args)
-}
-
-// writeUsage streams one usage-only chunk — the shape a server sends when the client asked
-// for stream_options.include_usage. The parser stashes it and attaches it to the stream's
-// terminal Done, so it may be written before the content chunks a reply is built from: a
-// script emits usage by calling this ahead of writeFinal or writeToolCall.
-func writeUsage(w io.Writer, prompt, completion, total int) {
-	sseData(w, sseChunk{Usage: &sseUsage{
-		PromptTokens: prompt, CompletionTokens: completion, TotalTokens: total,
-	}})
-}
-
-// sseData writes v as one SSE data event. Writes are best-effort for the same
-// server-goroutine reason decodeRequest is; the fixed chunk structs never fail to marshal.
-func sseData(w io.Writer, v any) {
-	b, _ := json.Marshal(v)
-	_, _ = fmt.Fprintf(w, "data: %s\n\n", b)
-}
-
-// The on-the-wire SSE chunk shape the provider parses — only the fields these fakes set.
-type sseChunk struct {
-	Choices []sseChoice `json:"choices"`
-	Usage   *sseUsage   `json:"usage,omitempty"`
-}
-
-type sseUsage struct {
-	PromptTokens     int `json:"prompt_tokens"`
-	CompletionTokens int `json:"completion_tokens"`
-	TotalTokens      int `json:"total_tokens"`
-}
-
-type sseChoice struct {
-	Delta        sseDelta `json:"delta"`
-	FinishReason string   `json:"finish_reason,omitempty"`
-}
-
-type sseDelta struct {
-	Content   string        `json:"content,omitempty"`
-	ToolCalls []sseToolCall `json:"tool_calls,omitempty"`
-}
-
-type sseToolCall struct {
-	ID       string  `json:"id"`
-	Type     string  `json:"type"`
-	Function sseFunc `json:"function"`
-}
-
-type sseFunc struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-}
-
-// ---------------------------------------------------------------------------
 
 // planSpec is the baseline Firing: read-only Plan against the fake Upstream. Events is
 // deliberately left nil so every test also exercises the discard path Once installs.
