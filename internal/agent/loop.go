@@ -209,11 +209,12 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	calls := resp.ToolCalls()
 	if a.turns.wrappingUp() {
 		// The wrap-up Turn (turnLifecycle.wrapUp) keeps at most ONE tool: write_file, for a delegation
-		// spawned with an `output_path`, and then only the calls aimed at that tool survive
-		// (wrapUpCalls, subagent.go). Everything else the reply asked for is asking for something
-		// the request told it it cannot have, and a withdrawn menu that is still reachable is no
-		// withdrawal at all — so those calls are DROPPED undispatched here, and with the menu
-		// withdrawn wholesale that is every call.
+		// spawned with an `output_path`, and then only the calls aimed at that tool survive — the
+		// first write to the output path and any write aimed elsewhere (wrapUpCalls, subagent.go).
+		// Everything else the reply asked for — a second output-path write included — is asking
+		// for something the request told it it cannot have, and a withdrawn menu that is still
+		// reachable is no withdrawal at all — so those calls are DROPPED undispatched here, and
+		// with the menu withdrawn wholesale that is every call.
 		calls = a.wrapUpCalls(calls)
 	}
 	if len(calls) == 0 {

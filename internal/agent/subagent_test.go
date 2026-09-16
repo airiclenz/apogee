@@ -2631,6 +2631,74 @@ func TestSubAgent_OutputPathKeepsWriteFileInTheWrapUp(t *testing.T) {
 	}
 }
 
+// TestWrapUpCallsKeepsTheFirstOutputWrite pins the filter alone: of a wrap-up reply's three
+// write_file calls — one aimed elsewhere, two at the output path — the filter keeps the
+// elsewhere-write (so resolve's refusal can reach the transcript) and the FIRST output-path write,
+// and drops the second, which the clause's "once" already withdrew.
+func TestWrapUpCallsKeepsTheFirstOutputWrite(t *testing.T) {
+	ws := t.TempDir()
+	cfg := subAgentConfig(&recordingSink{}, domain.ModeAllowEdits, tools.NewWriteFile(ws))
+	cfg.WorkspaceDir = ws
+	a, err := newAgent(cfg, &requestLogResponder{})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.resolveOutputPath("out/report.md")
+	if _, ok := a.wrapUpWriter(); !ok {
+		t.Fatal("wrapUpWriter = false, want write_file on the wrap-up menu")
+	}
+	writeCall := func(id, path string) domain.ToolCall {
+		return domain.ToolCall{ID: id, Tool: tools.WriteFileToolName,
+			Arguments: json.RawMessage(fmt.Sprintf(`{"path":%q,"content":%q}`, path, id))}
+	}
+
+	kept := a.wrapUpCalls([]domain.ToolCall{
+		writeCall("elsewhere", "elsewhere.md"),
+		writeCall("first", "out/report.md"),
+		writeCall("second", "out/report.md"),
+	})
+
+	var ids []string
+	for _, call := range kept {
+		ids = append(ids, call.ID)
+	}
+	if want := []string{"elsewhere", "first"}; !slices.Equal(ids, want) {
+		t.Errorf("kept call ids = %v, want %v — the elsewhere-write and the first output write only", ids, want)
+	}
+}
+
+// TestSubAgent_WrapUpRunsTheOutputWriteOnce drives the "once" whole: a wrap-up reply that asks
+// for two write_file calls to the output path with different content lands the FIRST content and
+// commits exactly one write_file result — the second call is dropped undispatched, never run
+// over the first.
+func TestSubAgent_WrapUpRunsTheOutputWriteOnce(t *testing.T) {
+	wrapUp := []provider.Delta{
+		{Kind: provider.DeltaContent, Content: childClosingReport},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{ID: "w0", Type: "function",
+			Function: provider.FunctionCall{Name: tools.WriteFileToolName,
+				Arguments: `{"path":"out/report.md","content":"the first draft"}`}}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{ID: "w1", Type: "function",
+			Function: provider.FunctionCall{Name: tools.WriteFileToolName,
+				Arguments: `{"path":"out/report.md","content":"the second draft"}`}}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+	a, _, sink, ws := outputPathAgent(t, domain.ModeAllowEdits, "out/report.md", wrapUp)
+
+	runExchange(t, a, "please research")
+
+	body, err := os.ReadFile(filepath.Join(ws, "out", "report.md"))
+	if err != nil {
+		t.Fatalf("the wrap-up write did not land: %v", err)
+	}
+	if string(body) != "the first draft" {
+		t.Errorf("output file = %q, want the FIRST write's content", body)
+	}
+	results := wrapUpWriteResults(sink.events, tools.WriteFileToolName)
+	if len(results) != 1 || results[0].IsError {
+		t.Errorf("write_file results = %+v, want exactly one non-error result — the second output write is dropped", results)
+	}
+}
+
 // TestSubAgent_WrapUpRefusesAWriteElsewhere pins the refusal: a wrap-up write_file aimed anywhere
 // but the output path gets exactly the wrap-up refusal naming that path, and writes nothing — so
 // the output path is still absent when the run ends, and the capped result says so in its body

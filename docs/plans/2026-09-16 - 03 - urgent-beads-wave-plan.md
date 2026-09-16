@@ -109,7 +109,7 @@ NOTES (2026-09-16): bead close is the verifier's at commit time — `bd close ap
 
 **Commit:** `fix(apogee): alias RefClippedEvent on the public Event list and pin the list complete`
 
-## 4. wrap-up runs the output-path write once (apogee-mfh)
+## 4. wrap-up runs the output-path write once (apogee-mfh) — ✅ DONE (2026-09-16)
 
 **What:** Fix: `internal/agent/subagent.go` `wrapUpCalls` keeps every `write_file` call in the wrap-up reply, so two writes to the output path both run although `wrapUpOutputClauseFormat` says `You may still call write_file once, for %s only.` Keep the FIRST `write_file` whose `classifyWriteTarget(tool, call).real == a.outputTarget` and drop later output-path writes; writes aimed elsewhere keep flowing so `resolution.go`'s `wrap-up: only %s may be written` refusal still reaches the transcript. Update the func comment and the `loop.go` call-site comment.
 

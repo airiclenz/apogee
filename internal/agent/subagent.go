@@ -353,19 +353,33 @@ func (a *Agent) wrapUpWriter() (domain.Tool, bool) {
 }
 
 // wrapUpCalls is the wrap-up Turn's call filter (step, loop.go): with write_file on the menu
-// (wrapUpWriter) it keeps every write_file call the reply made and drops the rest, and with the
-// menu withdrawn wholesale it keeps nothing. A kept call is not yet permitted — the wrap-up row of
-// resolve refuses one aimed anywhere but the output path — it is merely dispatched, so the
-// refusal reaches the transcript instead of vanishing with the dropped calls.
+// (wrapUpWriter) it keeps the write_file calls the reply made — the FIRST one aimed at the output
+// path, judged by classifyWriteTarget's resolved target against Agent.outputTarget (two readings
+// of one resolver), plus every one aimed elsewhere — and drops the rest; with the menu withdrawn
+// wholesale it keeps nothing. The clause promised write_file "once, for <path> only"
+// (wrapUpOutputClauseFormat), so a second write to the output path is asking for something the
+// request said it cannot have: it is dropped undispatched like any other withdrawn call, and the
+// first write is the one that lands. A kept elsewhere-write is not yet permitted — the wrap-up
+// row of resolve refuses one aimed anywhere but the output path — it is merely dispatched, so
+// the refusal reaches the transcript instead of vanishing with the dropped calls.
 func (a *Agent) wrapUpCalls(calls []domain.ToolCall) []domain.ToolCall {
-	if _, ok := a.wrapUpWriter(); !ok {
+	writer, ok := a.wrapUpWriter()
+	if !ok {
 		return nil
 	}
 	var kept []domain.ToolCall
+	outputWriteKept := false
 	for _, call := range calls {
-		if call.Tool == tools.WriteFileToolName {
-			kept = append(kept, call)
+		if call.Tool != tools.WriteFileToolName {
+			continue
 		}
+		if a.classifyWriteTarget(writer, call).real == a.outputTarget {
+			if outputWriteKept {
+				continue
+			}
+			outputWriteKept = true
+		}
+		kept = append(kept, call)
 	}
 	return kept
 }
