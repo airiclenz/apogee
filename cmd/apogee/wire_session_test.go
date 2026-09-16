@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 )
@@ -287,6 +289,200 @@ func TestSessionHostResumeBeginsActive(t *testing.T) {
 	}
 	if rec.Meta.Title != "kept" {
 		t.Errorf("Title after a resumed Save = %q; want the resumed title preserved", rec.Meta.Title)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Fork: the child record and the parent id it carries through every save
+// ----------------------------------------------------------------------------
+
+// forkPrefix is the scrollback prefix the fork tests hand the host: two top-level prompts and one a
+// delegate asked at depth 1, so a count by Save's rule (every user entry, depth included) is 3
+// where a depth-0 count would be 2.
+func forkPrefix() []session.Entry {
+	return []session.Entry{
+		{Kind: session.EntryKindUser, Text: "first"},
+		{Kind: session.EntryKindAssistant, Text: "one", Done: true},
+		{Kind: session.EntryKindUser, Text: "second"},
+		{Kind: session.EntryKindUser, Text: "a delegate's brief", Depth: 1},
+		{Kind: session.EntryKindAssistant, Text: "two", Done: true},
+	}
+}
+
+// Fork writes a NEW record — the child loads back under its own id with ParentID naming the active
+// session, the transcript and Session it was handed, the wiring facts, and UserMsgs counted by
+// Save's rule — and leaves the parent's file byte-for-byte as it was: a fork is a write beside the
+// active record, never of it.
+func TestSessionHostForkWritesAChildRecord(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	store := session.NewStore(dir)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	if err := host.Save(apogee.Session{}, nil, "parent", 2, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save parent: %v", err)
+	}
+	parentID := host.ActiveID()
+	parentPath := filepath.Join(dir, parentID+".json")
+	before, err := os.ReadFile(parentPath)
+	if err != nil {
+		t.Fatalf("read the parent's file: %v", err)
+	}
+	cut := apogee.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"cut":true}`)}
+
+	child, err := host.Fork(session.Meta{ID: parentID}, cut, forkPrefix(), "parent")
+	if err != nil {
+		t.Fatalf("Fork: %v", err)
+	}
+
+	if child.ID == "" || child.ID == parentID {
+		t.Fatalf("child id = %q; want a fresh id distinct from the parent's %q", child.ID, parentID)
+	}
+	if child.ParentID != parentID {
+		t.Errorf("returned ParentID = %q; want the parent's id %q", child.ParentID, parentID)
+	}
+	if host.ActiveID() != parentID {
+		t.Errorf("Fork activated %q; the parent %q must stay the active session", host.ActiveID(), parentID)
+	}
+	rec, err := store.Load(child.ID)
+	if err != nil {
+		t.Fatalf("Load the child: %v", err)
+	}
+	if rec.Meta.ParentID != parentID {
+		t.Errorf("stored ParentID = %q; want %q", rec.Meta.ParentID, parentID)
+	}
+	if rec.Meta.Title != "parent" || rec.Meta.Workspace != "/ws" || rec.Meta.Model != "m" {
+		t.Errorf("stored child Meta = %+v; want title \"parent\", workspace /ws, model m", rec.Meta)
+	}
+	if rec.Meta.UserMsgs != 3 {
+		t.Errorf("stored UserMsgs = %d; want 3 (every user entry, the depth-1 one included)", rec.Meta.UserMsgs)
+	}
+	if rec.Meta.CreatedAt.IsZero() || !rec.Meta.UpdatedAt.Equal(rec.Meta.CreatedAt) {
+		t.Errorf("stored CreatedAt/UpdatedAt = %v/%v; want both set to the fork's moment", rec.Meta.CreatedAt, rec.Meta.UpdatedAt)
+	}
+	if !bytes.Equal(rec.Session.State, cut.State) {
+		t.Errorf("stored Session.State = %s; want the cut state %s", rec.Session.State, cut.State)
+	}
+	entries, err := session.DecodeTranscript(rec.Transcript)
+	if err != nil {
+		t.Fatalf("decode the child's transcript: %v", err)
+	}
+	if len(entries) != len(forkPrefix()) || entries[3].Depth != 1 {
+		t.Errorf("stored transcript = %+v; want the prefix as handed over", entries)
+	}
+	after, err := os.ReadFile(parentPath)
+	if err != nil {
+		t.Fatalf("re-read the parent's file: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("the fork rewrote the parent's file:\nbefore: %s\nafter:  %s", before, after)
+	}
+}
+
+// The parent id is the host's OWN identity: a fresh host whose first Save has not landed still
+// forks a child whose ParentID is the id it pre-minted for that Save — not the "" the renderer
+// reads from ActiveID in that window.
+func TestForkStampsParentIDFromTheHostIdentity(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	preMinted := host.SessionID()
+	if preMinted == "" || host.ActiveID() != "" {
+		t.Fatalf("pre-minted id %q, active %q; want a pre-minted id and no active session", preMinted, host.ActiveID())
+	}
+
+	child, err := host.Fork(session.Meta{ID: ""}, apogee.Session{}, forkPrefix(), "t")
+	if err != nil {
+		t.Fatalf("Fork: %v", err)
+	}
+
+	if child.ParentID != preMinted {
+		t.Errorf("ParentID = %q; want the pre-minted id %q, not what the parent Meta carried", child.ParentID, preMinted)
+	}
+	if host.SessionID() != preMinted {
+		t.Errorf("Fork moved the host's own identity to %q; want %q unchanged", host.SessionID(), preMinted)
+	}
+}
+
+// Activating a forked child carries its ParentID into the identity later Saves rebuild Meta from,
+// so the first Save after a resume of the child does not write "" over the pointer the fork wrote.
+func TestActivateCarriesParentIDIntoLaterSaves(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	if err := host.Save(apogee.Session{}, nil, "parent", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save parent: %v", err)
+	}
+	parentID := host.ActiveID()
+	child, err := host.Fork(session.Meta{ID: parentID}, apogee.Session{}, forkPrefix(), "parent")
+	if err != nil {
+		t.Fatalf("Fork: %v", err)
+	}
+
+	host.Activate(child)
+	if err := host.Save(apogee.Session{}, nil, "parent", 4, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save the child: %v", err)
+	}
+
+	rec, err := store.Load(child.ID)
+	if err != nil {
+		t.Fatalf("Load the child: %v", err)
+	}
+	if rec.Meta.ParentID != parentID {
+		t.Errorf("ParentID after Activate+Save = %q; want %q kept", rec.Meta.ParentID, parentID)
+	}
+	if rec.Meta.UserMsgs != 4 {
+		t.Errorf("UserMsgs after the child's Save = %d; want 4 (the Save's own count)", rec.Meta.UserMsgs)
+	}
+}
+
+// A --resume start on a forked child (newSessionHost's resumed branch) carries its ParentID too:
+// the next Save keeps the pointer rather than forgetting the fork.
+func TestResumeCarriesParentIDIntoLaterSaves(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	child := &session.Record{Meta: session.Meta{
+		ID: "20260916T120000Z-abcd", Title: "kept", ParentID: "20260916T110000Z-0000",
+	}}
+	host := newSessionHost(store, "/ws", "m", child, "", nil, "", nil)
+
+	if err := host.Save(apogee.Session{}, nil, "derived", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	rec, err := store.Load(child.Meta.ID)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.Meta.ParentID != child.Meta.ParentID {
+		t.Errorf("ParentID after a resumed Save = %q; want the resumed %q", rec.Meta.ParentID, child.Meta.ParentID)
+	}
+}
+
+// Rotate closes the forked child with everything else about its identity: the session the next
+// Save mints is not a fork, so it carries no ParentID.
+func TestRotateClearsParentID(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	child := &session.Record{Meta: session.Meta{
+		ID: "20260916T120000Z-abcd", Title: "kept", ParentID: "20260916T110000Z-0000",
+	}}
+	host := newSessionHost(store, "/ws", "m", child, "", nil, "", nil)
+
+	host.Rotate()
+	if err := host.Save(apogee.Session{}, nil, "fresh", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save after Rotate: %v", err)
+	}
+
+	fresh := host.ActiveID()
+	if fresh == child.Meta.ID {
+		t.Fatalf("Save after Rotate updated the child %q; want a fresh session", fresh)
+	}
+	rec, err := store.Load(fresh)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.Meta.ParentID != "" {
+		t.Errorf("ParentID of the session after Rotate = %q; want none", rec.Meta.ParentID)
 	}
 }
 

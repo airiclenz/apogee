@@ -160,7 +160,8 @@ func (m *Model) progressSave() tea.Cmd {
 // ----------------------------------------------------------------------------
 //
 // One conversation writes its record three ways — the per-Turn/idle Save, the Rename that carries a
-// title (generated or typed), and the browser's Delete — and each of them runs off the Update loop
+// title (generated or typed), and the browser's Delete — and once writes ANOTHER record from it: the
+// Fork that cuts a child off the active session (/fork). Each of them runs off the Update loop
 // on its own Cmd goroutine. They MUST NOT overlap. Save replaces the record wholesale while Rename
 // is a read-modify-write of it, so a Rename that read the record before a Save replaced it writes
 // the pre-save version back, reverting the session by a whole Turn — engine state and scrollback
@@ -173,6 +174,11 @@ func (m *Model) progressSave() tea.Cmd {
 // tea.Batch two writes (batch members run on separate goroutines — this is precisely how the title
 // flush came to race the coalesced save), and a write scheduled while the latch is held must WAIT
 // rather than dispatch.
+//
+// Fork writes a file of its own rather than the active record, and queues all the same: the child
+// carries the parent's id, which is the identity the host holds at the moment the write runs, so a
+// fork overtaking the parent's own first Save — or a Rotate — would name a parent that never landed
+// or the wrong one. Behind the queue the parent's Save has landed before the child is cut from it.
 //
 // Rotate and Activate join them although they write no file at all: they RETARGET the stream, moving
 // the active session every later Save resolves against. A save that overtakes a Rotate is written
@@ -195,6 +201,7 @@ const (
 	writeDelete                          // SessionHost.Delete — the browser's delete verb
 	writeRotate                          // SessionHost.Rotate — /clear|/new, and deleting the ACTIVE record, retiring its id
 	writeActivate                        // SessionHost.Activate — a /sessions resume adopting the loaded record's id
+	writeFork                            // SessionHost.Fork — /fork cutting a child record off the active session
 )
 
 // retargets reports whether this kind moves the active session — which record subsequent Saves
@@ -221,6 +228,9 @@ type recordWrite struct {
 	// session.Meta is plain values throughout, so the value-copied Model carries it safely.
 	meta session.Meta
 
+	// fork is what the child record is cut from (writeFork only).
+	fork forkPayload
+
 	// relist re-reads the store once the write lands, so the /sessions overlay repaints over the
 	// result — what the browser's own verbs want, and what the QUIET title apply must not have
 	// (foldSessionList opens the overlay over every list it folds, so a generated title would pop
@@ -232,6 +242,27 @@ type recordWrite struct {
 	// needs when the fold puts it back on the stash.
 	retryTitle bool
 	source     titleSource
+}
+
+// forkPayload is one queued fork: the engine state cut at the fork point (Engine.CutSnapshot), the
+// scrollback prefix through it already projected onto the neutral wire form (entriesToRecords over
+// transcript.prefixThrough), the title the child starts under, and the parent's metadata as the
+// renderer holds it. The host stamps the child's ParentID from its own identity and takes parent
+// only as the fallback (SessionHost.Fork). Plain values only, like the rest of recordWrite.
+type forkPayload struct {
+	sess    domain.Session
+	entries []session.Entry
+	title   string
+	parent  session.Meta
+}
+
+// forkResult is what a landed fork hands the fold: the child's metadata as the host minted it, and
+// the child's record assembled here from the same inputs the host wrote — so the fold can adopt
+// the child the way a /sessions resume adopts a loaded record without reading it back from disk.
+// record.Meta IS child; the record carries it beside the cut Session and the encoded prefix.
+type forkResult struct {
+	child  session.Meta
+	record session.Record
 }
 
 // scheduleSave queues p as a record write and returns the Cmd to run — the save pipeline's entry to
@@ -330,6 +361,8 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 			sessions.Rotate() // reports nothing: closing a session cannot fail
 		case writeActivate:
 			sessions.Activate(w.meta) // reports nothing: adopting a loaded id cannot fail
+		case writeFork:
+			done.fork, done.err = forkRecord(sessions, w.fork)
 		}
 		if w.relist {
 			// The re-list rides on the write's own goroutine, so the rows the browser repaints are
@@ -341,6 +374,31 @@ func (m Model) writeCmd(w recordWrite) tea.Cmd {
 		}
 		return done
 	}
+}
+
+// forkRecord performs one queued fork through the host and assembles the child's record from the
+// inputs the host was handed: the metadata the host minted, the prefix encoded exactly as the host
+// encoded it (session.EncodeTranscript over the same entries), and the cut Session. A host error
+// yields the zero result beside it; an encode failure is reported the same way, though the host
+// encoding the same entries makes it unreachable in practice.
+func forkRecord(sessions SessionHost, f forkPayload) (forkResult, error) {
+	child, err := sessions.Fork(f.parent, f.sess, f.entries, f.title)
+	if err != nil {
+		return forkResult{}, err
+	}
+	blob, err := session.EncodeTranscript(f.entries)
+	if err != nil {
+		return forkResult{}, err
+	}
+	return forkResult{
+		child: child,
+		record: session.Record{
+			RecordVersion: session.RecordVersion,
+			Meta:          child,
+			Transcript:    blob,
+			Session:       f.sess,
+		},
+	}, nil
 }
 
 // saveComplete folds a finished save: it notes the ok↔fail transition exactly once (on the ok→fail
@@ -369,11 +427,11 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 	return m.pumpOrQuit()
 }
 
-// foldRecordWrite folds a finished Rename, Delete, Rotate or Activate: it releases the single-flight
-// latch, dispatches whatever waited behind it, and re-lists for the browser verbs that asked to
-// repaint over the result. All of them are best-effort — a rename that did not stick leaves the old
-// title on the re-list, a delete that did not leaves the row, and neither retarget can fail — so
-// nothing is said about a failure.
+// foldRecordWrite folds a finished Rename, Delete, Rotate, Activate or Fork: it releases the
+// single-flight latch, dispatches whatever waited behind it, and re-lists for the browser verbs that
+// asked to repaint over the result. All of them are best-effort — a rename that did not stick leaves
+// the old title on the re-list, a delete that did not leaves the row, and neither retarget can fail
+// — so nothing is said about a failure.
 //
 // The one failure that is NOT simply swallowed is a quiet title write. Its apply path branches on
 // ActiveID(), which the host mints at the START of the first Save, before the atomic write has put

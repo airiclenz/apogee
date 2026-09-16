@@ -323,6 +323,21 @@ func DecodeTranscript(data []byte) ([]Entry, error) {
 	return env.Entries, nil
 }
 
+// UserMessageCount reports how many user messages entries hold — one per EntryKindUser at EVERY
+// depth, a delegate's own prompts included. It is the browsable "N msgs" count Meta.UserMsgs carries,
+// spelled on the wire form so that a writer handed a transcript rather than a Driver's own
+// scrollback — the host forking a child record from a cut prefix — stamps the same count the
+// Driver's per-Turn Save does, and the cell does not change on the child's first Save.
+func UserMessageCount(entries []Entry) int {
+	n := 0
+	for i := range entries {
+		if entries[i].Kind == EntryKindUser {
+			n++
+		}
+	}
+	return n
+}
+
 // stripEntry re-runs the terminal-escape defence over every field of one decoded entry that a
 // Driver can paint. The list is the union of the two enumerations a Driver's own decode path used
 // to hold — the fields it stripped one by one, and the ones its card-wide sanitize pass covered —

@@ -483,6 +483,7 @@ type fakeSessionHost struct {
 	mu       sync.Mutex
 	saves    []savedCall
 	renames  []renameCall // every Rename asked for, in order (the browser's `r` and generated titles)
+	forks    []forkCall   // every Fork asked for, in order (/fork through the record write queue)
 	rotates  int
 	activeID string
 	minted   int   // ids handed out so far, so a rotated session gets a distinct one
@@ -490,6 +491,8 @@ type fakeSessionHost struct {
 	// renameErr scripts a Rename failure — the store's ENOENT when the record is not on disk yet,
 	// which is what a title answering inside the first Save's window actually hits.
 	renameErr error
+	// forkErr scripts a Fork failure (the store refusing the child's write).
+	forkErr error
 
 	// The browser-side store (item 7): the /sessions overlay lists/loads/deletes/renames these
 	// records. seed populates it; Load makes a record active, so a test can prove that resuming
@@ -601,6 +604,66 @@ func (h *fakeSessionHost) Rename(id, title string) error {
 		h.stored[id] = rec
 	}
 	return nil
+}
+
+// forkCall is one child record the host was asked to cut: the inputs as Fork received them, and
+// the parent id the fake stamped — its own active id, as the real host stamps its own identity
+// rather than trusting the parent Meta it was handed.
+type forkCall struct {
+	parent     session.Meta
+	sess       domain.Session
+	transcript []session.Entry
+	title      string
+	parentID   string
+}
+
+// Fork models the real host's fork: it mints a child id, stamps ParentID from the fake's OWN
+// active id (falling back to parent.ID when none is active), counts UserMsgs by Save's rule, and
+// stores the child so the browser can list and load it — activating nothing. Every call is
+// recorded whether or not it fails.
+func (h *fakeSessionHost) Fork(
+	parent session.Meta,
+	sess domain.Session,
+	transcript []session.Entry,
+	title string,
+) (session.Meta, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	parentID := h.activeID
+	if parentID == "" {
+		parentID = parent.ID
+	}
+	h.forks = append(h.forks, forkCall{
+		parent: parent, sess: sess, transcript: transcript, title: title, parentID: parentID,
+	})
+	if h.forkErr != nil {
+		return session.Meta{}, h.forkErr
+	}
+	h.minted++
+	meta := session.Meta{
+		ID:       fmt.Sprintf("s%d", h.minted),
+		Title:    title,
+		ParentID: parentID,
+		UserMsgs: session.UserMessageCount(transcript),
+	}
+	blob, err := session.EncodeTranscript(transcript)
+	if err != nil {
+		return session.Meta{}, err
+	}
+	if h.stored == nil {
+		h.stored = map[string]session.Record{}
+	}
+	h.stored[meta.ID] = session.Record{
+		RecordVersion: session.RecordVersion, Meta: meta, Transcript: blob, Session: sess,
+	}
+	return meta, nil
+}
+
+// forkCalls returns a copy of the recorded Forks in order.
+func (h *fakeSessionHost) forkCalls() []forkCall {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]forkCall(nil), h.forks...)
 }
 
 // renameCall is one title the host was asked to store. It is recorded whether or not a matching

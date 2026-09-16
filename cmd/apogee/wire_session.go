@@ -76,12 +76,17 @@ type sessionHost struct {
 }
 
 // activeSession is the identity of the session Saves currently target: the id minted once (or
-// seeded by a resume), plus the CreatedAt and Title a later Save must preserve — only Rename
-// rewrites the title, and only Rotate/Load changes the id.
+// seeded by a resume), plus the CreatedAt, Title and ParentID a later Save must preserve — only
+// Rename rewrites the title, only Rotate/Load changes the id, and the parent pointer is fixed at
+// the fork that minted the record (Fork) and travels with its identity from there: through the
+// Activate that adopts a forked child and the --resume that starts on one alike, so no Save of a
+// child ever writes ParentID "" over the pointer the fork wrote. Every site that builds one
+// carries it (Save's fresh identity legitimately has none: a session that is not a fork).
 type activeSession struct {
 	id        string
 	title     string
 	createdAt time.Time
+	parentID  string
 }
 
 // sessionHost satisfies the persistence seam the TUI drives.
@@ -105,6 +110,7 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 			id:        resumed.Meta.ID,
 			title:     resumed.Meta.Title,
 			createdAt: resumed.Meta.CreatedAt,
+			parentID:  resumed.Meta.ParentID,
 		}
 		return h
 	}
@@ -153,6 +159,7 @@ func (h *sessionHost) Save(
 			UpdatedAt:     now,
 			Workspace:     h.workspace,
 			Model:         model,
+			ParentID:      a.parentID,
 			UserMsgs:      userMsgs,
 			CtxUsed:       ctxUsed,
 			Usage:         usage,
@@ -203,10 +210,11 @@ func (h *sessionHost) Load(id string) (session.Record, error) {
 
 // Activate makes meta's session the one subsequent Saves update, replacing the current active
 // session rather than forking a new file — the /sessions resume flow calls it once RestoreSession
-// has confirmed the switch. Its id, Title, and CreatedAt carry over so a later Save preserves them.
+// has confirmed the switch. Its id, Title, CreatedAt and ParentID carry over so a later Save
+// preserves them.
 func (h *sessionHost) Activate(meta session.Meta) {
 	h.mu.Lock()
-	h.active = &activeSession{id: meta.ID, title: meta.Title, createdAt: meta.CreatedAt}
+	h.active = &activeSession{id: meta.ID, title: meta.Title, createdAt: meta.CreatedAt, parentID: meta.ParentID}
 	h.mu.Unlock()
 	// The scratch dir follows the activation: the resumed session's own dir (re)exists and is
 	// what the engine fences the next tool call to.
@@ -298,6 +306,59 @@ func (h *sessionHost) Rename(id, title string) error {
 	}
 	h.mu.Unlock()
 	return nil
+}
+
+// Fork writes the child record a /fork cuts off the session Saves currently target: a NEW file
+// under a freshly minted id holding sess (the engine state cut at the fork point) and transcript
+// (the scrollback prefix through it) under title, stamped with the wiring facts every record gets
+// (Workspace, Model) and with ParentID — the pointer the session browser and a resume read the fork
+// relationship from. It returns the child's Meta and activates nothing: the parent stays the record
+// later Saves update until the resume flow Activates the child.
+//
+// The parent's id is the host's OWN identity — the active session's id, else the id a fresh start
+// pre-minted for its first Save (SessionID's answer) — rather than parent.ID: the renderer reads
+// ActiveID, which is "" until the first queued Save has landed, so trusting what it carried would
+// fork a child with no parent in exactly the window a quick /fork hits. parent.ID is the fallback
+// for a host holding no identity at all. UserMsgs is counted from transcript by the rule Save's
+// count follows (session.UserMessageCount), so the child's "N msgs" cell holds across its first
+// Save; CreatedAt is the fork's moment, and usage and context fill start at zero — a child begins
+// its own spend. The write is synchronous under the store's lock like Rename; the TUI reaches it
+// only through its record write queue, behind the parent's own landed Save.
+func (h *sessionHost) Fork(
+	parent session.Meta,
+	sess apogee.Session,
+	transcript []session.Entry,
+	title string,
+) (session.Meta, error) {
+	blob, err := session.EncodeTranscript(transcript)
+	if err != nil {
+		return session.Meta{}, err
+	}
+	now := h.now().UTC()
+	h.mu.Lock()
+	parentID := h.nextID
+	if h.active != nil {
+		parentID = h.active.id
+	}
+	model := h.model
+	h.mu.Unlock()
+	if parentID == "" {
+		parentID = parent.ID
+	}
+	meta := session.Meta{
+		ID:        session.NewID(now),
+		Title:     title,
+		CreatedAt: now,
+		UpdatedAt: now,
+		Workspace: h.workspace,
+		Model:     model,
+		ParentID:  parentID,
+		UserMsgs:  session.UserMessageCount(transcript),
+	}
+	if err := h.store.Save(session.Record{Meta: meta, Transcript: blob, Session: sess}); err != nil {
+		return session.Meta{}, err
+	}
+	return meta, nil
 }
 
 // ActiveID reports the active session's id, or "" before the first Save has minted one (and after

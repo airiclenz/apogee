@@ -517,3 +517,88 @@ func TestSavedRecordHoldsANestedChildsSiblingOnce(t *testing.T) {
 		t.Errorf("the saved record holds %q for run s1, want exactly its one whole answer", got)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The fork write: through the queue, behind the parent's Save, carrying the child
+// ----------------------------------------------------------------------------
+
+// A queued fork is a record write like the others: scheduled while a Save is in flight it WAITS
+// rather than dispatching, reaches the host only after that Save has landed — which is what makes
+// the parent id it stamps the id that Save minted — and its completion carries the child's Meta
+// beside the record the queue assembles from the same inputs. UserMsgs on both is the count Save's
+// own rule gives the same scrollback (every user entry, a delegate's depth-1 prompt included), so
+// the child's first Save after a resume leaves its "N msgs" cell where the fork put it.
+func TestQueuedForkWaitsForTheSaveAndCarriesTheChild(t *testing.T) {
+	host := &fakeSessionHost{}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	seedConversation(&m)
+	m.transcript.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 0},
+		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey"}`)}})
+	m.transcript.addUserAt(1, "s1", domain.UserInput{Text: "the delegate's brief"})
+	prefix := entriesToRecords(m.transcript.entries)
+	wantMsgs := m.transcript.userMessageCount()
+	if wantMsgs != 2 {
+		t.Fatalf("the seeded scrollback counts %d user messages; want 2 (one top-level, one at depth 1)", wantMsgs)
+	}
+	cut := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"cut":true}`)}
+
+	m, turnSave := stepCmd(t, m, turnSnapshotMsg{Sess: domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"turn":1}`)}})
+	if turnSave == nil {
+		t.Fatal("the per-Turn snapshot scheduled no save to be in flight behind")
+	}
+	forkCmd := m.scheduleWrite(recordWrite{kind: writeFork, fork: forkPayload{
+		sess: cut, entries: prefix, title: "forked", parent: session.Meta{ID: host.ActiveID()},
+	}})
+
+	if forkCmd != nil {
+		t.Fatal("a fork scheduled behind an in-flight save dispatched instead of waiting")
+	}
+	if len(m.pendingWrites) != 1 || m.pendingWrites[0].kind != writeFork {
+		t.Fatalf("pending writes = %+v; want the fork alone, behind the save", m.pendingWrites)
+	}
+	m, next := stepCmd(t, m, cmdMsg(turnSave)) // the save lands; the fold pumps the fork
+	done, isDone := cmdMsg(next).(recordWriteDoneMsg)
+	if !isDone || done.write.kind != writeFork {
+		t.Fatalf("the write pumped behind the save answered %T (%+v); want the fork's recordWriteDoneMsg", cmdMsg(next), done.write)
+	}
+	if done.err != nil {
+		t.Fatalf("the fork reported %v", done.err)
+	}
+	saves, forks := host.savedCalls(), host.forkCalls()
+	if len(saves) != 1 || len(forks) != 1 {
+		t.Fatalf("host saw %d saves and %d forks; want one of each", len(saves), len(forks))
+	}
+	if forks[0].parentID != saves[0].id || done.fork.child.ParentID != saves[0].id {
+		t.Errorf("fork stamped parent %q, completion carries %q; want the id the landed save minted, %q",
+			forks[0].parentID, done.fork.child.ParentID, saves[0].id)
+	}
+	if forks[0].title != "forked" || len(forks[0].transcript) != len(prefix) {
+		t.Errorf("the host received title %q and %d entries; want \"forked\" and the %d-entry prefix",
+			forks[0].title, len(forks[0].transcript), len(prefix))
+	}
+	if done.fork.child.UserMsgs != wantMsgs || done.fork.record.Meta.UserMsgs != wantMsgs {
+		t.Errorf("child UserMsgs = %d (record %d); want %d, the count Save's rule gives the same scrollback",
+			done.fork.child.UserMsgs, done.fork.record.Meta.UserMsgs, wantMsgs)
+	}
+	if done.fork.record.Meta.ID != done.fork.child.ID || done.fork.record.RecordVersion != session.RecordVersion {
+		t.Errorf("record = %+v; want the child's Meta under RecordVersion %d", done.fork.record, session.RecordVersion)
+	}
+	if !bytes.Equal(done.fork.record.Session.State, cut.State) {
+		t.Errorf("record Session.State = %s; want the cut state %s", done.fork.record.Session.State, cut.State)
+	}
+	entries, err := session.DecodeTranscript(done.fork.record.Transcript)
+	if err != nil {
+		t.Fatalf("decode the record's transcript: %v", err)
+	}
+	if len(entries) != len(prefix) || session.UserMessageCount(entries) != wantMsgs {
+		t.Errorf("record transcript holds %d entries (%d user); want the %d-entry prefix with %d user entries",
+			len(entries), session.UserMessageCount(entries), len(prefix), wantMsgs)
+	}
+	m = step(t, m, done) // the fold releases the latch and the queue is dry
+	if m.writeBusy || len(m.pendingWrites) != 0 {
+		t.Errorf("after the fork folded: busy=%v pending=%d; want the latch released and nothing waiting", m.writeBusy, len(m.pendingWrites))
+	}
+	if host.ActiveID() != saves[0].id {
+		t.Errorf("the fork moved the active session to %q; want the parent %q still active", host.ActiveID(), saves[0].id)
+	}
+}

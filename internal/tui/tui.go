@@ -95,6 +95,17 @@ type SessionHost interface {
 	Delete(id string) error
 	// Rename sets a stored session's title.
 	Rename(id, title string) error
+	// Fork writes a NEW record — a child of the active session — holding sess (the engine state
+	// cut at the fork point) and transcript (the scrollback prefix through it, in the neutral wire
+	// form transcriptbridge.go projects) under title, and returns the child's browsable metadata.
+	// The host mints the child's id and stamps ParentID from its OWN identity — the id its Saves
+	// target, pre-minted or landed — rather than from parent, whose ID a renderer may read as ""
+	// before the first Save lands (ActiveID); parent is the fallback for a host with no identity
+	// of its own. UserMsgs is counted from transcript by the rule Save's count follows
+	// (session.UserMessageCount). It does NOT activate the child: which record later Saves target
+	// is unchanged until the resume flow Activates it. The renderer reaches Fork only through the
+	// record write queue (sessionsave.go, writeFork), never from a command path directly.
+	Fork(parent session.Meta, sess domain.Session, transcript []session.Entry, title string) (session.Meta, error)
 	// ActiveID reports the active session's ID, or "" before the first Save has minted one.
 	ActiveID() string
 }
