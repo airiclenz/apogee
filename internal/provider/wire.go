@@ -185,6 +185,36 @@ type RawResponse struct {
 	TopCandidates []string
 }
 
+// Wire names the outbound protocol a server entry speaks — which request body the Client
+// encodes, which reply shape it decodes, and which headers carry the API key. It is a
+// per-server fact like EffortDialect (a property of the endpoint, never of the call), set
+// once per Client through WithWire from the entry's `wire:` key. Two wires exist:
+// WireOpenAI is chat-completions, the historical default every existing server entry keeps;
+// WireAnthropic is the Messages API. The zero value is not a wire of its own — WireFor
+// folds it to WireOpenAI, so a config that names no wire is served exactly what it was
+// served before the key existed.
+type Wire string
+
+const (
+	// WireOpenAI is the OpenAI-compatible chat-completions protocol: POST /v1/chat/completions,
+	// `Authorization: Bearer`, SSE `data:` chunks. The default.
+	WireOpenAI Wire = "openai"
+	// WireAnthropic is the Anthropic Messages protocol: POST /v1/messages, `x-api-key`,
+	// event-typed SSE.
+	WireAnthropic Wire = "anthropic"
+)
+
+// WireFor maps a server entry's `wire:` value onto a Wire: "" and "openai" are WireOpenAI,
+// "anthropic" is WireAnthropic. Any other spelling is folded to WireOpenAI as well — the
+// config loader's enum is where a typo is refused, so the Client stays total and never
+// speaks a protocol it does not have.
+func WireFor(name string) Wire {
+	if Wire(name) == WireAnthropic {
+		return WireAnthropic
+	}
+	return WireOpenAI
+}
+
 // WireDirection tags which half of one round-trip a WireRecord holds.
 type WireDirection string
 

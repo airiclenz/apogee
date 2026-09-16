@@ -3,7 +3,6 @@ package provider
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -121,8 +120,12 @@ func upstreamStatusText(code int, body, location string) string {
 	return text
 }
 
-// Client is the OpenAI-compatible chat-completions Responder: it turns a provider.Request
-// into the wire JSON, calls the Upstream over net/http, and assembles the reply. It adds
+// Client is the HTTP Responder: it turns a provider.Request into the wire body of the
+// protocol WithWire selected, calls the Upstream over net/http, and assembles the reply. The
+// protocol-specific half — the body, the headers that carry the key, the reply decode and
+// the SSE parser — is a wireCodec the Client selects once at construction (openaiCodec is the
+// default and the historical behaviour); everything else — retries, timeouts, redirect
+// refusal, fault classification, sanitising, wire capture — is shared by every wire. It adds
 // bounded retries (transient transport faults, 429, and 5xx) and an optional per-attempt
 // timeout on top of the bare TS oracle, which the embeddable core needs and the VS Code
 // extension got from the editor.
@@ -156,6 +159,13 @@ type Client struct {
 	discoveryDeadline time.Duration    // bound for one Discover call; 0 ⇒ the discoveryTimeout default
 	wireObserver      func(WireRecord) // nil ⇒ no wire capture at all (see WithWireObserver)
 
+	// wire names the protocol WithWire selected and codec speaks it. Both are settled once by
+	// NewClient — after every Option has run, so WithWire and WithChatPath compose in any order —
+	// and never change: a server's protocol is a property of the endpoint, and moving to another
+	// endpoint means another Client.
+	wire  Wire
+	codec wireCodec
+
 	// effortDialect is the thinking-effort dialect this server's entry FORCED, and the zero
 	// EffortDialectNone when it forced none — the `auto` that leaves Discover's passive detection
 	// to answer (see WithEffortDialect). Unlike model it is written once by NewClient and never
@@ -164,15 +174,45 @@ type Client struct {
 	effortDialect EffortDialect
 }
 
+// wireCodec is the protocol-specific half of a Client: one implementation per Wire, selected
+// at construction and consulted at exactly five points of a round-trip. The Client owns
+// everything around those points — retries, timeouts, the read caps, fault classification, the
+// wire observer — so a codec is only ever asked to translate: a seam Request onto bytes, bytes
+// off a reply onto the seam types. A codec never touches net/http and never sees the observer.
+type wireCodec interface {
+	// path is the request path joined onto the Client's base URL.
+	path() string
+	// headers are the request headers that carry the API key — none when the key is empty.
+	headers(apiKey string) map[string]string
+	// encode renders a Request (its Model already resolved by the Client) onto the request
+	// body and reports whether that body expressed a thinking effort, the gate on
+	// thinkingEffortHint.
+	encode(req Request) (body []byte, carriesEffort bool, err error)
+	// decodeWhole decodes one non-streamed 200 body. A reply that framed a failure in-band
+	// comes back as the *wireError with a zero RawResponse; a body that cannot be decoded is
+	// the bare error, which the Client wraps.
+	decodeWhole(body io.Reader) (RawResponse, *wireError, error)
+	// parseSSE reads one streamed 200 body and yields Deltas until it ends, however it ends.
+	// carried reports that the request expressed a thinking effort (see encode).
+	parseSSE(body io.Reader, carried bool, yield func(Delta) bool)
+}
+
 // Option configures a Client (functional-options pattern — most fields have a sane
 // default and only advanced callers override them).
 type Option func(*Client)
 
-// WithAPIKey sets the bearer token sent as Authorization on every request.
+// WithAPIKey sets the API key sent on every request, in whichever header the selected wire
+// carries it (`Authorization: Bearer` on the openai wire).
 func WithAPIKey(key string) Option { return func(c *Client) { c.apiKey = key } }
 
-// WithChatPath overrides the chat-completions path (default "/v1/chat/completions").
+// WithChatPath overrides the openai wire's chat-completions path (default
+// "/v1/chat/completions"). It composes with WithWire in either order.
 func WithChatPath(path string) Option { return func(c *Client) { c.chatPath = path } }
+
+// WithWire selects the protocol this Client speaks (default WireOpenAI). A Wire the Client
+// has no codec for is served as WireOpenAI — the Client stays total, and the config loader is
+// where an unknown spelling is refused. Read back through Client.Wire.
+func WithWire(w Wire) Option { return func(c *Client) { c.wire = w } }
 
 // WithHTTPClient injects the underlying *http.Client (for custom transports or test
 // servers). Its Timeout must stay 0 — a client-level timeout would also abort streams;
@@ -271,8 +311,20 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 	for _, opt := range opts {
 		opt(c)
 	}
+	c.wire, c.codec = c.selectCodec()
 	return c
 }
+
+// selectCodec resolves the Wire the options asked for — every spelling the Client has no
+// codec for folds to WireOpenAI — and builds that wire's codec. It runs once, after the
+// options, so the codec sees the final chat path.
+func (c *Client) selectCodec() (Wire, wireCodec) {
+	return WireOpenAI, &openaiCodec{client: c, chatPath: c.chatPath}
+}
+
+// Wire reports the protocol this Client speaks — the WithWire selection after the unknown
+// fold, so it is always a Wire the Client has a codec for.
+func (c *Client) Wire() Wire { return c.wire }
 
 var (
 	_ Responder = (*Client)(nil)
@@ -282,7 +334,7 @@ var (
 // SetModel rebinds the model id this Client sends on the wire — and hints Discover with —
 // for every subsequent request. It exists because the Upstream's loaded model can change
 // under a running session (the heartbeat observes the switch; Agent.Rebind applies it, ADR
-// 0024), and the configured model wins over the Request's in buildBody, so rebinding the
+// 0024), and the configured model wins over the Request's in encode, so rebinding the
 // engine's Config alone would leave the old id on the wire.
 //
 // It is safe to call from another goroutine while requests are in flight: the change lands on
@@ -333,8 +385,7 @@ func (c *Client) Close() error {
 // decode rather than exhausting memory.
 func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) {
 	req.Stream = false
-	wire := c.buildBody(req)
-	body, err := json.Marshal(wire)
+	body, carriedEffort, err := c.encode(req)
 	if err != nil {
 		return RawResponse{}, fmt.Errorf("apogee: marshal request: %w", err)
 	}
@@ -347,20 +398,30 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return RawResponse{}, c.statusError(resp, wire.carriesEffort())
+		return RawResponse{}, c.statusError(resp, carriedEffort)
 	}
 
-	var decoded chatCompletionResponse
-	if err := json.NewDecoder(io.LimitReader(resp.Body, maxResponseBodyBytes)).Decode(&decoded); err != nil {
+	reply, werr, err := c.codec.decodeWhole(io.LimitReader(resp.Body, maxResponseBodyBytes))
+	if err != nil {
 		return RawResponse{}, fmt.Errorf("apogee: decode response: %w", err)
 	}
-	if decoded.Error != nil {
-		// An aggregator can answer HTTP 200 and put the provider's failure in the body. It must
-		// not fall through to toRawResponse, which maps such a reply's zero choices to a silent
-		// zero RawResponse — the empty-reply masquerade this guard exists to stop.
-		return RawResponse{}, c.inBandError(*decoded.Error, wire.carriesEffort())
+	if werr != nil {
+		// A failure the server framed inside an HTTP 200 — the empty-reply masquerade the codec
+		// refuses to map onto a zero RawResponse — is rendered exactly like a status would be.
+		return RawResponse{}, c.inBandError(*werr, carriedEffort)
 	}
-	return decoded.toRawResponse(), nil
+	return reply, nil
+}
+
+// encode renders req onto the selected wire. The configured model wins over the Request's
+// on every wire — SetModel rebinds it under a running session — so it is resolved here, once,
+// before the codec sees the request. The bool reports whether the body expressed a thinking
+// effort; it gates thinkingEffortHint on the reply's fault.
+func (c *Client) encode(req Request) (body []byte, carriedEffort bool, err error) {
+	if model := c.activeModel(); model != "" {
+		req.Model = model
+	}
+	return c.codec.encode(req)
 }
 
 // send issues the POST with bounded retries and returns the live response together with
@@ -374,7 +435,7 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 // touching the caller's context — but it must outlive the body read, so it rides the
 // returned cancel rather than a local defer.
 func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Duration) (*http.Response, context.CancelFunc, error) {
-	url := c.baseURL + c.chatPath
+	url := c.baseURL + c.codec.path()
 
 	// One request record per call, not per attempt: every retry posts these same bytes, and
 	// this is the last point at which they are still exactly what goes on the wire.
@@ -542,128 +603,12 @@ func faultError(f fault, text, location string) error {
 	return fmt.Errorf("%w %s", err, thinkingEffortHint)
 }
 
-// buildBody projects a Request onto the OpenAI chat-completions JSON body, faithfully to
-// the TS oracle: the configured model wins over the request's, sampling knobs are
-// included only when set, stream_options.include_usage rides every streamed request, and
-// tools (when present) switch message formatting into native-tool mode. The logprobs pair is
-// added only when the caller asked for it (`apogee probe model`), and the thinking-effort keys
-// only when a caller named an effort (applyEffort picks which one the bound server reads), so
-// the loop's bytes are untouched.
-func (c *Client) buildBody(req Request) chatRequest {
-	hasTools := len(req.Tools) > 0
-
-	body := chatRequest{Stream: req.Stream}
-	body.Messages = make([]chatMessage, 0, len(req.Messages))
-	for _, m := range req.Messages {
-		body.Messages = append(body.Messages, formatMessage(m, hasTools))
-	}
-
-	if req.Stream {
-		body.StreamOptions = &streamOptions{IncludeUsage: true}
-	}
-
-	model := c.activeModel()
-	if model == "" {
-		model = req.Model
-	}
-	body.Model = model
-
-	s := req.Sampling
-	body.Temperature = s.Temperature
-	body.TopP = s.TopP
-	body.TopK = s.TopK
-	body.RepeatPenalty = s.RepeatPenalty
-	body.MaxTokens = s.MaxTokens
-
-	if req.LogProbs {
-		// Asked for only when the caller wants the candidate distribution, so an ordinary
-		// loop request stays byte-identical on the wire (see chatRequest's pointer fields).
-		on, n := true, topLogProbsCount
-		body.LogProbs = &on
-		body.TopLogProbs = &n
-	}
-
-	applyEffort(&body, req.EffortDialect, req.ThinkingEffort)
-
-	if hasTools {
-		body.Tools = make([]chatTool, 0, len(req.Tools))
-		for _, t := range req.Tools {
-			body.Tools = append(body.Tools, chatTool{
-				Type:     "function",
-				Function: chatToolFunction(t),
-			})
-		}
-	}
-	return body
-}
-
-// applyEffort expresses a request's thinking-effort intent in the dialect the bound server
-// reads, one canonical mapping per sighted dialect (ADR 0050, amended by ADR 0060):
-//
-//   - kwargs (llama.cpp, and the zero dialect): `chat_template_kwargs` is forwarded into the
-//     chat template, where the Qwen-family templates read `enable_thinking` to pre-close the
-//     reasoning block and the newer ones read a `reasoning_effort` ENTRY for how much of it to
-//     produce. Template-dependent, and a strict OpenAI-compatible server may reject the unknown
-//     field, so a caller must not rely on it alone.
-//   - reasoning (OpenRouter): a top-level `reasoning` object — a level, or `enabled: false` to
-//     switch thinking off, which is what the "off" rung means in that dialect.
-//   - openai (OpenAI, Groq): a top-level `reasoning_effort` FIELD — the same word as the kwargs
-//     entry above, in a different place on the wire. Those models cannot disable reasoning at
-//     all, so the "off" rung maps to their documented floor, "minimal".
-//   - off (an entry's `effort-dialect: off`): nothing is emitted in any shape. A server that
-//     errors on a kwarg it does not know is told nothing at all, which is the only mapping that
-//     cannot make it fail — and the one case where a stated effort is deliberately dropped.
-//
-// Nothing is emitted for an absent ("") or unrecognised effort: the config loader's enum
-// already rejects typos, the Client stays total, and a caller that asks for nothing puts
-// byte-identical bytes on the wire. Levels the bound template does not know pass through
-// verbatim — the server rejecting one is the enriched turn error, not this function's business.
-func applyEffort(body *chatRequest, dialect EffortDialect, effort Effort) {
-	if !isNamedEffort(effort) {
-		return
-	}
-
-	switch dialect {
-	case EffortDialectOff:
-		return
-	case EffortDialectReasoning:
-		if effort == EffortOff || effort == EffortNone {
-			enabled := false
-			body.Reasoning = &reasoningField{Enabled: &enabled}
-			return
-		}
-		body.Reasoning = &reasoningField{Effort: string(effort)}
-	case EffortDialectOpenAI:
-		level := string(effort)
-		if effort == EffortOff || effort == EffortNone {
-			level = string(EffortMinimal)
-		}
-		body.ReasoningEffort = &level
-	case EffortDialectNone, EffortDialectKwargs:
-		if effort == EffortOff {
-			body.ChatTemplateKwargs = map[string]any{"enable_thinking": false}
-			return
-		}
-		body.ChatTemplateKwargs = map[string]any{"reasoning_effort": string(effort)}
-	}
-}
-
-// isNamedEffort reports whether e is one of the vocabulary's named levels — "" (absence) and
-// anything unrecognised are not, and emit nothing on every dialect.
-func isNamedEffort(e Effort) bool {
-	switch e {
-	case EffortOff, EffortNone, EffortMinimal, EffortLow,
-		EffortMedium, EffortHigh, EffortXHigh, EffortMax:
-		return true
-	default:
-		return false
-	}
-}
-
-// setAuth adds the bearer header when an API key is configured.
+// setAuth adds the headers that carry the API key, in the selected wire's spelling — the one
+// applier every request goes through, completions and discovery alike. Nothing is added when
+// no key is configured.
 func (c *Client) setAuth(h http.Header) {
-	if c.apiKey != "" {
-		h.Set("Authorization", "Bearer "+c.apiKey)
+	for name, value := range c.codec.headers(c.apiKey) {
+		h.Set(name, value)
 	}
 }
 
@@ -687,30 +632,6 @@ func (c *Client) observeWire(direction WireDirection, payload []byte) {
 		return
 	}
 	c.wireObserver(WireRecord{Direction: direction, Payload: payload})
-}
-
-// formatMessage renders one seam Message onto the wire schema. Without native tools a
-// tool-result degrades to a user message (the model never sees a bare "tool" role it was
-// not told to produce); with native tools the tool linkage is preserved. content is null
-// when an assistant message carries only tool calls (OpenAI's convention).
-func formatMessage(m Message, hasTools bool) chatMessage {
-	if !hasTools && m.Role == "tool" {
-		content := m.Content
-		return chatMessage{Role: "user", Content: &content}
-	}
-
-	out := chatMessage{Role: m.Role}
-	if len(m.ToolCalls) > 0 && m.Content == "" {
-		out.Content = nil // null: tool-call-only assistant turn
-	} else {
-		content := m.Content
-		out.Content = &content
-	}
-	if hasTools {
-		out.ToolCallID = m.ToolCallID
-		out.ToolCalls = m.ToolCalls
-	}
-	return out
 }
 
 // isRetryableStatus reports whether an HTTP status warrants a retry: 429 (rate-limited)

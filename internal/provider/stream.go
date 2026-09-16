@@ -2,8 +2,8 @@ package provider
 
 import (
 	"bufio"
+	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -88,8 +88,7 @@ type Delta struct {
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
-		wire := c.buildBody(req)
-		body, err := json.Marshal(wire)
+		body, carriedEffort, err := c.encode(req)
 		if err != nil {
 			yield(Delta{Kind: DeltaError, Err: fmt.Sprintf("apogee: marshal request: %v", err)})
 			return
@@ -106,11 +105,64 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
-			yield(c.statusDelta(resp, wire.carriesEffort()))
+			yield(c.statusDelta(resp, carriedEffort))
 			return
 		}
-		c.parseSSE(resp.Body, wire.carriesEffort(), yield)
+
+		// Wire capture, when armed: tee the body as it is read and hand the observer one record
+		// on whichever return ends the parse — [DONE], an in-band error, a read fault, a consumer
+		// that broke, or the server closing. The codec never sees the observer: the tee sits in
+		// front of it, so the capture is the same whichever wire is parsing. Unarmed, not a byte
+		// is kept.
+		stream := io.Reader(resp.Body)
+		if c.wireObserver != nil {
+			var raw bytes.Buffer
+			stream = io.TeeReader(resp.Body, &raw)
+			defer func() { c.observeWire(WireResponse, c.streamCapture(raw.Bytes())) }()
+		}
+		c.codec.parseSSE(stream, carriedEffort, yield)
 	}
+}
+
+// streamCapture is what a WireResponse record holds for a stream: on the openai wire the
+// `data:` payloads joined by newlines, the shape WireRecord documents and the Inspector reads
+// (the SSE framing is not the protocol, the payloads are); on any other wire the body as
+// received, because its event-typed framing IS the protocol.
+func (c *Client) streamCapture(raw []byte) []byte {
+	if c.wire != WireOpenAI {
+		return raw
+	}
+	return joinDataPayloads(raw)
+}
+
+// joinDataPayloads extracts the `data:` payloads of an SSE body under exactly the line rule
+// the openai parser reads by — the same scanner, the same trim, the same prefix, and the same
+// stop at the [DONE] terminator (included: it is the protocol) — so the record holds every
+// payload the parser saw and nothing it skipped or never reached.
+func joinDataPayloads(raw []byte) []byte {
+	scanner := newSSEScanner(bytes.NewReader(raw))
+	var payloads []string
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if !strings.HasPrefix(line, "data: ") {
+			continue
+		}
+		data := strings.TrimPrefix(line, "data: ")
+		payloads = append(payloads, data)
+		if data == sseDone {
+			break
+		}
+	}
+	return []byte(strings.Join(payloads, "\n"))
+}
+
+// newSSEScanner is the line scanner every SSE read goes through: a 64 KiB initial buffer that
+// may grow to hold one tool call's whole argument payload plus framing. One constructor, so
+// the parser and the capture split lines under the same bound.
+func newSSEScanner(body io.Reader) *bufio.Scanner {
+	scanner := bufio.NewScanner(body)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxToolCallBytes+64*1024)
+	return scanner
 }
 
 // statusDelta renders a non-2xx streamed response as a terminal Delta, mirroring statusError
@@ -159,167 +211,6 @@ func (c *Client) inBandErrorDelta(werr wireError, raw string, carriedEffort bool
 		text += " " + thinkingEffortHint
 	}
 	return Delta{Kind: DeltaError, Err: text, Retryable: f.retryable}
-}
-
-// parseSSE reads the SSE body line by line and yields Deltas. It accumulates every tool
-// call of the reply across their argument fragments — addressed by wire index, id, or
-// last-addressed, and all emitted at the end, never mid-stream — skips a malformed event
-// rather than failing the stream (counting it, so the terminal Delta reports how many were
-// skipped and a stream that carried nothing else faults on the count), caps accumulated
-// tool-call arguments, caps the total content plus reasoning text at maxReplyTextBytes, and
-// emits a terminal Done with the last finish reason and any usage chunk — a port of the
-// oracle's parseSSEStream. Returning false from yield (consumer broke) stops cleanly.
-// carriedEffort is carried through from the request Stream built — the in-band error
-// delta needs it, and this is the only seam between that request and the error it explains.
-func (c *Client) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) bool) {
-	scanner := bufio.NewScanner(body)
-	scanner.Buffer(make([]byte, 0, 64*1024), maxToolCallBytes+64*1024)
-
-	// Wire capture, when armed: keep each data: payload and hand the joined stream to the
-	// observer once, on whichever return ends this function — [DONE], an in-band error, a
-	// read fault, a consumer that broke, or the server closing. Unarmed, not a byte is kept.
-	capturing := c.wireObserver != nil
-	var captured []string
-	if capturing {
-		defer func() { c.observeWire(WireResponse, []byte(strings.Join(captured, "\n"))) }()
-	}
-
-	var open openToolCalls
-	var pendingFinish string
-	var pendingUsage *Usage
-	// The id the server put on the reply's chunks: the first one that names a model settles it
-	// (every chunk of a reply repeats the same id), and it rides the terminal Done.
-	var servedModel string
-
-	// Running total of the content and reasoning bytes yielded so far. Tool-call bytes are
-	// not summed here — openToolCalls carries its own maxToolCallBytes cap, on the sum
-	// across every call it holds open.
-	textBytes := 0
-	// How many data: payloads failed to decode. Each is skipped so one bad chunk cannot kill
-	// a stream that is otherwise fine, but never silently: the count rides the terminal Delta,
-	// and a stream that yielded nothing else is faulted on it (finish below).
-	malformed := 0
-
-	// finish ends the stream on its success path: every accumulated tool call, then the
-	// terminal Done. Both ends of a stream — the explicit [DONE] and the server closing the
-	// connection — come through here, so the malformed-only fault is judged once: a stream
-	// that yielded no text, no tool call, and skipped at least one chunk carried nothing the
-	// consumer could commit, and an empty Done would let it pose as a finished empty reply.
-	finish := func(reason string, usage *Usage) {
-		if textBytes == 0 && len(open.entries) == 0 && malformed > 0 {
-			yield(Delta{
-				Kind:            DeltaError,
-				Err:             fmt.Sprintf(malformedOnlyErrFmt, malformed),
-				MalformedChunks: malformed,
-			})
-			return
-		}
-		if !open.flush(yield) {
-			return
-		}
-		yield(Delta{Kind: DeltaDone, FinishReason: reason, Usage: usage, Model: servedModel, MalformedChunks: malformed})
-	}
-
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		if capturing {
-			captured = append(captured, data)
-		}
-
-		if data == "[DONE]" {
-			reason := pendingFinish
-			if reason == "" {
-				reason = "stop"
-			}
-			finish(reason, pendingUsage)
-			return
-		}
-
-		var chunk sseChunk
-		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
-			malformed++ // skip the event, as the oracle did — but on the record
-			continue
-		}
-		if chunk.Error != nil {
-			// An aggregator can answer HTTP 200 and put the provider's failure in-band. It is
-			// terminal, and it must not fall through to the choice-less `continue` below — that
-			// path ends at the implicit Done and commits a silent empty reply. Every tool call
-			// accumulated so far is dropped with it — none has been emitted, because calls are
-			// held until the stream ends: the reply is faulted, not partly usable.
-			fault := c.inBandErrorDelta(*chunk.Error, data, carriedEffort)
-			fault.MalformedChunks = malformed
-			yield(fault)
-			return
-		}
-		if servedModel == "" {
-			servedModel = chunk.Model
-		}
-		if chunk.Usage != nil {
-			usage := chunk.Usage.usage()
-			pendingUsage = &usage
-		}
-		if len(chunk.Choices) == 0 {
-			continue
-		}
-
-		choice := chunk.Choices[0]
-		// The cap counts the CHOSEN reasoning field, never both: a proxy that duplicates the
-		// channel into both spellings would otherwise be capped at half the real limit.
-		thinking := choice.Delta.thinking()
-		textBytes += len(choice.Delta.Content) + len(thinking)
-		if textBytes > maxReplyTextBytes {
-			// Terminal and NOT Retryable: the same request re-streamed would overflow again.
-			// Returning here runs the deferred body close and wire-capture flush, as on every
-			// other terminal path; the crossing chunk is never yielded, so what the consumer
-			// received stays at or under the cap.
-			yield(Delta{
-				Kind: DeltaError,
-				Err: fmt.Sprintf(
-					"apogee: streamed reply exceeded the %d MiB text limit",
-					maxReplyTextBytes>>20,
-				),
-			})
-			return
-		}
-		if thinking != "" && !yield(Delta{Kind: DeltaThinking, Thinking: thinking}) {
-			return
-		}
-		if choice.Delta.Content != "" && !yield(Delta{Kind: DeltaContent, Content: choice.Delta.Content}) {
-			return
-		}
-		for _, frag := range choice.Delta.ToolCalls {
-			if open.fold(frag) {
-				yield(Delta{Kind: DeltaError, Err: "apogee: tool call arguments exceeded size limit"})
-				return
-			}
-		}
-		if choice.FinishReason != "" {
-			pendingFinish = choice.FinishReason
-		}
-	}
-
-	if err := scanner.Err(); err != nil {
-		// A read that failed before the terminator. Retryable when the failure is the
-		// connection's, not the reply's: a mid-stream EOF or a network timeout is the class an
-		// HTTP-layer retry would have covered had it struck before the first byte, so the loop
-		// gets to re-stream it exactly like an in-band 502 (isTransientReadError).
-		yield(Delta{
-			Kind:            DeltaError,
-			Err:             fmt.Sprintf("apogee: read stream: %v", err) + malformedChunksNote(malformed),
-			Retryable:       isTransientReadError(err),
-			MalformedChunks: malformed,
-		})
-		return
-	}
-
-	// The stream ended without an explicit [DONE] (server closed the connection): flush
-	// every accumulated tool call and emit a terminal Done, as the oracle does. The usage
-	// chunk is not carried on this path, as it never was.
-	finish("stop", nil)
 }
 
 // malformedOnlyErrFmt is the fault for a stream that decoded nothing the consumer could

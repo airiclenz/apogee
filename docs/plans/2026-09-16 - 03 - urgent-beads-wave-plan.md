@@ -188,7 +188,14 @@ NOTES (2026-09-16): CONTEXT.md's Upstream entry cross-references the Wire term i
 
 **Commit:** `feat(config): per-server wire: key selects the outbound protocol family (ADR 0078)`
 
-## 8. Provider codec seam — the OpenAI wire behind `wireCodec` (apogee-6fp)
+## 8. Provider codec seam — the OpenAI wire behind `wireCodec` (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — internal/agent/rebind.go: made necessary by the configured-model-wins rule moving from `buildBody` to `Client.encode` (the comment named the old site).
+NOTES (2026-09-16): consequential edit — internal/title/title.go: made necessary by the same move (two comments named `buildBody` as the model-wins site).
+NOTES (2026-09-16): the configured-model-wins rule is applied in the shared `Client.encode` before the codec's `encode(Request)` runs, not inside `buildBody` — every wire needs it and the plan's `encode(Request)` signature carries no model; `client_test.go:761`'s comment still says "in buildBody" and was left, since the acceptance forbids editing existing provider test files.
+NOTES (2026-09-16): `openaiCodec` holds its `*Client` (the plan's "receive the *Client" option) for `sanitize`/`inBandErrorDelta`; `inBandErrorDelta` stays a shared Client renderer in stream.go for the next codec's fault arms; the openai SSE shapes (`sseChunk`, `openToolCalls`) stay in stream.go — the item names only `parseSSE` for the move.
+NOTES (2026-09-16): the capture tee sees the scanner's read-ahead, so on an early consumer break the record now holds every `data:` payload received before the break rather than only the ones parsed (`TestWireObserver_StreamRecordsPayloadOnEarlyBreak` asserts a prefix and stays green); the join stops at `[DONE]` exactly as the parser does.
+NOTES (2026-09-16): two guard tests beyond the three named landed in the same two new files — `TestClientChatPathSurvivesWireOption` (WithChatPath composes with WithWire in any order) and `TestSetAuthAppliesTheCodecHeaders` (the shared applier, discovery included).
 
 **What:** Structural, byte-identical. In `internal/provider` introduce exported `type Wire string` (`WireOpenAI = "openai"`, `WireAnthropic = "anthropic"`, `WireFor(name string) Wire` mapping ""→openai) and option `WithWire(Wire)`; inside `Client` an unexported `wireCodec` interface — `path() string`, `headers(apiKey string) map[string]string`, `encode(Request) (body []byte, carriesEffort bool, err error)`, `decodeWhole(io.Reader) (RawResponse, *wireError, error)`, `parseSSE(io.Reader, carried bool, yield func(Delta) bool)`. Move `buildBody`/`formatMessage`/`applyEffort`/`chatCompletionResponse` decode/`parseSSE` into `openaiCodec` (`internal/provider/wire_openai.go`); `send`/`do`/retry/`sanitize`/`observeWire`/`classify` stay shared; `setAuth` becomes codec headers. `WithChatPath` keeps working by overriding the openai codec's path. Unknown `Wire` in `WithWire` → openai. Binding standards: one deep module per codec; no dialect branches outside the codec.
 

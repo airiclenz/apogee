@@ -7,9 +7,10 @@ import (
 
 // This file holds the on-the-wire JSON structs — the literal OpenAI chat-completions
 // request/response schema — kept separate from the loop-facing seam types in wire.go.
-// buildBody maps a seam Request onto chatRequest; toRawResponse maps a decoded
-// chatCompletionResponse back onto the seam RawResponse. Keeping the two layers apart is
-// what lets the seam stay Go-idiomatic while the JSON stays exactly as the server expects.
+// The openai codec (wire_openai.go) maps a seam Request onto chatRequest in buildBody;
+// toRawResponse maps a decoded chatCompletionResponse back onto the seam RawResponse.
+// Keeping the two layers apart is what lets the seam stay Go-idiomatic while the JSON stays
+// exactly as the server expects.
 
 // chatRequest is the request body. Sampling pointers and tools are omitted when unset so
 // the server applies its own defaults; content/messages/stream are always present.

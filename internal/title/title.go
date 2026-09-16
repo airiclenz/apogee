@@ -199,7 +199,7 @@ var windowHeader = mustPrompt("window-header.txt")
 // model, never title text; they are here so a bare "fix it" still earns a title that reads
 // sensibly, not so they can be echoed back into it.
 //
-// Model is deliberately left empty: the Client's own configured model wins in buildBody, which
+// Model is deliberately left empty: the Client's own configured model wins in Client.encode, which
 // is what binds the naming call to the session's current server and model (Ratified design 3).
 // The request carries no tools and does not stream — it is one round-trip for one line of text.
 // It also asks for no reasoning pass: an eight-word title needs no chain-of-thought, while a
@@ -233,7 +233,7 @@ func Prompt(prompts []string, workspaceBase string, date time.Time, dialect prov
 //
 // Everything else it shares with Prompt deliberately, so the two naming calls cannot drift into
 // different sampling: the same temperature and token backstop, no tools, no streaming, no model
-// (the Client's own configured one wins in buildBody — which is what binds this call to the CHILD's
+// (the Client's own configured one wins in Client.encode — which is what binds this call to the CHILD's
 // Upstream, ADR 0068 decision 2), and the same request for no reasoning pass at all, stated in
 // whichever dialect the caller names. A two-to-four-word name needs no chain-of-thought even more
 // plainly than an eight-word title does.

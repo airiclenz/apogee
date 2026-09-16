@@ -219,7 +219,7 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 
 	// Commit — from here on nothing can fail.
 	a.cfg = next
-	// The provider client's configured model WINS over the request's (provider.buildBody), so the
+	// The provider client's configured model WINS over the request's (provider.Client.encode), so the
 	// wire model moves only if the Responder is told. It is an optional interface rather than a
 	// widening of the Responder seam: a fake responder in a test simply does not implement it, and
 	// a Responder with no notion of a model id has nothing to rebind.
