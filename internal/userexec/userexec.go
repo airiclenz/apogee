@@ -120,7 +120,7 @@ func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
 		return Result{}, errors.New("no command to run")
 	}
-	program, err := resolveProgram(argv[0], opts.WorkspaceRoot)
+	program, err := ResolveProgram(argv[0], opts.WorkspaceRoot)
 	if err != nil {
 		return Result{}, err
 	}
@@ -167,17 +167,22 @@ func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 	return result, fmt.Errorf("could not run %s: %w", argv[0], runErr)
 }
 
-// resolveProgram turns argv[0] into the absolute program apogee will execute, or the refusal it
-// earns.
+// ResolveProgram turns argv[0] into the absolute program apogee will execute, or the refusal it
+// earns: `refusing to run %q: …` wrapping security.ErrExecFromWritablePath when it resolves inside
+// workspaceRoot (an empty root fences nothing), or `%q is not on this machine's PATH` when nothing
+// answers to the name. It is the judge Run applies before it executes anything, exported so a
+// caller that has to pass the SAME verdict without running — internal/config's key resolver,
+// judging a memoised `api-key-cmd:` against the workspace a later use names — asks the one fence
+// rather than a second spelling of it.
 //
 // An argv[0] carrying a path separator is made absolute FIRST, against apogee's own working
 // directory: that is exactly what exec.Command does with such a name — it skips PATH and hands the
 // relative path to the child, which resolves it against the same directory — so making it absolute
 // here changes nothing about which file runs and everything about whether the fence can see it. A
 // bare name has no such meaning and goes through the PATH lookup unchanged. An absolute form that
-// cannot be derived is left relative on purpose: ResolveProgram refuses a relative program path,
-// which is the same answer security.RefuseExecFromWritablePath gives for that case.
-func resolveProgram(argv0, workspaceRoot string) (string, error) {
+// cannot be derived is left relative on purpose: security.ResolveProgram refuses a relative program
+// path, which is the same answer security.RefuseExecFromWritablePath gives for that case.
+func ResolveProgram(argv0, workspaceRoot string) (string, error) {
 	program := argv0
 	if filepath.Base(program) != program {
 		if absolute, err := filepath.Abs(program); err == nil {

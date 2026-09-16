@@ -147,13 +147,19 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// The resolver is hoisted rather than built inside the branch because a second thing asks it: the
 	// Sub-agent server's entry resolves its OWN key through the same one (resolveFiringRouting), and
 	// two resolvers would run one `api-key-cmd:` twice where the two entries name the same source.
+	//
+	// The exec fence is judged against THIS Firing's workspace, whatever root the resolver was built
+	// with: the daemon holds one resolver across every Schedule it fires, each in the workspace its
+	// entry names, so the root that fences an `api-key-cmd:` is a fact of the Firing, not of the
+	// resolver — and a key the same command answered for another workspace is refused here all the
+	// same when this one holds the program.
 	keys := in.keys
 	if keys == nil {
 		keys = config.NewKeyResolver(in.roots.workspace)
 	}
 	apiKey := in.apiKey
 	if apiKey == "" {
-		resolved, err := keys.Resolve(in.entry)
+		resolved, err := keys.ResolveWithin(in.entry, in.roots.workspace)
 		if err != nil {
 			return apogee.Config{}, firingRouting{}, nil, err
 		}
@@ -500,8 +506,9 @@ func resolveFiringRouting(
 	// human's and they do not move when the box does (ADR 0069, delegationSeatOf).
 	seat := delegationSeatOf(server)
 
-	// That entry's OWN key source — never the run's, which authenticates against another server.
-	apiKey, err := keys.Resolve(entry)
+	// That entry's OWN key source — never the run's, which authenticates against another server —
+	// fenced against this Firing's workspace the way the run's own is (firingConfig).
+	apiKey, err := keys.ResolveWithin(entry, in.roots.workspace)
 	if err != nil {
 		return firingRouting{seat: seat}, delegationStateNotice(name, nil, "", err)
 	}

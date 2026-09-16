@@ -133,10 +133,11 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, error)
 
 	return &daemonWiring{
 		opts: opts,
-		// The key resolver is built with an EMPTY workspace root, so its `api-key-cmd:` exec
-		// fence refuses nothing: the daemon's workspace is the SCHEDULE ENTRY's, minted per
-		// Firing (wire_firing.go passes its own roots.workspace), so there is no one root the
-		// daemon itself could measure an api-key command against.
+		// The key resolver is built ROOTLESS because the `api-key-cmd:` exec fence is judged per
+		// Firing, against the Firing's workspace: the daemon's workspace is the SCHEDULE ENTRY's,
+		// minted per Firing, so there is no one root the daemon itself could measure an api-key
+		// command against — firingConfig names the Firing's own roots.workspace on every
+		// resolution (KeyResolver.ResolveWithin), memoised keys included.
 		keys:      config.NewKeyResolver(""),
 		confiner:  newConfiner(),
 		store:     store,

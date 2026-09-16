@@ -212,7 +212,10 @@ NOTES (2026-09-16): `internal/config/defaults_test.go` dropped its two template-
 
 commit: `feat(config): remember-model and ui.stall-after default to the values the starter template ships`
 
-## 11. The daemon fences an `api-key-cmd:` against the Firing's workspace (apogee-add)
+## 11. The daemon fences an `api-key-cmd:` against the Firing's workspace (apogee-add) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the fence pre-check refuses on `security.ErrExecFromWritablePath` only; a program merely missing from PATH is left to the run (a memoised key stays the key the command once printed, a fresh use reports the missing program in the run's own words). `keyCommandArgv` is split out of `runKeyCommand` so the pre-check and the run parse the line identically.
+NOTES (2026-09-16): `plantKeyCommand` (the cmd/apogee twin) and `keyCommandAt` live in `cmd/apogee/daemonfire_test.go` rather than beside `keyCommandFor` in `keysource_test.go`, keeping the edit inside the item's Files list.
 
 **What:** Fix apogee-add under the ratified call. `internal/config/keyresolve.go`: add `func (r *KeyResolver) ResolveWithin(e ServerEntry, workspaceRoot string) (string, error)` — for a command source it judges the program against `workspaceRoot` with the same fence `runKeyCommand` applies (`security.ResolveProgram` through `userexec`, refusal sentence unchanged: `apogee: server %q: api-key-cmd: refusing to run %q: …resolves inside…`) BEFORE consulting or filling the memo, so a memoised key is refused too when this root fences it; `Resolve(e)` becomes `ResolveWithin(e, r.workspaceRoot)`. `cmd/apogee/wire_firing.go` `firingConfig`: `keys.ResolveWithin(in.entry, in.roots.workspace)`. `cmd/apogee/daemonfire.go`: the `newDaemonWiring` comment now says the resolver is rootless because the fence is judged per Firing. Producers/consumers of the fence root: `NewKeyResolver` callers in `wire_boot.go`, `probe.go`, `probemodel.go`, `daemonfire.go` — unchanged.
 

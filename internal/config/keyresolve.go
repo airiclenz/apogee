@@ -36,6 +36,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -43,6 +44,7 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/userexec"
 	"github.com/google/shlex"
 )
@@ -129,9 +131,11 @@ type KeyResolver struct {
 	cache map[string]*keyResolution
 
 	// workspaceRoot is the fence an `api-key-cmd:` program is measured against before it runs (see
-	// runKeyCommand). It is the resolved workspace root of the Driver that built this resolver, and
-	// EMPTY on the two commands that have no workspace to name — `probe model` and `daemon` — where
-	// internal/userexec's empty-fence rule then refuses nothing.
+	// runKeyCommand) when a caller does not name one of its own (Resolve). It is the resolved
+	// workspace root of the Driver that built this resolver, and EMPTY where that Driver has no one
+	// workspace to name: `probe model`, which reads no workspace and so refuses nothing
+	// (internal/userexec's empty-fence rule), and the daemon, whose workspace is the Firing's — there
+	// the fence is judged per Firing against the Firing's workspace, through ResolveWithin.
 	workspaceRoot string
 
 	// commandTimeout overrides keyCommandTimeout for one resolver. It exists for tests, which
@@ -142,7 +146,8 @@ type KeyResolver struct {
 
 // NewKeyResolver returns an empty resolver fenced to workspaceRoot: an `api-key-cmd:` whose program
 // resolves inside that root is refused before it runs. An empty root fences nothing, which is what
-// a command holding no workspace passes.
+// a command holding no workspace passes — and what a Driver whose workspace is decided per use
+// passes, judging each use through ResolveWithin instead.
 func NewKeyResolver(workspaceRoot string) *KeyResolver {
 	return &KeyResolver{workspaceRoot: workspaceRoot}
 }
@@ -163,13 +168,35 @@ func NewKeyResolver(workspaceRoot string) *KeyResolver {
 // uses share the single run. A FAILURE is deliberately not cached — a keychain that was locked, a
 // GUI prompt the user dismissed, an agent that had not started yet are all fixable without editing
 // the config, so the next use asks again rather than holding the session to the first bad minute.
+//
+// An `api-key-cmd:` is fenced against the resolver's own workspace root; ResolveWithin is the same
+// resolution judged against a root the caller names.
 func (r *KeyResolver) Resolve(e ServerEntry) (string, error) {
+	return r.ResolveWithin(e, r.workspaceRoot)
+}
+
+// ResolveWithin is Resolve with the exec fence judged against workspaceRoot instead of the root the
+// resolver was built with: an `api-key-cmd:` whose program resolves inside that root is refused,
+// with the refusal runKeyCommand would word, BEFORE the memo is consulted or filled — so a key the
+// same command already answered from outside one root is refused all the same when a later use
+// names a root that fences it, and nothing is remembered from the refused use. An empty root fences
+// nothing.
+//
+// It exists for the Driver whose workspace is decided per use rather than per session: the daemon
+// holds one resolver across every Schedule it fires, each Firing in the workspace its entry names,
+// and the fence has to be that Firing's workspace — a program the model may have written into the
+// tree this Firing runs in — rather than any one root the daemon could have been built with.
+func (r *KeyResolver) ResolveWithin(e ServerEntry, workspaceRoot string) (string, error) {
 	source := keySourceOf(e)
 	switch source.kind() {
 	case keySourceNone:
 		return "", nil
 	case keySourceLiteral:
 		return source.literal, nil
+	case keySourceCommand:
+		if err := fenceKeyCommand(e.Name, source.command, workspaceRoot); err != nil {
+			return "", err
+		}
 	}
 
 	resolution, mine := r.claim(e.Name, source)
@@ -177,7 +204,7 @@ func (r *KeyResolver) Resolve(e ServerEntry) (string, error) {
 		<-resolution.done
 		return resolution.key, resolution.err
 	}
-	resolution.key, resolution.err = resolveKeySource(e.Name, source, r.workspaceRoot, r.timeout())
+	resolution.key, resolution.err = resolveKeySource(e.Name, source, workspaceRoot, r.timeout())
 	if resolution.err != nil {
 		r.forget(e.Name, resolution)
 	}
@@ -309,23 +336,17 @@ func APIKeyEnvNames(opts Options) []string {
 // It still resolves on the USER's PATH — but a program that resolves INSIDE the workspace is refused
 // before it runs, through the same fence as every other exec apogee performs. The config file is the
 // operator's and the workspace is the model's, so an `api-key-cmd:` landing in the latter would hand
-// the model the credential this key source exists to protect. The workspace root each Driver holds
-// is the whole fence: this command runs on apogee's own behalf, before any confinement box exists.
+// the model the credential this key source exists to protect. The workspace root the caller names —
+// the Driver's own, or the Firing's (ResolveWithin) — is the whole fence: this command runs on
+// apogee's own behalf, before any confinement box exists.
 //
 // The child gets no stdin and no terminal (a tool that must prompt does so through a GUI agent), and
 // inherits the environment whole — `pass`, `op`, `security` and their agents need HOME, DISPLAY, the
 // D-Bus and GPG agent addresses; internal/userexec's package comment carries the why of each.
 func runKeyCommand(entry, command, workspaceRoot string, timeout time.Duration) (string, error) {
-	argv, err := shlex.Split(command)
+	argv, err := keyCommandArgv(entry, command)
 	if err != nil {
-		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q cannot be read as a command line: %w — "+
-			"check the quoting; the line is split the way a POSIX shell splits one, but no shell runs it, so a "+
-			"pipeline belongs in a script of your own", entry, command, err)
-	}
-	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
-		return "", fmt.Errorf("apogee: server %q: api-key-cmd: %q names no program — give the command whose "+
-			"output IS the key, for example security find-generic-password -s apogee -a %s -w",
-			entry, command, entry)
+		return "", err
 	}
 
 	result, err := userexec.Run(context.Background(), argv, userexec.Options{
@@ -358,6 +379,39 @@ func runKeyCommand(entry, command, workspaceRoot string, timeout time.Duration) 
 			"send no Authorization header%s", entry, command, said)
 	}
 	return key, nil
+}
+
+// keyCommandArgv splits an entry's `api-key-cmd:` line into the argv it runs as, or the refusal a
+// line that cannot be read as one — or names no program at all — earns.
+func keyCommandArgv(entry, command string) ([]string, error) {
+	argv, err := shlex.Split(command)
+	if err != nil {
+		return nil, fmt.Errorf("apogee: server %q: api-key-cmd: %q cannot be read as a command line: %w — "+
+			"check the quoting; the line is split the way a POSIX shell splits one, but no shell runs it, so a "+
+			"pipeline belongs in a script of your own", entry, command, err)
+	}
+	if len(argv) == 0 || strings.TrimSpace(argv[0]) == "" {
+		return nil, fmt.Errorf("apogee: server %q: api-key-cmd: %q names no program — give the command whose "+
+			"output IS the key, for example security find-generic-password -s apogee -a %s -w",
+			entry, command, entry)
+	}
+	return argv, nil
+}
+
+// fenceKeyCommand passes the verdict runKeyCommand's run would pass on the command's program —
+// the same judge, internal/userexec's ResolveProgram, against the same root — without running
+// anything, and words a refusal exactly as the run would. Only the fence's own verdict is a refusal
+// here: a program that is merely not on PATH is left to the run, where a memoised answer is still
+// the key the command once printed, and a fresh use reports the missing program in the run's words.
+func fenceKeyCommand(entry, command, workspaceRoot string) error {
+	argv, err := keyCommandArgv(entry, command)
+	if err != nil {
+		return err
+	}
+	if _, err := userexec.ResolveProgram(argv[0], workspaceRoot); errors.Is(err, security.ErrExecFromWritablePath) {
+		return fmt.Errorf("apogee: server %q: api-key-cmd: %w", entry, err)
+	}
+	return nil
 }
 
 // saidOnStderr renders the tail internal/userexec kept of what the command complained about as the

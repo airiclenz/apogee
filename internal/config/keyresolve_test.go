@@ -400,6 +400,88 @@ func TestKeyResolverWithNoWorkspaceRootFencesNothing(t *testing.T) {
 	}
 }
 
+// The fence is a fact of the USE, not of the resolver: a rootless resolver — the daemon's, which
+// fires every Schedule through one — refuses a program the root a use names holds, and runs the same
+// program when another use names a root elsewhere.
+func TestKeyResolverResolveWithinRefusesAProgramInsideTheGivenRoot(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	planted := plantKeyCommand(t, filepath.Join(root, "node_modules", ".bin"), "getkey")
+	tally := tallyPath(t, "runs")
+	entry := ServerEntry{
+		Name:      "openrouter",
+		APIKeyCmd: fixtureCommandAt(planted, "count", tally, "sk-planted"),
+	}
+
+	resolver := NewKeyResolver("")
+	got, err := resolver.ResolveWithin(entry, root)
+	if err == nil {
+		t.Fatalf("the planted command answered with %q, want a refusal", got)
+	}
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("the refusal does not carry security.ErrExecFromWritablePath: %v", err)
+	}
+	for _, want := range []string{"openrouter", "api-key-cmd", "refusing to run", "resolves inside", security.EvalRealPath(planted)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal never says %q:\n%s", want, err)
+		}
+	}
+	if runs := fixtureRuns(t, tally); runs != 0 {
+		t.Errorf("the planted command ran %d times, want 0 — the fence refuses BEFORE anything runs", runs)
+	}
+
+	got, err = resolver.ResolveWithin(entry, t.TempDir())
+	if err != nil || got != "sk-planted" {
+		t.Fatalf("against a root elsewhere the same command resolved to (%q, %v), want its printed key", got, err)
+	}
+	if runs := fixtureRuns(t, tally); runs != 1 {
+		t.Errorf("the planted command ran %d times, want 1", runs)
+	}
+}
+
+// A memoised key is no way past the fence: a command that answered from OUTSIDE one root is refused
+// when a later use names a root that holds its program — the memo is neither consulted nor touched
+// by the refused use, so a use fenced elsewhere afterwards still pays nothing.
+func TestKeyResolverResolveWithinRefusesAMemoisedKeyTheRootFences(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	planted := plantKeyCommand(t, filepath.Join(root, "node_modules", ".bin"), "getkey")
+	tally := tallyPath(t, "runs")
+	entry := ServerEntry{
+		Name:      "openrouter",
+		APIKeyCmd: fixtureCommandAt(planted, "count", tally, "sk-planted"),
+	}
+
+	resolver := NewKeyResolver("")
+	got, err := resolver.ResolveWithin(entry, t.TempDir())
+	if err != nil || got != "sk-planted" {
+		t.Fatalf("resolved outside the fencing root to (%q, %v), want the command's printed key", got, err)
+	}
+
+	got, err = resolver.ResolveWithin(entry, root)
+	if err == nil {
+		t.Fatalf("the fencing root answered the memoised %q, want a refusal", got)
+	}
+	if !errors.Is(err, security.ErrExecFromWritablePath) {
+		t.Errorf("the refusal does not carry security.ErrExecFromWritablePath: %v", err)
+	}
+	for _, want := range []string{"openrouter", "api-key-cmd", "refusing to run", security.EvalRealPath(planted)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal never says %q:\n%s", want, err)
+		}
+	}
+
+	got, err = resolver.ResolveWithin(entry, t.TempDir())
+	if err != nil || got != "sk-planted" {
+		t.Fatalf("after the refusal a use fenced elsewhere answered (%q, %v), want the memoised key", got, err)
+	}
+	if runs := fixtureRuns(t, tally); runs != 1 {
+		t.Errorf("the command ran %d times, want 1 — the refusal touches the memo not at all", runs)
+	}
+}
+
 // The answer is cached against the entry's NAME and its key fields: a second use is free, an edited
 // command re-resolves the way a config reload needs it to, and another entry is its own resolution.
 func TestKeyResolverCachesPerEntryAndSourceTriple(t *testing.T) {

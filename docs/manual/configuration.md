@@ -1394,10 +1394,11 @@ manager that already holds it: the line is split on spaces and quotes and run **
 shell** — pipes, redirections and `$VARIABLES` need a wrapper script of your own — and
 the command's stdout, trailing whitespace trimmed, is the key. Its **program is resolved
 before it runs and refused if it lands inside the workspace**, the way apogee fences every
-program it executes (a run with no workspace to measure against — `apogee probe model`, and
-the daemon itself — refuses nothing): the config file is yours, the workspace is the model's, and a key
-command sitting in the latter would hand the model the credential the key source exists to
-protect. So a wrapper script of your own belongs outside the workspace, or is named by an
+program it executes (`apogee probe model`, which has no workspace to measure against, refuses
+nothing; a daemon Firing is judged per Firing against the Firing's workspace, a key the same
+command already answered elsewhere included): the config file is yours, the workspace is the
+model's, and a key command sitting in the latter would hand the model the credential the key
+source exists to protect. So a wrapper script of your own belongs outside the workspace, or is named by an
 absolute path. `api-key-env:` names an
 environment variable rather than holding a key (`api-key-env: OPENROUTER_API_KEY`), read
 from the environment apogee itself was started in — and dropped from the environment every

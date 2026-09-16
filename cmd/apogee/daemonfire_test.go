@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -420,6 +421,86 @@ func TestDaemonFireRunsInTheEntrysWorkspace(t *testing.T) {
 	if spec.Store == nil {
 		t.Error("the firing saves nothing — a Firing's deliverable is its record in the shared store")
 	}
+}
+
+// The `api-key-cmd:` exec fence is judged per Firing, against the FIRING's workspace: the daemon
+// holds one rootless resolver across every Schedule it fires, so the root that fences a key command
+// is the workspace the entry names, not any root the resolver was built with. A Firing whose
+// workspace holds the program is refused before the run composes — and stays refused once a
+// sibling Firing in another workspace has resolved the same command, memo or no memo.
+func TestDaemonFireFencesTheKeyCommandInTheEntrysWorkspace(t *testing.T) {
+	fenced := t.TempDir()
+	planted := plantKeyCommand(t, filepath.Join(fenced, "node_modules", ".bin"), "getkey")
+	harness := newDaemonFireHarness(t, config.Options{
+		HostAlias: "startup",
+		Endpoint:  "http://startup.invalid",
+		Servers: []config.ServerEntry{
+			{Name: "startup", Endpoint: "http://startup.invalid"},
+			{Name: "nightly", Endpoint: "http://nightly.invalid", APIKeyCmd: keyCommandAt(planted, "sk-planted")},
+		},
+	})
+
+	_, err := harness.raise(entryFor(t, "inside", daemon.Action{Server: "nightly", Workspace: fenced}))
+	if err == nil {
+		t.Fatal("a Firing whose workspace holds the key command composed a run, want a refusal")
+	}
+	for _, want := range []string{`server "nightly"`, "api-key-cmd", "refusing to run", "resolves inside"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("the refusal never says %q:\n%s", want, err)
+		}
+	}
+	if harness.runner.called {
+		t.Error("the refused Firing still reached the runner")
+	}
+
+	spec := harness.fire(t, entryFor(t, "outside", daemon.Action{Server: "nightly", Workspace: t.TempDir()}))
+	if got := spec.Config.APIKey; got != "sk-planted" {
+		t.Errorf("a sibling Firing in a workspace elsewhere sends %q, want the command's sk-planted", got)
+	}
+
+	_, err = harness.raise(entryFor(t, "inside", daemon.Action{Server: "nightly", Workspace: fenced}))
+	if err == nil || !strings.Contains(err.Error(), "refusing to run") {
+		t.Fatalf("with the key memoised the fenced Firing answered %v, want the refusal all the same", err)
+	}
+}
+
+// plantKeyCommand plants THIS test binary at dir/name and returns its absolute path — a runnable
+// `api-key-cmd:` program sitting wherever the caller puts it, the twin of internal/config's own.
+// keyCommandFor always names os.Executable(), which never sits in a workspace, so a fence test
+// needs the binary INSIDE one. A hard link first (the file itself under a new path, nothing opened
+// for writing — see internal/config's plantKeyCommand for the ETXTBSY reason), a copy only where
+// the link fails.
+func plantKeyCommand(t *testing.T, dir, name string) string {
+	t.Helper()
+
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("making the planted command's directory: %v", err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.Link(exe, path); err == nil {
+		return path
+	}
+	data, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatalf("reading this test binary: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o755); err != nil {
+		t.Fatalf("planting the key command: %v", err)
+	}
+	return path
+}
+
+// keyCommandAt is keyCommandFor for a planted copy of this binary: the same fixture invocation,
+// quoted the same way, with the program wherever the caller planted it.
+func keyCommandAt(program, key string) string {
+	return "'" + program + "' -test.run=^TestAPIKeyCommandFixture$ " + keyFixtureMarker + key
 }
 
 // A tick whose entry has since left the adopted set is reported rather than fired: the daemon's
