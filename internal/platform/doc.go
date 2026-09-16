@@ -68,10 +68,11 @@
 // launcher. seatbelt.go is the host-agnostic half of the macOS backend — the generated
 // profile, its canonical roots and quoting — so it unit-tests on any host, and
 // seatbelt_darwin.go is the darwin-tagged constructor that probes once for sandbox-exec.
-// denialkill.go is the confinement fence's output-side companion: the OS-denial strerror
-// spellings and the DenialKillWriter the execution tools wire onto a CONFINED run so the
-// first denial signature kills the process group instead of letting the script's remaining
-// lines run — the job `set -e` cannot do for an AND-OR list (2026-08-22 incident, fix A).
+// denialkill.go is the confinement fence's output-side companion: the line-anchored OS-denial
+// signature and the DenialKillWriter the execution tools wire onto a CONFINED run's stderr so
+// the first line ending in a denial kills the process group instead of letting the script's
+// remaining lines run — the job `set -e` cannot do for an AND-OR list (2026-08-22 incident,
+// fix A).
 //
 // The Windows backend's parts. winguard.go is the rules, and confines nothing: the version
 // floor below which there is no token backend, the guardrails saying which roots may never be

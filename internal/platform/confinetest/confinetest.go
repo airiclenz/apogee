@@ -37,16 +37,17 @@ type Shell interface {
 }
 
 // DenialKiller is the harness's live kill-on-denial output watch as the battery drives
-// it: an io.Writer the chained-script probe wires as the confined script's stdout and
-// stderr, plus Detected reporting whether it matched an OS-denial signature (and so
-// issued its kill). platform.DenialKillWriter satisfies it.
+// it: an io.Writer the chained-script probe wires as the confined script's STDERR (stdout
+// is unwatched, as on the terminal tool's pipe path), plus Detected reporting whether it
+// matched a line-anchored OS-denial signature (and so issued its kill).
+// platform.DenialKillWriter satisfies it.
 type DenialKiller interface {
 	io.Writer
 	Detected() bool
 }
 
 // DenialKillerFactory builds one DenialKiller for one probe run: next receives every
-// output byte the watch forwards, and kill must stop the run — the probe hands it the
+// stderr byte the watch forwards, and kill must stop the run — the probe hands it the
 // CommandContext cancel, the same path whose cmd.Cancel kill the terminal tool's
 // runSubprocess hands platform.NewDenialKillWriter. It is handed in rather than imported
 // for the same import-cycle reason Shell is redeclared above.
@@ -322,10 +323,11 @@ func runConfined(t *testing.T, c domain.Confiner, sh Shell, box domain.Confineme
 
 // runChainedClobber runs the chained clobber script confined to box with cwd = dir, wired
 // through the harness's kill-on-denial watch the way the terminal tool's runSubprocess
-// wires it: the watch is the script's stdout AND stderr, and its kill is the
-// CommandContext cancel, whose default cmd.Cancel kills the process the moment a denial
+// wires it: the watch is the script's STDERR alone (stdout goes to its own buffer,
+// unwatched — a command's data is never a denial), and its kill is the CommandContext
+// cancel, whose default cmd.Cancel kills the process the moment a line ending in a denial
 // signature streams past. It returns the watch (for its Detected verdict), the captured
-// output (for failure diagnostics), and the run error. WaitDelay bounds the output drain:
+// stderr (for failure diagnostics), and the run error. WaitDelay bounds the output drain:
 // the killed shell's orphaned sleep still holds the pipe, and without the bound Wait
 // would sit out the sleep's full duration.
 func runChainedClobber(
@@ -343,9 +345,9 @@ func runChainedClobber(
 	argv := sh.Command(line)
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir
-	var output bytes.Buffer
+	var output, stdout bytes.Buffer
 	killer := newKiller(&output, cancel)
-	cmd.Stdout = killer
+	cmd.Stdout = &stdout
 	cmd.Stderr = killer
 	cmd.WaitDelay = time.Second
 	setRawCommandLine(cmd, sh.CommandLine(line))

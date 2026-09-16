@@ -193,8 +193,9 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 // test runner takes subprocessEnv(), the same minus the credentials, because a test suite needs
 // the toolchain variables its user's shell has but no subprocess of the model's needs apogee's
 // key. SplitStdout: the execution tools leave it false — they SHOW the model what a command
-// printed, and the interleaved order is the truthful one there; only a caller that CONSUMES the
-// output as a payload (RunHookSubprocess) sets it.
+// printed, and the interleaved order is the truthful one there (write by write on a CONFINED
+// run, whose stderr rides through the denial watch on its own copier — subprocess.CappedBuffer);
+// only a caller that CONSUMES the output as a payload (RunHookSubprocess) sets it.
 //
 // The returned error is non-nil only for ctx cancellation (so the loop rolls the Turn back) or a
 // confinement-unavailable demotion; a clean non-zero process exit is a normal result (ExitCode

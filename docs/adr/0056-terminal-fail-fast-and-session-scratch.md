@@ -66,6 +66,32 @@ deliberately unmatched). The escape battery's `chained_script_clobber_denied` pr
 reproduces the incident shape under the real backends and asserts the watch matched, the
 script died non-zero, and the unguarded relative write never reached the workspace.
 
+*Amended (2026-09-16, apogee-1mj):* two changes to the watch, replacing the "false match …
+surfaces loudly" trade above. The incident that forced them (session-mining `fc413fb5`) was a
+confined `cat` of a log to **stdout** whose lines ended in a real Go denial
+(`open /dev/ptmx: permission denied`) — the cat itself was denied nothing, and the watch,
+matching any byte of either stream by `strings.Contains`, killed it and labelled the stop as a
+confinement denial. **(1) The pipe path watches stderr alone.** In the shared `run` funnel
+stdout is wired to the capped buffer unwrapped and only stderr passes through
+`platform.DenialKillWriter`: a command's data is never its complaint. The two streams still
+land in one `CombinedOutput`, now through two of os/exec's copiers, so `subprocess.CappedBuffer`
+locks and the combined output is ordered write by write rather than strictly byte-interleaved.
+The PTY Console (`internal/console`) has one stream and keeps its single watched one. The
+escape battery's `chained_script_clobber_denied` probe is wired the same way, so it still
+proves the production shape. **(2) The signature is line-anchored.** A line — its trailing
+blanks and CR trimmed — matches when it *ends* in `Permission denied` / `permission denied` /
+`Operation not permitted` / `operation not permitted` followed by one of the tails the common
+toolchains append (nothing; Java's `)`; Rust's ` (os error N)`; rsync's ` (N)`; Python's
+`: '<path>'` / `: "<path>"`, anything to the end of the line; Perl's ` at <file> line N.`), or
+when it carries `EACCES` / `EPERM` bounded by non-alphanumeric bytes or the line's start or
+end (Node's `EACCES: permission denied`, Ruby's `Errno::EACCES`, a `write failed: EPERM`).
+A line that merely contains the phrase (`permission denied for user x`, `note: permission
+denied earlier`) is not a denial. The final newline-less line counts as a line in both
+`LooksLikeConfinementDenial` and the live scan, which carries the unfinished line between
+writes (capped at 4 KiB) so a line split across pipe chunks — inside the phrase or inside a
+long allowed tail — still matches. Signature-free denials (curl's exit 23, `useradd`) remain
+the documented miss; the watch is still best-effort in both directions.
+
 **3. Every session gets a scratch dir inside the confinement box.** A new dotdir root
 `~/.apogee/scratch/<session-id>/` (sibling of `sessions/`, `library/`, …), created `0700`
 when the session id is minted and **following the active session** across rotation;

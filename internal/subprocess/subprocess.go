@@ -8,6 +8,7 @@ import (
 	"io"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -58,8 +59,11 @@ type SubprocessSpec struct {
 	// output as a payload sets it — a caller splicing a child's stdout into a file it will
 	// write needs it clean, since a diagnostic in the middle of that would land in the file as
 	// if it were code. The execution tools leave it false: they SHOW the model what a command
-	// printed, and the interleaved order is the truthful one there. RunSubprocessTo implies it:
-	// there the payload leaves through the caller's writer instead.
+	// printed, and the interleaved order is the truthful one there — with the confined-run
+	// exception: a CONFINED run's stderr passes through the denial watch on its own copier, so
+	// its two streams land in CombinedOutput write by write, no longer strictly byte-interleaved
+	// (see CappedBuffer). RunSubprocessTo implies it: there the payload leaves through the
+	// caller's writer instead.
 	SplitStdout bool
 	// Cmdline, when non-empty, is the verbatim process command line to launch Argv with
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
@@ -78,7 +82,9 @@ type SubprocessSpec struct {
 
 // SubprocessResult is the captured outcome of one subprocess execution.
 type SubprocessResult struct {
-	// CombinedOutput is stdout and stderr interleaved (capped), what the model reads. A spec
+	// CombinedOutput is stdout and stderr interleaved (capped), what the model reads — write by
+	// write rather than byte by byte on a CONFINED run, whose stderr arrives through the denial
+	// watch's own copier (see CappedBuffer). A spec
 	// that split the streams (SplitStdout), and every RunSubprocessTo run, leaves it holding
 	// stderr ALONE — that caller took the child's stdout as data, so what remains here is only
 	// what the command complained.
@@ -225,7 +231,6 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	out.Limit = MaxSubprocessOutputBytes
 	cmd.Stdout = &out
 	cmd.Stderr = &out
-	splitStdout := spec.SplitStdout || streamStdout != nil
 	switch {
 	case streamStdout != nil:
 		cmd.Stdout = streamStdout
@@ -269,23 +274,22 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 		box = *fence
 	}
 
-	// A CONFINED run's output is watched live for an OS-denial signature; the first match
-	// cancels runCtx, which fires cmd.Cancel — the §2.4 process-group kill — so a script
-	// whose command the fence denied is stopped there instead of running its remaining
-	// lines against a half-done state (fix A of the 2026-08-22 workspace-clobber
+	// A CONFINED run's STDERR is watched live for a line-anchored OS-denial signature; the
+	// first match cancels runCtx, which fires cmd.Cancel — the §2.4 process-group kill — so
+	// a script whose command the fence denied is stopped there instead of running its
+	// remaining lines against a half-done state (fix A of the 2026-08-22 workspace-clobber
 	// incident). `set -e` cannot do this alone: POSIX exempts every command of an AND-OR
 	// list but the last, so a denied `mkdir d && cd d` chain does not abort the script and
 	// the unguarded lines after it run with the cwd unchanged — the incident's clobber.
-	// The watch wraps the SAME capped buffer the streams already feed (one instance on
-	// both keeps exec's single interleaved copier); on a split-stdout run only stderr is
-	// watched, stdout being the caller's payload. Unconfined runs are never watched.
+	// Stdout is never watched (2026-09-16, ADR 0056 D2 amendment): it is the command's
+	// data, and a confined `cat` of a log whose lines end in a real denial must not be
+	// killed for quoting one. The watch wraps the same capped buffer stdout already feeds,
+	// so CombinedOutput stays one capture — through two of exec's copiers now, which is why
+	// CappedBuffer locks. Unconfined runs are never watched.
 	var denialWatch *platform.DenialKillWriter
 	if confined {
 		denialWatch = platform.NewDenialKillWriter(&out, cancel)
 		cmd.Stderr = denialWatch
-		if !splitStdout {
-			cmd.Stdout = denialWatch
-		}
 	}
 
 	runErr := platform.RunWithTeardown(cmd, teardown)
@@ -382,18 +386,24 @@ func exitCodeOf(cmd *exec.Cmd, runErr error) int {
 
 // CappedBuffer is an io.Writer that accumulates up to Limit bytes and silently discards the
 // rest, so a runaway subprocess cannot exhaust memory through its output. The discarded tail
-// is summarised by String.
+// is summarised by String. Write and String are safe for concurrent use: a CONFINED run
+// feeds one buffer from two of os/exec's copiers (stdout directly, stderr through the denial
+// watch), so the combined output of such a run is ordered write by write — each copier's
+// chunk lands whole — and is no longer strictly byte-interleaved across the two streams.
 type CappedBuffer struct {
 	// Limit is the ceiling in bytes; a zero Limit accumulates nothing and counts everything
 	// as discarded, so a caller always sets it before the buffer is written to.
 	Limit int
 
+	mu        sync.Mutex
 	buf       bytes.Buffer
 	discarded int
 }
 
 // Write accepts bytes up to the buffer's limit, counting (but not storing) any overflow.
 func (b *CappedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	if remaining := b.Limit - b.buf.Len(); remaining > 0 {
 		if len(p) <= remaining {
 			b.buf.Write(p)
@@ -411,6 +421,8 @@ func (b *CappedBuffer) Write(p []byte) (int, error) {
 // String returns the captured output, with a truncation marker appended when output was
 // discarded so the model knows the tail is missing.
 func (b *CappedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	s := b.buf.String()
 	if b.discarded > 0 {
 		s += fmt.Sprintf("\n… [output truncated: %d more bytes]", b.discarded)

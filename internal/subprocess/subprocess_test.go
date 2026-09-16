@@ -257,6 +257,79 @@ func TestRunSubprocessDenialWatchKillsConfinedRun(t *testing.T) {
 	}
 }
 
+// TestRunSubprocessDenialWatchIgnoresStdout pins the stderr-only wiring of the pipe path
+// (ADR 0056 D2, amended 2026-09-16): a CONFINED script that prints a real, line-ending Go
+// denial on STDOUT — the session-mining fc413fb5 shape, a `cat` of a log whose lines end in
+// `open /dev/ptmx: permission denied` — is not killed, its later write lands, and the run is
+// not flagged DenialStopped; stdout is the command's data, not its complaint. The denial
+// text still reaches CombinedOutput, so the model reads what the command printed.
+func TestRunSubprocessDenialWatchIgnoresStdout(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the watch keys on POSIX EPERM spellings only")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	written := filepath.Join(dir, "after.txt")
+	script := `echo "open /dev/ptmx: permission denied"` + "\n" +
+		"echo landed > " + written + "\n"
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: dir},
+	})
+
+	res, err := RunSubprocess(ctx, SubprocessSpec{Argv: []string{"/bin/sh", "-c", script}})
+
+	if err != nil {
+		t.Fatalf("RunSubprocess err = %v, want nil", err)
+	}
+	if res.DenialStopped {
+		t.Error("DenialStopped = true, want the stdout denial text left unwatched")
+	}
+	if res.ExitCode != 0 {
+		t.Errorf("ExitCode = %d, want 0 — the run must complete untouched", res.ExitCode)
+	}
+	if _, statErr := os.Stat(written); statErr != nil {
+		t.Errorf("stat %q = %v, want the write after the stdout denial to land", written, statErr)
+	}
+	if !strings.Contains(res.CombinedOutput, "open /dev/ptmx: permission denied") {
+		t.Errorf("CombinedOutput = %q, want the stdout line captured", res.CombinedOutput)
+	}
+}
+
+// TestCappedBufferConcurrentWrites pins the lock a confined run relies on: two writers — the
+// shape of exec's stdout copier and the denial watch's stderr copier feeding one buffer —
+// land every chunk whole, the cap holds, and the discard count is exact, under -race.
+func TestCappedBufferConcurrentWrites(t *testing.T) {
+	t.Parallel()
+
+	const writers, perWriter = 4, 100
+	chunk := strings.Repeat("x", 8)
+	buf := CappedBuffer{Limit: writers * perWriter * len(chunk) / 2}
+	var wg sync.WaitGroup
+	for writer := 0; writer < writers; writer++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				if _, err := buf.Write([]byte(chunk)); err != nil {
+					t.Errorf("Write: %v", err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+
+	got := buf.String()
+	wantMarker := fmt.Sprintf("… [output truncated: %d more bytes]", buf.Limit)
+	if !strings.HasSuffix(got, wantMarker) {
+		t.Errorf("String() = %q, want it to end in %q", got, wantMarker)
+	}
+	if body := strings.TrimSuffix(got, "\n"+wantMarker); len(body) != buf.Limit || strings.Trim(body, "x") != "" {
+		t.Errorf("captured body = %d bytes of %q, want exactly %d x's", len(body), body, buf.Limit)
+	}
+}
+
 // TestRunSubprocessDenialWatchNeverWatchesUnconfined pins the watch's structural gate: the
 // identical denial-shaped output on an UNCONFINED run is not scanned, not killed, and not
 // flagged — an unconfined EPERM can never be blamed on the box (the same gate the confined

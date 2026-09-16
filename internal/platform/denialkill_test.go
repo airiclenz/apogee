@@ -15,9 +15,11 @@ func newProbeDenialKiller(next io.Writer, kill func()) confinetest.DenialKiller 
 	return NewDenialKillWriter(next, kill)
 }
 
-// TestLooksLikeConfinementDenial pins the signature match the confined-run watch and the
-// terminal's result label share: every documented denial spelling matches, ordinary
-// failure text does not.
+// TestLooksLikeConfinementDenial pins the line-anchored signature match the confined-run
+// watch and the terminal's result label share: every documented denial spelling matches at a
+// line's end — with each toolchain's allowed tail, a CR-terminated line and a final
+// newline-less line included — a bounded errno name matches anywhere on the line, and a line
+// that merely contains the phrase mid-sentence does not.
 func TestLooksLikeConfinementDenial(t *testing.T) {
 	t.Parallel()
 
@@ -32,6 +34,20 @@ func TestLooksLikeConfinementDenial(t *testing.T) {
 		{"libc strerror EACCES (landlock)", "mkdir: cannot create directory '/tmp/srtest': Permission denied", true},
 		{"Go errno text EACCES", "open /etc/f: permission denied", true},
 		{"bare errno name EACCES", "write failed: EACCES", true},
+		{"libc capitalised at line end", "open /etc/x: Permission denied", true},
+		{"python PermissionError", "PermissionError: [Errno 13] Permission denied: '/etc/x'", true},
+		{"python os.rename two paths", "PermissionError: [Errno 13] Permission denied: '/a' -> '/b'", true},
+		{"rust os error tail", "Permission denied (os error 13)", true},
+		{"java parenthesised", "java.io.FileNotFoundException: /etc/x (Permission denied)", true},
+		{"perl at-line tail", "Permission denied at x.pl line 3.", true},
+		{"node errno prefix", "Error: EACCES: permission denied, open '/x'", true},
+		{"ruby errno constant", "Errno::EACCES", true},
+		{"rsync numeric tail", "Permission denied (13)", true},
+		{"CR-terminated PTY line", "mkdir: Permission denied\r\n", true},
+		{"final newline-less line after clean lines", "building...\nopen /dev/ptmx: permission denied", true},
+		{"phrase mid-sentence", "permission denied for user x", false},
+		{"phrase followed by prose", "note: permission denied earlier", false},
+		{"errno letters inside an identifier", "MYEPERMISSION=1", false},
 		{"unrelated failure", "no such file or directory", false},
 		{"windows access denied deliberately unmatched", "Access is denied.", false},
 		{"empty", "", false},
@@ -74,27 +90,84 @@ func TestDenialKillWriterKillsOnceAndForwards(t *testing.T) {
 	}
 }
 
-// TestDenialKillWriterMatchesAcrossWriteBoundary pins the carried-tail scan: a signature
-// split across two pipe chunks still triggers the kill.
+// TestDenialKillWriterMatchesAcrossWriteBoundary pins the carried-line scan: a line split
+// across two pipe chunks — inside the signature itself, or inside a long allowed tail after
+// it — still triggers the kill once the line is whole.
 func TestDenialKillWriterMatchesAcrossWriteBoundary(t *testing.T) {
 	t.Parallel()
 
+	cases := []struct {
+		name   string
+		first  string
+		second string
+	}{
+		{"split inside the signature", "mkdir: x: Operation not per", "mitted\n"},
+		{"split inside a long allowed tail", "PermissionError: [Errno 13] Permission denied: '/etc/some/long/pa", "th'\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out strings.Builder
+			killed := false
+			w := NewDenialKillWriter(&out, func() { killed = true })
+
+			if _, err := w.Write([]byte(tc.first)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if _, err := w.Write([]byte(tc.second)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+
+			if !killed || !w.Detected() {
+				t.Errorf("split line not detected: killed=%v Detected=%v", killed, w.Detected())
+			}
+			if got := out.String(); got != tc.first+tc.second {
+				t.Errorf("forwarded output = %q, want every byte forwarded", got)
+			}
+		})
+	}
+}
+
+// TestDenialKillWriterHalfSignatureDoesNotKill pins the carry's negative half: a chunk
+// ending inside the phrase is not a match on its own — the kill waits for the rest of the
+// line.
+func TestDenialKillWriterHalfSignatureDoesNotKill(t *testing.T) {
+	t.Parallel()
+
 	var out strings.Builder
-	killed := false
-	w := NewDenialKillWriter(&out, func() { killed = true })
+	w := NewDenialKillWriter(&out, func() { t.Error("kill fired on a half signature") })
 
 	if _, err := w.Write([]byte("mkdir: x: Operation not per")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
-	if killed {
-		t.Fatal("kill fired on a half signature")
+
+	if w.Detected() {
+		t.Error("Detected() = true on a half signature")
 	}
-	if _, err := w.Write([]byte("mitted\n")); err != nil {
+}
+
+// TestDenialKillWriterIgnoresPhraseMidLine pins the anchoring live: a line that contains
+// the phrase without ending in it streams through unkilled, and a later real denial on its
+// own line still kills.
+func TestDenialKillWriterIgnoresPhraseMidLine(t *testing.T) {
+	t.Parallel()
+
+	var out strings.Builder
+	kills := 0
+	w := NewDenialKillWriter(&out, func() { kills++ })
+
+	if _, err := w.Write([]byte("note: permission denied earlier\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if kills != 0 || w.Detected() {
+		t.Fatalf("kill fired on a mid-line phrase: kills=%d Detected=%v", kills, w.Detected())
+	}
+	if _, err := w.Write([]byte("open /etc/x: permission denied\n")); err != nil {
 		t.Fatalf("Write: %v", err)
 	}
 
-	if !killed || !w.Detected() {
-		t.Errorf("split signature not detected: killed=%v Detected=%v", killed, w.Detected())
+	if kills != 1 || !w.Detected() {
+		t.Errorf("line-end denial after prose not detected: kills=%d Detected=%v", kills, w.Detected())
 	}
 }
 

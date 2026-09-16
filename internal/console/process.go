@@ -136,8 +136,11 @@ func Start(spec Spec) (*Process, error) {
 	var collect io.Writer = process.ring
 	if spec.Confined {
 		// A confined command that prints an OS denial is stopped where it was denied instead
-		// of running on against a half-done workspace (ADR 0056 §2). The watch forwards every
-		// byte to the ring first, so the model still reads the denial that killed it.
+		// of running on against a half-done workspace (ADR 0056 §2). A PTY has one stream, so
+		// the watch reads stdout and stderr alike here — the line-anchored signature, not the
+		// pipe path's stderr-only wiring, is what keeps a quoted denial from killing it. The
+		// watch forwards every byte to the ring first, so the model still reads the denial
+		// that killed it.
 		process.denial = platform.NewDenialKillWriter(process.ring, process.Kill)
 		collect = process.denial
 	}
