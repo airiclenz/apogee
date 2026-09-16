@@ -1,0 +1,40 @@
+# The upstream TestE2EForkKeepsThePrefixAndSurvivesAResume talks to: three prompts in the parent
+# session, and — after the child is resumed with `--resume <child id>` — one prompt in the child.
+#
+# Every turn matches on `when:` and repeats, for tasklist.yaml's reason: the run spans TWO launches,
+# and the resumed child replays its whole conversation, so an ordered script would have spent its
+# turns in the parent and answered the child with an HTTP 500. The title turn sits above the prompt
+# turns because `auto-title:` is on by default and a driven TUI asks for a session title off the
+# first prompt; the trailing catch-all answers anything no prompt claims.
+model: fork-model
+turns:
+    # The session title, matched before any prompt's own turn. It is the title the parent wears,
+    # the title the child starts under, and the name the browser's ⑂ tag spells.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Fork journey
+    # The three prompts of the parent session. Each reply is one distinct sentence so the request
+    # log can be judged from the END: the kept Exchange's reply is the message the child's history
+    # must close on, and the dropped Exchange's prompt and reply must be absent from it.
+    - when:
+        last_message: ^Name the first stop
+      repeat: true
+      text: The first stop is the harbour.
+    - when:
+        last_message: ^Name the second stop
+      repeat: true
+      text: The second stop is the lighthouse.
+    - when:
+        last_message: ^Name the third stop
+      repeat: true
+      text: The third stop is the cliff path.
+    # The child's own prompt, sent after the `--resume` relaunch. A resumed session issues no
+    # request until it is asked something, so this turn is what puts the child's history on the wire.
+    - when:
+        last_message: ^Where did we stop
+      repeat: true
+      text: We stopped at the lighthouse.
+    # Anything else — a Mechanism's own call, or a round no prompt claims.
+    - repeat: true
+      text: Nothing else to add.

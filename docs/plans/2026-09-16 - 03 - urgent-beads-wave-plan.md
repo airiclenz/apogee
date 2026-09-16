@@ -472,7 +472,10 @@ NOTES (2026-09-16): the `⑂` (U+2442) glyph was verified to measure one cell un
 
 **Commit:** `feat(tui): the session browser tags a forked session with its parent`
 
-## 22. End-to-end fork journey (apogee-zci)
+## 22. End-to-end fork journey (apogee-zci) — ✅ DONE (2026-09-16)
+NOTES (2026-09-16): the parent record's baseline is taken from the store once its idle save has landed (one record), and the comparison after `/fork` covers `Session`, `Transcript` and `Meta` minus `UpdatedAt` — the field the fork's queued idle save re-stamps (regression guard G).
+NOTES (2026-09-16): the fixture is `fork.yaml` as the item names it (loaded with `loadScript(t, "fork")`), beside the other hand-written prompt fixtures rather than under test-drivers.md's `<server>-<what>.yaml` recording name.
+NOTES (2026-09-16): `bd close apogee-zci --reason="<commit subject>"` is the verifier's at the commit (standing requirement); not run here.
 
 **What:** Depends on items 20, 21. `cmd/apogee/e2e_fork_test.go` (shape of `e2e_tasklist_test.go`): stubllm script with three prompts; `/fork`, pick the row that drops the last prompt (`drop` 1); judge the frame shows the `forked from` note and the last prompt absent; `RelaunchWith("--resume <child id>")` → the child replays all but the last prompt and its next prompt reaches the wire with a history ending at the kept Exchange's final assistant message and containing no dropped prompt (stub request log, judged from the end); the parent's `Session`, `Transcript` and Meta minus `UpdatedAt` are unchanged from before `/fork`; `/sessions` shows the `⑂` tag — checked after the child's prompt. CHANGELOG sidecar for the feature; close apogee-zci.
 
