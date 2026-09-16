@@ -1986,8 +1986,8 @@ func (a settingsApplier) rideTheRebind() error {
 // re-resolves them, and the loader answers with the same Options resolution starts from.
 //
 // Nothing is cached across applies: a row applies against the file as it is at that moment. The
-// migration notice is dropped rather than surfaced — a file still in the retired schema was already
-// migrated and announced at launch, and this read happens after the pane has just written to it.
+// notice hook is a no-op because a live read never migrates: a file still in the retired schema is
+// refused with the start-up refusal rather than folded under a running session (LoadFileConfig).
 //
 // A file that no longer parses is reported back unchanged: what a refusal COSTS differs per key —
 // connections that stay where they are, a list nothing displaces — so each caller says that in its
