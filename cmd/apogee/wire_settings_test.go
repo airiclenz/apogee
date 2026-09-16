@@ -566,36 +566,6 @@ func TestStepBudgetNoticeRowAppliesOneGeneration(t *testing.T) {
 	}
 }
 
-// The negation between the file's seven positive keys and the engine's seven Disable… gates is
-// walked in BOTH directions now — the live holder keeps the Floor in the engine's spelling, and
-// everything composed out of the session reads config.Options — so the pair has to round-trip. A
-// gate that lost its inverse would come back as a guard the human never asked for.
-func TestOptionsFromFloorInvertsFloorFromOptions(t *testing.T) {
-	t.Parallel()
-	for _, positive := range []config.Options{
-		{}, // every guard opted out
-		{
-			ToolUseEnforcer: true, EmptyResponseRecovery: true, ToolCallRepair: true,
-			ToolCallSalvage: true, ToolLoopBreaker: true, ToolResultCap: true, ReadCache: true,
-		},
-		{ToolUseEnforcer: true, ToolCallSalvage: true, ReadCache: true},
-	} {
-		got := optionsFromFloor(floorFromOptions(positive))
-		// Compared key by key rather than whole, because config.Options carries slices: what the
-		// inverse promises is these seven fields and nothing else.
-		if got.ToolUseEnforcer != positive.ToolUseEnforcer ||
-			got.EmptyResponseRecovery != positive.EmptyResponseRecovery ||
-			got.ToolCallRepair != positive.ToolCallRepair ||
-			got.ToolCallSalvage != positive.ToolCallSalvage ||
-			got.ToolLoopBreaker != positive.ToolLoopBreaker ||
-			got.ToolResultCap != positive.ToolResultCap ||
-			got.ReadCache != positive.ReadCache {
-			t.Errorf("optionsFromFloor(floorFromOptions(%+v)) = %+v; the seven keys must survive the round trip",
-				positive, got)
-		}
-	}
-}
-
 // The seven Floor-guard keys are known by name in three places that cannot import one another —
 // the engine's guard table (apogee.FloorGuardKeys), the config keys a file spells and an entry's
 // `id:` is refused against (config.FloorGuardKeys), and this package's key→field map behind
@@ -1366,6 +1336,47 @@ func clobberOptions(opts config.Options) {
 		opts.Reactions[i] = domain.Reaction{ID: "clobbered"}
 	}
 	clear(opts.SystemPrompt.Models)
+}
+
+// The overlay's `context-files:` list is the RESOLVED one — the names while the switch is on, nothing
+// while it is off — and the names survive the off. Both halves matter to a Firing raised from this
+// session: one composed while the block is off must read no list at all (not the names standing
+// behind the switch), and one composed after the human switched it back on must read the names the
+// pane last gave it, not the ones this run launched with. The pair beside now is where they wait.
+//
+// boot is asserted last, untouched: the overlay is written over a COPY, so the snapshot this run
+// launched with still says what it said.
+func TestLiveSettingsContextFilesReEnableReinstallsTheNames(t *testing.T) {
+	t.Parallel()
+	live := newLiveSettings(config.Options{ContextFiles: []string{"AGENTS.md"}})
+
+	if got := live.setContextFilesEnable(false); !slices.Equal(got, []string{"AGENTS.md"}) {
+		t.Errorf("setContextFilesEnable(false) = %v, want the names kept aside", got)
+	}
+	if got := live.options().ContextFiles; len(got) != 0 {
+		t.Errorf("options().ContextFiles = %v while off, want none", got)
+	}
+
+	// New names given while the block is OFF wait beside the switch: the projection stays empty, and
+	// the setter reports the switch it would install them under.
+	if on := live.setContextFileNames([]string{"NOTES.md"}); on {
+		t.Error("setContextFileNames while off reported the switch on")
+	}
+	if got := live.options().ContextFiles; len(got) != 0 {
+		t.Errorf("options().ContextFiles = %v after naming files under an off switch, want none", got)
+	}
+
+	want := []string{"NOTES.md"}
+	if got := live.setContextFilesEnable(true); !slices.Equal(got, want) {
+		t.Errorf("setContextFilesEnable(true) = %v, want %v — the names given while off", got, want)
+	}
+	if got := live.options().ContextFiles; !slices.Equal(got, want) {
+		t.Errorf("options().ContextFiles = %v after the re-enable, want %v", got, want)
+	}
+
+	if got := live.boot.ContextFiles; !slices.Equal(got, []string{"AGENTS.md"}) {
+		t.Errorf("boot.ContextFiles = %v, want the launch snapshot untouched by every apply", got)
+	}
 }
 
 // The same sentence answers a key whose seam this Driver did not COMPOSE. Every member of the

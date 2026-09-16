@@ -41,13 +41,21 @@ import (
 // switch, the next scheduled Firing. Something has to hold what those re-resolutions read, and this
 // is it: one place, one mutex, seeded from opts so a session nobody edits behaves exactly as before.
 //
-// What lives here is the exception list, not a second configuration path. Everything else about a run
-// stays in the immutable `config.Options` snapshot the closures still carry, and a value only earns a field
-// here once a seam puts it into effect (ADR 0031: no value the human can move without the engine
-// hearing about it). That snapshot is held here too, but only as the base the exception list is
-// projected onto (boot, options()): a caller that has to compose a WHOLE run out of this session —
-// a Firing raised inside it — needs the unmoved keys beside the moved ones, and reading them off a
-// second copy is how the two would come to disagree.
+// What lives here is two readings of ONE configuration, not a second configuration path. boot is the
+// `config.Options` this run resolved at launch, held whole and never written; now is the same value
+// as the session holds it NOW — boot with every key a `/settings` commit has since applied written
+// over it, through the one door (update). A value earns a write into now only once a seam puts it
+// into effect (ADR 0031: no value the human can move without the engine hearing about it), and
+// options() hands now back whole, so a caller that has to compose a WHOLE run out of this session —
+// a Firing raised inside it — reads the unmoved keys beside the moved ones off one value rather than
+// off a per-key mirror that has to be projected back onto the launch snapshot (which is how the two
+// used to be able to disagree). The keys nothing applies mid-session — the workspace, the confinement
+// flag, the MCP block — come back exactly as they were resolved because nothing ever writes them.
+//
+// Beside the two Options sit the LATCHES: facts about the server the session is on that no config
+// key spells (what a beat observed, the bound entry's own pins) and so cannot live in an Options
+// value. They are what the live-edited keys are resolved through at a rebind, and they move with the
+// session (followEntry, observe) rather than with the file.
 //
 // The mutex is real work rather than ceremony. The writes come from the Update goroutine — the pane's
 // keypress, through the live-apply dispatcher below — while a scheduled Firing reads them from the
@@ -56,26 +64,34 @@ import (
 type liveSettings struct {
 	mu sync.RWMutex
 
-	// boot is the `config.Options` this run resolved at launch, held whole. It is the base every
-	// value below is projected back onto when options() hands the session's configuration to
-	// something that composes a whole run from it — a Firing raised inside the session (ADR 0037's
-	// promise, extended to the runs a session raises). Held whole rather than key by key because the
-	// overlay is an EXCEPTION list in the other direction too: the keys nothing applies mid-session —
-	// the workspace, the confinement flag, the MCP block — must come back exactly as they were
-	// resolved, and re-listing them here is how they would start to drift from what runRoot resolved.
-	// Nothing writes to it; the fields below are what a `/settings` commit moves.
+	// boot is the `config.Options` this run resolved at launch, held whole and immutable: what a
+	// session nobody edits is configured as, and the base now started from. Nothing writes to it.
 	boot config.Options
+
+	// now is the session's configuration as it stands NOW: boot with every key a `/settings` commit
+	// has since applied written over it. It is the ONE overlay — every setter below writes it, options()
+	// clones it — so there is exactly one place a live key lives and exactly one projection a Firing
+	// composes from. The lists it holds are the holder's own (cloned from boot at construction, replaced
+	// whole by every setter), which is what lets options() hand out copies without a caller ever
+	// reaching the backing arrays this session is running on.
+	//
+	// The `context-files:` block is the one key written under a rule of its own: now.ContextFiles is
+	// the RESOLVED list exactly as ApplyConfig resolves it at startup — the names while the switch is
+	// on, nil while it is off — and the pair the pane edits is kept beside it (contextFilesOn,
+	// contextFileNames below).
+	now config.Options
 
 	// gen is the Reaction surface as the session is running it NOW: the Floor enable set, the
 	// `bypass:` switch and the user-origin observe list, in the ONE value a live swap carries
-	// (ADR 0076 A8). It is held beside boot rather than among the pushed keys below because a
-	// generation is exactly what the engine seam takes — a row that knew only its own key would have
-	// to compose the other halves from somewhere, and composing them from the launch snapshot is how
-	// two guards flipped in one session come to disagree.
+	// (ADR 0076 A8). It is held beside now rather than derived from it because a generation is exactly
+	// what the engine seam takes — a row that knew only its own key would have to compose the other
+	// halves from somewhere, and composing them from the launch snapshot is how two guards flipped in
+	// one session come to disagree. Every writer that moves it moves the matching keys on now in the
+	// same locked act, so the two never describe two different edits.
 	//
 	// The Floor gates are held NEGATIVE here, the engine's own spelling, because that is the shape
-	// the seam takes; floorFromOptions and optionsFromFloor are the one pair that turns the file's
-	// positive keys into it and back, so "off in the file" and "off in the pane" cannot come to mean
+	// the seam takes; floorFromOptions is the one seam that turns the file's seven positive keys —
+	// which live on now — into it, so "off in the file" and "off in the pane" cannot come to mean
 	// two different things. The observe list lives here for the reason the rest of this holder
 	// exists: a Firing raised INSIDE the session builds a Runner of its own out of this projection,
 	// so a `reactions:` edit that reached the session and not the runs it raises would be exactly the
@@ -83,9 +99,6 @@ type liveSettings struct {
 	// a refused edit leaves both the session and this mirror on the list that is actually running.
 	gen apogee.Generation
 
-	// pinnedWindow is the `context-window:` key in tokens: > 0 is the user's pin, which outranks
-	// whatever the server reports (ADR 0024 decision 9), and 0 means "discover it, live".
-	pinnedWindow int
 	// observedWindow is the window the last beat could name — remembered because a pin EDIT re-drives
 	// the rebind closure with no beat of its own, and a pin CLEARED to 0 must then bind the discovered
 	// window rather than unbind it. Nothing outside a beat knows this number.
@@ -96,24 +109,18 @@ type liveSettings struct {
 	// server the heartbeat had already dialled advertises no thinking-effort dial at all.
 	effortDialect provider.EffortDialect
 	// entryWindow is the BOUND `servers:` entry's own `context-window:` pin (ADR 0045), 0 when that
-	// entry pins none. It is held beside the top-level key rather than folded into it because the two
-	// are different statements — this one describes the server the session is on, and a move replaces
-	// it whole (followEntry) while the key above survives every move. Without it a switch's window
-	// would live for one beat: the rebind that follows re-resolves from the pin and would bind the new
-	// server's observation over the number its entry pinned.
+	// entry pins none. It is held beside the top-level key (now.ContextWindow) rather than folded into
+	// it because the two are different statements — this one describes the server the session is on,
+	// and a move replaces it whole (followEntry) while the key survives every move. Without it a
+	// switch's window would live for one beat: the rebind that follows re-resolves from the pin and
+	// would bind the new server's observation over the number its entry pinned.
 	entryWindow int
-	// pinnedWorking is the top-level `working-window:` key in tokens: > 0 bounds the room the Budget
-	// works in, 0 leaves the whole advertised window as that room. It is held beside the window pin
-	// because the entry override below is resolved against it at a `/server` move, and the two must
-	// be read as one statement. Unlike pinnedWindow it reaches no seam of a RUNNING session — the
-	// room is read off the file into the Config the engine was constructed with — so its setter is
-	// the write alone, for the runs this session raises (setWorkingWindow).
-	pinnedWorking int
 	// entryWorking is the BOUND `servers:` entry's own `working-window:` bound, 0 when that entry
-	// bounds none and the top-level key above answers. It is latched beside the window pin, moves
-	// with it (followEntry, setServers), and is resolved over the top-level key exactly as that pin
-	// is (config.ResolveWorkingWindow) — how much room is affordable describes the server the session
-	// is on, so a move must replace it whole rather than work a new server in the retired one's room.
+	// bounds none and the top-level key (now.WorkingWindow) answers. It is latched beside the window
+	// pin, moves with it (followEntry, setServers), and is resolved over the top-level key exactly as
+	// that pin is (config.ResolveWorkingWindow) — how much room is affordable describes the server the
+	// session is on, so a move must replace it whole rather than work a new server in the retired
+	// one's room.
 	entryWorking int
 	// entryCap is the BOUND entry's own `max-output-tokens:` pin (ADR 0046), 0 when that entry pins
 	// none and the engine derives the ceiling from the reply room the Budget reserves. It is held
@@ -123,18 +130,12 @@ type liveSettings struct {
 	// `max-output-tokens:` key for an entry's pin to outrank, so what the entry says IS what the
 	// session is bound to.
 	entryCap int
-	// pinnedReserve is the top-level `response-reserve:` share, 0 when the key is unset and apogee's
-	// own built-in share stands. It is held rather than re-read off the launch snapshot because the
-	// entry override below is resolved against it at a `/server` move, and the two must be read as
-	// one statement. There is no setter: the key is file-only and nothing applies an edit of it to a
-	// running session, so unlike pinnedWindow above it never moves.
-	pinnedReserve float64
 	// entryReserve is the BOUND entry's own `response-reserve:` override, 0 when that entry states
-	// none and the top-level share above answers. It is latched beside the two token bounds, moves
-	// with them (followEntry, setServers), and is resolved over the top-level key exactly as the
-	// window is (config.ResolveResponseReserve) — the split describes the server the session is on,
-	// so a move must replace it whole rather than divide the new server's window the retired one's
-	// way.
+	// none and the top-level share (now.ResponseReserve, file-only — nothing applies an edit of it to
+	// a running session) answers. It is latched beside the two token bounds, moves with them
+	// (followEntry, setServers), and is resolved over the top-level key exactly as the window is
+	// (config.ResolveResponseReserve) — the split describes the server the session is on, so a move
+	// must replace it whole rather than divide the new server's window the retired one's way.
 	entryReserve float64
 	// entryName is that entry's `servers:` name — how a re-read list is matched back to the server
 	// this session is on, so a `context-window:` edited on the BOUND entry re-resolves the pin above
@@ -151,114 +152,19 @@ type liveSettings struct {
 	// and the whole entry is held because a Firing wants the server, not a resolution of it.
 	entry config.ServerEntry
 
-	// servers is the `servers:` list: the single upstream definition (ADR 0036), which the switch
-	// list, the `server:` recording check and the pane's picker all resolve names against.
-	servers []config.ServerEntry
-
-	// seatChoice is the `sub-agents-choice:` gate (ADR 0069) as the session holds it NOW: who picks
-	// the server a delegation runs on. It earns a field here for rememberModel's reason — the value
-	// is an INPUT to something that has not happened yet (the next roster build, and the runs this
-	// session raises), so one left in the launch snapshot would be frozen for the life of the
-	// process and a `/settings` flip would govern nothing until the next start.
-	seatChoice config.SubAgentsChoice
-
-	// subAgentsServer is the `sub-agents-server:` key as routing resolves it NOW — the name the file
-	// last carried, or whatever a `/sub-agents-server` pick moved it to. It is MIRRORED here rather
-	// than owned: the routing wiring holds the authoritative value behind its own lock
-	// (delegationWiring.targetName), and this holder only has to be able to answer for it, for the
-	// seatChoice above's reason — a Firing raised from this session composes its own routing off
-	// this projection, so a name left in the launch snapshot would send every `/schedule` Firing to
-	// the entry the process launched with however often the human re-pointed the key.
-	subAgentsServer string
-
-	// systemPrompt is the `system-prompt-text` / `system-prompt-file` / `system-prompt-models` trio
-	// (ADR 0023) plus the `system-prompt-layers:` list (ADR 0067). It is held whole rather than per
-	// key because ResolveSystemPrompt collapses the whole block into one template per model at every
-	// rebind: selection across the trio is whole-entry replacement, and the layers append behind
-	// whichever entry it selected.
-	systemPrompt config.SystemPromptSettings
-	// useDefaultPrompt is the fourth key of that one prompt — `use-default-prompt:`, the last rung
-	// of the ladder (ADR 0064 §2). It is held beside the block, and installed with it under one
-	// lock, because the rebind reads the two as a single question: what prompt does this session
-	// resolve right now?
-	useDefaultPrompt bool
-
-	// contextFilesEnable and contextFileNames are the `context-files:` block's two keys as the session
-	// holds them NOW. They live here because each key's edit has to carry the OTHER half — the engine
-	// takes the pair (Agent.SetContextFiles) — so switching the block back on installs the names as
-	// they stand rather than the ones this run launched with.
-	contextFilesEnable bool
-	contextFileNames   []string
-
-	// modelProfiles is the `model-profiles:` map (ADR 0044): the user tier the next per-model
-	// resolution matches a model name against. It is held because an edit to it is an INPUT to a
-	// resolution rather than a value the engine keeps — even though its own key also
-	// pushes the resolved profile at SetProfile straight away: without it a switch made after the
-	// edit would re-resolve against the map this process launched with.
-	modelProfiles []profiles.Entry
-
-	// rememberModel is the `remember-model:` toggle as the session holds it NOW. It earns a field here
-	// for the holder's own reason and no other: nothing re-resolves it and no engine seam takes it, but
-	// the three places that ASK it — the two recording seams and the boot restore (wire_verbs.go,
-	// launcher.go) — all ask long after launch, so a value left in the launch snapshot would be frozen
-	// for the life of the process and a `/settings` flip would govern nothing until the next start.
-	rememberModel bool
-
-	// searchEndpoint, disabledTools, allowHosts and denyHosts mirror the four keys that reach the
-	// session through the tool set's SWAP DOOR — `web-search-endpoint:`, `tools.disabled:` and the
-	// two `url-safety:` host lists. The set itself is liveTools' to own and nothing re-reads these
-	// four from here; they are held for options()' sake alone, so a Firing raised from this session
-	// runs the roster and the host layer the session is ON rather than the ones it launched with.
-	// They are written from the spec the set was BUILT from and only after the swap committed — a
-	// refused SwapTools leaves the session on the set it had, and the overlay has to say the same.
-	searchEndpoint string
-	disabledTools  []string
-	allowHosts     []string
-	denyHosts      []string
-
-	// autoCompact and pruneToolResults mirror the two engine toggles that are in force the moment
-	// their apply returns (`auto-compact:`, `prune-tool-results:`) and travel no generation. The
-	// engine holds both and nothing re-resolves them, so they are held for the four above's reason:
-	// an unattended run raised from this session must run the compaction and the pruning the human
-	// last chose, not the ones the process started with. `bypass:` and the seven Floor-guard keys
-	// are the same kind of mirror and are held in the generation above, which is what their one seam
-	// takes.
-	autoCompact      bool
-	pruneToolResults bool
-
-	// delegateMaxSteps mirrors `delegate-max-steps:`, which is the WRITE alone for THIS session —
-	// the bound is read off the file into the Config the engine was constructed with, and there is
-	// no setter behind it. It is mirrored for the one reader that can still act on it: a Firing
-	// builds a Config of its own out of options(), so a bound tightened mid-session bounds the
-	// delegations of the runs this session raises even though the session keeps the one it opened
-	// with. Same posture as inspector below.
-	delegateMaxSteps int
-	// delegateMaxDepth mirrors `delegate-max-depth:` on exactly the same footing — read off the
-	// file into the constructed Config, no setter behind it, mirrored for the Firings this
-	// session raises.
-	delegateMaxDepth int
-	// delegateMaxTokens and delegateTimeout mirror `delegate-max-tokens:` and `delegate-timeout:`
-	// on the same footing again — read off the file into the constructed Config at spawn, no
-	// setter behind them, mirrored for the Firings this session raises.
-	delegateMaxTokens int
-	delegateTimeout   time.Duration
-
-	// inspector mirrors `ui.inspector:`, whose live apply is the WRITE alone — the wire observer is
-	// installed while THIS session's provider client is constructed and there is no seam to arm one
-	// afterwards (applyTheWriteAlone). It is mirrored anyway, for the one reader that can still act
-	// on it: a Firing builds its own client, so a capture armed mid-session is armed for the runs the
-	// session raises even though the session itself keeps the client it opened with.
-	inspector bool
-
-	// undoSnapshots mirrors `undo-snapshots:`, whose live apply is the WRITE alone — the session's
-	// undo store is opened while the session id is minted and there is no seam to re-open one under
-	// a running Agent (ADR 0074). It is mirrored for the one reader that can still act on it: a
-	// Firing opens a store of its own for the session it records under, so a human who turned
-	// snapshots off mid-session turns them off for the runs this session raises.
-	undoSnapshots bool
+	// contextFilesOn and contextFileNames are the `context-files:` block's two keys as the pane
+	// edits them — the named exception to "every key lives on now". The block is two keys and ONE
+	// resolved list, and the engine takes the pair (Agent.SetContextFiles): each key's edit has to
+	// carry the OTHER half, so switching the block back on installs the names as they stand rather
+	// than the ones this run launched with — which means the names have to be kept somewhere while
+	// the switch is off, and now.ContextFiles is nil then (the two spellings of "off" are one
+	// answer, ApplyConfig's). Both setters write now.ContextFiles from this pair.
+	contextFilesOn   bool
+	contextFileNames []string
 }
 
-// newLiveSettings seeds the holder with what THIS run resolved.
+// newLiveSettings seeds the holder with what THIS run resolved: boot and now start as the same value,
+// and only a `/settings` commit ever parts them.
 //
 // The context-file PAIR is seeded from the resolved name list, which is the very read the pane's own
 // two rows are formatted from (settingsrows.go): the two spellings of "off" collapse into an empty
@@ -266,41 +172,24 @@ type liveSettings struct {
 func newLiveSettings(opts config.Options) *liveSettings {
 	observe, sync := domain.SplitLanes(opts.Reactions)
 	return &liveSettings{
-		boot:          opts,
-		pinnedWindow:  opts.ContextWindow,
-		pinnedWorking: opts.WorkingWindow,
+		boot: opts,
+		// Cloned rather than assigned so the overlay's lists are the holder's own from the first
+		// write: a setter replaces a list whole, but a caller that was handed boot elsewhere must never
+		// find its arrays shared with the value this session is running on.
+		now: cloneOptions(opts),
 		// The latch a determined startup binds with, seeded rather than pushed: the entry this
 		// session STARTS on is the one resolution holds on options (config.Options.StartupEntry),
 		// and its bind runs before this holder exists. A pre-bound start holds the zero entry, so
 		// both fields are the honest zero until the human's first pick latches one through
 		// followEntry.
-		entryWindow:        int(opts.StartupEntry.ContextWindow),
-		entryWorking:       opts.StartupEntry.WorkingWindow,
-		entryCap:           opts.StartupEntry.MaxOutputTokens,
-		pinnedReserve:      opts.ResponseReserve,
-		entryReserve:       opts.StartupEntry.ResponseReserve,
-		entryName:          opts.HostAlias,
-		entry:              opts.StartupEntry,
-		servers:            opts.Servers,
-		seatChoice:         opts.SubAgentsChoice,
-		subAgentsServer:    opts.SubAgentsServer,
-		systemPrompt:       opts.SystemPrompt,
-		useDefaultPrompt:   opts.UseDefaultPrompt,
-		contextFilesEnable: len(opts.ContextFiles) > 0,
-		contextFileNames:   opts.ContextFiles,
-		modelProfiles:      opts.ModelProfiles,
-		rememberModel:      opts.RememberModel,
-		// And the keys this holder only MIRRORS — the tool set's four, the engine's two toggles, the
-		// inspector and the undo store — seeded from the same snapshot for the reason the rest are: a
-		// session nobody edits must hand back exactly the configuration it launched with.
-		searchEndpoint:   opts.WebSearchEndpoint,
-		disabledTools:    opts.ToolsDisabled,
-		allowHosts:       opts.URLAllowHosts,
-		denyHosts:        opts.URLDenyHosts,
-		autoCompact:      opts.AutoCompact,
-		pruneToolResults: opts.PruneToolResults,
-		inspector:        opts.UI.Inspector,
-		undoSnapshots:    opts.UndoSnapshots,
+		entryWindow:      int(opts.StartupEntry.ContextWindow),
+		entryWorking:     opts.StartupEntry.WorkingWindow,
+		entryCap:         opts.StartupEntry.MaxOutputTokens,
+		entryReserve:     opts.StartupEntry.ResponseReserve,
+		entryName:        opts.HostAlias,
+		entry:            opts.StartupEntry,
+		contextFilesOn:   len(opts.ContextFiles) > 0,
+		contextFileNames: opts.ContextFiles,
 
 		// The Reaction surface as one generation, seeded from the very values the composition root
 		// hands the engine holder (wire_live.go): the seven Floor keys through their one negation
@@ -317,12 +206,39 @@ func newLiveSettings(opts config.Options) *liveSettings {
 			Observe:           observe,
 			Sync:              sync,
 		},
-
-		delegateMaxSteps:  opts.DelegateMaxSteps,
-		delegateMaxDepth:  opts.DelegateMaxDepth,
-		delegateMaxTokens: opts.DelegateMaxTokens,
-		delegateTimeout:   opts.DelegateTimeout,
 	}
+}
+
+// cloneOptions is the one deep copy of a `config.Options`: the value with every list and map it
+// carries copied, so what comes back shares no backing array with what went in. It is what options()
+// hands out and what now is seeded from, for one reason: the value travels to another goroutine — a
+// Firing composes on the Scheduler's — and a caller that sorted or appended to the roster it was
+// given would otherwise be editing the set this session is running.
+//
+// The eight collections are the ones the value carries; a ninth added to config.Options has to be
+// added here, and TestLiveSettingsOptionsFollowEveryApply's clobber is where a missed one shows.
+func cloneOptions(opts config.Options) config.Options {
+	opts.ToolsDisabled = slices.Clone(opts.ToolsDisabled)
+	opts.URLAllowHosts = slices.Clone(opts.URLAllowHosts)
+	opts.URLDenyHosts = slices.Clone(opts.URLDenyHosts)
+	opts.Reactions = slices.Clone(opts.Reactions)
+	opts.Servers = slices.Clone(opts.Servers)
+	opts.ModelProfiles = slices.Clone(opts.ModelProfiles)
+	opts.ContextFiles = slices.Clone(opts.ContextFiles)
+	opts.SystemPrompt.Models = maps.Clone(opts.SystemPrompt.Models)
+	return opts
+}
+
+// update is the ONE door a live key is written through: it runs fn against now under the write lock
+// and nothing else. Every setter below is this call with the field spelled out, and the applies that
+// need no more than the write — a toggle no seam takes, a bound the next Firing reads — call it
+// directly. There is deliberately no return: a setter that must hand something back under the same
+// lock (the context-file pair, setServers' moved answer, the generation writers) spells its own
+// locked body instead of composing two doors.
+func (s *liveSettings) update(fn func(*config.Options)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn(&s.now)
 }
 
 // pin reports the context-window pin in force right now — what a first binding and a server move
@@ -330,15 +246,7 @@ func newLiveSettings(opts config.Options) *liveSettings {
 func (s *liveSettings) pin() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.pinnedWindow
-}
-
-// setPin moves the pin. 0 restores discover-live, which the next rebind binds from the observed
-// window below rather than from nothing.
-func (s *liveSettings) setPin(tokens int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pinnedWindow = tokens
+	return s.now.ContextWindow
 }
 
 // followEntry takes the bound entry's own two token pins — its `context-window:` and its
@@ -379,7 +287,7 @@ func (s *liveSettings) followEntry(entry config.ServerEntry) {
 func (s *liveSettings) reservePin() float64 {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.pinnedReserve
+	return s.now.ResponseReserve
 }
 
 // workingPin reports the top-level `working-window:` bound — what a server move resolves an entry's
@@ -388,17 +296,7 @@ func (s *liveSettings) reservePin() float64 {
 func (s *liveSettings) workingPin() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.pinnedWorking
-}
-
-// setWorkingWindow mirrors `working-window:`. Like setDelegateMaxSteps there is no engine seam this
-// shadows — the room is a field of the Config an Agent was constructed with — so the store is the
-// whole of what the value can reach in this process, and what it reaches is the next Firing's own
-// Budget and the next `/server` move's resolution.
-func (s *liveSettings) setWorkingWindow(tokens int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pinnedWorking = tokens
+	return s.now.WorkingWindow
 }
 
 // window reports the context window in force right now for the server this session is on: the bound
@@ -409,7 +307,7 @@ func (s *liveSettings) setWorkingWindow(tokens int) {
 func (s *liveSettings) window() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
+	return config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow)
 }
 
 // observe records what a landed beat reported about the server: the context window, and the effort
@@ -453,7 +351,7 @@ func (s *liveSettings) observedDialect() provider.EffortDialect {
 func (s *liveSettings) serverList() []config.ServerEntry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.servers
+	return s.now.Servers
 }
 
 // boundEntry is the `servers:` entry this session is ON, as the list stands NOW — the name followEntry
@@ -471,7 +369,7 @@ func (s *liveSettings) boundEntry() (config.ServerEntry, bool) {
 	if s.entryName == "" {
 		return config.ServerEntry{}, false
 	}
-	for _, e := range s.servers {
+	for _, e := range s.now.Servers {
 		if e.Name == s.entryName {
 			return e, true
 		}
@@ -494,10 +392,10 @@ func (s *liveSettings) choices(base config.Options) []config.ServerEntry {
 // lock, for the reason setContextFilesEnable's pair does — the rebind resolves them as one prompt,
 // and installing half of one edit beside half of another would resolve a prompt nobody configured.
 func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings, useDefault bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.systemPrompt = sp
-	s.useDefaultPrompt = useDefault
+	s.update(func(o *config.Options) {
+		o.SystemPrompt = sp
+		o.UseDefaultPrompt = useDefault
+	})
 }
 
 // promptEditorSeed is the text the `/settings` pane's `system-prompt-text` editor OPENS on when
@@ -533,7 +431,7 @@ func (s *liveSettings) setSystemPrompt(sp config.SystemPromptSettings, useDefaul
 // what the run sends is then an error, not the default — and a refused read reaches exactly that.
 func (s *liveSettings) promptEditorSeed(model, home string) string {
 	s.mu.RLock()
-	systemPrompt, useDefault := s.systemPrompt, s.useDefaultPrompt
+	systemPrompt, useDefault := s.now.SystemPrompt, s.now.UseDefaultPrompt
 	s.mu.RUnlock()
 
 	if systemPrompt.Global.Text != "" || systemPrompt.Global.File != "" || len(systemPrompt.Layers) > 0 {
@@ -566,20 +464,33 @@ func promptSeedNoDiskRead(string) ([]byte, error) { return nil, errPromptSeedNoD
 // setContextFilesEnable flips the `context-files:` off-switch and reports the names to install with
 // it. The pair is read and written under ONE lock because the engine takes it as a pair: an enable
 // that read the names outside the lock could install a half of one edit beside a half of another.
+//
+// The resolved list on now is written in the same act, collapsed exactly as ApplyConfig collapses the
+// block at startup — the names while the switch is on, nil while it is off — so an unattended run
+// raised from a session that switched the block off reads no list at all rather than the names left
+// standing behind the switch, and a re-enable installs the names kept aside here.
 func (s *liveSettings) setContextFilesEnable(on bool) []string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.contextFilesEnable = on
+	s.contextFilesOn = on
+	s.now.ContextFiles = nil
+	if on {
+		s.now.ContextFiles = slices.Clone(s.contextFileNames)
+	}
 	return s.contextFileNames
 }
 
 // setContextFileNames replaces the `context-files.names:` list and reports the switch to install it
-// under — setContextFilesEnable's mirror, and the other half of the same pair.
+// under — setContextFilesEnable's mirror, and the other half of the same pair. The resolved list on
+// now follows the same rule: the new names reach it only while the switch is on.
 func (s *liveSettings) setContextFileNames(names []string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.contextFileNames = names
-	return s.contextFilesEnable
+	if s.contextFilesOn {
+		s.now.ContextFiles = slices.Clone(names)
+	}
+	return s.contextFilesOn
 }
 
 // setServers installs a re-read `servers:` list. Nothing in the engine holds one — the picker, the
@@ -606,16 +517,16 @@ func (s *liveSettings) setContextFileNames(names []string) bool {
 // without changing this session's window. For the CAP the resolved answer is the entry's own field —
 // ADR 0046 grew no top-level key to fall back to — so the two comparisons read differently while
 // asking one question. The SHARE compares the entry's own override for a third reason: the top-level
-// `response-reserve:` key it resolves against is file-only and cannot move mid-session (pinnedReserve
-// has no setter), so the raw and resolved answers part only where an entry DROPS an override the
-// top-level key already matches — and there this errs toward riding, which reinstalls the number the
-// session already holds rather than leaving a moved share waiting for the next bind.
+// `response-reserve:` key it resolves against is file-only and cannot move mid-session (nothing
+// writes now.ResponseReserve), so the raw and resolved answers part only where an entry DROPS an
+// override the top-level key already matches — and there this errs toward riding, which reinstalls
+// the number the session already holds rather than leaving a moved share waiting for the next bind.
 func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	window, outputCap := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow), s.entryCap
+	window, outputCap := config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow), s.entryCap
 	reserve := s.entryReserve
-	s.servers = servers
+	s.now.Servers = servers
 	for _, e := range servers {
 		if e.Name != "" && e.Name == s.entryName {
 			s.entryWindow, s.entryCap = int(e.ContextWindow), e.MaxOutputTokens
@@ -637,19 +548,8 @@ func (s *liveSettings) setServers(servers []config.ServerEntry) bool {
 			break
 		}
 	}
-	return config.ResolveContextWindow(s.entryWindow, s.pinnedWindow) != window ||
+	return config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow) != window ||
 		s.entryCap != outputCap || s.entryReserve != reserve
-}
-
-// setModelProfiles installs a re-read `model-profiles:` map — the USER tier of the per-model
-// resolution (ADR 0044), which every later rebind and every scheduled Firing matches against. The
-// map alone is not a state the engine can be put into, so the key's apply pushes the resolved
-// profile through SetProfile as well; this store is what keeps the two from drifting apart the
-// moment the session changes model.
-func (s *liveSettings) setModelProfiles(entries []profiles.Entry) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.modelProfiles = entries
 }
 
 // modelProfileEntries reports the `model-profiles:` user tier as it stands now. It is the read the
@@ -659,7 +559,7 @@ func (s *liveSettings) setModelProfiles(entries []profiles.Entry) {
 func (s *liveSettings) modelProfileEntries() []profiles.Entry {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.modelProfiles
+	return s.now.ModelProfiles
 }
 
 // remember reports whether `remember-model:` is on right now — the question the two recording seams
@@ -673,26 +573,7 @@ func (s *liveSettings) modelProfileEntries() []profiles.Entry {
 func (s *liveSettings) remember() bool {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.rememberModel
-}
-
-// setRememberModel flips that toggle. The store IS the whole apply for the key — there is nothing to
-// push at the engine and nothing to re-resolve, since what the toggle gates has not happened yet: the
-// next explicit `/model` pick, the next committed profile load, the next start-up.
-func (s *liveSettings) setRememberModel(on bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.rememberModel = on
-}
-
-// setSubAgentsChoice installs the `sub-agents-choice:` gate the human just committed. The store is
-// the whole of what the value can reach from here, for setRememberModel's reason: what the gate
-// decides is whether the NEXT roster build offers the model a seat to choose, and that build has not
-// happened yet.
-func (s *liveSettings) setSubAgentsChoice(choice config.SubAgentsChoice) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.seatChoice = choice
+	return s.now.RememberModel
 }
 
 // setSubAgentsServer mirrors the `sub-agents-server:` name routing now resolves against, pushed by
@@ -701,9 +582,7 @@ func (s *liveSettings) setSubAgentsChoice(choice config.SubAgentsChoice) {
 // latch, the second heartbeat and the far seat all live in the routing wiring, which has already
 // moved by the time this is called — and what it feeds is the run composed NEXT (firingConfig).
 func (s *liveSettings) setSubAgentsServer(name string) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.subAgentsServer = name
+	s.update(func(o *config.Options) { o.SubAgentsServer = name })
 }
 
 // generation hands back the Reaction surface as the session is running it — the value a PARTIAL
@@ -743,10 +622,16 @@ func (s *liveSettings) generationLocked() apogee.Generation {
 // It is called AFTER the swap returned, never before, for setToolSet's reason: a refused list leaves
 // the session firing the Reactions it already had, and a mirror written ahead of the swap would hand
 // a Firing a list this session never ran.
+//
+// The `reactions:` key on now holds BOTH lanes in one list, which is what the resolved key is
+// (config.Options.Reactions), so the two the generation keeps apart are folded back together there —
+// a Firing raised from this session splits them again for its own two halves, and one that saw only
+// the observe half would run without the `gate:` the session is answering to.
 func (s *liveSettings) setReactionLanes(observe, sync []domain.Reaction) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.gen.Observe, s.gen.Sync = observe, sync
+	s.now.Reactions = append(slices.Clone(observe), sync...)
 }
 
 // setToolSet mirrors the spec the live tool set was just BUILT from — the four keys that reach the
@@ -761,10 +646,10 @@ func (s *liveSettings) setReactionLanes(observe, sync []domain.Reaction) {
 // set it already had, and an overlay written ahead of the swap would hand a Firing a roster this
 // session never ran.
 func (s *liveSettings) setToolSet(spec toolSetSpec) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.searchEndpoint, s.disabledTools = spec.endpoint, spec.disabled
-	s.allowHosts, s.denyHosts = spec.allowHosts, spec.denyHosts
+	s.update(func(o *config.Options) {
+		o.WebSearchEndpoint, o.ToolsDisabled = spec.endpoint, spec.disabled
+		o.URLAllowHosts, o.URLDenyHosts = spec.allowHosts, spec.denyHosts
+	})
 }
 
 // setBypass moves `bypass:` on the held generation and hands back the WHOLE value the engine seam
@@ -777,23 +662,8 @@ func (s *liveSettings) setToolSet(spec toolSetSpec) {
 func (s *liveSettings) setBypass(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.gen.Bypass = on
+	s.gen.Bypass, s.now.Bypass = on, on
 	return s.generationLocked()
-}
-
-// setAutoCompact mirrors the `auto-compact:` toggle, for setBypass' reason and on its terms.
-func (s *liveSettings) setAutoCompact(on bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.autoCompact = on
-}
-
-// setPruneToolResults mirrors the `prune-tool-results:` toggle, for setBypass' reason and on its
-// terms.
-func (s *liveSettings) setPruneToolResults(on bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.pruneToolResults = on
 }
 
 // setFloorGuard flips ONE Floor-guard key on the holder and hands back the WHOLE Generation the
@@ -802,9 +672,10 @@ func (s *liveSettings) setPruneToolResults(on bool) {
 // an apply that read the rest outside the lock could re-arm a guard a concurrent apply had just
 // taken away.
 //
-// The key is moved in the FILE's positive spelling — the inverse out, the flip, the negation back —
-// so this row and a start-up read the same seven keys the same way round and neither has to spell
-// the negation a second time.
+// The key is moved in the FILE's positive spelling, on now — the seven positive keys are the overlay's
+// own fields — and the engine's negative spelling is re-derived from them through the one negation
+// seam, so this row and a start-up read the same seven keys the same way round and neither has to
+// spell the negation a second time.
 //
 // An unknown key is a programming error the seven table rows cannot make, so it changes nothing and
 // the generation is handed back as it stands. The key set floorGuardFields answers for is pinned to
@@ -812,11 +683,10 @@ func (s *liveSettings) setPruneToolResults(on bool) {
 func (s *liveSettings) setFloorGuard(key string, on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	positive := optionsFromFloor(s.gen.Floor)
 	if field, known := floorGuardFields[key]; known {
-		*field(&positive) = on
+		*field(&s.now) = on
 	}
-	s.gen.Floor = floorFromOptions(positive)
+	s.gen.Floor = floorFromOptions(s.now)
 	return s.generationLocked()
 }
 
@@ -845,7 +715,7 @@ var floorGuardFields = map[string]func(*config.Options) *bool{
 func (s *liveSettings) setContextFillNotice(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.gen.ContextFillNotice = on
+	s.gen.ContextFillNotice, s.now.ContextFillNotice = on, on
 	return s.generationLocked()
 }
 
@@ -854,7 +724,7 @@ func (s *liveSettings) setContextFillNotice(on bool) apogee.Generation {
 func (s *liveSettings) setStepBudgetNotice(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.gen.StepBudgetNotice = on
+	s.gen.StepBudgetNotice, s.now.StepBudgetNotice = on, on
 	return s.generationLocked()
 }
 
@@ -874,84 +744,12 @@ func floorFromOptions(o config.Options) apogee.FloorConfig {
 	}
 }
 
-// optionsFromFloor is floorFromOptions' inverse: the seven gates read back into the positive keys a
-// file spells and a pane row shows. It exists because the live holder keeps the Floor in the
-// ENGINE's spelling now — that is what one generation carries — while everything composed out of
-// this session reads config.Options, so the negation has to be walkable in both directions.
-//
-// Only those seven fields are set; the rest of the value is the zero Options, and the caller
-// projects them onto whatever base it is answering for (optionsLocked).
-func optionsFromFloor(f apogee.FloorConfig) config.Options {
-	return config.Options{
-		ToolUseEnforcer:       !f.DisableToolUseEnforcer,
-		EmptyResponseRecovery: !f.DisableEmptyResponseRecovery,
-		ToolCallRepair:        !f.DisableToolCallRepair,
-		ToolCallSalvage:       !f.DisableToolCallSalvage,
-		ToolLoopBreaker:       !f.DisableToolLoopBreaker,
-		ToolResultCap:         !f.DisableToolResultCap,
-		ReadCache:             !f.DisableReadCache,
-	}
-}
-
-// setDelegateMaxSteps mirrors `delegate-max-steps:`. Like setInspector below there is no engine
-// seam this shadows — the bound is a field of the Config an Agent was constructed with — so the
-// store is the whole of what the value can reach in this process, and what it reaches is the next
-// Firing's own delegations.
-func (s *liveSettings) setDelegateMaxSteps(steps int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.delegateMaxSteps = steps
-}
-
-// setDelegateMaxDepth mirrors `delegate-max-depth:`, on setDelegateMaxSteps's footing: the bound
-// is a field of the Config an Agent was constructed with, so the store is the whole of what the
-// value can reach in this process, and what it reaches is the next Firing's own delegations.
-func (s *liveSettings) setDelegateMaxDepth(depth int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.delegateMaxDepth = depth
-}
-
-// setDelegateMaxTokens mirrors `delegate-max-tokens:`, on setDelegateMaxSteps's footing: the
-// budget is a field of the Config an Agent was constructed with, so the store is the whole of what
-// the value can reach in this process, and what it reaches is the next Firing's own delegations.
-func (s *liveSettings) setDelegateMaxTokens(tokens int) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.delegateMaxTokens = tokens
-}
-
-// setDelegateTimeout mirrors `delegate-timeout:`, on the same footing.
-func (s *liveSettings) setDelegateTimeout(limit time.Duration) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.delegateTimeout = limit
-}
-
-// setInspector mirrors `ui.inspector:`. Unlike the two above there is no engine seam this shadows —
-// the capture is armed while a provider client is CONSTRUCTED — so the store is the whole of what
-// the value can reach in this process, and what it reaches is the next Firing's own client.
-func (s *liveSettings) setInspector(on bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.inspector = on
-}
-
-// setUndoSnapshots mirrors `undo-snapshots:`. Like setInspector above there is no engine seam this
-// shadows — the session's undo store is opened once, while the session id is minted, and the
-// journal is injected into an Agent that then records into it — so the store is the whole of what
-// the value can reach in this process, and what it reaches is the next Firing's own store.
-func (s *liveSettings) setUndoSnapshots(on bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.undoSnapshots = on
-}
-
 // options reports this session's configuration as it stands NOW: the Options this run launched with,
-// with every key a `/settings` commit has since applied written back over them. It is what an
-// unattended run raised INSIDE the session composes from (ADR 0037's promise carried into the runs a
-// session raises) — a Firing that budgeted, fenced and armed itself from the launch snapshot would
-// silently ignore every edit made since, which is exactly the drift the boot-Config inheritance had.
+// with every key a `/settings` commit has since applied written back over them — now, handed out as
+// a copy. It is what an unattended run raised INSIDE the session composes from (ADR 0037's promise
+// carried into the runs a session raises) — a Firing that budgeted, fenced and armed itself from the
+// launch snapshot would silently ignore every edit made since, which is exactly the drift the
+// boot-Config inheritance had.
 //
 // The overlay is what the APPLY recorded, never a re-read of the config file. The file can lag: a
 // value the pane persisted and a seam then refused is written and not in force, and ADR 0037 makes
@@ -959,90 +757,18 @@ func (s *liveSettings) setUndoSnapshots(on bool) {
 //
 // What it deliberately does NOT answer is the WIRE. The endpoint and the key belong to the Upstream
 // binding rather than to this holder (rebindInputs overlays them from the binding it is handed), and
-// a caller composing a run against a named server carries that entry itself.
+// a caller composing a run against a named server carries that entry itself. Nor the bound entry's
+// own pins: the window and the working room come back as the TOP-LEVEL keys alone, which is each
+// field's own meaning (config.Options.ContextWindow, .WorkingWindow) and what a caller resolves the
+// bound entry's pin over (firingBinding hands that entry back beside this projection).
 //
-// Every slice and map handed back is a COPY. The value travels to another goroutine — a Firing
-// composes on the Scheduler's — and a caller that sorted or appended to the roster it was given
-// would be editing the set this session is running.
+// Every slice and map handed back is a COPY (cloneOptions). The value travels to another goroutine —
+// a Firing composes on the Scheduler's — and a caller that sorted or appended to the roster it was
+// given would be editing the set this session is running.
 func (s *liveSettings) options() config.Options {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	return s.optionsLocked()
-}
-
-// optionsLocked is options' body, split out for the one caller that must read the projection and
-// something else beside it at a SINGLE instant: firingBinding below, which composes a whole run out
-// of this holder. It requires the read lock to be held already — Go's RWMutex is not re-entrant for
-// a reader once a writer is queued behind it, so nesting the two would deadlock the Update
-// goroutine's next commit.
-func (s *liveSettings) optionsLocked() config.Options {
-	next := s.boot
-
-	// The keys that are PUSHED at a seam and are in force the moment their apply returns. Nothing
-	// re-reads them from here; they are mirrored so this projection can answer for them at all.
-	next.WebSearchEndpoint = s.searchEndpoint
-	next.ToolsDisabled = slices.Clone(s.disabledTools)
-	next.URLAllowHosts = slices.Clone(s.allowHosts)
-	next.URLDenyHosts = slices.Clone(s.denyHosts)
-	next.AutoCompact = s.autoCompact
-	next.PruneToolResults = s.pruneToolResults
-	next.UI.Inspector = s.inspector
-	next.UndoSnapshots = s.undoSnapshots
-	next.DelegateMaxSteps = s.delegateMaxSteps
-	next.DelegateMaxDepth = s.delegateMaxDepth
-	next.DelegateMaxTokens = s.delegateMaxTokens
-	next.DelegateTimeout = s.delegateTimeout
-
-	// And the Reaction surface, which is pushed as ONE value and comes back as five keys: the
-	// reaction list, the `bypass:` switch, the `context-fill-notice:` and `step-budget-notice:`
-	// switches, and the seven Floor gates in the FILE's positive spelling —
-	// optionsFromFloor being the inverse of the negation the seam takes, so an unattended run raised
-	// from this session runs the floor and the Reactions the human last chose rather than the ones
-	// the process started with.
-	//
-	// The key holds BOTH lanes in one list, which is what the resolved `reactions:` key is
-	// (config.Options.Reactions), so the two the generation keeps apart are folded back together
-	// here — a Firing raised from this session splits them again for its own two halves, and one
-	// that saw only the observe half would run without the `gate:` the session is answering to.
-	next.Reactions = append(slices.Clone(s.gen.Observe), s.gen.Sync...)
-	next.Bypass = s.gen.Bypass
-	next.ContextFillNotice = s.gen.ContextFillNotice
-	next.StepBudgetNotice = s.gen.StepBudgetNotice
-	floor := optionsFromFloor(s.gen.Floor)
-	next.ToolUseEnforcer = floor.ToolUseEnforcer
-	next.EmptyResponseRecovery = floor.EmptyResponseRecovery
-	next.ToolCallRepair = floor.ToolCallRepair
-	next.ToolCallSalvage = floor.ToolCallSalvage
-	next.ToolLoopBreaker = floor.ToolLoopBreaker
-	next.ToolResultCap = floor.ToolResultCap
-	next.ReadCache = floor.ReadCache
-
-	// And the keys that are re-RESOLVED rather than pushed — the same values rebindInputs projects
-	// for a rebind, since a Firing and a rebind are two readings of one question: what would this
-	// session resolve right now? The window is the TOP-LEVEL pin alone, which is the field's own
-	// meaning (config.Options.ContextWindow) and what a caller resolves the bound entry's pin over.
-	next.ContextWindow = s.pinnedWindow
-	// The working room is the TOP-LEVEL key alone, for the window's reason above: that is the field's
-	// own meaning (config.Options.WorkingWindow), and it is what a caller resolves the bound entry's
-	// own bound over (firingBinding hands that entry back beside this projection).
-	next.WorkingWindow = s.pinnedWorking
-	next.Servers = slices.Clone(s.servers)
-	next.SystemPrompt = s.systemPrompt
-	next.SystemPrompt.Models = maps.Clone(s.systemPrompt.Models)
-	next.UseDefaultPrompt = s.useDefaultPrompt
-	next.ModelProfiles = slices.Clone(s.modelProfiles)
-	next.RememberModel = s.rememberModel
-	next.SubAgentsChoice = s.seatChoice
-	next.SubAgentsServer = s.subAgentsServer
-
-	// The `context-files:` block is TWO keys and ONE resolved list, so it is collapsed here exactly
-	// as ApplyConfig collapses it at startup: the names while the switch is on, and no list at all
-	// while it is off — which is what makes the two spellings of "off" one answer.
-	next.ContextFiles = nil
-	if s.contextFilesEnable {
-		next.ContextFiles = slices.Clone(s.contextFileNames)
-	}
-	return next
+	return cloneOptions(s.now)
 }
 
 // firingBinding hands out everything a Firing raised inside this session composes from that lives in
@@ -1073,7 +799,7 @@ func (s *liveSettings) firingBinding(bound upstreamBinding) (config.Options, con
 	entry.ParallelAgents = 0
 	entry.APIKey, entry.APIKeyCmd, entry.APIKeyEnv, entry.PlaintextKeyOK = "", "", "", false
 	entry.Description, entry.EffortDialect = "", ""
-	return s.optionsLocked(), entry
+	return cloneOptions(s.now), entry
 }
 
 // rebindInputs projects the live values onto a COPY of the startup snapshot and hands back the
@@ -1099,18 +825,18 @@ func (s *liveSettings) rebindInputs(base config.Options, bound upstreamBinding) 
 	// bound entry's `context-window:` when it names one, else the top-level key — the precedence
 	// config.ResolveContextWindow spells, called inline because the read lock is already held here.
 	// Resolved once, so the copy and the returned pin cannot disagree.
-	pin := config.ResolveContextWindow(s.entryWindow, s.pinnedWindow)
+	pin := config.ResolveContextWindow(s.entryWindow, s.now.ContextWindow)
 	base.ContextWindow = pin
 	// And how that window is split on the server the session is on NOW: the bound entry's
 	// `response-reserve:` over the top-level key (config.ResolveResponseReserve, the ranks the
 	// window's own resolution spells). It is written ONTO the copy rather than handed back beside the
 	// two bounds because `config.Options` spells this number as a session-wide share, which is
 	// exactly what a caller reading the copy needs — a Firing composes its Config from it.
-	base.ResponseReserve = config.ResolveResponseReserve(s.entryReserve, s.pinnedReserve)
-	base.Servers = s.servers
-	base.SystemPrompt = s.systemPrompt
-	base.UseDefaultPrompt = s.useDefaultPrompt
-	base.ModelProfiles = s.modelProfiles
+	base.ResponseReserve = config.ResolveResponseReserve(s.entryReserve, s.now.ResponseReserve)
+	base.Servers = s.now.Servers
+	base.SystemPrompt = s.now.SystemPrompt
+	base.UseDefaultPrompt = s.now.UseDefaultPrompt
+	base.ModelProfiles = s.now.ModelProfiles
 	// And the other bound the server states: the reply ceiling the bound entry pins (ADR 0046). It
 	// travels beside the window because the spec the caller builds carries it beside the window, and
 	// it is handed back rather than written onto the copy because `config.Options` spells this number
@@ -1462,7 +1188,7 @@ var settingsTable = []settingsEntry{
 			// Mirrored onto the holder so a Firing raised from this session compacts the way the
 			// session does — the engine holds the toggle, and a Firing builds an engine of its own.
 			if a.live != nil {
-				a.live.setAutoCompact(on)
+				a.live.update(func(o *config.Options) { o.AutoCompact = on })
 			}
 			return "", nil
 		},
@@ -1479,7 +1205,7 @@ var settingsTable = []settingsEntry{
 			// Mirrored onto the holder for auto-compact's reason above: a Firing raised from this
 			// session prunes the way the session does, off an engine it builds for itself.
 			if a.live != nil {
-				a.live.setPruneToolResults(on)
+				a.live.update(func(o *config.Options) { o.PruneToolResults = on })
 			}
 			return "", nil
 		},
@@ -1583,7 +1309,7 @@ var settingsTable = []settingsEntry{
 			// profile load records — and a decision the next start-up makes. So the holder store is the
 			// whole apply, and the seams that ask (recordModelChoice, recordLaunchProfile,
 			// launcherWiring.restore) read it from there at the moment they have something to record.
-			a.live.setRememberModel(on)
+			a.live.update(func(o *config.Options) { o.RememberModel = on })
 			return "", nil
 		},
 	},
@@ -1599,7 +1325,7 @@ var settingsTable = []settingsEntry{
 			// beat reported, so clearing a pin hands the session back to the server rather than to
 			// "unknown". No note — the pin is what the Budget and Compaction measure against from the
 			// moment the rebind commits.
-			a.live.setPin(tokens)
+			a.live.update(func(o *config.Options) { o.ContextWindow = tokens })
 			return "", a.rideTheRebind()
 		},
 	},
@@ -1948,7 +1674,7 @@ func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error)
 		return "", err
 	}
 	if a.live != nil {
-		a.live.setDelegateMaxSteps(steps)
+		a.live.update(func(o *config.Options) { o.DelegateMaxSteps = steps })
 	}
 	return "", nil
 }
@@ -1964,7 +1690,7 @@ func applyDelegateMaxDepth(a settingsApplier, key, value string) (string, error)
 		return "", err
 	}
 	if a.live != nil {
-		a.live.setDelegateMaxDepth(depth)
+		a.live.update(func(o *config.Options) { o.DelegateMaxDepth = depth })
 	}
 	return "", nil
 }
@@ -1980,7 +1706,7 @@ func applyDelegateMaxTokens(a settingsApplier, key, value string) (string, error
 		return "", err
 	}
 	if a.live != nil {
-		a.live.setDelegateMaxTokens(tokens)
+		a.live.update(func(o *config.Options) { o.DelegateMaxTokens = tokens })
 	}
 	return "", nil
 }
@@ -1994,7 +1720,7 @@ func applyDelegateTimeout(a settingsApplier, key, value string) (string, error) 
 		return "", fmt.Errorf("apogee: %s is a length of time of 0 or more, not %q", key, value)
 	}
 	if a.live != nil {
-		a.live.setDelegateTimeout(limit)
+		a.live.update(func(o *config.Options) { o.DelegateTimeout = limit })
 	}
 	return "", nil
 }
@@ -2014,7 +1740,7 @@ func applyWorkingWindow(a settingsApplier, key, value string) (string, error) {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.setWorkingWindow(tokens)
+		a.live.update(func(o *config.Options) { o.WorkingWindow = tokens })
 	}
 	return "", nil
 }
@@ -2035,7 +1761,7 @@ func applyInspector(a settingsApplier, key, value string) (string, error) {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.setInspector(on)
+		a.live.update(func(o *config.Options) { o.UI.Inspector = on })
 	}
 	return "", nil
 }
@@ -2056,7 +1782,7 @@ func applyUndoSnapshots(a settingsApplier, key, value string) (string, error) {
 		return "", err
 	}
 	if a.live != nil {
-		a.live.setUndoSnapshots(on)
+		a.live.update(func(o *config.Options) { o.UndoSnapshots = on })
 	}
 	return "", nil
 }
@@ -2200,7 +1926,7 @@ func (a settingsApplier) recordSeatChoice(choice config.SubAgentsChoice) {
 	if a.live == nil {
 		return
 	}
-	a.live.setSubAgentsChoice(choice)
+	a.live.update(func(o *config.Options) { o.SubAgentsChoice = choice })
 }
 
 // rideTheRebind re-drives the per-model resolution for the model the session is bound to right now.
@@ -2391,7 +2117,7 @@ func (a settingsApplier) reloadModelProfiles() error {
 	if err != nil {
 		return err
 	}
-	a.live.setModelProfiles(file.ModelProfiles)
+	a.live.update(func(o *config.Options) { o.ModelProfiles = file.ModelProfiles })
 	model := a.binding().Model
 	if model == "" {
 		return nil

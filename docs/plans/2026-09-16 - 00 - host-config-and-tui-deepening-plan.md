@@ -146,7 +146,13 @@ refusal-text test in `configmigrate_test.go` unchanged.
 
 **Commit:** `fix(config): a live re-read refuses the retired top-level keys instead of folding them`
 
-## 3. `liveSettings` holds boot + one live overlay
+## 3. `liveSettings` holds boot + one live overlay — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): acceptance count — `grep -c 'func (s \*liveSettings) set' cmd/apogee/wire_settings.go`: 24 at HEAD, 11 after; the 13 dropped setters (setPin, setWorkingWindow, setRememberModel, setSubAgentsChoice, setAutoCompact, setPruneToolResults, setDelegateMaxSteps/Depth/Tokens, setDelegateTimeout, setInspector, setUndoSnapshots, setModelProfiles) each had one in-file caller and a bare field write, now `live.update(func(o *config.Options) { o.X = v })` at that site; the 11 kept are the named doors that return under the lock, precede or follow a seam commit (setToolSet, setReactionLanes, setServers, setSystemPrompt, the context-files pair), have an outside caller (setSubAgentsServer, delegation.go) or write the Generation (setBypass, setFloorGuard, setContextFillNotice, setStepBudgetNotice — item 4's).
+NOTES (2026-09-16): context-files — took the plan's first option: `now.ContextFiles` is the RESOLVED list (nil off / names on) and a side pair `contextFilesOn` + `contextFileNames` keeps the names aside while off, so `options()` is the bare `cloneOptions(now)` with no collapse; the "one named side bool" is a bool plus the side list the names need while off.
+NOTES (2026-09-16): the Generation writers (setBypass, setFloorGuard, setContextFillNotice, setStepBudgetNotice, setReactionLanes) dual-write `gen` and the matching keys on `now` in the same locked act, so `options()` keeps reporting `bypass:`, the two notice switches, the seven Floor keys and `reactions:` without the projection; `gen` itself is left in place for item 4. setFloorGuard now flips the positive key on `now` and re-derives `gen.Floor` via `floorFromOptions(s.now)`.
+NOTES (2026-09-16): `optionsFromFloor` and `TestOptionsFromFloorInvertsFloorFromOptions` deleted — the projection (`optionsLocked`) was the inverse's only production caller and the seven positive keys now live on `now`, so the negation is walked in one direction only; `optionsLocked` itself deleted (firingBinding reads `cloneOptions(s.now)` under its own read lock). 22 non-Generation mirror fields folded into `now` (the plan's "18" undercounted: incl. pinnedReserve, which has no setter and maps to now.ResponseReserve).
+NOTES (2026-09-16): `now` is seeded as `cloneOptions(opts)` so the overlay's lists never alias `boot`'s; `boot` is kept per the item text though nothing reads it in production after this item (the new test asserts it untouched).
 
 **What.** `cmd/apogee/wire_settings.go`: `liveSettings` keeps `boot config.Options` (immutable) and
 `now config.Options` (the overlay) under the existing lock, with one door
