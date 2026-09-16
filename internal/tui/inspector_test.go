@@ -569,6 +569,18 @@ func TestReadableRequestSummarisesTheEnvelope(t *testing.T) {
 			payload: `{"model":"gpt-oss-20b","messages":[{"role":"user"}]}`,
 			want:    "1 messages · model gpt-oss-20b",
 		},
+		{
+			// The Messages wire hoists the system prompt above the messages (ADR 0078): the
+			// count alone would leave it out, so it is named beside the count.
+			name:    "system hoisted on the anthropic wire",
+			payload: `{"model":"claude-x","system":"be brief","messages":[{"role":"user"}],"tools":[{"name":"grep"}]}`,
+			want:    "system + 1 messages · 1 tools · model claude-x",
+		},
+		{
+			name:    "system as blocks, no messages",
+			payload: `{"model":"claude-x","system":[{"type":"text","text":"be brief"}]}`,
+			want:    "system · model claude-x",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -753,6 +765,120 @@ func TestReadableKeepsWhatIsNotADeltaChunk(t *testing.T) {
 	want = append(want, malformed, "[DONE]")
 	if !slices.Equal(lines, want) {
 		t.Errorf("readable = %q, want the unclassifiable lines kept %q", lines, want)
+	}
+}
+
+// anthropicStreamCapture is a Messages event stream as the Client records it on the anthropic
+// wire — the body as received, `event:` framing and blank separators included (provider
+// streamCapture) — carrying a thinking block with its signature, a text block, a tool_use block
+// with its input fragment, a ping in the middle, and the stop reason and output usage.
+const anthropicStreamCapture = `event: message_start
+data: {"type":"message_start","message":{"id":"msg_1","type":"message","role":"assistant","model":"claude-x","content":[],"stop_reason":null,"usage":{"input_tokens":25,"cache_read_input_tokens":5,"output_tokens":1}}}
+
+event: content_block_start
+data: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"weighing "}}
+
+event: ping
+data: {"type": "ping"}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"the options"}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"c2lnbmVk"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":0}
+
+event: content_block_start
+data: {"type":"content_block_start","index":1,"content_block":{"type":"text","text":""}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"here is "}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"the answer"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":1}
+
+event: content_block_start
+data: {"type":"content_block_start","index":2,"content_block":{"type":"tool_use","id":"toolu_abcdefghijklmnop","name":"read_file","input":{}}}
+
+event: content_block_delta
+data: {"type":"content_block_delta","index":2,"delta":{"type":"input_json_delta","partial_json":"{\"path\":\"secret.txt\"}"}}
+
+event: content_block_stop
+data: {"type":"content_block_stop","index":2}
+
+event: message_delta
+data: {"type":"message_delta","delta":{"stop_reason":"tool_use","stop_sequence":null},"usage":{"output_tokens":15}}
+
+event: message_stop
+data: {"type":"message_stop"}
+
+`
+
+// TestReadableRendersAMessagesStream pins the second decoder (ADR 0078): a captured anthropic
+// stream reads back as the same readable lines the openai branch spells — thinking and text as
+// one passage per kind, the tool call named without its arguments — plus the rows this wire says
+// in typed events of its own: the served model, the input accounting, the stop reason and the
+// output accounting. The `event:` framing, the blank separators, the ping, the signature and the
+// block stops contribute no row, because none of them is something the model said.
+func TestReadableRendersAMessagesStream(t *testing.T) {
+	lines, hidden := wireReadableLines(domain.WireDirectionResponse, anthropicStreamCapture)
+
+	want := []string{
+		readableModelPrefix + "claude-x",
+		readableUsagePrefix + "25 input tokens · 5 cached",
+		readableThinkingPrefix + "weighing the options",
+		readableTextPrefix + "here is the answer",
+		readableToolCallPrefix + "read_file toolu_abcdef",
+		readableStopPrefix + "tool_use",
+		readableUsagePrefix + "15 output tokens",
+	}
+	if hidden != 0 {
+		t.Errorf("hidden = %d, want nothing dropped from a short stream", hidden)
+	}
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want the stream's passages %q", lines, want)
+	}
+	if joined := strings.Join(lines, "\n"); strings.Contains(joined, "secret.txt") {
+		t.Errorf("the tool input reached the readable rendering:\n%s", joined)
+	}
+}
+
+// TestReadableKeepsWhatIsNotAMessagesEvent is the never-hide half of the second decoder: on a
+// framed stream, an in-band error event, a fragment type this pane does not know and a truncated
+// payload each go through in their pretty form — the payload without its `data:` framing, so a
+// JSON one indents — and each closes the passage it followed.
+func TestReadableKeepsWhatIsNotAMessagesEvent(t *testing.T) {
+	fault := `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`
+	unknown := `{"type":"content_block_delta","index":0,"delta":{"type":"citations_delta","citation":{}}}`
+	malformed := `{"type":"content_block_delta","index":`
+	payload := strings.Join([]string{
+		"event: content_block_delta",
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"done"}}`,
+		"",
+		"event: error",
+		"data: " + fault,
+		"",
+		"event: content_block_delta",
+		"data: " + unknown,
+		"",
+		"data: " + malformed,
+	}, "\n")
+
+	lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
+
+	want := append([]string{readableTextPrefix + "done"}, prettyWireLine(fault)...)
+	want = append(want, prettyWireLine(unknown)...)
+	want = append(want, malformed)
+	if !slices.Equal(lines, want) {
+		t.Errorf("readable = %q, want the unclassifiable payloads kept %q", lines, want)
 	}
 }
 

@@ -338,7 +338,10 @@ NOTES (2026-09-16): `TestE2EAnthropicWireCompletesAToolLoop` is not parallel —
 
 **Commit:** `test(cmd/apogee): a full tool-use loop completes over the anthropic wire`
 
-## 15. Inspector reads Anthropic SSE (apogee-6fp)
+## 15. Inspector reads Anthropic SSE (apogee-6fp) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the anthropic capture is the SSE body as received (provider streamCapture, item 10), so the readable decoder keys on the `data:` payloads' `type` and treats a framed stream's non-`data:` lines as framing (no row); the openai path and its tests are byte-for-byte unchanged.
+NOTES (2026-09-16): consequential edit — docs/manual/commands.md: made necessary by the `/inspect` row's summary and passage wording, which now also covers the anthropic wire.
 
 **What:** Depends on item 10. `internal/tui/inspector.go` decodes OpenAI `sseChunk` payloads for the readable wire view and falls back to raw JSON otherwise. Add a second decoder keyed on the payload's `type` (message_start … message_stop) rendering the same readable lines (text, thinking, tool_use name+fragment, stop reason, usage); `wireRequestSummary` also reads top-level `system` when present. Same output style as the OpenAI branch; no new key or option.
 

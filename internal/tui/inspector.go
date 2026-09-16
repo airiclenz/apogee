@@ -359,16 +359,22 @@ func wireReadableLines(direction, payload string) (lines []string, hidden int) {
 }
 
 // wireRequestSummary reduces a request body to the one line that says what was asked of the model:
-// how many messages the conversation was replayed as, how many tools it was offered, and which
-// model it went to. A field the body does not carry is left out rather than reported as zero, and a
-// body carrying none of the three is no summary at all — ok is false, and the caller shows the body
-// as it stands.
+// how many messages the conversation was replayed as, whether a system prompt rode above them, how
+// many tools it was offered, and which model it went to. A field the body does not carry is left
+// out rather than reported as zero, and a body carrying none of them is no summary at all — ok is
+// false, and the caller shows the body as it stands.
 //
 // The lengths are counted off json.RawMessage rather than a decoded shape on purpose: this is a
 // VIEW of a request some provider dialect built, and a summary that failed whenever a message
 // carried a member this pane never modelled would fail on exactly the bodies worth looking at.
+//
+// `system` is the Messages wire's hoisted system prompt (ADR 0078): on the openai wire it is a
+// message among the messages and needs no word of its own, while on the anthropic wire it is a
+// top-level member the message count would otherwise silently leave out — so it is named beside
+// the count (`system + 2 messages`), never folded into it.
 func wireRequestSummary(payload string) (summary string, ok bool) {
 	var body struct {
+		System   *json.RawMessage   `json:"system"`
 		Messages *[]json.RawMessage `json:"messages"`
 		Tools    *[]json.RawMessage `json:"tools"`
 		Model    *string            `json:"model"`
@@ -377,8 +383,13 @@ func wireRequestSummary(payload string) (summary string, ok bool) {
 		return "", false
 	}
 	var parts []string
-	if body.Messages != nil {
+	switch {
+	case body.Messages != nil && body.System != nil:
+		parts = append(parts, "system + "+strconv.Itoa(len(*body.Messages))+" messages")
+	case body.Messages != nil:
 		parts = append(parts, strconv.Itoa(len(*body.Messages))+" messages")
+	case body.System != nil:
+		parts = append(parts, "system")
 	}
 	if body.Tools != nil {
 		parts = append(parts, strconv.Itoa(len(*body.Tools))+" tools")
@@ -392,66 +403,313 @@ func wireRequestSummary(payload string) (summary string, ok bool) {
 	return strings.Join(parts, " · "), true
 }
 
-// wireResponsePassages turns a captured response — the stream's raw data payloads newline-joined
-// (domain.WireEvent) — into the passages it spells. Consecutive deltas of one kind are one passage,
-// because a token is not a thought and a stream that showed one row per token would be the raw
-// rendering with extra steps; an empty delta contributes nothing and does NOT break the run, since
-// a keep-alive chunk in the middle of a sentence did not end the sentence.
+// wireResponsePassages turns a captured response into the passages it spells. Consecutive deltas
+// of one kind are one passage, because a token is not a thought and a stream that showed one row
+// per token would be the raw rendering with extra steps; an empty delta contributes nothing and
+// does NOT break the run, since a keep-alive chunk in the middle of a sentence did not end the
+// sentence.
+//
+// The capture comes in one of two shapes, and the readable rendering reads both (ADR 0078): on the
+// openai wire the stream's raw `data:` payloads newline-joined (domain.WireEvent), each line a
+// chat-completion chunk; on the anthropic wire the SSE body as received, framing and all, each
+// `data:` line an event keyed on its `type`. The shape is read off the capture itself
+// (isSSEFramed) — a framed stream's non-`data:` lines are the framing its parser never reads (the
+// `event:` line repeats the payload's type, the blank line separates events) and contribute no row,
+// while every payload goes through one of the two decoders (readablePassages.readChunk,
+// readMessagesEvent).
 //
 // A tool call is its own passage, named and identified but never argued: the arguments arrive as
-// fragments across chunks and raw mode already has them in full. Anything that is not a delta chunk
-// at all — the [DONE] sentinel, a blank line, a truncated document, a usage-only chunk, an in-band
-// error member — closes the open passage and goes through in its pretty form, which for a line that
-// is not JSON is the line exactly as it arrived (prettyWireLine).
+// fragments across chunks and raw mode already has them in full. Any payload neither decoder
+// claims — the [DONE] sentinel, a blank line, a truncated document, a usage-only chunk, an in-band
+// error member, an event type this pane does not know — closes the open passage and goes through
+// in its pretty form, which for a line that is not JSON is the line exactly as it arrived
+// (prettyWireLine). What the reader is looking at is what a server actually sent, and the one
+// thing this pane may never do is hide the part that did not fit the shape.
 func wireResponsePassages(payload string) []string {
 	trimmed := strings.Trim(payload, "\n")
 	if trimmed == "" {
 		return nil
 	}
-	var (
-		rows   []string
-		prefix string
-		text   string
-	)
-	// closePassage renders the open run, if there is one, and leaves nothing open behind it.
-	closePassage := func() {
-		if prefix == "" {
-			return
-		}
-		rows = append(rows, wrapReadable(prefix, text, readableWrapColumn)...)
-		prefix, text = "", ""
-	}
-	// extend adds one delta to the open run of its kind, opening a run when the kind changed.
-	extend := func(kind, delta string) {
-		if delta == "" {
-			return
-		}
-		if prefix != kind {
-			closePassage()
-			prefix = kind
-		}
-		text += delta
-	}
+	framed := isSSEFramed(trimmed)
+	var p readablePassages
 	for _, raw := range strings.Split(trimmed, "\n") {
-		var chunk sseChunk
-		if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &chunk); err != nil || len(chunk.Choices) == 0 {
-			closePassage()
-			rows = append(rows, prettyWireLine(raw)...)
-			continue
-		}
-		delta := chunk.Choices[0].Delta
-		extend(readableThinkingPrefix, delta.thinking())
-		extend(readableTextPrefix, delta.Content)
-		for _, call := range delta.ToolCalls {
-			if call.Function.Name == "" {
+		data := strings.TrimSpace(raw)
+		if framed {
+			if !strings.HasPrefix(data, sseDataPrefix) {
 				continue
 			}
-			closePassage()
-			rows = append(rows, wrapReadable(readableToolCallPrefix, toolCallLabel(call.Function.Name, call.ID), readableWrapColumn)...)
+			// The fallback below keeps the payload without its framing: the prefix is not the
+			// protocol, and with it in the way json.Indent would refuse the body entirely.
+			raw = strings.TrimPrefix(data, sseDataPrefix)
+			data = raw
 		}
+		if p.readChunk(data) || p.readMessagesEvent(data) {
+			continue
+		}
+		p.keep(raw)
 	}
-	closePassage()
-	return rows
+	p.close()
+	return p.rows
+}
+
+// sseDataPrefix is the SSE line prefix carrying a payload; every other line is framing. It mirrors
+// the provider's own constant (internal/provider/wire_anthropic_stream.go) for the same reason
+// sseChunk mirrors its decode shape: that one is unexported there.
+const sseDataPrefix = "data: "
+
+// isSSEFramed reports whether a captured response kept its SSE framing — the shape every wire but
+// openai records (provider streamCapture: "on any other wire the body as received"). The openai
+// capture never carries a `data:` prefix, because joining the payloads is precisely what stripped
+// it; a capture that does is therefore a framed one, and its lines are read as framing plus
+// payloads rather than as payloads alone.
+func isSSEFramed(trimmed string) bool {
+	return strings.HasPrefix(trimmed, sseDataPrefix) || strings.Contains(trimmed, "\n"+sseDataPrefix)
+}
+
+// readablePassages is the accumulator one response's readable rendering is built in: the rows
+// rendered so far and the passage still open — its kind prefix and the text its deltas have
+// spelled. It is a type rather than the closures it began as because two decoders now feed it,
+// one per wire, and the passage rule (one run per kind, closed by whatever is not of that kind) is
+// theirs to share, not to copy.
+type readablePassages struct {
+	rows   []string
+	prefix string
+	text   string
+}
+
+// close renders the open run, if there is one, and leaves nothing open behind it.
+func (p *readablePassages) close() {
+	if p.prefix == "" {
+		return
+	}
+	p.rows = append(p.rows, wrapReadable(p.prefix, p.text, readableWrapColumn)...)
+	p.prefix, p.text = "", ""
+}
+
+// extend adds one delta to the open run of its kind, opening a run when the kind changed.
+func (p *readablePassages) extend(kind, delta string) {
+	if delta == "" {
+		return
+	}
+	if p.prefix != kind {
+		p.close()
+		p.prefix = kind
+	}
+	p.text += delta
+}
+
+// row closes the open run and renders one passage of its own — a tool call, a stop reason, a
+// usage line — wrapped like any other.
+func (p *readablePassages) row(prefix, text string) {
+	p.close()
+	p.rows = append(p.rows, wrapReadable(prefix, text, readableWrapColumn)...)
+}
+
+// keep closes the open run and passes one unclassified line through in its pretty form.
+func (p *readablePassages) keep(line string) {
+	p.close()
+	p.rows = append(p.rows, prettyWireLine(line)...)
+}
+
+// readChunk reads one payload as a chat-completion chunk (sseChunk) and folds its delta in,
+// reporting whether the payload was one: a document that does not decode, or decodes without a
+// choice, is not this decoder's to render.
+func (p *readablePassages) readChunk(data string) bool {
+	var chunk sseChunk
+	if err := json.Unmarshal([]byte(data), &chunk); err != nil || len(chunk.Choices) == 0 {
+		return false
+	}
+	delta := chunk.Choices[0].Delta
+	p.extend(readableThinkingPrefix, delta.thinking())
+	p.extend(readableTextPrefix, delta.Content)
+	for _, call := range delta.ToolCalls {
+		if call.Function.Name == "" {
+			continue
+		}
+		p.row(readableToolCallPrefix, toolCallLabel(call.Function.Name, call.ID))
+	}
+	return true
+}
+
+// The Messages stream event types the readable rendering classifies by, as each payload's `type`
+// names them, and the content_block_delta fragment types under them. They mirror the provider's
+// own vocabulary (internal/provider/wire_anthropic_stream.go), unexported there like the rest.
+const (
+	messagesEventStart      = "message_start"
+	messagesEventBlockStart = "content_block_start"
+	messagesEventBlockDelta = "content_block_delta"
+	messagesEventBlockStop  = "content_block_stop"
+	messagesEventDelta      = "message_delta"
+	messagesEventStop       = "message_stop"
+	messagesEventPing       = "ping"
+
+	messagesBlockText     = "text"
+	messagesBlockThinking = "thinking"
+	messagesBlockToolUse  = "tool_use"
+
+	messagesDeltaText      = "text_delta"
+	messagesDeltaThinking  = "thinking_delta"
+	messagesDeltaInputJSON = "input_json_delta"
+	messagesDeltaSignature = "signature_delta"
+)
+
+// The readable rendering's row prefixes for what the Messages wire says OUTSIDE its content
+// blocks: the served model and the input accounting (message_start), the stop reason and the
+// output accounting (message_delta). The openai wire says these in a usage-only chunk that goes
+// through pretty; here they are typed events of their own and read as such.
+const (
+	readableModelPrefix = "· model "
+	readableStopPrefix  = "· stop "
+	readableUsagePrefix = "· usage "
+)
+
+// messagesEvent is one Messages stream payload as the readable rendering reads it, narrowed to
+// the members it classifies by — the MIRROR of the provider's anthropicEvent
+// (internal/provider/wire_anthropic_stream.go), partial in width like sseChunk and for the same
+// reason. Which members an event populates depends on its type: Message on message_start,
+// ContentBlock on content_block_start, Delta on content_block_delta and message_delta, Usage on
+// message_delta.
+type messagesEvent struct {
+	Type    string `json:"type"`
+	Message *struct {
+		Model string         `json:"model"`
+		Usage *messagesUsage `json:"usage"`
+	} `json:"message"`
+	ContentBlock *struct {
+		Type     string `json:"type"`
+		Text     string `json:"text"`
+		Thinking string `json:"thinking"`
+		ID       string `json:"id"`
+		Name     string `json:"name"`
+	} `json:"content_block"`
+	Delta *struct {
+		Type       string `json:"type"`
+		Text       string `json:"text"`
+		Thinking   string `json:"thinking"`
+		StopReason string `json:"stop_reason"`
+	} `json:"delta"`
+	Usage *messagesUsage `json:"usage"`
+}
+
+// messagesUsage is the Messages wire's token accounting as the rendering reads it: the input side
+// arrives on message_start (cache reads counted apart from input_tokens on this wire), the output
+// side on message_delta — the same split the provider assembles its Usage from.
+type messagesUsage struct {
+	InputTokens     int `json:"input_tokens"`
+	OutputTokens    int `json:"output_tokens"`
+	CacheReadTokens int `json:"cache_read_input_tokens"`
+}
+
+// readMessagesEvent reads one payload as a Messages stream event keyed on its type and folds it
+// in, reporting whether it rendered the payload. Text and thinking fragments extend a passage like
+// chat-completion deltas; a tool_use block is named at its start and its input fragments are
+// elided like the openai arguments; block and message stops close the open passage; a ping is the
+// keep-alive and contributes nothing. An event whose type this pane does not know, a fragment type
+// it does not know, an error event, and a known event carrying nothing it can say are all NOT
+// rendered — false hands them to the caller's pretty fallback, so nothing the server said is lost.
+func (p *readablePassages) readMessagesEvent(data string) bool {
+	var ev messagesEvent
+	if err := json.Unmarshal([]byte(data), &ev); err != nil {
+		return false
+	}
+	switch ev.Type {
+	case messagesEventStart:
+		return p.readMessageStart(ev)
+	case messagesEventBlockStart:
+		return p.readBlockStart(ev)
+	case messagesEventBlockDelta:
+		return p.readBlockDelta(ev)
+	case messagesEventDelta:
+		return p.readMessageDelta(ev)
+	case messagesEventBlockStop, messagesEventStop:
+		p.close()
+		return true
+	case messagesEventPing:
+		return true
+	}
+	return false
+}
+
+// readMessageStart renders message_start as the served model and the input accounting, one row
+// each, and claims the event only when it had at least one of them to say.
+func (p *readablePassages) readMessageStart(ev messagesEvent) bool {
+	if ev.Message == nil {
+		return false
+	}
+	said := false
+	if ev.Message.Model != "" {
+		p.row(readableModelPrefix, ev.Message.Model)
+		said = true
+	}
+	if u := ev.Message.Usage; u != nil && u.InputTokens > 0 {
+		parts := []string{strconv.Itoa(u.InputTokens) + " input tokens"}
+		if u.CacheReadTokens > 0 {
+			parts = append(parts, strconv.Itoa(u.CacheReadTokens)+" cached")
+		}
+		p.row(readableUsagePrefix, strings.Join(parts, " · "))
+		said = true
+	}
+	return said
+}
+
+// readBlockStart opens a content block: a tool_use block is the named tool-call passage, a text
+// or thinking block extends its kind with whatever text the start already carried (nothing, on a
+// stream). A block type this pane does not know is not claimed.
+func (p *readablePassages) readBlockStart(ev messagesEvent) bool {
+	block := ev.ContentBlock
+	if block == nil {
+		return false
+	}
+	switch block.Type {
+	case messagesBlockToolUse:
+		if block.Name == "" {
+			return false
+		}
+		p.row(readableToolCallPrefix, toolCallLabel(block.Name, block.ID))
+	case messagesBlockText:
+		p.extend(readableTextPrefix, block.Text)
+	case messagesBlockThinking:
+		p.extend(readableThinkingPrefix, block.Thinking)
+	default:
+		return false
+	}
+	return true
+}
+
+// readBlockDelta folds one content_block_delta fragment in by its type: text and thinking extend
+// their passages; a tool call's input JSON and a thinking block's signature are classified and
+// elided — the arguments because raw mode has them in full, the signature because it is opaque
+// bytes the model never spelled. A fragment type this pane does not know is not claimed.
+func (p *readablePassages) readBlockDelta(ev messagesEvent) bool {
+	delta := ev.Delta
+	if delta == nil {
+		return false
+	}
+	switch delta.Type {
+	case messagesDeltaText:
+		p.extend(readableTextPrefix, delta.Text)
+	case messagesDeltaThinking:
+		p.extend(readableThinkingPrefix, delta.Thinking)
+	case messagesDeltaInputJSON, messagesDeltaSignature:
+	default:
+		return false
+	}
+	return true
+}
+
+// readMessageDelta renders message_delta as the stop reason and the output accounting, one row
+// each, and claims the event only when it had at least one of them to say.
+func (p *readablePassages) readMessageDelta(ev messagesEvent) bool {
+	said := false
+	if ev.Delta != nil && ev.Delta.StopReason != "" {
+		p.row(readableStopPrefix, ev.Delta.StopReason)
+		said = true
+	}
+	if ev.Usage != nil && ev.Usage.OutputTokens > 0 {
+		p.row(readableUsagePrefix, strconv.Itoa(ev.Usage.OutputTokens)+" output tokens")
+		said = true
+	}
+	return said
 }
 
 // toolCallLabel names one call in the readable rendering: the tool's name, and as much of the wire
