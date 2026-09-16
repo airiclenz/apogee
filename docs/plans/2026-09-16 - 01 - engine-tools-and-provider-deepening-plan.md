@@ -582,7 +582,13 @@ pair and request-tail branching become a `stubllm.Script` with `when:` selectors
 
 **Commit:** `test: the bench-readiness upstream scripts stubllm`
 
-## 18. `writeTarget` — the write side's scope value; `write_file` and `edit_existing_file` adopt it
+## 18. `writeTarget` — the write side's scope value; `write_file` and `edit_existing_file` adopt it — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `notFound` takes the read's error beside the prefix — `notFound(err, prefix)` — because the not-found/refusal split is decided from the error (notFoundOrRefusal's rule); the plan's `notFound(prefix)` spelling has no other source for it.
+NOTES (2026-09-16): `writeScope` carries `ctx` and not yet `journal`: capture stays in path_safety.go this item and reads the journal and permit off the context, so `write`/`journaled` hand the context on; the journal joins the scope (and the context leaves it) when item 21 makes capture structural. A `journal` field nothing reads would be dead code.
+NOTES (2026-09-16): `escapeTargetPin` was deleted rather than kept as a shim — its only callers were `readWriteTarget` and `statWriteTarget`, which now go through `writeTarget.pin`, so the shim had no caller and failed `make lint` (unused); no test or doc referenced it. `readWriteTarget`, `statWriteTarget` and `currentPerm` stay as shims per the guard.
+NOTES (2026-09-16): `journaled` is the single-target form (`journaled(post, body)` over `journaledMutation`), which serves `delete_file` (item 19); the two-path verbs (item 20) will need a pair form beside it. `resolvedTargetNote` is now a root-only shim over `writeTarget.note` for read_file and the not-yet-migrated writers.
+NOTES (2026-09-16): the empty-path refusal moved INTO `writeScope.target` (`errPathRequired`, "path is required" — the text every single-path writer already spelled), asked before the content-size check so the refusal order is unchanged.
 
 **What.** New `internal/tools/write_target.go`: `writeScope` (root, permit, journal) with
 `target(args) (writeTarget, error)` — asked once per call for the argument the marker names — and

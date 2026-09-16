@@ -44,9 +44,22 @@ type workspaceScopedWriter interface {
 // lands elsewhere. Keeping both spellings on one value is what lets the disclosure be the
 // SAME resolution the gate decided from (ResolvedWriteTarget), rather than a second opinion
 // computed on the display side.
+//
+// Beyond the two spellings the value carries the argument it was resolved FROM and the scope it
+// was resolved UNDER (write_target.go): a write tool asks its writeScope once per call and then
+// reads, stats, discloses and writes through the value, so the verb's every reach for its path is
+// the one resolution dispatch classified. The marker's own root-only resolution
+// (resolveTargetUnbounded) fills only Named and Real; that is all classification and disclosure
+// read.
 type writeTarget struct {
 	Named string
 	Real  string
+
+	// input is the argument as the model spelled it — what the fenced primitives take, and what a
+	// refusal quotes back.
+	input string
+	// scope is the execution the value was resolved for: its root and its approved-escape permit.
+	scope writeScope
 }
 
 // IsWorkspaceScopedWriter reports whether t is one of Apogee's own workspace-scoped
@@ -102,19 +115,15 @@ func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
 // re-deriving them through the marker — which a reader does not carry at all: same resolution,
 // one less round trip through the call's JSON. The sentence a surface renders is its own (the
 // pane and the card share the TUI's); what all three must not do is disagree about the path,
-// which is why they all read resolveTargetUnbounded.
+// which is why they all read resolveTargetUnbounded. The tail itself is writeTarget.note's; this
+// is the root-only spelling of it for a reader, and for a writer that has not yet adopted the
+// value.
 func resolvedTargetNote(input, root string) string {
-	if _, _, isMount := virtualMountRef(input); isMount {
-		// A virtual-mount reference names no host path at all (path_virtual.go), so there is
-		// nothing for this note to disclose — and joining it onto the workspace root would
-		// invent one.
+	target, err := writeScope{root: root}.target(input)
+	if err != nil {
 		return ""
 	}
-	target, ok := resolveTargetUnbounded(input, root)
-	if !ok || target.Real == target.Named {
-		return ""
-	}
-	return " → resolves to " + target.Real
+	return target.note()
 }
 
 // writeTargetOf is the marker lookup both accessors above share: it resolves through the
@@ -141,6 +150,11 @@ func writeTargetOf(t domain.Tool, call domain.ToolCall) (writeTarget, bool) {
 // Ignoring the rest of the call's arguments is deliberate: classification asks only where
 // the write would land, so a malformed sibling argument still yields a target for dispatch
 // to judge, and Execute is where that argument is decoded properly and rejected.
+//
+// It answers off the VALUE Execute will go through (writeScope.target, write_target.go) rather
+// than off the bare resolver, so the two can never be two resolutions of one argument; the scope
+// is root-only here because classification carries no execution context and needs none — a
+// permit changes where a write may land, never where the argument resolves.
 func pathArgWriteTarget(call domain.ToolCall, root string) (writeTarget, bool) {
 	var args struct {
 		Path string `json:"path"`
@@ -148,7 +162,11 @@ func pathArgWriteTarget(call domain.ToolCall, root string) (writeTarget, bool) {
 	if err := decodeArgs(call.Arguments, &args); err != nil {
 		return writeTarget{}, false
 	}
-	return resolveTargetUnbounded(args.Path, root)
+	target, err := writeScope{root: root}.target(args.Path)
+	if err != nil {
+		return writeTarget{}, false
+	}
+	return target, true
 }
 
 // destinationArgWriteTarget is pathArgWriteTarget's twin for the two-path writers (copy_file,

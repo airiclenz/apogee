@@ -248,7 +248,7 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		return errorResult(call.ID, "python not available: no Python interpreter found on PATH (looked for "+strings.Join(pythonCandidates, ", ")+")"), nil
 	}
 
-	dir, err := t.resolveWorkdir(args.Workdir)
+	dir, err := resolveWorkdirInRoot(args.Workdir, t.root)
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
@@ -270,15 +270,6 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 		return domain.ToolResult{}, err
 	}
 	return subprocessToolResult(call.ID, res), nil
-}
-
-// resolveWorkdir resolves the optional working directory within the root (path-safe), or
-// returns the root itself when none is given.
-func (t *PythonExec) resolveWorkdir(workdir string) (string, error) {
-	if workdir == "" {
-		return t.root, nil
-	}
-	return resolveInRoot(workdir, t.root)
 }
 
 var (

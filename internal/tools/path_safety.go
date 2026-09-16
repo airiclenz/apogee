@@ -203,10 +203,11 @@ func statInRoot(path, root string) (os.FileInfo, error) {
 // pane shows the operator the resolved path before they answer (confinement-execution-contract
 // §4). When the answer is yes — or the mode is the one whose contract is that the VM is the box —
 // dispatch stamps the execution context with a domain.WriteEscapePermit naming exactly that
-// resolved path. The three helpers below are all this package does with it: read the permitted
-// target, and pin the write family's OWN read-back and pre-flight stat to it. There is no
-// per-tool logic and no per-tool decision — the permit either governs this call's target or it
-// does not, and every verb asks the same question in the same place.
+// resolved path. All this package does with it is read the permitted target (below) and pin the
+// write family's OWN read-back and pre-flight stat to it — the writeScope's permit and the
+// writeTarget.pin that routes on it (write_target.go). There is no per-tool logic and no per-tool
+// decision — the permit either governs this call's target or it does not, and every verb asks the
+// same question in the same place.
 //
 // The floor is unconditional: a call with no permit passes "" and behaves byte-for-byte as it did
 // before ADR 0049, and no READ tool takes a permit at all.
@@ -224,74 +225,29 @@ func writeEscapeTarget(ctx context.Context) string {
 	return permit.Real
 }
 
-// readWriteTarget reads the file a write tool is about to replace, through the fence THAT CALL is
-// entitled to: the workspace root for an ordinary edit, and — for an approved escape — an os.Root
-// pinned at the permitted target's own parent directory, which is where the write's own root is
-// pinned (security's permitted branch). The read-modify-write verbs need this half: a patch or a
-// find-and-replace has to see the bytes it is about to rewrite, so refusing the read would make
-// "an approved gate executes" false for exactly the verbs a model edits with.
-//
-// It widens nothing else. The permit names one fully-resolved path and this pins to that path
-// alone; the READ tools keep calling safeReadFile and are handed no permit ever, which is ADR
-// 0049's write-side-only rule where it is enforceable. And the bytes cannot part company with the
-// write: the write re-resolves the argument against the same permitted target, so an argument that
-// has come to mean something else is refused and nothing lands.
-func readWriteTarget(ctx context.Context, input, root string) ([]byte, error) {
-	pinInput, pinRoot, absent := escapeTargetPin(ctx, input, root)
-	if absent {
-		return nil, os.ErrNotExist
-	}
-	return safeReadFile(pinInput, pinRoot)
-}
+// readWriteTarget and statWriteTarget are the free-function spellings of writeTarget.read and
+// writeTarget.stat (write_target.go), kept for the verbs that still reach the fence by argument
+// and root rather than through the value — the find/replace pair, delete_file and the
+// file-operation tools — and for the undo capture below, which takes its pre-image the same way.
+// Each is one line over the method; the method's doc is the contract, and the permit pin both go
+// through is writeTarget.pin. An empty argument answers as the method's own refusal
+// (errPathRequired), which no caller reaches: every verb refuses an empty path before it asks the
+// fence anything.
 
-// statWriteTarget stats the file a write tool is about to create, replace or remove, through the
-// same fence readWriteTarget reads it through. It serves the file-operation tools' friendly
-// pre-flight refusals (checkFileOpsPathsFrom, checkDeletePath), which have to look where the
-// operation itself will look or they would describe a different file than the one that gets
-// touched. The safety is still the fenced primitive's: it re-decides containment at operation
-// time, so a name swapped after this returns can only turn a friendly refusal into a blunt one.
-func statWriteTarget(ctx context.Context, path, root string) (os.FileInfo, error) {
-	if err := refuseVirtualWrite(path); err != nil {
+func readWriteTarget(ctx context.Context, input, root string) ([]byte, error) {
+	target, err := writeScopeOf(ctx, root).target(input)
+	if err != nil {
 		return nil, err
 	}
-	pinPath, pinRoot, absent := escapeTargetPin(ctx, path, root)
-	if absent {
-		return nil, os.ErrNotExist
-	}
-	return statInRoot(pinPath, pinRoot)
+	return target.read()
 }
 
-// escapeTargetPin answers the (input, root) pair a fenced read or stat of THIS CALL'S OWN write
-// target must use, and whether that target is knowably absent.
-//
-// The workspace branch is checked FIRST and is unconditional: a permit never moves an in-workspace
-// read, so a call carrying one behaves identically to one that does not for every path inside the
-// fence. "Inside" is decided by RESOLUTION, which is why a workspace-spelled path that leaves the
-// fence through a symlink is not inside it. Outside, the pair is repointed only when the argument
-// re-resolves to EXACTLY the permitted target — the same equality security's mutation root routes
-// on (internal/security/writepermit.go) — and then only to that target's own parent directory, so
-// the one name reachable through the returned root is the approved one.
-//
-// absent is true when that parent is not an openable directory. The target cannot exist then, and
-// the caller reports ordinary absence: pinning a root that cannot be opened would surface a fence
-// refusal instead, which for a not-yet-created destination is both wrong and unexplainable.
-func escapeTargetPin(ctx context.Context, input, root string) (pinInput, pinRoot string, absent bool) {
-	permitted := writeEscapeTarget(ctx)
-	if permitted == "" {
-		return input, root, false
+func statWriteTarget(ctx context.Context, path, root string) (os.FileInfo, error) {
+	target, err := writeScopeOf(ctx, root).target(path)
+	if err != nil {
+		return nil, err
 	}
-	if _, err := resolveInRoot(input, root); err == nil {
-		return input, root, false
-	}
-	target, ok := resolveTargetUnbounded(input, root)
-	if !ok || target.Real != filepath.Clean(permitted) {
-		return input, root, false
-	}
-	parent := filepath.Dir(target.Real)
-	if !rootUsable(parent) {
-		return "", "", true
-	}
-	return filepath.Base(target.Real), parent, false
+	return target.stat()
 }
 
 // ----------------------------------------------------------------------------
@@ -316,7 +272,7 @@ func escapeTargetPin(ctx context.Context, input, root string) (pinInput, pinRoot
 //
 // input is the argument the mutation NAMED, kept beside the resolved path because a read-back
 // (commitReadBack) has to go through the same fence the mutation did, and that fence is chosen
-// from the argument rather than from its resolution (escapeTargetPin).
+// from the argument rather than from its resolution (writeTarget.pin).
 type preImage struct {
 	journal   *undo.Journal
 	root      string
@@ -366,16 +322,15 @@ func capturePreImage(ctx context.Context, input, root string) *preImage {
 	return captured
 }
 
-// currentPerm answers the mode bits the file at input carries right now, read through the same
-// fence its bytes were, or 0 when it cannot be stat'd — the journal then falls back to its own
-// default mode. It is advisory: the mode is consulted only to recreate a file a revert RESTORES,
-// so being wrong about it costs a restored file its executable bit and nothing more.
+// currentPerm is the free-function spelling of writeTarget.perm (write_target.go) for the capture
+// above, which still takes its pre-image by argument and root: the mode bits the file carries right
+// now through the fence its bytes were read through, or 0 when it cannot be stat'd.
 func currentPerm(ctx context.Context, input, root string) os.FileMode {
-	info, err := statWriteTarget(ctx, input, root)
+	target, err := writeScopeOf(ctx, root).target(input)
 	if err != nil {
 		return 0
 	}
-	return info.Mode().Perm()
+	return target.perm()
 }
 
 // commit records the completed mutation against the pre-image this value captured. Call it
@@ -435,7 +390,7 @@ func (p *preImage) commitReadBack(ctx context.Context) {
 // path would be refused as an escape on any host whose root is itself reached through a
 // symlink (macOS /tmp). The approved escape is the one exception and takes the RESOLVED path,
 // because that is what the permit names and what the approval pane disclosed (ADR 0049) — and
-// it is recognised by exactly the test escapeTargetPin uses, so a record can never claim a
+// it is recognised by exactly the test writeTarget.pin uses, so a record can never claim a
 // permit the write itself did not run under.
 func journalTarget(ctx context.Context, input, root string) (path, permitted string) {
 	target, ok := resolveTargetUnbounded(input, root)

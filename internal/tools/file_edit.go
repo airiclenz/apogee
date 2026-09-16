@@ -73,8 +73,13 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 	if !ok {
 		return fail, nil
 	}
-	if args.Path == "" {
-		return errorResult(call.ID, "path is required"), nil
+
+	// The one resolution of this call's path (writeScope.target): the read, the disclosure and
+	// the write below all go through this value, so they describe the same file as the one
+	// dispatch classified. An empty path is its refusal.
+	target, err := writeScopeOf(ctx, t.root).target(args.Path)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
 	}
 	if len(args.Content) > maxFileContentBytes {
 		return errorResult(call.ID, fmt.Sprintf("content exceeds maximum size (%d bytes)", maxFileContentBytes)), nil
@@ -86,15 +91,15 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 	// and REFUSED on the write's parent chain (security's symlink policy), so the one path
 	// this edit can still take through a link is a symlinked final NAME — which the read
 	// followed and the write is about to replace.
-	original, err := readWriteTarget(ctx, args.Path, t.root)
+	original, err := target.read()
 	if err != nil {
-		return errorResult(call.ID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(args.Path, t.root), args.Path)), nil
+		return errorResult(call.ID, target.notFound(err, "file not found: ")), nil
 	}
 
 	// Which file those bytes actually came from, read BEFORE the write: the write replaces a
 	// symlinked name with a regular file, so afterwards nothing is left to say that "edit
 	// docs/notes.md" read — and disclosed — the contents of somewhere else.
-	resolved := resolvedTargetNote(args.Path, t.root)
+	resolved := target.note()
 
 	if isPatchContent(args.Content) {
 		hunks := parsePatchHunks(args.Content)
@@ -105,7 +110,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		if !ok {
 			return errorResult(call.ID, "patch hunk did not match file content"), nil
 		}
-		if err := safeWriteFile(ctx, args.Path, t.root, []byte(patched), 0o644); err != nil {
+		if err := target.write([]byte(patched), 0o644); err != nil {
 			return errorResult(call.ID, err.Error()), nil
 		}
 		suffix := ""
@@ -117,7 +122,7 @@ func (t *EditExistingFile) Execute(ctx context.Context, call domain.ToolCall) (d
 		return okEditRegions(call.ID, content, string(original), patched), nil
 	}
 
-	if err := safeWriteFile(ctx, args.Path, t.root, []byte(args.Content), 0o644); err != nil {
+	if err := target.write([]byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 	return okEditRegions(call.ID, "updated "+args.Path+resolved+syntaxTrailer(args.Path, args.Content),

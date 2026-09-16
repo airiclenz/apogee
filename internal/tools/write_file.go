@@ -81,19 +81,24 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if !ok {
 		return fail, nil
 	}
-	if args.Path == "" {
-		return errorResult(call.ID, "path is required"), nil
+
+	// The one resolution of this call's path (writeScope.target): every reach below — the
+	// pre-flight stat, the pre-read, the disclosure and the write — goes through this value, so
+	// they describe the same file as the one dispatch classified. An empty path is its refusal.
+	target, err := writeScopeOf(ctx, t.root).target(args.Path)
+	if err != nil {
+		return errorResult(call.ID, err.Error()), nil
 	}
 	if len(args.Content) > maxFileContentBytes {
 		return errorResult(call.ID, fmt.Sprintf("content too large: %d bytes (max %d)", len(args.Content), maxFileContentBytes)), nil
 	}
 
 	// A directory at the target is refused in words before the write can fail in the fence's:
-	// safeWriteFile renames a staged file over the name, and the *os.LinkError that answers a
+	// the write renames a staged file over the name, and the *os.LinkError that answers a
 	// directory there says nothing a model can act on. The stat looks where the write itself will
-	// look (statWriteTarget: the workspace fence, or an approved escape's permitted target), as
+	// look (writeTarget.stat: the workspace fence, or an approved escape's permitted target), as
 	// checkFileOpsDestination does; every other stat outcome is left to the write to decide.
-	if info, err := statWriteTarget(ctx, args.Path, t.root); err == nil && info.IsDir() {
+	if info, err := target.stat(); err == nil && info.IsDir() {
 		return errorResult(call.ID, "write_file: target is a directory: "+args.Path), nil
 	}
 
@@ -103,20 +108,20 @@ func (t *WriteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// before side — the ordinary create, where nothing is there yet, and the rare unreadable
 	// original alike: a tool that read nothing at all until today must not start refusing writes
 	// on a read error.
-	original, readErr := readWriteTarget(ctx, args.Path, t.root)
+	original, readErr := target.read()
 
 	// Where this write REALLY lands, read before the write rather than after it, so the
 	// sentence below says the same thing the approval pane said about the same call — after
 	// the write the final name is a plain file whatever it was, and the two surfaces would
-	// part company on exactly the call worth disclosing (resolvedTargetNote).
-	resolved := resolvedTargetNote(args.Path, t.root)
+	// part company on exactly the call worth disclosing (writeTarget.note).
+	resolved := target.note()
 
 	// TOCTOU-safe write: the workspace fence is enforced AT WRITE TIME through an
 	// os.Root pinned at t.root, so a path component swapped to an outside-pointing
 	// symlink — including a concurrent swap by a confined subprocess — is refused
 	// rather than followed (security review H1). Parent directories are created within
 	// the same fence.
-	if err := safeWriteFile(ctx, args.Path, t.root, []byte(args.Content), 0o644); err != nil {
+	if err := target.write([]byte(args.Content), 0o644); err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
 
