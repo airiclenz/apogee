@@ -135,6 +135,28 @@ const (
 //     summarize alike: repoint the one `mcp-servers:` entry at another machine and the row still
 //     reads "1 server". Its values are compared, never rendered — a `servers:` entry carries an
 //     api-key, and it stays as far from a row as it has always been.
+//
+// Set is the INVERSE of Read: it takes a value spelled the way the file spells it and lands it on
+// the same Options field Read answers from, so for every row that has one, Set(Read(o), &o2)
+// leaves o2 holding what o holds (TestRegistrySetIsTheInverseOfRead). It is the row's whole
+// admission in one call — the key's validate hook first, then the kind's own parse
+// (renderSettingValue: a bool is true or false, an enum is one of its values), then the landing —
+// so a value Set refuses is exactly a value the settings writer refuses, in the writer's own
+// sentence: the hook's where the row has one, the kind's where the kind is the whole contract. A
+// site that lands a value from a source of its own adds its lead AROUND that sentence (the env pass:
+// "apogee: invalid APOGEE_BYPASS "x": …") rather than restating it. A key that shares a carrier
+// with its neighbours (`ui.*`, `present.*`, `sessions.*`) edits its one field of the block and
+// re-runs the block's own validator before the block is written back, so a Set that fails has
+// touched nothing. Nil for the rows that have no spelled inverse: the structured rows, whose Read
+// is a summary; `context-files.enable`, whose Read derives from the resolved list and owns no field;
+// and `sub-agents-server`, whose Read shows a word for the empty value. Every other row — editable
+// or not — has one, because what a key's value looks like written down is a fact about the key,
+// and who may write it is Editable's question.
+//
+// In the table each row writes its LANDING alone (land, or landIn for a block's field: the
+// canonical text onto the typed field) and bindSetters, run once when the table is built, binds
+// that landing under the admission the row already carries — the row cannot name itself inside
+// its own literal, and the hook and the kind it would restate are two fields up.
 type Key struct {
 	Path       string
 	Kind       Kind
@@ -150,6 +172,7 @@ type Key struct {
 	Read       func(o Options) string
 	Text       func(o Options) string
 	Structure  func(o Options) any
+	Set        func(value string, o *Options) error
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
@@ -172,7 +195,7 @@ var (
 // block, in the order the seeded template (internal/config/defaults/config.yaml) presents them —
 // so a surface that renders the registry top to bottom reads like the file the user edits.
 // model-profiles is the template's closing block, so it sits last here too.
-var KeyRegistry = []Key{
+var KeyRegistry = bindSetters([]Key{
 	{
 		Path: "servers", Kind: KindStructured,
 		Desc:      "The servers you run models on — name, endpoint, and what each one needs.",
@@ -195,6 +218,7 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Desc:     "Which servers: entry a session starts on; /server records the last one chosen.",
 		Read:     func(o Options) string { return o.StartupServer },
+		Set:      land(asIs, func(o *Options) *string { return &o.StartupServer }),
 	},
 	{
 		// KindServer for its neighbour's reason — the names it takes are whatever THIS config's
@@ -224,6 +248,7 @@ var KeyRegistry = []Key{
 		Desc: "Who picks where a delegation runs: fixed = the sub-agents-server key; model = the " +
 			"top-level model may say run_on per delegation.",
 		Read: func(o Options) string { return string(o.SubAgentsChoice) },
+		Set:  land(ParseSubAgentsChoice, func(o *Options) *SubAgentsChoice { return &o.SubAgentsChoice }),
 	},
 	{
 		Path: "mode", Kind: KindEnum, Default: string(domain.ModeAskBefore), EnumValues: modeValues,
@@ -232,6 +257,7 @@ var KeyRegistry = []Key{
 		Validate: validateSettingMode,
 		Desc:     "Autonomy mode: how tool calls are gated, from least to most autonomous.",
 		Read:     func(o Options) string { return o.Mode },
+		Set:      land(asIs, func(o *Options) *string { return &o.Mode }),
 	},
 	{
 		// Prose rather than a value on a line, so it is the one key the pane edits in a field of its
@@ -251,6 +277,11 @@ var KeyRegistry = []Key{
 		// compared in never reads a default nobody wrote as somebody's prompt.
 		Read: func(o Options) string { return countSummary(lineCount(o.SystemPrompt.Global.Text), "line") },
 		Text: func(o Options) string { return o.SystemPrompt.Global.Text },
+		// Landed AS GIVEN, where every other landing takes the kind's canonical text: the writer's
+		// trailing-newline normalisation is a block scalar's chomp, and what a reader takes out of the
+		// file is what this lands, whichever way the file spelt it — so the prose Text reports is the
+		// prose Set puts back, newline for newline.
+		Set: land(asIs, func(o *Options) *string { return &o.SystemPrompt.Global.Text }),
 	},
 	{
 		// A plain path on a plain line, so the pane types it like any other string. What it names is
@@ -265,6 +296,7 @@ var KeyRegistry = []Key{
 		// word standing in for emptiness would be a word the next commit persisted as a path, and a row
 		// reading "none" against a blank default would arm a reset for a key with no line to remove.
 		Read: func(o Options) string { return o.SystemPrompt.Global.File },
+		Set:  land(asIs, func(o *Options) *string { return &o.SystemPrompt.Global.File }),
 	},
 	{
 		Path: "system-prompt-models", Kind: KindStructured,
@@ -290,6 +322,7 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Desc:     "Fall back to apogee's built-in system prompt when none of the keys above sets one.",
 		Read:     func(o Options) string { return boolValue(o.UseDefaultPrompt) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseDefaultPrompt }),
 	},
 	{
 		Path: "context-files.enable", Kind: KindBool, Default: "true",
@@ -309,6 +342,7 @@ var KeyRegistry = []Key{
 		Validate: validateContextFileNames, // the startup check itself: contextFilesSettings.validate
 		Desc:     "Workspace-root file names folded into the system prompt, in list order.",
 		Read:     func(o Options) string { return listValue(o.ContextFiles) },
+		Set:      land(parseList, func(o *Options) *[]string { return &o.ContextFiles }),
 	},
 	{
 		Path: "confine-to-workspace", Kind: KindBool, Default: "true",
@@ -316,6 +350,7 @@ var KeyRegistry = []Key{
 		Editable:   false, // the acknowledgement interlock stays single-homed in /confine (ADR 0012)
 		Desc:       "Auto's blast radius: filesystem writes fenced to the workspace under OS confinement.",
 		Read:       func(o Options) string { return boolValue(o.ConfineToWorkspace) },
+		Set:        land(strconv.ParseBool, func(o *Options) *bool { return &o.ConfineToWorkspace }),
 	},
 	{
 		Path: "unconfined-hosts", Kind: KindStructured,
@@ -330,6 +365,7 @@ var KeyRegistry = []Key{
 		Validate: validateSearchEndpoint,
 		Desc:     "Search endpoint the web_search tool queries; unset uses DuckDuckGo, off disables it.",
 		Read:     func(o Options) string { return o.WebSearchEndpoint },
+		Set:      land(asIs, func(o *Options) *string { return &o.WebSearchEndpoint }),
 	},
 	{
 		Path: "mcp-servers", Kind: KindStructured,
@@ -349,6 +385,7 @@ var KeyRegistry = []Key{
 		// The NAMES rather than a count: the list is short, which tools are off is the whole of what
 		// the row is asked, and the value seeds the edit field — blank when nothing is disabled.
 		Read: func(o Options) string { return listValue(o.ToolsDisabled) },
+		Set:  land(parseList, func(o *Options) *[]string { return &o.ToolsDisabled }),
 	},
 	{
 		// The switch's ADD direction (ADR 0057 decision 3), beside it here because the template puts
@@ -363,6 +400,7 @@ var KeyRegistry = []Key{
 		// The names, for the roster row's reason above; "[]" for a list nobody has set, since adding
 		// nothing back is the default rather than an unanswered row.
 		Read: func(o Options) string { return listValue(o.ToolsEnabled) },
+		Set:  land(parseList, func(o *Options) *[]string { return &o.ToolsEnabled }),
 	},
 	{
 		// The host layer over the network tools' url-safety guard, a name list on one line like the
@@ -376,78 +414,91 @@ var KeyRegistry = []Key{
 		// The names, for the roster's reason above — and "[]" for a list nobody has set, since an empty
 		// allow list means every host rather than none.
 		Read: func(o Options) string { return listValue(o.URLAllowHosts) },
+		Set:  land(parseList, func(o *Options) *[]string { return &o.URLAllowHosts }),
 	},
 	{
 		Path: "url-safety.deny-hosts", Kind: KindStringList,
 		Editable: true,
 		Desc:     "Hosts the network tools may never reach, with their subdomains; deny wins over the allow list.",
 		Read:     func(o Options) string { return listValue(o.URLDenyHosts) },
+		Set:      land(parseList, func(o *Options) *[]string { return &o.URLDenyHosts }),
 	},
 	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
 		Read:     func(o Options) string { return boolValue(o.UseProjectSkills) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseProjectSkills }),
 	},
 	{
 		Path: "use-shipped-skills", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Offer the skills apogee ships with, below every skill folder on disk.",
 		Read:     func(o Options) string { return boolValue(o.UseShippedSkills) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseShippedSkills }),
 	},
 	{
 		Path: "auto-compact", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Fold older turns into a compact brief before the context window overflows.",
 		Read:     func(o Options) string { return boolValue(o.AutoCompact) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.AutoCompact }),
 	},
 	{
 		Path: "prune-tool-results", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Collapse stale tool results to one-line stubs when history outgrows its budget share.",
 		Read:     func(o Options) string { return boolValue(o.PruneToolResults) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.PruneToolResults }),
 	},
 	{
 		Path: "tool-use-enforcer", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: retry a turn that narrated where the model was asked to act.",
 		Read:     func(o Options) string { return boolValue(o.ToolUseEnforcer) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolUseEnforcer }),
 	},
 	{
 		Path: "empty-response-recovery", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: retry an empty reply with a completion-check nudge.",
 		Read:     func(o Options) string { return boolValue(o.EmptyResponseRecovery) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.EmptyResponseRecovery }),
 	},
 	{
 		Path: "tool-call-repair", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: correct an unknown or malformed tool call and retry it.",
 		Read:     func(o Options) string { return boolValue(o.ToolCallRepair) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolCallRepair }),
 	},
 	{
 		Path: "tool-call-salvage", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: run a tool call the model wrote as JSON in its text instead of on the wire.",
 		Read:     func(o Options) string { return boolValue(o.ToolCallSalvage) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolCallSalvage }),
 	},
 	{
 		Path: "tool-loop-breaker", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: break an identical repeated tool call, or an exact A-B-A-B alternation, with a directive naming the repeat.",
 		Read:     func(o Options) string { return boolValue(o.ToolLoopBreaker) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolLoopBreaker }),
 	},
 	{
 		Path: "tool-result-cap", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: trim an older oversized tool result to its budget share in the request.",
 		Read:     func(o Options) string { return boolValue(o.ToolResultCap) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolResultCap }),
 	},
 	{
 		Path: "read-cache", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: cap a re-read of a file unchanged since apogee last read it.",
 		Read:     func(o Options) string { return boolValue(o.ReadCache) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ReadCache }),
 	},
 	{
 		Path: "context-fill-notice", Kind: KindBool, Default: "false",
@@ -455,6 +506,7 @@ var KeyRegistry = []Key{
 		Desc: "Tell the model how close it is to automatic compaction (50/75/90) on its tool " +
 			"results. Not a Floor guard: off until bench evidence turns it on.",
 		Read: func(o Options) string { return boolValue(o.ContextFillNotice) },
+		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.ContextFillNotice }),
 	},
 	{
 		Path: "step-budget-notice", Kind: KindBool, Default: "false",
@@ -462,6 +514,7 @@ var KeyRegistry = []Key{
 		Desc: "Tell a sub-agent once, at three quarters of its delegate-max-steps, to write its output " +
 			"now. Not a Floor guard: off until bench evidence turns it on.",
 		Read: func(o Options) string { return boolValue(o.StepBudgetNotice) },
+		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.StepBudgetNotice }),
 	},
 	{
 		Path: "delegate-max-steps", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxSteps),
@@ -470,6 +523,7 @@ var KeyRegistry = []Key{
 		Desc: "Turns a delegated sub-agent may take before apogee ends it; 0 lets it run " +
 			"unbounded; takes effect at the next start.",
 		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxSteps) },
+		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateMaxSteps }),
 	},
 	{
 		Path: "delegate-max-depth", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxDepth),
@@ -478,6 +532,7 @@ var KeyRegistry = []Key{
 		Desc: "How deep delegation may nest: 1 lets the session delegate and its delegates not; " +
 			"at least 1; takes effect at the next start.",
 		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxDepth) },
+		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateMaxDepth }),
 	},
 	{
 		Path: "delegate-max-tokens", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxTokens),
@@ -486,6 +541,7 @@ var KeyRegistry = []Key{
 		Desc: "Prompt tokens a delegated sub-agent may spend in all before apogee ends it; 0 lets " +
 			"it run unbounded; takes effect at the next start.",
 		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxTokens) },
+		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateMaxTokens }),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
@@ -498,6 +554,7 @@ var KeyRegistry = []Key{
 		// The limit as a DURATION prints itself (`2h0m0s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
 		Read: func(o Options) string { return o.DelegateTimeout.String() },
+		Set:  land(ParseDelegateTimeout, func(o *Options) *time.Duration { return &o.DelegateTimeout }),
 	},
 	{
 		Path: "undo-snapshots", Kind: KindBool, Default: "true",
@@ -505,6 +562,7 @@ var KeyRegistry = []Key{
 		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +
 			"covers subprocess and MCP writes; takes effect at the next start.",
 		Read: func(o Options) string { return boolValue(o.UndoSnapshots) },
+		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.UndoSnapshots }),
 	},
 	{
 		Path: "auto-title", Kind: KindBool, Default: "true",
@@ -512,12 +570,14 @@ var KeyRegistry = []Key{
 		Desc: "Name a new session from its first prompt, and an unnamed delegation from its " +
 			"task, with one small extra completion each.",
 		Read: func(o Options) string { return boolValue(o.AutoTitle) },
+		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.AutoTitle }),
 	},
 	{
 		Path: "remember-model", Kind: KindBool, Default: "false",
 		Editable: true,
 		Desc:     "Record the model you pick into its servers: entry and come back on it next start.",
 		Read:     func(o Options) string { return boolValue(o.RememberModel) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.RememberModel }),
 	},
 	{
 		Path: "context-window", Kind: KindInt, Default: "0",
@@ -525,6 +585,7 @@ var KeyRegistry = []Key{
 		Validate: validateContextWindow,
 		Desc:     "Pin the model context window in tokens; 0 discovers it from the server, live.",
 		Read:     func(o Options) string { return strconv.Itoa(o.ContextWindow) },
+		Set:      land(strconv.Atoi, func(o *Options) *int { return &o.ContextWindow }),
 	},
 	{
 		// Editable, and the edit is honoured at the NEXT start, for `response-reserve`'s reason below:
@@ -537,6 +598,7 @@ var KeyRegistry = []Key{
 		Desc: "Bound the room the Budget works in to this many tokens; 0 uses the whole " +
 			"window; takes effect at the next start.",
 		Read: func(o Options) string { return strconv.Itoa(o.WorkingWindow) },
+		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.WorkingWindow }),
 	},
 	{
 		// Editable, and the edit is honoured at the NEXT start — the share is read off the file into
@@ -552,18 +614,21 @@ var KeyRegistry = []Key{
 		// the writer persists too — so the value seeding an edit field is one the next commit writes
 		// back unchanged.
 		Read: func(o Options) string { return strconv.FormatFloat(o.ResponseReserve, 'g', -1, 64) },
+		Set:  land(parseFloat, func(o *Options) *float64 { return &o.ResponseReserve }),
 	},
 	{
 		Path: "present.auto-open", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Open a presented document in its application on a local desktop run.",
 		Read:     func(o Options) string { return boolValue(o.Present.AutoOpen) },
+		Set:      landIn(presentOf, PresentSettings.Validate, strconv.ParseBool, func(p *PresentSettings) *bool { return &p.AutoOpen }),
 	},
 	{
 		Path: "present.command", Kind: KindString,
 		Editable: true,
 		Desc:     "Open presented documents with this application instead of the OS default ({path} = the file).",
 		Read:     func(o Options) string { return o.Present.Command },
+		Set:      landIn(presentOf, PresentSettings.Validate, asIs, func(p *PresentSettings) *string { return &p.Command }),
 	},
 	{
 		Path: "present.port", Kind: KindInt, Default: "0",
@@ -571,12 +636,14 @@ var KeyRegistry = []Key{
 		Validate: validatePresentPort,
 		Desc:     "The built-in document server's port; 0 picks a free one per session.",
 		Read:     func(o Options) string { return strconv.Itoa(o.Present.Port) },
+		Set:      landIn(presentOf, PresentSettings.Validate, strconv.Atoi, func(p *PresentSettings) *int { return &p.Port }),
 	},
 	{
 		Path: "present.host", Kind: KindString,
 		Editable: true,
 		Desc:     "Address the printed document URL advertises; empty is detected from the SSH connection.",
 		Read:     func(o Options) string { return o.Present.Host },
+		Set:      landIn(presentOf, PresentSettings.Validate, asIs, func(p *PresentSettings) *string { return &p.Host }),
 	},
 	{
 		Path: "ui.spinner", Kind: KindEnum, Default: "snake", EnumValues: spinnerValues,
@@ -584,18 +651,21 @@ var KeyRegistry = []Key{
 		Validate: validateSpinnerName,
 		Desc:     "The status-line spinner animation shown while a turn runs.",
 		Read:     func(o Options) string { return string(o.UI.Spinner) },
+		Set:      landIn(uiOf, UISettings.Validate, domain.ParseSpinnerStyle, func(u *UISettings) *domain.SpinnerStyle { return &u.Spinner }),
 	},
 	{
 		Path: "ui.spinner-color", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Run the ten-second colour loop over the spinner glyph.",
 		Read:     func(o Options) string { return boolValue(o.UI.SpinnerColor) },
+		Set:      landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.SpinnerColor }),
 	},
 	{
 		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Paint the scroll bar on the transcript and on any overflowing popup, and reserve its column.",
 		Read:     func(o Options) string { return boolValue(o.UI.ShowScrollbar) },
+		Set:      landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.ShowScrollbar }),
 	},
 	{
 		// A dynamic vocabulary (KindScheme), so EnumValues is empty and the surface asks the session
@@ -606,6 +676,7 @@ var KeyRegistry = []Key{
 		Validate: validateColorSchemeName,
 		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
 		Read:     func(o Options) string { return o.UI.ColorScheme },
+		Set:      landIn(uiOf, UISettings.Validate, asIs, func(u *UISettings) *string { return &u.ColorScheme }),
 	},
 	{
 		// A length of time, which this table has no kind for — and one key is not a vocabulary, so it
@@ -618,6 +689,7 @@ var KeyRegistry = []Key{
 		// The threshold as a DURATION prints itself (`1m30s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
 		Read: func(o Options) string { return o.UI.StallAfter.String() },
+		Set:  landIn(uiOf, UISettings.Validate, parseStallAfter, func(u *UISettings) *time.Duration { return &u.StallAfter }),
 	},
 	{
 		// No validate hook and none possible: a bool's kind IS its whole contract. Editable, and the
@@ -631,6 +703,7 @@ var KeyRegistry = []Key{
 		// started: a row edited mid-session goes on reporting the armed state until the next start,
 		// the same fact the description states.
 		Read: func(o Options) string { return boolValue(o.UI.Inspector) },
+		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.Inspector }),
 	},
 	{
 		// A bool like ui.spinner-color beside it, and applied the same way: its whole effect is on
@@ -641,6 +714,7 @@ var KeyRegistry = []Key{
 		Desc: "Show the skills that fit the message you are typing in a band above the input box; " +
 			"Tab opens the / menu on them.",
 		Read: func(o Options) string { return boolValue(o.UI.SkillSuggestions) },
+		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.SkillSuggestions }),
 	},
 	{
 		// A bool like ui.skill-suggestions beside it, applied the same way (the renderer's own
@@ -652,6 +726,7 @@ var KeyRegistry = []Key{
 		Desc: "Start with the task-list cards in the transcript open; a click on one folds them all " +
 			"and records the choice here.",
 		Read: func(o Options) string { return boolValue(o.UI.TaskListOpen) },
+		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.TaskListOpen }),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
@@ -665,6 +740,7 @@ var KeyRegistry = []Key{
 		// The age as a DURATION prints itself (`720h0m0s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
 		Read: func(o Options) string { return o.Sessions.MaxAge.String() },
+		Set:  landIn(sessionsOf, SessionSettings.Validate, parseSessionsMaxAge, func(s *SessionSettings) *time.Duration { return &s.MaxAge }),
 	},
 	{
 		// A count, and the range is the whole contract — present.port's shape with a floor and no
@@ -676,6 +752,7 @@ var KeyRegistry = []Key{
 		Desc: "Keep at most this many saved sessions, newest first; 0 keeps every one. " +
 			"Takes effect at the next start.",
 		Read: func(o Options) string { return strconv.Itoa(o.Sessions.MaxCount) },
+		Set:  landIn(sessionsOf, SessionSettings.Validate, strconv.Atoi, func(s *SessionSettings) *int { return &s.MaxCount }),
 	},
 	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
@@ -683,6 +760,7 @@ var KeyRegistry = []Key{
 		Validate: validateCursorShapeName,
 		Desc:     "The shape the prompt's caret is drawn with; it is always steady.",
 		Read:     func(o Options) string { return o.CursorShape },
+		Set:      land(asIs, func(o *Options) *string { return &o.CursorShape }),
 	},
 	{
 		// Free text with no validate hook, like present.command: the value is a command LINE, and
@@ -694,6 +772,7 @@ var KeyRegistry = []Key{
 		// word standing in for emptiness ("$EDITOR", "the OS opener") would be a word the next commit
 		// persisted as a command.
 		Read: func(o Options) string { return o.Editor },
+		Set:  land(asIs, func(o *Options) *string { return &o.Editor }),
 	},
 	{
 		Path: "bypass", Kind: KindBool, Default: "false",
@@ -701,6 +780,7 @@ var KeyRegistry = []Key{
 		Editable: true,
 		Desc:     "Run with advise and shape Reactions of user or bench origin off; Floor guards and structural reducers stay on.",
 		Read:     func(o Options) string { return boolValue(o.Bypass) },
+		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.Bypass }),
 	},
 	{
 		// Structured because an entry is a block of its own — a Moment list, an argv command or a URL
@@ -726,7 +806,7 @@ var KeyRegistry = []Key{
 		Read:      func(o Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
 		Structure: func(o Options) any { return o.ModelProfiles },
 	},
-}
+})
 
 // ----------------------------------------------------------------------------
 // The rows' validate hooks
@@ -1124,6 +1204,151 @@ func countSummary(n int, noun string) string {
 	default:
 		return strconv.Itoa(n) + " " + noun + "s"
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The rows' landings, and the binding that makes a Set of one
+// ----------------------------------------------------------------------------
+//
+// A row's Set is written in the table as its LANDING alone — which typed field the canonical text
+// goes onto, and through which parse — because the two halves in front of the landing are already
+// on the row (the validate hook, the kind) and a literal cannot name itself. bindSetters binds
+// the three into the one call Key.Set documents, once, as the table is built.
+
+// bindSetters binds every landing the table writes under the admission its row carries, and hands
+// the table back; a row with no landing keeps its nil Set. It is called on the literal itself so
+// LookupKey and every table built over the registry (keyAccessors) see the bound Set from the
+// first read — an init-time pass would run after those package-level tables had copied their rows.
+func bindSetters(rows []Key) []Key {
+	for i := range rows {
+		landing := rows[i].Set
+		if landing == nil {
+			continue
+		}
+		row := rows[i]
+		rows[i].Set = func(value string, o *Options) error {
+			canonical, err := row.admit(value)
+			if err != nil {
+				return err
+			}
+			return landing(canonical, o)
+		}
+	}
+	return rows
+}
+
+// admit is the row's admission: the validate hook first — the startup check itself, whose sentence
+// names the key and what it takes — then the kind's own parse (renderSettingValue), which is the
+// writer's refusal for a row whose kind is the whole of its contract and the drift guard for one
+// whose hook accepts a spelling the kind's vocabulary lacks. What comes back is the CANONICAL text
+// the landing parses ("true", "7", "[a, b]"): trimmed, as the file would spell it, which is why a
+// value refused here and one refused at the settings pane are refused by one implementation in
+// one sentence. A text row is the exception both ways — its value is prose, so nothing is trimmed
+// and what was given is what is landed.
+func (k Key) admit(value string) (string, error) {
+	text := value
+	if k.Kind != KindText {
+		text = strings.TrimSpace(value)
+	}
+	if k.Validate != nil {
+		if err := k.Validate(text); err != nil {
+			return "", err
+		}
+	}
+	_, canonical, err := renderSettingValue(k, text)
+	if err != nil {
+		return "", fmt.Errorf("apogee: %w", err)
+	}
+	if k.Kind == KindText {
+		return value, nil
+	}
+	return canonical, nil
+}
+
+// land is the landing of a row whose value is one Options field of its own: the canonical text
+// through parse, onto the field at names. The parse runs on text the row's kind has already
+// accepted, so its error is a defect in this table rather than a value anybody typed — and it is
+// returned rather than discarded, because a landing that swallowed one would be one refactor away
+// from writing a zero nobody asked for.
+func land[T any](parse func(string) (T, error), at func(*Options) *T) func(string, *Options) error {
+	return func(canonical string, o *Options) error {
+		v, err := parse(canonical)
+		if err != nil {
+			return err
+		}
+		*at(o) = v
+		return nil
+	}
+}
+
+// landIn is the landing of a row that shares a carrier with its neighbours — one field of a block
+// the Options holds whole (`ui.*`, `present.*`, `sessions.*`). The edit runs on a COPY of the block,
+// the block's own validator judges the copy — the same check startup makes on the parsed block, so
+// a field that is fine alone but wrong beside its siblings is refused here too — and only a copy
+// it accepts is written back: a Set that fails has touched nothing.
+func landIn[B, T any](
+	block func(*Options) *B,
+	validate func(B) error,
+	parse func(string) (T, error),
+	at func(*B) *T,
+) func(string, *Options) error {
+	return func(canonical string, o *Options) error {
+		edited := *block(o)
+		v, err := parse(canonical)
+		if err != nil {
+			return err
+		}
+		*at(&edited) = v
+		if err := validate(edited); err != nil {
+			return err
+		}
+		*block(o) = edited
+		return nil
+	}
+}
+
+// The three blocks a landIn row edits, named once so the rows read alike.
+func uiOf(o *Options) *UISettings            { return &o.UI }
+func presentOf(o *Options) *PresentSettings  { return &o.Present }
+func sessionsOf(o *Options) *SessionSettings { return &o.Sessions }
+
+// asIs is the parse of a row whose canonical text IS its value: a name, a path, a command line.
+func asIs(canonical string) (string, error) { return canonical, nil }
+
+// parseFloat reads the one fractional key's canonical text (KindFloat) back into the share it is.
+func parseFloat(canonical string) (float64, error) { return strconv.ParseFloat(canonical, 64) }
+
+// parseList reads a name list's canonical text (`[a, b]`) back through the one list parse
+// (ParseSettingList), answering NIL for an empty list: that is what the file pass resolves an
+// absent or empty list to, and Set is its inverse, so `[]` and "nothing set" land alike.
+func parseList(canonical string) ([]string, error) {
+	names := ParseSettingList(canonical)
+	if len(names) == 0 {
+		return nil, nil
+	}
+	return names, nil
+}
+
+// parseStallAfter reads a `ui.stall-after:` value through the yaml seam that reads it at startup
+// (toUISettings) — so the empty value that means "the default" and the `0` that means "off" are
+// the seam's calls here as they are there — refusing, in the block validator's own sentence, the
+// text the seam could make nothing of.
+func parseStallAfter(value string) (time.Duration, error) {
+	settings := uiConfig{StallAfter: &value}.toUISettings()
+	if err := settings.Validate(); err != nil {
+		return 0, err
+	}
+	return settings.StallAfter, nil
+}
+
+// parseSessionsMaxAge reads a `sessions.max-age:` value through its startup seam
+// (toSessionSettings), parseStallAfter's shape for parseStallAfter's reason.
+func parseSessionsMaxAge(value string) (time.Duration, error) {
+	settings := sessionsConfig{MaxAge: &value}.toSessionSettings()
+	if err := settings.Validate(); err != nil {
+		return 0, err
+	}
+	return settings.MaxAge, nil
 }
 
 // LookupKey returns the registry row for a yaml path. A linear scan is the right shape at

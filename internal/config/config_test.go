@@ -572,11 +572,12 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"UseShippedSkills":  true,
 		"UseDefaultPrompt":  true,
 		"AutoTitle":         true, "RememberModel": true,
-		"ContextWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
+		"ContextWindow": true, "WorkingWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true,
 		"Present":      true,
 		"SystemPrompt": true, "ContextFiles": true, "UI": true, "CursorShape": true,
+		"ToolsEnabled": true, "Sessions": true,
 	}
 
 	var got, unset Options
@@ -630,11 +631,11 @@ func everyKeyFileConfig() fileConfig {
 		DelegateMaxTokens: intptr(5_000_000),
 		DelegateTimeout:   strptr("30m"),
 		RememberModel:     boolptr(true),
-		ContextWindow:     64000, ResponseReserve: 0.3,
+		ContextWindow:     64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
 			Run: []any{"true"}}},
-		Tools:         &toolsConfig{Disabled: []string{"web_search"}},
+		Tools:         &toolsConfig{Disabled: []string{"web_search"}, Enabled: []string{"web_fetch"}},
 		URLSafety:     &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
 		ModelProfiles: map[string]modelProfileConfig{"qwen": {ToolCallFormat: "xml"}},
 		Present: &presentConfig{AutoOpen: boolptr(false), Command: "open {path}", Port: 8080,
@@ -645,7 +646,9 @@ func everyKeyFileConfig() fileConfig {
 		ContextFiles:       &contextFilesConfig{Enable: boolptr(false), Names: []string{"CLAUDE.md"}},
 		CursorShape:        "bar",
 		UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false),
-			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true)},
+			ColorScheme: "nord", StallAfter: strptr("30s"), Inspector: boolptr(true),
+			SkillSuggestions: boolptr(false), TaskListOpen: boolptr(false)},
+		Sessions: &sessionsConfig{MaxAge: strptr("720h"), MaxCount: intptr(50)},
 	}
 }
 
@@ -5247,7 +5250,10 @@ func TestApplyConfigMalformedFileErrors(t *testing.T) {
 	}
 }
 
-// A set-but-unparseable APOGEE_BYPASS is a hard error rather than a silently-ignored flag.
+// A set-but-unparseable APOGEE_BYPASS is a hard error rather than a silently-ignored flag. The
+// refusal is the env pass's lead — the variable and the value — around the sentence the row's Set
+// refuses with, which is the settings writer's own for a bool: one wording per key, whichever
+// source offered the value.
 func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 	t.Parallel()
 	getenv := func(k string) string {
@@ -5260,6 +5266,47 @@ func TestApplyConfigBadBypassEnvErrors(t *testing.T) {
 	err := ApplyConfig(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify)
 	if err == nil {
 		t.Fatal("invalid APOGEE_BYPASS: want an error, got nil")
+	}
+	const want = `apogee: invalid APOGEE_BYPASS "yes-please": bypass is true or false, not "yes-please"`
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+}
+
+// A mode outside the ladder in APOGEE_MODE is refused by the env pass itself, with the variable
+// named, rather than carried raw for the Driver's own ParseMode to refuse at wiring: the row's Set
+// admits the text through the mode hook (validateSettingMode — ParseMode's sentence), and the pass
+// puts its lead in front. A mode ON the ladder lands exactly as it always did.
+func TestApplyConfigBadModeEnvErrors(t *testing.T) {
+	t.Parallel()
+	getenv := func(k string) string {
+		if k == EnvMode {
+			return "fast"
+		}
+		return ""
+	}
+	opts := Options{ConfigDir: t.TempDir()}
+	_, err := ResolveOptions(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify, testHostID)
+	if err == nil {
+		t.Fatal("invalid APOGEE_MODE: want an error, got nil")
+	}
+	const want = `apogee: invalid APOGEE_MODE "fast": invalid --mode "fast" (want plan, ask-before, allow-edits, or auto)`
+	if err.Error() != want {
+		t.Errorf("error = %q, want %q", err, want)
+	}
+
+	getenv = func(k string) string {
+		if k == EnvMode {
+			return string(domain.ModeAuto)
+		}
+		return ""
+	}
+	opts = Options{ConfigDir: t.TempDir()}
+	if _, err := ResolveOptions(&opts, func(string) bool { return false }, getenv, os.ReadFile, noNotify, testHostID); err != nil {
+		t.Fatalf("APOGEE_MODE=auto: %v", err)
+	}
+	if opts.Mode != string(domain.ModeAuto) {
+		t.Errorf("mode = %q, want %q", opts.Mode, domain.ModeAuto)
 	}
 }
 

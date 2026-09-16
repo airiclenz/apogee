@@ -457,10 +457,13 @@ func (s SessionSettings) Validate() error {
 //     stale one standing. That is also what makes [LoadFileConfig] answer with usable Options.
 //   - fromEnv projects a variable's text and fromFlag the already-parsed flag value, each onto the
 //     same field. They run only where their source SET the key (a non-empty variable, an explicitly
-//     changed flag), so neither can shadow the value below it. Both are nil for a key with no source
-//     of that kind, which is most of the schema — a per-machine or per-model fact does not belong to
-//     one invocation, and ADR 0012 fences two keys to the global file outright. A nil accessor IS
-//     that fence: the pass skips the row, so there is no path for those sources to reach the key.
+//     changed flag), so neither can shadow the value below it. The env projection is the row's own
+//     Set (setThroughRow): the variable's text is admitted and landed exactly as a value typed at
+//     the settings pane is, so a value the pane refuses is a value the environment cannot smuggle
+//     in. Both are nil for a key with no source of that kind, which is most of the schema — a
+//     per-machine or per-model fact does not belong to one invocation, and ADR 0012 fences two keys
+//     to the global file outright. A nil accessor IS that fence: the pass skips the row, so there is
+//     no path for those sources to reach the key.
 //
 // Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
 // context-files keys, the four present keys, the seven ui keys — each write the whole block their key
@@ -506,10 +509,7 @@ var keyAccessors = []keyAccessor{
 		// config, the choice of entry is an invocation.
 		row:      mustKey("server"),
 		fromFile: func(o *Options, fc fileConfig) { o.StartupServer = fc.Server },
-		fromEnv: func(o *Options, text string) error {
-			o.StartupServer = text
-			return nil
-		},
+		fromEnv:  setThroughRow("server"),
 		fromFlag: func(o *Options, flags Options) { o.StartupServer = flags.StartupServer },
 	},
 	{
@@ -541,10 +541,9 @@ var keyAccessors = []keyAccessor{
 				o.Mode = fc.Mode
 			}
 		},
-		fromEnv: func(o *Options, text string) error {
-			o.Mode = text
-			return nil
-		},
+		// Through the row, so a mode outside the ladder is refused HERE — at the pass, with the
+		// variable named — rather than carried raw for the Driver's own ParseMode to refuse later.
+		fromEnv:  setThroughRow("mode"),
 		fromFlag: func(o *Options, flags Options) { o.Mode = flags.Mode },
 	},
 	{
@@ -926,17 +925,10 @@ var keyAccessors = []keyAccessor{
 		fromFile: func(o *Options, fc fileConfig) {
 			o.Bypass = fc.Bypass != nil && *fc.Bypass
 		},
-		// The one env value that is parsed rather than carried: a set-but-unparseable flag is a hard
-		// error, never a silently-ignored boolean. applyEnv adds the variable's name to the message,
-		// because the name is the row's to know, not this closure's.
-		fromEnv: func(o *Options, text string) error {
-			b, err := strconv.ParseBool(text)
-			if err != nil {
-				return errors.New("want a boolean")
-			}
-			o.Bypass = b
-			return nil
-		},
+		// A set-but-unparseable value is a hard error, never a silently-ignored boolean: the row's
+		// Set refuses it in the writer's own sentence, and applyEnv adds the variable's name in
+		// front, because the name is the row's to know rather than this table's.
+		fromEnv:  setThroughRow("bypass"),
 		fromFlag: func(o *Options, flags Options) { o.Bypass = flags.Bypass },
 	},
 	{
@@ -956,6 +948,16 @@ var keyAccessors = []keyAccessor{
 			}
 		},
 	},
+}
+
+// setThroughRow is the env pass's projection for a key that lands its variable's text through the
+// registry row itself (Key.Set): the parse, the refusal sentence and the field are the row's, so
+// this table restates none of them — it only turns the row's (value, options) order into the
+// projection's. Looked up once, when the table is built; a path the registry lacks is a defect in
+// this file and panics as mustKey's other callers do.
+func setThroughRow(path string) func(o *Options, text string) error {
+	row := mustKey(path)
+	return func(o *Options, text string) error { return row.Set(text, o) }
 }
 
 // The file projections shared by the key groups that resolve into ONE carrier: four system-prompt
@@ -2894,9 +2896,11 @@ const (
 // environment source at all. The variables that name no config key — APOGEE_ENDPOINT,
 // APOGEE_API_KEY, APOGEE_MODEL — are not read here at all: since ADR 0036 they override the
 // startup SERVER rather than a file key, so they are resolved outside this loop. A
-// set-but-unparseable APOGEE_BYPASS is a hard error rather than a silently-ignored boolean,
-// reported with the name the row carries. getenv is injected so the pass is testable without
-// mutating the process environment.
+// set-but-unparseable value — APOGEE_BYPASS=maybe, APOGEE_MODE=fast — is a hard error rather than
+// a silently-ignored setting: the row's Set refuses it in the sentence the settings writer would
+// use, and this pass puts the variable's name and the value in front of that sentence, so the
+// refusal names its source. getenv is injected so the pass is testable without mutating the
+// process environment.
 func applyEnv(o *Options, getenv func(string) string) error {
 	for _, k := range keyAccessors {
 		if k.fromEnv == nil || k.row.EnvVar == "" {
@@ -2907,11 +2911,20 @@ func applyEnv(o *Options, getenv func(string) string) error {
 			continue
 		}
 		if err := k.fromEnv(o, v); err != nil {
-			return fmt.Errorf("apogee: invalid %s %q: %w", k.row.EnvVar, v, err)
+			return fmt.Errorf("apogee: invalid %s %q: %w", k.row.EnvVar, v, sansPrefix{err})
 		}
 	}
 	return nil
 }
+
+// sansPrefix is a row's refusal with the package prefix taken off its front, for a site that puts
+// a lead of its own in front of the sentence — the env pass's variable and value — and says
+// "apogee:" once, ahead of the lead, rather than once per layer. The sentence is otherwise the
+// row's, word for word, and the refusal itself stays reachable through Unwrap.
+type sansPrefix struct{ err error }
+
+func (e sansPrefix) Error() string { return strings.TrimPrefix(e.err.Error(), "apogee: ") }
+func (e sansPrefix) Unwrap() error { return e.err }
 
 // applyFlags overlays the parsed flags, writing a key only when its flag was explicitly set
 // (changed reports cobra's per-flag Changed). An unset flag carries its zero default, which must

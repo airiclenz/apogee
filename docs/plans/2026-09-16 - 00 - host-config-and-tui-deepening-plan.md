@@ -428,7 +428,15 @@ reason in its comment).
 
 **Commit:** `refactor(config): one delegate-timeout parser; every registry default read back from an empty file`
 
-## 12. `Key.Set` — the inverse of `Read`
+## 12. `Key.Set` — the inverse of `Read` — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the one refusal-sentence rule applied as the guard states: `Set` refuses in the writer's sentence (the hook's where a row has one, else renderSettingValue's kind sentence) and the env pass leads it with `apogee: invalid APOGEE_X %q: ` — so the bypass tail `want a boolean` the What names is replaced by the bool kind's writer sentence (`bypass is true or false, not %q`); the lead is verbatim, the package prefix is said once (`sansPrefix` strips the inner `apogee: `, Unwrap keeps the chain).
+NOTES (2026-09-16): admission order is the hook FIRST, then the kind's parse — so `mode`'s Set refuses through validateSettingMode with ParseMode's sentence as the guard states, and every hooked row refuses in its startup sentence; the set of refused values is unchanged either way (every hook judges raw text itself).
+NOTES (2026-09-16): `Set` is carried on every row with a spelled value, editable or not (`confine-to-workspace`, `tools.enabled` included — item 13's file pass wants them); nil on the structured rows, `context-files.enable` and `sub-agents-server` (its Read shows "auto (session server)" for the empty value, which is not a spelling). The rows write their landing (`land`/`landIn`) and `bindSetters` binds it under the row's admission as the table is built, since a literal cannot name its own row.
+NOTES (2026-09-16): the round-trip fixture is `applyFile(&o, everyKeyFileConfig())` — the projection LoadFileConfig runs, over the struct fixture rather than a marshalled file; `everyKeyFileConfig()` gained the keys it was missing (`working-window`, `tools.enabled`, `ui.skill-suggestions`, `ui.task-list-open`, `sessions.*`) so the reach half proves something for every row, and TestEveryConfigKeyReachesTheOptions's want map gained `WorkingWindow`, `ToolsEnabled`, `Sessions` accordingly (a pre-existing fixture gap, closed).
+NOTES (2026-09-16): `configwrite_scalar.go` is listed in Files but needed no edit — renderSettingValue is reused as the kind's parse unchanged.
+NOTES (2026-09-16): consequential edit — cmd/apogee/docs_env_test.go: made necessary by the env pass now naming the variable on the mode refusal (its comment said it did not).
+NOTES (2026-09-16): consequential edit — docs/adr/0043-files-split-by-concern-and-config-gets-a-package.md: dated in-place amendment made necessary by the row gaining a fourth projection beside the three the 2026-08-21 amendment records.
 
 **What.** Depends on item 11. `internal/config/registry.go` `Key` gains `Set func(string, *Options)
 error`, built per kind from the switch `configwrite_scalar.go` `renderSettingValue` already owns

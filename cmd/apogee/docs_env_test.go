@@ -197,11 +197,11 @@ func firstSentence(section string) string {
 // CLEARS APOGEE_MODE so its own mode assertions measure flags, which is the opposite of the claim
 // here.
 //
-// The two refusals do not word themselves alike. APOGEE_BYPASS names the variable; APOGEE_MODE's
-// comes from domain.ParseMode, which is shared by the flag, the variable and the config file's
-// `mode:` key and says `--mode` for all three. Both name the setting and the offending value, which
-// is what is asserted; naming the SOURCE in the mode refusal too is recorded as a follow-up rather
-// than fixed here, since the message belongs to internal/domain.
+// Both refusals are the env pass's: the variable and the value in front of the sentence the
+// key's registry row refuses with (config.Key.Set) — the writer's own for a bool, and for the mode
+// domain.ParseMode's, which is shared by the flag, the variable and the config file's `mode:` key
+// and says `--mode` for all three. Both name the setting and the offending value, which is what is
+// asserted.
 func TestDocsEnvBadValuesNameTheVariableAndTheValue(t *testing.T) {
 	for _, tc := range []struct {
 		name     string

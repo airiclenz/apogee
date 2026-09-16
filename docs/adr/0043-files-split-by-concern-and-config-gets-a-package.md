@@ -266,3 +266,27 @@ whole of what those two files now do. ADR 0011's thin renderer is untouched: wha
 is still a list of rows a pane can paint. The rejected alternative above still stands as rejected —
 moving `settingsrows.go` / `settingsedit.go` themselves would put renderer-shaped output in the
 config package, and none of that output moved.
+
+## Amendment (2026-09-16) — the row carries the inverse too: `Key.Set`
+
+The 2026-08-21 amendment put the three READ projections on the row. The row now carries the
+**fourth, `Key.Set`** — the inverse of `Read`: a value spelled the way the file spells it, admitted
+through the row's own validate hook and its kind's parse (the settings writer's checks, in the
+writer's sentences), and landed on the one Options field `Read` answers from. A block-mapped key
+(`ui.*`, `present.*`, `sessions.*`) edits its field of a copy of the block and re-runs the block's
+validator before the copy is written back, so a refused `Set` has touched nothing.
+`TestRegistrySetIsTheInverseOfRead` pins the pair: for every row with a `Set`, `Set(Read(o))` on a
+copy of `o` leaves it equal to `o`, and on the defaults moves exactly the field the row owns.
+
+The rows with no `Set` are the ones with no spelled inverse — the structured rows,
+`context-files.enable` (its `Read` derives from the resolved list) and `sub-agents-server` (its
+`Read` shows a word for the empty value). The line drawn above stands: `Set` says what a key's value
+IS when written down and where it goes, not who may write it — that is still `Editable`'s question,
+and the pane's drawing is still the binary's.
+
+The first site to land through the row is resolution's own env pass: `APOGEE_SERVER`,
+`APOGEE_MODE` and `APOGEE_BYPASS` project through `row.Set`, so a value the pane refuses is one the
+environment cannot smuggle in, and the refusal is the row's sentence behind the pass's own lead
+(`apogee: invalid APOGEE_BYPASS "maybe": bypass is true or false, not "maybe"`). One consequence
+is named: `APOGEE_MODE=fast` is now refused at the env pass, with the variable named, where it
+used to be carried raw and refused by the Driver's `ParseMode` at wiring.

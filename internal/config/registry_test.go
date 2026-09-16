@@ -704,3 +704,186 @@ func readsAlike(t *testing.T, k Key, got, want string) bool {
 	}
 	return gotCanonical == wantCanonical
 }
+
+// TestRegistrySetIsTheInverseOfRead pins the row's fourth projection to its first: for every row
+// that has a Set, the value Read spells is one Set lands back unchanged, on the one Options field
+// the row owns and no other. The fixture is the Options the file pass resolves for
+// everyKeyFileConfig() — the projection LoadFileConfig runs (applyFile), over a file that states
+// every key at a non-default value — and the defaults an empty file resolves to are the base the
+// reach half lands on. Two halves per row, both on the typed Options fields and never on strings:
+//
+//   - exact: Set(Read(o)) on a copy of o leaves the copy equal to o — the spelling a row shows is
+//     one the row takes back, and landing it touches nothing else;
+//   - reach: Set(Read(o)) on the DEFAULTS moves exactly the field the row is known to own — so a
+//     row whose Set writes its neighbour's field (two bools both false in the fixture would pass
+//     the exact half) is named, as TestEveryConfigKeyReachesTheOptions names a fromFile that does.
+//
+// A KindText row round-trips through Text: its Read is a line-count summary, and the prose behind
+// it is the value. Rows with no Set are exactly the ones with no spelled inverse — the structured
+// rows, `context-files.enable` (its Read derives from the resolved list and owns no field) and
+// `sub-agents-server` (its Read shows a word for the empty value) — and every editable row but the
+// first of those has one, since the pane's apply lands through it.
+func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
+	t.Parallel()
+
+	var resolved, defaults Options
+	applyFile(&resolved, everyKeyFileConfig())
+	applyFile(&defaults, fileConfig{})
+
+	// The Options field each row lands on, by name: the reach half's expectation, and the one
+	// place the ownership is spelled out — the rows themselves write a closure, which no test can
+	// read the field name off.
+	owns := map[string]string{
+		"server": "StartupServer", "sub-agents-choice": "SubAgentsChoice", "mode": "Mode",
+		"system-prompt-text": "SystemPrompt", "system-prompt-file": "SystemPrompt",
+		"use-default-prompt": "UseDefaultPrompt", "context-files.names": "ContextFiles",
+		"confine-to-workspace": "ConfineToWorkspace", "web-search-endpoint": "WebSearchEndpoint",
+		"tools.disabled": "ToolsDisabled", "tools.enabled": "ToolsEnabled",
+		"url-safety.allow-hosts": "URLAllowHosts", "url-safety.deny-hosts": "URLDenyHosts",
+		"use-project-skills": "UseProjectSkills", "use-shipped-skills": "UseShippedSkills",
+		"auto-compact": "AutoCompact", "prune-tool-results": "PruneToolResults",
+		"tool-use-enforcer": "ToolUseEnforcer", "empty-response-recovery": "EmptyResponseRecovery",
+		"tool-call-repair": "ToolCallRepair", "tool-call-salvage": "ToolCallSalvage",
+		"tool-loop-breaker": "ToolLoopBreaker", "tool-result-cap": "ToolResultCap",
+		"read-cache": "ReadCache", "context-fill-notice": "ContextFillNotice",
+		"step-budget-notice": "StepBudgetNotice", "delegate-max-steps": "DelegateMaxSteps",
+		"delegate-max-depth": "DelegateMaxDepth", "delegate-max-tokens": "DelegateMaxTokens",
+		"delegate-timeout": "DelegateTimeout", "undo-snapshots": "UndoSnapshots",
+		"auto-title": "AutoTitle", "remember-model": "RememberModel",
+		"context-window": "ContextWindow", "working-window": "WorkingWindow",
+		"response-reserve":  "ResponseReserve",
+		"present.auto-open": "Present", "present.command": "Present", "present.port": "Present",
+		"present.host": "Present",
+		"ui.spinner":   "UI", "ui.spinner-color": "UI", "ui.show-scrollbar": "UI",
+		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
+		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI",
+		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions",
+		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
+	}
+	noInverse := map[string]string{
+		"context-files.enable": "Read derives from the resolved list; the key owns no Options field",
+		"sub-agents-server":    "Read shows a word for the empty value, which is not a spelling",
+	}
+
+	for _, k := range KeyRegistry {
+		t.Run(k.Path, func(t *testing.T) {
+			t.Parallel()
+			if k.Set == nil {
+				switch {
+				case k.Kind == KindStructured:
+				case noInverse[k.Path] != "":
+				default:
+					t.Fatalf("registry row %q has no Set — every row with a spelled value has one; "+
+						"a row with no spelled inverse is listed in this test's noInverse set with its reason", k.Path)
+				}
+				return
+			}
+			if _, listed := noInverse[k.Path]; listed || k.Kind == KindStructured {
+				t.Fatalf("registry row %q now has a Set; take it out of this test's exemptions", k.Path)
+			}
+			field, known := owns[k.Path]
+			if !known {
+				t.Fatalf("registry row %q has a Set but this test does not know which Options field it "+
+					"owns — add it to the owns table", k.Path)
+			}
+			spelled, spelledDefault := k.Read(resolved), k.Read(defaults)
+			if k.Kind == KindText {
+				spelled, spelledDefault = k.Text(resolved), k.Text(defaults)
+			}
+
+			exact := resolved
+			if err := k.Set(spelled, &exact); err != nil {
+				t.Fatalf("Set(Read(o)) = %q refused what the row itself reads: %v", spelled, err)
+			}
+			if diffs := structDiff(exact, resolved); len(diffs) != 0 {
+				t.Errorf("Set(Read(o)) does not land what Read reads:\n%s", strings.Join(diffs, "\n"))
+			}
+
+			reached := defaults
+			if err := k.Set(spelled, &reached); err != nil {
+				t.Fatalf("Set(Read(o)) = %q on the defaults refused: %v", spelled, err)
+			}
+			moved := make([]string, 0, 1)
+			for _, diff := range structDiff(reached, defaults) {
+				moved = append(moved, strings.SplitN(diff, " ", 2)[0])
+			}
+			if spelled == spelledDefault {
+				t.Fatalf("the fixture leaves %q at its default (%q); give everyKeyFileConfig a value "+
+					"for it, or the reach half proves nothing", k.Path, spelled)
+			}
+			if !slices.Equal(moved, []string{field}) {
+				t.Errorf("Set moved the Options fields %v, want exactly [%s] — the field the row reads", moved, field)
+			}
+		})
+	}
+}
+
+// TestRegistrySetRefusesWhatValidateRefuses pins the admission half of Set to the row's own
+// validate hook: whatever the hook refuses, Set refuses, in the hook's own sentence — so a site that
+// lands a value through the row (the env pass, a Driver's live apply) reports the refusal the
+// settings pane reports, with only its own lead in front. Whatever the hook ACCEPTS, Set accepts
+// unless the kind's own parse refuses it (the writer's kind check — a bool that is not one, an enum
+// outside its vocabulary), in which case the refusal is the writer's sentence for that. Either way
+// a refused Set has touched nothing: the Options it was handed are what they were.
+//
+// The values are a common battery rather than a per-key table, on purpose: the claim is the SHAPE
+// of Set's answer against the hook's for every row, and the hooks' per-key wordings are already
+// pinned by TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse.
+func TestRegistrySetRefusesWhatValidateRefuses(t *testing.T) {
+	t.Parallel()
+
+	var resolved Options
+	applyFile(&resolved, everyKeyFileConfig())
+	battery := []string{
+		"", "   ", "nonsense", "-1", "0", "1", "70000", "1.5", "yes please", "off",
+		"[../secrets.md]", "[AGENTS.md, ./AGENTS.md]", "%zz", "You are apogee in {{ workspace }}.",
+		"-5m", "90", "soonish",
+	}
+
+	for _, k := range KeyRegistry {
+		if k.Set == nil {
+			continue
+		}
+		for _, value := range battery {
+			t.Run(k.Path+"="+value, func(t *testing.T) {
+				t.Parallel()
+				admitted := value
+				if k.Kind != KindText {
+					admitted = strings.TrimSpace(value)
+				}
+				var hookErr error
+				if k.Validate != nil {
+					hookErr = k.Validate(admitted)
+				}
+				_, _, kindErr := renderSettingValue(k, admitted)
+
+				got := resolved
+				setErr := k.Set(value, &got)
+
+				switch {
+				case hookErr != nil:
+					if setErr == nil {
+						t.Fatalf("Validate refuses %q (%v) but Set accepted it", value, hookErr)
+					}
+					if setErr.Error() != hookErr.Error() {
+						t.Errorf("Set refuses %q as\n  %v\nwant the hook's own sentence\n  %v", value, setErr, hookErr)
+					}
+				case kindErr != nil:
+					if setErr == nil {
+						t.Fatalf("the kind refuses %q (%v) but Set accepted it", value, kindErr)
+					}
+					if want := "apogee: " + kindErr.Error(); setErr.Error() != want {
+						t.Errorf("Set refuses %q as\n  %v\nwant the writer's kind sentence\n  %v", value, setErr, want)
+					}
+				case setErr != nil:
+					t.Fatalf("neither Validate nor the kind refuses %q, but Set did: %v", value, setErr)
+				}
+				if setErr != nil {
+					if diffs := structDiff(got, resolved); len(diffs) != 0 {
+						t.Errorf("a refused Set still wrote:\n%s", strings.Join(diffs, "\n"))
+					}
+				}
+			})
+		}
+	}
+}
