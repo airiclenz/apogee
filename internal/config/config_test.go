@@ -351,11 +351,12 @@ func wantDefaults() Options {
 // resolveSources drives the three passes in the order ResolveOptions drives them, off injected
 // sources: a parsed file, a getenv over a map, and a flag set whose changed names are listed. It
 // stops where ResolveOptions' validation begins, so a case can state a value the validators would
-// refuse and still assert what resolution made of it.
+// refuse and still assert what resolution made of it; what the file pass itself refuses (a
+// string-spelled key's value the row's Set admits nothing of) fails the case, as it fails startup.
 func resolveSources(t *testing.T, fc fileConfig, env map[string]string, flags Options, changed []string) (Options, []string) {
 	t.Helper()
 	var o Options
-	applyFile(&o, fc)
+	mustApplyFile(t, &o, fc)
 	if err := applyEnv(&o, func(name string) string { return env[name] }); err != nil {
 		t.Fatalf("applyEnv(%v): %v", env, err)
 	}
@@ -363,6 +364,16 @@ func resolveSources(t *testing.T, fc fileConfig, env map[string]string, flags Op
 	confine, notices := resolveConfineToWorkspace(o.ConfineToWorkspace, o.UnconfinedHosts, testHostID)
 	o.ConfineToWorkspace = confine
 	return o, notices
+}
+
+// mustApplyFile is the file pass over a fileConfig every key of which the rows accept: the pass
+// refuses through the rows now, so a test that builds its file in code states that acceptance
+// here rather than discarding the refusal.
+func mustApplyFile(t *testing.T, o *Options, fc fileConfig) {
+	t.Helper()
+	if err := applyFile(o, fc); err != nil {
+		t.Fatalf("applyFile: %v", err)
+	}
 }
 
 // The three keys that resolve from more than one source, driven end to end through their registry
@@ -581,8 +592,8 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 	}
 
 	var got, unset Options
-	applyFile(&got, everyKeyFileConfig())
-	applyFile(&unset, fileConfig{})
+	mustApplyFile(t, &got, everyKeyFileConfig())
+	mustApplyFile(t, &unset, fileConfig{})
 
 	moved := map[string]bool{}
 	for _, diff := range structDiff(got, unset) {
@@ -2183,6 +2194,42 @@ func TestApplyConfigDelegateTimeout(t *testing.T) {
 			}
 			if opts.DelegateTimeout != tt.want {
 				t.Errorf("opts.delegateTimeout = %s; want %s", opts.DelegateTimeout, tt.want)
+			}
+		})
+	}
+}
+
+// The file pass refuses through the registry rows: a string-spelled key whose value the row's Set
+// admits nothing of is refused at the pass itself, so startup (ApplyConfig) and a live re-read of
+// the same file (LoadFileConfig — every `/settings` apply under a running session) refuse it in
+// ONE sentence, the row's own. Before the pass carried the refusal, the live re-read resolved the
+// bad value to the key's default in silence, while startup refused it.
+func TestFilePassRefusesThroughTheRows(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name     string
+		file     string
+		wantErr  string
+		wantPath string
+	}{
+		{name: "delegate-timeout", file: "delegate-timeout: 5x\n", wantErr: `apogee: invalid delegate-timeout "5x": want a length of time like 2h or 30m, or 0 to let a delegation run unbounded`},
+		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: "apogee: invalid cursor-shape: "},
+		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, tt.file)
+
+			opts := Options{ConfigDir: home}
+			startupErr := ApplyConfig(&opts, func(string) bool { return false },
+				func(string) string { return "" }, os.ReadFile, noNotify)
+			_, liveErr := LoadFileConfig(FilePath(home), os.ReadFile, noNotify)
+
+			if startupErr == nil || !strings.HasPrefix(startupErr.Error(), tt.wantErr) {
+				t.Fatalf("ApplyConfig error = %v, want it to open with %q", startupErr, tt.wantErr)
+			}
+			if liveErr == nil || liveErr.Error() != startupErr.Error() {
+				t.Fatalf("LoadFileConfig error = %v, want the startup sentence %q", liveErr, startupErr)
 			}
 		})
 	}

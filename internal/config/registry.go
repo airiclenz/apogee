@@ -112,8 +112,9 @@ const (
 // is the whole of their contract (a bool, a plain name), and where a validator already exists
 // for the same key at startup it is THAT function this points at, so a value refused at a
 // settings surface and a value refused at launch are refused by one implementation. Startup
-// resolution does not call it — it validates the parsed block it already builds — so this is
-// the write path's guard rather than a second schema.
+// resolution reaches it only through Set, for the string-spelled keys the file pass lands that
+// way (keyAccessors); every other key it validates on the parsed block it already builds — so
+// this is the write path's guard rather than a second schema.
 //
 // Read, Text and Structure are the row's three projections of a RESOLVED config ([Options]) —
 // what the key is holding right now, as against everything above, which says what the key is.
@@ -1135,8 +1136,9 @@ func validateColorSchemeName(value string) error {
 // checks a SPELLING, and what each name is drawn as is the renderer's business alone. The empty
 // value is the request for the default and is accepted, as it is everywhere else. The refusal
 // itself is the domain's sentence ([domain.UnknownCursorShapeError]), wrapped with the key this
-// pane is about to write; ApplyConfig calls this too, so the startup refusal and the one this pane
-// writes are the same sentence, and so is the renderer's parse.
+// pane is about to write; the file pass lands the key through the row's Set (keyAccessors), so the
+// startup refusal, the live re-read's and the one this pane writes are the same sentence, and so
+// is the renderer's parse.
 func validateCursorShapeName(value string) error {
 	if value == "" || domain.ValidCursorShapeName(value) {
 		return nil
@@ -1145,9 +1147,9 @@ func validateCursorShapeName(value string) error {
 }
 
 // validateSubAgentsChoice refuses a `sub-agents-choice:` outside the two words the key takes, through
-// the same parse the startup resolution and the live apply both go through ([ParseSubAgentsChoice]),
-// so a value refused at the /settings pane and a value refused at launch are refused by one
-// implementation in one wording. The empty string is not a defect: it is the key left out, and the
+// the same parse the file pass and the live apply both go through ([ParseSubAgentsChoice]) — the
+// file pass lands the key through the row's Set (keyAccessors) — so a value refused at the
+// /settings pane and a value refused at launch are refused by one implementation in one wording. The empty string is not a defect: it is the key left out, and the
 // parse answers it with the same `fixed` the row's default declares.
 func validateSubAgentsChoice(value string) error {
 	_, err := ParseSubAgentsChoice(value)

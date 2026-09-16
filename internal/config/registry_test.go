@@ -727,8 +727,8 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 	t.Parallel()
 
 	var resolved, defaults Options
-	applyFile(&resolved, everyKeyFileConfig())
-	applyFile(&defaults, fileConfig{})
+	mustApplyFile(t, &resolved, everyKeyFileConfig())
+	mustApplyFile(t, &defaults, fileConfig{})
 
 	// The Options field each row lands on, by name: the reach half's expectation, and the one
 	// place the ownership is spelled out — the rows themselves write a closure, which no test can
@@ -833,7 +833,7 @@ func TestRegistrySetRefusesWhatValidateRefuses(t *testing.T) {
 	t.Parallel()
 
 	var resolved Options
-	applyFile(&resolved, everyKeyFileConfig())
+	mustApplyFile(t, &resolved, everyKeyFileConfig())
 	battery := []string{
 		"", "   ", "nonsense", "-1", "0", "1", "70000", "1.5", "yes please", "off",
 		"[../secrets.md]", "[AGENTS.md, ./AGENTS.md]", "%zz", "You are apogee in {{ workspace }}.",

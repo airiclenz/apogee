@@ -454,7 +454,12 @@ func (s SessionSettings) Validate() error {
 //     states the key, its built-in default where the file does not. Every row has one, and the write
 //     is unconditional — the file is the only source below the default, so there is nothing left to
 //     fall through TO, and a full pass resets every field the schema owns rather than leaving a
-//     stale one standing. That is also what makes [LoadFileConfig] answer with usable Options.
+//     stale one standing. That is also what makes [LoadFileConfig] answer with usable Options. It
+//     REFUSES a value the key cannot take, in the row's own sentence: the file pass stays
+//     yaml-typed — a decoded bool or int is landed as the number it already is, never re-parsed
+//     from text — and only the keys the file spells as a STRING with a validate hook to judge it
+//     (`sub-agents-choice`, `delegate-timeout`, `cursor-shape`) land through the row's own Set, so
+//     the startup refusal, the live re-read's and the settings pane's are one wording.
 //   - fromEnv projects a variable's text and fromFlag the already-parsed flag value, each onto the
 //     same field. They run only where their source SET the key (a non-empty variable, an explicitly
 //     changed flag), so neither can shadow the value below it. The env projection is the row's own
@@ -480,7 +485,7 @@ func (s SessionSettings) Validate() error {
 // registry, rather than pretending to be file keys that no longer exist.
 type keyAccessor struct {
 	row      Key
-	fromFile func(o *Options, fc fileConfig)
+	fromFile func(o *Options, fc fileConfig) error
 	fromEnv  func(o *Options, text string) error
 	fromFlag func(o *Options, flags Options)
 }
@@ -497,18 +502,19 @@ var keyAccessors = []keyAccessor{
 		// File-only: the list names MACHINES, which is a config act rather than an invocation one —
 		// its invocation-settable neighbour is the `server:` pointer below it.
 		row: mustKey("servers"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.Servers = nil
 			if len(fc.Servers) > 0 {
 				o.Servers = fc.Servers
 			}
+			return nil
 		},
 	},
 	{
 		// The one key of the `servers:` neighbourhood with sources above the file: the list is
 		// config, the choice of entry is an invocation.
 		row:      mustKey("server"),
-		fromFile: func(o *Options, fc fileConfig) { o.StartupServer = fc.Server },
+		fromFile: func(o *Options, fc fileConfig) error { o.StartupServer = fc.Server; return nil },
 		fromEnv:  setThroughRow("server"),
 		fromFlag: func(o *Options, flags Options) { o.StartupServer = flags.StartupServer },
 	},
@@ -517,29 +523,35 @@ var keyAccessors = []keyAccessor{
 		// act — `/sub-agents-server` records the choice back into the file — not something one
 		// invocation overrides, so the key has neither a variable nor a flag.
 		row:      mustKey("sub-agents-server"),
-		fromFile: func(o *Options, fc fileConfig) { o.SubAgentsServer = fc.SubAgentsServer },
+		fromFile: func(o *Options, fc fileConfig) error { o.SubAgentsServer = fc.SubAgentsServer; return nil },
 	},
 	{
 		// File-only for its neighbour's reason one row up — who gets to choose the seat is a config
 		// act, not something one invocation overrides. The default comes from the row, so the value
 		// resolution starts from and the one /settings shows as "the default" are one string.
 		row: mustKey("sub-agents-choice"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.SubAgentsChoice = SubAgentsChoice(mustKey("sub-agents-choice").Default)
-			if fc.SubAgentsChoice != "" {
-				o.SubAgentsChoice = SubAgentsChoice(fc.SubAgentsChoice)
+			if fc.SubAgentsChoice == "" {
+				return nil
 			}
+			// Through the row, so a word outside the two the key takes is refused HERE, by the
+			// registry's own validator, rather than carried raw for the startup pass to refuse
+			// later: resolving it silently to `fixed` would leave the file reading as configured
+			// while the model was never offered the choice.
+			return mustKey("sub-agents-choice").Set(fc.SubAgentsChoice, o)
 		},
 	},
 	{
 		row: mustKey("mode"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			// The default comes from the row, so the mode resolution starts from and the mode /settings
 			// shows as "the default" are one string.
 			o.Mode = mustKey("mode").Default
 			if fc.Mode != "" {
 				o.Mode = fc.Mode
 			}
+			return nil
 		},
 		// Through the row, so a mode outside the ladder is refused HERE — at the pass, with the
 		// variable named — rather than carried raw for the Driver's own ParseMode to refuse later.
@@ -584,30 +596,32 @@ var keyAccessors = []keyAccessor{
 		// the same thing an explicit `true` does; the effective value is resolveConfineToWorkspace's,
 		// because only it holds this machine's identity.
 		row: mustKey("confine-to-workspace"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ConfineToWorkspace = fc.ConfineToWorkspace == nil || *fc.ConfineToWorkspace
+			return nil
 		},
 	},
 	{
 		// Global-config-only for the reason above — a hostile repo must not be able to name your
 		// host — and carried past resolution so the session can report the list back and extend it.
 		row: mustKey("unconfined-hosts"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.UnconfinedHosts = nil
 			if len(fc.UnconfinedHosts) > 0 {
 				o.UnconfinedHosts = fc.UnconfinedHosts
 			}
+			return nil
 		},
 	},
 	{
 		row:      mustKey("web-search-endpoint"),
-		fromFile: func(o *Options, fc fileConfig) { o.WebSearchEndpoint = fc.WebSearch },
+		fromFile: func(o *Options, fc fileConfig) error { o.WebSearchEndpoint = fc.WebSearch; return nil },
 	},
 	{
 		// The on-disk entries are mapped across one by one, as they are everywhere else in this
 		// package: the schema shape and the resolved one stay independently evolvable.
 		row: mustKey("mcp-servers"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.MCPServers = nil
 			if len(fc.MCPServers) > 0 {
 				servers := make([]mcp.ServerConfig, len(fc.MCPServers))
@@ -616,199 +630,227 @@ var keyAccessors = []keyAccessor{
 				}
 				o.MCPServers = servers
 			}
+			return nil
 		},
 	},
 	{
 		// Each half of the `tools:` block projects on its own, the way the `url-safety:` pair below
 		// does: a block that names only one of them configures that one and leaves the other empty.
 		row: mustKey("tools.disabled"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ToolsDisabled = nil
 			if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
 				o.ToolsDisabled = fc.Tools.Disabled
 			}
+			return nil
 		},
 	},
 	{
 		row: mustKey("tools.enabled"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ToolsEnabled = nil
 			if fc.Tools != nil && len(fc.Tools.Enabled) > 0 {
 				o.ToolsEnabled = fc.Tools.Enabled
 			}
+			return nil
 		},
 	},
 	{
 		// Each list of the `url-safety:` block projects on its own: a block that names only one of
 		// them configures that one and leaves the other at its default.
 		row: mustKey("url-safety.allow-hosts"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.URLAllowHosts = nil
 			if fc.URLSafety != nil && len(fc.URLSafety.AllowHosts) > 0 {
 				o.URLAllowHosts = fc.URLSafety.AllowHosts
 			}
+			return nil
 		},
 	},
 	{
 		row: mustKey("url-safety.deny-hosts"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.URLDenyHosts = nil
 			if fc.URLSafety != nil && len(fc.URLSafety.DenyHosts) > 0 {
 				o.URLDenyHosts = fc.URLSafety.DenyHosts
 			}
+			return nil
 		},
 	},
 	{
 		row: mustKey("use-project-skills"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.UseProjectSkills = fc.UseProjectSkills == nil || *fc.UseProjectSkills
+			return nil
 		},
 	},
 	{
 		row: mustKey("use-shipped-skills"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.UseShippedSkills = fc.UseShippedSkills == nil || *fc.UseShippedSkills
+			return nil
 		},
 	},
 	{
 		row: mustKey("use-default-prompt"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.UseDefaultPrompt = fc.UseDefaultPrompt == nil || *fc.UseDefaultPrompt
+			return nil
 		},
 	},
 	{
 		row: mustKey("auto-compact"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.AutoCompact = fc.AutoCompact == nil || *fc.AutoCompact
+			return nil
 		},
 	},
 	{
 		row: mustKey("prune-tool-results"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.PruneToolResults = fc.PruneToolResults == nil || *fc.PruneToolResults
+			return nil
 		},
 	},
 	{
 		row: mustKey("tool-use-enforcer"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ToolUseEnforcer = fc.ToolUseEnforcer == nil || *fc.ToolUseEnforcer
+			return nil
 		},
 	},
 	{
 		row: mustKey("empty-response-recovery"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.EmptyResponseRecovery = fc.EmptyResponseRecovery == nil || *fc.EmptyResponseRecovery
+			return nil
 		},
 	},
 	{
 		row: mustKey("tool-call-repair"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ToolCallRepair = fc.ToolCallRepair == nil || *fc.ToolCallRepair
+			return nil
 		},
 	},
 	{
 		row: mustKey("tool-call-salvage"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ToolCallSalvage = fc.ToolCallSalvage == nil || *fc.ToolCallSalvage
+			return nil
 		},
 	},
 	{
 		row: mustKey("tool-loop-breaker"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ToolLoopBreaker = fc.ToolLoopBreaker == nil || *fc.ToolLoopBreaker
+			return nil
 		},
 	},
 	{
 		row: mustKey("tool-result-cap"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ToolResultCap = fc.ToolResultCap == nil || *fc.ToolResultCap
+			return nil
 		},
 	},
 	{
 		row: mustKey("read-cache"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ReadCache = fc.ReadCache == nil || *fc.ReadCache
+			return nil
 		},
 	},
 	{
 		// Default OFF, unlike the seven Floor keys above it: a model-facing behaviour above the Floor
 		// ships off until bench evidence turns it on (ADR 0077).
 		row: mustKey("context-fill-notice"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ContextFillNotice = fc.ContextFillNotice != nil && *fc.ContextFillNotice
+			return nil
 		},
 	},
 	{
 		// Default OFF for context-fill-notice's reason: the step-budget notice steers a sub-agent.
 		row: mustKey("step-budget-notice"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.StepBudgetNotice = fc.StepBudgetNotice != nil && *fc.StepBudgetNotice
+			return nil
 		},
 	},
 	{
 		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
 		// absence of one, so presence cannot stand in for the positive value the way it does there.
 		row: mustKey("delegate-max-steps"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.DelegateMaxSteps = defaultDelegateMaxSteps
 			if fc.DelegateMaxSteps != nil && *fc.DelegateMaxSteps >= 0 {
 				o.DelegateMaxSteps = *fc.DelegateMaxSteps
 			}
+			return nil
 		},
 	},
 	{
 		// A plain int on disk: 0 is not a value here (the bound is at least 1), so an absent key
 		// and a 0 resolve alike, to the default — the settings surface refuses the 0 outright.
 		row: mustKey("delegate-max-depth"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.DelegateMaxDepth = defaultDelegateMaxDepth
 			if fc.DelegateMaxDepth >= 1 {
 				o.DelegateMaxDepth = fc.DelegateMaxDepth
 			}
+			return nil
 		},
 	},
 	{
 		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no bound").
 		row: mustKey("delegate-max-tokens"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.DelegateMaxTokens = defaultDelegateMaxTokens
 			if fc.DelegateMaxTokens != nil && *fc.DelegateMaxTokens >= 0 {
 				o.DelegateMaxTokens = *fc.DelegateMaxTokens
 			}
+			return nil
 		},
 	},
 	{
 		// A duration's text on disk, `ui.stall-after`'s posture: an absent key and an empty value
 		// resolve to the default, an explicit `0` is off, and text no duration can be made of is
-		// left at the default HERE and refused by the startup pass (ResolveOptions), which quotes it.
+		// refused HERE, through the row, in the sentence that quotes it — a bound that quietly
+		// resolved to the default would leave the file reading as configured while a delegation
+		// ran under a limit nobody set. Refusing at the pass rather than at startup alone is what
+		// makes a bad value in a LIVE-edited file refuse on the re-read too, through the loader's
+		// own error, instead of resolving to the default in silence.
 		row: mustKey("delegate-timeout"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.DelegateTimeout = defaultDelegateTimeout
-			if fc.DelegateTimeout != nil {
-				if d, err := ParseDelegateTimeout(*fc.DelegateTimeout); err == nil {
-					o.DelegateTimeout = d
-				}
+			if fc.DelegateTimeout == nil {
+				return nil
 			}
+			return mustKey("delegate-timeout").Set(*fc.DelegateTimeout, o)
 		},
 	},
 	{
 		row: mustKey("undo-snapshots"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
+			return nil
 		},
 	},
 	{
 		row: mustKey("auto-title"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.AutoTitle = fc.AutoTitle == nil || *fc.AutoTitle
+			return nil
 		},
 	},
 	{
 		// The one switch of this run that defaults OFF: writing back into the human's own config is
 		// opted into, never assumed.
 		row: mustKey("remember-model"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.RememberModel = fc.RememberModel != nil && *fc.RememberModel
+			return nil
 		},
 	},
 	{
@@ -817,33 +859,36 @@ var keyAccessors = []keyAccessor{
 		// still reaches here as "unpinned" — a fractional or negative value never gets this far,
 		// because TokenCount refuses it at the decode rather than letting it be floored to one.
 		row: mustKey("context-window"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ContextWindow = 0
 			if fc.ContextWindow > 0 {
 				o.ContextWindow = int(fc.ContextWindow)
 			}
+			return nil
 		},
 	},
 	{
 		// Presence is the positive value here too, for the pin above's reason: 0 and absent both mean
 		// "this run bounds nothing of its own", which leaves the advertised window as the working room.
 		row: mustKey("working-window"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.WorkingWindow = 0
 			if fc.WorkingWindow > 0 {
 				o.WorkingWindow = fc.WorkingWindow
 			}
+			return nil
 		},
 	},
 	{
 		// Presence is the positive value here too, for context-window's reason: the loader accepts
 		// nothing but 0 and the open range (0, 1), so 0 is "unset" and apogee's built-in share stands.
 		row: mustKey("response-reserve"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ResponseReserve = 0
 			if fc.ResponseReserve > 0 {
 				o.ResponseReserve = fc.ResponseReserve
 			}
+			return nil
 		},
 	},
 	{
@@ -909,21 +954,31 @@ var keyAccessors = []keyAccessor{
 		fromFile: fileSessions,
 	},
 	{
-		// Carried as the raw NAME: ResolveOptions validates it against the vocabulary internal/domain
-		// owns, so this seam neither parses nor refuses it.
-		row:      mustKey("cursor-shape"),
-		fromFile: func(o *Options, fc fileConfig) { o.CursorShape = fc.CursorShape },
+		// Carried as the NAME, never parsed into a shape — what each name is drawn as is the
+		// renderer's business — but judged HERE, through the row, against the vocabulary
+		// internal/domain owns: drawing a block for a shape no terminal cursor has would leave the
+		// user staring at a caret their config did not ask for. The empty value is the request for
+		// the default and stays empty, as it does everywhere else.
+		row: mustKey("cursor-shape"),
+		fromFile: func(o *Options, fc fileConfig) error {
+			o.CursorShape = ""
+			if fc.CursorShape == "" {
+				return nil
+			}
+			return mustKey("cursor-shape").Set(fc.CursorShape, o)
+		},
 	},
 	{
 		// File-only (ADR 0041): $VISUAL and $EDITOR are a FALLBACK below this key, read at the launch
 		// site, rather than a source above it — which is why this row names no environment variable.
 		row:      mustKey("editor"),
-		fromFile: func(o *Options, fc fileConfig) { o.Editor = fc.Editor },
+		fromFile: func(o *Options, fc fileConfig) error { o.Editor = fc.Editor; return nil },
 	},
 	{
 		row: mustKey("bypass"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.Bypass = fc.Bypass != nil && *fc.Bypass
+			return nil
 		},
 		// A set-but-unparseable value is a hard error, never a silently-ignored boolean: the row's
 		// Set refuses it in the writer's own sentence, and applyEnv adds the variable's name in
@@ -941,11 +996,12 @@ var keyAccessors = []keyAccessor{
 		// Ordered by pattern on the way in (toProfileEntries), so the same file always resolves to
 		// the same slice; the map is carried whole rather than merged pattern by pattern (ADR 0044).
 		row: mustKey("model-profiles"),
-		fromFile: func(o *Options, fc fileConfig) {
+		fromFile: func(o *Options, fc fileConfig) error {
 			o.ModelProfiles = nil
 			if len(fc.ModelProfiles) > 0 {
 				o.ModelProfiles = toProfileEntries(fc.ModelProfiles)
 			}
+			return nil
 		},
 	},
 }
@@ -967,15 +1023,30 @@ func setThroughRow(path string) func(o *Options, text string) error {
 // named function is the honest way to say that. context-files is the one that is not a plain copy:
 // Options carries the RESOLVED name list rather than the block, because the composition root has no
 // use for the switch that produced it.
-func fileSystemPrompt(o *Options, fc fileConfig) { o.SystemPrompt = fc.toSystemPromptSettings() }
+func fileSystemPrompt(o *Options, fc fileConfig) error {
+	o.SystemPrompt = fc.toSystemPromptSettings()
+	return nil
+}
 
-func fileContextFiles(o *Options, fc fileConfig) { o.ContextFiles = fc.contextFiles().resolved() }
+func fileContextFiles(o *Options, fc fileConfig) error {
+	o.ContextFiles = fc.contextFiles().resolved()
+	return nil
+}
 
-func filePresent(o *Options, fc fileConfig) { o.Present = fc.present() }
+func filePresent(o *Options, fc fileConfig) error {
+	o.Present = fc.present()
+	return nil
+}
 
-func fileUI(o *Options, fc fileConfig) { o.UI = fc.ui() }
+func fileUI(o *Options, fc fileConfig) error {
+	o.UI = fc.ui()
+	return nil
+}
 
-func fileSessions(o *Options, fc fileConfig) { o.Sessions = fc.sessions() }
+func fileSessions(o *Options, fc fileConfig) error {
+	o.Sessions = fc.sessions()
+	return nil
+}
 
 // present, ui and contextFiles are the three optional blocks as the file leaves them: the block it
 // carries, or — where it names no block at all — the block its own mapper builds from nothing,
@@ -2729,17 +2800,27 @@ func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 // empty string, a nil pointer, a zero number, a present-but-empty list) — is the key's own registry
 // row (keyAccessors). A key added to the schema is therefore read here by the act of being
 // described, rather than by a branch someone had to remember to add beside thirty-seven others.
-func applyFile(o *Options, fc fileConfig) {
+//
+// A value a key refuses is refused HERE, in the row's own sentence, and the pass stops at it: the
+// string-spelled keys with a validate hook land through the row's Set (keyAccessor). The pass is
+// the one projection both startup and every live re-read make, so the refusal is one sentence in
+// both places — and a bad value edited into the file under a running session REFUSES on the
+// re-read, through the loader's error, where it once resolved to the key's default in silence.
+func applyFile(o *Options, fc fileConfig) error {
 	for _, k := range keyAccessors {
-		k.fromFile(o, fc)
+		if err := k.fromFile(o, fc); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // LoadFileConfig reads and parses the config file and answers with what it alone resolves to: every
 // key of the schema at the value the file states, or at its built-in default where the file states
 // nothing. An absent file is not an error but the common case — a config file is optional — and
 // answers with the defaults. A malformed file IS a hard error: silently ignoring it would mask a
-// typo'd setting. readFile is injected so the loader is testable without touching the filesystem.
+// typo'd setting — and so is a value a key refuses (applyFile), in the sentence startup refuses it
+// with. readFile is injected so the loader is testable without touching the filesystem.
 //
 // It is the same projection resolution starts from (applyFile), which is what lets a surface that
 // re-reads ONE block of the file — the /settings applies, which re-resolve the block they just
@@ -2759,7 +2840,9 @@ func LoadFileConfig(path string, readFile func(string) ([]byte, error), notify f
 		return Options{}, err
 	}
 	var o Options
-	applyFile(&o, fc)
+	if err := applyFile(&o, fc); err != nil {
+		return Options{}, err
+	}
 	return o, nil
 }
 
@@ -3028,7 +3111,11 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// flag carries its zero default, so what a flag SAYS is only meaningful together with whether it
 	// was changed, which is applyFlags' own test.
 	flags := *opts
-	applyFile(opts, fc)
+	// The file pass refuses a value a key cannot take in the row's own sentence — the same pass,
+	// and the same sentence, a live re-read (LoadFileConfig) refuses it with.
+	if err := applyFile(opts, fc); err != nil {
+		return nil, err
+	}
 	if err := applyEnv(opts, getenv); err != nil {
 		return nil, err
 	}
@@ -3059,24 +3146,6 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	if err := opts.Sessions.Validate(); err != nil {
 		return notices, err
 	}
-	// A `cursor-shape:` naming a shape no terminal cursor has is the same kind of loud startup
-	// error, for the same reason: drawing a block instead would leave the user staring at a caret
-	// their config did not ask for. The judgement is the registry's own validator, so the startup
-	// refusal and the one the /settings pane writes are one wording over the vocabulary
-	// internal/domain owns.
-	if err := validateCursorShapeName(opts.CursorShape); err != nil {
-		return notices, err
-	}
-	// A `delegate-timeout:` that is not a length of time is the same kind of loud startup error, on
-	// `ui.stall-after`'s reasoning: a bound that quietly resolved to the default would leave the file
-	// reading as configured while a delegation ran under a limit nobody set. The judgement is the
-	// registry's own validator over the text AS WRITTEN, so the startup refusal and the one the
-	// /settings pane writes are one wording.
-	if fc.DelegateTimeout != nil {
-		if err := validateDelegateTimeout(*fc.DelegateTimeout); err != nil {
-			return notices, err
-		}
-	}
 	// A system-prompt block that contradicts itself — both spellings of one prompt at one level,
 	// or a per-model entry carrying no prompt at all — is a defect in the FILE, independent of
 	// this machine and of which model this run resolves, so it is refused here for every level.
@@ -3093,14 +3162,6 @@ func ResolveOptions(opts *Options, changed func(string) bool, getenv func(string
 	// today gets switched on months later, by which time the typo has lost its context. Whether the
 	// named files exist is deliberately not asked: discovery is the feature (contextFilesSettings).
 	if err := fc.contextFiles().validate(); err != nil {
-		return notices, err
-	}
-	// A `sub-agents-choice:` naming neither of the two words the key takes is refused on the
-	// cursor-shape reasoning above: an unknown word is not a magnitude nothing can spend but a value
-	// that means nothing at all, and resolving it silently to `fixed` would leave the file reading as
-	// configured while the model was never offered the choice. The judgement is the registry's own
-	// validator, so the startup refusal and the one the /settings pane writes are one wording.
-	if err := validateSubAgentsChoice(string(opts.SubAgentsChoice)); err != nil {
 		return notices, err
 	}
 	// A `servers:` entry that could never be switched to — no name, no endpoint, or a name an

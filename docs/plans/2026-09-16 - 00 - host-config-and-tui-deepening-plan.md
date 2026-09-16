@@ -465,7 +465,11 @@ as the guard states).
 
 **Commit:** `feat(config): the registry row carries Set, the inverse of Read`
 
-## 13. The file pass validates through the rows
+## 13. The file pass validates through the rows — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `projectReactions` returns `toReactions`' mapping error instead of swallowing it — reachable only from a fileConfig built in code (parseConfigFile refuses the file first); its doc comment says so.
+NOTES (2026-09-16): a refused value that the file spells with surrounding whitespace (a quoted `" 5x "`) is now quoted trimmed in the sentence, because `Key.Set`'s admission trims before the hook — the item's "only string-spelled keys route through `row.Set`'s parse" consequence; the plain spellings every test pins are byte-identical.
+NOTES (2026-09-16): a file carrying two defects may now name a different one first — the three row refusals run at the file pass, ahead of the block validators (`present`, `ui`, `sessions`) that stay in `ResolveOptions`.
 
 **What.** Depends on item 12. `internal/config/config.go`: the three `ResolveOptions` validation
 branches that call registry validators (`validateCursorShapeName`, `validateDelegateTimeout`,

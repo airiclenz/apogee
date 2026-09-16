@@ -396,14 +396,18 @@ func validateReactionBlocks(list []reactionConfig) error {
 // projectReactions writes every Reaction the block resolved to onto the Options — both lanes in one
 // list, which each Driver splits for the two halves that fire them.
 //
-// A mapping FAILURE leaves the list empty rather than half-applied: parseConfigFile has already
-// refused any file this could fail on (validateReactionBlocks), so the only way to reach it is a
-// fileConfig built in code, and a partially fired reaction set is a worse answer there than none.
-func projectReactions(o *Options, fc fileConfig) {
+// A mapping FAILURE leaves the list empty rather than half-applied, and is returned as the file
+// pass's refusal: parseConfigFile has already refused any file this could fail on
+// (validateReactionBlocks), so the only way to reach it is a fileConfig built in code, and a
+// partially fired reaction set is a worse answer there than none.
+func projectReactions(o *Options, fc fileConfig) error {
 	o.Reactions = nil
-	if mapped, err := toReactions(fc.Reactions); err == nil {
-		o.Reactions = mapped
+	mapped, err := toReactions(fc.Reactions)
+	if err != nil {
+		return err
 	}
+	o.Reactions = mapped
+	return nil
 }
 
 // ReactionEnvNames is every environment variable name the resolved Reactions read a webhook header
