@@ -16,6 +16,7 @@ import (
 // ----------------------------------------------------------------------------
 
 func TestParseInputCommands(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		verb string
@@ -42,8 +43,10 @@ func TestParseInputCommands(t *testing.T) {
 // list of "/" verbs, so a verb can never be offered by the dropdown while the parser has never
 // heard of it (or vice versa). Every row parses, and every row is offered.
 func TestCommandTableDrivesParserAndMenu(t *testing.T) {
+	t.Parallel()
 	for _, spec := range commandSpecs {
 		t.Run(spec.name, func(t *testing.T) {
+			t.Parallel()
 			verb, _, ok := matchCommand("/" + spec.name)
 			if !ok {
 				t.Fatalf("matchCommand(%q) was not recognised; every registry row parses", "/"+spec.name)
@@ -124,6 +127,7 @@ func openEffortPicker(t *testing.T, eng *fakeEngine, support provider.EffortSupp
 // The verb ASKS rather than reads: the level-word grammar is deleted (ADR 0060 D7), so /effort opens
 // the popup and — until a row is taken — has moved nothing and said nothing.
 func TestEffortCommandOpensThePicker(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{effortProfile: domain.EffortLow}
 	m := openEffortPicker(t, eng, dialledEffort())
 
@@ -142,6 +146,7 @@ func TestEffortCommandOpensThePicker(t *testing.T) {
 // row (ADR 0060 D5), but a hand-typed line still lands, and a verb that resolved and then did nothing
 // would read as a broken command rather than as an absent dial.
 func TestEffortWithoutADialAnswersWithOneNote(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{effortProfile: domain.EffortLow}
 	m := openEffortPicker(t, eng, provider.EffortSupport{})
 
@@ -161,6 +166,7 @@ func TestEffortWithoutADialAnswersWithOneNote(t *testing.T) {
 // value that CLEARS the override, and every accept closes the pane on the binding resolution — both
 // layers named, because a level means one thing as an override and another as a profile setting.
 func TestEffortPickerAcceptDrivesTheEngineDoor(t *testing.T) {
+	t.Parallel()
 	reported := provider.EffortSupport{
 		Supported: true,
 		Dialect:   provider.EffortDialectReasoning,
@@ -217,6 +223,7 @@ func TestEffortPickerAcceptDrivesTheEngineDoor(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			eng := &fakeEngine{effortProfile: c.profile, effortOverride: c.override}
 			m := openEffortPicker(t, eng, c.support)
 			for range c.down {
@@ -246,6 +253,7 @@ func TestEffortPickerAcceptDrivesTheEngineDoor(t *testing.T) {
 // request is built: a level set mid-Turn changes nothing about the one in flight, and mid-Turn is
 // exactly when a human notices the model is thinking too hard.
 func TestEffortRunsWhileTheWorkerWorks(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{effortProfile: domain.EffortLow}
 	m := newTestModelEng(t, eng, testOpts)
 	m.hb.effort = dialledEffort()
@@ -282,6 +290,7 @@ func TestEffortRunsWhileTheWorkerWorks(t *testing.T) {
 // is what keeps a multi-line message whose first line reads "/clear" a message rather than a
 // command.
 func TestFirstCommandTokenIsTheParsersCut(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"/clear":              "/clear",
 		"/confine off --save": "/confine",
@@ -309,8 +318,10 @@ func TestFirstCommandTokenIsTheParsersCut(t *testing.T) {
 // not one token — but the guard is the second layer, and a defence in depth is only worth having if
 // it is tested at its own level.
 func TestNoSkillIDCanOutParseABuiltinVerb(t *testing.T) {
+	t.Parallel()
 	for _, spec := range commandSpecs {
 		t.Run(spec.name, func(t *testing.T) {
+			t.Parallel()
 			id := spec.name + " off --save"
 
 			verb, rest, ok := matchCommand("/" + id)
@@ -338,6 +349,7 @@ func TestNoSkillIDCanOutParseABuiltinVerb(t *testing.T) {
 // display order — commandSuggestions renders it as it stands, no render-time sort — so a verb added
 // in the wrong place would quietly un-sort the menu; this fails loudly instead.
 func TestCommandSpecsReadAlphabetically(t *testing.T) {
+	t.Parallel()
 	names := make([]string, 0, len(commandSpecs))
 	for _, spec := range commandSpecs {
 		names = append(names, spec.name)
@@ -353,6 +365,7 @@ func TestCommandSpecsReadAlphabetically(t *testing.T) {
 // and impossible to notice once there — a verb that quietly stopped being recallable would look like
 // recall losing lines — so the set is pinned by name rather than by count.
 func TestOnlyResetAndPureUIVerbsAreNotRecallable(t *testing.T) {
+	t.Parallel()
 	var got []string
 	for _, spec := range commandSpecs {
 		if spec.noRecall {
@@ -371,6 +384,7 @@ func TestOnlyResetAndPureUIVerbsAreNotRecallable(t *testing.T) {
 // commandrun.go, where forgetting a verb failed nothing a human could see — the verb simply ran
 // into a dead upstream — so the set is pinned by name here rather than by count.
 func TestOnlyTheCannedTurnAndCompactionOpenAnExchange(t *testing.T) {
+	t.Parallel()
 	var got []string
 	for _, spec := range commandSpecs {
 		if spec.opensExchange {
@@ -389,6 +403,7 @@ func TestOnlyTheCannedTurnAndCompactionOpenAnExchange(t *testing.T) {
 // flag's own set, and the six verbs the latch refuses because of the two flags together — because
 // the second is the one a reader of the latch actually asks about.
 func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) {
+	t.Parallel()
 	var touching []string
 	for _, spec := range commandSpecs {
 		if spec.touchesServer {
@@ -423,6 +438,7 @@ func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) 
 // the hook never ran for. And the set carrying one is named: it is exactly the switch that was
 // deleted, so a further grammar is a deliberate edit at this line rather than a silent one.
 func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
+	t.Parallel()
 	var got []string
 	for _, spec := range commandSpecs {
 		if spec.parseArgs == nil {
@@ -448,6 +464,7 @@ func TestOnlyTheGrammarVerbsCarryAParseArgsHook(t *testing.T) {
 // the bare "/" and on every prefix of their own names — a verb the human cannot discover is a verb
 // they will not find. The busy menu offers them too, tagged (the row below pins the tag itself).
 func TestServerVerbsAreOffered(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ partial, want string }{
 		{"", "stop-server"},
 		{"", "unload-model"},
@@ -476,6 +493,7 @@ func TestServerVerbsAreOffered(t *testing.T) {
 // The merged "/" dropdown the human actually sees offers them as well — one registry feeds it, so a
 // row the table declares reaches the menu whole.
 func TestSlashMenuOffersTheServerVerbs(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	for _, tc := range []struct{ typed, want string }{
 		{"/", "stop-server"},
@@ -501,6 +519,7 @@ func TestSlashMenuOffersTheServerVerbs(t *testing.T) {
 // ISSUES #12 symptom — but the rows that cannot run there say so. The tag follows commandSpecs'
 // whileRunning column exactly, so a future verb flipping that flag needs no second edit here.
 func TestCommandSuggestionsTagIdleOnlyRowsWhileBusy(t *testing.T) {
+	t.Parallel()
 	rows := commandSuggestions("", true, true)
 	if len(rows) != len(commandSpecs) {
 		t.Fatalf("rows = %d, want every one of the %d verbs listed while busy", len(rows), len(commandSpecs))
@@ -588,6 +607,7 @@ func TestTypedEffortStillParsesWithoutADial(t *testing.T) {
 // safeWhileRunning is asked about the parsed LINE, not the verb: /confine reports under one form
 // and mutates Auto's blast radius under the other, and only the report is boundary-free.
 func TestSafeWhileRunningReadsTheLine(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		in   string
 		want bool
@@ -610,6 +630,7 @@ func TestSafeWhileRunningReadsTheLine(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.in, func(t *testing.T) {
+			t.Parallel()
 			parsed := parseInput(c.in, nil)
 			if parsed.kind != kindCommand {
 				t.Fatalf("parseInput(%q).kind = %v, want a command", c.in, parsed.kind)
@@ -622,6 +643,7 @@ func TestSafeWhileRunningReadsTheLine(t *testing.T) {
 }
 
 func TestParseInputUnknownSlashIsMessage(t *testing.T) {
+	t.Parallel()
 	// An unrecognised /verb is NOT a command — a message that merely CONTAINS a "/" word (a path,
 	// a typo, an unparsed "/skill foo") is sent to the agent verbatim, never silently swallowed.
 	// The sole-token case is the typo guard's, and has its own test below.
@@ -642,6 +664,7 @@ func TestParseInputUnknownSlashIsMessage(t *testing.T) {
 // the issue that spawned this, a "/skills" the build did not yet have — from reaching the model as
 // prose. Everything else keeps its old classification exactly.
 func TestParseInputSoleUnknownSlash(t *testing.T) {
+	t.Parallel()
 	known := knownSkills("grill-me", "clear")
 	cases := []struct {
 		name string
@@ -662,6 +685,7 @@ func TestParseInputSoleUnknownSlash(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := parseInput(c.in, known)
 			if got.kind != c.want {
 				t.Fatalf("parseInput(%q).kind = %v, want %v", c.in, got.kind, c.want)
@@ -682,6 +706,7 @@ func TestParseInputSoleUnknownSlash(t *testing.T) {
 // /skill picker verb has no special case left: a sole "/skill" earns the same generic refusal as
 // any other word naming nothing.
 func TestUnknownSlashNote(t *testing.T) {
+	t.Parallel()
 	for _, token := range []string{"/code-adit", "/skill"} {
 		got := unknownSlashNote(token)
 		if !strings.Contains(got, token) || !strings.Contains(got, "unknown command or skill") {
@@ -691,6 +716,7 @@ func TestUnknownSlashNote(t *testing.T) {
 }
 
 func TestParseInputMessageExtractsFileRefs(t *testing.T) {
+	t.Parallel()
 	got := parseInput("look at @main.go and @internal/agent/loop.go please", nil)
 	if got.kind != kindMessage {
 		t.Fatalf("kind = %v, want message", got.kind)
@@ -722,6 +748,7 @@ func knownSkills(ids ...string) func(string) bool {
 // while the whole-input command rule still wins outright — a command verb SHADOWS a skill of the
 // same id.
 func TestParseInputSkillTokens(t *testing.T) {
+	t.Parallel()
 	known := knownSkills("grill-me", "clear")
 
 	got := parseInput("/grill-me check @main.go", known)
@@ -758,6 +785,7 @@ func TestParseInputSkillTokens(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestParseInputConfineGrammar(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -773,6 +801,7 @@ func TestParseInputConfineGrammar(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := parseInput(c.in, nil)
 			if got.kind != kindCommand || got.command != "confine" {
 				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the confine command", c.in, got.kind, got.command)
@@ -788,6 +817,7 @@ func TestParseInputConfineGrammar(t *testing.T) {
 }
 
 func TestParseInputConfineArgumentErrors(t *testing.T) {
+	t.Parallel()
 	// Every bad-argument form stays a COMMAND carrying an error, so the router can report the
 	// usage line: neither swallowed silently nor forwarded to the agent as a message.
 	cases := []struct {
@@ -803,6 +833,7 @@ func TestParseInputConfineArgumentErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := parseInput(c.in, nil)
 			if got.kind != kindCommand || got.command != "confine" {
 				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the confine command", c.in, got.kind, got.command)
@@ -825,6 +856,7 @@ func TestParseInputConfineArgumentErrors(t *testing.T) {
 // scheme this build cannot find is a forgiving load, not a parse error), two tokens are only ever
 // "export <name>".
 func TestParseInputColorSchemeArguments(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -842,6 +874,7 @@ func TestParseInputColorSchemeArguments(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := parseInput(c.in, nil)
 			if got.kind != kindCommand || got.command != "color-scheme" {
 				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the color-scheme command", c.in, got.kind, got.command)
@@ -857,6 +890,7 @@ func TestParseInputColorSchemeArguments(t *testing.T) {
 }
 
 func TestParseInputColorSchemeArgumentErrors(t *testing.T) {
+	t.Parallel()
 	// The refusing branch, and the reason it exists: a line the parser cannot read must never be
 	// guessed into a switch, because a wrong guess repaints the screen and writes the config.
 	cases := []struct {
@@ -869,6 +903,7 @@ func TestParseInputColorSchemeArgumentErrors(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			got := parseInput(c.in, nil)
 			if got.kind != kindCommand || got.command != "color-scheme" {
 				t.Fatalf("parseInput(%q) = {kind:%v cmd:%q}, want the color-scheme command", c.in, got.kind, got.command)
@@ -887,6 +922,7 @@ func TestParseInputColorSchemeArgumentErrors(t *testing.T) {
 }
 
 func TestParseInputBlankIsEmptyMessage(t *testing.T) {
+	t.Parallel()
 	got := parseInput("   ", nil)
 	if got.kind != kindMessage || got.text != "" {
 		t.Errorf("parseInput(blank) = {kind:%v text:%q}, want empty message", got.kind, got.text)

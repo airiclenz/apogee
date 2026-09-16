@@ -361,6 +361,7 @@ func stageRow(t *testing.T, m Model, text string) Model {
 // TestTypingWhileRunningEditsInput is the routing change itself: printable keys reach the textarea
 // while a worker runs, instead of scrolling the transcript past a refused box.
 func TestTypingWhileRunningEditsInput(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	for _, r := range "hi" {
 		m = step(t, m, keyRune(r))
@@ -374,6 +375,7 @@ func TestTypingWhileRunningEditsInput(t *testing.T) {
 // longer a no-op, but it still launches nothing. The message becomes a staged row — on the display
 // queue AND in the Exchange's mailbox — and the editor is cleared for the next one.
 func TestEnterWhileRunningStagesRow(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	box := m.worker.box
 
@@ -415,6 +417,7 @@ func TestEnterWhileRunningStagesRow(t *testing.T) {
 // (finishWorker) registers nil, so the seam reads no dead box. The engine reads the Bridge's
 // predicate and never the Model, which is value-copied on every Update (ADR 0011).
 func TestEnterWhileRunningRaisesThePendingSeam(t *testing.T) {
+	t.Parallel()
 	br := NewBridge()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	m.registerBox = br.setMailbox
@@ -455,6 +458,7 @@ func TestEnterWhileRunningRaisesThePendingSeam(t *testing.T) {
 // submitted message — the refs resolve at delivery, so a mid-run "@main.go" is as useful as one
 // typed at idle.
 func TestStagedRowCarriesFileRefs(t *testing.T) {
+	t.Parallel()
 	m := stageRow(t, runningModel(t), "look at @main.go too")
 	if n := len(m.pendingInterjections); n != 1 {
 		t.Fatalf("staged rows = %d; want 1", n)
@@ -469,6 +473,7 @@ func TestStagedRowCarriesFileRefs(t *testing.T) {
 // band above the box paints it as a "queued command" row, the box empties as a send does, no note is
 // written and nothing is driven — the line runs at the next idle.
 func TestCommandWhileRunningIsQueued(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m.input.SetValue("/compact")
 	next, cmd := stepCmd(t, m, keyEnter())
@@ -510,6 +515,7 @@ func commandLines(m Model) []string {
 // longer runs: the band's row nearest the box is the one un-done, and a queued command is always
 // that row.
 func TestBackspaceEmptyPopsTheQueuedCommand(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "a remark")
 	m = stageRow(t, m, "/compact")
@@ -534,6 +540,7 @@ func TestBackspaceEmptyPopsTheQueuedCommand(t *testing.T) {
 // not what the human asked to happen next, and the command runs at the stop's idle
 // (TestStopRunsTheQueuedCommandAndHoldsTheMessage).
 func TestStopKeepsTheQueuedCommand(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "/compact")
 
@@ -548,6 +555,7 @@ func TestStopKeepsTheQueuedCommand(t *testing.T) {
 // At idle the queued command RUNS through the ordinary command path and its row is gone: a /compact
 // queued mid-run starts its worker the moment the Exchange completes.
 func TestQueuedCommandRunsAtIdle(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -575,6 +583,7 @@ func TestQueuedCommandRunsAtIdle(t *testing.T) {
 // holds the message: the hold note counts messages alone, because only they wait for the next ⏎
 // (ADR 0025 D7, amended 2026-09-14).
 func TestStopRunsTheQueuedCommandAndHoldsTheMessage(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -605,6 +614,7 @@ func TestStopRunsTheQueuedCommandAndHoldsTheMessage(t *testing.T) {
 // verbatim and editable, leaving the older one queued — and withdraws it from the mailbox, so a
 // row taken back can never still be delivered.
 func TestBackspaceEmptyPopsNewestIntoEditor(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	box := m.worker.box
 	m = stageRow(t, m, "first remark")
@@ -627,6 +637,7 @@ func TestBackspaceEmptyPopsNewestIntoEditor(t *testing.T) {
 // A row already drained by the worker is NOT popped back: its delivery is out of the Model's
 // hands, and handing the human an editor copy would invite sending the same message twice.
 func TestBackspaceDoesNotPopADrainedRow(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "in flight")
 	m.worker.box.drainAll() // the worker took it at a between-Steps boundary
@@ -644,6 +655,7 @@ func TestBackspaceDoesNotPopADrainedRow(t *testing.T) {
 // Backspace on an empty box pops the queue and nothing else: with the chips retired there is no
 // second staging area behind it, so a second press on an emptied queue is an ordinary no-op.
 func TestBackspaceOnEmptyPopsOnlyTheQueue(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	m.pendingInterjections = []queuedInterjection{staged(1, "held row")}
 
@@ -666,6 +678,7 @@ func TestBackspaceOnEmptyPopsOnlyTheQueue(t *testing.T) {
 // and lands in the scrollback as its own block, while the sticky header keeps naming the prompt
 // that OPENED the Exchange — an interjection is not a new section.
 func TestInterjectedMsgMovesRowToTranscript(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "also check the tests")
 	m = stageRow(t, m, "and the docs")
@@ -694,6 +707,7 @@ func TestInterjectedMsgMovesRowToTranscript(t *testing.T) {
 // A report naming nothing (a drain whose deliveries were all refused) changes nothing: the rows
 // stay queued for the terminal flush.
 func TestEmptyInterjectedMsgKeepsRowsQueued(t *testing.T) {
+	t.Parallel()
 	m := stageRow(t, runningModel(t), "held")
 	m = step(t, m, interjectedMsg{})
 	if n := len(m.pendingInterjections); n != 1 {
@@ -709,6 +723,7 @@ func TestEmptyInterjectedMsgKeepsRowsQueued(t *testing.T) {
 // TestStatusLineShowsQueuedCount: the status line says how much is waiting, and says nothing once
 // the queue drains.
 func TestStatusLineShowsQueuedCount(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	if got := plain(m.View()); strings.Contains(got, "queued") {
 		t.Errorf("an empty queue still says 'queued':\n%s", got)
@@ -733,6 +748,7 @@ func TestStatusLineShowsQueuedCount(t *testing.T) {
 // shows the terminal's own background, and every content row indented into the body column behind
 // its ⧖ marker, oldest first.
 func TestQueuedStripRendersAsIndentedBand(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "one")
 	m = stageRow(t, m, "two")
@@ -761,6 +777,7 @@ func TestQueuedStripRendersAsIndentedBand(t *testing.T) {
 // TestQueuedStripOverflowMarkerRidesInsideTheBand: past the cap the "… N more queued" marker is an
 // ordinary band row — indented, padded, and inside the frame rather than bare above it.
 func TestQueuedStripOverflowMarkerRidesInsideTheBand(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	for i := 0; i <= maxQueuedRows; i++ {
 		m = stageRow(t, m, fmt.Sprintf("row %d", i))
@@ -786,6 +803,7 @@ func TestQueuedStripOverflowMarkerRidesInsideTheBand(t *testing.T) {
 // the whole padded line — text, indent, and pad — goes through queuedText in one Render, which is
 // what makes the background reach the window edge.
 func TestQueuedRowUsesThemeBandStyle(t *testing.T) {
+	t.Parallel()
 	m := stageRow(t, runningModel(t), "one")
 
 	line := bodyIndent + glyphInterject + " one"
@@ -800,6 +818,7 @@ func TestQueuedRowUsesThemeBandStyle(t *testing.T) {
 // lipgloss.Height, so the frame rows must be inside the strip's own string for the accounting to
 // stay right — and the chrome below it must survive the taller strip at the standard 80×24.
 func TestQueuedStripHeightCountsItsFrame(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "one")
 	m = stageRow(t, m, "two")
@@ -828,6 +847,7 @@ func TestQueuedStripHeightCountsItsFrame(t *testing.T) {
 // it describes — a budget that can seat one row spends it on the count, not on one of five — and
 // under three rows the band is not drawn at all, the case the status line's "N queued" carries.
 func TestQueuedBandShrinksIntoTheFrameBudget(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		height     int  // the terminal's rows (the viewport gets height − 8)
 		staged     int  // messages waiting to go out
@@ -857,6 +877,7 @@ func TestQueuedBandShrinksIntoTheFrameBudget(t *testing.T) {
 			name += "/dropdown"
 		}
 		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 			m := withStagedRows(modelWithOverlayRoomAt(t, 80, c.height, testOpts), c.staged)
 			if c.dropdown {
 				m.input.SetValue("/")
@@ -907,6 +928,7 @@ func TestQueuedBandShrinksIntoTheFrameBudget(t *testing.T) {
 // the band is being dropped for — showed neither the band nor its count. The slot now spends its
 // width in the order it is read for (statusLeft), so the phrase is what gives way to the count.
 func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
+	t.Parallel()
 	// Each state opens a pane beside the queue, because a pane is what takes the rows the band would
 	// otherwise have had: at twelve and thirteen rows its four leave the band nothing at all.
 	dropdown := func(m Model) Model {
@@ -939,6 +961,7 @@ func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
 		for _, width := range []int{20, narrowOverlayWindow, 80} {
 			for _, height := range []int{smallestOverlayWindow, 13} {
 				t.Run(fmt.Sprintf("%s/%d×%d", s.name, width, height), func(t *testing.T) {
+					t.Parallel()
 					m := withStagedRows(modelWithOverlayRoomAt(t, width, height, testOpts), 5)
 					m = s.place(t, m)
 
@@ -968,6 +991,7 @@ func TestSuppressedBandKeepsItsCountOnTheStatusLine(t *testing.T) {
 // short to spend on advice instead: the hint is refused there, not promoted into the rows the queue
 // was denied.
 func TestBandShapeSeatsTheHintLast(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		staged     int
@@ -990,6 +1014,7 @@ func TestBandShapeSeatsTheHintLast(t *testing.T) {
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			plan := bandShape(c.staged, c.budget, c.hints)
 
 			if plan.shown != c.wantShown || plan.hidden != c.wantHidden || plan.hint != c.wantHint {
@@ -1016,6 +1041,7 @@ func TestBandShapeSeatsTheHintLast(t *testing.T) {
 // band row above it, never by one between the two surfaces: the staged strip gives up its lower
 // framing row so the block still reads as one object.
 func TestHintRowIsNearestTheInputBox(t *testing.T) {
+	t.Parallel()
 	var rec suggestCall
 	m := withStagedRows(modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), 2)
 	m = typeDraft(t, m, "audit the parser")
@@ -1045,6 +1071,7 @@ func TestHintRowIsNearestTheInputBox(t *testing.T) {
 // TestQueuedStripEmptyWithoutAQueue: no queue, no band — not even the framing rows, which would
 // otherwise leak two blank black lines into every idle frame.
 func TestQueuedStripEmptyWithoutAQueue(t *testing.T) {
+	t.Parallel()
 	if got := runningModel(t).renderPendingInterjections(); got != "" {
 		t.Errorf("strip = %q with nothing staged; want the empty string", got)
 	}
@@ -1053,6 +1080,7 @@ func TestQueuedStripEmptyWithoutAQueue(t *testing.T) {
 // TestPasteWhileRunningTypes replaces TestPasteIgnoredWhileRunning: a paste is an edit, and the
 // box is editable while the model works.
 func TestPasteWhileRunningTypes(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m.input.SetValue("keep")
 	m = step(t, m, tea.PasteMsg{Content: " and this"})
@@ -1064,6 +1092,7 @@ func TestPasteWhileRunningTypes(t *testing.T) {
 // TestScrollWhileRunningViaPgKeysAndWheel: the transcript scroll keys are ceded to typing while
 // the model works, so the two routes that remain must both still work.
 func TestScrollWhileRunningViaPgKeysAndWheel(t *testing.T) {
+	t.Parallel()
 	scrolled := func(t *testing.T, msg tea.Msg) {
 		t.Helper()
 		m := runningModel(t)
@@ -1081,8 +1110,14 @@ func TestScrollWhileRunningViaPgKeysAndWheel(t *testing.T) {
 			t.Errorf("%T did not scroll while running: offset %d → %d", msg, before, got)
 		}
 	}
-	t.Run("pgup", func(t *testing.T) { scrolled(t, tea.KeyPressMsg{Code: tea.KeyPgUp}) })
-	t.Run("wheel", func(t *testing.T) { scrolled(t, tea.MouseWheelMsg{Button: tea.MouseWheelUp}) })
+	t.Run("pgup", func(t *testing.T) {
+		t.Parallel()
+		scrolled(t, tea.KeyPressMsg{Code: tea.KeyPgUp})
+	})
+	t.Run("wheel", func(t *testing.T) {
+		t.Parallel()
+		scrolled(t, tea.MouseWheelMsg{Button: tea.MouseWheelUp})
+	})
 
 	// The letter keys that used to scroll now type, which is the deliberate trade.
 	m := step(t, runningModel(t), keyRune('k'))
@@ -1097,6 +1132,7 @@ func TestScrollWhileRunningViaPgKeysAndWheel(t *testing.T) {
 // command row is offered too, and the ones that need a boundary carry the "— runs at idle" tag rather
 // than being hidden, so the menu says what accepting them will do.
 func TestAutocompleteOpensWhileRunning(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "main.go"), []byte("package main\n"), 0o600); err != nil {
 		t.Fatalf("writing the fixture file: %v", err)
@@ -1144,6 +1180,7 @@ func TestAutocompleteOpensWhileRunning(t *testing.T) {
 // boundary at all, so ⏎ on one prints its note, empties the box (the whole-input form IS the command
 // line), and leaves the worker and the queue exactly where they were — nothing staged, nothing sent.
 func TestReportingCommandsRunWhileRunning(t *testing.T) {
+	t.Parallel()
 	opts := testOpts
 	opts.Version = "9.9.9-test"
 	cases := []struct {
@@ -1188,6 +1225,7 @@ func TestReportingCommandsRunWhileRunning(t *testing.T) {
 // safe, like SetMode) and answers immediately, while "off" would swap Auto's blast radius under a
 // Step that is already dispatching tool calls — so it is refused, the engine untouched.
 func TestConfineStatusRunsWhileRunningButOffIsRefused(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1225,6 +1263,7 @@ func TestConfineStatusRunsWhileRunningButOffIsRefused(t *testing.T) {
 // token out of the draft: the rest of the half-written message stays verbatim, exactly as an
 // accept at idle leaves it, and nothing is driven until the Exchange ends.
 func TestAcceptIdleOnlyCommandWhileRunningQueuesTheVerbAndKeepsTheDraft(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1262,6 +1301,7 @@ func TestAcceptIdleOnlyCommandWhileRunningQueuesTheVerbAndKeepsTheDraft(t *testi
 // and the staged row carries the id out to the engine — a skill is message content, so it rides the
 // interjection rather than answering to the command policy.
 func TestAcceptSkillWhileRunningStagesTheID(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("open the exchange")
 	m, _ = stepCmd(t, m, keyEnter())
@@ -1292,7 +1332,9 @@ func TestAcceptSkillWhileRunningStagesTheID(t *testing.T) {
 // TestApprovalAndAskKeysUnchanged: the two rendezvous states keep the keyboard they always had —
 // a/d/s decide, the ask box takes the answer, and neither stages anything.
 func TestApprovalAndAskKeysUnchanged(t *testing.T) {
+	t.Parallel()
 	t.Run("approval decides and stages nothing", func(t *testing.T) {
+		t.Parallel()
 		m := runningModel(t)
 		reply := make(chan domain.ApprovalDecision, 1)
 		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "write_file", CacheKey: ordinaryGateKey}, Reply: reply})
@@ -1315,6 +1357,7 @@ func TestApprovalAndAskKeysUnchanged(t *testing.T) {
 	})
 
 	t.Run("ask answers rather than queues", func(t *testing.T) {
+		t.Parallel()
 		m := runningModel(t)
 		reply := make(chan domain.AskAnswer, 1)
 		m = step(t, m, askReqMsg{Request: domain.AskRequest{Question: "which file?"}, Reply: reply})
@@ -1343,6 +1386,7 @@ func TestApprovalAndAskKeysUnchanged(t *testing.T) {
 // reads as the queue legend once an Exchange opens, the send legend while the box is borrowed for
 // an ask_user answer, and the idle legend again at the terminal fold.
 func TestPlaceholderFollowsTheExchange(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	if got := m.legend(); got != runningPlaceholder {
 		t.Errorf("placeholder = %q; want the running legend", got)
@@ -1403,6 +1447,7 @@ func lastEntry(t *testing.T, m Model) entry {
 // under its own power open the NEXT Exchange, as one message joining them oldest-first, with no
 // keypress in between.
 func TestExchangeDoneFlushesQueue(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1437,6 +1482,7 @@ func TestExchangeDoneFlushesQueue(t *testing.T) {
 // TestCompactDoneFlushes: a compaction is a natural completion too. /compact drives no Exchange
 // (it carries no mailbox), so a row typed while it runs has been waiting for exactly this boundary.
 func TestCompactDoneFlushes(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/compact")
@@ -1466,6 +1512,7 @@ func TestCompactDoneFlushes(t *testing.T) {
 // TestCancelHoldsWithSingleNote: Esc stops everything, the queue included. Nothing is sent, the
 // rows stay exactly where they were, and the hold is stated once — not once per keypress after it.
 func TestCancelHoldsWithSingleNote(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "one")
 	m = stageRow(t, m, "two")
@@ -1502,6 +1549,7 @@ func TestCancelHoldsWithSingleNote(t *testing.T) {
 // delivered, the hold note counts only that one, and the next ⏎ does not re-send what the model
 // already read. The transcript's ⧖ record stays put as the surviving evidence of that delivery.
 func TestCancelDropsADeliveredRow(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1550,6 +1598,7 @@ func TestCancelDropsADeliveredRow(t *testing.T) {
 // row committed into an Exchange that ended under its own power is history. It is not re-staged, not
 // re-sent, and a later Exchange's stop cannot resurrect it either.
 func TestNaturalCompletionKeepsDeliveredRowsDelivered(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1582,6 +1631,7 @@ func TestNaturalCompletionKeepsDeliveredRowsDelivered(t *testing.T) {
 // TestErrorHolds: a loop fault holds the queue exactly as a stop does, and clearing the error
 // takes its own ⏎ — the first press dismisses, the second sends what was held.
 func TestErrorHolds(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("open the exchange")
@@ -1624,6 +1674,7 @@ func TestErrorHolds(t *testing.T) {
 
 // TestIdleEnterEmptyInputSendsHeld: with rows held, ⏎ on an EMPTY box is a send, not a no-op.
 func TestIdleEnterEmptyInputSendsHeld(t *testing.T) {
+	t.Parallel()
 	m, eng := heldModel(t, "first", "second")
 
 	next, cmd := stepCmd(t, m, keyEnter())
@@ -1647,6 +1698,7 @@ func TestIdleEnterEmptyInputSendsHeld(t *testing.T) {
 // TestIdleEnterMergesEditorLast: what is in the box goes out WITH the held rows, and last — it is
 // the newest thing the human wrote. The @file references of both halves are unioned, once each.
 func TestIdleEnterMergesEditorLast(t *testing.T) {
+	t.Parallel()
 	m, eng := heldModel(t, "look at @a.go", "and @b.go")
 	m.input.SetValue("plus @a.go once more")
 
@@ -1709,6 +1761,7 @@ func TestJoinedInterjectionsRebasesSkillSpans(t *testing.T) {
 // It must not be overtaken by the flush — staged rows are session-ephemeral, and opening a fresh
 // Exchange into a program that is leaving would either be abandoned or delay the exit.
 func TestQuitDeferredBeatsFlush(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m = stageRow(t, m, "never sent")
 	m, quitCmd := ctrlCQuit(t, m)
@@ -1732,6 +1785,7 @@ func TestQuitDeferredBeatsFlush(t *testing.T) {
 // TestClearKeepsHeldRows: /clear starts a fresh session, and a held queue is not part of the
 // session it clears — the rows are outgoing input the human wrote and has not unwritten.
 func TestClearKeepsHeldRows(t *testing.T) {
+	t.Parallel()
 	m, _ := heldModel(t, "keep me")
 	m.input.SetValue("/clear")
 
@@ -1753,6 +1807,7 @@ func TestClearKeepsHeldRows(t *testing.T) {
 // completes. The transcript must read in DELIVERY order — no duplicates, no reordering — because
 // that is the record's whole claim: what the model saw, and when.
 func TestEndToEndInterjectionScript(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("refactor the parser")
@@ -1854,6 +1909,7 @@ func TestInterjectBoxRaceClean(t *testing.T) {
 // the run on screen through the engine seam, labels the staged row with it, and leaves the
 // conversation's own mailbox untouched — the child's engine-side mailbox IS the queue.
 func TestRunViewInterjectsIntoTheViewedChild(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := modelViewingChild(t, eng, childRunning)
 	box := m.worker.box
@@ -1904,6 +1960,7 @@ func TestRunViewInterjectsIntoTheViewedChild(t *testing.T) {
 // message (ChildInterjectionEvent) is what takes the row off the band, and the landed half puts the
 // message where the child actually read it — inside the run the view is showing.
 func TestRunViewChildDeliveryClearsTheBand(t *testing.T) {
+	t.Parallel()
 	m := modelViewingChild(t, &fakeEngine{}, childRunning)
 	m.input.SetValue("check the tests too")
 	m = step(t, m, keyEnter())
@@ -1935,6 +1992,7 @@ func TestRunViewChildDeliveryClearsTheBand(t *testing.T) {
 // outcome worse than a refusal. The refusal reaches the reader where they are: the note at depth 0
 // as always, and the same sentence flashed on the status line of the view they are still inside.
 func TestRunViewChildGoneKeepsTheDraft(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{interjectChildFn: func(string, domain.UserInput) error { return domain.ErrNoSuchChild }}
 	m := modelViewingChild(t, eng, childRunning)
 
@@ -1964,7 +2022,9 @@ func TestRunViewChildGoneKeepsTheDraft(t *testing.T) {
 // verb runs on the spot and a mistyped one earns the typo guard's note, neither of them queued for
 // the run on screen.
 func TestRunViewCommandsNeverReachTheChild(t *testing.T) {
+	t.Parallel()
 	t.Run("a reporting verb runs", func(t *testing.T) {
+		t.Parallel()
 		eng := &fakeEngine{}
 		m := modelViewingChild(t, eng, childRunning)
 
@@ -1983,6 +2043,7 @@ func TestRunViewCommandsNeverReachTheChild(t *testing.T) {
 	})
 
 	t.Run("an unknown slash is refused", func(t *testing.T) {
+		t.Parallel()
 		eng := &fakeEngine{}
 		m := modelViewingChild(t, eng, childRunning)
 

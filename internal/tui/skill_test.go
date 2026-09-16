@@ -78,6 +78,7 @@ func skillOpts() Options {
 // the matching skills, marked with the transcript's own skill glyph and shown as the token they
 // write.
 func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("/c") // five c-commands, and "clean-code" matches as a substring
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -104,6 +105,7 @@ func TestSlashMenuMergesCommandsAndSkills(t *testing.T) {
 // Accepting a skill row writes its inline token at the point the human was typing — the "/id " the
 // submit parse reads back out.
 func TestAcceptSkillRowFromTheMergedMenu(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("please /rev")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -132,6 +134,7 @@ func TestAcceptSkillRowFromTheMergedMenu(t *testing.T) {
 // abandoned on line 1 and the next keystroke landed in the middle of it. The widths are the app's
 // real one (80 columns ⇒ a 76-column text area) and the two the walk also failed at.
 func TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		window  int    // window columns; the text area is four narrower (border + padding)
@@ -145,6 +148,7 @@ func TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 			m = step(t, m, tea.WindowSizeMsg{Width: tc.window, Height: 24})
 			iw := m.inputInnerWidth()
@@ -189,6 +193,7 @@ func TestAcceptSkillRowSeatsTheCaretOnAWrappedDraft(t *testing.T) {
 // name in one namespace — and stays invocable by typing its "/id" token anywhere but at the head of
 // the line, the only position the whole-input command rule claims.
 func TestSlashMenuShadowsCollidingSkillID(t *testing.T) {
+	t.Parallel()
 	o := testOpts
 	o.Skills = fakeSkillCatalog{skills: []skills.Skill{{ID: "clear", DisplayName: "Clear Code"}}}
 	m := newTestModelEng(t, &fakeEngine{}, o)
@@ -214,6 +219,7 @@ func TestSlashMenuShadowsCollidingSkillID(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestSlashMatchRank(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		partial string
@@ -231,6 +237,7 @@ func TestSlashMatchRank(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := slashMatchRank(tc.partial, tc.item); got != tc.want {
 				t.Errorf("slashMatchRank(%q, %q) = %d, want %d", tc.partial, tc.item, got, tc.want)
 			}
@@ -243,6 +250,7 @@ func TestSlashMatchRank(t *testing.T) {
 // human had actually started typing. The prefix match now leads, and it leads as the HIGHLIGHTED
 // row (selected stays zero-valued), which is what accepting picks up.
 func TestSlashMenuRanksPrefixMatchAboveSubstring(t *testing.T) {
+	t.Parallel()
 	o := testOpts
 	o.Skills = fakeSkillCatalog{skills: []skills.Skill{ // catalog order: sorted by DisplayName
 		{ID: "feature-implementation", DisplayName: "Feature Implementation", Summary: "ship a feature"},
@@ -271,6 +279,7 @@ func TestSlashMenuRanksPrefixMatchAboveSubstring(t *testing.T) {
 // table (alphabetical) order, then the skills in catalog order. TestSlashMenuMergesCommandsAndSkills
 // pins the same stability for the mixed-tier "/c" case.
 func TestSlashMenuKeepsScanOrderWithinOneRankTier(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	// The bound model reports a dial, so the one gated row (/effort) is offered and the menu lists
 	// the table whole — this test is about ORDER, not about which rows the moment withholds
@@ -297,6 +306,7 @@ func TestSlashMenuKeepsScanOrderWithinOneRankTier(t *testing.T) {
 // matching skills than the menu can hold, the sole prefix match — last in catalog order — still
 // leads the list. Capping inside the scan loop dropped it before the ranking could ever see it.
 func TestSkillSuggestionsCapAfterRanking(t *testing.T) {
+	t.Parallel()
 	catalog := make([]skills.Skill, 0, maxAutocompleteItems+2)
 	for i := 0; i < maxAutocompleteItems+1; i++ {
 		id := fmt.Sprintf("a%d-widget", i) // substring match; sorts before the prefix match
@@ -321,6 +331,7 @@ func TestSkillSuggestionsCapAfterRanking(t *testing.T) {
 // A fully typed skill token keeps its own row — the token being completed is not yet "already
 // invoked" — and ⏎ then SENDS the message it stands in rather than re-completing it.
 func TestTypedSkillTokenStaysOfferedAndSubmits(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("please /review")
@@ -346,6 +357,7 @@ func TestTypedSkillTokenStaysOfferedAndSubmits(t *testing.T) {
 // read off the tokens standing in the buffer since there is no attachment state beside them. Delete
 // the token and the row comes back — the exclusion self-heals with the text.
 func TestSlashMenuExcludesSkillsAlreadyInTheBuffer(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 
 	// "clean" prefixes no command verb, so the menu's rows here are the skill half alone.
@@ -366,6 +378,7 @@ func TestSlashMenuExcludesSkillsAlreadyInTheBuffer(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestSubmitCarriesSkillIDs(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/clean-code do the thing /review")
@@ -394,6 +407,7 @@ func TestSubmitCarriesSkillIDs(t *testing.T) {
 
 // An input that is ONLY a skill token is a valid submit — "just run the skill" (edge default #2).
 func TestSubmitBareSkillTokenSends(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/clean-code")
@@ -421,6 +435,7 @@ func TestSubmitBareSkillTokenSends(t *testing.T) {
 // the send (ISSUES #5: the attachment used to vanish once the input cleared) — and it is visible as
 // the ACCENTED token inside the text, not as a chip beside it.
 func TestSentUserBlockAccentsTheSkillToken(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/clean-code fix the parser")
@@ -441,6 +456,7 @@ func TestSentUserBlockAccentsTheSkillToken(t *testing.T) {
 
 // A token that matches no catalog id is ordinary prose: it travels verbatim and resolves nothing.
 func TestSubmitUnknownTokenIsPlainText(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/clean-cod the typo and /usr/bin the path")
@@ -456,6 +472,7 @@ func TestSubmitUnknownTokenIsPlainText(t *testing.T) {
 }
 
 func TestSubmitEmptyAndNoSkillsIgnored(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("")
@@ -468,6 +485,7 @@ func TestSubmitEmptyAndNoSkillsIgnored(t *testing.T) {
 // /continue no longer carries skills: the chips it used to consume are gone, and its canned turn
 // is the whole input by construction — there is no token in it to invoke anything with.
 func TestContinueCarriesNoSkills(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/continue")
@@ -489,6 +507,7 @@ func TestContinueCarriesNoSkills(t *testing.T) {
 // Staging a message with a skill token while the model works carries the id on the row's
 // UserInput — the silent drop the chip flow left behind (interject.go's discarded parse).
 func TestStagedInterjectionCarriesSkillIDs(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	startStubWorker(t, &m)
 	m.input.SetValue("/review this diff too")
@@ -506,6 +525,7 @@ func TestStagedInterjectionCarriesSkillIDs(t *testing.T) {
 // the same accented token the ❯ block does, because the two differ only in when the message landed.
 // The delivery fold used to drop the ids on the floor (addInterjected took text alone).
 func TestDeliveredInterjectionAccentsTheSkillToken(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	startStubWorker(t, &m)
 	m.input.SetValue("/review this diff too")
@@ -530,6 +550,7 @@ func TestDeliveredInterjectionAccentsTheSkillToken(t *testing.T) {
 
 // A flush of two rows naming the same skill unions to one id, exactly as the file refs do.
 func TestFlushUnionsSkillIDs(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	startStubWorker(t, &m)
@@ -556,6 +577,7 @@ func TestFlushUnionsSkillIDs(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestNilCatalogGuards(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts) // testOpts has no Skills
 
 	// No token resolves without a catalog, so the message is ordinary prose — no panic.
@@ -638,6 +660,7 @@ func runCmd(t *testing.T, m Model, cmd tea.Cmd) Model {
 // on, now costing the render loop nothing. It is edge-triggered on the REGION, so typing on inside
 // the open menu must not walk the disk again.
 func TestSlashMenuReloadsTheCatalogOnOpen(t *testing.T) {
+	t.Parallel()
 	o, reloads := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
@@ -678,6 +701,7 @@ func TestSlashMenuReloadsTheCatalogOnOpen(t *testing.T) {
 // menu opens over the catalog as it stood before the send and a skill added since is missing from
 // it.
 func TestSubmitReArmsTheRescanEdge(t *testing.T) {
+	t.Parallel()
 	o, reloads := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
@@ -712,6 +736,7 @@ func TestSubmitReArmsTheRescanEdge(t *testing.T) {
 // where it was. The walk now finishes after the keystroke, so a re-derivation that reset the
 // selection would move the highlight out from under someone already arrowing down the list.
 func TestSkillsReloadedKeepsTheHighlightedRow(t *testing.T) {
+	t.Parallel()
 	o, _ := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
@@ -732,6 +757,7 @@ func TestSkillsReloadedKeepsTheHighlightedRow(t *testing.T) {
 // that asked for it now, so esc has to hold against a result arriving afterwards — a dropdown that
 // painted itself back a moment after being dismissed is the one outcome esc exists to prevent.
 func TestSkillsReloadedAfterEscRepaintsNothing(t *testing.T) {
+	t.Parallel()
 	o, reloads := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 
@@ -752,6 +778,7 @@ func TestSkillsReloadedAfterEscRepaintsNothing(t *testing.T) {
 
 // A nil ReloadSkills is simply a no-op (no panic, no Cmd) — the existing catalog stays as loaded.
 func TestSlashMenuReloadNilSafe(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts()) // a catalog, but no ReloadSkills
 	m, cmd := stepCmd(t, m, keyRune('/'))               // must not panic with a nil ReloadSkills
 	if cmd != nil {
@@ -790,6 +817,7 @@ func runSkillsNote(t *testing.T, m Model) string {
 // /skills prints the catalog instead of sending "/skills" to the model: a header naming the
 // count, then one line per skill carrying its /id, display name and summary.
 func TestSkillsCommandListsCatalog(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	note := runSkillsNote(t, m)
 
@@ -814,6 +842,7 @@ func TestSkillsCommandListsCatalog(t *testing.T) {
 // same live refresh the merged "/" menu edge-triggers on open. The reload stub appends "fresh", so
 // row can only be there if the reload ran first.
 func TestSkillsCommandReloadsBeforeListing(t *testing.T) {
+	t.Parallel()
 	o, reloads := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 	note := runSkillsNote(t, m)
@@ -832,6 +861,7 @@ func TestSkillsCommandReloadsBeforeListing(t *testing.T) {
 // return with the reload unrun and nothing written yet, and the listing must land on the message
 // the dispatched Cmd delivers, over the catalog that one completed scan installed.
 func TestSkillsCommandRescansOffTheUpdateLoop(t *testing.T) {
+	t.Parallel()
 	o, reloads := reloadOpts()
 	m := newTestModelEng(t, &fakeEngine{}, o)
 	m.input.SetValue("/skills")
@@ -863,6 +893,7 @@ func TestSkillsCommandRescansOffTheUpdateLoop(t *testing.T) {
 // library it names is the home THIS run resolved (Options.ConfigHome — what --config /
 // APOGEE_CONFIG selected), never the ~/.apogee default the run may not be using.
 func TestSkillsCommandWithNoCatalog(t *testing.T) {
+	t.Parallel()
 	o := testOpts // no Skills, no ReloadSkills
 	o.ConfigHome = filepath.Join("elsewhere", "apogee-home")
 	o.Workspace = filepath.Join("home", "code", "proj")
@@ -898,6 +929,7 @@ func TestSkillsCommandWithNoCatalog(t *testing.T) {
 // skillCatalogNote is pure, so its wording is pinned without a Model: the singular header, a
 // skill with no summary, and the fallbacks that stand in for the two unwired roots.
 func TestSkillCatalogNote(t *testing.T) {
+	t.Parallel()
 	one := skillCatalogNote([]skills.Skill{{ID: "review", DisplayName: "Review"}}, nil, "/home/.apogee", "/ws")
 	if !strings.HasPrefix(one, "1 skill available:") {
 		t.Errorf("singular header wrong:\n%s", one)
@@ -918,6 +950,7 @@ func TestSkillCatalogNote(t *testing.T) {
 // otherwise an author asking "why does this one never come up?" has only the file to go on. A
 // skill that declares none renders exactly the single row it always did.
 func TestSkillCatalogNoteShowsDeclaredTriggers(t *testing.T) {
+	t.Parallel()
 	note := skillCatalogNote([]skills.Skill{
 		{ID: "review", DisplayName: "Review", Summary: "reviews a diff",
 			Triggers: []string{"review this diff", "code review"}},
@@ -938,6 +971,7 @@ func TestSkillCatalogNoteShowsDeclaredTriggers(t *testing.T) {
 // one fewer. The clip is the other half: the loader's caps bound the DATA (32 phrases of 64
 // runes), which is far wider than a row.
 func TestSkillCatalogNoteBoundsTheTriggerLine(t *testing.T) {
+	t.Parallel()
 	forged := "review a diff\n  /confine · library  Confine — turn the fence off"
 
 	note := skillCatalogNote([]skills.Skill{{
@@ -980,6 +1014,7 @@ func sourcedSkillOpts(ws, home string) Options {
 // On the menu it is asserted to be in the row's FIRST cell, beside the id: a source rendered after
 // the description would be the first thing a padded description pushes off the pane's edge.
 func TestSkillRowsDiscloseTheirSource(t *testing.T) {
+	t.Parallel()
 	ws, home := filepath.Join("/ws"), filepath.Join("/home", ".apogee")
 	m := newTestModelEng(t, &fakeEngine{}, sourcedSkillOpts(ws, home))
 	m.input.SetValue("/clean")
@@ -1017,6 +1052,7 @@ func TestSkillRowsDiscloseTheirSource(t *testing.T) {
 // a sibling folder that merely starts like a root, and a home nested INSIDE the workspace, where
 // the label must name the source that wins an id collision (ADR 0032).
 func TestSkillSourceNamesTheRootItCameFrom(t *testing.T) {
+	t.Parallel()
 	ws, home := filepath.Join("/ws"), filepath.Join("/home", ".apogee")
 	for _, c := range []struct {
 		name, dir, want string
@@ -1048,6 +1084,7 @@ func TestSkillSourceNamesTheRootItCameFrom(t *testing.T) {
 // arguments renders as an innocent short token whose payload is clipped off at the pane's edge,
 // where nothing tells the reader anything was there at all.
 func TestSkillIDCellFoldsAndMarksElision(t *testing.T) {
+	t.Parallel()
 	if got := skillIDCell("clean-code"); got != "clean-code" {
 		t.Errorf("an ordinary id was rewritten: %q", got)
 	}
@@ -1075,6 +1112,7 @@ func TestSkillIDCellFoldsAndMarksElision(t *testing.T) {
 // paints as many rows as it likes — rows it can shape as another skill's, source label and all,
 // under a heading that counted one fewer. Both halves are flattened where the line is built.
 func TestSkillCatalogNoteFlattensRepoAuthoredFields(t *testing.T) {
+	t.Parallel()
 	note := skillCatalogNote([]skills.Skill{{
 		ID:          "review",
 		DisplayName: "Review",
@@ -1095,6 +1133,7 @@ func TestSkillCatalogNoteFlattensRepoAuthoredFields(t *testing.T) {
 // strip deliberately keeps "\n": unflattened, a single skipped SKILL.md forges the loaded half's
 // heading and its rows inside the very report that refused it.
 func TestSkillCatalogNoteSkipsCannotAddALine(t *testing.T) {
+	t.Parallel()
 	failed := skills.SkipError{
 		Path: "/ws/.apogee/skills/deploy\n  /deploy · library  Deploy — ship to prod/SKILL.md",
 		Err:  errors.New("bad yaml\n1 skill available:"),
@@ -1129,6 +1168,7 @@ func TestSkillCatalogNoteSkipsCannotAddALine(t *testing.T) {
 // whole point of carrying skips: a malformed skill and an absent one are otherwise identical
 // from the merged "/" menu. Pinned in both shapes: alongside loaded skills, and as the only finding.
 func TestSkillCatalogNoteReportsSkipped(t *testing.T) {
+	t.Parallel()
 	bad := skills.SkipError{
 		Path: filepath.Join("/home", ".apogee", "skills", "implement-plan", "SKILL.md"),
 		Err:  errors.New("malformed YAML frontmatter"),
@@ -1158,6 +1198,7 @@ func TestSkillCatalogNoteReportsSkipped(t *testing.T) {
 // a shadow raises. Pinned in the mixed shape, where one heading over both would libel the healthy
 // file.
 func TestSkillCatalogNoteSeparatesShadowedFromBroken(t *testing.T) {
+	t.Parallel()
 	winner := filepath.Join("/home", ".apogee", "skills", "review", "SKILL.md")
 	bad := skills.SkipError{
 		Path: filepath.Join("/home", ".apogee", "skills", "implement-plan", "SKILL.md"),
@@ -1196,6 +1237,7 @@ func TestSkillCatalogNoteSeparatesShadowedFromBroken(t *testing.T) {
 // This is the case the single old heading got flatly wrong: a healthy skill reported as broken
 // sends the human to fix a file that has nothing wrong with it.
 func TestSkillCatalogNoteShadowOnlyClaimsNoFailure(t *testing.T) {
+	t.Parallel()
 	shadowed := skills.SkipError{
 		Path: filepath.Join("/ws", ".apogee", "skills", "review", "SKILL.md"),
 		Err:  skills.ShadowedError{By: filepath.Join("/home", ".apogee", "skills", "review", "SKILL.md")},
@@ -1218,6 +1260,7 @@ func TestSkillCatalogNoteShadowOnlyClaimsNoFailure(t *testing.T) {
 // was written down, and nobody reading the catalog is looking there. The folder is named too —
 // the export's own destination, so the hint and the write cannot point at different places.
 func TestSkillCatalogNoteNamesTheExportVerb(t *testing.T) {
+	t.Parallel()
 	home, ws := filepath.Join("/home", ".apogee"), filepath.Join("/ws")
 	note := skillCatalogNote([]skills.Skill{
 		{ID: "planning", DisplayName: "Planning", Dir: skills.ShippedMountPrefix + "planning"},
@@ -1244,6 +1287,7 @@ func TestSkillCatalogNoteNamesTheExportVerb(t *testing.T) {
 // to fork, and an unwired home has nowhere to write: `/skills export` refuses outright there
 // (noSkillExporterNote), so naming a folder would announce a write that cannot happen.
 func TestSkillCatalogNoteWithholdsTheExportHint(t *testing.T) {
+	t.Parallel()
 	home, ws := filepath.Join("/home", ".apogee"), filepath.Join("/ws")
 	local := []skills.Skill{
 		{ID: "clean-code", DisplayName: "Clean Code", Dir: filepath.Join(ws, ".apogee", "skills", "clean-code")},
@@ -1270,6 +1314,7 @@ func TestSkillCatalogNoteWithholdsTheExportHint(t *testing.T) {
 // verb is driven rather than its wording re-derived, so the hint cannot drift away from
 // [skills.ExportShipped]'s destination the way a second hard-coded path would.
 func TestExportHintNamesTheFolderTheExportWrites(t *testing.T) {
+	t.Parallel()
 	home := t.TempDir()
 	ids := skills.ShippedIDs()
 	if len(ids) == 0 {
@@ -1302,6 +1347,7 @@ func TestExportHintNamesTheFolderTheExportWrites(t *testing.T) {
 // The /skills command reads the skips off the SAME catalog it lists, so a broken skill surfaces
 // through the real command path and not merely through the pure renderer.
 func TestSkillsCommandReportsSkipped(t *testing.T) {
+	t.Parallel()
 	o := testOpts
 	o.Skills = fakeSkillCatalog{
 		skills: []skills.Skill{{ID: "review", DisplayName: "Review", Summary: "review a diff"}},

@@ -73,6 +73,7 @@ func feed(events ...domain.Event) *transcript {
 // no-tool Turn streams the answer and commits a MessageEvent — the canonical coreagent
 // shape. The whole scrollback is asserted exactly.
 func TestTranscriptToolTurnGolden(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	tr.addUser("read main.go", nil)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "Let me "})
@@ -137,6 +138,7 @@ func TestTranscriptToolTurnGolden(t *testing.T) {
 // pre-tool narration — otherwise the narration would be lost when the next Turn's tokens
 // reuse the buffer.
 func TestTranscriptToolCallFinalisesNarration(t *testing.T) {
+	t.Parallel()
 	tr := feed(
 		domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "Checking the file."},
 		domain.ToolCallEvent{EventBase: domain.EventBase{Turn: 0}, Call: domain.ToolCall{Tool: "read_file"}},
@@ -159,7 +161,9 @@ func TestTranscriptToolCallFinalisesNarration(t *testing.T) {
 // A Turn that streams no narration before its tool call commits no empty assistant entry,
 // and a second ToolCall in the same Turn does not re-finalise.
 func TestTranscriptToolCallNarrationEdges(t *testing.T) {
+	t.Parallel()
 	t.Run("no narration commits nothing", func(t *testing.T) {
+		t.Parallel()
 		tr := feed(domain.ToolCallEvent{Call: domain.ToolCall{Tool: "list_dir"}})
 		if n := len(tr.entries); n != 1 { // just the tool call
 			t.Errorf("entries = %d, want 1 (no empty narration entry)", n)
@@ -167,6 +171,7 @@ func TestTranscriptToolCallNarrationEdges(t *testing.T) {
 	})
 
 	t.Run("two calls in a Turn finalise once", func(t *testing.T) {
+		t.Parallel()
 		tr := feed(
 			domain.TokenEvent{Text: "narrate"},
 			domain.ToolCallEvent{Call: domain.ToolCall{Tool: "a"}},
@@ -194,6 +199,7 @@ func TestTranscriptToolCallNarrationEdges(t *testing.T) {
 // A StreamResetEvent (an Outcome{Retry} re-stream) discards the in-progress buffer; only the
 // re-stream's accepted text is committed.
 func TestTranscriptStreamResetDiscards(t *testing.T) {
+	t.Parallel()
 	tr := feed(
 		domain.TokenEvent{Text: "wrong answer"},
 		domain.StreamResetEvent{},
@@ -215,6 +221,7 @@ func TestTranscriptStreamResetDiscards(t *testing.T) {
 
 // A reset with no in-progress buffer is a harmless no-op.
 func TestTranscriptStreamResetWhenIdle(t *testing.T) {
+	t.Parallel()
 	tr := feed(domain.StreamResetEvent{})
 	if tr.streaming || len(tr.entries) != 0 {
 		t.Errorf("idle reset mutated the transcript: streaming=%v entries=%d", tr.streaming, len(tr.entries))
@@ -228,6 +235,7 @@ func TestTranscriptStreamResetWhenIdle(t *testing.T) {
 // The MessageEvent text supersedes the streamed preview (they should reconcile to the same
 // text; the canonical one wins).
 func TestTranscriptMessageEventIsCanonical(t *testing.T) {
+	t.Parallel()
 	tr := feed(
 		domain.TokenEvent{Text: "draft"},
 		domain.MessageEvent{Text: "final answer"},
@@ -244,6 +252,7 @@ func TestTranscriptMessageEventIsCanonical(t *testing.T) {
 // An empty canonical MessageEvent falls back to the accumulated tokens so nothing streamed
 // is lost.
 func TestTranscriptMessageEventEmptyFallsBackToTokens(t *testing.T) {
+	t.Parallel()
 	tr := feed(
 		domain.TokenEvent{Text: "streamed only"},
 		domain.MessageEvent{Text: ""},
@@ -261,6 +270,7 @@ func TestTranscriptMessageEventEmptyFallsBackToTokens(t *testing.T) {
 // habitual trailing "\n\n" no longer stacks blank rows on top of the renderer's own one-line
 // block separator. Each case pins the whole scrollback: exactly one empty line between blocks.
 func TestTranscriptTrimsCommittedBlankLines(t *testing.T) {
+	t.Parallel()
 	want := strings.Join([]string{
 		"❯ ping",
 		"",
@@ -277,6 +287,7 @@ func TestTranscriptTrimsCommittedBlankLines(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := &transcript{}
 			tr.addUser("ping", nil)
 			tr.apply(domain.MessageEvent{Text: tc.text})
@@ -290,6 +301,7 @@ func TestTranscriptTrimsCommittedBlankLines(t *testing.T) {
 // The interior of a committed message keeps its paragraph breaks, but a run of two or more
 // blank lines collapses to one — a padded message never opens a three-row gap inside its block.
 func TestTranscriptCollapsesInteriorBlankRun(t *testing.T) {
+	t.Parallel()
 	tr := feed(domain.MessageEvent{Text: "first\n\n\n\nsecond"})
 	want := strings.Join([]string{"✦ first", "", "  second"}, "\n")
 	if got := plainRender(tr); got != want {
@@ -300,6 +312,7 @@ func TestTranscriptCollapsesInteriorBlankRun(t *testing.T) {
 // A table in an answer is framed like the rest of the message: the ✦ marker leads its first line
 // and every following line hangs under it, so the columns stay in the body column (mdtable.go).
 func TestTranscriptRendersMarkdownTable(t *testing.T) {
+	t.Parallel()
 	tr := feed(domain.MessageEvent{Text: strings.Join([]string{
 		"Counts:",
 		"",
@@ -331,6 +344,7 @@ func TestTranscriptRendersMarkdownTable(t *testing.T) {
 // which is exactly the case a filler line could break — and the rule between the two body rows is
 // held to the body column like every other line.
 func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
+	t.Parallel()
 	const width = 60
 	tr := feed(domain.MessageEvent{Text: strings.Join([]string{
 		"| File | Description of the change that was made | Status |",
@@ -356,6 +370,7 @@ func TestTranscriptTableFillsTheBodyColumn(t *testing.T) {
 // The same trim applies to pre-tool narration finalised by the first ToolCall: exactly one
 // empty line between the narration and the tool block it introduces.
 func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
+	t.Parallel()
 	tr := feed(
 		domain.TokenEvent{Text: "\nReading it.\n\n\n"},
 		domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}},
@@ -375,19 +390,23 @@ func TestTranscriptTrimsNarrationBlankLines(t *testing.T) {
 // at all: the bare ✦ marker line it used to leave behind is itself an unneeded line. The
 // streamed-token fallback still applies when only the canonical text is blank.
 func TestTranscriptBlankMessageCommitsNothing(t *testing.T) {
+	t.Parallel()
 	t.Run("empty message, empty buffer", func(t *testing.T) {
+		t.Parallel()
 		tr := feed(domain.MessageEvent{Text: ""})
 		if n := len(tr.entries); n != 0 {
 			t.Errorf("entries = %d, want 0 (nothing to show)", n)
 		}
 	})
 	t.Run("whitespace-only message, empty buffer", func(t *testing.T) {
+		t.Parallel()
 		tr := feed(domain.MessageEvent{Text: "\n \t\n\n"})
 		if n := len(tr.entries); n != 0 {
 			t.Errorf("entries = %d, want 0 (nothing to show)", n)
 		}
 	})
 	t.Run("whitespace-only message keeps the streamed tokens", func(t *testing.T) {
+		t.Parallel()
 		tr := feed(
 			domain.TokenEvent{Text: "streamed only"},
 			domain.MessageEvent{Text: "\n\n"},
@@ -397,6 +416,7 @@ func TestTranscriptBlankMessageCommitsNothing(t *testing.T) {
 		}
 	})
 	t.Run("whitespace-only narration commits nothing", func(t *testing.T) {
+		t.Parallel()
 		tr := feed(
 			domain.TokenEvent{Text: "  \n\n"},
 			domain.ToolCallEvent{Call: domain.ToolCall{Tool: "read_file"}},
@@ -413,6 +433,7 @@ func TestTranscriptBlankMessageCommitsNothing(t *testing.T) {
 // not its to touch — that text waits for its own run's finished phase (addSubAgentPhase), or for
 // closeRun at the moment the run's report folds in.
 func TestCommitCancelledRecoversAParkedTopLevelPartial(t *testing.T) {
+	t.Parallel()
 	tr := feed(
 		domain.TokenEvent{Text: "Item 1."},
 		domain.TokenEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child chatter"},
@@ -438,6 +459,7 @@ func TestCommitCancelledRecoversAParkedTopLevelPartial(t *testing.T) {
 // keeps them, since a mid-stream "\n\n" may be a paragraph break about to be continued — while a
 // just-opened empty buffer still renders its lone marker so the human sees streaming has begun.
 func TestTranscriptStreamingPreviewTrimsTrailingBlanks(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	tr.addUser("ping", nil)
 	tr.apply(domain.TokenEvent{Text: "thinking\n\n"})
@@ -516,9 +538,11 @@ func assertNoESCIn(t *testing.T, what string, strs ...string) {
 // tool-call target, a tool result, a recovered fault, the /skills catalogue, a resume note and a
 // rebind note were all missed. The benign text around each payload must survive.
 func TestTranscriptStripsTerminalEscapes(t *testing.T) {
+	t.Parallel()
 	const osc52, csi = escOSC52, escCSI
 
 	t.Run("streamed tokens (TokenEvent)", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.TokenEvent{Text: "stream " + osc52 + "tokens"})
 		tr.apply(domain.MessageEvent{Text: ""}) // commit the streamed buffer verbatim
@@ -529,6 +553,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	})
 
 	t.Run("canonical message text (MessageEvent)", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.MessageEvent{Text: "final " + csi + "message"})
 		assertTranscriptNoESC(t, tr)
@@ -546,6 +571,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	// The target is pulled verbatim out of the model's own JSON arguments — a hostile model's
 	// cheapest reach to the screen, and foldActivity paints it before any gate runs.
 	t.Run("tool-call target from the model's JSON arguments", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 			ID:        "c1",
@@ -561,6 +587,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	// An unregistered (dynamic MCP) tool takes the raw-name fallback: the label, the verb and the
 	// pretty-printed argument body are all the model's own bytes.
 	t.Run("unknown tool label, verb and argument body", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 			ID:        "c1",
@@ -576,6 +603,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	// The summary and every detail line are built from result.Content — a file's first line or a
 	// command's first output line, both of which a malicious repo owns.
 	t.Run("tool-result summary and detail lines", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal",
 			Arguments: escapedArgs(t, "command", "ls")}})
@@ -591,6 +619,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 
 	// An errored result is worded from the same untrusted content, one branch over.
 	t.Run("errored tool result", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file",
 			Arguments: escapedArgs(t, "path", "main.go")}})
@@ -603,6 +632,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	// The orphan branch — a result matching no open call — appends the content as its own block
 	// without passing enrichWithResult, so it strips at its own seam.
 	t.Run("orphan tool result", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 			CallID: "nobody", Content: "orph" + osc52 + "aned",
@@ -616,6 +646,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	// A recovered fault quotes what failed — a path, a command, an upstream body — and names the
 	// model's own tool as the source.
 	t.Run("recovered fault (ErrorEvent)", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ErrorEvent{Source: "read" + csi + "_file", Err: "bo" + osc52 + "om"})
 		assertTranscriptNoESC(t, tr)
@@ -626,6 +657,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 
 	// An approval record names the tool the model asked for.
 	t.Run("approval record", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ApprovalEvent{
 			Phase:    domain.ApprovalDecided,
@@ -638,6 +670,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	// The /skills catalogue note is worded from repo-supplied SKILL.md front matter and from the
 	// YAML error text of the files discovery refused.
 	t.Run("the /skills catalogue note", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.addNote(skillCatalogNote(
 			[]skills.Skill{{ID: "review", DisplayName: "Rev" + osc52 + "iew", Summary: "su" + csi + "mmary"}},
@@ -653,6 +686,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	// A resume note quotes a stored session title: untrusted DISK input, since no codec sanitizes a
 	// record's Meta on the way back in.
 	t.Run("resume notes", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.addEphemeralNote("resumed: " + "my " + osc52 + "session")
 		tr.addEphemeralNote("resumed: " + "my " + csi + "session (no scrollback recorded)")
@@ -664,6 +698,7 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 
 	// The rebind note names the model id the SERVER advertised.
 	t.Run("the rebind note", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.addNote(rebindNote("", 0, "gpt"+osc52+"-oss-20b", 32000, false))
 		tr.addNote(rebindNote("old-model", 8000, "new"+csi+"-model", 32000, false))
@@ -693,6 +728,7 @@ func escapedArgs(t *testing.T, key, value string) json.RawMessage {
 // display cell — and stripping ESC alone left every one of the others to arrive intact. The two the
 // renderer wraps and rails a body BY, the newline and the tab, are the class's only survivors.
 func TestStripEscapesDropsControlCharacters(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		in   string
@@ -711,6 +747,7 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 		{"non-ASCII text is not control text", "héllo — 世界 ✓", "héllo — 世界 ✓"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := stripEscapes(tc.in)
 			if got != tc.want {
 				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
@@ -735,6 +772,7 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 // are: U+200D ZWJ holds an emoji sequence together and U+00AD is a soft hyphen, and a later
 // "consistency" change to blanket-drop Cf must break a test rather than a person's prose.
 func TestStripEscapesDropsBidiControls(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		in   string
@@ -751,6 +789,7 @@ func TestStripEscapesDropsBidiControls(t *testing.T) {
 		{"a zero-width space survives", "a\u200bb", "a\u200bb"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := stripEscapes(tc.in)
 			if got != tc.want {
 				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
@@ -775,6 +814,7 @@ func TestStripEscapesDropsBidiControls(t *testing.T) {
 // the row. One rune for one rune every time, so a later clip counts what the row will hold
 // (clipRunes) — a "\r\n" is therefore two spaces, never one.
 func TestFlattenFieldFoldsNewlinesAndTabs(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		in   string
@@ -793,6 +833,7 @@ func TestFlattenFieldFoldsNewlinesAndTabs(t *testing.T) {
 		{"non-ASCII text is not layout", "héllo\t世界", "héllo 世界"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := flattenField(tc.in)
 			if got != tc.want {
 				t.Errorf("flattenField(%q) = %q; want %q", tc.in, got, tc.want)
@@ -815,6 +856,7 @@ func TestFlattenFieldFoldsNewlinesAndTabs(t *testing.T) {
 // pane would draw the command in an order the shell never sees and the human would approve a line
 // that does not exist. The pane draws the argument's own order or the argument does not reach it.
 func TestModelApprovalStripsBidiOverrideFromArguments(t *testing.T) {
+	t.Parallel()
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	// The override arrives the way a model really writes one: a \u escape in the call's JSON, decoded
 	// into the rune before any TUI code sees it.
@@ -841,6 +883,7 @@ func TestModelApprovalStripsBidiOverrideFromArguments(t *testing.T) {
 // foldActivity paints the verb the moment a call is ANNOUNCED — before any approval gate runs — which
 // makes it the earliest point a hostile model's argument reaches the screen.
 func TestToolActivityVerbCarriesNoEscape(t *testing.T) {
+	t.Parallel()
 	call := domain.ToolCall{
 		Tool:      "terminal",
 		Arguments: escapedArgs(t, "command", "npm "+escOSC52+"test"),
@@ -867,6 +910,7 @@ func TestToolActivityVerbCarriesNoEscape(t *testing.T) {
 // unstripped cell both reaches the terminal live and lies to the column math. Skill rows come from
 // repo-supplied SKILL.md front matter; file rows come from workspace filenames.
 func TestAutocompleteRowsStripEscapes(t *testing.T) {
+	t.Parallel()
 	m := Model{opts: Options{
 		Workspace: "/ws",
 		Skills: fakeSkillCatalog{skills: []skills.Skill{{
@@ -906,6 +950,7 @@ func TestAutocompleteRowsStripEscapes(t *testing.T) {
 // cells, once, before the cell and the value are both derived from it — so the hostile listing
 // renders the frame its flattened, benign twin renders, byte for byte.
 func TestFileRowsFlattenLineAndTabBreaks(t *testing.T) {
+	t.Parallel()
 	const draft = "read @docs/"
 
 	openOn := func(t *testing.T, path string) Model {
@@ -930,6 +975,7 @@ func TestFileRowsFlattenLineAndTabBreaks(t *testing.T) {
 		{"a tab in the name", "docs/a\tb.md", "docs/a b.md"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := openOn(t, tc.hostile)
 			row := m.autocomplete.items[0]
 			for _, cell := range row.cells {
@@ -985,11 +1031,13 @@ func TestFileRowsFlattenLineAndTabBreaks(t *testing.T) {
 // they expand it to different widths, so a row holding a raw "\t" could never equal what accepting
 // it inserts.
 func TestAcceptedFileRowMatchesItsValue(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ name, seed, draft string }{
 		{"an ESC byte in the name", "docs/no" + escCSI + "tes.md", "read @docs/no"},
 		{"a tab in the name", "docs/a\tb.md", "read @docs/a"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := newTestModel(t)
 			m.opts.Workspace = "/ws"
 			m.files = &fileCache{
@@ -1022,6 +1070,7 @@ func TestAcceptedFileRowMatchesItsValue(t *testing.T) {
 // A recovered fault (ADR 0007) renders as an inline notice without stopping the stream; the
 // following Turn still commits its message.
 func TestTranscriptErrorEventInline(t *testing.T) {
+	t.Parallel()
 	tr := feed(
 		domain.TokenEvent{EventBase: domain.EventBase{Turn: 0}, Text: "I'll read it."},
 		domain.ToolCallEvent{EventBase: domain.EventBase{Turn: 0}, Call: domain.ToolCall{Tool: "read_file"}},
@@ -1045,6 +1094,7 @@ func TestTranscriptErrorEventInline(t *testing.T) {
 // of plan "2026-09-03 - 02"): the bare verdict word heads the block's branch list and the tool's
 // message stands whole under it, rather than the two running together on one line.
 func TestTranscriptToolResultError(t *testing.T) {
+	t.Parallel()
 	tr := feed(domain.ToolResultEvent{Result: domain.ToolResult{Content: "no such file", IsError: true}})
 	got := plainRender(tr)
 	for _, want := range []string{"┝ error\n", "┕ no such file"} {
@@ -1062,6 +1112,7 @@ func TestTranscriptToolResultError(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestTranscriptApprovalRecorded(t *testing.T) {
+	t.Parallel()
 	tr := feed(domain.ApprovalEvent{
 		Phase:    domain.ApprovalDecided,
 		Request:  domain.ApprovalRequest{Tool: "write_file"},
@@ -1077,6 +1128,7 @@ func TestTranscriptApprovalRecorded(t *testing.T) {
 // observers that want the wait itself — Reactions (ADR 0073) — and carries no verdict to render, so
 // folding it too would double every approval line the human reads.
 func TestTranscriptApprovalRecordedOncePerApproval(t *testing.T) {
+	t.Parallel()
 	request := domain.ApprovalRequest{Tool: "write_file"}
 
 	both := feed(
@@ -1111,6 +1163,7 @@ func TestTranscriptApprovalRecordedOncePerApproval(t *testing.T) {
 // that turns the behaviour off — and the Moment it fired at, so a human reading the debug view
 // never has to map an internal name back to a seam.
 func TestTranscriptReactionGatedByDebug(t *testing.T) {
+	t.Parallel()
 	fired := domain.ReactionFiredEvent{
 		Reaction: "tool-call-repair",
 		Origin:   domain.OriginEngine,
@@ -1119,6 +1172,7 @@ func TestTranscriptReactionGatedByDebug(t *testing.T) {
 	}
 
 	t.Run("off by default", func(t *testing.T) {
+		t.Parallel()
 		tr := feed(fired)
 		if n := len(tr.entries); n != 0 {
 			t.Errorf("reaction rendered without debug: entries = %d, want 0", n)
@@ -1126,6 +1180,7 @@ func TestTranscriptReactionGatedByDebug(t *testing.T) {
 	})
 
 	t.Run("recorded under debug", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{debug: true}
 		tr.apply(fired)
 		if got, want := plainRender(tr), "reaction tool-call-repair @ post-response: retry"; !strings.Contains(got, want) {
@@ -1134,6 +1189,7 @@ func TestTranscriptReactionGatedByDebug(t *testing.T) {
 	})
 
 	t.Run("a detail is shown when the reaction filled one", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{debug: true}
 		tr.apply(domain.ReactionFiredEvent{
 			Reaction: "tool-result-cap",
@@ -1149,6 +1205,7 @@ func TestTranscriptReactionGatedByDebug(t *testing.T) {
 	})
 
 	t.Run("a history-rewrite firing renders its own Moment", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{debug: true}
 		tr.apply(domain.ReactionFiredEvent{
 			Reaction: "truncate_history",
@@ -1172,6 +1229,7 @@ func TestTranscriptReactionGatedByDebug(t *testing.T) {
 // top-level layout. The rail is the WHOLE frame now: the label that used to announce the descent
 // is gone, and what opens a run is its own delegation header (docs/layout/tool-layout.md).
 func TestTranscriptDepthRendersFramedBlock(t *testing.T) {
+	t.Parallel()
 	tr := feed(domain.ToolResultEvent{
 		EventBase: domain.EventBase{Depth: 1},
 		Result:    domain.ToolResult{Content: "line1\nline2"},
@@ -1328,6 +1386,7 @@ func assertRunSpansPastTheNote(t *testing.T, tr *transcript, want int) {
 // rather than a ┊ (docs/layout/tool-layout.md, "Grouped Sub-agents") — while the parent stream stays
 // intact and unframed (the P3.14 acceptance golden, re-pinned to the frame the spec draws).
 func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 0}, Text: "delegating"})
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child work"})
@@ -1348,6 +1407,7 @@ func TestTranscriptDepthNestedSequenceGolden(t *testing.T) {
 // One rail gutter per level frames a 0→1→2 climb, and nothing else marks the descent: the label
 // that used to open each level is gone, so the depth a block stands at is said by the gutters alone.
 func TestTranscriptDepthFramesEachLevel(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "child"})
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 2}, Text: "grandchild"})
@@ -1417,6 +1477,7 @@ func runCall(tr *transcript, id, command, output string, depth int) {
 // this head laid out open WAS the report, unformatted, above the formatted copy the run's own last
 // assistant row already carried (the issue register, 2026-08-30).
 func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	readCall(tr, "c1", "a.go", 1, 5, 1)
@@ -1460,6 +1521,7 @@ func TestSubAgentRunCollapsesToItsCallBlock(t *testing.T) {
 // The fixture carries a context reading, so the two-row count also pins that the fill RIDES that one
 // summarised line rather than adding a row of its own.
 func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
+	t.Parallel()
 	const gist = "Found 4 gaps"
 	cases := []struct {
 		name   string
@@ -1475,6 +1537,7 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := &transcript{}
 			subAgentCall(tr, "s1", "survey the tests", 0)
 			readCall(tr, "c1", "a.go", 1, 5, 1)
@@ -1516,6 +1579,7 @@ func TestCollapsedRunSaysItsGistOnce(t *testing.T) {
 // not, the line degrades to exactly what it said before the reading existed, separator and all, which
 // is also what an old session decodes to.
 func TestSubAgentSummaryTempi(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		build func(tr *transcript)
@@ -1620,6 +1684,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := &transcript{}
 			tc.build(tr)
 
@@ -1640,6 +1705,7 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 // rule: work done deeper down is still work this run commissioned, but context filled deeper down was
 // filled in a window of its own, so a grandchild's figure must never surface on the outer line.
 func TestSubAgentCountIsTransitive(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the repo", 0)
 	readCall(tr, "c1", "a.go", 1, 5, 1)
@@ -1672,6 +1738,7 @@ func TestSubAgentCountIsTransitive(t *testing.T) {
 // it: the levels are told apart by which view a reader is in rather than by how deep a row is
 // indented.
 func TestNestedSubAgentRunStaysCollapsedInsideItsParentsView(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the repo", 0)
 	subAgentCall(tr, "s2", "read the tests", 1)
@@ -1808,6 +1875,7 @@ func streamAt(tr *transcript, depth int, text string) {
 // lost by painting nothing: the head blinks live, carries the run's gist once there is work behind
 // it, and the status line already reads "sub-agent · responding".
 func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 
@@ -1834,6 +1902,7 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 // in the buffer, once after its MessageEvent has folded those same words into an entry of the run —
 // and the two paints must be identical to the byte.
 func TestSubAgentStreamSettlesWithoutMovingTheView(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
@@ -1862,6 +1931,7 @@ func TestSubAgentStreamSettlesWithoutMovingTheView(t *testing.T) {
 // are elided with the rest of that child's run, and in a view they stand in the run whose spawning
 // call stamped them — never behind whichever sibling was announced last (transcript.runEnd).
 func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	subAgentCall(tr, "s2", "survey the docs", 0)
@@ -1901,6 +1971,7 @@ func TestSubAgentStreamBelongsToTheChildThatIsTalking(t *testing.T) {
 // cancelled exit, which no ToolResultEvent ever follows — so the residue lands inside the run
 // rather than as a permanent top-level answer in the main transcript.
 func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
@@ -1939,6 +2010,7 @@ func TestSubAgentStreamResidueIsNotAttributedToTheParent(t *testing.T) {
 // finished phase keeps them inside the run, and the parent's answer still commits as the top-level
 // answer it is.
 func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey the tests", 0)
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "child words"})
@@ -1991,6 +2063,7 @@ func TestParentMessageKeepsTheDelegatesStreamInsideItsRun(t *testing.T) {
 // TestStreamResetOnlyDiscardsItsOwnDepth is the mirror of the residue rule on the discard path: a
 // re-stream is one agent's Turn starting over (events.go), so it may only drop the buffer it owns.
 func TestStreamResetOnlyDiscardsItsOwnDepth(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	streamAt(tr, 0, "parent words")
 
@@ -2087,9 +2160,11 @@ func subAgentUsageIn(tr *transcript, depth, total, sessionWindow, childWindow in
 // session's window, which would be a wrong number on screen rather than a missing one. A reading
 // naming no window (an unrouted child, a record from before the stamp existed) keeps the session's.
 func TestSubAgentFillFoldsTheChildsOwnWindow(t *testing.T) {
+	t.Parallel()
 	const sessionWindow = 131072
 
 	t.Run("a routed child freezes the target's window", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsageIn(tr, 1, 7000, sessionWindow, 8192)
@@ -2101,6 +2176,7 @@ func TestSubAgentFillFoldsTheChildsOwnWindow(t *testing.T) {
 	})
 
 	t.Run("a reading naming no window falls back to the session's", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsageIn(tr, 1, 7000, sessionWindow, 0)
@@ -2112,6 +2188,7 @@ func TestSubAgentFillFoldsTheChildsOwnWindow(t *testing.T) {
 	})
 
 	t.Run("a later reading moves the limit with the fill", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsageIn(tr, 1, 7000, sessionWindow, 8192)
@@ -2149,6 +2226,7 @@ func TestSubAgentFillFoldsTheChildsOwnWindow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := &transcript{}
 			tc.build(tr)
 
@@ -2165,9 +2243,11 @@ func TestSubAgentFillFoldsTheChildsOwnWindow(t *testing.T) {
 // nothing from an agent that names no model. The comparison is made at FOLD time, so what a finished
 // run says about itself survives the session rebinding to the very model the child ran on.
 func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
+	t.Parallel()
 	const window = 32768
 
 	t.Run("a routed child keeps the model it ran on", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
@@ -2178,6 +2258,7 @@ func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
 	})
 
 	t.Run("a child on the session's own model keeps nothing", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsageOn(tr, 1, 12000, window, "gpt-oss-20b", "gpt-oss-20b")
@@ -2188,6 +2269,7 @@ func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
 	})
 
 	t.Run("a reading naming no model leaves the answer standing", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
@@ -2199,6 +2281,7 @@ func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
 	})
 
 	t.Run("a maintenance reading names the model it left the fill alone for", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		fold := domain.UsageEvent{
@@ -2219,6 +2302,7 @@ func TestSubAgentModelFoldsOnlyWhenItDiffers(t *testing.T) {
 	})
 
 	t.Run("the frozen answer outlives a rebind to the child's model", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsageOn(tr, 1, 12000, window, "qwen3-4b", "gpt-oss-20b")
@@ -2257,6 +2341,7 @@ func TestApplyUsageStripsTheDelegateModel(t *testing.T) {
 // line, and only where it is not the session's own. A same-model delegation renders exactly the line
 // this block rendered before routing existed — no cell, no separator.
 func TestSubAgentSummaryNamesADifferingModel(t *testing.T) {
+	t.Parallel()
 	const window = 32768
 
 	cases := []struct {
@@ -2305,6 +2390,7 @@ func TestSubAgentSummaryNamesADifferingModel(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := &transcript{}
 			tc.build(tr)
 
@@ -2327,9 +2413,11 @@ func fillOf(tr *transcript, i int) (used, limit int) {
 // and to nothing else. Each agent fills its own window, so the fill is neither cumulative across
 // the child's Turns nor transitive up the nesting, and a finished run's figure is history.
 func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
+	t.Parallel()
 	const window = 32768
 
 	t.Run("the reading lands on the open run one level above it", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		readCall(tr, "c1", "a.go", 1, 5, 1)
@@ -2345,6 +2433,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 	})
 
 	t.Run("the latest reading replaces the previous one — a fill, never a sum", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
@@ -2358,6 +2447,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 	})
 
 	t.Run("a total the server omitted falls back to prompt+completion", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
@@ -2372,6 +2462,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 	})
 
 	t.Run("a second run reads for itself while the finished one stays frozen", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsage(tr, 1, 12000, window)
@@ -2389,6 +2480,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 	})
 
 	t.Run("a nested run's reading stops at the nested head", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the repo", 0)
 		subAgentCall(tr, "s2", "read the tests", 1)
@@ -2412,6 +2504,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 	})
 
 	t.Run("a reading with no open run at its depth folds nothing", func(t *testing.T) {
+		t.Parallel()
 		cases := []struct {
 			name  string
 			build func(tr *transcript)
@@ -2448,6 +2541,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				tr := &transcript{}
 				tc.build(tr)
 
@@ -2471,6 +2565,7 @@ func TestSubAgentUsageFillsItsOwnRun(t *testing.T) {
 // the same tool is called twice in a Turn — so each call shows its own summary and no orphan
 // result entry is appended.
 func TestToolResultGroupsByCallID(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "a", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "b", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
@@ -2518,6 +2613,7 @@ func TestToolResultGroupsByCallID(t *testing.T) {
 // The gate is the KIND's, never the block's size: the short prompt below toggles like any other,
 // and whether that state changes what is painted is the painter's question, asked at the live width.
 func TestToggleExpandedTargetsCollapsibleKinds(t *testing.T) {
+	t.Parallel()
 	fixture := func() *transcript {
 		tr := &transcript{}
 		tr.addUser("read a.go", nil)
@@ -2544,6 +2640,7 @@ func TestToggleExpandedTargetsCollapsibleKinds(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := fixture()
 
 			got := tr.toggleExpanded(tc.index)
@@ -3063,6 +3160,7 @@ func TestTranscriptToggleTypeExpandedTargetsToolCalls(t *testing.T) {
 // but preserves the debug flag (a hidden view toggle, not conversation). It is the /clear + /new
 // "start a new session" primitive; the caller re-seeds the start-up box afterwards.
 func TestTranscriptReset(t *testing.T) {
+	t.Parallel()
 	tr := &transcript{}
 	tr.addStartup(startupView{Logo: "logo", Host: "host", Model: "model"})
 	tr.addUser("hello", nil)
@@ -3243,9 +3341,11 @@ func childUsage(callID string, depth, total int, cum domain.Usage) domain.UsageE
 // siblings running at once each keep their own — and the two readings on one event fold
 // independently, which is what lets a maintenance call be counted without moving the fill.
 func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
+	t.Parallel()
 	const window = 32768
 
 	t.Run("the totals land on the run the reading's own call opened", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentCall(tr, "s2", "survey the docs", 0)
@@ -3262,6 +3362,7 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 	})
 
 	t.Run("the newest reading replaces the previous one", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
@@ -3275,6 +3376,7 @@ func TestSubAgentUsageFoldsTheChildsRunningTotals(t *testing.T) {
 	})
 
 	t.Run("a maintenance reading counts and leaves the fill standing", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		tr.applyUsage(childUsage("s1", 1, 12000, domain.Usage{Calls: 1, PromptTokens: 11000, CompletionTokens: 1000, TotalTokens: 12000}), window, "")
@@ -3393,7 +3495,9 @@ func childMessage(tr *transcript, spawn, text string, depth int, landed bool) {
 // never got there becomes a host note instead. Both halves are what a human who was shown a message
 // queued is owed — the account is never silence.
 func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
+	t.Parallel()
 	t.Run("the entry carries the child's depth and run", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
@@ -3413,6 +3517,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 	})
 
 	t.Run("a collapsed run elides it with the rest of its span", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
@@ -3432,6 +3537,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 	})
 
 	t.Run("with two siblings live it lands in its OWN run, not behind the last", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		readCall(tr, "c1", "a.go", 1, 5, 1)
@@ -3455,6 +3561,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 	})
 
 	t.Run("it registers no sticky user block", func(t *testing.T) {
+		t.Parallel()
 		th := newTheme(scheme.Default())
 		tr := &transcript{}
 		tr.addUser("delegate it", nil)
@@ -3482,6 +3589,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 	})
 
 	t.Run("a message that never landed is a note naming the delegation", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
@@ -3498,6 +3606,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 	})
 
 	t.Run("the note names a NAMED delegation", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{
 			Call: domain.ToolCall{ID: "s1", Tool: "sub_agent",
@@ -3524,7 +3633,9 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 // one of the two is on the wire, so only one of them survives a resume — which is exactly why both
 // are set rather than one.
 func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
+	t.Parallel()
 	t.Run("both fields take the generated name", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		tr.apply(domain.SubAgentNamedEvent{
@@ -3544,6 +3655,7 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 	// The status line asks the transcript for the acting delegate's name per compose, so a run that
 	// read as "sub-agent · reading" before the rename reads as its own name the next frame.
 	t.Run("the status line's lookup answers with it", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		if got := tr.runName("s1"); got != "" {
@@ -3565,6 +3677,7 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 	// rather than a second opinion, and a backstop that let a control through would put it on the
 	// one row a collapsed delegation always paints.
 	t.Run("a control character in the name is stripped", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		tr.apply(domain.SubAgentNamedEvent{
@@ -3581,6 +3694,7 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 	// first line off the row and leave a delegation with no text at all — strictly worse than what
 	// the block already wore.
 	t.Run("an empty name leaves the head as it was", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		tr.apply(domain.SubAgentNamedEvent{
@@ -3605,6 +3719,7 @@ func TestRefClippedNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
 	t.Parallel()
 
 	t.Run("the note is the event's own sentence", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 
 		tr.apply(domain.RefClippedEvent{Ref: "@docs/big.md", Tokens: 32000, Absolute: true})
@@ -3620,6 +3735,7 @@ func TestRefClippedNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
 	})
 
 	t.Run("a child's clip lands inside the delegate's run", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentStarted(tr, "s1", 1)
@@ -3653,6 +3769,7 @@ func TestPruneNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
 	t.Parallel()
 
 	t.Run("the note reads the engine's own counts", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 
 		tr.apply(domain.PruneEvent{Results: 3, Tokens: 1200})
@@ -3668,6 +3785,7 @@ func TestPruneNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
 	})
 
 	t.Run("a child's prune lands inside the delegate's run", func(t *testing.T) {
+		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentStarted(tr, "s1", 1)
@@ -3755,6 +3873,7 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 	}
 	for _, tc := range writes {
 		t.Run("write: "+tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := seed()
 			before := tr.generation
 
@@ -3781,6 +3900,7 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 	}
 	for _, tc := range holds {
 		t.Run("holds: "+tc.name, func(t *testing.T) {
+			t.Parallel()
 			tr := seed()
 			before := tr.generation
 

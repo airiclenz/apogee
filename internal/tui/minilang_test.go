@@ -42,6 +42,7 @@ func keyRune(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: str
 // only the re-seeded start-up box, with NO "context cleared" note — the reprinted box is the signal.
 // It stays idle (no worker) and clears the input. Seeded conversation proves the wipe.
 func TestClearResetsSessionView(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	seedConversation(&m)
@@ -79,6 +80,7 @@ func TestClearResetsSessionView(t *testing.T) {
 // /new aliases /clear: it shares the startNewSession seam, so it clears the engine and resets the
 // view down to the re-seeded start-up box exactly as /clear does.
 func TestNewCommandAliasesClear(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	seedConversation(&m)
@@ -109,6 +111,7 @@ func TestNewCommandAliasesClear(t *testing.T) {
 // On a ClearContext error the view is NOT reset: the seeded conversation survives and the failure is
 // noted, so a fresh-looking view can never lie about an engine that still remembers.
 func TestClearCommandSurfacesEngineError(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{clearFn: func() error { return domain.ErrInputPending }}
 	m := newTestModelEng(t, eng, testOpts)
 	seedConversation(&m)
@@ -142,8 +145,10 @@ func noServerBoundEngine() *fakeEngine {
 // view alone: nothing is asked of the engine, no refusal note is printed, the scrollback comes back
 // down to the re-seeded start-up box, and the session is still the one waiting for a server.
 func TestPreboundClearResetsTheViewWithoutTheEngine(t *testing.T) {
+	t.Parallel()
 	for _, verb := range []string{"/clear", "/new"} {
 		t.Run(verb, func(t *testing.T) {
+			t.Parallel()
 			eng := noServerBoundEngine()
 			m := newTestModelEng(t, eng, preboundOpts(PreboundFirstBoot, ""))
 			m = step(t, m, keyEsc()) // close the unasked picker; the pre-bound state outlives it
@@ -177,6 +182,7 @@ func TestPreboundClearResetsTheViewWithoutTheEngine(t *testing.T) {
 // the Agent the LATER bind builds, so a view-only reset would paint a fresh view over an engine that
 // comes back remembering the whole resumed conversation.
 func TestPreboundClearWithAResumePendingKeepsTheRefusal(t *testing.T) {
+	t.Parallel()
 	eng := noServerBoundEngine()
 	opts := preboundOpts(PreboundFirstBoot, "")
 	opts.Resumed = &ResumedSession{Title: "an older task"}
@@ -230,6 +236,7 @@ func transcriptHasUser(entries []entry, want string) bool {
 // clobbering the one just closed (session-system plan §6). Both ride the record-write queue, so the
 // test drains it exactly as the Update loop would.
 func TestClearClosesSessionIntoHistoryAndRotates(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 	seedConversation(&m)
@@ -268,6 +275,7 @@ func TestClearClosesSessionIntoHistoryAndRotates(t *testing.T) {
 // rotates: Rotate is unconditional-on-success and idempotent on an inactive session, so a stale active
 // id can never leak into the next conversation.
 func TestClearWithoutConversationRotatesButDoesNotSave(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 
@@ -290,6 +298,7 @@ func TestClearWithoutConversationRotatesButDoesNotSave(t *testing.T) {
 // one conversation, one id. Asserted at the fold layer, because the recording host serialises its
 // own calls and so cannot see the ordering the Model is responsible for.
 func TestClearRotateWaitsForAnInFlightSave(t *testing.T) {
+	t.Parallel()
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 	seedConversation(&m)
@@ -339,6 +348,7 @@ func TestClearRotateWaitsForAnInFlightSave(t *testing.T) {
 // fires, so the outgoing session's id stays live and later Turns keep updating its file. The final Save
 // runs before ClearContext, so it did happen; it is harmless (the session was closing anyway).
 func TestClearErrorDoesNotRotate(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{clearFn: func() error { return domain.ErrInputPending }}
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, eng, host)
@@ -364,6 +374,7 @@ func TestClearErrorDoesNotRotate(t *testing.T) {
 }
 
 func TestCompactCommandLaunchesWorker(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/compact")
@@ -383,6 +394,7 @@ func TestCompactCommandLaunchesWorker(t *testing.T) {
 }
 
 func TestCompactDoneAddsNoteAndResetsGauge(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	startStubWorker(t, &m) // the /compact worker is in flight
 	m.ctxUsed = 4200       // the gauge is lit from before compaction
@@ -401,6 +413,7 @@ func TestCompactDoneAddsNoteAndResetsGauge(t *testing.T) {
 }
 
 func TestCompactDoneSurfacesError(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	startStubWorker(t, &m)
 	m.ctxUsed = 4200
@@ -422,6 +435,7 @@ func TestCompactDoneSurfacesError(t *testing.T) {
 // nothing, so the gauge must stay lit and the note must say so plainly rather than falsely
 // claiming a compaction. This pins the 2b truthfulness fix at the TUI seam.
 func TestCompactDoneSkippedLeavesGaugeAndSaysNothing(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	startStubWorker(t, &m) // the /compact worker is in flight
 	m.ctxUsed = 4200       // the gauge is lit from before; a skip must leave it alone
@@ -449,6 +463,7 @@ func TestCompactDoneSkippedLeavesGaugeAndSaysNothing(t *testing.T) {
 // is classified from Compact's error (startCompact), so a cancel never masquerades as a
 // gauge-resetting compaction.
 func TestCancelledCompactLeavesGaugeUntouched(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	startStubWorker(t, &m) // the /compact worker is in flight
@@ -472,6 +487,7 @@ func TestCancelledCompactLeavesGaugeUntouched(t *testing.T) {
 }
 
 func TestContinueCommandLaunchesWorker(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/continue")
@@ -489,6 +505,7 @@ func TestContinueCommandLaunchesWorker(t *testing.T) {
 }
 
 func TestMessageWithFileRefsSubmitsRefs(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()} // immediately ExchangeComplete when driven
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue(`review @main.go and @"docs/my plan.md" now`)
@@ -538,6 +555,7 @@ func drainCmd(t *testing.T, m Model, cmd tea.Cmd) {
 // the line stays in the box for a one-character fix, and nothing reaches the model. The silent send
 // that made a mistyped (or not-yet-existing) verb look broken is exactly ISSUES #12's complaint.
 func TestUnknownSoleSlashRefusedAtIdle(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/code-adit")
@@ -560,6 +578,7 @@ func TestUnknownSoleSlashRefusedAtIdle(t *testing.T) {
 // The same refusal while a worker runs: a mistyped invocation is no more queued for the model than
 // it is sent to it, and the running Exchange is left entirely alone.
 func TestUnknownSoleSlashRefusedWhileRunning(t *testing.T) {
+	t.Parallel()
 	m := runningModel(t)
 	m.input.SetValue("/code-adit")
 	next, cmd := stepCmd(t, m, keyEnter())
@@ -581,6 +600,7 @@ func TestUnknownSoleSlashRefusedWhileRunning(t *testing.T) {
 // More than the one token is an ordinary message, whatever it opens with: the guard claims only
 // the input a human can have meant as an invocation and nothing else.
 func TestUnknownSlashWithMoreWordsStillSends(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}
 	m := newTestModelEng(t, eng, skillOpts())
 	m.input.SetValue("/code-adit the parser")
@@ -603,6 +623,7 @@ func TestUnknownSlashWithMoreWordsStillSends(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestComputeAutocompleteCommands(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("/c") // clear, color-scheme, compact, confine, continue all start with "c"
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -619,6 +640,7 @@ func TestComputeAutocompleteCommands(t *testing.T) {
 }
 
 func TestComputeAutocompleteNarrowsAndExact(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("/cl") // only "clear"
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -633,6 +655,7 @@ func TestComputeAutocompleteNarrowsAndExact(t *testing.T) {
 }
 
 func TestComputeAutocompleteOffersNewAlias(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("/n") // only "new" begins with "n"
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -643,6 +666,7 @@ func TestComputeAutocompleteOffersNewAlias(t *testing.T) {
 }
 
 func TestComputeAutocompleteOffersConfine(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("/conf") // only "confine" begins with "conf"
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -656,6 +680,7 @@ func TestComputeAutocompleteOffersConfine(t *testing.T) {
 }
 
 func TestConfineArgumentErrorNeverTouchesTheEngine(t *testing.T) {
+	t.Parallel()
 	// A mistyped /confine line is reported, never acted on: the one command that can widen
 	// Auto's blast radius must not toggle anything the user did not spell correctly.
 	eng := &fakeEngine{}
@@ -680,6 +705,7 @@ func TestConfineArgumentErrorNeverTouchesTheEngine(t *testing.T) {
 // Accepting a command row is an ACTION, not a completion: the verb runs on the spot and its token
 // is consumed. Here the box held nothing else, so it comes back empty.
 func TestAutocompleteAcceptWithTab(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/cl")
@@ -697,6 +723,7 @@ func TestAutocompleteAcceptWithTab(t *testing.T) {
 }
 
 func TestAutocompleteNavigateThenAccept(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/c")
@@ -719,6 +746,7 @@ func TestAutocompleteNavigateThenAccept(t *testing.T) {
 }
 
 func TestAutocompleteEscDismisses(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("/c")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -735,6 +763,7 @@ func TestAutocompleteEscDismisses(t *testing.T) {
 }
 
 func TestAutocompleteEnterExactSubmits(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/clear") // exactly the only suggestion
@@ -749,6 +778,7 @@ func TestAutocompleteEnterExactSubmits(t *testing.T) {
 }
 
 func TestAutocompleteOpensWhenTypingSlash(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m = step(t, m, keyRune('/'))
 	if !m.autocomplete.active {
@@ -767,6 +797,7 @@ func TestAutocompleteOpensWhenTypingSlash(t *testing.T) {
 // opens the menu on its trailing "/word" — the second ISSUES #12 symptom ("slash commands don't
 // work if I already typed something in the prompt editor").
 func TestSlashMenuOpensAfterADraft(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.input.SetValue("fix the parser /comp")
 	ac := m.computeAutocomplete(m.caretByteOffset())
@@ -785,6 +816,7 @@ func TestSlashMenuOpensAfterADraft(t *testing.T) {
 // Accepting a command row from a draft RUNS the command and hands the draft back minus the verb:
 // invoking a command never destroys what was being written, and never sends it either.
 func TestAcceptCommandRunsItAndKeepsTheDraft(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("fix the parser /comp")
@@ -814,6 +846,7 @@ func TestAcceptCommandRunsItAndKeepsTheDraft(t *testing.T) {
 // runs, the draft stays, nothing is sent. (The whole-input form keeps falling through to submit:
 // TestAutocompleteEnterExactSubmits.)
 func TestEnterOnMidDraftCommandRunsAndKeepsTheDraft(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("hold on /clear")
@@ -839,6 +872,7 @@ func TestEnterOnMidDraftCommandRunsAndKeepsTheDraft(t *testing.T) {
 // ("/confine off --save"). The picker pair /model and /server are the carve-out, pinned by
 // TestOnlyThePickerVerbsRunBareAtAccept.
 func TestAcceptConfineSplicesWithoutFiring(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("/conf")
@@ -864,6 +898,7 @@ func TestAcceptConfineSplicesWithoutFiring(t *testing.T) {
 // instead of parking "/model " in the box for an argument the human was never going to type. Both
 // accept keys take the same path, so both are driven here.
 func TestAcceptModelRunsItAndOpensThePicker(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		key  tea.KeyPressMsg
@@ -872,6 +907,7 @@ func TestAcceptModelRunsItAndOpensThePicker(t *testing.T) {
 		{name: "enter", key: keyEnter()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m, rb := seededPicker(t, testOpts)
 			m.input.SetValue("/mod")
 			m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -899,6 +935,7 @@ func TestAcceptModelRunsItAndOpensThePicker(t *testing.T) {
 // /server is /model's twin here: an argument-taking verb whose bare form opens the picker, so its
 // row runs rather than completing.
 func TestAcceptServerRunsItAndOpensThePicker(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		key  tea.KeyPressMsg
@@ -907,6 +944,7 @@ func TestAcceptServerRunsItAndOpensThePicker(t *testing.T) {
 		{name: "enter", key: keyEnter()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			sw := &fakeSwitch{}
 			opts := testOpts
 			seams := serverSeams(&opts)
@@ -943,6 +981,7 @@ func TestAcceptServerRunsItAndOpensThePicker(t *testing.T) {
 // and every member is checked to be argument-taking (the flag says nothing on a verb that reads no
 // arguments).
 func TestOnlyThePickerVerbsRunBareAtAccept(t *testing.T) {
+	t.Parallel()
 	var got []string
 	for _, spec := range commandSpecs {
 		if !spec.runsBareAtAccept {
@@ -964,6 +1003,7 @@ func TestOnlyThePickerVerbsRunBareAtAccept(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestWorkspaceFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
 	mustWrite(t, filepath.Join(dir, "README.md"), "# readme")
@@ -991,6 +1031,7 @@ func TestWorkspaceFiles(t *testing.T) {
 }
 
 func TestComputeAutocompleteFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
 	opts := testOpts
@@ -1022,6 +1063,7 @@ func TestComputeAutocompleteFiles(t *testing.T) {
 // did, quoted rows keep the overlay alive across the spaces the bare rule tokenizes on. Every row
 // puts the caret at the end of the value — the forward-typing case, unchanged by caret-awareness.
 func TestCaretFileTokenAtTheEnd(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		value   string
@@ -1046,6 +1088,7 @@ func TestCaretFileTokenAtTheEnd(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			start, end, partial, ok := caretFileToken(c.value, len(c.value))
 			if ok != c.ok || partial != c.partial || (ok && start != c.start) {
 				t.Errorf("caretFileToken(%q) = (%d, %q, %v), want (%d, %q, %v)",
@@ -1061,6 +1104,7 @@ func TestCaretFileTokenAtTheEnd(t *testing.T) {
 // Typing an open quote keeps the dropdown listing across spaces, the row shows the quoted token
 // it will insert, and accepting splices exactly that (plus the trailing space that closes it).
 func TestComputeAutocompleteQuotedFiles(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
 	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
@@ -1090,6 +1134,7 @@ func TestComputeAutocompleteQuotedFiles(t *testing.T) {
 // Quoting is decided by the PATH, not by how the user started typing: a bare partial completing
 // to a spaced path still splices the quoted form, because only that form resolves.
 func TestAcceptAutocompleteQuotesSpacedPath(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
 	opts := testOpts
@@ -1107,6 +1152,7 @@ func TestAcceptAutocompleteQuotesSpacedPath(t *testing.T) {
 // A fully typed quoted token counts as an exact match in either dialect, so ⏎ submits instead of
 // re-completing — and the ref reaching the engine is the clean, unquoted path.
 func TestAutocompleteQuotedFileEnterExactSubmits(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
 	opts := testOpts
@@ -1157,6 +1203,7 @@ func caretAt(t *testing.T, m Model, off int) Model {
 // caretToken is the whole caret-awareness rule: the word the caret stands in or immediately after,
 // empty when it stands in whitespace.
 func TestCaretToken(t *testing.T) {
+	t.Parallel()
 	const value = "fix /rev the parser"
 	cases := []struct {
 		name  string
@@ -1175,6 +1222,7 @@ func TestCaretToken(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			start, end := caretToken(value, c.caret)
 			if got := value[start:end]; got != c.want {
 				t.Errorf("caretToken(%q, %d) = %q, want %q", value, c.caret, got, c.want)
@@ -1191,6 +1239,7 @@ func TestCaretToken(t *testing.T) {
 // The merged menu follows the CARET, not the end of the buffer: going back to a half-typed token
 // with prose already written after it offers exactly what the end of the draft would.
 func TestCompletionFollowsTheCaretMidBuffer(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("fix /rev the parser please")
 	m = caretAt(t, m, len("fix /rev"))
@@ -1210,6 +1259,7 @@ func TestCompletionFollowsTheCaretMidBuffer(t *testing.T) {
 // Accepting mid-buffer splices over the token's own range: what was written on BOTH sides survives,
 // the caret lands just after what was written, and no separator is doubled.
 func TestAcceptSplicesInPlaceAndReSeatsTheCaret(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("fix /rev the parser please")
 	m = caretAt(t, m, len("fix /rev"))
@@ -1230,6 +1280,7 @@ func TestAcceptSplicesInPlaceAndReSeatsTheCaret(t *testing.T) {
 // The "@" region is caret-aware in both of its shapes — the bare word and the quoted path whose
 // spaces the bare rule would tokenize on.
 func TestFileCompletionAtACaretMidBuffer(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
 	mustWrite(t, filepath.Join(dir, "my plan.md"), "# plan")
@@ -1260,6 +1311,7 @@ func TestFileCompletionAtACaretMidBuffer(t *testing.T) {
 
 // A caret elsewhere on the line must not resurrect a menu for a token it has left.
 func TestNoMenuWhenTheCaretLeavesTheToken(t *testing.T) {
+	t.Parallel()
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("/rev the parser")
 
@@ -1276,6 +1328,7 @@ func TestNoMenuWhenTheCaretLeavesTheToken(t *testing.T) {
 // A command invoked from the MIDDLE of a draft runs and leaves both sides of it standing — with the
 // two separators the cut would strand collapsed back into the one word-space the human typed.
 func TestCommandRunsFromTheMiddleOfADraft(t *testing.T) {
+	t.Parallel()
 	eng := &fakeEngine{}
 	m := newTestModelEng(t, eng, testOpts)
 	m.input.SetValue("fix the parser /clear and ship it")

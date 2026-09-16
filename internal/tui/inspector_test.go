@@ -54,6 +54,7 @@ func inspectorModel(t *testing.T, events ...domain.Event) Model {
 // maxWireRecords halves of a round-trip and drops the oldest, in arrival order — the tail of a
 // debugging session, never the head of one.
 func TestWireRingKeepsTheLatestRecordsInOrder(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	const sent = maxWireRecords + 5
 	for i := range sent {
@@ -75,6 +76,7 @@ func TestWireRingKeepsTheLatestRecordsInOrder(t *testing.T) {
 // on the status line. (fold_test.go's WireEvent row states the same fact for the fold table; this
 // one holds it while the ring itself is filling.)
 func TestWireFoldDisturbsNothingElse(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	before := len(m.transcript.entries)
 
@@ -93,6 +95,7 @@ func TestWireFoldDisturbsNothingElse(t *testing.T) {
 // the terminal), and the JSON is expanded once, at fold time, so the pane never parses on a repaint.
 // The pane opens READABLE, so the body itself is what raw mode shows — both are asserted here.
 func TestWirePayloadReachesThePaneStrippedAndPretty(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, "{\"model\":\"\x1b[31mred\x1b[0m\"}", 1, 0))
 
 	rec := m.wire[0]
@@ -120,6 +123,7 @@ func TestWirePayloadReachesThePaneStrippedAndPretty(t *testing.T) {
 // sentinel, or an error body that is not JSON at all, is shown exactly as the server sent it. A
 // raw-protocol view that hid what it could not parse would hide the very thing it was opened for.
 func TestWirePayloadKeepsANonJSONLineAsItArrived(t *testing.T) {
+	t.Parallel()
 	lines, hidden := wirePayloadLines("{\"a\":1}\n[DONE]")
 
 	if hidden != 0 {
@@ -136,6 +140,7 @@ func TestWirePayloadKeepsANonJSONLineAsItArrived(t *testing.T) {
 // messages/tools/model, so the readable rendering falls back to the pretty lines whole and lands on
 // the very same marker — which is the point: each mode states its own count.
 func TestWireRecordCapsItsLinesAndSaysSo(t *testing.T) {
+	t.Parallel()
 	payload := "{\"a\":[" + strings.Repeat("1,", maxWireRecordLines) + "1]}"
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, payload, 1, 0))
 
@@ -163,6 +168,7 @@ func TestWireRecordCapsItsLinesAndSaysSo(t *testing.T) {
 // the direction, the turn and — for a delegated run only — the depth, with the payload's lines
 // under it, oldest first.
 func TestInspectorRowsHeadEveryRecord(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t,
 		wireEvent(domain.WireDirectionRequest, `{"a":1}`, 2, 0),
 		wireEvent(domain.WireDirectionResponse, `{"b":2}`, 2, 1),
@@ -201,6 +207,7 @@ func TestInspectorRowsHeadEveryRecord(t *testing.T) {
 // reply is decoded off the connection and never captured — absence on its own reads as a response
 // that was lost. The newest request never carries it: its call may still be in flight.
 func TestInspectorNamesAnUnrecordedReply(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t,
 		wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0),
 		wireEvent(domain.WireDirectionRequest, `{"b":2}`, 2, 0),
@@ -239,6 +246,7 @@ func TestInspectorNamesAnUnrecordedReply(t *testing.T) {
 // ring DID record an answer for is a complete round-trip and gets no note, so the row never becomes
 // noise under every request in a streaming session.
 func TestInspectorSaysNothingWhenTheReplyWasRecorded(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t,
 		wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0),
 		wireEvent(domain.WireDirectionResponse, `{"b":2}`, 1, 0),
@@ -276,6 +284,7 @@ func recordsWithNoReplyNote(t *testing.T, m Model) []int {
 // the SAME wire stream — the (depth, callID) pair — and never just the next record of the ring,
 // which in a fan-out belongs to somebody else.
 func TestInspectorPairsTheNoteByWireStream(t *testing.T) {
+	t.Parallel()
 	const (
 		parent  = "" // depth 0 was spawned by no call
 		child   = "call-child"
@@ -338,6 +347,7 @@ func TestInspectorPairsTheNoteByWireStream(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := inspectorModel(t, tc.events...)
 
 			noted := recordsWithNoReplyNote(t, m)
@@ -353,6 +363,7 @@ func TestInspectorPairsTheNoteByWireStream(t *testing.T) {
 // off, the pane says which key arms it instead of drawing an empty box. With the key ON the same
 // empty ring is a WAIT, not a thing to fix, so it says that instead.
 func TestInspectorDisarmedNamesTheKey(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.inspector = inspectorPane{open: true}
 
@@ -373,6 +384,7 @@ func TestInspectorDisarmedNamesTheKey(t *testing.T) {
 // draft in the box untouched, because the pane is a
 // report and not a modal.
 func TestInspectVerbOpensThePaneAndEscCloses(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.opts.Inspector = true
 	m = m.foldEvent(wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
@@ -412,6 +424,7 @@ func TestInspectVerbOpensThePaneAndEscCloses(t *testing.T) {
 // record worth reading — the newest, which is also the one the reader just watched go wrong — is on
 // the screen without a hundred page-downs, and the scroll keys then move from THERE.
 func TestInspectOpensOnTheNewestRecord(t *testing.T) {
+	t.Parallel()
 	var events []domain.Event
 	for i := range maxWireRecords {
 		events = append(events, wireEvent(domain.WireDirectionRequest, `{"n":`+strconv.Itoa(i)+`}`, i, 0))
@@ -451,6 +464,7 @@ func TestInspectOpensOnTheNewestRecord(t *testing.T) {
 // behind it exactly as it would with no pane up — and even ctrl+r is the OPEN pane's alone, so a
 // closed pane leaves the chord to whatever else the keyboard does with it.
 func TestInspectorLeavesEveryOtherKeyAlone(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
 
 	m = step(t, m, keySpace())
@@ -473,6 +487,7 @@ func TestInspectorLeavesEveryOtherKeyAlone(t *testing.T) {
 // would switch TO — because a pane that offered "ctrl+r raw" while already raw would be lying about
 // the one key it owns beyond the report's five.
 func TestCtrlRFlipsTheRenderingAndTheHint(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t, wireEvent(domain.WireDirectionResponse,
 		`{"choices":[{"delta":{"reasoning_content":"weighing it"}}]}`, 1, 0))
 
@@ -512,6 +527,7 @@ func TestCtrlRFlipsTheRenderingAndTheHint(t *testing.T) {
 // chord is built on: "r" is printable, so it belongs to the box behind the pane and can never be the
 // toggle. This is what makes the toggle a CHORD rather than a key.
 func TestInspectorIgnoresAPlainRWhileOpen(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
 
 	m = step(t, m, tea.KeyPressMsg{Code: 'r', Text: "r"})
@@ -531,6 +547,7 @@ func TestInspectorIgnoresAPlainRWhileOpen(t *testing.T) {
 // was left. Nothing about the mode is persisted, and there is no code to keep in step — dismissal
 // zeroes the whole reportPane.
 func TestReopenedInspectorStartsReadable(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
 
 	m = step(t, m, ctrlR())
@@ -554,6 +571,7 @@ func TestReopenedInspectorStartsReadable(t *testing.T) {
 // ONE line naming how much conversation was replayed, how many tools were offered and which model
 // was asked — and a field the body does not carry is left out rather than reported as a zero.
 func TestReadableRequestSummarisesTheEnvelope(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		payload string
@@ -584,6 +602,7 @@ func TestReadableRequestSummarisesTheEnvelope(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			lines, hidden := wireReadableLines(domain.WireDirectionRequest, tc.payload)
 
 			if hidden != 0 {
@@ -601,6 +620,7 @@ func TestReadableRequestSummarisesTheEnvelope(t *testing.T) {
 // — is shown exactly as raw mode shows it, dropped count and all. A readable view that answered a
 // body it did not understand with an empty pane would hide the body worth reading.
 func TestReadableRequestFallsBackToTheBody(t *testing.T) {
+	t.Parallel()
 	m := inspectorModel(t, wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
 
 	rec := m.wire[0]
@@ -622,6 +642,7 @@ func TestReadableRequestFallsBackToTheBody(t *testing.T) {
 // delta in the middle of a run contributes nothing without breaking it — a keep-alive chunk did not
 // end the sentence.
 func TestReadableMergesConsecutiveDeltas(t *testing.T) {
+	t.Parallel()
 	payload := strings.Join([]string{
 		`{"choices":[{"delta":{"reasoning_content":"weighing "}}]}`,
 		`{"choices":[{"delta":{"reasoning_content":""}}]}`,
@@ -650,6 +671,7 @@ func TestReadableMergesConsecutiveDeltas(t *testing.T) {
 // reasoning reached extend as two empty strings and rendered as NOTHING AT ALL, which is exactly
 // what this pane's never-hide contract forbids.
 func TestReadableClassifiesTheReasoningSpellingAsThinking(t *testing.T) {
+	t.Parallel()
 	payload := `{"choices":[{"delta":{"reasoning":"weighing the options"}}]}`
 
 	lines, hidden := wireReadableLines(domain.WireDirectionResponse, payload)
@@ -666,6 +688,7 @@ func TestReadableClassifiesTheReasoningSpellingAsThinking(t *testing.T) {
 // TestReadableMergesConsecutiveReasoningDeltas holds the alias to the same passage discipline the
 // canonical spelling gets: a run of `reasoning` deltas is one passage, not one row per chunk.
 func TestReadableMergesConsecutiveReasoningDeltas(t *testing.T) {
+	t.Parallel()
 	payload := strings.Join([]string{
 		`{"choices":[{"delta":{"reasoning":"weighing "}}]}`,
 		`{"choices":[{"delta":{"reasoning":""}}]}`,
@@ -689,6 +712,7 @@ func TestReadableMergesConsecutiveReasoningDeltas(t *testing.T) {
 // single thinking passage, because the precedence is decided per chunk and nothing latches onto the
 // spelling the first chunk happened to use.
 func TestReadableJoinsBothReasoningSpellingsIntoOnePassage(t *testing.T) {
+	t.Parallel()
 	payload := strings.Join([]string{
 		`{"choices":[{"delta":{"reasoning_content":"weighing "}}]}`,
 		`{"choices":[{"delta":{"reasoning":"the options"}}]}`,
@@ -707,6 +731,7 @@ func TestReadableJoinsBothReasoningSpellingsIntoOnePassage(t *testing.T) {
 // and a string-typed field would fail the whole chunk's Unmarshal — dropping its CONTENT along with
 // its reasoning, into the prettyWireLine fallback.
 func TestReadableKeepsContentWhenReasoningIsNotAString(t *testing.T) {
+	t.Parallel()
 	payload := strings.Join([]string{
 		`{"choices":[{"delta":{"reasoning":{"text":"weighing"},"content":"here is "}}]}`,
 		`{"choices":[{"delta":{"reasoning":null,"content":"the answer"}}]}`,
@@ -725,6 +750,7 @@ func TestReadableKeepsContentWhenReasoningIsNotAString(t *testing.T) {
 // are elided — they arrive as fragments across chunks and raw mode has them in full — and the
 // passage closes the run it interrupted rather than joining it.
 func TestReadableNamesAToolCallWithoutItsArguments(t *testing.T) {
+	t.Parallel()
 	payload := strings.Join([]string{
 		`{"choices":[{"delta":{"content":"calling"}}]}`,
 		`{"choices":[{"delta":{"tool_calls":[{"id":"call_abcdefghijklmnop","function":{"name":"read_file","arguments":"{\"path\":\"secret.txt\"}"}}]}}]}`,
@@ -750,6 +776,7 @@ func TestReadableNamesAToolCallWithoutItsArguments(t *testing.T) {
 // keep their pretty form, a malformed document and the stream's sentinel arrive exactly as the
 // server sent them, and each of them closes the passage it followed.
 func TestReadableKeepsWhatIsNotADeltaChunk(t *testing.T) {
+	t.Parallel()
 	usage := `{"choices":[],"usage":{"total_tokens":7}}`
 	malformed := `{"choices":[{"delta":`
 	payload := strings.Join([]string{
@@ -829,6 +856,7 @@ data: {"type":"message_stop"}
 // output accounting. The `event:` framing, the blank separators, the ping, the signature and the
 // block stops contribute no row, because none of them is something the model said.
 func TestReadableRendersAMessagesStream(t *testing.T) {
+	t.Parallel()
 	lines, hidden := wireReadableLines(domain.WireDirectionResponse, anthropicStreamCapture)
 
 	want := []string{
@@ -856,6 +884,7 @@ func TestReadableRendersAMessagesStream(t *testing.T) {
 // payload each go through in their pretty form — the payload without its `data:` framing, so a
 // JSON one indents — and each closes the passage it followed.
 func TestReadableKeepsWhatIsNotAMessagesEvent(t *testing.T) {
+	t.Parallel()
 	fault := `{"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}`
 	unknown := `{"type":"content_block_delta","index":0,"delta":{"type":"citations_delta","citation":{}}}`
 	malformed := `{"type":"content_block_delta","index":`
@@ -886,6 +915,7 @@ func TestReadableKeepsWhatIsNotAMessagesEvent(t *testing.T) {
 // is broken into rows no wider than it, the kind prefix on the FIRST row only and two spaces under
 // it, so the pane — which elides rather than wraps — shows the whole passage instead of its head.
 func TestReadableWrapsALongPassage(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		text string
@@ -895,6 +925,7 @@ func TestReadableWrapsALongPassage(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			payload := `{"choices":[{"delta":{"content":` + strconv.Quote(tc.text) + `}}]}`
 
 			lines, _ := wireReadableLines(domain.WireDirectionResponse, payload)
@@ -928,6 +959,7 @@ func TestReadableWrapsALongPassage(t *testing.T) {
 // lines and a handful of readable ones, and a pane that borrowed the pretty count would announce an
 // elision the readable rows never made.
 func TestReadableCountsItsOwnHiddenLines(t *testing.T) {
+	t.Parallel()
 	chunks := make([]string, 0, 20)
 	for range 20 {
 		chunks = append(chunks, `{"choices":[{"delta":{"content":"x"}}]}`)
@@ -986,6 +1018,7 @@ func paneText(t *testing.T, m Model) string {
 // with a run view open the pane lists its records alone, under a title carrying its name, and
 // closing the view gives the whole ring back byte-identically titled.
 func TestInspectorScopesToTheViewedRun(t *testing.T) {
+	t.Parallel()
 	const (
 		childBody   = "child-body"
 		siblingBody = "sibling-body"
@@ -1038,6 +1071,7 @@ func TestInspectorScopesToTheViewedRun(t *testing.T) {
 // and the way back to the whole ring. With the capture OFF that slot keeps the disarmed row — the
 // key is the actionable answer to an empty pane, and the scope never displaces it.
 func TestInspectorScopedEmptyNamesEveryCause(t *testing.T) {
+	t.Parallel()
 	// The ring is NOT empty: it holds the parent's record, so what is empty here is the scope.
 	m := scopedInspectorModel(t, wireEvent(domain.WireDirectionRequest, "parent-body", 1, 0))
 
@@ -1065,7 +1099,9 @@ func TestInspectorScopedEmptyNamesEveryCause(t *testing.T) {
 // unrecorded-reply note is asked over the very list the rows came from, so a sibling's response
 // landing between a request and its answer neither answers it nor is counted as its successor.
 func TestInspectorPairsTheNoteInsideTheScope(t *testing.T) {
+	t.Parallel()
 	t.Run("a sibling between the halves leaves a complete round-trip unnoted", func(t *testing.T) {
+		t.Parallel()
 		m := scopedInspectorModel(t,
 			wireEventOfCall(domain.WireDirectionRequest, "child-request", 1, 1, "s1"),
 			wireEventOfCall(domain.WireDirectionResponse, "sibling-response", 1, 1, "s2"),
@@ -1078,6 +1114,7 @@ func TestInspectorPairsTheNoteInsideTheScope(t *testing.T) {
 	})
 
 	t.Run("the run's own next request still carries the note", func(t *testing.T) {
+		t.Parallel()
 		m := scopedInspectorModel(t,
 			wireEventOfCall(domain.WireDirectionRequest, "child-request-1", 1, 1, "s1"),
 			wireEventOfCall(domain.WireDirectionResponse, "sibling-response", 1, 1, "s2"),
@@ -1094,6 +1131,7 @@ func TestInspectorPairsTheNoteInsideTheScope(t *testing.T) {
 // the last row of the RUN's list, not of the ring behind it — a scroll set past a longer list than
 // the pane shows would open it below its own rows.
 func TestInspectScopedOpensOnTheViewedRunsNewestRecord(t *testing.T) {
+	t.Parallel()
 	var events []domain.Event
 	for i := range maxWireRecords / 2 {
 		events = append(events,
@@ -1137,6 +1175,7 @@ func TestInspectScopedOpensOnTheViewedRunsNewestRecord(t *testing.T) {
 // clamp alone already tracks the tail until the list grows by that much, and they stay UNDER the
 // ring's cap, past which the oldest record rotates out for every new one and the list stops growing.
 func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
+	t.Parallel()
 	var events []domain.Event
 	for i := range 6 {
 		events = append(events, wireEvent(domain.WireDirectionRequest, `{"n":`+strconv.Itoa(i)+`}`, i, 0))

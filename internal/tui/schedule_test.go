@@ -89,6 +89,7 @@ func liveStatus(id, name string, cycle time.Duration, mode domain.Mode) schedule
 // literal "auto" picks the mode, and everything after them is the prompt — carried VERBATIM, because
 // a Firing submits it as typed and re-spacing a human's text is not the parser's business.
 func TestScheduleArgFormCreates(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, line string
 		wantCycle  time.Duration
@@ -103,6 +104,7 @@ func TestScheduleArgFormCreates(t *testing.T) {
 			domain.ModePlan, "automate the report"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			sch := &fakeScheduler{}
 			m := scheduleModel(t, sch, "")
 
@@ -129,6 +131,7 @@ func TestScheduleArgFormCreates(t *testing.T) {
 // the surface hands the Spec over as typed and words the refusal it gets back — naming the floor,
 // which is the one number the human needs to type a working line.
 func TestScheduleSubFloorCycleReportsTheFloor(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{addErr: fmt.Errorf("%w (5s is under the 30s floor)", schedule.ErrCycle)}
 	m := scheduleModel(t, sch, "")
 
@@ -147,6 +150,7 @@ func TestScheduleSubFloorCycleReportsTheFloor(t *testing.T) {
 // than taken for prose — quietly opening the cycle picker over the prompt "5x tidy the logs" would
 // answer a question nobody asked.
 func TestScheduleMalformedCycleTeachesTheGrammar(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "")
 
@@ -167,6 +171,7 @@ func TestScheduleMalformedCycleTeachesTheGrammar(t *testing.T) {
 // The "auto" token answers to the same Auto-eligibility value the picker row does: on a host where
 // the ladder has closed auto, the line is refused with the host's own reason and nothing is created.
 func TestScheduleAutoTokenIsGated(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "this host cannot fence commands")
 
@@ -187,6 +192,7 @@ func TestScheduleAutoTokenIsGated(t *testing.T) {
 // Bare /schedule reports what is live: one row per Schedule stating how often, in which mode, when
 // next, and how it has been going. Skips and the in-flight mark show only when true.
 func TestScheduleBareListsWhatIsLive(t *testing.T) {
+	t.Parallel()
 	busy := liveStatus("sch-2", "log watch", 15*time.Minute, domain.ModeAuto)
 	busy.Fired, busy.Skipped, busy.InFlight = 12, 2, true
 	sch := &fakeScheduler{live: []schedule.Status{
@@ -243,6 +249,7 @@ func TestScheduleFireTimesSpellTheLocalWallClock(t *testing.T) {
 
 // With nothing live the same verb teaches the grammar instead of printing an empty table.
 func TestScheduleBareWithNoneTeachesTheForm(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 
 	m, _ = typeCommand(t, m, "/schedule")
@@ -259,6 +266,7 @@ func TestScheduleBareWithNoneTeachesTheForm(t *testing.T) {
 // "/schedule <prompt>" asks the two questions the line did not answer, in order, and creates the
 // Schedule at the second accept — carrying the prompt through both popups untouched.
 func TestSchedulePromptOnlyWalksBothPickers(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "")
 
@@ -300,6 +308,7 @@ func TestSchedulePromptOnlyWalksBothPickers(t *testing.T) {
 
 // Esc closes the flow at either question and creates nothing — the draft dies with the overlay.
 func TestSchedulePickerEscapeCreatesNothing(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "")
 
@@ -319,6 +328,7 @@ func TestSchedulePickerEscapeCreatesNothing(t *testing.T) {
 // taking it answers with the reason and leaves the pane open, so plan is one keypress away and the
 // prompt need not be retyped.
 func TestScheduleModePickerGatesAuto(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "this host cannot fence commands")
 
@@ -351,6 +361,7 @@ func TestScheduleModePickerGatesAuto(t *testing.T) {
 
 // With auto eligible the same row creates an auto Schedule.
 func TestScheduleModePickerTakesAuto(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "")
 
@@ -374,7 +385,9 @@ func TestScheduleModePickerTakesAuto(t *testing.T) {
 // The three shapes of /schedule-stop: nothing live is a note, exactly one live needs no question,
 // and several open the picker whose accept stops the highlighted row.
 func TestScheduleStopFormsByCount(t *testing.T) {
+	t.Parallel()
 	t.Run("none", func(t *testing.T) {
+		t.Parallel()
 		sch := &fakeScheduler{}
 		m := scheduleModel(t, sch, "")
 
@@ -389,6 +402,7 @@ func TestScheduleStopFormsByCount(t *testing.T) {
 	})
 
 	t.Run("one", func(t *testing.T) {
+		t.Parallel()
 		sch := &fakeScheduler{live: []schedule.Status{
 			liveStatus("sch-1", "nightly tidy", time.Hour, domain.ModePlan),
 		}}
@@ -405,6 +419,7 @@ func TestScheduleStopFormsByCount(t *testing.T) {
 	})
 
 	t.Run("several", func(t *testing.T) {
+		t.Parallel()
 		sch := &fakeScheduler{live: []schedule.Status{
 			liveStatus("sch-1", "nightly tidy", time.Hour, domain.ModePlan),
 			liveStatus("sch-2", "log watch", 15*time.Minute, domain.ModeAuto),
@@ -440,8 +455,10 @@ func TestScheduleStopFormsByCount(t *testing.T) {
 // A build with no scheduler wired answers both verbs with one honest note and no overlay — the
 // nil-seam posture, never an error and never silence.
 func TestScheduleWithoutASchedulerReportsIt(t *testing.T) {
+	t.Parallel()
 	for _, line := range []string{"/schedule", "/schedule 1h tidy the logs", "/schedule-stop"} {
 		t.Run(line, func(t *testing.T) {
+			t.Parallel()
 			m := newTestModelEng(t, &fakeEngine{}, testOpts) // no Schedules seam
 
 			m, cmd := typeCommand(t, m, line)
@@ -462,6 +479,7 @@ func TestScheduleWithoutASchedulerReportsIt(t *testing.T) {
 // session's engine. The popup path proves the whole flow answers keys mid-run, since an overlay that
 // rendered without claiming them would be a modal the human could not close.
 func TestScheduleRunsWhileTheWorkerWorks(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "")
 	startStubWorker(t, &m)
@@ -493,6 +511,7 @@ func TestScheduleRunsWhileTheWorkerWorks(t *testing.T) {
 // folds each Event into a fresh model, which is precisely the no-open-block case — a Gate refusal's
 // failure — where the fold falls back to the note.
 func TestScheduleEventsRenderAsNotes(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{live: []schedule.Status{
 		liveStatus("sch-1", "nightly tidy", time.Hour, domain.ModePlan),
 	}}
@@ -535,6 +554,7 @@ func TestScheduleEventsRenderAsNotes(t *testing.T) {
 // The notices are PERSISTED: a Firing is something that happened in this session's lifetime, not
 // re-derived chrome, so it survives the round trip through the record's transcript blob.
 func TestScheduleNoticesSurviveTheTranscriptBlob(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 
 	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
@@ -591,6 +611,7 @@ func fireSchedule(t *testing.T, m Model, id, name, prompt string) Model {
 // key, the Schedule's name leading the branch row, the static running marker in that row's outcome
 // slot, and the prompt as the body — open (`!done`) until the run returns.
 func TestScheduleFiringOpensABlock(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	before := len(m.transcript.entries)
 
@@ -626,6 +647,7 @@ func TestScheduleFiringOpensABlock(t *testing.T) {
 // answer), the prompt
 // still beneath it, then what the run cost and where the record is.
 func TestScheduleFiringCompletesInPlace(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 	index := len(m.transcript.entries) - 1
@@ -661,6 +683,7 @@ func TestScheduleFiringCompletesInPlace(t *testing.T) {
 // the outputDetail grammar — and a collapsed block previews no line of it, counting the answer
 // behind the "+N more lines" marker instead. The prompt keeps its place after it.
 func TestScheduleFiringMultiLineAnswerLeadsTheBody(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -683,6 +706,7 @@ func TestScheduleFiringMultiLineAnswerLeadsTheBody(t *testing.T) {
 // Two Schedules firing at once enrich the right blocks: the pairing is the ScheduleID, exactly as a
 // tool result pairs by call id, so an answer can never land in another Schedule's block.
 func TestScheduleFiringPairsByScheduleID(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the logs")
 	m = fireSchedule(t, m, "sch-2", "inbox sweep", "sweep the inbox")
@@ -709,6 +733,7 @@ func TestScheduleFiringPairsByScheduleID(t *testing.T) {
 // the partial record's pointer when one saved. It shows no answer — an "error:" line above a partial
 // answer would read as a result.
 func TestScheduleFiringFailsInItsBlock(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -738,6 +763,7 @@ func TestScheduleFiringFailsInItsBlock(t *testing.T) {
 // completed one — the answer still rides the branch. What says the answer is not one is the stats
 // line's last cell, which a collapsed block can show, and the body line naming the cause beneath it.
 func TestScheduleFiringMarksAnAbandonedFinalTurn(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -770,6 +796,7 @@ func TestScheduleFiringMarksAnAbandonedFinalTurn(t *testing.T) {
 // One body line per anomaly, in the composer's order, between the fault line and the record
 // pointer: the pointer is the block's closer, and what went wrong belongs above it.
 func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -804,6 +831,7 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 // configuration and the errors to the filesystem — so they are escape-stripped at the block's own
 // sanitize seam and nowhere earlier.
 func TestScheduleFiringStripsEscapesInTheContextAnomalies(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -831,6 +859,7 @@ func TestScheduleFiringStripsEscapesInTheContextAnomalies(t *testing.T) {
 // is the one place this session shows a write nobody watched, so the whole of it is pinned: a fault
 // above, the pointer below, and the two new lines between them in the block's own voice.
 func TestScheduleFiringListsWhatItChangedAndTheUndoVerb(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the notes")
 
@@ -867,6 +896,7 @@ func TestScheduleFiringListsWhatItChangedAndTheUndoVerb(t *testing.T) {
 // composes a verb of its own, so a human is not sent to a command that answers "nothing to undo".
 // A single path takes the singular header.
 func TestScheduleFiringWithNoUndoOfferListsTheFilesAlone(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the notes")
 
@@ -897,6 +927,7 @@ func TestScheduleFiringWithNoUndoOfferListsTheFilesAlone(t *testing.T) {
 // (TestScheduleFiringCompletesInPlace pins that whole body; this is the negative stated where the
 // pair is read).
 func TestScheduleFiringWithNoWritesShowsNoChangedLine(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -917,6 +948,7 @@ func TestScheduleFiringWithNoWritesShowsNoChangedLine(t *testing.T) {
 // sanitize seam and nowhere earlier, and a line break inside either is flattened into the one row
 // the block authored for it rather than becoming a row the block did not.
 func TestScheduleFiringStripsEscapesInTheChangedLines(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "tidy the notes")
 
@@ -952,6 +984,7 @@ func TestScheduleFiringStripsEscapesInTheChangedLines(t *testing.T) {
 // are self-hiding, which is why a faulted Firing that also spent tokens is the case worth pinning:
 // it is the only one that shows the whole order at once.
 func TestScheduleFiringStatsReportWhatTheRunCost(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -977,6 +1010,7 @@ func TestScheduleFiringStatsReportWhatTheRunCost(t *testing.T) {
 // A Firing that spent nothing and delegated nothing renders the stats line it always did — the
 // omit-at-zero rule, which is what keeps an unspent run's line byte-identical to yesterday's.
 func TestScheduleFiringStatsOmitAnAbsentSpend(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -995,6 +1029,7 @@ func TestScheduleFiringStatsOmitAnAbsentSpend(t *testing.T) {
 // A fault that surfaced no cause still gets its line: that the Turn was abandoned is the fact, and
 // the cause is the detail — a line naming none is not the same as no fault at all.
 func TestScheduleFiringMarksAFaultWithNoCause(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -1013,6 +1048,7 @@ func TestScheduleFiringMarksAFaultWithNoCause(t *testing.T) {
 // every run is not one. (TestScheduleFiringCompletesInPlace pins the whole clean body; this is the
 // negative half of the faulted pair above, stated where the pair is read.)
 func TestScheduleFiringLeavesACleanRunUnmarked(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -1031,6 +1067,7 @@ func TestScheduleFiringLeavesACleanRunUnmarked(t *testing.T) {
 // A failure with no open block is a Firing that never started — the Gate refused it — so it lands as
 // the note it always was rather than inventing a block for a run that did not happen.
 func TestScheduleFailureWithoutABlockStaysANote(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 
 	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
@@ -1049,6 +1086,7 @@ func TestScheduleFailureWithoutABlockStaysANote(t *testing.T) {
 // The block's own wording, case by case: a run that answered nothing still says so, an unpersisted
 // run points nowhere, and a record saved without a title still says the run is on disk.
 func TestScheduleFiringWordsWhatItHas(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name        string
 		outcome     schedule.Outcome
@@ -1061,6 +1099,7 @@ func TestScheduleFiringWordsWhatItHas(t *testing.T) {
 			[]string{"1 turn · 0s", "saved — find it in /sessions"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m := scheduleModel(t, &fakeScheduler{}, "")
 			m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 			m = step(t, m, scheduleEventMsg{Event: schedule.Event{
@@ -1084,6 +1123,7 @@ func TestScheduleFiringWordsWhatItHas(t *testing.T) {
 // text, the answer is raw model output (ADR 0010: the library hands it over unsanitized) — so no ESC
 // byte survives the fold in any of the three.
 func TestScheduleFiringStripsEscapes(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly \x1b]52;c;x\x07tidy", "check \x1bthe log")
 	m = step(t, m, scheduleEventMsg{Event: schedule.Event{
@@ -1102,6 +1142,7 @@ func TestScheduleFiringStripsEscapes(t *testing.T) {
 // claim a tool of its own is running while it sits idle. Its block state is real, though — the same
 // click that opens a tool block opens this one.
 func TestScheduleFiringIsNoToolCall(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m = fireSchedule(t, m, "sch-1", "nightly tidy", "check the log")
 
@@ -1123,6 +1164,7 @@ func TestScheduleFiringIsNoToolCall(t *testing.T) {
 
 // A cycle is spelled the way the argument form takes it, not the way time.Duration prints it.
 func TestFormatCycle(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		in   time.Duration
 		want string
@@ -1144,6 +1186,7 @@ func TestFormatCycle(t *testing.T) {
 
 // The cycle picker glosses each preset in words, singular where it should be.
 func TestCycleRowsGlossEveryPreset(t *testing.T) {
+	t.Parallel()
 	rows := cycleRows()
 	if len(rows) != len(scheduleCycles) {
 		t.Fatalf("rows = %d, want %d", len(rows), len(scheduleCycles))
@@ -1166,6 +1209,7 @@ func TestCycleRowsGlossEveryPreset(t *testing.T) {
 // Plan writes (ADR 0012 second loosen, 2026-09-14). The auto-blocked note that points at plan
 // carries the same qualification.
 func TestScheduleModeGlossNamesTheScratchDir(t *testing.T) {
+	t.Parallel()
 	const want = "read-only — it reads and reports; its only writes go to its own scratch dir"
 	if got := scheduleModeGloss(domain.ModePlan); got != want {
 		t.Errorf("scheduleModeGloss(plan) = %q, want %q", got, want)
@@ -1178,6 +1222,7 @@ func TestScheduleModeGlossNamesTheScratchDir(t *testing.T) {
 // The hint's verb follows the kind: nothing in /schedule's three pickers switches the session, and
 // the stop picker's ⏎ ends something.
 func TestPickerHintFollowsTheKind(t *testing.T) {
+	t.Parallel()
 	for kind, want := range map[pickerKind]string{
 		pickerModel:        pickerHint,
 		pickerCycle:        "type to filter · ↑/↓ select · ⏎ choose · esc close",
@@ -1192,6 +1237,7 @@ func TestPickerHintFollowsTheKind(t *testing.T) {
 
 // The argument tail reaches the verb unsplit, so a multi-line prompt keeps its lines.
 func TestScheduleTakesTheRawTail(t *testing.T) {
+	t.Parallel()
 	parsed := parseInput("/schedule 1h check the log\nthen report", nil)
 	if parsed.kind != kindCommand || parsed.command != "schedule" {
 		t.Fatalf("parseInput = {kind:%v cmd:%q}, want the schedule command", parsed.kind, parsed.command)
@@ -1203,6 +1249,7 @@ func TestScheduleTakesTheRawTail(t *testing.T) {
 
 // A verb that does not read its arguments carries neither form, exactly as it never carried args.
 func TestNonArgumentVerbsCarryNoTail(t *testing.T) {
+	t.Parallel()
 	parsed := parseInput("/clear everything", nil)
 	if parsed.rest != "" || parsed.args != nil {
 		t.Errorf("parsed = {args:%v rest:%q}, want both empty", parsed.args, parsed.rest)
@@ -1224,6 +1271,7 @@ func activityModel(t *testing.T, reports *[]bool) Model {
 // The seam reports TRANSITIONS, not frames: a session says it started working once, says it
 // stopped once, and says nothing at all about the stream in between.
 func TestReportActivityPublishesTransitionsOnly(t *testing.T) {
+	t.Parallel()
 	var reports []bool
 	m := activityModel(t, &reports)
 	if len(reports) != 0 {
@@ -1255,6 +1303,7 @@ func TestReportActivityPublishesTransitionsOnly(t *testing.T) {
 // two halves of one thought — and a Firing released there would land on top of the message about to
 // go out. The report stays busy until the queue is gone.
 func TestReportActivityHoldsWhileAQueueIsHeld(t *testing.T) {
+	t.Parallel()
 	var reports []bool
 	m := activityModel(t, &reports)
 
@@ -1282,6 +1331,7 @@ func TestReportActivityHoldsWhileAQueueIsHeld(t *testing.T) {
 // row waiting to go out, exactly like a staged interjection: a Firing released there would drive
 // the engine the queued /clear is about to reset. quiescent() holds until the queue drains.
 func TestReportActivityHoldsWhileACommandIsQueued(t *testing.T) {
+	t.Parallel()
 	var reports []bool
 	m := activityModel(t, &reports)
 
@@ -1306,6 +1356,7 @@ func TestReportActivityHoldsWhileACommandIsQueued(t *testing.T) {
 // The composition root's Notify seam: one scheduler Event, sent from the scheduler's own goroutine
 // through the Bridge, arrives as the Msg the Update loop folds into a note.
 func TestBridgeNotifyScheduleReachesTheTranscript(t *testing.T) {
+	t.Parallel()
 	br := NewBridge()
 	// An unbound Bridge is the startup window before Run binds the program; a Firing that narrated
 	// there must be dropped rather than panic.

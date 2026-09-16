@@ -366,7 +366,11 @@ NOTES (2026-09-17): ten `t.Run` literals stay serial under a parallel parent per
 
 commit: `test(tui): t.Parallel across the model, mouse, settings and sessions driver tests`
 
-## 19. internal/tui `t.Parallel` sweep — group B (apogee-11s)
+## 19. internal/tui `t.Parallel` sweep — group B (apogee-11s) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): no test in the ten files calls `t.Setenv`/`t.Chdir`/`os.Setenv`/`os.Chdir` or assigns a package-level var (directly or through a helper), and none proved non-deterministic under `-race -count=3` or `-parallel 16`, so every top-level test carries `t.Parallel()` and no `// serial:` comment was needed.
+NOTES (2026-09-17): three `t.Run` literals stay serial under a parallel parent per the guard — `TestScheduleEventsRenderAsNotes`'s table (steps one parent Model by value, one unlocked `*paintCache`) and `TestReportingCommandsRunWhileRunning`'s table (closes over the parent's `Options`); the two one-line literals of `TestScrollWhileRunningViaPgKeysAndWheel` were expanded to three lines so `t.Parallel()` could be their first statement (`scrolled` builds its own Model per call).
+NOTES (2026-09-17): literals closing over only immutable parent values — a const window, an escape string, a theme, a `popupSpec` by value, a `[]string` row, a known-skills func — or a builder closure that returns a fresh transcript/Model per call (`fixture`, `seed`, `openOn`) got `t.Parallel()`, matching item 18's treatment of `raise`, `blobFor` and `clickLine`.
 
 **What:** Depends on item 18; same rule and same serial-exception wording as item 18. Files: `picker_test.go`, `transcript_test.go`, `interject_test.go`, `minilang_test.go`, `schedule_test.go`, `skill_test.go`, `mdtable_test.go`, `inspector_test.go`, `popup_test.go`, `command_test.go`.
 

@@ -21,6 +21,7 @@ import (
 // streamed message, so the "not a table" cases matter as much as the happy ones.
 
 func TestTableSplitRow(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -39,6 +40,7 @@ func TestTableSplitRow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := splitTableRow(tc.in); !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("splitTableRow(%q) = %#v; want %#v", tc.in, got, tc.want)
 			}
@@ -47,6 +49,7 @@ func TestTableSplitRow(t *testing.T) {
 }
 
 func TestTableDelimiterAlignment(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string
@@ -63,6 +66,7 @@ func TestTableDelimiterAlignment(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got, ok := parseDelimiterRow(tc.in)
 			if !ok {
 				t.Fatalf("parseDelimiterRow(%q) rejected the row; want it accepted", tc.in)
@@ -77,6 +81,7 @@ func TestTableDelimiterAlignment(t *testing.T) {
 // A row that is not built purely from hyphen cells is not a delimiter row — the two-line lookahead
 // leans on this to keep ordinary prose out of the table path.
 func TestTableDelimiterRejected(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{
 		"",
 		"   ",
@@ -97,6 +102,7 @@ func TestTableDelimiterRejected(t *testing.T) {
 }
 
 func TestTableMatchBlock(t *testing.T) {
+	t.Parallel()
 	lines := []string{
 		"| Tool | Calls |",
 		"|:--|--:|",
@@ -125,6 +131,7 @@ func TestTableMatchBlock(t *testing.T) {
 
 // A table need not start at line 0: the walk offers every line in turn.
 func TestTableMatchBlockAtOffset(t *testing.T) {
+	t.Parallel()
 	lines := []string{"intro", "", "| a |", "| - |", "| x |", "", "tail"}
 
 	table, span, ok := matchTableBlock(lines, 2)
@@ -146,6 +153,7 @@ func TestTableMatchBlockAtOffset(t *testing.T) {
 // The header sets the column count: a short row is padded with empty cells, a long one loses its
 // excess, and neither reshapes the table.
 func TestTableRowCellCountFitted(t *testing.T) {
+	t.Parallel()
 	lines := []string{
 		"| a | b | c |",
 		"| - | - | - |",
@@ -170,6 +178,7 @@ func TestTableRowCellCountFitted(t *testing.T) {
 // The block ends at the first blank line and at the first line carrying no pipe; what follows is
 // left for the walk to render as its own block.
 func TestTableBlockTerminates(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		lines    []string
@@ -184,6 +193,7 @@ func TestTableBlockTerminates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			table, span, ok := matchTableBlock(tc.lines, 0)
 			if !ok {
 				t.Fatalf("matchTableBlock(%#v) did not detect the table", tc.lines)
@@ -202,6 +212,7 @@ func TestTableBlockTerminates(t *testing.T) {
 // delimiter with nothing above it, and a header still waiting for the rest of its table to stream
 // in.
 func TestTableNotATable(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name  string
 		lines []string
@@ -218,6 +229,7 @@ func TestTableNotATable(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if table, span, ok := matchTableBlock(tc.lines, 0); ok {
 				t.Errorf("matchTableBlock(%#v) = %#v, span %d, detected; want no table", tc.lines, table, span)
 			}
@@ -228,6 +240,7 @@ func TestTableNotATable(t *testing.T) {
 // Out-of-range starts are asked for by no caller today, but the walk indexes the slice it is
 // given: matchTableBlock answers "no table" rather than panicking.
 func TestTableMatchBlockOutOfRange(t *testing.T) {
+	t.Parallel()
 	lines := []string{"| a |", "| - |"}
 	for _, start := range []int{-1, 1, 2, 7} {
 		if _, _, ok := matchTableBlock(lines, start); ok && start != 0 {
@@ -251,6 +264,7 @@ func TestTableMatchBlockOutOfRange(t *testing.T) {
 // the table's width (TestTableRowsShareOneWidth pins that), and those blanks are invisible in
 // print. Everything a reader can see in the example is pinned here exactly.
 func TestTableRendersLayoutExample(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| Tool | Calls | Notes |",
@@ -285,6 +299,7 @@ func TestTableRendersLayoutExample(t *testing.T) {
 // its row count — the filler line under the shorter cells beside it is held to the width too, as are
 // the two rules between the three rows.
 func TestTableRowsShareOneWidth(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| File | Description of the change that was made | Status |",
@@ -312,6 +327,7 @@ func TestTableRowsShareOneWidth(t *testing.T) {
 // The table's own syntax is consumed: no pipe and no delimiter hyphens survive into the rendered
 // block, and the header is styled where the profile emits colour.
 func TestTableConsumesItsSyntax(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "| a | b | c |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
@@ -343,6 +359,7 @@ func TestTableConsumesItsSyntax(t *testing.T) {
 // A cell is rendered through renderInline like any other text, so the inline subset works inside a
 // table for free: an <u>…</u> cell has its tags consumed and its text underlined.
 func TestTableCellUnderline(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "| a | b |\n| --- | --- |\n| <u>x</u> | y |"
 
@@ -368,6 +385,7 @@ func TestTableCellUnderline(t *testing.T) {
 // has to hold for the inter-row rules as much as for the header's, since they are the same stroke
 // continued down the block.
 func TestTableRuleIsContinuous(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| Tool | Calls | Notes |",
@@ -447,6 +465,7 @@ func tableRuleLines(lines []string) []int {
 // and not boxed — it has no bottom frame to close. Three body rows therefore draw three rules in
 // all, and the block's last line is a row rather than a stroke hanging under one.
 func TestTableRulesBetweenBodyRows(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| a | b |",
@@ -479,6 +498,7 @@ func TestTableRulesBetweenBodyRows(t *testing.T) {
 // One body row draws exactly one rule — the header's. A rule under the last row would be a bottom
 // frame, which the block does not have however many rows it holds.
 func TestTableLastRowHasNoRuleUnderIt(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "| a | b |\n| --- | --- |\n| 1 | one |"
 
@@ -494,6 +514,7 @@ func TestTableLastRowHasNoRuleUnderIt(t *testing.T) {
 // tall, which puts the only inter-row rule between the second line of the first row and the first
 // line of the second.
 func TestTableWrappedRowIsNotRuledInside(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| short | long |",
@@ -541,6 +562,7 @@ func glyphColumns(s, glyph string) []int {
 
 // Each column is padded on the side its delimiter cell names, header cells included.
 func TestTableAlignsColumns(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| left | right | mid |",
@@ -565,6 +587,7 @@ func TestTableAlignsColumns(t *testing.T) {
 
 // A centred cell with an odd remainder takes the extra space on its right (layout.md).
 func TestTableCentreOddRemainder(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "| head |\n| :-: |\n| ab |"
 
@@ -578,6 +601,7 @@ func TestTableCentreOddRemainder(t *testing.T) {
 // Inline markup inside a cell styles as it does in a paragraph, and it is the rendered width that
 // sets the column: the ** and ` markers must not push the column open.
 func TestTableInlineMarkupInCells(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| name | note |",
@@ -618,6 +642,7 @@ func TestTableInlineMarkupInCells(t *testing.T) {
 // the cell that no longer fits now wraps onto further lines inside its column instead of being cut
 // with a … tail, and every word of it survives in order.
 func TestTableWrapsToWidth(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	const cell = "very long very long very long very long very long very long"
 	source := strings.Join([]string{
@@ -666,6 +691,7 @@ func TestTableWrapsToWidth(t *testing.T) {
 // Below its natural width the block is still a table — the squeezed columns wrap rather than fall
 // back — so its height grows with the wrapping instead of holding at one line per row.
 func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
@@ -690,6 +716,7 @@ func TestTableShrinksToTheWidthItIsGiven(t *testing.T) {
 // own column and every word of it is still on screen. This is the issue the wave closes — a cell
 // cut with a … lost information the model had put in the table.
 func TestTableWrapsInsteadOfTruncating(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	const note = "the quick brown fox jumps over the lazy dog"
 	source := strings.Join([]string{
@@ -719,6 +746,7 @@ func TestTableWrapsInsteadOfTruncating(t *testing.T) {
 // first line rather than floating in its middle. The filler line is padded out like any other, so
 // the block's right edge stays straight through it.
 func TestTableRowHeightIsItsTallestCell(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| short | long |",
@@ -751,6 +779,7 @@ func TestTableRowHeightIsItsTallestCell(t *testing.T) {
 // the padding is applied per line, so a continuation line that fell back to the left would show as
 // a step in an otherwise straight column.
 func TestTableWrappedLinesKeepAlignment(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| right | mid |",
@@ -777,6 +806,7 @@ func TestTableWrappedLinesKeepAlignment(t *testing.T) {
 // wrapped row adds. That straight right edge is what the transcript's right-hand chrome is laid
 // out against (mouse.go, model.go).
 func TestTableEveryLineIsTheTableWidth(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| a header that is much too long for its column | b |",
@@ -802,6 +832,7 @@ func TestTableEveryLineIsTheTableWidth(t *testing.T) {
 // its SGR run on the continuation line and resets at its end, so the second half of a **bold** cell
 // is bold too rather than the style bleeding out of the table (wrapText, render.go).
 func TestTableWrapKeepsInlineStyle(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("profile emits no colour, so there is no SGR run to carry across the break")
@@ -833,6 +864,7 @@ func TestTableWrapKeepsInlineStyle(t *testing.T) {
 // its content needs and nothing is dropped. A cap would only put the truncation back at a different
 // threshold, which is the thing this wave removes.
 func TestTableWrapIsUnbounded(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	const words = 120
 	cell := strings.TrimSpace(strings.Repeat("word ", words))
@@ -893,6 +925,7 @@ func BenchmarkRenderTable(b *testing.B) {
 // breaks the wrapper makes rather than as one run (they are still all there, in order: wrapText
 // caps the line without dropping anything — TestWrapTextHoldsTheWidthCap).
 func TestTableUnfittableFallsBack(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "| alpha | beta | gamma |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 
@@ -921,6 +954,7 @@ func TestTableUnfittableFallsBack(t *testing.T) {
 // two dividers are paid for, renderMarkdownBody draws the block as plain paragraphs there — source
 // text visible, neither table glyph anywhere in it — and the very next cell up is a table again.
 func TestTableNarrowerThanTheFloorFallsBack(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	lines := []string{"| alpha | beta | gamma |", "| --- | --- | --- |", "| 1 | 2 | 3 |"}
 	tbl, _, ok := matchTableBlock(lines, 0)
@@ -953,6 +987,7 @@ func TestTableNarrowerThanTheFloorFallsBack(t *testing.T) {
 // dividers, eighteen — would have thrown the whole block down to paragraphs for want of a width
 // none of its columns would ever have used.
 func TestTableOfNarrowColumnsIsNotRejected(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "| id | ab | xy |\n| --- | --- | --- |\n| 1 | 2 | 3 |"
 	const width = 3*2 + 2*tableDividerWidth // 12: the three natural widths and their dividers
@@ -974,6 +1009,7 @@ func TestTableOfNarrowColumnsIsNotRejected(t *testing.T) {
 // While a table streams in, the header row that has no delimiter under it yet is an ordinary
 // paragraph — the same contract every other half-typed construct keeps.
 func TestTableStreamingDegradesToParagraphs(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	const header = "| Tool | Calls |"
 
@@ -987,6 +1023,7 @@ func TestTableStreamingDegradesToParagraphs(t *testing.T) {
 // A table ends where its block ends: whatever follows renders as its own block, and the table is
 // not re-parsed line by line into it.
 func TestTableFollowedByOtherBlocks(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := strings.Join([]string{
 		"| a | b |",
@@ -1011,6 +1048,7 @@ func TestTableFollowedByOtherBlocks(t *testing.T) {
 
 // A table that opens partway down a message leaves the prose above and below it alone.
 func TestTableInsideProse(t *testing.T) {
+	t.Parallel()
 	th := newTheme(scheme.Default())
 	source := "Here it is:\n| a | b |\n| - | - |\n| 1 | 2 |\ndone"
 
@@ -1030,6 +1068,7 @@ func TestTableInsideProse(t *testing.T) {
 // widened to it and so is never charged it, which is what keeps a table of naturally narrow columns
 // from being turned away over a floor none of its columns would ever occupy.
 func TestTableFitColumns(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		widths []int
@@ -1054,6 +1093,7 @@ func TestTableFitColumns(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			required := 0
 			for _, w := range tc.widths {
 				required += min(w, tc.floor)

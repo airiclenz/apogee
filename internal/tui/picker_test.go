@@ -85,6 +85,7 @@ func seededPicker(t *testing.T, opts Options) (Model, *fakeRebind) {
 // is already bound to: every offered row switches something, which is what makes pickerHint's
 // "⏎ switch" true on all of them.
 func TestModelPickerListsTheOffering(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 
 	m, cmd := typeCommand(t, m, "/model")
@@ -119,6 +120,7 @@ func TestModelPickerListsTheOffering(t *testing.T) {
 // A beat landing under an open picker refreshes the offering in place, and a selection the shorter
 // list can no longer hold is clamped rather than left pointing past the end.
 func TestModelPickerFollowsTheOfferingWhileOpen(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat()) // two offered rows once the bound model is excluded
 	m, _ = typeCommand(t, m, "/model")
@@ -143,6 +145,7 @@ func TestModelPickerFollowsTheOfferingWhileOpen(t *testing.T) {
 
 // Esc closes the picker and moves nothing.
 func TestModelPickerEscCloses(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m, _ = typeCommand(t, m, "/model")
 
@@ -164,6 +167,7 @@ func TestModelPickerEscCloses(t *testing.T) {
 // and its window, the display adopts what came back, the start-up box is restated, and the change
 // is worded by rebindNote — no second set of strings.
 func TestModelPickerAcceptRebindsThroughTheSeam(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m, _ = typeCommand(t, m, "/model")
 
@@ -195,6 +199,7 @@ func TestModelPickerAcceptRebindsThroughTheSeam(t *testing.T) {
 // picked model measures as "nothing new" and binds nothing back. Without it, a multi-model server
 // still resolving the old discovery hint would yank the session back within one Interval.
 func TestModelPickerPickSurvivesTheNextBeat(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m, _ = typeCommand(t, m, "/model")
 	m, _ = stepCmd(t, m, keyEnter())
@@ -219,6 +224,7 @@ func TestModelPickerPickSurvivesTheNextBeat(t *testing.T) {
 // A refused rebind leaves every binding exactly where it was and says so once, in the heartbeat's
 // own words (rebindFailNote).
 func TestModelPickerAcceptReportsARefusedRebind(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	rb.answer = func(string, int) (RebindResult, error) { return RebindResult{}, errors.New("engine busy") }
 	m, _ = typeCommand(t, m, "/model")
@@ -238,6 +244,7 @@ func TestModelPickerAcceptReportsARefusedRebind(t *testing.T) {
 // reply — and drives no seam. No ROW can reach this any more (that row is not offered), so the
 // argument form is the one route left to it.
 func TestModelCommandNamingTheBoundModelIsANote(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 
 	m, _ = typeCommand(t, m, "/model test-model")
@@ -258,7 +265,9 @@ func TestModelCommandNamingTheBoundModelIsANote(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelCommandArgumentForm(t *testing.T) {
+	t.Parallel()
 	t.Run("known id switches without an overlay", func(t *testing.T) {
+		t.Parallel()
 		m, rb := seededPicker(t, testOpts)
 
 		m, _ = typeCommand(t, m, "/model other-model")
@@ -276,6 +285,7 @@ func TestModelCommandArgumentForm(t *testing.T) {
 	})
 
 	t.Run("unknown id points at the bare form", func(t *testing.T) {
+		t.Parallel()
 		m, rb := seededPicker(t, testOpts)
 
 		m, _ = typeCommand(t, m, "/model nope")
@@ -293,6 +303,7 @@ func TestModelCommandArgumentForm(t *testing.T) {
 	})
 
 	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
+		t.Parallel()
 		m, rb := seededPicker(t, testOpts)
 
 		m, _ = typeCommand(t, m, "/model a b")
@@ -412,6 +423,7 @@ func seededModelRecording(t *testing.T, rec *fakeRecorder) (Model, *fakeRebind) 
 // An accepted ROW is an explicit pick, so it reaches the recording seam exactly once with the id that
 // bound, and the note says the key now names it.
 func TestModelPickerAcceptRecordsTheChoice(t *testing.T) {
+	t.Parallel()
 	rec := &fakeRecorder{saved: true}
 	m, _ := seededModelRecording(t, rec)
 	m, _ = typeCommand(t, m, "/model")
@@ -429,6 +441,7 @@ func TestModelPickerAcceptRecordsTheChoice(t *testing.T) {
 // "/model <id>" is the same explicit act down the same bind path, so it records on the same terms —
 // which is the whole reason the recording hangs off bindPickedModel and not off either caller.
 func TestModelCommandArgumentFormRecordsTheChoice(t *testing.T) {
+	t.Parallel()
 	rec := &fakeRecorder{saved: true}
 	m, _ := seededModelRecording(t, rec)
 
@@ -446,6 +459,7 @@ func TestModelCommandArgumentFormRecordsTheChoice(t *testing.T) {
 // server, a launcher-fronted entry — so it offers every explicit pick and believes the answer: false
 // with no error is announced as nothing at all.
 func TestModelPickRecordedFalseClaimsNothing(t *testing.T) {
+	t.Parallel()
 	rec := &fakeRecorder{} // the binary's silent skip: no write, no error
 	m, _ := seededModelRecording(t, rec)
 
@@ -467,6 +481,7 @@ func TestModelPickRecordedFalseClaimsNothing(t *testing.T) {
 // A write that could not land is a footnote and never an undo: the session is on the picked model
 // either way, and the warning follows the change it is a footnote to.
 func TestModelPickRecordingFailureWarnsAndKeepsTheBinding(t *testing.T) {
+	t.Parallel()
 	rec := &fakeRecorder{err: errors.New("config.yaml is a directory")}
 	m, _ := seededModelRecording(t, rec)
 
@@ -484,6 +499,7 @@ func TestModelPickRecordingFailureWarnsAndKeepsTheBinding(t *testing.T) {
 // An unwired seam is the ordinary hand-built Options and the pre-remember-model behaviour: the pick
 // binds, and nothing is recorded or claimed.
 func TestModelPickWithNoRecordingSeamStillBinds(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts) // testOpts wires no ConfigHost
 
 	m, _ = typeCommand(t, m, "/model other-model")
@@ -502,6 +518,7 @@ func TestModelPickWithNoRecordingSeamStillBinds(t *testing.T) {
 // A pick that did not BIND is not a choice to remember: the rebind was refused, the session is still
 // on the old model, and writing the new id would leave the file describing a server nobody is on.
 func TestModelPickRefusedRebindRecordsNothing(t *testing.T) {
+	t.Parallel()
 	rec := &fakeRecorder{saved: true}
 	m, rb := seededModelRecording(t, rec)
 	rb.answer = func(string, int) (RebindResult, error) { return RebindResult{}, errors.New("engine busy") }
@@ -519,6 +536,7 @@ func TestModelPickRefusedRebindRecordsNothing(t *testing.T) {
 // The rule the whole feature turns on (design call 4): a rebind the HEARTBEAT observed is news about
 // the server, not a choice — the same orchestration runs, and the recording seam is never consulted.
 func TestHeartbeatObservedRebindRecordsNothing(t *testing.T) {
+	t.Parallel()
 	rec := &fakeRecorder{saved: true}
 	m, rb := seededModelRecording(t, rec)
 
@@ -536,6 +554,7 @@ func TestHeartbeatObservedRebindRecordsNothing(t *testing.T) {
 // to a human the heartbeat (or start-up) put on that model, so the pick reaches the seam anyway and
 // the saved line follows the already-bound answer it is a consequence of.
 func TestModelNamingTheBoundModelRecordsThePin(t *testing.T) {
+	t.Parallel()
 	rec := &fakeRecorder{saved: true}
 	m, rb := seededModelRecording(t, rec)
 
@@ -562,6 +581,7 @@ func TestModelNamingTheBoundModelRecordsThePin(t *testing.T) {
 // /model is idle-only by the commandSpecs table, so a line typed mid-run is queued to run at idle
 // instead of running now — the tag the dropdown shows and what ⏎ does are one rule.
 func TestModelCommandIsIdleOnly(t *testing.T) {
+	t.Parallel()
 	if spec, ok := commandByName("model"); !ok || spec.whileRunning || !spec.takesArgs {
 		t.Fatalf("commandSpec = %+v, want an idle-only verb that reads its arguments", spec)
 	}
@@ -586,7 +606,9 @@ func TestModelCommandIsIdleOnly(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestModelCommandDegradesWithAnHonestNote(t *testing.T) {
+	t.Parallel()
 	t.Run("heartbeat unwired", func(t *testing.T) {
+		t.Parallel()
 		m := newTestModelEng(t, &fakeEngine{}, testOpts)
 
 		m, _ = typeCommand(t, m, "/model")
@@ -595,6 +617,7 @@ func TestModelCommandDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("server offline", func(t *testing.T) {
+		t.Parallel()
 		rb := &fakeRebind{}
 		m := wireRebind(t, testOpts, &fakeHeartbeat{}, rb)
 		m = foldBeatMsg(t, m, twoModelBeat())
@@ -614,6 +637,7 @@ func TestModelCommandDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("display-frozen heartbeat", func(t *testing.T) {
+		t.Parallel()
 		m := wireHeartbeat(t, testOpts, &fakeHeartbeat{}) // no Rebind seam
 		m = foldBeatMsg(t, m, twoModelBeat())
 
@@ -623,6 +647,7 @@ func TestModelCommandDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("nothing advertised yet", func(t *testing.T) {
+		t.Parallel()
 		m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
 		m = foldBeatMsg(t, m, heartbeat.Beat{Reachable: true, ActiveModel: "test-model", ContextWindow: 32768})
 
@@ -632,6 +657,7 @@ func TestModelCommandDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("nothing but what the session is already bound to", func(t *testing.T) {
+		t.Parallel()
 		// The rung below "nothing advertised yet": the server answered, but everything it serves is
 		// what this session is on — so the exclusion empties the offering and the note takes over.
 		m := wireRebind(t, testOpts, &fakeHeartbeat{}, &fakeRebind{})
@@ -831,6 +857,7 @@ func seededServers(t *testing.T, sw *fakeSwitch) (Model, *fakeRebind) {
 // /server lists the configured servers, marks the one this session is on (by entry name, the identity
 // the binary assembled the list by) and opens on it.
 func TestServerPickerListsTheConfiguredServers(t *testing.T) {
+	t.Parallel()
 	m, _ := seededServers(t, &fakeSwitch{})
 
 	m, cmd := typeCommand(t, m, "/server")
@@ -869,7 +896,9 @@ func TestServerPickerListsTheConfiguredServers(t *testing.T) {
 // switch (the key source rebinds, and the pin records the entry the human named), and re-picking the
 // bound entry is still the already-on answer.
 func TestServerEntriesSharingAnEndpointAreToldApartByName(t *testing.T) {
+	t.Parallel()
 	t.Run("only the bound entry is marked", func(t *testing.T) {
+		t.Parallel()
 		m, _ := seededSiblings(t, &fakeSwitch{}, &fakeRecorder{saved: true})
 
 		m, _ = typeCommand(t, m, "/server")
@@ -891,6 +920,7 @@ func TestServerEntriesSharingAnEndpointAreToldApartByName(t *testing.T) {
 	})
 
 	t.Run("picking the sibling switches", func(t *testing.T) {
+		t.Parallel()
 		sw, rec := siblingSwitch(), &fakeRecorder{saved: true}
 		m, _ := seededSiblings(t, sw, rec)
 
@@ -916,6 +946,7 @@ func TestServerEntriesSharingAnEndpointAreToldApartByName(t *testing.T) {
 	})
 
 	t.Run("re-picking the bound entry answers and records", func(t *testing.T) {
+		t.Parallel()
 		sw, rec := siblingSwitch(), &fakeRecorder{saved: true}
 		m, _ := seededSiblings(t, sw, rec)
 
@@ -940,6 +971,7 @@ func TestServerEntriesSharingAnEndpointAreToldApartByName(t *testing.T) {
 // beat fires at once and binds through the ordinary rebind path, announcing itself (a switch is not
 // a launch, so the quiet first-contact seed does not apply).
 func TestServerSwitchHappyPath(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	m, rb := seededServers(t, sw)
 	oldGen := m.hb.gen
@@ -1026,6 +1058,7 @@ func seededSiblings(t *testing.T, sw *fakeSwitch, rec *fakeRecorder) (Model, *fa
 // A switch onto a configured entry is also a CHOICE (ADR 0036 decision 2): the name the session moved
 // to goes to the recording seam, and the move's own note says the key now remembers it.
 func TestServerSwitchRecordsTheChoice(t *testing.T) {
+	t.Parallel()
 	sw, rec := &fakeSwitch{}, &fakeRecorder{saved: true}
 	m, _ := seededServersRecording(t, sw, rec)
 
@@ -1043,6 +1076,7 @@ func TestServerSwitchRecordsTheChoice(t *testing.T) {
 // The renderer cannot tell a configured row from the synthesized one an override startup earns, so it
 // offers every name it was given and believes the answer: a write the binary skipped claims nothing.
 func TestServerSwitchOntoAnUnlistedRowClaimsNoRecording(t *testing.T) {
+	t.Parallel()
 	sw, rec := &fakeSwitch{}, &fakeRecorder{} // the binary's silent skip: no write, no error
 	m, _ := seededServersRecording(t, sw, rec)
 
@@ -1063,6 +1097,7 @@ func TestServerSwitchOntoAnUnlistedRowClaimsNoRecording(t *testing.T) {
 // The recording is best-effort persistence of something already true: a failed write is a footnote
 // UNDER the move it belongs to, and the session stays on the server it just moved to.
 func TestServerSwitchRecordFailureWarnsAndTheSwitchStands(t *testing.T) {
+	t.Parallel()
 	sw, rec := &fakeSwitch{}, &fakeRecorder{err: errors.New("permission denied")}
 	m, _ := seededServersRecording(t, sw, rec)
 
@@ -1088,6 +1123,7 @@ func TestServerSwitchRecordFailureWarnsAndTheSwitchStands(t *testing.T) {
 // records the name anyway, because start-up put this session here and the pin is the only thing left
 // to ask for. The saved line is a line of its own — there is no move's note to carry the clause.
 func TestServerNamingTheActiveServerRecordsThePin(t *testing.T) {
+	t.Parallel()
 	sw, rec := &fakeSwitch{}, &fakeRecorder{saved: true}
 	m, _ := seededServersRecording(t, sw, rec)
 
@@ -1115,7 +1151,9 @@ func TestServerNamingTheActiveServerRecordsThePin(t *testing.T) {
 // exactly as it did before the pin existed: the "already …" note, alone, and no panic reaching for a
 // recorder nobody supplied.
 func TestReSelectionWithNoRecordingSeamAnswersAndNothingMore(t *testing.T) {
+	t.Parallel()
 	t.Run("model", func(t *testing.T) {
+		t.Parallel()
 		m, _ := seededPicker(t, testOpts) // testOpts wires no ConfigHost
 		before := len(noteTexts(m))
 
@@ -1128,6 +1166,7 @@ func TestReSelectionWithNoRecordingSeamAnswersAndNothingMore(t *testing.T) {
 	})
 
 	t.Run("server", func(t *testing.T) {
+		t.Parallel()
 		m, _ := seededServers(t, &fakeSwitch{}) // seededServers wires no RecordServerChoice
 		before := len(noteTexts(m))
 
@@ -1143,6 +1182,7 @@ func TestReSelectionWithNoRecordingSeamAnswersAndNothingMore(t *testing.T) {
 // Everything still in flight on the old chain lands inert: the switch retired that generation, so a
 // beat or a tick from the server the session just left changes nothing and schedules nothing.
 func TestServerSwitchRetiresTheOldChain(t *testing.T) {
+	t.Parallel()
 	m, rb := seededServers(t, &fakeSwitch{})
 	oldGen := m.hb.gen
 	m, _ = typeCommand(t, m, "/server remote")
@@ -1172,6 +1212,7 @@ func TestServerSwitchRetiresTheOldChain(t *testing.T) {
 // In the gap between the switch and the first bind there is nothing to send to, and the refusal
 // names the NEW endpoint — the async cold start's own wording, reached by a second route.
 func TestServerSwitchBlocksSendsUntilTheFirstBind(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{}
 	opts := testOpts
 	rb := &fakeRebind{}
@@ -1202,6 +1243,7 @@ func TestServerSwitchBlocksSendsUntilTheFirstBind(t *testing.T) {
 // new server that is not there says so on its FIRST failed beat, because nothing observed about the
 // old server is evidence about this one.
 func TestServerSwitchBelievesTheFirstFailureOnTheNewServer(t *testing.T) {
+	t.Parallel()
 	m, _ := seededServers(t, &fakeSwitch{})
 	m, _ = typeCommand(t, m, "/server remote")
 
@@ -1218,6 +1260,7 @@ func TestServerSwitchBelievesTheFirstFailureOnTheNewServer(t *testing.T) {
 // A refused switch moves NOTHING: the seam is validate-then-commit all the way down, so the note is
 // the whole of the answer.
 func TestServerSwitchReportsARefusedSwitch(t *testing.T) {
+	t.Parallel()
 	sw := &fakeSwitch{answer: func(string) (ServerSwitchResult, error) {
 		return ServerSwitchResult{}, errors.New("an exchange is in flight")
 	}}
@@ -1249,7 +1292,9 @@ func TestServerSwitchReportsARefusedSwitch(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
+	t.Parallel()
 	t.Run("already on it", func(t *testing.T) {
+		t.Parallel()
 		sw := &fakeSwitch{}
 		m, _ := seededServers(t, sw)
 
@@ -1269,6 +1314,7 @@ func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
 	})
 
 	t.Run("unknown name lists the configured ones", func(t *testing.T) {
+		t.Parallel()
 		sw := &fakeSwitch{}
 		m, _ := seededServers(t, sw)
 
@@ -1281,6 +1327,7 @@ func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
 	})
 
 	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
+		t.Parallel()
 		sw := &fakeSwitch{}
 		m, _ := seededServers(t, sw)
 
@@ -1293,6 +1340,7 @@ func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
 	})
 
 	t.Run("no servers configured", func(t *testing.T) {
+		t.Parallel()
 		// An empty list and an unwired seam are ONE situation for the human, so they are one line.
 		for _, tc := range []struct {
 			name string
@@ -1310,6 +1358,7 @@ func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
 			}()},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				m, _ := seededPicker(t, tc.opts)
 
 				m, _ = typeCommand(t, m, "/server")
@@ -1323,6 +1372,7 @@ func TestServerCommandAnswersWithoutSwitching(t *testing.T) {
 // /server is idle-only by the commandSpecs table: it ends in an engine mutation Agent.SwitchUpstream
 // allows only at a quiescent boundary, so a line typed mid-run earns the standing answer.
 func TestServerCommandIsIdleOnly(t *testing.T) {
+	t.Parallel()
 	if spec, ok := commandByName("server"); !ok || spec.whileRunning || !spec.takesArgs {
 		t.Fatalf("commandSpec = %+v, want an idle-only verb that reads its arguments", spec)
 	}
@@ -1370,6 +1420,7 @@ func seededLoad(t *testing.T, fake *fakeLauncher) Model {
 // each row carries the facts the choice is made on: the backend, the configured context window, the
 // port when the profile lives somewhere other than this session's server, and the running mark.
 func TestModelPickerListsTheLaunchProfiles(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	m := seededLoad(t, fake)
 
@@ -1410,6 +1461,7 @@ func TestModelPickerListsTheLaunchProfiles(t *testing.T) {
 // Names of different lengths do not stagger the facts beside them: every row starts its backend cell
 // at one shared display column, so the offering reads as a table rather than as a ragged list.
 func TestModelPickerAlignsTheProfileColumns(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	fake.profiles = []LaunchProfileChoice{
 		{Name: "a-much-longer-profile", Backend: "llamacpp", ContextWindow: 32768},
@@ -1437,6 +1489,7 @@ func TestModelPickerAlignsTheProfileColumns(t *testing.T) {
 // stripping anything, so an unstripped "\x1bc" (RIS, a full terminal reset) hidden in a profile's
 // address would be painted for real. Stripped, the rest of it stays as inert literal text.
 func TestModelPickerEscapeStripsTheProfilePort(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	fake.profiles = []LaunchProfileChoice{
 		{Name: "alpha", Backend: "llamacpp", Addr: "1.2.3.4:\x1bc9999", ContextWindow: 32768},
@@ -1464,6 +1517,7 @@ func TestModelPickerEscapeStripsTheProfilePort(t *testing.T) {
 // A profile running SOMEWHERE ELSE is exactly the switch this verb is for and keeps its row, port
 // marker and all.
 func TestModelPickerExcludesTheLoadedProfile(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	fake.profiles = []LaunchProfileChoice{
 		{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", ContextWindow: 32768, Running: true},
@@ -1486,6 +1540,7 @@ func TestModelPickerExcludesTheLoadedProfile(t *testing.T) {
 // evidence that a profile points there, and dropping a row on that guess would hide the very
 // profile the human came to load.
 func TestModelPickerExcludesNothingWithoutASessionAddress(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	fake.profiles = []LaunchProfileChoice{
 		{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", Running: true},
@@ -1503,6 +1558,7 @@ func TestModelPickerExcludesNothingWithoutASessionAddress(t *testing.T) {
 // The rows are re-read on EVERY open (ADR 0029 D4), so a profile added in the launcher's own TUI a
 // moment ago is offered here without restarting apogee.
 func TestModelPickerReadsTheProfilesFreshOnEveryOpen(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	m := seededLoad(t, fake)
 	m, _ = typeCommand(t, m, "/model")
@@ -1522,6 +1578,7 @@ func TestModelPickerReadsTheProfilesFreshOnEveryOpen(t *testing.T) {
 // ⏎ on a row hands off to the actuation latch: the overlay closes, the latch is taken for THAT
 // profile, and the blocking verb rides the returned Cmd (actuation.go owns everything after this).
 func TestModelPickerAcceptTakesTheLatch(t *testing.T) {
+	t.Parallel()
 	m := seededLoad(t, newLauncher())
 	m, _ = typeCommand(t, m, "/model")
 	m = step(t, m, keyDown())
@@ -1541,6 +1598,7 @@ func TestModelPickerAcceptTakesTheLatch(t *testing.T) {
 
 // Esc closes the picker and actuates nothing.
 func TestProfilePickerEscCloses(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	m := seededLoad(t, fake)
 	m, _ = typeCommand(t, m, "/model")
@@ -1559,7 +1617,9 @@ func TestProfilePickerEscCloses(t *testing.T) {
 }
 
 func TestModelCommandProfileArgumentForm(t *testing.T) {
+	t.Parallel()
 	t.Run("known name activates without an overlay", func(t *testing.T) {
+		t.Parallel()
 		m := seededLoad(t, newLauncher())
 
 		m, cmd := typeCommand(t, m, "/model beta")
@@ -1576,6 +1636,7 @@ func TestModelCommandProfileArgumentForm(t *testing.T) {
 	})
 
 	t.Run("a profile that is already loaded is still a name", func(t *testing.T) {
+		t.Parallel()
 		// The exclusion is about the OFFERING. A name the config plainly holds is never "unknown",
 		// and re-activating it is the launcher's own idempotent no-op.
 		fake := newLauncher()
@@ -1592,6 +1653,7 @@ func TestModelCommandProfileArgumentForm(t *testing.T) {
 	})
 
 	t.Run("unknown name lists the defined ones", func(t *testing.T) {
+		t.Parallel()
 		m := seededLoad(t, newLauncher())
 
 		m, _ = typeCommand(t, m, "/model nope")
@@ -1603,6 +1665,7 @@ func TestModelCommandProfileArgumentForm(t *testing.T) {
 	})
 
 	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
+		t.Parallel()
 		m := seededLoad(t, newLauncher())
 
 		m, _ = typeCommand(t, m, "/model a b")
@@ -1618,7 +1681,9 @@ func TestModelCommandProfileArgumentForm(t *testing.T) {
 // config the seam reads, the profiles that config was supposed to hold, and the profile list that
 // held nothing but what is already loaded.
 func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
+	t.Parallel()
 	t.Run("the config could not be read", func(t *testing.T) {
+		t.Parallel()
 		fake := newLauncher()
 		fake.listErr = errors.New("no launcher config at /home/x/.config/llama-launcher/config.yaml")
 		m := seededLoad(t, fake)
@@ -1629,6 +1694,7 @@ func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("no profiles defined", func(t *testing.T) {
+		t.Parallel()
 		m := seededLoad(t, &fakeLauncher{})
 
 		m, _ = typeCommand(t, m, "/model")
@@ -1637,6 +1703,7 @@ func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("the only profile is the one already loaded", func(t *testing.T) {
+		t.Parallel()
 		fake := newLauncher()
 		fake.profiles = []LaunchProfileChoice{
 			{Name: "alpha", Backend: "llamacpp", Addr: "localhost:1234", Running: true},
@@ -1649,6 +1716,7 @@ func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("the integration reported off is not a degrade at all", func(t *testing.T) {
+		t.Parallel()
 		// `llama-launcher: off`, or a key cleared mid-session (ADR 0037): the seams stay wired for
 		// the session and say so per call. That is the host having no launcher, which /model answers
 		// with the models the server itself advertises — exactly what an unwired seam does.
@@ -1665,6 +1733,7 @@ func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
 	})
 
 	t.Run("the argument form takes the same ladder", func(t *testing.T) {
+		t.Parallel()
 		// A degrade must answer BOTH forms: an argument reaching the accept path past a config that
 		// cannot be read would actuate nothing and say nothing.
 		fake := newLauncher()
@@ -1684,6 +1753,7 @@ func TestModelCommandLauncherDegradesWithAnHonestNote(t *testing.T) {
 // posture: bringing a server up is the one useful act while the current one is down, and that is
 // exactly what this verb does now.
 func TestModelPickerOffersProfilesWhileOffline(t *testing.T) {
+	t.Parallel()
 	m := seededLoad(t, newLauncher())
 	for range offlineFailureThreshold {
 		m = foldBeatMsg(t, m, downBeat("dial tcp: refused"))
@@ -1703,6 +1773,7 @@ func TestModelPickerOffersProfilesWhileOffline(t *testing.T) {
 // /model is idle-only by the commandSpecs table, and that covers the launcher offering too: it ends
 // in a blocking launcher verb that changes the server the running Exchange is talking to.
 func TestModelCommandIsIdleOnlyWithTheLauncher(t *testing.T) {
+	t.Parallel()
 	fake := newLauncher()
 	opts := launcherOpts(fake)
 	m := newTestModelEng(t, &fakeEngine{}, opts)
@@ -1727,6 +1798,7 @@ func TestModelCommandIsIdleOnlyWithTheLauncher(t *testing.T) {
 // /load is not a verb any more: the launcher's profiles are /model's offering, so the old word earns
 // the sole-token typo guard's refusal rather than quietly doing something.
 func TestLoadIsNoLongerAVerb(t *testing.T) {
+	t.Parallel()
 	if spec, ok := commandByName("load"); ok {
 		t.Errorf("commandSpecs still carries %+v; /model is the launcher's verb now", spec)
 	}
@@ -1754,6 +1826,7 @@ func TestLoadIsNoLongerAVerb(t *testing.T) {
 // space: every cell participates, marker cells included, and a space is a filter character like any
 // other because the overlay is modal and space is no verb inside it.
 func TestPickerFilterMatchesTheJoinedRowCells(t *testing.T) {
+	t.Parallel()
 	row := popupRow{"Qwen3-Coder", "— 32k", "· running"}
 	tests := []struct {
 		name   string
@@ -1770,6 +1843,7 @@ func TestPickerFilterMatchesTheJoinedRowCells(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := rowMatchesFilter(row, tc.filter); got != tc.want {
 				t.Errorf("rowMatchesFilter(%v, %q) = %v, want %v", row, tc.filter, got, tc.want)
 			}
@@ -1959,8 +2033,10 @@ func pickerKindCases() []pickerKindCase {
 // the count is their count, and ⏎ takes the offering entry the highlighted row stands for. Every kind
 // is checked, because nothing is opt-out of the filter.
 func TestPickerFilteredViewAgreesOnRowsCountAndAccept(t *testing.T) {
+	t.Parallel()
 	for _, tc := range pickerKindCases() {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			m, assertAccept := tc.open(t)
 			if !m.picker.open {
 				t.Fatal("precondition: the picker is not open")
@@ -1992,6 +2068,7 @@ func TestPickerFilteredViewAgreesOnRowsCountAndAccept(t *testing.T) {
 // what keeps every unfiltered behaviour (the rows, the count, the accept target) exactly what it was
 // before a filter existed.
 func TestPickerEmptyFilterIsTheIdentityView(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	rb.calls = nil
@@ -2020,6 +2097,7 @@ func TestPickerEmptyFilterIsTheIdentityView(t *testing.T) {
 // way a shorter offering does — the same posture a beat carrying fewer models takes — so ⏎ can still
 // only take a row the pane painted.
 func TestPickerFilterNarrowingClampsTheSelection(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	rb.calls = nil
@@ -2044,6 +2122,7 @@ func TestPickerFilterNarrowingClampsTheSelection(t *testing.T) {
 // A filter matching nothing keeps the pane open with no rows and no highlight, and ⏎ takes nothing —
 // a visible filter over an empty list already says why, and backspace is the way back.
 func TestPickerFilterWithNoMatchesTakesNothing(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	rb.calls = nil
@@ -2084,6 +2163,7 @@ func typeFilter(t *testing.T, m Model, text string) Model {
 // activation key and nothing to submit. Backspace is the undo, one rune at a time, and on an empty
 // filter it is a no-op rather than a second way to close.
 func TestPickerTypingNarrowsTheRowsLive(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	m, _ = typeCommand(t, m, "/model")
@@ -2132,6 +2212,7 @@ func TestPickerTypingNarrowsTheRowsLive(t *testing.T) {
 // regression the one filtered view exists for, driven here through the keys a human actually presses:
 // row 0 of the pruned list is row 1 of the advertised offering.
 func TestPickerEnterTakesTheTypedFilterRow(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	rb.calls = nil
@@ -2151,6 +2232,7 @@ func TestPickerEnterTakesTheTypedFilterRow(t *testing.T) {
 // esc closes outright with a filter set: one key, one meaning, so the legend's "esc close" is never
 // conditionally wrong. There is no clear-the-filter-first stage — backspace is that.
 func TestPickerEscClosesMidFilter(t *testing.T) {
+	t.Parallel()
 	m, rb := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	rb.calls = nil
@@ -2173,6 +2255,7 @@ func TestPickerEscClosesMidFilter(t *testing.T) {
 // The movement chords still MOVE: ctrl+p/ctrl+n are the picker's own verbs and carry no printable
 // text, so they can never end up in the filter. Every other chord stays swallowed by the modal.
 func TestPickerChordsMoveOrAreSwallowedRatherThanTyped(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	m, _ = typeCommand(t, m, "/model")
@@ -2201,6 +2284,7 @@ func TestPickerChordsMoveOrAreSwallowedRatherThanTyped(t *testing.T) {
 // The filter is one uniform mechanism rather than a /model feature: typing into /schedule's cycle
 // popup prunes its rows the same way, and ⏎ answers with the row the pane was left showing.
 func TestPickerTypingFiltersTheCyclePicker(t *testing.T) {
+	t.Parallel()
 	m := scheduleModel(t, &fakeScheduler{}, "")
 	m, _ = typeCommand(t, m, "/schedule tidy the logs")
 	if got := m.pickerCount(); got != len(scheduleCycles) {
@@ -2223,6 +2307,7 @@ func TestPickerTypingFiltersTheCyclePicker(t *testing.T) {
 // CYCLES, so carrying "4h" into a list of modes would open the second question over zero rows, a
 // pane that answers nothing and reads as broken.
 func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
+	t.Parallel()
 	sch := &fakeScheduler{}
 	m := scheduleModel(t, sch, "")
 	m, _ = typeCommand(t, m, "/schedule tidy the logs")
@@ -2249,6 +2334,7 @@ func TestPickerCycleAcceptClearsTheFilter(t *testing.T) {
 // Every hint variant LEADS with the filter segment: ↑/↓ and esc are legible from any list, but a
 // filter with no activation key is the one thing a legend has to say out loud.
 func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
+	t.Parallel()
 	kinds := []pickerKind{
 		pickerModel, pickerServer, pickerLoad, pickerCycle, pickerScheduleMode, pickerScheduleStop,
 		pickerEffort, pickerMode, pickerFork,
@@ -2265,6 +2351,7 @@ func TestPickerHintsLeadWithTypeToFilter(t *testing.T) {
 // pickerOfferingRows, acceptPicker) carry no missing-key branch on the strength of this test, so a
 // kind added to the enum without a row would fail here rather than as a nil call on the first ⏎.
 func TestEveryPickerKindHasAnOffering(t *testing.T) {
+	t.Parallel()
 	for kind := pickerModel; kind <= pickerFork; kind++ {
 		offering, ok := pickerOfferings[kind]
 		if !ok {
@@ -2321,6 +2408,7 @@ func pickerFilterRow(lines []string) int {
 // unfiltered pane spends nothing on any of it — no line, no spacers — so the rows sit exactly where
 // they always did.
 func TestPickerPaintsTheFilterLineWithBreathingRoom(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	m, _ = typeCommand(t, m, "/model")
@@ -2367,6 +2455,7 @@ func TestPickerPaintsTheFilterLineWithBreathingRoom(t *testing.T) {
 // filter line, no rows and no highlight. The visible filter over an empty list is the whole message —
 // there is no "no matches" prose row, and backspace is the way back.
 func TestPickerZeroMatchesPaintsTheFilterOverNoRows(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 	m = foldBeatMsg(t, m, threeModelBeat())
 	m, _ = typeCommand(t, m, "/model")
@@ -2418,6 +2507,7 @@ func manyModelBeat() heartbeat.Beat {
 // stopped explaining itself. The pane still fits the rows the frame granted it — the two blank lines
 // are budgeted, not merely drawn.
 func TestPickerShortWindowGivesUpRowsBeforeTheFilterLine(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 	m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 20})
 	m = foldBeatMsg(t, m, manyModelBeat())
@@ -2473,6 +2563,7 @@ func longOfferingBeat(n int) heartbeat.Beat {
 // an offering longer than the taste fills its window by definition — so it would take a ninth row and
 // drop the blank exactly where the pane could most afford it. maxPickerRows rows, both spacers.
 func TestPickerRoomyWindowKeepsTheRowTasteAndBothSpacers(t *testing.T) {
+	t.Parallel()
 	m, _ := seededPicker(t, testOpts)
 	m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 50})
 	m = foldBeatMsg(t, m, longOfferingBeat(40))
@@ -2549,6 +2640,7 @@ func TestEffortPickerRowsFollowTheReportedVocabulary(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
 			var got []string
 			for _, row := range effortRows(c.support) {
 				got = append(got, row[0])
@@ -2564,6 +2656,7 @@ func TestEffortPickerRowsFollowTheReportedVocabulary(t *testing.T) {
 // it is asking about, and takes the "⏎ choose" legend: nothing it accepts re-points the session at
 // another model or server, which is the only thing "switch" may promise.
 func TestEffortPickerPaneNamesTheDialAndChooses(t *testing.T) {
+	t.Parallel()
 	m := newTestModel(t)
 	m.hb.effort = provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs}
 	m.picker = picker{open: true, kind: pickerEffort}
@@ -2653,6 +2746,7 @@ func seededSubAgents(t *testing.T, host *fakeDelegationHost) Model {
 // run on. One row is no entry: `auto`, LAST, the opt-out that clears the routing — an action, which
 // is why it still costs the pane no third cell.
 func TestSubAgentsServerPickerListsTheConfiguredTargets(t *testing.T) {
+	t.Parallel()
 	host := &fakeDelegationHost{}
 	m := seededSubAgents(t, host)
 
@@ -2707,6 +2801,7 @@ func TestSubAgentsServerPickerListsTheConfiguredTargets(t *testing.T) {
 // It rides the endpoint's own cell, so an entry nobody described draws exactly the row it drew
 // before descriptions existed and the pane keeps its two columns either way.
 func TestSubAgentsServerPickerShowsTheEntryDescription(t *testing.T) {
+	t.Parallel()
 	host := &fakeDelegationHost{targets: []ServerChoice{
 		{Name: "grunt", Endpoint: "http://grunt:2222", Description: "fast local 4B — search and edits"},
 		{Name: "plain", Endpoint: "http://plain:3333"},
@@ -2735,6 +2830,7 @@ func TestSubAgentsServerPickerShowsTheEntryDescription(t *testing.T) {
 // the "· current" mark is aligned in. The projection is shared, so this is the pin that the rendering
 // decision stayed where rows are composed.
 func TestServerPickerRowsIgnoreTheEntryDescription(t *testing.T) {
+	t.Parallel()
 	described := []ServerChoice{
 		{Name: "test-host", Endpoint: "http://localhost:1234", Description: "the big box upstairs"},
 		{Name: "remote", Endpoint: "http://remote:8080", Description: "the box in the cupboard"},
@@ -2764,6 +2860,7 @@ func TestServerPickerRowsIgnoreTheEntryDescription(t *testing.T) {
 // the recording hung off it — never the routing, which the host's own notice says once the newly
 // named server is observed.
 func TestSubAgentsServerAcceptRetargetsAndRecords(t *testing.T) {
+	t.Parallel()
 	host := &fakeDelegationHost{saved: true}
 	m := seededSubAgents(t, host)
 
@@ -2788,6 +2885,7 @@ func TestSubAgentsServerAcceptRetargetsAndRecords(t *testing.T) {
 
 // esc closes the overlay and changes nothing at all — neither the routing nor the file.
 func TestSubAgentsServerPickerEscCloses(t *testing.T) {
+	t.Parallel()
 	host := &fakeDelegationHost{saved: true}
 	m := seededSubAgents(t, host)
 
@@ -2808,6 +2906,7 @@ func TestSubAgentsServerPickerEscCloses(t *testing.T) {
 // The argument form skips the picker entirely and takes the named entry — the "/server <name>" idiom,
 // resolved against the very list the picker would have shown.
 func TestSubAgentsServerArgumentFormSkipsThePicker(t *testing.T) {
+	t.Parallel()
 	host := &fakeDelegationHost{saved: true}
 	m := seededSubAgents(t, host)
 
@@ -2838,7 +2937,9 @@ const autoRowNote = "sub-agents server: auto · this session's own server · sub
 // EMPTY name and records that same emptiness, which clears the `sub-agents-server:` key so the
 // opt-out survives a restart. Both forms of the verb reach it, and both say the same line.
 func TestSubAgentsServerAutoRowClearsTheRouting(t *testing.T) {
+	t.Parallel()
 	t.Run("the picker's last row", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{saved: true}
 		m := seededSubAgents(t, host)
 
@@ -2863,6 +2964,7 @@ func TestSubAgentsServerAutoRowClearsTheRouting(t *testing.T) {
 	})
 
 	t.Run("the argument form", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{saved: true}
 		m := seededSubAgents(t, host)
 
@@ -2885,6 +2987,7 @@ func TestSubAgentsServerAutoRowClearsTheRouting(t *testing.T) {
 	// A host that wrote nothing claims nothing, the named pick's own posture: the clause states a
 	// write that happened, and "cleared" is a write like "saved" is.
 	t.Run("a recording that did not happen claims no clause", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{} // saved false, no error
 		m := seededSubAgents(t, host)
 
@@ -2901,7 +3004,9 @@ func TestSubAgentsServerAutoRowClearsTheRouting(t *testing.T) {
 // file's, and a name the file carries must stay reachable by that name — the invariant that the two
 // forms never disagree about what exists cuts this way too.
 func TestSubAgentsServerConfiguredAutoEntryWinsTheName(t *testing.T) {
+	t.Parallel()
 	t.Run("the argument form resolves the entry", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{targets: autoNamedServers, saved: true}
 		m := seededSubAgents(t, host)
 
@@ -2917,6 +3022,7 @@ func TestSubAgentsServerConfiguredAutoEntryWinsTheName(t *testing.T) {
 	})
 
 	t.Run("the picker offers the entry and the opt-out both", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{targets: autoNamedServers, saved: true}
 		m := seededSubAgents(t, host)
 
@@ -2939,6 +3045,7 @@ func TestSubAgentsServerConfiguredAutoEntryWinsTheName(t *testing.T) {
 // The accept re-reads the targets, so a `servers:` block emptied under the OPEN overlay costs the
 // accept and nothing more: an index past the offering's last row names no entry and moves nothing.
 func TestSubAgentsServerAcceptSurvivesTargetsThatVanished(t *testing.T) {
+	t.Parallel()
 	host := &fakeDelegationHost{saved: true}
 	m := seededSubAgents(t, host)
 
@@ -2963,7 +3070,9 @@ func TestSubAgentsServerAcceptSurvivesTargetsThatVanished(t *testing.T) {
 // The answers that are notes: a name no entry carries, surplus arguments, and nothing to delegate to
 // (an empty list and an unwired host being one situation for the human).
 func TestSubAgentsServerAnswersWithoutRetargeting(t *testing.T) {
+	t.Parallel()
 	t.Run("unknown name lists the configured ones", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{}
 		m := seededSubAgents(t, host)
 
@@ -2976,6 +3085,7 @@ func TestSubAgentsServerAnswersWithoutRetargeting(t *testing.T) {
 	})
 
 	t.Run("surplus arguments earn the usage line", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{}
 		m := seededSubAgents(t, host)
 
@@ -2988,6 +3098,7 @@ func TestSubAgentsServerAnswersWithoutRetargeting(t *testing.T) {
 	})
 
 	t.Run("nothing to delegate to", func(t *testing.T) {
+		t.Parallel()
 		for _, tc := range []struct {
 			name string
 			host *fakeDelegationHost
@@ -2996,6 +3107,7 @@ func TestSubAgentsServerAnswersWithoutRetargeting(t *testing.T) {
 			{name: "unwired host", host: nil},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
 				var m Model
 				if tc.host == nil {
 					opts := testOpts
@@ -3015,6 +3127,7 @@ func TestSubAgentsServerAnswersWithoutRetargeting(t *testing.T) {
 
 // A refused retarget is the whole of the answer: nothing moved, so nothing is recorded either.
 func TestSubAgentsServerRefusedRetargetRecordsNothing(t *testing.T) {
+	t.Parallel()
 	host := &fakeDelegationHost{saved: true, retargetErr: errors.New("no servers entry named \"remote\"")}
 	m := seededSubAgents(t, host)
 
@@ -3032,7 +3145,9 @@ func TestSubAgentsServerRefusedRetargetRecordsNothing(t *testing.T) {
 // A recording that did not happen claims nothing, and one that FAILED warns while the retarget
 // stands: the routing already moved, and the key is best-effort persistence of that fact.
 func TestSubAgentsServerRecordingIsBestEffort(t *testing.T) {
+	t.Parallel()
 	t.Run("skipped silently", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{} // saved false, no error: the binary's silent skip
 		m := seededSubAgents(t, host)
 
@@ -3044,6 +3159,7 @@ func TestSubAgentsServerRecordingIsBestEffort(t *testing.T) {
 	})
 
 	t.Run("a failed write warns and the retarget stands", func(t *testing.T) {
+		t.Parallel()
 		host := &fakeDelegationHost{recordErr: errors.New("permission denied")}
 		m := seededSubAgents(t, host)
 
@@ -3063,6 +3179,7 @@ func TestSubAgentsServerRecordingIsBestEffort(t *testing.T) {
 // where the NEXT delegation is spawned and reaches no sub-agent already in flight. It is also not on
 // the actuation latch's list, so a launcher verb in flight does not block it either.
 func TestSubAgentsServerRunsWhileTheWorkerWorks(t *testing.T) {
+	t.Parallel()
 	spec, ok := commandByName("sub-agents-server")
 	if !ok || !spec.whileRunning || !spec.takesArgs || !spec.runsBareAtAccept {
 		t.Fatalf("commandSpec = %+v, want an argument-taking, bare-running verb that is safe mid-run", spec)
@@ -3123,6 +3240,7 @@ func openModePicker(t *testing.T, start domain.Mode) (Model, *fakeEngine) {
 // the footer paints for that rung and followed by what the rung permits, under the choosing legend:
 // nothing here re-points the session at another model or server, which is all "switch" may promise.
 func TestPickerModeOffersTheLadderInOrder(t *testing.T) {
+	t.Parallel()
 	m, _ := openModePicker(t, domain.ModePlan)
 
 	rows := m.pickerRows()
@@ -3155,6 +3273,7 @@ func TestPickerModeOffersTheLadderInOrder(t *testing.T) {
 // loosen, 2026-09-14), so a gloss calling Plan write-free or Ask-Before all-gating would misread the
 // ladder to the human choosing a rung. The strings are pinned whole.
 func TestModeGlossNamesTheScratchDirOnTheLowerRungs(t *testing.T) {
+	t.Parallel()
 	for mode, want := range map[domain.Mode]string{
 		domain.ModePlan:      "reads and reports; writes only its scratch dir",
 		domain.ModeAskBefore: "asks first for every edit outside its scratch dir and every command",
@@ -3168,6 +3287,7 @@ func TestModeGlossNamesTheScratchDirOnTheLowerRungs(t *testing.T) {
 // ⏎ on a rung does exactly what Shift+Tab onto that rung does — the engine seam first, then
 // opts.Mode, which is what the footer reads — and closes the overlay behind it.
 func TestPickerModeAcceptMovesTheRungLikeShiftTab(t *testing.T) {
+	t.Parallel()
 	m, eng := openModePicker(t, domain.ModePlan)
 
 	m = step(t, m, keyDown()) // plan → ask before
@@ -3192,6 +3312,7 @@ func TestPickerModeAcceptMovesTheRungLikeShiftTab(t *testing.T) {
 // this is the session's own ladder, which Shift+Tab already reaches unconditionally, so refusing it
 // in one route only would be a new restriction.
 func TestPickerModeAutoRungActsOnEveryHost(t *testing.T) {
+	t.Parallel()
 	m, eng := openModePicker(t, domain.ModePlan)
 	m.opts.ScheduleAutoBlocked = "this host cannot fence the filesystem"
 
@@ -3214,6 +3335,7 @@ func TestPickerModeAutoRungActsOnEveryHost(t *testing.T) {
 // esc is a "not now": the overlay closes and neither the engine's rung nor the one the footer reads
 // has moved, even from a highlight the human walked onto.
 func TestPickerModeEscapeMovesNothing(t *testing.T) {
+	t.Parallel()
 	m, eng := openModePicker(t, domain.ModeAskBefore)
 
 	m = step(t, m, keyDown())
