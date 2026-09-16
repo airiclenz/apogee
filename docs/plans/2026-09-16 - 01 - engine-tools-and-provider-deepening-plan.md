@@ -104,7 +104,11 @@ touches. If the check fails, stop the run.
 
 **Commit:** none (no-op item).
 
-## 2. One collector from `provider.Delta` to reply; a transient fault re-streams the summary
+## 2. One collector from `provider.Delta` to reply; a transient fault re-streams the summary — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `collectCompletion` takes the `provider.Request` and calls `a.upstream.Stream` itself (a method on `*Agent`, for the stripper) rather than the plan's `deltas iter.Seq[provider.Delta]` — the acceptance grep (`.Stream(` → 0 in loop.go/compact.go) requires the stream call to live in collect.go; the table test scripts the Deltas through a fake Responder instead.
+NOTES (2026-09-16): `joinThinking` moved from loop.go to collect.go with the strip it now owns; the `reply` type is replaced by `completion` (the plan's name), and `assembleResponse` reads the already-stripped content instead of stripping again.
+NOTES (2026-09-16): consequential edit — internal/agent/doc.go: made necessary by the new collect.go (the package map's structural test `TestDocMapNamesEveryFile` names every file).
 
 **What.** New `internal/agent/collect.go`: `collectCompletion(ctx, deltas iter.Seq[provider.Delta],
 observe func(provider.Delta)) completion` returning `{content, thinking, toolCalls, finish, usage,

@@ -513,9 +513,11 @@ const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server
 // request rather than the conversation's fill, so a reader of the live gauge or the tokens/sec
 // clock skips the flagged event (the gauge re-measures on the next real Turn's usage) and a reader
 // of the cumulative totals accepts it — the contract on domain.UsageEvent. It reuses the loop's
-// request projection (toProviderRequest) and collects the streamed content into one string; a
-// cancelled ctx or a terminal stream fault surfaces as an error, so the reducer leaves the
-// conversation untouched and — having no completed call to account for — emits nothing.
+// request projection (toProviderRequest) and the loop's Delta collector (collectCompletion, with
+// no observer); a cancelled ctx or a terminal stream fault surfaces as an error, so the reducer
+// leaves the conversation untouched and — having no completed call to account for — emits nothing.
+// One fault is re-streamed before it surfaces: a TRANSIENT one (Delta.Retryable), re-sent once
+// after the Turn's own hold-off, so a momentary 502 during a summary no longer fails the fold.
 //
 // The summary call asks for NO reasoning, whatever the session's effort resolves to. Compaction is
 // maintenance, not a Turn: the summarizer does a mechanical job under a bounded output cap
@@ -555,49 +557,49 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	// `effort: off` in its profile counts as having asked even on a dialect the override skips.
 	askedForNoReasoning := preq.ThinkingEffort == provider.EffortOff
 
-	var content, upstreamThinking strings.Builder
-	var failed bool
-	var errMsg string
-	var finish domain.FinishReason
-	var usage *provider.Usage
-	var served string
-	for delta := range c.a.upstream.Stream(ctx, preq) {
-		switch delta.Kind {
-		case provider.DeltaContent:
-			content.WriteString(delta.Content)
-		case provider.DeltaThinking:
-			upstreamThinking.WriteString(delta.Thinking)
-		case provider.DeltaDone:
-			usage = delta.Usage // nil when the server omits its accounting, exactly as in streamResponse
-			served = delta.Model
-			finish = domain.FinishReason(delta.FinishReason)
-		case provider.DeltaError, provider.DeltaContextOverflow:
-			failed = true
-			errMsg = delta.Err
+	// One summary stream, re-streamed ONCE on a TRANSIENT fault (Delta.Retryable — an in-band 502
+	// an aggregator wrapped in an HTTP 200, a body cut mid-stream), after the same hold-off the Turn's
+	// re-stream waits (holdOffRestream). Silently: nothing streamed into the transcript, so there is
+	// no StreamResetEvent to emit, and a fold that recovers is a fold like any other. Before this
+	// re-stream a momentary 502 during a summary faulted the fold and latched compactFailed for the
+	// rest of the Exchange (foldFaulted) — a stand-down meant for a history that cannot shrink, not
+	// for a blip. The second fault, of any class, surfaces as every fault always did.
+	var summary completion
+	for restreamed := false; ; {
+		summary = c.a.collectCompletion(ctx, preq, nil)
+		if ctx.Err() != nil {
+			return "", ctx.Err() // a cancel masquerades as a stream error; ctx wins (as in respondAndReview)
 		}
+		if !summary.failed {
+			break
+		}
+		if summary.retryable && !restreamed {
+			restreamed = true
+			if holdOffRestream(ctx) {
+				continue
+			}
+			// The wait ended on a cancel, not the clock: route it as the cancel it is, never as the
+			// fault it was waiting to retry.
+			return "", ctx.Err()
+		}
+		return "", errors.New(summary.errMsg)
 	}
-	if ctx.Err() != nil {
-		return "", ctx.Err() // a cancel masquerades as a stream error; ctx wins (as in respondAndReview)
-	}
-	if failed {
-		return "", errors.New(errMsg)
-	}
+
 	// Account for the completed summary call on the OWNING Agent's tally — the same tally its Turns
 	// feed, so /usage stays accurate straight after a fold instead of silently losing the tokens the
 	// fold spent. Emitting only here (past the cancel and fault exits) keeps the tally honest about
 	// what actually completed, and unlike streamResponse this call does NOT calibrate the chars→token
 	// estimator: the summarizer prompt is a rendered transcript, not the conversation the estimator
 	// models.
-	// The summary is assembled the way a Turn's reply is (assembleResponse): the inline thinking a
-	// delimited profile emits is lifted out of the content, so no <think> span can ride into the
+	// The summary arrives assembled the way a Turn's reply is (collectCompletion): the inline thinking
+	// a delimited profile emits is lifted out of the content, so no <think> span can ride into the
 	// summary message and from there back into the folded conversation, and what is lifted joins the
 	// Upstream-split channel for the spend the fault below reports.
-	visible, inlineThinking := c.a.stripper.Strip(content.String())
-	thinking := joinThinking(upstreamThinking.String(), inlineThinking)
+	visible, thinking := summary.content, summary.thinking
 
-	if usage != nil {
+	if usage := summary.usage; usage != nil {
 		event := c.a.usage.record(
-			c.a.base(c.a.turns.index), c.a.cfg.Model, served, c.a.cfg.Context.MaxContextTokens,
+			c.a.base(c.a.turns.index), c.a.cfg.Model, summary.served, c.a.cfg.Context.MaxContextTokens,
 			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedPromptTokens,
 		)
 		event.Maintenance = true
@@ -611,7 +613,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	// still returns "" and keeps that error verbatim. The reasoning spend is an estimate through the
 	// chars→token estimator (the stream carries the text, never the server's count of it), hence
 	// "roughly" — as in emptyReplyFault.
-	if strings.TrimSpace(visible) == "" && finish == domain.FinishLength {
+	if strings.TrimSpace(visible) == "" && summary.finish == domain.FinishLength {
 		spent := ""
 		if thinking != "" {
 			spent = fmt.Sprintf(", after roughly %d tokens of reasoning", c.a.tokens.EstimateTokens(len(thinking)))
@@ -627,7 +629,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	// see the compactMaxTokens comment for why keeping beats discarding here and how that squares
 	// with ADR 0046. The marker rides inside the summary message, so context.Compact folds exactly
 	// as it does for a complete summary.
-	if finish == domain.FinishLength {
+	if summary.finish == domain.FinishLength {
 		return visible + "\n\n" + summaryTruncatedMarker, nil
 	}
 	return visible, nil

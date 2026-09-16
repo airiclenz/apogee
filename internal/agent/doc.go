@@ -32,7 +32,10 @@
 //
 // The loop. loop.go is the Step body: arming and building the request, the standing system
 // content, file and skill reference resolution, the streamed upstream call, response assembly
-// and tool-call parsing, and the post-response retry cap. turn.go is turnLifecycle, the
+// and tool-call parsing, and the post-response retry cap. collect.go is the one consumer of the
+// provider's Delta stream — the completion a Turn's reply and the summarizer's call both read,
+// with the inline thinking already lifted out — and the observer hook the Turn streams live
+// through. turn.go is turnLifecycle, the
 // Turn/Exchange state between quiescent boundaries (ADR 0007) and the exits that mutate the
 // conversation. floorguards.go is what the Floor guards keep outside internal/floor
 // (ADR 0071): the reserved guard ids and the config keys and action labels a guard is known

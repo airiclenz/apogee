@@ -629,18 +629,19 @@ func (a *Agent) emptyReplyFault(resp *domain.Response) string {
 	return fmt.Sprintf(cappedReplyErrFmt, a.maxOutputTokens(), spent)
 }
 
-// assembleResponse applies the model profile at the parse seam (D5/D6). It strips the reply's
-// inline thinking/harmony channel out of the visible content, drops the native calls the loop
-// could not dispatch (dispatchableCalls), and — only when the structured native path produced
-// no usable calls — recovers a text-format tool call from that stripped content,
-// removing the call's markup from the committed text and assigning it a deterministic
-// Turn-derived ID (so snapshot/resume and tests stay stable, unlike the oracle's wall-clock ID).
-// The model's reasoning (the Upstream-split channel — `reasoning_content` or its `reasoning`
-// alias — joined with any stripped inline channel) rides on the Response so assistantMessage can preserve it in history. For a native,
-// no-inline-thinking profile the stripper and text parser are no-ops, so visible == reply.content
-// and calls == nativeCalls — byte-identical to the pre-profile path.
-func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep reply, nativeCalls []domain.ToolCall) *domain.Response {
-	visible, reasoning := a.stripper.Strip(rep.content)
+// assembleResponse applies the model profile's parse seam to the collected completion (D5/D6).
+// The collector has already stripped the reply's inline thinking/harmony channel out of the
+// visible content (collectCompletion); this drops the native calls the loop could not dispatch
+// (dispatchableCalls), and — only when the structured native path produced no usable calls —
+// recovers a text-format tool call from that stripped content, removing the call's markup from the
+// committed text and assigning it a deterministic Turn-derived ID (so snapshot/resume and tests
+// stay stable, unlike the oracle's wall-clock ID). The model's reasoning (the Upstream-split
+// channel — `reasoning_content` or its `reasoning` alias — joined with any stripped inline
+// channel) rides on the Response so assistantMessage can preserve it in history. For a native,
+// no-inline-thinking profile the stripper and text parser are no-ops, so visible == the wire
+// content and calls == nativeCalls — byte-identical to the pre-profile path.
+func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep completion, nativeCalls []domain.ToolCall) *domain.Response {
+	visible := rep.content
 
 	calls := a.dispatchableCalls(turn, nativeCalls)
 	if len(calls) == 0 {
@@ -654,7 +655,7 @@ func (a *Agent) assembleResponse(turn int, view domain.LoopView, rep reply, nati
 		}
 	}
 
-	return domain.NewResponse(visible, joinThinking(rep.thinking, reasoning), calls, rep.finish, view)
+	return domain.NewResponse(visible, rep.thinking, calls, rep.finish, view)
 }
 
 // dispatchableCalls drops the native tool calls the loop cannot run — an entry missing the tool
@@ -693,52 +694,25 @@ func (a *Agent) dispatchableCalls(turn int, calls []domain.ToolCall) []domain.To
 	return kept
 }
 
-// joinThinking combines the Upstream-split reasoning (reply.thinking, the `reasoning_content`
-// field or its `reasoning` alias) with the reasoning the stripper lifted out of the inline content, Upstream first and
-// blank-line joined. Either being empty returns the other unchanged, so a native reply with no
-// inline channel returns reply.thinking untouched (the byte-identical anchor).
-func joinThinking(upstream, inline string) string {
-	switch {
-	case upstream == "":
-		return inline
-	case inline == "":
-		return upstream
-	default:
-		return upstream + "\n\n" + inline
-	}
-}
-
-// reply is the assembled result of consuming one streamed completion.
-type reply struct {
-	content   string
-	thinking  string
-	toolCalls []provider.ToolCall
-	finish    domain.FinishReason
-	failed    bool   // a terminal DeltaError / DeltaContextOverflow arrived
-	overflow  bool   // that terminal fault was DeltaContextOverflow: the PROMPT did not fit, so folding the history can make the same request succeed
-	retryable bool   // that terminal fault was TRANSIENT (429 / 5xx / provider_unavailable in-band, or a mid-stream EOF / net timeout): re-sending the same request can succeed
-	errMsg    string // the terminal fault message when failed
-}
-
-// streamResponse consumes the provider's Delta stream, emitting a TokenEvent for the newly-
-// revealed VISIBLE content as it arrives (the live half of §6 #6) and accumulating text,
-// reasoning, and the fully-joined tool calls. While the accumulated content ends inside an
-// unclosed inline reasoning span (stripper.IsMidChannel), token emission is HELD so a model that
-// inlines thinking/harmony channels never leaks that markup onto a live stream (item 3); the
-// channel's visible text is revealed once its span closes. A native / no-inline-thinking profile's
-// stripper is never mid-channel and returns the content untouched, so every content delta emits
-// verbatim and unbuffered — byte-identical to the pre-profile loop. The SSE body is drained to its
-// terminal Delta and closed before this returns — so Approval, consulted afterward in
-// dispatchTools, never blocks an open Upstream connection. A cancellation surfaces as a terminal
-// DeltaError; the caller distinguishes it from a real fault by checking ctx.Err(). A prompt the
-// model's context window cannot hold surfaces as a terminal DeltaContextOverflow, which the reply
-// records as failed AND overflow so the caller can tell a recoverable request from a generic fault.
-func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) reply {
-	var out reply
-	var content, thinking strings.Builder
-	emitted := 0  // bytes of stripped visible content already sent as TokenEvents this stream
-	reasoned := 0 // bytes of stripped inline reasoning already sent as ReasoningEvents this stream
-	for delta := range a.upstream.Stream(ctx, a.toProviderRequest(req)) {
+// streamResponse is the Turn's Upstream call: collectCompletion with the observer that makes the
+// stream LIVE. Each content Delta emits a TokenEvent for the newly-revealed VISIBLE content as it
+// arrives (the live half of §6 #6); while the accumulated content ends inside an unclosed inline
+// reasoning span (stripper.IsMidChannel), token emission is HELD so a model that inlines
+// thinking/harmony channels never leaks that markup onto a live stream (item 3), and the
+// channel's visible text is revealed once its span closes. A native / no-inline-thinking
+// profile's stripper is never mid-channel and returns the content untouched, so every content
+// delta emits verbatim and unbuffered — byte-identical to the pre-profile loop. Each native
+// reasoning Delta emits a ReasoningEvent verbatim (the server already split the channel; the
+// provider never yields an empty Thinking chunk), and the terminal Done calibrates the token
+// estimator and emits the Turn's UsageEvent right there — observation only: the text still
+// reaches history through the completion the collector returns. What the collector records —
+// the drained body, the cancel masquerade the caller resolves with ctx.Err(), the overflow and
+// retryable bits — is its doc's.
+func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) completion {
+	var content strings.Builder // the observer's own accumulation: the visible/reasoning split is prefix-stable over it
+	emitted := 0                // bytes of stripped visible content already sent as TokenEvents this stream
+	reasoned := 0               // bytes of stripped inline reasoning already sent as ReasoningEvents this stream
+	observe := func(delta provider.Delta) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
@@ -746,18 +720,8 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 			emitted = a.emitVisibleDelta(turn, acc, emitted)
 			reasoned = a.emitReasoningDelta(turn, acc, reasoned)
 		case provider.DeltaThinking:
-			thinking.WriteString(delta.Thinking)
-			// The native reasoning channel is already separated by the server, so every chunk
-			// is reasoning verbatim — no strip, no prefix bookkeeping (the provider never
-			// yields an empty Thinking chunk). Observation only: the channel still reaches
-			// history through reply.thinking, exactly as before.
 			a.cfg.Events.Emit(domain.ReasoningEvent{EventBase: a.base(turn), Text: delta.Thinking})
-		case provider.DeltaToolCall:
-			if delta.ToolCall != nil {
-				out.toolCalls = append(out.toolCalls, *delta.ToolCall)
-			}
 		case provider.DeltaDone:
-			out.finish = domain.FinishReason(delta.FinishReason)
 			if u := delta.Usage; u != nil {
 				// Calibrate the token accounting against the server's own count before surfacing
 				// it: the reported prompt tokens are the honest fill, and prompt-tokens vs the
@@ -778,23 +742,9 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 					u.PromptTokens, u.CompletionTokens, u.TotalTokens, u.CachedPromptTokens,
 				))
 			}
-		case provider.DeltaError, provider.DeltaContextOverflow:
-			// Both are terminal, but only the overflow says something about the request that
-			// the loop can act on: the prompt exceeded the window, so a shorter history is a
-			// real remedy. Keep the bit here rather than re-classifying the message later.
-			out.failed = true
-			out.overflow = delta.Kind == provider.DeltaContextOverflow
-			out.errMsg = delta.Err
-			// The provider's transient-class verdict rides out with the fault (an in-band 502 is
-			// a 502, and a mid-stream EOF is treated like one), because retrying mid-stream is the
-			// LOOP's call, not the provider's: only the loop owns the Turn and the events. An
-			// overflow never carries it — a prompt too long stays too long.
-			out.retryable = delta.Retryable
 		}
 	}
-	out.content = content.String()
-	out.thinking = thinking.String()
-	return out
+	return a.collectCompletion(ctx, a.toProviderRequest(req), observe)
 }
 
 // emitVisibleDelta emits the newly-revealed VISIBLE tail of the accumulated content as a
