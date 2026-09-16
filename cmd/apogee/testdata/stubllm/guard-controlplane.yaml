@@ -1,0 +1,53 @@
+# The upstream TestE2EGuardControlPlane talks to: a model that asks for two terminal commands under
+# the workspace's git control plane, one a read and one a write.
+#
+# The two commands are chosen for what the shell WRITE VIEW makes of them (internal/security's
+# `write-git-control-plane` rule, ShellWriteView — ADR 0049). `ls -la .git/hooks` names the control
+# plane in its text but writes nothing: the view sees a read leader and no redirect, so the rule
+# stays at TierNone and the call meets only the ordinary subprocess gate. `echo hooked > .git/config`
+# redirects INTO the control plane: the view sees the write, and the rule hard-refuses the call before
+# it spawns. What this script pins is that the registry's real Terminal — not a stub tool — is what
+# declares the `command` key the view reads.
+#
+# Every turn repeats: apogee's own asides (the title, a summary) would otherwise consume a turn.
+model: guard-controlplane-model
+turns:
+    # The session title. apogee asks for one off the first prompt, so this has to be matched BEFORE
+    # the prompt's own turn or it would take it (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Control-plane commands
+    # The wrap-up once the REFUSED call has come back. The refusal is a terminal tool result like any
+    # other, so it is told apart from the allowed one by its own text — the guard's wording is what
+    # the model was handed — and matched BEFORE the generic wrap-up below.
+    - when:
+        tool_result: terminal
+        last_message: ^refused by the dangerous-action guard
+      repeat: true
+      text: The control plane stayed shut.
+    # The wrap-up once an ALLOWED terminal call has come back. Matched BEFORE the prompt turns below
+    # so a result can never be answered as a fresh request.
+    - when:
+        tool_result: terminal
+      repeat: true
+      text: That is what the hooks dir had to say.
+    # A READ under the control plane through the shell: the write view sees no write, so the rule
+    # stays silent and the ordinary subprocess gate is all that stands in the way.
+    - when:
+        last_message: ^List the git hooks
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"ls -la .git/hooks"}'
+    # A WRITE under the control plane through the shell: a redirect into `.git/config`, which the
+    # write view sees and the rule hard-refuses.
+    - when:
+        last_message: ^Overwrite the git config
+      repeat: true
+      tool_calls:
+        - name: terminal
+          arguments: '{"command":"echo hooked > .git/config"}'
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: Nothing else to add.

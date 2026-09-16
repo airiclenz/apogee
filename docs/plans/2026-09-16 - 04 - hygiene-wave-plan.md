@@ -135,7 +135,9 @@ NOTES (2026-09-16): the "missing stage" case builds its expected `beat N |` rows
 
 commit: `fix(demorig): check prints every beat row when the --stage dir cannot be judged`
 
-## 7. Journey: the real Terminal's shell-write view reaches the guard (apogee-t74)
+## 7. Journey: the real Terminal's shell-write view reaches the guard (apogee-t74) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): the workspace's control plane is seeded by hand (`.git/config` + `.git/hooks/`, no HEAD) rather than `git init -q`, the plan's stated alternative, so the test needs no git binary; the refused exchange is told from the allowed one by a script turn matching `last_message: ^refused by the dangerous-action guard` with its own wrap-up text, so the second `WaitText` cannot be satisfied by the first exchange's line.
 
 **What:** Test-only, closes apogee-t74. No test drives a read-only command through the registry's real `*tools.Terminal` (`ShellCommandKeys`) to a `TierNone` verdict from the `write-git-control-plane` rule; `internal/security/dangerous_test.go` uses `stubTool`. Two tests: (a) `cmd/apogee/e2e_guard_controlplane_test.go` in the shape of `TestE2EApprovalForcesALookAtTheControlPlane` (`e2e_approval_test.go`): a new script `testdata/stubllm/guard-controlplane.yaml` whose first prompt issues `terminal` with `{"command":"ls -la .git/hooks"}` — approve if the approval pane appears (`decide`), then `WaitText` the stub's final line — and whose second prompt issues `{"command":"echo hooked > .git/config"}`; judge that the second call's tool result on the wire (`stub.Requests()`) carries the rule's reason `write or delete under a repository's git control plane` and that the workspace's `.git/config` is byte-identical to before. (b) `internal/tools/shellmarker_test.go`: the registry's real `terminal` and `console_open` tools (via `DefaultToolsWithHost`, see `planmenu_test.go`) both satisfy `domain.ShellCommandTool` and `domain.ShellCommandArgKeys` returns `[]string{"command"}` for each.
 
