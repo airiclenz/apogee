@@ -32,8 +32,8 @@ import (
 // entry is a "not now", which persists nothing and is re-offered at the next start-up).
 //
 // The renderer never sees a key. It is handed the entry NAMES and the store's human name, and each
-// answer is one call to a seam the binary owns ([Options.MigrateKey], [Options.KeepPlaintextKey]) —
-// the SaveHostAcknowledgement contract, for the same reasons: the file format, the store and the
+// answer is one call to a seam the binary owns ([ConfigHost.MigrateKey], [ConfigHost.KeepPlaintextKey])
+// — the [ConfigHost.SaveHostAcknowledgement] contract, for the same reasons: the file format, the store and the
 // read-back verification are the binary's business, and a secret that never crosses into the
 // renderer cannot be painted, logged or recorded by it.
 
@@ -51,7 +51,9 @@ const keyMigrationHint = "type to filter · ↑/↓ select · ⏎ choose · esc 
 
 // openKeyMigration raises the first offer at construction, before the first frame is painted — the
 // openPrebound seam, and for the same reason: the overlay is STATE, so it has to be set on the
-// stored Model rather than returned as a Cmd.
+// stored Model rather than returned as a Cmd. It raises nothing where no [ConfigHost] is wired: the
+// offer is decided ABOUT before any act is called (ADR 0054 decision 3a), and a host that is wired
+// has the answers — the offer and the seams are set together (cmd/apogee/keymigrate.go).
 //
 // It gives way to anything already up. A pre-bound session opens the `/server` picker or the
 // `/settings` pane here, and that ask is the more urgent one — a session with no server can do
@@ -61,7 +63,7 @@ const keyMigrationHint = "type to filter · ↑/↓ select · ⏎ choose · esc 
 // waiting, because "not now" is exactly what it is: it comes back at the next start-up.
 func (m *Model) openKeyMigration() {
 	offer := m.opts.KeyMigration
-	if offer.StoreName == "" || len(offer.Entries) == 0 || m.opts.MigrateKey == nil {
+	if offer.StoreName == "" || len(offer.Entries) == 0 || m.opts.Config == nil {
 		return
 	}
 	if m.picker.open || m.settings.open {
@@ -164,10 +166,7 @@ func (m Model) acceptKeyMigration(choice int) (tea.Model, tea.Cmd) {
 // store write, the read-back through the very command it is about to persist, and the rewrite —
 // and reports the file it wrote, so the confirmation can name where to look.
 func (m Model) migrateKeyNote(entry string) string {
-	if m.opts.MigrateKey == nil {
-		return "moving a key is not available in this build"
-	}
-	path, err := m.opts.MigrateKey(entry)
+	path, err := m.configHostOrNoop().MigrateKey(entry)
 	if err != nil {
 		return fmt.Sprintf("could not move %s's key: %s", stripEscapes(entry), stripEscapes(err.Error()))
 	}
@@ -179,10 +178,7 @@ func (m Model) migrateKeyNote(entry string) string {
 // acknowledgement that this key stays in the file (ADR 0035), so the note says how to take it back:
 // the line it wrote is the line to delete.
 func (m Model) keepPlaintextKeyNote(entry string) string {
-	if m.opts.KeepPlaintextKey == nil {
-		return "recording that answer is not available in this build"
-	}
-	path, err := m.opts.KeepPlaintextKey(entry)
+	path, err := m.configHostOrNoop().KeepPlaintextKey(entry)
 	if err != nil {
 		return fmt.Sprintf("could not record that answer for %s: %s",
 			stripEscapes(entry), stripEscapes(err.Error()))
@@ -221,7 +217,7 @@ const (
 // retired, and two unasked-for panes at once are a stack of questions the human clears without
 // reading.
 func (m *Model) openSubAgentsMigration() {
-	if len(m.opts.SubAgentsMigration) == 0 || m.opts.MigrateSubAgentsServer == nil {
+	if len(m.opts.SubAgentsMigration) == 0 || m.opts.Config == nil {
 		return
 	}
 	if m.picker.open || m.settings.open {
@@ -291,10 +287,7 @@ func (m Model) acceptSubAgentsMigration(choice int) (tea.Model, tea.Cmd) {
 // the rewrite, and the retarget that puts the answer in force in THIS session — and reports the file
 // it wrote, so the confirmation can name where to look.
 func (m Model) migrateSubAgentsNote(entry string) string {
-	if m.opts.MigrateSubAgentsServer == nil {
-		return "moving the sub-agents flag is not available in this build"
-	}
-	path, err := m.opts.MigrateSubAgentsServer(entry)
+	path, err := m.configHostOrNoop().MigrateSubAgentsServer(entry)
 	if err != nil {
 		return fmt.Sprintf("could not move %s's sub-agents flag: %s",
 			stripEscapes(entry), stripEscapes(err.Error()))

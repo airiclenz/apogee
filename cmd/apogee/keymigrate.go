@@ -123,9 +123,9 @@ func (w *rootWiring) prepareSubAgentsMigration() {
 	w.subAgentsFlagged = names
 }
 
-// subAgentsMigrator is the [tui.Options.MigrateSubAgentsServer] seam: the whole of the offer's "move
-// it" answer, reported by the file it rewrote. nil when this run found no retired flag, which is also
-// when no offer was raised.
+// subAgentsMigrator is the act behind [tui.ConfigHost.MigrateSubAgentsServer]: the whole of the
+// offer's "move it" answer, reported by the file it rewrote. nil when this run found no retired flag,
+// which is also when no offer was raised — and when the host answers a refusal instead.
 //
 // It is ADR 0037's validate → persist → apply in three lines. The writer validates and persists (a
 // name no entry carries, or a file whose shape it will not risk, is refused with nothing written);
@@ -235,8 +235,9 @@ func subAgentsFlagNotice(path string, names []string) string {
 		strings.Join(names, ", "), path)
 }
 
-// keyMigrator is the [tui.Options.MigrateKey] seam: the whole move for one entry, reported by the
-// file it rewrote. nil when this run found no store, which is also when no offer was raised.
+// keyMigrator is the act behind [tui.ConfigHost.MigrateKey]: the whole move for one entry, reported
+// by the file it rewrote. nil when this run found no store, which is also when no offer was raised —
+// and when the host answers a refusal instead.
 func (w *rootWiring) keyMigrator() func(string) (string, error) {
 	if w.secrets == nil {
 		return nil
@@ -257,9 +258,9 @@ func (w *rootWiring) keyMigrator() func(string) (string, error) {
 	}
 }
 
-// plaintextKeyKeeper is the [tui.Options.KeepPlaintextKey] seam: the "never for this entry" answer,
-// recorded as the marker on that entry alone. It is wired with the migrator because it is an answer
-// to the same question — a run that raised no offer has nothing to record.
+// plaintextKeyKeeper is the act behind [tui.ConfigHost.KeepPlaintextKey]: the "never for this entry"
+// answer, recorded as the marker on that entry alone. It is wired with the migrator because it is an
+// answer to the same question — a run that raised no offer has nothing to record.
 func (w *rootWiring) plaintextKeyKeeper() func(string) (string, error) {
 	if w.secrets == nil {
 		return nil

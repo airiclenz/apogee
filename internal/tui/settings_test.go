@@ -3011,8 +3011,7 @@ func externalEditModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, e
 		rows:  func() []SettingRow { return rows },
 		write: log.write, reset: log.reset, apply: log.apply,
 	}
-	opts.ExternalEditSpec = edit.spec
-	opts.ReloadConfig = edit.reload
+	opts.Config = fakeConfigHost{externalEditSpec: edit.spec, reloadConfig: edit.reload}
 	return openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, opts))
 }
 
@@ -3291,8 +3290,10 @@ func configWatchModel(t *testing.T, rows []SettingRow, log *settingsWriteLog, ed
 		rows:  func() []SettingRow { return rows },
 		write: log.write, reset: log.reset, apply: log.apply,
 	}
-	opts.ReloadConfig = edit.reload
-	opts.AwaitConfigChange = func(context.Context) bool { return true }
+	opts.Config = fakeConfigHost{
+		reloadConfig:      edit.reload,
+		awaitConfigChange: func(context.Context) bool { return true },
+	}
 	return newTestModelEng(t, &fakeEngine{}, opts)
 }
 

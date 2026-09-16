@@ -1003,7 +1003,7 @@ func (m Model) bindPickedModel(picked heartbeat.ModelSummary) (tea.Model, tea.Cm
 		// whose heartbeat (or start-up) put them here can make: the record runs on the bound path's own
 		// terms below, and every skip that is not the renderer's — remember off, an unlisted entry, a
 		// launcher-fronted one — stays the seam's to make silently.
-		record := recordModelChoice(m.opts.RecordModelChoice, id)
+		record := recordModelChoice(m.configHostOrNoop(), id)
 		if record.saved {
 			m.transcript.addNote(modelSavedNote)
 		}
@@ -1022,7 +1022,7 @@ func (m Model) bindPickedModel(picked heartbeat.ModelSummary) (tea.Model, tea.Cm
 		model: id, window: window, dialect: m.hb.observedDialect, effort: picked.EffortSupport,
 	})
 	if next.opts.Model == id {
-		record := recordModelChoice(next.opts.RecordModelChoice, id)
+		record := recordModelChoice(next.configHostOrNoop(), id)
 		if record.saved {
 			next.transcript.addNote(modelSavedNote)
 		}
@@ -1045,13 +1045,13 @@ const modelSavedNote = "model: saved — this server starts on it next time"
 // one feature seen from the two classes of server apogee talks to.
 //
 // A failed write is a warning and nothing more: the session is already bound, and the recording is
-// best-effort persistence of something that is already true. An unwired seam records nothing and says
-// nothing, which is the pre-remember-model behaviour every hand-built Options keeps.
-func recordModelChoice(record func(model string) (bool, error), id string) choiceRecord {
-	if record == nil || id == "" {
+// best-effort persistence of something that is already true. An unwired host records nothing and says
+// nothing ([noopConfigHost]), which is the pre-remember-model behaviour every hand-built Options keeps.
+func recordModelChoice(host ConfigHost, id string) choiceRecord {
+	if id == "" {
 		return choiceRecord{}
 	}
-	saved, err := record(id)
+	saved, err := host.RecordModelChoice(id)
 	if err != nil {
 		return choiceRecord{warning: "could not record the model choice: " + stripEscapes(err.Error())}
 	}

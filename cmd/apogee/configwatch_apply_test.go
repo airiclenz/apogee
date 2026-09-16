@@ -167,10 +167,10 @@ func TestRunRootWiresTheConfigWatch(t *testing.T) {
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
 	}
-	if rec.opts.AwaitConfigChange == nil {
-		t.Fatal("the composition root wired no config watch; an external save would apply to nothing")
+	if rec.opts.Config == nil {
+		t.Fatal("the composition root wired no config host; an external save would apply to nothing")
 	}
-	if rec.opts.AwaitConfigChange(context.Background()) {
+	if rec.opts.Config.AwaitConfigChange(context.Background()) {
 		t.Error("the wait reported a change after teardown; the watch is stopped with the TUI")
 	}
 
@@ -178,7 +178,7 @@ func TestRunRootWiresTheConfigWatch(t *testing.T) {
 	if err := rec.opts.Settings.Write("auto-title", "false"); err != nil {
 		t.Fatalf("Settings.Write: %v", err)
 	}
-	reload, err := rec.opts.ReloadConfig()
+	reload, err := rec.opts.Config.ReloadConfig()
 	if err != nil {
 		t.Fatalf("ReloadConfig: %v", err)
 	}

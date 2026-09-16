@@ -19,7 +19,7 @@ package main
 // The incapable backend is platform.NewDenyConfiner() — FSWrite=false, the exact shape of a
 // container where landlock_create_ruleset returns ENOSYS. The `/confine` steps are driven
 // through the two seams the TUI command actually calls, tui.Engine.SetConfineToWorkspace and
-// tui.Options.SaveHostAcknowledgement, because internal/tui's Model is unexported and this is
+// tui.ConfigHost.SaveHostAcknowledgement, because internal/tui's Model is unexported and this is
 // package main; the command's own parsing and routing are pinned by the tests in
 // internal/tui (plan items 6 and 7).
 
@@ -173,11 +173,11 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 		t.Fatal("tui.Options.Confinement.HostID is empty; /confine status could never name the host " +
 			"an acknowledgement is recorded against")
 	}
-	if rec.opts.SaveHostAcknowledgement == nil {
-		t.Fatal("tui.Options.SaveHostAcknowledgement is nil; `/confine off --save` would write nothing")
+	if rec.opts.Config == nil {
+		t.Fatal("tui.Options.Config is nil; `/confine off --save` would write nothing")
 	}
 
-	written, err := rec.opts.SaveHostAcknowledgement()
+	written, err := rec.opts.Config.SaveHostAcknowledgement()
 	if err != nil {
 		t.Fatalf("SaveHostAcknowledgement: %v", err)
 	}

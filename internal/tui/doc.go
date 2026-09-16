@@ -158,7 +158,7 @@
 // recorded against) arrive as [Options.Confinement] from the composition root — the renderer never
 // imports internal/platform — while the *effective* setting is read live off
 // [Engine.ConfineToWorkspace], since the user can change it mid-session. `--save` delegates the
-// config write to [Options.SaveHostAcknowledgement] for the same reason the session saver is a
+// config write to [ConfigHost.SaveHostAcknowledgement] for the same reason the session saver is a
 // seam: file paths and formats are the binary's business, and a save that fails or is unwired
 // never invalidates the session toggle that already happened.
 //
@@ -615,7 +615,7 @@
 // monitor, an offline server, a nil rebind seam, an empty offering — each is one honest note and no
 // overlay, and picking the row the session is already on is answered too (rebindNote's "" contract is
 // about the observations nobody asked for, not about an explicit act). An explicit pick is also a
-// CHOICE, the way a committed switch is: the id that BOUND goes to [Options.RecordModelChoice], which
+// CHOICE, the way a committed switch is: the id that BOUND goes to [ConfigHost.RecordModelChoice], which
 // writes it as this server's `model:` key while `remember-model:` is on and skips it silently
 // otherwise. It hangs off the accept path ([Model.bindPickedModel]) rather than off applyRebind,
 // because that orchestration is shared with the heartbeat and a rebind the beat merely OBSERVED is
@@ -652,7 +652,7 @@
 // the config file, on a machine with a secret store apogee can both write to and read back from,
 // earns one three-row question — move it, not now, never for this entry. [Options.KeyMigration]
 // carries the entry NAMES and the store's human name and never a key; each answer is one call to
-// [Options.MigrateKey] or [Options.KeepPlaintextKey], the SaveHostAcknowledgement contract, so the
+// [ConfigHost.MigrateKey] or [ConfigHost.KeepPlaintextKey], the SaveHostAcknowledgement contract, so the
 // store, the read-back verification and the file format all stay the binary's business. A round of
 // several entries rides the overlay's own queue — one pane each, the next opening where the last
 // closed, esc ending the round with nothing persisted — and the whole offer gives way to the
@@ -661,7 +661,7 @@
 //
 // A THIRD unasked pane sits behind that one in the same file (ADR 0045): a `servers:` entry still
 // spelling the retired `sub-agents: true` flag earns a two-row question — move it, not now — and
-// taking it calls [Options.MigrateSubAgentsServer], which rewrites the file onto the root
+// taking it calls [ConfigHost.MigrateSubAgentsServer], which rewrites the file onto the root
 // `sub-agents-server:` key and re-points this session's delegations at the entry. It is one question
 // rather than a round, because the answer is a single key naming a single entry, and it gives way to
 // the key migration exactly as that gives way to the pre-bound ask.
@@ -887,7 +887,7 @@
 // settingswatcher.go the two ways that same file changes from OUTSIDE the pane — a row's ⏎ opening
 // the human's own editor on the key's line (foreground, which suspends the program; detached, which
 // does not) and the binary's config watcher reporting a save made anywhere else — one round trip with
-// two triggers, both re-reading through [Options.ReloadConfig] and both landing through the one apply
+// two triggers, both re-reading through [ConfigHost.ReloadConfig] and both landing through the one apply
 // loop, so a key edited in a terminal editor cannot take a different path from the same key edited in
 // a GUI one (ADR 0041); settingsapply.go what a committed key then DOES — the armed reset (the one
 // commit whose value is "remove the line"), the write, the live-apply router that turns a persisted

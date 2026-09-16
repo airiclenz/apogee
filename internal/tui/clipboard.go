@@ -18,7 +18,7 @@ import (
 
 // writeSystemClipboard writes text to the host's system clipboard. It is a package-level variable
 // rather than a direct call so a test can substitute a recorder — the same injectable seam
-// [Options.ExternalEditSpec] uses for the external editor, one level down: the platform program
+// [ConfigHost.ExternalEditSpec] uses for the external editor, one level down: the platform program
 // (pbcopy, xclip/xsel/wl-copy, clip.exe) is the one thing a unit test cannot have.
 var writeSystemClipboard = clipboard.WriteAll
 

@@ -38,7 +38,7 @@ func (f *fakeBind) bind(name string) (ServerSwitchResult, error) {
 }
 
 // fakeRecorder stands in for the splice writer behind either recording seam —
-// [ServerHost.RecordChoice] and [Options.RecordModelChoice] take the same shape because they are
+// [ServerHost.RecordChoice] and [ConfigHost.RecordModelChoice] take the same shape because they are
 // one feature seen from the two things a session records. saved is what it reports having done: true
 // is the binary's answer for a choice the file can carry, and the zero value is its silent skip for
 // one it cannot.

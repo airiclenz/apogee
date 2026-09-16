@@ -533,10 +533,10 @@ func TestRunRootRecordModelChoiceWritesOnlyWritablePicks(t *testing.T) {
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
 		}
-		if rec.opts.RecordModelChoice == nil {
-			t.Fatal("the composition root left the model-recording seam unwired")
+		if rec.opts.Config == nil {
+			t.Fatal("the composition root left the config host, and the model recording with it, unwired")
 		}
-		return rec.opts.RecordModelChoice, configPath
+		return rec.opts.Config.RecordModelChoice, configPath
 	}
 
 	// assertUnwritten is what all three skips have in common: the seam said no, and the file the human
@@ -767,8 +767,8 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
 		}
-		if rec.opts.Settings == nil {
-			t.Fatal("the composition root left the live-apply dispatcher unwired")
+		if rec.opts.Settings == nil || rec.opts.Config == nil {
+			t.Fatal("the composition root left the live-apply dispatcher or the config host unwired")
 		}
 		return rec.opts, configPath
 	}
@@ -784,11 +784,11 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 		srv := upstreamServer(t, "model-a", 4096)
 		opts, configPath := wire(t, config.ServerEntry{Name: "workbench", Endpoint: srv.URL})
 
-		if saved, err := opts.RecordModelChoice("model-b"); saved || err != nil {
+		if saved, err := opts.Config.RecordModelChoice("model-b"); saved || err != nil {
 			t.Fatalf("recording with the toggle off = (%v, %v); want (false, nil)", saved, err)
 		}
 		flip(t, opts, "true")
-		if saved, err := opts.RecordModelChoice("model-b"); !saved || err != nil {
+		if saved, err := opts.Config.RecordModelChoice("model-b"); !saved || err != nil {
 			t.Fatalf("recording after the flip = (%v, %v); want (true, nil) — the flip governs the next pick",
 				saved, err)
 		}
@@ -807,7 +807,7 @@ func TestRunRootRememberModelTogglesLive(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read the config back: %v", err)
 		}
-		if saved, err := opts.RecordModelChoice("model-c"); saved || err != nil {
+		if saved, err := opts.Config.RecordModelChoice("model-c"); saved || err != nil {
 			t.Errorf("recording after switching off = (%v, %v); want (false, nil)", saved, err)
 		}
 		after, err := os.ReadFile(configPath)

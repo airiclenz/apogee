@@ -92,9 +92,12 @@ leaves nil. That is what keeps the per-member degrades provable — "the pane ha
 write with" is one literal — without a fake per combination of wired halves.
 
 **7 — What is NOT a family stays a field.** A resolved value (`ColorScheme`, `Workspace`,
-`StallAfter`), a single act with no siblings (`SaveHostAcknowledgement`), a lone provider — these are
+`StallAfter`), a single act with no siblings (`GenerateTitle`), a lone provider — these are
 not capabilities a host has or lacks as a set, and wrapping one in an interface would be indirection
-with a single adapter. The test is whether the acts share a subject AND a wiring decision.
+with a single adapter. The test is whether the acts share a subject AND a wiring decision. *(Amended
+2026-09-17: this example first read `SaveHostAcknowledgement`, which had siblings all along — the
+seven other acts over the same config file — and is now a member of `ConfigHost`; see the Amendment
+section below.)*
 
 ## Consequences
 
@@ -109,3 +112,22 @@ with a single adapter. The test is whether the acts share a subject AND a wiring
   first of them, `ServerHost` (server ×4 + heartbeat ×2), is what decision 3a was written from.
 - Behaviour is unchanged by construction: every degrade the nil funcs produced is produced by a nil
   host or by the act's own answer, and the whole existing suite passes with no expectation changed.
+
+## Amendment (2026-09-17) — `ConfigHost`, the config file as one family
+
+The eight bare funcs that acted on the config file — `SaveHostAcknowledgement`, `ReloadConfig`,
+`AwaitConfigChange`, `MigrateKey`, `KeepPlaintextKey`, `MigrateSubAgentsServer`, `RecordModelChoice`,
+`ExternalEditSpec` — are one named interface, `tui.ConfigHost`, carried as `Options.Config`, under the
+call ratified for `docs/plans/2026-09-16 - 04 - hygiene-wave-plan.md` item 14 (apogee-970). They pass
+decision 7's own test: one subject (the file the composition root resolved — its path, its format, the
+secret store and the editor behind it) and one wiring decision (the binary always wires all eight;
+a Driver that composes no file leaves the host nil). The composition root's adapter is `configHost`
+(`cmd/apogee/wire_options.go`, decision 4), the test fake is `fakeConfigHost` (decision 6).
+
+Decision 2 holds through ONE guard rather than eight nil checks: `configHostOrNoop` answers a nil host
+with an unexported `noopConfigHost` whose acts refuse with the sentence each nil func's check used to
+word directly, so the acts that can carry their refusal in their own answer call through it. The
+decide-before-call acts keep decision 3a's posture and read `Options.Config == nil` where the per-func
+nil check was: whether a watch chain opens, and whether either start-up offer is raised. Decision 7's
+example of a lone act was `SaveHostAcknowledgement`, which this fold shows had siblings all along; the
+example is now `GenerateTitle`.

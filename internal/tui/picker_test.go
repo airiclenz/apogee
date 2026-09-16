@@ -405,7 +405,7 @@ func TestModelPickJudgesTheOverrideAgainstThePickedModel(t *testing.T) {
 func seededModelRecording(t *testing.T, rec *fakeRecorder) (Model, *fakeRebind) {
 	t.Helper()
 	opts := testOpts
-	opts.RecordModelChoice = rec.record
+	opts.Config = fakeConfigHost{recordModelChoice: rec.record}
 	return seededPicker(t, opts)
 }
 
@@ -484,7 +484,7 @@ func TestModelPickRecordingFailureWarnsAndKeepsTheBinding(t *testing.T) {
 // An unwired seam is the ordinary hand-built Options and the pre-remember-model behaviour: the pick
 // binds, and nothing is recorded or claimed.
 func TestModelPickWithNoRecordingSeamStillBinds(t *testing.T) {
-	m, rb := seededPicker(t, testOpts) // testOpts wires no RecordModelChoice
+	m, rb := seededPicker(t, testOpts) // testOpts wires no ConfigHost
 
 	m, _ = typeCommand(t, m, "/model other-model")
 
@@ -1116,7 +1116,7 @@ func TestServerNamingTheActiveServerRecordsThePin(t *testing.T) {
 // recorder nobody supplied.
 func TestReSelectionWithNoRecordingSeamAnswersAndNothingMore(t *testing.T) {
 	t.Run("model", func(t *testing.T) {
-		m, _ := seededPicker(t, testOpts) // testOpts wires no RecordModelChoice
+		m, _ := seededPicker(t, testOpts) // testOpts wires no ConfigHost
 		before := len(noteTexts(m))
 
 		m, _ = typeCommand(t, m, "/model test-model")

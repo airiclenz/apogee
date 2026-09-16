@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -176,4 +177,117 @@ func TestBuildAppendsCallerOptionsLast(t *testing.T) {
 	if n := built.Len(); n != 0 {
 		t.Errorf("Build's own tea.WithOutput received %d bytes; the caller's option must win", n)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// The ConfigHost family's nil degrade (ADR 0054 decision 2)
+// ----------------------------------------------------------------------------
+
+// A Driver that composes no [ConfigHost] gets, act for act, what the eight bare funcs gave when each
+// was nil — pinned here so the fold onto one interface (and its one guard, configHostOrNoop) can be
+// seen to have dropped no degrade. The three offer answers and the editor refusals carry their
+// sentence in the act's own error now, which is why they read through the same "could not" framing a
+// wired host's failure does; the decide-before-call acts — the watch chain and the two start-up
+// offers — never call at all (decision 3a).
+func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
+	structured := settingsStructuredRow()
+	rows := []SettingRow{structured}
+	nilConfig := func() Options {
+		opts := testOpts
+		opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return rows }}
+		return opts
+	}
+
+	t.Run("the host acknowledgement says it was not saved", func(t *testing.T) {
+		m := newTestModelEng(t, &fakeEngine{confine: true}, nilConfig())
+
+		got := m.saveHostAcknowledgement()
+
+		want := "not saved: this build cannot write the host acknowledgement\n" +
+			"  the change applies to this session only"
+		if got != want {
+			t.Errorf("saveHostAcknowledgement() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("the external edit refuses on the row and launches nothing", func(t *testing.T) {
+		m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, nilConfig()))
+
+		next, cmd := m.settingsExternalEdit(structured)
+
+		if cmd != nil {
+			t.Error("⏎ on a structured row launched something with no host wired")
+		}
+		if got := next.(Model).settingsNote(structured); got != "✗ "+noExternalEditNote {
+			t.Errorf("note = %q, want %q", got, "✗ "+noExternalEditNote)
+		}
+	})
+
+	t.Run("an editor that returns refuses the re-read on the row", func(t *testing.T) {
+		m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, nilConfig()))
+
+		next, cmd := m.foldSettingsEdit(settingsEditedMsg{path: structured.Path})
+
+		if cmd != nil {
+			t.Error("the return trip applied something with no host wired")
+		}
+		if got := next.(Model).settingsNote(structured); got != "✗ "+noExternalEditNote {
+			t.Errorf("note = %q, want %q", got, "✗ "+noExternalEditNote)
+		}
+	})
+
+	t.Run("nothing is watched and a stray report re-reads nothing", func(t *testing.T) {
+		m := newTestModelEng(t, &fakeEngine{}, nilConfig())
+		before := len(noteTexts(m))
+
+		if cmd := m.awaitConfigChange(); cmd != nil {
+			t.Errorf("an unwired host armed %T", cmdMsg(cmd))
+		}
+		next, cmd := m.foldConfigChanged(configChangedMsg{alive: true})
+
+		if cmd != nil {
+			t.Error("a report with no host to re-read through opened a wait")
+		}
+		if got := next.(Model); len(noteTexts(got)) != before || got.cfgWatch.fails != 0 {
+			t.Errorf("a report with no host changed the session: notes %d→%d, fails %d",
+				before, len(noteTexts(got)), got.cfgWatch.fails)
+		}
+	})
+
+	t.Run("the key-migration offer is not raised and its answers say so", func(t *testing.T) {
+		opts := nilConfig()
+		opts.KeyMigration = KeyMigrationOffer{StoreName: "macOS Keychain", Entries: []string{"workstation"}}
+		m := newTestModelEng(t, &fakeEngine{}, opts)
+
+		if m.picker.open {
+			t.Errorf("picker = %+v, want no offer where no host could answer it", m.picker)
+		}
+		if got := m.migrateKeyNote("workstation"); !strings.Contains(got, errNoKeyMigration.Error()) {
+			t.Errorf("migrateKeyNote = %q, want the unavailable sentence", got)
+		}
+		if got := m.keepPlaintextKeyNote("workstation"); !strings.Contains(got, errNoPlaintextKeyRecord.Error()) {
+			t.Errorf("keepPlaintextKeyNote = %q, want the unavailable sentence", got)
+		}
+	})
+
+	t.Run("the sub-agents offer is not raised and its answer says so", func(t *testing.T) {
+		opts := nilConfig()
+		opts.SubAgentsMigration = []string{"cheap"}
+		m := newTestModelEng(t, &fakeEngine{}, opts)
+
+		if m.picker.open {
+			t.Errorf("picker = %+v, want no offer where no host could answer it", m.picker)
+		}
+		if got := m.migrateSubAgentsNote("cheap"); !strings.Contains(got, errNoSubAgentsMigration.Error()) {
+			t.Errorf("migrateSubAgentsNote = %q, want the unavailable sentence", got)
+		}
+	})
+
+	t.Run("a model pick records nothing and warns of nothing", func(t *testing.T) {
+		m := newTestModelEng(t, &fakeEngine{}, nilConfig())
+
+		if got := recordModelChoice(m.configHostOrNoop(), "model-b"); got != (choiceRecord{}) {
+			t.Errorf("recordModelChoice = %+v, want the session-scoped pick: nothing saved, no warning", got)
+		}
+	})
 }

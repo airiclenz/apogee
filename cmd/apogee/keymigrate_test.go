@@ -647,13 +647,10 @@ func TestRunRootCarriesBothMigrationOffers(t *testing.T) {
 		t.Errorf("KeyMigration = %+v; want the plaintext entry offered a move into %q",
 			got, store.Name())
 	}
-	if rec.opts.MigrateKey == nil {
-		t.Error("the key offer arrived with no seam to answer it")
+	if rec.opts.Config == nil {
+		t.Error("the offers arrived with no host to answer them")
 	}
 	if got := rec.opts.SubAgentsMigration; len(got) != 1 || got[0] != "cheaper" {
 		t.Errorf("SubAgentsMigration = %v; want the one entry the same file still flags", got)
-	}
-	if rec.opts.MigrateSubAgentsServer == nil {
-		t.Error("the retired-flag offer arrived with no seam to answer it")
 	}
 }

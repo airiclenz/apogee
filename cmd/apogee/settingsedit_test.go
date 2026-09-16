@@ -416,10 +416,10 @@ func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
 	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 		t.Fatalf("runRoot: %v", err)
 	}
-	if rec.opts.ExternalEditSpec == nil || rec.opts.ReloadConfig == nil {
-		t.Fatal("the composition root left an external-edit seam unwired")
+	if rec.opts.Config == nil {
+		t.Fatal("the composition root left the config host unwired")
 	}
-	launch, err := rec.opts.ExternalEditSpec("servers")
+	launch, err := rec.opts.Config.ExternalEditSpec("servers")
 	if err != nil {
 		t.Fatalf("ExternalEditSpec: %v", err)
 	}
@@ -427,7 +427,7 @@ func TestRunRootWiresTheExternalEditSeams(t *testing.T) {
 		t.Errorf("argv ends with %q, want the session's config %q", launch.Argv[len(launch.Argv)-1], want)
 	}
 	// Nothing has touched the file since the spec read it, so the return trip over it reports nothing.
-	reload, err := rec.opts.ReloadConfig()
+	reload, err := rec.opts.Config.ReloadConfig()
 	if err != nil {
 		t.Fatalf("ReloadConfig: %v", err)
 	}

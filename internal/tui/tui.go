@@ -179,7 +179,7 @@ type SettingsHost interface {
 	// against rows that are current.
 	//
 	// The binary owns everything behind it — the key registry, the schema, the precedence that
-	// decided which source won, the masking of a secret — exactly as [Options.SaveHostAcknowledgement]
+	// decided which source won, the masking of a secret — exactly as [ConfigHost.SaveHostAcknowledgement]
 	// owns the file format. No rows ⇒ `/settings` has nothing to show and says so.
 	Rows() []SettingRow
 
@@ -191,7 +191,7 @@ type SettingsHost interface {
 	// and it alone knows whether the key may be written at all — the registry's editability, the
 	// splice, the verification and the atomic write are all behind this one call.
 	//
-	// It is synchronous like [Options.SaveHostAcknowledgement]: one small file, spliced and
+	// It is synchronous like [ConfigHost.SaveHostAcknowledgement]: one small file, spliced and
 	// renamed, on a keypress the human is waiting on. An error is REPORTED, never swallowed — the
 	// pane shows it on the row and treats the key as unchanged — so a read-only config home
 	// surfaces as a refusal rather than as an edit that silently did not happen, and a host that
@@ -225,6 +225,191 @@ type SettingsHost interface {
 	// expresses the intent, so the row says "saved — live apply failed: …" and a re-committed edit
 	// retries the apply.
 	Apply(path, value string) (note string, err error)
+}
+
+// ConfigHost is the config FILE as one host capability: the eight acts a running session performs on
+// the file the composition root resolved — the host acknowledgement `/confine off --save` records,
+// the `$EDITOR` round trip's two halves, the watcher's wait, the three start-up-offer answers and the
+// `remember-model:` recording — named as one interface rather than spelled as eight bare funcs (ADR
+// 0054). It stands beside [SettingsHost], whose four acts are over the same file, and is the family
+// the others lean on for their posture: every act here is "one small file, spliced and renamed",
+// synchronous, on a keypress the human is waiting on, with a failure REPORTED and never swallowed —
+// the [SettingsHost.Write] contract.
+// The binary owns everything behind it — the file's location, its format, the secret store, the
+// editor this environment names, the watcher — and the renderer learns only what each answer says,
+// which is what keeps a secret and a YAML fragment out of a Model that is painted and journaled.
+//
+// A nil host means the config file is unwired whole — a bench or headless Driver that composes no
+// file (ADR 0031) — and every act degrades as its unwired func did: the acknowledgement says it was
+// not saved, the external edit says the row cannot open an editor, nothing is watched, no start-up
+// offer is raised, and every model pick is session-scoped ([configHostOrNoop]). A host that IS wired
+// but cannot do one act says so in that act's own answer (ADR 0054 decision 3).
+type ConfigHost interface {
+	// SaveHostAcknowledgement persists THIS host's `unconfined-hosts:` acknowledgement to the
+	// global config (the `/confine off --save` half) and returns the file it wrote, so the
+	// confirmation can name what changed and how to undo it. An error means persistence was not
+	// possible and `--save` says so; the session toggle itself never depends on it.
+	SaveHostAcknowledgement() (path string, err error)
+
+	// ReloadConfig re-reads the config file after an external edit and reports which keys came
+	// back different — the return half of the round trip ExternalEditSpec opens. The binary re-runs
+	// the startup resolution over the file it alone can parse and diffs it against what the file
+	// said when the editor was launched (ExternalEditSpec takes that baseline), so what comes back
+	// is the human's edit and nothing else.
+	//
+	// A parse or validation failure returns the error with NOTHING applied and the file untouched:
+	// the human's own text stays exactly as they left it, and the row that launched the edit carries
+	// the reason so they can go back in and fix it.
+	//
+	// What is returned is not yet in force — the pane applies each key through [SettingsHost.Apply]
+	// and its own renderer-local keys itself, the same two homes an in-pane commit uses (ADR 0037
+	// decision 1), so a key edited in the file and a key edited on the row land the same way. The
+	// keys the reload never reports are the confinement pair, fenced to `/confine` (ADR 0012), and
+	// `server:`, whose live move is a deliberate act at the picker rather than a consequence of
+	// re-reading a file.
+	//
+	// Beside the keys it carries the loader's NOTICES ([ConfigReload.Notices]) — the lines start-up
+	// would have printed for this file, an unknown key above all — but only the ones the re-read
+	// found NEW against its baseline: a notice the file has carried all along was said once already,
+	// at start-up or at the save that introduced it, and apogee's own writes re-take the baseline
+	// (ADR 0041 decision 8), so a persistent typo does not narrate itself on every pane commit.
+	ReloadConfig() (ConfigReload, error)
+
+	// AwaitConfigChange blocks until the config file has changed on disk, and reports whether the
+	// watch is still open: false means it has ENDED — the program is shutting down, or the binary
+	// stopped watching — and nothing will ever be reported again.
+	//
+	// It is the second trigger for the round trip ReloadConfig answers, and the reason there is a
+	// second one (ADR 0041 decision 3). ADR 0037 made the editor's EXIT the end-of-edit signal, which
+	// a desktop opener cannot give: `open`, `xdg-open` and `cmd /c start` return the moment the file
+	// is handed to the application that owns `.yaml`, long before the human has typed anything, so
+	// the diff behind that signal reads unchanged bytes and concludes they edited nothing. The file
+	// itself is the signal instead — and then it does not matter who wrote it: the editor this pane
+	// launched, a GUI editor left open in another window, or a `vim ~/.apogee/config.yaml` in a
+	// second terminal all apply the same way (decision 5).
+	//
+	// The Model owns the cadence and the consequences and nothing else, exactly as it does for
+	// [ServerHost.Beat]: one wait is opened at Init, each landed report re-reads through ReloadConfig,
+	// journals and applies what came back through the same two homes an in-pane commit uses, and
+	// opens the next wait. WHICH file is watched, how, and how often is the binary's alone. A nil
+	// host watches nothing, the pre-watcher behaviour: a foreground editor still applies on exit and
+	// a detached one applies at the next relaunch.
+	AwaitConfigChange(ctx context.Context) bool
+
+	// MigrateKey moves the named entry's key out of the config file and into the machine's secret
+	// store, leaving the entry pointing at it with an `api-key-cmd:` line, and returns the file it
+	// rewrote so the confirmation can name it (ADR 0047, keymigration.go).
+	//
+	// It is the whole move: the store write, the read-back of the key through the very command it
+	// is about to persist, and only then the rewrite (ADR 0047's verify-before-rewrite). A failure
+	// anywhere in that sequence means the config file was left exactly as it was, and it is
+	// REPORTED — the [SettingsHost.Write] contract — because a migration that silently did not
+	// happen leaves the human believing their key has moved. Synchronous, on the keypress that
+	// answered the offer, like every other act here. The offer itself is raised only where a host is
+	// wired at all ([Options.KeyMigration]).
+	MigrateKey(entry string) (path string, err error)
+
+	// KeepPlaintextKey records the "never for this entry" answer — `plaintext-key-ok: true` on that
+	// entry, the per-entry acknowledgement that ends the offer for good (ADR 0035's deliberate-edit
+	// grain) — and returns the file it wrote, so the confirmation can say which line to delete to
+	// be asked again. Same contract as MigrateKey in every other respect.
+	KeepPlaintextKey(entry string) (path string, err error)
+
+	// MigrateSubAgentsServer takes the other start-up offer ([Options.SubAgentsMigration]) for the
+	// named entry: the retired flag lines go, and `sub-agents-server:` names this entry, in one edit
+	// of the file — after which the session's own delegations are re-pointed there, so the answer is
+	// in force now rather than at the next start-up. It reports the file it rewrote, so the
+	// confirmation can name where to look.
+	//
+	// The [SettingsHost.Write] contract in every other respect: synchronous on the keypress that
+	// answered, and a failure means the file was left exactly as it was and is REPORTED.
+	MigrateSubAgentsServer(entry string) (path string, err error)
+
+	// RecordModelChoice persists the model this session just bound as the one its server comes back
+	// on NEXT time — the `model:` key of the `servers:` entry the session is on, written only while
+	// the `remember-model:` toggle is on. The renderer calls it with the id the human picked and
+	// knows nothing else about it: which entry the session is on, whether that entry is one apogee
+	// may write a model onto, and whether the toggle is on at all are the binary's questions, because
+	// only the binary can see the file.
+	//
+	// Only an EXPLICIT pick reaches it — the `/model` picker's accept and `/model <id>`, which share
+	// one bind path. A rebind the heartbeat merely OBSERVED records nothing: a server that loaded
+	// another model is news about the server rather than a choice this human made, and a session
+	// that followed it must not turn that observation into config nobody wrote. The
+	// `--model`/`APOGEE_MODEL` startup overrides record nothing for the same reason — they are facts
+	// about one invocation.
+	//
+	// It answers whether it WROTE, exactly as [ServerHost.RecordChoice] does, which is what lets the
+	// renderer state the recording without claiming one for the picks the binary skips: the toggle
+	// off, a session on no configured entry, and a session on a LAUNCHER-FRONTED entry — whose
+	// `model:` is a deliberately empty discovery hint, that class of server remembering its choice
+	// as a Launch profile instead — are all false with no error.
+	//
+	// It is best-effort persistence of something that ALREADY happened: the session is bound before
+	// this is called and stays bound whatever it answers, so an error is a note and never an undo.
+	// Like [ServerHost.RecordChoice] it is synchronous — one small file, spliced and renamed — and
+	// called on the Update loop. A nil host records nothing and every pick is session-scoped, which
+	// is the behaviour this key was introduced to replace; every hand-built Options keeps it.
+	RecordModelChoice(model string) (recorded bool, err error)
+
+	// ExternalEditSpec is the command line that opens the config file at path's own line — the
+	// nested structures' whole edit idiom (ADR 0037 decision 5): a `servers:` list or a
+	// `model-profiles:` map is a shape no row can hold, so ⏎ on such a row hands the human the file
+	// itself in their own editor rather than growing a form for each of them.
+	//
+	// The binary resolves all four parts because it owns all four: the config file's location, the
+	// line that key sits on (its own splice writer already parses the document for it), which editor
+	// this environment names — the `editor` key, then $VISUAL, then $EDITOR, then the platform's own
+	// opener — with a line-jump argument passed only to the editors known to take one, and whether
+	// that program takes this terminal ([EditorCommand.Detached], ADR 0041 decision 6). The renderer
+	// receives a command it runs and nothing else, exactly as [SettingsHost.Write] hands it a file
+	// format it never composes.
+	//
+	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses, a
+	// program this machine cannot run) and nothing is launched.
+	ExternalEditSpec(path string) (EditorCommand, error)
+}
+
+// noopConfigHost is what a nil [ConfigHost] degrades to: every act answers exactly as its unwired
+// bare func used to before the family was named (ADR 0054 decision 2) — the three file writes and
+// the editor spec refuse with the sentence the pane showed for a nil seam, the wait ends at once,
+// and the recording says it wrote nothing. It is unexported because a Driver composes the degrade by
+// leaving [Options.Config] nil, never by handing this over.
+type noopConfigHost struct{}
+
+// The refusals the unwired acts answer with — the sentences the per-func nil checks used to word
+// directly, now carried in the act's own error so one guard serves every call site.
+var (
+	errNoHostAcknowledgement = errors.New("this build cannot write the host acknowledgement")
+	errNoKeyMigration        = errors.New("moving a key is not available in this build")
+	errNoPlaintextKeyRecord  = errors.New("recording that answer is not available in this build")
+	errNoSubAgentsMigration  = errors.New("moving the sub-agents flag is not available in this build")
+	errNoExternalEdit        = errors.New(noExternalEditNote)
+)
+
+func (noopConfigHost) SaveHostAcknowledgement() (string, error) { return "", errNoHostAcknowledgement }
+func (noopConfigHost) ReloadConfig() (ConfigReload, error)      { return ConfigReload{}, errNoExternalEdit }
+func (noopConfigHost) AwaitConfigChange(context.Context) bool   { return false }
+func (noopConfigHost) MigrateKey(string) (string, error)        { return "", errNoKeyMigration }
+func (noopConfigHost) KeepPlaintextKey(string) (string, error)  { return "", errNoPlaintextKeyRecord }
+func (noopConfigHost) MigrateSubAgentsServer(string) (string, error) {
+	return "", errNoSubAgentsMigration
+}
+func (noopConfigHost) RecordModelChoice(string) (bool, error) { return false, nil }
+func (noopConfigHost) ExternalEditSpec(string) (EditorCommand, error) {
+	return EditorCommand{}, errNoExternalEdit
+}
+
+// configHostOrNoop is the ONE nil guard the family has: the wired host, or the degrade above when a
+// Driver composed none. Every act that can carry its refusal in its own answer calls through here
+// rather than checking the field; the acts the renderer must decide ABOUT before calling — whether a
+// watch chain opens, whether a start-up offer is raised (ADR 0054 decision 3a) — read
+// [Options.Config] directly, because calling to find out would be the act.
+func (m Model) configHostOrNoop() ConfigHost {
+	if m.opts.Config == nil {
+		return noopConfigHost{}
+	}
+	return m.opts.Config
 }
 
 // SchemeHost is the colour-scheme seam the TUI drives: what can be switched TO right now, what one
@@ -515,13 +700,13 @@ type LauncherHost interface {
 	// RecordProfile persists the Launch profile a load just COMMITTED as the one this server comes
 	// back on NEXT time — the `launch-profile:` key of a launcher-fronted `servers:` entry, written
 	// only while the `remember-model:` toggle is on. It is the launcher class's half of what
-	// [Options.RecordModelChoice] does for a plain multi-model server: that class remembers a wire
+	// [ConfigHost.RecordModelChoice] does for a plain multi-model server: that class remembers a wire
 	// model id, this one remembers the profile that loads one, and no entry carries both — a
 	// launcher-fronted `model:` is a deliberately empty discovery hint.
 	//
 	// The renderer calls it with the profile name the load activated and knows nothing else about it.
 	// WHICH entry the pointer belongs on is the binary's question in a stronger sense than it is for
-	// [Options.RecordModelChoice]: a load can move the session onto a server no `servers:` entry
+	// [ConfigHost.RecordModelChoice]: a load can move the session onto a server no `servers:` entry
 	// names, and the pointer's home is the ACTUATING entry either way — the one whose
 	// `llama-launcher:` key this session's launcher path follows — which only the binary holds.
 	//
@@ -981,82 +1166,22 @@ type Options struct {
 	// "unknown" rather than inventing a backend.
 	Confinement ConfinementInfo
 
-	// SaveHostAcknowledgement persists THIS host's `unconfined-hosts:` acknowledgement to the
-	// global config (the `/confine off --save` half) and returns the file it wrote, so the
-	// confirmation can name what changed and how to undo it. nil ⇒ persistence is unavailable
-	// and `--save` says so; the session toggle itself never depends on it. Writing config is
-	// the binary's job (it owns the path and the file format), exactly like Save below.
-	SaveHostAcknowledgement func() (path string, err error)
+	// Config is the config FILE as one named capability ([ConfigHost], ADR 0054): the acknowledgement
+	// `/confine off --save` records, the `$EDITOR` round trip's two halves and the watcher's wait,
+	// the three start-up-offer answers, and the `remember-model:` recording. The eight acts were eight
+	// bare funcs and are one interface for the reason [SettingsHost] is: they are faces of one thing a
+	// host either has or has not — a config file it owns the path, the format and the secret store
+	// of — and the renderer drives all eight the same way, owning WHEN and never WHAT.
+	//
+	// nil ⇒ unwired whole, and every act degrades as its bare func did when nil (noopConfigHost):
+	// what every hand-built test Options and every Driver that composes no file gets (ADR 0031).
+	Config ConfigHost
 
 	// Settings is the `/settings` pane's seam onto the config file: the rows it shows, the write and
 	// the reset a committed row makes, and the live apply of the key it just persisted
 	// ([SettingsHost]). nil ⇒ the pane is unwired: it has nothing to show and says so, the nil-seam
 	// degrade every provider here takes.
 	Settings SettingsHost
-
-	// ExternalEditSpec is the command line that opens the config file at path's own line — the
-	// nested structures' whole edit idiom (ADR 0037 decision 5): a `servers:` list or a
-	// `model-profiles:` map is a shape no row can hold, so ⏎ on such a row hands the human the file
-	// itself in their own editor rather than growing a form for each of them.
-	//
-	// The binary resolves all four parts because it owns all four: the config file's location, the
-	// line that key sits on (its own splice writer already parses the document for it), which editor
-	// this environment names — the `editor` key, then $VISUAL, then $EDITOR, then the platform's own
-	// opener — with a line-jump argument passed only to the editors known to take one, and whether
-	// that program takes this terminal ([EditorCommand.Detached], ADR 0041 decision 6). The renderer
-	// receives a command it runs and nothing else, exactly as [SettingsHost.Write] hands it a file format
-	// it never composes.
-	//
-	// An error is REPORTED on the row (an unreadable config, a file shape the parse refuses, a
-	// program this machine cannot run) and nothing is launched. nil ⇒ no external edit is available
-	// and ⏎ on those rows does nothing, the nil-seam degrade every provider here takes.
-	ExternalEditSpec func(path string) (EditorCommand, error)
-
-	// ReloadConfig re-reads the config file after that external edit and reports which keys came
-	// back different — the return half of the same round trip. The binary re-runs the startup
-	// resolution over the file it alone can parse and diffs it against what the file said when the
-	// editor was launched (ExternalEditSpec takes that baseline), so what comes back is the human's
-	// edit and nothing else.
-	//
-	// A parse or validation failure returns the error with NOTHING applied and the file untouched:
-	// the human's own text stays exactly as they left it, and the row that launched the edit carries
-	// the reason so they can go back in and fix it.
-	//
-	// What is returned is not yet in force — the pane applies each key through [SettingsHost.Apply] and
-	// its own renderer-local keys itself, the same two homes an in-pane commit uses (ADR 0037
-	// decision 1), so a key edited in the file and a key edited on the row land the same way. The
-	// keys the reload never reports are the confinement pair, fenced to `/confine` (ADR 0012), and
-	// `server:`, whose live move is a deliberate act at the picker rather than a consequence of
-	// re-reading a file. nil ⇒ the round trip ends at the editor, and the pane says so.
-	//
-	// Beside the keys it carries the loader's NOTICES ([ConfigReload.Notices]) — the lines start-up
-	// would have printed for this file, an unknown key above all — but only the ones the re-read
-	// found NEW against its baseline: a notice the file has carried all along was said once already,
-	// at start-up or at the save that introduced it, and apogee's own writes re-take the baseline
-	// (ADR 0041 decision 8), so a persistent typo does not narrate itself on every pane commit.
-	ReloadConfig func() (ConfigReload, error)
-
-	// AwaitConfigChange blocks until the config file has changed on disk, and reports whether the
-	// watch is still open: false means it has ENDED — the program is shutting down, or the binary
-	// stopped watching — and nothing will ever be reported again.
-	//
-	// It is the second trigger for the round trip [ReloadConfig] answers, and the reason there is a
-	// second one (ADR 0041 decision 3). ADR 0037 made the editor's EXIT the end-of-edit signal, which
-	// a desktop opener cannot give: `open`, `xdg-open` and `cmd /c start` return the moment the file
-	// is handed to the application that owns `.yaml`, long before the human has typed anything, so the
-	// diff behind that signal reads unchanged bytes and concludes they edited nothing. The file itself
-	// is the signal instead — and then it does not matter who wrote it: the editor this pane launched,
-	// a GUI editor left open in another window, or a `vim ~/.apogee/config.yaml` in a second terminal
-	// all apply the same way (decision 5).
-	//
-	// The Model owns the cadence and the consequences and nothing else, exactly as it does for
-	// [ServerHost.Beat]: one wait is opened at Init, each landed report re-reads through [ReloadConfig],
-	// journals and applies what came back through the same two homes an in-pane commit uses, and opens
-	// the next wait. WHICH file is watched, how, and how often is the binary's alone.
-	//
-	// nil ⇒ nothing is watched, the pre-watcher behaviour: a foreground editor still applies on exit
-	// and a detached one applies at the next relaunch.
-	AwaitConfigChange func(ctx context.Context) bool
 
 	// Skills is the discovered skill catalog the merged "/" menu lists and an inline "/token"
 	// resolves against; nil ⇒ no skills are wired (the menu offers no skills and no token
@@ -1115,8 +1240,8 @@ type Options struct {
 	//
 	// nil ⇒ naming is unwired, exactly as a nil Sessions is: the automatic call never fires and a
 	// bare `/rename` reports that generation is unavailable. Never an error. It is a func rather
-	// than an interface for the same reason SaveHostAcknowledgement is: the TUI needs one call, not
-	// a type.
+	// than an interface because it has no siblings (ADR 0054 decision 7): the TUI needs one call,
+	// not a type.
 	GenerateTitle func(ctx context.Context, prompts []string) (string, error)
 
 	// AutoTitle gates only the AUTOMATIC naming call — the `auto-title:` config key, default true.
@@ -1164,33 +1289,12 @@ type Options struct {
 	// hand-built Options and a headless run get.
 	//
 	// It carries NAMES and never a key. What each answer does to the file and to the store is
-	// entirely behind the two seams below, so nothing this renderer holds, paints or records can be
-	// a secret.
+	// entirely behind [ConfigHost.MigrateKey] and [ConfigHost.KeepPlaintextKey], so nothing this
+	// renderer holds, paints or records can be a secret.
 	KeyMigration KeyMigrationOffer
 
-	// MigrateKey moves the named entry's key out of the config file and into the machine's secret
-	// store, leaving the entry pointing at it with an `api-key-cmd:` line, and returns the file it
-	// rewrote so the confirmation can name it.
-	//
-	// It is the whole move: the store write, the read-back of the key through the very command it
-	// is about to persist, and only then the rewrite (ADR 0047's verify-before-rewrite). A failure
-	// anywhere in that sequence means the config file was left exactly as it was, and it is
-	// REPORTED — the [SettingsHost.Write] contract — because a migration that silently did not happen
-	// leaves the human believing their key has moved.
-	//
-	// Synchronous, on the keypress that answered the offer, like every other config write here.
-	// nil ⇒ no offer is raised at all.
-	MigrateKey func(entry string) (path string, err error)
-
-	// KeepPlaintextKey records the "never for this entry" answer — `plaintext-key-ok: true` on that
-	// entry, the per-entry acknowledgement that ends the offer for good (ADR 0035's deliberate-edit
-	// grain) — and returns the file it wrote, so the confirmation can say which line to delete to
-	// be asked again. Same contract as MigrateKey in every other respect. nil ⇒ the answer says it
-	// cannot be recorded, the nil-seam degrade every seam here takes.
-	KeepPlaintextKey func(entry string) (path string, err error)
-
 	// SubAgentsMigration is the OTHER start-up offer, and the one thing it has in common with the
-	// pair above is its posture: the `servers:` entries whose block still spells ADR 0045's retired
+	// offer above is its posture: the `servers:` entries whose block still spells ADR 0045's retired
 	// `sub-agents: true` flag, in the file's own order. Nothing decodes that key any more — the root
 	// `sub-agents-server:` key replaced it — so a config carrying it delegates nowhere its owner
 	// meant, and the start-up offers the one edit that fixes it (keymigration.go).
@@ -1200,44 +1304,6 @@ type Options struct {
 	// file that has one is a file that never ran, and the choice between them is the human's. Empty —
 	// the ordinary case — raises nothing at all.
 	SubAgentsMigration []string
-
-	// MigrateSubAgentsServer takes that offer for the named entry: the retired flag lines go, and
-	// `sub-agents-server:` names this entry, in one edit of the file — after which the session's own
-	// delegations are re-pointed there, so the answer is in force now rather than at the next
-	// start-up. It reports the file it rewrote, so the confirmation can name where to look.
-	//
-	// The [SettingsHost.Write] contract in every other respect: synchronous on the keypress that
-	// answered, and a failure means the file was left exactly as it was and is REPORTED. nil ⇒ no
-	// offer is raised at all.
-	MigrateSubAgentsServer func(entry string) (path string, err error)
-
-	// RecordModelChoice persists the model this session just bound as the one its server comes back on
-	// NEXT time — the `model:` key of the `servers:` entry the session is on, written only while the
-	// `remember-model:` toggle is on. The renderer calls it with the id the human picked and knows
-	// nothing else about it: which entry the session is on, whether that entry is one apogee may write
-	// a model onto, and whether the toggle is on at all are the binary's questions, because only the
-	// binary can see the file.
-	//
-	// Only an EXPLICIT pick reaches it — the `/model` picker's accept and `/model <id>`, which share one
-	// bind path. A rebind the heartbeat merely OBSERVED records nothing: a server that loaded another
-	// model is news about the server rather than a choice this human made, and a session that followed
-	// it must not turn that observation into config nobody wrote. The `--model`/`APOGEE_MODEL` startup
-	// overrides record nothing for the same reason — they are facts about one invocation.
-	//
-	// It answers whether it WROTE, exactly as [ServerHost.RecordChoice] does, which is what lets the
-	// renderer state the recording without claiming one for the picks the binary skips: the toggle off,
-	// a session on no configured entry, and a session on a LAUNCHER-FRONTED entry — whose `model:` is a
-	// deliberately empty discovery hint, that class of server remembering its choice as a Launch profile
-	// instead — are all false with no error.
-	//
-	// It is best-effort persistence of something that ALREADY happened: the session is bound before this
-	// is called and stays bound whatever it answers, so an error is a note and never an undo. Like
-	// [ServerHost.RecordChoice] it is synchronous — one small file, spliced and renamed — and called
-	// on the Update loop.
-	//
-	// nil ⇒ nothing is recorded and every pick is session-scoped, which is the behaviour this key was
-	// introduced to replace; every hand-built Options keeps it.
-	RecordModelChoice func(model string) (recorded bool, err error)
 
 	// Launcher is the llama-launcher seam whole ([LauncherHost]): the Launch profiles this machine
 	// defines, the verb that activates one, the two that free or stop the server this session is on,
@@ -1647,7 +1713,7 @@ type SettingRow struct {
 	EditPointer string   // where a non-Editable key is edited instead; "" exactly when Editable
 	Desc        string   // the one-line description shown for the selected row
 
-	// ExternalEdit says ⏎ on this row opens the human's own editor ([Options.ExternalEditSpec]).
+	// ExternalEdit says ⏎ on this row opens the human's own editor ([ConfigHost.ExternalEditSpec]).
 	// It is DECLARED by the binary rather than inferred from the kind, for [SettingServer]'s reason:
 	// the confinement keys are structured and read-only too, and their interlock stays single-homed in
 	// `/confine` (ADR 0012), so "which read-only rows open an editor" is a fact about the schema and
@@ -1657,7 +1723,7 @@ type SettingRow struct {
 }
 
 // EditorCommand is one resolved external edit — the OUT half of the round trip
-// ([Options.ExternalEditSpec]): what to run, and whether this terminal goes with it.
+// ([ConfigHost.ExternalEditSpec]): what to run, and whether this terminal goes with it.
 //
 // Both facts are the binary's, for the same reason the argv is: which programs need a tty is a fact
 // about the PROGRAMS, resolved beside the ladder that named one (ADR 0041 decision 6), and a
@@ -1694,7 +1760,7 @@ type AppliedSetting struct {
 	Value string // its new value, in the spelling the pane journals and applies
 }
 
-// ConfigReload is one answer from [Options.ReloadConfig]: the keys a re-read of the config file found
+// ConfigReload is one answer from [ConfigHost.ReloadConfig]: the keys a re-read of the config file found
 // changed, and the notices the loader raised over that file that its baseline had not — both halves
 // of what a saved file has to tell a running session. The keys land (applyReloaded); the notices are
 // only SAID, one transcript line each in the loader's own words, because a notice is the trace a key

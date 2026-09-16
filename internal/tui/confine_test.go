@@ -147,10 +147,10 @@ func TestConfineOffSaveDrivesTheWriterSeam(t *testing.T) {
 	eng := &fakeEngine{confine: true}
 	calls := 0
 	opts := confineOpts(degradedHost, domain.ModeAuto)
-	opts.SaveHostAcknowledgement = func() (string, error) {
+	opts.Config = fakeConfigHost{saveHostAcknowledgement: func() (string, error) {
 		calls++
 		return "/home/u/.apogee/config.yaml", nil
-	}
+	}}
 	_, view := runConfineLine(t, eng, opts, "/confine off --save")
 
 	if calls != 1 {
@@ -169,7 +169,9 @@ func TestConfineOffSaveDrivesTheWriterSeam(t *testing.T) {
 func TestConfineOffSaveFailureLeavesTheSessionToggleStanding(t *testing.T) {
 	eng := &fakeEngine{confine: true}
 	opts := confineOpts(degradedHost, domain.ModeAuto)
-	opts.SaveHostAcknowledgement = func() (string, error) { return "", errors.New("disk on fire") }
+	opts.Config = fakeConfigHost{
+		saveHostAcknowledgement: func() (string, error) { return "", errors.New("disk on fire") },
+	}
 	_, view := runConfineLine(t, eng, opts, "/confine off --save")
 
 	if got := eng.confinesSet(); len(got) != 1 || got[0] {
@@ -183,7 +185,7 @@ func TestConfineOffSaveFailureLeavesTheSessionToggleStanding(t *testing.T) {
 }
 
 func TestConfineOffSaveWithoutAWriterSaysNothingWasWritten(t *testing.T) {
-	eng := &fakeEngine{confine: true} // opts.SaveHostAcknowledgement is nil
+	eng := &fakeEngine{confine: true} // opts.Config is nil
 	_, view := runConfineLine(t, eng, confineOpts(degradedHost, domain.ModeAuto), "/confine off --save")
 
 	if got := eng.confinesSet(); len(got) != 1 || got[0] {

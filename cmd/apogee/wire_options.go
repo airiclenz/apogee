@@ -9,11 +9,14 @@ package main
 // every field it names is filled.
 //
 // Below it, the host capabilities that projection names as INTERFACES rather than as bare funcs
-// (ADR 0054): settingsHost, the `/settings` pane's four acts over one config file, and schemeHost,
-// the three things this program does with the schemes folder. Each is one value the literal hands
-// over and one seam a renderer test fakes.
+// (ADR 0054): configHost, the eight acts a session performs on the config file itself; settingsHost,
+// the `/settings` pane's four acts over that same file; and schemeHost, the three things this program
+// does with the schemes folder. Each is one value the literal hands over and one seam a renderer test
+// fakes.
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 
 	"github.com/airiclenz/apogee"
@@ -87,13 +90,6 @@ func (w *rootWiring) options() tui.Options {
 		// and leaves every flow below exactly as it was; the seam that ENDS the state is
 		// [tui.ServerHost.Bind] above.
 		Prebound: w.opts.Prebound,
-		// And the same persistence one rung in, for the model rather than for the server
-		// (`remember-model:`): an explicit `/model` pick becomes the `model:` key on the entry the
-		// session is on, so that server comes back on it. Always wired — the toggle is read inside,
-		// where a `/settings` flip reaches it — and skipped silently wherever there is nothing this
-		// key can honestly record: an unlisted server, or a launcher-fronted entry, whose model is
-		// chosen by loading a Launch profile instead.
-		RecordModelChoice: w.recordModelChoice,
 		// The whole llama-launcher seam as one named capability (ADR 0054, launcher.go): the
 		// `/model`-over-profiles, `/unload-model` and `/stop-server` half of ADR 0029 — browse the
 		// launcher's profiles, activate one, following it onto another server when it lives there,
@@ -171,27 +167,29 @@ func (w *rootWiring) options() tui.Options {
 			Caps:    w.confiner.Capabilities(),
 			HostID:  platform.HostID(),
 		},
-		// The `--save` half of `/confine off --save`: record THIS host in the same config.yaml
-		// ApplyConfig read at startup, so the next run resolves unconfined here without the claim
-		// following the file onto any other machine. The renderer learns only the path written —
-		// the on-disk format is the binary's business, like the session Save seam below.
-		SaveHostAcknowledgement: config.HostAcknowledgementSaver(
-			filepath.Join(w.roots.config, "config.yaml"), platform.HostID()),
-		// The start-up key-migration offer and the two answers that write anything (keymigrate.go,
-		// ADR 0047). The renderer is handed the entry NAMES and the store's human name — never a key
-		// — and each answer is one call back into this layer, which owns the store, the read-back
-		// verification and the file format exactly as it owns the acknowledgement above. All three
-		// stay zero on a run with no plaintext key or no usable store, and the renderer then raises
-		// nothing.
-		KeyMigration:     w.keyOffer,
-		MigrateKey:       w.keyMigrator(),
-		KeepPlaintextKey: w.plaintextKeyKeeper(),
+		// The config FILE as one named capability (ADR 0054): the `--save` half of `/confine off
+		// --save`, recording THIS host in the same config.yaml ApplyConfig read at startup; the
+		// `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5) and the watcher's
+		// wait that is its second trigger (ADR 0041 decision 3); the answers to the two start-up
+		// offers below; and the `remember-model:` recording of an explicit `/model` pick. The renderer
+		// learns only what each answer says — a path written, the keys that changed, a command line
+		// — because the file's location, its format, the secret store and the editor this
+		// environment names are all this layer's (configHost, below). Always wired here: the acts a
+		// run cannot perform — an offer answer with no store, a recording with the toggle off — say
+		// so in their own answer, and the nil-host degrade tui.ConfigHost documents is what a Driver
+		// composes (ADR 0031), never this binary.
+		Config: configHost{w: w, saveHostAcknowledgement: config.HostAcknowledgementSaver(
+			configPath, platform.HostID())},
+		// The start-up key-migration offer (keymigrate.go, ADR 0047): the renderer is handed the
+		// entry NAMES and the store's human name — never a key — and each answer is one call back
+		// into this layer through the host above. It stays zero on a run with no plaintext key or
+		// no usable store, and the renderer then raises nothing.
+		KeyMigration: w.keyOffer,
 		// The other start-up offer, in the same shape (keymigrate.go, ADR 0045): the entries whose
-		// block still spells the retired `sub-agents: true` flag, and the one answer that writes
-		// anything — the rewrite, and the retarget that puts it in force in this session. Both stay
-		// zero on a config that carries no retired flag, which is every config written since.
-		SubAgentsMigration:     w.subAgentsFlagged,
-		MigrateSubAgentsServer: w.subAgentsMigrator(),
+		// block still spells the retired `sub-agents: true` flag; the one answer that writes anything
+		// — the rewrite, and the retarget that puts it in force in this session — is the host's. It
+		// stays zero on a config that carries no retired flag, which is every config written since.
+		SubAgentsMigration: w.subAgentsFlagged,
 		// The whole `/settings` seam as one named capability (ADR 0054): the rows the pane shows,
 		// the write and the reset that splice this run's config.yaml, and the apply that puts the
 		// key just persisted into effect. Everything behind it — the registry, the file format, the
@@ -210,19 +208,7 @@ func (w *rootWiring) options() tui.Options {
 				return w.live.promptEditorSeed(w.holder.Binding().Model, w.roots.config)
 			},
 		},
-		// The `$EDITOR` round trip for the keys no row can hold (ADR 0037 decision 5): out through a
-		// command line this binary resolves — the file, the key's own line, the editor this environment
-		// names — and back through a re-read that says which keys changed. The pane applies them
-		// through the same two homes an in-pane commit uses; nothing here applies anything, so the
-		// file's authority and the apply's single path both stay where they were (settingsedit.go).
-		ExternalEditSpec: w.externalEdits.spec,
-		ReloadConfig:     w.externalEdits.changed,
-		// And the trigger that does not need an editor at all (ADR 0041 decision 3): one wait on the
-		// watcher started in the assembly, answered when the file changes. What the renderer does with
-		// the news is exactly what it does when an editor exits — re-read through ReloadConfig, apply
-		// through the two homes above — so a saved file applies whoever saved it (decision 5).
-		AwaitConfigChange: awaitConfigChangeOn(w.configWatch),
-		Skills:            w.skillProvider,
+		Skills: w.skillProvider,
 		// Re-scan the skill source dirs when the merged "/" menu opens, swapping in a fresh catalog
 		// on the shared Provider — the same one Config.Skills resolves against — so a skill added
 		// mid-session both shows and attaches. The error is soft (Provider.Reload never signals
@@ -275,6 +261,98 @@ func (w *rootWiring) options() tui.Options {
 // ----------------------------------------------------------------------------
 // The host capabilities Options names as interfaces (ADR 0054)
 // ----------------------------------------------------------------------------
+
+// configHost is this binary's [tui.ConfigHost]: the eight acts a session performs on the config file
+// this run resolved, which are eight faces of one file — the host acknowledgement, the `$EDITOR`
+// round trip and the watcher's wait, the three start-up-offer answers, and the model recording. It
+// holds the wiring itself rather than eight closures over it, the serverHost posture: every act reads
+// live state the wiring owns — the external-edit baseline, the watcher, the secret store, the bound
+// entry — and each is the verb that already existed beside it (keymigrate.go, settingsedit.go,
+// wire_server.go, wire_verbs.go), unchanged by the regrouping. This value is only where the
+// renderer's eight names meet them.
+type configHost struct {
+	w *rootWiring
+	// saveHostAcknowledgement is the one act that is a closure, because internal/config hands it over
+	// as one ([config.HostAcknowledgementSaver]): the config path and this host's id are resolved at
+	// the launch call and the on-disk format stays that package's.
+	saveHostAcknowledgement func() (string, error)
+}
+
+// SaveHostAcknowledgement is the `--save` half of `/confine off --save`: THIS host recorded in the
+// same config.yaml ApplyConfig read at startup, so the next run resolves unconfined here without the
+// claim following the file onto any other machine. The renderer learns only the path written.
+func (h configHost) SaveHostAcknowledgement() (string, error) { return h.saveHostAcknowledgement() }
+
+// ReloadConfig is the return half of the `$EDITOR` round trip: a re-read that says which keys changed
+// against the baseline the spec took, and the loader's notices that are new against it
+// (settingsedit.go). Nothing here applies anything — the pane applies through the same two homes an
+// in-pane commit uses, so the file's authority and the apply's single path both stay where they were.
+func (h configHost) ReloadConfig() (tui.ConfigReload, error) { return h.w.externalEdits.changed() }
+
+// AwaitConfigChange is the trigger that needs no editor at all (ADR 0041 decision 3): one wait on the
+// watcher started in the assembly, answered when the file changes. What the renderer does with the
+// news is exactly what it does when an editor exits — re-read through ReloadConfig, apply through the
+// two homes above — so a saved file applies whoever saved it (decision 5).
+func (h configHost) AwaitConfigChange(ctx context.Context) bool {
+	return awaitConfigChangeOn(h.w.configWatch)(ctx)
+}
+
+// MigrateKey answers the key-migration offer's "move it" (keymigrate.go, ADR 0047): the store write,
+// the read-back through the very command about to be persisted, and only then the rewrite. A run that
+// found no usable store raised no offer, and answers a stray call with a refusal rather than a move.
+func (h configHost) MigrateKey(entry string) (string, error) {
+	migrate := h.w.keyMigrator()
+	if migrate == nil {
+		return "", errNoSecretStore
+	}
+	return migrate(entry)
+}
+
+// KeepPlaintextKey answers the same offer's "never for this entry": the `plaintext-key-ok: true`
+// marker on that entry alone, wired with the migrator because it is an answer to the same question.
+func (h configHost) KeepPlaintextKey(entry string) (string, error) {
+	keep := h.w.plaintextKeyKeeper()
+	if keep == nil {
+		return "", errNoSecretStore
+	}
+	return keep(entry)
+}
+
+// MigrateSubAgentsServer answers the retired-flag offer (keymigrate.go, ADR 0045): the rewrite onto
+// the root `sub-agents-server:` key, and the retarget that puts it in force in this session. A run
+// that found no retired flag raised no offer, and answers a stray call with a refusal.
+func (h configHost) MigrateSubAgentsServer(entry string) (string, error) {
+	migrate := h.w.subAgentsMigrator()
+	if migrate == nil {
+		return "", errNoRetiredFlag
+	}
+	return migrate(entry)
+}
+
+// RecordModelChoice is `remember-model:` one rung in from the server choice: an explicit `/model`
+// pick becomes the `model:` key on the entry the session is on, so that server comes back on it. The
+// toggle is read inside, where a `/settings` flip reaches it, and the pick is skipped silently
+// wherever there is nothing this key can honestly record — an unlisted server, or a launcher-fronted
+// entry, whose model is chosen by loading a Launch profile instead (wire_verbs.go).
+func (h configHost) RecordModelChoice(model string) (bool, error) {
+	return h.w.recordModelChoice(model)
+}
+
+// ExternalEditSpec is the out half of the `$EDITOR` round trip for the keys no row can hold (ADR 0037
+// decision 5): a command line this binary resolves — the file, the key's own line, the editor this
+// environment names — and the baseline the return half diffs against (settingsedit.go).
+func (h configHost) ExternalEditSpec(path string) (tui.EditorCommand, error) {
+	return h.w.externalEdits.spec(path)
+}
+
+// The two refusals the offer answers give when the run raised no offer to answer. They cannot be
+// reached from the renderer — it raises an offer only from a non-zero [tui.Options.KeyMigration] or
+// [tui.Options.SubAgentsMigration], which this layer fills together with the seams behind them — so
+// they exist to keep the acts total rather than to be read.
+var (
+	errNoSecretStore = errors.New("apogee: no secret store was found for this run; nothing to move a key into")
+	errNoRetiredFlag = errors.New("apogee: no server entry carries the retired sub-agents flag")
+)
 
 // settingsHost is this binary's [tui.SettingsHost]: the four acts of the `/settings` pane, which
 // are four faces of one config file — the rows it shows off the resolution THIS run made, the write

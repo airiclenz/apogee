@@ -152,9 +152,9 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	return nil
 }
 
-// awaitConfigChangeOn adapts the polling watcher to [tui.Options.AwaitConfigChange]: one wait, one
+// awaitConfigChangeOn adapts the polling watcher to [tui.ConfigHost.AwaitConfigChange]: one wait, one
 // answer, and nothing about files or YAML crossing the seam (ADR 0041 decision 3). The renderer
-// re-reads through [tui.Options.ReloadConfig] when this returns true, which is the same call an
+// re-reads through [tui.ConfigHost.ReloadConfig] when this returns true, which is the same call an
 // editor's exit makes — one apply path, two triggers.
 //
 // It answers false on two ends, and they mean the same thing to the caller: the program's context is

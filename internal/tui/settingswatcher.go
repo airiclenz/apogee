@@ -15,7 +15,7 @@ import (
 // round trip with two triggers (ADR 0041 decision 6). A human can open the file in their own editor
 // from a row — foreground, which suspends the program, or detached, which does not — and a human can
 // save that same file from anywhere else entirely, which the binary's watcher reports. Both ends
-// arrive here, both re-read through [Options.ReloadConfig], and both land through the ONE apply loop
+// arrive here, both re-read through [ConfigHost.ReloadConfig], and both land through the ONE apply loop
 // below (applyReloaded → settingsApplied, settingsapply.go), so a key edited in a terminal editor
 // cannot take a different path from the same key edited in a GUI one.
 //
@@ -66,7 +66,7 @@ const settingsDetachedEditNote = "opened in your editor"
 // settingsExternalEdit answers ⏎ on a row holding a structure no field can express: it opens the
 // human's own editor on that key's line (ADR 0037 decision 5). The command line is the binary's —
 // which file, which line, which editor, and whether that editor takes this terminal — and this only
-// runs it ([Options.ExternalEditSpec]).
+// runs it ([ConfigHost.ExternalEditSpec]).
 //
 // Two ways to run it, one keypress (ADR 0041 decision 6). A FOREGROUND editor gets the program's own
 // terminal through tea.ExecProcess and its exit is the trigger for the re-read, exactly as it has
@@ -93,10 +93,7 @@ func (m Model) settingsExternalEdit(row SettingRow) (tea.Model, tea.Cmd) {
 	if m.busy() || m.actuation.inFlight {
 		return m.settingsFailed(row, settingsEditBusyNote)
 	}
-	if m.opts.ExternalEditSpec == nil {
-		return m.settingsFailed(row, noExternalEditNote)
-	}
-	launch, err := m.opts.ExternalEditSpec(row.Path)
+	launch, err := m.configHostOrNoop().ExternalEditSpec(row.Path)
 	if err != nil {
 		return m.settingsFailed(row, stripEscapes(err.Error()))
 	}
@@ -182,10 +179,7 @@ func (m Model) foldSettingsEdit(msg settingsEditedMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		return m.settingsFailed(launched, stripEscapes(msg.err.Error()))
 	}
-	if m.opts.ReloadConfig == nil {
-		return m.settingsFailed(launched, noExternalEditNote)
-	}
-	reload, err := m.opts.ReloadConfig()
+	reload, err := m.configHostOrNoop().ReloadConfig()
 	if err != nil {
 		return m.settingsFailed(launched, stripEscapes(err.Error()))
 	}
@@ -225,7 +219,7 @@ func (m Model) applyReloaded(rows []SettingRow, applied []AppliedSetting, watche
 
 // configChangedMsg is one report from the binary's config watcher: the file changed, or — alive
 // false — the WATCH itself ended and nothing more will ever be reported. It carries no path and no
-// keys, because the watcher knows neither: what changed is [Options.ReloadConfig]'s answer, and the
+// keys, because the watcher knows neither: what changed is [ConfigHost.ReloadConfig]'s answer, and the
 // message is only the news that it is worth asking (ADR 0041 decision 3).
 type configChangedMsg struct{ alive bool }
 
@@ -270,15 +264,16 @@ const configWatchAppliedNote = "config changed on disk — applied: "
 //
 // It takes the program context, as [Model.beatCmd] does, so a quit ends the wait where it stands
 // rather than leaving it parked on a channel until the composition root's teardown reaches the
-// watcher. nil seam ⇒ no Cmd and therefore no chain, the nil-seam degrade every provider here takes.
+// watcher. nil host ⇒ no Cmd and therefore no chain: whether a chain opens is decided ABOUT the host
+// before any act is called (ADR 0054 decision 3a), the one place this family reads the field itself.
 func (m Model) awaitConfigChange() tea.Cmd {
-	await := m.opts.AwaitConfigChange
-	if await == nil {
+	host := m.opts.Config
+	if host == nil {
 		return nil
 	}
 	ctx := m.parent
 	return func() tea.Msg {
-		return configChangedMsg{alive: await(ctx)}
+		return configChangedMsg{alive: host.AwaitConfigChange(ctx)}
 	}
 }
 
@@ -301,16 +296,15 @@ func (m Model) awaitConfigChange() tea.Cmd {
 //
 // The next wait is opened before anything is applied, so a re-read that ends in a refusal still leaves
 // the session watching — a broken config the human is about to fix is exactly the file the next report
-// has to be about. A watch that has ENDED arms nothing: there is no report to wait for any more.
+// has to be about. A watch that has ENDED arms nothing: there is no report to wait for any more —
+// and neither does a report that reached a session with no [ConfigHost], which could never have
+// opened the wait it answers.
 func (m Model) foldConfigChanged(msg configChangedMsg) (tea.Model, tea.Cmd) {
-	if !msg.alive {
+	if !msg.alive || m.opts.Config == nil {
 		return m, nil
 	}
 	next := m.awaitConfigChange()
-	if m.opts.ReloadConfig == nil {
-		return m, next
-	}
-	reload, err := m.opts.ReloadConfig()
+	reload, err := m.opts.Config.ReloadConfig()
 	if err != nil {
 		return m.foldConfigUnreadable(err), next
 	}
@@ -339,7 +333,7 @@ func (m Model) noteLoaderNotices(notices []string) Model {
 }
 
 // appliedPaths is the note's list: the registry path of every key the re-read found changed, in the
-// order [Options.ReloadConfig] returned them, which is the registry's own. It reads the APPLIED slice
+// order [ConfigHost.ReloadConfig] returned them, which is the registry's own. It reads the APPLIED slice
 // rather than the pane's rows on purpose — the rows are one surface's view of the config and a key
 // the pane does not list still moved the session.
 func appliedPaths(applied []AppliedSetting) []string {

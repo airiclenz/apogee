@@ -59,13 +59,10 @@ func (m Model) runConfine(args confineArgs) (tea.Model, tea.Cmd) {
 // saveHostAcknowledgement drives the binary's config writer for `/confine off --save` and
 // renders the one-line outcome: which file records this host, or why nothing was written. A
 // failed (or unwired) save never invalidates the session toggle that already happened — the two
-// are independent, and saying so is what keeps the confirmation truthful.
+// are independent, and saying so is what keeps the confirmation truthful. An unwired host refuses
+// through the same answer ([ConfigHost.SaveHostAcknowledgement]), so one sentence covers both.
 func (m Model) saveHostAcknowledgement() string {
-	if m.opts.SaveHostAcknowledgement == nil {
-		return "not saved: this build cannot write the host acknowledgement\n" +
-			"  the change applies to this session only"
-	}
-	path, err := m.opts.SaveHostAcknowledgement()
+	path, err := m.configHostOrNoop().SaveHostAcknowledgement()
 	if err != nil {
 		return "not saved: " + err.Error() + "\n  the change applies to this session only"
 	}

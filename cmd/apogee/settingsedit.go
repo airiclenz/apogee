@@ -179,7 +179,7 @@ func newExternalEdit(opts config.Options, workspace string, getenv func(string) 
 	return e
 }
 
-// spec answers [tui.Options.ExternalEditSpec]: the command line that opens the config file at key's
+// spec answers [tui.ConfigHost.ExternalEditSpec]: the command line that opens the config file at key's
 // own line, how that command has to be started, and the moment the return trip's baseline is taken.
 //
 // The spawn mode crosses the seam because it is a fact about the program the ladder just named
@@ -228,7 +228,7 @@ func (e *externalEdit) spec(key string) (tui.EditorCommand, error) {
 	}, nil
 }
 
-// changed answers [tui.Options.ReloadConfig]: the keys whose value came back different from the
+// changed answers [tui.ConfigHost.ReloadConfig]: the keys whose value came back different from the
 // baseline, in registry order, with the value the pane is to journal and apply for each.
 //
 // The whole file is re-resolved through the startup path, so a parse error, a port out of range or a
