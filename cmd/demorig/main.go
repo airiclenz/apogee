@@ -5,12 +5,14 @@
 //	demorig lint graphics/demo/storyboards/hero.yaml
 //	demorig beats graphics/demo/storyboards/hero.yaml <take.mp4> <session.json> [--json]
 //	demorig check graphics/demo/storyboards/hero.yaml <session.json> [--stage <dir>]
+//	demorig render graphics/demo/storyboards/hero.yaml <take.mp4> <session.json> [-o out.gif] [--dry-run]
 //
 // `lint` checks the storyboard against its schema and the tape it names, printing every
 // problem and exiting 1 on any. `beats` locates each beat in a raw take from the saved
 // session's timestamps (ffmpeg and ffprobe on PATH). `check` judges a take by its saved
-// session and the stage repo: every expect as a PASS/FAIL row, exit 1 on any FAIL. The
-// subcommand that renders the GIF builds on the same loader.
+// session and the stage repo: every expect as a PASS/FAIL row, exit 1 on any FAIL. `render`
+// cuts the GIF from the take as the storyboard frames each beat — speed, hold, zoom, cut —
+// through one ffmpeg filtergraph, then gifsicle when it is on PATH.
 //
 // It is a dev tool, not a release asset: `make demorig` builds it, and `make dist` does not
 // ship it.
@@ -55,6 +57,7 @@ func newRootCommand() *cobra.Command {
 	cmd.AddCommand(newLintCommand())
 	cmd.AddCommand(newBeatsCommand())
 	cmd.AddCommand(newCheckCommand())
+	cmd.AddCommand(newRenderCommand(ffmpegTools{}))
 	return cmd
 }
 

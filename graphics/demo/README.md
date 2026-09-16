@@ -15,12 +15,15 @@ brew install vhs gifsicle        # vhs pulls ttyd + ffmpeg and fetches its own h
 export OPENROUTER_API_KEY=…      # the rig's default server is OpenRouter; the key is read from here
 ./setup.sh                       # build the rig (idempotent)
 ./record.sh hero                 # reset the stage, record tapes/hero.tape, check the take — exit 1 = retake
-./render.sh ~/.cache/apogee-demo/hero.mp4 ../demo.gif 1.25 3.8
+go run -C ../.. ./cmd/demorig render storyboards/hero.yaml ~/.cache/apogee-demo/hero.mp4 <session.json>
 ```
 
 `record.sh` ends by judging the take against `storyboards/hero.yaml` (`demorig check`, see
 **Checking a take** below) and exits with its status, so a retake loop is `until ./record.sh hero;
-do :; done` — budget the takes first (**Things that are settled**).
+do :; done` — budget the takes first (**Things that are settled**). On a keeper it prints the
+`demorig render` line with the take's session filled in; the render writes the storyboard's
+`ship:` path (`../demo.gif`) unless `-o` names another, and `--dry-run` prints the ffmpeg command
+line instead of running it.
 
 **The server alias and the model id are on camera** in the footer for the whole clip, so pick
 both deliberately. The defaults are the `openrouter` alias with `~deepseek/deepseek-v4-flash-latest`
@@ -36,7 +39,7 @@ which refuses to start a take while it is unset.
 |---|---|
 | `setup.sh` | builds the rig: isolated apogee home, stage repo, generated `env.sh`, warm Go cache |
 | `record.sh <tape>` | resets the stage, records `tapes/<tape>.tape`, then judges the take with `demorig check` when `storyboards/<tape>.yaml` exists (exit 1 on a FAIL) |
-| `render.sh` | raw take → shipping GIF (head trim, time-compression, palette encode) |
+| `demorig render <storyboard> <take.mp4> <session.json>` | raw take → shipping GIF from the storyboard: per-beat speed, hold, zoom and cut, then the palette encode; the rig's Go tool (`make demorig` at the repo root, or `go run -C ../.. ./cmd/demorig`) |
 | `reset.sh` | restores the planted bug + CHANGELOG stub, wipes session state |
 | `gen.sh <src> <dst>` | writes the work-dir copy of a tape, expanding the hero tape's typed lines into humanized typing |
 | `type.sh <string>` | one typed string → its humanized typing block; `--check` asserts the profile's totals |
@@ -91,13 +94,16 @@ friction any user hits running `auto` in a Go project, not a demo artifact.
 first try. If a beat silently doesn't happen, suspect the verb before suspecting the model.
 
 **Pace is decided in post, never in the tape.** Tapes record at real speed with generous
-`Sleep`s; `render.sh` trims and compresses. A re-pace or a different start point then costs
-an ffmpeg run instead of another take of a nondeterministic model. The hero clip ships as
-`1.25` speed from `3.8`s (dropping the shell + launch so it opens already inside apogee).
+`Sleep`s; `demorig render` cuts, paces and zooms from the storyboard's per-beat `frame:`. A
+re-pace or a different start point then costs an edit to the storyboard and an ffmpeg run instead
+of another take of a nondeterministic model. The hero clip opens on the TUI's first paint (beat 1's
+`{video: first-paint}` anchor drops the shell + launch) and paces each beat as `storyboards/hero.yaml`
+frames it.
 
-**`render.sh` cannot cut from the middle — ffmpeg can.** When a take carries dead air between
-two beats (a knob 2 overshoot, say), splice it out before rendering and feed the spliced file
-to `render.sh`:
+**Dead air is cut in the storyboard, not by hand.** When a take carries dead air between two
+beats (a knob 2 overshoot, say), `speed` on the beat compresses it and `cut: true` drops the
+segment; the render splices with `trim` + `concat`, which is this hand recipe, one segment per
+beat, for when a splice has to be checked frame by frame:
 
 ```sh
 ffmpeg -y -i hero.mp4 -filter_complex \
@@ -118,9 +124,9 @@ history. Knob 1 (storyboard beat 4) decides where the interjection lands — it 
 tool cards are still streaming, or it reads as an ordinary next message instead of a queued one;
 the session JSON is the tell, where the entry reads `interjected` on a hit and `user` on a miss.
 Knob 2 (beat 6) must outlast the run's tail, but overshooting is **not** free the way this file
-used to claim: `render.sh` trims only the HEAD (`-ss`), so every idle second between the last beat
-and `/undo` ships as dead air in the middle of the clip. Give it margin for a slow run, not an
-unbounded cushion. Knob 3 (beat 5) is when the fix's card is opened: the tape opens that card, and
+used to claim: the render compresses beat 6's segment only as far as its `speed` says, so every
+idle second between the last beat and `/undo` ships as dead air in the middle of the clip unless
+the storyboard cuts it. Give it margin for a slow run, not an unbounded cushion. Knob 3 (beat 5) is when the fix's card is opened: the tape opens that card, and
 the gesture only reaches the right one while the edit is still the most recent block.
 
 **Knob 3 waits for the fix's card, and the measurement is why** (recorded in full under the
@@ -210,8 +216,9 @@ keystroke (**VHS pitfalls already paid for**, above). `type.sh --check` pins the
 when a band, the seed or a typed string is edited, not per take. Two timing consequences: typed
 strings now run **longer** than `40 ms × N` (25–45 ms a letter, plus pauses), so knob 1 — beat
 4's `Sleep 8s`, reasoned in the storyboard's beat 4 `notes` — is retuned against a take, and the
-storyboard's `align.first_prompt_at` and beat-4 `offset` are re-derived from the new totals; and the `render.sh` head trim above (`1.25 3.8`) is re-measured on the
-next take: the expanded `apogee --mode auto` moves the shell+launch boundary by ~+0.2–0.5 s.
+storyboard's `align.first_prompt_at` and beat-4 `offset` are re-derived from the new totals. The
+head trim needs no re-measuring: the expanded `apogee --mode auto` moves the shell+launch boundary
+by ~+0.2–0.5 s, and beat 1's `first-paint` anchor finds it by scene detection on every take.
 
 The generator's byte-stability across awks is checkable, not just claimed: both `type.sh` and
 `gen.sh` run `${AWK:-awk}`, so an `AWK=<implementation>` prefix picks the awk for a whole pass
@@ -326,8 +333,8 @@ Worth knowing when scripting a new one:
 
 Every clip that ships gets a folder under `history/<date>-<slug>/` holding a copy of the shipped
 GIF plus a `NOTES.md` with the facts a re-record needs and a screen recording cannot show: the
-model and server alias that were on camera, the endpoint, the tape and apogee commit, the
-`render.sh` arguments, and how many takes it took. Alternate renders of the same take (untimed,
+model and server alias that were on camera, the endpoint, the tape, storyboard and apogee commit,
+the render line, and how many takes it took. Alternate renders of the same take (untimed,
 with-launch) live beside it rather than loose in `graphics/`.
 
 `graphics/demo.gif` stays the one path the README references; `history/` is the record, not the

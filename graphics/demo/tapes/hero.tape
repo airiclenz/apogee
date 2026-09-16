@@ -1,6 +1,6 @@
 # The README hero clip: one task, red -> green, with a queued interjection mid-run, the fix's
 # split diff opened on camera, and a closing /undo preview that reverts nothing.
-# Recorded at real speed; trimmed and compressed afterwards by render.sh.
+# Recorded at real speed; cut, paced and zoomed afterwards by `demorig render` from the storyboard.
 #
 # This file is VHS mechanics only: what to type, what to wait on, and when. The WHY of every
 # beat and every timing — the knobs, the measurements behind them, what a keeper take must show —

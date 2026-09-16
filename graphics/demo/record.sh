@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Record one take. Resets the stage first, then runs the named tape in the work dir, and — when
 # the clip has a storyboard — judges the take against it, exiting with `demorig check`'s status
-# so a retake loop can key off it.
+# so a retake loop can key off it, and names the `demorig render` line that cuts the GIF from it.
 #
 #   ./record.sh hero          # runs tapes/hero.tape -> <work>/hero.mp4, then checks the take
 #
@@ -44,11 +44,11 @@ time vhs "$TAPE.tape"
 
 echo
 echo "raw take: $WORK/$TAPE.mp4"
-echo "post-process with: $HERE/render.sh $WORK/$TAPE.mp4 <out.gif> [speed] [start]"
 
 # Judge the take against the clip's storyboard. reset.sh wiped the sessions dir before the
 # take, so the newest session there is this take's. A clip without a storyboard (a new tape
-# still being drafted) records fine and is simply not checked.
+# still being drafted) records fine and is simply not checked — and not rendered either: the
+# render reads its pace, holds, zooms and cuts from the storyboard.
 if [ -f "$STORYBOARD" ]; then
   SESSION="$(ls -t "$DEMO_HOME/.apogee/sessions/"*.json 2>/dev/null | head -n 1 || true)"
   if [ -z "$SESSION" ]; then
@@ -58,6 +58,8 @@ if [ -f "$STORYBOARD" ]; then
   echo
   echo "checking the take against $STORYBOARD …"
   go run -C "$REPO" ./cmd/demorig check "$STORYBOARD" "$SESSION" --stage "$STAGE"
+  echo
+  echo "render with: go run -C $REPO ./cmd/demorig render $STORYBOARD $WORK/$TAPE.mp4 $SESSION [-o out.gif]"
 else
   echo "no storyboard for $TAPE — take not checked"
 fi
