@@ -143,7 +143,7 @@ func TestNewSeedsTheEffortDialectFromTheConfig(t *testing.T) {
 	cfg.EffortDialect = domain.EffortDialectReasoning
 	cfg.Profile.Thinking.Effort = domain.EffortMedium
 
-	up := &recordingResponder{reply: "done"} // an effort assertion: the stubllm log does not carry it yet
+	up := &recordingResponder{reply: "done"} // an effort assertion off provider.Request; the stubllm log carries it too
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

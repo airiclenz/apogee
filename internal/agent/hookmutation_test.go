@@ -17,9 +17,10 @@ import (
 )
 
 // capturingResponder records the request it is asked to send, as the provider sees it, then
-// replies with a canned message. Its remaining users assert the request's Sampling — a field the
-// stubllm request log does not yet carry; what a Reaction shaped onto the wire is read off the
-// scripted upstream's log.
+// replies with a canned message. Its remaining users assert the request's Sampling straight off
+// provider.Request; the stubllm request log carries Sampling and Effort too, so they are
+// migration candidates. What a Reaction shaped onto the wire is read off the scripted
+// upstream's log.
 type capturingResponder struct {
 	got   provider.Request
 	reply string

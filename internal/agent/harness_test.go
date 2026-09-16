@@ -119,9 +119,9 @@ func streamReply(content string) iter.Seq[provider.Delta] {
 }
 
 // recordingResponder is the canned-reply fake that also captures the last request it was handed,
-// as the provider sees it — the fields a stubllm request log does not yet carry (the effort
-// dialect, the thinking effort) are what its remaining users assert. A pointer receiver so last
-// survives across calls.
+// as the provider sees it — its remaining users assert the effort dialect and thinking effort
+// straight off provider.Request; the stubllm request log carries Effort too, so they are
+// migration candidates. A pointer receiver so last survives across calls.
 type recordingResponder struct {
 	reply string
 	last  provider.Request

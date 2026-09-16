@@ -365,7 +365,7 @@ func TestRebindCarriesTheReplyCeiling(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 98304
 	cfg.Context.MaxOutputTokens = 2048
-	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("bounded")}} // a Sampling assertion: the stubllm log does not carry it yet
+	responder := &captureAllResponder{scripts: [][]provider.Delta{contentScript("bounded")}} // a Sampling assertion off provider.Request; the stubllm log carries it too
 
 	a, err := newAgent(cfg, responder)
 	if err != nil {

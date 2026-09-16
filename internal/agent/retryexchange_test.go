@@ -19,9 +19,9 @@ import (
 )
 
 // captureAllResponder yields a pre-scripted stream per call and records EVERY request it was
-// handed as the provider sees it. Its remaining user asserts a request's Sampling — a field the
-// stubllm request log does not yet carry; every assertion on the messages sent reads the
-// scripted upstream's log instead.
+// handed as the provider sees it. Its remaining user asserts a request's Sampling straight off
+// provider.Request; the stubllm request log carries Sampling and Effort too, so the user is a
+// migration candidate. Every assertion on the messages sent reads the scripted upstream's log.
 type captureAllResponder struct {
 	scripts [][]provider.Delta
 	got     []provider.Request
