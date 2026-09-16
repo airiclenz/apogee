@@ -141,6 +141,9 @@ func (w *rootWiring) options() tui.Options {
 		ColorScheme:         w.colorScheme,
 		ColorSchemeName:     w.opts.UI.ColorScheme,
 		ColorSchemeWarnings: w.colorSchemeWarnings,
+		// The confinement posture announceConfinement already said on stderr, repeated so the
+		// alternate screen opening over that line does not lose it (apogee-2sj).
+		StartupNotices: w.startupNotices,
 		// And what keeps the scheme switchable from inside the program: what the picker offers, the
 		// resolve behind an answer to it, and the export that CREATES a scheme file at all — one
 		// named capability over one folder (ADR 0054), read on every ask so a file written or edited

@@ -154,6 +154,20 @@ func TestE2EAutoDegradationJourneyOnAnIncapableHost(t *testing.T) {
 	if strings.Contains(stderr, "running UNCONFINED") {
 		t.Errorf("the unconfined-Auto warning fired for a launch with confine-to-workspace true:\n%s", stderr)
 	}
+	// And whatever the real host DID say is what the TUI is handed to repeat in the transcript
+	// (apogee-2sj): the same sentences, verbatim, in print order, free of the warning above.
+	var wantNotices string
+	if len(rec.opts.StartupNotices) > 0 {
+		wantNotices = strings.Join(rec.opts.StartupNotices, "\n") + "\n"
+	}
+	if wantNotices != stderr {
+		t.Errorf("tui.Options.StartupNotices = %q; want exactly the stderr lines %q", rec.opts.StartupNotices, stderr)
+	}
+	for _, notice := range rec.opts.StartupNotices {
+		if strings.Contains(notice, "running UNCONFINED") {
+			t.Errorf("the transcript would repeat the unconfined-Auto warning on a confined launch: %q", notice)
+		}
+	}
 	hostID := rec.opts.Confinement.HostID
 	if hostID == "" {
 		t.Fatal("tui.Options.Confinement.HostID is empty; /confine status could never name the host " +

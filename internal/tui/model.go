@@ -720,6 +720,11 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// last word on the frame the human is looking at — and because a scheme that loaded cleanly, the
 	// ordinary case, adds nothing here at all.
 	m.noteColorSchemeWarnings(opts.ColorSchemeWarnings)
+	// What the binary already said on stderr about the confinement posture, before the alternate
+	// screen opened over it (apogee-2sj). After the scheme warnings because it is the later word:
+	// the shell scrollback carried it a moment ago, and the frame repeats it so the human who
+	// looked up at the opening screen still meets it.
+	m.noteStartupNotices(opts.StartupNotices)
 	// A session the binary could not resolve a server for opens ASKING (ADR 0036 decisions 3 and 7):
 	// the `/server` picker, or `/settings` when nothing is configured to pick. It goes last of all —
 	// after every notice above — because it is the one thing the human has to act on before the
@@ -867,6 +872,18 @@ func (m *Model) noteContextFiles() {
 func (m *Model) noteColorSchemeWarnings(warnings []string) {
 	for _, w := range warnings {
 		m.transcript.addEphemeralNote(w)
+	}
+}
+
+// noteStartupNotices repeats, verbatim and in order, what the binary printed on stderr about the
+// confinement posture before the alternate screen opened (Options.StartupNotices). The lines are
+// composed and already printed by the binary; this only places them, as EPHEMERAL notes for the
+// same reason the colour-scheme warnings are: each is re-derived from the mode, the config and the
+// host's backend at every launch, so persisting one would stack a duplicate into the record on
+// every resume while telling the next launch nothing it does not re-discover.
+func (m *Model) noteStartupNotices(notices []string) {
+	for _, n := range notices {
+		m.transcript.addEphemeralNote(n)
 	}
 }
 

@@ -236,6 +236,10 @@ type rootWiring struct {
 	// The resolved `ui.color-scheme:` palette and whatever the resolve complained about.
 	colorScheme         scheme.Scheme
 	colorSchemeWarnings []string
+
+	// What announceConfinement printed on stderr before the alternate screen opened, verbatim and
+	// in print order, for the TUI to repeat as ephemeral notes (tui.Options.StartupNotices).
+	startupNotices []string
 }
 
 // close ends the run: every facility this wiring opened, in the reverse of the order it was opened,

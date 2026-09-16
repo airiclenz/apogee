@@ -275,11 +275,17 @@ func (w *rootWiring) resolveConfig() error {
 // alternate screen has not opened yet and a raw write is still safe — and pre-warms the one cost
 // that posture implies. Both branches are per-session and mutually exclusive: Auto unconfined by
 // choice, or Auto asking for a confinement this host cannot enforce.
+//
+// Every sentence it prints is ALSO kept on w.startupNotices, in print order, for the TUI to repeat
+// as ephemeral transcript notes (tui.Options.StartupNotices): the stderr line is right while the
+// screen is still the shell's, but the alternate screen opens over it a moment later and the
+// human's first look at the session would otherwise never show what was said (apogee-2sj). The
+// stderr line stays — headless and daemon runs have no transcript, and a scrollback keeps it.
 func (w *rootWiring) announceConfinement() {
 	// A per-session startup warning whenever Auto runs unconfined (ADR 0012): confine=false
 	// is safe only inside a VM, and it is the only blanket loosen in the system.
 	if w.mode == domain.ModeAuto && !w.opts.ConfineToWorkspace {
-		fmt.Fprintln(os.Stderr, unconfinedAutoWarning)
+		w.announce(unconfinedAutoWarning)
 	}
 
 	// The mirror branch: Auto WITH confinement asked for, on a host whose backend cannot
@@ -287,7 +293,7 @@ func (w *rootWiring) announceConfinement() {
 	// now, which is what made Auto look broken (the issue register, 2026-07-21). Say it once,
 	// name the backend, and point at /confine.
 	if notice := probe.DegradedNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		fmt.Fprintln(os.Stderr, notice)
+		w.announce(notice)
 	}
 
 	// The third cell, and the sibling of the branch above rather than a third exclusive one: a
@@ -297,7 +303,7 @@ func (w *rootWiring) announceConfinement() {
 	// posture is announced. It cannot fire together with the degradation notice: that one needs
 	// FSWrite false, this one needs it true.
 	if notice := probe.ResidualNotice(probe.BackendName(w.confiner), w.confiner.Capabilities(), w.mode, w.opts.ConfineToWorkspace); notice != "" {
-		fmt.Fprintln(os.Stderr, notice)
+		w.announce(notice)
 	}
 
 	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
@@ -319,4 +325,12 @@ func (w *rootWiring) announceConfinement() {
 	if shouldPrewarmLabelWalk(w.mode, w.opts.ConfineToWorkspace, w.confiner.Capabilities().FSWrite) {
 		platform.PrewarmLabelWalk(w.confiner, w.roots.workspace, os.Stderr)
 	}
+}
+
+// announce prints one startup notice on stderr and keeps it for the transcript — the one seam
+// through which announceConfinement speaks, so the two surfaces cannot drift: what the shell
+// scrollback shows is, verbatim, what the opening frame repeats.
+func (w *rootWiring) announce(notice string) {
+	fmt.Fprintln(os.Stderr, notice)
+	w.startupNotices = append(w.startupNotices, notice)
 }

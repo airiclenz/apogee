@@ -230,7 +230,12 @@ NOTES (2026-09-16): `plantKeyCommand` (the cmd/apogee twin) and `keyCommandAt` l
 
 commit: `fix(daemon): an api-key-cmd is fenced against the Firing's workspace, memo included`
 
-## 12. Startup notices reach the transcript (apogee-2sj)
+## 12. Startup notices reach the transcript (apogee-2sj) — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): consequential edit — cmd/apogee/wire.go: made necessary by `w.startupNotices`, which the item names on `rootWiring`; that struct lives in wire.go, not wire_boot.go.
+NOTES (2026-09-16): the three `fmt.Fprintln` sites in `announceConfinement` funnel through one `rootWiring.announce` helper (print + append) so the stderr line and the handed-over slice cannot drift; the printed strings and their order are unchanged.
+NOTES (2026-09-16): `TestE2EAutoDegradationJourneyOnAnIncapableHost` takes the plan's first option (phase 3 asserts `rec.opts.StartupNotices` equals the captured stderr and is free of "running UNCONFINED"); no separate deny-confiner driven case was added.
+NOTES (2026-09-16): the manual never described the stderr-only startup line, so no manual edit was needed; `docs/manual/daemon.md` :88-91 ("in the same words an unconfined interactive launch prints") stays true.
 
 **What:** Closes apogee-2sj under the ratified call. `cmd/apogee/wire_boot.go` `announceConfinement` keeps its `os.Stderr` lines and ALSO appends each string it prints (`unconfinedAutoWarning`, `probe.DegradedNotice`, `probe.ResidualNotice`) to `w.startupNotices []string`; `wire_options.go` `options()` passes `StartupNotices: w.startupNotices`. `internal/tui/tui.go`: `Options.StartupNotices []string` (doc: "printed on stderr before the alternate screen opened; repeated here so the moment is not lost"). `Model` posts them exactly as `noteColorSchemeWarnings` posts `ColorSchemeWarnings` — one `addEphemeralNote` per notice, in order, after the colour-scheme warnings; the note text is the notice verbatim. Headless and daemon are untouched.
 

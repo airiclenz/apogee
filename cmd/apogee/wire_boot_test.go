@@ -555,6 +555,18 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 			if tt.wantResidual && !strings.Contains(stderr, "truncate(2)") {
 				t.Errorf("the disclosure does not name the access it is about: %q", stderr)
 			}
+
+			// The transcript half (apogee-2sj): whatever went to stderr is handed to the TUI,
+			// verbatim and in print order, and nothing else is — a silent cell hands over nil.
+			// Off Windows the label pre-warm prints nothing, so the two surfaces are equal.
+			var wantNotices string
+			if len(rec.opts.StartupNotices) > 0 {
+				wantNotices = strings.Join(rec.opts.StartupNotices, "\n") + "\n"
+			}
+			if wantNotices != stderr {
+				t.Errorf("tui.Options.StartupNotices = %q; want exactly the stderr lines %q",
+					rec.opts.StartupNotices, stderr)
+			}
 		})
 	}
 }

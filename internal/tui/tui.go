@@ -932,6 +932,14 @@ type Options struct {
 	// ordinary run, where the scheme loaded cleanly.
 	ColorSchemeWarnings []string
 
+	// StartupNotices is what the binary said about this session's confinement posture — the
+	// unconfined-Auto warning, the degradation notice, the residual disclosure — printed on stderr
+	// before the alternate screen opened; repeated here so the moment is not lost when that screen
+	// opens over the line. Each becomes one ephemeral transcript note at construction, verbatim
+	// and in print order, after the colour-scheme warnings. Nil on the ordinary run, where the
+	// posture needed no announcing.
+	StartupNotices []string
+
 	// Schemes is what keeps the palette switchable from inside the program: what the picker offers,
 	// the resolve behind an answer to it, and the export that creates a file to edit ([SchemeHost]).
 	// All three read the schemes folder on every ask, so a file written mid-session is offered and

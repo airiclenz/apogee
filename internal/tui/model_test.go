@@ -6902,3 +6902,55 @@ func TestCancelCommitsThePartialBeforeTheNote(t *testing.T) {
 		}
 	})
 }
+
+// TestStartupNoticesPostAsEphemeralNotes pins the transcript half of apogee-2sj: what the binary
+// said on stderr about the confinement posture before the alternate screen opened is repeated in
+// the opening frame — one note per notice, verbatim, in print order, after the colour-scheme
+// warnings — and none of it reaches the saved record, since every line is re-derived at launch.
+func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
+	t.Parallel()
+
+	const (
+		schemeWarning = `color-scheme "mine.yaml": key "error": bad hex "#zz0000" — using default`
+		first         = "apogee: WARNING — auto mode is running UNCONFINED (confine-to-workspace: false)."
+		second        = "apogee: landlock cannot fence truncate(2) on this kernel; see /confine status."
+	)
+	m := newModel(context.Background(), &fakeEngine{}, Options{
+		ColorSchemeWarnings: []string{schemeWarning},
+		StartupNotices:      []string{first, second},
+	}, nil)
+
+	var notes []string
+	for _, e := range m.transcript.entries {
+		if e.kind != entryNote {
+			continue
+		}
+		switch e.text {
+		case schemeWarning, first, second:
+			notes = append(notes, e.text)
+			if !e.ephemeral {
+				t.Errorf("note %q is persisted; it is re-derived at every launch", e.text)
+			}
+		}
+	}
+	if want := []string{schemeWarning, first, second}; !slices.Equal(notes, want) {
+		t.Errorf("startup notes = %q; want the scheme warning then the notices in print order %q", notes, want)
+	}
+
+	blob, err := encodeTranscript(&m.transcript)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	for _, notice := range []string{first, second} {
+		if bytes.Contains(blob, []byte(notice)) {
+			t.Errorf("the saved transcript carries the startup notice %q; it must stay display-only", notice)
+		}
+	}
+
+	clean := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	for _, notice := range []string{first, second} {
+		if hasEntry(clean, entryNote, notice) {
+			t.Errorf("a run with no startup notices still noted %q", notice)
+		}
+	}
+}
