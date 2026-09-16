@@ -91,10 +91,11 @@ func (m Model) askChoiceKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 
 // submitAnswer sends the typed answer back to the blocked ask_user tool over the rendezvous
 // reply channel (buffered cap 1, so the send never blocks — messages.go) and returns to
-// running so the worker's blocked Step resumes; the spinner tick is re-armed because the
-// chain died when the question went up. The input box is emptied (it was borrowed for the
-// answer). An empty answer is allowed — the human may legitimately reply with nothing — so
-// the answer round-trips whatever was typed. Only reachable from stateAwaitingAsk.
+// running so the worker's blocked Step resumes — the launch verb's resume half (resumeRunning,
+// model.go), which re-arms the spinner because the chain died when the question went up. The
+// input box is emptied (it was borrowed for the answer). An empty answer is allowed — the human
+// may legitimately reply with nothing — so the answer round-trips whatever was typed. Only
+// reachable from stateAwaitingAsk.
 func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	if m.pendingAsk == nil {
 		return m, nil
@@ -121,11 +122,8 @@ func (m Model) submitAnswer() (tea.Model, tea.Cmd) {
 	m.pendingAsk = nil
 	m.askChecked = nil // the question is answered: no checked set outlives it
 	m.input.Reset()
-	m.restoreAskDraft() // the question has let go of the box: the message it interrupted comes back
-	m.state = stateRunning
-	m.setPlaceholder(m.legendFor(runningPlaceholder)) // the box is the human's own again — ⏎ queues from here
-	m.layout()
-	tick := m.spin.arm()
+	m.restoreAskDraft()       // the question has let go of the box: the message it interrupted comes back
+	tick := m.resumeRunning() // the box is the human's own again — ⏎ queues from here
 	return m, tick
 }
 

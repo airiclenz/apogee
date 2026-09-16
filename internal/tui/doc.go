@@ -486,7 +486,7 @@
 // shred. And a record is one TURN's, so a chunk under a new Turn index commits the one before it.
 // [Model.foldThinking] is the only writer among the folds, with a StreamResetEvent (that run's Turn
 // is superseded, so its record is dropped) and a MessageEvent (that run's Turn is committed) each
-// ending an in-flight record, beside the worker boundaries launchExchange and finishWorker, which
+// ending an in-flight record, beside the worker boundaries enterRunning and finishWorker, which
 // commit every one of them: a stop or a fault sends no closing message, and what an agent thought
 // before dying is the point of the pane. It succeeds the single-buffer reasoning tail this seam
 // first landed as, whose stated purpose was to be the retention a reasoning display would be built

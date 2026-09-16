@@ -534,7 +534,14 @@ on the set the session runs), `TestApplySettingAcceptsTheStartupOnlyKeys` (appli
 
 **Commit:** `refactor(cmd): live applies land through the registry row's Set`
 
-## 15. One launch verb: "an Exchange is in flight" is written once
+## 15. One launch verb: "an Exchange is in flight" is written once — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): state write sites — ONE: both verbs share the unexported tail `markRunning` (model.go), the only writer of `stateRunning`; the verbs live in model.go beside `stopWorker`/`finishWorker` (the lifecycle trio).
+NOTES (2026-09-16): `enterRunning` takes the built `cmd`/`cancel` as the plan's signature says, so `cacheBoundaryAtIdle` runs after `startExchange` is CALLED but before the Cmd RUNS (Bubble Tea runs Cmds after Update returns); the pre-Submit boundary invariant holds and the verb's doc states it. `installBox(nil)` for `/compact` is the verb's own `installBox(box)` with a nil box.
+NOTES (2026-09-16): `resumeRunning` keeps the placeholder→layout→spin order `sendApproval`/`submitAnswer` spelled; callers bind the returned Cmd in a statement of its own (spinnerAnim.arm's pointer rule) rather than `return m, m.resumeRunning()` — `sendApproval` previously wrote `return m, m.spin.arm()`, the form arm's doc warns against.
+NOTES (2026-09-16): consequential edit — internal/tui/thinking.go: made necessary by the launch commit moving from `launchExchange` to `enterRunning` (the board's "two worker boundaries" doc named the old site).
+NOTES (2026-09-16): consequential edit — internal/tui/sessionsave.go: made necessary by `cacheBoundaryAtIdle`'s caller moving from commandrun.go to `enterRunning` (model.go); its doc named the old file.
+NOTES (2026-09-16): consequential edit — internal/tui/doc.go: made necessary by the same move (the thinking-board paragraph named `launchExchange` as the launch boundary).
 
 **What.** `internal/tui`: `enterRunning(cmd tea.Cmd, cancel, box, activity)` and `resumeRunning()`
 on `Model` perform every write the four launch sites (`launchExchange`, the two `/continue` arms,

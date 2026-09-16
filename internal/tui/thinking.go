@@ -83,7 +83,7 @@ type thinkingRecord struct {
 // agent's Turn into a record per interleaved chunk and spend the board's whole capacity in seconds.
 //
 // It is written by exactly one fold ([Model.foldThinking]) and by the two worker boundaries no
-// Event announces (launchExchange, [Model.finishWorker]).
+// Event announces — every launch ([Model.enterRunning]) and every unwind ([Model.finishWorker]).
 type thinkingBoard struct {
 	done []thinkingRecord
 	live []thinkingRecord

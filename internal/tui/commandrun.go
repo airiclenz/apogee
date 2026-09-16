@@ -96,10 +96,11 @@ func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 	return m, tea.Batch(cmds...)
 }
 
-// launchExchange starts the worker over one Exchange and moves the Model into stateRunning: a
-// fresh mailbox for what the human types while it runs, the worker Cmd and the CancelFunc the stop
-// key calls (C4), the queue legend on the emptied box, the opening "thinking" phrase, and the
-// spinner tick — batched as the one Cmd the caller returns.
+// launchExchange starts the worker over one Exchange and moves the Model into stateRunning
+// through the one launch verb (enterRunning, model.go): a fresh mailbox for what the human types
+// while it runs, the worker Cmd and the CancelFunc the stop key calls (C4), the queue legend on
+// the emptied box, the opening "thinking" phrase, and the spinner tick — batched as the one Cmd
+// the caller returns.
 //
 // It is the tail the two send paths share — a typed submit and an interjection flush — so a
 // message the queue sends enters exactly the state a typed one does. Everything upstream of it
@@ -109,23 +110,12 @@ func (m Model) runDeferredCommands() (Model, tea.Cmd) {
 //
 // The mailbox is fresh per Exchange: this worker is the only one that will ever drain it, and it
 // dies with the Exchange (finishWorker clears it), so a row can never be delivered into an
-// Exchange other than the one it was typed during. The activity phrase is set here because the
-// request is away and nothing has come back yet — "thinking" holds until the first Event
-// re-derives it (activity.go).
+// Exchange other than the one it was typed during.
 func (m Model) launchExchange(in domain.UserInput) (tea.Model, tea.Cmd) {
-	// The last boundary the Model can see before the worker owns the engine — and before the
-	// Submit that rides the worker Cmd — so a delegation inside the very first Turn still has an
-	// engine half to pair its live transcript with (cacheBoundaryAtIdle).
-	m.cacheBoundaryAtIdle()
-	m.installBox(newInterjectBox())
-	cmd, cancel := startExchange(m.parent, m.eng, in, m.box, m.notify, m.flushEvents)
-	m.cancel = cancel
-	m.state = stateRunning
-	m.setPlaceholder(m.legendFor(runningPlaceholder)) // the empty box now invites a queued message, not a send
-	m.setActivity(runRef{}, actThinking, "")
-	m.thinking.commitAll() // the last Exchange's thinking is finished, not inherited (thinking.go)
-	tick := m.spin.arm()
-	return m, tea.Batch(cmd, tick)
+	box := newInterjectBox()
+	cmd, cancel := startExchange(m.parent, m.eng, in, box, m.notify, m.flushEvents)
+	batch := m.enterRunning(cmd, cancel, box, actThinking)
+	return m, batch
 }
 
 // startNewSession closes the current session into history and resets the TUI to a fresh one. /clear and
@@ -333,15 +323,10 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 			// the TUI aborts on every live cancel): /continue resumes the OPEN Exchange rather than
 			// opening a new one. Drive Step-only from the boundary (startResume) — no Submit, no new
 			// user block; the interrupted note already stands, so the transcript is left untouched.
-			m.cacheBoundaryAtIdle()         // the boundary the resumed Turn re-attempts from (launchExchange)
-			m.installBox(newInterjectBox()) // a resumed Exchange is a running one; it takes interjections too
-			cmd, cancel := startResume(m.parent, m.eng, m.box, m.notify, m.flushEvents)
-			m.cancel = cancel
-			m.state = stateRunning
-			m.setPlaceholder(m.legendFor(runningPlaceholder))
-			m.setActivity(runRef{}, actThinking, "") // the resumed work is a request in flight (as in submit)
-			tick := m.spin.arm()
-			return m, tea.Batch(cmd, tick)
+			box := newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
+			cmd, cancel := startResume(m.parent, m.eng, box, m.notify, m.flushEvents)
+			batch := m.enterRunning(cmd, cancel, box, actThinking) // the resumed work is a request in flight (as in submit)
+			return m, batch
 		}
 		// The canned turn carries no skills: a skill is invoked by naming its /token in a real
 		// message, and this turn's text is apogee's own "Please continue", not the human's line.
@@ -349,17 +334,12 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// tokens when it is eventually sent, and nothing is silently borrowed from it here.
 		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
 		m.transcript.addUser("/continue", nil)
-		m.layout()
-		m.cacheBoundaryAtIdle() // the canned turn is a launch like any other (launchExchange)
-		m.installBox(newInterjectBox())
+		m.layout()               // before the launch: the verb lays nothing out (enterRunning)
+		box := newInterjectBox() // the canned turn is a launch like any other (launchExchange)
 		cmd, cancel := startExchange(m.parent, m.eng,
-			domain.UserInput{Text: "Please continue"}, m.box, m.notify, m.flushEvents)
-		m.cancel = cancel
-		m.state = stateRunning
-		m.setPlaceholder(m.legendFor(runningPlaceholder))
-		m.setActivity(runRef{}, actThinking, "") // a canned turn is still a request in flight (as in submit)
-		tick := m.spin.arm()
-		return m, tea.Batch(cmd, tick)
+			domain.UserInput{Text: "Please continue"}, box, m.notify, m.flushEvents)
+		batch := m.enterRunning(cmd, cancel, box, actThinking) // a canned turn is still a request in flight (as in submit)
+		return m, batch
 
 	case "clear", "new":
 		// /new is an alias of /clear: both start a fresh session — wipe the view, reset the engine's
@@ -475,22 +455,16 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		// Compaction is a real upstream call (summary generation), so it rides a worker goroutine
 		// like /continue rather than blocking the Update loop (ADR 0011). Esc cancels it via
 		// stopWorker; the terminal compactDoneMsg records the outcome.
-		m.layout() // reflow the input box after the caller emptied it (or cut the accepted verb out)
+		m.layout() // reflow the input box after the caller emptied it (or cut the accepted verb out); the verb lays nothing out (enterRunning)
 		// No mailbox: /compact drives no Exchange, so there is nothing to interject INTO. A row
 		// staged while it runs stays on the display queue and goes out at the terminal fold. The
-		// Bridge is told the same (installBox): there is no Exchange for the seam to pre-empt in.
-		m.installBox(nil)
-		m.cacheBoundaryAtIdle() // a worker launch caches the boundary it launches from (launchExchange)
+		// Bridge is told the same (the nil box enterRunning installs): there is no Exchange for the
+		// seam to pre-empt in. Typing is live through a compaction too — the row simply waits for
+		// the terminal fold — so the legend says "queue" here as well; and compaction emits no
+		// Events until it lands, so the phrase the verb sets is the one that stands until then.
 		cmd, cancel := startCompact(m.parent, m.eng)
-		m.cancel = cancel
-		m.state = stateRunning
-		// Typing is live through a compaction too — the row simply waits for the terminal fold
-		// (there is no Exchange to interject into), so the legend says "queue" here as well.
-		m.setPlaceholder(m.legendFor(runningPlaceholder))
-		// Compaction emits no Events until it lands, so the phrase is set here or not at all.
-		m.setActivity(runRef{}, actCompacting, "")
-		tick := m.spin.arm()
-		return m, tea.Batch(cmd, tick)
+		batch := m.enterRunning(cmd, cancel, nil, actCompacting)
+		return m, batch
 
 	case "confine":
 		// Report or swap the blast radius. Synchronous and idle-safe like /clear: no upstream

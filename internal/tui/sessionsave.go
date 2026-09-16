@@ -119,7 +119,7 @@ func (m *Model) cacheBoundary(sess domain.Session) {
 
 // cacheBoundaryAtIdle takes the Model's OWN engine Snapshot and caches it as the boundary a
 // progress save will pair with. Every worker launch calls it just before handing the engine over
-// (commandrun.go), which is the last moment the Model can see a boundary of its own: from there the
+// (enterRunning, model.go), which is the last moment the Model can see a boundary of its own: from there the
 // engine belongs to the worker goroutine until the Turn ends, and the launch's Submit has not run
 // yet, so what is cached can never carry pendingInput — a snapshot holding one is unresumable
 // (Submit refuses with ErrInputPending, /continue refuses because InExchange is false). It is

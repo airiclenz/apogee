@@ -1864,6 +1864,63 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	return next, tea.Batch(cmd, nameCmd, record)
 }
 
+// enterRunning is the ONE launch verb: every worker launch — a typed or flushed submit
+// (launchExchange), both /continue arms and /compact (commandrun.go) — enters "an Exchange is in
+// flight" through it, so the writes that state is made of are spelled once, in their load-bearing
+// order: the boundary (cacheBoundaryAtIdle — the last one the Model can see before the worker owns
+// the engine), the mailbox (installBox: the Exchange's own box, or nil for a /compact nothing can
+// be interjected into), the CancelFunc the stop key calls (C4), the state flip and the queue legend
+// (markRunning), the opening activity phrase (the caller's: actThinking for a request in flight,
+// actCompacting for a summary call — set here because nothing has come back yet; the first Event
+// re-derives it, activity.go), the thinking board's commit (the last Exchange's thinking is
+// finished, not inherited — thinking.go; every launch commits, which is what keeps a /continue or
+// /compact from leaning on finishWorker to close a board it never opened), and the spinner tick
+// (spin.arm). It returns the batched Cmd the caller hands back from Update: the worker and the
+// first tick.
+//
+// cmd and cancel arrive already built (startExchange, startResume, startCompact — worker.go), and
+// the boundary is still the pre-Submit one: a tea.Cmd is inert until the program runs it after
+// Update returns, so the Snapshot taken here precedes the Submit that rides cmd whatever the
+// caller's statement order. Everything upstream of the launch stays the caller's — the parse, the
+// upstream and InExchange guards, the transcript block, the layout — and the box that reaches
+// this verb is the same one the worker was built over, so the two readers of the mailbox agree.
+//
+// It takes a pointer because the spinner generation bump must land on the Model copy the caller
+// returns — so a caller binds the Cmd in a statement of its own, never `return m, m.enterRunning(…)`
+// (spinnerAnim.arm).
+func (m *Model) enterRunning(cmd tea.Cmd, cancel context.CancelFunc, box *interjectBox, kind activityKind) tea.Cmd {
+	m.cacheBoundaryAtIdle()
+	m.installBox(box)
+	m.cancel = cancel
+	m.markRunning()
+	m.setActivity(runRef{}, kind, "")
+	m.thinking.commitAll()
+	tick := m.spin.arm()
+	return tea.Batch(cmd, tick)
+}
+
+// resumeRunning is the launch verb's resume half: a blocked Step that a decision has just unblocked
+// — an approval verdict (sendApproval), an ask_user answer (submitAnswer) — returns the Model to
+// running WITHOUT a launch. The worker never died, so there is no boundary to cache, no box to
+// install and no CancelFunc to store; what the pane's departure changes is the state flip and the
+// legend (markRunning), the layout — the pane is gone, so a draft it had clamped grows back
+// (draftRowsCeiling) — and the spinner, re-armed because the tick chain died when the prompt went
+// up. It returns that tick; the same pointer rule as enterRunning applies (bind it, then return).
+func (m *Model) resumeRunning() tea.Cmd {
+	m.markRunning()
+	m.layout()
+	return m.spin.arm()
+}
+
+// markRunning is the tail the two launch verbs share and the ONLY writer of stateRunning: the
+// state flip, and in the same breath the legend the emptied box invites with — ⏎ queues a message
+// now, it does not send one (runningPlaceholder, routed through legendFor so a box addressing a
+// delegate keeps its own invitation).
+func (m *Model) markRunning() {
+	m.state = stateRunning
+	m.setPlaceholder(m.legendFor(runningPlaceholder))
+}
+
 // stopWorker cancels the in-flight worker. The worker honours the cancel at the next
 // quiescent boundary and returns a cancelledMsg, which clears the state; until then the
 // model stays running. A cancelled approval gate unblocks the same way (C3/C4).
@@ -1883,9 +1940,9 @@ func (m *Model) stopWorker() {
 }
 
 // finishWorker returns the model to a terminal state once the worker's terminal Msg
-// arrives: it cancels and clears the CancelFunc, any pending Approval or ask_user
-// question, and the Exchange's interjection mailbox. The new state is idle for a completed
-// or cancelled Exchange, errored for a loop fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit); otherwise, when
+// arrives — the inverse of the launch verb (enterRunning): it cancels and clears the CancelFunc,
+// any pending Approval or ask_user question, and the Exchange's interjection mailbox. The new
+// state is idle for a completed or cancelled Exchange, errored for a loop fault. The returned Cmd is tea.Quit when a busy quit was deferred (see quit); otherwise, when
 // the Exchange settled at idle, it is the final per-session save (saveAtIdle) — the Model owns
 // the engine again at this boundary, so it takes its own Snapshot — else nil.
 //

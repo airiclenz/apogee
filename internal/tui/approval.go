@@ -268,15 +268,14 @@ func (m Model) resolveApproval() (tea.Model, tea.Cmd) {
 
 // sendApproval hands one verdict back over the pending request's rendezvous reply channel (buffered
 // cap 1, so the send never blocks — messages.go) and returns the model to running so the worker's
-// blocked Step resumes; the spinner tick is re-armed because the chain died when the prompt went up.
+// blocked Step resumes — the launch verb's resume half (resumeRunning, model.go): the state, the
+// legend the question has let go of, the layout the departed pane frees, and the re-armed spinner.
 func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cmd) {
 	m.pending.Reply <- decision
 	m.pending = nil
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
-	m.state = stateRunning
-	m.setPlaceholder(m.legendFor(runningPlaceholder)) // the question has let go of the box (submitAnswer's rule)
-	m.layout()                                        // the pane is gone: a draft the prompt had clamped grows back (draftRowsCeiling)
-	return m, m.spin.arm()
+	tick := m.resumeRunning()
+	return m, tick
 }
 
 // approvalPrompt renders the pending tool call the human must rule on as a bordered popup pane

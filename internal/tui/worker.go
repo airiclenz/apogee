@@ -15,8 +15,9 @@ import (
 
 // startExchange builds the cancellable worker that drives one Exchange over eng. It returns
 // the tea.Cmd the model schedules (Bubble Tea runs it on its own goroutine) and the
-// CancelFunc the model stores, so a stop key cancels the in-flight Step at the next
-// quiescent boundary (phase-2 detail plan §3 C4). Only one worker runs at a time — the model
+// CancelFunc the model stores — both handed to the one launch verb, [Model.enterRunning], which
+// is where every start* pair below enters the Model — so a stop key cancels the in-flight Step
+// at the next quiescent boundary (phase-2 detail plan §3 C4). Only one worker runs at a time — the model
 // launches none while one runs, and what the human types meanwhile is STAGED rather than
 // submitted (ADR 0025) — so eng is only ever driven from the current worker, and the Agent's
 // single-goroutine contract holds by construction (C1).
@@ -39,7 +40,8 @@ func startExchange(parent context.Context, eng Engine, input domain.UserInput, b
 // startCompact builds the cancellable worker that runs one /compact over eng — a single
 // upstream summary call that must not block the Update loop (ADR 0011), so it rides the same
 // worker path as an Exchange. It returns the tea.Cmd the model schedules and the CancelFunc
-// the model stores so Esc cancels the in-flight compaction. A cancel surfaces as the shared
+// the model stores (through [Model.enterRunning], with a nil mailbox) so Esc cancels the
+// in-flight compaction. A cancel surfaces as the shared
 // cancelledMsg (the model's cancel handling — AbortExchange is a safe no-op here); otherwise
 // the terminal Msg is compactDoneMsg carrying whatever Compact reported.
 //
@@ -65,7 +67,8 @@ func startCompact(parent context.Context, eng Engine) (tea.Cmd, context.CancelFu
 // true right after such a restore). It is startExchange without the Submit: the Exchange is already
 // open — the restored snapshot round-tripped InExchange: true — so there is nothing new to enqueue
 // and the worker Steps straight on. It returns the tea.Cmd the model schedules and the CancelFunc it
-// stores exactly as startExchange does, and notify carries the same per-Turn snapshots. The model
+// stores exactly as startExchange does ([Model.enterRunning]), and notify carries the same per-Turn
+// snapshots. The model
 // launches this only from the /continue drive when eng.InExchange() (model.go); the single-worker
 // invariant keeps eng driven from one goroutine, so C1 still holds. It takes an interjection box
 // for the same reason startExchange does — a resumed Exchange is a running Exchange, and the human

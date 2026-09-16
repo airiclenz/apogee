@@ -259,7 +259,8 @@ func TestFoldThinkingFilesEveryRunAndTurnSeparately(t *testing.T) {
 // folded through foldEvent — a superseded stream, which DROPS it, and a committed message, which
 // KEEPS it — and two are worker boundaries no Event announces, which matter because a stop or a
 // fault never sends the closing message the second case relies on, and what an agent thought before
-// dying is the point of the pane.
+// dying is the point of the pane: the unwind (finishWorker) and the launch (enterRunning), the
+// latter walked over every site that launches.
 func TestThinkingBoardEndsAtEveryBoundary(t *testing.T) {
 	t.Parallel()
 
@@ -310,24 +311,39 @@ func TestThinkingBoardEndsAtEveryBoundary(t *testing.T) {
 		}
 	})
 
-	t.Run("a fresh exchange", func(t *testing.T) {
-		t.Parallel()
+	// Every worker launch is the same boundary (enterRunning): a typed submit, /continue in both
+	// its arms — the canned turn and the Step-only resume of an interrupted session — and /compact,
+	// which drives no Exchange yet still commits the board a stop or a fault would otherwise leave
+	// for finishWorker to close.
+	for _, tc := range []struct {
+		name       string
+		inExchange bool // the engine reports a restored, still-open Exchange (the /continue resume arm)
+		line       string
+	}{
+		{name: "a fresh exchange", line: "what next?"},
+		{name: "a canned /continue", line: "/continue"},
+		{name: "a /continue that resumes an interrupted Exchange", inExchange: true, line: "/continue"},
+		{name: "a /compact", line: "/compact"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-		m := newTestModelEng(t, &fakeEngine{}, testOpts)
-		m.thinking.append("left over from before", runRef{}, 1)
+			m := newTestModelEng(t, &fakeEngine{inExchange: tc.inExchange}, testOpts)
+			m.thinking.append("left over from before", runRef{}, 1)
 
-		m.input.SetValue("what next?")
-		m, _ = stepCmd(t, m, keyEnter())
+			m.input.SetValue(tc.line)
+			m, _ = stepCmd(t, m, keyEnter())
 
-		if m.state != stateRunning {
-			t.Fatalf("state = %v, want running: the submit never launched a worker", m.state)
-		}
-		if got := liveThinking(m.thinking); got != "" {
-			t.Errorf("in-flight thinking = %q, want a new Exchange to start with none", got)
-		}
-		want := []thinkingRecord{{turn: 1, text: "left over from before"}}
-		if got := m.thinking.done; !slices.Equal(got, want) {
-			t.Errorf("committed records = %+v, want %+v", got, want)
-		}
-	})
+			if m.state != stateRunning {
+				t.Fatalf("state = %v, want running: %q never launched a worker", m.state, tc.line)
+			}
+			if got := liveThinking(m.thinking); got != "" {
+				t.Errorf("in-flight thinking = %q, want a launch to start with none", got)
+			}
+			want := []thinkingRecord{{turn: 1, text: "left over from before"}}
+			if got := m.thinking.done; !slices.Equal(got, want) {
+				t.Errorf("committed records = %+v, want %+v", got, want)
+			}
+		})
+	}
 }
