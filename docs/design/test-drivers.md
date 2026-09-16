@@ -209,8 +209,12 @@ said, while a capture is something a test author adds.
 Every served request lands in the log, which is the stub's half of an assertion: what the agent
 actually sent, in order, and which turn answered it.
 
-- `server.Requests() []Request` — `N`, `Model`, `Messages`, `Tools`, `Stream`, `Unmatched`,
-  `TurnIndex`, `At`.
+- `server.Requests() []Request` — `N`, `Model`, `Messages`, `Tools`, `Stream`, `Sampling`,
+  `Effort`, `Unmatched`, `TurnIndex`, `At`. `Sampling` is the `max_tokens` and `temperature` the
+  body carried (nil where it carried none); `Effort` is the thinking-effort key it carried, in
+  whichever dialect the provider spoke — `chat_template_kwargs`, `reasoning` or
+  `reasoning_effort`, recorded verbatim — so a test about "what did the engine ask the sampler
+  for" reads the log instead of a fake that captured the request before the client shaped it.
 - `server.LastMessage(n)` — the text of request *n*'s last message; the shortest way to assert
   what was asked.
 - `server.Unmatched()` — the requests the script did not anticipate.

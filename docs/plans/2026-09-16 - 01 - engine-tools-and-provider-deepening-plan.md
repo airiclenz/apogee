@@ -454,7 +454,16 @@ bytes through `Handler()` and a listening server; a narration+tool-call Turn fra
 
 **Commit:** `test(agent): the engine's pure fakes play a stubllm Script through an in-process transport`
 
-## 13. The request log records sampling and effort; the compaction fakes migrate
+## 13. The request log records sampling and effort; the compaction fakes migrate — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): `TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer`'s `EffortDialect == EffortDialectNone` assertion is recast as "no effort key on the wire" (`assertNoEffort`), per the guard; the other dialect assertions read the kwargs shape (`assertKwargsEffort`: exactly `chat_template_kwargs`, no other dialect's key).
+NOTES (2026-09-16): the plan's Files name `internal/agent/effort_test.go`, which does not exist in the tree; the EffortOff / kwargs-dialect assertions live in `internal/agent/compact_test.go` and were migrated there.
+NOTES (2026-09-16): the five fakes' users span nine files beyond the four listed (autocompact_guard, fillnotice, hooksynthesis, overflowrecovery, predictiveguard, prune, setlive, subagent, unknownwindow) — the enumeration read as a floor; all were migrated so the fake types could be deleted. `compactSpyResponder(t, reply)` is a plain repeating echo turn (it answered summarizer and main calls alike), while `summaryTurn` (`when: system:` on the summarizer's instruction) selects the summary for `summaryEffortResponder`, `scriptedCompactResponder` and `recoveryScript`; `overflowTurn()` was split out of `overflowResponder` for the scripted overflow entries.
+NOTES (2026-09-16): `TestOverflowRecoveryOnToolContinuationIsTemplateLegal` registers the seeded `read_file` tool, because the provider projects a tool result onto the wire as a tool message only when the request offers native tools (`formatMessage`) — the same recast item 12 made for `TestRetryExchange_CarriesSupersededAssistantAndCorrection`; `assertRequestTemplateLegal` and `foldedSummaryRequest` now take `stubllm.Request`.
+NOTES (2026-09-16): `isSummaryRequest(provider.Request)` stays for the out-of-scope `foldBlockingResponder`; its log twin is `isSummaryLogged(stubllm.Request)`, both on the new `summaryInstructionMark` constant. `flakySummaryResponder` (compact_test.go) is a hand fake neither this item nor item 12 names and was left as is.
+NOTES (2026-09-16): the "a field the stubllm request log does not yet carry" comments on `recordingResponder` (harness_test.go), `capturingResponder` (hookmutation_test.go), `captureAllResponder` (retryexchange_test.go) and the inline one at rebind_test.go's `captureAllResponder` site now read stale; item 14 (depends on 13) retires those four fakes and their comments, so they were left for it.
+NOTES (2026-09-16): consequential edit — docs/design/test-drivers.md: made necessary by the two new `Request` fields on the request log.
+NOTES (2026-09-16): acceptance grep `Stream(.*provider.Request) iter.Seq\[provider.Delta\]` over internal/agent/*_test.go: 21 after item 12 → 15 now.
 
 **What.** Depends on item 12. `internal/stubllm/log.go` `Request` gains `Sampling` (max tokens,
 temperature) and the effort/reasoning keys the dialects send, recorded verbatim from the body.

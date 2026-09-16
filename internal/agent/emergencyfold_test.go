@@ -42,7 +42,7 @@ func assertTemplateLegal(t *testing.T, a *Agent) {
 // boundary instead of into the protected prefix.
 func TestEmergencyFoldRunsMidExchangeAndBridges(t *testing.T) {
 	sink := &recordingSink{}
-	up := &compactSpyResponder{reply: "EMERGENCY-SUMMARY"}
+	up := compactSpyResponder(t, "EMERGENCY-SUMMARY")
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -54,8 +54,8 @@ func TestEmergencyFoldRunsMidExchangeAndBridges(t *testing.T) {
 		t.Fatal("emergencyFold = false mid-Exchange; the overflow path must fold there (S2 is amended for it)")
 	}
 
-	if up.summaryCalls != 1 {
-		t.Fatalf("summarizer calls = %d, want exactly 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want exactly 1", up.summaryCalls())
 	}
 	if a.conv.Len() != 3 {
 		t.Fatalf("conv.Len() = %d after the fold, want 3 (prefix + summary + bridge)", a.conv.Len())
@@ -145,7 +145,7 @@ func TestEmergencyFoldUnknownWindowStillBoundsTheSummaryCall(t *testing.T) {
 // and a retry would overflow identically — false, no upstream call, conversation untouched.
 func TestEmergencyFoldSkipsWhenNothingToFold(t *testing.T) {
 	sink := &recordingSink{}
-	up := &compactSpyResponder{reply: "UNREACHED"}
+	up := compactSpyResponder(t, "UNREACHED")
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -158,8 +158,8 @@ func TestEmergencyFoldSkipsWhenNothingToFold(t *testing.T) {
 		t.Fatal("emergencyFold = true on a skipped fold; nothing was folded, so a retry cannot help")
 	}
 
-	if up.summaryCalls != 0 {
-		t.Errorf("summarizer calls = %d on a skipped fold, want 0", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Errorf("summarizer calls = %d on a skipped fold, want 0", up.summaryCalls())
 	}
 	if a.conv.Len() != 2 {
 		t.Errorf("conv.Len() = %d, want 2 — a skipped fold must not touch the conversation", a.conv.Len())
@@ -177,7 +177,7 @@ func TestEmergencyFoldSkipsWhenNothingToFold(t *testing.T) {
 // upstream call, leaving the Turn to abandon exactly as it does today.
 func TestEmergencyFoldRespectsCompactionOptOut(t *testing.T) {
 	sink := &recordingSink{}
-	up := &compactSpyResponder{reply: "UNREACHED"}
+	up := compactSpyResponder(t, "UNREACHED")
 	cfg := autoCompactConfig(sink)
 	cfg.Context.CompactionEnabled = false
 	a, err := newAgent(cfg, up)
@@ -191,8 +191,8 @@ func TestEmergencyFoldRespectsCompactionOptOut(t *testing.T) {
 		t.Fatal("emergencyFold = true with auto-compact off; the opt-out covers recovery too")
 	}
 
-	if up.summaryCalls != 0 {
-		t.Errorf("summarizer calls = %d with auto-compact off, want 0 (the gate precedes the upstream call)", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Errorf("summarizer calls = %d with auto-compact off, want 0 (the gate precedes the upstream call)", up.summaryCalls())
 	}
 	if a.conv.Len() != 4 {
 		t.Errorf("conv.Len() = %d, want 4 — the opted-out fold must not touch the conversation", a.conv.Len())

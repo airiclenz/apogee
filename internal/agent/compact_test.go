@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"iter"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -32,11 +33,19 @@ import (
 // surface cleanly and leave the conversation untouched.
 func overflowResponder(t testing.TB) *scriptedUpstream {
 	t.Helper()
-	return scriptedResponder(t, stubllm.Turn{Repeat: true, HTTP: &stubllm.HTTPReply{
+	turn := overflowTurn()
+	turn.Repeat = true
+	return scriptedResponder(t, turn)
+}
+
+// overflowTurn answers one request with the 400 a server sends when the prompt exceeds its window
+// (overflowBody), which the provider classes DeltaContextOverflow.
+func overflowTurn() stubllm.Turn {
+	return stubllm.Turn{HTTP: &stubllm.HTTPReply{
 		Status:      http.StatusBadRequest,
 		Body:        overflowBody,
 		ContentType: "application/json",
-	}})
+	}}
 }
 
 // overflowBody is the llama.cpp 400 body for a prompt past the window, carrying the marker the
@@ -444,32 +453,47 @@ func TestCompactSummaryRequestOmitsSystemPrompt(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 
-// summaryEffortResponder records the SUMMARIZER's request beside the last MAIN-turn one, so a
-// test can assert what the fold asked for on the wire and what the very next Turn asked for. It
-// tells the two apart by the summary system prompt, as scriptedCompactResponder does —
-// internal/context's summaryInstruction is unexported, and the leading substring is the stable
-// half of it.
-type summaryEffortResponder struct {
-	summary      string
-	reply        string
-	summaryReq   provider.Request
-	summaryCalls int
-	last         provider.Request
+// summaryEffortResponder answers the SUMMARIZER's calls with summary and every MAIN-turn request
+// with reply, so a test can read what the fold asked for on the wire (lastSummary) and what the
+// very next Turn asked for (last) — the two requests told apart by the summary system prompt.
+func summaryEffortResponder(t testing.TB, summary, reply string) *scriptedUpstream {
+	t.Helper()
+	return scriptedResponder(t, summaryTurn(summary), stubllm.Turn{Text: reply, Repeat: true})
 }
 
-func (r *summaryEffortResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting a conversation") {
-		r.summaryCalls++
-		r.summaryReq = req
-		return streamReply(r.summary)
+// kwargsEffort is the `chat_template_kwargs` object a request carrying effort in the kwargs
+// dialect puts on the wire (internal/provider's applyEffort): the off rung switches thinking off,
+// a level names itself.
+func kwargsEffort(effort provider.Effort) map[string]any {
+	if effort == provider.EffortOff {
+		return map[string]any{"enable_thinking": false}
 	}
-	r.last = req
-	return streamReply(r.reply)
+	return map[string]any{"reasoning_effort": string(effort)}
+}
+
+// assertKwargsEffort fails unless the request carried exactly the kwargs-dialect effort — and no
+// other dialect's key — the way a server bound to that dialect would read it.
+func assertKwargsEffort(t *testing.T, what string, got stubllm.Request, effort provider.Effort) {
+	t.Helper()
+	if want := kwargsEffort(effort); !reflect.DeepEqual(got.Effort.ChatTemplateKwargs, want) {
+		t.Errorf("%s chat_template_kwargs = %v, want %v", what, got.Effort.ChatTemplateKwargs, want)
+	}
+	if got.Effort.Reasoning != nil || got.Effort.ReasoningEffort != "" {
+		t.Errorf("%s carried another dialect's effort key: %+v", what, got.Effort)
+	}
+}
+
+// assertNoEffort fails when the request carried a thinking-effort key in any dialect.
+func assertNoEffort(t *testing.T, what string, got stubllm.Request) {
+	t.Helper()
+	if got.Effort.ChatTemplateKwargs != nil || got.Effort.Reasoning != nil || got.Effort.ReasoningEffort != "" {
+		t.Errorf("%s carried an effort key: %+v, want none on the wire", what, got.Effort)
+	}
 }
 
 // foldOnce folds a freshly seeded conversation and fails the test unless a summary call actually
 // went out — a skipped fold makes every assertion below it read a stale request.
-func foldOnce(t *testing.T, a *Agent, up *summaryEffortResponder, want int) {
+func foldOnce(t *testing.T, a *Agent, up *scriptedUpstream, want int) {
 	t.Helper()
 	seedFoldable(a)
 	skipped, err := a.Compact(context.Background())
@@ -479,8 +503,8 @@ func foldOnce(t *testing.T, a *Agent, up *summaryEffortResponder, want int) {
 	if skipped {
 		t.Fatal("Compact skipped a foldable conversation; want a fold so a summary request was made")
 	}
-	if up.summaryCalls != want {
-		t.Fatalf("summarizer calls = %d, want %d", up.summaryCalls, want)
+	if got := up.summaryCalls(); got != want {
+		t.Fatalf("summarizer calls = %d, want %d", got, want)
 	}
 }
 
@@ -496,27 +520,21 @@ func TestCompactSummarizerAsksForNoReasoning(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.EffortDialect = domain.EffortDialectKwargs
 	cfg.Profile.Thinking.Effort = domain.EffortMedium
-	up := &summaryEffortResponder{summary: "FOLDED", reply: "done"}
+	up := summaryEffortResponder(t, "FOLDED", "done")
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
 
 	foldOnce(t, a, up, 1)
-	if got := up.summaryReq.ThinkingEffort; got != provider.EffortOff {
-		t.Errorf("summary request effort = %q, want %q — the profile's level must not reach the summarizer",
-			got, provider.EffortOff)
-	}
-	if got := up.summaryReq.EffortDialect; got != provider.EffortDialectKwargs {
-		t.Errorf("summary request dialect = %q, want the server's %q left alone", got, provider.EffortDialectKwargs)
-	}
+	// The off rung in the server's own kwargs dialect: the profile's level must not reach the
+	// summarizer, and the dialect is left alone.
+	assertKwargsEffort(t, "summary request", up.lastSummary(), provider.EffortOff)
 
 	// The session override is intent about the conversation, not about a maintenance call.
 	a.SetEffortOverride(domain.EffortHigh)
 	foldOnce(t, a, up, 2)
-	if got := up.summaryReq.ThinkingEffort; got != provider.EffortOff {
-		t.Errorf("summary request effort under a session override = %q, want %q", got, provider.EffortOff)
-	}
+	assertKwargsEffort(t, "summary request under a session override", up.lastSummary(), provider.EffortOff)
 
 	// ...and the next real Turn still carries it, so the override was suppressed for the summary
 	// call alone rather than dropped.
@@ -526,39 +544,31 @@ func TestCompactSummarizerAsksForNoReasoning(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step: %v", err)
 	}
-	if got := up.last.ThinkingEffort; got != provider.EffortHigh {
-		t.Errorf("main-turn effort = %q, want the session override %q", got, provider.EffortHigh)
-	}
+	assertKwargsEffort(t, "main-turn request", up.last(), provider.EffortHigh)
 }
 
 // TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer is the anchor half: on a server
 // that named no effort dialect, apogee asks for nothing it did not ask for before this override
 // existed (ADR 0050 — a caller that asks for nothing changes nothing on the wire), so the summary
 // request carries resolvedEffort byte for byte: nothing when nothing is configured, the session
-// override when one is set.
+// override when one is set. On the wire the zero dialect is indistinguishable from a bound
+// kwargs one — applyEffort maps both to the kwargs shape — so the anchor is read as what
+// reached the wire: no effort key at all, then the override in the kwargs shape.
 func TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer(t *testing.T) {
 	t.Parallel()
 
-	up := &summaryEffortResponder{summary: "FOLDED", reply: "done"}
+	up := summaryEffortResponder(t, "FOLDED", "done")
 	a, err := newAgent(baseConfig(&recordingSink{}), up) // baseConfig names no dialect
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
 
 	foldOnce(t, a, up, 1)
-	if got := up.summaryReq.ThinkingEffort; got != provider.Effort("") {
-		t.Errorf("summary request effort = %q, want none — nothing is configured and no dialect was named", got)
-	}
-	if got := up.summaryReq.EffortDialect; got != provider.EffortDialectNone {
-		t.Errorf("summary request dialect = %q, want the zero anchor", got)
-	}
+	assertNoEffort(t, "summary request", up.lastSummary()) // nothing is configured and no dialect was named
 
 	a.SetEffortOverride(domain.EffortHigh)
 	foldOnce(t, a, up, 2)
-	if got := up.summaryReq.ThinkingEffort; got != provider.EffortHigh {
-		t.Errorf("summary request effort = %q, want the session's resolved %q untouched on an undialled server",
-			got, provider.EffortHigh)
-	}
+	assertKwargsEffort(t, "summary request", up.lastSummary(), provider.EffortHigh) // the session's resolved effort, untouched
 }
 
 // TestChildSummarizerFollowsTheParentsReboundDialect is the delegate half of the incident: the
@@ -569,7 +579,7 @@ func TestCompactSummarizerKeepsTheResolvedEffortOnAnUndialledServer(t *testing.T
 func TestChildSummarizerFollowsTheParentsReboundDialect(t *testing.T) {
 	t.Parallel()
 
-	up := &summaryEffortResponder{summary: "FOLDED", reply: "done"}
+	up := summaryEffortResponder(t, "FOLDED", "done")
 	parent, err := newAgent(baseConfig(&recordingSink{}), up) // the startup Config names no dialect
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -590,15 +600,11 @@ func TestChildSummarizerFollowsTheParentsReboundDialect(t *testing.T) {
 	if _, err := child.Compact(context.Background()); err != nil {
 		t.Fatalf("child Compact: %v", err)
 	}
-	if up.summaryCalls != 1 {
-		t.Fatalf("summarizer calls = %d, want exactly the child's one fold", up.summaryCalls)
+	if got := up.summaryCalls(); got != 1 {
+		t.Fatalf("summarizer calls = %d, want exactly the child's one fold", got)
 	}
-	if got := up.summaryReq.EffortDialect; got != provider.EffortDialectKwargs {
-		t.Fatalf("child summary request dialect = %q, want the parent's rebound %q", got, provider.EffortDialectKwargs)
-	}
-	if got := up.summaryReq.ThinkingEffort; got != provider.EffortOff {
-		t.Errorf("child summary request effort = %q, want %q", got, provider.EffortOff)
-	}
+	// The off rung in the parent's rebound kwargs dialect.
+	assertKwargsEffort(t, "child summary request", up.lastSummary(), provider.EffortOff)
 }
 
 // cappedSummaryTurn scripts one summary reply by its three observable parts: the reasoning channel
@@ -608,27 +614,6 @@ func TestChildSummarizerFollowsTheParentsReboundDialect(t *testing.T) {
 // no separate channel, for the inline-<think> shape a delimited profile emits.
 func cappedSummaryTurn(thinking, content, finish string) stubllm.Turn {
 	return stubllm.Turn{Reasoning: thinking, Text: content, FinishReason: finish}
-}
-
-// cappedSummaryResponder is cappedSummaryTurn as a hand-written fake. Its one remaining user is
-// maxTokRecordingResponder, which reads the summariser request's Sampling — a field the stubllm
-// request log does not yet carry.
-type cappedSummaryResponder struct {
-	thinking string
-	content  string
-	finish   string
-}
-
-func (r cappedSummaryResponder) Stream(context.Context, provider.Request) iter.Seq[provider.Delta] {
-	return func(yield func(provider.Delta) bool) {
-		if r.thinking != "" && !yield(provider.Delta{Kind: provider.DeltaThinking, Thinking: r.thinking}) {
-			return
-		}
-		if r.content != "" && !yield(provider.Delta{Kind: provider.DeltaContent, Content: r.content}) {
-			return
-		}
-		yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: r.finish})
-	}
 }
 
 // TestCompactBlankSummaryFaultsOnTheCapOnlyWhenItWasCut pins what a blank summary SAYS. A reply
@@ -766,21 +751,6 @@ func TestCompactCappedSummaryFaultNamesOnlyWhatTheRequestAsked(t *testing.T) {
 	}
 }
 
-// maxTokRecordingResponder is cappedSummaryResponder with one addition: it records the MaxTokens
-// the summariser request actually carried, so a test can hold the fault text against the number the
-// server was sent rather than against the constant the engine happens to set today.
-type maxTokRecordingResponder struct {
-	cappedSummaryResponder
-	sent *int
-}
-
-func (r maxTokRecordingResponder) Stream(ctx context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	if req.Sampling.MaxTokens != nil {
-		*r.sent = *req.Sampling.MaxTokens
-	}
-	return r.cappedSummaryResponder.Stream(ctx, req)
-}
-
 // TestCompactCappedSummaryFaultNamesTheAppliedCap pins that the capped-summary fault names the cap
 // the request was SENT with — the MaxTokens set on the summariser request — not the bare constant.
 // Today the two agree (compactMaxTokens), and the test pins that too; the point is that the number
@@ -789,11 +759,7 @@ func (r maxTokRecordingResponder) Stream(ctx context.Context, req provider.Reque
 func TestCompactCappedSummaryFaultNamesTheAppliedCap(t *testing.T) {
 	t.Parallel()
 
-	sent := 0
-	up := maxTokRecordingResponder{
-		cappedSummaryResponder: cappedSummaryResponder{thinking: "plan the summary at length", finish: "length"},
-		sent:                   &sent,
-	}
+	up := scriptedResponder(t, cappedSummaryTurn("plan the summary at length", "", "length"))
 	a, err := newAgent(baseConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -805,9 +771,11 @@ func TestCompactCappedSummaryFaultNamesTheAppliedCap(t *testing.T) {
 	if err == nil {
 		t.Fatal("Compact err = nil, want the capped-summary fault")
 	}
-	if sent == 0 {
-		t.Fatal("the summariser request carried no MaxTokens; want the cap on the request")
+	maxTokens := up.last().Sampling.MaxTokens
+	if maxTokens == nil {
+		t.Fatal("the summariser request carried no max_tokens; want the cap on the request")
 	}
+	sent := *maxTokens
 	if sent != compactMaxTokens {
 		t.Errorf("summariser request MaxTokens = %d, want compactMaxTokens (%d)", sent, compactMaxTokens)
 	}
@@ -1013,13 +981,13 @@ func TestFoldTable(t *testing.T) {
 	type env struct {
 		a    *Agent
 		sink *recordingSink
-		up   *compactSpyResponder
+		up   *scriptedUpstream
 	}
 	// over seeds a history far past the 8k window's allocation, so the estimate row's gate opens.
 	over := func(t *testing.T, cfg func(*domain.Config)) env {
 		t.Helper()
 		sink := &recordingSink{}
-		up := &compactSpyResponder{reply: "FOLDED-SUMMARY"}
+		up := compactSpyResponder(t, "FOLDED-SUMMARY")
 		c := autoCompactConfig(sink)
 		if cfg != nil {
 			cfg(&c)
@@ -1064,8 +1032,8 @@ func TestFoldTable(t *testing.T) {
 				if !errors.Is(r.err, g.refusal) || (g.refusal == nil && r.err != nil) {
 					t.Errorf("err = %v, want %v", r.err, g.refusal)
 				}
-				if e.up.summaryCalls != 0 {
-					t.Errorf("summarizer calls = %d, want 0 (the gate precedes the wire)", e.up.summaryCalls)
+				if e.up.summaryCalls() != 0 {
+					t.Errorf("summarizer calls = %d, want 0 (the gate precedes the wire)", e.up.summaryCalls())
 				}
 				if n := countCompactionErrors(e.sink.events); n != 0 {
 					t.Errorf("compaction ErrorEvents = %d, want 0 (a closed gate is silent)", n)
@@ -1079,8 +1047,8 @@ func TestFoldTable(t *testing.T) {
 			if r := e.a.foldFor(context.Background(), 0, foldOnDemand); r.end != foldEndFolded || r.err != nil {
 				t.Fatalf("result = %+v, want a fold that ran", r)
 			}
-			if e.up.summaryCalls != 1 {
-				t.Errorf("summarizer calls = %d, want 1", e.up.summaryCalls)
+			if e.up.summaryCalls() != 1 {
+				t.Errorf("summarizer calls = %d, want 1", e.up.summaryCalls())
 			}
 		})
 		t.Run("overflow ignores both latches", func(t *testing.T) {
@@ -1196,7 +1164,7 @@ func TestFoldTable(t *testing.T) {
 		} {
 			t.Run(s.name, func(t *testing.T) {
 				sink := &recordingSink{}
-				a, err := newAgent(autoCompactConfig(sink), &compactSpyResponder{reply: "FOLDED-SUMMARY"})
+				a, err := newAgent(autoCompactConfig(sink), compactSpyResponder(t, "FOLDED-SUMMARY"))
 				if err != nil {
 					t.Fatalf("newAgent: %v", err)
 				}
@@ -1236,7 +1204,7 @@ func TestFoldTable(t *testing.T) {
 			})
 			t.Run(fmt.Sprintf("kind %d skipped", kind), func(t *testing.T) {
 				sink := &recordingSink{}
-				up := &compactSpyResponder{reply: "UNREACHED"}
+				up := compactSpyResponder(t, "UNREACHED")
 				a, err := newAgent(autoCompactConfig(sink), up)
 				if err != nil {
 					t.Fatalf("newAgent: %v", err)
@@ -1246,8 +1214,8 @@ func TestFoldTable(t *testing.T) {
 				if r.end != foldEndDeclined || !r.skipped || r.err != nil {
 					t.Fatalf("result = %+v, want declined + skipped", r)
 				}
-				if up.summaryCalls != 0 || a.turns.compactSat || countCompactionErrors(sink.events) != 0 {
-					t.Errorf("a skip proves nothing: calls %d, saturated %v, events %d", up.summaryCalls, a.turns.compactSat, countCompactionErrors(sink.events))
+				if up.summaryCalls() != 0 || a.turns.compactSat || countCompactionErrors(sink.events) != 0 {
+					t.Errorf("a skip proves nothing: calls %d, saturated %v, events %d", up.summaryCalls(), a.turns.compactSat, countCompactionErrors(sink.events))
 				}
 			})
 		}

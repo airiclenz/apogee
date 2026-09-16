@@ -16,45 +16,21 @@ package agent
 
 import (
 	"context"
-	"iter"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// scriptedCompactResponder plays a scripted stream for each MAIN-turn call while intercepting the
-// summarizer call (identified by the summary system prompt) to count auto-folds and return a canned
-// summary — so a test can drive a real multi-Turn Exchange (tool calls and all) and still assert
-// exactly when an auto-fold fired, without a summarizer call consuming a main-turn script slot.
-type scriptedCompactResponder struct {
-	scripts      [][]provider.Delta
-	summaryReply string
-	summaryCalls int
-	calls        int
-	requests     []provider.Request // every MAIN-turn request, in order — what the model actually saw
-}
-
-func (r *scriptedCompactResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting a conversation") {
-		r.summaryCalls++
-		return streamReply(r.summaryReply)
-	}
-	r.requests = append(r.requests, req)
-	i := r.calls
-	r.calls++
-	return func(yield func(provider.Delta) bool) {
-		if i >= len(r.scripts) {
-			yield(provider.Delta{Kind: provider.DeltaError, Err: "scriptedCompactResponder: out of scripts"})
-			return
-		}
-		for _, d := range r.scripts[i] {
-			if !yield(d) {
-				return
-			}
-		}
-	}
+// scriptedCompactResponder plays turns in order for the MAIN-turn requests while the summarizer's
+// calls take a summary turn of their own — selected by the summary system prompt, so a fold never
+// consumes a main-turn slot. A test can drive a real multi-Turn Exchange (tool calls and all) and
+// still read exactly when an auto-fold fired (summaryCalls) and what the model saw (mains). An
+// empty summary is a fault: context.Compact rejects it (errEmptySummary).
+func scriptedCompactResponder(t testing.TB, summary string, turns ...stubllm.Turn) *scriptedUpstream {
+	t.Helper()
+	return scriptedResponder(t, append([]stubllm.Turn{summaryTurn(summary)}, turns...)...)
 }
 
 // countCompactionErrors counts the ErrorEvents attributed to the "compaction" source — the
@@ -75,14 +51,11 @@ func countCompactionErrors(events []domain.Event) int {
 // must instead fire at the next Exchange opening where the same over-budget history is folded.
 func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedCompactResponder{
-		summaryReply: "FOLDED",
-		scripts: [][]provider.Delta{
-			toolCallScript("c1", "probe", "{}"), // Turn 0 (opening): ask for the tool
-			contentScript("continued"),          // Turn 1 (continuation): finish the Exchange
-			contentScript("next answer"),        // Turn 2 (the next Exchange, after the deferred fold)
-		},
-	}
+	up := scriptedCompactResponder(t, "FOLDED",
+		toolCallTurn("c1", "probe", "{}"), // Turn 0 (opening): ask for the tool
+		contentTurn("continued"),          // Turn 1 (continuation): finish the Exchange
+		contentTurn("next answer"),        // Turn 2 (the next Exchange, after the deferred fold)
+	)
 	cfg := autoCompactConfig(sink)
 	toolReg := domain.NewToolRegistry()
 	// The tool result alone (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
@@ -106,8 +79,8 @@ func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 	if res0.Status != domain.StatusTurnComplete {
 		t.Fatalf("Turn 0 status = %q, want %q (a tool Turn)", res0.Status, domain.StatusTurnComplete)
 	}
-	if up.summaryCalls != 0 {
-		t.Fatalf("a fold fired on the opening Turn before the history was over budget: %d", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Fatalf("a fold fired on the opening Turn before the history was over budget: %d", up.summaryCalls())
 	}
 	if !a.historyExceedsAllocation() {
 		t.Fatalf("setup: history is not over budget after the large tool result; the guard would be untested")
@@ -120,8 +93,8 @@ func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 	if res1.Status != domain.StatusExchangeComplete {
 		t.Fatalf("Turn 1 status = %q, want %q", res1.Status, domain.StatusExchangeComplete)
 	}
-	if up.summaryCalls != 0 {
-		t.Fatalf("auto-compaction folded mid-Exchange (%d summarizer calls); the inExchange guard must defer it", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Fatalf("auto-compaction folded mid-Exchange (%d summarizer calls); the inExchange guard must defer it", up.summaryCalls())
 	}
 
 	// The next Exchange opening: inExchange is false at the top of step(), so the deferred fold fires.
@@ -131,8 +104,8 @@ func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 	if _, err := a.Step(context.Background()); err != nil {
 		t.Fatalf("Step 2: %v", err)
 	}
-	if up.summaryCalls != 1 {
-		t.Fatalf("deferred fold did not fire at the next Exchange opening: summarizer calls = %d, want 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("deferred fold did not fire at the next Exchange opening: summarizer calls = %d, want 1", up.summaryCalls())
 	}
 	// Only a MID-Exchange fold owes the conversation an overflow bridge. This one ran at an
 	// Exchange opening, where the human's own "again" follows the summary as its own turn, so a
@@ -143,7 +116,7 @@ func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 				i, convRoles(a))
 		}
 	}
-	if last := up.requests[len(up.requests)-1].Messages; last[len(last)-1].Content != "again" {
+	if last := up.mains()[len(up.mains())-1].Messages; last[len(last)-1].Content != "again" {
 		t.Errorf("the post-fold request ends %q, want the user's own %q", last[len(last)-1].Content, "again")
 	}
 }
@@ -156,7 +129,7 @@ func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 // window), re-arming so a later overflow folds again.
 func TestAutoCompactSaturatesWhenPrefixExceedsAllocation(t *testing.T) {
 	sink := &recordingSink{}
-	up := &compactSpyResponder{reply: "SUMMARY"}
+	up := compactSpyResponder(t, "SUMMARY")
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -170,8 +143,8 @@ func TestAutoCompactSaturatesWhenPrefixExceedsAllocation(t *testing.T) {
 
 	// Exchange 1: one fold attempt, but the oversized prefix keeps it over budget → saturate.
 	runExchange(t, a, "q1")
-	if up.summaryCalls != 1 {
-		t.Fatalf("first over-budget opening did not fold once: summarizer calls = %d, want 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("first over-budget opening did not fold once: summarizer calls = %d, want 1", up.summaryCalls())
 	}
 	if n := countCompactionErrors(sink.events); n != 1 {
 		t.Fatalf("saturating fold emitted %d compaction ErrorEvents, want exactly 1", n)
@@ -179,8 +152,8 @@ func TestAutoCompactSaturatesWhenPrefixExceedsAllocation(t *testing.T) {
 
 	// Exchange 2: still over budget, but saturated → no further fold, no further ErrorEvent.
 	runExchange(t, a, "q2")
-	if up.summaryCalls != 1 {
-		t.Fatalf("saturated trigger re-folded on growth: summarizer calls = %d, want 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("saturated trigger re-folded on growth: summarizer calls = %d, want 1", up.summaryCalls())
 	}
 	if n := countCompactionErrors(sink.events); n != 1 {
 		t.Fatalf("saturated trigger emitted another ErrorEvent: %d, want 1", n)
@@ -190,16 +163,16 @@ func TestAutoCompactSaturatesWhenPrefixExceedsAllocation(t *testing.T) {
 	// fold (now in budget), and the latch is rearmed for a future overflow.
 	a.cfg.Context.MaxContextTokens = 1 << 20
 	runExchange(t, a, "q3")
-	if up.summaryCalls != 1 {
-		t.Fatalf("in-budget Exchange folded: summarizer calls = %d, want 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("in-budget Exchange folded: summarizer calls = %d, want 1", up.summaryCalls())
 	}
 
 	// Shrinking the window back over budget re-arms the trigger → it folds again and re-saturates,
 	// proving the latch cleared rather than sticking off permanently.
 	a.cfg.Context.MaxContextTokens = 8192
 	runExchange(t, a, "q4")
-	if up.summaryCalls != 2 {
-		t.Fatalf("saturation did not clear: summarizer calls = %d, want 2 after the window shrank back over budget", up.summaryCalls)
+	if up.summaryCalls() != 2 {
+		t.Fatalf("saturation did not clear: summarizer calls = %d, want 2 after the window shrank back over budget", up.summaryCalls())
 	}
 	if n := countCompactionErrors(sink.events); n != 2 {
 		t.Fatalf("re-saturating fold did not emit a fresh ErrorEvent: %d compaction ErrorEvents, want 2", n)
@@ -214,7 +187,7 @@ func TestAutoCompactSaturatesWhenPrefixExceedsAllocation(t *testing.T) {
 // could not if the earlier skip had wrongly saturated (a latched trigger stands down entirely).
 func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
 	sink := &recordingSink{}
-	up := &compactSpyResponder{reply: "SUMMARY"}
+	up := compactSpyResponder(t, "SUMMARY")
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -232,8 +205,8 @@ func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
 	// ErrorEvent, no summarizer call. The just-submitted user message and its reply then accumulate a
 	// foldable tail for the next opening.
 	runExchange(t, a, "q1")
-	if up.summaryCalls != 0 {
-		t.Fatalf("a skipped fold still called the summarizer: %d, want 0", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Fatalf("a skipped fold still called the summarizer: %d, want 0", up.summaryCalls())
 	}
 	if n := countCompactionErrors(sink.events); n != 0 {
 		t.Fatalf("a skipped fold emitted %d compaction ErrorEvents, want 0 (nothing folded ⇒ nothing proved)", n)
@@ -246,8 +219,8 @@ func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
 	// reply), so the fold RUNS. If the earlier skip had saturated, shouldAutoCompact would stand the
 	// trigger down and this fold would never fire — so the summarizer call proves the latch stayed clear.
 	runExchange(t, a, "q2")
-	if up.summaryCalls != 1 {
-		t.Fatalf("the fold did not run once a foldable tail existed: summarizer calls = %d, want 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("the fold did not run once a foldable tail existed: summarizer calls = %d, want 1", up.summaryCalls())
 	}
 	if a.historyExceedsAllocation() {
 		t.Error("the fold ran but did not bring the history under its allocation; the setup drifted")
@@ -380,13 +353,10 @@ func TestExchangeStartRepairedAfterMidExchangeTruncation(t *testing.T) {
 // AbortExchange eats the first user message along with the summary.
 func TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedCompactResponder{
-		summaryReply: "FOLDED",
-		scripts: [][]provider.Delta{
-			toolCallScript("c1", "probe", "{}"), // Turn 0 (opening): ask for the oversized tool
-			toolCallScript("c2", "peek", "{}"),  // Turn 1: over budget at its top → fold, then keep the Exchange open
-		},
-	}
+	up := scriptedCompactResponder(t, "FOLDED",
+		toolCallTurn("c1", "probe", "{}"), // Turn 0 (opening): ask for the oversized tool
+		toolCallTurn("c2", "peek", "{}"),  // Turn 1: over budget at its top → fold, then keep the Exchange open
+	)
 	cfg := autoCompactConfig(sink)
 	toolReg := domain.NewToolRegistry()
 	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
@@ -415,8 +385,8 @@ func TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange(t *testing.
 	if res0.Status != domain.StatusTurnComplete {
 		t.Fatalf("Turn 0 status = %q, want %q (a tool Turn)", res0.Status, domain.StatusTurnComplete)
 	}
-	if up.summaryCalls != 0 {
-		t.Fatalf("a fold fired on the opening Turn before the history was over budget: %d", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Fatalf("a fold fired on the opening Turn before the history was over budget: %d", up.summaryCalls())
 	}
 	if !a.historyExceedsAllocation() {
 		t.Fatalf("setup: history is not over budget after the large tool result; the fold would be untested")
@@ -429,8 +399,8 @@ func TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange(t *testing.
 	if res1.Status != domain.StatusTurnComplete {
 		t.Fatalf("Turn 1 status = %q, want %q (the fold does not end the Exchange)", res1.Status, domain.StatusTurnComplete)
 	}
-	if up.summaryCalls != 1 {
-		t.Fatalf("mid-Exchange fold fired %d times, want exactly 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("mid-Exchange fold fired %d times, want exactly 1", up.summaryCalls())
 	}
 	if a.historyExceedsAllocation() {
 		t.Error("the fold ran but did not bring the history under its allocation; the setup drifted")
@@ -482,17 +452,14 @@ func compactionErrorTexts(events []domain.Event) []string {
 // estimate-driven trigger's own count.
 func TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedCompactResponder{
-		summaryReply: "", // an empty summary is a fault: context.Compact rejects it (errEmptySummary)
-		scripts: [][]provider.Delta{
-			toolCallScript("c1", "probe", "{}"),     // Turn 0 (opening): the oversized result puts the history over budget
-			toolCallScript("c2", "peek", "{}"),      // Turn 1: over budget at its top → the fold RUNS and faults
-			toolCallScript("c3", "peek", `{"n":3}`), // Turn 2: still over budget → the latch must stand the trigger down
-			toolCallScript("c4", "peek", `{"n":4}`), // Turn 3: ditto — a second silent boundary
-			//                                          (the arguments differ per Turn so the tool-loop
-			//                                          breaker guard does not read them as a repeat)
-		},
-	}
+	up := scriptedCompactResponder(t, "", // an empty summary is a fault: context.Compact rejects it (errEmptySummary)
+		toolCallTurn("c1", "probe", "{}"),     // Turn 0 (opening): the oversized result puts the history over budget
+		toolCallTurn("c2", "peek", "{}"),      // Turn 1: over budget at its top → the fold RUNS and faults
+		toolCallTurn("c3", "peek", `{"n":3}`), // Turn 2: still over budget → the latch must stand the trigger down
+		toolCallTurn("c4", "peek", `{"n":4}`), // Turn 3: ditto — a second silent boundary
+		//                                          (the arguments differ per Turn so the tool-loop
+		//                                          breaker guard does not read them as a repeat)
+	)
 	cfg := autoCompactConfig(sink)
 	toolReg := domain.NewToolRegistry()
 	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
@@ -526,8 +493,8 @@ func TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange(t *testing.T) {
 	if !a.historyExceedsAllocation() {
 		t.Fatal("setup: the history is not over budget after the failed fold; the stand-down would be untested")
 	}
-	if up.summaryCalls != 1 {
-		t.Fatalf("summarizer calls = %d, want 1 — a faulted fold was retried at a later Turn boundary", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 — a faulted fold was retried at a later Turn boundary", up.summaryCalls())
 	}
 	errs := compactionErrorTexts(sink.events)
 	if len(errs) != 1 {
@@ -548,13 +515,10 @@ func TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange(t *testing.T) {
 // down for an Exchange that is already over would be a lie.
 func TestAutoCompactFailedFoldReArmsAtTheNextExchangeOpening(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedCompactResponder{
-		summaryReply: "", // every fold faults
-		scripts: [][]provider.Delta{
-			contentScript("one"), // Exchange 1: one Turn, after the fold at its opening faulted
-			contentScript("two"), // Exchange 2: the trigger must have re-armed
-		},
-	}
+	up := scriptedCompactResponder(t, "", // every fold faults
+		contentTurn("one"), // Exchange 1: one Turn, after the fold at its opening faulted
+		contentTurn("two"), // Exchange 2: the trigger must have re-armed
+	)
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -567,16 +531,16 @@ func TestAutoCompactFailedFoldReArmsAtTheNextExchangeOpening(t *testing.T) {
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a2"})
 
 	runExchange(t, a, "q1")
-	if up.summaryCalls != 1 {
-		t.Fatalf("the first opening did not fold once: summarizer calls = %d, want 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("the first opening did not fold once: summarizer calls = %d, want 1", up.summaryCalls())
 	}
 	if a.turns.compactFailed {
 		t.Error("the stand-down latch survived openExchange; the main agent must re-arm at every opening")
 	}
 
 	runExchange(t, a, "q2")
-	if up.summaryCalls != 2 {
-		t.Fatalf("the trigger did not re-arm at the next Exchange opening: summarizer calls = %d, want 2", up.summaryCalls)
+	if up.summaryCalls() != 2 {
+		t.Fatalf("the trigger did not re-arm at the next Exchange opening: summarizer calls = %d, want 2", up.summaryCalls())
 	}
 	errs := compactionErrorTexts(sink.events)
 	if len(errs) != 2 {
@@ -596,13 +560,10 @@ func TestAutoCompactFailedFoldReArmsAtTheNextExchangeOpening(t *testing.T) {
 // DeltaContextOverflow, and the emergency fold's own summary call must still be made.
 func TestFailedFoldStandDownDoesNotBlockTheEmergencyFold(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedCompactResponder{
-		summaryReply: "", // both folds fault, so the emergency fold's shot is visible in the call count alone
-		scripts: [][]provider.Delta{
-			toolCallScript("c1", "probe", "{}"),                                             // Turn 0 (opening): the oversized result puts the history over budget
-			{{Kind: provider.DeltaContextOverflow, Err: "apogee: context window exceeded"}}, // Turn 1: fold faults, then the request is rejected
-		},
-	}
+	up := scriptedCompactResponder(t, "", // both folds fault, so the emergency fold's shot is visible in the call count alone
+		toolCallTurn("c1", "probe", "{}"), // Turn 0 (opening): the oversized result puts the history over budget
+		overflowTurn(),                    // Turn 1: fold faults, then the request is rejected
+	)
 	cfg := autoCompactConfig(sink)
 	toolReg := domain.NewToolRegistry()
 	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: strings.Repeat("x", 25000)}); err != nil {
@@ -628,15 +589,15 @@ func TestFailedFoldStandDownDoesNotBlockTheEmergencyFold(t *testing.T) {
 	if !a.turns.compactFailed {
 		t.Fatal("setup: the Turn-boundary fold did not fault, so the latch is not set and the exemption is untested")
 	}
-	if up.summaryCalls != 2 {
-		t.Fatalf("summarizer calls = %d, want 2 — the stand-down latch swallowed the emergency fold's one shot", up.summaryCalls)
+	if up.summaryCalls() != 2 {
+		t.Fatalf("summarizer calls = %d, want 2 — the stand-down latch swallowed the emergency fold's one shot", up.summaryCalls())
 	}
 }
 
 // TestCompactOnDemandIgnoresTheStandDownLatch pins the other exemption: /compact is the human asking
 // for this fold now, so a stand-down left by a failed automatic fold must not silently refuse them.
 func TestCompactOnDemandIgnoresTheStandDownLatch(t *testing.T) {
-	up := &compactSpyResponder{reply: "SUMMARY"}
+	up := compactSpyResponder(t, "SUMMARY")
 	a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -651,7 +612,7 @@ func TestCompactOnDemandIgnoresTheStandDownLatch(t *testing.T) {
 	if skipped {
 		t.Fatal("Compact skipped; the seeded tail is foldable, so the assertion below would be vacuous")
 	}
-	if up.summaryCalls != 1 {
-		t.Fatalf("summarizer calls = %d, want 1 — the on-demand fold must ignore the stand-down latch", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want 1 — the on-demand fold must ignore the stand-down latch", up.summaryCalls())
 	}
 }

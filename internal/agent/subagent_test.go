@@ -1879,7 +1879,7 @@ func TestStepCapNeverBoundsTheMainAgent(t *testing.T) {
 // foldedSummaryRequest returns the first recorded request carrying a message with the canned
 // summary text — the request the model saw immediately AFTER an auto-fold, which is the one whose
 // shape a fold can break.
-func foldedSummaryRequest(reqs []provider.Request, summary string) (provider.Request, bool) {
+func foldedSummaryRequest(reqs []stubllm.Request, summary string) (stubllm.Request, bool) {
 	for _, req := range reqs {
 		for _, m := range req.Messages {
 			if strings.Contains(m.Content, summary) {
@@ -1887,7 +1887,7 @@ func foldedSummaryRequest(reqs []provider.Request, summary string) (provider.Req
 			}
 		}
 	}
-	return provider.Request{}, false
+	return stubllm.Request{}, false
 }
 
 // TestSubAgent_ChildFoldsMidDelegationAndFinishes is the delegate half of the child's mid-Exchange
@@ -1904,15 +1904,12 @@ func TestSubAgent_ChildFoldsMidDelegationAndFinishes(t *testing.T) {
 	cfg.Context.MaxContextTokens = 8192
 	cfg.Context.CompactionEnabled = true
 
-	up := &scriptedCompactResponder{
-		summaryReply: "CHILD-SUMMARY",
-		scripts: [][]provider.Delta{
-			subAgentCallScript("c1", "trawl the repo"),    // parent Turn 0: delegate
-			toolCallScript("t1", "read_thing", `{}`),      // child Turn 0: the oversized read
-			contentScript("the child's own final answer"), // child Turn 1: folds at its top, then answers
-			contentScript("parent done"),                  // parent Turn 1: finish
-		},
-	}
+	up := scriptedCompactResponder(t, "CHILD-SUMMARY",
+		subAgentCallTurn("c1", "trawl the repo"),    // parent Turn 0: delegate
+		toolCallTurn("t1", "read_thing", `{}`),      // child Turn 0: the oversized read
+		contentTurn("the child's own final answer"), // child Turn 1: folds at its top, then answers
+		contentTurn("parent done"),                  // parent Turn 1: finish
+	)
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -1924,8 +1921,8 @@ func TestSubAgent_ChildFoldsMidDelegationAndFinishes(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if up.summaryCalls != 1 {
-		t.Fatalf("folds during the delegation = %d, want exactly 1 — the child must fold mid-Exchange", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("folds during the delegation = %d, want exactly 1 — the child must fold mid-Exchange", up.summaryCalls())
 	}
 	sub, ok := lastSubAgentResult(sink.events)
 	if !ok {
@@ -1938,7 +1935,7 @@ func TestSubAgent_ChildFoldsMidDelegationAndFinishes(t *testing.T) {
 		t.Errorf("the child's fold emitted %d compaction ErrorEvents, want 0", n)
 	}
 
-	req, ok := foldedSummaryRequest(up.requests, "CHILD-SUMMARY")
+	req, ok := foldedSummaryRequest(up.mains(), "CHILD-SUMMARY")
 	if !ok {
 		t.Fatal("no request carried the folded summary; the child's post-fold request was not observed")
 	}
@@ -1969,15 +1966,12 @@ func TestSubAgent_ChildNeverFoldsWithAutoCompactOff(t *testing.T) {
 	cfg.Context.MaxContextTokens = 8192
 	cfg.Context.CompactionEnabled = false
 
-	up := &scriptedCompactResponder{
-		summaryReply: "CHILD-SUMMARY",
-		scripts: [][]provider.Delta{
-			subAgentCallScript("c1", "trawl the repo"),
-			toolCallScript("t1", "read_thing", `{}`),
-			contentScript("the child's own final answer"),
-			contentScript("parent done"),
-		},
-	}
+	up := scriptedCompactResponder(t, "CHILD-SUMMARY",
+		subAgentCallTurn("c1", "trawl the repo"),
+		toolCallTurn("t1", "read_thing", `{}`),
+		contentTurn("the child's own final answer"),
+		contentTurn("parent done"),
+	)
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -1989,8 +1983,8 @@ func TestSubAgent_ChildNeverFoldsWithAutoCompactOff(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if up.summaryCalls != 0 {
-		t.Errorf("summarizer calls = %d with `auto-compact` off, want 0 — the child's fold obeys the same gate", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Errorf("summarizer calls = %d with `auto-compact` off, want 0 — the child's fold obeys the same gate", up.summaryCalls())
 	}
 	sub, ok := lastSubAgentResult(sink.events)
 	if !ok {

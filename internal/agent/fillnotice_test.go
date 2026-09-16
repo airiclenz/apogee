@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // fillConfig is an 8192-window config with the notice switched on and no compaction — the
@@ -170,16 +169,13 @@ func TestContextFillNoticeReportsTheHighestRungOneResultCrosses(t *testing.T) {
 // past 50 fires the 50 rung again.
 func TestContextFillNoticeReArmsAfterAFold(t *testing.T) {
 	sink := &recordingSink{}
-	up := &scriptedCompactResponder{
-		summaryReply: "FOLDED",
-		scripts: [][]provider.Delta{
-			toolCallScript("c1", "probe", `{"n":1}`), // Exchange 1: one result past the line
-			contentScript("first done"),
-			toolCallScript("c2", "probe", `{"n":2}`), // Exchange 2 (after the fold): under 50, then past it
-			toolCallScript("c3", "probe", `{"n":3}`),
-			contentScript("second done"),
-		},
-	}
+	up := scriptedCompactResponder(t, "FOLDED",
+		toolCallTurn("c1", "probe", `{"n":1}`), // Exchange 1: one result past the line
+		contentTurn("first done"),
+		toolCallTurn("c2", "probe", `{"n":2}`), // Exchange 2 (after the fold): under 50, then past it
+		toolCallTurn("c3", "probe", `{"n":3}`),
+		contentTurn("second done"),
+	)
 	cfg := fillConfig(sink)
 	cfg.Context.CompactionEnabled = true
 	cfg.Tools = domain.NewToolRegistry()
@@ -207,8 +203,8 @@ func TestContextFillNoticeReArmsAfterAFold(t *testing.T) {
 
 	runExchange(t, a, "again")
 
-	if up.summaryCalls != 1 {
-		t.Fatalf("summary calls = %d, want the one fold at the second Exchange's opening", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summary calls = %d, want the one fold at the second Exchange's opening", up.summaryCalls())
 	}
 	fired = noticeFirings(sink)
 	if len(fired) != 2 || !strings.HasPrefix(fired[1].Detail, "rung 50 (") {
@@ -232,15 +228,12 @@ func TestContextFillNoticeFirstPostFoldResultFiresItsOwnRung(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			up := &scriptedCompactResponder{
-				summaryReply: "FOLDED",
-				scripts: [][]provider.Delta{
-					toolCallScript("c1", "probe", `{"n":1}`), // Exchange 1: one result past the line
-					contentScript("first done"),
-					toolCallScript("c2", "probe", `{"n":2}`), // Exchange 2 (after the fold): straight onto a rung
-					contentScript("second done"),
-				},
-			}
+			up := scriptedCompactResponder(t, "FOLDED",
+				toolCallTurn("c1", "probe", `{"n":1}`), // Exchange 1: one result past the line
+				contentTurn("first done"),
+				toolCallTurn("c2", "probe", `{"n":2}`), // Exchange 2 (after the fold): straight onto a rung
+				contentTurn("second done"),
+			)
 			cfg := fillConfig(sink)
 			cfg.Context.CompactionEnabled = true
 			cfg.Tools = domain.NewToolRegistry()
@@ -255,8 +248,8 @@ func TestContextFillNoticeFirstPostFoldResultFiresItsOwnRung(t *testing.T) {
 			runExchange(t, a, "start")
 			runExchange(t, a, "again")
 
-			if up.summaryCalls != 1 {
-				t.Fatalf("summary calls = %d, want the one fold at the second Exchange's opening", up.summaryCalls)
+			if up.summaryCalls() != 1 {
+				t.Fatalf("summary calls = %d, want the one fold at the second Exchange's opening", up.summaryCalls())
 			}
 			fired := noticeFirings(sink)
 			if len(fired) != 2 || !strings.HasPrefix(fired[0].Detail, "rung 90 (") || !strings.HasPrefix(fired[1].Detail, tc.wantRung) {

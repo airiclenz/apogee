@@ -76,7 +76,7 @@ func TestPredictiveGuardFoldsAtTheWindowThresholdOnly(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			up := &recoveryResponder{reply: "the reply", summary: "EMERGENCY-SUMMARY"}
+			up := recoveryResponder(t, "the reply", "EMERGENCY-SUMMARY")
 			a, err := newAgent(autoCompactConfig(sink), up)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -96,19 +96,19 @@ func TestPredictiveGuardFoldsAtTheWindowThresholdOnly(t *testing.T) {
 			if errs := errorEvents(sink.events); len(errs) != 0 {
 				t.Errorf("the guard surfaced %d ErrorEvent(s) %v; a predictive fold is quiet", len(errs), errs)
 			}
-			if len(up.mains) != 1 {
+			if len(up.mains()) != 1 {
 				t.Fatalf("main requests = %d, want 1 — the guard replaces the oversized request, it does not add one",
-					len(up.mains))
+					len(up.mains()))
 			}
 			want := 0
 			if tc.wantFold {
 				want = 1
 			}
-			if up.summaries != want {
-				t.Fatalf("summarizer calls = %d, want %d", up.summaries, want)
+			if up.summaryCalls() != want {
+				t.Fatalf("summarizer calls = %d, want %d", up.summaryCalls(), want)
 			}
 
-			sent := up.mains[0]
+			sent := up.mains()[0]
 			if !tc.wantFold {
 				if len(sent.Messages) != 3 {
 					t.Errorf("request carried %d messages, want the 3 seeded ones unfolded", len(sent.Messages))
@@ -165,7 +165,7 @@ func TestPredictiveGuardUncalibratedNeedsTwiceTheRoom(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			up := &recoveryResponder{reply: "the reply", summary: "EMERGENCY-SUMMARY"}
+			up := recoveryResponder(t, "the reply", "EMERGENCY-SUMMARY")
 			a, err := newAgent(autoCompactConfig(sink), up)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -189,13 +189,13 @@ func TestPredictiveGuardUncalibratedNeedsTwiceTheRoom(t *testing.T) {
 			if tc.wantFold {
 				want = 1
 			}
-			if up.summaries != want {
-				t.Fatalf("summarizer calls = %d, want %d", up.summaries, want)
+			if up.summaryCalls() != want {
+				t.Fatalf("summarizer calls = %d, want %d", up.summaryCalls(), want)
 			}
-			if len(up.mains) != 1 {
-				t.Fatalf("main requests = %d, want 1", len(up.mains))
+			if len(up.mains()) != 1 {
+				t.Fatalf("main requests = %d, want 1", len(up.mains()))
 			}
-			sent := up.mains[0]
+			sent := up.mains()[0]
 			if !tc.wantFold {
 				if len(sent.Messages) != 3 {
 					t.Errorf("request carried %d messages, want the 3 seeded ones unfolded", len(sent.Messages))
@@ -246,7 +246,7 @@ func TestPredictiveGuardWithoutAKnownWindowUsesTheConservativeCeiling(t *testing
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			sink := &recordingSink{}
-			up := &recoveryResponder{reply: "the reply", summary: "EMERGENCY-SUMMARY"}
+			up := recoveryResponder(t, "the reply", "EMERGENCY-SUMMARY")
 			cfg := baseConfig(sink) // no MaxContextTokens: neither discovery nor `context-window:` reported one
 			cfg.Context.CompactionEnabled = true
 			a, err := newAgent(cfg, up)
@@ -271,13 +271,13 @@ func TestPredictiveGuardWithoutAKnownWindowUsesTheConservativeCeiling(t *testing
 			if tc.wantFold {
 				wantSummaries = 1
 			}
-			if up.summaries != wantSummaries {
-				t.Errorf("summarizer calls = %d, want %d", up.summaries, wantSummaries)
+			if up.summaryCalls() != wantSummaries {
+				t.Errorf("summarizer calls = %d, want %d", up.summaryCalls(), wantSummaries)
 			}
-			if len(up.mains) != 1 {
-				t.Fatalf("main requests = %d, want 1", len(up.mains))
+			if len(up.mains()) != 1 {
+				t.Fatalf("main requests = %d, want 1", len(up.mains()))
 			}
-			sent := up.mains[0]
+			sent := up.mains()[0]
 			if !tc.wantFold {
 				if len(sent.Messages) != 3 {
 					t.Errorf("request carried %d messages, want the 3 seeded ones untouched", len(sent.Messages))
@@ -300,7 +300,7 @@ func TestPredictiveGuardWithoutAKnownWindowUsesTheConservativeCeiling(t *testing
 // server, not the estimator, has the last word on what fits.
 func TestPredictiveGuardRefusedFoldStillSendsTheRequest(t *testing.T) {
 	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "the reply", summary: "UNREACHED"}
+	up := recoveryResponder(t, "the reply", "UNREACHED")
 	cfg := autoCompactConfig(sink)
 	cfg.Context.CompactionEnabled = false
 	a, err := newAgent(cfg, up)
@@ -321,12 +321,12 @@ func TestPredictiveGuardRefusedFoldStillSendsTheRequest(t *testing.T) {
 	if errs := errorEvents(sink.events); len(errs) != 0 {
 		t.Errorf("a refused predictive fold surfaced %d ErrorEvent(s) %v; it is not a fault", len(errs), errs)
 	}
-	if up.summaries != 0 {
-		t.Errorf("summarizer calls = %d with auto-compact off, want 0", up.summaries)
+	if up.summaryCalls() != 0 {
+		t.Errorf("summarizer calls = %d with auto-compact off, want 0", up.summaryCalls())
 	}
-	if len(up.mains) != 1 || len(up.mains[0].Messages) != 3 {
+	if len(up.mains()) != 1 || len(up.mains()[0].Messages) != 3 {
 		t.Errorf("main requests = %d (first carrying %d messages), want 1 carrying the 3 seeded ones unfolded",
-			len(up.mains), len(up.mains[0].Messages))
+			len(up.mains()), len(up.mains()[0].Messages))
 	}
 }
 
@@ -336,7 +336,7 @@ func TestPredictiveGuardRefusedFoldStillSendsTheRequest(t *testing.T) {
 // byte-identical to a plain fault's — rather than folding a second time.
 func TestPredictiveGuardSpendsTheTurnsOneFold(t *testing.T) {
 	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "UNREACHED", summary: "EMERGENCY-SUMMARY", overflows: []bool{true}}
+	up := recoveryResponder(t, "UNREACHED", "EMERGENCY-SUMMARY", true)
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -353,12 +353,12 @@ func TestPredictiveGuardSpendsTheTurnsOneFold(t *testing.T) {
 		t.Errorf("status = %q, want %q — a spent recovery ends the Exchange at a clean boundary",
 			res.Status, domain.StatusExchangeComplete)
 	}
-	if up.summaries != 1 {
-		t.Errorf("summarizer calls = %d, want exactly 1 — the predictive fold spent the Turn's only one", up.summaries)
+	if up.summaryCalls() != 1 {
+		t.Errorf("summarizer calls = %d, want exactly 1 — the predictive fold spent the Turn's only one", up.summaryCalls())
 	}
-	if len(up.mains) != 1 {
+	if len(up.mains()) != 1 {
 		t.Errorf("main requests = %d, want 1 — the overflow arrives with the fold already spent, so there is no retry",
-			len(up.mains))
+			len(up.mains()))
 	}
 	errs := errorEvents(sink.events)
 	if len(errs) != 1 {

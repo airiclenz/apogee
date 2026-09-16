@@ -20,12 +20,43 @@ type Request struct {
 	Tools []string
 	// Stream reports whether the request asked for SSE.
 	Stream bool
+	// Sampling is what the request asked of the sampler: the cap and temperature it carried,
+	// nil where it carried none.
+	Sampling Sampling
+	// Effort is the thinking-effort intent the request expressed, in whichever wire dialect it
+	// spoke, recorded verbatim from the body.
+	Effort Effort
 	// Unmatched reports that no Turn answered: the stub replied HTTP 500.
 	Unmatched bool
 	// TurnIndex is the index of the Turn that answered, or -1 when Unmatched.
 	TurnIndex int
 	// At is when the request arrived.
 	At time.Time
+}
+
+// Sampling is the sampling keys a request carried. Both are pointers so a request that named
+// no cap or temperature — leaving the server's defaults to apply — logs nil, distinct from one
+// that asked for zero.
+type Sampling struct {
+	MaxTokens   *int     // `max_tokens`
+	Temperature *float64 // `temperature`
+}
+
+// Effort is a request's thinking-effort keys, one member per wire dialect apogee speaks
+// (internal/provider's applyEffort): a request carries at most one of them, and a request
+// that asked for no effort — or whose server's dialect is `off` — carries none, so a test that
+// asserts "nothing about effort reached the wire" checks all three are empty.
+type Effort struct {
+	// ChatTemplateKwargs is llama.cpp's `chat_template_kwargs` object as the body carried it:
+	// `{"enable_thinking": false}` for the off rung, `{"reasoning_effort": "<level>"}` for a
+	// level. Nil when the body carried none.
+	ChatTemplateKwargs map[string]any
+	// Reasoning is OpenRouter's `reasoning` object as the body carried it: `{"effort": "<level>"}`
+	// or `{"enabled": false}`. Nil when the body carried none.
+	Reasoning map[string]any
+	// ReasoningEffort is the top-level `reasoning_effort` string OpenAI and Groq read, or ""
+	// when the body carried none.
+	ReasoningEffort string
 }
 
 // Message is one message off a request, reduced to what a test or a matcher reads.

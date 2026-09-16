@@ -158,7 +158,7 @@ func TestLoopViewParallelAgents_StampsTheDelegationWidth(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.ParallelAgents = 3
-	a, err := newAgent(cfg, &compactSpyResponder{reply: "reply"})
+	a, err := newAgent(cfg, compactSpyResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

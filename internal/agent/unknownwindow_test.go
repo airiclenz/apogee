@@ -112,7 +112,7 @@ func TestUnknownWindowGuardMeasuresTheTranscriptNotTheWholeRequest(t *testing.T)
 	const exchanges = 5
 
 	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "the reply", summary: "UNREACHED"}
+	up := recoveryResponder(t, "the reply", "UNREACHED")
 	cfg := baseConfig(sink) // no MaxContextTokens: nothing reported a window
 	cfg.Tools = tools.NewDefaultRegistry(t.TempDir())
 	cfg.Context.CompactionEnabled = true
@@ -139,9 +139,9 @@ func TestUnknownWindowGuardMeasuresTheTranscriptNotTheWholeRequest(t *testing.T)
 		}
 	}
 
-	if up.summaries != 0 {
+	if up.summaryCalls() != 0 {
 		t.Errorf("summarizer calls = %d over %d short Exchanges, want 0 — the %d-char tool menu is a fixed cost no fold can shed",
-			up.summaries, exchanges, menuChars)
+			up.summaryCalls(), exchanges, menuChars)
 	}
 	if a.conv.Len() != 2*exchanges {
 		t.Errorf("conv.Len() = %d (roles %s), want %d — a conversation that fits was folded away",
@@ -183,7 +183,7 @@ func TestUnknownWindowClampKeepsTheFoldSurvivable(t *testing.T) {
 // so an unbudgeted session sheds history proactively instead of growing until the server rejects it.
 func TestUnknownWindowFoldsAtTheExchangeBoundary(t *testing.T) {
 	sink := &recordingSink{}
-	up := &compactSpyResponder{reply: "FOLDED-SUMMARY"}
+	up := compactSpyResponder(t, "FOLDED-SUMMARY")
 	cfg := baseConfig(sink)
 	cfg.Context.CompactionEnabled = true // compaction is ON: the WINDOW is what used to make it inert
 	a, err := newAgent(cfg, up)
@@ -202,13 +202,13 @@ func TestUnknownWindowFoldsAtTheExchangeBoundary(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	if up.summaryCalls != 1 {
-		t.Fatalf("summarizer calls = %d, want exactly 1 auto-fold", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want exactly 1 auto-fold", up.summaryCalls())
 	}
-	if n := len(up.last.Messages); n > 5 {
+	if n := len(up.last().Messages); n > 5 {
 		t.Errorf("main request carried %d messages; the boundary fold did not shed history", n)
 	}
-	last := up.last.Messages[len(up.last.Messages)-1]
+	last := up.last().Messages[len(up.last().Messages)-1]
 	if last.Role != string(domain.RoleUser) || !strings.Contains(last.Content, "the fresh question") {
 		t.Errorf("fresh user message not preserved as its own turn: %+v", last)
 	}

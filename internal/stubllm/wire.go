@@ -17,12 +17,23 @@ type modelEntry struct {
 }
 
 // chatRequest is the subset of the POST /v1/chat/completions request the stub reads: enough to
-// log what was asked, to match a Turn against it, and to choose the reply shape.
+// log what was asked, to match a Turn against it, and to choose the reply shape. The sampling
+// and thinking-effort keys are pointers and maps so an ABSENT key logs as nil rather than as a
+// zero — a request that asked for nothing and one that asked for zero are different requests,
+// and a test about "nothing reached the wire" needs to tell them apart.
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Stream   bool          `json:"stream"`
-	Messages []chatMessage `json:"messages"`
-	Tools    []chatTool    `json:"tools"`
+	Model       string        `json:"model"`
+	Stream      bool          `json:"stream"`
+	Messages    []chatMessage `json:"messages"`
+	Tools       []chatTool    `json:"tools"`
+	MaxTokens   *int          `json:"max_tokens"`
+	Temperature *float64      `json:"temperature"`
+	// The three shapes a thinking-effort intent takes on the wire (internal/provider's
+	// applyEffort): llama.cpp's chat-template kwargs, OpenRouter's `reasoning` object and the
+	// top-level `reasoning_effort` string OpenAI and Groq read.
+	ChatTemplateKwargs map[string]any `json:"chat_template_kwargs"`
+	Reasoning          map[string]any `json:"reasoning"`
+	ReasoningEffort    *string        `json:"reasoning_effort"`
 }
 
 // chatMessage is one message off a request. Content is a pointer because a tool-call-only
@@ -58,6 +69,21 @@ func (r chatRequest) messages() []Message {
 			})
 		}
 		out = append(out, message)
+	}
+	return out
+}
+
+// sampling reduces the request's sampling keys to the log's shape.
+func (r chatRequest) sampling() Sampling {
+	return Sampling{MaxTokens: r.MaxTokens, Temperature: r.Temperature}
+}
+
+// effort reduces the request's thinking-effort keys to the log's shape: each recorded exactly
+// as the body carried it, and nil where the body carried none.
+func (r chatRequest) effort() Effort {
+	out := Effort{ChatTemplateKwargs: r.ChatTemplateKwargs, Reasoning: r.Reasoning}
+	if r.ReasoningEffort != nil {
+		out.ReasoningEffort = *r.ReasoningEffort
 	}
 	return out
 }

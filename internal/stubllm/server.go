@@ -327,6 +327,8 @@ func (s *Server) take(request chatRequest) (Turn, error) {
 		Messages:  request.messages(),
 		Tools:     request.toolNames(),
 		Stream:    request.Stream,
+		Sampling:  request.sampling(),
+		Effort:    request.effort(),
 		TurnIndex: -1,
 		At:        time.Now(),
 	}

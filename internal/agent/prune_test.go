@@ -233,7 +233,7 @@ func TestAutoPruneGateIsLiveAndInherited(t *testing.T) {
 func TestAutoPruneLeavesTheCompactionTriggerIntact(t *testing.T) {
 	cfg := pruneConfig(&recordingSink{})
 	cfg.Context.CompactionEnabled = true
-	up := &compactSpyResponder{reply: "FOLDED"}
+	up := compactSpyResponder(t, "FOLDED")
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -249,7 +249,7 @@ func TestAutoPruneLeavesTheCompactionTriggerIntact(t *testing.T) {
 		}
 	}
 
-	if up.summaryCalls != 1 {
-		t.Errorf("summarizer calls = %d across two Turns with pruning armed, want exactly 1", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Errorf("summarizer calls = %d across two Turns with pruning armed, want exactly 1", up.summaryCalls())
 	}
 }

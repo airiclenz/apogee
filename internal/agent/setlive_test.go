@@ -184,7 +184,7 @@ func TestAgentSetCompactionEnabledMovesTheAutoFoldGate(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.title, func(t *testing.T) {
 			t.Parallel()
-			up := &compactSpyResponder{reply: "reply"}
+			up := compactSpyResponder(t, "reply")
 			cfg := autoCompactConfig(&recordingSink{})
 			cfg.Context.CompactionEnabled = tc.seed
 			a, err := newAgent(cfg, up)
@@ -202,8 +202,8 @@ func TestAgentSetCompactionEnabledMovesTheAutoFoldGate(t *testing.T) {
 				t.Fatalf("Step: %v", err)
 			}
 
-			if up.summaryCalls != tc.wantSummaryCalls {
-				t.Fatalf("summarizer calls = %d, want %d", up.summaryCalls, tc.wantSummaryCalls)
+			if up.summaryCalls() != tc.wantSummaryCalls {
+				t.Fatalf("summarizer calls = %d, want %d", up.summaryCalls(), tc.wantSummaryCalls)
 			}
 		})
 	}
@@ -309,7 +309,7 @@ func TestAgentSetParallelAgentsMovesTheFanOutWidth(t *testing.T) {
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.ParallelAgents = 3
-	a, err := newAgent(cfg, &compactSpyResponder{reply: "reply"})
+	a, err := newAgent(cfg, compactSpyResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -337,7 +337,7 @@ func TestAgentSetParallelAgentsIsRaceFree(t *testing.T) {
 	t.Parallel()
 
 	cfg := baseConfig(&recordingSink{})
-	a, err := newAgent(cfg, &compactSpyResponder{reply: "reply"})
+	a, err := newAgent(cfg, compactSpyResponder(t, "reply"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}

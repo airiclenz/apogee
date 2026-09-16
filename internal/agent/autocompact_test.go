@@ -8,29 +8,71 @@ package agent
 
 import (
 	"context"
-	"iter"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// compactSpyResponder echoes reply and records both the last request it saw and how many of those
-// requests were summarizer calls (identified by the summary system prompt) — so a test can assert
-// whether an auto-fold happened and what the main request carried afterward.
-type compactSpyResponder struct {
-	reply        string
-	summaryCalls int
-	last         provider.Request
+// summaryInstructionMark is the leading substring of internal/context's unexported
+// summaryInstruction — the stable half of it — by which the summarizer's call is told from a
+// Turn's request: it opens the summarizer's own system message and appears in no other.
+const summaryInstructionMark = "compacting a conversation"
+
+// isSummaryLogged reports whether a logged request is the compaction summarizer's call rather
+// than a Turn's request, the stubllm half of isSummaryRequest.
+func isSummaryLogged(r stubllm.Request) bool {
+	return len(r.Messages) > 0 && strings.Contains(r.Messages[0].Content, summaryInstructionMark)
 }
 
-func (r *compactSpyResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	r.last = req
-	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting a conversation") {
-		r.summaryCalls++
+// summaryTurn is the turn that answers every summarizer call with text, selected by the
+// summarizer's system message so it never spends an ordered turn — a test can drive a real
+// multi-Turn Exchange (tool calls and all) and still see exactly when a fold fired.
+func summaryTurn(text string) stubllm.Turn {
+	return stubllm.Turn{When: &stubllm.Match{System: summaryInstructionMark}, Text: text, Repeat: true}
+}
+
+// compactSpyResponder echoes reply to every request, summarizer calls included, so a test can
+// count auto-folds through summaryCalls and read what the main request carried afterward
+// through last.
+func compactSpyResponder(t testing.TB, reply string) *scriptedUpstream {
+	t.Helper()
+	return echoResponder(t, reply)
+}
+
+// summaryCalls is how many of the upstream's requests were the summarizer's.
+func (u *scriptedUpstream) summaryCalls() int {
+	n := 0
+	for _, r := range u.server.Requests() {
+		if isSummaryLogged(r) {
+			n++
+		}
 	}
-	return streamReply(r.reply)
+	return n
+}
+
+// mains is every MAIN-turn request, in order — the log with the summarizer's calls left out,
+// what the model actually saw.
+func (u *scriptedUpstream) mains() []stubllm.Request {
+	var out []stubllm.Request
+	for _, r := range u.server.Requests() {
+		if !isSummaryLogged(r) {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// lastSummary is the most recent summarizer request, or the zero Request when none was made.
+func (u *scriptedUpstream) lastSummary() stubllm.Request {
+	requests := u.server.Requests()
+	for i := len(requests) - 1; i >= 0; i-- {
+		if isSummaryLogged(requests[i]) {
+			return requests[i]
+		}
+	}
+	return stubllm.Request{}
 }
 
 // autoCompactConfig is baseConfig with a discovered window and the automatic trigger enabled — the
@@ -48,7 +90,7 @@ func autoCompactConfig(sink domain.EventSink) domain.Config {
 // turn rather than being folded into the summary.
 func TestAutoCompactFoldsWhenHistoryOverBudget(t *testing.T) {
 	sink := &recordingSink{}
-	up := &compactSpyResponder{reply: "FOLDED-SUMMARY"}
+	up := compactSpyResponder(t, "FOLDED-SUMMARY")
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -63,13 +105,13 @@ func TestAutoCompactFoldsWhenHistoryOverBudget(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	if up.summaryCalls != 1 {
-		t.Fatalf("summarizer calls = %d, want exactly 1 auto-fold", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Fatalf("summarizer calls = %d, want exactly 1 auto-fold", up.summaryCalls())
 	}
-	if n := len(up.last.Messages); n > 5 {
+	if n := len(up.last().Messages); n > 5 {
 		t.Errorf("main request carried %d messages (seeded %d); auto-compaction did not fold", n, seeded)
 	}
-	last := up.last.Messages[len(up.last.Messages)-1]
+	last := up.last().Messages[len(up.last().Messages)-1]
 	if last.Role != string(domain.RoleUser) || !strings.Contains(last.Content, "the fresh question") {
 		t.Errorf("fresh user message not preserved as its own turn: %+v", last)
 	}
@@ -82,7 +124,7 @@ func TestAutoCompactFoldsWhenHistoryOverBudget(t *testing.T) {
 // the trigger fires at the threshold, not before, so no summarizer call runs and the model sees the
 // original messages.
 func TestAutoCompactNotBelowThreshold(t *testing.T) {
-	up := &compactSpyResponder{reply: "reply"}
+	up := compactSpyResponder(t, "reply")
 	a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -96,18 +138,18 @@ func TestAutoCompactNotBelowThreshold(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	if up.summaryCalls != 0 {
-		t.Fatalf("summarizer calls = %d, want 0 below the threshold", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Fatalf("summarizer calls = %d, want 0 below the threshold", up.summaryCalls())
 	}
-	if up.last.Messages[0].Content != "task one" {
-		t.Errorf("history was altered below the threshold: first message = %q", up.last.Messages[0].Content)
+	if up.last().Messages[0].Content != "task one" {
+		t.Errorf("history was altered below the threshold: first message = %q", up.last().Messages[0].Content)
 	}
 }
 
 // TestAutoCompactOptOutRespected pins the `auto-compact: false` opt-out: with CompactionEnabled off,
 // an over-budget history is sent whole — no auto-fold — even though the window is known.
 func TestAutoCompactOptOutRespected(t *testing.T) {
-	up := &compactSpyResponder{reply: "reply"}
+	up := compactSpyResponder(t, "reply")
 	cfg := autoCompactConfig(&recordingSink{})
 	cfg.Context.CompactionEnabled = false
 	a, err := newAgent(cfg, up)
@@ -123,10 +165,10 @@ func TestAutoCompactOptOutRespected(t *testing.T) {
 		t.Fatalf("Step: %v", err)
 	}
 
-	if up.summaryCalls != 0 {
-		t.Fatalf("summarizer calls = %d with auto-compact off; want 0", up.summaryCalls)
+	if up.summaryCalls() != 0 {
+		t.Fatalf("summarizer calls = %d with auto-compact off; want 0", up.summaryCalls())
 	}
-	if n := len(up.last.Messages); n < 50 {
+	if n := len(up.last().Messages); n < 50 {
 		t.Errorf("history was folded despite the opt-out: request carried only %d messages", n)
 	}
 }
@@ -160,7 +202,7 @@ func TestOnDemandCompactIgnoresAutoGate(t *testing.T) {
 // over-budget history folds on the first Turn, and the resulting small history does NOT re-fold on
 // the next Turn — one summarizer call across both.
 func TestAutoCompactRunsOnceThenStable(t *testing.T) {
-	up := &compactSpyResponder{reply: "FOLDED"}
+	up := compactSpyResponder(t, "FOLDED")
 	a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -176,7 +218,7 @@ func TestAutoCompactRunsOnceThenStable(t *testing.T) {
 		}
 	}
 
-	if up.summaryCalls != 1 {
-		t.Errorf("summarizer calls = %d across two Turns, want exactly 1 (folded once, then stable)", up.summaryCalls)
+	if up.summaryCalls() != 1 {
+		t.Errorf("summarizer calls = %d across two Turns, want exactly 1 (folded once, then stable)", up.summaryCalls())
 	}
 }

@@ -15,50 +15,38 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // isSummaryRequest reports whether req is the compaction summarizer's call rather than a Turn's
-// request, identified by the summary system prompt (as compactSpyResponder does) — the seam a
-// scripted fake needs to answer the two request kinds differently within one Turn.
+// request, identified by the summary system prompt (as isSummaryLogged reads the request log) —
+// the seam a hand-written fake needs to answer the two request kinds differently within one Turn.
 func isSummaryRequest(req provider.Request) bool {
-	return len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting a conversation")
+	return len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, summaryInstructionMark)
 }
 
-// recoveryResponder scripts the Upstream per request kind: a summarizer call always yields
-// summary, while each MAIN request consumes the next entry of overflows — true ⇒ one terminal
-// DeltaContextOverflow (the 400 a server sends when the prompt exceeds the window), false or past
-// the end ⇒ reply. Every main request is recorded in order, so a test can assert what the retried
-// request actually carried.
-type recoveryResponder struct {
-	reply     string
-	replyCall *provider.ToolCall // when set, a non-overflowing main request ASKS FOR THIS TOOL instead of answering
-	summary   string
-	overflows []bool
-	mains     []provider.Request
-	summaries int
+// recoveryScript scripts the upstream per request kind: a summarizer call always takes the
+// summary turn, while each MAIN request consumes the next entry of overflows — true ⇒ the 400 a
+// server sends when the prompt exceeds the window, false ⇒ reply — and every main request past
+// the end is answered with reply. The request log keeps every main request in order (mains), so
+// a test can assert what the retried request actually carried.
+func recoveryScript(reply stubllm.Turn, summary string, overflows ...bool) stubllm.Script {
+	turns := []stubllm.Turn{summaryTurn(summary)}
+	for _, overflow := range overflows {
+		if overflow {
+			turns = append(turns, overflowTurn())
+			continue
+		}
+		turns = append(turns, reply)
+	}
+	reply.Repeat = true
+	return stubllm.Script{Turns: append(turns, reply)}
 }
 
-func (r *recoveryResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
-	if isSummaryRequest(req) {
-		r.summaries++
-		return streamReply(r.summary)
-	}
-	i := len(r.mains)
-	r.mains = append(r.mains, req)
-	if i < len(r.overflows) && r.overflows[i] {
-		return func(yield func(provider.Delta) bool) {
-			yield(provider.Delta{Kind: provider.DeltaContextOverflow, Err: overflowFaultMsg})
-		}
-	}
-	if r.replyCall != nil {
-		return func(yield func(provider.Delta) bool) {
-			if !yield(provider.Delta{Kind: provider.DeltaToolCall, ToolCall: r.replyCall}) {
-				return
-			}
-			yield(provider.Delta{Kind: provider.DeltaDone, FinishReason: "tool_calls"})
-		}
-	}
-	return streamReply(r.reply)
+// recoveryResponder is recoveryScript with a text reply, played in process.
+func recoveryResponder(t testing.TB, reply, summary string, overflows ...bool) *scriptedUpstream {
+	t.Helper()
+	return scriptResponder(t, recoveryScript(contentTurn(reply), summary, overflows...))
 }
 
 // foldBlockingResponder overflows every main request and BLOCKS the summary call until ctx is
@@ -88,7 +76,7 @@ func (r foldBlockingResponder) Stream(ctx context.Context, req provider.Request)
 // on its own: a template refuses a request ending on an assistant turn, and an instruct model
 // handed one reads it as "keep writing that" rather than as a task to resume, so every fold that
 // leaves the conversation ending in its summary owes it a user bridge.
-func assertRequestTemplateLegal(t *testing.T, req provider.Request) {
+func assertRequestTemplateLegal(t *testing.T, req stubllm.Request) {
 	t.Helper()
 	prev := ""
 	last := ""
@@ -129,7 +117,7 @@ func convRoles(a *Agent) string {
 // host — and the surviving history is the folded shape plus the reply.
 func TestOverflowRecoveryFoldsAndRetriesToCompletion(t *testing.T) {
 	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "recovered reply", summary: "EMERGENCY-SUMMARY", overflows: []bool{true}}
+	up := recoveryResponder(t, "recovered reply", "EMERGENCY-SUMMARY", true)
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -147,11 +135,11 @@ func TestOverflowRecoveryFoldsAndRetriesToCompletion(t *testing.T) {
 	if res.Status != domain.StatusExchangeComplete {
 		t.Errorf("status = %q, want %q — the recovered Turn ran to a final answer", res.Status, domain.StatusExchangeComplete)
 	}
-	if up.summaries != 1 {
-		t.Errorf("summarizer calls = %d, want exactly 1 (the one emergency fold this Turn may spend)", up.summaries)
+	if up.summaryCalls() != 1 {
+		t.Errorf("summarizer calls = %d, want exactly 1 (the one emergency fold this Turn may spend)", up.summaryCalls())
 	}
-	if len(up.mains) != 2 {
-		t.Fatalf("main requests = %d, want 2 (the overflowed one and the retry)", len(up.mains))
+	if len(up.mains()) != 2 {
+		t.Fatalf("main requests = %d, want 2 (the overflowed one and the retry)", len(up.mains()))
 	}
 	if errs := errorEvents(sink.events); len(errs) != 0 {
 		t.Errorf("recovery surfaced %d ErrorEvent(s) %v; a successful recovery is quiet", len(errs), errs)
@@ -179,10 +167,10 @@ func TestOverflowRecoveryFoldsAndRetriesToCompletion(t *testing.T) {
 
 	// The retried request is the folded conversation — smaller than the one that overflowed, ending
 	// at the bridge so the model is told to continue rather than to keep writing the summary.
-	retry := up.mains[1]
-	if len(retry.Messages) >= len(up.mains[0].Messages) {
+	retry := up.mains()[1]
+	if len(retry.Messages) >= len(up.mains()[0].Messages) {
 		t.Errorf("retry carried %d messages, want fewer than the overflowed request's %d",
-			len(retry.Messages), len(up.mains[0].Messages))
+			len(retry.Messages), len(up.mains()[0].Messages))
 	}
 	if last := retry.Messages[len(retry.Messages)-1]; last.Role != string(domain.RoleUser) || last.Content != overflowBridge {
 		t.Errorf("retry does not end at the user bridge: %+v", last)
@@ -200,15 +188,7 @@ func TestOverflowRecoveryRetriedToolCallContinuesTheExchange(t *testing.T) {
 	cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, ran: &ran, result: "the answer is 42"})
 	cfg.Context.MaxContextTokens = 8192
 	cfg.Context.CompactionEnabled = true
-	up := &recoveryResponder{
-		replyCall: &provider.ToolCall{
-			ID:       "c9",
-			Type:     "function",
-			Function: provider.FunctionCall{Name: "lookup", Arguments: `{"q":"meaning"}`},
-		},
-		summary:   "EMERGENCY-SUMMARY",
-		overflows: []bool{true},
-	}
+	up := scriptResponder(t, recoveryScript(toolCallTurn("c9", "lookup", `{"q":"meaning"}`), "EMERGENCY-SUMMARY", true))
 	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -249,7 +229,7 @@ func TestOverflowRecoveryRetriedToolCallContinuesTheExchange(t *testing.T) {
 // is not repeated.
 func TestOverflowRecoveryGivesUpAfterASecondOverflow(t *testing.T) {
 	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "UNREACHED", summary: "EMERGENCY-SUMMARY", overflows: []bool{true, true}}
+	up := recoveryResponder(t, "UNREACHED", "EMERGENCY-SUMMARY", true, true)
 	a, err := newAgent(autoCompactConfig(sink), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -279,11 +259,11 @@ func TestOverflowRecoveryGivesUpAfterASecondOverflow(t *testing.T) {
 	if hasEvent[domain.MessageEvent](sink.events) {
 		t.Error("a MessageEvent was emitted for a Turn that produced no assistant message")
 	}
-	if up.summaries != 1 {
-		t.Errorf("summarizer calls = %d, want exactly 1 — the Turn folds once, never twice", up.summaries)
+	if up.summaryCalls() != 1 {
+		t.Errorf("summarizer calls = %d, want exactly 1 — the Turn folds once, never twice", up.summaryCalls())
 	}
-	if len(up.mains) != 2 {
-		t.Errorf("main requests = %d, want 2 (the original and the single retry)", len(up.mains))
+	if len(up.mains()) != 2 {
+		t.Errorf("main requests = %d, want 2 (the original and the single retry)", len(up.mains()))
 	}
 }
 
@@ -293,7 +273,7 @@ func TestOverflowRecoveryGivesUpAfterASecondOverflow(t *testing.T) {
 // Exchange, and crucially NO retry request on the wire.
 func TestOverflowRecoveryRespectsCompactionOptOut(t *testing.T) {
 	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "UNREACHED", summary: "UNREACHED", overflows: []bool{true}}
+	up := recoveryResponder(t, "UNREACHED", "UNREACHED", true)
 	cfg := autoCompactConfig(sink)
 	cfg.Context.CompactionEnabled = false
 	a, err := newAgent(cfg, up)
@@ -318,11 +298,11 @@ func TestOverflowRecoveryRespectsCompactionOptOut(t *testing.T) {
 	if len(errs) != 1 || errs[0].Source != "loop" || errs[0].Err != overflowFaultMsg {
 		t.Fatalf("ErrorEvents = %v, want exactly one {Source:%q Err:%q}", errs, "loop", overflowFaultMsg)
 	}
-	if up.summaries != 0 {
-		t.Errorf("summarizer calls = %d with auto-compact off, want 0", up.summaries)
+	if up.summaryCalls() != 0 {
+		t.Errorf("summarizer calls = %d with auto-compact off, want 0", up.summaryCalls())
 	}
-	if len(up.mains) != 1 {
-		t.Errorf("main requests = %d with auto-compact off, want 1 (no retry)", len(up.mains))
+	if len(up.mains()) != 1 {
+		t.Errorf("main requests = %d with auto-compact off, want 1 (no retry)", len(up.mains()))
 	}
 	if a.conv.Len() != seeded+1 {
 		t.Errorf("conv.Len() = %d, want %d — the opted-out Turn folds nothing", a.conv.Len(), seeded+1)
@@ -353,8 +333,14 @@ func seedOpenToolTurn(a *Agent) {
 // consecutive same-role messages.
 func TestOverflowRecoveryOnToolContinuationIsTemplateLegal(t *testing.T) {
 	sink := &recordingSink{}
-	up := &recoveryResponder{reply: "continuing from the summary", summary: "EMERGENCY-SUMMARY", overflows: []bool{true}}
-	a, err := newAgent(autoCompactConfig(sink), up)
+	up := recoveryResponder(t, "continuing from the summary", "EMERGENCY-SUMMARY", true)
+	// The seeded tool is registered so the request offers native tools: the provider projects a
+	// tool result onto the wire as a tool message only then (formatMessage), and the shape under
+	// test is the wire's.
+	cfg := configWithTools(sink, fakeTool{name: "read_file", readOnly: true, result: "package main"})
+	cfg.Context.MaxContextTokens = 8192
+	cfg.Context.CompactionEnabled = true
+	a, err := newAgent(cfg, up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
@@ -371,13 +357,13 @@ func TestOverflowRecoveryOnToolContinuationIsTemplateLegal(t *testing.T) {
 	if errs := errorEvents(sink.events); len(errs) != 0 {
 		t.Errorf("recovery surfaced %d ErrorEvent(s) %v; a successful mid-Exchange recovery is quiet", len(errs), errs)
 	}
-	if len(up.mains) != 2 {
-		t.Fatalf("main requests = %d, want 2 (the overflowed continuation and the retry)", len(up.mains))
+	if len(up.mains()) != 2 {
+		t.Fatalf("main requests = %d, want 2 (the overflowed continuation and the retry)", len(up.mains()))
 	}
 
 	// The setup really was the pathological shape: the request that overflowed carried tool results.
 	var toolResults int
-	for _, m := range up.mains[0].Messages {
+	for _, m := range up.mains()[0].Messages {
 		if m.Role == string(domain.RoleTool) {
 			toolResults++
 		}
@@ -386,8 +372,8 @@ func TestOverflowRecoveryOnToolContinuationIsTemplateLegal(t *testing.T) {
 		t.Fatal("test setup: the overflowed request carried no tool results, so it is not a tool continuation")
 	}
 
-	assertRequestTemplateLegal(t, up.mains[1])
-	if last := up.mains[1].Messages[len(up.mains[1].Messages)-1]; last.Content != overflowBridge {
+	assertRequestTemplateLegal(t, up.mains()[1])
+	if last := up.mains()[1].Messages[len(up.mains()[1].Messages)-1]; last.Content != overflowBridge {
 		t.Errorf("retried continuation does not end at the user bridge: %+v", last)
 	}
 	if a.conv.Len() != 4 {
@@ -469,7 +455,7 @@ func TestOverflowRecoveryCancelDuringFoldIsResumable(t *testing.T) {
 // those prove the paths route on the outcome; this proves refold produces the right one.
 func TestRefoldOutcomeMapping(t *testing.T) {
 	t.Run("folded: history rewritten, t re-derived against it, foldSpent latched", func(t *testing.T) {
-		up := &recoveryResponder{reply: "UNREACHED", summary: "EMERGENCY-SUMMARY"}
+		up := recoveryResponder(t, "UNREACHED", "EMERGENCY-SUMMARY")
 		a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
@@ -484,8 +470,8 @@ func TestRefoldOutcomeMapping(t *testing.T) {
 		if !tr.foldSpent {
 			t.Error("foldSpent was not latched on a fold that ran")
 		}
-		if up.summaries != 1 {
-			t.Errorf("summarizer calls = %d, want 1", up.summaries)
+		if up.summaryCalls() != 1 {
+			t.Errorf("summarizer calls = %d, want 1", up.summaryCalls())
 		}
 		// The fold collapsed the tail to prefix | summary | bridge, and refold re-derived rollback
 		// against that folded conversation (not the pre-fold length).
@@ -501,7 +487,7 @@ func TestRefoldOutcomeMapping(t *testing.T) {
 	})
 
 	t.Run("declined: conversation untouched, t re-derived unchanged, foldSpent stays clear", func(t *testing.T) {
-		up := &recoveryResponder{reply: "UNREACHED", summary: "UNREACHED"}
+		up := recoveryResponder(t, "UNREACHED", "UNREACHED")
 		cfg := autoCompactConfig(&recordingSink{})
 		cfg.Context.CompactionEnabled = false // the fold declines before any Upstream call
 		a, err := newAgent(cfg, up)
@@ -519,8 +505,8 @@ func TestRefoldOutcomeMapping(t *testing.T) {
 		if tr.foldSpent {
 			t.Error("foldSpent latched on a declined fold; the reactive path must still be free to fold")
 		}
-		if up.summaries != 0 {
-			t.Errorf("summarizer calls = %d, want 0 (the fold declined before the wire)", up.summaries)
+		if up.summaryCalls() != 0 {
+			t.Errorf("summarizer calls = %d, want 0 (the fold declined before the wire)", up.summaryCalls())
 		}
 		if a.conv.Len() != lenBefore {
 			t.Errorf("conv.Len() = %d, want %d (a declined fold leaves history untouched)", a.conv.Len(), lenBefore)
@@ -531,7 +517,7 @@ func TestRefoldOutcomeMapping(t *testing.T) {
 	})
 
 	t.Run("cancelled: conversation untouched, t left intact, queue re-queued once", func(t *testing.T) {
-		up := &recoveryResponder{reply: "UNREACHED", summary: "EMERGENCY-SUMMARY"}
+		up := recoveryResponder(t, "UNREACHED", "EMERGENCY-SUMMARY")
 		a, err := newAgent(autoCompactConfig(&recordingSink{}), up)
 		if err != nil {
 			t.Fatalf("newAgent: %v", err)
