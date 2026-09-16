@@ -1,0 +1,124 @@
+{
+  "recordVersion": 1,
+  "meta": {
+    "id": "20260916T100000Z-demohero",
+    "title": "the test suite is failing - find the bug, fix it, and prove the tests pass",
+    "createdAt": "2026-09-16T10:00:02Z",
+    "updatedAt": "2026-09-16T10:00:19Z",
+    "workspace": "/Users/demo/Repos/taskman",
+    "model": "~deepseek/deepseek-v4-flash-latest",
+    "userMsgs": 2
+  },
+  "transcript": {
+    "version": 1,
+    "entries": [
+      {
+        "kind": "user",
+        "at": "2026-09-16T10:00:00Z",
+        "text": "the test suite is failing - find the bug, fix it, and prove the tests pass"
+      },
+      {
+        "kind": "assistant",
+        "at": "2026-09-16T10:00:02.1Z",
+        "text": "I'll run the tests first to see what fails.",
+        "done": true
+      },
+      {
+        "kind": "toolCall",
+        "at": "2026-09-16T10:00:02.9Z",
+        "callID": "call_1",
+        "done": true,
+        "tool": {
+          "label": "Tests",
+          "verb": "running tests",
+          "name": "run_tests",
+          "stat": "FAIL",
+          "summary": {}
+        }
+      },
+      {
+        "kind": "assistant",
+        "at": "2026-09-16T10:00:07.4Z",
+        "text": "TestPriority expects the higher priority first; task.go sorts ascending.",
+        "done": true
+      },
+      {
+        "kind": "toolCall",
+        "at": "2026-09-16T10:00:08Z",
+        "callID": "call_2",
+        "done": true,
+        "tool": {
+          "label": "Read",
+          "verb": "reading",
+          "target": "task.go",
+          "name": "read_file",
+          "stat": "31 lines",
+          "summary": {}
+        }
+      },
+      {
+        "kind": "toolCall",
+        "at": "2026-09-16T10:00:12.2Z",
+        "callID": "call_3",
+        "done": true,
+        "tool": {
+          "label": "Replace",
+          "verb": "editing",
+          "target": "task.go",
+          "name": "single_find_and_replace",
+          "stat": "+1 −1",
+          "statValue": {
+            "added": 1,
+            "removed": 1
+          },
+          "summary": {}
+        }
+      },
+      {
+        "kind": "interjected",
+        "at": "2026-09-16T10:00:12.6Z",
+        "text": "also add a CHANGELOG entry for the fix"
+      },
+      {
+        "kind": "toolCall",
+        "at": "2026-09-16T10:00:15.1Z",
+        "callID": "call_4",
+        "done": true,
+        "tool": {
+          "label": "Replace",
+          "verb": "editing",
+          "target": "CHANGELOG.md",
+          "name": "single_find_and_replace",
+          "stat": "+3 −0",
+          "statValue": {
+            "added": 3
+          },
+          "summary": {}
+        }
+      },
+      {
+        "kind": "toolCall",
+        "at": "2026-09-16T10:00:16.4Z",
+        "callID": "call_5",
+        "done": true,
+        "tool": {
+          "label": "Tests",
+          "verb": "running tests",
+          "name": "run_tests",
+          "stat": "PASS",
+          "summary": {}
+        }
+      },
+      {
+        "kind": "assistant",
+        "at": "2026-09-16T10:00:19Z",
+        "text": "Fixed the sort order in task.go and noted it in CHANGELOG.md; the suite passes.",
+        "done": true
+      }
+    ]
+  },
+  "session": {
+    "Version": 0,
+    "State": null
+  }
+}

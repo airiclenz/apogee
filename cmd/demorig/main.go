@@ -3,9 +3,11 @@
 // GIF from it, so a re-record is a repeatable loop rather than a hand-tuned ffmpeg session.
 //
 //	demorig lint graphics/demo/storyboards/hero.yaml
+//	demorig beats graphics/demo/storyboards/hero.yaml <take.mp4> <session.json> [--json]
 //
 // `lint` checks the storyboard against its schema and the tape it names, printing every
-// problem and exiting 1 on any. The subcommands that locate beats in a take, judge it and
+// problem and exiting 1 on any. `beats` locates each beat in a raw take from the saved
+// session's timestamps (ffmpeg and ffprobe on PATH). The subcommands that judge a take and
 // render the GIF build on the same loader.
 //
 // It is a dev tool, not a release asset: `make demorig` builds it, and `make dist` does not
@@ -49,6 +51,7 @@ func newRootCommand() *cobra.Command {
 		Args:          cobra.NoArgs,
 	}
 	cmd.AddCommand(newLintCommand())
+	cmd.AddCommand(newBeatsCommand())
 	return cmd
 }
 

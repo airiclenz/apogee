@@ -117,7 +117,11 @@ internal/session/transcript.go — EntryKind*, Entry.At, ToolView; graphics/demo
 
 Depends on item 1.
 
-## 3. `demorig beats` — beat times from the session JSON
+## 3. `demorig beats` — beat times from the session JSON — ✅ DONE (2026-09-16)
+
+NOTES (2026-09-16): added `cmd/demorig/beats_test.go` (not in the item's file list) covering the table and JSON writers; `main.go` gained the `beats` wiring and a doc line — a consequential edit of adding the subcommand.
+NOTES (2026-09-16): `FirstPainter` binds its take and threshold at construction (`FirstPaint(ctx)`), so `resolveBeats` calls it lazily and only for a `{video: first-paint}` anchor — tested; the ffmpeg/ffprobe adapter test synthesises a black→white clip via lavfi and is skipped here (neither tool on PATH), so it is unverified against a live ffmpeg.
+NOTES (2026-09-16): the fixture is a golden: `TestHeroFixtureIsCurrent` compares it byte-for-byte to `heroEntries()` and `DEMORIG_UPDATE_FIXTURES=1 go test ./cmd/demorig/ -run TestHeroFixtureIsCurrent` rewrites it.
 
 **What:** Recast at the regression check (2026-09-16). `demorig beats <storyboard> <take.mp4> <session.json> [--json]` prints one row per beat: id, title, seconds into the take. Three parts, each its own file: `session.go` decodes a `session.Record` and its `Transcript` raw message into `[]session.Entry` (import `internal/session`; never redeclare the shapes); `anchors.go` resolves each `Anchor` over the entries in list order (prefix matches, `nth`/`last`), returning the entry and its `At`; `align.go` maps `At` to video seconds: `t(at) = align.first_prompt_at + (at − firstUser.At) + paint_lag`, where `firstUser` is the first `EntryKindUser` entry; `firstPaint` (scene detection) comes from a `FirstPainter` interface whose ffmpeg adapter runs `ffmpeg -t 12 -i <take> -vf "select='gt(scene,<threshold>)',showinfo" -f null -` and takes the first `pts_time:` on stderr, and it is used ONLY by the `{video: first-paint}` anchor, never in the pin. `first-paint` resolves to `firstPaint`, `end` to the take's duration (`ffprobe`). An unresolved anchor is an error naming the beat.
 
