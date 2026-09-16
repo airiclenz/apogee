@@ -79,6 +79,8 @@ func accentTestModel(t *testing.T, width int, workspace, value string) Model {
 // draft where the widget does not: a tab weighed as one column instead of four, a dropped rune
 // weighed as a column the widget never drew.
 func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		line  string
@@ -117,6 +119,8 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
 			ta := textarea.New()
 			ta.Prompt = ""
 			ta.ShowLineNumbers = false
@@ -174,6 +178,8 @@ func TestWrapRowStartsMirrorsTheWidget(t *testing.T) {
 // COLUMNS come from the width authority, which counts it as the painter will — one cell on a
 // terminal that never answered mode 2027, two on one that did.
 func TestInputCellSpans(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name       string
 		measure    widthAuthority // the zero value is the painter's default, ansi.WcWidth
@@ -237,6 +243,8 @@ func TestInputCellSpans(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := inputCellSpans(c.measure, c.value, c.width, c.from, c.to)
 			if c.wantNothin {
 				if got != nil {
@@ -254,6 +262,8 @@ func TestInputCellSpans(t *testing.T) {
 // The accent is resolve-gated, which is what makes it double as live validation: the catalog id
 // lights up and the typo beside it stays plain prose.
 func TestResolvingSkillTokenIsAccented(t *testing.T) {
+	t.Parallel()
+
 	m := accentTestModel(t, 80, "", "/clean-code please check this /code-adit")
 	view := m.inputView()
 	opener := accentOpener(t, m.th.skillToken)
@@ -275,6 +285,8 @@ func TestResolvingSkillTokenIsAccented(t *testing.T) {
 // The @ half resolves against the workspace listing the cache holds: a real file lights, a path
 // that is not there stays plain.
 func TestResolvingFileTokenIsAccented(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "internal", "loop.go"), "package internal")
 
@@ -294,6 +306,8 @@ func TestResolvingFileTokenIsAccented(t *testing.T) {
 // stays cold across a render — the token renders plain and lights up only once the "@" overlay's
 // next lookup has warmed the listing.
 func TestAccentRenderNeverWalksTheWorkspace(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
 
@@ -315,6 +329,8 @@ func TestAccentRenderNeverWalksTheWorkspace(t *testing.T) {
 
 // A token wider than the box is drawn on two rows, so it is accented on two rows.
 func TestAccentedTokenWrapsAcrossRows(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "internal", "tui", "model.go"), "package tui")
 
@@ -335,6 +351,8 @@ func TestAccentedTokenWrapsAcrossRows(t *testing.T) {
 // The two overlays compose in one order only: the accent paints first and the drag-selection
 // paints over it, so a selected token reads as SELECTED rather than keeping its own colour.
 func TestSelectionWinsOverTheAccent(t *testing.T) {
+	t.Parallel()
+
 	m := accentTestModel(t, 80, "", "/clean-code please check this")
 	m.sel = promptSel{
 		active:    true,
@@ -354,6 +372,8 @@ func TestSelectionWinsOverTheAccent(t *testing.T) {
 // A draft taller than the box scrolls inside it, and the accent follows the SCROLL: it lands on
 // the visible row the token is actually drawn on, not on the row its absolute position names.
 func TestAccentFollowsTheScrolledTextarea(t *testing.T) {
+	t.Parallel()
+
 	lines := make([]string, 15)
 	for i := range lines {
 		lines[i] = "line"
@@ -382,6 +402,8 @@ func TestAccentFollowsTheScrolledTextarea(t *testing.T) {
 // A skill whose id is not in the catalog cannot light up, and a catalog that is not wired at all
 // lights nothing — the predicate is the same one submit resolves by.
 func TestAccentSpansFollowTheCatalog(t *testing.T) {
+	t.Parallel()
+
 	m := accentTestModel(t, 80, "", "/clean-code and /review")
 	if got := len(m.resolvingTokens()); got != 2 {
 		t.Fatalf("resolvingTokens = %d spans, want 2", got)

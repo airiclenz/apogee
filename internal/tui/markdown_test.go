@@ -43,6 +43,8 @@ func underlineSGR(th theme) string {
 }
 
 func TestRenderInlineBold(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	got := renderInline(th, "a **bold** b")
 	if v := strip(got); v != "a bold b" {
@@ -59,6 +61,8 @@ func TestRenderInlineBold(t *testing.T) {
 // <u>…</u> is the one HTML pair the renderer knows: the tags are consumed and the enclosed run is
 // underlined (SGR 4).
 func TestRenderInlineUnderline(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	got := renderInline(th, "press <u>Enter</u> now")
 	if v := strip(got); v != "press Enter now" {
@@ -75,6 +79,8 @@ func TestRenderInlineUnderline(t *testing.T) {
 // Only the exact lowercase pair is markup. Everything else that looks like it — CommonMark's __,
 // an uppercase tag, a tag with anything after the "u" — survives byte for byte and unstyled.
 func TestRenderInlineUnderlineLiteralPassthrough(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	for _, in := range []string{"__text__", "<U>x</U>", "<u >x</u>"} {
 		got := renderInline(th, in)
@@ -85,6 +91,8 @@ func TestRenderInlineUnderlineLiteralPassthrough(t *testing.T) {
 }
 
 func TestRenderInlineCode(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	got := renderInline(th, "run `go test` now")
 	if v := strip(got); v != "run go test now" {
@@ -97,6 +105,8 @@ func TestRenderInlineCode(t *testing.T) {
 
 // A code span wins over bold: ** inside `…` stays literal (CommonMark code-span precedence).
 func TestRenderInlineCodeBeatsBold(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	got := renderInline(th, "`**x**`")
 	if v := strip(got); v != "**x**" {
@@ -106,6 +116,8 @@ func TestRenderInlineCodeBeatsBold(t *testing.T) {
 
 // A code span wins over <u> too: the tag text stays visible inside `…` and is never underlined.
 func TestRenderInlineCodeBeatsUnderline(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	got := renderInline(th, "`<u>x</u>`")
 	if v := strip(got); v != "<u>x</u>" {
@@ -118,6 +130,8 @@ func TestRenderInlineCodeBeatsUnderline(t *testing.T) {
 
 // An unterminated marker (mid-stream) is left literal — never a leaked escape or eaten text.
 func TestRenderInlineUnterminated(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	for _, in := range []string{"a **bold start", "a `code start", "trailing *", "a <u>open"} {
 		got := renderInline(th, in)
@@ -131,6 +145,8 @@ func TestRenderInlineUnterminated(t *testing.T) {
 }
 
 func TestHeadingStripsMarkers(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	for _, lvl := range []string{"#", "##", "###", "####", "#####", "######"} {
 		out := renderMarkdownBody(th, lvl+" Title", 40)
@@ -151,6 +167,8 @@ func TestHeadingStripsMarkers(t *testing.T) {
 
 // Seven #s (or a # with no following space) is not a heading; it renders as a plain paragraph.
 func TestNotAHeading(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	for _, in := range []string{"####### TooDeep", "#NoSpace"} {
 		out := renderMarkdownBody(th, in, 40)
@@ -161,6 +179,8 @@ func TestNotAHeading(t *testing.T) {
 }
 
 func TestBulletList(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	for _, b := range []string{"-", "*", "+"} {
 		out := renderMarkdownBody(th, b+" one\n"+b+" two", 40)
@@ -177,6 +197,8 @@ func TestBulletList(t *testing.T) {
 }
 
 func TestNumberedList(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "1. first\n2) second", 40)
 	if v := strip(out[0]); v != "1. first" {
@@ -189,6 +211,8 @@ func TestNumberedList(t *testing.T) {
 
 // A wrapped list item hangs under its text: the continuation line is indented to the marker width.
 func TestListHangingIndent(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "- "+strings.Repeat("word ", 8), 20)
 	if len(out) < 2 {
@@ -203,6 +227,8 @@ func TestListHangingIndent(t *testing.T) {
 }
 
 func TestFencedCodeBlock(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "```go\nfmt.Println()\n```", 40)
 	if len(out) != 1 {
@@ -223,6 +249,8 @@ func TestFencedCodeBlock(t *testing.T) {
 
 // An unterminated fence (still streaming) renders the body it has, with no leaked fence marker.
 func TestFencedCodeBlockUnterminated(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "```\ncode line", 40)
 	if v := strip(out[0]); v != "  code line" {
@@ -238,6 +266,8 @@ func TestFencedCodeBlockUnterminated(t *testing.T) {
 // A run of two or more blank lines collapses to a single blank row (the paragraph break stays,
 // the padding goes); one blank line is left exactly as it was.
 func TestCollapsesBlankRuns(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	cases := []struct {
 		name string
@@ -252,6 +282,8 @@ func TestCollapsesBlankRuns(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			out := renderMarkdownBody(th, tc.in, 40)
 			if len(out) != len(tc.want) {
 				t.Fatalf("renderMarkdownBody(%q) = %#v; want %#v", tc.in, visible(out), tc.want)
@@ -268,6 +300,8 @@ func TestCollapsesBlankRuns(t *testing.T) {
 // Blank lines inside a fenced code block are code, not padding: they survive verbatim, and a
 // blank line immediately after the closing fence is not swallowed by one inside it.
 func TestFencedCodeBlockKeepsBlankLines(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	out := renderMarkdownBody(th, "```go\na()\n\n\nb()\n```\n\ntail", 40)
 	want := []string{"  a()", "  ", "  ", "  b()", "", "tail"}
@@ -305,6 +339,8 @@ func visibleTrimmed(lines []string) []string {
 // existing assistant-text assertions green). A pipe that is not part of a table — no delimiter
 // row under it — is plain text like any other character.
 func TestPlainTextUnchanged(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	for _, in := range []string{
 		"just plain assistant text",
@@ -325,6 +361,8 @@ func TestPlainTextUnchanged(t *testing.T) {
 // boundary — the guarantee that baked-in ANSI never perturbs the wrap arithmetic. A table obeys
 // the same cap: its columns shrink and its cells truncate until the whole block fits.
 func TestWidthNeverExceeds(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const width = 20
 	bodies := []string{
@@ -349,6 +387,8 @@ func TestWidthNeverExceeds(t *testing.T) {
 // are what close that, so the only line left that may cross the cap is the one layout.md exempts —
 // a single indivisible grapheme wider than the whole width, which keeps a line to itself.
 func TestTableWidthNeverExceedsAcrossWidths(t *testing.T) {
+	t.Parallel()
+
 	source := strings.Join([]string{
 		"| id | description | " + vs16Warning + " |",
 		"| --- | :-: | --: |",
@@ -380,6 +420,8 @@ func TestTableWidthNeverExceedsAcrossWidths(t *testing.T) {
 }
 
 func TestEmptyMessageRendersOneLine(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if out := renderMarkdownBody(th, "", 40); len(out) != 1 || strip(out[0]) != "" {
 		t.Errorf("empty message = %#v; want a single empty line (so its marker shows)", out)
@@ -387,6 +429,8 @@ func TestEmptyMessageRendersOneLine(t *testing.T) {
 }
 
 func TestWithMarker(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	got := withMarker(th, glyphAssistant+" ", []string{"first", "second"})
 	if got[0] != glyphAssistant+" first" {

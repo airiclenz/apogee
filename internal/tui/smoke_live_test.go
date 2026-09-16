@@ -48,6 +48,7 @@ import (
 // model is not a Go-visible input, so caching would replay a stale PASS across a model swap.
 // APOGEE_API_KEY carries the upstream bearer token when the server under test is keyed; unset —
 // the keyless local default — sends no auth header (liveAPIKey, live_test.go).
+// serial: an env-gated live run against one shared model server; parallel live runs would contend for it.
 func TestSmokeLiveProfileSeam(t *testing.T) {
 	endpoint := os.Getenv("APOGEE_LIVE_ENDPOINT")
 	if endpoint == "" {

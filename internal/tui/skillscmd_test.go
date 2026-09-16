@@ -34,6 +34,8 @@ func TestParseSkills(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.line, func(t *testing.T) {
+			t.Parallel()
+
 			got, err := parseSkills(strings.Fields(c.line))
 			if (err != nil) != c.wantErr {
 				t.Fatalf("parseSkills(%q) error = %v, want error: %v", c.line, err, c.wantErr)
@@ -73,6 +75,8 @@ func TestSkillsArgsZeroValueIsTheListing(t *testing.T) {
 // rather than leaving "/skills " standing in the box for an argument nobody meant to type
 // (runsBareAtAccept). The regression this pins is the flag being forgotten when takesArgs was added.
 func TestAcceptSkillsRunsBareInsteadOfSplicing(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m.input.SetValue("/skil")
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -103,6 +107,8 @@ func exportOpts(t *testing.T) Options {
 // the folder AND what the copy now means: a library skill outranks the shipped one it was copied
 // from, so "/id" resolves to the editable copy from the next scan onwards.
 func TestSkillsExportWritesTheShippedFolder(t *testing.T) {
+	t.Parallel()
+
 	opts := exportOpts(t)
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, cmd := typeCommand(t, m, "/skills export debugging")
@@ -132,6 +138,8 @@ func TestSkillsExportWritesTheShippedFolder(t *testing.T) {
 // the refusal reaches the transcript as an ERROR — nothing happened, and a note would read like it
 // had.
 func TestSkillsExportRefusesASecondCopy(t *testing.T) {
+	t.Parallel()
+
 	opts := exportOpts(t)
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, _ = typeCommand(t, m, "/skills export debugging")
@@ -149,6 +157,8 @@ func TestSkillsExportRefusesASecondCopy(t *testing.T) {
 // An id nothing ships is refused, and the refusal lists what the binary does carry — the id was
 // typed by a human, so the vocabulary is the useful half of the answer.
 func TestSkillsExportRefusesANonShippedID(t *testing.T) {
+	t.Parallel()
+
 	opts := exportOpts(t)
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, _ = typeCommand(t, m, "/skills export clean-code") // in the catalog, but not shipped
@@ -170,6 +180,8 @@ func TestSkillsExportRefusesANonShippedID(t *testing.T) {
 // A malformed line reports the usage and writes nothing — the /confine posture, and it matters here
 // because the form that WOULD have run creates a folder.
 func TestSkillsCommandReportsItsUsageOnABadLine(t *testing.T) {
+	t.Parallel()
+
 	opts := exportOpts(t)
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, cmd := typeCommand(t, m, "/skills export")
@@ -188,6 +200,8 @@ func TestSkillsCommandReportsItsUsageOnABadLine(t *testing.T) {
 // Without a resolved apogee home there is no library to write into, and saying so beats writing a
 // skill folder into whatever directory the process happens to be standing in.
 func TestSkillsExportWithNoResolvedHome(t *testing.T) {
+	t.Parallel()
+
 	opts := skillOpts() // ConfigHome unset
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, _ = typeCommand(t, m, "/skills export debugging")
@@ -226,6 +240,8 @@ func TestSkillsLineDecidesWhatRunsMidRun(t *testing.T) {
 // run at idle instead of running now — while the bare listing keeps answering, which is the whole
 // point of splitting the policy on the line (TestSkillsListingStillAnswersMidRun below).
 func TestSkillsExportIsRefusedWhileTheModelWorks(t *testing.T) {
+	t.Parallel()
+
 	opts := exportOpts(t)
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m, _ = typeCommand(t, m, "open the exchange")
@@ -246,6 +262,8 @@ func TestSkillsExportIsRefusedWhileTheModelWorks(t *testing.T) {
 // The listing is unchanged by the grammar: it still answers while a worker works, because it only
 // reads from disk. This is the half the export must not have taken down with it.
 func TestSkillsListingStillAnswersMidRun(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModelEng(t, &fakeEngine{}, skillOpts())
 	m, _ = typeCommand(t, m, "open the exchange")
 	if m.state != stateRunning {
@@ -268,6 +286,8 @@ func TestSkillsListingStillAnswersMidRun(t *testing.T) {
 // A shipped skill is labelled as one in the report — the field a SKILL.md does not author, and the
 // only thing on the row that says an entry came out of the binary rather than out of a cloned repo.
 func TestSkillsListingLabelsAShippedSkill(t *testing.T) {
+	t.Parallel()
+
 	o := testOpts
 	o.Skills = fakeSkillCatalog{skills: []skills.Skill{
 		{ID: "debugging", DisplayName: "Debugging", Summary: "find the fault",

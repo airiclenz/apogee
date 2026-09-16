@@ -19,6 +19,8 @@ import (
 // render rather than a byte-exact golden, so a lipgloss change cannot false-fail it; the guard
 // below it catches the opposite failure, a toolLabel role that paints nothing at all.
 func TestToolHeaderLabelStyled(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	block := renderToolBlock(th, toolView{Label: "Read", Target: "main.go"}, 80, blockState{}).lines
 	head := block[0]

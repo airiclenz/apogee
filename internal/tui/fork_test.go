@@ -58,6 +58,8 @@ func assertNoFork(t *testing.T, m Model, host *fakeSessionHost, want string) {
 // the child — the host's active id is the child's, the engine was restored with the cut state, and
 // the note names the parent.
 func TestForkPickerListsPromptsAndForks(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{}
 	host := &fakeSessionHost{}
 	m := newForkModel(t, eng, host)
@@ -134,6 +136,8 @@ func TestForkPickerListsPromptsAndForks(t *testing.T) {
 // A session whose every prompt lies before its last fold has no State to stand at: /fork says so
 // and opens nothing.
 func TestForkRefusesAFoldedSession(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newForkModel(t, &fakeEngine{}, host)
 	m.transcript.addCompacted(runRef{})
@@ -145,6 +149,8 @@ func TestForkRefusesAFoldedSession(t *testing.T) {
 
 // A session that has not spoken has nothing to fork.
 func TestForkRefusesAnEmptySession(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newSessionModel(t, &fakeEngine{}, host)
 
@@ -155,6 +161,8 @@ func TestForkRefusesAnEmptySession(t *testing.T) {
 
 // Esc closes the picker and forks nothing.
 func TestForkEscClosesThePicker(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{}
 	host := &fakeSessionHost{}
 	m := newForkModel(t, eng, host)
@@ -174,6 +182,8 @@ func TestForkEscClosesThePicker(t *testing.T) {
 // /fork is idle-only by the commandSpecs table — the cut reads the engine, which is the Model's own
 // only at idle — so a line typed mid-run is queued to run at idle instead of opening the picker.
 func TestForkIsIdleOnly(t *testing.T) {
+	t.Parallel()
+
 	if spec, ok := commandByName("fork"); !ok || spec.whileRunning || spec.touchesServer || spec.takesArgs {
 		t.Fatalf("commandSpec = %+v, want a bare idle-only verb that touches no server", spec)
 	}
@@ -196,6 +206,8 @@ func TestForkIsIdleOnly(t *testing.T) {
 // Without a session host there is no record to cut a child from: /fork is refused up front with
 // the /sessions posture rather than queueing a write the queue would drop.
 func TestForkRefusesWithoutASessionHost(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModelEng(t, &fakeEngine{}, testOpts)
 	seedConversation(&m)
 
@@ -213,6 +225,8 @@ func TestForkRefusesWithoutASessionHost(t *testing.T) {
 // would refuse: the switch is skipped, the record is already written, and the note names the
 // child so /sessions can reach it. The active id stays the parent's.
 func TestForkSkipsTheSwitchWhenBusy(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{}
 	host := &fakeSessionHost{}
 	m := newForkModel(t, eng, host)
@@ -254,6 +268,8 @@ func TestForkSkipsTheSwitchWhenBusy(t *testing.T) {
 // A fork the host refused is said out loud — the human is waiting on it — and the session stays
 // where it was.
 func TestForkNotesAHostRefusal(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{}
 	host := &fakeSessionHost{forkErr: errForkRefused}
 	m := newForkModel(t, eng, host)

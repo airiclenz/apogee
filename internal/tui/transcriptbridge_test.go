@@ -277,6 +277,8 @@ func TestTranscriptCodecClosesEveryInterruptedToolCall(t *testing.T) {
 		{name: "the child call beneath it", index: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			e := got[tc.index]
 			if !e.done {
 				t.Error("done = false; a replayed call must not claim its work is still going")
@@ -420,6 +422,8 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 	t.Parallel()
 
 	t.Run("answered questions replay as two blocks", func(t *testing.T) {
+		t.Parallel()
+
 		data := []byte(`{"version":1,"entries":[` +
 			`{"kind":"toolCall","callID":"a1","done":true,"tool":{"label":"Ask User","verb":"asking",` +
 			`"target":"Ship it?","name":"ask_user","summary":{"text":"Yes"},` +
@@ -457,6 +461,8 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 	})
 
 	t.Run("a question awaiting its answer is not forced solo", func(t *testing.T) {
+		t.Parallel()
+
 		data := []byte(`{"version":1,"entries":[` +
 			`{"kind":"toolCall","callID":"a1","tool":{"label":"Ask User","verb":"asking",` +
 			`"target":"Ship it?","name":"ask_user"}},` +
@@ -492,6 +498,8 @@ func TestTranscriptCodecReDerivesAnsweredQuestionSolo(t *testing.T) {
 	})
 
 	t.Run("errored questions stay groupable and replay as one group", func(t *testing.T) {
+		t.Parallel()
+
 		// A question the tool could not put to anyone (its Asker was gone): the result comes back an
 		// error, enrichWithResult words the branch with the bare verdict word and returns before the
 		// outcome hook, so the record is done, carries the message as its BODY and never becomes a
@@ -720,6 +728,8 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a promoted line comes back quoted", func(t *testing.T) {
+		t.Parallel()
+
 		// A one-line `cat`: the output is promoted onto the branch as it stands (promotedOutput), which
 		// is the shape whose summary is the tool's words and not the block's.
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
@@ -760,6 +770,8 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 	// without it could no longer be demoted, so the same session would paint a different shape after
 	// a resume at the very widths the guard exists for.
 	t.Run("the promotion's typed stat comes back with it", func(t *testing.T) {
+		t.Parallel()
+
 		const narrow = 40
 
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
@@ -792,6 +804,8 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 	})
 
 	t.Run("a line the block worded stays unquoted and writes no member", func(t *testing.T) {
+		t.Parallel()
+
 		card := toolView{
 			Label: "Read", Verb: "reading", Target: "main.go", name: "read_file",
 			Summary: namedSummary(detailLine{Text: "1 - 100"}),
@@ -822,6 +836,8 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 	})
 
 	t.Run("a blob written before the member decodes unquoted and paints the same", func(t *testing.T) {
+		t.Parallel()
+
 		// The same record twice, with and without the member, so the comparison isolates it: an old file
 		// must decode as it always did, and the fact it lacks must be worth nothing to the painter.
 		const head = `{"version":1,"entries":[{"kind":"toolCall","callID":"c1","done":true,"tool":{` +
@@ -1151,6 +1167,8 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 	const window = 32768
 
 	t.Run("a reported run carries its fill through the record", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentUsage(tr, 1, 12000, window)
@@ -1177,6 +1195,8 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 	})
 
 	t.Run("a routed run keeps the window it actually filled", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		// The child ran on the Sub-agent server (ADR 0045): a small window inside a big session.
@@ -1201,6 +1221,8 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 	})
 
 	t.Run("a run that never reported writes neither member", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 		subAgentReport(tr, "s1", "tests read", 0)
@@ -1215,6 +1237,8 @@ func TestTranscriptCodecRoundTripsASubAgentFill(t *testing.T) {
 	})
 
 	t.Run("a blob written before the members decodes to the zero pair", func(t *testing.T) {
+		t.Parallel()
+
 		legacy := []byte(`{"version":1,"entries":[{"kind":"toolCall","callID":"s1","done":true,` +
 			`"tool":{"label":"Sub-Agent","name":"sub_agent","summary":{"text":"survey the tests"}}}]}`)
 		got, err := decodeTranscript(legacy)
@@ -1251,6 +1275,8 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a named head replays with the name as its target", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{
 			Call: domain.ToolCall{ID: "s1", Tool: "sub_agent",
@@ -1288,6 +1314,8 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 	})
 
 	t.Run("the wire structs carry exactly the members that were decided on", func(t *testing.T) {
+		t.Parallel()
+
 		fields := func(v any) []string {
 			typ := reflect.TypeOf(v)
 			out := make([]string, 0, typ.NumField())
@@ -1404,6 +1432,8 @@ func TestTranscriptCodecRoundTripsTheSpawningCallID(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a delegated entry carries its spawning call through the record", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{entries: []entry{
 			{kind: entryUser, text: "delegate it"},
 			{kind: entryAssistant, text: "first child answer", depth: 1, spawnCallID: "c1"},
@@ -1437,6 +1467,8 @@ func TestTranscriptCodecRoundTripsTheSpawningCallID(t *testing.T) {
 	})
 
 	t.Run("a message addressed to a child replays into the same run", func(t *testing.T) {
+		t.Parallel()
+
 		// The delivered block is an entryUser at depth (transcript.addUserAt), so BOTH members have
 		// to survive for it: without the depth it replays railed at the top level, and without the
 		// run it regroups outside its head's span — a message the human sent to one delegate coming
@@ -1468,6 +1500,8 @@ func TestTranscriptCodecRoundTripsTheSpawningCallID(t *testing.T) {
 	})
 
 	t.Run("a blob written before the member decodes to no run identity", func(t *testing.T) {
+		t.Parallel()
+
 		legacy := []byte(`{"version":1,"entries":[{"kind":"assistant","text":"child answer","depth":1}]}`)
 		got, err := decodeTranscript(legacy)
 		if err != nil {
@@ -1501,6 +1535,8 @@ func TestTranscriptCodecRoundTripsRecordedRegions(t *testing.T) {
 	t.Parallel()
 
 	t.Run("the regions and the file each was cut from survive the round trip", func(t *testing.T) {
+		t.Parallel()
+
 		tv := toolView{
 			Label: "Git Diff", Verb: "diffing", Target: "main..HEAD", name: "git_diff_range",
 			Summary: namedSummary(detailLine{Text: "+2 −1"}),
@@ -1553,6 +1589,8 @@ func TestTranscriptCodecRoundTripsRecordedRegions(t *testing.T) {
 	})
 
 	t.Run("a record written before the members decodes with no regions and keeps its rows", func(t *testing.T) {
+		t.Parallel()
+
 		data := []byte(`{"version":1,"entries":[` +
 			`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Edit","verb":"editing",` +
 			`"target":"main.go","name":"edit_existing_file","summary":{"text":"+1 −1"},` +
@@ -1573,6 +1611,8 @@ func TestTranscriptCodecRoundTripsRecordedRegions(t *testing.T) {
 	})
 
 	t.Run("region lines and file names are escape-stripped on the way in", func(t *testing.T) {
+		t.Parallel()
+
 		data := []byte(`{"version":1,"entries":[` +
 			`{"kind":"toolCall","callID":"c1","done":true,"tool":{"label":"Git Diff","verb":"diffing",` +
 			`"target":"main..HEAD","name":"git_diff_range","summary":{"text":"+1 −1"},` +

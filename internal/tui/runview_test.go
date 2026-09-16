@@ -38,7 +38,11 @@ func enterOnLastBlock(t *testing.T, m Model) Model {
 }
 
 func TestRunViewOpensOnExpand(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a framed run opens as a view, at its tail, with the block cursor gone", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithRun(t)
 		m = step(t, m, keyAltUp())
 		if !m.cursor.active {
@@ -68,6 +72,8 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 	})
 
 	t.Run("a running head with no entries behind it opens too", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m.transcript.reset()
 		m.transcript.addUser("survey the repo", nil)
@@ -83,6 +89,8 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 	})
 
 	t.Run("a delegation that ran and left nothing keeps the inline toggle", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m.transcript.reset()
 		m.transcript.addUser("survey the repo", nil)
@@ -101,6 +109,8 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 	})
 
 	t.Run("the sub-agent umbrella keeps its own click", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithSubAgentGroup(t)
 		header := memberRows(t, m, 1)[0] - 1 // the umbrella sits directly above the first member row
 		if got := strip(m.lines[header]); !strings.Contains(got, "Sub-Agent (3)") {
@@ -124,6 +134,8 @@ func TestRunViewOpensOnExpand(t *testing.T) {
 // it — targetTask folds the task and asks the redirect nothing — and the guard inside the redirect
 // stands behind that, for any reach that asks it about the run it is already showing.
 func TestRunViewOwnHeadDoesNotReopenItself(t *testing.T) {
+	t.Parallel()
+
 	// Long enough to fold at 80 columns, so the task row is a click surface at all (promptCollapsedRows).
 	const tallTask = "survey the repository from top to bottom and write down every package it holds, " +
 		"what each one is for, which of them the TUI reaches into, and which of them reach back — " +
@@ -170,6 +182,8 @@ func TestRunViewOwnHeadDoesNotReopenItself(t *testing.T) {
 // row for any OTHER reach that hands the redirect the run already on screen, so it is asserted
 // where that reach is: at the seam, called directly with the viewed run's own head.
 func TestRunViewOpenRunAtRefusesTheViewedRunsOwnHead(t *testing.T) {
+	t.Parallel()
+
 	m := enterOnLastBlock(t, modelWithRun(t))
 	if got := m.viewedRun().spawn; got != "s1" {
 		t.Fatalf("setup: ⏎ on the delegation opened run %q; want the run it heads", got)
@@ -223,6 +237,8 @@ func seeMoreCount(t *testing.T, row string) int {
 // (entry.taskExpanded), and the flag it must NOT have started writing is pinned here beside it —
 // that one is the inline rail this plan deleted.
 func TestRunViewTaskFoldOpensWhatItAdvertises(t *testing.T) {
+	t.Parallel()
+
 	// Tall enough at 80 columns to hide several rows behind the marker, and ending in a word that
 	// appears nowhere else, so "did the hidden rows come out?" is one lookup (promptCollapsedRows).
 	const lastWord = "loosestrife"
@@ -296,7 +312,11 @@ func TestRunViewTaskFoldOpensWhatItAdvertises(t *testing.T) {
 }
 
 func TestRunViewEscGoesOneLevelUp(t *testing.T) {
+	t.Parallel()
+
 	t.Run("esc returns to the level below, at the offset and follow it was left at", func(t *testing.T) {
+		t.Parallel()
+
 		// A scrollback taller than the viewport with the delegation part-way UP it, so "where the
 		// human left it" is a real offset rather than a short transcript's only one — and so the
 		// click that opens the view is a click that moved nothing.
@@ -345,6 +365,8 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 	})
 
 	t.Run("a view taller than the level below still hands that level's offset back", func(t *testing.T) {
+		t.Parallel()
+
 		// A run whose own paint is LONGER than the conversation holding it: the offset still
 		// standing when the repaint lands is the view's, past the level below's last line, so the
 		// repaint clamps it to the bottom and clears the follow flag on the way (refreshViewport).
@@ -398,6 +420,8 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 	})
 
 	t.Run("a nested run opens a second level and two esc unwind it", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m.transcript.reset()
 		m.transcript.addUser("survey the repo", nil)
@@ -430,6 +454,8 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 	})
 
 	t.Run("esc inside a view never arms the stop", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithRun(t)
 		cancelled := startStubWorker(t, &m)
 		m = enterOnLastBlock(t, m)
@@ -448,6 +474,8 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 	})
 
 	t.Run("a pane waiting for an answer keeps its own esc", func(t *testing.T) {
+		t.Parallel()
+
 		for _, tc := range []struct {
 			name  string
 			state uiState
@@ -456,6 +484,8 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 			{"an approval request", stateAwaitingApproval},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
 				m := modelWithRun(t)
 				startStubWorker(t, &m)
 				m = enterOnLastBlock(t, m)
@@ -472,6 +502,8 @@ func TestRunViewEscGoesOneLevelUp(t *testing.T) {
 }
 
 func TestRunViewStatusSlotOffersTheWayBack(t *testing.T) {
+	t.Parallel()
+
 	m := modelWithRun(t)
 	startStubWorker(t, &m)
 	if got := plainSlot(m.statusRight()); got != "esc×2 stop" {
@@ -492,7 +524,11 @@ func plainSlot(slot string) string {
 }
 
 func TestRunViewStackFollowsTheEntriesItNames(t *testing.T) {
+	t.Parallel()
+
 	t.Run("a reset that drops the run closes its view", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithRun(t)
 		m = enterOnLastBlock(t, m)
 
@@ -508,6 +544,8 @@ func TestRunViewStackFollowsTheEntriesItNames(t *testing.T) {
 	})
 
 	t.Run("a replay of the same run keeps it", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithRun(t)
 		m = enterOnLastBlock(t, m)
 
@@ -582,6 +620,8 @@ func noteInTranscript(m Model, text string) bool {
 // claimant gave that key. Only a running child is invited to; the other two lifecycles say why they
 // are not, because a legend may only advertise a key that does something.
 func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name  string
 		phase childPhase
@@ -592,6 +632,8 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 		{name: "scheduled", phase: childScheduled, want: "repo-scout has not started · esc back"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := modelViewingChild(t, &fakeEngine{}, tc.phase)
 
 			if got := m.legend(); got != tc.want {
@@ -601,6 +643,8 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 	}
 
 	t.Run("backing out gives the conversation its own legend back", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 
 		m = step(t, m, keyEsc())
@@ -614,6 +658,8 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 	})
 
 	t.Run("the viewed child finishing re-words the box in place", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 
 		m = step(t, m, eventMsg{Event: domain.SubAgentPhaseEvent{
@@ -628,6 +674,8 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 	})
 
 	t.Run("a completing Exchange below does not re-label a box addressing a child", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 
 		m = step(t, m, exchangeDoneMsg{})
@@ -643,6 +691,8 @@ func TestRunViewPlaceholderNamesTheChild(t *testing.T) {
 // note lands at depth 0 as it always has AND the same sentence flashes on the status line, because
 // a reader inside the view would otherwise see nothing at all until they backed out.
 func TestRunViewEnterRefusesANonRunningChild(t *testing.T) {
+	t.Parallel()
+
 	for _, phase := range []childPhase{childOver, childScheduled} {
 		eng := &fakeEngine{}
 		m := modelViewingChild(t, eng, phase)
@@ -704,6 +754,8 @@ func clearsTheFlash(t *testing.T, cmd tea.Cmd) bool {
 // TestRefuseChildMessageFlashesOnlyInsideAView is the guard on the flash's one condition: at depth 0
 // the note is already on screen, so the slot stays with the context gauge and nothing is flashed.
 func TestRefuseChildMessageFlashesOnlyInsideAView(t *testing.T) {
+	t.Parallel()
+
 	for _, note := range []string{
 		childNotRunningNote("repo-scout"),
 		childGoneNote("repo-scout"),
@@ -732,7 +784,11 @@ func TestRefuseChildMessageFlashesOnlyInsideAView(t *testing.T) {
 // through the very pane the view is painted under, so ⏎ there must still answer the question in
 // front of the human rather than message the run behind it.
 func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
+	t.Parallel()
+
 	t.Run("an ask is answered, not sent to the child", func(t *testing.T) {
+		t.Parallel()
+
 		eng := &fakeEngine{}
 		m := modelViewingChild(t, eng, childRunning)
 		reply := make(chan domain.AskAnswer, 1)
@@ -757,6 +813,8 @@ func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
 	})
 
 	t.Run("an approval is decided, not sent to the child", func(t *testing.T) {
+		t.Parallel()
+
 		eng := &fakeEngine{}
 		m := modelViewingChild(t, eng, childRunning)
 		reply := make(chan domain.ApprovalDecision, 1)
@@ -782,9 +840,13 @@ func TestRunViewDecisionPanesKeepEnter(t *testing.T) {
 // pane cancels the question instead (runViewOwnsEsc steps aside for both states). The view is still
 // open behind the pane, so the child's own invitation comes back the moment the question is away.
 func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
+	t.Parallel()
+
 	const childLegendText = "Message repo-scout…  ⏎ send · ↑ recall · esc back"
 
 	t.Run("an ask hands the box the answering legend", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 		if got := m.legend(); got != childLegendText {
 			t.Fatalf("setup: placeholder = %q; want the child legend", got)
@@ -820,6 +882,8 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 	})
 
 	t.Run("an approval keeps the conversation's own legend", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 		reply := make(chan domain.ApprovalDecision, 1)
 
@@ -852,6 +916,8 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 		{name: "an approval", open: approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: make(chan domain.ApprovalDecision, 1)}},
 	} {
 		t.Run("a stop under "+tc.name+" hands the box back to the view", func(t *testing.T) {
+			t.Parallel()
+
 			m := modelViewingChild(t, &fakeEngine{}, childRunning)
 			m = step(t, m, tc.open)
 
@@ -864,6 +930,8 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 	}
 
 	t.Run("a fault under a pane hands it back too", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 		m = step(t, m, approvalReqMsg{Request: domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey}, Reply: make(chan domain.ApprovalDecision, 1)})
 
@@ -883,6 +951,8 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 // pane holds esc for its own answer. The trail itself stays either way — it says where the reader
 // is, which is true under a pane — and the hint comes back the moment the question is away.
 func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
+	t.Parallel()
+
 	// header is the row the sticky overlay freezes at the top of the view (render.go), plainly.
 	header := func(t *testing.T, m Model) string {
 		t.Helper()
@@ -909,6 +979,8 @@ func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name+" takes the hint off the header", func(t *testing.T) {
+			t.Parallel()
+
 			m := modelViewingChild(t, &fakeEngine{}, childRunning)
 			before := header(t, m)
 			if !strings.Contains(before, breadcrumbHint) {

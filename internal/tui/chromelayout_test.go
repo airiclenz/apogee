@@ -25,6 +25,8 @@ import (
 // row and a CRLF opens two. Reading them as one boundary — the intuitive line ending — would put
 // this table one row under the widget for every CRLF, which is the failure the count already had.
 func TestInputContentRows(t *testing.T) {
+	t.Parallel()
+
 	const w = 10
 	cases := []struct {
 		name  string
@@ -48,6 +50,8 @@ func TestInputContentRows(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := inputContentRows(c.value, w); got != c.want {
 				t.Errorf("inputContentRows(%q, %d) = %d, want %d", c.value, w, got, c.want)
 			}
@@ -58,6 +62,8 @@ func TestInputContentRows(t *testing.T) {
 // A zero or negative width floors to one column rather than dividing by zero, and still returns at
 // least one row.
 func TestInputContentRowsZeroWidth(t *testing.T) {
+	t.Parallel()
+
 	if got := inputContentRows("ab", 0); got < 1 {
 		t.Errorf("inputContentRows with zero width = %d, want >= 1 (width floored to one)", got)
 	}
@@ -102,6 +108,8 @@ func widgetContentRows(t *testing.T, value string, width int) (rows, effWidth in
 // The mirror split on '\n' alone until 2026-08-14 and came up a row short for either; asking the
 // real widget is what settles that CRLF is two rows here and not the one a line ending suggests.
 func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		value string
@@ -148,6 +156,8 @@ func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
 			want, w := widgetContentRows(t, c.value, c.width)
 			if got := inputContentRows(c.value, w); got != want {
 				t.Errorf("inputContentRows(%q, %d) = %d, the widget draws %d rows", c.value, w, got, want)
@@ -161,6 +171,8 @@ func TestInputContentRowsMirrorsTheWidget(t *testing.T) {
 // roughly 41% of inputs like these, so any regression to an approximation fails here loudly rather
 // than on one lucky fixture. Deterministic — a fixed seed, so a failure is reproducible.
 func TestInputContentRowsMirrorsTheWidgetOnGeneratedDrafts(t *testing.T) {
+	t.Parallel()
+
 	// The alphabet is chosen for the boundaries the two mirrors disagreed at: spaces (the widget's
 	// word/space grouping), hyphens (a breakpoint to ansi.Wordwrap but not to the widget), a wide
 	// rune and a VS16 cluster (grapheme-vs-rune measurement), newlines (logical lines), and tabs
@@ -187,6 +199,8 @@ func TestInputContentRowsMirrorsTheWidgetOnGeneratedDrafts(t *testing.T) {
 // never shrinks below minInputRows, whatever the mirror returns. inputContentRows itself stays
 // unclamped — layout() derives the viewport's height from the clamped box height, not from this.
 func TestPromptEditorRowsClampsTheWidgetCount(t *testing.T) {
+	t.Parallel()
+
 	const width = 8
 	cases := []string{
 		"",
@@ -265,6 +279,8 @@ func dropdownFrame(t *testing.T, staged int) Model {
 // nothing — and its row now comes down from the walk that stacked it (stackInputSlot), off the row the
 // transcript-side slot reported it ended above, rather than from a second sum over the same blocks.
 func TestDropdownSpanMatchesTheDrawnFrame(t *testing.T) {
+	t.Parallel()
+
 	m := dropdownFrame(t, 0)
 
 	y0, h, ok := m.frameSpans().pane(paneDropdown)
@@ -286,6 +302,8 @@ func TestDropdownSpanMatchesTheDrawnFrame(t *testing.T) {
 // publishes. The strip is no framePane and has no span of its own; what pins it is where the frame
 // draws it, directly on the row the dropdown's rectangle ends.
 func TestDropdownSpanWithAStagedStripBelowIt(t *testing.T) {
+	t.Parallel()
+
 	const staged = 2
 	m := dropdownFrame(t, staged)
 
@@ -314,6 +332,8 @@ func TestDropdownSpanWithAStagedStripBelowIt(t *testing.T) {
 // frame. That is the whole of what the entry means now — it no longer doubles as "nothing addresses
 // this pane by rectangle".
 func TestDropdownSpanIsAbsentWithNoMenuOpen(t *testing.T) {
+	t.Parallel()
+
 	m := modelWithOverlayRoomAt(t, 100, 30, Options{Workspace: "."})
 
 	if y0, h, ok := m.frameSpans().pane(paneDropdown); ok {
@@ -326,6 +346,8 @@ func TestDropdownSpanIsAbsentWithNoMenuOpen(t *testing.T) {
 // row the frame draws it on — asserted against the drawn frame rather than against a recorded number,
 // so the walk above the chrome stays pinned to the painter whatever is stacked below it.
 func TestFrameSpansKeepTheTranscriptSlotWhereItIsDrawn(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		pane framePane
@@ -349,6 +371,8 @@ func TestFrameSpansKeepTheTranscriptSlotWhereItIsDrawn(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := c.open(modelWithOverlayRoomAt(t, 100, 30, Options{Workspace: "."}))
 			block := m.frameOverlays().block(c.pane)
 			if block == "" {

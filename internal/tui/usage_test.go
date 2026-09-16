@@ -53,6 +53,8 @@ var (
 // that runs beside the rows. At the pane's floor the two are handed back together and the reading
 // is what stays.
 func TestReportPaneBreathes(t *testing.T) {
+	t.Parallel()
+
 	m := usageModel(t, mainTotals, 8192)
 	for i := range maxUsageRows {
 		m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("delegate %d", i), childTotals, 4096)
@@ -120,7 +122,11 @@ func TestReportPaneBreathes(t *testing.T) {
 // main agent, each delegate that reported a count — in transcript order — and the session total,
 // which appears only where there is more than one agent to add up.
 func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
+	t.Parallel()
+
 	t.Run("the main agent alone gets no session row", func(t *testing.T) {
+		t.Parallel()
+
 		rows := usageModel(t, mainTotals, 8192).usageRows()
 
 		if len(rows) != 2 {
@@ -142,6 +148,8 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 	})
 
 	t.Run("delegates come in transcript order and the session row sums them", func(t *testing.T) {
+		t.Parallel()
+
 		m := usageModel(t, mainTotals, 8192)
 		m = delegate(t, m, "s1", "survey the tests", childTotals, 16384)
 		m = delegate(t, m, "s2", "survey the docs", childTotals, 0)
@@ -175,6 +183,8 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 	})
 
 	t.Run("a delegate that reported nothing is left out", func(t *testing.T) {
+		t.Parallel()
+
 		m := usageModel(t, mainTotals, 8192)
 		m = delegate(t, m, "s1", "survey the tests", domain.Usage{}, 0)
 
@@ -184,6 +194,8 @@ func TestUsageRowsReportEveryAgentThatSpent(t *testing.T) {
 	})
 
 	t.Run("nothing reported at all is no rows", func(t *testing.T) {
+		t.Parallel()
+
 		if rows := usageModel(t, domain.Usage{}, 0).usageRows(); rows != nil {
 			t.Errorf("rows = %q, want none — the pane says so in prose instead", rows)
 		}
@@ -207,6 +219,8 @@ func equalRow(got, want popupRow) bool {
 // itself, spells its one key, carries the rows composed above — and, with nothing counted, says so
 // on a line of prose rather than drawing a header over an empty table.
 func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
+	t.Parallel()
+
 	m := usageModel(t, mainTotals, 8192)
 	m = delegate(t, m, "s1", "survey the tests", childTotals, 16384)
 	pane := strip(m.renderUsage())
@@ -235,6 +249,8 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 // its rows once a reply has named a model, in the order the session first saw them, and carries no
 // such line while no reply has — a server that names no model leaves the pane exactly as it was.
 func TestUsagePaneNamesTheModelsThatAnswered(t *testing.T) {
+	t.Parallel()
+
 	m := usageModel(t, mainTotals, 8192)
 	m.servedModels = []string{"gpt-oss-20b-mxfp4", "grunt-8b"}
 
@@ -262,6 +278,8 @@ func (m Model) closedUsage() Model {
 // nothing, the frame budgets it as one of its own (openPanes), and esc — its only key — closes it
 // while leaving the draft in the box untouched.
 func TestUsageVerbOpensThePaneAndEscCloses(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m.input.SetValue("/usage")
 	m, cmd := stepCmd(t, m, keyEnter())
@@ -310,6 +328,8 @@ func keyPgDown() tea.KeyPressMsg { return tea.KeyPressMsg{Code: tea.KeyPgDown} }
 // window a row, pgup/pgdown a drawn window, and both clamp at the two ends the wheel clamps at — the
 // first row, and the last FULL window. The hint says so on the pane itself.
 func TestUsageKeysScrollTheReport(t *testing.T) {
+	t.Parallel()
+
 	m := usageScrollModel(t)
 	win, ok := m.usageWindow()
 	if !ok {
@@ -372,6 +392,8 @@ func TestUsageKeysScrollTheReport(t *testing.T) {
 // REPORT rather than the conversation hidden behind it — the transcript owns them again the moment it
 // is closed — and a printable key still reaches the input box, because the pane is not modal.
 func TestUsageKeysLeaveTheRestOfTheFrameAlone(t *testing.T) {
+	t.Parallel()
+
 	m := usageScrollModel(t)
 
 	if control := step(t, m.dismissUsage(), keyPgUp()); !control.detached {
@@ -400,7 +422,11 @@ func TestUsageKeysLeaveTheRestOfTheFrameAlone(t *testing.T) {
 // nobody said. Present, it is one column for the WHOLE pane: an agent that reported no share
 // leaves its cell empty rather than shortening its row out of the columns beside it.
 func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
+	t.Parallel()
+
 	t.Run("no agent reported a share", func(t *testing.T) {
+		t.Parallel()
+
 		rows := usageModel(t, mainTotals, 8192).usageRows()
 
 		if got := rows[0]; !equalRow(got, usageHeaderCells(false)) {
@@ -412,6 +438,8 @@ func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
 	})
 
 	t.Run("one agent reported a share", func(t *testing.T) {
+		t.Parallel()
+
 		cachedMain := mainTotals
 		cachedMain.CachedPromptTokens = 12000
 		m := usageModel(t, cachedMain, 8192)
@@ -440,6 +468,8 @@ func TestUsageCachedColumnIsDrawnOnlyWhereAServerReportedOne(t *testing.T) {
 // a column its neighbours still fill, which reads as a delegate whose server stated no share rather
 // than as a number the record lost.
 func TestUsageRestoredDelegateKeepsItsCachedShare(t *testing.T) {
+	t.Parallel()
+
 	child := childTotals
 	child.CachedPromptTokens = 300
 
@@ -484,6 +514,8 @@ func TestUsageRestoredDelegateKeepsItsCachedShare(t *testing.T) {
 // reports one of its own — the heads REPLACE it rather than adding to it, or a resumed session whose
 // blocks came back with the scrollback would count every delegate twice.
 func TestDelegateUsageTotalPrefersLiveHeadsOverTheResumedReading(t *testing.T) {
+	t.Parallel()
+
 	m := usageModel(t, mainTotals, 0)
 	m.delegateUsage = childTotals
 

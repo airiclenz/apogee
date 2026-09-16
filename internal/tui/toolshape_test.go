@@ -20,6 +20,8 @@ import (
 // result is a summary, not a body, and only a command with more to say than one line reshapes into
 // the Terminal block above.
 func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "abc1234\n"}})
@@ -37,6 +39,8 @@ func TestRenderOneLineOutputRidesTheBranch(t *testing.T) {
 // commands still fold into one block, each output standing in the outcome slot at its own row's
 // right edge behind a leader of its own — the grouping a body would (correctly) break.
 func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"git rev-parse HEAD"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "abc1234"}})
@@ -69,6 +73,8 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 // A call whose result has not landed shows its target and a leader running to the row's edge, the
 // outcome slot empty — the same row it will keep once the outcome arrives to fill that slot.
 func TestRenderInFlightStandalone(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}})
 
@@ -90,6 +96,8 @@ func TestRenderInFlightStandalone(t *testing.T) {
 // popup is where a human approves an action, the transcript block is the record (layout.md,
 // "Collapsed and expanded blocks").
 func TestRenderNoTargetStandalone(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1,"b":2}`)}})
 
@@ -124,6 +132,8 @@ func TestRenderNoTargetStandalone(t *testing.T) {
 // ratified call on failed tool rows). The summary is part of that list, so the collapsed cap counts
 // it like any other branch line.
 func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "mcp_thing", Arguments: []byte(`{"a":1}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "no such server", IsError: true}})
@@ -152,6 +162,8 @@ func TestRenderNoTargetKeepsItsSummary(t *testing.T) {
 // slot and a targetless block paints none (collapsedRemainder), so its ▶ carries the news alone. The
 // 60-line blob is the case the old rule made 61 permanent rows.
 func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
+	t.Parallel()
+
 	blob := func(lines int) []byte {
 		items := make([]string, lines)
 		for i := range items {
@@ -202,6 +214,8 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(tr)
 
@@ -240,6 +254,8 @@ func TestTargetlessBlocksCollapseToTheBudget(t *testing.T) {
 // It asserts the SHAPE rather than the text, which the per-shape tests above pin line by line: what
 // would regress here is a path that still soft-wraps unbounded, and that shows as a row count.
 func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
+	t.Parallel()
+
 	const width = 60
 	long := strings.Repeat("go test ./internal/tui/ -run TestSomethingLong ", 9)
 	body := "line one is itself long enough to wrap at sixty columns without help\ntwo\nthree\nfour"
@@ -346,6 +362,8 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 	th := newTheme(scheme.Default())
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			lines := strings.Split(renderPlain(tc.build(), width), "\n")
 			if len(lines) > 1+collapsedBodyCap {
 				t.Errorf("collapsed block is %d rows, want at most %d:\n%s",
@@ -378,6 +396,8 @@ func TestEveryToolShapeCollapsesInsideTheRowBudget(t *testing.T) {
 // a block behaves: it still collapses to the house budget behind a remainder marker and still
 // gives every retained line back on toggle.
 func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name          string
 		args          string
@@ -421,6 +441,8 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
 				ID: "c1", Tool: "mcp_search", Arguments: []byte(tc.args)}})
@@ -458,6 +480,8 @@ func TestUnregisteredCallLabelsItsArguments(t *testing.T) {
 // breaks on now: the label. Each case pins the whole scrollback, so a break shows as the separate
 // blocks it must produce.
 func TestRenderGroupBreakers(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		build func(tr *transcript)
@@ -532,6 +556,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(tr)
 			if got, want := renderPlain(tr, 80), strings.Join(tc.want, "\n"); got != want {
@@ -544,6 +570,8 @@ func TestRenderGroupBreakers(t *testing.T) {
 	// up nothing but the rows its body would have taken — which are a click away on the member
 	// itself (design call 3).
 	t.Run("a call with output joins the run", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go build"}`)}})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "done"}})
@@ -582,6 +610,8 @@ func skillFetch(tr *transcript, id, query, content string) {
 // tool (docs/layout/tool-layout.md). The body is the skill's own text, behind the collapse
 // indicator every block with more to say wears.
 func TestRenderSkillFetchCard(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	skillFetch(tr, "c1", "how do I format Go",
 		"<skill: Coding Standards>\nUse gofmt as the sole formatter.\n</skill>\n")
@@ -605,6 +635,8 @@ func TestRenderSkillFetchCard(t *testing.T) {
 // row: the retarget is anchored on the `<skill: …>` opener the tool writes, and a miss leaves the
 // card saying what was asked for rather than inventing what came back.
 func TestRenderSkillFetchMissKeepsTheQuery(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	skillFetch(tr, "c1", "how do I fly a kite",
 		`no skill matches "how do I fly a kite". Carry on without one, or call load_skill again describing the task differently.`)
@@ -623,6 +655,8 @@ func TestRenderSkillFetchMissKeepsTheQuery(t *testing.T) {
 // groupable, and what the unregistered fallback never gave it — and the never-group mark keeps it
 // out anyway, at every index the umbrella could form from.
 func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	skillFetch(tr, "c1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
 	skillFetch(tr, "c2", "cut a release", "<skill: Brew Release>\nTag it.\n</skill>\n")
@@ -647,6 +681,8 @@ func TestSkillFetchesNeverJoinTheToolsSuperGroup(t *testing.T) {
 // at the group's own depth. A narration between two of them leaves two lone cards — the shape a
 // single fetch has always had — rather than one list spanning the sentence.
 func TestSkillGroupBreaksAtANarration(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	skillFetch(tr, "c1", "format Go", "<skill: Coding Standards>\nUse gofmt.\n</skill>\n")
 	tr.apply(domain.MessageEvent{Text: "now the release"})
@@ -671,6 +707,8 @@ func TestSkillGroupBreaksAtANarration(t *testing.T) {
 // the never-group mark keeps a fetch out of the umbrella (presentToolCall) and the umbrella's own
 // rule ends a run where the fetch stands.
 func TestSkillGroupSitsBetweenTwoToolUmbrellas(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	readCall(tr, "r1", "a.go", 1, 5, 0)
 	readCall(tr, "r2", "b.go", 1, 5, 0)

@@ -88,6 +88,8 @@ func TestBuildNilOutputMatchesRun(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			ctx := context.Background()
 			wantOpts, wantTraced, wantErr := programOptions(ctx, tc.opts, tc.environ, tc.decline)
 			if wantTraced != nil {
@@ -114,6 +116,8 @@ func TestBuildNilOutputMatchesRun(t *testing.T) {
 // wrapper, no sync-query stripper — both of those wrap os.Stdout, which is not where this program
 // paints — and the renderer really does write into the writer that was handed in.
 func TestBuildDriverOutputSkipsTrace(t *testing.T) {
+	t.Parallel()
+
 	ctx := context.Background()
 	out := &syncBuffer{}
 	// The stripper is asked for and must still be refused: it is an os.Stdout wrapper.
@@ -163,6 +167,8 @@ func TestBuildRefusesTraceWithOutput(t *testing.T) {
 // TestBuildAppendsCallerOptionsLast: a Driver's options are appended last precisely so they WIN.
 // The proof is the strongest one available — two writers, and the frames land in the caller's.
 func TestBuildAppendsCallerOptionsLast(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -190,6 +196,8 @@ func TestBuildAppendsCallerOptionsLast(t *testing.T) {
 // wired host's failure does; the decide-before-call acts — the watch chain and the two start-up
 // offers — never call at all (decision 3a).
 func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
+	t.Parallel()
+
 	structured := settingsStructuredRow()
 	rows := []SettingRow{structured}
 	nilConfig := func() Options {
@@ -199,6 +207,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 	}
 
 	t.Run("the host acknowledgement says it was not saved", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModelEng(t, &fakeEngine{confine: true}, nilConfig())
 
 		got := m.saveHostAcknowledgement()
@@ -211,6 +221,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 	})
 
 	t.Run("the external edit refuses on the row and launches nothing", func(t *testing.T) {
+		t.Parallel()
+
 		m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, nilConfig()))
 
 		next, cmd := m.settingsExternalEdit(structured)
@@ -224,6 +236,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 	})
 
 	t.Run("an editor that returns refuses the re-read on the row", func(t *testing.T) {
+		t.Parallel()
+
 		m := openSettingsPane(t, newTestModelEng(t, &fakeEngine{}, nilConfig()))
 
 		next, cmd := m.foldSettingsEdit(settingsEditedMsg{path: structured.Path})
@@ -237,6 +251,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 	})
 
 	t.Run("nothing is watched and a stray report re-reads nothing", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModelEng(t, &fakeEngine{}, nilConfig())
 		before := len(noteTexts(m))
 
@@ -255,6 +271,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 	})
 
 	t.Run("the key-migration offer is not raised and its answers say so", func(t *testing.T) {
+		t.Parallel()
+
 		opts := nilConfig()
 		opts.KeyMigration = KeyMigrationOffer{StoreName: "macOS Keychain", Entries: []string{"workstation"}}
 		m := newTestModelEng(t, &fakeEngine{}, opts)
@@ -271,6 +289,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 	})
 
 	t.Run("the sub-agents offer is not raised and its answer says so", func(t *testing.T) {
+		t.Parallel()
+
 		opts := nilConfig()
 		opts.SubAgentsMigration = []string{"cheap"}
 		m := newTestModelEng(t, &fakeEngine{}, opts)
@@ -284,6 +304,8 @@ func TestNilConfigHostDegradesLikeTheUnwiredFuncs(t *testing.T) {
 	})
 
 	t.Run("a model pick records nothing and warns of nothing", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModelEng(t, &fakeEngine{}, nilConfig())
 
 		if got := recordModelChoice(m.configHostOrNoop(), "model-b"); got != (choiceRecord{}) {

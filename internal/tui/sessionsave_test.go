@@ -65,6 +65,8 @@ func entriesHaveNote(entries []entry, want string) bool {
 // zero domain.Session is a legal envelope, which is the whole reason the cache carries a presence
 // flag beside the value.
 func TestProgressSaveWithoutBoundarySchedulesNothing(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)
@@ -86,6 +88,8 @@ func TestProgressSaveWithoutBoundarySchedulesNothing(t *testing.T) {
 // taken later in the NEXT Turn writes that engine half beside a transcript holding everything the
 // scrollback has gained since — the record a second reader opens while a delegation runs.
 func TestProgressSavePairsCachedBoundaryWithLiveTranscript(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)
@@ -125,6 +129,8 @@ func TestProgressSavePairsCachedBoundaryWithLiveTranscript(t *testing.T) {
 // Update loop still owns the engine and before the Submit that rides the worker Cmd, so what is
 // cached can never carry pendingInput.
 func TestLaunchCachesBoundarySnapshotBeforeSubmit(t *testing.T) {
+	t.Parallel()
+
 	ops := &engineOps{}
 	marker := domain.Session{Version: domain.SessionVersion, State: json.RawMessage(`{"boundary":"pre-submit"}`)}
 	eng := &fakeEngine{
@@ -162,6 +168,8 @@ func TestLaunchCachesBoundarySnapshotBeforeSubmit(t *testing.T) {
 // must not survive it: pairing it with the fresh session's transcript would file a record whose two
 // halves describe different conversations.
 func TestStartNewSessionClearsCachedBoundarySnapshot(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)
@@ -185,6 +193,8 @@ func TestStartNewSessionClearsCachedBoundarySnapshot(t *testing.T) {
 // payload IS the resumed session's boundary — cached from the record already in hand, so that a
 // delegation in the resumed session's first Turn has an engine half to pair with.
 func TestRestoreCachesBoundarySnapshot(t *testing.T) {
+	t.Parallel()
+
 	var src transcript
 	src.addUser("what is the capital of france", nil)
 	blob, err := encodeTranscript(&src)
@@ -269,6 +279,8 @@ func delegateChildResult() eventMsg {
 // progress save carries the cached boundary as its engine half and a live transcript in which the
 // delegation is still open.
 func TestDelegationBoundariesFireTheProgressSave(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)
@@ -321,6 +333,8 @@ func TestDelegationBoundariesFireTheProgressSave(t *testing.T) {
 // folded during an in-flight save leave exactly one pending write, and the one that lands is the
 // later one, holding everything the transcript gained in between.
 func TestProgressSaveTriggersCoalesceBehindAnInFlightSave(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)
@@ -365,6 +379,8 @@ func TestProgressSaveTriggersCoalesceBehindAnInFlightSave(t *testing.T) {
 // delegateUsage (Model.delegateUsageTotal). A record carrying only the first understates a session
 // that fanned out by whatever its children spent, which on a delegating run is most of it.
 func TestSaveCarriesBothHalvesOfTheSessionsSpend(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)
@@ -395,6 +411,8 @@ func TestSaveCarriesBothHalvesOfTheSessionsSpend(t *testing.T) {
 // saw them — and a save takes a copy, so a reply naming a new model after the snapshot cannot reach
 // into a payload already queued.
 func TestSaveCarriesTheModelsThatAnswered(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)
@@ -423,7 +441,11 @@ func TestSaveCarriesTheModelsThatAnswered(t *testing.T) {
 // restore) or the reopened session's first save drops them. A reply the resumed session gets from
 // a new model joins the set behind them.
 func TestResumedRecordKeepsItsServedModelsAcrossTheFirstSave(t *testing.T) {
+	t.Parallel()
+
 	t.Run("--resume carries the record's ids in", func(t *testing.T) {
+		t.Parallel()
+
 		host := &fakeSessionHost{}
 		m := newModel(context.Background(), &fakeEngine{}, Options{
 			Sessions:  host,
@@ -450,6 +472,8 @@ func TestResumedRecordKeepsItsServedModelsAcrossTheFirstSave(t *testing.T) {
 	})
 
 	t.Run("a browser restore carries the record's ids in", func(t *testing.T) {
+		t.Parallel()
+
 		host := &fakeSessionHost{}
 		host.seed(session.Record{
 			Meta: session.Meta{
@@ -484,6 +508,8 @@ func TestResumedRecordKeepsItsServedModelsAcrossTheFirstSave(t *testing.T) {
 // saved twice and replayed twice. The hand-over parks (displace), and the record carries the one
 // whole answer.
 func TestSavedRecordHoldsANestedChildsSiblingOnce(t *testing.T) {
+	t.Parallel()
+
 	var src transcript
 	src.addUser("survey everything", nil)
 	src.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 0},
@@ -529,6 +555,8 @@ func TestSavedRecordHoldsANestedChildsSiblingOnce(t *testing.T) {
 // own rule gives the same scrollback (every user entry, a delegate's depth-1 prompt included), so
 // the child's first Save after a resume leaves its "N msgs" cell where the fork put it.
 func TestQueuedForkWaitsForTheSaveAndCarriesTheChild(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)

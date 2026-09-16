@@ -47,6 +47,8 @@ func toolResult() eventMsg {
 // sequence the renderer emits for MouseModeCellMotion, or the terminal is left in a mode the
 // frame's MouseMode no longer describes.
 func TestResizeReassertsMouseTrackingVerbatim(t *testing.T) {
+	t.Parallel()
+
 	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 
 	_, cmd := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -63,6 +65,8 @@ func TestResizeReassertsMouseTrackingVerbatim(t *testing.T) {
 // The tool result is the case the whole file exists for: the child that may have reset tracking
 // has just reported back, so the sequence goes out on the spot.
 func TestToolResultReassertsMouseTracking(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 
 	_, cmd := m.Update(toolResult())
@@ -75,6 +79,8 @@ func TestToolResultReassertsMouseTracking(t *testing.T) {
 // Everything else leaves the terminal alone. A streamed token arrives thousands of times a Turn
 // and no child touched the tty between them, so a re-assert there would be pure noise on the wire.
 func TestNonToolEventDoesNotReassertMouseTracking(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 
 	_, cmd := m.Update(eventMsg{Event: domain.TokenEvent{Text: "still working"}})
@@ -88,6 +94,8 @@ func TestNonToolEventDoesNotReassertMouseTracking(t *testing.T) {
 // re-assert would enable reporting the renderer never turned on — and the escapes would arrive
 // ahead of the alternate screen the first laid-out frame opens.
 func TestPreReadyToolResultDoesNotReassertMouseTracking(t *testing.T) {
+	t.Parallel()
+
 	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil) // no WindowSizeMsg yet
 
 	_, cmd := m.Update(toolResult())
@@ -101,6 +109,8 @@ func TestPreReadyToolResultDoesNotReassertMouseTracking(t *testing.T) {
 // records a running count, so each re-assert is a line of its own (the log's change suppression
 // would collapse a constant value).
 func TestDiagLogRecordsEveryMouseReassert(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "diag.txt")
 	diag, err := newDiagLog(path)
 	if err != nil {
@@ -131,6 +141,8 @@ func TestDiagLogRecordsEveryMouseReassert(t *testing.T) {
 // and the re-assert. They travel as one tea.Batch, which the runtime unpacks — so the drivers that
 // stand in for it must too, or the write inside the batch is silently lost.
 func TestRunWritesLandsARecordWriteBatchedWithTheReassert(t *testing.T) {
+	t.Parallel()
+
 	host := &fakeSessionHost{}
 	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
 	seedConversation(&m)

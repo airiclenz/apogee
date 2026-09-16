@@ -66,6 +66,8 @@ func TestUndoParsesItsTwoForms(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.line, func(t *testing.T) {
+			t.Parallel()
+
 			parsed := parseInput(c.line, nil)
 
 			if parsed.kind != kindCommand || parsed.command != "undo" {
@@ -106,6 +108,8 @@ func TestUndoIsAnIdleOnlyArgumentTakingVerb(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestUndoPreviewsTheStepAndStashesItsGeneration(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{undoStep: scriptedStep(7), undoStepOK: true}
 
 	m, view := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/undo")
@@ -127,6 +131,8 @@ func TestUndoPreviewsTheStepAndStashesItsGeneration(t *testing.T) {
 }
 
 func TestUndoConfirmRevertsAtThePreviewedGeneration(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{
 		undoStep:   scriptedStep(7),
 		undoStepOK: true,
@@ -158,6 +164,8 @@ func TestUndoConfirmRevertsAtThePreviewedGeneration(t *testing.T) {
 }
 
 func TestUndoConfirmOnAStaleGenerationRePreviewsInsteadOfReverting(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{undoStep: scriptedStep(7), undoStepOK: true}
 
 	m, _ := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/undo")
@@ -186,9 +194,13 @@ func TestUndoConfirmOnAStaleGenerationRePreviewsInsteadOfReverting(t *testing.T)
 }
 
 func TestUndoWithNothingRecordedSaysSoAndNamesTheEnginesReason(t *testing.T) {
+	t.Parallel()
+
 	for _, line := range []string{"/undo", "/undo confirm"} {
 		for _, reason := range []string{"", "git not found"} {
 			t.Run(line+" "+reason, func(t *testing.T) {
+				t.Parallel()
+
 				// The empty journal answers both surfaces: a preview reports no step, a revert refuses.
 				eng := &fakeEngine{undoStepOK: false, undoErr: undo.ErrNothingToUndo, undoNote: reason}
 
@@ -209,6 +221,8 @@ func TestUndoWithNothingRecordedSaysSoAndNamesTheEnginesReason(t *testing.T) {
 }
 
 func TestUndoArgumentErrorReportsTheUsageLineAndTouchesNothing(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{undoStep: scriptedStep(7), undoStepOK: true}
 
 	_, view := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/undo sideways")
@@ -224,6 +238,8 @@ func TestUndoArgumentErrorReportsTheUsageLineAndTouchesNothing(t *testing.T) {
 // /undo mutates the workspace, so a line typed while the model works is queued to run at idle
 // instead of running now — the group it would revert is the one the running Step is still filling.
 func TestUndoIsRefusedWhileTheModelWorks(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{undoStep: scriptedStep(7), undoStepOK: true}
 	m := newTestModelEng(t, eng, testOpts)
 	m, _ = typeCommand(t, m, "open the exchange")
@@ -260,6 +276,8 @@ func TestRedoParsesItsTwoForms(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.line, func(t *testing.T) {
+			t.Parallel()
+
 			parsed := parseInput(c.line, nil)
 
 			if parsed.kind != kindCommand || parsed.command != "redo" {
@@ -296,6 +314,8 @@ func TestRedoIsAnIdleOnlyArgumentTakingVerb(t *testing.T) {
 }
 
 func TestRedoPreviewsTheStepAndStashesItsOwnGeneration(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{redoStep: scriptedStep(7), redoStepOK: true}
 
 	m, view := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/redo")
@@ -318,6 +338,8 @@ func TestRedoPreviewsTheStepAndStashesItsOwnGeneration(t *testing.T) {
 }
 
 func TestRedoConfirmRePlaysAtThePreviewedGeneration(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{
 		redoStep:   scriptedStep(7),
 		redoStepOK: true,
@@ -350,6 +372,8 @@ func TestRedoConfirmRePlaysAtThePreviewedGeneration(t *testing.T) {
 }
 
 func TestRedoConfirmOnAStaleGenerationRePreviewsInsteadOfReplaying(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{redoStep: scriptedStep(7), redoStepOK: true}
 
 	m, _ := runUndoLine(t, newTestModelEng(t, eng, testOpts), "/redo")
@@ -377,8 +401,12 @@ func TestRedoConfirmOnAStaleGenerationRePreviewsInsteadOfReplaying(t *testing.T)
 }
 
 func TestRedoWithNothingUndoneSaysSoAndStashesNothing(t *testing.T) {
+	t.Parallel()
+
 	for _, line := range []string{"/redo", "/redo confirm"} {
 		t.Run(line, func(t *testing.T) {
+			t.Parallel()
+
 			// The empty stack answers both surfaces: a preview reports no step, a redo refuses.
 			eng := &fakeEngine{redoStepOK: false, redoErr: undo.ErrNothingToRedo}
 
@@ -397,6 +425,8 @@ func TestRedoWithNothingUndoneSaysSoAndStashesNothing(t *testing.T) {
 // A stamp left by an /undo preview must not travel to the other stack: a `/redo confirm` typed
 // after it quotes zero, which the engine's stale guard refuses, so the human previews first.
 func TestRedoConfirmDoesNotSpendTheUndoStamp(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{
 		undoStep: scriptedStep(7), undoStepOK: true,
 		redoStep: scriptedStep(7), redoStepOK: true,

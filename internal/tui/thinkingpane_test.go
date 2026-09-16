@@ -18,6 +18,8 @@ func thinkingBoardWith(done, live []thinkingRecord) thinkingBoard {
 // TestThinkingRows is the pane's whole composition: which records a frame speaks for, the order it
 // puts them in, the headings it spells over them, and the plain rows it makes of their text.
 func TestThinkingRows(t *testing.T) {
+	t.Parallel()
+
 	const column = 40
 
 	main1 := thinkingRecord{run: runRef{}, turn: 1, text: "first thought"}
@@ -123,6 +125,8 @@ func TestThinkingRows(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := newTestModel(t)
 			m.thinking = tc.board
 			m.viewStack = tc.viewStack
@@ -161,6 +165,8 @@ func TestThinkingRows(t *testing.T) {
 // one — a prefix, a JSON fragment, a per-record elision, turn metadata inside the body — would
 // have to change this test by name.
 func TestThinkingRowsCarryNoClutter(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m.thinking = thinkingBoardWith([]thinkingRecord{{
 		run: runRef{}, turn: 2, text: "weigh the options",
@@ -187,6 +193,8 @@ func TestThinkingRowsCarryNoClutter(t *testing.T) {
 // viewed run's name folded in under a run view), the keys it spells, and the absence of a ctrl+r
 // key it does not answer.
 func TestThinkingContentNamesItself(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m.thinking = thinkingBoardWith([]thinkingRecord{{run: runRef{}, turn: 1, text: "hm"}}, nil)
 
@@ -217,6 +225,8 @@ func TestThinkingContentNamesItself(t *testing.T) {
 // column is the pane's inner width less the marker column and the overflow bar's reserved one, and
 // it never falls under the floor however narrow the window gets.
 func TestThinkingWrapColumnFollowsTheWindow(t *testing.T) {
+	t.Parallel()
+
 	for _, width := range []int{80, 120, 200} {
 		m := newTestModel(t)
 		m.width = width
@@ -239,6 +249,8 @@ func TestThinkingWrapColumnFollowsTheWindow(t *testing.T) {
 // derived: every rune of a canned record's text must appear, in order, in what the pane PAINTS —
 // at a narrow terminal as well as a wide one. A fixed 96-column wrap fails it at width 80.
 func TestThinkingPaneLosesNoText(t *testing.T) {
+	t.Parallel()
+
 	text := strings.Join([]string{
 		"The first line of reasoning runs well past a hundred columns so that any fixed wrap column has to cut it somewhere.",
 		"A second line, shorter, but still comfortably wider than an eighty-column terminal can seat in one row.",
@@ -313,7 +325,11 @@ func thinkingPaneModel(t *testing.T, records int) Model {
 // drawn on rows something budgeted), it is scoped as the VIEW is, and it stays a report rather than
 // a modal — a printable key still reaches the box behind it.
 func TestThinkingCommand(t *testing.T) {
+	t.Parallel()
+
 	t.Run("the verb opens the pane and drives no worker", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m = m.foldEvent(reasoningAt(runRef{}, 1, "weigh the options"))
 		m.input.SetValue("/thinking")
@@ -335,6 +351,8 @@ func TestThinkingCommand(t *testing.T) {
 	})
 
 	t.Run("inside a run view it is the viewed run's thinking alone", func(t *testing.T) {
+		t.Parallel()
+
 		child := runRef{depth: 1, spawn: "call-a"}
 		m := newTestModel(t)
 		m = m.foldEvent(reasoningAt(runRef{}, 1, "the orchestrator's own thought"))
@@ -356,6 +374,8 @@ func TestThinkingCommand(t *testing.T) {
 	})
 
 	t.Run("a printable key still reaches the box behind it", func(t *testing.T) {
+		t.Parallel()
+
 		m := thinkingPaneModel(t, 4)
 
 		m = step(t, m, keyRune('x'))
@@ -373,6 +393,8 @@ func TestThinkingCommand(t *testing.T) {
 // Turn worth reading — the one the human just watched the model work through — is on the screen
 // without a page-down per record, and the scroll keys then move from THERE.
 func TestThinkingOpensOnTheNewestRecord(t *testing.T) {
+	t.Parallel()
+
 	m := thinkingPaneModel(t, 40)
 	m.thinkingPane = reportPane{} // reopen through the verb itself, which is what sets the scroll
 	next, _ := m.runThinkingCommand()
@@ -397,6 +419,8 @@ func TestThinkingOpensOnTheNewestRecord(t *testing.T) {
 // than on the window the last reading was left at. Both ways of closing spend dismissThinking's one
 // body (dismissReport), so proving it here proves it for esc and for a click outside alike.
 func TestDismissingTheThinkingPaneDropsTheScroll(t *testing.T) {
+	t.Parallel()
+
 	m := thinkingPaneModel(t, 40)
 	m.thinkingPane.top = 7
 
@@ -417,6 +441,8 @@ func TestDismissingTheThinkingPaneDropsTheScroll(t *testing.T) {
 // already tracks the tail until the list grows by that much, so a case that appended a few rows
 // would pass against a frozen pane and prove nothing.
 func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
+	t.Parallel()
+
 	m := thinkingPaneModel(t, 6)
 	m.thinkingPane = reportPane{} // open through the verb itself, which is what arms the follow
 	next, _ := m.runThinkingCommand()

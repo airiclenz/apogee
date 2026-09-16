@@ -67,6 +67,8 @@ func TestParseCursorShapeRefusesAnUnknownName(t *testing.T) {
 
 // submitParse classifies a free-text line as a message and extracts its @file references.
 func TestPromptEditorSubmitParseMessage(t *testing.T) {
+	t.Parallel()
+
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("look at @main.go and @pkg/x.go please")
 	parsed := e.submitParse(nil)
@@ -86,6 +88,8 @@ func TestPromptEditorSubmitParseMessage(t *testing.T) {
 
 // submitParse recognises a leading /command and reports the bare verb.
 func TestPromptEditorSubmitParseCommand(t *testing.T) {
+	t.Parallel()
+
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("/clear")
 	parsed := e.submitParse(nil)
@@ -97,6 +101,8 @@ func TestPromptEditorSubmitParseCommand(t *testing.T) {
 // submitParse resolves the inline /tokens through the predicate it is handed, so a message that
 // names a skill arrives with the id extracted and the token still in its text.
 func TestPromptEditorSubmitParseExtractsSkillTokens(t *testing.T) {
+	t.Parallel()
+
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("/go-testing tidy this up")
 	parsed := e.submitParse(knownSkills("go-testing", "git"))
@@ -112,6 +118,8 @@ func TestPromptEditorSubmitParseExtractsSkillTokens(t *testing.T) {
 // edge-trigger that says a "/" menu region is open. Emptying the text is what drops the skills too
 // — they live in it as /tokens, not beside it.
 func TestPromptEditorResetClearsEverything(t *testing.T) {
+	t.Parallel()
+
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 	e.input.SetValue("half-typed /go")
 	e.autocomplete = autocompleteState{active: true, kind: acCommand}
@@ -153,6 +161,8 @@ func wrappedRowsOf(line string, width int) int {
 // bare CursorDowns therefore stalls on the first line forever and a completion spliced into the
 // second seats its caret in the middle of the first. Every rune position of each draft round-trips.
 func TestPromptEditorCaretToOffsetCrossesWrappedRows(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		width int
@@ -171,6 +181,8 @@ func TestPromptEditorCaretToOffsetCrossesWrappedRows(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			wrapped := false
 			for _, line := range strings.Split(tc.value, "\n") {
 				if wrappedRowsOf(line, tc.width) >= 2 {
@@ -227,6 +239,8 @@ func TestPromptEditorCaretToOffsetCrossesWrappedRows(t *testing.T) {
 // 0, and must land on that row's logical line at that row's first rune; the phantom row's first
 // rune is the line's end, which is exactly where a click on it belongs.
 func TestPromptEditorReseatCaretReachesEveryVisualRow(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		width int
@@ -244,6 +258,8 @@ func TestPromptEditorReseatCaretReachesEveryVisualRow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 			e.input.SetWidth(tc.width)
 			e.input.SetHeight(3) // shorter than the draft, so the scroll re-clamp runs for real
@@ -286,6 +302,8 @@ func TestPromptEditorReseatCaretReachesEveryVisualRow(t *testing.T) {
 
 // rows grows one row per logical line and clamps at maxInputRows.
 func TestPromptEditorRowsGrowsAndClamps(t *testing.T) {
+	t.Parallel()
+
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 
 	e.input.SetValue("hello")
@@ -309,6 +327,8 @@ func TestPromptEditorRowsGrowsAndClamps(t *testing.T) {
 // placeholder: the legend is derived at paint (Model.legend), so there is nothing here to swap in
 // place.
 func TestPromptEditorIdleLegendFollowsKeyDisambiguation(t *testing.T) {
+	t.Parallel()
+
 	e := newPromptEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface))
 
 	if got := e.idleLegend(); got != idlePlaceholder {
@@ -337,6 +357,8 @@ func TestPromptEditorIdleLegendFollowsKeyDisambiguation(t *testing.T) {
 // (handleKey's `case "esc"`). The LITERAL is pinned here rather than the constant, because a
 // placeholder that still promised a one-press stop would be the chrome lying about the keyboard.
 func TestRunningPlaceholderAnnouncesTheDoubleEsc(t *testing.T) {
+	t.Parallel()
+
 	const want = "queue a message…  ⏎ queue · ↑ recall · esc×2 stop"
 
 	if runningPlaceholder != want {

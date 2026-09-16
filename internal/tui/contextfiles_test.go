@@ -56,6 +56,8 @@ func restoreSession(t *testing.T, m Model) Model {
 // seed, /clear, and a /sessions restore — because each of them re-read the files, so each of
 // them may be carrying different bytes than the last.
 func TestContextFilesNoticeAtEverySessionBoundary(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		title string
 		drive func(t *testing.T, m Model) Model
@@ -67,6 +69,8 @@ func TestContextFilesNoticeAtEverySessionBoundary(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.title, func(t *testing.T) {
+			t.Parallel()
+
 			eng := &fakeEngine{contextReport: loadedReport()}
 			m := tc.drive(t, newTestModelEng(t, eng, testOpts))
 
@@ -81,6 +85,8 @@ func TestContextFilesNoticeAtEverySessionBoundary(t *testing.T) {
 // A repo carrying none of the configured names is the common case, and it stays silent: no note
 // at any boundary, not even an empty one.
 func TestContextFilesNoticeSilentWithoutFiles(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{} // the zero report: nothing loaded, nothing unreadable
 	m := restoreSession(t, clearSession(t, newTestModelEng(t, eng, testOpts)))
 
@@ -95,6 +101,8 @@ func TestContextFilesNoticeSilentWithoutFiles(t *testing.T) {
 // Several files are named in one note, in list order, while a file that is present but
 // unreadable gets a note of its own: the skip is loud, and it never fails the session.
 func TestContextFilesNoticeNamesEveryFile(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{contextReport: domain.ContextFilesReport{Files: []domain.ContextFileNote{
 		{Name: "CONVENTIONS.md", Bytes: 512},
 		{Name: "BROKEN.md", Err: "permission denied"},
@@ -116,6 +124,8 @@ func TestContextFilesNoticeNamesEveryFile(t *testing.T) {
 // escape-stripped — on the loaded line as well as the unreadable one, since the host strips
 // every composed notice rather than picking halves out of it.
 func TestContextFilesNoticeStripsEscapes(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{contextReport: domain.ContextFilesReport{Files: []domain.ContextFileNote{
 		{Name: "A\x1b[31mGENTS.md", Bytes: 512},
 		{Name: "BRO\x1b[31mKEN.md", Err: "permission\x07 denied"},
@@ -136,6 +146,8 @@ func TestContextFilesNoticeStripsEscapes(t *testing.T) {
 // Budget share — never on an unknown window (a zero share), never on content that merely fills
 // its share.
 func TestContextFilesNoticeBudgetWarn(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		title    string
 		standing int
@@ -155,6 +167,8 @@ func TestContextFilesNoticeBudgetWarn(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.title, func(t *testing.T) {
+			t.Parallel()
+
 			report := loadedReport()
 			report.StandingTokens, report.SystemShare = tc.standing, tc.share
 
@@ -209,6 +223,8 @@ func TestContextFilesNoticeNeverPersisted(t *testing.T) {
 // The notice is a boundary event, not a repaint one: a resize (or any other Msg) must never
 // re-read the report or reprint the note.
 func TestContextFilesNoticeNotReprintedOnRepaint(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{contextReport: loadedReport()}
 	m := newTestModelEng(t, eng, testOpts)
 	reads := eng.contextReads()

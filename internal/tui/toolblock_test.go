@@ -14,6 +14,8 @@ import (
 // left, dotted leader, outcome flush against the row's right edge — lie one level down under the
 // opened row, the shape docs/layout/tool-layout.md sketches.
 func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	readCall(tr, "c1", "README.md", 1, 154, 0)
 	readCall(tr, "c2", "TODO.md", 1, 408, 0)
@@ -46,6 +48,8 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 // branches, and the separators between its blocks alike — carries the │ rail gutter, so the run
 // reads as one continuous frame.
 func TestRenderGroupsInsideSubAgent(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	readCall(tr, "c1", "a.go", 1, 5, 1)
 	readCall(tr, "c2", "bb.go", 1, 9, 1)
@@ -67,6 +71,8 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 // Two different tools that share a friendly label group together — the reader groups by what the
 // header says, not by tool id.
 func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "single_find_and_replace", Arguments: []byte(`{"path":"a.go"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1", Content: "replaced text in a.go"}})
@@ -94,6 +100,8 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 // are what a super-group is — which is the point of the rename: a patch and a find-and-replace are
 // different acts, and a reader scanning the rows should be told which one ran.
 func TestRenderSplitsEditFromReplace(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "edit_existing_file",
 		Arguments: []byte(`{"path":"a.go","content":"x"}`)}})
@@ -129,6 +137,8 @@ func TestRenderSplitsEditFromReplace(t *testing.T) {
 // continues the row they opened out of; and an open member's body under a second gutter, closed by
 // the see-less footer.
 func TestRenderSuperGroupSketchStates(t *testing.T) {
+	t.Parallel()
+
 	// entries[0] and [1] are the two reads — one run — and entries[2] is the Terminal call that makes
 	// the second, which is what an umbrella needs at all (toolSuperGroup).
 	const readHead, runHead = 0, 2
@@ -152,6 +162,8 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 	}
 
 	t.Run("collapsed to its type rows", func(t *testing.T) {
+		t.Parallel()
+
 		want := strings.Join(append(header,
 			readRowShut,
 			groupMemberLine("  ┕ Terminal ⋯ exit 0"),
@@ -162,6 +174,8 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 	})
 
 	t.Run("1st step: a type row opened to its members", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		if !tr.setTypeExpanded(readHead, true) {
 			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open", readHead)
@@ -175,6 +189,8 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 	})
 
 	t.Run("2nd step: a member opened to its body", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		if !tr.setTypeExpanded(readHead, true) || !tr.setTypeExpanded(runHead, true) {
 			t.Fatal("setTypeExpanded = false; want both type rows of the umbrella open")
@@ -220,6 +236,8 @@ func runGroup(depth int, calls ...[2]string) *transcript {
 // row each with every ▶ flush against the block's right edge, whatever the commands beneath it are
 // doing.
 func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	for _, c := range []struct{ id, command, output string }{
 		{"c1", "go build ./...", "ok\nbuilt"},
@@ -260,6 +278,8 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 // wears no state indicator and takes no click — the type rows own their state, and the header's own
 // count is of CALLS.
 func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
@@ -296,6 +316,8 @@ func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 // The fixture is deliberately one long member and one short one: the short row proves the leader
 // stretches to hold its outcome at the same edge the cut row reaches by giving the target up.
 func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
+	t.Parallel()
+
 	const width = 60
 	long := "cd . && " + strings.Repeat("echo one-more-fragment && ", 6) + "true"
 
@@ -351,6 +373,8 @@ func TestGroupMemberKeepsItsSummaryAndClipsTheTarget(t *testing.T) {
 // the siblings still one row each, untouched. It is one golden because the shape is the point: a
 // gutter that lost its space or a see-less row that drifted off the edge is the failure this catches.
 func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
+	t.Parallel()
+
 	const width = 80
 	tr := runGroup(0,
 		[2]string{"go build ./...", "ok\nbuilt"},
@@ -389,6 +413,8 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 // see-less there would offer a click that does nothing; one painted no body row, so there is nothing
 // above the footer for it to be closing — the sub-agent run whose whole reveal is its railed span.
 func TestSeeLessFooterClosesAnOpenBody(t *testing.T) {
+	t.Parallel()
+
 	const width = 60
 	th := newTheme(scheme.Default())
 	body := []string{"    ok   a", "    PASS"}
@@ -403,6 +429,8 @@ func TestSeeLessFooterClosesAnOpenBody(t *testing.T) {
 		{"an empty body has nothing to close", nil, targetHeader, nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			rows := seeLessFooter(th, tc.body, width, tc.toggle)
 			if len(rows) != len(tc.want) {
 				t.Fatalf("footer painted %d rows, want %d: %q", len(rows), len(tc.want), rows)
@@ -426,6 +454,8 @@ func TestSeeLessFooterClosesAnOpenBody(t *testing.T) {
 // closes the lot. This is the click surface the mouse then resolves against (mouse.go,
 // toggleBlockAt).
 func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
+	t.Parallel()
+
 	tr := runGroup(0,
 		[2]string{"go build ./...", "ok\nbuilt"},
 		[2]string{"go vet ./...", "clean\nno findings\ndone"},
@@ -466,6 +496,8 @@ func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
 // tone (design call 8). Painted in the same style, a member's body would look like a section of the
 // delegate's frame rather than the output of one call inside it.
 func TestExpandedMemberGutterIsNotTheSubAgentRail(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")

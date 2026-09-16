@@ -81,6 +81,8 @@ func preboundModel(t *testing.T, reason PreboundReason, name string,
 // saying why it came up. The stale one names the entry that went missing — the whole reason it is a
 // reason of its own.
 func TestPreboundStartOpensTheServerPickerWithItsNotice(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name   string
 		reason PreboundReason
@@ -91,6 +93,8 @@ func TestPreboundStartOpensTheServerPickerWithItsNotice(t *testing.T) {
 		{"stale choice", PreboundStaleChoice, "old-box", `server: "old-box" names no configured entry`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m, _ := preboundModel(t, tc.reason, tc.stale, &fakeBind{}, &fakeRecorder{})
 
 			if !m.picker.open || m.picker.kind != pickerServer {
@@ -117,6 +121,8 @@ func TestPreboundStartOpensTheServerPickerWithItsNotice(t *testing.T) {
 // fills), but a beat against no Monitor would paint the session offline against an endpoint nobody
 // has named yet.
 func TestPreboundSessionIssuesNoBeat(t *testing.T) {
+	t.Parallel()
+
 	m, _ := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
 
 	if cmd := m.beatCmd(); cmd != nil {
@@ -133,6 +139,8 @@ func TestPreboundSessionIssuesNoBeat(t *testing.T) {
 // recorded as the one the next session starts on, the display adopts what came back, and the state
 // is over.
 func TestPreboundChoiceBindsRecordsAndEndsTheState(t *testing.T) {
+	t.Parallel()
+
 	bind, rec := &fakeBind{}, &fakeRecorder{saved: true}
 	m, _ := preboundModel(t, PreboundFirstBoot, "", bind, rec)
 
@@ -185,6 +193,8 @@ func TestPreboundChoiceBindsRecordsAndEndsTheState(t *testing.T) {
 // "/server <name>" is the same accept by another route, so it binds too rather than trying to switch
 // an engine that does not exist.
 func TestPreboundArgumentFormBinds(t *testing.T) {
+	t.Parallel()
+
 	bind, rec := &fakeBind{}, &fakeRecorder{}
 	m, _ := preboundModel(t, PreboundStaleChoice, "old-box", bind, rec)
 	m = step(t, m, keyEsc())
@@ -202,6 +212,8 @@ func TestPreboundArgumentFormBinds(t *testing.T) {
 // A refused construction leaves the session exactly as unbound as it was — the seam is
 // validate-then-commit — and says so.
 func TestPreboundBindFailureLeavesTheSessionUnbound(t *testing.T) {
+	t.Parallel()
+
 	bind := &fakeBind{answer: func(string) (ServerSwitchResult, error) {
 		return ServerSwitchResult{}, errors.New("auto needs a confinement backend")
 	}}
@@ -228,6 +240,8 @@ func TestPreboundBindFailureLeavesTheSessionUnbound(t *testing.T) {
 // The recording is best-effort persistence of something already true: a failed write warns and the
 // session stays on the server it just bound.
 func TestPreboundRecordFailureWarnsAndTheBindStands(t *testing.T) {
+	t.Parallel()
+
 	bind := &fakeBind{}
 	rec := &fakeRecorder{err: errors.New("permission denied")}
 	m, _ := preboundModel(t, PreboundFirstBoot, "", bind, rec)
@@ -245,6 +259,8 @@ func TestPreboundRecordFailureWarnsAndTheBindStands(t *testing.T) {
 // esc closes the pane that asked and leaves the session's own fact on the status line — the licence
 // layout.md gives every surface that gives way.
 func TestPreboundEscLeavesTheStatusLineFact(t *testing.T) {
+	t.Parallel()
+
 	m, _ := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
 
 	m = step(t, m, keyEsc())
@@ -263,6 +279,8 @@ func TestPreboundEscLeavesTheStatusLineFact(t *testing.T) {
 // A message typed while pre-bound reaches no engine: the ask comes back up carrying the same notice
 // it opened with, and the message stays in the box for the ⏎ that follows the choice.
 func TestPreboundSubmitReopensThePicker(t *testing.T) {
+	t.Parallel()
+
 	m, eng := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
 	m = step(t, m, keyEsc())
 	notesBefore := len(noteTexts(m))
@@ -287,6 +305,8 @@ func TestPreboundSubmitReopensThePicker(t *testing.T) {
 // The two verbs that open an Exchange without a message answer to the same truth, in words that name
 // the state rather than an endpoint that does not exist.
 func TestPreboundRefusesTheExchangeVerbs(t *testing.T) {
+	t.Parallel()
+
 	m, eng := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
 	m = step(t, m, keyEsc())
 
@@ -304,6 +324,8 @@ func TestPreboundRefusesTheExchangeVerbs(t *testing.T) {
 // whose read-only `servers` row already points at the file that has to be edited. No picker opens —
 // there is nothing in it — and the guidance rides the status line.
 func TestPreboundNoServersOpensSettings(t *testing.T) {
+	t.Parallel()
+
 	opts := preboundOpts(PreboundNoServers, "")
 	seams := serverSeams(&opts)
 	seams.list, seams.bind = nil, (&fakeBind{}).bind
@@ -326,6 +348,8 @@ func TestPreboundNoServersOpensSettings(t *testing.T) {
 // still said, and a message typed against it earns the same sentence rather than a picker over
 // nothing.
 func TestPreboundNoServersGuidesWithoutAPane(t *testing.T) {
+	t.Parallel()
+
 	opts := preboundOpts(PreboundNoServers, "")
 	seams := serverSeams(&opts)
 	seams.list, seams.bind = nil, (&fakeBind{}).bind
@@ -356,6 +380,8 @@ func TestPreboundNoServersGuidesWithoutAPane(t *testing.T) {
 // An ordinary bound session is untouched by any of this: the zero PreboundStart is the whole of the
 // opt-in, so no pane opens unasked and the status line stays the queue's.
 func TestBoundStartOpensNothing(t *testing.T) {
+	t.Parallel()
+
 	m, _ := seededServers(t, &fakeSwitch{})
 
 	if m.prebound() || m.picker.open || m.settings.open {

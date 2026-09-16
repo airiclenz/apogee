@@ -24,6 +24,8 @@ import (
 // fixture's hyphen ("sub-agent") is the point — it is exactly the breakpoint run the wrapper used
 // to grow past the limit.
 func TestSubAgentReflowAtSmallWidths(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const depth = 2
 	floor := depth*railWidth + th.measure.Width(glyphAssistant+" ") + 1
@@ -57,6 +59,8 @@ func TestSubAgentReflowAtSmallWidths(t *testing.T) {
 // resumes — and that refusal is what this golden pins. A FINISHED delegation carries a ✓ after its
 // name whatever its own fold flag says (design call 6).
 func TestRenderSubAgentGroupSketchStates(t *testing.T) {
+	t.Parallel()
+
 	// The three delegations stand at entries 0, 2 and 4 — each with one nested read between them.
 	const secondHead = 2
 
@@ -82,6 +86,8 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	}
 
 	t.Run("collapsed to one row per agent", func(t *testing.T) {
+		t.Parallel()
+
 		want := strings.Join(append([]string{header}, rows...), "\n")
 		if got := renderPlain(build(t), 80); got != want {
 			t.Errorf("collapsed fan-out mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
@@ -92,6 +98,8 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	// so the state that used to open a rail under the row is refused outright and the group paints
 	// exactly the rows it painted shut — no ┌─┶, no railed span, no prompt.
 	t.Run("a framed member refuses to open a rail in place", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		if tr.setExpanded(secondHead, true) {
 			t.Fatalf("setExpanded(%d, true) = true; a run opens as a view, never as a rail", secondHead)
@@ -110,6 +118,8 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 	// reported at all, and one that reported a failure is marked by its red outcome slot alone
 	// (design call 6). Both are pinned here against the very rows the goldens above carry the mark on.
 	t.Run("no ✓ while running and none on failure", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "working", 0)
 		readCall(tr, "r1", "a.go", 1, 5, 1)
@@ -135,6 +145,8 @@ func TestRenderSubAgentGroupSketchStates(t *testing.T) {
 // (ownGroup, renderSubAgentGroup). Each row carries the SKILL that answered, off the retarget item
 // 1 landed, and none of the delegation-only markings: no ✓ for having reported, no run to open.
 func TestRenderSkillGroupSketchStates(t *testing.T) {
+	t.Parallel()
+
 	build := func(fetches ...[3]string) *transcript {
 		tr := &transcript{}
 		for _, f := range fetches {
@@ -147,6 +159,8 @@ func TestRenderSkillGroupSketchStates(t *testing.T) {
 	grill := [3]string{"c3", "grill me", "Grill Me"}
 
 	t.Run("two fetches are one umbrella", func(t *testing.T) {
+		t.Parallel()
+
 		want := strings.Join([]string{
 			"✦ Skill (2)",
 			groupMemberLine("  ┝ Coding Standards ⋯"),
@@ -158,6 +172,8 @@ func TestRenderSkillGroupSketchStates(t *testing.T) {
 	})
 
 	t.Run("three fetches are one umbrella", func(t *testing.T) {
+		t.Parallel()
+
 		want := strings.Join([]string{
 			"✦ Skill (3)",
 			groupMemberLine("  ┝ Coding Standards ⋯"),
@@ -173,6 +189,8 @@ func TestRenderSkillGroupSketchStates(t *testing.T) {
 	// every other folded call gets (renderGroupMember) — and never a run view. The list is not
 	// re-headed by the interruption either: the rows after the open member resume headerless.
 	t.Run("a member opens inline, never a run view", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(standards, release)
 		if tr.entries[0].headsRun() || tr.entries[0].opensRun() {
 			t.Fatal("a skill fetch heads a run; opensRun/headsRun must stay keyed on sub_agent")
@@ -206,6 +224,8 @@ func TestRenderSkillGroupSketchStates(t *testing.T) {
 // The burst then adds nothing at all, which is the other half of the claim: the payload already rode
 // the phase, and folding it a second time would print the report twice (transcript.addToolResult).
 func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
+	t.Parallel()
+
 	// Two lines: the report lays out as the delegation's BODY, which leaves the slot to say the one
 	// word docs/layout/tool-layout.md gives a finished delegation — and gives the open state a body
 	// to show.
@@ -243,6 +263,8 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 		{name: "after the trailing result burst", burst: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := renderPlain(build(t, tc.burst), 80); got != collapsed {
 				t.Errorf("collapsed mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
 			}
@@ -267,6 +289,8 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 // and no click target at all, since there is nothing behind it to open. Its own started phase is
 // what ends that (domain.SubAgentPhaseEvent), and the row is an ordinary live delegation from there.
 func TestSubAgentScheduledUntilItStarts(t *testing.T) {
+	t.Parallel()
+
 	// Two members running with a call apiece, and a third the cap held back.
 	build := func(t *testing.T) *transcript {
 		t.Helper()
@@ -292,6 +316,8 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	// delegation opens onto today (TestRunViewPlaceholderNamesTheChild). An affordance that arrived
 	// the instant a worker freed a slot would be one no reader could learn.
 	t.Run("queued member says scheduled and still wears its indicator", func(t *testing.T) {
+		t.Parallel()
+
 		want := strings.Join(append(append([]string{header}, running...),
 			groupMemberLine("  ┕ check ⋯ scheduled")), "\n")
 		if got := renderPlain(build(t), 80); got != want {
@@ -300,6 +326,8 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	})
 
 	t.Run("queued member is a click target like its running siblings", func(t *testing.T) {
+		t.Parallel()
+
 		lines, targets := targetedRender(build(t), 80)
 		if got := targets[rowWith(t, lines, "check")].kind; got != targetHeader {
 			t.Errorf("scheduled row is target kind %v, want targetHeader", got)
@@ -312,6 +340,8 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	})
 
 	t.Run("its start ends the scheduled row", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		subAgentStarted(tr, "s3", 1)
 		want := strings.Join(append(append([]string{header}, running...),
@@ -322,6 +352,8 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	})
 
 	t.Run("started member with work is an ordinary expandable row", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		subAgentStarted(tr, "s3", 1)
 		readCall(tr, "rs3", "c.go", 1, 5, 1)
@@ -346,6 +378,8 @@ func TestSubAgentScheduledUntilItStarts(t *testing.T) {
 	// the delegation carried (renderSubAgentMemberRows), which is a swap the reader never has to
 	// notice — the row was openable throughout.
 	t.Run("a refused delegation is not scheduled", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
 			CallID: "s3", Content: "sub-agent depth limit reached", IsError: true}})
@@ -407,10 +441,14 @@ func loneDelegation(tr *transcript, id, task, path, report string) {
 // happened to stand by itself. Under ADR 0063 that row is the whole of the shape either way — a run
 // opens as a VIEW and never as a rail in place, so neither shape has a frame of its own to differ in.
 func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
+	t.Parallel()
+
 	// The claim is stronger than "it looks like the sketch": the two rows are compared BYTE FOR BYTE
 	// on the same delegation, lone and grouped, rather than restated as a second golden — two
 	// goldens is exactly how the two shapes would come to disagree.
 	t.Run("row is the grouped member's, to the byte", func(t *testing.T) {
+		t.Parallel()
+
 		lone := &transcript{}
 		loneDelegation(lone, "s1", "survey", "a.go", "all clear")
 		// The survey stands LAST in the group, which is where a lone run stands in its own list of
@@ -430,6 +468,8 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 	// A lone run refuses to open in place exactly as a grouped member does, and its span stays
 	// elided: what expanding it opens is its run view (ADR 0063).
 	t.Run("it refuses to open a rail of its own", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		loneDelegation(tr, "s1", "survey", "a.go", "all clear")
 		tr.apply(domain.MessageEvent{Text: "back to parent"})
@@ -453,6 +493,8 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 	// still working has not reported at all, and one that reported a failure is marked by its red
 	// outcome slot alone (design call 6).
 	t.Run("no ✓ while running and none on failure", func(t *testing.T) {
+		t.Parallel()
+
 		for _, tc := range []struct {
 			name  string
 			build func(tr *transcript)
@@ -474,6 +516,8 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 			},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
 				tr := &transcript{}
 				tc.build(tr)
 
@@ -496,6 +540,8 @@ func TestLoneSubAgentRunWearsTheGroupMembersRow(t *testing.T) {
 // written once and stands in the golden and in the after-the-expand comparison alike, running
 // member and finished member both.
 func TestFramedSubAgentRowKeepsItsTopLevelDetails(t *testing.T) {
+	t.Parallel()
+
 	// The first delegation is still working and has a reading of its own; the second has reported.
 	// The usage lands while only the first is open, which is the run it is attributed to.
 	build := func(t *testing.T) *transcript {
@@ -532,6 +578,8 @@ func TestFramedSubAgentRowKeepsItsTopLevelDetails(t *testing.T) {
 		{name: "a finished member keeps its count and gist", head: 2},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := build(t)
 			if tr.setExpanded(tc.head, true) {
 				t.Fatalf("setExpanded(%d, true) = true; a run opens as a view, never as a rail", tc.head)
@@ -544,6 +592,8 @@ func TestFramedSubAgentRowKeepsItsTopLevelDetails(t *testing.T) {
 }
 
 func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
+	t.Parallel()
+
 	const refusal = "sub-agent depth limit reached (max 2): cannot spawn a deeper sub-agent"
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"first"}`)}})
@@ -588,6 +638,8 @@ func TestSpanlessSubAgentHeadsGroupWithEachOther(t *testing.T) {
 // either: a run whose work died with the engine that was running it must not go on blinking at a
 // reader who resumed it hours later.
 func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	subAgentCall(tr, "s1", "survey", 0)
 	readCall(tr, "r1", "a.go", 1, 5, 1) // the child's work, settled — the head above it is not
@@ -636,6 +688,8 @@ func TestSubAgentInterruptedHeadIsNotFinished(t *testing.T) {
 // existed. Recording the phase is what would break it: subAgentReported answers from the phase, so
 // a cancelled head would tick finished on the strength of a rollback.
 func TestSubAgentCancelledFinishedLeavesTheHeadInterrupted(t *testing.T) {
+	t.Parallel()
+
 	const report = "a report no cancelled delegation ever produced"
 
 	tr := &transcript{}
@@ -681,6 +735,8 @@ func TestSubAgentCancelledFinishedLeavesTheHeadInterrupted(t *testing.T) {
 // vocabulary is anchored at the start of the head's own summary, so such a run keeps the ordinary
 // tone and the ✓ it earned.
 func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
@@ -721,6 +777,8 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 	const failedSlot = "1 tool call · error"
 
 	t.Run("a lone failed run is red on the one row it has", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		loneDelegation(tr, "s1", "broken", "a.go", "")
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
@@ -730,6 +788,8 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 	})
 
 	t.Run("a failed member of a fan-out is red beside its sibling", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "working", 0)
 		readCall(tr, "r1", "a.go", 1, 5, 1)
@@ -744,6 +804,8 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 	})
 
 	t.Run("a report that only mentions an error is not a failure", func(t *testing.T) {
+		t.Parallel()
+
 		const slot = "1 tool call · recovered from an error: all good"
 
 		tr := &transcript{}
@@ -759,6 +821,8 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 	// own verdict, gave it the done ✓. The verdict is the result's, so the row is neither red nor
 	// un-✓'d and the two marks agree.
 	t.Run("a report that opens with the failure vocabulary is not a failure", func(t *testing.T) {
+		t.Parallel()
+
 		const slot = "1 tool call · error: none found"
 
 		tr := &transcript{}
@@ -774,6 +838,8 @@ func TestFailedDelegationPaintsItsSlotRed(t *testing.T) {
 	// The lone block is collapsed, so the count of what stands behind the ▶ joins the slot after the
 	// same middle dot the stats use, and the red covers the whole of what the slot says.
 	t.Run("a delegation refused before it ran is red and wears no done mark", func(t *testing.T) {
+		t.Parallel()
+
 		const slot = "error · +1 more line"
 
 		tr := &transcript{}
@@ -816,10 +882,14 @@ const (
 // frame around a delegation and never what the delegation shows of itself, so the lone block and
 // the grouped member say the same rows in their own frames.
 func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
+	t.Parallel()
+
 	const width = 80
 	prompt := []string{"task: survey the tests", "and report back", "with detail"}
 
 	t.Run("a lone block opens onto the prompt", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		refusedDelegation(tr, "s1", refusedTask)
 		if !tr.setExpanded(0, true) {
@@ -845,6 +915,8 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 	})
 
 	t.Run("collapsed it is one row", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		refusedDelegation(tr, "s1", refusedTask)
 
@@ -858,6 +930,8 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 	})
 
 	t.Run("a grouped member opens onto the same rows", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		refusedDelegation(tr, "s1", refusedTask)
 		refusedDelegation(tr, "s2", "build it")
@@ -916,6 +990,8 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 	// replayed from a session written before the text was retained (transcriptbridge.go) — opens
 	// onto nothing, so its member row stays bare however its siblings fold (subAgentHidesPrompt).
 	t.Run("a shut member with no prompt wears nothing", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		refusedDelegation(tr, "s1", refusedTask)
 		refusedDelegation(tr, "s2", "")
@@ -933,6 +1009,8 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 	// The prompt is the UNFRAMED reading's alone. A delegation with a run behind it shows its task
 	// in its view (ADR 0063), so the block here neither opens nor grows the lead line.
 	t.Run("a delegation with a span shows no prompt body at all", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		subAgentCall(tr, "s1", refusedTask, 0)
 		readCall(tr, "r1", "a.go", 1, 5, 1)
@@ -972,6 +1050,8 @@ func TestUnframedSubAgentShowsThePromptWhenExpanded(t *testing.T) {
 // refusal still in its slot, because an indicator bought by demoting the outcome would be the fold
 // paying for the affordance with what the row says.
 func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
+	t.Parallel()
+
 	// Long enough that the guard refuses it at the narrow end of the table and admits it at the
 	// wide end — the depth bound's own wording with the sentence it closes with.
 	const refusal = refusedResult + " — no further delegation is possible"
@@ -991,6 +1071,8 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 		{"and at 120 columns", 120, refusal},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			subAgentCall(tr, "s1", refusedTask, 0)
 			subAgentReport(tr, "s1", refusal, 0)
@@ -1032,6 +1114,8 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 	// while wearing the ▶ that opens onto the prompt — the binding "no unconditional demote"
 	// (render.go's rooted paint) asked of a fold rather than of a lone block.
 	t.Run("a folded grouped member keeps its promoted refusal at 110 columns", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		subAgentCall(tr, "s1", refusedTask, 0)
 		subAgentReport(tr, "s1", refusal, 0)
@@ -1060,6 +1144,8 @@ func TestNeverRanDelegationRowIsExpandableAtEveryWidth(t *testing.T) {
 // whether a reader could watch it at all — in exactly the case parallel delegation exists to make
 // (ADR 0039). Recorded in the issue register, 2026-09-01.
 func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
+	t.Parallel()
+
 	const width = 80
 
 	// Two children with a slot apiece and nothing committed behind either: the shape a fan-out
@@ -1072,6 +1158,8 @@ func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
 	}
 
 	t.Run("both folded rows wear the indicator and carry their own entry", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		started(tr)
 
@@ -1099,6 +1187,8 @@ func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
 	})
 
 	t.Run("activating a member opens that member's own child", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m.transcript.reset()
 		m.transcript.addUser("survey the repo", nil)
@@ -1123,6 +1213,8 @@ func TestRunningGroupedDelegationOpensItsChild(t *testing.T) {
 // throughout — which is what leaves a record with no retained task (transcriptbridge.go) showing the
 // view it always showed.
 func TestSubAgentPromptDetailsLeadsWithTheTask(t *testing.T) {
+	t.Parallel()
+
 	long := strings.Repeat("x", detailClipRunes+20)
 
 	for _, tc := range []struct {
@@ -1138,6 +1230,8 @@ func TestSubAgentPromptDetailsLeadsWithTheTask(t *testing.T) {
 		{"every line is held to the detail clip", long, []string{clipDetail(unframedSubAgentPromptLead + long)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := subAgentPromptDetails(tc.task)
 
 			text := make([]string, 0, len(got))
@@ -1167,6 +1261,8 @@ func TestSubAgentPromptDetailsLeadsWithTheTask(t *testing.T) {
 // other rule. It must still paint as three separate blocks, with the delegation opening onto the
 // prompt it carried rather than shrinking to an umbrella member row that has nowhere to show it.
 func TestUnframedSubAgentNeverFoldsIntoASuperGroup(t *testing.T) {
+	t.Parallel()
+
 	const width = 80
 
 	tr := &transcript{}
@@ -1207,6 +1303,8 @@ func TestUnframedSubAgentNeverFoldsIntoASuperGroup(t *testing.T) {
 // else the task it was given, else the constant — so a delegation the model named nothing still
 // reads as something rather than as a gap between two separators.
 func TestBreadcrumbTrailNamesTheWayBackUp(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	delegationCall(tr, "", "s1", "planner", "plan the work", 0)
 	delegationCall(tr, "s1", "s2", "repo-scout", "scout the repo", 1)
@@ -1245,6 +1343,8 @@ func TestBreadcrumbTrailNamesTheWayBackUp(t *testing.T) {
 // make out — and the row is squared to the width either way, so the header's field runs the whole
 // way across instead of showing the terminal's background through the gap.
 func TestBreadcrumbRowSpendsItsWidthInOrder(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const trail = "← main › repo-scout"
 
@@ -1348,6 +1448,8 @@ func backgroundToken(t *testing.T, probe string) string {
 // flag meaning on a sub_agent call is the one reading that is not a run: a delegation that is OVER
 // and left nothing behind it still opens onto the prompt it carried (unframedSubAgentView).
 func TestRunHeadOwnsNoBlockState(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name       string
 		build      func(tr *transcript)
@@ -1384,6 +1486,8 @@ func TestRunHeadOwnsNoBlockState(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(tr)
 
@@ -1417,6 +1521,8 @@ func TestRunHeadOwnsNoBlockState(t *testing.T) {
 // line as its gist and no more of it anywhere, and the run's own view, where the report stands
 // exactly once — as the last row, after the work, under the task the child was handed.
 func TestFinishedRunSaysItsReportOnce(t *testing.T) {
+	t.Parallel()
+
 	const report = "Found 4 gaps\nin the suite\nhere they are"
 	build := func() *transcript {
 		tr := &transcript{}
@@ -1429,6 +1535,8 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 	}
 
 	t.Run("the conversation's row keeps the gist and nothing else", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build()
 		if tr.setExpanded(0, true) {
 			t.Fatal("setExpanded(0, true) = true; a run opens as a view, never as a rail")
@@ -1446,6 +1554,8 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 	})
 
 	t.Run("the run's view holds the one formatted copy", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build()
 		tr.setRoot(runRef{depth: 1, spawn: "s1"})
 
@@ -1506,6 +1616,8 @@ const (
 // all three; the row's outcome slot is where it has to land. Before this the slot said the fixed
 // word "done" over a capped run and over a steered one alike, which is the regression this pins.
 func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
+	t.Parallel()
+
 	// One painted row per case: the head's own, found by the count its slot opens with. The width is
 	// generous on purpose — what is under test is what the slot SAYS, and a row narrow enough to clip
 	// it would assert the geometry instead.
@@ -1579,6 +1691,8 @@ func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			loneDelegation(tr, "s1", "survey the tests", "a.go", "")
 			report(tr, tc.content, tc.failed)
@@ -1594,6 +1708,8 @@ func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
 // of them mid-report has not been capped and has not been steered, and a row that said so would be
 // reporting a fact the run never produced.
 func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name    string
 		content string
@@ -1604,6 +1720,8 @@ func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
 		{"the notice quoted mid-report", "The child said:" + envelopeSteeredTwo + "\nand carried on"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := delegationVerdict(tc.content); got != delegationDoneVerdict {
 				t.Errorf("delegationVerdict = %q, want %q", got, delegationDoneVerdict)
 			}
@@ -1626,6 +1744,8 @@ func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
 // the row's spelling: a run stopped at its step cap did not finish, keeps the ordinary marker tone,
 // and wears no ✓.
 func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
@@ -1658,6 +1778,8 @@ func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 	}
 
 	t.Run("a finished run is green on the one row it has", func(t *testing.T) {
+		t.Parallel()
+
 		const slot = "1 tool call · done"
 
 		tr := &transcript{}
@@ -1676,6 +1798,8 @@ func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 	})
 
 	t.Run("a run stopped at its step cap keeps the marker tone", func(t *testing.T) {
+		t.Parallel()
+
 		const slot = "1 tool call · stopped at its step cap"
 
 		tr := &transcript{}
@@ -1709,6 +1833,8 @@ func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 // applied by CALL ID, so it must land on the member it names and leave its sibling wearing the task
 // it was given (ADR 0039).
 func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
+	t.Parallel()
+
 	const name = "test-surveyor"
 
 	build := func(t *testing.T) *transcript {
@@ -1732,6 +1858,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	// The collapsed group is where the delegation is READ: its member row leads with the head's
 	// Target, so the rename is visible on the scrollback without opening anything.
 	t.Run("the collapsed member row wears it and its sibling is untouched", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		rename(tr, "s1", name)
 
@@ -1746,6 +1874,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	})
 
 	t.Run("the breadcrumb trail names it", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		rename(tr, "s1", name)
 
@@ -1761,6 +1891,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	// of the head like the rest. The fold that renames the head is the same one that re-resolves the
 	// box (fold.go), which is why the legend never lags a rename by an event.
 	t.Run("the run view's invitation names it", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelViewingChild(t, &fakeEngine{}, childRunning)
 		m = m.foldEvent(domain.SubAgentNamedEvent{
 			EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
@@ -1776,6 +1908,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	})
 
 	t.Run("the /usage row names it", func(t *testing.T) {
+		t.Parallel()
+
 		m := usageModel(t, mainTotals, 8192)
 		m = delegate(t, m, "s1", "survey the tests", childTotals, 16384)
 		m = delegate(t, m, "s2", "build the docs", childTotals, 0)
@@ -1799,6 +1933,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	// has to reach the row through the run head the fold rewrote. Asserted off the rendered phrase,
 	// never off transcript.runName, because the row is what the human reads.
 	t.Run("the status line names it", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m = m.foldEvent(domain.ToolCallEvent{
 			Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey the tests"}`)},
@@ -1824,6 +1960,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	// event beat its parent's tool call in — renames nothing rather than renaming the last run it
 	// finds, and appends nothing either.
 	t.Run("an unknown call id renames nothing", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		before := renderPlain(tr, 80)
 		rename(tr, "gone", name)
@@ -1839,6 +1977,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	// The control: a delegation the model named itself is one the engine never renames (no event is
 	// emitted for it at all), so its row goes on saying what its call said.
 	t.Run("a call the model named is unchanged when no event fires", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		delegationCall(tr, "", "s1", "planner", "plan the work", 0)
 
@@ -1852,6 +1992,8 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 	// A record saved before the rename and resumed after it would otherwise paint the task's first
 	// line the session had already stopped showing (ADR 0068).
 	t.Run("a record saved after the rename comes back wearing it", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t)
 		rename(tr, "s1", name)
 
@@ -1914,6 +2056,8 @@ func skippedDelegation(tr *transcript, id, task string, burst bool) {
 // are the body under the task the delegation carried, exactly as a refusal's are
 // (TestUnframedSubAgentShowsThePromptWhenExpanded).
 func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
+	t.Parallel()
+
 	const width = 80
 	// The word the row must NOT say: a delegation whose finished phase arrived is over, and a rule
 	// that read only the missing started phase would leave it queued for the rest of the session.
@@ -1953,6 +2097,8 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 		{name: "after the trailing result burst", burst: true},
 	} {
 		t.Run("collapsed "+tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := renderPlain(build(t, tc.burst), width)
 			if got != collapsed {
 				t.Errorf("collapsed mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, collapsed)
@@ -1967,6 +2113,8 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 	}
 
 	t.Run("expanded, the skip content is the body", func(t *testing.T) {
+		t.Parallel()
+
 		tr := build(t, true)
 		if !tr.setExpanded(2, true) {
 			t.Fatalf("setExpanded(2, true) = false; want the skipped member open")
@@ -1989,6 +2137,8 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 	// A lone skipped delegation — a message queued before the group's only delegation could start
 	// — is the same head in the lone frame: the refusal's shape row for row.
 	t.Run("a lone skipped delegation opens onto the same words", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		skippedDelegation(tr, "s1", "check", true)
 		if got := renderPlain(tr, width); strings.Contains(got, scheduledWord) || !strings.Contains(got, "error") {

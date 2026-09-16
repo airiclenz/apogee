@@ -65,6 +65,8 @@ func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscr
 // fixture: it is the one kind that may never be cached (refreshStartup rewrites it in place), so
 // its presence pins that "all hits" means "every block the cache is allowed to hold".
 func TestPaintCacheServesAnUnchangedTranscript(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := warmed(feed(
 		domain.MessageEvent{Text: "the first answer, long enough to wrap somewhere in here"},
@@ -94,6 +96,8 @@ func TestPaintCacheServesAnUnchangedTranscript(t *testing.T) {
 // width, and a blink flip over a LIVE block. This is the hit/miss case in both directions — the
 // changed block misses, and what it paints is still right.
 func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := warmed(feed(
 		domain.MessageEvent{Text: "an answer"},
@@ -149,6 +153,8 @@ func TestPaintCacheRepaintsWhenTheKeyMoves(t *testing.T) {
 // the LAST member of a run is the case a head-only key would serve stale, since nothing else about
 // the block moved.
 func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	for i, c := range [][2]string{
@@ -188,6 +194,8 @@ func TestPaintCacheCoversEveryGroupMemberState(t *testing.T) {
 // keeps the cache from answering about the old one. Without the clear in transcript.reset this
 // test paints the FIRST session's message at index 1.
 func TestPaintCacheDoesNotSurviveAReset(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	tr.addStartup(startupView{Host: "localhost", Model: "test"})
@@ -214,6 +222,8 @@ func TestPaintCacheDoesNotSurviveAReset(t *testing.T) {
 // on a cache that the previous ones have filled, which is the only way a stale row can be observed
 // at all. Several steps assert mid-way as well, at a state the loop would otherwise skip past.
 func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	tr.addStartup(startupView{Host: "localhost", Model: "connecting…", Version: "0.0.0"})
@@ -371,6 +381,8 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 // changes on every token), so the number a token append must not move is the count of paints
 // performed over the COMMITTED entries — and that number is zero.
 func TestPaintCacheRepaintsOnlyTheStreamingTail(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := warmed(&transcript{})
 	const exchanges = 25 // 25 prompts + 25 answers = 50 settled blocks
@@ -476,6 +488,8 @@ func equalLines(a, b []string) bool {
 // paint the top level left behind at those very indices. Both directions are checked, because the
 // hazard is symmetric: what a view memoises must not be served back to the conversation either.
 func TestPaintCacheKeysOnTheRoot(t *testing.T) {
+	t.Parallel()
+
 	tr, root := rootedFixture()
 	tr = warmed(tr)
 	th := newTheme(scheme.Default())

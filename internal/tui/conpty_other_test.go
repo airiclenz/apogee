@@ -13,5 +13,7 @@ import "testing"
 // console-mode defect (see altscreen_windows.go for why it cannot exist anywhere else), and there
 // is no pseudoconsole off Windows to host it in.
 func TestConPTYPaintsTheIntendedFrame(t *testing.T) {
+	t.Parallel()
+
 	t.Skip("the ConPTY harness is Windows-only: the ghosting it guards is a Windows console-mode defect")
 }

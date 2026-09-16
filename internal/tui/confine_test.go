@@ -57,6 +57,8 @@ func runConfineLine(t *testing.T, eng *fakeEngine, opts Options, line string) (M
 }
 
 func TestConfineOffTogglesTheEngineAndStatesTheBlastRadius(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: true}
 	_, view := runConfineLine(t, eng, confineOpts(degradedHost, domain.ModeAuto), "/confine off")
 
@@ -71,6 +73,8 @@ func TestConfineOffTogglesTheEngineAndStatesTheBlastRadius(t *testing.T) {
 }
 
 func TestConfineOnTogglesTheEngineBack(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: false} // an earlier /confine off in this session
 	_, view := runConfineLine(t, eng, confineOpts(degradedHost, domain.ModeAuto), "/confine on")
 
@@ -88,6 +92,8 @@ func TestConfineOnTogglesTheEngineBack(t *testing.T) {
 }
 
 func TestConfineOffWhenAlreadyOffSaysSo(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: false}
 	_, view := runConfineLine(t, eng, confineOpts(degradedHost, domain.ModeAuto), "/confine off")
 
@@ -102,6 +108,8 @@ func TestConfineOffWhenAlreadyOffSaysSo(t *testing.T) {
 }
 
 func TestConfineOnWhenAlreadyOnSaysSo(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: true}
 	_, view := runConfineLine(t, eng, confineOpts(capableHost, domain.ModeAuto), "/confine on")
 
@@ -114,6 +122,8 @@ func TestConfineOnWhenAlreadyOnSaysSo(t *testing.T) {
 }
 
 func TestConfineOffOnACapableHostIsAllowedAndSaysSo(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: true}
 	_, view := runConfineLine(t, eng, confineOpts(capableHost, domain.ModeAuto), "/confine off")
 
@@ -126,8 +136,12 @@ func TestConfineOffOnACapableHostIsAllowedAndSaysSo(t *testing.T) {
 }
 
 func TestConfineStatusReportsAndTouchesNothing(t *testing.T) {
+	t.Parallel()
+
 	for _, line := range []string{"/confine", "/confine status"} {
 		t.Run(line, func(t *testing.T) {
+			t.Parallel()
+
 			eng := &fakeEngine{confine: true}
 			_, view := runConfineLine(t, eng, confineOpts(degradedHost, domain.ModeAuto), line)
 
@@ -144,6 +158,8 @@ func TestConfineStatusReportsAndTouchesNothing(t *testing.T) {
 }
 
 func TestConfineOffSaveDrivesTheWriterSeam(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: true}
 	calls := 0
 	opts := confineOpts(degradedHost, domain.ModeAuto)
@@ -167,6 +183,8 @@ func TestConfineOffSaveDrivesTheWriterSeam(t *testing.T) {
 }
 
 func TestConfineOffSaveFailureLeavesTheSessionToggleStanding(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: true}
 	opts := confineOpts(degradedHost, domain.ModeAuto)
 	opts.Config = fakeConfigHost{
@@ -185,6 +203,8 @@ func TestConfineOffSaveFailureLeavesTheSessionToggleStanding(t *testing.T) {
 }
 
 func TestConfineOffSaveWithoutAWriterSaysNothingWasWritten(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: true} // opts.Config is nil
 	_, view := runConfineLine(t, eng, confineOpts(degradedHost, domain.ModeAuto), "/confine off --save")
 
@@ -197,6 +217,8 @@ func TestConfineOffSaveWithoutAWriterSaysNothingWasWritten(t *testing.T) {
 }
 
 func TestConfineArgumentErrorReportsTheUsageLine(t *testing.T) {
+	t.Parallel()
+
 	eng := &fakeEngine{confine: true}
 	_, view := runConfineLine(t, eng, confineOpts(degradedHost, domain.ModeAuto), "/confine sideways")
 
@@ -217,6 +239,8 @@ func TestConfineArgumentErrorReportsTheUsageLine(t *testing.T) {
 // /settings mode row both read it from here, so the equality is on the WHOLE string — a reworded
 // half would be two claims about one rung again.
 func TestAutoBlastRadiusLineByFenceState(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name    string
 		info    ConfinementInfo
@@ -238,6 +262,8 @@ func TestAutoBlastRadiusLineByFenceState(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := autoBlastRadiusLine(c.info, c.confine); got != c.want {
 				t.Errorf("autoBlastRadiusLine = %q, want %q", got, c.want)
 			}
@@ -246,6 +272,8 @@ func TestAutoBlastRadiusLineByFenceState(t *testing.T) {
 }
 
 func TestConfineStatusReportWording(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name    string
 		info    ConfinementInfo
@@ -286,6 +314,8 @@ func TestConfineStatusReportWording(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := confineStatusReport(c.info, c.mode, c.confine)
 			for _, want := range c.want {
 				if !strings.Contains(got, want) {
@@ -302,6 +332,8 @@ func TestConfineStatusReportWording(t *testing.T) {
 }
 
 func TestConfineToggleNotesNeverClaimARepair(t *testing.T) {
+	t.Parallel()
+
 	// TODO constraint 1: the wording states the blast radius; it must never read as fixing a
 	// malfunction, because nothing is broken — the ladder is doing what ADR 0012 says.
 	notes := []string{
@@ -322,6 +354,8 @@ func TestConfineToggleNotesNeverClaimARepair(t *testing.T) {
 }
 
 func TestConfineOffNoteOnALowerRungSaysWhereItApplies(t *testing.T) {
+	t.Parallel()
+
 	got := confineOffNote(degradedHost, domain.ModeAllowEdits, true)
 	if !strings.Contains(got, "allow edits") || !strings.Contains(got, "auto") {
 		t.Errorf("note does not say the setting applies in auto:\n%s", got)
@@ -329,6 +363,8 @@ func TestConfineOffNoteOnALowerRungSaysWhereItApplies(t *testing.T) {
 }
 
 func TestConfineOnNoteLeavesThePersistedEntryAlone(t *testing.T) {
+	t.Parallel()
+
 	got := confineOnNote(degradedHost, domain.ModeAuto, false)
 	if !strings.Contains(got, "unconfined-hosts:") || !strings.Contains(got, "untouched") {
 		t.Errorf("note does not say a saved acknowledgement is untouched:\n%s", got)

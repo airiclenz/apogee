@@ -34,6 +34,8 @@ func backdateActivity(m *Model, at time.Time) {
 // TestActivityText proves the phrase every kind renders, that idle says nothing at all, and
 // that a Depth > 0 activity is prefixed with the same sub-agent label the transcript rail uses.
 func TestActivityText(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name string
 		act  activity
@@ -61,6 +63,8 @@ func TestActivityText(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tc.act.text(""); got != tc.want {
 				t.Errorf("text() = %q, want %q", got, tc.want)
 			}
@@ -73,6 +77,8 @@ func TestActivityText(t *testing.T) {
 // target the registry also carries never reaches the status line: the tool-call block a line below
 // already names it, and the path was what pushed the context gauge off the row.
 func TestToolActivityVerb(t *testing.T) {
+	t.Parallel()
+
 	longPath := "internal/tui/" + strings.Repeat("deeply-nested/", 6) + "main.go"
 
 	tests := []struct {
@@ -108,6 +114,8 @@ func TestToolActivityVerb(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := toolActivityVerb(tc.call, workspaceRoot{}); got != tc.want {
 				t.Errorf("toolActivityVerb() = %q, want %q", got, tc.want)
 			}
@@ -123,6 +131,8 @@ func TestToolActivityVerb(t *testing.T) {
 // seconds below a minute, "Nm SSs" with zero-padded seconds above it, and no hour form (a long
 // call keeps counting minutes).
 func TestFormatElapsed(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		d    time.Duration
 		want string
@@ -141,6 +151,8 @@ func TestFormatElapsed(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.want, func(t *testing.T) {
+			t.Parallel()
+
 			if got := formatElapsed(tc.d); got != tc.want {
 				t.Errorf("formatElapsed(%v) = %q, want %q", tc.d, got, tc.want)
 			}
@@ -151,6 +163,8 @@ func TestFormatElapsed(t *testing.T) {
 // TestActivityElapsed proves the clock measures from the activity's own start and never
 // reports an absurd duration for an activity that was never given one.
 func TestActivityElapsed(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	if got := (activity{}).elapsed(now); got != 0 {
 		t.Errorf("a zero since elapsed to %v, want 0", got)
@@ -176,6 +190,8 @@ func TestActivityElapsed(t *testing.T) {
 // engine; a stopping worker already tells the human what it is doing; a compaction emits nothing
 // until it lands; and a threshold of 0 is the key's own off switch.
 func TestActivityQuiet(t *testing.T) {
+	t.Parallel()
+
 	now := time.Now()
 	const after = 90 * time.Second
 	silentFor := func(d time.Duration) time.Time { return now.Add(-d) }
@@ -269,6 +285,8 @@ func TestActivityQuiet(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if owed := tc.act.quiet(tc.lastEvent, now, tc.after); owed != tc.wantOwed {
 				t.Errorf("quiet() = %v, want %v", owed, tc.wantOwed)
 			}
@@ -285,6 +303,8 @@ func TestActivityQuiet(t *testing.T) {
 //
 // The table walks every kind in the vocabulary, so a new one has to be answered for here as well.
 func TestMoveActivityRestampsOnlyWatchedKinds(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name        string
 		kind        activityKind
@@ -300,6 +320,8 @@ func TestMoveActivityRestampsOnlyWatchedKinds(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := newTestModel(t)
 			heardAt := time.Now().Add(-20 * time.Minute)
 			m.lastEvent = heardAt
@@ -325,6 +347,8 @@ func TestMoveActivityRestampsOnlyWatchedKinds(t *testing.T) {
 // TestFoldActivitySequence walks a realistic turn — reasoning, streamed text, a tool call, its
 // result, the closing message — and asserts the phrase at every step.
 func TestFoldActivitySequence(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 
 	steps := []struct {
@@ -368,6 +392,8 @@ func TestFoldActivitySequence(t *testing.T) {
 // and a clock keyed on that text would show the second file's call still counting the first one's
 // seconds. Within one call the reverse holds: re-announcing it must not restart anything.
 func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 
 	m = m.foldEvent(domain.TokenEvent{Text: "one"})
@@ -417,6 +443,8 @@ func TestFoldActivityClockRunsPerPhrase(t *testing.T) {
 // TestFoldActivityDepthPrefixesSubAgent proves a nested (Depth > 0) event renders under the
 // sub-agent label, and that the parent resuming at Depth 0 drops the prefix again.
 func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 
 	m = m.foldEvent(domain.ToolCallEvent{
@@ -443,6 +471,8 @@ func TestFoldActivityDepthPrefixesSubAgent(t *testing.T) {
 // both read exactly as the line read before names existed. The clock is read at the activity's own
 // start so the phrase is asserted whole, "0s" and all.
 func TestStatusPhraseNamesTheActingDelegation(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name string
 		head string // the spawning sub_agent call's arguments; "" = no run head folds at all
@@ -464,6 +494,8 @@ func TestStatusPhraseNamesTheActingDelegation(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := newTestModel(t)
 			if tc.head != "" {
 				m = m.foldEvent(domain.ToolCallEvent{
@@ -484,6 +516,8 @@ func TestStatusPhraseNamesTheActingDelegation(t *testing.T) {
 // TestStatusPhraseDropsTheNameWhenTheParentResumes proves the name is the ACTING agent's, not a mode
 // the slot latches into: the parent's own events carry no spawning call, so its phrase is bare again.
 func TestStatusPhraseDropsTheNameWhenTheParentResumes(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m = m.foldEvent(domain.ToolCallEvent{
 		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"name":"repo-scout","task":"audit"}`)},
@@ -522,6 +556,8 @@ func fannedOutModel(t *testing.T) Model {
 // other, so the row flipped to whichever spoke last and restarted its clock doing so; a slot per run
 // lets the row say the one honest thing it has space for — how many are working, and for how long.
 func TestStatusPhraseMergesConcurrentDelegates(t *testing.T) {
+	t.Parallel()
+
 	m := fannedOutModel(t)
 
 	if got, want := len(m.acts.children()), 2; got != want {
@@ -551,6 +587,8 @@ func TestStatusPhraseMergesConcurrentDelegates(t *testing.T) {
 // own phase event, and that the row falls back a rung each time: the merged count to the one
 // delegate still working, and that one to the parent's own word.
 func TestStatusPhraseFallsBackAsDelegatesFinish(t *testing.T) {
+	t.Parallel()
+
 	m := fannedOutModel(t)
 
 	m = m.foldEvent(domain.SubAgentPhaseEvent{
@@ -582,6 +620,8 @@ func TestStatusPhraseFallsBackAsDelegatesFinish(t *testing.T) {
 // child's own depth (internal/agent/dispatch.go), so a queued delegate joining leaves the running
 // ones exactly where they are.
 func TestActivityBoardClosesChildSlotsWhenTheParentSpeaks(t *testing.T) {
+	t.Parallel()
+
 	m := fannedOutModel(t)
 
 	m = m.foldEvent(domain.SubAgentPhaseEvent{
@@ -607,6 +647,8 @@ func TestActivityBoardClosesChildSlotsWhenTheParentSpeaks(t *testing.T) {
 // reaching the fold after the stop must never take the row back and tell the human their stop was
 // ignored (activity.go, model.go stopWorker).
 func TestStatusPhraseStopsTheWholeRun(t *testing.T) {
+	t.Parallel()
+
 	m := fannedOutModel(t)
 
 	m.stopWorker()
@@ -626,6 +668,8 @@ func TestStatusPhraseStopsTheWholeRun(t *testing.T) {
 // last result lands — one result while another call is still open must not claim the model is
 // thinking again.
 func TestFoldActivityBatchStaysOnTool(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)}})
 	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "2", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)}})
@@ -645,6 +689,8 @@ func TestFoldActivityBatchStaysOnTool(t *testing.T) {
 // worker keeps emitting until it reaches a quiescent boundary, and none of those events may
 // overwrite "stopping". Only finishWorker clears it.
 func TestFoldActivityStoppingIsSticky(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m.setActivity(runRef{}, actStopping, "")
 
@@ -671,6 +717,8 @@ func TestFoldActivityStoppingIsSticky(t *testing.T) {
 // TestFoldActivityIgnoresObservationalEvents proves the accounting and audit events leave the
 // live phrase alone — the status line must not flicker off the work actually in flight.
 func TestFoldActivityIgnoresObservationalEvents(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "1", Tool: "terminal", Arguments: []byte(`{"command":"go test"}`)}})
 	want := shownAct(m)

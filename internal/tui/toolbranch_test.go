@@ -18,6 +18,8 @@ import (
 // outcome in the slot — and its type row, which could not sum a run with an open member, with the
 // run's total.
 func TestRenderGroupWithInFlightMember(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	readCall(tr, "c1", "README.md", 1, 154, 0)
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c2", Tool: "read_file", Arguments: []byte(`{"path":"TODO.md"}`)}})
@@ -57,6 +59,8 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 // first one's target — there is no column to re-measure, the leader simply absorbs whatever the two
 // targets differ by.
 func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	readCall(tr, "c1", "main.go", 1, 154, 0)
 
@@ -91,6 +95,8 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 // none of them lays out at all: the block spends its one row on the leader and that row's own slot
 // counts the body whole (collapsedBodyRows, collapsedRemainder), which is the shape the sketch draws.
 func TestRenderMultiDetailStandalone(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal", Arguments: []byte(`{"command":"go test ./..."}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
@@ -113,6 +119,8 @@ func TestRenderMultiDetailStandalone(t *testing.T) {
 // Asserted expanded, because a collapsed diff paints no body line at all (collapsedBodyRows) and
 // there would be no colour to see.
 func TestRenderDiffDetailStandalone(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "c1",
@@ -171,6 +179,8 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 // shape: a collapsed diff hides its body whole like every other block (collapsedBodyRows), so its
 // hunks are what a click reveals.
 func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
 	tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
@@ -204,6 +214,8 @@ func TestRenderDiffMatchesLayoutSketch(t *testing.T) {
 // A diff whose body is hidden still names the whole change on its branch: the diffstat counts
 // every line, and the count beside it in the same slot says how many the collapsed paint withheld.
 func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
+	t.Parallel()
+
 	const longDiff = 25 // well past the collapsed budget, so the stat and the paint cannot agree by luck
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}})
@@ -232,6 +244,8 @@ func TestRenderDiffStatSurvivesTheBodyCap(t *testing.T) {
 // (collapsedBodyRows) and the branch row's own slot counts the body whole, down to a body of one
 // line — there is no length at which a collapsed block starts previewing its output.
 func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
+	t.Parallel()
+
 	diffLines := func(n int) string {
 		return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n")
 	}
@@ -273,6 +287,8 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(tr)
 			if got := tr.entries[0].tool.Details.len(); got != tc.wantKept {
@@ -298,6 +314,8 @@ func TestCollapsedPaintTruncatesRetainedBodies(t *testing.T) {
 // fixtures, because that is the claim — nothing about the entry changes but the flag the painter
 // reads (layout.md, "Collapsed and expanded blocks").
 func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
+	t.Parallel()
+
 	diffContent := func(n int) string { return strings.TrimSuffix(strings.Repeat("+ added\n", n), "\n") }
 	// The body is the diff's own regions now, so every row carries the after-file line it sits on,
 	// right-aligned into one gutter for the whole body (stackedDiffLines).
@@ -350,6 +368,8 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(tr)
 			// The block is a header, a branch line, then its body: everything past the branch is
@@ -398,6 +418,8 @@ func TestExpandedBlockPaintsItsWholeBody(t *testing.T) {
 // subtests fails the day the two roles resolve to the same colour: a contrast step that quietly went
 // away would satisfy every equality beneath it.
 func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
@@ -407,6 +429,8 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 	}
 
 	t.Run("a single block", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c1", Tool: "terminal",
 			Arguments: []byte(`{"command":"go test ./..."}`)}})
@@ -438,6 +462,8 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 	})
 
 	t.Run("a group member", func(t *testing.T) {
+		t.Parallel()
+
 		// Both members carry a MULTI-line body: a one-line output rides the branch as the call's
 		// summary instead, which would leave the member with nothing to open.
 		tr := runGroup(0, [2]string{"go build ./...", "ok\nbuilt"}, [2]string{"go vet ./...", "clean\ndone"})
@@ -475,6 +501,8 @@ func TestExpandedBlockLiftsItsDetailTone(t *testing.T) {
 // every kind: the paints must differ (the tone step is there) and each must be exactly what
 // detailStyle hands out for that state (the band is under it, and under nothing else).
 func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
@@ -489,6 +517,8 @@ func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			line := []detailLine{{Kind: tc.kind, Text: "+ added"}}
 			branch := branchMarker(true) // one line, so it is the list's last: the ┕ elbow
 			closed, _ := clipDetails(th, line, 40)
@@ -534,6 +564,8 @@ func TestDiffLinesKeepTheirColourInBothBlockStates(t *testing.T) {
 // regression that put the direction back on the glyphs would show up here as a foreground that is
 // neither `muted` nor `muted-bright`.
 func TestDetailStyleBandsTheDiffKindsUnderTheStateTone(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	cases := []struct {
 		name string
@@ -545,6 +577,8 @@ func TestDetailStyleBandsTheDiffKindsUnderTheStateTone(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			for _, expanded := range []bool{false, true} {
 				got := detailStyle(th, tc.kind, expanded)
 				if want := detailTone(th, expanded).GetForeground(); got.GetForeground() != want {
@@ -570,6 +604,8 @@ func TestDetailStyleBandsTheDiffKindsUnderTheStateTone(t *testing.T) {
 // row it ends, and a tail appended past the column would fold that row in two and spend a row the
 // budget does not have (clipWrap).
 func TestCollapsedBlockStandsAtMostTwoRows(t *testing.T) {
+	t.Parallel()
+
 	const width = 80
 	command := strings.Repeat("cd . && head -3 go.mod && ", 16)[:400]
 
@@ -606,6 +642,8 @@ func TestCollapsedBlockStandsAtMostTwoRows(t *testing.T) {
 // indicator at all (docs/layout/tool-layout.md). The block therefore wears nothing, marks nothing,
 // and a click on it keeps its selection meaning, at any width.
 func TestClippedTargetAloneIsNoToggleTarget(t *testing.T) {
+	t.Parallel()
+
 	const width = 60
 	path := "internal/" + strings.Repeat("deeply-nested-package/", 6) + "main.go"
 
@@ -656,6 +694,8 @@ func askUserCall(tr *transcript, id, args, answer string) {
 // painter rule is new here — that is the claim. Once the presenter hands the block a body, the
 // machinery already in place gives the exchange its permanent shape.
 func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	askUserCall(tr, "c1", `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`, "Ask before")
 
@@ -698,9 +738,13 @@ func TestAnsweredAskUserBlockPaintsTheRecord(t *testing.T) {
 // included — keeps the click that closes it again. A question still on the screen hides nothing and
 // is no target at all.
 func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
+	t.Parallel()
+
 	const question = `{"question":"Which mode?","choices":["Plan","Ask before","Auto"]}`
 
 	t.Run("an answered question marks its rows", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		askUserCall(tr, "c1", question, "Ask before")
 
@@ -731,6 +775,8 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 	})
 
 	t.Run("a pending question is no target", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		askUserCall(tr, "c1", question, "")
 
@@ -748,7 +794,11 @@ func TestAnsweredAskUserBlockIsAToggleTarget(t *testing.T) {
 // nothing has been answered, so there is no record to stand alone — which is what keeps this a rule
 // about records and not a rule about Ask User.
 func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
+	t.Parallel()
+
 	t.Run("answered questions stand alone", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "Yes")
 		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "No")
@@ -773,6 +823,8 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 	// presenter — so it rides the wire (session.ToolView.Solo). Without it a resumed session would fold
 	// two records into one group, which is the scrollback changing shape across a restart.
 	t.Run("a replayed record still stands alone", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "Yes")
 		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "No")
@@ -792,6 +844,8 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 	})
 
 	t.Run("pending questions still group", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		askUserCall(tr, "c1", `{"question":"Ship it?","choices":["Yes","No"]}`, "")
 		askUserCall(tr, "c2", `{"question":"Tag it?","choices":["Yes","No"]}`, "")
@@ -1083,6 +1137,8 @@ func TestSplitDiffPaintsAFileHeaderPerSection(t *testing.T) {
 // apogee's verdict about the call and does paint red. Telling those two apart by their spelling is
 // exactly what F-29 could not do.
 func TestOutcomeSlotPaintsTheSummarysOwnVerdict(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
@@ -1112,6 +1168,8 @@ func TestOutcomeSlotPaintsTheSummarysOwnVerdict(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := tc.view.Summary.Text; got != tc.slot {
 				t.Fatalf("outcome slot = %q, want %q", got, tc.slot)
 			}
@@ -1143,6 +1201,8 @@ func TestOutcomeSlotPaintsTheSummarysOwnVerdict(t *testing.T) {
 // carries one of its own: the row reads red because the summary says so, not because a painter
 // recognised the house plural on its way past (runAggregate, namedSummary).
 func TestRunAggregateCarriesItsFailureVerdict(t *testing.T) {
+	t.Parallel()
+
 	run := []toolView{
 		{Summary: summaryOnly(errorSummaryPrefix + "no such file").Summary},
 		{Summary: typedSummary(pluralStat(5, "line"))},
@@ -1172,6 +1232,8 @@ func TestRunAggregateCarriesItsFailureVerdict(t *testing.T) {
 // the marker tone, and a failed one is red, since the success verdict may never talk a failure out
 // of its red.
 func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	if !colorActive(th) {
 		t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
@@ -1225,6 +1287,8 @@ func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			view := delegation(t, tc.content, tc.failed)
 
 			if got := view.Summary.Text; got != tc.slot {
@@ -1255,6 +1319,8 @@ func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
 // the ENGINE drove a run to its boundary. The match is on the whole phrase too, so a sentence that
 // merely contains the word is not the verdict.
 func TestSummaryStyleGreensOnlyTheDelegationVerdict(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 
 	for _, tc := range []struct {
@@ -1276,6 +1342,8 @@ func TestSummaryStyleGreensOnlyTheDelegationVerdict(t *testing.T) {
 		{"", false},
 	} {
 		t.Run(tc.text, func(t *testing.T) {
+			t.Parallel()
+
 			got := succeededSummary(tc.text)
 			if got != tc.want {
 				t.Fatalf("succeededSummary(%q) = %v, want %v", tc.text, got, tc.want)

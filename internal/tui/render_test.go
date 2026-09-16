@@ -104,6 +104,8 @@ func firingBlock(answer string) *transcript {
 // pointer beneath it. It is one transcript toggled rather than two fixtures, because that is the
 // claim: nothing about the entry changes but the flag the painter reads.
 func TestFiringBlockCollapsesToItsRemainderCount(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name                        string
 		answer                      string
@@ -144,6 +146,8 @@ func TestFiringBlockCollapsesToItsRemainderCount(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := firingBlock(tc.answer)
 
 			if got, want := renderPlain(tr, 80), strings.Join(tc.wantCollapsed, "\n"); got != want {
@@ -167,6 +171,8 @@ func TestFiringBlockCollapsesToItsRemainderCount(t *testing.T) {
 // both blink phases — most of all while the Firing is still going, which is the one frame a star
 // would have blinked in.
 func TestFiringBlockHeaderNeverBlinks(t *testing.T) {
+	t.Parallel()
+
 	open := &transcript{}
 	open.addFiring(schedule.Event{
 		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy", Prompt: "check the log",
@@ -184,6 +190,8 @@ func TestFiringBlockHeaderNeverBlinks(t *testing.T) {
 		{"a Firing that returned", firingBlock("the log is clean"), "⟳ Schedule"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := headerStar(t, tc.tr, false); got != tc.want {
 				t.Errorf("header at the settled phase = %q, want %q", got, tc.want)
 			}
@@ -201,11 +209,15 @@ func TestFiringBlockHeaderNeverBlinks(t *testing.T) {
 // sub-agent tool name over deeper entries — so a rule that stopped checking the entry kind fails
 // here rather than quietly regrouping the transcript.
 func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
+	t.Parallel()
+
 	fired := schedule.Event{
 		Kind: schedule.EventFired, ScheduleID: "sch-1", ScheduleName: "nightly tidy", Prompt: "check the log",
 	}
 
 	t.Run("it breaks a run of same-label calls", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		readCall(tr, "c1", "main.go", 1, 154, 0)
 		tr.addFiring(fired)
@@ -222,6 +234,8 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 	})
 
 	t.Run("it opens no sub-agent span", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		tr.addFiring(fired)
 		tr.entries[0].tool.name = subAgentToolName
@@ -268,6 +282,8 @@ func TestFiringBlockJoinsNoToolGrouping(t *testing.T) {
 // regression in any of them changes this golden, and the golden doubles as the living example of
 // what the canon spec sketches.
 func TestTranscriptLayoutGolden(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.addUser("read the docs, then run the tests", nil)
 	tr.apply(domain.TokenEvent{Text: "Reading the docs first."})
@@ -369,6 +385,8 @@ func numberedLines(n int) string {
 // A buffer far longer than the bound paints its LAST lines and none of its first: the preview is
 // the tail of the reply, which is the only part of it the viewport can show.
 func TestPreviewPaintsOnlyItsTail(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const lines = previewTailLines * 4
 	tr := streamingPreview(numberedLines(lines))
@@ -390,6 +408,8 @@ func TestPreviewPaintsOnlyItsTail(t *testing.T) {
 // over the bound. What a repaint pays is a function of the screen, not of the reply's length —
 // which is what removes the O(N²) term over a streaming turn.
 func TestPreviewRowCountIsBounded(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	huge := streamingPreview(numberedLines(10000)).renderLines(th, 80)
 	justOver := streamingPreview(numberedLines(previewTailLines+1)).renderLines(th, 80)
@@ -403,6 +423,8 @@ func TestPreviewRowCountIsBounded(t *testing.T) {
 // A buffer under the bound — every reply anyone actually reads — paints byte-identically to what
 // it painted before the bound existed: the whole buffer, trailing blank lines held back.
 func TestPreviewUnderTheBoundIsUnchanged(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const text = "# Heading\n\nsome prose that is long enough to wrap once at this width, and then some.\n\n- a\n- b\n\n\n"
 
@@ -419,6 +441,8 @@ func TestPreviewUnderTheBoundIsUnchanged(t *testing.T) {
 // An empty buffer still renders its lone marker line, so the human sees that streaming has begun
 // (the contract paintPreview has always carried).
 func TestPreviewOfAnEmptyBufferKeepsItsMarker(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := &transcript{streaming: true}
 
@@ -516,6 +540,8 @@ func rootedFixture() (*transcript, runRef) {
 // human's prompt above it, the sibling delegation beside it, the nested run's own span — is not
 // there at all.
 func TestRootedPaintShowsOneRunAndNothingElse(t *testing.T) {
+	t.Parallel()
+
 	tr, root := rootedFixture()
 	tr.apply(domain.TokenEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "still looking"})
 	tr.setRoot(root)
@@ -549,6 +575,8 @@ func TestRootedPaintShowsOneRunAndNothingElse(t *testing.T) {
 // paint and not by accounting: it never freezes at the top of the viewport, because the thing a
 // reader needs frozen in a run view is the way back out.
 func TestRootedPaintRegistersNoUserBlock(t *testing.T) {
+	t.Parallel()
+
 	tr, root := rootedFixture()
 	tr.setRoot(root)
 	view := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint)
@@ -581,6 +609,8 @@ func TestRootedPaintRegistersNoUserBlock(t *testing.T) {
 // at the zero value paints byte for byte what it painted before the view was ever opened — the same
 // lines, the same click surface, the same user blocks, and no header of its own.
 func TestUnrootedPaintIsUnchangedByAVisit(t *testing.T) {
+	t.Parallel()
+
 	tr, root := rootedFixture()
 	tr.paints = newPaintCache()
 	th := newTheme(scheme.Default())
@@ -606,6 +636,8 @@ func TestUnrootedPaintIsUnchangedByAVisit(t *testing.T) {
 // leaves the view held two columns off the right edge, the very margin the status line's right slot
 // keeps below it (layout.md, "The status line's right slot").
 func TestRunViewHeaderIsDrawnByTheStickyOverlay(t *testing.T) {
+	t.Parallel()
+
 	tr, root := rootedFixture()
 	m := newTestModel(t)
 	m.transcript = *tr

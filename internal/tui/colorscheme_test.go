@@ -93,6 +93,8 @@ func colorSchemeNote(t *testing.T, m Model) string {
 // force marked, and the grammar for the two things to do next. Built-ins and user files are one
 // list, because the human picks a NAME and shadowing has already decided which file that name means.
 func TestColorSchemeCommandListsWhatCanBeSwitchedTo(t *testing.T) {
+	t.Parallel()
+
 	opts := colorSchemeOpts(nil, []string{"dark", "light", "mine"}, nil, nil)
 	opts.ColorSchemeName = "light"
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme")
@@ -112,6 +114,8 @@ func TestColorSchemeCommandListsWhatCanBeSwitchedTo(t *testing.T) {
 // unmarked list: the screen is drawn in the default while the file names something else, and that
 // gap is exactly what the listing is opened to explain (the forgiving load, ADR 0040 design call 8).
 func TestColorSchemeCommandNamesAConfiguredSchemeThatIsNotOnOffer(t *testing.T) {
+	t.Parallel()
+
 	opts := colorSchemeOpts(nil, []string{"dark", "light"}, nil, nil)
 	opts.ColorSchemeName = "solarized"
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme")
@@ -125,6 +129,8 @@ func TestColorSchemeCommandNamesAConfiguredSchemeThatIsNotOnOffer(t *testing.T) 
 // so instead of naming the built-ins it could not load either — the nil-seam degrade every provider
 // in [Options] takes.
 func TestColorSchemeCommandWithNoDiscoverySeam(t *testing.T) {
+	t.Parallel()
+
 	opts := testOpts // no scheme host at all
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme")
 
@@ -138,6 +144,8 @@ func TestColorSchemeCommandWithNoDiscoverySeam(t *testing.T) {
 // disk, every style is rebuilt from what came back, and the terminal is asked to clear — so the file
 // and the screen say the same thing whichever way the human got there.
 func TestColorSchemeCommandSwitchesAndPersists(t *testing.T) {
+	t.Parallel()
+
 	log := &settingsWriteLog{}
 	var asked []string
 	opts := colorSchemeOpts(log, []string{"dark", "light"}, func(name string) (scheme.Scheme, []string) {
@@ -174,6 +182,8 @@ func TestColorSchemeCommandSwitchesAndPersists(t *testing.T) {
 // palette — and each complaint reaches the human as its own ephemeral note, with the confirmation
 // pointing at them rather than repeating them.
 func TestColorSchemeCommandSurfacesResolveWarnings(t *testing.T) {
+	t.Parallel()
+
 	const warning = `color-scheme "mine.yaml": key "error": bad hex "#zz0000" — using default`
 	opts := colorSchemeOpts(&settingsWriteLog{}, []string{"dark", "mine"},
 		func(string) (scheme.Scheme, []string) { return stubScheme("#654321"), []string{warning} }, nil)
@@ -193,6 +203,8 @@ func TestColorSchemeCommandSurfacesResolveWarnings(t *testing.T) {
 // A refused write changes NOTHING: the file still names the old scheme, so the screen must go on
 // showing it, and the refusal is an error entry because the act did not happen.
 func TestColorSchemeCommandReportsARefusedWrite(t *testing.T) {
+	t.Parallel()
+
 	log := &settingsWriteLog{err: errors.New("config home is read-only")}
 	var resolved bool
 	opts := colorSchemeOpts(log, []string{"dark", "light"}, func(string) (scheme.Scheme, []string) {
@@ -219,6 +231,8 @@ func TestColorSchemeCommandReportsARefusedWrite(t *testing.T) {
 // The write landed and the apply could not happen: ADR 0037 decision 1 says the write STANDS, so the
 // note is the same "saved — live apply failed" sentence the settings row gives, not a refusal.
 func TestColorSchemeCommandKeepsTheWriteWhenTheApplyCannotHappen(t *testing.T) {
+	t.Parallel()
+
 	log := &settingsWriteLog{}
 	opts := colorSchemeOpts(log, []string{"dark", "light"}, nil, nil) // no ResolveScheme
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme light")
@@ -235,6 +249,8 @@ func TestColorSchemeCommandKeepsTheWriteWhenTheApplyCannotHappen(t *testing.T) {
 // wrote and the line that loads it back — under the SAME name, because a user file shadows the
 // built-in it was copied from (design call 6).
 func TestColorSchemeCommandExportsAnEditableCopy(t *testing.T) {
+	t.Parallel()
+
 	var asked []string
 	opts := colorSchemeOpts(nil, []string{"dark", "light"}, nil, func(name string) (string, error) {
 		asked = append(asked, name)
@@ -260,6 +276,8 @@ func TestColorSchemeCommandExportsAnEditableCopy(t *testing.T) {
 // the transcript as an ERROR — the file the human asked for is not there, and a note would read like
 // it was.
 func TestColorSchemeCommandSurfacesARefusedExport(t *testing.T) {
+	t.Parallel()
+
 	const refusal = `apogee: color-scheme "/home/u/.apogee/schemes/dark.yaml" already exists — edit it or delete it first`
 	opts := colorSchemeOpts(nil, []string{"dark"}, nil, func(string) (string, error) {
 		return "", errors.New(refusal)
@@ -278,6 +296,8 @@ func TestColorSchemeCommandSurfacesARefusedExport(t *testing.T) {
 // Without an export seam there is nowhere to write to, and saying so beats a silence that looks
 // exactly like a successful export.
 func TestColorSchemeCommandWithNoExportSeam(t *testing.T) {
+	t.Parallel()
+
 	opts := colorSchemeOpts(nil, []string{"dark"}, nil, nil)
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme export dark")
 
@@ -290,6 +310,8 @@ func TestColorSchemeCommandWithNoExportSeam(t *testing.T) {
 // A line the parser could not read reports the usage and drives nothing — the /confine posture, and
 // the reason it matters here: a guessed switch repaints the screen and writes the config.
 func TestColorSchemeCommandReportsItsUsageOnABadLine(t *testing.T) {
+	t.Parallel()
+
 	log := &settingsWriteLog{}
 	opts := colorSchemeOpts(log, []string{"dark", "light"},
 		func(string) (scheme.Scheme, []string) { return stubScheme("#123456"), nil }, nil)

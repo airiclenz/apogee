@@ -44,6 +44,7 @@ import (
 // a swap changes the var and the cache busts naturally; or (2) always pass -count=1, the
 // canonical cache disable (there is no clean in-test API to self-disable caching). `make
 // live-eval` bakes in -count=1 so the right thing is the easy thing.
+// serial: an env-gated live run against one shared model server; parallel live runs would contend for it.
 func TestE2ELiveModel(t *testing.T) {
 	endpoint := os.Getenv("APOGEE_LIVE_ENDPOINT")
 	if endpoint == "" {

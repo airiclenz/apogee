@@ -19,6 +19,8 @@ import (
 // processing, size detection and the cursor optimizations, so the trace would record a different
 // program from the one being debugged.
 func TestTracedOutputIsATermFileOverStdout(t *testing.T) {
+	t.Parallel()
+
 	traced, err := newTracedOutput(os.Stdout, filepath.Join(t.TempDir(), "trace.txt"))
 	if err != nil {
 		t.Fatalf("newTracedOutput: %v", err)
@@ -34,6 +36,8 @@ func TestTracedOutputIsATermFileOverStdout(t *testing.T) {
 // TestTracedOutputTeesEveryWriteToTheTraceFile pins the tee: the terminal gets the bytes and the
 // trace gets a faithful, re-parsable record of the same bytes, in the same order.
 func TestTracedOutputTeesEveryWriteToTheTraceFile(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	screen, err := os.Create(filepath.Join(dir, "screen.bin")) // the stand-in terminal
 	if err != nil {
@@ -89,6 +93,8 @@ func TestTracedOutputTeesEveryWriteToTheTraceFile(t *testing.T) {
 // else. Closing the process's stdout because a diagnostic was switched on would be a far worse
 // bug than the one the diagnostic is chasing.
 func TestTracedOutputCloseLeavesTheTerminalOpen(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	screen, err := os.Create(filepath.Join(dir, "screen.bin"))
 	if err != nil {
@@ -110,6 +116,8 @@ func TestTracedOutputCloseLeavesTheTerminalOpen(t *testing.T) {
 // TestProgramOptionsInstallNoTraceWhenTheFlagIsUnset is the guard against an always-on wrapper:
 // with no --tui-trace the program must be built with exactly the options it has always had.
 func TestProgramOptionsInstallNoTraceWhenTheFlagIsUnset(t *testing.T) {
+	t.Parallel()
+
 	opts, traced, err := programOptions(context.Background(), Options{}, nil, false)
 	if err != nil {
 		t.Fatalf("programOptions: %v", err)
@@ -125,6 +133,8 @@ func TestProgramOptionsInstallNoTraceWhenTheFlagIsUnset(t *testing.T) {
 // TestProgramOptionsInstallTheTraceWhenTheFlagIsSet is the other half: a named path adds the
 // output option and hands back the file the caller has to close.
 func TestProgramOptionsInstallTheTraceWhenTheFlagIsSet(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "trace.txt")
 	opts, traced, err := programOptions(context.Background(), Options{TracePath: path}, nil, false)
 	if err != nil {
@@ -145,6 +155,8 @@ func TestProgramOptionsInstallTheTraceWhenTheFlagIsSet(t *testing.T) {
 // TestProgramOptionsReportAnUnopenableTracePath: a bad path is a start-up error the human sees,
 // not a silently-dropped flag that leaves them waiting for a file that never appears.
 func TestProgramOptionsReportAnUnopenableTracePath(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "no-such-dir", "trace.txt")
 	if _, _, err := programOptions(context.Background(), Options{TracePath: path}, nil, false); err == nil {
 		t.Errorf("programOptions(%q) succeeded, want an error", path)
@@ -155,6 +167,8 @@ func TestProgramOptionsReportAnUnopenableTracePath(t *testing.T) {
 // to this terminal, with an unset one spelled unambiguously rather than left blank, plus the
 // width method the painter starts on.
 func TestDiagLogRecordsTheStartupEnvironment(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "diag.txt")
 	diag, err := newDiagLog(path)
 	if err != nil {
@@ -245,6 +259,8 @@ func TestDiagLogReadsAPainterEnvironmentTheWayThePainterWill(t *testing.T) {
 // message the width authority already observes, and the resulting width method is recorded
 // beside it.
 func TestDiagLogRecordsAModeReportFedThroughUpdate(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "diag.txt")
 	diag, err := newDiagLog(path)
 	if err != nil {
@@ -276,6 +292,8 @@ func TestDiagLogRecordsAModeReportFedThroughUpdate(t *testing.T) {
 // TestDiagLogSuppressesUnchangedValues: the log is meant to be pasted into an issue, so a size
 // re-reported every frame or a mode answered twice the same way must not repeat.
 func TestDiagLogSuppressesUnchangedValues(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "diag.txt")
 	diag, err := newDiagLog(path)
 	if err != nil {
@@ -303,6 +321,8 @@ func TestDiagLogSuppressesUnchangedValues(t *testing.T) {
 // kind — which is what makes a terminal that stopped reporting visible as presses with nothing
 // following them.
 func TestDiagLogRecordsMouseEventKinds(t *testing.T) {
+	t.Parallel()
+
 	path := filepath.Join(t.TempDir(), "diag.txt")
 	diag, err := newDiagLog(path)
 	if err != nil {
@@ -328,6 +348,8 @@ func TestDiagLogRecordsMouseEventKinds(t *testing.T) {
 // TestDiagLogIsNilSafeWhenTheFlagIsUnset: nil is the off state and every observation point runs
 // unconditionally, so a nil log that panicked would take down every ordinary session.
 func TestDiagLogIsNilSafeWhenTheFlagIsUnset(t *testing.T) {
+	t.Parallel()
+
 	var diag *diagLog
 	diag.start(os.Getenv, nil, ansi.WcWidth)
 	diag.observe(tea.WindowSizeMsg{Width: 80, Height: 24})

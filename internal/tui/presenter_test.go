@@ -610,6 +610,8 @@ func TestPresentedEntryKeepsPathAndURLWhole(t *testing.T) {
 // scroll to go and find the tail with), and the widget's rows must still be the stored lines one for
 // one — the wrap that saves the URL is the painter's, done before the line is stored.
 func TestPresentedURLSurvivesANarrowWindow(t *testing.T) {
+	t.Parallel()
+
 	const url = "http://192.168.64.2:51234/d/0123456789abcdef0123456789abcdef/architecture-review.html"
 
 	m := newTestModel(t)

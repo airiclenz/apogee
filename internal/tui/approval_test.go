@@ -24,6 +24,8 @@ import (
 // (TestModelApprovalFlattensFieldsThatCouldForgeRows): the forged text is still on the pane after
 // the fix — folded into the title it belongs to — so a substring check passes on the forgery.
 func TestModelApprovalTitleFoldsAToolNameNewline(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:      "terminal\nReason: pre-approved",
@@ -58,6 +60,8 @@ func TestModelApprovalTitleFoldsAToolNameNewline(t *testing.T) {
 // Reason it widens — labelled by this Driver rather than by the engine, and
 // it is ABSENT (not blank) for the overwhelming majority of calls, whose tools declare no scope.
 func TestModelApprovalRendersTheDeclaredScope(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:      "diagnostics",
@@ -92,6 +96,8 @@ func TestModelApprovalRendersTheDeclaredScope(t *testing.T) {
 // actually reads (ConsoleSend.ApprovalScope, ADR 0059). The tool words it and the pane paints it,
 // and both halves are asserted here — the wording is only worth having if it survives the pane.
 func TestModelApprovalNamesTheConsoleASendReaches(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	call := domain.ToolCall{ID: "1", Tool: "console_send", Arguments: json.RawMessage(`{"id":3,"input":"npm test"}`)}
 	req := domain.ApprovalRequest{
@@ -115,6 +121,8 @@ func TestModelApprovalNamesTheConsoleASendReaches(t *testing.T) {
 // forged "Reason:" the human then authorises against. It counts ROWS rather than substrings,
 // because the forged text is still on the pane after the fix — folded into the line it belongs to.
 func TestModelApprovalFlattensAScopeThatCouldForgeARow(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:      "diagnostics",
@@ -144,6 +152,8 @@ func TestModelApprovalFlattensAScopeThatCouldForgeARow(t *testing.T) {
 // the ratified wording, and it is the LAST body line: it qualifies a decision row rather than the
 // call above it.
 func TestModelApprovalDisclosesTheMCPServerGrant(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:           "github__search",
@@ -188,6 +198,8 @@ func TestModelApprovalDisclosesTheMCPServerGrant(t *testing.T) {
 // human then authorises against. It counts ROWS rather than substrings, because the forged text is
 // still on the pane after the fix, folded into the line it belongs to.
 func TestModelApprovalFlattensAServerAliasThatCouldForgeARow(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:           "evil__tool",
@@ -219,6 +231,8 @@ func TestModelApprovalFlattensAServerAliasThatCouldForgeARow(t *testing.T) {
 // highlight walks and the pointer seats over the three rows that ARE there, and one faint line under
 // the menu says why — otherwise a pane one row shorter than the one before it would read as a bug.
 func TestModelApprovalHidesTheSessionRowOnAForcedGate(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:      "terminal",
@@ -287,6 +301,8 @@ func TestModelApprovalHidesTheSessionRowOnAForcedGate(t *testing.T) {
 // The ordinary gate is the control: a request the engine CAN remember (a CacheKey) keeps its four
 // rows, its `s`, and no disclosure — the pane the mockup draws, unchanged to the byte.
 func TestModelApprovalKeepsTheSessionRowOnAnOrdinaryGate(t *testing.T) {
+	t.Parallel()
+
 	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 100, Height: 30})
 	req := domain.ApprovalRequest{
 		Tool:      "terminal",
@@ -330,6 +346,8 @@ func TestModelApprovalKeepsTheSessionRowOnAnOrdinaryGate(t *testing.T) {
 // the screen at every window the pane is drawn in, and the disclosure is back once the window can
 // pay for it, below `Cancel` as the golden (t10-forced-pane.txt) draws it.
 func TestModelApprovalForcedPaneKeepsADecisionRowAtTheFloor(t *testing.T) {
+	t.Parallel()
+
 	req := domain.ApprovalRequest{
 		Tool:      "terminal",
 		Reason:    "dangerous-action guard forced approval",
@@ -348,6 +366,8 @@ func TestModelApprovalForcedPaneKeepsADecisionRowAtTheFloor(t *testing.T) {
 		{30, true},
 	} {
 		t.Run(fmt.Sprintf("80×%d", tc.height), func(t *testing.T) {
+			t.Parallel()
+
 			m := modelWithOverlayRoomAt(t, 80, tc.height, Options{Workspace: "/ws/a"})
 			pane := m.approvalPrompt(req)
 			rows := strings.Split(ansiPattern.ReplaceAllString(pane, ""), "\n")

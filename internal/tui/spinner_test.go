@@ -703,6 +703,8 @@ func openCall(m *Model, id, command string) {
 // stash refreshViewport writes (m.lines) is the observable: a sentinel left standing is a repaint
 // that did not happen.
 func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
+	t.Parallel()
+
 	const sentinel = "left standing by a tick that drew nothing"
 
 	running := newTestModel(t)
@@ -761,6 +763,8 @@ func TestSpinnerTickRepaintsOnlyOnAFlipWhileACallIsOpen(t *testing.T) {
 // early to leave the offset exactly where the human put it, but it swaps the content lines before it
 // does, and that is what carries the new glyph onto the screen without re-attaching the view.
 func TestTickRepaintReachesADetachedViewport(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 	m.input.SetValue("run the tests")
 	m = step(t, m, keyEnter())
@@ -796,6 +800,8 @@ func TestTickRepaintReachesADetachedViewport(t *testing.T) {
 // of the star's own — while a selection over text the flip did not touch lives through the same
 // repaint.
 func TestBlinkingStarDropsOnlyTheSelectionsSpanningIt(t *testing.T) {
+	t.Parallel()
+
 	// live returns a running model whose transcript is exactly the given lead-in plus one open
 	// tool-call block, repainted and with a drag-selection armed across the viewport's first row.
 	live := func(t *testing.T, leadIn func(m *Model)) Model {

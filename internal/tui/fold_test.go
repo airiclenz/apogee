@@ -721,6 +721,8 @@ func TestFoldStatsSubFloorWindowReadsUnmeasured(t *testing.T) {
 // moment ago. The frame is asserted as well as the derivation: the painted box is what the human
 // reads.
 func TestFoldSubAgentNamedEventReResolvesThePlaceholder(t *testing.T) {
+	t.Parallel()
+
 	const want = "Message repo scout…  ⏎ send · ↑ recall · esc back"
 
 	m := modelViewingChild(t, &fakeEngine{}, childRunning)
@@ -746,6 +748,8 @@ func TestFoldSubAgentNamedEventReResolvesThePlaceholder(t *testing.T) {
 // not put the child's invitation on the box they are typing into — the derivation answers the
 // ask state without consulting the view.
 func TestFoldSubAgentNamedEventLeavesABorrowedBoxAlone(t *testing.T) {
+	t.Parallel()
+
 	m := modelViewingChild(t, &fakeEngine{}, childRunning)
 
 	m.state = stateAwaitingAsk

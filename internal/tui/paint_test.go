@@ -142,6 +142,8 @@ func transcriptPaintRows(t *testing.T, m Model, method ansi.Method) []string {
 // width methods. Only the trailing blanks differ — the composed view pads rows out to the block
 // width, and a terminal paints nothing in a blank cell at the end of a line.
 func TestPaintFrameMatchesTheViewOnASCII(t *testing.T) {
+	t.Parallel()
+
 	m := paintTestModel(t, "a plain ascii tail paragraph")
 
 	want := strings.Split(plain(m.View()), "\n")
@@ -172,8 +174,12 @@ func trimRight(s string) string { return strings.TrimRight(s, " ") }
 // column short. joinScrollbar (model.go) squares every row off in the authority's measure instead,
 // which is by construction the measure the frame is painted in.
 func TestPaintedScrollbarHoldsOneColumn(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := paintedAs(t, paintTestModel(t, "danger "+vs16Warning+" here", "a plain ascii tail paragraph"), tc.method)
 
 			columns := map[int]int{}
@@ -215,6 +221,8 @@ func TestPaintedScrollbarHoldsOneColumn(t *testing.T) {
 // a hard-wired GraphemeWidth rather than the authority (ADR 0030) comes out a column long here on
 // the WcWidth painter, which is the default one.
 func TestTableDividerHoldsOneColumn(t *testing.T) {
+	t.Parallel()
+
 	source := strings.Join([]string{
 		"| Tool | Calls | Notes |",
 		"|:--|--:|:-:|",
@@ -224,6 +232,8 @@ func TestTableDividerHoldsOneColumn(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			for _, glyph := range []string{glyphTableColumn, glyphTableCross} {
 				if got := paintedWidth(glyph, tc.method); got != 1 {
 					t.Errorf("%q paints %d columns, want the one cell tableDividerWidth assumes", glyph, got)
@@ -258,8 +268,12 @@ func TestTableDividerHoldsOneColumn(t *testing.T) {
 // cells wide, so it can only ever show a cap violation as silently lost content. Measuring the
 // row the Model hands bubbletea, with the painter's own method, catches the overrun itself.
 func TestComposedFrameHoldsTheWidthCapWhenPainted(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := paintedAs(t, paintTestModel(t,
 				"a plain ascii tail paragraph",
 				"日本語のテキストと ascii が混ざった段落",
@@ -282,6 +296,8 @@ func TestComposedFrameHoldsTheWidthCapWhenPainted(t *testing.T) {
 // in WcWidth unless a terminal answers mode 2027. A dependency bump that moves either number
 // changes what the TUI paints, so it should fail here first and loudly.
 func TestPaintedWidthMeasuresDisagreeOnVS16(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name              string
 		s                 string
@@ -296,6 +312,8 @@ func TestPaintedWidthMeasuresDisagreeOnVS16(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := paintedWidth(tc.s, ansi.GraphemeWidth); got != tc.grapheme {
 				t.Errorf("GraphemeWidth(%q) = %d, want %d", tc.s, got, tc.grapheme)
 			}
@@ -321,6 +339,8 @@ func TestPaintedWidthMeasuresDisagreeOnVS16(t *testing.T) {
 // own version of the bar drifting left. Routing the measure and the pad through th.measure
 // (ADR 0030) is what squares them, and the fixture's second row is the straight edge that proves it.
 func TestPaintedPopupColumnsHoldOneOffset(t *testing.T) {
+	t.Parallel()
+
 	rows := []popupRow{
 		{"danger " + vs16Warning, "— first"},
 		{"eight_ok", "— second"}, // eight cells in EITHER measure
@@ -328,6 +348,8 @@ func TestPaintedPopupColumnsHoldOneOffset(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
@@ -354,10 +376,14 @@ func TestPaintedPopupColumnsHoldOneOffset(t *testing.T) {
 // Measuring and cutting must also agree with EACH OTHER (ADR 0030 §3), which is why the function
 // takes both operations off th.measure rather than pairing one with ansi.Truncate.
 func TestPopupTruncationFollowsThePainter(t *testing.T) {
+	t.Parallel()
+
 	const title = "danger " + vs16Warning // eight painted cells under WcWidth, nine under GraphemeWidth
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
@@ -382,8 +408,12 @@ func TestPopupTruncationFollowsThePainter(t *testing.T) {
 // painter is not on leaves the bar a column short on exactly the row carrying ⚠️ — the row a human
 // would read as a rendering glitch rather than as a width bug.
 func TestPaintedQueuedBandFillsTheWindow(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := stageRow(t, paintedAs(t, runningModel(t), tc.method), "danger "+vs16Warning+" queued")
 
 			lines := strings.Split(strip(m.renderPendingInterjections()), "\n")
@@ -418,6 +448,8 @@ func TestPaintedQueuedBandFillsTheWindow(t *testing.T) {
 // The GraphemeWidth arm is the case the two measures agree about, so it passed before the fix too;
 // it is here to pin that the fix left the agreeing case exactly where it was.
 func TestPaintedBoxRowsAreNotFolded(t *testing.T) {
+	t.Parallel()
+
 	// One row of ⚠️ , six times: twelve cells to the WcWidth painter and eighteen to lipgloss, which
 	// is the disagreement — the row fits the pane's inner width in the measure the terminal paints
 	// in, and overflows it in the measure lipgloss would have wrapped it at.
@@ -458,6 +490,8 @@ func TestPaintedBoxRowsAreNotFolded(t *testing.T) {
 	} {
 		for _, tc := range paintMethods {
 			t.Run(box.name+"/"+tc.name, func(t *testing.T) {
+				t.Parallel()
+
 				th := newTheme(scheme.Default())
 				th.measure = widthAuthority{method: tc.method}
 
@@ -496,11 +530,15 @@ func TestPaintedBoxRowsAreNotFolded(t *testing.T) {
 // Both measures are swept because both painted the defect: the tab weighs the same nothing in each,
 // so this is not a case the two disagree about — it is one they were both being lied to about.
 func TestPaintedTabBearingUserBlockKeepsItsWidthAndItsAccent(t *testing.T) {
+	t.Parallel()
+
 	const width = 44
 	const text = "a\tb /review c" // one tab, and a token to the right of it for the accent to miss
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
@@ -555,6 +593,8 @@ func TestPaintedTabBearingUserBlockKeepsItsWidthAndItsAccent(t *testing.T) {
 // Both measures are swept because both painted the defect: a tab weighs the same nothing in each,
 // so this is not a case the two disagree about — it is one they were both being lied to about.
 func TestPaintedTabBearingCodeBlockKeepsItsWidth(t *testing.T) {
+	t.Parallel()
+
 	const width = 44
 	// The transcript pays two columns for the ✦ marker gutter and the code block two more for its
 	// own indent, so the source line is measured against 40. A tab-indented statement of 39 visible
@@ -565,6 +605,8 @@ func TestPaintedTabBearingCodeBlockKeepsItsWidth(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
@@ -616,6 +658,8 @@ func TestPaintedTabBearingCodeBlockKeepsItsWidth(t *testing.T) {
 // Both measures are swept because both painted the defect: the tab weighs the same nothing in each,
 // so this is not a case the two disagree about — it is one they were both being lied to about.
 func TestPaintedTabBearingTableCellKeepsItsColumns(t *testing.T) {
+	t.Parallel()
+
 	// A short transcript on purpose: with nothing to scroll the gutter is blank, so a painted row
 	// ends at its own last glyph and its width is the table's own rather than the window's.
 	source := strings.Join([]string{
@@ -626,6 +670,8 @@ func TestPaintedTabBearingTableCellKeepsItsColumns(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := step(t, newTestModel(t), eventMsg{Event: domain.MessageEvent{Text: source}})
 			m = paintedAs(t, m, tc.method)
 
@@ -684,6 +730,8 @@ func TestPaintedTabBearingTableCellKeepsItsColumns(t *testing.T) {
 //
 // Both measures are swept because both painted the defect: the tab weighs the same nothing in each.
 func TestPaintedTabBearingPopupRowKeepsItsColumns(t *testing.T) {
+	t.Parallel()
+
 	rows := []popupRow{
 		{"a\tb", "— tabbed"},    // six cells once the tab is spent, two while it is still one
 		{"eight_ok", "— plain"}, // eight cells in EITHER measure: the first column's width
@@ -691,6 +739,8 @@ func TestPaintedTabBearingPopupRowKeepsItsColumns(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
@@ -739,10 +789,14 @@ func TestPaintedTabBearingPopupRowKeepsItsColumns(t *testing.T) {
 // A path with a tab in it is a real path: a tab is legal in a POSIX filename and the model names
 // the file, so the block does not get to assume the name is tame.
 func TestPaintedTabBearingPresentedPathKeepsItsWidth(t *testing.T) {
+	t.Parallel()
+
 	const path = "docs/re\tports/architecture-review.html"
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := step(t, newTestModel(t), presentedMsg{Path: path, Method: domain.PresentShown})
 			m = paintedAs(t, m, tc.method)
 
@@ -787,6 +841,8 @@ func TestPaintedTabBearingPresentedPathKeepsItsWidth(t *testing.T) {
 // paint disagrees. The card's top border is the straight edge the row is held against, because a
 // row that ends anywhere else is a row that has left the box.
 func TestPaintedTabBearingStartupCardKeepsItsBorder(t *testing.T) {
+	t.Parallel()
+
 	opts := testOpts
 	opts.HostAlias = "box\tone:1111" // a host alias is config text; a stray tab is a typo away
 
@@ -848,6 +904,8 @@ func TestPaintedTabBearingStartupCardKeepsItsBorder(t *testing.T) {
 // Both measures are swept because both painted the defect: the tab weighs the same nothing in each,
 // so this is not a case the two disagree about — it is one they were both being lied to about.
 func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
+	t.Parallel()
+
 	const width = 80 // wide enough that no branch line wraps, so each row is one row
 	// The em dash opens each summary and appears in neither target, so a summary is never mistaken
 	// for the target that leads its row.
@@ -858,6 +916,8 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
@@ -914,6 +974,8 @@ func TestPaintedTabBearingToolTargetKeepsItsColumn(t *testing.T) {
 // are swept because the row is painted in front of both, and the CJK path is the case where they
 // agree on the glyph (two cells each) and a rune count was the thing lying.
 func TestPaintedTabBearingToolTargetKeepsTheGauge(t *testing.T) {
+	t.Parallel()
+
 	// Every target here is past the old cap. The tab-bearing one is 16 "a\t" pairs and a suffix: raw
 	// it measures 27 cells and the screen pays 91 for it.
 	targets := []struct {
@@ -929,6 +991,8 @@ func TestPaintedTabBearingToolTargetKeepsTheGauge(t *testing.T) {
 	for _, tc := range paintMethods {
 		for _, tg := range targets {
 			t.Run(tc.name+"/"+tg.name, func(t *testing.T) {
+				t.Parallel()
+
 				// paint runs one read_file call to its status row, args verbatim so the caller can ask
 				// for the same call with and without a target.
 				paint := func(args []byte) (row, gauge string, width int) {
@@ -991,10 +1055,14 @@ func TestPaintedTabBearingToolTargetKeepsTheGauge(t *testing.T) {
 // ideograph is two cells to WcWidth and to GraphemeWidth alike. That agreement is the point — the
 // rune count was the only thing lying, and it is allowed to, up to 2×.
 func TestPaintedWideDetailLineWrapsWithoutDisplacement(t *testing.T) {
+	t.Parallel()
+
 	const fill = "字" // two cells under either measure, and no expansion can flatten it
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			wide := paintedDetailRows(t, tc.method, fill)
 			ascii := paintedDetailRows(t, tc.method, "a")
 
@@ -1106,6 +1174,8 @@ func paintedDetailRows(t *testing.T, method ansi.Method, fill string) paintedDet
 // grapheme is one cell to the WcWidth painter and two to a mode-2027 terminal's, so a fit made in
 // the wrong measure either cuts a row that fitted or leaves standing one that did not.
 func TestPaintedStackedStartupCardFitsItsValues(t *testing.T) {
+	t.Parallel()
+
 	card := startupView{
 		Logo:    strings.TrimRight(apogeeLogo, "\n"), // 36 cells wide: every width below is the stacked layout
 		Host:    "192.168.64.1:1111",
@@ -1119,6 +1189,8 @@ func TestPaintedStackedStartupCardFitsItsValues(t *testing.T) {
 
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			th := newTheme(scheme.Default())
 			th.measure = widthAuthority{method: tc.method}
 
@@ -1218,8 +1290,12 @@ func lastGlyph(s string) string {
 // short of the border, on the one row a human would read as a rendering glitch rather than as a
 // width bug (ADR 0030 §5).
 func TestPaintedSettingsPaneFillsTheTranscriptBudget(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := paintedAs(t, settingsFrameModel(t, 80, 24, 40), tc.method)
 			budget := m.transcriptBudget()
 			rows := paintFrame(t, m, tc.method)
@@ -1256,8 +1332,12 @@ func TestPaintedSettingsPaneFillsTheTranscriptBudget(t *testing.T) {
 // configuration with nothing in it. The floor is the existing one: the full-height rule changed which
 // surface the surplus goes to, not what a pane costs at the bottom of the ladder.
 func TestPaintedSettingsPaneAtItsFourRowFloor(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := paintedAs(t, settingsFrameModel(t, 80, smallestOverlayWindow, 40), tc.method)
 			rows := paintFrame(t, m, tc.method)
 
@@ -1292,8 +1372,12 @@ func TestPaintedSettingsPaneAtItsFourRowFloor(t *testing.T) {
 // fact has to carry the way out as well as the state: it is swallowing every keypress on a window
 // showing none of it, so a frame that painted nothing would leave the human with a dead keyboard.
 func TestPaintedSettingsGiveWayFactRidesTheStatusLine(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m := paintedAs(t, settingsFrameModel(t, 80, smallestOverlayWindow-1, 40), tc.method)
 			rows := paintFrame(t, m, tc.method)
 			painted := strings.Join(mapStrip(rows), "\n")
@@ -1341,8 +1425,12 @@ func statusRowOf(t *testing.T, rows []string) string {
 // A first boot paints its notice in the transcript, under the start-up box and above the picker it
 // opened — the human reads why the pane is there in the same frame as the pane.
 func TestPaintedPreboundNoticeRidesTheTranscript(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m, _ := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
 			m = paintedAs(t, m, tc.method)
 			painted := strings.Join(mapStrip(paintFrame(t, m, tc.method)), "\n")
@@ -1360,9 +1448,15 @@ func TestPaintedPreboundNoticeRidesTheTranscript(t *testing.T) {
 // Both pre-bound facts ride the status line once the pane that asked is closed — the state and the
 // one act that changes it, on the row the give-way facts share (layout.md).
 func TestPaintedPreboundFactsRideTheStatusLine(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			t.Run("a server to choose", func(t *testing.T) {
+				t.Parallel()
+
 				m, _ := preboundModel(t, PreboundStaleChoice, "old-box", &fakeBind{}, &fakeRecorder{})
 				m = step(t, m, keyEsc())
 				m = paintedAs(t, m, tc.method)
@@ -1372,6 +1466,8 @@ func TestPaintedPreboundFactsRideTheStatusLine(t *testing.T) {
 				}
 			})
 			t.Run("nothing configured", func(t *testing.T) {
+				t.Parallel()
+
 				opts := preboundOpts(PreboundNoServers, "")
 				serverSeams(&opts).list = nil
 				opts.Settings = fakeSettingsHost{rows: func() []SettingRow { return settingsTestRows(6) }}
@@ -1389,8 +1485,12 @@ func TestPaintedPreboundFactsRideTheStatusLine(t *testing.T) {
 
 // A bind ends the state, and the status line goes back to saying nothing for an idle session.
 func TestPaintedPreboundFactClearsOnceBound(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range paintMethods {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m, _ := preboundModel(t, PreboundFirstBoot, "", &fakeBind{}, &fakeRecorder{})
 			m = step(t, m, keyEnter())
 			m = paintedAs(t, m, tc.method)

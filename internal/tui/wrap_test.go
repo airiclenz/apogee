@@ -15,6 +15,8 @@ import (
 // railedWidth floors a deeply-nested block's usable width at one column so the wrapper never
 // divides by zero, even when the rail gutters consume more than the whole terminal width.
 func TestRailedWidthFloors(t *testing.T) {
+	t.Parallel()
+
 	if got := railedWidth(80, 0); got != 80 {
 		t.Errorf("railedWidth(80, 0) = %d; want 80 (depth 0 takes no gutter)", got)
 	}
@@ -648,6 +650,8 @@ func TestWrappedSurfacesBreakInThePaintersMeasure(t *testing.T) {
 // cases is a group. Each case pins the entire rendered scrollback, so a separator that gained or
 // lost a rail shows as the row it is.
 func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name  string
 		build func(tr *transcript)
@@ -715,6 +719,8 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(tr)
 
@@ -733,6 +739,8 @@ func TestRenderSpacerRailsAtTheJoinDepth(t *testing.T) {
 // was the first frame's ┊ closer; now nothing stands between the rows because nothing hangs off
 // them, and neither delegation's words reach the conversation at all.
 func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"first"}`)}})
 	tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Text: "first child"})
@@ -759,6 +767,8 @@ func TestRenderConsecutiveSubAgentRunsAreNotConnected(t *testing.T) {
 // read as stray punctuation rather than as the frame continuing) and it ends on the glyph — the
 // gutter's trailing space is trimmed, so the row never leaves a styled blank hanging off its right.
 func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := feed(
 		domain.MessageEvent{EventBase: domain.EventBase{Depth: 1}, Text: "one"},
@@ -781,6 +791,8 @@ func TestRenderSpacerRailIsStyledAndUntrailed(t *testing.T) {
 // rather than a lipgloss byte-golden; the guard below it catches the opposite failure, a subRail
 // role that paints nothing at all and would leave the rail unstyled.
 func TestSubRailPaintedInToolHeaderGold(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 
 	rail := th.subRail.Render(glyphSubRail)
@@ -799,6 +811,8 @@ func TestSubRailPaintedInToolHeaderGold(t *testing.T) {
 // chrome and stay in the tone every other ┝/┕ takes. A frame painted in one voice throughout would
 // read as a box drawn around the run rather than as a rail hanging off it.
 func TestSubAgentFrameSplitsRailGoldFromBranchTone(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 
 	marker := paintRowMarker(th, subAgentOpenMarker, true)
@@ -820,6 +834,8 @@ func TestSubAgentFrameSplitsRailGoldFromBranchTone(t *testing.T) {
 // verdicts a row can carry are read as one pair — and it lands on the row it belongs to, after the
 // delegation's name and ahead of the leaders.
 func TestSubAgentDoneMarkPaintedInTheSuccessRole(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 
 	row := leaderRow(th, toolView{Target: "survey", finished: true}, branchMarker(true), 60, false, noRemainder)

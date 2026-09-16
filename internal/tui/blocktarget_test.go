@@ -75,6 +75,8 @@ func blockMarks(t *testing.T, tr *transcript, width int) []blockMark {
 // hint and the click target cannot drift apart — a block that grew an indicator without becoming
 // clickable, or became clickable without growing one, fails here too.
 func TestRenderMarksTheWholeBlock(t *testing.T) {
+	t.Parallel()
+
 	// run folds a terminal call and its multi-line output — the block with a body, and therefore
 	// the block with something to reveal.
 	run := func(tr *transcript, id, command, output string, depth int) {
@@ -280,6 +282,8 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(t, tr)
 
@@ -304,6 +308,8 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 // the label alone (renderToolBlock) — so each case names the header it keeps and the row the
 // indicator lands on is checked beside it.
 func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name                        string
 		build                       func() *transcript
@@ -345,6 +351,8 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := tc.build()
 
 			if got := headerStar(t, tr, false); got != tc.wantHeader {
@@ -378,6 +386,8 @@ func TestHeaderIndicatorFollowsTheBlockState(t *testing.T) {
 // byte-golden, and the second guard catches the opposite failure — an indicator styled into the
 // header label's own run, which is where the shape before the leader row put it.
 func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -401,6 +411,8 @@ func TestHeaderIndicatorIsStyledApartFromTheLabel(t *testing.T) {
 // header and one row, so no marker line is left for a body line opening with "+" to be mistaken
 // for.
 func TestRemainderCountRidesTheOutcomeSlot(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := &transcript{}
 	tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -433,6 +445,8 @@ func TestRemainderCountRidesTheOutcomeSlot(t *testing.T) {
 // case renders a transcript holding that block alone, so "every row of the block" and "every
 // rendered line" are the same set and a row that quietly changed its mind fails here.
 func TestPromptBlockIsOneClickSurface(t *testing.T) {
+	t.Parallel()
+
 	const width = 40
 	const huge = "alpha\nbravo\ncharlie\ndelta" // four wrapped rows: one past promptCollapsedRows
 	cases := []struct {
@@ -469,6 +483,8 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(t, tr)
 
@@ -501,6 +517,8 @@ func TestPromptBlockIsOneClickSurface(t *testing.T) {
 // each own a state, so the marks have to name the MEMBER's entry rather than the run's head, and a
 // mapping that quietly fell back to the head would open the wrong call.
 func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
+	t.Parallel()
+
 	// lockstep is the map's standing invariant, asserted before any index into it is used.
 	lockstep := func(t *testing.T, m Model) {
 		t.Helper()
@@ -522,6 +540,8 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 	}
 
 	t.Run("a single block's rows", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m.transcript.reset() // drop the seeded start-up box: the block under test opens at line 0
 		m.transcript.apply(domain.ToolCallEvent{Call: domain.ToolCall{
@@ -549,6 +569,8 @@ func TestBlockMarksAgreeWithTheMouseMapping(t *testing.T) {
 	})
 
 	t.Run("a group's member rows name their own calls", func(t *testing.T) {
+		t.Parallel()
+
 		m := newTestModel(t)
 		m.transcript.reset()
 		for i, c := range [][2]string{
@@ -629,6 +651,8 @@ func headerStar(t *testing.T, tr *transcript, blink bool) string {
 // did not blink when it should. The blinked-out phase keeps the star's column, so its expectation is
 // the header led by two leading spaces rather than one glyph short.
 func TestLiveBlockHeaderStarBlinks(t *testing.T) {
+	t.Parallel()
+
 	openRead := func(tr *transcript, id, path string, depth int) {
 		tr.apply(domain.ToolCallEvent{
 			EventBase: domain.EventBase{Depth: depth},
@@ -740,6 +764,8 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(t, tr)
 
@@ -782,6 +808,8 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tr.apply(domain.ToolCallEvent{Call: taskListCall})
 			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{CallID: "1", Content: tc.rendered}})
@@ -830,6 +858,8 @@ func TestTaskListBlockCollapsesToHeader(t *testing.T) {
 	}
 
 	t.Run("a click on the header and ⏎ at the block cursor both flip it", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithTaskListBlock(t, testOpts)
 		header := markedLine(t, m, targetHeader)
 		if !blockExpanded(t, m, header) {
@@ -930,6 +960,8 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a gesture on any card flips them all and writes the key back", func(t *testing.T) {
+		t.Parallel()
+
 		log := &settingsWriteLog{}
 		opts := testOpts
 		opts.Settings = fakeSettingsHost{write: log.write}
@@ -1004,6 +1036,8 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 	})
 
 	t.Run("a card added after the flip is seeded from the preference", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithTaskListBlock(t, testOpts)
 		header := markedLine(t, m, targetHeader)
 		m = clickCell(t, m, 2, screenRow(t, m, header)) // folds
@@ -1025,6 +1059,8 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 	})
 
 	t.Run("a folded launch seeds every card folded, and a resumed record too", func(t *testing.T) {
+		t.Parallel()
+
 		opts := testOpts
 		opts.TaskListFolded = true
 		m := modelWithTaskListBlock(t, opts)
@@ -1055,6 +1091,8 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 	})
 
 	t.Run("a nil settings host flips and writes nothing", func(t *testing.T) {
+		t.Parallel()
+
 		m := modelWithTaskListBlock(t, testOpts) // testOpts wires no SettingsHost
 		entries := len(m.transcript.entries)
 		header := markedLine(t, m, targetHeader)
@@ -1073,6 +1111,8 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 	})
 
 	t.Run("a failed write warns once and the flip stands", func(t *testing.T) {
+		t.Parallel()
+
 		log := &settingsWriteLog{err: errors.New("config.yaml: permission denied")}
 		opts := testOpts
 		opts.Settings = fakeSettingsHost{write: log.write}
@@ -1109,6 +1149,8 @@ func TestRowlessTaskListCardKeepsTheOrdinaryShape(t *testing.T) {
 	t.Parallel()
 
 	t.Run("an errored call shows its verdict collapsed", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: taskListCall})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
@@ -1134,6 +1176,8 @@ func TestRowlessTaskListCardKeepsTheOrdinaryShape(t *testing.T) {
 	})
 
 	t.Run("a fence-only result hides nothing", func(t *testing.T) {
+		t.Parallel()
+
 		tr := &transcript{}
 		tr.apply(domain.ToolCallEvent{Call: taskListCall})
 		tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{

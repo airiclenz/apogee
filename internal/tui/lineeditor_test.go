@@ -24,6 +24,8 @@ import (
 // therefore two spaces, never one. And a folded value is already folded — running the substitution
 // again must not move anything, or a second pass over a field would drift the caret it just seated.
 func TestLineBreaksFoldsNewlineTabAndCarriageReturn(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name string
 		in   string
@@ -41,6 +43,8 @@ func TestLineBreaksFoldsNewlineTabAndCarriageReturn(t *testing.T) {
 		{"non-ASCII text is not layout", "héllo\t世界", "héllo 世界"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := lineBreaks.Replace(tc.in)
 
 			if got != tc.want {

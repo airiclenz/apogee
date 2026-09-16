@@ -43,6 +43,8 @@ func reportCases(t *testing.T) []reportCase {
 // inside its box — a wrong pane rather than a build error. Walking the kinds is what makes a fourth
 // report inherit this guard.
 func TestReportKindsResolveDistinctly(t *testing.T) {
+	t.Parallel()
+
 	m := newTestModel(t)
 
 	panes := map[framePane]reportKind{}
@@ -120,6 +122,8 @@ func pressReport(t *testing.T, m Model, r reportKind, msg tea.KeyPressMsg) Model
 // through: ↑/↓ move a row, pgup/pgdown a DRAWN window, both clamp at the first row and at the last
 // full window, and esc closes the report leaving no scroll behind for the next open.
 func TestReportKeysScrollEitherReportByOneArithmetic(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range reportCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.model
@@ -192,6 +196,8 @@ func TestReportKeysScrollEitherReportByOneArithmetic(t *testing.T) {
 // report reports is the window the frame DREW — the spec's clamped top and the rows the painter
 // seated from it — rather than a second derivation that could disagree with the paint by a row.
 func TestReportWindowIsThePaintersOwnAnswer(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range reportCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.model
@@ -217,6 +223,8 @@ func TestReportWindowIsThePaintersOwnAnswer(t *testing.T) {
 // from a taller window — or set past the end, which is where the /inspect verb deliberately opens
 // (runInspectCommand) — composes the LAST FULL window rather than one row over an empty pane.
 func TestReportScrollClampsToTheLastFullWindow(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range reportCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.model
@@ -267,6 +275,8 @@ func TestTranscriptSlotPanesStateTheStackingOrderOnce(t *testing.T) {
 // one frame that draws both reports: the /inspect pane opens on the row the /usage report closes on,
 // with nothing between them and nothing overlapping.
 func TestTheTwoReportRectsStackInTheSlotsStatedOrder(t *testing.T) {
+	t.Parallel()
+
 	m := bothPanesModel(t, 4)
 
 	usageTop, usageRows, ok := m.reportPaneRect(usageReport)
@@ -325,6 +335,8 @@ func TestFrameOverlayBlocksAnswerForEveryPane(t *testing.T) {
 // claimed on both would swallow a chord the live box behind the /usage report was owed — the same
 // reason the toggle is not a printable letter (the doctrine in reportpane.go).
 func TestCtrlRIsTheInspectorsKeyAlone(t *testing.T) {
+	t.Parallel()
+
 	if handled, _, _ := usageReportModel(t, 40).reportKey(usageReport, ctrlR()); handled {
 		t.Error("/usage claimed ctrl+r; it has one rendering and the chord belongs to the box behind it")
 	}
@@ -442,6 +454,8 @@ func reportWindowOrFail(t *testing.T, m Model, r reportKind) reportWindow {
 // it back on the tail. The invariant is TOTAL in both directions — following is exactly "the window
 // is at the tail" — so no path can leave the flag saying one thing while the window does another.
 func TestFollowingReportsTrackTheTail(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range followCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.model
@@ -511,6 +525,8 @@ func wheelReport(t *testing.T, m Model, r reportKind, button tea.MouseButton) Mo
 // pane detached by a wheel-up, whose rows then dropped past their cap onto the tail, with nothing
 // left to re-arm it.
 func TestTheWheelDetachesAndReArmsTheFollow(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range followCases(t) {
 		t.Run(tc.name, func(t *testing.T) {
 			m := tc.model
@@ -565,6 +581,8 @@ func TestTheWheelDetachesAndReArmsTheFollow(t *testing.T) {
 // clamp-only scroll it has always had. Both halves are gated: no key or notch ARMS the follow here,
 // and a flag set behind the module's back is not HONOURED either.
 func TestTheUsageReportDoesNotFollowItsTail(t *testing.T) {
+	t.Parallel()
+
 	if usageReport.follows() {
 		t.Fatal("/usage follows its tail — the ratified scope is /inspect and /thinking alone")
 	}

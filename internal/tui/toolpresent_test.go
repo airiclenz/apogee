@@ -50,6 +50,8 @@ func bodyText(tv toolView) string {
 // the "+N more lines" remainder those rows used to assert is the collapsed paint's, and it is
 // asserted where it is now composed (TestCollapsedPaintTruncatesRetainedBodies, render_test.go).
 func TestPresentToolCall(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		call       domain.ToolCall
@@ -351,6 +353,8 @@ func TestPresentToolCall(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tv := presentToolCall(tc.call, "", workspaceRoot{})
 			if tv.Label != tc.wantLabel {
 				t.Errorf("Label = %q, want %q", tv.Label, tc.wantLabel)
@@ -549,6 +553,8 @@ func TestPresentSubAgentRetainsTheWholeTask(t *testing.T) {
 // shortenPaths deliberately never touches one, so the absolute path read_file failed on stands in
 // the body absolute while the slot beside it names nothing at all.
 func TestPresentToolCallErrorResult(t *testing.T) {
+	t.Parallel()
+
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"/ws/missing.go"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "file not found: /ws/missing.go", IsError: true}, workspaceRoot{root: "/ws"})
 	if got := tv.Summary.Text; got != "error" {
@@ -762,6 +768,8 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 // that body now holds every line, since the collapsed shape's remainder is the painter's act.
 // view_diff is the one producer filling both, a diffstat in the slot over a coloured body.
 func TestPresentToolCallOutcomeSplit(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name        string
 		call        domain.ToolCall
@@ -864,6 +872,8 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tv := presentToolCall(tc.call, "", workspaceRoot{})
 			tv.enrichWithResult(tc.result, workspaceRoot{})
 			if tv.Summary.Text != tc.wantSummary {
@@ -973,6 +983,8 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 // A call still in flight carries neither half of an outcome, and the zero summary is plain, so
 // it groups with its finished neighbours rather than breaking their block.
 func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
+	t.Parallel()
+
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "read_file", Arguments: []byte(`{"path":"main.go"}`)}, "", workspaceRoot{})
 	if tv.Summary.Text != "" || tv.Details.len() != 0 {
 		t.Errorf("in-flight outcome = %+v / %+v; want both halves empty", tv.Summary, tv.Details)
@@ -1114,6 +1126,8 @@ func TestAskUserPendingCallHasNoRecord(t *testing.T) {
 // paint's (TestCollapsedPaintTruncatesRetainedBodies, render_test.go), so expanding the block
 // can show the lines it hides; nothing here counts or truncates.
 func TestDiffBody(t *testing.T) {
+	t.Parallel()
+
 	details := diffBody("  ctx\n- old line\n+ new line")
 	wantKinds := []detailKind{detailPlain, detailDiffRemoved, detailDiffAdded}
 	if len(details) != len(wantKinds) {
@@ -1176,6 +1190,8 @@ func changedBody(t *testing.T, tv toolView) []string {
 // merely broken model must not be able to turn a card into a panic or into a claim about a change
 // nobody asked for.
 func TestEditCallsCarryTheirChangedLines(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		call domain.ToolCall
@@ -1258,6 +1274,8 @@ func TestEditCallsCarryTheirChangedLines(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tv := presentToolCall(tc.call, "", workspaceRoot{})
 			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("body = %q, want %q", got, tc.want)
@@ -1270,6 +1288,8 @@ func TestEditCallsCarryTheirChangedLines(t *testing.T) {
 // collapsed paint's cap on these lines (collapsedBodyCap, render.go), never a truncation performed
 // here — which is what makes expanding the block able to show the change.
 func TestEditBodyRetainsEveryChangedLine(t *testing.T) {
+	t.Parallel()
+
 	const lines = 40 // far past the collapsed budget, so a build-time cap could not hide in the noise
 	inserted := strings.TrimSuffix(strings.Repeat("added\\n", lines), "\\n")
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
@@ -1284,6 +1304,8 @@ func TestEditBodyRetainsEveryChangedLine(t *testing.T) {
 // — a minified blob pasted into a replacement must not flood a row — and the clip counts RUNES, so
 // a multi-byte edit is never cut mid-character.
 func TestEditBodyClipsALongChangedLine(t *testing.T) {
+	t.Parallel()
+
 	long := strings.Repeat("é", detailClipRunes+50)
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "single_find_and_replace",
 		Arguments: []byte(`{"path":"main.go","oldText":"x","newText":"` + long + `"}`)}, "", workspaceRoot{})
@@ -1307,6 +1329,8 @@ func TestEditBodyClipsALongChangedLine(t *testing.T) {
 // empty write is the interesting one — it genuinely writes nothing, so a body of one blank line
 // would be a line the call never asked for.
 func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		args string
@@ -1350,6 +1374,8 @@ func TestWriteCallCarriesTheWrittenLines(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file", Arguments: []byte(tc.args)}, "", workspaceRoot{})
 			if got := changedBody(t, tv); strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
 				t.Errorf("body = %q, want %q", got, tc.want)
@@ -1376,6 +1402,8 @@ func gutterColumn(t *testing.T, tv toolView) []string {
 // of them; the "+ " marker and the text it tags stay exactly where they were, which is what keeps
 // the clip taking the tail and the green band tinting the text alone.
 func TestWriteBodyNumbersEveryLineItStates(t *testing.T) {
+	t.Parallel()
+
 	short := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
 		Arguments: []byte(`{"path":"notes.txt","content":"alpha\nbeta\ngamma"}`)}, "", workspaceRoot{})
 
@@ -1407,6 +1435,8 @@ func TestWriteBodyNumbersEveryLineItStates(t *testing.T) {
 // bodies (a needle's position is unknown until the tool has run). Those three read byte-identically
 // to the bodies they always drew.
 func TestEditCallsNumberOnlyTheFullContentBody(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		call domain.ToolCall
@@ -1441,6 +1471,8 @@ func TestEditCallsNumberOnlyTheFullContentBody(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tv := presentToolCall(tc.call, "", workspaceRoot{})
 			if got := gutterColumn(t, tv); !slices.Equal(got, tc.want) {
 				t.Errorf("gutters = %q, want %q", got, tc.want)
@@ -1458,6 +1490,8 @@ func TestEditCallsNumberOnlyTheFullContentBody(t *testing.T) {
 // The engine sends the path only when the two differ (domain.ToolCallEvent.ResolvedPath), so the
 // ordinary call is byte-identical to the card it always drew: same target, nothing appended.
 func TestToolCardNamesTheResolvedPath(t *testing.T) {
+	t.Parallel()
+
 	ws := workspaceRoot{root: "/home/me/proj"}
 	call := domain.ToolCall{ID: "1", Tool: "write_file",
 		Arguments: []byte(`{"path":"docs/notes.md","content":"hi"}`)}
@@ -1483,6 +1517,8 @@ func TestToolCardNamesTheResolvedPath(t *testing.T) {
 // where the tool reports bytes) and the argument-derived lines hang beneath it — including when
 // there is only one of them. Nothing is promoted into that slot, because it is already taken.
 func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
+	t.Parallel()
+
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",
 		Arguments: []byte(`{"path":"notes.txt","content":"hello"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "wrote 5 bytes to notes.txt",
@@ -1503,6 +1539,8 @@ func TestWriteBodySurvivesItsByteCountSummary(t *testing.T) {
 // all but from the tool's domain.DiffStat, counted over the diff operations themselves
 // (internal/tools). The outcome itself keeps every line, so what the paint hides is only hidden.
 func TestDiffStatSpansTheWholeDiff(t *testing.T) {
+	t.Parallel()
+
 	const longDiff = 25 // well past the collapsed budget, so the stat and the paint cannot agree by luck
 	long := strings.TrimSuffix(strings.Repeat("+ added\n", longDiff), "\n")
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, "", workspaceRoot{})
@@ -1520,6 +1558,8 @@ func TestDiffStatSpansTheWholeDiff(t *testing.T) {
 // there is no diff to describe — so it falls to the prose floor as one plain summary line
 // with nothing beneath the branch, exactly as it rendered before the view read fields.
 func TestViewDiffNoChangesRendersAsProse(t *testing.T) {
+	t.Parallel()
+
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "view_diff", Arguments: []byte(`{"path":"main.go"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "No changes detected"}, workspaceRoot{})
 
@@ -1756,6 +1796,8 @@ func TestViewDiffUntaggedBodyRendersPlain(t *testing.T) {
 // plus the two answers that are not a phrase at all: the deliberate blank (`—`) and the decline
 // that leaves a tool's prose floor in the slot.
 func TestToolStat(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name   string
 		tool   string
@@ -1825,6 +1867,8 @@ func TestToolStat(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			p, known := toolRegistry[tc.tool]
 			if !known || (p.stat == nil && p.argStat == nil) {
 				t.Fatalf("%s has no stat hook — the table gives it a slot", tc.tool)
@@ -1849,6 +1893,8 @@ func TestToolStat(t *testing.T) {
 // floor stays: a third-party tool (which can never emit a summary — the sum is sealed) renders as
 // it always did.
 func TestToolStatDeclinesWithoutATypedSummary(t *testing.T) {
+	t.Parallel()
+
 	for _, name := range []string{"read_file", "list_dir", "grep", "web_search", "view_diff"} {
 		if _, ok := toolRegistry[name].stat(domain.ToolResult{Content: "prose"}); ok {
 			t.Errorf("%s must decline a summary-less result", name)
@@ -1922,6 +1968,8 @@ func TestGitStatusReportSurvivesItsTypedSummary(t *testing.T) {
 // nothing to show is that floor end to end: its stat recognises no commit lines, so the extractor's
 // own "(no output)" phrase keeps the slot.
 func TestDecliningStatKeepsTheProseFloor(t *testing.T) {
+	t.Parallel()
+
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "git_log", Arguments: []byte(`{"ref":"HEAD"}`)}, "", workspaceRoot{})
 	tv.enrichWithResult(domain.ToolResult{CallID: "1", Content: "\n"}, workspaceRoot{})
 	if tv.Summary.Text != "(no output)" {
@@ -1936,6 +1984,8 @@ func TestDecliningStatKeepsTheProseFloor(t *testing.T) {
 // between them (consoleOpenDetail, consoleStatusStat), and it is the difference between a card that
 // reads as one console session and one that repeats itself twice per call.
 func TestConsoleCardStatesEachFactOnce(t *testing.T) {
+	t.Parallel()
+
 	open := presentToolCall(domain.ToolCall{ID: "1", Tool: "console_open",
 		Arguments: []byte(`{"command":"npm run dev"}`)}, "", workspaceRoot{})
 	open.enrichWithResult(domain.ToolResult{CallID: "1",
@@ -2073,6 +2123,8 @@ func TestReadFileBodyRecordsTheLocateReport(t *testing.T) {
 // TestClipDetail: one over-long line (a minified blob, a wall-of-text report) is truncated
 // with an ellipsis rather than soft-wrapping into many rows.
 func TestClipDetail(t *testing.T) {
+	t.Parallel()
+
 	long := strings.Repeat("x", detailClipRunes+40)
 	got := clipDetail(long)
 	if want := detailClipRunes + 1; len([]rune(got)) != want { // +1 for the ellipsis
@@ -2098,6 +2150,8 @@ func TestClipDetail(t *testing.T) {
 // one row per line would have let a key open a row of the pane's own — which on the approval prompt
 // is where "Reason:" lives.
 func TestArgumentDetailsLabelsEachArgument(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		args string
@@ -2146,6 +2200,8 @@ func TestArgumentDetailsLabelsEachArgument(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := detailLineTexts(argumentDetails(json.RawMessage(tc.args)))
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("argumentDetails(%s) =\n%#v\nwant\n%#v", tc.args, got, tc.want)
@@ -2176,6 +2232,8 @@ func TestArgumentDetailsLabelsEachArgument(t *testing.T) {
 // Each case asserts the rendered value against the value stdlib JSON decodes, rather than against a
 // literal, so the pane is pinned TO the executor rather than to a second copy of the same guess.
 func TestArgumentDetailsCollapsesDuplicateKeysToTheValueTheToolReceives(t *testing.T) {
+	t.Parallel()
+
 	const longS = "\u017F" // LATIN SMALL LETTER LONG S — stdlib's field fold matches it to "s"
 
 	cases := []struct {
@@ -2231,6 +2289,8 @@ func TestArgumentDetailsCollapsesDuplicateKeysToTheValueTheToolReceives(t *testi
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := detailLineTexts(argumentDetails(json.RawMessage(tc.args)))
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("argumentDetails(%s) =\n%#v\nwant\n%#v", tc.args, got, tc.want)
@@ -2280,6 +2340,8 @@ func TestArgumentDetailsCollapsesDuplicateKeysToTheValueTheToolReceives(t *testi
 // the screen; head-only, the last line of a value is where a payload appended to an innocent body
 // lives and it was the line the cap always spent first.
 func TestArgumentValueLinesCapsTheValueAndKeepsItsTail(t *testing.T) {
+	t.Parallel()
+
 	value := make([]string, 20)
 	for i := range value {
 		value[i] = fmt.Sprintf("l%d", i)
@@ -2323,6 +2385,8 @@ func TestArgumentValueLinesCapsTheValueAndKeepsItsTail(t *testing.T) {
 // arguments add no lines at all. Every line the fallback does emit hangs at argumentValueIndent:
 // content survives verbatim, but as a value's line rather than at the column a label lives in.
 func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
+	t.Parallel()
+
 	const ind = argumentValueIndent
 	cases := []struct {
 		name string
@@ -2340,6 +2404,8 @@ func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := detailLineTexts(argumentDetails(json.RawMessage(tc.args)))
 			if !reflect.DeepEqual(got, tc.want) {
 				t.Errorf("argumentDetails(%s) =\n%#v\nwant\n%#v", tc.args, got, tc.want)
@@ -2355,6 +2421,8 @@ func TestArgumentDetailsFallsBackWhereThereIsNothingToLabel(t *testing.T) {
 // against. Indenting every emitted line is the fix: the bytes are still all on the screen, but none
 // of them can sit where a label sits, whatever they say.
 func TestArgumentDetailsFallbackCannotPaintALabelledRow(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		args string
@@ -2365,6 +2433,8 @@ func TestArgumentDetailsFallbackCannotPaintALabelledRow(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			got := detailLineTexts(argumentDetails(json.RawMessage(tc.args)))
 			if len(got) == 0 {
 				t.Fatalf("argumentDetails(%s) rendered nothing; the blob must still reach the screen", tc.args)
@@ -2384,6 +2454,8 @@ func TestArgumentDetailsFallbackCannotPaintALabelledRow(t *testing.T) {
 // The labelled path is untouched by the fallback's indent: a real argument still opens a flush-left
 // `name:` label with its value's lines beneath it, which is what makes the indent mean anything.
 func TestArgumentDetailsLabelledShapeSurvivesTheFallbackIndent(t *testing.T) {
+	t.Parallel()
+
 	got := detailLineTexts(argumentDetails(json.RawMessage(`{"command":"git status"}`)))
 	want := []string{"command:", argumentValueIndent + "git status"}
 	if !reflect.DeepEqual(got, want) {
@@ -2434,6 +2506,8 @@ func proseView(text string) toolView {
 // spelling, an invariant noun, a diffstat, a phrase with no arithmetic — because a hook that changed
 // the shape it answers in would show up here as a run that stopped adding up.
 func TestRunAggregate(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		name string
 		run  []toolView
@@ -2481,6 +2555,8 @@ func TestRunAggregate(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := aggregated(tc.run...).Text; got != tc.want {
 				t.Errorf("runAggregate(%v) = %q, want %q", tc.run, got, tc.want)
 			}
@@ -2491,6 +2567,8 @@ func TestRunAggregate(t *testing.T) {
 	// so nothing is reworded and a lone failure keeps the sentence that says what went wrong instead
 	// of being counted as "1 error".
 	t.Run("a run of one is its own summary", func(t *testing.T) {
+		t.Parallel()
+
 		for _, tv := range []toolView{
 			statView(pluralStat(5, "line")),
 			statView(plainStat("exit 0")),
@@ -2510,6 +2588,8 @@ func TestRunAggregate(t *testing.T) {
 	// A promoted line is the TOOL's text, not a typed stat, so it is never added into an arithmetic
 	// it was never part of — even when it happens to read exactly like one.
 	t.Run("a promoted line never sums", func(t *testing.T) {
+		t.Parallel()
+
 		run := []toolView{
 			statView(pluralStat(5, "line")),
 			{Summary: quotedSummary(detailLine{Text: "9 lines"})},
@@ -2522,6 +2602,8 @@ func TestRunAggregate(t *testing.T) {
 	// The aggregate's own wording reads red by the same test a member's failure does, so the type row
 	// needs no second answer to "did this fail" (failedSummary, render.go).
 	t.Run("the errors aggregate reads as a failure", func(t *testing.T) {
+		t.Parallel()
+
 		for _, text := range []string{"1 error", "3 errors"} {
 			if !failedSummary(text) {
 				t.Errorf("failedSummary(%q) = false; the aggregate would paint in the ordinary tone", text)
@@ -3587,6 +3669,8 @@ func TestFileContentBodiesAreNumbered(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			body := tc.tv.Details.all()
 			if !tc.numbered {
 				for i, line := range body {
@@ -3648,6 +3732,8 @@ func detailDump(lines []detailLine) string {
 // firstLineDetail, which takes the FIRST line and only that, so the trailer reaches the model and
 // never the pane.
 func TestWriteCardShowsOnlyTheFirstLineOfASyntaxTrailer(t *testing.T) {
+	t.Parallel()
+
 	const trailed = "wrote 31 bytes to main.go\nsyntax check: 1 problem(s)\n  line 4: expected declaration, found '}'"
 
 	tv := presentToolCall(domain.ToolCall{ID: "1", Tool: "write_file",

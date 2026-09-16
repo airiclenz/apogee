@@ -10,6 +10,8 @@ import (
 // The cache serves a workspace listing from one walk, holds it for the TTL (so a file created
 // while the cache is warm is not yet seen), and re-walks once the TTL lapses.
 func TestFileCacheServesThenExpires(t *testing.T) {
+	t.Parallel()
+
 	dir := t.TempDir()
 	mustWrite(t, filepath.Join(dir, "main.go"), "package main")
 	mustWrite(t, filepath.Join(dir, "internal", "loop.go"), "package internal")
@@ -35,6 +37,8 @@ func TestFileCacheServesThenExpires(t *testing.T) {
 // A change of workspace root invalidates the cache immediately, even within the TTL; an empty
 // root yields nothing.
 func TestFileCacheInvalidatesOnRootChange(t *testing.T) {
+	t.Parallel()
+
 	a := t.TempDir()
 	mustWrite(t, filepath.Join(a, "a.go"), "package a")
 	b := t.TempDir()

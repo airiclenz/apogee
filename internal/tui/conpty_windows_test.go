@@ -155,6 +155,7 @@ func (r conptyResult) ghostRows() []string {
 // on a host that forwards the client's stream (Windows Terminal's own OpenConsole, finding 41) the
 // frame is where the ghost appears, which is why both are asserted. If a host shows neither, the
 // test skips rather than reporting a pass it has not earned.
+// serial: spawns this test binary under a pseudoconsole and reads the process-wide console state.
 func TestConPTYPaintsTheIntendedFrame(t *testing.T) {
 	control := runConPTYChild(t, conptyArmUnfixed)
 	if control.Err != "" {
@@ -288,6 +289,7 @@ func conptyBareLFs(path string) (int, error) {
 
 // TestConPTYChildProcess is the other half of TestConPTYPaintsTheIntendedFrame, running in a second
 // process with a pseudoconsole for a terminal. It is inert — a skip — in an ordinary test run.
+// serial: conptyAttachConsole swaps the process-wide os.Stdin and os.Stdout.
 func TestConPTYChildProcess(t *testing.T) {
 	resultPath := os.Getenv(conptyResultEnv)
 	if resultPath == "" {

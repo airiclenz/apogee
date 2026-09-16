@@ -95,6 +95,8 @@ func typeDraft(t *testing.T, m Model, text string) Model {
 // band that tracked only the first keystroke or only a full submit would fail here rather than in a
 // human's terminal.
 func TestSkillHintsTrackTheDraft(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -126,6 +128,8 @@ func TestSkillHintsTrackTheDraft(t *testing.T) {
 // itself is cut out of the text the matcher ranks — otherwise "/code-audit" would match the
 // code-audit skill on its own name and pin it to the top of a band it has already been invoked from.
 func TestSkillHintsExcludeInvokedSkills(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -153,7 +157,11 @@ func TestSkillHintsExcludeInvokedSkills(t *testing.T) {
 // question is noise. Neither may reach the matcher at all: a band that ranked and then hid would
 // pay for a walk nobody sees.
 func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
+	t.Parallel()
+
 	t.Run("knob off", func(t *testing.T) {
+		t.Parallel()
+
 		var rec suggestCall
 		opts := bandOpts(gatedSuggest(&rec))
 		opts.SkillSuggestions = false
@@ -168,6 +176,8 @@ func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
 	})
 
 	t.Run("knob switched off mid-draft", func(t *testing.T) {
+		t.Parallel()
+
 		var rec suggestCall
 		m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 		m = typeDraft(t, m, "audit the parser")
@@ -189,6 +199,8 @@ func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
 	})
 
 	t.Run("menu open", func(t *testing.T) {
+		t.Parallel()
+
 		var rec suggestCall
 		m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 		m = typeDraft(t, m, "audit the parser")
@@ -214,6 +226,8 @@ func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
 // is composing, over a surface that has taken the very key its legend names — and the frame must
 // not reserve it either, or the staged band loses its closing row to a row nobody draws.
 func TestSkillHintsStandDownOffTheLiveStates(t *testing.T) {
+	t.Parallel()
+
 	for _, state := range []uiState{stateAwaitingApproval, stateAwaitingAsk, stateErrored} {
 		var rec suggestCall
 		m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
@@ -241,6 +255,8 @@ func TestSkillHintsStandDownOffTheLiveStates(t *testing.T) {
 // clipped and padded to the window exactly as a staged row is — so the black field runs edge to
 // edge and the terminal's own background never shows through past the text.
 func TestSkillHintRowIsPaintedLikeTheBand(t *testing.T) {
+	t.Parallel()
+
 	for _, width := range []int{80, 34, 12} {
 		var rec suggestCall
 		m := modelWithOverlayRoomAt(t, width, 24, bandOpts(gatedSuggest(&rec)))
@@ -271,6 +287,8 @@ func TestSkillHintRowIsPaintedLikeTheBand(t *testing.T) {
 // terminal live AND lie to the column arithmetic that pads the band's field, so it is stripped and
 // flattened where the row is built — the row must still measure exactly one window's width.
 func TestSkillHintRowStripsEscapesFromTheCatalog(t *testing.T) {
+	t.Parallel()
+
 	m := modelWithOverlayRoom(t, 24, bandOpts(func(string, func(string) bool, int) []skills.Suggestion {
 		return []skills.Suggestion{{ID: "code\x1b[31m-audit\nHIJACK", DisplayName: "Code Audit"}}
 	}))
@@ -294,6 +312,8 @@ func TestSkillHintRowStripsEscapesFromTheCatalog(t *testing.T) {
 // input box, so it is swept beside the staged strip it shares a plan with — and beside a dropdown,
 // the combination the frame-wide allocation exists for.
 func TestBandNeverOverflowsTheFrame(t *testing.T) {
+	t.Parallel()
+
 	for _, staged := range []int{0, 2, 5} {
 		for height := 8; height <= 26; height++ {
 			var rec suggestCall
@@ -322,6 +342,8 @@ func TestBandNeverOverflowsTheFrame(t *testing.T) {
 // matcher must answer for the spent ids — because that closure is what a real matcher would consult,
 // and a spent set nothing reads would dedup nothing.
 func TestSuggestedSkillIsSpentOnSend(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -363,6 +385,8 @@ func TestSuggestedSkillIsSpentOnSend(t *testing.T) {
 // them. Without this the first two-word message of a session would silently spend the top matches
 // for a draft the human never saw a band for.
 func TestSuggestionsSurviveASendWithNoBand(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -388,6 +412,8 @@ func TestSuggestionsSurviveASendWithNoBand(t *testing.T) {
 // it, but from the human's side it is the same act — the message has left their hands and the worker
 // delivers it — so the row above it is spent exactly as a plain send spends it.
 func TestStagedInterjectionSpendsTheBand(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -422,6 +448,8 @@ func TestStagedInterjectionSpendsTheBand(t *testing.T) {
 // before it are offered again afterwards. It is the same boundary the transcript resets on, which is
 // what makes the rule "once per session" rather than "once per catalog scan".
 func TestClearResetsTheSpentSkills(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -456,6 +484,8 @@ func TestClearResetsTheSpentSkills(t *testing.T) {
 // set is never written to a record, so a restore that kept it could only ever inherit the outgoing
 // session's spend — which is what this pins shut.
 func TestRestoreResetsTheSpentSkills(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -485,6 +515,8 @@ func TestRestoreResetsTheSpentSkills(t *testing.T) {
 // command nor a skill is refused with the typo guard's note and the line is left standing in the box
 // — nothing went out — so the advice above it must still be there to act on afterwards.
 func TestSuggestionsSurviveARefusedLine(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
 
@@ -515,6 +547,8 @@ func TestSuggestionsSurviveARefusedLine(t *testing.T) {
 // matcher returns are the engine's question (suggest_library_test.go); this table holds one row of
 // each shape the band can end up with: a clear winner, two genuine runners-up, and nothing at all.
 func TestSuggestBandPrecision(t *testing.T) {
+	t.Parallel()
+
 	catalog, err := skills.Load(skills.Sources{Home: "../skills/testdata/library"})
 	if err != nil {
 		t.Fatalf("Load(../skills/testdata/library): %v", err)

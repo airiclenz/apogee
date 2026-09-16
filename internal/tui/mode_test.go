@@ -31,6 +31,8 @@ func newModeModel(t *testing.T, start domain.Mode) (Model, *fakeEngine) {
 // advances opts.Mode, drives the engine via SetMode, and renders the FRIENDLY footer label
 // (spaced, not the hyphenated wire form).
 func TestModelShiftTabCyclesMode(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct {
 		start, want domain.Mode
 		label       string
@@ -42,6 +44,8 @@ func TestModelShiftTabCyclesMode(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(string(tc.start), func(t *testing.T) {
+			t.Parallel()
+
 			m, eng := newModeModel(t, tc.start)
 
 			m = step(t, m, keyShiftTab())
@@ -73,6 +77,8 @@ func TestModelShiftTabCyclesMode(t *testing.T) {
 // The left run is asserted VERBATIM at each width, not merely searched: a segment that leaves takes
 // its separator with it, so no rung of the ladder may open or close on a dangling ✦.
 func TestFooterDropsSegmentsBeforeTheModeMarker(t *testing.T) {
+	t.Parallel()
+
 	m := footerFactsModel(t)
 	marker := footerModeText(modeMarker(domain.ModeAuto), confinedWord)
 
@@ -106,6 +112,8 @@ func TestFooterDropsSegmentsBeforeTheModeMarker(t *testing.T) {
 // TestModeColorDistinct proves each autonomy mode maps to its own footer-marker colour, so the
 // four markers are visually distinguishable.
 func TestModeColorDistinct(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	modes := []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto}
 	seen := map[string]domain.Mode{}
@@ -129,6 +137,8 @@ func TestModeColorDistinct(t *testing.T) {
 // "unconfined" and it trails the marker's own styled run in the error tone. The symbol still leads,
 // which is what this test is for.
 func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		mode                domain.Mode
 		symbol, label, tail string
@@ -139,6 +149,8 @@ func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
 		{domain.ModeAuto, "⏵⏵", "auto", " · " + unconfinedWord},
 	} {
 		t.Run(string(tc.mode), func(t *testing.T) {
+			t.Parallel()
+
 			m, _ := newModeModel(t, tc.mode)
 			footer := m.footerContent(80)
 			want := tc.symbol + " " + tc.label
@@ -162,6 +174,8 @@ func TestFooterModeMarkerLeadsWithTheModeSymbol(t *testing.T) {
 // TestModeMarkerFallsBackToTheWordAlone proves an off-ladder mode keeps its word and borrows no
 // other rung's shape: no glyph, and no orphan leading space where one would have gone.
 func TestModeMarkerFallsBackToTheWordAlone(t *testing.T) {
+	t.Parallel()
+
 	off := domain.Mode("hands-off")
 	if got := modeSymbol(off); got != "" {
 		t.Errorf("modeSymbol(%q) = %q, want no glyph for an off-ladder mode", off, got)
@@ -174,6 +188,8 @@ func TestModeMarkerFallsBackToTheWordAlone(t *testing.T) {
 // TestModelShiftTabCyclesWhileBusy proves mid-turn switching: Shift+Tab cycles the mode and
 // drives the engine while running, while awaiting an approval, and while awaiting an answer.
 func TestModelShiftTabCyclesWhileBusy(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name  string
 		state uiState
@@ -183,6 +199,8 @@ func TestModelShiftTabCyclesWhileBusy(t *testing.T) {
 		{"awaiting-ask", stateAwaitingAsk},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			m, eng := newModeModel(t, domain.ModeAskBefore)
 			m.state = tc.state
 
@@ -224,6 +242,8 @@ func TestConfinementWordFollowsModeFlagAndBackend(t *testing.T) {
 		{"plan says nothing", degradedHost, domain.ModePlan, true, ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			if got := confinementWord(tc.info, tc.mode, tc.confine); got != tc.want {
 				t.Errorf("confinementWord(%+v, %q, confine=%v) = %q, want %q",
 					tc.info, tc.mode, tc.confine, got, tc.want)

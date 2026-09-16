@@ -93,6 +93,8 @@ func splitMarker(t *testing.T, row, want string, width int) string {
 // behind — pluralised. A body inside the cap paints whole with no marker at all, which is the
 // boundary the trigger turns on, and an interjection collapses by the very same rule.
 func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
+	t.Parallel()
+
 	const width = 40
 	// One unbreakable word, wrapped hard: it fills the block's rows edge to edge, which is what
 	// makes the third row long enough to be truncated by the marker beside it.
@@ -143,6 +145,8 @@ func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			tr := &transcript{}
 			tc.build(tr)
 
@@ -172,6 +176,8 @@ func TestCollapsedPromptPaintsThreeRowsWithAnInlineMarker(t *testing.T) {
 // paints exactly the compact shape back, over one transcript, because that is the claim: nothing
 // about the entry changes but the flag the painter reads.
 func TestExpandedPromptPaintsItsWholeBodyAndTrailsSeeLess(t *testing.T) {
+	t.Parallel()
+
 	const width = 40
 	tr := &transcript{}
 	tr.addUser("alpha\nbravo\ncharlie\ndelta\necho", nil)
@@ -212,6 +218,8 @@ func TestExpandedPromptPaintsItsWholeBodyAndTrailsSeeLess(t *testing.T) {
 // every prompt OWNS an expanded state, and one whose body fits inside the row cap paints identically
 // either way — holding the flag is not the same as showing it.
 func TestUnderThresholdPromptIgnoresItsExpandedState(t *testing.T) {
+	t.Parallel()
+
 	tr := &transcript{}
 	tr.addUser("alpha\nbravo", nil)
 
@@ -231,6 +239,8 @@ func TestUnderThresholdPromptIgnoresItsExpandedState(t *testing.T) {
 // off the expanded paint at that same narrow width, so the marker's arithmetic is asserted against
 // the rows it is counting rather than against a number written down here.
 func TestPromptCollapseFollowsThePaintWidth(t *testing.T) {
+	t.Parallel()
+
 	const narrow = 24
 	tr := &transcript{}
 	tr.addUser("the quick brown fox jumps over the lazy dog and keeps on running", nil)
@@ -260,6 +270,8 @@ func TestPromptCollapseFollowsThePaintWidth(t *testing.T) {
 // see-less row expanded — with no trailing ✦ row of any kind. What records the invocation now is
 // the token inside the text (TestSentBlockAccentsItsSkillTokens).
 func TestPromptWithSkillsPaintsNoChipRow(t *testing.T) {
+	t.Parallel()
+
 	const width = 44
 	const text = "/review alpha\nbravo\ncharlie\ndelta"
 	tr := &transcript{}
@@ -338,6 +350,8 @@ func accentRuns(block, opener string) []string {
 // still reads as the sentence that was sent (ISSUES, "sent prompts with skills"; layout.md,
 // "Tokens light up when they resolve").
 func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const width = 44
 	const text = "/review this diff"
@@ -359,6 +373,8 @@ func TestSentBlockAccentsItsSkillTokens(t *testing.T) {
 // A token invoked twice is painted twice: the SPANS drive the accent, not the de-duped name list,
 // so both occurrences light up.
 func TestSentBlockAccentsEveryOccurrence(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const text = "/review this diff and /review that one"
 	tr := &transcript{}
@@ -376,6 +392,8 @@ func TestSentBlockAccentsEveryOccurrence(t *testing.T) {
 // A token the block had to break across a soft-wrap is accented on BOTH rows — the prompt box's
 // own rule for a wrapped token (TestAccentedTokenWrapsAcrossRows), against the transcript's wrap.
 func TestAccentedSkillTokenStraddlesASoftWrap(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const width = 12 // the token is wider than the row left of the marker, so the block breaks it
 	const text = "/coding-standards"
@@ -397,10 +415,14 @@ func TestAccentedSkillTokenStraddlesASoftWrap(t *testing.T) {
 // the truncated row carrying the see-more marker stays inside that row's own content — the marker
 // is apogee talking, and an accent that reached it would recolour that voice.
 func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	const width = 44
 
 	t.Run("a token on a hidden row paints nothing", func(t *testing.T) {
+		t.Parallel()
+
 		const text = "alpha\nbravo\ncharlie\ndelta /review"
 		tr := &transcript{}
 		tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
@@ -412,6 +434,8 @@ func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
 	})
 
 	t.Run("a token on the marker row paints, and the marker keeps its own colour", func(t *testing.T) {
+		t.Parallel()
+
 		const text = "alpha\nbravo\ncharlie /review\ndelta"
 		tr := &transcript{}
 		tr.addUser(text, []skillSpan{spanOf(t, text, "/review", 1)})
@@ -436,6 +460,8 @@ func TestCollapsedBlockAccentsOnlyWhatItShows(t *testing.T) {
 // two guards for the opposite failures — a role that paints nothing at all, and one that paints
 // exactly what the body does.
 func TestPromptMarkerCarriesTheHighlightStyle(t *testing.T) {
+	t.Parallel()
+
 	th := newTheme(scheme.Default())
 	tr := &transcript{}
 	tr.addUser("alpha\nbravo\ncharlie\ndelta", nil)

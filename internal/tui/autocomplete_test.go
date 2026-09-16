@@ -33,6 +33,8 @@ func newDropdownModel(t *testing.T, opts Options) Model {
 // A dropdown carrying a skill row is painted with the shared popup chrome: a title row, the rounded
 // box border, and the ❯ marker on the selected row — all above the bottom input chrome.
 func TestAutocompleteSkillDropdownChrome(t *testing.T) {
+	t.Parallel()
+
 	m := newDropdownModel(t, skillOpts())
 	// "zzz" is the draft's own marker word — no menu row can carry it, so its position in the view
 	// is the input box's. No command verb has the "clean" prefix, so the sole row is the skill's.
@@ -60,6 +62,8 @@ func TestAutocompleteSkillDropdownChrome(t *testing.T) {
 
 // The "/" command menu carries the "commands" title; an "@" file token carries the "files" title.
 func TestAutocompleteCommandAndFileTitles(t *testing.T) {
+	t.Parallel()
+
 	cmd := newDropdownModel(t, testOpts)
 	cmd.input.SetValue("/")
 	cmd.autocomplete = cmd.computeAutocomplete(cmd.caretByteOffset())
@@ -83,6 +87,8 @@ func TestAutocompleteCommandAndFileTitles(t *testing.T) {
 // (queueCommand), so the tag says "runs at idle", not that the line is refused. The literal is
 // pinned here because it is a promise the menu makes about the accept.
 func TestIdleOnlyTagSaysRunsAtIdle(t *testing.T) {
+	t.Parallel()
+
 	if idleOnlyTag != "— runs at idle" {
 		t.Fatalf("idleOnlyTag = %q; want %q — an idle-only verb is queued, never refused", idleOnlyTag, "— runs at idle")
 	}
@@ -105,6 +111,8 @@ func TestIdleOnlyTagSaysRunsAtIdle(t *testing.T) {
 // the column contract each producer concatenated its own two-space gap, so the summaries stepped
 // raggedly down the pane behind whatever name preceded them.
 func TestSlashMenuSummariesShareOneColumn(t *testing.T) {
+	t.Parallel()
+
 	m := newDropdownModel(t, skillOpts())
 	m.input.SetValue("/c") // the four c-verbs plus the clean-code skill: first cells of very different widths
 	m.autocomplete = m.computeAutocomplete(m.caretByteOffset())
@@ -138,6 +146,8 @@ func TestSlashMenuSummariesShareOneColumn(t *testing.T) {
 // the 100×30 harness window) — flush with the input box below it, the same width the /sessions
 // popup spans.
 func TestAutocompleteDropdownSpansFullWidth(t *testing.T) {
+	t.Parallel()
+
 	m := newDropdownModel(t, skillOpts())
 	wantWidth := m.width // the full window width, matching the input box
 	m.input.SetValue("/c")
@@ -163,6 +173,8 @@ func TestAutocompleteDropdownSpansFullWidth(t *testing.T) {
 // the menu takes its rows out of the same viewport, so the granted window is smaller than the same
 // terminal gives an unaccompanied dropdown — and the row the human has arrowed onto is still in it.
 func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
+	t.Parallel()
+
 	cases := []struct{ height, staged int }{
 		{18, 0}, {20, 0}, {22, 0}, {24, 0}, {30, 0},
 		{22, 2}, {24, 2}, {30, 2},
@@ -206,6 +218,8 @@ func TestAutocompleteSelectionStaysOnScreenAtEveryBudget(t *testing.T) {
 // from it, because handleKey has given those keys to the decision — while it went on competing for
 // the same four rows as the pane the run is blocked on.
 func TestModalPromptDismissesTheDropdown(t *testing.T) {
+	t.Parallel()
+
 	arrivals := []struct {
 		name string
 		msg  tea.Msg
@@ -222,6 +236,8 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 	for _, a := range arrivals {
 		for _, d := range drafts {
 			t.Run(a.name+"/"+d.name, func(t *testing.T) {
+				t.Parallel()
+
 				m := modelWithOverlayRoomAt(t, 80, 30, Options{Workspace: "."})
 				startStubWorker(t, &m)
 				m.input.SetValue(d.value)
@@ -264,6 +280,8 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 // exactly as a bare "/confine" id is, and a genuine skill that merely starts with the same letters
 // is untouched.
 func TestSlashMenuShadowsASkillIDThatIsACommandLine(t *testing.T) {
+	t.Parallel()
+
 	m := Model{opts: Options{Skills: fakeSkillCatalog{skills: []skills.Skill{
 		{ID: "confine off --save", DisplayName: "Confine", Summary: "looks like a skill"},
 		{ID: "confidence", DisplayName: "Confidence", Summary: "a genuine skill"},
@@ -290,6 +308,8 @@ func TestSlashMenuShadowsASkillIDThatIsACommandLine(t *testing.T) {
 // off the right edge behind an alignment that looks like the pane's own; and an over-long one,
 // which must end in the ellipsis rather than simply stopping where the pane runs out.
 func TestSlashMenuBoundsAHostileSkillID(t *testing.T) {
+	t.Parallel()
+
 	padded := "clean" + strings.Repeat(" ", 40) + "confine off --save"
 	long := "clean-" + strings.Repeat("z", maxSkillIDCells)
 	opts := testOpts
@@ -348,6 +368,8 @@ func bandedModel(t *testing.T, opts Options) Model {
 // the key its legend was advertising, so a band still painted underneath would say "tab to pick"
 // about a key that no longer means that.
 func TestTabOpensTheSuggestionMenuOverTheBandsRows(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := bandedModel(t, bandOpts(gatedSuggest(&rec)))
 
@@ -389,6 +411,8 @@ func TestTabOpensTheSuggestionMenuOverTheBandsRows(t *testing.T) {
 // textarea does with it — that is the widget's business and this item changes none of it — but that
 // a model with the band wired answers it exactly as a model without one does.
 func TestTabWithNoBandStaysTheEditorsOwnKey(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "hi") // under the gate
 	if len(m.skillHints) != 0 {
@@ -410,6 +434,8 @@ func TestTabWithNoBandStaysTheEditorsOwnKey(t *testing.T) {
 // there was no partial — so everything the human had written survives on both sides of it, and the
 // token lands with the boundaries that make it one the parse will resolve.
 func TestSuggestionMenuInsertsTheTokenAtTheCaret(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name  string
 		draft string
@@ -429,6 +455,8 @@ func TestSuggestionMenuInsertsTheTokenAtTheCaret(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			var rec suggestCall
 			m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), tc.draft)
 			for range tc.left {
@@ -452,6 +480,8 @@ func TestSuggestionMenuInsertsTheTokenAtTheCaret(t *testing.T) {
 // dropdown closes: esc dismisses it outright, and the next character re-derives the overlay from the
 // draft, where no "/" token stands at the caret.
 func TestSuggestionMenuClosesOnEscAndOnTyping(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name string
 		key  tea.KeyPressMsg
@@ -460,6 +490,8 @@ func TestSuggestionMenuClosesOnEscAndOnTyping(t *testing.T) {
 		{name: "a typed character", key: keyRune('!')},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			var rec suggestCall
 			m := step(t, bandedModel(t, bandOpts(gatedSuggest(&rec))), keyTab())
 			if !m.autocomplete.active {
@@ -480,6 +512,8 @@ func TestSuggestionMenuClosesOnEscAndOnTyping(t *testing.T) {
 // up a row that would splice a token nothing resolves, so the vanished hint is skipped and a menu
 // with nothing left to show does not open at all.
 func TestSuggestionMenuSkipsAHintTheCatalogNoLongerHolds(t *testing.T) {
+	t.Parallel()
+
 	var rec suggestCall
 	opts := bandOpts(gatedSuggest(&rec))
 	catalog := opts.Skills.(fakeSkillCatalog)

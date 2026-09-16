@@ -11,6 +11,8 @@ import (
 // return in the terminal, smearing the wide start-up card. logo.go normalises the embedded bytes;
 // this pins that the normalised string is what the renderers consume.
 func TestApogeeLogoCarriesNoCarriageReturns(t *testing.T) {
+	t.Parallel()
+
 	if strings.Contains(apogeeLogo, "\r") {
 		t.Errorf("apogeeLogo contains carriage returns; embed normalisation in logo.go is broken")
 	}

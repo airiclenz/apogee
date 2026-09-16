@@ -142,6 +142,8 @@ func offerModel(t *testing.T, w *configWriteLog, entries ...string) Model {
 // The pane comes up unasked at construction, under a notice naming what was found and where it
 // could go instead, and it asks about the FIRST entry with the rest queued behind it.
 func TestKeyMigrationOfferOpensWithItsNotice(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation", "laptop")
 
@@ -176,6 +178,8 @@ func TestKeyMigrationOfferOpensWithItsNotice(t *testing.T) {
 // called (ADR 0054 decision 3a), so a nil host raises nothing rather than answering a refusal. Each
 // is an offer apogee could not complete.
 func TestKeyMigrationOfferNeedsAStoreAnEntryAndASeam(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name string
 		mut  func(*Options)
@@ -185,6 +189,8 @@ func TestKeyMigrationOfferNeedsAStoreAnEntryAndASeam(t *testing.T) {
 		{"no seam", func(o *Options) { o.Config = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			opts := offerOpts(&configWriteLog{}, "workstation")
 			tc.mut(&opts)
 
@@ -200,6 +206,8 @@ func TestKeyMigrationOfferNeedsAStoreAnEntryAndASeam(t *testing.T) {
 // The pre-bound ask owns the opening frame. A session with no server is asked THAT question alone —
 // the offer costs nothing by waiting, because "not now" is what it already means.
 func TestKeyMigrationGivesWayToThePreboundAsk(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{}
 	opts := preboundOpts(PreboundFirstBoot, "")
 	opts.KeyMigration = KeyMigrationOffer{StoreName: "macOS Keychain", Entries: []string{"workstation"}}
@@ -220,6 +228,8 @@ func TestKeyMigrationGivesWayToThePreboundAsk(t *testing.T) {
 // "not now" persists nothing at all — not the marker either, since the whole point of the answer is
 // that it is not final — and moves on to the next entry.
 func TestKeyMigrationNotNowPersistsNothing(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation", "laptop")
 
@@ -244,6 +254,8 @@ func TestKeyMigrationNotNowPersistsNothing(t *testing.T) {
 // "never for this entry" is the one answer that writes without moving anything: the per-entry
 // marker, and a note saying which file records it so the human can take it back.
 func TestKeyMigrationNeverRecordsTheMarker(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation")
 
@@ -270,6 +282,8 @@ func TestKeyMigrationNeverRecordsTheMarker(t *testing.T) {
 // it — the store write, the read-back, the rewrite — is the binary's (keymigrate.go's own suite);
 // what is proved here is that one answer is one call about one entry.
 func TestKeyMigrationMoveCallsTheSeamAndAdvances(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := offerModel(t, w, "workstation", "laptop")
 
@@ -295,6 +309,8 @@ func TestKeyMigrationMoveCallsTheSeamAndAdvances(t *testing.T) {
 // keeps its plaintext key, which is the state "not now" leaves it in, so the next start-up asks
 // again rather than this one asking twice.
 func TestKeyMigrationReportsAFailedMove(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{err: errors.New("the keychain refused the key")}
 	m := offerModel(t, w, "workstation")
 
@@ -311,6 +327,8 @@ func TestKeyMigrationReportsAFailedMove(t *testing.T) {
 
 // esc ends the whole round: every entry still queued is a "not now", and nothing is written.
 func TestKeyMigrationEscEndsTheRound(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{}
 	m := offerModel(t, w, "workstation", "laptop")
 
@@ -346,6 +364,8 @@ func subAgentsOfferModel(t *testing.T, f *configWriteLog, entries ...string) Mod
 // The pane comes up unasked at construction, under a notice naming the entries that carry the
 // retired flag, and it asks about the FIRST of them — the name the answer would write as the key.
 func TestSubAgentsMigrationOfferOpensWithItsNotice(t *testing.T) {
+	t.Parallel()
+
 	f := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := subAgentsOfferModel(t, f, "cheap", "spare")
 
@@ -368,6 +388,8 @@ func TestSubAgentsMigrationOfferOpensWithItsNotice(t *testing.T) {
 // nothing, and neither is one whose [ConfigHost] the Driver left unwired: the gate is decided ABOUT
 // the host before any act is called (ADR 0054 decision 3a).
 func TestSubAgentsMigrationNeedsAnEntryAndASeam(t *testing.T) {
+	t.Parallel()
+
 	f := &configWriteLog{}
 	if m := newTestModelEng(t, &fakeEngine{}, subAgentsOfferOpts(f)); m.picker.open {
 		t.Errorf("picker = %+v, want nothing raised for a config with no retired flag", m.picker)
@@ -383,6 +405,8 @@ func TestSubAgentsMigrationNeedsAnEntryAndASeam(t *testing.T) {
 // and the file that carries it. What the seam DOES — the rewrite and the retarget — is the binary's
 // (keymigrate.go's own suite).
 func TestSubAgentsMigrationMoveCallsTheSeam(t *testing.T) {
+	t.Parallel()
+
 	f := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	m := subAgentsOfferModel(t, f, "cheap", "spare")
 
@@ -403,6 +427,8 @@ func TestSubAgentsMigrationMoveCallsTheSeam(t *testing.T) {
 // A move that FAILED says so, and the file is the seam's business: nothing here claims a routing
 // change that did not happen.
 func TestSubAgentsMigrationReportsAFailedMove(t *testing.T) {
+	t.Parallel()
+
 	f := &configWriteLog{err: errors.New("the servers: list has no entry named \"cheap\"")}
 	m := subAgentsOfferModel(t, f, "cheap")
 
@@ -417,6 +443,8 @@ func TestSubAgentsMigrationReportsAFailedMove(t *testing.T) {
 // "not now" and esc are the same answer spelled two ways: nothing is written, and the offer comes
 // back at the next start-up because the file still carries the flag.
 func TestSubAgentsMigrationDeclinedPersistsNothing(t *testing.T) {
+	t.Parallel()
+
 	for _, tc := range []struct {
 		name string
 		key  func() tea.KeyPressMsg
@@ -426,6 +454,8 @@ func TestSubAgentsMigrationDeclinedPersistsNothing(t *testing.T) {
 		{name: "esc", key: keyEsc},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			f := &configWriteLog{}
 			m := subAgentsOfferModel(t, f, "cheap")
 			if tc.down {
@@ -448,6 +478,8 @@ func TestSubAgentsMigrationDeclinedPersistsNothing(t *testing.T) {
 // gives way exactly as the key migration gives way to the pre-bound ask: nothing of it is written,
 // and the Options still describe what this start-up found, so the next one asks.
 func TestSubAgentsMigrationGivesWayToTheKeyMigration(t *testing.T) {
+	t.Parallel()
+
 	w := &configWriteLog{path: "/home/x/.apogee/config.yaml"}
 	opts := offerOpts(w, "workstation")
 	opts.SubAgentsMigration = []string{"cheap"}
