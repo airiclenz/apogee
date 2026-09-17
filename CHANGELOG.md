@@ -10,6 +10,24 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Fixed:** Undo whole-tree images (ADR 0074) work again for confined Auto writes on landlock hosts: the pre-image snapshot git ran inside the workspace box and failed with `index.lock: Permission denied`, painting a red `undo:` line on every write.
+
+- **Fixed:** `.gitattributes` pins `*.golden` and `**/testdata/**` to LF, so a `core.autocrlf=true` checkout (Windows CI) no longer turns `tuitest.compareGolden`'s byte-for-byte compare red on a diff that looks identical (`apogee-80n`).
+
+- **Test driver:** `tuitest.Frame.PromptBox()` returns the input box's content rows (the lowest `╭…╰` pair in the frame, borders excluded) so a test can match inside the prompt box instead of anywhere on screen (`apogee-htf`, part 1).
+
+- Driver tests no longer race the command palette: `submit()` waits for the typed line inside the prompt box only, and the `/usage` and `/model` pane markers are the panes' own key hints rather than strings the palette's summary row also paints (`apogee-htf`); `tui.CommandSummaries()` backs a guard test that holds every pane marker to that rule.
+
+- **Fixed:** `TestE2ESubAgentView` captured the `t17-run-view` golden one tick early on a slow runner — the wait now also requires the child's first read receipt (`⋯ 2 lines`) to be painted before the frame is compared (`apogee-ig7`).
+
+- The announced-path driver tests' approval-pane watcher (`watchApprovalPanes`) reads a frame only after the screen's byte counter has moved, on `stepSettings`'s precedent, and polls every 10 ms instead of 5 — it no longer rebuilds every terminal cell under the screen lock on a quiet tick, which cost a quarter of those tests' CPU and held the lock against the program's own writes (`apogee-pqs`, part 1); the rising-edge count and its cleanup stop are unchanged.
+
+- e2e: `submit()` now waits `DefaultTimeout` plus 100 ms per typed byte for the prompt to land, so a long prompt on a loaded runner (~90 ms/key) no longer times out mid-typing (`apogee-pqs`).
+
+- `make test` packs its shards by the committed `scripts/test-timings.seed` when the gitignored `.test-timings` cache is absent (a fresh checkout — CI's runner every time), so CI's two `cmd/apogee` shards balance like a warm local run instead of the equal-cost split that ran them 185 s against 117 s; the script names its timings source on stderr, and `make test-timings-seed` refreshes the seed from the last run's cache (`apogee-2c0`).
+
+- The daemon test harness's `run` now registers a Cleanup that stops and joins the daemon it started — after `newDaemonHarness`'s seam restore, so LIFO joins the Scheduler's goroutines before `runOnce` is restored under them. A daemon test that failed before its own wait used to leave those goroutines reading the seam a later test rewrote, which is the `DATA RACE` cascade `apogee-5tn` recorded; the audit found every other scheduler site (`newScheduleHarness`, `newReloadHarness`, `TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram`, `runRoot` under `TestRunRootWiresTheSchedulerAndClosesItWithTheTUI` and the driven e2e sessions) already ordered, and both `Scheduler` goroutines (`loop`, `run`) `wg`-tracked so `Close` joins them.
+
 - Two new `ui:` keys for the `✦ Tools (N calls)` umbrella fold: `ui.tools-open` (bool, default `false`) is whether a large umbrella starts open, and `ui.tools-fold-over` (int, default `5`; `0` never folds, negative refused) is how many type rows an umbrella may show before it counts as large. Both show in `/settings`, resolve through the file like `ui.task-list-open`, and are documented in the manual and the seeded template; the fold itself lands with the renderer items.
 
 - **Large Tools umbrellas fold to their header.** A `✦ Tools (N calls)` umbrella that is at rest — no worker in flight, every call done — with more type rows than `ui.tools-fold-over` now paints as its header line alone with a `▶`, or open with a `▼`, under the one shared `ui.tools-open` preference; small or live umbrellas keep their header exactly as before. The fold is a paint input (`paintKey.large`/`folded`), so a preference flip or a threshold edit repaints every umbrella it moves.
