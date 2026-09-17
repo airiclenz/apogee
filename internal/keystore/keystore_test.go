@@ -1073,3 +1073,74 @@ func TestWriteRefusesWhatItCannotStore(t *testing.T) {
 		t.Errorf("a refused write ran %d store tool(s), want none", len(runs))
 	}
 }
+
+// A failed write ends with the two lines that finish the move without apogee: the store command,
+// with the secret left off for the tool to prompt for, and the api-key-cmd: line the migration would
+// have written. The commonest failure is a locked keyring on a box with no GUI agent to unlock it, and
+// the same tool run from a terminal prompts there — so the error must hand over the command to type
+// rather than leave the user to reconstruct it from the manual.
+func TestWriteFailureNamesTheCommandsToFinishByHand(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		kind      kind
+		program   string
+		entry     string
+		wantStore string
+		wantRead  string
+	}{
+		{
+			name:      "secret service",
+			kind:      kindSecretService,
+			program:   secretServiceProgram,
+			entry:     "openrouter-ds4",
+			wantStore: "`secret-tool store --label='apogee: openrouter-ds4' service apogee entry openrouter-ds4`",
+			wantRead:  "`api-key-cmd: secret-tool lookup service apogee entry openrouter-ds4`",
+		},
+		{
+			name:      "keychain, entry name needing shell quotes",
+			kind:      kindKeychain,
+			program:   keychainProgram,
+			entry:     "work laptop",
+			wantStore: "`security add-generic-password -U -s apogee -a 'work laptop' -w`",
+			wantRead:  "`api-key-cmd: security find-generic-password -s apogee -a 'work laptop' -w`",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			for _, failure := range []struct {
+				name string
+				run  runner
+			}{
+				{name: "never finished", run: func(context.Context, []string, string) (toolResult, error) {
+					return toolResult{}, errors.New(tc.program + " did not answer in time")
+				}},
+				{name: "refused", run: func(context.Context, []string, string) (toolResult, error) {
+					return toolResult{stderr: "locked", code: 1}, nil
+				}},
+			} {
+				store := Store{kind: tc.kind, program: tc.program, run: failure.run}
+
+				err := store.Write(tc.entry, "sk-live-1")
+
+				if err == nil {
+					t.Fatalf("%s: Write() = nil, want the failure surfaced", failure.name)
+				}
+				message := err.Error()
+				if !strings.Contains(message, tc.wantStore) {
+					t.Errorf("%s: Write() = %v, want the store command %s", failure.name, err, tc.wantStore)
+				}
+				if !strings.Contains(message, tc.wantRead) {
+					t.Errorf("%s: Write() = %v, want the read-back line %s", failure.name, err, tc.wantRead)
+				}
+				if strings.Contains(message, "sk-live-1") {
+					t.Errorf("%s: Write() = %v, want the secret kept off the command to type", failure.name, err)
+				}
+			}
+		})
+	}
+}

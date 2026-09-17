@@ -10,6 +10,8 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- A key migration that fails now ends with the two commands that finish it by hand — the `secret-tool store` / `security add-generic-password` line (secret left off, the tool prompts for it) and the `api-key-cmd:` line to write — so a locked keyring with no GUI agent to unlock it (`secret-tool did not answer in time`) is fixed by pasting the command into a terminal instead of reconstructing it from the manual.
+
 - **Fixed:** Undo whole-tree images (ADR 0074) work again for confined Auto writes on landlock hosts: the pre-image snapshot git ran inside the workspace box and failed with `index.lock: Permission denied`, painting a red `undo:` line on every write.
 
 - **Fixed:** `.gitattributes` pins `*.golden` and `**/testdata/**` to LF, so a `core.autocrlf=true` checkout (Windows CI) no longer turns `tuitest.compareGolden`'s byte-for-byte compare red on a diff that looks identical (`apogee-80n`).

@@ -1440,6 +1440,15 @@ writes `plaintext-key-ok: true` beside the key and is not asked again. A machine
 with no usable store — and every unattended `apogee headless` run — gets a notice
 naming the entries and the alternatives instead.
 
+A move that fails ends with the two commands that finish it by hand. The usual
+case is a locked keyring on a machine with no GUI agent to unlock it: `secret-tool`
+waits for a prompt nobody can answer and times out. Run from a terminal, the same
+tool prompts there instead — so paste the store command the notice quotes
+(`secret-tool store --label='apogee: <entry>' service apogee entry <entry>`, or
+`security add-generic-password -U -s apogee -a <entry> -w` on macOS), type the key
+when asked, and replace the entry's `api-key:` line with the quoted
+`api-key-cmd:` line.
+
 ## Local servers — llama-launcher
 
 `/server` moves a session between servers that are **already running**. Bringing one

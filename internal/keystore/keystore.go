@@ -208,17 +208,42 @@ func (s Store) Write(entry, key string) error {
 	// is a byte cut, so the tail goes first: a key the cut halved is a fragment no redaction can match.
 	complaint := redactKey(trimCappedKeyTail(outcome.stderr, key), key)
 	if err != nil {
-		return fmt.Errorf("apogee: server %q: could not be stored in %s: %w%s",
-			entry, s.Name(), err, said(complaint))
+		return fmt.Errorf("apogee: server %q: could not be stored in %s: %w%s%s",
+			entry, s.Name(), err, said(complaint), s.byHand(entry))
 	}
 	// A non-zero exit is the ordinary failure. The stderr test is there for `security -i`, which runs
 	// each line it reads and can report a refusal on stderr while still exiting 0 for having read the
 	// input successfully — treating that as a write would hand the caller a key the store never took.
 	if outcome.code != 0 || strings.TrimSpace(outcome.stderr) != "" {
-		return fmt.Errorf("apogee: server %q: %s refused the key%s",
-			entry, s.Name(), said(complaint))
+		return fmt.Errorf("apogee: server %q: %s refused the key%s%s",
+			entry, s.Name(), said(complaint), s.byHand(entry))
 	}
 	return nil
+}
+
+// byHand is the tail every failed write carries: the two lines that finish the move without apogee.
+//
+// The commonest failure is not a broken store but one that could not ASK — a keyring that has to be
+// unlocked prompts through a GUI agent, and a headless box has none, so the tool waits until the
+// timeout. Run from a terminal, the same tool prompts on that terminal instead, so the fix is to type
+// the very command apogee just ran. Both store commands below leave the secret off the line for the
+// tool to prompt for — `security` prompts when `-w` ends the command, `secret-tool store` always
+// reads it from the terminal — for the argv reason in the package comment. The second line is
+// ReadCmd, byte for byte: the migration would have written it into the file, so the user writes it.
+func (s Store) byHand(entry string) string {
+	var store string
+	switch s.kind {
+	case kindKeychain:
+		store = fmt.Sprintf("%s add-generic-password -U -s %s -a %s -w",
+			keychainProgram, service, shellWord(entry))
+	case kindSecretService:
+		store = fmt.Sprintf("%s store --label=%s service %s entry %s",
+			secretServiceProgram, shellWord(service+": "+entry), service, shellWord(entry))
+	default:
+		return ""
+	}
+	return fmt.Sprintf(" — to finish by hand, in a terminal run `%s` (it prompts for the key), then "+
+		"replace the entry's api-key: line with `api-key-cmd: %s`", store, s.ReadCmd(entry))
 }
 
 // writeCommand is the argv and the stdin one write is made of.
