@@ -73,24 +73,35 @@ func TestBackendName(t *testing.T) {
 func TestCapabilityLine(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name string
-		caps domain.ConfinementCaps
-		want string
+		name    string
+		backend string
+		caps    domain.ConfinementCaps
+		want    string
 	}{
-		{"nothing enforced", domain.ConfinementCaps{}, "landlock (fs-write: unavailable · network: unavailable)"},
-		{"fs only", domain.ConfinementCaps{FSWrite: true}, "landlock (fs-write: available · network: unavailable)"},
-		{"both", domain.ConfinementCaps{FSWrite: true, NetworkEgress: true}, "landlock (fs-write: available · network: available)"},
+		{"nothing enforced", "landlock", domain.ConfinementCaps{}, "landlock (fs-write: unavailable · network: unavailable)"},
+		{"fs only", "landlock", domain.ConfinementCaps{FSWrite: true}, "landlock (fs-write: available · network: unavailable)"},
+		{"both", "landlock", domain.ConfinementCaps{FSWrite: true, NetworkEgress: true}, "landlock (fs-write: available · network: available)"},
 		// The fence is real but incomplete (landlock ABI 1–2): the line names what it does not
 		// cover, so /confine status, `apogee probe` and the startup line all carry it.
-		{"fs with a residual", domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
+		{"fs with a residual", "landlock", domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}},
 			"landlock (fs-write: available · network: unavailable · unfenced: truncate(2))"},
-		{"more than one residual", domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)", "refer(2)"}},
+		{"more than one residual", "landlock", domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)", "refer(2)"}},
 			"landlock (fs-write: available · network: unavailable · unfenced: truncate(2), refer(2))"},
+		// No fence at all: the line says WHY, after the network cell, so the three surfaces
+		// tell the user which host fact stands between them and a confined Auto.
+		{"unfenceable with a reason", "namespace", domain.ConfinementCaps{Unavailable: "bwrap not on PATH"},
+			"namespace (fs-write: unavailable · network: unavailable · why: bwrap not on PATH)"},
+		// A reason beside a working fence is stale by definition and is never rendered.
+		{"fs with a stale reason", "landlock", domain.ConfinementCaps{FSWrite: true, Unavailable: "stale"},
+			"landlock (fs-write: available · network: unavailable)"},
+		// Both disclosures at once: the residual is named first, the reason last.
+		{"residual and a reason", "landlock", domain.ConfinementCaps{Residuals: []string{"truncate(2)"}, Unavailable: "ENOSYS"},
+			"landlock (fs-write: unavailable · network: unavailable · unfenced: truncate(2) · why: ENOSYS)"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := probe.CapabilityLine("landlock", tt.caps); got != tt.want {
+			if got := probe.CapabilityLine(tt.backend, tt.caps); got != tt.want {
 				t.Errorf("CapabilityLine = %q; want %q", got, tt.want)
 			}
 		})

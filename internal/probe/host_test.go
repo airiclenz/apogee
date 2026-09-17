@@ -280,6 +280,28 @@ func TestReportDegradedHostCarriesTheStartupNotice(t *testing.T) {
 	}
 }
 
+// A backend that cannot fence says WHY on the report's backend line — the same ` · why:` cell
+// the startup line and /confine status carry — and the degradation notice still closes the
+// report: the reason explains the gating, it never replaces the remedy.
+func TestReportUnfenceableHostSaysWhy(t *testing.T) {
+	t.Parallel()
+	const reason = "bwrap not on PATH"
+	host := probe.GatherHost(context.Background(), probe.Inputs{
+		Confiner:           fakeConfiner{caps: domain.ConfinementCaps{Unavailable: reason}},
+		ConfineToWorkspace: true,
+	})
+	report := host.Report()
+
+	backendLine := "backend:       fake (fs-write: unavailable · network: unavailable · why: " + reason + ")"
+	if !strings.Contains(report, backendLine) {
+		t.Errorf("report's backend field does not carry the why cell %q:\n%s", backendLine, report)
+	}
+	notice := probe.DegradedNotice(host.Backend, host.Caps, domain.ModeAuto, true)
+	if notice == "" || !strings.Contains(report, notice) {
+		t.Errorf("report does not still carry the startup degradation notice verbatim:\n%s", report)
+	}
+}
+
 // The one backend-specific line: residue the composition root handed in is rendered verbatim
 // under a "labels:" field, so a Windows run that was killed before it could revert its
 // mandatory labels is diagnosable off-session (ADR 0020 §2).

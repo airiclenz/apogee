@@ -32,6 +32,9 @@ access the backend knows it cannot cover on this host. On Linux that is truncati
 older than 6.2 (landlock ABI 1–2: Ubuntu 22.04, Debian 12, RHEL 9), where a confined command
 cannot create or write outside the workspace but can still *empty* a file that is already there.
 Auto stays eligible; the field exists so the report never claims a fence it does not have.
+Where fs-write is `unavailable`, a backend that knows why appends a ` · why: <reason>` field
+instead — `namespace (fs-write: unavailable · network: unavailable · why: bwrap not on PATH)` —
+naming the host fact that stands between you and a confined Auto.
 
 `apogee probe model` is the other half, and it is deliberately an **explicit act**
 rather than something the bare noun triggers, because it costs live model calls *and*

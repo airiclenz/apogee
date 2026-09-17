@@ -46,7 +46,9 @@
 
 ---
 
-## 1. Capability honesty gains a reason: `ConfinementCaps.Unavailable` and its wording
+## 1. Capability honesty gains a reason: `ConfinementCaps.Unavailable` and its wording — ✅ DONE (2026-09-17)
+NOTES (2026-09-17): race evidence deferred: no-TSan host
+NOTES (2026-09-17): `TestCapabilityLine`'s table gained a `backend` column (the plan's namespace row needs a backend other than the hard-coded "landlock"); the existing rows keep their order and expectations, each now naming "landlock" explicitly.
 
 **What:** Add `Unavailable string` to `domain.ConfinementCaps` (`internal/domain/confinement.go`) beneath `Residuals`, documented as the disclosure of *why* `FSWrite` is false — one short sentence, empty whenever `FSWrite` is true or the backend has nothing to say; disclosure only, never read by `AutoEligible`. Producers today: `landlockConfiner.Capabilities` (item 2 fills it), the namespace backend (items 4–6); `seatbeltConfiner`, `denyConfiner`, the Windows backend leave it empty. Consumers: `probe.CapabilityLine` (`internal/probe/confinement.go`) is the ONE renderer — when `caps.FSWrite` is false and `caps.Unavailable != ""` it appends ` · why: <Unavailable>` inside the parentheses, after the network cell (and after `unfenced:` if both ever appear), so `apogee probe host`, `/confine` status and the startup line all say it. `DegradedNotice`, `ResidualNotice`, `AutoUnattendedBlocked` are unchanged. Restate in `CapabilityLine`'s comment that the reason rides here for the same three-surfaces reason as the residuals.
 **Regression guard.** `docs/manual/probe.md` (lines 25–33) documents the `backend:` line's fields (matrix + `unfenced:`) and no other item lists that page: add one sentence beside the `unfenced:` paragraph naming the ` · why: <reason>` field a backend appends when fs-write is unavailable.

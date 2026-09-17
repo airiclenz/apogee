@@ -61,6 +61,14 @@ type ConfinementCaps struct {
 	// open says so rather than reporting a fence it does not have. It is disclosure only —
 	// AutoEligible reads FSWrite alone, so a residual never blocks Auto, it only gets said.
 	Residuals []string
+
+	// Unavailable is the disclosure of WHY FSWrite is false — one short sentence naming the
+	// reason this backend cannot fence on this host ("landlock ABI 0: ENOSYS", "bwrap not on
+	// PATH"); empty whenever FSWrite is true or the backend has nothing to say. It is the
+	// other half of capability honesty (contract §5): a backend that cannot fence says so AND
+	// says why, so the user diagnosing a gating Auto is told which host fact to change. It is
+	// disclosure only — AutoEligible reads FSWrite alone and never this.
+	Unavailable string
 }
 
 // AutoEligible reports whether these capabilities satisfy the Auto gate. Under ADR 0012

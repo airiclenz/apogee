@@ -44,7 +44,10 @@ func BackendName(c domain.Confiner) string {
 //
 // A backend that fences writes but knowingly leaves a write-class access open discloses those
 // in caps.Residuals (contract §5), and the line names them: "landlock (fs-write: available ·
-// network: unavailable · unfenced: truncate(2))". Appending them HERE rather than at each
+// network: unavailable · unfenced: truncate(2))". A backend that cannot fence at all discloses
+// the reason in caps.Unavailable, and the line says it last: "namespace (fs-write: unavailable ·
+// network: unavailable · why: bwrap not on PATH)" — only while fs-write is unavailable, since a
+// reason beside a working fence would be a stale story. Appending both HERE rather than at each
 // surface is what makes /confine status, `apogee probe` and the startup line say it together —
 // one function, three surfaces, as the rest of this file's wording already works.
 func CapabilityLine(backend string, caps domain.ConfinementCaps) string {
@@ -52,6 +55,9 @@ func CapabilityLine(backend string, caps domain.ConfinementCaps) string {
 		backend, availability(caps.FSWrite), availability(caps.NetworkEgress))
 	if len(caps.Residuals) > 0 {
 		line += " · unfenced: " + strings.Join(caps.Residuals, ", ")
+	}
+	if !caps.FSWrite && caps.Unavailable != "" {
+		line += " · why: " + caps.Unavailable
 	}
 	return line + ")"
 }
