@@ -69,7 +69,10 @@
 // run/gate/confine/delegate/refuse arms, Approval, result clamping, and the audit records. gate.go is the user's stage of
 // that Approver — the gate reactions asked after resolve() and before anything runs, their
 // allow/deny/ask protocol, and the fold that lets them tighten the ladder's verdict and never
-// loosen it (ADR 0076 D2). treesnapshot.go is the
+// loosen it (ADR 0076 D2). secretsguard.go is the commit-secrets pre-check dispatch runs before
+// a git_commit resolves: the call's staging replayed into a shadow index and diffed, the pure
+// scanner's findings tightening the guard verdict to a forced approval (ADR 0080).
+// treesnapshot.go is the
 // tracked-file mutation floor around subprocess calls — the git-status snapshots taken before
 // and after each run and the warning line naming what changed (always on, ADR 0006 class).
 // subagent.go is the sub-agent

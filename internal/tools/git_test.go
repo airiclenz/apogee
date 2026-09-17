@@ -2426,6 +2426,36 @@ func TestGitCommit_StagesWorkspaceRelativePathspecs(t *testing.T) {
 	}
 }
 
+// TestCommitPathspecsMatchTheCommitTool pins the builder git_commit's `add` and the engine's
+// commit-secrets pre-check share: the same root-taking signature, the same workspace-relative
+// spellings in the model's order (trailing slash kept), and the same refusal — the first entry
+// that escapes the root is ErrPathEscape and NO list comes back, so neither site stages a
+// partial list.
+func TestCommitPathspecsMatchTheCommitTool(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatalf("mkdir docs: %v", err)
+	}
+
+	got, err := CommitPathspecs([]string{"a.txt", "docs/", filepath.Join(root, "b.txt")}, root)
+	if err != nil {
+		t.Fatalf("CommitPathspecs err = %v", err)
+	}
+	if want := []string{"a.txt", "docs/", "b.txt"}; strings.Join(got, " ") != strings.Join(want, " ") {
+		t.Errorf("pathspecs = %q, want %q", got, want)
+	}
+
+	escaped, err := CommitPathspecs([]string{"a.txt", "../../etc/passwd"}, root)
+	if !errors.Is(err, ErrPathEscape) {
+		t.Errorf("escape err = %v, want ErrPathEscape", err)
+	}
+	if escaped != nil {
+		t.Errorf("escape returned %q, want no list", escaped)
+	}
+}
+
 // TestGitLog_PathNarrowsAfterTheDoubleDash: the optional path is a pathspec placed after the
 // existing "--", workspace-relative and with its trailing slash kept, so the ref position stays
 // terminated and TestGitLog_PathShapedRefIsNotAPathspecLog's guarantee is untouched.

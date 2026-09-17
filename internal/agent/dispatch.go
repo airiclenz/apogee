@@ -383,7 +383,8 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 // consulted, no gate key is ever minted, and nothing runs.
 //
 // The Resolution is computed once (resolve(), resolution.go) from the facts resolutionInput
-// gathers — the registry lookup, the always-on guardrails, the effective mode, the caps probe,
+// gathers — the registry lookup, the always-on guardrails (tightened, for a git_commit, by the
+// commit-secrets shadow-index pre-check in secretsguard.go), the effective mode, the caps probe,
 // and the one on-disk write-target check — and the gate stage then folds the user's gate
 // reactions into it: a deny refuses the call, an ask forces the Approver, an allow leaves the
 // ladder's verdict standing (gate.go). This function holds no ladder, guard-tier or demote
@@ -423,7 +424,8 @@ func (a *Agent) prepareCall(ctx context.Context, turn int, call domain.ToolCall,
 		return slot
 	}
 
-	input := a.resolutionInput(tool, call, a.guards.PreExecute(call, tool, a.guardExemptions()))
+	guard := a.tightenForStagedSecrets(ctx, call, a.guards.PreExecute(call, tool, a.guardExemptions()))
+	input := a.resolutionInput(tool, call, guard)
 	slot.tool, slot.writeTarget = tool, input.writeTarget
 	slot.verdict = a.applyGates(ctx, turn, call, resolve(input))
 	if slot.verdict.kind == resolveRefuse {

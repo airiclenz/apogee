@@ -466,8 +466,12 @@ func branchSuccessMessage(args gitBranchArgs) string {
 // git_commit — stage and commit
 // ----------------------------------------------------------------------------
 
+// GitCommitToolName is the registry name of the commit tool — the one call whose staged
+// diff the engine scans for secret material before it resolves (internal/agent/secretsguard.go).
+const GitCommitToolName = "git_commit"
+
 var gitCommitSpec = toolSpec{
-	name:        "git_commit",
+	name:        GitCommitToolName,
 	description: "Stage files and create a git commit. If files are specified they are staged first; otherwise commits whatever is currently staged. Amend is blocked on published commits to prevent divergent history.",
 	schema: json.RawMessage(`{
   "type": "object",
@@ -554,16 +558,11 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// inside the workspace: each is fenced and spelled workspace-relative (workspacePathspec),
 	// after the "--" that makes git read it as a pathspec and nothing else.
 	if len(args.Files) > 0 {
-		addArgs := make([]string, 0, 1+len(args.Files))
-		addArgs = append(addArgs, "--")
-		for _, f := range args.Files {
-			pathspec, err := workspacePathspec(f, t.root)
-			if err != nil {
-				return errorResult(call.ID, err.Error()), nil
-			}
-			addArgs = append(addArgs, pathspec)
+		pathspecs, err := CommitPathspecs(args.Files, t.root)
+		if err != nil {
+			return errorResult(call.ID, err.Error()), nil
 		}
-		_, text, ok, err := gitWrite(ctx, t.root, "add", addArgs, "git add failed")
+		_, text, ok, err := gitWrite(ctx, t.root, "add", append([]string{"--"}, pathspecs...), "git add failed")
 		if err != nil {
 			return domain.ToolResult{}, err
 		}
@@ -1161,6 +1160,26 @@ func clampGitLogCount(n int) int {
 	default:
 		return n
 	}
+}
+
+// CommitPathspecs is the pathspec builder git_commit stages its `files` through: each entry
+// resolved through the workspace fence and spelled workspace-relative (workspacePathspec), in
+// the order the model wrote them, without the terminating "--" the caller places ahead of them.
+// The first path that escapes the root — a symlink out of it or a ".." climb — is the error, so
+// nothing is staged from a list that names anything outside the workspace. It is exported
+// because the engine's secrets pre-check (internal/agent/secretsguard.go) stages the same list
+// into a shadow index before the tool runs, and the two sites must agree on every spelling: a
+// path the tool would refuse is a path the pre-check must not judge.
+func CommitPathspecs(files []string, root string) ([]string, error) {
+	pathspecs := make([]string, 0, len(files))
+	for _, f := range files {
+		pathspec, err := workspacePathspec(f, root)
+		if err != nil {
+			return nil, err
+		}
+		pathspecs = append(pathspecs, pathspec)
+	}
+	return pathspecs, nil
 }
 
 // workspacePathspec resolves a model-supplied path through the workspace fence (resolveInRoot,
