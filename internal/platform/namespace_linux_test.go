@@ -5,12 +5,15 @@ package platform
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform/confinetest"
 )
 
 // namespaceBaseFlags is the fixed prefix every bwrap launch line carries before the
@@ -230,4 +233,89 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestNamespaceProbe drives the shared escape battery (confinement-execution-contract §6.2
+// rows #1–#6, #11, #12) against the namespace backend as this host constructs it. The
+// harness skips itself when the construction probe reported FSWrite==false (no bwrap, or a
+// kernel that refuses unprivileged user namespaces), so a CI container without userns
+// skips cleanly; wherever bwrap and userns work — landlock or not — every row runs for
+// real. Row #12 must DENY with the bytes intact (Residuals nil: the fence is complete or
+// absent, never partial); row #11 passes only because the kill-on-denial signature matches
+// the EROFS the read-only root answers — the journey test for the announced fence.
+func TestNamespaceProbe(t *testing.T) {
+	// Not parallel: the confined children are real subprocesses.
+	confinetest.Probe(t, NewNamespaceConfiner(), Current(), FailFastPreamble(), newProbeDenialKiller)
+}
+
+// TestNamespaceProbeNetwork drives the network arm (rows #7–#8): `--unshare-net` on a
+// network-deny box, an open network on the default box.
+func TestNamespaceProbeNetwork(t *testing.T) {
+	confinetest.ProbeNetwork(t, NewNamespaceConfiner(), Current())
+}
+
+// stubLauncher writes an executable shell script named bwrap under a fresh temp dir and
+// returns its path, so probeNamespace is exercised against a launcher whose verdict the
+// test controls rather than the host's real bwrap.
+func stubLauncher(t *testing.T, script string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "bwrap")
+	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+script), 0o755); err != nil {
+		t.Fatalf("write stub launcher: %v", err)
+	}
+	return path
+}
+
+func TestNamespaceProbeReasonNamesTheCause(t *testing.T) {
+	// Not parallel: the PATH case uses t.Setenv.
+
+	t.Run("refused_launch_carries_the_launcher_line", func(t *testing.T) {
+		// A kernel that refuses CLONE_NEWUSER surfaces as bwrap's own diagnostic on stderr
+		// and a non-zero exit; the reason must carry that line so the probe surfaces say
+		// what refused, not just that something did.
+		const diagnostic = "bwrap: setting up uid map: Permission denied"
+		launcher := stubLauncher(t, "echo '"+diagnostic+"' >&2\nexit 1\n")
+
+		reason := probeNamespace(launcher)
+
+		if !strings.Contains(reason, diagnostic) {
+			t.Errorf("reason = %q, want it to contain %q", reason, diagnostic)
+		}
+		if !strings.HasPrefix(reason, "bwrap refused: ") {
+			t.Errorf("reason = %q, want the %q prefix", reason, "bwrap refused: ")
+		}
+	})
+
+	t.Run("successful_launch_is_fenceable", func(t *testing.T) {
+		launcher := stubLauncher(t, "exit 0\n")
+
+		if reason := probeNamespace(launcher); reason != "" {
+			t.Errorf("reason = %q, want \"\" for a launcher that exits 0", reason)
+		}
+	})
+
+	t.Run("silent_refusal_falls_back_to_the_exit_error", func(t *testing.T) {
+		// A launcher that fails without a word still yields a reason that says something.
+		launcher := stubLauncher(t, "exit 3\n")
+
+		reason := probeNamespace(launcher)
+
+		if want := "bwrap refused: exit status 3"; reason != want {
+			t.Errorf("reason = %q, want %q", reason, want)
+		}
+	})
+
+	t.Run("bwrap_absent_from_path", func(t *testing.T) {
+		t.Setenv("PATH", t.TempDir())
+
+		c := NewNamespaceConfiner()
+
+		caps := c.Capabilities()
+		if caps.FSWrite || caps.NetworkEgress {
+			t.Errorf("Capabilities = %+v, want neither cell when bwrap is absent", caps)
+		}
+		if caps.Unavailable != "bwrap not on PATH" {
+			t.Errorf("Unavailable = %q, want %q", caps.Unavailable, "bwrap not on PATH")
+		}
+	})
 }

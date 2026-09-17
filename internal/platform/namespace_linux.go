@@ -3,10 +3,13 @@
 package platform
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -21,10 +24,11 @@ import (
 // confinement model as landlock and seatbelt: a confined tool call runs under a launcher
 // that fences the real child, and the parent (the main apogee process) is never
 // restricted. The launcher is bubblewrap (`bwrap`), resolved on PATH once at construction
-// (the probing NewNamespaceConfiner) and never re-queried, so Capabilities reports what
-// this host can enforce here and now (§5). A host without bwrap fences nothing and says
-// why, and the dispatch disposition gates the subprocess surface instead ("confine if you
-// can, gate if you can't", ADR 0012).
+// (the probing NewNamespaceConfiner, which then launches it once for real) and never
+// re-queried, so Capabilities reports what this host can enforce here and now (§5). A host
+// without bwrap, or whose kernel refuses it the namespaces, fences nothing and says why,
+// and the dispatch disposition gates the subprocess surface instead ("confine if you can,
+// gate if you can't", ADR 0012).
 //
 // Why bwrap and not a native unshare: the fence is a user namespace plus a mount
 // namespace whose root is a read-only bind of `/` with the box's writable roots bound
@@ -77,6 +81,74 @@ type namespaceConfiner struct {
 // caps/argv/rewrite logic is exercised without a real bwrap (contract §5).
 func newNamespaceConfiner(bwrapPath, unavailable string) *namespaceConfiner {
 	return &namespaceConfiner{bwrapPath: bwrapPath, unavailable: unavailable}
+}
+
+// NewNamespaceConfiner probes this host once and returns the namespace backend: bwrap is
+// resolved on PATH (ADR 0042 — an optional external enhancement, gracefully absent), and a
+// resolved bwrap is then launched for real once, because "bwrap is installed" is not "bwrap
+// can fence here" (contract §5). Kernels and profiles that refuse CLONE_NEWUSER to an
+// unprivileged process — `kernel.apparmor_restrict_unprivileged_userns`, a seccomp filter,
+// `user.max_user_namespaces=0` — refuse it at run time, not at PATH-lookup time, so only a
+// real launch can answer. Either failure yields a backend that fences nothing and says why
+// through Capabilities().Unavailable; the probe has no disk side effect, so the report
+// confiner may construct it too.
+func NewNamespaceConfiner() *namespaceConfiner {
+	bwrapPath, err := exec.LookPath("bwrap")
+	if err != nil {
+		return newNamespaceConfiner("", "bwrap not on PATH")
+	}
+	if reason := probeNamespace(bwrapPath); reason != "" {
+		return newNamespaceConfiner("", reason)
+	}
+	return newNamespaceConfiner(bwrapPath, "")
+}
+
+// namespaceProbeTimeout bounds the construction probe's one real launch: a bwrap that
+// hangs setting up its namespaces must not stall apogee's startup.
+const namespaceProbeTimeout = 10 * time.Second
+
+// probeNamespace launches the platform shell running a no-op under bwrapPath with the exact
+// flag line Confine would generate for a box rooted at the temp dir, and returns "" when
+// the launch exits 0 — the host can fence — or the reason it cannot: `bwrap refused: <last
+// non-empty stderr line>` (bwrap prints one diagnostic line, e.g. `bwrap: setting up uid
+// map: Permission denied`; the exit error stands in when it printed nothing) or `bwrap
+// timed out`. Stdin and stdout are /dev/null; only stderr is captured. WaitDelay bounds the
+// drain after a timeout kill so a child left holding the stderr pipe cannot wedge Wait.
+func probeNamespace(bwrapPath string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), namespaceProbeTimeout)
+	defer cancel()
+
+	argv := append(namespaceArgv(domain.ConfinementBox{WorkspaceRoot: os.TempDir()}, pathExists), "--")
+	argv = append(argv, Current().Command(":")...)
+	cmd := exec.CommandContext(ctx, bwrapPath, argv...)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	cmd.WaitDelay = ProcessWaitDelay
+
+	err := cmd.Run()
+	if err == nil {
+		return ""
+	}
+	if ctx.Err() != nil {
+		return "bwrap timed out"
+	}
+	reason := lastNonEmptyLine(stderr.String())
+	if reason == "" {
+		reason = err.Error()
+	}
+	return "bwrap refused: " + reason
+}
+
+// lastNonEmptyLine returns the last line of s that is not blank, trimmed, or "" when every
+// line is blank — the one diagnostic line a refused launcher leaves on stderr.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return ""
 }
 
 // Capabilities reports what the namespace backend can enforce on this host, probed once at
