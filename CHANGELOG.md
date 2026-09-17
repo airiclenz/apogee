@@ -10,6 +10,16 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- A Confiner backend that cannot fence terminal commands now says *why*: `domain.ConfinementCaps` gains `Unavailable` (disclosure only, never read by the Auto gate), and the shared backend line renders it as ` · why: <reason>` after the network cell whenever fs-write is unavailable — so `apogee probe host`, `/confine` status and the startup line name the host fact that stands between the user and a confined Auto. `docs/manual/probe.md` documents the field.
+
+- Linux: when landlock cannot fence, the confiner now says why — `ConfinementCaps.Unavailable` carries the errno `landlock_create_ruleset` answered with (`landlock unavailable (landlock_create_ruleset: function not implemented)` on a kernel without landlock, `operation not supported` when the LSM is booted off), and the `__confined-exec` refusal names the same errno.
+
+- Linux gains a second Confiner backend, `namespace`: `internal/platform/namespace_linux.go` fences a confined command under `bwrap` — a read-only bind of `/` with the box's workspace root and writable paths bound read-write over it, bwrap's minimal `/dev`, a fresh `/proc`, `--die-with-parent`, and `--unshare-net` only when the box opts into network-deny. `Capabilities` is `{FSWrite, NetworkEgress}` with bwrap present and `{false, false}` carrying the reason in `Unavailable` without it; `Confine` without bwrap returns `ErrConfinementUnavailable` with that reason, never an unfenced run. The hermetic half only — the PATH probe and selector wiring follow. `seatbeltCanonicalRoot` moved to `confine_posix.go` as `canonicalWritableRoot`, shared by the seatbelt profile and the bwrap binds.
+
+- ADR 0081 records the Linux namespace confiner backend (landlock first, then `bwrap`, the reasons when neither); the confinement execution contract gains the namespace backend's §2.3 argv shape and `/dev` write-exempt set, the §5 real-launch probe row and `Unavailable` disclosure, and a §6.3 acceptance checklist; ADR 0042 §4 notes Linux now carries the same bounded external-program exception macOS does.
+
+- Linux hosts without landlock (Raspberry Pi OS, most containers) now confine Auto's terminal commands through user + mount namespaces when `bwrap` is installed — landlock still wins where it exists — and `apogee probe host` says why a backend cannot fence (`· why: …`).
+
 - A key migration that fails now ends with the two commands that finish it by hand — the `secret-tool store` / `security add-generic-password` line (secret left off, the tool prompts for it) and the `api-key-cmd:` line to write — so a locked keyring with no GUI agent to unlock it (`secret-tool did not answer in time`) is fixed by pasting the command into a terminal instead of reconstructing it from the manual.
 
 - **Fixed:** Undo whole-tree images (ADR 0074) work again for confined Auto writes on landlock hosts: the pre-image snapshot git ran inside the workspace box and failed with `index.lock: Permission denied`, painting a red `undo:` line on every write.
