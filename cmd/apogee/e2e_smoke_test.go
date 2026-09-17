@@ -9,6 +9,7 @@ package main
 // TestE2ESmokePTY's, below. What is here is everything a driver inside the process can see.
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"testing"
@@ -483,6 +484,27 @@ func submit(drv driven, text string) {
 	}, tuitest.Within(tuitest.DefaultTimeout+time.Duration(len(text))*typingAllowance),
 		tuitest.Awaiting("the typed prompt to appear in the prompt box"))
 	drv.Press(tuitest.Enter)
+}
+
+// toolTurnAllowance is the extra wait [awaitReply] grants per tool turn in the chain ahead of a
+// wrap-up line, on top of [tuitest.DefaultTimeout]. Every tool turn is a model round-trip, the
+// tool itself and the bookkeeping git around it (two tree reads, the pre and post images) — a
+// second or more each under the race detector on the loaded 4-vCPU CI runner, where a landlock
+// host also re-execs the race-built test binary to fence a confined command. A flat 5 s budget was
+// exhausted with the fifth tool's receipt already on screen and the wrap-up's request just sent.
+const toolTurnAllowance = 2 * time.Second
+
+// awaitReply waits for the model's wrap-up line after a chain of toolTurns sequential tool calls.
+// It is [tuitest.Driver.WaitText] with a budget that grows with the chain — [tuitest.DefaultTimeout]
+// plus [toolTurnAllowance] per turn — so the longest fixture outlasts its own round-trips on a slow
+// runner while a one-turn reply still fails as fast as before. A passing run pays nothing extra:
+// the wait returns the moment the line paints.
+func awaitReply(drv driven, text string, toolTurns int) {
+	drv.WaitFor(func() bool {
+		_, _, ok := drv.Frame().Find(text)
+		return ok
+	}, tuitest.Within(tuitest.DefaultTimeout+time.Duration(toolTurns)*toolTurnAllowance),
+		tuitest.Awaiting(fmt.Sprintf("%q on screen after %d tool turns", text, toolTurns)))
 }
 
 // promptTail is the part of a typed line a wrapped prompt box is guaranteed to show — its tail,

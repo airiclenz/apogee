@@ -930,7 +930,8 @@ func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
 	panes := watchApprovalPanes(t, drv)
 
 	submit(drv, announcedWorkspacePrompt)
-	drv.WaitText("Every workspace tool answered.")
+	// Five sequential tool turns sit between the prompt and this line — the suite's longest chain.
+	awaitReply(drv, "Every workspace tool answered.", 5)
 	drv.WaitQuiet(settled)
 
 	// The orientation announced the configured spelling — the link — and every call the model made
