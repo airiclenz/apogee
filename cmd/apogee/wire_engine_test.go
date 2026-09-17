@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,6 +17,11 @@ func TestFriendlyConstructErr(t *testing.T) {
 
 	if got := friendlyConstructErr(apogee.ErrAutoUnavailable); !errors.Is(got, errAutoUnavailable) {
 		t.Errorf("friendlyConstructErr(ErrAutoUnavailable) = %v; want errAutoUnavailable", got)
+	}
+	// The message names both Linux rungs (ADR 0081): a host without landlock can still fence
+	// through bwrap, and the user must be told so rather than sent to rebuild a kernel.
+	if msg := errAutoUnavailable.Error(); !strings.Contains(msg, "or bwrap with user namespaces") {
+		t.Errorf("errAutoUnavailable = %q; want it to name the namespace rung (\"or bwrap with user namespaces\")", msg)
 	}
 
 	other := errors.New("some other failure")

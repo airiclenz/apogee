@@ -1640,7 +1640,7 @@ type ResumedSession struct {
 // wired nothing"; the report says unknown rather than guessing, and the footer's word reads it as
 // a backend that cannot promise a fence.
 type ConfinementInfo struct {
-	Backend string                 // the backend's human label ("landlock", "seatbelt", "deny"); "" ⇒ unknown
+	Backend string                 // the backend's human label ("landlock", "namespace", "seatbelt", "deny"); "" ⇒ unknown
 	Caps    domain.ConfinementCaps // what it can enforce on THIS host — FSWrite false is the degraded case
 	HostID  string                 // platform.HostID(), the id --save records; "" ⇒ unknown
 }

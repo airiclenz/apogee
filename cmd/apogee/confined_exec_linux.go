@@ -14,7 +14,9 @@ import (
 // confines a subprocess by re-invoking THIS binary in the hidden helper mode: as a
 // separate process it applies the landlock domain to itself and exec's the real argv,
 // because Go cannot run code between fork and execve under CGO_ENABLED=0. This is the
-// product-binary counterpart of the landlock test's runConfinedExecChild.
+// product-binary counterpart of the landlock test's runConfinedExecChild. The namespace
+// backend — Linux's fallback where landlock is absent (ADR 0081) — never comes through
+// here: bwrap IS its launcher, so the apogee binary is not re-invoked.
 //
 // argv after the sentinel is [<encoded-box>, "--", <real argv...>]. On success
 // ApplyLandlockAndExec replaces the process image and never returns; on any failure this

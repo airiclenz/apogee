@@ -62,7 +62,7 @@ type DenialKillerFactory func(next io.Writer, kill func()) DenialKiller
 // kill-on-denial watch factory (platform.NewDenialKillWriter) — handed in rather than
 // imported for the same import-cycle reason Shell is redeclared above. The battery and
 // its assertions are identical across backends, so "confined" means the same thing on
-// landlock, seatbelt and the Windows token backend.
+// landlock, namespace, seatbelt and the Windows token backend.
 //
 // When c reports FSWrite==false (e.g. a kernel built without landlock) enforcement cannot be
 // exercised on this host, so Probe skips — the backend is still constructed and Capabilities
@@ -135,7 +135,8 @@ func Probe(t *testing.T, c domain.Confiner, sh Shell, failFastPreamble string, n
 	t.Run("inherits_domain_across_exec_denied", func(t *testing.T) {
 		// The confined child execs a second program (a nested shell) that writes outside
 		// the box: the restriction must survive that and deny it (contract §6.2 row #6).
-		// On Linux it proves a landlock domain survives execve; on Windows it proves a
+		// On Linux it proves a landlock domain survives execve (or, under the namespace
+		// backend, that the nested shell stays inside bwrap's mount namespace); on Windows it proves a
 		// descendant created by the confined child inherits the restricted token — exactly
 		// as load-bearing a claim, and exactly as unproven until asserted (ADR 0020 §7).
 		target := filepath.Join(outside, "inherited-escape.txt")

@@ -17,25 +17,27 @@ import (
 
 // Confiner is the OS-level confinement facility for the unbounded subprocess surface
 // (ADR 0012). The interface is PUBLIC because the host injects it via Config; the
-// backends (seatbelt / landlock / a restricted low-integrity Windows token) live in
-// internal/platform.
+// backends (seatbelt / landlock / user + mount namespaces through bwrap where landlock is
+// absent / a restricted low-integrity Windows token) live in internal/platform.
 //
 // Granularity is the single, all-OS subprocess (Linux landlock applied to the child
-// after fork, before execve; macOS sandbox-exec wrapping the child). There is no
+// after fork, before execve, or bwrap wrapping the child in its own namespaces; macOS
+// sandbox-exec wrapping the child). There is no
 // in-process per-thread confinement — Apogee's own in-process writes are
 // path-safety-bounded instead (ADR 0012's blast-radius split).
 type Confiner interface {
 	// Capabilities reports what this backend can actually enforce, here and now —
 	// probed once at construction, never optimistic (confinement-execution-contract
-	// §5). A kernel without landlock, or a macOS without sandbox-exec, reports
-	// {false, false}, so the dispatch disposition gates the subprocess surface rather
-	// than confining it.
+	// §5). A kernel without landlock and without bwrap, or a macOS without sandbox-exec,
+	// reports {false, false} — and says why in ConfinementCaps.Unavailable — so the
+	// dispatch disposition gates the subprocess surface rather than confining it.
 	Capabilities() ConfinementCaps
 
 	// Confine prepares cmd to execute confined to box, then RETURNS — it does not run
 	// cmd (confinement-execution-contract §2.2). It rewrites cmd to launch under the
 	// host OS confinement facility (macOS: exec under sandbox-exec -p <profile>; Linux:
-	// interpose the landlock re-exec wrapper; Windows: hand CreateProcessAsUser a
+	// interpose the landlock re-exec wrapper, or launch under bwrap where landlock is
+	// absent; Windows: hand CreateProcessAsUser a
 	// restricted low-integrity token, leaving the argv untouched — ADR 0020) and sets
 	// cmd.SysProcAttr so the caller's process-group kill reaches the wrapped child, or,
 	// on Windows, so the child starts under that token. The caller has already wired

@@ -148,7 +148,7 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, error)
 }
 
 // closeConfiner tears the confinement backend down at the end of the daemon's life and reports the
-// one failure that has no other surface. Two of the three backends need nothing; the Windows token
+// one failure that has no other surface. The POSIX backends (landlock, namespace, seatbelt) need nothing; the Windows token
 // backend has to put the disk back (ADR 0020 §2), and a teardown that could not is a silently
 // mutated disk the user is otherwise never told about — which is why runRoot and runHeadless make
 // this same optional-interface assertion, through the same wording (internal/platform).

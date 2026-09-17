@@ -256,7 +256,7 @@ func (c *landlockConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 
 	// Re-exec the apogee binary in __confined-exec mode; argv after "--" is the original
 	// command, run confined by the in-child half (ApplyLandlockAndExec). The wrap carries the
-	// resolved program path and the process-group rule for both POSIX backends
+	// resolved program path and the process-group rule for the three POSIX backends
 	// (confine_posix.go).
 	if err := wrapArgvUnderLauncher(cmd, self, confinedExecSentinel, encoded, "--"); err != nil {
 		return err

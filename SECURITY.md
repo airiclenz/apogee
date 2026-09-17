@@ -16,7 +16,8 @@ Anything that lets a model, a tool result, a skill, an MCP server or a web page 
 documented posture says it cannot. The guarantees apogee makes, in the order they matter:
 
 - **Auto-mode confinement** — an unsupervised run cannot write outside the workspace and its
-  scratch directory (Linux landlock, macOS seatbelt, a restricted Windows token). An escape
+  scratch directory (Linux landlock, or user + mount namespaces via `bwrap` where the kernel
+  has no landlock; macOS seatbelt; a restricted Windows token). An escape
   from the fence, on any platform, is the highest-severity report there is. See
   [Auto mode's blast radius](docs/manual/configuration.md#auto-modes-blast-radius).
 - **The dangerous-action guard** — the refused and prompted command shapes documented under

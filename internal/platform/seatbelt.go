@@ -18,7 +18,7 @@ import (
 // seatbeltConfiner realises the single, subprocess-granularity confinement model
 // (ADR 0012) on macOS: a confined tool call execs under the system sandbox profiler
 // `sandbox-exec -p <profile>`, which applies the generated seatbelt profile to the
-// real child. This is the SAME single granularity as Linux landlock — there is no
+// real child. This is the SAME single granularity as Linux landlock and namespaces — there is no
 // in-process per-thread confinement and no macOS-gates-every-edit asymmetry. Apogee's
 // own in-process writes are path-safety-bounded in every mode (the contract's
 // blast-radius split, D1).
@@ -114,7 +114,7 @@ func (c *seatbeltConfiner) Confine(_ context.Context, box domain.ConfinementBox,
 
 	// Launch the original command under the sandbox profiler; argv after the profile is the
 	// original command, run confined by sandbox-exec. The wrap carries the resolved program
-	// path and the process-group rule for both POSIX backends (confine_posix.go).
+	// path and the process-group rule for the three POSIX backends (confine_posix.go).
 	if err := wrapArgvUnderLauncher(cmd, profiler, "-p", profile); err != nil {
 		return err
 	}

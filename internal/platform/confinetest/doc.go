@@ -1,7 +1,7 @@
 // Package confinetest is the shared escape-probe harness every Confiner backend's
-// acceptance tests call, so "confined" means the same thing on Linux landlock, macOS
-// seatbelt and the Windows restricted-token backend (confinement-execution-contract
-// §6, §9.3). It builds confined *exec.Cmd values via the backend under test and asserts
+// acceptance tests call, so "confined" means the same thing on Linux landlock, Linux
+// namespaces (bwrap, where landlock is absent), macOS seatbelt and the Windows
+// restricted-token backend (confinement-execution-contract §6, §9.3). It builds confined *exec.Cmd values via the backend under test and asserts
 // OS denial for a confined subprocess.
 //
 // It is test-support, not production code: it lives in its own package so a backend's

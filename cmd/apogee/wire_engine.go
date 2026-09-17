@@ -782,11 +782,12 @@ func (e *lateEngine) SwitchUpstream(spec apogee.UpstreamSpec) error {
 }
 
 // errAutoUnavailable is the friendly framing of ErrAutoUnavailable: Auto needs
-// filesystem-write confinement, which this host cannot provide (no landlock on Linux, no
-// sandbox-exec on macOS — ADR 0012). The lower rungs of the ladder still work.
+// filesystem-write confinement, which this host cannot provide (no landlock and no bwrap with
+// user namespaces on Linux, no sandbox-exec on macOS — ADR 0012, ADR 0081). The lower rungs
+// of the ladder still work.
 var errAutoUnavailable = errors.New(
 	"apogee: auto mode requires filesystem-write confinement, which is unavailable on this host " +
-		"(Linux needs landlock — kernel ≥5.13; macOS needs sandbox-exec) — " +
+		"(Linux needs landlock — kernel ≥5.13 — or bwrap with user namespaces; macOS needs sandbox-exec) — " +
 		"use --mode plan, --mode ask-before, or --mode allow-edits")
 
 // friendlyConstructErr maps construction errors to actionable CLI messages. The headline

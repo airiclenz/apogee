@@ -50,7 +50,8 @@ Three things set it apart from other AI coding assistants.
   the floor has to earn its place on an eval bench before it ships turned on.
 - **Autonomy fenced by the operating system, not by a prompt.** Four autonomy modes run
   from read-only Plan up to unsupervised Auto — and Auto is confined at the OS level on
-  all three platforms (Linux landlock, macOS seatbelt, a restricted Windows token), so
+  all three platforms (Linux landlock, or user + mount namespaces via `bwrap` where the
+  kernel has no landlock; macOS seatbelt; a restricted Windows token), so
   an unsupervised agent *cannot* write outside your workspace, rather than being asked
   nicely not to. Where the OS genuinely cannot enforce the fence, apogee asks before
   each command instead of running it unbounded.

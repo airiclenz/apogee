@@ -1740,12 +1740,19 @@ work straight away. The path line works regardless.
 Auto is the one unsupervised mode, so it is fenced: filesystem writes are confined to
 the workspace at the OS level, the network is open, and MCP still asks. All three
 platforms have a backend — landlock on Linux, `sandbox-exec` on macOS, a restricted
-low-integrity token on Windows. Where the OS cannot fence a command — a Windows build
-older than 10 1809 (17763), and most containers, where landlock reports `ENOSYS`
-regardless of kernel version — Auto keeps the promise the honest way and asks before
-each shell call instead of running it unbounded ("confine if you can, gate if you
-can't"). That is not a fault, so Apogee says so at startup rather than letting Auto
-look broken.
+low-integrity token on Windows. A Linux host whose kernel has no landlock (Raspberry Pi
+OS, most containers, where it reports `ENOSYS` regardless of kernel version) uses
+`bwrap` when it is installed instead: the command runs in its own user + mount
+namespaces with `/` read-only and only the workspace and scratch directory bound
+writable — the same fence, kept by a different mechanism, and landlock still wins
+wherever it exists. Where the OS cannot fence a command at all — a Windows build older
+than 10 1809 (17763), or a Linux host with neither landlock nor `bwrap` — Auto keeps the
+promise the honest way and asks before each shell call instead of running it unbounded
+("confine if you can, gate if you can't"). That is not a fault, so Apogee says so at
+startup rather than letting Auto look broken, and `apogee probe host` says *why* the
+backend cannot fence in a ` · why: …` cell on its `backend:` line (for example
+`why: landlock unavailable (landlock_create_ruleset: function not implemented); bwrap
+not on PATH`).
 
 **The hardened git reads run free in every mode, and no fence applies to them.**
 `git_status`, `git_log`, `git_diff_range` and `git_show` build every argument themselves, run with

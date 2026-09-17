@@ -898,7 +898,8 @@ _Avoid_: conflating it with Approval — an answer is not a permission.
 OS-level restriction of the **unbounded subprocess surface** (shell / subprocess), attaching to
 **blast radius, not to a mode-wide binary** (ADR 0012, superseding ADR 0004): a tool runs
 unsupervised only if its blast radius is bounded — **either** by OS confinement of the subprocess
-surface (Linux **landlock** applied pre-`execve` on the child; macOS **`sandbox-exec`** wrapping
+surface (Linux **landlock** applied pre-`execve` on the child, or **user + mount namespaces** via
+`bwrap` where landlock is absent — ADR 0081; macOS **`sandbox-exec`** wrapping
 the child; Windows a restricted **low-integrity token** handed to process creation, with the box
 expressed as a mandatory label on the disk and reverted on teardown — one clean subprocess
 granularity on all three), **or** by Apogee's own
@@ -912,7 +913,9 @@ written, so the call is bounded without a box). A third-party tool of any of tho
 scoping Apogee cannot vouch for, gates instead of running unsupervised. It is a **capability
 matrix, not a one-bit flag**: each backend reports what it can enforce (`fs-write`, `network-egress`,
 …). In **Auto** the network is **open by default**, so **`AutoEligible()` requires filesystem
-confinement only** — Linux Auto needs landlock ABI ≥1 (kernel ≥5.13), not ABI v4. The unbounded
+confinement only** — Linux Auto needs landlock ABI ≥1 (kernel ≥5.13), not ABI v4, or `bwrap` with
+unprivileged user namespaces where landlock is absent; a backend that can fence neither says why in
+`ConfinementCaps.Unavailable` (`· why: …` on every wording surface). The unbounded
 surface is tuned by the global **`confine-to-workspace`** flag (below). The per-tool teeth remain:
 **MCP**, which executes in a server Apogee cannot fence, gates through Approval whenever
 `confine-to-workspace` is on; and if fs-confinement is *unavailable* on the host, subprocess tools

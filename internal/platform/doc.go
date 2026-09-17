@@ -8,10 +8,12 @@
 // selected by build tag, so Windows shell/quoting/path semantics are
 // table-testable from any host and exercised natively on Windows. The real
 // Confiner backends are selected per OS at build time: landlock on Linux
-// (Phase 3), seatbelt on macOS (Phase 3), a restricted low-integrity token on
-// Windows (Phase 5, ADR 0020), and denyConfiner — a deny-all stub reporting
-// {false, false} — everywhere else, including a Windows host below the version
-// floor. An incapable backend does not refuse Auto: the dispatch disposition
+// (Phase 3), falling back to user + mount namespaces through bwrap on a kernel
+// without landlock (ADR 0081), seatbelt on macOS (Phase 3), a restricted
+// low-integrity token on Windows (Phase 5, ADR 0020), and denyConfiner — a
+// deny-all stub reporting {false, false} — everywhere else, including a Windows
+// host below the version floor. A backend that cannot fence says why in
+// Capabilities().Unavailable. An incapable backend does not refuse Auto: the dispatch disposition
 // gates the subprocess surface through Approval instead (ADR 0012; §4–5 and §9
 // of docs/design/confinement-execution-contract.md).
 //
@@ -39,7 +41,7 @@
 //
 // # The files, one line each
 //
-// Twenty-five files, in five groups: the shell/path Host every OS-touching caller reads, the
+// Twenty-six files, in five groups: the shell/path Host every OS-touching caller reads, the
 // Confiner backends, the process-tree teardown every spawner reuses, the per-machine identity,
 // and the single-instance lock. The Windows label mechanism is a module of its own beside them
 // (internal/platform/winlabel).
@@ -54,9 +56,13 @@
 // long-path resolver that lets Contains expand an 8.3 short name instead of refusing to
 // compare it.
 //
-// The Confiner selectors. confiner_linux.go, confiner_darwin.go and confiner_other.go are
-// three-line per-OS choices of NewConfiner and NewReportConfiner — landlock, seatbelt, and the
-// deny-all stub. confiner_windows.go is the odd one out: it is both the Windows selector and
+// The Confiner selectors. confiner_darwin.go and confiner_other.go are three-line per-OS
+// choices of NewConfiner and NewReportConfiner — seatbelt, and the deny-all stub.
+// confiner_linux.go is a two-rung ladder: landlock when it can fence writes, else the namespace
+// backend, and when neither fences the namespace backend carrying both reasons — the order
+// lives in one place (selectLinuxConfiner) so the session and report selectors cannot disagree,
+// and the namespace probe (a real bwrap launch) runs only when landlock cannot fence
+// (ADR 0081). confiner_windows.go is the odd one out: it is both the Windows selector and
 // the token backend itself, the only backend that mutates the machine (it labels the box's
 // roots on disk and reverts them on Close, ADR 0020).
 //

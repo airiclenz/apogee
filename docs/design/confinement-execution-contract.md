@@ -894,7 +894,7 @@ package confinetest
 // assertions are identical across backends.
 //
 //   t   – the test
-//   c   – the backend under test (landlock on Linux, seatbelt on macOS, token on Windows)
+//   c   – the backend under test (landlock or namespace on Linux, seatbelt on macOS, token on Windows)
 //   sh  – the platform shell the probes run through (`platform.Current()`), taken from the
 //         caller so the battery runs natively on Windows; redeclared as a local three-method
 //         interface rather than imported, because internal/platform's own tests are in

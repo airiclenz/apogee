@@ -11,10 +11,10 @@ import (
 
 // These tests are hermetic and host-agnostic: the argv wrap and the process-group flag are
 // pure preparation of an *exec.Cmd with no process started, so they run on every non-Windows
-// host. They pin the shape both POSIX backends now inherit — the landlock re-exec wrapper
-// (landlock_linux.go) and the seatbelt sandbox-exec launch (seatbelt.go) — whose own argv
-// assertions must keep passing unchanged; that pair is the "the wrapper moved, the argv did
-// not" oracle. The prefixes below are spelled literally rather than through
+// host. They pin the shape all three POSIX backends now inherit — the landlock re-exec wrapper
+// (landlock_linux.go), the namespace bwrap launch (namespace_linux.go) and the seatbelt
+// sandbox-exec launch (seatbelt.go) — whose own argv assertions must keep passing unchanged;
+// that trio is the "the wrapper moved, the argv did not" oracle. The prefixes below are spelled literally rather than through
 // confinedExecSentinel, which is linux-tagged and does not exist in a !windows file.
 
 func TestWrapArgvUnderLauncher(t *testing.T) {
