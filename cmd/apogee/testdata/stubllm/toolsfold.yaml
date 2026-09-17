@@ -1,0 +1,41 @@
+# The upstream the Tools umbrella fold runs talk to (TestE2EToolsUmbrella*, TestE2EToolsFoldOver*):
+# one prompt that makes the model issue three groupable calls of three DIFFERENT tools in one Turn.
+# Three different tools rather than three of one, because a type row is a same-label run — three
+# read_file calls would coalesce into one `Read (3)` row, and the fold under test is keyed on the
+# number of type rows, not of calls. All three are harmless reads (never `terminal`): a driven run
+# boots in ask-before, where a gated call would leave the umbrella live and the fold never comes.
+#
+# Every turn matches on `when:` and repeats, because one of the runs spans TWO launches: the
+# session resumed with `--continue` replays the whole conversation, so an ordered script would have
+# spent its turns in the first run and answered the second with an HTTP 500. The title turn sits
+# above the prompt's own for smoke.yaml's reason — `auto-title:` is on by default, so a driven TUI
+# asks for a session title off the first prompt — and the trailing catch-all answers anything
+# neither the prompt nor its results claim.
+model: toolsfold-model
+turns:
+    # The session title, matched before the prompt's own turn.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Workspace survey
+    # The wrap-up, once the last of the three results has come back. Matched AHEAD of the prompt
+    # turn so a request carrying the results can never be answered as a fresh request.
+    - when:
+        tool_result: grep
+      repeat: true
+      text: The workspace is surveyed.
+    # The prompt: three calls in one list, each of a different tool, so the umbrella they fold under
+    # has three type rows — Read, List and Grep.
+    - when:
+        last_message: ^Survey the workspace
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+        - name: list_dir
+          arguments: '{"path":"."}'
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+    # Anything else — a Mechanism's own call, or a round the prompt does not claim.
+    - repeat: true
+      text: Nothing else to add.
