@@ -519,7 +519,8 @@ block is there, and lands below the whole commented example block when it is not
 key cannot hold is refused before anything is written, with the reason on the row and your text
 still in the buffer. The file is written only on your own act — a pane edit, a verb that records
 its choice such as `/server`, `/sub-agents-server` or `/color-scheme`, the click that folds or
-opens the task-list card (`ui.task-list-open`) — never on one you did not ask for.
+opens the task-list card (`ui.task-list-open`) or a large Tools umbrella (`ui.tools-open`) — never
+on one you did not ask for.
 
 **And what is saved is applied — to the session you are in.** The `⏎` that persists a key
 also puts it into effect, so as a rule a setting does not wait for a restart: change `mode:`, `bypass:`, the

@@ -131,18 +131,34 @@ closer is drawn today.
   exception to it: a framed sub-agent has one state, collapsed, and opening it
   opens a different *surface* rather than a third fold stage of the row
   ([ADR 0063](../adr/0063-sub-agent-runs-are-user-addressable-views.md)).
-  The one block whose collapsed state is its **header alone** is `task_list`:
-  it folds to `✦ Task List (done/total)` — no task row beneath, no
-  `+N more lines`, because the header's own count already says what the fold
-  holds — and opens to every row uncapped with no `see less…` footer, the
-  header's `▼` being the fold. The `▶`/`▼` sits on the header; a click on the
-  card, or `enter` at the block cursor on it, toggles EVERY task-list block in
-  the transcript together, and the state is remembered across sessions in
-  `ui.task-list-open` (2026-09-14; the table row below says so). A card with
-  no task row to fold over — an errored call, a cleared list — takes the
-  ordinary targetless shape instead, so a failure is never folded away.
-- The umbrella's floor is its type rows — it never folds to one line.
-  Clicking the umbrella header **closes all open children**.
+  `task_list` is the first of two blocks whose collapsed state is its
+  **header alone**: it folds to `✦ Task List (done/total)` — no task row
+  beneath, no `+N more lines`, because the header's own count already says
+  what the fold holds — and opens to every row uncapped with no `see less…`
+  footer, the header's `▼` being the fold. The `▶`/`▼` sits on the header; a
+  click on the card, or `enter` at the block cursor on it, toggles EVERY
+  task-list block in the transcript together, and the state is remembered
+  across sessions in `ui.task-list-open` (2026-09-14; the table row below says
+  so). A card with no task row to fold over — an errored call, a cleared list —
+  takes the ordinary targetless shape instead, so a failure is never folded
+  away.
+- The umbrella folds by its **size**. A **large** umbrella — at rest (no call
+  in flight, the Turn settled) with more type rows than `ui.tools-fold-over`
+  (default `5`; `0` makes no umbrella large) — is the second block that folds
+  to its **header alone**: `✦ Tools (N calls) ▶`, no type row beneath, no
+  `+N more lines`, the call count saying what the fold holds ("Grouped tools
+  folded (large umbrella)" below). Open, it wears `▼` on the header and paints
+  its type rows exactly as a small one does; a click on the header, or `enter`
+  at the block cursor on it, toggles EVERY large umbrella in the transcript
+  together, and the state is remembered across sessions in `ui.tools-open`
+  (default `false` — a large umbrella starts folded). The fold covers the
+  rows: whatever type rows and members a reader had opened stay open beneath
+  the header and are there again when it unfolds. A **small** or **live**
+  umbrella keeps the earlier rule: its floor is its type rows, its header
+  wears no indicator, and clicking the header **closes every open child**
+  (2026-09-17; supersedes design call 9, which had the umbrella never fold to
+  one line and its click close children unconditionally — plan
+  `docs/plans/2026-09-17 - 01`).
 - Failure marking: the red right-slot summary only; no glyph or header color
   changes. Failures propagate upward as red `N errors` on type rows.
 - Keyboard: a **modal block cursor**. `alt+up`/`alt+down` enters transcript
@@ -237,6 +253,17 @@ group it replaced — one header, one row — and reads the same everywhere.
   │ │                                                                 see less…
   │ ┕ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
+```
+
+## Grouped tools folded (large umbrella)
+
+A LARGE umbrella — at rest with more type rows than `ui.tools-fold-over` —
+folds to its header alone under `ui.tools-open`; the `▶` sits on the header
+and no type row is painted beneath it. Open, it is the "Grouped tools
+collapsed (super-group)" shape above with a `▼` after the count.
+
+```text
+✦ Tools (N calls) ▶
 ```
 
 ## Grouped Sub-agents

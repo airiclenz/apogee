@@ -131,7 +131,7 @@ const (
 //     (superMemberMarker) and by the very painter a plain group's members go through
 //     (renderGroupMember), so a member opens onto its body inside a type row exactly as it does
 //     inside a group — the sketch's 2nd step.
-//   - a SMALL or live umbrella's HEADER wears no state indicator at all: its floor is its type
+//   - a SMALL or live umbrella's HEADER wears no state indicator of its own: its floor is its type
 //     rows, and a click there closes every open child instead (targetUmbrella). It is marked as a
 //     target only while something IS open, so a header with nothing to close keeps a click's
 //     selection meaning rather than offering an affordance that does nothing.

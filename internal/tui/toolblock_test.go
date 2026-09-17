@@ -130,8 +130,10 @@ func TestRenderSplitsEditFromReplace(t *testing.T) {
 // opened to its own body. One transcript walks all three, so the goldens read as the steps a reader
 // actually takes rather than as three unrelated fixtures.
 //
-// The shape each step pins is the spec's: a header naming the umbrella and counting its CALLS and
-// never a state indicator, since its floor is the type rows; one row per consecutive run in time
+// The shape each step pins is the spec's: a header naming the umbrella and counting its CALLS and,
+// while the umbrella is small, no state indicator, since its floor is the type rows (the two LARGE
+// states — more type rows than `ui.tools-fold-over`, at rest — fold to that header under a ▶/▼
+// instead, and close this test); one row per consecutive run in time
 // order, counting the run only where it holds more than one call; the run's aggregate in the outcome
 // slot ("14 lines" for the two reads, summed); member rows one level deeper under the │ gutter that
 // continues the row they opened out of; and an open member's body under a second gutter, closed by
@@ -316,9 +318,10 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 
 // The count is the run's own arithmetic and is painted as such: it rides the TYPE ROW in the faint
 // indicator tone rather than in the label's bold gold, so a reader scanning the gold down the
-// left edge does not read "(2)" as part of the tool's name (design call 6). The umbrella's header
+// left edge does not read "(2)" as part of the tool's name (design call 6). A small umbrella's header
 // wears no state indicator and takes no click — the type rows own their state, and the header's own
-// count is of CALLS.
+// count is of CALLS; only a LARGE umbrella's header (more type rows than `ui.tools-fold-over`, at
+// rest) wears the fold's ▶/▼.
 func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 	t.Parallel()
 
