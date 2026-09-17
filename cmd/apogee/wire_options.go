@@ -116,11 +116,14 @@ func (w *rootWiring) options() tui.Options {
 		// arrives as the duration it means, not as the text it was written as.
 		// The scroll bar and the task-list fold are the two keys whose polarity flips here — the
 		// config says show / open, the renderer's option says hide / folded, so each zero value is
-		// the default the key carries (see tui.Options).
+		// the default the key carries (see tui.Options). The Tools umbrella fold does NOT flip: its
+		// key defaults to false, so the option's zero value already means the fold the key carries.
 		Spinner:        w.opts.UI.Spinner,
 		SpinnerColor:   w.opts.UI.SpinnerColor,
 		HideScrollbar:  !w.opts.UI.ShowScrollbar,
 		TaskListFolded: !w.opts.UI.TaskListOpen,
+		ToolsOpen:      w.opts.UI.ToolsOpen,
+		ToolsFoldOver:  w.opts.UI.ToolsFoldOver,
 		StallAfter:     w.opts.UI.StallAfter,
 		// And `ui.inspector`, which the ENGINE acts on (domain.Config.Inspector arms the capture) and
 		// the renderer only words its empty pane with: /inspect names the key when nothing was

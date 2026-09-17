@@ -1706,6 +1706,22 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "ui.tools-open",
+			row:  settingsToolsOpenRow("true"),
+			seed: func(m Model) Model {
+				m.setToolsOpen(true) // off the key's folded default, so the apply has a move to make
+				return m
+			},
+			check: func(t *testing.T, m Model) {
+				t.Helper()
+				// Same polarity as the key, unlike the task list's: false is the fold.
+				if m.opts.ToolsOpen || m.transcript.toolsOpen {
+					t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v; want both false — the umbrellas would go on painting open",
+						m.opts.ToolsOpen, m.transcript.toolsOpen)
+				}
+			},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1737,6 +1753,111 @@ func settingsTaskListOpenRow() SettingRow {
 		Path: "ui.task-list-open", Section: "Interface", Kind: SettingBool, Value: "true",
 		Default: "true", Editable: true, Desc: "Start with the task-list cards in the transcript open.",
 	}
+}
+
+// settingsToolsOpenRow is the `ui.tools-open` row as the registry describes it — a bool at its
+// `false` default, which the renderer applies to every large Tools umbrella itself — holding value.
+func settingsToolsOpenRow(value string) SettingRow {
+	return SettingRow{
+		Path: "ui.tools-open", Section: "Interface", Kind: SettingBool, Value: value,
+		Default: "false", Editable: true, Desc: "Large Tools umbrellas start open.",
+	}
+}
+
+// settingsToolsFoldOverRow is the `ui.tools-fold-over` row as the registry describes it: an int
+// whose default is 5, edited through the value buffer, which the renderer applies to itself. It
+// carries no Value, the stall-after row's posture, so the buffer opens empty and a test types the
+// whole count rather than appending to the seed.
+func settingsToolsFoldOverRow() SettingRow {
+	return SettingRow{
+		Path: "ui.tools-fold-over", Section: "Interface", Kind: SettingInt, Default: "5",
+		Editable: true, Desc: "Type rows a Tools umbrella may show before it folds to its header; 0 never folds.",
+	}
+}
+
+// TestSettingsToolsKeysApplyLocally is the pane's half of the shared umbrella fold (item 3 of plan
+// "2026-09-17 - 01"): both Tools keys are the renderer's own and never reach the seam. `ui.tools-open`
+// lands on the Option and the transcript field the paint reads on the same keypress; `ui.tools-fold-over`
+// goes through the value buffer an int row opens — a count lands on both halves, and text a count
+// cannot be made of, or a negative one, is refused on the row and moves nothing (parseStallAfter's
+// posture: the binary validates before it writes, but the pane is not the only thing that can put a
+// value in that file).
+func TestSettingsToolsKeysApplyLocally(t *testing.T) {
+	t.Parallel()
+
+	t.Run("ui.tools-open moves the fold on both halves", func(t *testing.T) {
+		t.Parallel()
+		rows := []SettingRow{settingsToolsOpenRow("false")}
+		log := &settingsWriteLog{}
+		m, _ := settingsEditModel(t, rows, log)
+
+		m = step(t, m, keyEnter()) // false → true
+
+		if want := []settingEdit{{path: "ui.tools-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
+			t.Fatalf("writes = %+v, want %+v", log.writes, want)
+		}
+		if len(log.applies) != 0 {
+			t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
+		}
+		if !m.opts.ToolsOpen || !m.transcript.toolsOpen {
+			t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v after `true`; want both true", m.opts.ToolsOpen, m.transcript.toolsOpen)
+		}
+		if got, want := m.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
+			t.Errorf("value cell = %q, want %q", got, want)
+		}
+
+		m = step(t, m, keyEnter()) // and back
+
+		if m.opts.ToolsOpen || m.transcript.toolsOpen {
+			t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v after `false`; want both false", m.opts.ToolsOpen, m.transcript.toolsOpen)
+		}
+	})
+
+	row := settingsToolsFoldOverRow()
+	edit := func(t *testing.T, log *settingsWriteLog, text string) Model {
+		t.Helper()
+		m, _ := settingsEditModel(t, []SettingRow{row}, log)
+		m.setToolsFoldOver(5) // the shipped threshold, which testOpts' zero value does not carry
+		return step(t, typeSetting(t, step(t, m, keyEnter()), text), keyEnter())
+	}
+
+	t.Run("ui.tools-fold-over lands a count on both halves through the value buffer", func(t *testing.T) {
+		t.Parallel()
+		log := &settingsWriteLog{}
+		m := edit(t, log, "8")
+
+		if want := []settingEdit{{path: "ui.tools-fold-over", value: "8"}}; !reflect.DeepEqual(log.writes, want) {
+			t.Fatalf("writes = %+v, want %+v", log.writes, want)
+		}
+		if len(log.applies) != 0 {
+			t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
+		}
+		if m.opts.ToolsFoldOver != 8 || m.transcript.toolsFoldOver != 8 {
+			t.Errorf("opts.ToolsFoldOver = %d, transcript.toolsFoldOver = %d; want both 8", m.opts.ToolsFoldOver, m.transcript.toolsFoldOver)
+		}
+		if got := edit(t, &settingsWriteLog{}, "0"); got.opts.ToolsFoldOver != 0 || got.transcript.toolsFoldOver != 0 {
+			t.Errorf("opts.ToolsFoldOver = %d, transcript.toolsFoldOver = %d after `0`; want both 0, the key's own \"never\"",
+				got.opts.ToolsFoldOver, got.transcript.toolsFoldOver)
+		}
+	})
+
+	t.Run("ui.tools-fold-over refuses a negative count and text on the row", func(t *testing.T) {
+		t.Parallel()
+		for _, text := range []string{"-1", "many"} {
+			log := &settingsWriteLog{}
+			m := edit(t, log, text)
+			if len(log.applies) != 0 {
+				t.Errorf("%q: applies = %+v, want none: the renderer owns this key", text, log.applies)
+			}
+			if got := m.settingsNote(row); !strings.Contains(got, "saved — live apply failed") {
+				t.Errorf("%q: marker = %q, want the apply's own refusal", text, got)
+			}
+			if m.opts.ToolsFoldOver != 5 || m.transcript.toolsFoldOver != 5 {
+				t.Errorf("%q: opts.ToolsFoldOver = %d, transcript.toolsFoldOver = %d; want both still 5 — a refused apply must not move the threshold",
+					text, m.opts.ToolsFoldOver, m.transcript.toolsFoldOver)
+			}
+		}
+	})
 }
 
 // TestSettingsTaskListOpenAppliesToEveryCard is the pane's half of the shared fold (item 4 of plan

@@ -39,9 +39,11 @@ package tui
 // A super-group adds the two kinds its extra LEVEL needs (renderSuperGroup). targetType is a type
 // row: it toggles the run's own second state (transcript.toggleTypeExpanded) rather than the
 // expanded flag every other target flips, which is what lets a reader open a run to its member rows
-// and then open a member to its body. targetUmbrella is the umbrella header, whose click is not a
-// toggle at all — its floor is the type rows, so it never folds to one line and instead closes every
-// open child beneath it (design call 9, transcript.closeSuperGroup).
+// and then open a member to its body. targetUmbrella is the umbrella header, whose click answers by
+// the umbrella's size (transcript.umbrellaIsLarge): a LARGE one at rest folds to its header line and
+// back under the shared `ui.tools-open` preference (Model.toggleToolsFold), while a small or live one
+// is no toggle at all — its floor is the type rows, and the click closes every open child beneath
+// it instead (design call 9, transcript.closeSuperGroup).
 type targetKind int
 
 const (

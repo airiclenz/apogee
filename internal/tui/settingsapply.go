@@ -33,9 +33,10 @@ import (
 //   - the EDIT JOURNAL, this session's record of what it did to each key — what the row's ` *`
 //     marker, the value an edit starts from, and the value a re-opened sub-list opens on are all
 //     read off;
-//   - the TASK-LIST FOLD, the one key a gesture on the transcript commits rather than the pane
-//     (toggleTaskListFold): the same write, the same journal entry and the same live apply as a
-//     row's ⏎, reached from a click on a card — and silent, because the card itself is the report.
+//   - the TRANSCRIPT FOLDS, the two keys a gesture on the transcript commits rather than the pane
+//     (toggleTaskListFold, toggleToolsFold): the same write, the same journal entry and the same
+//     live apply as a row's ⏎, reached from a click on a card or a large Tools umbrella's header —
+//     and silent, because the card or the folded header itself is the report.
 
 // settingsArmReset arms the selected row's reset-to-default — backspace on a row that HAS something to
 // reset. Arming is deliberately a state and not the act: removing a line from a file the human
@@ -286,6 +287,21 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// per the file. The sweep bumps the transcript's generation, so the repaint tail lays out
 		// again for the cards' moved height.
 		m.setTaskListFolded(value != settingTrue)
+	case settingKeyToolsOpen:
+		// Same polarity as the key (unlike the task list: this key defaults to false), and the same
+		// shape of apply — the value lands on every large Tools umbrella at once through the one
+		// setter a header toggle takes (toggleToolsFold), so a `/settings` edit and a hand-edited
+		// file fold or open them live. The setter touches the transcript, so the repaint tail draws
+		// each umbrella afresh for its moved height.
+		m.setToolsOpen(value == settingTrue)
+	case settingKeyToolsFoldOver:
+		n, err := parseToolsFoldOver(value)
+		if err != nil {
+			return m, "", nil, true, err
+		}
+		// Which umbrellas are large is a paint fact, so the setter touches the transcript: an
+		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
+		m.setToolsFoldOver(n)
 	case settingKeyStallAfter:
 		after, err := parseStallAfter(value)
 		if err != nil {
@@ -326,6 +342,21 @@ func parseStallAfter(value string) (time.Duration, error) {
 			"(0 turns the quiet qualifier off), not %q", value)
 	}
 	return after, nil
+}
+
+// parseToolsFoldOver reads the `ui.tools-fold-over` row's value as the type-row count a resting
+// umbrella must exceed to be large, and refuses what a count cannot be — parseStallAfter's posture,
+// and for its reason: the parse restates internal/config's rather than calling it (ADR 0043), and
+// the whole contract is one strconv.Atoi and a floor of 0, the key's own spelling of "never".
+//
+// The refusal is worded for the row it is rendered on: the key, what it takes, and the text offered.
+func parseToolsFoldOver(value string) (int, error) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 0 {
+		return 0, fmt.Errorf("ui.tools-fold-over takes a number of type rows of 0 or more "+
+			"(0 never folds a Tools umbrella), not %q", value)
+	}
+	return n, nil
 }
 
 // applyColorScheme puts a named colour scheme into effect on THIS screen — the live half of ADR
@@ -410,6 +441,8 @@ const (
 	settingKeyStallAfter       = "ui.stall-after"
 	settingKeySkillSuggestions = "ui.skill-suggestions"
 	settingKeyTaskListOpen     = "ui.task-list-open"
+	settingKeyToolsOpen        = "ui.tools-open"
+	settingKeyToolsFoldOver    = "ui.tools-fold-over"
 	settingKeyCursorShape      = "cursor-shape"
 )
 
@@ -465,6 +498,52 @@ func (m Model) toggleTaskListFold() Model {
 		return m
 	}
 	return m.recordSettingEdit(settingEdit{path: settingKeyTaskListOpen, value: value})
+}
+
+// toolsOpenSource is the label the umbrella fold gesture's one failure notice carries — the key's
+// own name, taskListOpenSource's posture, so a transcript line reads `tools-open: not saved: …`.
+const toolsOpenSource = "tools-open"
+
+// setToolsOpen moves the shared Tools umbrella fold on BOTH halves the Model keeps: the Option that
+// records the preference (Options.ToolsOpen) and the transcript field the paint reads
+// ([transcript.setToolsOpen]), which every large umbrella on screen answers to on the next frame.
+// It is the one writer of either, so the two cannot drift — a toggle on a header and an apply of
+// `ui.tools-open` both come through here — and a pointer method for setTaskListFolded's reason.
+func (m *Model) setToolsOpen(open bool) {
+	m.opts.ToolsOpen = open
+	m.transcript.setToolsOpen(open)
+}
+
+// setToolsFoldOver moves the type-row threshold a resting umbrella is large above on both halves,
+// setToolsOpen's rule: the Option records the value, the transcript paints by it
+// ([transcript.setToolsFoldOver]). Only `ui.tools-fold-over`'s apply comes through here — no
+// gesture moves the threshold — but the same one-writer rule keeps the row and the paint agreeing.
+func (m *Model) setToolsFoldOver(n int) {
+	m.opts.ToolsFoldOver = n
+	m.transcript.setToolsFoldOver(n)
+}
+
+// toggleToolsFold is what a click on a LARGE Tools umbrella's header, or ⏎ at the block cursor on
+// one, means (toggleBlockAt): the shared fold flips on every large umbrella, and the flip is
+// PERSISTED through [SettingsHost.Write] as `ui.tools-open` — toggleTaskListFold's whole contract,
+// mirrored: the pane's own write and journal entry (recordSettingEdit), no note on success, one
+// transcript error naming the key when the write failed, with the flipped state standing either
+// way. A nil seam flips and writes nothing — the Driver degrade (ADR 0031) — and the write is
+// synchronous on the keypress, returning the Model alone for the caller to repaint, anchored.
+func (m Model) toggleToolsFold() Model {
+	m.setToolsOpen(!m.opts.ToolsOpen)
+	if m.opts.Settings == nil {
+		return m
+	}
+	value := settingFalse
+	if m.opts.ToolsOpen {
+		value = settingTrue
+	}
+	if err := m.opts.Settings.Write(settingKeyToolsOpen, value); err != nil {
+		m.transcript.addError(toolsOpenSource, taskListNotSavedNote+err.Error(), runRef{})
+		return m
+	}
+	return m.recordSettingEdit(settingEdit{path: settingKeyToolsOpen, value: value})
 }
 
 // settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the

@@ -1055,6 +1055,26 @@ type Options struct {
 	// hand-edited file moves it mid-session the same way (settingsApplyLocal).
 	TaskListFolded bool
 
+	// ToolsOpen starts every LARGE Tools umbrella in the transcript — one at rest with more type
+	// rows than ToolsFoldOver ([transcript.umbrellaIsLarge]) — OPEN on its type rows rather than
+	// folded to its counted header: what the `ui.tools-open` config key selected, threaded through
+	// with the SAME polarity, unlike TaskListFolded, because the key defaults to false and so its
+	// zero value already means the auto-fold the umbrella ships with. It is one preference for
+	// every large umbrella and nothing else: an umbrella keeps no fold of its own, so the paint reads
+	// the shared value each frame, and a click or ⏎ on any large header flips it for all of them
+	// ([Model.toggleToolsFold]) and writes the key back through [SettingsHost] silently (ADR 0035
+	// addendum); a `/settings` edit or a hand-edited file moves it mid-session the same way
+	// (settingsApplyLocal). Small and live umbrellas paint exactly as they did without it.
+	ToolsOpen bool
+
+	// ToolsFoldOver is how many type rows a Tools umbrella may show before it is LARGE and obeys
+	// ToolsOpen — the `ui.tools-fold-over` config key's value, already validated by the binary
+	// (internal/config's UISettings), so the renderer takes a count and never a spelling of one. The
+	// zero value is the documented "never": no umbrella has fewer than zero rows, so none is ever
+	// large under it, and a hand-built Options paints every umbrella exactly as it did before the
+	// fold existed. A `/settings` edit moves it mid-session (settingsApplyLocal).
+	ToolsFoldOver int
+
 	// StallAfter is how long the ENGINE may go silent, mid-turn, before the status line reports the
 	// quiet — what the `ui.stall-after` config key selected, already parsed by the binary
 	// (internal/config's UISettings), so the renderer takes a duration and never a spelling of one.

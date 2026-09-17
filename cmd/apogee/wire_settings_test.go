@@ -921,6 +921,39 @@ func TestRunRootThreadsTheTaskListFoldInverted(t *testing.T) {
 	}
 }
 
+// The two Tools umbrella keys reach the renderer with the SAME polarity, unlike the task-list fold:
+// `ui.tools-open` defaults to false, so tui.Options.ToolsOpen's zero value already means the fold
+// the key carries, and the threshold is a count either side. Both values of the bool are walked,
+// with a threshold off its default, so a wiring that dropped either key fails on one of them.
+func TestRunRootThreadsTheToolsFoldKeys(t *testing.T) {
+	t.Parallel()
+	for _, open := range []bool{true, false} {
+		t.Run(fmt.Sprintf("tools-open=%v", open), func(t *testing.T) {
+			t.Parallel()
+			rec := &recordingLauncher{}
+			opts := config.Options{
+				Endpoint:     "http://127.0.0.1:1111",
+				Model:        "fake",
+				StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+				Mode:         "ask-before",
+				Workspace:    t.TempDir(),
+				UI: config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
+					ColorScheme: "dark", ToolsOpen: open, ToolsFoldOver: 7},
+			}
+			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+				t.Fatalf("runRoot: %v", err)
+			}
+			if rec.opts.ToolsOpen != open {
+				t.Errorf("tui.Options.ToolsOpen = %v; want %v, the resolved ui.tools-open as it is",
+					rec.opts.ToolsOpen, open)
+			}
+			if rec.opts.ToolsFoldOver != 7 {
+				t.Errorf("tui.Options.ToolsFoldOver = %d; want 7, the resolved ui.tools-fold-over", rec.opts.ToolsFoldOver)
+			}
+		})
+	}
+}
+
 // The settings table is kept in config.KeyRegistry order — the order the pane renders the rows in —
 // so the surface and the table can be read side by side, and a key inserted into the registry cannot
 // quietly land at the bottom of the table. A subsequence is what is asserted rather than an exact
