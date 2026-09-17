@@ -4,7 +4,8 @@
 [ADR 0012](../adr/0012-confinement-attaches-to-blast-radius-and-confine-to-workspace-flag.md)
 (supersedes [ADR 0004](../adr/0004-auto-mode-requires-os-level-confinement.md)) ·
 **Realised by:** P3.2 (Linux landlock), P3.3 (macOS seatbelt), P3.4 (mode ladder + dispatch wiring),
-P3.7 (write-tool family), P3.8 (execution tools). **No production code lands in P3.1** — this document
+P3.7 (write-tool family), P3.8 (execution tools); the Windows token backend (§9, 2026-07-22) and the
+Linux namespace backend (§2.3/§5/§6.3, 2026-09-17, ADR 0081) amended it. **No production code lands in P3.1** — this document
 *is* P3.1's output: the contract those tasks build to, mechanically.
 
 > **Relationship to ADR 0012.** ADR 0012 settled the *policy* — confinement attaches to blast radius,
@@ -31,8 +32,9 @@ Three of Phase-3's tasks (P3.2, P3.3, P3.4) are "mechanical" only if four things
    third-party tool, and it must survive `registry.Subset` so a sub-agent inherits it (D2).
 3. **The per-call disposition** — the one table, keyed on `(mode, tool-class, confine-to-workspace,
    backend-caps)`, that `needsApproval`'s successor computes. Every later tool task asserts its own row.
-4. **The shared escape-probe harness** — the hermetic "try to escape the box" battery both backends'
-   acceptance tests call, so "confined" means the same thing on Linux and macOS.
+4. **The shared escape-probe harness** — the hermetic "try to escape the box" battery every backend's
+   acceptance tests call, so "confined" means the same thing on Linux and macOS *(and, since
+   2026-09-17, the same thing under either Linux backend — ADR 0081)*.
 
 The load-bearing call is §2: ADR 0012 deleted in-process per-thread confinement, which means the
 **Phase-0 stub signature `Confine(ctx, box, fn func(ctx) error)` can no longer express the model** —
@@ -54,7 +56,9 @@ Confine(ctx context.Context, box ConfinementBox, fn func(context.Context) error)
 ```
 
 ADR 0012 fixes confinement to a **single, all-OS subprocess granularity**: macOS execs the child under
-`sandbox-exec -p <profile>`; Linux applies a landlock domain to the child after fork, before `execve`.
+`sandbox-exec -p <profile>`; Linux applies a landlock domain to the child after fork, before `execve`
+*(or, on a landlock-less kernel, launches the child under `bwrap` — the namespace backend, 2026-09-17,
+ADR 0081; an argv rewrite of the same shape as the seatbelt one)*.
 For the backend to *own that wrapping*, it must see the command being launched. An opaque
 `fn func(ctx) error` hides the `*exec.Cmd` inside the closure, so the backend cannot prepend the
 `sandbox-exec` prefix or interpose the landlock re-exec wrapper.
@@ -107,7 +111,9 @@ The semantics flip from **run-fn** to **prepare-cmd**:
   > and never blocks on it. See §9.
 - The tool then runs `cmd`. A confined child that writes outside the box gets an OS error —
   strerror(EACCES) ("Permission denied") under Linux landlock, whose filesystem refusals are EACCES,
-  not EPERM; strerror(EPERM) ("Operation not permitted") under macOS seatbelt *(wording reconciled
+  not EPERM; strerror(EROFS) ("Read-only file system") under the Linux namespace backend, whose
+  read-only root answers every out-of-box write that way (2026-09-17, ADR 0081 / ADR 0056 D2);
+  strerror(EPERM) ("Operation not permitted") under macOS seatbelt *(wording reconciled
   2026-08-22, ADR 0056: this contract previously said "EPERM" unqualified, and the EPERM-only
   denial-label signature list built on that wording could never have matched a real Linux denial;
   the shared spelling set now lives in `internal/platform` — `LooksLikeConfinementDenial` — and is
@@ -136,7 +142,8 @@ and runs the cmd; the **backend** wraps it.
 
 ### 2.3 Backend obligations
 
-Both backends implement the same `Confine`, build-tagged per OS; every other OS keeps `denyConfiner`
+Both backends implement the same `Confine`, build-tagged per OS *(Linux has two since 2026-09-17 —
+landlock, then the namespace backend below — selected in that order, §2.6)*; every other OS keeps `denyConfiner`
 (which now reports `AutoEligible()==false` and is never handed a cmd to confine, because the disposition
 gates the subprocess surface when caps are insufficient).
 
@@ -192,8 +199,33 @@ decides raw-syscall vs the `github.com/landlock-l/go-landlock` helper and record
 > Cobra. The box is passed inline (argv) so the helper needs no shared state with the parent — coherent
 > with statelessness (ADR 0008).
 
-**The `/dev/null` device exemption (amendment, 2026-08-13).** Both POSIX backends allow writes to the
-literal device file `/dev/null`, *in addition to* the box's writable roots. Without it the POSIX shell
+**Linux (namespace, 2026-09-17, `//go:build linux`;
+[ADR 0081](../adr/0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md)).** The second Linux
+backend, selected when landlock cannot fence on this kernel (§2.6). It is an **argv rewrite** of the
+seatbelt shape, not a re-exec of the Apogee binary: the launcher is bubblewrap (`bwrap`), resolved on
+`PATH` once at construction as an optional external enhancement (ADR 0042 §4 — Linux's bounded
+exception, macOS's twin), and `Confine` rewrites:
+
+```
+cmd.Path = <bwrap, resolved on PATH at construction>
+cmd.Args = [bwrap, "--ro-bind", "/", "/", "--dev", "/dev", "--proc", "/proc", "--die-with-parent",
+            ("--unshare-net" iff box.NetworkAllow is non-empty),
+            "--bind", <root>, <root> (for WorkspaceRoot and each existing WritablePaths entry, canonicalised),
+            "--", <original cmd.Path>, <original cmd.Args[1:]...>]
+```
+
+The original `Stdin/Stdout/Stderr/Dir/Env` are inherited by `bwrap`, which execs the real child inside
+a user namespace and a mount namespace whose root is a read-only bind of `/` with the box's roots bound
+read-write over it: an out-of-box write fails with **EROFS**. `Setpgid` puts `bwrap` and its child in one
+process group (§2.4) and `--die-with-parent` kills the child when `bwrap` dies. The flag line is a
+**pure function of the box** and is unit-tested as argv with no process (hermetic), exactly as the
+seatbelt profile is. Never `--new-session` (it would detach the child from the tool's terminal) and never
+`--unshare-pid` (it would hide the child's process group from the teardown kill). The parent process is
+never restricted; a backend whose construction probe failed (§5) answers every `Confine` with
+`ErrConfinementUnavailable` carrying the reason — never an unfenced run.
+
+**The `/dev/null` device exemption (amendment, 2026-08-13).** Both path-policy POSIX backends (landlock,
+seatbelt) allow writes to the literal device file `/dev/null`, *in addition to* the box's writable roots. Without it the POSIX shell
 redirection idiom (`2>/dev/null`) is denied inside every confined tool call; `/dev/null` is a
 side-effect-free data sink, so exempting it from the write fence widens nothing an agent — or a
 reviewer of one — could ever observe. The obligation is backend-local:
@@ -213,11 +245,19 @@ Three properties of the exemption are contract, not incident:
    for it — and it does not appear in the exec fence's writable set (`internal/security/execsafety.go`).
    The box stays pure policy (workspace + user paths), and every box-construction site inherits the
    exemption for free.
-2. **The exempt set is exactly `/dev/null`.** No other device is write-exempt — `/dev/tty`, `/dev/zero`,
-   `/dev/stdout` and the rest stay fenced. Extending the set is a change to *this contract*, not a
-   backend detail.
-3. **Reads are untouched.** Neither backend fences reads (landlock never handles read; the seatbelt
-   profile denies only `file-write*`), so device *reads* were never gated and the exemption changes
+2. **The exempt set is exactly `/dev/null`** for landlock and seatbelt. No other device is write-exempt
+   there — `/dev/tty`, `/dev/zero`, `/dev/stdout` and the rest stay fenced. Extending the set is a
+   change to *this contract*, not a backend detail — and this is that change, once: *(amended
+   2026-09-17, ADR 0081)* **the namespace backend's write-exempt set is bwrap's minimal `--dev /dev`
+   device set** — `null`, `zero`, `full`, `random`, `urandom`, `tty`, `ptmx`, a fresh `devpts` at
+   `/dev/pts`, a private `tmpfs` at `/dev/shm`, and the child's own controlling terminal at
+   `/dev/console`. Each node is either side-effect-free (a sink, a source, a private scratch mount) or
+   the terminal the child already owns, so the wider set widens nothing the box protects; it is still
+   backend-level (property 1 holds — nothing is synthesised into the box) and any further widening
+   is again a change to this contract.
+3. **Reads are untouched.** No backend fences reads (landlock never handles read; the seatbelt
+   profile denies only `file-write*`; the namespace backend's `--ro-bind / /` leaves reads and exec
+   open), so device *reads* were never gated and the exemption changes
    nothing for them.
 
 Windows (§9) is unaffected: its backend fences by integrity label rather than by path, and the `NUL`
@@ -249,8 +289,9 @@ descendant can do to leave it (the residual below).
   becomes its own group leader, so no negative-PID kill aimed at the run's group reaches it: it escapes
   both `cmd.Cancel` and the clean-exit reap and survives the call, while the tool reports the leader's
   own exit status. It remains inside whatever write-fence the Confiner installed — changing process
-  group sheds no landlock ruleset and no seatbelt profile — so what is lost is supervision, not
-  confinement. Enforcing against it (a subreaper, descendant tracking) was **rejected**: deliberately
+  group sheds no landlock ruleset, no seatbelt profile and no mount namespace — so what is lost is
+  supervision, not confinement *(and under the namespace backend, 2026-09-17, less of that:
+  `--die-with-parent` kills the child when `bwrap` dies, whatever group it moved to)*. Enforcing against it (a subreaper, descendant tracking) was **rejected**: deliberately
   backgrounding a process is legitimate `terminal` use. Windows has no counterpart — its Job Object
   holds a descendant unless the job permits breakaway, which this one does not.
 - **Tool obligation — Windows (Phase 5):** Windows has no process groups, so the container is a **Job
@@ -293,7 +334,11 @@ non-blocking) preparation and is not the run's lifetime.
 
 `cmd/apogee` stops injecting `denyConfiner` and selects the **real backend for the host OS** behind build
 tags — `platform.NewConfiner()` returns the landlock backend on Linux, the seatbelt backend on macOS,
-and `denyConfiner` elsewhere. *(Amended 2026-07-22, §9: Windows is no longer "elsewhere" — it selects
+and `denyConfiner` elsewhere. *(Amended 2026-09-17, ADR 0081: Linux has two rungs — landlock when it
+can fence writes (ABI ≥ 1), else the namespace backend; when neither fences, the namespace backend is
+returned carrying both reasons in `Capabilities().Unavailable`. The order lives in one place,
+`selectLinuxConfiner`, so the session and report selectors cannot disagree; the namespace backend is
+constructed lazily because its probe forks `bwrap`.)* *(Amended 2026-07-22, §9: Windows is no longer "elsewhere" — it selects
 the token backend at or above build 17763, and `denyConfiner` only below that floor.)*
 The `ConfinementBox` is built from the injected
 `WorkspaceDir` plus the per-project `WritablePaths`/`NetworkAllow` from config (see §7 — the box must
@@ -780,7 +825,21 @@ never optimistic:
   true`. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
   `Residuals = [truncate(2)]`** (the ruleset cannot handle `LANDLOCK_ACCESS_FS_TRUNCATE` before
   ABI 3): the fence is real but a confined command can still *empty* an existing file outside the
-  box, and a kernel ≥ 6.2 closes it.
+  box, and a kernel ≥ 6.2 closes it. A kernel without landlock says why in `Unavailable`
+  (`landlock unavailable (landlock_create_ruleset: <errno>)`).
+  *(Amended 2026-09-17, [ADR 0081](../adr/0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md).)*
+  Landlock is the **first rung**; when it cannot fence writes the selector (§2.6) constructs the
+  **namespace backend**, whose probe resolves `bwrap` on `PATH` and then **launches it once for real**
+  — the platform shell's no-op under the exact flag line `Confine` would generate for a box rooted at
+  the temp dir, bounded by a timeout — because "bwrap is installed" is not "bwrap can fence here"
+  (`apparmor_restrict_unprivileged_userns`, a seccomp filter and `user.max_user_namespaces=0` all
+  refuse at launch, not at lookup). Exit 0 ⇒ **`{FSWrite: true, NetworkEgress: true, Residuals: nil}`**
+  — one launch fences the filesystem and, when the box asks, the network, and nothing is residual
+  (`--unshare-net` is deny-all, the same coarse tightening landlock ABI 4 enforces). Any failure ⇒
+  `{false, false}` with `Unavailable` = `bwrap not on PATH`, `bwrap refused: <bwrap's last stderr
+  line>` or `bwrap timed out`; when landlock could not fence either, the string carries **both**
+  reasons, landlock's first. The probe has no disk side effect, so `NewReportConfiner()` is
+  `NewConfiner()` verbatim on Linux.
 - **macOS:** probe for `/usr/bin/sandbox-exec` (present on stock macOS). Present ⇒ `{true, true}` (one
   profile enforces both). Absent ⇒ `{false, false}`.
 - **Windows** *(added 2026-07-22, §9 / ADR 0020)*: read the un-shimmed build number
@@ -791,6 +850,12 @@ never optimistic:
   per-run *path-labelling* failure is a `Confine`-time `ErrConfinementUnavailable` (§9) — the one
   place capability honesty splits in two.
 - **Other OSes:** `denyConfiner` ⇒ `{false, false}`.
+
+`Unavailable` is the *why* of a `FSWrite = false` report (added 2026-09-17, ADR 0081): one short
+sentence naming what this backend could not do on this host, rendered by `probe.CapabilityLine` as
+` · why: <reason>` only while fs-write is unavailable, so the startup notice, `apogee probe host` and
+`/confine` say what would have to change rather than a bare `false`. It never gates anything —
+`AutoEligible()` reads `FSWrite` alone.
 
 `Residuals` is the disclosure half of capability honesty (added 2026-08-26): the write-class
 accesses a backend **knowingly cannot fence on this host while `FSWrite` is true**, each named by
@@ -812,8 +877,8 @@ opts back into network-deny via `box.NetworkAllow`. The `agent.New` Auto gate (`
 
 ## 6. The shared escape-probe harness (makes P3.2/P3.3 acceptance mechanical)
 
-Both backends prove the same property: **a confined subprocess cannot escape the box, and the parent is
-unaffected.** P3.1 pins the harness so the two backend tests differ only in which `Confiner` they pass.
+Every backend proves the same property: **a confined subprocess cannot escape the box, and the parent is
+unaffected.** P3.1 pins the harness so the backend tests differ only in which `Confiner` they pass.
 
 ### 6.1 Shape
 
@@ -856,7 +921,7 @@ harness asserts on exit status / error.
 |---|---|---|---|
 | 1 | write `WorkspaceRoot/probe.txt` | **succeeds** (exit 0; file present) — positive control | both |
 | 2 | write a `WritablePaths` entry outside the workspace | **succeeds** — the allowlist works | both |
-| 3 | write `<sibling-temp>/escape.txt` (outside box) | **denied** — non-zero exit / OS denial (EACCES on landlock, EPERM on seatbelt); file absent | both |
+| 3 | write `<sibling-temp>/escape.txt` (outside box) | **denied** — non-zero exit / OS denial (EACCES on landlock, EROFS on namespace, EPERM on seatbelt); file absent | both |
 | 4 | write `$HOME/.ssh/escape` (outside box) | **denied** | both |
 | 5 | after #1–#4, the **parent** writes `<sibling-temp>/parent.txt` | **succeeds** — parent unrestricted | both |
 | 6 | the confined child `exec`s a second program that writes outside | **denied** — domain inherits across `execve` | Linux, **Windows** |
@@ -911,6 +976,16 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > (`TestLandlockResidualsMatchHostABI`), which is what makes the row un-fakeable in either
 > direction.
 
+> **Amended 2026-09-17 (ADR 0081).** The **namespace** backend runs the same battery through a third
+> Linux driver (`TestNamespaceProbe` / `TestNamespaceProbeNetwork`): rows #1–#6, #11 and #12 plus
+> #7/#8. "Linux" in the Backend column means either Linux backend. Row #3's denial is **EROFS** under
+> it (the read-only root, not a permission errno), which is why row #11 needed ADR 0056 D2's third
+> spelling; row #12 must **deny** with the bytes intact, because the backend reports `Residuals: nil`
+> — its fence is complete or absent, never partial. The harness skips itself where the construction
+> probe reported `FSWrite == false` (no `bwrap`, or a kernel that refuses unprivileged user
+> namespaces), so a CI container without userns skips cleanly; wherever `bwrap` and userns work —
+> landlock or not — every row runs for real.
+
 ### 6.3 Per-backend acceptance checklists (now mechanical)
 
 **P3.2 (Linux landlock)** is done when: `Capabilities()` is honest across a ≥6.7 and a 5.13–6.6 kernel
@@ -918,6 +993,17 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 `confinetest.ProbeNetwork` passes #7 on ≥6.7 (skipped below); the parent stays unrestricted after a
 confined child (#5); cross-build green (file `linux`-tagged; other OSes keep `denyConfiner`); x/sys
 promoted to a direct dep with `go mod tidy` clean.
+
+**Linux namespace (2026-09-17, ADR 0081)** is done when: on a host with `bwrap` and working unprivileged
+user namespaces `confinetest.Probe` passes #1–#6, #11 and #12 (#12 denying, `Residuals: nil`) and
+`confinetest.ProbeNetwork` passes #7/#8; the argv line is unit-tested as a pure function of the box with
+no process (hermetic — `--unshare-net` iff `NetworkAllow` is non-empty, missing roots skipped, never
+`--new-session` or `--unshare-pid`); `bwrap` absent **or** userns refused ⇒ `Capabilities() ==
+{false, false}` with a non-empty `Unavailable` naming the cause (`bwrap not on PATH` / `bwrap refused:
+<stderr line>` / `bwrap timed out`), and `Confine` then returns `ErrConfinementUnavailable`; a
+landlock-capable host **never constructs it** (`selectLinuxConfiner` returns landlock first, and the
+namespace constructor is not called); when neither rung fences, the returned backend's `Unavailable`
+carries both reasons; cross-build green (file `linux`-tagged; no new module dependency).
 
 *(Added 2026-07-22: the Windows token backend's checklist is **§9.4**, kept there with the rest of its
 obligations rather than tacked on here.)*
@@ -1043,8 +1129,8 @@ verbatim below the floor — no new wording, no new surface.
   finishes an outstanding restore; `NewReportConfiner()` is what `cmd/apogee/probe.go` builds, and
   it skips recovery so the host report stays free/offline/read-only as ADR 0021 §1 pins it, and so
   the residue line reports the outstanding journal instead of consuming it (ADR 0020 §2). The
-  other three backends define `NewReportConfiner()` as `NewConfiner()` verbatim: nothing about
-  constructing them touches the user's disk.
+  other backends — landlock, namespace *(2026-09-17)* and seatbelt — define `NewReportConfiner()` as
+  `NewConfiner()` verbatim: nothing about constructing them touches the user's disk.
 - **`NetworkEgress` is false and a network-deny box fails closed** — a non-empty `NetworkAllow`
   yields `ErrConfinementUnavailable`, mirroring `landlock_linux.go`'s `networkDenyDecision`.
 - **Teardown of the process tree is §2.4's Windows half** (the Job Object, owned by the execution

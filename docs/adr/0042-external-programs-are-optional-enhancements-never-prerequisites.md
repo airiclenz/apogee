@@ -61,6 +61,19 @@ in its `__confined-exec` helper mode (landlock), and Windows drops a low-integri
 ([ADR 0020](0020-windows-confinement-is-a-low-integrity-token-and-the-box-is-a-disk-label.md)) —
 neither reaches outside the binary.
 
+*Amended (2026-09-17, [ADR 0081](0081-linux-falls-back-to-a-namespace-fence-through-bwrap.md)):*
+Linux now has the same bounded exception. On a kernel where landlock cannot fence (Raspberry Pi OS
+leaves the LSM off its boot line; a container's seccomp profile answers `ENOSYS`) the selector falls
+back to a **namespace backend** that launches the child under bubblewrap (`bwrap`) — resolved on
+`PATH` at construction, launched once for real to prove the host grants unprivileged user
+namespaces, gracefully absent. It is bounded exactly as the macOS one is: it buys **a mode, not the
+agent** (`{false, false}` with the reason in `Capabilities().Unavailable`, and the
+confine-if-you-can/gate-if-you-can't net keeps every other mode working), and it is reached only on
+the second rung — a landlock-capable kernel never looks for it, so "Linux re-execs apogee itself"
+stays true of the first rung. Two of the three OSes now carry the exception; the rule stands
+because both are bounded the same way, and a native (bwrap-free) namespace launcher remains the
+recorded follow-up that would take Linux's back.
+
 **5. The module graph stays lean and stdlib-first.** The direct requires are the set the policy
 named — Cobra, Bubble Tea/Lipgloss/Bubbles, the MCP go-sdk, `yaml.v3`, and small utilities — and a
 new direct dependency is a decision to be argued, not a convenience to be taken. The standing
