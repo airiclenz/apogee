@@ -127,7 +127,9 @@
 // reload does and reports its notices, a pending migration and every key's resolved value;
 // probecontext.go `apogee probe context`, which composes a session's Config through the Firing
 // composer's server-bound half, constructs an idle Agent and prints its Turn-1 context cost —
-// the offline estimate of what apogee itself puts in front of the model (ADR 0079);
+// the offline estimate of what apogee itself puts in front of the model (ADR 0079), or with
+// `--live` the server's own Turn-1 count for one fixed one-word request, twice (as configured,
+// then Bypass) when advise/shape Reactions are armed;
 // undo.go `apogee undo <session-id> [confirm]`, the revert an unattended
 // Firing has nobody to offer — it opens one saved session's snapshot store from a fresh
 // process and shows `/undo`'s own listing (ADR 0074).

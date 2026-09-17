@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
@@ -176,5 +177,239 @@ func TestProbeContextNeitherDialsNorWrites(t *testing.T) {
 	}
 	if got := stub.Requests(); len(got) != 0 {
 		t.Errorf("the stub saw %d request(s); the probe takes no beat:\n%v", len(got), got)
+	}
+}
+
+// probeContextLiveStub is the upstream a live probe measures against: every request is answered
+// with the one-word reply and a fixed usage, so the report's measured column is scriptable and a
+// second request — the Bypass reading — is answered rather than refused.
+func probeContextLiveStub(t *testing.T, usage stubllm.Usage) *stubllm.Server {
+	t.Helper()
+	return stubllm.New(t, stubllm.Script{
+		Model: "stub-model",
+		Turns: []stubllm.Turn{{Repeat: true, Text: "OK", Usage: &usage}},
+	})
+}
+
+// contextCostMeasuredCell reads the cell under the named measured column off the total row: the
+// column line names the columns and the total row puts the count under its label, right-aligned,
+// so the cell is the text on the total row that ends where the label ends.
+func contextCostMeasuredCell(t *testing.T, report, label string) string {
+	t.Helper()
+	lines := strings.Split(strings.TrimRight(report, "\n"), "\n")
+	if len(lines) < 3 {
+		t.Fatalf("the live report has %d lines, too few for a column line and a total row:\n%s", len(lines), report)
+	}
+	columns := lines[1]
+	end := strings.Index(columns, label)
+	if end < 0 {
+		t.Fatalf("the column line does not name %q:\n%s", label, report)
+	}
+	end += len(label)
+	var total string
+	for _, line := range lines[2:] {
+		if strings.HasPrefix(line, "  total") {
+			total = line
+		}
+	}
+	if total == "" {
+		t.Fatalf("the live report has no total row:\n%s", report)
+	}
+	if len(total) < end {
+		t.Fatalf("the total row %q ends before the %q column:\n%s", total, label, report)
+	}
+	cell := total[:end]
+	return strings.TrimSpace(cell[strings.LastIndex(cell, "   ")+3:])
+}
+
+// TestProbeContextLiveMeasuresTurn1 drives --live against a stub whose reply carries a fixed usage
+// and asserts the measured shape: the total row carries the server's own count under `measured`,
+// the header labels the ratio as calibrated, the stub saw exactly one request, and that request's
+// user message is the fixed one-word prompt with the reply ceiling on it.
+func TestProbeContextLiveMeasuresTurn1(t *testing.T) {
+	t.Parallel()
+	stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 777, Completion: 1})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	workspace := probeContextWorkspace(t)
+
+	report := runProbeContext(t, home, workspace, stub.URL, "--live")
+
+	if got := contextCostMeasuredCell(t, report, probe.ContextCostColumnMeasured); got != "777" {
+		t.Errorf("the measured cell = %q, want the stub's 777:\n%s", got, report)
+	}
+	if !strings.Contains(report, "chars/token, calibrated)") {
+		t.Errorf("the header does not label the ratio as calibrated:\n%s", report)
+	}
+	if strings.Contains(report, "estimate,") {
+		t.Errorf("a live report must not label itself an estimate:\n%s", report)
+	}
+	requests := stub.Requests()
+	if len(requests) != 1 {
+		t.Fatalf("the stub saw %d request(s); --live sends exactly one:\n%v", len(requests), requests)
+	}
+	if got := stub.LastMessage(1); got != probeContextLivePrompt {
+		t.Errorf("the request's user message = %q, want the fixed prompt %q", got, probeContextLivePrompt)
+	}
+	if cap := requests[0].Sampling.MaxTokens; cap == nil || *cap != probeContextLiveReplyCap {
+		t.Errorf("the request's max_tokens = %v, want the reply ceiling %d", cap, probeContextLiveReplyCap)
+	}
+}
+
+// TestProbeContextLiveCarriesTheCachedShare pins the bracketed cached share on the measured cell
+// when the server reports one.
+func TestProbeContextLiveCarriesTheCachedShare(t *testing.T) {
+	t.Parallel()
+	stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 777, Completion: 1, Cached: 512})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	workspace := probeContextWorkspace(t)
+
+	report := runProbeContext(t, home, workspace, stub.URL, "--live")
+
+	if got := contextCostMeasuredCell(t, report, probe.ContextCostColumnMeasured); got != "777 (512 cached)" {
+		t.Errorf("the measured cell = %q, want the count with its cached share:\n%s", got, report)
+	}
+}
+
+// TestProbeContextLiveSendsTwiceWhenReactionsArmed asserts the Reactions delta: a config that arms
+// an advise Reaction makes --live send twice — as configured, then under Bypass on a fresh Agent —
+// and print both measured columns with the delta line, while an observe-only config sends once.
+// The two requests carry the same fixed prompt: a user's advise Reaction fires at post-tool-result
+// or file-changed, neither of which precedes Turn 1, so the wire cannot show the lane armed — the
+// count and the columns are the claim.
+func TestProbeContextLiveSendsTwiceWhenReactionsArmed(t *testing.T) {
+	t.Parallel()
+	workspace := probeContextWorkspace(t)
+
+	t.Run("advise armed", func(t *testing.T) {
+		t.Parallel()
+		stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 800, Completion: 1})
+		home := eventLinesHome(t, stub.URL, stub.Model)
+		appendHomeConfig(t, home,
+			"reactions:\n"+
+				"  - id: lint\n    on: [post-tool-result]\n    advise: [\"true\"]\n")
+
+		report := runProbeContext(t, home, workspace, stub.URL, "--live")
+
+		if got := contextCostMeasuredCell(t, report, probe.ContextCostColumnAsConfigured); got != "800" {
+			t.Errorf("the as-configured cell = %q, want 800:\n%s", got, report)
+		}
+		if got := contextCostMeasuredCell(t, report, probe.ContextCostColumnBypass); got != "800" {
+			t.Errorf("the bypass cell = %q, want 800:\n%s", got, report)
+		}
+		if !strings.HasSuffix(strings.TrimRight(report, "\n"), "Reactions add 0 tokens at Turn 1") {
+			t.Errorf("the report does not end on the delta line:\n%s", report)
+		}
+		if strings.Contains(report, "armed") {
+			t.Errorf("a live report must not print the estimate's armed line:\n%s", report)
+		}
+		requests := stub.Requests()
+		if len(requests) != 2 {
+			t.Fatalf("the stub saw %d request(s); an armed config sends twice:\n%v", len(requests), requests)
+		}
+		for n := 1; n <= 2; n++ {
+			if got := stub.LastMessage(n); got != probeContextLivePrompt {
+				t.Errorf("request %d's user message = %q, want the fixed prompt", n, got)
+			}
+		}
+	})
+
+	t.Run("observe only", func(t *testing.T) {
+		t.Parallel()
+		stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 800, Completion: 1})
+		home := eventLinesHome(t, stub.URL, stub.Model)
+		appendHomeConfig(t, home,
+			"reactions:\n  - id: record\n    on: [exchange-finished]\n    run: [\"true\"]\n")
+
+		report := runProbeContext(t, home, workspace, stub.URL, "--live")
+
+		if got := contextCostMeasuredCell(t, report, probe.ContextCostColumnMeasured); got != "800" {
+			t.Errorf("the measured cell = %q, want 800:\n%s", got, report)
+		}
+		if got := stub.Requests(); len(got) != 1 {
+			t.Errorf("the stub saw %d request(s); an observe-only config sends once:\n%v", len(got), got)
+		}
+	})
+}
+
+// TestProbeContextLiveNeverRunsATool pins the mechanism that keeps a tool off the floor: a reply
+// that asks for a write, with usage attached, ends the Turn on the usage — the ctx is cancelled
+// before dispatch — so the stub sees exactly one request (no tool result ever comes back) and the
+// file the call named never appears, in Auto, where nothing else would have stopped it.
+func TestProbeContextLiveNeverRunsATool(t *testing.T) {
+	t.Parallel()
+	workspace := probeContextWorkspace(t)
+	target := filepath.Join(workspace, "never.txt")
+	usage := stubllm.Usage{Prompt: 640, Completion: 20}
+	stub := stubllm.New(t, stubllm.Script{
+		Model: "stub-model",
+		Turns: []stubllm.Turn{{
+			Repeat: true,
+			ToolCalls: []stubllm.ToolCall{{
+				Name:      "write_file",
+				Arguments: `{"path":"` + target + `","content":"the probe ran a tool\n"}`,
+			}},
+			Usage: &usage,
+		}},
+	})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+
+	report := runProbeContext(t, home, workspace, stub.URL, "--live", "--mode", "auto")
+
+	if got := contextCostMeasuredCell(t, report, probe.ContextCostColumnMeasured); got != "640" {
+		t.Errorf("the measured cell = %q, want 640:\n%s", got, report)
+	}
+	if got := stub.Requests(); len(got) != 1 {
+		t.Errorf("the stub saw %d request(s); the tool call must never come back as a result:\n%v", len(got), got)
+	}
+	if _, err := os.Stat(target); !os.IsNotExist(err) {
+		t.Errorf("the tool the reply asked for ran: %s exists (stat err = %v)", target, err)
+	}
+}
+
+// TestProbeContextLiveNeverWrites pins the live half's pledge: after a live probe the temp home
+// holds no session record, no scratch dir and no probe fingerprint.
+func TestProbeContextLiveNeverWrites(t *testing.T) {
+	t.Parallel()
+	stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 777, Completion: 1})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	workspace := probeContextWorkspace(t)
+
+	runProbeContext(t, home, workspace, stub.URL, "--live")
+
+	for _, dir := range []string{filepath.Join(home, "sessions"), filepath.Join(home, "scratch"), probe.ProbeDir(home)} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Errorf("%s exists after a live probe (stat err = %v); --live writes nothing", dir, err)
+		}
+	}
+	if got := stub.Requests(); len(got) != 1 {
+		t.Errorf("the stub saw %d request(s); want the one measurement:\n%v", len(got), got)
+	}
+}
+
+// TestProbeContextLiveRefusesAServerThatReportsNoUsage asserts the honest failure: a reply that
+// carries no usage leaves nothing to measure, and the command says so rather than printing an
+// estimate dressed as a measurement.
+func TestProbeContextLiveRefusesAServerThatReportsNoUsage(t *testing.T) {
+	t.Parallel()
+	assertNoAmbientApogeeConfig(t)
+	stub := stubllm.New(t, stubllm.Script{
+		Model: "stub-model",
+		Turns: []stubllm.Turn{{Repeat: true, Text: "OK"}},
+	})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	workspace := probeContextWorkspace(t)
+
+	cmd := probeContextCommand()
+	var out, errOut bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&errOut)
+	cmd.SetArgs([]string{"--config", home, "--workspace", workspace, "--endpoint", stub.URL, "--live"})
+	err := cmd.ExecuteContext(context.Background())
+
+	if err == nil || !strings.Contains(err.Error(), "reported no usage") {
+		t.Fatalf("err = %v, want the no-usage refusal; stdout:\n%s", err, out.String())
+	}
+	if out.Len() != 0 {
+		t.Errorf("a refused live probe printed a report:\n%s", out.String())
 	}
 }

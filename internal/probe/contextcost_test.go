@@ -37,6 +37,106 @@ func TestContextCostReportGolden(t *testing.T) {
 	tuitest.GoldenText(t, filepath.Join("testdata", "contextcost.golden"), report)
 }
 
+// contextCostCalibratedFixture is the fixture a live reading re-renders: the same bytes through a
+// calibrated ratio (3.7 chars/token here), so the tokens column moves while the bytes hold.
+func contextCostCalibratedFixture() domain.ContextCost {
+	return domain.ContextCost{
+		Rows: []domain.ContextCostRow{
+			{Name: "prompt", Bytes: 1043, Tokens: 282},
+			{Name: "orientation", Bytes: 612, Tokens: 166},
+			{Name: "context files", Bytes: 4201, Tokens: 1136},
+			{Name: "tool menu", Bytes: 11512, Tokens: 3112},
+		},
+		Bytes:      17368,
+		Tokens:     4695,
+		Calibrated: true,
+	}
+}
+
+// TestContextCostReportMeasuredGolden pins the two live shapes against their goldens: one
+// `measured` column carrying a cached share (testdata/contextcost-measured.golden), and the
+// `as configured` / `bypass` pair with the delta line (testdata/contextcost-delta.golden). The
+// header reads `calibrated` on both.
+func TestContextCostReportMeasuredGolden(t *testing.T) {
+	t.Parallel()
+
+	t.Run("one column", func(t *testing.T) {
+		t.Parallel()
+
+		report := ContextCost{
+			Estimate:      contextCostCalibratedFixture(),
+			Mode:          "auto",
+			CharsPerToken: 3.7,
+			Measured: []ContextCostMeasured{
+				{Label: ContextCostColumnMeasured, PromptTokens: 4611, CachedPromptTokens: 4096},
+			},
+		}.Report()
+
+		tuitest.GoldenText(t, filepath.Join("testdata", "contextcost-measured.golden"), report)
+	})
+
+	t.Run("two columns", func(t *testing.T) {
+		t.Parallel()
+
+		report := ContextCost{
+			Estimate:      contextCostCalibratedFixture(),
+			Mode:          "auto",
+			CharsPerToken: 3.7,
+			Armed:         1,
+			Measured: []ContextCostMeasured{
+				{Label: ContextCostColumnAsConfigured, PromptTokens: 4640},
+				{Label: ContextCostColumnBypass, PromptTokens: 4611},
+			},
+		}.Report()
+
+		tuitest.GoldenText(t, filepath.Join("testdata", "contextcost-delta.golden"), report)
+	})
+}
+
+// TestContextCostReportMeasuredColumns asserts the live shape semantically: the column line and
+// the total row put each measured count under its label, the header says calibrated, the cached
+// share rides in brackets, the delta line is the two counts' difference, and the armed line — the
+// estimate's pointer at --live — is not printed on a live report.
+func TestContextCostReportMeasuredColumns(t *testing.T) {
+	t.Parallel()
+
+	report := ContextCost{
+		Estimate:      contextCostCalibratedFixture(),
+		Mode:          "plan",
+		CharsPerToken: 3.7,
+		Armed:         2,
+		Measured: []ContextCostMeasured{
+			{Label: ContextCostColumnAsConfigured, PromptTokens: 4640, CachedPromptTokens: 12},
+			{Label: ContextCostColumnBypass, PromptTokens: 4611},
+		},
+	}.Report()
+	lines := strings.Split(report, "\n")
+
+	if !strings.Contains(lines[0], "(mode plan; ~3.7 chars/token, calibrated)") {
+		t.Errorf("the header does not label the ratio as calibrated: %q", lines[0])
+	}
+	columns, total := lines[1], lines[len(lines)-2]
+	for _, cell := range []struct{ label, value string }{
+		{ContextCostColumnAsConfigured, "4640 (12 cached)"},
+		{ContextCostColumnBypass, "4611"},
+	} {
+		at := strings.Index(columns, cell.label) + len(cell.label)
+		if at < len(cell.label) {
+			t.Fatalf("the column line does not name %q: %q", cell.label, columns)
+		}
+		if got := strings.Index(total, cell.value) + len(cell.value); got != at {
+			t.Errorf("%q ends at column %d on the total row, its label ends at %d:\n%s\n%s",
+				cell.value, got, at, columns, total)
+		}
+	}
+	if last := lines[len(lines)-1]; last != "Reactions add 29 tokens at Turn 1" {
+		t.Errorf("the delta line = %q, want the two counts' difference", last)
+	}
+	if strings.Contains(report, "armed") {
+		t.Errorf("a live report must not print the estimate's armed line:\n%s", report)
+	}
+}
+
 // TestContextCostReportRows asserts the rows semantically, so a re-recorded golden cannot pass a
 // table whose columns drifted: every piece is a row, the total closes the table, and the two
 // numeric columns line up on their right edges.

@@ -74,7 +74,9 @@
 // engine's own Turn-1 report (domain.ContextCost, ADR 0079) beside the mode it was composed under
 // and the ratio its `~` estimates went through, one row per piece plus the total, and the line that
 // names the armed advise/shape Reactions an idle estimate cannot see. Free like the host report: the
-// composition root reads the report off an Agent that sends nothing.
+// composition root reads the report off an Agent that sends nothing — until `--live`, which adds the
+// server's own Turn-1 count as a measured column (two, as configured and Bypass, with the delta
+// line, when Reactions are armed) and re-labels the ratio as calibrated.
 //
 // And doc.go this map.
 package probe

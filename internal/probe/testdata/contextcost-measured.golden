@@ -1,0 +1,7 @@
+Context cost — what apogee puts in front of the model at Turn 1 (mode auto; ~3.7 chars/token, calibrated)
+                        bytes tokens             measured
+  prompt              1,043 B   ~282
+  orientation           612 B   ~166
+  context files       4,201 B  ~1136
+  tool menu          11,512 B  ~3112
+  total              17,368 B  ~4695   4611 (4096 cached)
