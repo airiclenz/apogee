@@ -199,8 +199,14 @@ func TestE2EHostileToolResultsKeepOneRowPerEntry(t *testing.T) {
 // about: the settings sub-list that has to say what `auto` costs in a column too narrow for the
 // sentence, and the approval pane that has to wrap a three-hundred-character argument without letting
 // a continuation row fall back to the pane's left edge.
+//
+// The `auto` sentence it greps for is the blast-radius line, which the settings sub-list paints only
+// when the run's backend reports fs-write; a host that cannot fence would say "commands cannot be
+// fenced here" instead and fail the step for a reason that has nothing to do with wrapping. So the
+// run takes installFenceableConfiner's stand-in where it must — the test asserts wrapping, not the
+// fence — and, because that helper swaps a package var, it is serial like the announced tests.
 func TestE2EHostileWrapsUnderItsOwnIndent(t *testing.T) {
-	t.Parallel()
+	installFenceableConfiner(t)
 
 	ws := hostileWorkspace(t)
 	stub := stubllm.New(t, loadScript(t, "hostile"))
