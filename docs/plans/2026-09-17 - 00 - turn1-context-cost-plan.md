@@ -53,7 +53,9 @@
 - TUI surfaces (`/usage`, status line) — a later plan once the bench has used the number.
 - apogee-sim changes (external module).
 
-## 1. ADR 0079 and the CONTEXT.md term
+## 1. ADR 0079 and the CONTEXT.md term — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): retry — the ADR's Context gained the dated ratification sentence ("The owner ratified the calls below on 2026-09-17 (plan `docs/plans/2026-09-17 - 00`).") per the verifier's FIX, matching how ADR 0078 dates its body; no other change to the previous attempt's ADR or CONTEXT.md entry.
 
 **What:** Write `docs/adr/0079-context-cost-is-a-first-class-engine-report.md` in the house ADR format (status Accepted, date 2026-09-17): the ratified calls above as decisions, with the estimate-vs-measured distinction, the bytes-pinned golden, the paid-only-on-`--live` rule and the additive headless keys. The ADR also names the second supersession of ADR 0062 call 13 — the goldens-for-rendering-surfaces-only rule at `docs/design/test-drivers.md:419-423` (restated at `internal/tuitest/golden.go:14-17`), superseded once by ADR 0075 §14 — for item 3's bytes-per-piece golden, which is the supersession item 3's guard relies on. Add a **Context cost** entry to `CONTEXT.md` next to **Context files** / **System prompt** (read that section first for the house voice): "the tokens apogee itself puts in front of the model before the user's message — the standing system content plus the tool menu — as a per-piece estimate and, once measured, the Turn-1 `prompt_tokens`; the Reactions' directives are part of it only when measured". Cross-link the ADR from the term.
 
