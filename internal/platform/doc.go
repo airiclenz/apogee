@@ -60,14 +60,18 @@
 // the token backend itself, the only backend that mutates the machine (it labels the box's
 // roots on disk and reverts them on Close, ADR 0020).
 //
-// The POSIX backends. confine_posix.go is the argv rewrite landlock and seatbelt share —
-// neither runs the command, both re-exec it under a launcher in its own process group — so
-// each backend keeps only what is genuinely its own. landlock_linux.go is the Linux backend:
+// The POSIX backends. confine_posix.go is what landlock, namespace and seatbelt share — the
+// argv rewrite (none runs the command, each re-execs it under a launcher in its own process
+// group) and the canonical writable root — so each backend keeps only what is genuinely its
+// own. landlock_linux.go is the Linux backend:
 // the ABI probe, the ruleset built from the box, the encode/decode of that box across the
 // re-exec, and ApplyLandlockAndExec, the helper mode the apogee binary re-enters as the
-// launcher. seatbelt.go is the host-agnostic half of the macOS backend — the generated
-// profile, its canonical roots and quoting — so it unit-tests on any host, and
-// seatbelt_darwin.go is the darwin-tagged constructor that probes once for sandbox-exec.
+// launcher. namespace_linux.go is the second Linux backend, for a kernel without landlock:
+// the bwrap flags built from the box (a read-only bind of / with the writable roots bound
+// over it), its capabilities and the launch under bwrap. seatbelt.go is the host-agnostic
+// half of the macOS backend — the generated profile and its quoting — so it unit-tests on
+// any host, and seatbelt_darwin.go is the darwin-tagged constructor that probes once for
+// sandbox-exec.
 // denialkill.go is the confinement fence's output-side companion: the line-anchored OS-denial
 // signature and the DenialKillWriter the execution tools wire onto a CONFINED run's stderr so
 // the first line ending in a denial kills the process group instead of letting the script's

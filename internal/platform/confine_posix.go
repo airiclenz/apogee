@@ -5,26 +5,29 @@ package platform
 import (
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"syscall"
 )
 
-// POSIX confinement plumbing — the argv wrap both POSIX backends share (ADR 0012;
+// POSIX confinement plumbing — the argv wrap the POSIX backends share (ADR 0012;
 // confinement-execution-contract §2.2/§2.3/§2.4).
 //
-// landlock (landlock_linux.go) and seatbelt (seatbelt.go) fence by the same mechanism:
-// neither runs the command, both rewrite it to run under a launcher — the apogee binary
-// itself in its __confined-exec helper mode on Linux, /usr/bin/sandbox-exec on macOS — and
-// both put the wrapped child in its own process group. Only the launcher and the arguments
-// between it and the original argv differ, so the rewrite itself lives here once and each
-// backend keeps only the part that is genuinely its own (the ruleset, the profile, the
-// capability probe).
+// landlock (landlock_linux.go), namespace (namespace_linux.go) and seatbelt (seatbelt.go)
+// fence by the same mechanism: none runs the command, each rewrites it to run under a
+// launcher — the apogee binary itself in its __confined-exec helper mode, bwrap, or
+// /usr/bin/sandbox-exec on macOS — and each puts the wrapped child in its own process
+// group. Only the launcher and the arguments between it and the original argv differ, so
+// the rewrite itself lives here once and each backend keeps only the part that is
+// genuinely its own (the ruleset, the bwrap flags, the profile, the capability probe).
+// The canonical writable root the seatbelt profile and the bwrap binds both derive their
+// rules from lives here for the same reason.
 //
-// This file is //go:build !windows because that is the only tag both backends compile
-// under: landlock is linux-only, and seatbelt is !windows so its profile generator stays
-// hermetically testable on the Linux dev host. It is deliberately NOT platform_posix.go —
-// that file is the Host rule set (shell, quoting, path semantics), a different concern.
-// Windows fences with a restricted low-integrity token instead and wraps nothing (ADR 0020;
-// contract §9.2), so there is no Windows counterpart to share with.
+// This file is //go:build !windows because that is the only tag every backend compiles
+// under: landlock and namespace are linux-only, and seatbelt is !windows so its profile
+// generator stays hermetically testable on the Linux dev host. It is deliberately NOT
+// platform_posix.go — that file is the Host rule set (shell, quoting, path semantics), a
+// different concern. Windows fences with a restricted low-integrity token instead and wraps
+// nothing (ADR 0020; contract §9.2), so there is no Windows counterpart to share with.
 
 // errNoArgv is the refusal for a command with no argv: there is nothing to wrap, and
 // rewriting it would produce a launch line whose program is the launcher's own first
@@ -75,4 +78,22 @@ func setConfinedPgid(cmd *exec.Cmd) {
 		cmd.SysProcAttr = &syscall.SysProcAttr{}
 	}
 	cmd.SysProcAttr.Setpgid = true
+}
+
+// canonicalWritableRoot resolves a writable root through symlinks so the rule a backend
+// derives from it matches the kernel-canonical path the fence checks writes against: a
+// seatbelt (subpath ...) is matched against the resolved target (on macOS /tmp and /var are
+// symlinks into /private, so an unresolved /var/folders/... root would never match and every
+// in-box write would be denied), and a bwrap --bind of the canonical path mounts the same
+// directory the child's writes resolve to. A confinement-box root is a directory the child
+// writes into, so at confine time it exists and EvalSymlinks resolves it; if it cannot be
+// resolved (a not-yet-created root) the cleaned path is used as-is — the rule then simply
+// won't match a path that does not exist, which is the correct outcome. This is the same
+// resolution security.EvalRealPath performs for path-safety, kept dependency-free here so
+// internal/platform stays domain-only.
+func canonicalWritableRoot(root string) string {
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		return resolved
+	}
+	return filepath.Clean(root)
 }
