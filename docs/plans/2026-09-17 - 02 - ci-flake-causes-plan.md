@@ -113,7 +113,9 @@ NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance ran with
 **Acceptance:** `go test -race ./cmd/apogee/ -run 'PaneMarkersNeverEcho|TestE2EUsage|TestE2ESmoke|TestE2ELiveState' ` and the pinned 20× loop over `TestE2EUsageReportsCachedTokensAndDelegateSpend` and `TestE2EUsageHidesTheCachedColumnWithoutABreakdown` with zero `FAIL` lines
 **Commit:** `fix(e2e): submit waits inside the prompt box and pane markers never echo a palette row`
 
-## 6. t17 golden waits for the read receipt (`apogee-ig7`)
+## 6. t17 golden waits for the read receipt (`apogee-ig7`) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance and the 20× pinned loop ran without `-race` per the plan's execution-host block.
 
 **What:** Fix `apogee-ig7`: the `frameWhen` condition for the `t17-run-view` golden (`cmd/apogee/e2e_subagent_view_test.go` ~L113) requires `childParkedLine = "a.txt"`, which paints with the read CALL row, but the golden holds the `⋯ 2 lines` receipt — on a slow runner the frame is captured one tick early. Add `readReceipt = "2 lines"` beside the other pinned strings and require `holds(f, readReceipt)` in the condition alongside `!holds(f, secondRead)`. Golden unchanged.
 **Files:** `cmd/apogee/e2e_subagent_view_test.go`

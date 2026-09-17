@@ -48,6 +48,11 @@ const (
 	childParkedLine = "a.txt"
 	siblingAnswer   = "The first half is done."
 
+	// The receipt the child's first read row ends with once the result is in. The row is painted
+	// twice — first with the call alone, then with this tail — and the golden holds the second
+	// paint, so a frame that shows the file but not the receipt is one tick too early.
+	readReceipt = "2 lines"
+
 	// The tail of a collapsed run's row when its report is NOT one line: the count of the work and
 	// how the run ended, with no sentence promoted into the slot.
 	countedOutcome = "tool calls · done"
@@ -112,7 +117,7 @@ func TestE2ESubAgentView(t *testing.T) {
 	openWorkingRun(drv)
 	opened := frameWhen(t, drv, "the run view open on the child's first read", func(f tuitest.Frame) bool {
 		return holds(f, runViewCrumb) && holds(f, longTask) && holds(f, childParkedLine) &&
-			!holds(f, secondRead)
+			holds(f, readReceipt) && !holds(f, secondRead)
 	})
 
 	crumb := rowContaining(t, opened, runViewCrumb)
