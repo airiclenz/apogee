@@ -2,3 +2,9 @@
 # every platform — a CRLF checkout would bake \r into the binary and break TUI rendering.
 internal/tui/logo.txt text eol=lf
 graphics/apogee-logo.md text eol=lf
+
+# Every golden and testdata file is compared byte-for-byte by tuitest.compareGolden /
+# GoldenText, so it must be LF on every platform — a core.autocrlf=true checkout (Windows CI)
+# would otherwise turn a byte-identical frame into a diff that looks identical.
+*.golden text eol=lf
+**/testdata/** text eol=lf

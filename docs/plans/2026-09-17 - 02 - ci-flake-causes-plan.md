@@ -80,7 +80,7 @@ NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance ran `go 
 **Acceptance:** `go test -race ./cmd/apogee/ -run '^TestE2EAnnouncedWorkspaceThroughASymlink$' -count=3`
 **Commit:** `test(e2e): confined symlink workspace leaves no undo error and a journaled pre image`
 
-## 3. Pin golden and testdata files to LF (`apogee-80n`)
+## 3. Pin golden and testdata files to LF (`apogee-80n`) — ✅ DONE (2026-09-17)
 
 **What:** Fix `apogee-80n`: `windows-latest` checks out with `core.autocrlf=true` and `.gitattributes` pins only `internal/tui/logo.txt` and `graphics/apogee-logo.md`, so `internal/probe/testdata/*.golden` arrive CRLF and `tuitest.compareGolden`'s byte compare fails on a diff that looks identical. Add to `.gitattributes`, with a comment stating the rule (every golden and testdata file is compared byte-for-byte by `tuitest.compareGolden` / `GoldenText`, so it must be LF on every platform): `*.golden text eol=lf` and `**/testdata/** text eol=lf`. All 152 tracked files under those patterns are already `i/lf w/lf`, so no renormalisation commit is needed.
 **Regression guard.** `grep -vc 'i/lf'` prints `0` but exits 1 when nothing is selected, so a verifier chaining the acceptance commands with `&&` fails every correct run: spell the check `git ls-files --eol -- '*.golden' '**/testdata/**' | grep -v 'i/lf' | wc -l` (prints 0, exits 0); the three acceptance commands run separately and only their output is judged.
