@@ -459,6 +459,12 @@ func closePane(drv *tuitest.Driver, marker string) {
 	drv.WaitQuiet(settled)
 }
 
+// typingAllowance is the extra wait [submit] grants per typed byte, on top of
+// [tuitest.DefaultTimeout]. The loaded 4-vCPU CI runner lands a key about every 90 ms, so a flat
+// 5 s budget was exhausted 56 characters into a 79-byte prompt; a budget that grows with the
+// prompt outlasts the typing at any length while a short prompt still fails as fast as before.
+const typingAllowance = 100 * time.Millisecond
+
 // submit types a line into the prompt box and sends it. It takes the driver interface rather than
 // one driver, so the same step means the same thing in process and through the pty.
 //
@@ -466,12 +472,16 @@ func closePane(drv *tuitest.Driver, marker string) {
 // a slash command is being typed the palette paints `❯ /usage  session token usage — …` above the
 // box, and a whole-frame search would take that row for the typed line before the last key had
 // landed — so Enter accepted the palette's suggestion instead of sending.
+//
+// The wait's budget scales with the prompt: [tuitest.DefaultTimeout] plus [typingAllowance] per
+// byte, since every byte is a key the runner has to land before the tail can show.
 func submit(drv driven, text string) {
 	drv.Type(text)
 	drv.WaitFor(func() bool {
 		rows, ok := drv.Frame().PromptBox()
 		return ok && strings.Contains(strings.Join(rows, "\n"), promptTail(text))
-	}, tuitest.Awaiting("the typed prompt to appear in the prompt box"))
+	}, tuitest.Within(tuitest.DefaultTimeout+time.Duration(len(text))*typingAllowance),
+		tuitest.Awaiting("the typed prompt to appear in the prompt box"))
 	drv.Press(tuitest.Enter)
 }
 

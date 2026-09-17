@@ -136,7 +136,9 @@ NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance run with
 **Acceptance:** `go test -race ./cmd/apogee/ -run 'TestE2EAnnounced|TestE2EPlanRefusal|TestE2EPlanModeAnnounces'`; `grep -n 'paneWatchInterval' cmd/apogee/e2e_announced_test.go` shows the constant is used only as the poll sleep, and `BytesWritten` appears in the watcher
 **Commit:** `fix(e2e): approval-pane watcher reads a frame only after the screen was painted`
 
-## 8. `submit()` budget scales with the prompt length (`apogee-pqs`, part 2)
+## 8. `submit()` budget scales with the prompt length (`apogee-pqs`, part 2) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance and the pinned 20× loop ran without `-race`; the `go test` acceptance carried `-p 2 -parallel 2` per the plan's host block.
 
 **What:** Depends on item 5. Fix the other half of `apogee-pqs`: `submit()` gives every prompt `DefaultTimeout` (5 s) while the runner lands ~90 ms/key, so `announcedScratchReadPrompt` (79 bytes) times out at 56 chars. Add `const typingAllowance = 100 * time.Millisecond` (per byte, comment stating the measured 90 ms/key on the 4-vCPU runner) and pass `tuitest.Within(tuitest.DefaultTimeout + time.Duration(len(text))*typingAllowance)` to the wait item 5 rewrote; the `Awaiting` message stays. No chunked typing.
 **Files:** `cmd/apogee/e2e_smoke_test.go`
