@@ -58,7 +58,10 @@ NOTES (2026-09-17): `TestCapabilityLine`'s table gained a `backend` column (the 
 **Acceptance:** `go build ./... && go test ./internal/domain/ ./internal/probe/ -p 2 -parallel 2 -run 'CapabilityLine|Report|Confinement'`
 **Commit:** `feat(probe): a backend that cannot fence says why on every wording surface`
 
-## 2. Landlock reports why it is unavailable
+## 2. Landlock reports why it is unavailable — ✅ DONE (2026-09-17)
+NOTES (2026-09-17): race evidence deferred: no-TSan host
+NOTES (2026-09-17): applyLandlock's adapted refusal also names the errno (`landlock unavailable (abi -1: landlock_create_ruleset: function not implemented)`) rather than the bare ABI — same disclosure at the in-child site; no test pinned the old wording.
+NOTES (2026-09-17): TestLandlockProbe/ProbeNetwork/AllowsDevNull/ResidualsMatchHostABI skipped on this host (no landlock), as the plan's execution-host section predicts.
 
 **What:** Depends on item 1. `probeLandlockABI` (`internal/platform/landlock_linux.go`) discards the errno; keep it: change it to return `(abi int, errno syscall.Errno)` (errno 0 on success), store both on `landlockConfiner` (`abi int; probeErrno syscall.Errno`), and have `Capabilities` set `Unavailable` to `fmt.Sprintf("landlock unavailable (landlock_create_ruleset: %v)", c.probeErrno)` when `abi < landlockABIFSWrite` — so ENOSYS reads "function not implemented" and a boot-disabled LSM reads "operation not supported". `applyLandlock`'s call site adapts (it already refuses `abi < 1`). Add an unexported `unavailableReason() string` method returning that same sentence (or "" when fenceable) for item 6's selector to compose. Every other caller of `probeLandlockABI` is enumerated: `NewLandlockConfiner`, `applyLandlock` — no others (grep `probeLandlockABI` before editing).
 **Files:** `internal/platform/landlock_linux.go`, `internal/platform/landlock_linux_test.go`

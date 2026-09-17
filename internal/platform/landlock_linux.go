@@ -62,8 +62,9 @@ const confinedExecSentinel = "__confined-exec"
 // the running binary (os.Executable, per the contract) and is overridable only so the
 // confinetest harness can target the test binary; production code never sets it.
 type landlockConfiner struct {
-	abi        int    // landlock ABI version; <= 0 means landlock is unavailable on this host
-	reexecPath string // executable to re-exec for the confined child ("" => os.Executable())
+	abi        int           // landlock ABI version; <= 0 means landlock is unavailable on this host
+	probeErrno syscall.Errno // errno the construction probe returned; 0 when landlock answered
+	reexecPath string        // executable to re-exec for the confined child ("" => os.Executable())
 }
 
 // landlock ABI thresholds (confinement-execution-contract §5; ADR 0012). Each is the ABI
@@ -157,30 +158,48 @@ func deviceAccessMaskForABI(abi int) uint64 {
 // It returns domain.Confiner's sibling — the prepare-in-place backend — as a concrete
 // type; the domain.Confiner interface itself gains the *exec.Cmd signature in P3.4.
 func NewLandlockConfiner() *landlockConfiner {
-	return &landlockConfiner{abi: probeLandlockABI()}
+	abi, errno := probeLandlockABI()
+	return &landlockConfiner{abi: abi, probeErrno: errno}
 }
 
 // probeLandlockABI returns the landlock ABI version supported by this kernel, or a
 // value <= 0 when landlock is unavailable. It calls landlock_create_ruleset(NULL, 0,
 // LANDLOCK_CREATE_RULESET_VERSION), which the kernel answers with the ABI version and
-// never creates a ruleset (confinement-execution-contract §5).
-func probeLandlockABI() int {
-	abi, _, errno := unix.Syscall(
+// never creates a ruleset (confinement-execution-contract §5). The errno is kept rather
+// than discarded because it is the diagnosis: ENOSYS is a kernel built without landlock
+// (or a syscall filter hiding it), EOPNOTSUPP a kernel that has it but booted with the
+// LSM disabled — two different host facts to change. It is 0 whenever abi is valid.
+func probeLandlockABI() (abi int, errno syscall.Errno) {
+	version, _, errno := unix.Syscall(
 		unix.SYS_LANDLOCK_CREATE_RULESET,
 		0,
 		0,
 		unix.LANDLOCK_CREATE_RULESET_VERSION,
 	)
 	if errno != 0 {
-		return -1
+		return -1, errno
 	}
-	return int(abi)
+	return int(version), 0
+}
+
+// unavailableReason is the one-sentence disclosure of why this backend cannot fence on
+// this host, naming the syscall and the errno it answered with ("landlock unavailable
+// (landlock_create_ruleset: function not implemented)"), or "" when landlock fences
+// writes here. Capabilities carries it as ConfinementCaps.Unavailable; the Linux selector
+// composes it with the namespace backend's own reason when neither can fence.
+func (c *landlockConfiner) unavailableReason() string {
+	if c.abi >= landlockABIFSWrite {
+		return ""
+	}
+	return fmt.Sprintf("landlock unavailable (landlock_create_ruleset: %v)", c.probeErrno)
 }
 
 // Capabilities reports what landlock can enforce on this kernel, probed once at
 // construction (confinement-execution-contract §5). FSWrite is true at ABI >= 1
 // (kernel >= 5.13); NetworkEgress is true only at ABI >= 4 (kernel >= 6.7). A kernel
-// without landlock reports {false, false}.
+// without landlock reports {false, false} and says why in Unavailable — the errno the
+// construction probe returned, so ENOSYS reads "function not implemented" and a
+// boot-disabled LSM reads "operation not supported" (contract §5's other half).
 //
 // On a kernel that fences writes but predates LANDLOCK_ACCESS_FS_TRUNCATE (ABI 1-2,
 // kernel 5.13-6.1 — Ubuntu 22.04, Debian 12, RHEL 9) the fence is real but incomplete:
@@ -193,6 +212,7 @@ func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 	caps := domain.ConfinementCaps{
 		FSWrite:       c.abi >= landlockABIFSWrite,
 		NetworkEgress: c.abi >= landlockABINetwork,
+		Unavailable:   c.unavailableReason(),
 	}
 	if c.abi >= landlockABIFSWrite && c.abi < landlockABITruncate {
 		caps.Residuals = []string{"truncate(2)"}
@@ -269,9 +289,10 @@ func ApplyLandlockAndExec(box domain.ConfinementBox, argv []string) error {
 // calls landlock_restrict_self with NO_NEW_PRIVS set. After it returns nil the calling
 // process is confined for the remainder of its life and across any subsequent execve.
 func applyLandlock(box domain.ConfinementBox) error {
-	abi := probeLandlockABI()
+	abi, errno := probeLandlockABI()
 	if abi < landlockABIFSWrite {
-		return fmt.Errorf("%w: landlock unavailable (abi %d)", domain.ErrConfinementUnavailable, abi)
+		return fmt.Errorf("%w: landlock unavailable (abi %d: landlock_create_ruleset: %v)",
+			domain.ErrConfinementUnavailable, abi, errno)
 	}
 
 	handleNet, err := networkDenyDecision(box, abi)

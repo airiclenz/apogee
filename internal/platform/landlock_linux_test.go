@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
@@ -101,27 +102,36 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		wantAutoEligible bool
 		wantAccess       uint64   // mask applyLandlock would request; asserted only when wantFSWrite
 		wantResiduals    []string // write-class accesses this ABI leaves unfenced while FSWrite is true
+		probeErrno       syscall.Errno
+		wantUnavailable  string // the WHY behind FSWrite=false; "" on every fenceable row
 	}{
-		{"no_landlock", -1, false, false, false, 0, nil},
+		{"no_landlock", -1, false, false, false, 0, nil, unix.ENOSYS,
+			"landlock unavailable (landlock_create_ruleset: function not implemented)"},
 		// fs-only; AutoEligible on fs alone (ADR 0012). Its mask must stay at the ABI-1
 		// baseline: asking for TRUNCATE (ABI 3) here was EINVAL on every create_ruleset — so
 		// the access goes unfenced and is DISCLOSED instead (C-06, live-reproduced 2026-08-25).
-		{"abi1_kernel_5_13", 1, true, false, true, baselineFSWriteAccess, []string{"truncate(2)"}},
+		{"abi1_kernel_5_13", 1, true, false, true, baselineFSWriteAccess, []string{"truncate(2)"}, 0, ""},
 		// Debian 12 (6.1). REFER exists from here, and must be handled or the kernel denies
 		// cross-directory rename/link outright — including inside the workspace. TRUNCATE still
 		// does not, so the residual still stands.
-		{"abi2_kernel_5_19", 2, true, false, true, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER, []string{"truncate(2)"}},
+		{"abi2_kernel_5_19", 2, true, false, true, baselineFSWriteAccess | unix.LANDLOCK_ACCESS_FS_REFER, []string{"truncate(2)"}, 0, ""},
 		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable, so the fence is
 		// complete and nothing is disclosed.
-		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess, nil},
-		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess, nil}, // network egress now enforceable
-		{"abi6_newer", 6, true, true, true, fullFSWriteAccess, nil},
+		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess, nil, 0, ""},
+		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess, nil, 0, ""}, // network egress now enforceable
+		{"abi6_newer", 6, true, true, true, fullFSWriteAccess, nil, 0, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := &landlockConfiner{abi: tt.abi}
+			c := &landlockConfiner{abi: tt.abi, probeErrno: tt.probeErrno}
 			caps := c.Capabilities()
+			// The other half of capability honesty: a backend that cannot fence says WHY, and
+			// one that can says nothing — a stale reason on a fenceable kernel would send the
+			// user chasing a host fact that is not the problem.
+			if caps.Unavailable != tt.wantUnavailable {
+				t.Errorf("abi %d: Unavailable = %q, want %q", tt.abi, caps.Unavailable, tt.wantUnavailable)
+			}
 			if caps.FSWrite != tt.wantFSWrite {
 				t.Errorf("abi %d: FSWrite = %v, want %v", tt.abi, caps.FSWrite, tt.wantFSWrite)
 			}
@@ -160,6 +170,28 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 				t.Errorf("abi %d: accessMaskForABI = %#x, want %#x (advertising FSWrite obliges a mask this kernel accepts)", tt.abi, got, tt.wantAccess)
 			}
 		})
+	}
+}
+
+// TestLandlockUnavailableReasonNamesTheErrno pins that the reason carries the kernel's
+// own words for the failure, not a generic "unavailable": ENOSYS and EOPNOTSUPP point the
+// user at different host facts (a kernel without landlock versus one booted with the LSM
+// off), and the errno text is what tells them apart.
+func TestLandlockUnavailableReasonNamesTheErrno(t *testing.T) {
+	t.Parallel()
+
+	c := &landlockConfiner{abi: -1, probeErrno: unix.EOPNOTSUPP}
+
+	reason := c.unavailableReason()
+
+	if !strings.Contains(reason, "operation not supported") {
+		t.Errorf("unavailableReason() = %q; want the EOPNOTSUPP text \"operation not supported\"", reason)
+	}
+	if !strings.HasPrefix(reason, "landlock unavailable (landlock_create_ruleset: ") {
+		t.Errorf("unavailableReason() = %q; want it to name the backend and the syscall that refused", reason)
+	}
+	if got := c.Capabilities().Unavailable; got != reason {
+		t.Errorf("Capabilities().Unavailable = %q; want the same sentence unavailableReason() returns (%q)", got, reason)
 	}
 }
 
