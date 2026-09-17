@@ -90,7 +90,7 @@ NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance ran `go 
 **Acceptance:** `git check-attr eol -- internal/probe/testdata/contextcost.golden cmd/apogee/testdata/frames/t17-run-view.txt cmd/apogee/testdata/stubllm/$(ls cmd/apogee/testdata/stubllm | head -1) | grep -c 'eol: lf'` prints `3`; `git ls-files --eol -- '*.golden' '**/testdata/**' | grep -v 'i/lf' | wc -l` prints `0`; `go test ./internal/probe/ -run Golden`
 **Commit:** `fix(ci): pin golden and testdata files to LF so Windows checkouts compare byte-identical`
 
-## 4. `tuitest.Frame` prompt-box accessor (`apogee-htf`, part 1)
+## 4. `tuitest.Frame` prompt-box accessor (`apogee-htf`, part 1) — ✅ DONE (2026-09-17)
 
 **What:** Add `func (f Frame) PromptBox() (rows []string, ok bool)` to `internal/tuitest/frame.go`: scan rows bottom-up for the last row whose trimmed text starts with `╭` (the input border — `theme.inputBorder`, `lipgloss.RoundedBorder()`; pop-ups and the palette share the glyph, the prompt box is always the LOWEST such row in the bottom chrome, above the footer line and the `▁` bottom rule — `layout.md` §bottom chrome), then forward to the next row starting with `╰`; return the content rows between them (the `│ … │` rows, borders excluded) and `ok=false` when no such pair exists. Document the accessor in `docs/design/test-drivers.md` where `Frame.Find` is described. Pure function on the frame, no Screen access.
 **Files:** `internal/tuitest/frame.go`, `internal/tuitest/frame_test.go`, `docs/design/test-drivers.md`

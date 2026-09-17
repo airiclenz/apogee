@@ -156,6 +156,34 @@ func (f Frame) Find(text string) (int, int, bool) {
 	return 0, 0, false
 }
 
+// PromptBox returns the content rows of the input box — the `│ … │` rows between its rounded
+// borders, borders excluded — and ok=false when the frame holds no such box. Pop-ups and the
+// command palette draw the same rounded border (`theme.inputBorder`, `lipgloss.RoundedBorder()`),
+// so the box is found by position rather than by glyph: the prompt box is always the LOWEST
+// rounded box in the bottom chrome, above the footer line and the `▁` bottom rule (`layout.md`
+// §bottom chrome). The scan therefore runs bottom-up for the last row that opens with `╭` — an
+// elision marker on that border (`╭─ … +3 ────╮`) still opens with the corner — and forward from
+// there to the next row that opens with `╰`. The rows come back as plain text, trailing spaces
+// trimmed, exactly as [Frame.Row] gives them.
+func (f Frame) PromptBox() (rows []string, ok bool) {
+	top := -1
+	for y := len(f.rows) - 1; y >= 0; y-- {
+		if strings.HasPrefix(strings.TrimSpace(f.rows[y]), "╭") {
+			top = y
+			break
+		}
+	}
+	if top < 0 {
+		return nil, false
+	}
+	for y := top + 1; y < len(f.rows); y++ {
+		if strings.HasPrefix(strings.TrimSpace(f.rows[y]), "╰") {
+			return append([]string{}, f.rows[top+1:y]...), true
+		}
+	}
+	return nil, false
+}
+
 // StyleRuns splits row y into maximal spans of cells sharing one Style. Trailing blank cells are
 // dropped with the row's trailing spaces, so a run list ends where the visible row ends.
 func (f Frame) StyleRuns(y int) []Run {

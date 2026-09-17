@@ -343,6 +343,8 @@ f := scr.Snapshot()
 f.String()          // the whole picture, plain, trailing spaces trimmed
 f.Row(3)            // one row
 f.Find("Deny")      // the COLUMN and row of some text, or ok=false
+f.PromptBox()       // the input box's content rows (borders excluded), or ok=false — the LOWEST
+                    // `╭…╰` pair, so a pop-up or the palette sharing the glyph above it is skipped
 f.Cell(12, 3).Width // how many columns that grapheme occupies — the emulator's answer
 f.StyleRuns(3)      // the row split into maximal spans sharing one Style
 f.Cursor()          // where the caret is

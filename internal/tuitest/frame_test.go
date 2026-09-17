@@ -43,6 +43,73 @@ func TestFrameReadsTheEmulatorsText(t *testing.T) {
 	}
 }
 
+// TestFramePromptBoxIsTheLowestRoundedBox: pop-ups share the prompt box's rounded border, so the
+// accessor picks the box by position — the lowest `╭…╰` pair, above the footer — and hands back
+// only the content rows between its borders. No such pair, no box; an elision marker on the top
+// border does not hide it.
+func TestFramePromptBoxIsTheLowestRoundedBox(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		rows []string
+		want []string
+		ok   bool
+	}{
+		{
+			name: "pop-up above, footer below",
+			rows: []string{
+				"╭──── Approve write_file? ────╮",
+				"│ y approve · n deny          │",
+				"╰─────────────────────────────╯",
+				"╭─────────────────────────────╮",
+				"│ Send a message…             │",
+				"│ second line                 │",
+				"╰─────────────────────────────╯",
+				"  host ✦ model ✦ ~/repo",
+				"▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁",
+			},
+			want: []string{"│ Send a message…             │", "│ second line                 │"},
+			ok:   true,
+		},
+		{
+			name: "no rounded box",
+			rows: []string{
+				"assistant: hello",
+				"  host ✦ model ✦ ~/repo",
+				"▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁",
+			},
+			want: nil,
+			ok:   false,
+		},
+		{
+			name: "elision marker on the top border",
+			rows: []string{
+				"╭─ … +3 ──────────────────────╮",
+				"│ the last line of a long draft│",
+				"╰─────────────────────────────╯",
+				"  host ✦ model ✦ ~/repo",
+			},
+			want: []string{"│ the last line of a long draft│"},
+			ok:   true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, f := write(t, 40, len(tc.rows)+1, strings.Join(tc.rows, "\r\n"))
+			got, ok := f.PromptBox()
+			if ok != tc.ok {
+				t.Fatalf("PromptBox() ok = %v, want %v (rows %q)", ok, tc.ok, got)
+			}
+			if strings.Join(got, "\n") != strings.Join(tc.want, "\n") {
+				t.Errorf("PromptBox() rows = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestFrameMeasuresAWideRune: the emulator is the authority on how many columns a grapheme takes,
 // which is the whole of the glyph-alignment claim (T-20) — counting runes gets it wrong.
 func TestFrameMeasuresAWideRune(t *testing.T) {
