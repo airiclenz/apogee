@@ -3,12 +3,15 @@
 # processes, so `make check` is bounded by the slowest SHARD rather than by the slowest PACKAGE.
 #
 # Why sharding as well as `t.Parallel()`. Nearly all of the suite's wall time is in two
-# packages. cmd/apogee's e2e tests are parallel tests by default — `tuitest.CheckLeaks`
-# (internal/tuitest/leak.go) attributes goroutines to the test that started them, and the
-# launch helpers neither `t.Setenv` nor swap a package-level seam; only a test that reaches one
-# of those itself stays serial. internal/tui's driver tests are still serial, so that package
-# is bounded by sharding alone, and the balance ACROSS packages — the race-enabled process each
-# heavy package gets, against the one process the rest share — is sharding's other job.
+# packages, and both are parallel inside. cmd/apogee's e2e tests are parallel tests by default —
+# `tuitest.CheckLeaks` (internal/tuitest/leak.go) attributes goroutines to the test that started
+# them, and the launch helpers neither `t.Setenv` nor swap a package-level seam. internal/tui's
+# driver tests are parallel too (each builds its own Model and stub upstream). In both, only a
+# test that reaches `t.Setenv` or a seam itself — directly or through a helper — stays serial,
+# and a guard in each package (seams_guard_test.go) fails a parallel test that swaps one. What
+# `t.Parallel()` cannot do is balance ACROSS packages: the race-enabled processes each heavy
+# package gets, against the one process the rest share, and the `-parallel` bound each is
+# handed so the shards spend the box rather than multiply the load — that is sharding's job.
 #
 # A shard is a `go test` process of its own, so every test runs exactly as it does today: none
 # is skipped, weakened, reordered within its shard, or run with different flags — with ONE
@@ -36,7 +39,16 @@ cd "$(dirname "$0")/.."
 # if a third package grows heavy and is not named here the suite still runs, just slower — so it
 # is deliberately explicit rather than inferred from a threshold nothing measures.
 HEAVY_PKGS=(./cmd/apogee ./internal/tui)
-HEAVY_WEIGHT=(4 3) # cmd/apogee is ~1.7x internal/tui by total test time
+# Re-measured after the internal/tui `t.Parallel` sweep (2026-09-17, 9-core box, top-level
+# tests' durations summed): cmd/apogee 752 tests, 261 s under `go test -race -count=1 -p 1
+# -json` and 269 s in the shards' own cache; internal/tui 1880 tests, 85 s and 46 s — 3:1 to
+# 5:1, where the cache had read 1.7:1 (263 s against 150 s) before the sweep. Two tui shards
+# now finish (56–61 s each) under the four cmd/apogee ones (78–105 s), so the tui share drops
+# from three to two: at the default budget of 7 the split below is 4 + 2 shards plus the rest,
+# and one process fewer — each race-enabled tui.test holds over 1 GB — for the same critical
+# path. Moving that share to cmd/apogee instead (5 + 2) was tried and rejected: a fifth driven
+# e2e test running at once is exactly the fan-out the `-parallel` bound below exists to cap.
+HEAVY_WEIGHT=(4 2) # cmd/apogee is 3–5x internal/tui by total test time; see above
 
 TIMINGS=.test-timings
 GOFLAGS_TEST=(-race -count=1)

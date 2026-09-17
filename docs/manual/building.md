@@ -69,13 +69,16 @@ act; CI creates the tag and nothing more.
 ## Testing
 
 `make test` does not run `go test ./...` in one process. Almost all of the suite's wall time
-is in two packages — `cmd/apogee` and `internal/tui`. In `cmd/apogee` the e2e tests are
-`t.Parallel` tests by default: `tuitest.CheckLeaks` attributes goroutines to the test that
-started them, and the launch helpers neither `t.Setenv` (the testing package forbids that
-alongside `t.Parallel`) nor swap a package-level seam. Only a test that reaches one of those
+is in two packages — `cmd/apogee` and `internal/tui` — and both are `t.Parallel` inside.
+In `cmd/apogee` the e2e tests are parallel by default: `tuitest.CheckLeaks` attributes
+goroutines to the test that started them, and the launch helpers neither `t.Setenv` (the
+testing package forbids that alongside `t.Parallel`) nor swap a package-level seam.
+`internal/tui`'s driver tests are parallel too: each builds its own `Model` and stub upstream,
+and the paint cache, transcript arrays and textarea value the driver helpers touch belong to
+that model. In both packages only a test that reaches `t.Setenv` or a package-level seam
 itself — directly or through a helper — stays serial, and the testing package runs those
-before it releases the parallel ones. `internal/tui`'s driver tests are still serial, so a
-`-parallel` flag alone does not bound that package.
+before it releases the parallel ones; a guard in each package (`seams_guard_test.go`) fails
+any parallel test that swaps a seam, so the exception cannot creep back in unnoticed.
 
 `scripts/test-shards.sh` splits those two packages across several concurrent `go test`
 processes as well. A shard is a process of its own, so every test runs exactly as it does

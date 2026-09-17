@@ -403,7 +403,10 @@ NOTES (2026-09-17): literals closing over only immutable parent values (a const 
 
 commit: `test(tui): t.Parallel across the remaining driver tests`
 
-## 21. The tui seam guard, and the shards script and manual say so (apogee-11s)
+## 21. The tui seam guard, and the shards script and manual say so (apogee-11s) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): `HEAVY_WEIGHT` became `(4 2)` rather than a re-scaled `(5 2)`: the measured ratio is 3:1–5:1 (cmd/apogee 261 s/269 s vs internal/tui 85 s/46 s summed), two tui shards (56–61 s) already finish under the four cmd/apogee shards (78–105 s), and a 5 + 2 split was tried twice and went red on the kit's 5 s waits; the numbers and the rejection are in the script's comment.
+NOTES (2026-09-17): the full sharded run (`make test`) is red on this devbox with EVERY weighting, the previous `(4 3)` included — the box has 6 GB RAM and the race-enabled `tui.test` is OOM-killed at >1 GB RSS (six kills in dmesg across the runs) while the swap stalls cmd/apogee's 5 s waits; the isolated `go test -race -count=1 -p 1 ./cmd/apogee/ ./internal/tui/` passes (0 failures, exit 0). Environmental, pre-existing, not a regression of this item.
 
 **What:** Closes apogee-11s. Depends on item 20. Mirror `cmd/apogee/seams_guard_test.go` into `internal/tui/seams_guard_test.go`: `TestNoParallelTestSwapsAPackageSeam` derives the seam set from the package's top-level `var`s (asserting `writeSystemClipboard` is in it) and fails for any parallel test or `t.Run` literal that assigns one, plus the fixture-driven `…Bites` self-proof — copy the AST helpers rather than exporting them (two packages, two guards; the helpers are test code). Then rewrite the two prose sites: `scripts/test-shards.sh`'s header no longer says internal/tui's driver tests are serial (it says both heavy packages are parallel inside and sharding balances ACROSS packages; re-measure `HEAVY_WEIGHT` with `go test -json` timings and note the numbers in the comment), and `docs/manual/building.md`'s paragraph says `internal/tui` is parallel too. Rule for finding every site: `grep -rn 'still serial\|driver tests are serial' scripts docs Makefile`.
 
