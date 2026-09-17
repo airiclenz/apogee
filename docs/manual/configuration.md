@@ -28,7 +28,8 @@ aside, each such write is a single key: a committed `/settings` edit; the `serve
 `/server` switch records for your next start, and the `sub-agents-server:` line a
 `/sub-agents-server` pick records the same way; the `model:` — or, on a launcher-fronted
 entry, the `launch-profile:` — a `/model` pick writes into that entry when `remember-model:`
-is on; the `ui.task-list-open` flip a click on a task-list card records; the consented move
+is on; the `ui.task-list-open` flip a click on a task-list card records, and the `ui.tools-open`
+flip a click on a large Tools umbrella records the same way; the consented move
 of a `servers:` entry's retired `sub-agents: true` flag onto `sub-agents-server:`; and the
 one-time migration of a config still written in the retired schema — which copies the file
 aside first and says so on startup. "Your edits are never overwritten" stands: nothing is
@@ -653,7 +654,7 @@ touches: the catalog stays on this side of the wire, and a skill reaches the mod
 invoke it with `/id`
 ([ADR 0061](../adr/0061-skill-suggestions-are-driver-side-over-an-engine-matcher.md)).
 
-Five more keys live under `ui:`, and they change how the screen looks rather than what it says.
+Seven more keys live under `ui:`, and they change how the screen looks rather than what it says.
 `ui.spinner` names the animation the status line runs while a turn is in flight: `snake` — the
 default — `glitter`, or `classic`. A name that is none of those is a startup error rather than a
 fallback, because a misspelt spinner is a typo you want told about, not silently ignored.
@@ -672,6 +673,17 @@ choice for every task-list card in the session, and it is the one `ui:` key apog
 as reads: clicking a card folds — or opens — them all and records the flip in `config.yaml`
 silently, so the next session starts the way you left this one; only a write that fails is
 mentioned. The row shows in `/settings` like the rest, and a hand-edit applies live.
+
+`ui.tools-open` and `ui.tools-fold-over` do the same for the `✦ Tools (N calls)` umbrella a burst
+of tool calls is grouped under. An umbrella that has come to rest — no call still running — with
+more type rows than `ui.tools-fold-over` is *large*, and a large umbrella folds to its one header
+line unless `ui.tools-open` is on. `ui.tools-open` is **off by default**, so a large umbrella starts
+folded out of the box; like `ui.task-list-open` it is one choice for every large umbrella in the
+session, and it is written as well as read: clicking a large umbrella's header folds — or opens —
+them all and records the flip in `config.yaml` silently. Small umbrellas, and one still running a
+call, keep the header they always had, indicator-free. `ui.tools-fold-over` defaults to `5`; `0`
+means no umbrella is ever large, so none ever folds, and a value below zero is refused — in
+`/settings` at the keystroke, in the file at startup.
 
 `ui.color-scheme` names the palette the screen is drawn in. It defaults to `dark`, `light` is the
 other built-in, and any `~/.apogee/schemes/<name>.yaml` joins them under its own file name —

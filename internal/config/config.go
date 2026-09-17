@@ -317,6 +317,19 @@ type UISettings struct {
 	// silently through the settings seam, so the choice outlives the session (ADR 0035 addendum).
 	// Screen-only, like skillSuggestions: nothing about it reaches the model.
 	TaskListOpen bool
+	// toolsOpen is whether a LARGE Tools umbrella in the transcript — one at rest with more type
+	// rows than toolsFoldOver — starts open (every type row painted) or folded to its counted
+	// `✦ Tools (N calls)` header. Default FALSE: a large umbrella is a finished burst of calls, and
+	// folding it out of the box is the point. ONE shared state for every large umbrella, and
+	// taskListOpen's whole posture otherwise: the renderer applies it to itself, the fold gesture on
+	// any umbrella writes the flip back here silently (ADR 0035 addendum), and nothing about it
+	// reaches the model. Small and live umbrellas are untouched by it.
+	ToolsOpen bool
+	// toolsFoldOver is how many type rows a Tools umbrella may show before it counts as large and
+	// obeys toolsOpen. Default 5. 0 is the documented "never": no umbrella has fewer than zero rows,
+	// so none is ever large and every one keeps the header it always had. Negative is meaningless
+	// and Validate refuses it.
+	ToolsFoldOver int
 	// unparsedStallAfter is a `stall-after:` value time.ParseDuration could make nothing of, kept as
 	// it was written so Validate can name the text the human typed rather than the value it failed
 	// to become. Empty on every config that resolves — including one that never named the key —
@@ -338,7 +351,8 @@ var defaultStallAfter = mustParseDuration(defaultStallAfterText)
 // style, with the colour loop on, the scroll bar shown, the default colour scheme, the shipped
 // quiet threshold the stall guard waits out, the Inspector disarmed (a false left at the zero
 // value: an off-state that captures nothing is the absence of the feature), the skill-suggestion
-// band on, and the task-list cards open. The style is
+// band on, the task-list cards open, and the Tools umbrella folding past five type rows with
+// large umbrellas starting folded (a false left at the zero value). The style is
 // ASKED of internal/domain (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
 // so the vocabulary and its default stay in the one package that owns them — the same reason
 // validate does not list the valid names, and the same reason the scheme name comes from
@@ -355,13 +369,15 @@ func defaultUISettings() UISettings {
 		StallAfter:       defaultStallAfter,
 		SkillSuggestions: true,
 		TaskListOpen:     true,
+		ToolsFoldOver:    5,
 	}
 }
 
-// validate rejects a ui block naming a spinner style this build has no animation for, or a
-// `stall-after:` that is not a length of time to wait. Catching them here makes a typo a startup
-// error that names the key; left to the renderer they would silently resolve to some other style
-// and to the shipped threshold, and the user would be left wondering why their setting did nothing.
+// validate rejects a ui block naming a spinner style this build has no animation for, a
+// `stall-after:` that is not a length of time to wait, or a `tools-fold-over:` below zero. Catching
+// them here makes a typo a startup error that names the key; left to the renderer they would
+// silently resolve to some other style and to the shipped threshold, and the user would be left
+// wondering why their setting did nothing.
 // The spinner's valid set comes from internal/domain, which owns the vocabulary — this only adds the
 // key the bad value was read from, which that package cannot know.
 func (u UISettings) Validate() error {
@@ -375,6 +391,10 @@ func (u UISettings) Validate() error {
 	if u.StallAfter < 0 {
 		return fmt.Errorf("apogee: invalid ui.stall-after %s: want 0 or more, where 0 turns the "+
 			"quiet qualifier off", u.StallAfter)
+	}
+	if u.ToolsFoldOver < 0 {
+		return fmt.Errorf("apogee: invalid ui.tools-fold-over %d: want 0 or more, where 0 never "+
+			"folds a Tools umbrella", u.ToolsFoldOver)
 	}
 	return nil
 }
@@ -946,6 +966,14 @@ var keyAccessors = []keyAccessor{
 	},
 	{
 		row:      mustKey("ui.task-list-open"),
+		fromFile: fileUI,
+	},
+	{
+		row:      mustKey("ui.tools-open"),
+		fromFile: fileUI,
+	},
+	{
+		row:      mustKey("ui.tools-fold-over"),
 		fromFile: fileUI,
 	},
 	{
@@ -2422,6 +2450,17 @@ type uiConfig struct {
 	// distinguishable from an absent key — and the key is one the fold gesture writes back, so an
 	// absent key stays absent until the user's first toggle.
 	TaskListOpen *bool `yaml:"task-list-open"`
+	// ToolsOpen is whether large Tools umbrellas start open or folded. A pointer for Inspector's
+	// reason: the default is FALSE, and an explicit `tools-open: false` — the value a fold gesture
+	// writes back — is a fact about this config rather than an absent key, so the schema stays
+	// honest if the default ever moves.
+	ToolsOpen *bool `yaml:"tools-open"`
+	// ToolsFoldOver is how many type rows a Tools umbrella may show before it is large. A pointer
+	// because the explicit `0` — the documented spelling of "never folds" — must be distinguishable
+	// from an absent key, which keeps the default of 5. An int rather than a raw string, unlike
+	// stall-after: yaml's own parse is the only one there is, and the one judgement (below zero) is
+	// UISettings.Validate's.
+	ToolsFoldOver *int `yaml:"tools-fold-over"`
 }
 
 // toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
@@ -2464,6 +2503,12 @@ func (u uiConfig) toUISettings() UISettings {
 	}
 	if u.TaskListOpen != nil {
 		s.TaskListOpen = *u.TaskListOpen
+	}
+	if u.ToolsOpen != nil {
+		s.ToolsOpen = *u.ToolsOpen
+	}
+	if u.ToolsFoldOver != nil {
+		s.ToolsFoldOver = *u.ToolsFoldOver // refused below zero by UISettings.Validate, not here
 	}
 	return s
 }

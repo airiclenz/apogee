@@ -330,6 +330,121 @@ func TestTaskListOpenRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 	}
 }
 
+// The Tools umbrella fold's row is ui.task-list-open's twin with the default turned around: a bool
+// that defaults OFF — a large umbrella starts folded out of the box — editable, written back by the
+// fold gesture on a large umbrella (ADR 0035 addendum), and read back from what THIS session
+// resolved rather than the declared default. The fold itself and the write-back are the renderer's
+// (items 2 and 3 of the plan); what is asserted here is the row a surface renders it from.
+func TestToolsOpenRowIsAnEditableBoolDefaultingOff(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("ui.tools-open")
+	if !ok {
+		t.Fatal("no registry row for ui.tools-open; /settings could not show the key at all")
+	}
+	if row.Kind != KindBool {
+		t.Errorf("kind = %q, want %q", row.Kind, KindBool)
+	}
+	if row.Default != "false" {
+		t.Errorf("default = %q, want \"false\" — a config that names nothing starts large Tools umbrellas folded", row.Default)
+	}
+	if !row.Editable {
+		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
+	}
+
+	open := Options{UI: UISettings{ToolsOpen: true}}
+	if got := row.Read(open); got != "true" {
+		t.Errorf("read of a session with the umbrellas open = %q, want \"true\"", got)
+	}
+	if got := row.Read(Options{UI: defaultUISettings()}); got != "false" {
+		t.Errorf("read of an unconfigured session = %q, want \"false\"", got)
+	}
+}
+
+// The fold threshold's row is an int that defaults to five type rows and is editable, with a
+// validate hook — sessions.max-count's shape — so a value below zero is refused at the keystroke
+// in the same sentence the startup check would use. The row reads back what this session
+// resolved, including the documented `0` that never folds.
+func TestToolsFoldOverRowIsAnEditableIntDefaultingFive(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("ui.tools-fold-over")
+	if !ok {
+		t.Fatal("no registry row for ui.tools-fold-over; /settings could not show the key at all")
+	}
+	if row.Kind != KindInt {
+		t.Errorf("kind = %q, want %q", row.Kind, KindInt)
+	}
+	if row.Default != "5" {
+		t.Errorf("default = %q, want \"5\" — a config that names nothing folds an umbrella past five type rows", row.Default)
+	}
+	if !row.Editable {
+		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
+	}
+	if row.Validate == nil {
+		t.Error("the row has no validate hook; a negative threshold would reach the file before startup refused it")
+	}
+
+	never := Options{UI: UISettings{ToolsFoldOver: 0}}
+	if got := row.Read(never); got != "0" {
+		t.Errorf("read of a session that never folds = %q, want \"0\"", got)
+	}
+	if got := row.Read(Options{UI: defaultUISettings()}); got != "5" {
+		t.Errorf("read of an unconfigured session = %q, want \"5\"", got)
+	}
+}
+
+// A threshold below zero is meaningless — no umbrella has fewer than zero type rows — and both
+// doors refuse it: the validate hook the pane runs on the typed text, and the block validator
+// startup runs on the parsed `ui:` block. Zero and above pass both, zero being the documented
+// "never folds". The hook is driven through the row rather than by name so the test asserts the
+// door /settings actually knocks on.
+func TestToolsFoldOverRejectsNegative(t *testing.T) {
+	t.Parallel()
+
+	row, ok := LookupKey("ui.tools-fold-over")
+	if !ok {
+		t.Fatal("no registry row for ui.tools-fold-over")
+	}
+
+	tests := []struct {
+		text    string
+		n       int
+		refused bool
+	}{
+		{text: "-1", n: -1, refused: true},
+		{text: "-50", n: -50, refused: true},
+		{text: "0", n: 0, refused: false},
+		{text: "5", n: 5, refused: false},
+		{text: "12", n: 12, refused: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			t.Parallel()
+			hookErr := row.Validate(tt.text)
+			blockErr := UISettings{ToolsFoldOver: tt.n}.Validate()
+			if (hookErr != nil) != tt.refused {
+				t.Errorf("hook Validate(%q) = %v; want refused=%v", tt.text, hookErr, tt.refused)
+			}
+			if (blockErr != nil) != tt.refused {
+				t.Errorf("UISettings{ToolsFoldOver: %d}.Validate() = %v; want refused=%v", tt.n, blockErr, tt.refused)
+			}
+			if tt.refused {
+				if !strings.Contains(hookErr.Error(), "ui.tools-fold-over") {
+					t.Errorf("hook refusal %q does not name the key", hookErr)
+				}
+				if hookErr.Error() != blockErr.Error() {
+					t.Errorf("the two doors refuse in two sentences:\n  hook  %v\n  block %v", hookErr, blockErr)
+				}
+			}
+		})
+	}
+
+	if err := row.Validate("five"); err == nil || !strings.Contains(err.Error(), "ui.tools-fold-over") {
+		t.Errorf("hook Validate(\"five\") = %v; want a refusal naming the key", err)
+	}
+}
+
 // The context-fill notice's row is a bool that defaults OFF (ADR 0077): the one top-level boolean
 // beside the seven Floor keys that a config naming nothing leaves off, because the notice steers
 // the model rather than correcting it and ships off until bench evidence turns it on. The row reads
@@ -783,6 +898,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"ui.spinner":   "UI", "ui.spinner-color": "UI", "ui.show-scrollbar": "UI",
 		"ui.color-scheme": "UI", "ui.stall-after": "UI", "ui.inspector": "UI",
 		"ui.skill-suggestions": "UI", "ui.task-list-open": "UI",
+		"ui.tools-open": "UI", "ui.tools-fold-over": "UI",
 		"sessions.max-age": "Sessions", "sessions.max-count": "Sessions",
 		"cursor-shape": "CursorShape", "editor": "Editor", "bypass": "Bypass",
 	}

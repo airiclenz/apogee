@@ -730,6 +730,30 @@ var KeyRegistry = bindSetters([]Key{
 		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.TaskListOpen }),
 	},
 	{
+		// ui.task-list-open's twin for the Tools umbrella: a bool the renderer applies to itself and
+		// the fold gesture on a large umbrella writes back silently (ADR 0035 addendum). It defaults
+		// OFF, unlike its twin — a large umbrella is a finished burst of calls, and folding it out of
+		// the box is the point; what "large" means is the row below.
+		Path: "ui.tools-open", Kind: KindBool, Default: "false",
+		Editable: true,
+		Desc: "Large Tools umbrellas (more type rows than `ui.tools-fold-over`, at rest) start open; " +
+			"a click on one folds them all and records the choice here.",
+		Read: func(o Options) string { return boolValue(o.UI.ToolsOpen) },
+		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.ToolsOpen }),
+	},
+	{
+		// A count, and the range is the whole contract — sessions.max-count's shape with a floor and
+		// no ceiling: how many type rows an umbrella may show before it is "large" is the user's
+		// call, and only a negative one is meaningless. 0 is the documented "never": no umbrella can
+		// have fewer than zero rows, so none is ever large.
+		Path: "ui.tools-fold-over", Kind: KindInt, Default: "5",
+		Editable: true,
+		Validate: validateToolsFoldOver,
+		Desc:     "Type rows a Tools umbrella may show before it folds to its header; 0 never folds.",
+		Read:     func(o Options) string { return strconv.Itoa(o.UI.ToolsFoldOver) },
+		Set:      landIn(uiOf, UISettings.Validate, strconv.Atoi, func(u *UISettings) *int { return &u.ToolsFoldOver }),
+	},
+	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
 		// posture above, for the same reason: one key is not a vocabulary, and the kind carries the
 		// shape while the hook carries the contract the kind cannot.
@@ -1109,6 +1133,18 @@ func validateSessionsMaxCount(value string) error {
 			"(0 — the default — keeps every one)", value)
 	}
 	return SessionSettings{MaxCount: n}.Validate()
+}
+
+// validateToolsFoldOver refuses a `ui.tools-fold-over:` that is not a number of type rows, through
+// the same check startup makes on the parsed block (UISettings.Validate) rather than a second
+// range literal — validateSessionsMaxCount's shape.
+func validateToolsFoldOver(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil {
+		return fmt.Errorf("apogee: invalid ui.tools-fold-over %q: want a number of type rows "+
+			"(0 never folds)", value)
+	}
+	return UISettings{ToolsFoldOver: n}.Validate()
 }
 
 // validateColorSchemeName refuses a name that could not be a scheme's file name — empty, or one

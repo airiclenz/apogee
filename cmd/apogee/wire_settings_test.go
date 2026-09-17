@@ -886,6 +886,8 @@ var settingKeysAppliedByTheRenderer = []string{
 	"ui.color-scheme",
 	"ui.skill-suggestions",
 	"ui.task-list-open",
+	"ui.tools-open",
+	"ui.tools-fold-over",
 	"cursor-shape",
 }
 

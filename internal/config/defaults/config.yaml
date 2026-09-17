@@ -925,6 +925,15 @@ remember-model: true
 # a card folds (or opens) them all and records the flip here, silently, so the next session starts
 # the way you left this one. Default on.
 #
+# `tools-open` and `tools-fold-over` do the same for the `✦ Tools (N calls)` umbrella a burst of
+# tool calls is grouped under. An umbrella that has come to rest with more type rows than
+# `tools-fold-over` is *large*, and a large umbrella folds to its one header line unless `tools-open`
+# is true; clicking a large umbrella's header folds (or opens) every large umbrella and records the
+# flip in `tools-open`, silently, the way a task-list card does. Small umbrellas, and one still
+# running a call, keep the header they always had. `tools-fold-over: 0` means no umbrella is ever
+# large, so none ever folds.
+# Defaults: `tools-open: false`, `tools-fold-over: 5`.
+#
 ui:
   spinner: snake         # snake | glitter | classic
   spinner-color: true    # the 10s colour loop; false = your terminal's own text colour
@@ -934,6 +943,8 @@ ui:
   inspector: false       # true = capture the raw wire traffic /inspect shows; takes effect next start
   # skill-suggestions: true   # false = never paint the skill-suggestion band above the input box
   task-list-open: true   # false = task-list cards start folded; toggling a card writes this back
+  tools-open: false      # true = large Tools umbrellas start open; toggling one writes this back
+  tools-fold-over: 5     # type rows an umbrella may show before it folds; 0 = never folds
 
 # =============================================================================
 # Keeping the session store bounded — every session you run is saved under ~/.apogee/sessions/ and
