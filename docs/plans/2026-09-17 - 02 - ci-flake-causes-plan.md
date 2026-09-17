@@ -1,0 +1,136 @@
+# CI flake causes — implementation plan
+
+**Goal:** Close epic `apogee-mjk` (11 red `CI` runs 2026-09-11..17): one product bug (undo pre-image snapshot git runs inside the workspace box on confined Auto writes), one deterministic Windows golden failure (CRLF checkout), three load-exposed e2e waits, plus the two optional margin items (shard timings seed, schedule-test goroutine audit).
+**Date:** 2026-09-17
+**Status:** unexecuted
+**Sized for:** ~200k-context host
+**Base commit:** 544b1f42
+
+**Sources:**
+- `docs/handoffs/2026-09-17 - 00 - ci-flake-causes.md` (investigation record; reproduction recipe)
+- Beads `apogee-y72`, `apogee-80n`, `apogee-htf`, `apogee-ig7`, `apogee-pqs`, `apogee-2c0`, `apogee-5tn` (`bd show <id>` — root cause, anchors, acceptance)
+- ADR 0074 (undo whole-tree images), ADR 0012 (confinement policy), `docs/design/test-drivers.md` (tuitest API)
+- `AGENTS.md` → *Regressions are never deferred* (none of these items is a regression under that rule — see handoff)
+
+**Ratified design calls (owner, 2026-09-17):**
+- **Scope:** all seven beads, including the optional `apogee-2c0` and `apogee-5tn`.
+- **`apogee-htf`:** `tuitest.Frame` gains a prompt-box accessor; `submit()` and `openUsage` match inside it. `promptTail` stays.
+- **`apogee-pqs`:** both halves — `watchApprovalPanes` reads a frame only after a paint (`BytesWritten` gate), and `submit()`'s wait scales with prompt length.
+- **`apogee-80n`:** `.gitattributes` only; `compareGolden` keeps its raw byte compare.
+- **`apogee-2c0`:** a committed `scripts/test-timings.seed` the shard script falls back to; no CI cache action.
+- **`apogee-y72` fix shape (writer):** a `domain.WithoutConfinement(ctx)` helper; `floorCtx` is derived from it in `executeTool`. `git_stage`'s child stays confined. CHANGELOG *Fixed* line via the item's sidecar.
+
+**Regression check (2026-09-17, 544b1f42):** three reviewers, no item rejected; SAFE items carry only a `**Read first:**` line.
+- 1: guard folded (writer's decision — the rewritten `floorCtx` comment states the exec-fence narrowing is intended).
+- 2: guard folded (journal locator by glob; no session id reaches the e2e driver).
+- 3: guard folded (acceptance pipeline respelled so a correct run exits 0).
+- 5: guard folded (`CommandSummaries()` accessor — `commandSpecs` is unexported).
+- 9: guard folded (shard roster made observable; the seed-source line is what gates).
+- 10: guard folded (writer's decision — lands as NOTES + race evidence when the audit finds every site already ordered).
+
+**Standing requirements:**
+- `skills: coding-standards`
+- Deviations from item text land as a dated NOTES line under the item.
+- Every flake acceptance runs pinned: `go test -race -c -o "$CLAUDE_JOB_DIR/tmp/x.test" ./cmd/apogee/ && cd cmd/apogee && for i in $(seq 20); do taskset -c 0 "$CLAUDE_JOB_DIR/tmp/x.test" -test.run '^<Name>$' >/dev/null || echo FAIL $i; done` (no `$CLAUDE_JOB_DIR` → any scratch path). Never weaken an assertion to pass it.
+- Bead hygiene at closeout: `bd close` each bead its item closed; the epic when all seven are closed.
+
+**Out of scope:** normalising CRLF in `compareGolden`; an `actions/cache` step; a goroutine-leak detector for the whole `cmd/apogee` suite; changing `DefaultTimeout`; renaming `promptTail`; confining apogee's own bookkeeping git anywhere else (`closeUndoGroup` already runs unconfined).
+
+---
+
+## 1. Undo pre-image snapshot runs outside the workspace box (`apogee-y72`)
+
+**What:** Fix `apogee-y72` (broken since `43f07c6a`, 2026-09-07 — not a regression under the house rule, see handoff): `executeRun` (`internal/agent/dispatch.go`) installs the Confinement handle via `domain.WithConfinement` for `confineChildren` Runs before calling `executeTool`, so `floorCtx := ctx` there already carries it and `a.journal.MarkPre(floorCtx)` runs the snapshot store's `git add -A` / `write-tree` inside the landlock box, where `GIT_INDEX_FILE=<store>/index` is unwritable → `undo: capture the pre-image … index.lock: Permission denied` on every confined Auto write. Add `func WithoutConfinement(ctx context.Context) context.Context` to `internal/domain/confinement.go` beside `WithConfinement` (stores a nil value under `confinementCtxKey{}`; `ConfinementFromContext`'s type assertion then reports `ok == false`; cancellation still flows). In `executeTool` derive `floorCtx := domain.WithoutConfinement(ctx)` and rewrite the comment above it to state the fact ("stripped of any Confinement handle — executeRun installs one for confineChildren Runs before this point; apogee's bookkeeping git (`MarkPre`, `tree.beforeCall`, `mutationWarning`) is never the model's command"). `a.runTool(ctx, …)` keeps the confined ctx — `git_stage`'s child (`internal/tools/git_stage.go` → `tools.confinementBox`) must still see the box. No other caller changes.
+**Regression guard.** the rewritten floorCtx comment also states that stripping the handle narrows the bookkeeping git's exec fence from the box to the workspace root alone — identical to what the Confine (box != nil) path already did — so the narrowing is intended, not a regression
+**Files:** `internal/domain/confinement.go`, `internal/domain/confinement_test.go`, `internal/agent/dispatch.go`, `internal/agent/undo_group_test.go`
+**Read first:** internal/agent/dispatch.go — executeTool, executeRun, runTool; internal/domain/confinement.go — WithConfinement, ConfinementFromContext, confinementCtxKey; internal/agent/undo_group_test.go — TestACaptureFailureIsReportedAndNeverFailsTheExchange; internal/gitexec/gitexec.go — Resolve
+**Tests:** `internal/domain`: `TestWithoutConfinementHidesTheHandle` (handle installed → stripped → `ConfinementFromContext` ok=false; a ctx that never had one is unchanged; `Done()` still the parent's). `internal/agent/undo_group_test.go`: `TestConfinedRunTakesItsPreImageOutsideTheBox` — a recording `Snapshotter` whose `Capture(ctx)` records `domain.ConfinementFromContext(ctx)`; a fake write tool that records the same from its own ctx; drive `a.executeRun` with a `resolution{confineChildren: true, box: …}` (shape of `TestResolve_WorkspaceWriteRunCarriesTheBoxInTheConfiningCell`, or `executeTool` on a ctx pre-loaded with `WithConfinement` when `executeRun` needs more wiring — say which in NOTES); assert the snapshotter saw NO handle, the tool saw the handle, and `sink.events` holds no `ErrorEvent{Source: "undo"}` (idiom of `TestACaptureFailureIsReportedAndNeverFailsTheExchange`). Bite: the new agent test must fail on the pre-item tree.
+**Acceptance:** `go build ./... && go test ./internal/domain/ ./internal/agent/ -run 'WithoutConfinement|ConfinedRunTakesItsPreImage|UndoGroups|CaptureFailure|Resolve_WorkspaceWriteRun'`
+**Sidecar (CHANGELOG *Fixed*):** "Undo whole-tree images (ADR 0074) work again for confined Auto writes on landlock hosts: the pre-image snapshot git ran inside the workspace box and failed with `index.lock: Permission denied`, painting a red `undo:` line on every write."
+**Commit:** `fix(agent): take the undo pre-image outside the workspace box on confined Auto writes`
+
+## 2. Symlink e2e asserts the undo line is gone (`apogee-y72`, journey)
+
+**What:** Depends on item 1. `TestE2EAnnouncedWorkspaceThroughASymlink` (`cmd/apogee/e2e_announced_test.go`) already reproduces the bug on a landlock host (its final frame painted the `undo:` error while the test passed, because it asserts tool results only). Add to its tail: the settled frame holds neither `"Permission denied"` nor `"undo:"`, and the session's journal (`snapshot.Dir(home, sessionID)` → `journal.json`, idiom of `cmd/apogee/wire_live_test.go` / `undo_test.go`) records a group with a pre image for the write. The assertions are meaningful only when `installFenceableConfiner` left the real confiner in place (`Capabilities().FSWrite`); on a host where it swapped in `fenceableHost`, log that the box was fake and skip the two new assertions (`t.Logf`, not `t.Skip` — the rest of the test still runs).
+**Regression guard.** The driven run exposes no session id (`e2eSession` carries only home/ws/stub/args), so state the locator: glob `filepath.Join(sess.home, "snapshots", "*", "journal.json")` (storeRootName "snapshots", internal/snapshot/journal.go:20) and require exactly one match; decode it as `undo.Index` (internal/undo/persist.go:40) and assert one `GroupRecord` with `Pre != ""`.
+**Files:** `cmd/apogee/e2e_announced_test.go`
+**Read first:** cmd/apogee/e2e_announced_test.go — TestE2EAnnouncedWorkspaceThroughASymlink, installFenceableConfiner; cmd/apogee/e2e_support_test.go — e2eSession, launchTUIIn; internal/snapshot/journal.go — Dir, storeRootName; internal/undo/persist.go — Index, GroupRecord
+**Tests:** the extended `TestE2EAnnouncedWorkspaceThroughASymlink`. Bite on the dev box (landlock available): the extension fails with item 1 reverted.
+**Acceptance:** `go test -race ./cmd/apogee/ -run '^TestE2EAnnouncedWorkspaceThroughASymlink$' -count=3`
+**Commit:** `test(e2e): confined symlink workspace leaves no undo error and a journaled pre image`
+
+## 3. Pin golden and testdata files to LF (`apogee-80n`)
+
+**What:** Fix `apogee-80n`: `windows-latest` checks out with `core.autocrlf=true` and `.gitattributes` pins only `internal/tui/logo.txt` and `graphics/apogee-logo.md`, so `internal/probe/testdata/*.golden` arrive CRLF and `tuitest.compareGolden`'s byte compare fails on a diff that looks identical. Add to `.gitattributes`, with a comment stating the rule (every golden and testdata file is compared byte-for-byte by `tuitest.compareGolden` / `GoldenText`, so it must be LF on every platform): `*.golden text eol=lf` and `**/testdata/** text eol=lf`. All 152 tracked files under those patterns are already `i/lf w/lf`, so no renormalisation commit is needed.
+**Regression guard.** `grep -vc 'i/lf'` prints `0` but exits 1 when nothing is selected, so a verifier chaining the acceptance commands with `&&` fails every correct run: spell the check `git ls-files --eol -- '*.golden' '**/testdata/**' | grep -v 'i/lf' | wc -l` (prints 0, exits 0); the three acceptance commands run separately and only their output is judged.
+**Files:** `.gitattributes`
+**Read first:** .gitattributes — the two existing `text eol=lf` rows; internal/tuitest/golden.go — GoldenText, compareGolden; internal/probe/contextcost_test.go — TestContextCostReportGolden; internal/doctext/testdata — the five .pdf fixtures
+**Tests:** none in Go; the check is git's.
+**Acceptance:** `git check-attr eol -- internal/probe/testdata/contextcost.golden cmd/apogee/testdata/frames/t17-run-view.txt cmd/apogee/testdata/stubllm/$(ls cmd/apogee/testdata/stubllm | head -1) | grep -c 'eol: lf'` prints `3`; `git ls-files --eol -- '*.golden' '**/testdata/**' | grep -v 'i/lf' | wc -l` prints `0`; `go test ./internal/probe/ -run Golden`
+**Commit:** `fix(ci): pin golden and testdata files to LF so Windows checkouts compare byte-identical`
+
+## 4. `tuitest.Frame` prompt-box accessor (`apogee-htf`, part 1)
+
+**What:** Add `func (f Frame) PromptBox() (rows []string, ok bool)` to `internal/tuitest/frame.go`: scan rows bottom-up for the last row whose trimmed text starts with `╭` (the input border — `theme.inputBorder`, `lipgloss.RoundedBorder()`; pop-ups and the palette share the glyph, the prompt box is always the LOWEST such row in the bottom chrome, above the footer line and the `▁` bottom rule — `layout.md` §bottom chrome), then forward to the next row starting with `╰`; return the content rows between them (the `│ … │` rows, borders excluded) and `ok=false` when no such pair exists. Document the accessor in `docs/design/test-drivers.md` where `Frame.Find` is described. Pure function on the frame, no Screen access.
+**Files:** `internal/tuitest/frame.go`, `internal/tuitest/frame_test.go`, `docs/design/test-drivers.md`
+**Read first:** internal/tuitest/frame.go — Frame, Frame.Find, Frame.Rows, newFrame; internal/tuitest/frame_test.go — write, TestFrameReadsTheEmulatorsText; internal/tui/theme.go — inputBorder; internal/tui/mouse.go — inputBorderRows comment
+**Tests:** `TestFramePromptBoxIsTheLowestRoundedBox` in `internal/tuitest/frame_test.go` — build a frame (the package's existing frame-construction idiom) with a pop-up box above a prompt box and a footer below; assert the accessor returns only the prompt-box content rows; a frame with no `╭` row → `ok=false`; a prompt box with an elision marker on its top border (`╭─ … +3 ────╮`) is still found.
+**Acceptance:** `go build ./... && go test ./internal/tuitest/ -run 'PromptBox' && grep -n 'PromptBox' docs/design/test-drivers.md`
+**Commit:** `feat(tuitest): Frame.PromptBox exposes the prompt-box rows`
+
+## 5. `submit()` and pane markers stop matching the command palette (`apogee-htf`, part 2)
+
+**What:** Depends on item 4. Fix `apogee-htf`: `submit()` (`cmd/apogee/e2e_smoke_test.go`) waits for `promptTail(text)` anywhere on screen, so while the human types `/usage` the palette row `❯ /usage  session token usage — main agent and every sub-agent` satisfies it and Enter accepts the suggestion instead of sending; `openUsage`'s `usagePaneMarker = "session token usage"` is satisfied by the same row. Change `submit()`'s wait to search `strings.Join(rows, "\n")` of `drv.Frame().PromptBox()` (ok must be true). Change `usagePaneMarker` (`cmd/apogee/e2e_usage_test.go`) to the pane's hint `"↑/↓ scroll · esc close"` (`internal/tui/usage.go` `usageHint`) — a string no palette row carries — and the smoke test's raw `"session token usage"` wait (`e2e_smoke_test.go` ~L108) to the same constant; the same class hits `e2e_livestate_test.go` ~L271, which waits `"switch model"` after `/model` (the `/model` summary is `"switch model — the launcher's profiles…"`): replace it with a string from the model pane's own chrome. Rule for the sweep: every `WaitText` that follows a `submit("/<cmd>")` whose string is a substring of that command's `summary` in `internal/tui/command.go` is a collision — grep `submit(drv, "/` in `cmd/apogee/*_test.go` and compare each following wait against the summary. Guard test `TestPaneMarkersNeverEchoACommandSummary` in `cmd/apogee`: a table of the pane marker constants the e2e tests wait on right after a slash command (`usagePaneMarker`, the model-pane marker, `sessionsPaneMarker`, `thinkingPaneMarker`, `settingsHint`) asserted not to be a substring of any command summary (iterate the command table the palette reads).
+**Regression guard.** `commandSpecs` is unexported (internal/tui/command.go:257) and nothing in `internal/tui` exports its summaries, so the guard test cannot iterate the table from `cmd/apogee`: add an exported accessor `func CommandSummaries() []string` in `internal/tui/command.go` (each `commandSpecs` summary) and range the guard test over it.
+**Files:** `cmd/apogee/e2e_smoke_test.go`, `cmd/apogee/e2e_usage_test.go`, `cmd/apogee/e2e_livestate_test.go`, `cmd/apogee/pane_markers_test.go`, `internal/tui/command.go`
+**Read first:** cmd/apogee/e2e_smoke_test.go — submit, promptTail, settingsHint; cmd/apogee/e2e_usage_test.go — usagePaneMarker, sessionsPaneMarker; internal/tui/command.go — commandSpecs, commandSpec.summary; internal/tui/usage.go — usageHint
+**Tests:** `TestPaneMarkersNeverEchoACommandSummary` (fails on the pre-item tree for `usagePaneMarker`); `TestE2EUsageReportsCachedTokensAndDelegateSpend`, `TestE2EUsageHidesTheCachedColumnWithoutABreakdown`, `TestE2ESmoke*` (the smoke path through `/usage`), the `/model` livestate test — each 20× pinned per the standing recipe.
+**Acceptance:** `go test -race ./cmd/apogee/ -run 'PaneMarkersNeverEcho|TestE2EUsage|TestE2ESmoke|TestE2ELiveState' ` and the pinned 20× loop over `TestE2EUsageReportsCachedTokensAndDelegateSpend` and `TestE2EUsageHidesTheCachedColumnWithoutABreakdown` with zero `FAIL` lines
+**Commit:** `fix(e2e): submit waits inside the prompt box and pane markers never echo a palette row`
+
+## 6. t17 golden waits for the read receipt (`apogee-ig7`)
+
+**What:** Fix `apogee-ig7`: the `frameWhen` condition for the `t17-run-view` golden (`cmd/apogee/e2e_subagent_view_test.go` ~L113) requires `childParkedLine = "a.txt"`, which paints with the read CALL row, but the golden holds the `⋯ 2 lines` receipt — on a slow runner the frame is captured one tick early. Add `readReceipt = "2 lines"` beside the other pinned strings and require `holds(f, readReceipt)` in the condition alongside `!holds(f, secondRead)`. Golden unchanged.
+**Files:** `cmd/apogee/e2e_subagent_view_test.go`
+**Read first:** cmd/apogee/e2e_subagent_view_test.go — TestE2ESubAgentView, frameWhen, holds, childParkedLine, secondRead; cmd/apogee/testdata/frames/t17-run-view.txt — the `⋯ 2 lines` receipt row; internal/tuitest/golden.go — Golden
+**Tests:** `TestE2ESubAgentView` 20× pinned.
+**Acceptance:** `go test -race ./cmd/apogee/ -run '^TestE2ESubAgentView$'` and the pinned 20× loop with zero `FAIL` lines; `git diff --stat -- cmd/apogee/testdata/frames/t17-run-view.txt` is empty
+**Commit:** `fix(e2e): t17 run-view golden waits for the read receipt before capturing`
+
+## 7. `watchApprovalPanes` samples only after a paint (`apogee-pqs`, part 1)
+
+**What:** Fix half of `apogee-pqs`: `watchApprovalPanes` (`cmd/apogee/e2e_announced_test.go` ~L1112) rebuilds a full `Frame` every `paneWatchInterval` (5 ms) under `Screen.mu`, which is 25 % of the announced tests' CPU and delays the program's own writes. Rewrite the loop on the `stepSettings` precedent: remember `painted := drv.Screen().BytesWritten()`; every `paneWatchInterval` (raise to 10 ms) read `BytesWritten()` and only when it advanced take `drv.Frame()` and check the two markers (`approvalMarker`, `forcedMarker`), keeping the rising-edge counting and the `t.Cleanup` stop exactly as they are. Ten callers (nine in `e2e_announced_test.go`, one in `e2e_planmode_test.go`) are unchanged.
+**Files:** `cmd/apogee/e2e_announced_test.go`
+**Read first:** cmd/apogee/e2e_announced_test.go — watchApprovalPanes, paneWatchInterval; cmd/apogee/e2e_smoke_test.go — stepSettings; cmd/apogee/e2e_approval_test.go — approvalMarker, forcedMarker; internal/tuitest/screen.go — Screen.BytesWritten, Screen.Write; cmd/apogee/e2e_planmode_test.go — the tenth caller
+**Tests:** every caller of `watchApprovalPanes` — `TestE2EAnnounced*` (9), `TestE2EPlanRefusalNamesTheAnnouncedScratchDir`, `TestE2EPlanModeAnnouncesWhatItWithholds` — each still passes; `TestE2EAnnouncedScratchDirIsWritableInAskBefore` (the one whose pane count is non-zero) proves the edge counter still sees a pane through the gate.
+**Acceptance:** `go test -race ./cmd/apogee/ -run 'TestE2EAnnounced|TestE2EPlanRefusal|TestE2EPlanModeAnnounces'`; `grep -n 'paneWatchInterval' cmd/apogee/e2e_announced_test.go` shows the constant is used only as the poll sleep, and `BytesWritten` appears in the watcher
+**Commit:** `fix(e2e): approval-pane watcher reads a frame only after the screen was painted`
+
+## 8. `submit()` budget scales with the prompt length (`apogee-pqs`, part 2)
+
+**What:** Depends on item 5. Fix the other half of `apogee-pqs`: `submit()` gives every prompt `DefaultTimeout` (5 s) while the runner lands ~90 ms/key, so `announcedScratchReadPrompt` (79 bytes) times out at 56 chars. Add `const typingAllowance = 100 * time.Millisecond` (per byte, comment stating the measured 90 ms/key on the 4-vCPU runner) and pass `tuitest.Within(tuitest.DefaultTimeout + time.Duration(len(text))*typingAllowance)` to the wait item 5 rewrote; the `Awaiting` message stays. No chunked typing.
+**Files:** `cmd/apogee/e2e_smoke_test.go`
+**Read first:** cmd/apogee/e2e_smoke_test.go — submit, promptTail; internal/tuitest/wait.go — DefaultTimeout, Within, Awaiting; cmd/apogee/e2e_announced_test.go — announcedScratchReadPrompt, TestE2EAnnouncedScratchDirIsReadableByTheReadTools; cmd/apogee/e2e_support_test.go — driven.WaitFor
+**Tests:** `TestE2EAnnouncedScratchDirIsReadableByTheReadTools` 20× pinned; the smoke tests unchanged.
+**Acceptance:** `go test -race ./cmd/apogee/ -run 'TestE2EAnnouncedScratchDirIsReadableByTheReadTools|TestE2ESmoke'` and the pinned 20× loop over `TestE2EAnnouncedScratchDirIsReadableByTheReadTools` with zero `FAIL` lines
+**Commit:** `fix(e2e): submit's typing budget grows with the prompt length`
+
+## 9. Committed shard-timings seed (`apogee-2c0`)
+
+**What:** Close `apogee-2c0`: `scripts/test-shards.sh` packs by the gitignored `.test-timings` (tab-separated `importpath\tTestName\tseconds`, harvested after every run) and falls back to equal 0.1 s costs when it is absent, so CI's two `cmd/apogee` shards ran 185 s vs 117 s. Add a tracked `scripts/test-timings.seed` (same format; generated from a local `make test`) and make the script read `.test-timings` when present, else the seed (one `TIMINGS_SOURCE` resolution before the awk at ~L216; the harvest still writes `.test-timings` only). Add a Makefile target `test-timings-seed` that copies `.test-timings` to the seed (`@test -f .test-timings || (echo 'run make test first' && exit 1)`). Document the seed and the target in `docs/manual/building.md` next to where `make test` / sharding is described (grep `test-shards` docs/manual).
+**Regression guard.** The script prints no roster — bins live in `$work/bins.*` under `trap 'rm -rf "$work"' EXIT` (scripts/test-shards.sh:98-99,223-245) — so the roster claim is unobservable as written: make it observable by reading the `-run` regexes off `bash -x scripts/test-shards.sh 2>&1 | grep -- '-run '`, or have the new stderr line also print each bin's summed cost; Acceptance's `grep -c 'timings: scripts/test-timings.seed'` is what actually gates.
+**Files:** `scripts/test-shards.sh`, `scripts/test-timings.seed`, `Makefile`, `docs/manual/building.md`
+**Read first:** scripts/test-shards.sh — TIMINGS, harvest_timings, the cost awk (`FILENAME == ARGV[1]` / fallback `||` branch); Makefile — `test`, `help`; docs/manual/building.md — "Shards are balanced from the previous run's per-test durations" paragraph; .gitignore — `/.test-timings` comment
+**Tests:** shell-level: with `.test-timings` moved aside, `APOGEE_TEST_SHARDS=2 ./scripts/test-shards.sh` logs that the seed was used (add one stderr line naming the source) and the two `cmd/apogee` shard rosters — read off `bash -x scripts/test-shards.sh 2>&1 | grep -- '-run '`, or the per-bin summed cost the new stderr line prints — differ from the equal-cost split.
+**Acceptance:** `mv .test-timings "$CLAUDE_JOB_DIR/tmp/tt.bak" 2>/dev/null; APOGEE_TEST_SHARDS=2 make test 2>&1 | grep -c 'timings: scripts/test-timings.seed'` prints ≥ 1 (restore the file afterwards); `make test-timings-seed && git diff --stat -- scripts/test-timings.seed`; `make actionlint` (ci.yml untouched, still green)
+**Commit:** `chore(test): committed shard-timings seed so a fresh runner packs balanced shards`
+
+## 10. Schedule tests join every scheduler goroutine before the seam is restored (`apogee-5tn`)
+
+**What:** Close `apogee-5tn` (one race, CI 2026-09-11: write of `runOnce` by `TestScheduleFiringCarriesTheSessionsSyncLane` vs a read in `scheduleWiring.fire` from a `Scheduler` goroutine a prior test created). Two facts to establish and fix: (a) in `internal/schedule/schedule.go` `Close` does `s.wg.Wait()`; verify every goroutine that can reach `fire` is `wg`-tracked — `go s.loop(e)` (~L353) is `wg.Add(1)`'d, check `go s.run(e)` (~L481) is too; if not, that is the leak: add it and a test `TestCloseJoinsARunningFire` (a fire that blocks on a channel; `Close` returns only after it is released). (b) Every `schedule.New(` in `cmd/apogee/*_test.go` (`schedule_test.go` `newScheduleHarness` ~L880, ~L1165; `daemon_test.go` ~L846; harness constructors in `e2e_schedule_test.go`, `daemonfire_test.go`, `wire_firing_test.go`, `headless_test.go` — enumerate with the grep) registers `t.Cleanup(scheduler.Close)` AFTER any `runOnce` swap in the same test, so LIFO cleanup joins the goroutines before the seam is restored; `TestRunRootWiresTheSchedulerAndClosesItWithTheTUI` must actually await the Close the TUI triggers. Record the per-site verdict in a NOTES line.
+**Regression guard.** if the per-site audit finds every direct site already orders Close before the seam restore and (a) finds run goroutines wg-tracked, the item still lands as a commit: the NOTES line recording the per-site verdict plus the -count=20 race evidence, and the bead is closed on that evidence
+**Files:** `internal/schedule/schedule.go`, `internal/schedule/schedule_test.go`, `cmd/apogee/schedule_test.go`, `cmd/apogee/daemon_test.go`, `cmd/apogee/e2e_schedule_test.go`, `cmd/apogee/daemonfire_test.go`
+**Read first:** internal/schedule/schedule.go — Scheduler.wg, Close, run, loop; internal/schedule/schedule_test.go — TestCloseIsIdempotentAndJoinsEveryGoroutine; cmd/apogee/schedule_test.go — newScheduleHarness, TestRunRootWiresTheSchedulerAndClosesItWithTheTUI; cmd/apogee/daemon_test.go — newReloadHarness
+**Tests:** `TestCloseJoinsARunningFire` (if (a) found a gap); `go test -race -count=20 ./cmd/apogee -run 'Schedule|Firing'` clean; `go test -race ./internal/schedule/`.
+**Acceptance:** `go build ./... && go test -race ./internal/schedule/ && go test -race -count=20 ./cmd/apogee/ -run 'Schedule|Firing' 2>&1 | grep -c 'DATA RACE'` prints `0`
+**Commit:** `fix(test): schedule tests close their scheduler before the runOnce seam is restored`
