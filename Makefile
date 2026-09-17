@@ -186,6 +186,24 @@ install: build
 test:
 	@./scripts/test-shards.sh $(ARGS)
 
+## test-timings-seed: copy the last run's .test-timings into the committed scripts/test-timings.seed
+#
+# The seed is what scripts/test-shards.sh packs by on a checkout that has never run the suite —
+# CI's runner every time — so its shards balance like a warm local run instead of the equal-cost
+# fallback (185 s against 117 s for CI's two cmd/apogee shards before the seed). Refresh it from
+# a dev-box `make test` when the suite's shape moves; a stale seed only costs balance, never a
+# test. The header line names the box the timings came from, since a slow host's absolute
+# durations still rank the tests correctly but read oddly beside a fast box's.
+.PHONY: test-timings-seed
+test-timings-seed:
+	@test -f .test-timings || (echo 'run make test first' && exit 1)
+	@{ \
+		printf '# scripts/test-timings.seed — shard-timings fallback for scripts/test-shards.sh (importpath<TAB>TestName<TAB>seconds).\n'; \
+		printf '# Harvested by `make test` on %s (%s cores); regenerate with `make test-timings-seed`.\n' \
+			"$$(uname -m)" "$$( (command -v nproc >/dev/null 2>&1 && nproc) || sysctl -n hw.ncpu 2>/dev/null || echo '?')"; \
+		cat .test-timings; \
+	} >scripts/test-timings.seed
+
 ## live-eval: run the opt-in live-model eval and the gated judge tests against a real local model (always -count=1, never cached)
 #
 # The recipe counts the REAL apogee home before and after the run and fails on growth

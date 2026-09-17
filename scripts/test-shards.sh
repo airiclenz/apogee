@@ -21,7 +21,9 @@
 # timing cache) and around 55s warm.
 #
 # Balance comes from the timings of the LAST run, cached in .test-timings (gitignored, rebuilt
-# on every run). Without it the packer falls back to equal costs, which still shards correctly —
+# on every run). Without it the packer reads the committed scripts/test-timings.seed — the same
+# format, refreshed by `make test-timings-seed` — so a fresh checkout (CI's runner every time)
+# packs by measured costs rather than the equal-cost fallback, which still shards correctly —
 # just less evenly, since the expensive tests cluster by name prefix. A stale or missing cache
 # is therefore a SPEED regression and never a correctness one, which is the failure mode this
 # whole file is allowed to have.
@@ -51,7 +53,22 @@ HEAVY_PKGS=(./cmd/apogee ./internal/tui)
 HEAVY_WEIGHT=(4 2) # cmd/apogee is 3–5x internal/tui by total test time; see above
 
 TIMINGS=.test-timings
+TIMINGS_SEED=scripts/test-timings.seed
 GOFLAGS_TEST=(-race -count=1)
+
+# Which timings the packer reads: the last run's cache when there is one, else the committed
+# seed. Only the READ side falls back — the harvest at the end always rewrites .test-timings and
+# never the seed, so a stale seed cannot creep in through an ordinary run. The source is named
+# on stderr because it is the one thing that distinguishes a balanced plan from the equal-cost
+# fallback: the rosters themselves live in $work and are gone by the time anyone looks.
+if [ -f "$TIMINGS" ]; then
+	TIMINGS_SOURCE=$TIMINGS
+elif [ -f "$TIMINGS_SEED" ]; then
+	TIMINGS_SOURCE=$TIMINGS_SEED
+else
+	TIMINGS_SOURCE=""
+fi
+echo "test-shards: timings: ${TIMINGS_SOURCE:-none (equal costs)}" >&2
 
 # The shard budget. One process per core minus one leaves the box a core for the `go build`
 # work every shard triggers; the floor of 2 keeps the split meaningful on a small machine, and
@@ -209,15 +226,18 @@ for idx in "${!HEAVY_PKGS[@]}"; do
 		exit 1
 	fi
 
-	# Cost each test from the cache, defaulting unknown ones to a tenth of a second: high enough
-	# that a shard of brand-new tests is not assumed free, low enough not to outweigh a measured
-	# heavyweight. Then greedy bin-pack longest-first, which is what turns a 79s worst shard into
-	# an evenly loaded one.
-	awk -F'\t' -v pkg="$pkgpath" '
-		FILENAME == ARGV[1] { if ($1 == pkg) cost[$2] = $3; next }
-		{ printf "%.3f\t%s\n", ($0 in cost ? cost[$0] : 0.1), $0 }
-	' "$TIMINGS" "$list" 2>/dev/null >"$work/costed.$idx" ||
-		awk '{ printf "0.100\t%s\n", $0 }' "$list" >"$work/costed.$idx"
+	# Cost each test from the timings source (cache or seed — resolved above), defaulting unknown
+	# ones to a tenth of a second: high enough that a shard of brand-new tests is not assumed
+	# free, low enough not to outweigh a measured heavyweight. A `#` line in the source costs
+	# nothing and matches no package, which is what lets the seed carry a header. Then greedy
+	# bin-pack longest-first, which is what turns a 79s worst shard into an evenly loaded one.
+	if [ -n "$TIMINGS_SOURCE" ]; then
+		awk -F'\t' -v pkg="$pkgpath" '
+			FILENAME == ARGV[1] { if ($1 == pkg) cost[$2] = $3; next }
+			{ printf "%.3f\t%s\n", ($0 in cost ? cost[$0] : 0.1), $0 }
+		' "$TIMINGS_SOURCE" "$list" 2>/dev/null >"$work/costed.$idx" ||
+			awk '{ printf "0.100\t%s\n", $0 }' "$list" >"$work/costed.$idx"
+	fi
 	[ -s "$work/costed.$idx" ] || awk '{ printf "0.100\t%s\n", $0 }' "$list" >"$work/costed.$idx"
 
 	sort -k1,1rn "$work/costed.$idx" | awk -F'\t' -v n="$n" '

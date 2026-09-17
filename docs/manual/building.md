@@ -22,6 +22,7 @@ A `Makefile` wraps the common Go invocations:
 | `make stubllm` | Compile the scripted test upstream to `./stubllm` — a dev tool, never a release asset |
 | `make demorig` | Compile the demo storyboard rig to `./demorig` — a dev tool, never a release asset (see `graphics/demo/README.md`, "Storyboards") |
 | `make test` | Run the test suite with the race detector, sharded across processes (see [Testing](#testing)); `ARGS="..."` passes extra `go test` flags to every shard |
+| `make test-timings-seed` | Copy the last run's `.test-timings` into the committed `scripts/test-timings.seed` the shards pack by on a fresh checkout (see [Testing](#testing)) |
 | `make live-eval` | Run the opt-in live-model eval and the judge tests against a real server, always `-count=1`; `LIVE_ENDPOINT=` (default `http://127.0.0.1:1111`) becomes `APOGEE_LIVE_ENDPOINT` and `JUDGE_ENDPOINT=` (default the same) `APOGEE_JUDGE_ENDPOINT`, with `APOGEE_LIVE_MODEL` / `APOGEE_JUDGE_MODEL` set in the environment to pin the models; fails if the real `~/.apogee` grew during the run |
 | `make home-census` | Print the entry counts of the real `~/.apogee` sessions and scratch dirs (what `live-eval` compares) |
 | `make fmt` | `gofmt -w` over the tree |
@@ -99,10 +100,16 @@ leaves slots over. The bound is the script's, not the tests': the isolated
 where the `cmd/apogee` sweep's 202s → 66s shows.
 
 Shards are balanced from the previous run's per-test durations, cached in `.test-timings`
-(gitignored, rewritten every run). A missing or stale cache costs only a less even split,
+(gitignored, rewritten every run). A checkout that has never run the suite — a CI runner,
+every time — has no cache, so the script falls back to the committed
+`scripts/test-timings.seed` (same format) and packs by those; the run says which it read
+(`test-shards: timings: …` on stderr). A missing or stale cache costs only a less even split,
 never a skipped test: the roster comes from `go test -list`, and the script refuses to run a
 plan that does not cover every listed test. `APOGEE_TEST_SHARDS=n` overrides the per-package
 shard count; the script prints each shard's wall time so the balance can be read off a run.
+The seed goes stale as the suite's shape moves; refresh it with `make test-timings-seed`
+after a `make test` on a dev box (it copies `.test-timings` into the seed) and commit the
+result.
 
 `go test -race -count=1 ./...` remains the equivalent single-process run, and is the one to
 reach for when bisecting or debugging a single test. CI runs `make test` under
