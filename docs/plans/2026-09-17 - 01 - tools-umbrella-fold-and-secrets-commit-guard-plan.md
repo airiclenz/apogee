@@ -164,7 +164,8 @@ cmd/apogee/e2e_support_test.go — launchTUIIn, e2eWorkspace, flatten, submit; c
 **Acceptance:** `go test ./cmd/apogee/ -run 'TestE2EGuardSecrets|TestE2EGuardControlPlane|TestE2EApprovalForces'`
 **Commit:** `test(e2e): secrets commit guard journey on the approval pane`
 
-## 9. ADR 0080, guard docs and IDEAS.md
+## 9. ADR 0080, guard docs and IDEAS.md — ✅ DONE (2026-09-17)
+NOTES (2026-09-17): `IDEAS.md` is gitignored (`.gitignore:14`, untracked), so its edit — the "Prevent secrets …" line removed — lives on disk only and is not in FILES: `git add` refuses an ignored path; the acceptance grep runs against the working tree and passes (same handling as item 5).
 
 **What:** Depends on item 8. `docs/adr/0080-git-commit-forces-a-look-at-staged-secret-material.md` (`Status: accepted`, `Amends: ADR 0012` — adds a content-derived Tier-2 member): context (why a git hook cannot be the mechanism: `core.hooksPath=` blanking in `internal/gitexec`, the `write-git-control-plane` rule; why pre-execute: D6), decision (seam, shadow index, pattern and glob list, Tier 2 in every mode, hint-carried finding, no allow-list), consequences, alternatives rejected (gitleaks, write-time scanning, hard refuse). `docs/manual/configuration.md` §"The dangerous-action guard": add `commit-secrets` to the Tier-2 list with one sentence on what it scans and the approval escape; `CONTEXT.md` §"Safety and autonomy" **Dangerous-action guard** entry: name `commit-secrets` among the Tier-2 members and note it is content-derived. `IDEAS.md`: remove the "Prevent secrets, certificates, public-keys …" item.
 **Files:** `docs/adr/0080-git-commit-forces-a-look-at-staged-secret-material.md`, `docs/manual/configuration.md`, `CONTEXT.md`, `IDEAS.md`

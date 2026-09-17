@@ -1184,12 +1184,15 @@ path, fork bombs, writes to `~/.ssh`/credential/persistence files — no per-cal
 **force-approval** (`curl | bash`-class — sometimes a legit installer — and a write under
 `~/.apogee`, apogee's own control plane, which the operator legitimately curates by hand
 (ADR 0049 §4) — except the session's own scratch dir, which the box already declares writable
-(ADR 0049 amendment 2026-08-28): a speed-bump that forces the Approver even in Auto, carrying the rule's way out to
+(ADR 0049 amendment 2026-08-28), and `commit-secrets` — a `git_commit` whose shadow-staged diff or
+staged file names carry secret material (ADR 0080): a speed-bump that forces the Approver even in Auto, carrying the rule's way out to
 the prompt and to a denied call's result; a forced look on a call Auto would have confined stays
 confined once allowed — approval decides *whether*, confinement *where*). Rules match the call's **action text** — the tool, its target paths, its
 command lines and code — and never the **payload** a call carries (a file body, a replacement string,
 a search pattern, a commit message), so writing or grepping a document that merely *quotes* `~/.ssh`
-is not an action. It is **tighten-only** and trivially bypassable by anything determined,
+is not an action. `commit-secrets` is the one **content-derived** member: its evidence is what git
+would stage, precomputed by dispatch into a shadow index before the pure resolution runs (D6), never
+the call's arguments. It is **tighten-only** and trivially bypassable by anything determined,
 so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on; the global
 config may add *or* remove entries (it is the user's machine), a project config may only *add*.
 _Avoid_: "malicious-action filter", "blacklist", "denylist" (all imply an adversary boundary it is

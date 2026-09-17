@@ -1882,6 +1882,14 @@ is the session's own scratch directory, `~/.apogee/scratch/<session-id>/`: its s
 masked out of the command before any rule runs, because the fence already declares that
 directory writable and a look there would answer nothing — another session's scratch
 directory, and every other path under `~/.apogee`, keep the look.
+The one member that reads content rather than a command is `commit-secrets`: before a
+`git_commit` resolves, apogee stages the call's files into a shadow copy of the index and
+scans the staged diff's added lines for private-key blocks, AWS, GitHub and Slack tokens
+and JWTs, and the staged names for key and env files (`*.pem`, `*.key`, `*.p12`, `*.pfx`,
+`id_rsa*`, `id_ed25519*`, `id_ecdsa*`, `.env`, `.env.*` — the `.env.example`/`sample`/`template`
+templates and any `.pub` public key excepted); a hit forces the look in every mode, the
+`Fix:` row names the file and what was found, and approving is the only way through — there
+is no allow-list ([ADR 0080](../adr/0080-git-commit-forces-a-look-at-staged-secret-material.md)).
 A forced prompt is a speed-bump, not a block — you can say yes to it. But it carries no
 cache key, so **it offers no "Always allow this session" row** — the pane closes on
 `a forced look is asked every time` in its place: the yes authorises that one call, and
