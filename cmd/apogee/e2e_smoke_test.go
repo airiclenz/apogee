@@ -106,13 +106,13 @@ func TestE2ESmokeInProcess(t *testing.T) {
 	// Step 6 — /usage reports what the run actually spent. The stub's usage numbers are real
 	// numbers, so "non-zero" is a claim with something behind it.
 	submit(drv, "/usage")
-	drv.WaitText("session token usage")
+	drv.WaitText(usagePaneMarker)
 	drv.WaitQuiet(settled)
 	usage := drv.Frame()
 	if !hasNonZeroNumber(usage) {
 		t.Errorf("the /usage view shows no non-zero number:\n%s", usage)
 	}
-	closePane(drv, "session token usage")
+	closePane(drv, usagePaneMarker)
 
 	// Step 7 — /skills reports the catalog a fresh install has, which since `use-shipped-skills:`
 	// (default true) is apogee's own shipped set rather than an empty library. The crash markers are
@@ -461,10 +461,17 @@ func closePane(drv *tuitest.Driver, marker string) {
 
 // submit types a line into the prompt box and sends it. It takes the driver interface rather than
 // one driver, so the same step means the same thing in process and through the pty.
+//
+// The wait looks INSIDE the prompt box ([tuitest.Frame.PromptBox]), never anywhere on screen: while
+// a slash command is being typed the palette paints `❯ /usage  session token usage — …` above the
+// box, and a whole-frame search would take that row for the typed line before the last key had
+// landed — so Enter accepted the palette's suggestion instead of sending.
 func submit(drv driven, text string) {
 	drv.Type(text)
-	drv.WaitFor(func() bool { _, _, ok := drv.Frame().Find(promptTail(text)); return ok },
-		tuitest.Awaiting("the typed prompt to appear in the prompt box"))
+	drv.WaitFor(func() bool {
+		rows, ok := drv.Frame().PromptBox()
+		return ok && strings.Contains(strings.Join(rows, "\n"), promptTail(text))
+	}, tuitest.Awaiting("the typed prompt to appear in the prompt box"))
 	drv.Press(tuitest.Enter)
 }
 

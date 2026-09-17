@@ -301,9 +301,12 @@ func TestE2EUsageHeadlessCachedCellIsSelfHiding(t *testing.T) {
 
 // usagePaneMarker and sessionsPaneMarker are each pane's own furniture — the line a test waits to
 // see and then waits to LEAVE, rather than any content line, which a differently-scripted run might
-// not have.
+// not have. The usage marker is the pane's key hint (tui's usageHint), never its title: the title
+// "session token usage" is also the palette's summary for /usage, painted while the verb is still
+// being typed, so a wait on it was satisfied before the pane existed (apogee-htf).
+// TestPaneMarkersNeverEchoACommandSummary holds every such marker to that rule.
 const (
-	usagePaneMarker    = "session token usage"
+	usagePaneMarker    = "↑/↓ scroll · esc close"
 	sessionsPaneMarker = "type to filter · ↑/↓ select · ⏎ resume"
 )
 

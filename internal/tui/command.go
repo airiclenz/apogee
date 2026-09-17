@@ -377,6 +377,18 @@ func commandByName(name string) (commandSpec, bool) {
 	return commandSpec{}, false
 }
 
+// CommandSummaries is every commandSpecs summary, in table order — the one-line text the palette
+// paints beside each verb while the human types it. It exists for the driver tests: a pane marker
+// they wait on right after a slash command must not be a substring of any summary, or the palette
+// row satisfies the wait before the pane has opened. The table itself stays unexported.
+func CommandSummaries() []string {
+	summaries := make([]string, 0, len(commandSpecs))
+	for _, c := range commandSpecs {
+		summaries = append(summaries, c.summary)
+	}
+	return summaries
+}
+
 // verbArgsOf reads the opaque argument parse back as the type the verb's own grammar produced. A
 // line whose verb declares no grammar — and a line asked for a type other than the one its hook
 // returned — yields that type's zero value, which is deliberate: every grammar here words its BARE

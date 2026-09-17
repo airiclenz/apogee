@@ -45,6 +45,11 @@ const (
 	confineOnHead     = "confinement ON for this session"
 	cannotFenceHere   = "commands cannot be fenced here"
 
+	// modelPaneMarker is the /model picker's own key hint (picker.go's pickerHint) — the pane's
+	// chrome, never its title: "switch model" is also the palette's summary for /model, painted
+	// while the verb is still being typed (apogee-htf, TestPaneMarkersNeverEchoACommandSummary).
+	modelPaneMarker = "type to filter · ↑/↓ select · ⏎ switch · esc close"
+
 	appliedNote = "config changed on disk — applied: "
 	watchedMark = " ~"
 	editedMark  = " *"
@@ -268,7 +273,7 @@ func TestE2ELiveStateLauncherMoveKeepsTheSessionWorking(t *testing.T) {
 	// Step 11 — the picker is the launcher's own list: the profile on the session's own server, and
 	// the one that serves somewhere else, which is the one that moves anything.
 	submit(drv, "/model")
-	drv.WaitText("switch model")
+	drv.WaitText(modelPaneMarker)
 	drv.WaitQuiet(settled)
 	for _, name := range []string{"alpha", "beta"} {
 		if _, _, ok := drv.Frame().Find(name); !ok {
