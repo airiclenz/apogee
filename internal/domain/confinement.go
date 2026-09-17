@@ -135,6 +135,17 @@ func WithConfinement(ctx context.Context, conf Confinement) context.Context {
 	return context.WithValue(ctx, confinementCtxKey{}, conf)
 }
 
+// WithoutConfinement returns a context on which no Confinement handle is visible, whatever
+// its parents carry: it shadows the key with a nil value, so ConfinementFromContext's type
+// assertion reports ok == false while cancellation and every other value still flow from
+// ctx. The dispatch derives apogee's own bookkeeping context from it — the pre-image
+// snapshot, the tree-mutation floor — because that git is never the model's command and
+// must not run inside the call's box (executeRun installs the handle before executeTool
+// runs, so "take the ctx before the handle goes on" is no longer a point in the chain).
+func WithoutConfinement(ctx context.Context) context.Context {
+	return context.WithValue(ctx, confinementCtxKey{}, nil)
+}
+
 // ConfinementFromContext returns the Confinement handle installed by WithConfinement and
 // whether one is present. ok is false when the call is not running under a confinement
 // disposition (every mode other than Auto/confine-on for a subprocess tool), in which

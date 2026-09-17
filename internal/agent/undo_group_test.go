@@ -443,3 +443,98 @@ func TestACaptureFailureIsReportedAndNeverFailsTheExchange(t *testing.T) {
 		})
 	}
 }
+
+// handleRecordingSnapshotter is an image source that records, per capture, whether the
+// Confinement handle was visible on the ctx the capture ran under — the seam apogee-y72
+// broke: a snapshot taken inside the call's box cannot write the store's index. The first
+// entry is the pre image (MarkPre); the group's Close appends the post image after it.
+type handleRecordingSnapshotter struct {
+	sawHandle []bool
+}
+
+func (h *handleRecordingSnapshotter) Capture(ctx context.Context) (string, error) {
+	_, ok := domain.ConfinementFromContext(ctx)
+	h.sawHandle = append(h.sawHandle, ok)
+	return strings.Repeat("a", 40), nil
+}
+
+func (h *handleRecordingSnapshotter) Diff(context.Context, string, string) ([]string, error) {
+	return nil, nil
+}
+
+func (h *handleRecordingSnapshotter) ListBlobs(context.Context, string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+func (h *handleRecordingSnapshotter) Content(string, string) ([]byte, bool, error) {
+	return nil, false, nil
+}
+
+// handleRecordingTool is a write-capable stand-in that records whether the Confinement handle
+// reached ITS ctx — the one thing the fix must not take away from the tool.
+type handleRecordingTool struct {
+	ran       bool
+	sawHandle bool
+}
+
+func (h *handleRecordingTool) Name() string            { return "fake_write" }
+func (h *handleRecordingTool) Description() string     { return "test write-capable stand-in" }
+func (h *handleRecordingTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+
+func (h *handleRecordingTool) Execute(ctx context.Context, _ domain.ToolCall) (domain.ToolResult, error) {
+	h.ran = true
+	_, h.sawHandle = domain.ConfinementFromContext(ctx)
+	return domain.ToolResult{CallID: "call-1", Content: "ok"}, nil
+}
+
+// TestConfinedRunTakesItsPreImageOutsideTheBox: a confineChildren Run (an Auto workspace write
+// on a landlock host) installs the Confinement handle before executeTool takes the pre image,
+// so the snapshot's git must be stripped of it — while the tool itself still sees the box —
+// and no ErrorEvent{Source: "undo"} is painted for the exchange.
+func TestConfinedRunTakesItsPreImageOutsideTheBox(t *testing.T) {
+	root, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("resolve the temp root: %v", err)
+	}
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.WorkspaceDir = root
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	snap := &handleRecordingSnapshotter{}
+	a.SetJournal(undo.New(undo.WithSnapshotter(snap), undo.WithWorkspace(root)), "")
+	tool := &handleRecordingTool{}
+
+	a.turns.openExchange()
+	a.journal.BeginGroup()
+	call := domain.ToolCall{ID: "call-1", Tool: tool.Name()}
+	result, outcome := a.executeRun(context.Background(), 0, tool, call, resolution{
+		kind:            resolveRun,
+		confineChildren: true,
+		box:             domain.ConfinementBox{WorkspaceRoot: root},
+	})
+	a.turns.closeExchange()
+
+	if outcome != dispatchDone {
+		t.Fatalf("outcome = %v, want dispatchDone", outcome)
+	}
+	if result.IsError {
+		t.Errorf("the tool result was faulted by apogee's own bookkeeping: %+v", result)
+	}
+	if !tool.ran || !tool.sawHandle {
+		t.Errorf("tool ran = %v, saw the Confinement handle = %v; want both true", tool.ran, tool.sawHandle)
+	}
+	if len(snap.sawHandle) == 0 {
+		t.Fatal("no pre image was taken for a write-capable call")
+	}
+	if snap.sawHandle[0] {
+		t.Error("the pre-image snapshot ran with the Confinement handle on its ctx — inside the box")
+	}
+	for _, event := range sink.events {
+		if e, ok := event.(domain.ErrorEvent); ok && e.Source == "undo" {
+			t.Errorf("unexpected ErrorEvent{Source: \"undo\"}: %s", e.Err)
+		}
+	}
+}

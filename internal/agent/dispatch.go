@@ -1267,14 +1267,22 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// outside an engine) finds nil and says so rather than writing into a list nothing renders.
 	ctx = tasklist.WithList(ctx, a.tasks)
 
-	// The floor's own context, taken BEFORE the Confinement handle goes on: apogee's
-	// bookkeeping git is not the model's command and must never run inside the call's box. A
-	// confined snapshot would pay the re-exec wrapper twice per call — and two extra token
-	// label walks per call on Windows (ADR 0020) — for a read that changes nothing, and a
-	// backend that could not establish the box would turn the floor's silent skip into the D4
-	// demote signal, gating a call on apogee's own bookkeeping. Cancellation still reaches it:
-	// floorCtx is the same ctx chain, so a cancelled Turn skips the check, per contract.
-	floorCtx := ctx
+	// The floor's own context, stripped of any Confinement handle — executeRun installs one
+	// for confineChildren Runs before this point, so taking ctx as it stands is not enough:
+	// apogee's bookkeeping git (`MarkPre`, `tree.beforeCall`, `mutationWarning`) is never the
+	// model's command and must never run inside the call's box. Inside it, the snapshot
+	// store's own index (`GIT_INDEX_FILE=<store>/index`, outside the box) is unwritable
+	// (`index.lock: Permission denied` on every confined Auto write — apogee-y72), a confined
+	// snapshot would pay the re-exec
+	// wrapper twice per call — and two extra token label walks per call on Windows
+	// (ADR 0020) — for a read that changes nothing, and a backend that could not establish
+	// the box would turn the floor's silent skip into the D4 demote signal, gating a call on
+	// apogee's own bookkeeping. Stripping the handle also narrows the bookkeeping git's exec
+	// fence (gitexec.Resolve → security.ResolveProgram) from the box to the workspace root
+	// alone — identical to what the Confine (box != nil) path below has always done, so the
+	// narrowing is intended, not a regression. Cancellation still reaches it: floorCtx is the
+	// same ctx chain, so a cancelled Turn skips the check, per contract.
+	floorCtx := domain.WithoutConfinement(ctx)
 
 	if box != nil {
 		// Install the Confinement handle so the subprocess tool confines the command it

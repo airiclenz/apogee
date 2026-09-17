@@ -89,6 +89,40 @@ func TestSubprocessPermitAndConfinementAreDistinctKeys(t *testing.T) {
 	}
 }
 
+// TestWithoutConfinementHidesTheHandle pins the seam the dispatch's bookkeeping git rides: a
+// handle an outer scope installed is invisible below WithoutConfinement, a context that never
+// carried one is unchanged, and cancellation still flows from the parent — the stripped context
+// is the same chain, not a detached one.
+func TestWithoutConfinementHidesTheHandle(t *testing.T) {
+	t.Parallel()
+
+	box := ConfinementBox{WorkspaceRoot: "/work/space"}
+	parent, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	confined := WithConfinement(parent, Confinement{Box: box})
+	stripped := WithoutConfinement(confined)
+
+	if _, ok := ConfinementFromContext(confined); !ok {
+		t.Fatal("the installed handle was not visible before stripping")
+	}
+	if conf, ok := ConfinementFromContext(stripped); ok {
+		t.Errorf("ConfinementFromContext(stripped) = %+v, ok = true; want ok = false", conf)
+	}
+	if _, ok := ConfinementFromContext(WithoutConfinement(parent)); ok {
+		t.Error("stripping a context that never carried a handle made one appear")
+	}
+	if stripped.Done() != parent.Done() {
+		t.Error("the stripped context's Done() is not the parent's; cancellation must still flow")
+	}
+
+	cancel()
+
+	if stripped.Err() == nil {
+		t.Error("the parent's cancellation did not reach the stripped context")
+	}
+}
+
 // TestWriteEscapePermitFrom walks the write-escape seam's whole contract: a granted target rides a
 // context intact, a bare context reports absent, and a permit with no target is never present —
 // including when it shadows a granted one, so an inner scope cannot inherit an escape.
