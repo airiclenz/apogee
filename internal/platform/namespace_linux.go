@@ -44,12 +44,15 @@ import (
 // The box bounds where a confined child may WRITE. `--ro-bind / /` makes the whole
 // filesystem read-only, then each writable root is bound read-write over itself, so a
 // write outside the box fails with EROFS — the errno the kill-on-denial signature
-// (denialkill.go) recognises. The write-exempt set is bwrap's minimal `--dev /dev`: null,
-// zero, full, random, urandom, tty, ptmx, a fresh devpts at /dev/pts, a private tmpfs at
-// /dev/shm, and the child's own controlling terminal at /dev/console. Each node is either
-// side-effect-free (a sink, a source, a private scratch mount) or the terminal the child
-// already owns, so the exemption widens nothing the box protects — wider than landlock's
-// exact-/dev/null set, and the contract's §2.3 property 2 names this backend's set.
+// (denialkill.go) recognises. The write-exempt set is bwrap's minimal `--dev /dev` — defined
+// by bwrap and named by reference, not enumerated here. A live run shows the nodes null, zero,
+// full, random, urandom, tty; the symlinks ptmx, fd, core and stdin/stdout/stderr into the
+// child's own /proc view; a fresh devpts at /dev/pts; a private tmpfs at /dev/shm; and, only
+// when bwrap holds a controlling terminal, that terminal at /dev/console. Each entry is
+// side-effect-free (a sink, a source, a private scratch mount), a /proc symlink, or the
+// terminal the child already owns, so the exemption widens nothing the box protects — wider
+// than landlock's exact-/dev/null set, and the contract's §2.3 property 2 names this
+// backend's set.
 // `--proc /proc` mounts a fresh procfs so the child sees its own process tree.
 //
 // What passes through untouched: cwd (bwrap chdir's to the parent's directory, which the

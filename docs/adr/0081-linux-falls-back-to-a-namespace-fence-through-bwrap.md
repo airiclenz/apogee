@@ -75,12 +75,14 @@ bwrap --ro-bind / / --dev /dev --proc /proc --die-with-parent [--unshare-net]
 
 - `--ro-bind / /` — the whole filesystem, read-only: deny-default for writes; reads and exec stay
   open, because the box bounds where a confined child may **write**, like every other backend.
-- `--dev /dev` — bwrap's minimal device set (`null`, `zero`, `full`, `random`, `urandom`, `tty`,
-  `ptmx`, a fresh `devpts`, a private `tmpfs` at `/dev/shm`, the child's own controlling terminal at
-  `/dev/console`). This is the backend's **write-exempt set** — wider than landlock's and seatbelt's
-  exact `/dev/null`, and the contract's §2.3 property 2 is amended to say so. Each node is either
-  side-effect-free (a sink, a source, a private scratch mount) or the terminal the child already
-  owns, so the exemption widens nothing the box protects.
+- `--dev /dev` — bwrap's minimal device set, defined by bwrap and named by reference. A live run
+  shows the nodes `null`, `zero`, `full`, `random`, `urandom`, `tty`; the symlinks `ptmx`, `fd`,
+  `core` and `stdin`/`stdout`/`stderr` into the child's own `/proc` view; a fresh `devpts`; a
+  private `tmpfs` at `/dev/shm`; and, only when bwrap holds a controlling terminal, that terminal at
+  `/dev/console`. This is the backend's **write-exempt set** — wider than landlock's and seatbelt's
+  exact `/dev/null`, and the contract's §2.3 property 2 is amended to say so. Each entry is either
+  side-effect-free (a sink, a source, a private scratch mount), a `/proc` symlink, or the terminal
+  the child already owns, so the exemption widens nothing the box protects.
 - `--proc /proc` — a fresh procfs, so the child sees its own process tree.
 - `--die-with-parent` — the kernel delivers `SIGKILL` to the child the moment `bwrap` dies. Together
   with `Setpgid` (bwrap and its child share the process group the execution tool kills by negative

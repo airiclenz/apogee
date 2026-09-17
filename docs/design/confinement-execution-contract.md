@@ -249,12 +249,16 @@ Three properties of the exemption are contract, not incident:
    there — `/dev/tty`, `/dev/zero`, `/dev/stdout` and the rest stay fenced. Extending the set is a
    change to *this contract*, not a backend detail — and this is that change, once: *(amended
    2026-09-17, ADR 0081)* **the namespace backend's write-exempt set is bwrap's minimal `--dev /dev`
-   device set** — `null`, `zero`, `full`, `random`, `urandom`, `tty`, `ptmx`, a fresh `devpts` at
-   `/dev/pts`, a private `tmpfs` at `/dev/shm`, and the child's own controlling terminal at
-   `/dev/console`. Each node is either side-effect-free (a sink, a source, a private scratch mount) or
-   the terminal the child already owns, so the wider set widens nothing the box protects; it is still
-   backend-level (property 1 holds — nothing is synthesised into the box) and any further widening
-   is again a change to this contract.
+   device set** — the set is defined by bwrap, named here by reference, not enumerated by this
+   contract. A live run (bwrap 0.12, 2026-09-17) shows the device nodes `null`, `zero`, `full`,
+   `random`, `urandom`, `tty`; the symlinks `ptmx` → `pts/ptmx`, `fd` → `/proc/self/fd`, `core` →
+   `/proc/kcore` and `stdin`/`stdout`/`stderr` → `/proc/self/fd/N`; a fresh `devpts` at `/dev/pts`;
+   a private `tmpfs` at `/dev/shm`; and, only when bwrap itself holds a controlling terminal, that
+   terminal at `/dev/console`. Each entry is either side-effect-free (a sink, a source, a private
+   scratch mount), a symlink into the child's own `/proc` view, or the terminal the child already
+   owns, so the wider set widens nothing the box protects; it is still backend-level (property 1
+   holds — nothing is synthesised into the box) and any further widening is again a change to this
+   contract.
 3. **Reads are untouched.** No backend fences reads (landlock never handles read; the seatbelt
    profile denies only `file-write*`; the namespace backend's `--ro-bind / /` leaves reads and exec
    open), so device *reads* were never gated and the exemption changes
