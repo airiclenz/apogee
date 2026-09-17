@@ -207,7 +207,11 @@ NOTES (2026-09-17): the `--endpoint` flag help now reads "(nothing is sent witho
 
 **Commit:** `feat(probe): --live measures the Turn-1 prompt tokens and the armed-Reactions delta`
 
-## 7. Manual and index
+## 7. Manual and index — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): `cmd/apogee/probe.go` not edited — the `newProbeCommand` doc comment already carries the fifth-subject (`apogee probe context`) paragraph, landed with item 5 (91d343bf); no count remained to bump.
+NOTES (2026-09-17): no doc guard pins the manual's probe subcommand list (`cmd/apogee/docs_*_test.go` mentions probe.md only in a comment), so `docs_probe_test.go` was not created; the "All four reports" sentence in probe.md became "All five reports" as part of the same edit.
+NOTES (2026-09-17): the sample output is the real `apogee probe context` output against an empty workspace and home (no `context files` row), not the item-5 golden fixture.
 
 **What:** Depends on items 5 and 6. `docs/manual/probe.md`: a `probe context` paragraph (the page has no `##` headings — one H1 and prose subjects) placed after the `probe config` block and before **When a frame comes out wrong** — what the table means, the `~` estimate vs measured distinction, `--live` costs one request (two when Reactions are armed) per ADR 0021, the sample output from item 5, and that the number is the same number a headless run in the same mode reports on `run_finished.context_cost`. `cmd/apogee/probe.go`: bump the `newProbeCommand` doc comment's subject count. `docs/manual/README.md`: the probe row mentions `context`. `docs/manual/configuration.md`: the `APOGEE_BYPASS` paragraph gains one sentence — on a stock install the Turn-1 request is identical with and without Bypass, and `apogee probe context --live` shows the delta once Reactions are armed. Any doc guard that pins the manual's probe subcommand list to `newProbeCommand()` (grep `cmd/apogee/docs_*_test.go` for `probe`) is updated in the same item.
 

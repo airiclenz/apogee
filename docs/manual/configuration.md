@@ -307,7 +307,11 @@ while the Floor guards and the structural reducers stay on
 **gate** Reactions keep running too, because they change nothing the floor measures: a run under
 Bypass still fires your observe Reactions and still asks before it acts. On a stock install that
 changes nothing you can see, since nothing of user or bench origin is armed — the switch is the
-bench's control arm, and it earns its keep the moment a Driver arms Reactions of its own.
+bench's control arm, and it earns its keep the moment a Driver arms Reactions of its own. The
+Turn-1 request itself is identical with and without Bypass on a stock install, and
+`apogee probe context --live` shows the delta once Reactions are armed — it sends the same fixed
+request twice, as configured and under Bypass, and prints what the armed Reactions added
+([`apogee probe`](probe.md)).
 Bypass is the honest "model-shaping Reactions off" floor an armed Reaction is measured against on the
 bench ([ADR 0006](../adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), and it is the very code
 path you can run yourself. What it never touches is the agent's structure and its floor — context

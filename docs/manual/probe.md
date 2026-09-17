@@ -119,7 +119,46 @@ resolved
   ...
 ```
 
-All four reports are printed with terminal control characters and bidi overrides removed: a
+`apogee probe context` is the fifth subject, free like the host report by default: it answers
+"what does apogee itself put in front of the model at Turn 1?" — the **Context cost** of
+`CONTEXT.md`, [ADR 0079](../adr/0079-context-cost-is-a-first-class-engine-report.md). It
+composes the configuration a session on this host would start with, under the mode the session
+would start in (`--mode` picks another — the mode matters, since Plan filters the tool menu and
+adds a bullet to the orientation), constructs an idle agent from it and reads what that agent
+would send before your first message: one row per piece — the system prompt, the orientation
+block, the workspace context files when the tree has any, the tool menu (or the tool-instruction
+block on a profile without native tool calling) — with its bytes and its tokens, and a total. The
+bytes are exact; the tokens are an **estimate** through the default chars-per-token ratio, which
+is why every token figure is spelled with a `~` and the header names the ratio. Nothing is sent
+and nothing is written. The total is the same number a headless run in the same mode reports on
+`run_finished.context_cost` — the probe reads the engine's own report off an agent built the way
+`apogee headless` builds one, so the two cannot disagree. It takes `--endpoint`, `--model`,
+`--mode`, `--workspace` and `--config`.
+
+```console
+$ apogee probe context
+Context cost — what apogee puts in front of the model at Turn 1 (mode ask-before; estimate, ~4.0 chars/token)
+  prompt              2,457 B   ~615
+  orientation           658 B   ~165
+  tool menu          23,850 B  ~5963
+  total              26,965 B  ~6742
+```
+
+`--live` is the paid side of the same report, and like `probe model` it is an explicit act
+([ADR 0021](../adr/0021-probe-is-two-halves-the-host-report-is-free-the-model-battery-is-an-explicit-act.md)): it sends **one** fixed one-word request
+(`Reply with the single word OK.`, the reply capped at 8 tokens) to the configured endpoint and
+adds a `measured` column — the server's own `prompt_tokens` for that Turn 1, with the share it
+answered from its prefix cache in brackets when it reported one — while the estimate rows are
+re-rendered through the ratio that measurement calibrated, which the header then labels
+`calibrated`. It says so on stderr before the call, and it still writes nothing. Advise and shape
+Reactions add their directives only once a request is in flight, so an idle estimate cannot see
+them: with none armed the table ends on the total row; with one or more armed the offline report
+adds a line saying so, and `--live` sends **twice** — as configured, then under Bypass — and
+prints both counts as `as configured` and `bypass` columns, with the line `Reactions add N tokens
+at Turn 1` stating their difference. On a stock install nothing is armed, so `--live` costs one
+request.
+
+All five reports are printed with terminal control characters and bidi overrides removed: a
 server you are probing *because* you distrust it — a terminal that answers the measurement
 with escape sequences, or a config file whose text the report quotes — must not be able to
 repaint the diagnostic that judges it.
