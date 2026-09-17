@@ -877,29 +877,18 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 // CONFIGURED rows alone: only when neither the rendered prompt template nor the workspace context
 // files' blocks render anything is the result "" and nothing seeded at all (the no-prompt-AND-no-
 // context-files native anchor), and that check is taken BEFORE any ride-along row is asked to
-// render — the ride-along rule the table's ridesAlong column states.
+// render — the ride-along rule the table's ridesAlong column states. The walk itself is
+// standingRenders, shared with ContextCost (contextcost.go) so the report counts exactly the
+// blocks the request carries.
 func (a *Agent) standingSystem() string {
-	rows := standingBlocks()
-	rendered := make([]string, len(rows))
-	seeded := false
-	for i, row := range rows {
-		if row.ridesAlong {
-			continue
-		}
-		rendered[i] = row.render(a)
-		seeded = seeded || rendered[i] != ""
-	}
-	if !seeded {
+	rows := a.standingRenders()
+	if rows == nil {
 		return ""
 	}
-
 	parts := make([]string, 0, len(rows))
-	for i, row := range rows {
-		if row.ridesAlong {
-			rendered[i] = row.render(a)
-		}
-		if rendered[i] != "" {
-			parts = append(parts, rendered[i])
+	for _, row := range rows {
+		if row.rendered != "" {
+			parts = append(parts, row.rendered)
 		}
 	}
 	return strings.Join(parts, "\n\n")

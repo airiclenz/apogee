@@ -121,6 +121,12 @@ func (e *TokenEstimator) CharsPerToken() float64 { return e.charsPerToken }
 // context fill. It is 0 until the first Calibrate with a positive token count.
 func (e *TokenEstimator) Used() int { return e.used }
 
+// Calibrated reports whether a server usage report has been folded in — the same "Used > 0"
+// reading the loop's predictive guard takes when it widens its margin on an uncalibrated
+// estimate. False until the first Calibrate with a positive token count, so a consumer can label
+// a number computed through the default ratio as the estimate it is.
+func (e *TokenEstimator) Calibrated() bool { return e.used > 0 }
+
 // EstimateTokens converts a character count to a token estimate through the current ratio,
 // delegating the rounding to the single domain implementation (domain.Budget.EstimateTokens —
 // ceil, so a part is never estimated to fit when it is one token over). A non-positive ratio

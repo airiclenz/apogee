@@ -156,6 +156,15 @@ type ContextFilesReport = domain.ContextFilesReport
 // size loaded or the reason a present file could not be read.
 type ContextFileNote = domain.ContextFileNote
 
+// ContextCost is what apogee itself puts in front of the model at Turn 1 — the standing system
+// content piece by piece and the tool surface, with bytes and a token estimate per row and in
+// total — the read-only report Agent.ContextCost returns for a Driver to surface (ADR 0079).
+type ContextCost = domain.ContextCost
+
+// ContextCostRow is one piece of that report: its name, the bytes apogee sends for it and the
+// token estimate those bytes come to.
+type ContextCostRow = domain.ContextCostRow
+
 // ModelProfile describes how apogee EQUIPS and speaks to the configured model — three orthogonal
 // axes: its tool-call format, its inline thinking-channel style, and its tool roster (ADR 0057);
 // the host sets it via Config.Profile (a zero profile is native tool calls, no inline thinking,

@@ -65,6 +65,42 @@ func standingBlocks() []standingBlock {
 	}
 }
 
+// standingRender is one standingBlocks row together with what it rendered for this Agent — the
+// unit standingSystem joins and ContextCost counts.
+type standingRender struct {
+	name     string
+	rendered string
+}
+
+// standingRenders renders the table for this Agent under the RIDE-ALONG rule above — the two
+// configured rows first, and only when one of them rendered something the engine-owned rows —
+// and returns every row in table order, "" for a row that contributed nothing, or nil when
+// nothing seeds. It is the ONE walk of the table: standingSystem (loop.go) joins its non-empty
+// renders into the seeded message and ContextCost (contextcost.go) counts them piece by piece,
+// so the two cannot disagree on which blocks a request carries.
+func (a *Agent) standingRenders() []standingRender {
+	rows := standingBlocks()
+	rendered := make([]standingRender, len(rows))
+	seeded := false
+	for i, row := range rows {
+		rendered[i].name = row.name
+		if row.ridesAlong {
+			continue
+		}
+		rendered[i].rendered = row.render(a)
+		seeded = seeded || rendered[i].rendered != ""
+	}
+	if !seeded {
+		return nil
+	}
+	for i, row := range rows {
+		if row.ridesAlong {
+			rendered[i].rendered = row.render(a)
+		}
+	}
+	return rendered
+}
+
 // standingFences returns the CLOSED list forgesStandingStructure checks a content line against:
 // the table's fence column in row order, then the two lines of the advice fence an advise
 // Reaction's text is delivered in (domain.RenderAdvice). The advice fence is here for the same

@@ -35,6 +35,8 @@ var (
 	_ apogee.FloorConfig
 	_ apogee.ContextFilesReport
 	_ apogee.ContextFileNote
+	_ apogee.ContextCost
+	_ apogee.ContextCostRow
 	_ apogee.ModelProfile
 	_ apogee.ToolCallFormat
 	_ apogee.ThinkingProfile
