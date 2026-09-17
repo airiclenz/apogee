@@ -16,6 +16,7 @@ package main
 // has nothing to answer with under the in-process driver.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -31,6 +32,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // announcedMarker is the line the fixture skill's bundled file carries: what a read of that file
@@ -555,15 +557,20 @@ func TestE2EAnnouncedScratchDirHoldsTheToolchainCaches(t *testing.T) {
 // that cannot takes the caps-only stand-in the headless tests already use: it reports FSWrite and
 // confines nothing, which is the right trade for a fixture asserting PROMPTING. The fence itself
 // has its own suite (confinement_e2e_test.go).
-func installFenceableConfiner(t *testing.T) {
+//
+// The result says which of the two the run got — true for the host's real backend — so a caller
+// asserting on what a REAL box did to a confined command can tell a run where one was there from a
+// run where the stand-in confined nothing. Callers asserting prompting alone ignore it.
+func installFenceableConfiner(t *testing.T) (real bool) {
 	t.Helper()
 
 	if platform.NewConfiner().Capabilities().FSWrite {
-		return
+		return true
 	}
 	previous := newConfiner
 	newConfiner = func() apogee.Confiner { return fenceableHost }
 	t.Cleanup(func() { newConfiner = previous })
+	return false
 }
 
 // announcedScratchExport lifts the scratch dir back out of the command the model sent. The `\S+` is
@@ -901,8 +908,16 @@ const announcedWorkspaceCanary = "canary-9d4e.txt"
 // to name a canary file the script never mentions, and each write is read back out of the directory
 // the link resolves to. A tool that answered from the wrong root would leave those checks with
 // nothing to find.
+//
+// The tail is the undo floor over the same run (ADR 0074): the first write in a confined Auto run
+// takes its pre-image OUTSIDE the workspace box, so the settled frame paints no `undo:` error and the
+// session's journal records the exchange with a pre image. This run reproduced the `index.lock:
+// Permission denied` capture failure on every landlock host while its tool-result assertions
+// passed — the snapshot git ran inside the box the confined `cat` was meant for. Both assertions
+// need a REAL box to mean anything: where the fixture swapped in fenceableHost the bookkeeping git
+// was never confined, so the test logs that and judges the rest.
 func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
-	installFenceableConfiner(t)
+	realBox := installFenceableConfiner(t)
 
 	// The tree the project really lives in, and the name apogee is given for it.
 	tree := e2eWorkspace(t)
@@ -979,8 +994,73 @@ func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
 	}
 	stub.AssertConsumed(t)
 
+	// The undo floor: the pre-image snapshot git ran outside the box, so nothing about it reached
+	// the screen. Read before the quit — that is the frame the human was left looking at.
+	frame := drv.Frame().String()
+
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)
+	}
+
+	if !realBox {
+		t.Logf("the box was fenceableHost, which confines nothing: the undo-line and journal " +
+			"assertions are skipped — they mean something only where a real box could have " +
+			"caught the snapshot git")
+		return
+	}
+	for _, needle := range []string{"Permission denied", "undo:"} {
+		if strings.Contains(frame, needle) {
+			t.Errorf("the settled frame holds %q; a confined write must take its pre-image "+
+				"outside the box and paint no undo error:\n%s", needle, frame)
+		}
+	}
+	assertJournaledPreImage(t, sess.home)
+}
+
+// assertJournaledPreImage reads the one session journal a driven run left under home and requires
+// it to hold exactly one exchange with a pre image: the capture the first confined write took
+// before it landed. The driven run exposes no session id, so the store is found by its shape —
+// `snapshots/<session>/journal.json` (internal/snapshot) — and a run that opened two stores or
+// none is a failure of its own.
+//
+// The journal is written when the exchange closes, which the engine does after its reply is on
+// screen, so the read waits for the file rather than assuming the settled frame meant a closed
+// exchange.
+func assertJournaledPreImage(t *testing.T, home string) {
+	t.Helper()
+
+	pattern := filepath.Join(home, "snapshots", "*", "journal.json")
+	var matches []string
+	deadline := time.Now().Add(tuitest.DefaultTimeout)
+	for {
+		var err error
+		if matches, err = filepath.Glob(pattern); err != nil {
+			t.Fatalf("glob %s: %v", pattern, err)
+		}
+		if len(matches) > 0 || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(matches) != 1 {
+		t.Fatalf("the run left %d journal(s) under %s; want exactly one: %v",
+			len(matches), pattern, matches)
+	}
+
+	data, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatalf("read the session journal: %v", err)
+	}
+	var index undo.Index
+	if err := json.Unmarshal(data, &index); err != nil {
+		t.Fatalf("decode the session journal %s: %v\n%s", matches[0], err, data)
+	}
+	if len(index.Groups) != 1 {
+		t.Fatalf("the journal records %d exchange(s); want the run's one:\n%s", len(index.Groups), data)
+	}
+	if index.Groups[0].Pre == "" {
+		t.Errorf("the journal's exchange has no pre image; the first confined write must have "+
+			"captured one:\n%s", data)
 	}
 }
 
