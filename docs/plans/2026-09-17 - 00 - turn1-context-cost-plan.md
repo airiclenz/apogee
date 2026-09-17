@@ -97,7 +97,11 @@ Binding standards: no new render paths — `ContextCost()` reads the same `stand
 
 **Commit:** `feat(agent): ContextCost reports the Turn-1 standing content and tool menu per piece`
 
-## 3. Golden tripwire on injected bytes
+## 3. Golden tripwire on injected bytes — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): the negative check compares the one-byte-tampered temp-workspace render against the untampered fixture's in-process render rather than the golden file — the two are equal by TestContextCostGolden, and reading the file races its rewrite under `-update` (both tests are parallel).
+NOTES (2026-09-17): the tampered byte is inserted ahead of the fixture's trailing newline (`TrimSuffix "\n" + "x\n"`) because the context block renders the file trimmed — a byte appended after the newline counts as two.
+NOTES (2026-09-17): the standing rows' bytes are counted over `standingRenders()` text normalised to `<ws>`/`<scratch>`; the tool-menu row is taken as `ContextCost()` reports it (the negative check, run from a temp workspace, proves that row carries no path). `cfg.Mode` is set to `ModeAskBefore` explicitly — a zero Mode would render `{{mode}}` empty.
 
 **What:** Depends on item 2. Add `internal/agent/contextcost_golden_test.go` + `internal/agent/testdata/contextcost.golden`: build an Agent from `baseConfig` with the embedded default prompt (`config.DefaultSystemPrompt()`), the default roster (`tools.NewDefaultRegistryWithHost` as `defaultRoster` builds it), a fixture workspace under `testdata/contextcost-ws/` holding one `AGENTS.md`, native profile, depth 0, Plan mode off. Render `ContextCost()` and compare `Name` + `Bytes` per row against the golden as `name<TAB>bytes` lines. Normalise before comparing: the fixture's absolute workspace and scratch paths are substituted by the literals `<ws>` and `<scratch>` in the rendered prompt and orientation text before their bytes are counted (count the normalised text, not the live one), so the golden is machine-independent. `-update` flag rewrites the golden. The failure message names the row that moved and says the golden is updated deliberately with `go test ./internal/agent -run TestContextCostGolden -update`.
 
