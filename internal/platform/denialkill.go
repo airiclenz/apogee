@@ -9,31 +9,41 @@ import (
 )
 
 // denialLinePattern is the line-anchored OS-denial signature the confined-run watch and
-// the terminal's result label share (amended 2026-09-16, ADR 0056 D2): a LINE — its
-// trailing " \t\r" trimmed — ends in strerror(EPERM) ("Operation not permitted", what
-// seatbelt denials print on macOS) or strerror(EACCES) ("Permission denied", what landlock
-// denials print on Linux — its filesystem refusals are EACCES, not EPERM), in libc's
-// capitalisation or the lower-cased spelling Go's syscall.Errno prints, followed by one of
-// the tails the common toolchains append: nothing; Java's `)`; Rust's ` (os error N)`;
-// rsync's ` (N)`; Python's `: '<path>'` / `: "<path>"` (anything to the end of the line, so
-// its two-path `'/a' -> '/b'` counts); Perl's ` at <file> line N.`. The anchoring is the
-// point: a line that merely CONTAINS the phrase mid-sentence (`permission denied for user x`,
-// a quoted log line, a commit message) is not a denial. A signature-free denial (curl's
-// exit 23, useradd) is a documented miss. The spellings are POSIX by design — the Windows
-// token backend's denials print "Access is denied.", which is deliberately not matched: the
-// Windows terminal path has no fail-fast floor either (see FailFastPreamble). Best-effort
-// by design — strerror text is locale-dependent, and a missed match costs nothing (the
-// model still sees the non-zero exit).
+// the terminal's result label share (amended 2026-09-16 and 2026-09-17, ADR 0056 D2): a
+// LINE — its trailing " \t\r" trimmed — ends in strerror(EPERM) ("Operation not permitted",
+// what seatbelt denials print on macOS), strerror(EACCES) ("Permission denied", what landlock
+// denials print on Linux — its filesystem refusals are EACCES, not EPERM) or strerror(EROFS)
+// ("Read-only file system", what the Linux namespace backend prints: its fence is a
+// read-only bind of `/` with the box's roots bound writable over it, so an out-of-box create
+// or truncate fails with EROFS rather than a permission errno), in libc's capitalisation or
+// the lower-cased spelling Go's syscall.Errno prints, followed by one of the tails the common
+// toolchains append: nothing; Java's `)`; Rust's ` (os error N)`; rsync's ` (N)`; Python's
+// `: '<path>'` / `: "<path>"` (anything to the end of the line, so its two-path
+// `'/a' -> '/b'` counts); Perl's ` at <file> line N.`. The anchoring is the point: a line
+// that merely CONTAINS the phrase mid-sentence (`permission denied for user x`, `the
+// read-only file system was mounted earlier`, a quoted log line, a commit message) is not a
+// denial. A signature-free denial (curl's exit 23, useradd) is a documented miss. The EROFS
+// spelling is not keyed to a backend: a landlock- or seatbelt-confined run that writes to a
+// genuinely read-only mount (a squashfs, a `ro` bind) is now stopped as a denial too —
+// intended, since inside a confined run that write was never going to land either. The
+// spellings are POSIX by design — the Windows token backend's denials print "Access is
+// denied.", which is deliberately not matched: the Windows terminal path has no fail-fast
+// floor either (see FailFastPreamble). Best-effort by design — strerror text is
+// locale-dependent, and a missed match costs nothing (the model still sees the non-zero
+// exit).
 var denialLinePattern = regexp.MustCompile(
-	`(?:[Pp]ermission denied|[Oo]peration not permitted)` +
+	`(?:[Pp]ermission denied|[Oo]peration not permitted|[Rr]ead-only file system)` +
 		`(?:\)|\s\(os error \d+\)|\s\(\d+\)|: ['"].*|\sat \S+ line \d+\.?)?$`,
 )
 
 // denialErrnoPattern is the second half of the signature: the bare errno names toolchains
-// emit (Node's `Error: EACCES: permission denied, open '/x'`, Ruby's `Errno::EACCES`, a
+// emit (Node's `Error: EACCES: permission denied, open '/x'` or its
+// `Error: EROFS: read-only file system, mkdir '/x'` twin, Ruby's `Errno::EACCES`, a
 // `write failed: EPERM` at the line's end), bounded on both sides by a non-alphanumeric byte
-// or the line's start or end, so an identifier that merely embeds the letters does not match.
-var denialErrnoPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9])(?:EACCES|EPERM)(?:[^A-Za-z0-9]|$)`)
+// or the line's start or end, so an identifier that merely embeds the letters
+// (`MYEPERMISSION=1`, `MYEROFSFLAG=1`) does not match. EROFS joined EACCES and EPERM on
+// 2026-09-17 for the namespace backend's read-only-root fence (see denialLinePattern).
+var denialErrnoPattern = regexp.MustCompile(`(?:^|[^A-Za-z0-9])(?:EACCES|EPERM|EROFS)(?:[^A-Za-z0-9]|$)`)
 
 // denialLineTrim is what a line sheds before the anchored match: the CR a PTY appends and
 // trailing blanks, so `mkdir: Permission denied\r\n` off a Console matches like its pipe twin.

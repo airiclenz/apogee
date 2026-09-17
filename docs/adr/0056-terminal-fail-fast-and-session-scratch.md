@@ -92,6 +92,20 @@ writes (capped at 4 KiB) so a line split across pipe chunks — inside the phras
 long allowed tail — still matches. Signature-free denials (curl's exit 23, `useradd`) remain
 the documented miss; the watch is still best-effort in both directions.
 
+*Amended (2026-09-17, namespace confiner backend):* the signature learns a **third spelling**.
+Linux's second backend — user + mount namespaces through `bwrap`, selected where landlock is
+absent — fences with a read-only bind of `/` and the box's roots bound writable over it, so an
+out-of-box create or truncate fails with **EROFS**, not a permission errno, and the escape
+battery's `chained_script_clobber_denied` probe could never stop under it. The line-anchored
+half now also matches `Read-only file system` (libc) / `read-only file system` (Go) with the
+same tails, and the bounded-errno half matches `EROFS` (Node's
+`Error: EROFS: read-only file system, mkdir '/x'`, a `write failed: EROFS`); every anchor and
+tail rule is unchanged, so `the read-only file system was mounted earlier` and
+`MYEROFSFLAG=1` still do not match. The spelling is not keyed to a backend: a landlock- or
+seatbelt-confined run that writes to a genuinely read-only mount (a squashfs, a `ro` bind) is
+now stopped as a denial too — intended, since inside a confined run that write was never
+going to land either.
+
 **3. Every session gets a scratch dir inside the confinement box.** A new dotdir root
 `~/.apogee/scratch/<session-id>/` (sibling of `sessions/`, `library/`, …), created `0700`
 when the session id is minted and **following the active session** across rotation;

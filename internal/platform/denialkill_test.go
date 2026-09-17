@@ -16,10 +16,11 @@ func newProbeDenialKiller(next io.Writer, kill func()) confinetest.DenialKiller 
 }
 
 // TestLooksLikeConfinementDenial pins the line-anchored signature match the confined-run
-// watch and the terminal's result label share: every documented denial spelling matches at a
-// line's end — with each toolchain's allowed tail, a CR-terminated line and a final
-// newline-less line included — a bounded errno name matches anywhere on the line, and a line
-// that merely contains the phrase mid-sentence does not.
+// watch and the terminal's result label share: every documented denial spelling — EPERM's,
+// EACCES's and, since 2026-09-17, EROFS's — matches at a line's end — with each toolchain's
+// allowed tail, a CR-terminated line and a final newline-less line included — a bounded
+// errno name matches anywhere on the line, and a line that merely contains the phrase
+// mid-sentence does not.
 func TestLooksLikeConfinementDenial(t *testing.T) {
 	t.Parallel()
 
@@ -34,6 +35,12 @@ func TestLooksLikeConfinementDenial(t *testing.T) {
 		{"libc strerror EACCES (landlock)", "mkdir: cannot create directory '/tmp/srtest': Permission denied", true},
 		{"Go errno text EACCES", "open /etc/f: permission denied", true},
 		{"bare errno name EACCES", "write failed: EACCES", true},
+		{"libc strerror EROFS (namespace)", "mkdir: cannot create directory '/tmp/srtest': Read-only file system", true},
+		{"libc strerror EROFS with coreutils' Unicode quotes", "mkdir: cannot create directory ‘/tmp/srtest’: Read-only file system", true},
+		{"Go errno text EROFS", "open /etc/f: read-only file system", true},
+		{"python OSError EROFS", "OSError: [Errno 30] Read-only file system: '/x'", true},
+		{"node errno prefix EROFS", "Error: EROFS: read-only file system, mkdir '/x'", true},
+		{"bare errno name EROFS", "write failed: EROFS", true},
 		{"libc capitalised at line end", "open /etc/x: Permission denied", true},
 		{"python PermissionError", "PermissionError: [Errno 13] Permission denied: '/etc/x'", true},
 		{"python os.rename two paths", "PermissionError: [Errno 13] Permission denied: '/a' -> '/b'", true},
@@ -47,7 +54,9 @@ func TestLooksLikeConfinementDenial(t *testing.T) {
 		{"final newline-less line after clean lines", "building...\nopen /dev/ptmx: permission denied", true},
 		{"phrase mid-sentence", "permission denied for user x", false},
 		{"phrase followed by prose", "note: permission denied earlier", false},
+		{"read-only phrase mid-sentence", "the read-only file system was mounted earlier", false},
 		{"errno letters inside an identifier", "MYEPERMISSION=1", false},
+		{"EROFS letters inside an identifier", "MYEROFSFLAG=1", false},
 		{"unrelated failure", "no such file or directory", false},
 		{"windows access denied deliberately unmatched", "Access is denied.", false},
 		{"empty", "", false},
@@ -103,6 +112,7 @@ func TestDenialKillWriterMatchesAcrossWriteBoundary(t *testing.T) {
 	}{
 		{"split inside the signature", "mkdir: x: Operation not per", "mitted\n"},
 		{"split inside a long allowed tail", "PermissionError: [Errno 13] Permission denied: '/etc/some/long/pa", "th'\n"},
+		{"split inside the read-only signature", "mkdir: cannot create directory '/x': Read-only file sys", "tem\n"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

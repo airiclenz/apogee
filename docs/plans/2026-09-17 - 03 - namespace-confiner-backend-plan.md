@@ -70,7 +70,8 @@ NOTES (2026-09-17): TestLandlockProbe/ProbeNetwork/AllowsDevNull/ResidualsMatchH
 **Acceptance:** `go build ./... && go test ./internal/platform/ -p 2 -parallel 2 -run 'Landlock'`
 **Commit:** `feat(platform): landlock discloses the errno that made it unavailable`
 
-## 3. The kill-on-denial signature learns EROFS
+## 3. The kill-on-denial signature learns EROFS — ✅ DONE (2026-09-17)
+NOTES (2026-09-17): race evidence deferred: no-TSan host
 
 **What:** A mount-namespace fence denies out-of-box creates and truncates with `EROFS` (`Read-only file system`), which `denialLinePattern` / `denialErrnoPattern` (`internal/platform/denialkill.go`) do not match, so battery row #11 (`chained_script_clobber_denied`) cannot pass for the new backend. Extend `denialLinePattern`'s phrase alternation with `[Rr]ead-only file system` (libc `Read-only file system`, Go's `read-only file system`) and `denialErrnoPattern` with `EROFS`; keep every tail and anchor rule as is. Rewrite the pattern comments to name the third spelling and which backend prints it (ADR 0056 D2 amended by this item).
 **Regression guard.** `TestLooksLikeConfinementDenial` also gains the coreutils Unicode-quoted spelling `mkdir: cannot create directory ‘/tmp/srtest’: Read-only file system` → true (the phrase ends the line; the quotes precede it), and the pattern comment states in one sentence that the wider signature now also kills a landlock/seatbelt-confined run that hits a genuinely read-only mount (squashfs, ro bind) — intended. The "ADR 0056 D2 amended by this item" sentence lands nowhere today (`docs/adr/0056-terminal-fail-fast-and-session-scratch.md` lines 58–88 still record the signature as EACCES/EPERM only, and item 8's Files omit that ADR): add it to this item's Files with a dated amendment note at D2 — the third spelling, EROFS, and which backend prints it.
