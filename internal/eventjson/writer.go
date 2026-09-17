@@ -249,10 +249,17 @@ type RunFinished struct {
 	FinalText    string          `json:"final_text"`
 	Wrote        []string        `json:"wrote"`
 	ContextFiles ContextFiles    `json:"context_files"`
+	ContextCost  ContextCost     `json:"context_cost"`
 	UndoNote     string          `json:"undo_note"`
 	Saved        bool            `json:"saved"`
 	Usage        Usage           `json:"usage"`
 	SubAgents    []SubAgentUsage `json:"sub_agents"`
+	// Turn1PromptTokens and Turn1CachedPromptTokens are the MEASURED Turn-1 context: what the
+	// server charged for the run's first Depth-0 call, beside ContextCost's estimate of the same
+	// content (ADR 0079). Both are 0 on a run that never reached its first call or whose server
+	// reported no usage, so a consumer reads `turns` before treating a zero as a cost.
+	Turn1PromptTokens       int `json:"turn1_prompt_tokens"`
+	Turn1CachedPromptTokens int `json:"turn1_cached_prompt_tokens"`
 }
 
 // ContextFiles mirrors domain.ContextFilesReport: what the session's workspace context files
@@ -261,6 +268,28 @@ type ContextFiles struct {
 	Files          []ContextFileNote `json:"files"`
 	StandingTokens int               `json:"standing_tokens"`
 	SystemShare    int               `json:"system_share"`
+}
+
+// ContextCost mirrors domain.ContextCost (ADR 0079): what apogee itself put in front of the model
+// at Turn 1 — the standing system content and the tool surface — one row per piece in wire order,
+// the total bytes, and the token estimate over that total. Calibrated says whether the estimate's
+// chars→token ratio had been folded toward a server's own count when the report was taken; it is
+// taken idle, after construction and before the first Step, so on a headless run it is false and
+// the number is an estimate a consumer labels `~`. It is a value rather than a pointer so a run
+// that never constructed an Agent carries it zero-valued, exactly as context_files does.
+type ContextCost struct {
+	Rows       []ContextCostRow `json:"rows"`
+	Bytes      int              `json:"bytes"`
+	Tokens     int              `json:"tokens"`
+	Calibrated bool             `json:"calibrated"`
+}
+
+// ContextCostRow mirrors domain.ContextCostRow: one piece of the Turn-1 context by name, the bytes
+// apogee sends for it, and the token estimate over those bytes.
+type ContextCostRow struct {
+	Name   string `json:"name"`
+	Bytes  int    `json:"bytes"`
+	Tokens int    `json:"tokens"`
 }
 
 // ContextFileNote mirrors domain.ContextFileNote: one file's line of the session notice. Exactly

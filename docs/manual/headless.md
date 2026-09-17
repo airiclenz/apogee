@@ -104,6 +104,13 @@ A server that reports how much of a prompt it answered from its own prefix cache
 `· cached 12k` column to that agent's line — a subset of the prompt count, never a
 replacement for it; a server that says nothing about caching leaves the column off rather
 than printing a zero that would read as a cache miss.
+Below the usage lines comes what apogee itself put in front of the model at Turn 1, before
+the prompt: `context cost: ~812 tokens (prompt 640 · orientation 90 · tool menu 82)` — the
+estimate over the standing system content and the tool menu, one column per piece present —
+and, once the server has counted the first call, that count leads and the estimate follows:
+`context cost: 1234 tokens measured at turn 1 (estimate ~812)`. It is the same report
+`run_finished.context_cost` carries under `--format json`; a run that never built a session
+prints no such line.
 A run that **changed files** says which — on **stderr**, like every other narration on this
 Driver, just below the answer: a
 `changed — 2 file(s) this run:` header and one indented path per file, in the order the run
@@ -232,7 +239,17 @@ binary that wrote it).
 
 `run_finished` is the whole outcome: `exit_code`, `turns`, `denied`, `faulted`, `fault`, `error`
 (the run's error text, `null` when there was none), `title`, `final_text`, `wrote`,
-`context_files`, `undo_note`, `saved`, `usage` and `sub_agents`.
+`context_files`, `context_cost`, `undo_note`, `saved`, `usage`, `sub_agents`,
+`turn1_prompt_tokens` and `turn1_cached_prompt_tokens`.
+
+`context_cost` is what apogee itself put in front of the model at Turn 1, before the prompt — the
+standing system content and the tool menu — as `rows` (one `{name, bytes, tokens}` per piece, in
+wire order), the total `bytes`, the token estimate `tokens` over that total, and `calibrated`,
+which is `false` on a headless run: the estimate is taken once the session is built and before
+anything is sent, so it is a `~` number. `turn1_prompt_tokens` and `turn1_cached_prompt_tokens`
+are the measured twin — the server's own count for the run's first call, prompt included — and
+stay `0` when the run never made one or the server reported no usage. A run refused before its
+session existed carries the zero report, `rows` `null`.
 
 The rule is **exactly one `run_finished` on every exit path** — so stdout is never empty for a
 consumer to interpret. A run refused before it started writes that frame **alone**, with the exit

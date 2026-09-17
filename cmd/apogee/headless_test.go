@@ -1543,6 +1543,64 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		}
 	})
 
+	// What apogee itself put in front of the model at Turn 1 (ADR 0079), one line below the usage
+	// lines: the estimate with its per-piece breakdown when nothing has been measured, and the
+	// server's own Turn-1 count leading the estimate once one landed. The parenthesis lists only
+	// the rows the report carries, and a Result with no rows — every stubbed run above — prints
+	// no line at all, which is the usage line's own self-hiding rule.
+	t.Run("the context cost line spells the estimate per piece", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 1,
+			ContextCost: domain.ContextCost{
+				Rows: []domain.ContextCostRow{
+					{Name: "prompt", Bytes: 2560, Tokens: 640},
+					{Name: "orientation", Bytes: 360, Tokens: 90},
+					{Name: "tool menu", Bytes: 328, Tokens: 82},
+				},
+				Bytes: 3248, Tokens: 812,
+			},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if !strings.Contains(errOut, "context cost: ~812 tokens (prompt 640 · orientation 90 · tool menu 82)\n") {
+			t.Errorf("the context cost line is missing or misspelled: %q", errOut)
+		}
+	})
+
+	t.Run("the context cost line leads with the measured count once one landed", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 1,
+			ContextCost: domain.ContextCost{
+				Rows:  []domain.ContextCostRow{{Name: "prompt", Bytes: 2560, Tokens: 640}},
+				Bytes: 2560, Tokens: 640,
+			},
+			Turn1Usage: run.Usage{Calls: 1, PromptTokens: 1234},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if !strings.Contains(errOut, "context cost: 1234 tokens measured at turn 1 (estimate ~640)\n") {
+			t.Errorf("the measured context cost line is missing or misspelled: %q", errOut)
+		}
+	})
+
+	t.Run("a run with no context cost rows prints no context cost line", func(t *testing.T) {
+		stub := &stubRunner{res: run.Result{
+			FinalText: "the answer", Turns: 1,
+			Usage: run.Usage{Calls: 1, PromptTokens: 900, CompletionTokens: 100},
+		}}
+		_, errOut, err := headlessRun(t, stub, "a prompt")
+		if err != nil {
+			t.Fatalf("headless: %v", err)
+		}
+		if strings.Contains(errOut, "context cost:") {
+			t.Errorf("a Result with no rows grew a context cost line: %q", errOut)
+		}
+	})
+
 	t.Run("terminal escapes are stripped from the answer", func(t *testing.T) {
 		stub := &stubRunner{res: run.Result{FinalText: "safe \x1b]52;c;cGF5bG9hZA==\x07 text", Turns: 1}}
 		out, _, err := headlessRun(t, stub, "a prompt")
@@ -2446,6 +2504,53 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 			t.Errorf("fault = %v; want the reason the engine reported", data["fault"])
 		}
 	})
+}
+
+// TestHeadlessFormatJSONCarriesContextCost pins where the Context cost report rides the stream
+// (ADR 0079): the closing frame's `context_cost` — the idle estimate with its per-piece rows —
+// beside `turn1_prompt_tokens` / `turn1_cached_prompt_tokens`, the server's own Turn-1 count. The
+// opening frame is untouched: it is written before the Agent that could measure anything exists,
+// so a `context_cost` there could only ever be a zero.
+func TestHeadlessFormatJSONCarriesContextCost(t *testing.T) {
+	stub := &stubRunner{res: run.Result{
+		SessionID: "s-1", FinalText: "the answer", Turns: 2,
+		ContextCost: domain.ContextCost{
+			Rows: []domain.ContextCostRow{
+				{Name: "prompt", Bytes: 2560, Tokens: 640},
+				{Name: "tool menu", Bytes: 328, Tokens: 82},
+			},
+			Bytes: 2888, Tokens: 722,
+		},
+		Turn1Usage: run.Usage{Calls: 1, PromptTokens: 1234, CachedPromptTokens: 100},
+	}}
+	out, _, err := headlessRun(t, stub, "--format", "json", "a prompt")
+	if err != nil {
+		t.Fatalf("a completed run returned an error: %v", err)
+	}
+	lines := jsonEventLines(t, out)
+	if lines[0]["event"] != "run_started" {
+		t.Fatalf("the stream opens with %v, want run_started", lines[0]["event"])
+	}
+	if started, _ := lines[0]["data"].(map[string]any); started["context_cost"] != nil {
+		t.Errorf("run_started carries context_cost = %v; the estimate rides the closing frame alone", started["context_cost"])
+	}
+	_, data := finishedFrame(t, lines)
+	cost, ok := data["context_cost"].(map[string]any)
+	if !ok {
+		t.Fatalf("run_finished.context_cost = %v, want the report block", data["context_cost"])
+	}
+	if tokens, _ := cost["tokens"].(float64); tokens != 722 {
+		t.Errorf("run_finished.context_cost.tokens = %v, want 722", cost["tokens"])
+	}
+	if rows, _ := cost["rows"].([]any); len(rows) != 2 {
+		t.Errorf("run_finished.context_cost.rows = %v, want the two rows the Result carried", cost["rows"])
+	}
+	if got, _ := data["turn1_prompt_tokens"].(float64); got != 1234 {
+		t.Errorf("run_finished.turn1_prompt_tokens = %v, want 1234", data["turn1_prompt_tokens"])
+	}
+	if got, _ := data["turn1_cached_prompt_tokens"].(float64); got != 100 {
+		t.Errorf("run_finished.turn1_cached_prompt_tokens = %v, want 100", data["turn1_cached_prompt_tokens"])
+	}
 }
 
 // --format json replaces stdout and NOTHING else: every line this command narrates in its own voice

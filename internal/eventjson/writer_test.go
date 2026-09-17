@@ -101,8 +101,10 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 			`"data":{"session":"sess-1","workspace":"/w","model":"gpt-oss-20b","server":"http://host.internal:1111","mode":"auto","bypass":false,"confined":true,"version":"0.20.9"}}`,
 		`{"event":"run_finished","v":2,"seq":4,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,` +
 			`"data":{"exit_code":0,"turns":2,"denied":0,"faulted":false,"fault":"","error":null,"title":"","final_text":"done","wrote":null,` +
-			`"context_files":{"files":null,"standing_tokens":0,"system_share":0},"undo_note":"","saved":true,` +
-			`"usage":{"calls":0,"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"cached_prompt_tokens":0},"sub_agents":null}}`,
+			`"context_files":{"files":null,"standing_tokens":0,"system_share":0},` +
+			`"context_cost":{"rows":null,"bytes":0,"tokens":0,"calibrated":false},"undo_note":"","saved":true,` +
+			`"usage":{"calls":0,"prompt_tokens":0,"completion_tokens":0,"total_tokens":0,"cached_prompt_tokens":0},"sub_agents":null,` +
+			`"turn1_prompt_tokens":0,"turn1_cached_prompt_tokens":0}}`,
 	}
 
 	got := lines(t, &out)

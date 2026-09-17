@@ -2004,6 +2004,87 @@ func TestOnceReportsTheContextFilesWhenSubmitFails(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// The Turn-1 context cost (ADR 0079)
+// ---------------------------------------------------------------------------
+
+// TestOnceReportsContextCostAndTurn1Usage is the Firing's half of the Context cost report: the
+// idle estimate taken before the first Step rides Result.ContextCost with its per-piece rows, and
+// the server's OWN Turn-1 count rides Result.Turn1Usage from the first call's per-call figures.
+// The script's two calls carry deliberately different counts, so the assertion fails on a tap that
+// kept the latest reading, summed the stream, or read the cumulative field.
+func TestOnceReportsContextCostAndTurn1Usage(t *testing.T) {
+	t.Parallel()
+
+	registry := domain.NewToolRegistry()
+	if err := registry.Register(notingTool{}); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{When: &stubllm.Match{ToolResult: "note_something"}, Text: "noted",
+			Usage: &stubllm.Usage{Prompt: 2345, Completion: 20}},
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "note_something", Arguments: `{"note":"hello"}`}},
+			Usage: &stubllm.Usage{Prompt: 1234, Completion: 10, Cached: 100}},
+	}})
+
+	spec := planSpec(up.URL, "note something for me")
+	spec.Config.Tools = registry
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	if len(res.ContextCost.Rows) == 0 {
+		t.Errorf("Result.ContextCost.Rows is empty; a constructed Firing puts a tool menu in front of the model")
+	}
+	if res.ContextCost.Tokens <= 0 || res.ContextCost.Bytes <= 0 {
+		t.Errorf("Result.ContextCost = %+v, want a positive estimate over the Turn-1 bytes", res.ContextCost)
+	}
+	if res.ContextCost.Calibrated {
+		t.Error("Result.ContextCost.Calibrated = true; the report is taken idle, before any server count could fold in")
+	}
+	wantTurn1 := Usage{Calls: 1, PromptTokens: 1234, CachedPromptTokens: 100, CompletionTokens: 10, TotalTokens: 1244}
+	if res.Turn1Usage != wantTurn1 {
+		t.Errorf("Result.Turn1Usage = %+v, want %+v — the first call's own figures, untouched by the second", res.Turn1Usage, wantTurn1)
+	}
+	if res.Usage.PromptTokens != 1234+2345 {
+		t.Errorf("Result.Usage.PromptTokens = %d, want the cumulative %d beside the Turn-1 figure", res.Usage.PromptTokens, 1234+2345)
+	}
+}
+
+// TestEventTapTurn1IgnoresAMaintenanceReading pins the field the latch reads: a Maintenance call
+// the engine made at Turn 0 (a predictive fold) reports its own prompt AND a cumulative figure
+// that already includes it — and neither may become the Turn-1 count, which is the first
+// non-maintenance reading's per-call prompt alone. A later Turn's reading never moves it either.
+func TestEventTapTurn1IgnoresAMaintenanceReading(t *testing.T) {
+	t.Parallel()
+
+	tap := &eventTap{window: 32000}
+
+	tap.Emit(domain.UsageEvent{
+		EventBase: domain.EventBase{Turn: 0}, PromptTokens: 5000, CompletionTokens: 300, Maintenance: true,
+		Cumulative: domain.Usage{Calls: 1, PromptTokens: 5000, CompletionTokens: 300},
+	})
+	if got := tap.turn1(); got.Calls != 0 {
+		t.Fatalf("turn1() = %+v after a maintenance reading alone, want nothing latched", got)
+	}
+	tap.Emit(domain.UsageEvent{
+		EventBase: domain.EventBase{Turn: 0}, PromptTokens: 1234, CompletionTokens: 10, CachedPromptTokens: 100,
+		Cumulative: domain.Usage{Calls: 2, PromptTokens: 6234, CompletionTokens: 310},
+	})
+	tap.Emit(domain.UsageEvent{
+		EventBase: domain.EventBase{Turn: 1}, PromptTokens: 2345, CompletionTokens: 20,
+		Cumulative: domain.Usage{Calls: 3, PromptTokens: 8579, CompletionTokens: 330},
+	})
+
+	want := Usage{Calls: 1, PromptTokens: 1234, CachedPromptTokens: 100, CompletionTokens: 10}
+	if got := tap.turn1(); got != want {
+		t.Errorf("turn1() = %+v, want %+v — the first real call's own figures, not the cumulative", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // The written-files account
 // ---------------------------------------------------------------------------
 

@@ -605,12 +605,17 @@ func runFinishedFrame(res run.Result, err error) eventjson.RunFinished {
 		FinalText:    res.FinalText,
 		Wrote:        res.Wrote,
 		ContextFiles: contextFilesFrame(res.ContextFiles),
+		ContextCost:  contextCostFrame(res.ContextCost),
 		UndoNote:     res.UndoNote,
 		// The RECORD, not the run: --no-save leaves SessionID empty on a run that carried an id
 		// all along, and this is what a consumer reads before it feeds an id to `apogee undo`.
 		Saved:     res.SessionID != "",
 		Usage:     usageFrame(res.Usage),
 		SubAgents: subAgentFrames(res.SubAgents),
+		// The measured Turn-1 context beside the estimate above: the event's own per-call
+		// figures for the run's first call (run.Result.Turn1Usage), zero when none landed.
+		Turn1PromptTokens:       res.Turn1Usage.PromptTokens,
+		Turn1CachedPromptTokens: res.Turn1Usage.CachedPromptTokens,
 	}
 	if err != nil {
 		frame.ExitCode = exitCodeFor(err)
@@ -633,6 +638,23 @@ func contextFilesFrame(report domain.ContextFilesReport) eventjson.ContextFiles 
 		Files:          files,
 		StandingTokens: report.StandingTokens,
 		SystemShare:    report.SystemShare,
+	}
+}
+
+// contextCostFrame restates run.Result.ContextCost in the frame's own types, on the same terms as
+// contextFilesFrame: mechanical, and here rather than in internal/eventjson because that package
+// must not reach into internal/run to compose a frame. A report with no rows composes a null
+// `rows` member — the zero report the never-started exits carry, not an empty list.
+func contextCostFrame(report domain.ContextCost) eventjson.ContextCost {
+	var rows []eventjson.ContextCostRow
+	for _, row := range report.Rows {
+		rows = append(rows, eventjson.ContextCostRow{Name: row.Name, Bytes: row.Bytes, Tokens: row.Tokens})
+	}
+	return eventjson.ContextCost{
+		Rows:       rows,
+		Bytes:      report.Bytes,
+		Tokens:     report.Tokens,
+		Calibrated: report.Calibrated,
 	}
 }
 
@@ -1099,6 +1121,12 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	for _, line := range headlessUsageLines(res) {
 		cmd.PrintErrln(line)
 	}
+	// What apogee itself put in front of the model at Turn 1 (ADR 0079): the estimate over the
+	// standing content and the tool menu, and the server's own Turn-1 count once one landed. A run
+	// that constructed no Agent has no rows and prints no line.
+	if line := headlessContextCostLine(res); line != "" {
+		cmd.PrintErrln(line)
+	}
 	cmd.PrintErrln(headlessSummary(res))
 
 	if runErr != nil {
@@ -1325,6 +1353,39 @@ func headlessUsageLine(u run.Usage, who string) string {
 		line += " · " + who
 	}
 	return line
+}
+
+// headlessContextCostLine spells the Turn-1 context cost — what apogee itself put in front of the
+// model before the user's prompt — as one line, "" when the run has no report to spell (a
+// stubbed or never-constructed run carries no rows), which is the usage line's own self-hiding
+// rule. Unmeasured, it is the estimate with its per-piece breakdown, and the parenthesis lists
+// only the rows the report carries (a prompt-less run has no `prompt` column):
+//
+//	context cost: ~812 tokens (prompt 640 · orientation 90 · tool menu 82)
+//
+// Once the server's own Turn-1 count has landed (run.Result.Turn1Usage) the measured figure leads
+// and the estimate follows it, so a script that greps the line always finds the better number
+// first:
+//
+//	context cost: 1234 tokens measured at turn 1 (estimate ~812)
+//
+// The counts are printed in full rather than through format.Tokens: this line exists to be
+// charted, and a coarse "1k" beside an estimate of "~812" would hide exactly the difference it
+// is there to show.
+func headlessContextCostLine(res run.Result) string {
+	cost := res.ContextCost
+	if len(cost.Rows) == 0 {
+		return ""
+	}
+	if res.Turn1Usage.PromptTokens > 0 {
+		return fmt.Sprintf("context cost: %d tokens measured at turn 1 (estimate ~%d)",
+			res.Turn1Usage.PromptTokens, cost.Tokens)
+	}
+	pieces := make([]string, 0, len(cost.Rows))
+	for _, row := range cost.Rows {
+		pieces = append(pieces, fmt.Sprintf("%s %d", row.Name, row.Tokens))
+	}
+	return fmt.Sprintf("context cost: ~%d tokens (%s)", cost.Tokens, strings.Join(pieces, " · "))
 }
 
 // headlessTokens is format.Tokens with a spelling for zero. The shared formatter renders a

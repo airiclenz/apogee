@@ -150,6 +150,20 @@ type Result struct {
 	// loaded; the exits that have no Agent to ask carry the zero report. Nothing here is
 	// rendered by this library: the notice's wording belongs to the Driver.
 	ContextFiles domain.ContextFilesReport
+	// ContextCost is what apogee itself put in front of the model at Turn 1 — the standing
+	// system content and the tool surface, piece by piece (ADR 0079). It is taken IDLE, after
+	// construction and every pre-run setter but before the first Step, so it is the estimate over
+	// the bytes about to go on the wire and never a measurement: Calibrated is false on every
+	// Firing, and Turn1Usage beside it is the measured figure. Like ContextFiles it rides out on
+	// every Result a constructed session produced, the submit-failure exit included; the exits
+	// that have no Agent to ask carry the zero report. Nothing here is rendered by this library.
+	ContextCost domain.ContextCost
+	// Turn1Usage is the server's own accounting for the Firing's FIRST top-level call — the
+	// measured twin of ContextCost, plus the user's prompt. It is the event's per-call figures
+	// (PromptTokens, CachedPromptTokens), never a cumulative one, so a maintenance call the engine
+	// made ahead of the first Turn does not fold into it. Its Calls is 1 when a reading landed
+	// and 0 when the run never reached its first call or the Upstream reported no usage.
+	Turn1Usage Usage
 	// Wrote is the account of what the Firing CHANGED on disk: every path the run's writes
 	// touched, in the order each was first written and with no path repeated — deletes and
 	// move sources included, since the write funnel journals those too. It is taken after the
@@ -354,8 +368,15 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		FileRefs: refs.FileRefs(spec.Prompt),
 		SkillIDs: refs.SkillRefs(spec.Prompt, knownSkillID(spec.Config.Skills)),
 	}
+	// What this Firing is about to put in front of the model at Turn 1, taken HERE — after every
+	// setter above, because the orientation block spells the delegation seat and the menu is
+	// mode-filtered, and before Submit, because the read is idle-only. Every Result below carries
+	// it, the submit-failure exit included.
+	contextCost := a.ContextCost()
+
 	if err := a.Submit(in); err != nil {
-		return Result{ContextFiles: contextFiles}, fmt.Errorf("apogee: submit the firing's prompt: %w", err)
+		return Result{ContextFiles: contextFiles, ContextCost: contextCost},
+			fmt.Errorf("apogee: submit the firing's prompt: %w", err)
 	}
 
 	step, runErr := a.Run(ctx)
@@ -375,6 +396,8 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 		SubAgents:    tap.subAgentRuns(),
 		Usage:        tap.totals(),
 		ContextFiles: contextFiles,
+		ContextCost:  contextCost,
+		Turn1Usage:   tap.turn1(),
 		Wrote:        a.WroteFiles(),
 		UndoNote:     reason,
 		Err:          runErr,
@@ -568,6 +591,11 @@ type eventTap struct {
 	// whole Firing, which become Result.Usage.
 	usage Usage
 	final string
+	// firstCall is the top-level agent's FIRST non-maintenance reading at Turn 0 — the server's own
+	// per-call figures for the run's first call, which become Result.Turn1Usage. Calls is 1 once a
+	// reading has landed, and it is the latch: a Turn-0 retry that reported again does not
+	// overwrite it.
+	firstCall Usage
 	// open holds the in-flight sub-agent runs, keyed by the id of the delegating call that
 	// opened each one; runs is the finished ones in finish order.
 	open map[string]*openSubAgent
@@ -661,6 +689,7 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 			t.total = fill
 		}
 		t.usage.Adopt(cumulative)
+		t.noteTurn1(ev)
 		return
 	}
 	run := t.open[ev.CallID]
@@ -684,6 +713,25 @@ func (t *eventTap) noteUsage(ev domain.UsageEvent) {
 		run.window = ev.ContextWindow
 	}
 	run.usage.Adopt(cumulative)
+}
+
+// noteTurn1 latches the Firing's first Turn-1 reading: a Depth-0 event at Turn index 0 that is
+// not a Maintenance call, taken from the event's OWN per-call fields — PromptTokens and
+// CachedPromptTokens — and never from Cumulative, so a predictive fold the engine ran ahead of
+// the first reply cannot leak the summarizer's prompt into the figure. A reading that counted no
+// prompt is the absence of accounting and latches nothing; the first one that did stands for the
+// run. The caller holds t.mu.
+func (t *eventTap) noteTurn1(ev domain.UsageEvent) {
+	if t.firstCall.Calls > 0 || ev.Turn != 0 || ev.Maintenance || ev.PromptTokens <= 0 {
+		return
+	}
+	t.firstCall = Usage{
+		Calls:              1,
+		PromptTokens:       ev.PromptTokens,
+		CachedPromptTokens: ev.CachedPromptTokens,
+		CompletionTokens:   ev.CompletionTokens,
+		TotalTokens:        ev.TotalTokens,
+	}
 }
 
 // openSubAgentRun starts the bracket for the run call is delegating, filed under that call's
@@ -818,6 +866,14 @@ func (t *eventTap) totals() Usage {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.usage
+}
+
+// turn1 reports the Firing's first Turn-1 reading (noteTurn1) — zero throughout, Calls
+// included, when the run never reached its first call or the Upstream reported no usage.
+func (t *eventTap) turn1() Usage {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.firstCall
 }
 
 // fill reports the last observed context fill, 0 when the Upstream reported no usage.

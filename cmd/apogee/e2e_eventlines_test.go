@@ -242,8 +242,15 @@ func TestE2EEventLinesGolden(t *testing.T) {
 		// a standing_tokens that vanished or moved is still a diff — and the assertion below keeps
 		// its meaning. The arithmetic itself is pinned where it is deterministic:
 		// internal/agent/contextfiles_test.go.
+		//
+		// context_cost's rows and totals spell the same path lengths — the prompt row IS the
+		// standing prompt's bytes — so its `bytes` and `tokens` members take the same treatment. The
+		// patterns are quote-prefixed, so the `usage` lines' prompt_tokens / total_tokens /
+		// cached_prompt_tokens keys, whose digits the fixture does pin, are untouched.
 		redactions := append(eventLinesRedactions(workspace),
-			tuitest.Redact(`"standing_tokens":\d+`, `"standing_tokens":"<standing>"`))
+			tuitest.Redact(`"standing_tokens":\d+`, `"standing_tokens":"<standing>"`),
+			tuitest.Redact(`"bytes":\d+`, `"bytes":"<bytes>"`),
+			tuitest.Redact(`"tokens":\d+`, `"tokens":"<tokens>"`))
 		tuitest.GoldenText(t, eventLinesGolden("run"), out, redactions...)
 
 		lines := jsonEventLines(t, out)
@@ -264,6 +271,18 @@ func TestE2EEventLinesGolden(t *testing.T) {
 		if standing, _ := files["standing_tokens"].(float64); standing <= 0 {
 			t.Errorf("standing_tokens = %v; a run whose standing prompt was built counts its tokens",
 				files["standing_tokens"])
+		}
+		// The same for the Context cost report (ADR 0079): the redaction keeps the members and
+		// their positions, and this keeps their meaning — a constructed run estimates a positive
+		// Turn-1 cost. The measured twin is pinned in the golden itself: the script's Turn-1 usage
+		// is a fixture, not a path length.
+		cost, ok := data["context_cost"].(map[string]any)
+		if !ok {
+			t.Fatalf("the closing frame's context_cost is %v; want the report block", data["context_cost"])
+		}
+		if tokens, _ := cost["tokens"].(float64); tokens <= 0 {
+			t.Errorf("context_cost.tokens = %v; a run whose Turn-1 content was built estimates its cost",
+				cost["tokens"])
 		}
 	})
 
