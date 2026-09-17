@@ -131,10 +131,18 @@ const (
 //     (superMemberMarker) and by the very painter a plain group's members go through
 //     (renderGroupMember), so a member opens onto its body inside a type row exactly as it does
 //     inside a group — the sketch's 2nd step.
-//   - the HEADER wears no state indicator at all: the umbrella's floor is its type rows, it never
-//     folds to one line, and a click there closes every open child instead (targetUmbrella). It is
-//     marked as a target only while something IS open, so a header with nothing to close keeps a
-//     click's selection meaning rather than offering an affordance that does nothing.
+//   - a SMALL or live umbrella's HEADER wears no state indicator at all: its floor is its type
+//     rows, and a click there closes every open child instead (targetUmbrella). It is marked as a
+//     target only while something IS open, so a header with nothing to close keeps a click's
+//     selection meaning rather than offering an affordance that does nothing.
+//   - a LARGE umbrella — at rest over more type rows than `ui.tools-fold-over`
+//     ([transcript.umbrellaIsLarge]) — folds to its header line under the shared `ui.tools-open`
+//     preference (fold.folded): the header alone, wearing a ▶ after its count the way a
+//     header-folding card does (renderToolBlock), and marked targetUmbrella so a click or ⏎ there
+//     opens it. Open, it paints its rows exactly as a small one does, wears a ▼, and is marked
+//     targetUmbrella whether or not a child is open, since the click now has a fold to move rather
+//     than children to close. The type-row and member state beneath a fold is untouched: what a
+//     reader opened stays open under the header and is there again when it unfolds.
 //
 // The count the header states is the number of CALLS, not of rows: a reader wants to know how much
 // work is folded away, and the rows already say how it divides. Its star is the block's, live while
@@ -145,13 +153,23 @@ const (
 // rows are actually drawn in: demotion changes what a member hides, and that is what its indicator
 // and its click surface are answered from — the same reason the guard runs at the block's entrance
 // rather than inside a row.
-func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState) blockPaint {
+func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState, fold umbrellaFold) blockPaint {
 	calls := 0
 	for _, r := range runs {
 		calls += len(r.views)
 	}
 	label := th.toolLabel.Render(superGroupLabel) + " " +
 		th.toolIndicator.Render("("+plural(calls, superCallNoun)+")")
+	// A large umbrella's glyph sits after the count, the header-folding card's idiom
+	// (renderToolBlock): the indicator stays the row's last word.
+	if fold.large {
+		label += " " + th.toolIndicator.Render(stateIndicator(!fold.folded))
+	}
+	var out blockPaint
+	if fold.folded {
+		out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetUmbrella)
+		return out
+	}
 	room := toolRowCells(th, width)
 
 	var rows blockPaint
@@ -177,10 +195,9 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState)
 	}
 
 	header := targetNone
-	if open {
+	if open || fold.large {
 		header = targetUmbrella
 	}
-	var out blockPaint
 	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), header)
 	out.join(rows)
 	return out

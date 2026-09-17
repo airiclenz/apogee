@@ -3816,6 +3816,87 @@ func TestPruneNoteIsOneHostLineAtItsOwnRun(t *testing.T) {
 // root, the fold seed — moves [transcript.generation], and a write refused by its own guard, or a
 // plain read, does not. The counter is what turns "did a fold change the paint?" into one compare,
 // so a writer that forgets it is a stale frame that no arm will ever ask to repaint.
+// umbrellaIsLarge is the one gate on the Tools umbrella's fold, and every arm of it is a way the
+// fold would otherwise misfire: a live umbrella folding over the call a reader is watching, a
+// resting-looking one snapping shut between one result and the next call of the same Turn, a
+// threshold of 0 folding everything, and a threshold met exactly folding what it was told to
+// leave. The fixture is three runs — Read, Terminal, Read — over three type rows.
+func TestUmbrellaIsLargeNeedsRestAndThreshold(t *testing.T) {
+	t.Parallel()
+
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := &transcript{toolsFoldOver: 2}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		runCall(tr, "c2", "go test", "ok", 0)
+		readCall(tr, "c3", "b.go", 1, 9, 0)
+		return tr
+	}
+
+	t.Run("at rest over rows above the threshold", func(t *testing.T) {
+		t.Parallel()
+
+		if tr := build(t); !tr.umbrellaIsLarge(0) {
+			t.Error("umbrellaIsLarge(0) = false; want true — three type rows at rest over a threshold of 2")
+		}
+	})
+
+	t.Run("a live umbrella is never large", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c4", Tool: "read_file",
+			Arguments: []byte(`{"path":"c.go"}`)}})
+		if tr.umbrellaIsLarge(0) {
+			t.Error("umbrellaIsLarge(0) = true with a call still open; want false — a fold must never hide the running call")
+		}
+	})
+
+	t.Run("every member done but the Turn still running", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.setBusy(true)
+		if tr.umbrellaIsLarge(0) {
+			t.Error("umbrellaIsLarge(0) = true between one result and the next call; want false — rest is the Turn's fact")
+		}
+		tr.setBusy(false)
+		if !tr.umbrellaIsLarge(0) {
+			t.Error("umbrellaIsLarge(0) = false once the worker unwound; want true")
+		}
+	})
+
+	t.Run("a threshold of 0 makes no umbrella large", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.setToolsFoldOver(0)
+		if tr.umbrellaIsLarge(0) {
+			t.Error("umbrellaIsLarge(0) = true under a threshold of 0; want false — 0 says never fold")
+		}
+	})
+
+	t.Run("rows equal to the threshold are not over it", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.setToolsFoldOver(3)
+		if tr.umbrellaIsLarge(0) {
+			t.Error("umbrellaIsLarge(0) = true with rows == threshold; want false — large means MORE rows than the threshold")
+		}
+	})
+
+	t.Run("an index heading no umbrella", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.addUser("and then?", nil)
+		if tr.umbrellaIsLarge(len(tr.entries) - 1) {
+			t.Error("umbrellaIsLarge on a prompt = true; want false")
+		}
+	})
+}
+
 func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 	t.Parallel()
 
@@ -3864,6 +3945,9 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 		}},
 		{"setRoot", func(tr *transcript) { tr.setRoot(runRef{depth: 1, spawn: "s1"}) }},
 		{"setTaskListOpen", func(tr *transcript) { tr.setTaskListOpen(true) }},
+		{"setToolsOpen", func(tr *transcript) { tr.setToolsOpen(true) }},
+		{"setToolsFoldOver", func(tr *transcript) { tr.setToolsFoldOver(3) }},
+		{"setBusy", func(tr *transcript) { tr.setBusy(true) }},
 		{"setExpanded", func(tr *transcript) { tr.setExpanded(3, true) }},
 		{"toggleExpanded", func(tr *transcript) { tr.toggleExpanded(3) }},
 		{"setTypeExpanded", func(tr *transcript) { tr.setTypeExpanded(3, true) }},
@@ -3891,6 +3975,7 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 	}{
 		{"hasOpenToolCall", func(tr *transcript) { tr.hasOpenToolCall() }},
 		{"renderView", func(tr *transcript) { tr.renderView(newTheme(scheme.Default()), 80, false, "") }},
+		{"setBusy at the value it already holds", func(tr *transcript) { tr.setBusy(false) }},
 		{"setExpanded refused out of range", func(tr *transcript) { tr.setExpanded(99, true) }},
 		{"setExpanded refused on an open run head", func(tr *transcript) { tr.setExpanded(2, true) }},
 		{"setTaskExpanded refused on a plain call", func(tr *transcript) { tr.setTaskExpanded(3, true) }},

@@ -152,9 +152,10 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 // fact about the frame ([Model.backHint]), not about the scrollback. A caller with no frame hands
 // the plain [breadcrumbHint]; empty paints the trail with no hint at all (breadcrumbRow).
 //
-// What this reads of the transcript — entries, the live buffer, root — is under
-// [transcript.generation]: every writer of those fields bumps it, and the Update tail repaints on
-// the bump ([Model.settle], [frameKey]). A new field read here is a field whose writers must touch.
+// What this reads of the transcript — entries, the live buffer, root, the fold preferences and the
+// busy mirror — is under [transcript.generation]: every writer of those fields bumps it, and the
+// Update tail repaints on the bump ([Model.settle], [frameKey]). A new field read here is a field
+// whose writers must touch.
 func (t *transcript) renderView(th theme, width int, blink bool, backHint string) renderedTranscript {
 	if width < 1 {
 		width = 1
@@ -318,7 +319,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// a per-branch `i += …` — the one arithmetic in the renderer whose off-by-one would silently
 		// skip a block or paint it twice.
 		block := t.resolveBlock(th, i, in, width, blink, root)
-		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root.ref)
+		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root.ref, block.fold)
 		appendJoined(block.isUser, block.closes, in.depth, i, t.paintBlock(i, key, block.draw))
 		// A block ending on an OPEN span does not end the run: that span follows, railed one level
 		// deeper, and the separator between the two belongs to THAT rail rather than to the block's
@@ -531,6 +532,7 @@ type resolvedBlock struct {
 	shape blockShape        // which painter draws it, as the paint key names the branch (paintcache.go)
 	ins   []paintInput      // the records the key names and the painter reads, the block's head first
 	live  bool              // whether the block still holds an open call — each shape's own rule (blockState.live)
+	fold  umbrellaFold      // a Tools umbrella's large/folded answer, the zero value for every other shape (paintKey.large/folded)
 	draw  func() blockPaint // the paint, called only when the cache misses (transcript.paintBlock)
 
 	next   int  // where the walk resumes: past the block's own entries, and past a collapsed span's elided ones
@@ -627,18 +629,24 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
 	// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
 	// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
-	// paint (paintcache.go).
+	// paint (paintcache.go). Its FOLD is not per-entry: a large umbrella — at rest over more type
+	// rows than the threshold (umbrellaIsLarge) — folds to its header line under the one shared
+	// preference (toolsOpen), and both answers ride the block into the key (paintKey.large/folded)
+	// so a threshold edit or a preference flip is a fresh paint too.
 	if sup := toolSuperGroup(t.entries, head); len(sup) > 0 {
 		calls := sup.calls()
 		ins := root.inputs(t.entries[head : head+calls])
 		live := anyOpenCall(ins)
+		large := t.umbrellaIsLarge(head)
+		fold := umbrellaFold{large: large, folded: large && !t.toolsOpen}
 		return resolvedBlock{
 			shape: shapeToolSuper,
 			ins:   ins,
 			live:  live,
+			fold:  fold,
 			draw: func() blockPaint {
 				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, in.depth),
-					blockState{live: live, blink: blink}).railed(th, in.depth)
+					blockState{live: live, blink: blink}, fold).railed(th, in.depth)
 			},
 			next: head + calls,
 		}

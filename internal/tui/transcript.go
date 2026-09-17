@@ -64,6 +64,31 @@ type transcript struct {
 	// its assertions on the collapsed paint are written against; a Model built from Options is
 	// where the open default the config key carries comes in.
 	taskListOpen bool
+	// toolsOpen is the shared fold of every LARGE Tools umbrella — one at rest with more type rows
+	// than toolsFoldOver ([transcript.umbrellaIsLarge]) — whose record is the `ui.tools-open` key
+	// and whose fact is nothing but this field: unlike a task-list card an umbrella keeps no fold
+	// of its own, so the preference is read at paint (render.go) rather than seeded into an entry.
+	// It lives here beside taskListOpen for the same reason and with the same preservation across
+	// reset: /clear opens a new session under the human's preference. The zero value is FOLDED —
+	// the auto-fold the config key defaults to — and what a hand-built test transcript gets; under
+	// the test default toolsFoldOver of 0 no umbrella is ever large, so no test paint moves. The
+	// Model seeds it at construction and moves it through [transcript.setToolsOpen].
+	toolsOpen bool
+	// toolsFoldOver is the type-row count a resting umbrella must EXCEED to be large, the
+	// `ui.tools-fold-over` key's value; 0 — the zero value, and every hand-built test transcript's —
+	// says no umbrella is ever large, so every umbrella keeps the header it always painted. It is a
+	// paint input and preserved across reset exactly as toolsOpen is; the Model seeds it at
+	// construction and moves it through [transcript.setToolsFoldOver].
+	toolsFoldOver int
+	// busy is whether a worker is in flight — the Model's own fact (uiState.busy), mirrored here
+	// because it decides whether an umbrella is AT REST ([transcript.umbrellaIsLarge]): between one
+	// result and the next call of the same Turn every member is done and no call is open, and a
+	// fold that keyed on that alone would snap shut mid-Turn and spring open on the next call. It
+	// is the paint's input rather than a renderView parameter for taskListOpen's reason — the fact
+	// moves at two seams of the Model ([Model.markRunning], [Model.finishWorker]) and every reader of
+	// the paint's inputs is under one generation. It is a fact about the run, so reset preserves it
+	// as it does ws; the zero value — a hand-built test transcript's — is at rest.
+	busy bool
 	// root is the run the transcript is currently PAINTED at: the delegation whose own entries fill
 	// the view, with everything above and beside it left out (render.go, [transcript.setRoot]). The
 	// zero value is the whole transcript — the human's own conversation with every run folded into
@@ -86,7 +111,7 @@ type transcript struct {
 	// reason: a clock is a fact about the run, not about the conversation.
 	now func() time.Time
 	// generation counts the writes to what [transcript.renderView] reads — entries, pending (with
-	// its streaming and pendingRun halves), root and taskListOpen. Every `func (t *transcript)` that
+	// its streaming and pendingRun halves), root, taskListOpen, toolsOpen, toolsFoldOver and busy. Every `func (t *transcript)` that
 	// writes one of those fields bumps it ([transcript.touch]), so "has the paint's input moved since
 	// the last repaint?" is one integer compare at the end of every Update ([Model.settle]) rather
 	// than a repaint every arm has to remember to ask for. It is a plain counter riding the
@@ -895,7 +920,8 @@ func (t *transcript) reset() {
 	// render would find index 3 occupied and hand back the previous session's paint (paintcache.go).
 	t.paints.clear()
 	t.touch()
-	// t.debug, t.ws, t.taskListOpen and t.now are deliberately preserved across a session reset.
+	// t.debug, t.ws, t.taskListOpen, t.toolsOpen, t.toolsFoldOver, t.busy and t.now are deliberately
+	// preserved across a session reset.
 }
 
 // replay appends already-decoded committed entries after whatever the transcript already holds —
@@ -1741,6 +1767,70 @@ func (t *transcript) setTaskListOpen(open bool) bool {
 	return changed
 }
 
+// setToolsOpen moves the shared fold of every large Tools umbrella ([transcript.toolsOpen]): a
+// header toggle on any one of them flips them all, and a `/settings` edit or a hand-edited file
+// lands on every one the same way — setTaskListOpen's rule for the one preference an umbrella has.
+// There is no sweep to perform because no entry records the fold: the paint reads the field
+// (render.go), and the fold is in every large umbrella's paint key (paintKey.folded), so the next
+// frame draws each afresh. It reports whether the preference moved, so a caller that writes the
+// key back on a change can tell a no-op apply.
+func (t *transcript) setToolsOpen(open bool) bool {
+	changed := t.toolsOpen != open
+	t.toolsOpen = open
+	t.touch()
+	return changed
+}
+
+// setToolsFoldOver moves the type-row threshold a resting umbrella is large above
+// ([transcript.toolsFoldOver]) and reports whether it moved. It touches for setToolsOpen's reason:
+// which umbrellas are large is a paint fact (paintKey.large), and a `/settings` edit of the
+// threshold under an open preference has to redraw the ▼ and its click target on every umbrella
+// the edit moved across the line.
+func (t *transcript) setToolsFoldOver(n int) bool {
+	changed := t.toolsFoldOver != n
+	t.toolsFoldOver = n
+	t.touch()
+	return changed
+}
+
+// setBusy mirrors the Model's worker-in-flight fact ([transcript.busy]) and reports whether it
+// moved. It touches only on a move: the fact flips twice per Turn, and a repaint for a mirror that
+// found nothing to change would be a repaint for nothing.
+func (t *transcript) setBusy(busy bool) bool {
+	if t.busy == busy {
+		return false
+	}
+	t.busy = busy
+	t.touch()
+	return true
+}
+
+// umbrellaIsLarge reports whether the umbrella headed by entries[head] is LARGE — the one shape
+// that folds to its header line under the shared preference (toolsOpen) and wears a ▶/▼ there
+// (renderSuperGroup). An umbrella is large when it is AT REST with more type rows than the
+// threshold: no worker in flight (busy) and every member done, so a fold never snaps shut on work
+// still arriving — the running call is the last row's last member, and a reader watching it is the
+// reader the fold would rob — and more runs than toolsFoldOver, since a threshold of 0 says no
+// umbrella is ever large. Rest is asked of the Turn and not of the members alone: between one
+// result and the next call of the same Turn every member IS done, and a fold keyed on that would
+// snap shut and spring open with every call the model made.
+//
+// A small or live umbrella keeps the header it always painted: no indicator, and a click that
+// closes every open child (closeSuperGroup). head must be the umbrella's own head, for
+// closeSuperGroup's reason; an index heading no umbrella answers false.
+func (t *transcript) umbrellaIsLarge(head int) bool {
+	sup := toolSuperGroup(t.entries, head)
+	if len(sup) == 0 || t.busy || t.toolsFoldOver <= 0 || len(sup) <= t.toolsFoldOver {
+		return false
+	}
+	for i := head; i < head+sup.calls(); i++ {
+		if !t.entries[i].done {
+			return false
+		}
+	}
+	return true
+}
+
 // setTypeExpanded opens or closes the TYPE ROW of the run headed by entries[index] — the second,
 // independent level of a super-group's state (entry.typeExpanded) — and reports whether it found a
 // run head to set. Only a tool call can head a run (sameLabelRun), so every other kind answers false
@@ -1810,9 +1900,11 @@ func (t *transcript) toggleTaskExpanded(index int) bool {
 }
 
 // closeSuperGroup closes every open child of the umbrella headed by entries[head] — what a click on
-// its header means (design call 9, docs/layout/tool-layout.md: "the umbrella's floor is its type
-// rows … clicking the umbrella header closes all open children"). It reports whether anything was
-// open to close, so a click on a header with nothing behind it repaints nothing.
+// the header of a SMALL or live umbrella means (design call 9, as the ratified fold narrowed it:
+// a large umbrella at rest folds to its header line instead, under the shared preference
+// [transcript.setToolsOpen]; which one a header is, [transcript.umbrellaIsLarge] says). It reports
+// whether anything was open to close, so a click on a header with nothing behind it repaints
+// nothing.
 //
 // BOTH levels are cleared, the type rows and the members beneath them, because "closed" has to mean
 // the same thing whichever way a reader got there: a member left open under a type row that was

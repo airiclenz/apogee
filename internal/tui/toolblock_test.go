@@ -209,6 +209,48 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 			t.Errorf("2nd-step umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 		}
 	})
+
+	// The two states only a LARGE umbrella has (transcript.umbrellaIsLarge): the fixture's two type
+	// rows stand over a threshold of 1, and the umbrella is at rest — every call done, no worker in
+	// flight — so the shared preference decides between the header line alone and the rows.
+	t.Run("large, folded: the header line alone", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.toolsFoldOver = 1
+		if !tr.setTypeExpanded(readHead, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open under the fold", readHead)
+		}
+		want := "✦ Tools (3 calls) " + glyphCollapsed
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("folded umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if targets := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint).targets; len(targets) != 1 || targets[0].kind != targetUmbrella {
+			t.Errorf("folded header targets = %+v; want one targetUmbrella line", targets)
+		}
+	})
+
+	t.Run("large, open: ▼ over the rows a fold left as they were", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.toolsFoldOver = 1
+		if !tr.setTypeExpanded(readHead, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open", readHead)
+		}
+		if !tr.setToolsOpen(true) {
+			t.Fatal("setToolsOpen(true) = false; want the preference to move off its folded default")
+		}
+		want := strings.Join(append(append([]string{"✦ Tools (3 calls) " + glyphExpanded}, readRowOpen...),
+			groupMemberLine("  ┕ Terminal ⋯ exit 0"),
+		), "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("open large umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if targets := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint).targets; len(targets) == 0 || targets[0].kind != targetUmbrella {
+			t.Errorf("open large header target = %+v; want targetUmbrella on the header line", targets)
+		}
+	})
 }
 
 // runGroup folds a batch of same-label terminal calls, each with its output, into a fresh

@@ -56,6 +56,10 @@ func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscr
 		pendingRun: tr.pendingRun,
 		ws:         tr.ws,
 		root:       tr.root, // the oracle paints the same VIEW, not just the same entries
+		// the umbrella's fold inputs: the same preference and threshold, at the same rest
+		toolsOpen:     tr.toolsOpen,
+		toolsFoldOver: tr.toolsFoldOver,
+		busy:          tr.busy,
 	}
 	return cold.renderView(th, width, blink, breadcrumbHint)
 }
@@ -364,12 +368,104 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 		mutate: func() {
 			tr.refreshStartup(startupView{Host: "localhost", Model: "qwen3.6-27b", Context: "32k", Version: "0.0.0"})
 		},
+	}, {
+		// The umbrella's fold is a paint input no entry carries: the Terminal call made the reads'
+		// umbrella two type rows, so a threshold of 1 makes it large once at rest — c4 has been
+		// open through every step above (the blink step needs it), so first its result lands — and
+		// the preference then folds it to its header and opens it again with no flag flipped and no
+		// entry appended (paintKey.large/folded).
+		name: "the Tools umbrella folding and opening again",
+		mutate: func() {
+			tr.apply(domain.ToolResultEvent{Result: domain.ToolResult{
+				CallID:  "c4",
+				Content: "[File: d.go, 2 lines total, showing lines 1-2]\n…",
+				Summary: domain.ReadSpan{Start: 1, End: 2, Total: 2},
+			}})
+			small := tr.renderView(th, width, blink, breadcrumbHint)
+			check("the umbrella at rest, below the threshold")
+			tr.setToolsFoldOver(1)
+			folded := tr.renderView(th, width, blink, breadcrumbHint)
+			check("the umbrella folded to its header")
+			if equalLines(small.lines, folded.lines) {
+				t.Error("the umbrella painted identically small and folded — the threshold moved nothing")
+			}
+			tr.setToolsOpen(true)
+			opened := tr.renderView(th, width, blink, breadcrumbHint)
+			check("the large umbrella opened")
+			if equalLines(folded.lines, opened.lines) {
+				t.Error("the umbrella painted identically folded and open — the preference moved nothing")
+			}
+			tr.setToolsOpen(false)
+			tr.setToolsFoldOver(0)
+		},
 	}}
 
 	for _, s := range steps {
 		s.mutate()
 		check(s.name)
 	}
+}
+
+// The regression the fold's key terms guard: a large umbrella's ▼ and its click target are served
+// from the cache, and the two things that move them — the shared preference, and a threshold edit
+// under an open preference that carries the umbrella across the line — flip no entry flag and
+// append no entry. Each is walked warm against a cold oracle, and the flip is asserted to have
+// painted differently so a key that ignored it could not pass by painting the same thing twice.
+func TestPaintCacheRepaintsWhenTheFoldFlips(t *testing.T) {
+	t.Parallel()
+
+	th := newTheme(scheme.Default())
+	build := func(t *testing.T) *transcript {
+		t.Helper()
+		tr := warmed(&transcript{toolsFoldOver: 1})
+		tr.addUser("read both, then test", nil)
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		readCall(tr, "c2", "b.go", 1, 9, 0)
+		runCall(tr, "c3", "go test", "ok   a\nPASS", 0)
+		return tr
+	}
+	check := func(t *testing.T, what string, tr *transcript) renderedTranscript {
+		t.Helper()
+		got := tr.renderView(th, 80, false, breadcrumbHint)
+		sameRender(t, what, got, coldRender(tr, th, 80, false))
+		return got
+	}
+
+	t.Run("the toolsOpen flip", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		folded := check(t, "folded at the default", tr)
+		if !tr.setToolsOpen(true) {
+			t.Fatal("setToolsOpen(true) = false; want the preference to move")
+		}
+		opened := check(t, "opened by the preference", tr)
+		if equalLines(folded.lines, opened.lines) {
+			t.Error("the umbrella painted identically folded and open — the fixture is not large")
+		}
+		tr.setToolsOpen(false)
+		if again := check(t, "folded again", tr); !equalLines(folded.lines, again.lines) {
+			t.Error("folding again painted something other than the first fold")
+		}
+	})
+
+	t.Run("a toolsFoldOver change under toolsOpen = true", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		tr.setToolsOpen(true)
+		large := check(t, "large and open", tr)
+		if !tr.setToolsFoldOver(2) {
+			t.Fatal("setToolsFoldOver(2) = false; want the threshold to move")
+		}
+		small := check(t, "small again under the raised threshold", tr)
+		if equalLines(large.lines, small.lines) {
+			t.Error("the umbrella painted identically large and small — the raised threshold served the stale ▼")
+		}
+		if targets := tr.renderView(th, 80, false, breadcrumbHint).targets; targets[len(targets)-3].kind != targetNone {
+			t.Errorf("small umbrella header target = %v; want targetNone with no child open", targets[len(targets)-3].kind)
+		}
+	})
 }
 
 // The reuse property — the reason the cache exists. A long settled scrollback with a reply streaming
