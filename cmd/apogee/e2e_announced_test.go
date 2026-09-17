@@ -1175,11 +1175,12 @@ func readTreeFile(t *testing.T, tree, name string) string {
 	return string(body)
 }
 
-// paneWatchInterval is how often the pane counter reads the frame. An approval pane stands until it
-// is answered, and these fixtures answer none, so any interval short of the suite's own timeout
-// catches one — this is small enough that a test asserting "no pane BEFORE the next request" is
-// asking about the moment it thinks it is.
-const paneWatchInterval = 5 * time.Millisecond
+// paneWatchInterval is how often the pane counter polls the screen's byte counter — the sleep
+// between two looks, not how often a frame is read. An approval pane stands until it is answered,
+// and these fixtures answer none, so any interval short of the suite's own timeout catches one —
+// this is small enough that a test asserting "no pane BEFORE the next request" is asking about
+// the moment it thinks it is.
+const paneWatchInterval = 10 * time.Millisecond
 
 // watchApprovalPanes counts the approval panes a driven run raises, and returns the reader for that
 // count. It is the in-process counterpart of [paneTrace]: the trace file paneTrace reads is written
@@ -1189,6 +1190,12 @@ const paneWatchInterval = 5 * time.Millisecond
 // It counts RISING EDGES rather than frames, so a pane that stands over many polls is one pane, and
 // a second pane raised after the first is answered is two. The watcher stops at cleanup, before the
 // suite's leak check runs.
+//
+// It reads a frame only after the screen was painted, on [stepSettings]'s precedent: a frame is
+// every cell of the terminal rebuilt under the screen's lock, and rebuilding one every poll costs
+// more than the run it is measuring and holds the lock against the program's own writes. The byte
+// counter says "something was painted" for the price of a mutex, and a pane that was raised is
+// still standing at the next poll that sees the counter move, so nothing is missed by waiting.
 func watchApprovalPanes(t *testing.T, drv *tuitest.Driver) func() int {
 	t.Helper()
 
@@ -1200,6 +1207,7 @@ func watchApprovalPanes(t *testing.T, drv *tuitest.Driver) func() int {
 	stop, done := make(chan struct{}), make(chan struct{})
 	go func() {
 		defer close(done)
+		painted := drv.Screen().BytesWritten()
 		tick := time.NewTicker(paneWatchInterval)
 		defer tick.Stop()
 		for {
@@ -1208,6 +1216,11 @@ func watchApprovalPanes(t *testing.T, drv *tuitest.Driver) func() int {
 				return
 			case <-tick.C:
 			}
+			now := drv.Screen().BytesWritten()
+			if now == painted {
+				continue
+			}
+			painted = now
 			// Either pane counts: an ordinary gate paints the session row, a forced one the
 			// disclosure that stands in for it (e2e_approval_test.go's two markers).
 			frame := drv.Frame()

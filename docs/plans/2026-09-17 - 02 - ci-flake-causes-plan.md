@@ -124,7 +124,9 @@ NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance and the 
 **Acceptance:** `go test -race ./cmd/apogee/ -run '^TestE2ESubAgentView$'` and the pinned 20× loop with zero `FAIL` lines; `git diff --stat -- cmd/apogee/testdata/frames/t17-run-view.txt` is empty
 **Commit:** `fix(e2e): t17 run-view golden waits for the read receipt before capturing`
 
-## 7. `watchApprovalPanes` samples only after a paint (`apogee-pqs`, part 1)
+## 7. `watchApprovalPanes` samples only after a paint (`apogee-pqs`, part 1) — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): race evidence deferred: no-TSan host — acceptance run without `-race` at `-p 2 -parallel 2` (13/13 pass), and the standing pinned loop (20 × `taskset -c 0`, `TestE2EAnnouncedScratchDirIsWritableInAskBefore`) ran race-free-built: 20/20 pass.
 
 **What:** Fix half of `apogee-pqs`: `watchApprovalPanes` (`cmd/apogee/e2e_announced_test.go` ~L1112) rebuilds a full `Frame` every `paneWatchInterval` (5 ms) under `Screen.mu`, which is 25 % of the announced tests' CPU and delays the program's own writes. Rewrite the loop on the `stepSettings` precedent: remember `painted := drv.Screen().BytesWritten()`; every `paneWatchInterval` (raise to 10 ms) read `BytesWritten()` and only when it advanced take `drv.Frame()` and check the two markers (`approvalMarker`, `forcedMarker`), keeping the rising-edge counting and the `t.Cleanup` stop exactly as they are. Ten callers (nine in `e2e_announced_test.go`, one in `e2e_planmode_test.go`) are unchanged.
 **Regression guard.** The acceptance filter matches 13 tests in one package, among them `TestE2EAnnouncedScratchDirIsReadableByTheReadTools` (cmd/apogee/e2e_announced_test.go:732), whose `submit` echo wait (cmd/apogee/e2e_smoke_test.go:464, 5 s flat) stays unfixed until item 8 — at the default `-parallel 4` on this host that one test can red a correct item-7 tree. Per the host block the acceptance runs with `-p 2 -parallel 2` (the handoff's green regime); a red on that single test under this item is item 8's, not this item's — record it in NOTES rather than rerunning at higher parallelism.
