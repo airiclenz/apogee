@@ -122,7 +122,7 @@ The owner ratified the calls below on 2026-09-17 (plan `docs/plans/2026-09-17 - 
 - `internal/domain` gains `ContextCost`; `internal/agent` gains `Agent.ContextCost()` as a sibling
   producer over the `standingBlock` renders; the facade gains the `apogee.ContextCost` alias
   (`ContextCost` is not an Event, so `TestEveryDomainEventVariantIsAliased` is untouched).
-- `cmd/apogee/testdata` gains the bytes-per-piece golden; the eventlines goldens and the pinned
+- `internal/agent/testdata/contextcost.golden` is the bytes-per-piece golden; the eventlines goldens and the pinned
   `run_finished` line in `TestWriterEnvelopeOrderAndNulls` are refreshed.
 - `apogee probe context` and `apogee probe context --live` ship; `docs/manual/probe.md` and
   `docs/manual/headless.md` describe the table and the frame keys.
