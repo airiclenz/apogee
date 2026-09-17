@@ -70,5 +70,11 @@
 // is the twin that answers "unverified" everywhere else, so all six release targets compile the
 // probe rather than guessing.
 //
+// The context-cost half. contextcost.go is `apogee probe context` — the table that sets the
+// engine's own Turn-1 report (domain.ContextCost, ADR 0079) beside the mode it was composed under
+// and the ratio its `~` estimates went through, one row per piece plus the total, and the line that
+// names the armed advise/shape Reactions an idle estimate cannot see. Free like the host report: the
+// composition root reads the report off an Agent that sends nothing.
+//
 // And doc.go this map.
 package probe

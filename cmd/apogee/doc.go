@@ -125,6 +125,9 @@
 // into the mode a bubbletea session runs it in and probeterminal_other.go its POSIX
 // no-op twin; probeconfig.go `apogee probe config`, which reads config.yaml the way a live
 // reload does and reports its notices, a pending migration and every key's resolved value;
+// probecontext.go `apogee probe context`, which composes a session's Config through the Firing
+// composer's server-bound half, constructs an idle Agent and prints its Turn-1 context cost —
+// the offline estimate of what apogee itself puts in front of the model (ADR 0079);
 // undo.go `apogee undo <session-id> [confirm]`, the revert an unattended
 // Firing has nobody to offer — it opens one saved session's snapshot store from a fresh
 // process and shows `/undo`'s own listing (ADR 0074).

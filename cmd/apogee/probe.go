@@ -33,6 +33,11 @@ import (
 // live reload does and reports the notices, a pending migration and every key's resolved value —
 // a named child because its question ("what does the file say?") is narrower than the host
 // report's ("what would a session run with?"), and it never migrates the file it describes.
+//
+// `apogee probe context` is the fifth, free like the host report: it composes the Config a session
+// would start with, constructs an idle Agent from it and reads what apogee itself puts in front of
+// the model at Turn 1 (ADR 0079) — no request is sent, nothing is written — so the number a
+// `headless` run reports on `run_finished.context_cost` can be read without running one.
 func newProbeCommand() *cobra.Command {
 	cmd := probeHostCommand("probe",
 		"Report this host: confinement, roots, and endpoint reachability",
@@ -51,6 +56,7 @@ func newProbeCommand() *cobra.Command {
 	cmd.AddCommand(probeModelCommand())
 	cmd.AddCommand(probeTerminalCommand())
 	cmd.AddCommand(probeConfigCommand())
+	cmd.AddCommand(probeContextCommand())
 
 	return cmd
 }

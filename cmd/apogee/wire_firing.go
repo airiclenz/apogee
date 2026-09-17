@@ -107,29 +107,38 @@ type firingInputs struct {
 	report func(msg string)
 }
 
-// firingConfig composes the construction surface EVERY unattended run is driven from: one prompt,
-// nobody watching, no delegate that assumes a human. It exists because that surface was previously
-// spelled out three times — once per Driver — and three copies of a twenty-field literal is three
-// chances for one configuration to mean two different runs depending on which Driver read it, which
-// is the one thing ADR 0031's benchable-all-the-way-up shape cannot afford.
-//
-// It composes; it does not decide. The mode gate, the roots, the scratch sweep and every notice a
-// Driver prints in its own voice stay with the Driver — what comes
-// back is a Config, this run's routing (firingRouting) and the per-model rebind notices, which
-// headless prints on stderr, the daemon logs, and the TUI's `/schedule` Driver drops (its narration
-// is the session record it leaves behind).
-//
-// Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and handing it
-// any of them is how a run acquires a human it does not have. Events is the ONE exception, and only
-// where the Driver built a Reaction Runner (in.hooks): that Runner observes and forwards, so a
-// Firing gains no human from it — a Reaction can read what the run did and nothing a Reaction does
-// reaches the model, the conversation or the Session record (ADR 0073 §2). With no Runner it stays
-// nil, exactly as it was before the key existed. Tools is left nil too and the engine builds its
-// own registry — EXCEPT under `sub-agents-choice: model`, where the gate shapes the sub_agent
-// SCHEMA rather than anything on the Config the engine reads (ADR 0031), so a Firing that must
-// publish `run_on` has to hand over a roster assembled here. Either way a Firing still reaches no
-// external MCP server (ADR 0034): the assembled registry carries no MCP tools.
-func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRouting, []string, error) {
+// firingBinding is the server-BOUND half of an unattended run's Config — everything firingConfig
+// composes before it takes its one beat of the server: the key resolved from the bound entry's own
+// source, the per-model spec (prompt, profile, window budget) and the projection every Driver fills
+// identically, overlaid with the entry-derived keys. What it deliberately lacks is everything only a
+// live server or a run about to start can supply: the beat-derived fan-out width and effort dialect,
+// the run's scratch dir, the Reaction Runner, the routing and the namer. firingConfig adds those; the
+// offline `apogee probe context` (probecontext.go) stops here, because it constructs an Agent that
+// sends nothing and must neither dial the beat nor create a scratch dir on the way to its estimate.
+type firingBinding struct {
+	// cfg is the Config with every binding-derived key filled and every beat-derived key at its
+	// zero — a Config an Agent constructs from, not yet one a Firing runs on.
+	cfg apogee.Config
+	// spec is the per-model resolution the Config was overlaid from, kept because the beat's hint
+	// notice and the namer read the model and window it bound.
+	spec apogee.RebindSpec
+	// apiKey is the bearer token resolved from the bound entry's own key source.
+	apiKey string
+	// keys is the resolver it was resolved through, kept so the Sub-agent server's entry resolves
+	// its own key through the same one (resolveFiringRouting) rather than running an
+	// `api-key-cmd:` twice.
+	keys *config.KeyResolver
+	// notices is the per-model rebind's narration so far — a built-in Model profile announcing
+	// itself, the roster delta it carries.
+	notices []string
+}
+
+// bindFiringConfig composes the firingBinding: the model fallback, the key, the spec, the skill
+// catalog, the toolchain probe's start, the shared projection and the entry-derived overlay, in
+// firingConfig's own order. It observes nothing and writes nothing — the two facts the offline
+// probe relies on — and it fails exactly where firingConfig failed before the extraction: a key
+// source that refuses, or a per-model resolution that does.
+func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// The bound entry's own `model:` unless the Driver overlaid one. On a launcher-fronted server an
 	// empty model is legitimate — it means "whatever is serving" — so this is a fallback, not a
 	// default that has to hold a name.
@@ -161,7 +170,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	if apiKey == "" {
 		resolved, err := keys.ResolveWithin(in.entry, in.roots.workspace)
 		if err != nil {
-			return apogee.Config{}, firingRouting{}, nil, err
+			return firingBinding{}, err
 		}
 		apiKey = resolved
 	}
@@ -191,7 +200,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	specOpts.ResponseReserve = config.ResolveResponseReserve(in.entry.ResponseReserve, in.opts.ResponseReserve)
 	spec, notices, err := rebindSpecFor(specOpts, in.roots, model, 0, pinnedWindow, in.entry.MaxOutputTokens)
 	if err != nil {
-		return apogee.Config{}, firingRouting{}, nil, err
+		return firingBinding{}, err
 	}
 
 	// The share the run actually divides its window by, read back OFF the spec rather than resolved
@@ -221,6 +230,95 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 			UseShippedSkills: in.opts.UseShippedSkills,
 		})
 	}
+
+	// The toolchain roots' probe, started here for the Drivers that reach this composer with no
+	// session before it (headless, the daemon); inside a session it is the no-op second start. It
+	// runs in the temp root, never this run's home or workspace (toolchain_roots.go) — the
+	// workspace is only what its PATH is scoped out of.
+	hostToolchain.start(in.roots.workspace)
+
+	// The keys every Driver fills identically come off the one projection (wire_config.go) — the
+	// projection is called after hostToolchain.start above so the read-roots func it composes lists
+	// the toolchain roots — and what an unattended run adds on top is the entry it bound to and the
+	// observation it took of that server. Confiner and posture are the session's CONFIGURED ones,
+	// so an Auto run here is fenced by the same box an Auto session on this configuration would be;
+	// the posture is the boot value and not a `/confine` toggled since — that command moves the
+	// blast radius on the live engine and nothing mirrors it onto the settings holder, so it never
+	// reaches `in.opts`. That is the second named exception to "a Firing sees exactly what the
+	// session sees" (ADR 0037, note of 2026-08-25) — a `/confine off` is a per-session act a
+	// watching human takes on their own turn, while `/confine off --save`, which writes the host
+	// acknowledgement, is what loosens the Firings a LATER session raises.
+	//
+	// Every file-only key the projection carries is honoured for one reason: it is one
+	// configuration, and an unattended run must offer the model the same tools, obey the same host
+	// allow/deny lists, scrub the same variables out of a subprocess it chose the contents of, mount
+	// the same context files and read responses in the same shape a session on this host would.
+	cfg := projectConfig(in.opts, in.roots, in.confiner, in.mode, skillProvider)
+	cfg.Endpoint = in.entry.Endpoint
+	cfg.Model = spec.Model
+	cfg.APIKey = apiKey
+	// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
+	// seat by when the model is offered a seat to choose (ADR 0069, wire_server.go's shape). An
+	// unattended run needs them for the same reason a session does: the bullet that names the
+	// far seat is unreadable beside a near one the model can only call "this server".
+	cfg.ServerName = in.entry.Name
+	cfg.ServerDescription = in.entry.Description
+	// And the protocol the bound entry speaks — its `wire:` key as written (ADR 0078), the same
+	// value firingConfig's beat is dialled under, so an unattended run opens the connection a
+	// session on this entry opens (ADR 0031's Driver parity).
+	cfg.Wire = in.entry.Wire
+	// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
+	// rather than off opts, so the run reads responses in the same shape a session on the same
+	// model would, and a built-in match has already narrated itself through the notices.
+	cfg.Profile = spec.Profile
+	cfg.SystemPrompt = spec.SystemPrompt
+	cfg.Context.MaxContextTokens = spec.MaxContextTokens
+	// The room inside it this run works in: the bound entry's own `working-window:` over the
+	// top-level key (config.ResolveWorkingWindow, the ranks the window pin above spells).
+	// Unbounded at both scopes it stays 0 and the run works in the whole advertised window.
+	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(in.entry.WorkingWindow, in.opts.WorkingWindow)
+	// The `response-reserve:` share the bound entry resolves to, read back off the spec
+	// above. Unstated at both scopes it stays 0 and the Budget holds its own built-in fifth
+	// back.
+	cfg.Context.ResponseReserveFraction = reserve
+	// The bound entry's `max-output-tokens:` pin (ADR 0046). Unpinned it stays 0 and the
+	// engine derives the cap from its own reply budget — never "no cap", which for an
+	// unattended run is precisely the thing a runaway reply must not be able to become.
+	cfg.Context.MaxOutputTokens = in.entry.MaxOutputTokens
+
+	return firingBinding{cfg: cfg, spec: spec, apiKey: apiKey, keys: keys, notices: notices}, nil
+}
+
+// firingConfig composes the construction surface EVERY unattended run is driven from: one prompt,
+// nobody watching, no delegate that assumes a human. It exists because that surface was previously
+// spelled out three times — once per Driver — and three copies of a twenty-field literal is three
+// chances for one configuration to mean two different runs depending on which Driver read it, which
+// is the one thing ADR 0031's benchable-all-the-way-up shape cannot afford.
+//
+// It composes; it does not decide. The mode gate, the roots, the scratch sweep and every notice a
+// Driver prints in its own voice stay with the Driver — what comes
+// back is a Config, this run's routing (firingRouting) and the per-model rebind notices, which
+// headless prints on stderr, the daemon logs, and the TUI's `/schedule` Driver drops (its narration
+// is the session record it leaves behind). The server-bound half — the key, the spec, the shared
+// projection and the entry-derived overlay — is bindFiringConfig's, so the offline probe can compose
+// the same Config without the beat, the scratch dir and the routing this function adds on top.
+//
+// Approver, Asker and Presenter are deliberately left nil: run.Once pins its own, and handing it
+// any of them is how a run acquires a human it does not have. Events is the ONE exception, and only
+// where the Driver built a Reaction Runner (in.hooks): that Runner observes and forwards, so a
+// Firing gains no human from it — a Reaction can read what the run did and nothing a Reaction does
+// reaches the model, the conversation or the Session record (ADR 0073 §2). With no Runner it stays
+// nil, exactly as it was before the key existed. Tools is left nil too and the engine builds its
+// own registry — EXCEPT under `sub-agents-choice: model`, where the gate shapes the sub_agent
+// SCHEMA rather than anything on the Config the engine reads (ADR 0031), so a Firing that must
+// publish `run_on` has to hand over a roster assembled here. Either way a Firing still reaches no
+// external MCP server (ADR 0034): the assembled registry carries no MCP tools.
+func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRouting, []string, error) {
+	bound, err := bindFiringConfig(in)
+	if err != nil {
+		return apogee.Config{}, firingRouting{}, nil, err
+	}
+	cfg, spec, apiKey, keys, notices := bound.cfg, bound.spec, bound.apiKey, bound.keys, bound.notices
 
 	// The ONE observation this run takes of the server it is bound to, standing in for the heartbeat
 	// an unattended run has none of. Everything discovery can tell this composition comes off it:
@@ -295,38 +393,6 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// seed the box fences writable and the read root the read tools reach it back through — a
 	// Firing never moves it, so the live func below answers the one dir the run announced.
 	scratchDir := ensureScratchDir(in.roots.scratch, in.recordID)
-	// The toolchain roots' probe, started here for the Drivers that reach this composer with no
-	// session before it (headless, the daemon); inside a session it is the no-op second start. It
-	// runs in the temp root, never this run's home or workspace (toolchain_roots.go) — the
-	// workspace is only what its PATH is scoped out of.
-	hostToolchain.start(in.roots.workspace)
-
-	// The keys every Driver fills identically come off the one projection (wire_config.go) — the
-	// projection is called after hostToolchain.start above so the read-roots func it composes lists
-	// the toolchain roots — and what an unattended run adds on top is the entry it bound to and the
-	// observation it took of that server. Confiner and posture are the session's CONFIGURED ones,
-	// so an Auto run here is fenced by the same box an Auto session on this configuration would be;
-	// the posture is the boot value and not a `/confine` toggled since — that command moves the
-	// blast radius on the live engine and nothing mirrors it onto the settings holder, so it never
-	// reaches `in.opts`. That is the second named exception to "a Firing sees exactly what the
-	// session sees" (ADR 0037, note of 2026-08-25) — a `/confine off` is a per-session act a
-	// watching human takes on their own turn, while `/confine off --save`, which writes the host
-	// acknowledgement, is what loosens the Firings a LATER session raises.
-	//
-	// Every file-only key the projection carries is honoured for one reason: it is one
-	// configuration, and an unattended run must offer the model the same tools, obey the same host
-	// allow/deny lists, scrub the same variables out of a subprocess it chose the contents of, mount
-	// the same context files and read responses in the same shape a session on this host would.
-	cfg := projectConfig(in.opts, in.roots, in.confiner, in.mode, skillProvider)
-	cfg.Endpoint = in.entry.Endpoint
-	cfg.Model = spec.Model
-	cfg.APIKey = apiKey
-	// The bound entry in the HUMAN's own words, for the orientation block to name the SESSION
-	// seat by when the model is offered a seat to choose (ADR 0069, wire_server.go's shape). An
-	// unattended run needs them for the same reason a session does: the bullet that names the
-	// far seat is unreadable beside a near one the model can only call "this server".
-	cfg.ServerName = in.entry.Name
-	cfg.ServerDescription = in.entry.Description
 	cfg.ScratchDir = scratchDir
 	// And the same dir as the read root the read tools reach it back through: a Firing's model
 	// is told the dir is writable exactly as a session's is, and must be able to read what it
@@ -336,29 +402,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// the same five words on this side of the boundary (internal/agent's toProviderDialect
 	// converts them back at the wire seam, where the provider package holds no domain import).
 	cfg.EffortDialect = domain.EffortDialect(effortDialect)
-	// And the protocol the bound entry speaks — its `wire:` key as written (ADR 0078), the same
-	// value the beat above was dialled under, so an unattended run opens the connection a session
-	// on this entry opens (ADR 0031's Driver parity).
-	cfg.Wire = in.entry.Wire
-	// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
-	// rather than off opts, so the run reads responses in the same shape a session on the same
-	// model would, and a built-in match has already narrated itself through the notices.
-	cfg.Profile = spec.Profile
-	cfg.SystemPrompt = spec.SystemPrompt
 	cfg.ParallelAgents = config.ResolveParallelAgents(in.entry.ParallelAgents, slots)
-	cfg.Context.MaxContextTokens = spec.MaxContextTokens
-	// The room inside it this run works in: the bound entry's own `working-window:` over the
-	// top-level key (config.ResolveWorkingWindow, the ranks the window pin above spells).
-	// Unbounded at both scopes it stays 0 and the run works in the whole advertised window.
-	cfg.Context.WorkingWindow = config.ResolveWorkingWindow(in.entry.WorkingWindow, in.opts.WorkingWindow)
-	// The `response-reserve:` share the bound entry resolves to, read back off the spec
-	// above. Unstated at both scopes it stays 0 and the Budget holds its own built-in fifth
-	// back.
-	cfg.Context.ResponseReserveFraction = reserve
-	// The bound entry's `max-output-tokens:` pin (ADR 0046). Unpinned it stays 0 and the
-	// engine derives the cap from its own reply budget — never "no cap", which for an
-	// unattended run is precisely the thing a runaway reply must not be able to become.
-	cfg.Context.MaxOutputTokens = in.entry.MaxOutputTokens
 
 	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink
 	// (ADR 0073 §2). It is assigned after the literal rather than inside it because a nil

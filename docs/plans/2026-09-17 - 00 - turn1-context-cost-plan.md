@@ -143,7 +143,13 @@ Enumerated consumers of `RunStarted`/`RunFinished`: `cmd/apogee/headless.go`, `c
 
 **Commit:** `feat(headless): run_finished carries context_cost and the measured Turn-1 prompt tokens`
 
-## 5. `apogee probe context` — the offline estimate table
+## 5. `apogee probe context` — the offline estimate table — ✅ DONE (2026-09-17)
+
+NOTES (2026-09-17): the armed count reads `opts.Reactions` (the resolved `reactions:` list) rather than `cfg.Reactions` as the item's text says — the composer never fills `Config.Reactions` (a user's sync lane rides `run.Spec.Sync`, the observe lane the Runner), so `cfg.Reactions` is always empty here; the count covers advise, shape-view and shape-work classes.
+NOTES (2026-09-17): the armed line pluralises ("1 advise/shape Reaction armed" / "2 … Reactions armed") — the item's sentence is kept verbatim for N ≠ 1.
+NOTES (2026-09-17): the probe waits for the toolchain-roots probe (`hostToolchain.wait()`) before reading the estimate, so the orientation names the toolchain roots as a session's would rather than racing the background `go env`; the item did not specify this.
+NOTES (2026-09-17): `probe_test.go` — `TestSubcommandsRegistersProbe` gained `"context"` in its expected-children list (an enumeration test, consequential to the registration).
+NOTES (2026-09-17): a fifth probe subject paragraph was added to `newProbeCommand`'s doc comment (probe.go); the manual is item 7's.
 
 **What:** Depends on item 2. Add `probe context` in `cmd/apogee/probecontext.go`, registered in `newProbeCommand()` beside `model`/`terminal`/`config`. Flags: `--workspace`, `--config`, `--endpoint`, `--model` (the same `config.Options` + `config.ApplyConfig` + `resolveRoots` pattern as `probeHostCommand`/`probeModelCommand`). Composition: the Config comes from `projectConfig(opts, roots, confiner, mode, skillProvider)` under the resolved startup mode (see the guard), a deny-all Approver and a no-op Confiner — reuse what `firingConfig` composes rather than a third assembly, through a shared helper extracted in `wire_firing.go` (see the guard: `firingConfig` itself is never called). Construct the Agent with the ordinary `provider.NewClient` bound to the configured endpoint (it does not dial at construction), call `ContextCost()`, `Close()` — never Step, so nothing is sent. Rendering lives in `internal/probe/contextcost.go`: `type ContextCost struct{ Estimate domain.ContextCost; Armed int; ... }` with `Report() string` producing:
 

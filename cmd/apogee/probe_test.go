@@ -252,7 +252,7 @@ func TestSubcommandsRegistersProbe(t *testing.T) {
 	for _, c := range probe.Commands() {
 		children[c.Name()] = true
 	}
-	for _, want := range []string{"host", "model", "terminal", "config"} {
+	for _, want := range []string{"host", "model", "terminal", "config", "context"} {
 		if !children[want] {
 			t.Errorf("`probe` does not register the %q child; has %v", want, children)
 		}

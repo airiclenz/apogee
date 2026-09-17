@@ -1,0 +1,6 @@
+Context cost — what apogee puts in front of the model at Turn 1 (mode auto; estimate, ~4.0 chars/token)
+  prompt              1,043 B   ~261
+  orientation           612 B   ~153
+  context files       4,201 B  ~1050
+  tool menu          11,512 B  ~2878
+  total              17,368 B  ~4342
