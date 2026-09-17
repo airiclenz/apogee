@@ -124,15 +124,38 @@ func (h *daemonHarness) save(t *testing.T, body string) {
 
 // run drives one daemon to completion on its own goroutine and returns a func that waits for it and
 // yields the error it ended with. Nothing is signalled here — the caller decides when to stop.
+//
+// The daemon still dies with the test that ran it: a test that fails before it waits would otherwise
+// leave the daemon — and the Scheduler goroutines it fires through runOnce — running while
+// newDaemonHarness's earlier-registered Cleanup restores that seam under them, which is the data race
+// apogee-5tn recorded. The Cleanup is registered HERE, after that restore, so LIFO joins the daemon
+// first; on the ordinary path the caller's wait has already returned and it costs nothing.
 func (h *daemonHarness) run(t *testing.T) func() error {
 	t.Helper()
 
 	opts := config.Options{ConfigDir: h.home}
 	done := make(chan error, 1)
+	finished := make(chan struct{})
 	go func() {
 		done <- runDaemon(context.Background(), &opts, func(string) bool { return false },
 			h.out, h.errOut, h.signals)
+		close(finished)
 	}()
+	t.Cleanup(func() {
+		// Two signals, never blocking: the second cuts a shutdown grace short (daemonShutdown), and
+		// a daemon that already returned — the ordinary case — has nothing to take them.
+		for range 2 {
+			select {
+			case h.signals <- syscall.SIGTERM:
+			default:
+			}
+		}
+		select {
+		case <-finished:
+		case <-time.After(10 * time.Second):
+			t.Errorf("the daemon outlived its test; its Scheduler is still reading the seams the harness restores")
+		}
+	})
 	return func() error {
 		select {
 		case err := <-done:
