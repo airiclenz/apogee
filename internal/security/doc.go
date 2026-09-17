@@ -87,6 +87,14 @@
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
 // its command-line argument (domain.ShellCommandTool).
 //
+// secrets.go is the one rule whose evidence is not in the call at all but in what git has staged:
+// SecretFindings, the pure scan of a shadow-index staged diff (added lines only, attributed to
+// their `+++ b/` file) and of the staged paths (basename globs, `.pub` and the env templates
+// exempt) for secret material — private-key blocks, AWS / GitHub / Slack tokens, JWTs, key and
+// env file names — plus SecretsHint, the pinned Fix-row wording, and SecretsRuleID, the
+// commit-secrets rule dispatch raises to TierForceApproval on a git_commit that would carry
+// any of it (ADR 0080). Pure by contract: dispatch precomputes the diff and the paths (D6).
+//
 // The runaway halt and the trail. circuitbreaker.go trips after DefaultCircuitBreakerThreshold
 // consecutive identical FAILING calls, keyed by a (tool, arguments) signature that any success
 // clears. audit.go is the append-only call / decision / result record: the AuditDecision
