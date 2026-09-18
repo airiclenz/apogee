@@ -10,6 +10,12 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- `scripts/test-shards.sh` (`make test`) takes `APOGEE_TEST_RACE=0` to run the sharded suite without the race detector, for kernels where a `-race` binary cannot start (39-bit-VA arm64 rpi kernels: `FATAL: Found 39 - Supported 48`). The run announces it on stderr (`test-shards: race detector OFF (APOGEE_TEST_RACE=0) — this run does not stand in for make check`) and in its summary line (`==> go test (unraced): …`); any other value keeps `-race`, and the default plan is unchanged.
+
+- `scripts/test-shards.sh` (`make test`) takes `APOGEE_TEST_SLOW=1` for a Raspberry-Pi-class box: one shard per heavy package (an explicit `APOGEE_TEST_SHARDS` still wins), every process `-parallel 1`, the rest process `-p 2` — at most four driven tests at once, announced on stderr. Unset, the plan is unchanged.
+
+- `make check` refuses to run with `APOGEE_TEST_RACE=0` set (the gate is raced by definition; `make test` alone still accepts it); the building manual and the Makefile's `test` comment name `APOGEE_TEST_SLOW=1` and `APOGEE_TEST_RACE=0` and the 39-bit-VA Raspberry Pi kernel they exist for.
+
 - A Confiner backend that cannot fence terminal commands now says *why*: `domain.ConfinementCaps` gains `Unavailable` (disclosure only, never read by the Auto gate), and the shared backend line renders it as ` · why: <reason>` after the network cell whenever fs-write is unavailable — so `apogee probe host`, `/confine` status and the startup line name the host fact that stands between the user and a confined Auto. `docs/manual/probe.md` documents the field.
 
 - Linux: when landlock cannot fence, the confiner now says why — `ConfinementCaps.Unavailable` carries the errno `landlock_create_ruleset` answered with (`landlock unavailable (landlock_create_ruleset: function not implemented)` on a kernel without landlock, `operation not supported` when the LSM is booted off), and the `__confined-exec` refusal names the same errno.
