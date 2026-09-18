@@ -3407,16 +3407,16 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		}
 	})
 
-	t.Run("the header offers nothing while nothing is open", func(t *testing.T) {
+	t.Run("the shut header is a fold target", func(t *testing.T) {
 		t.Parallel()
 		m := modelWithSuperGroup(t)
 		header := umbrellaHeaderLine(t, m)
-		if kind := m.lineTargets[header].kind; kind != targetNone {
-			t.Errorf("the header of a shut umbrella is marked %v, want no target at all", kind)
+		if kind := m.lineTargets[header].kind; kind != targetUmbrella {
+			t.Errorf("the header of a shut umbrella is marked %v, want targetUmbrella", kind)
 		}
 		before := strings.Join(m.lines, "\n")
 		if got := strings.Join(clickLine(t, m, header).lines, "\n"); got != before {
-			t.Errorf("a click on the shut umbrella's header repainted it:\n%s", got)
+			t.Errorf("a click on the shut umbrella's header with nothing open repainted it:\n%s", got)
 		}
 	})
 }
@@ -3614,9 +3614,10 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 }
 
 // TestSmallUmbrellaHeaderStillClosesChildren is the fold's floor: an umbrella with no more type
-// rows than the threshold is SMALL, and its header keeps the meaning it always had — no glyph, a
-// click that closes every open child (transcript.closeSuperGroup) — with the shared preference
-// untouched and nothing written to the settings seam.
+// rows than the threshold is SMALL, and its header — wearing the fold's ▼ over its rows like every
+// umbrella's (renderSuperGroup) — keeps the click meaning it had, closing every open child
+// (transcript.closeSuperGroup), with the shared preference untouched and nothing written to the
+// settings seam.
 func TestSmallUmbrellaHeaderStillClosesChildren(t *testing.T) {
 	t.Parallel()
 	const readRun, runRun = 1, 3
@@ -3626,8 +3627,8 @@ func TestSmallUmbrellaHeaderStillClosesChildren(t *testing.T) {
 	m.opts.Settings = fakeSettingsHost{write: log.write}
 	m.opts.ToolsFoldOver, m.transcript.toolsFoldOver = 2, 2 // two type rows: at the threshold, not over it
 	m.refreshViewport()
-	if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls)"}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("setup: headers = %q, want the glyphless small header %q", got, want)
+	if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("setup: headers = %q, want the open small header %q", got, want)
 	}
 	m = clickCell(t, m, 4, screenRow(t, m, typeRowLine(t, m, readRun)))
 	m = clickCell(t, m, 4, screenRow(t, m, typeRowLine(t, m, runRun)))

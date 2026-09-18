@@ -25,11 +25,10 @@ import (
 const (
 	toolsFoldPrompt = "Survey the workspace."
 	toolsFoldWrapUp = "The workspace is surveyed."
-	// toolsFoldHeader is the umbrella's counted header for the fixture's three calls, as the frame
-	// spells it without a glyph: the shape a SMALL umbrella keeps (no indicator at all), and the
-	// prefix a large one wears its ▶/▼ after.
+	// toolsFoldHeader is the umbrella's counted header for the fixture's three calls, the prefix
+	// EVERY umbrella — small or large — wears its fold's ▶/▼ after.
 	toolsFoldHeader = "✦ Tools (3 calls)"
-	// The large umbrella's two headers: ▼ open on its type rows, ▶ folded to the header alone.
+	// The umbrella's two headers: ▼ open on its type rows, ▶ folded to the header alone.
 	toolsFoldHeaderOpen   = toolsFoldHeader + " ▼"
 	toolsFoldHeaderFolded = toolsFoldHeader + " ▶"
 	// toolsFoldReadRow is the first type row's head — its branch marker and label — the row a folded
@@ -139,10 +138,10 @@ func TestE2EToolsUmbrellaFoldIsRememberedAcrossAResume(t *testing.T) {
 }
 
 // TestE2EToolsFoldOverZeroNeverFolds pins the threshold's off switch: under `ui.tools-fold-over: 0`
-// no umbrella is ever large, so the same three-row umbrella comes to rest OPEN with the header a
-// small umbrella always wore — no ▶ and no ▼ after its count. The claim is made on the header LINE
-// alone: every type row of an open umbrella carries a ▶/▼ of its own, so a frame-wide search for
-// the glyph would trip on rows that are not the header's.
+// no umbrella is ever large, so the same three-row umbrella comes to rest OPEN — a small umbrella
+// starts every session open — wearing the ▼ every open umbrella's header wears after its count. The
+// claim is made on the header LINE alone: every type row of an open umbrella carries a ▶/▼ of its
+// own, so a frame-wide search for the glyph would trip on rows that are not the header's.
 func TestE2EToolsFoldOverZeroNeverFolds(t *testing.T) {
 	t.Parallel()
 
@@ -154,8 +153,11 @@ func TestE2EToolsFoldOverZeroNeverFolds(t *testing.T) {
 		t.Fatalf("the frame carries no %q header:\n%s", toolsFoldHeader, frame)
 	}
 	line := frame.Row(y)
-	if strings.Contains(line, "▶") || strings.Contains(line, "▼") {
-		t.Errorf("the header line wears a fold glyph under tools-fold-over: 0: %q", line)
+	if !strings.Contains(line, toolsFoldHeaderOpen) {
+		t.Errorf("the header line under tools-fold-over: 0 = %q; want the open small umbrella's %q", line, toolsFoldHeaderOpen)
+	}
+	if strings.Contains(line, "▶") {
+		t.Errorf("the header line stands folded under tools-fold-over: 0: %q", line)
 	}
 	if !strings.Contains(frame.String(), toolsFoldReadRow) {
 		t.Errorf("the umbrella hides its %q type row under tools-fold-over: 0:\n%s", toolsFoldReadRow, frame)

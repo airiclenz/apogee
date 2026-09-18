@@ -201,9 +201,10 @@ type paintKey struct {
 	// small fold's head flag deliberately included: both are named as the facts the paint moves on
 	// rather than as the facts they are derived from, because the shared preference and the
 	// threshold move a LARGE umbrella's fold with no entry flag flipped and no entry appended — a
-	// `/settings` edit of the threshold under an open preference carries an umbrella across the
-	// line — and a key that missed it would serve a header with a ▼ and a click target it no longer
-	// has. The small fold rides the same slot so both shapes' folds are keyed from one place.
+	// `/settings` edit of the threshold under a shut preference carries an umbrella across the
+	// line — and a key that missed it would serve a header wearing the wrong glyph over rows it no
+	// longer shows, or none where it now shows them. The small fold rides the same slot so both
+	// shapes' folds are keyed from one place.
 	large  bool
 	folded bool
 
@@ -462,6 +463,9 @@ func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, li
 // says the umbrella has more type rows than the threshold ([transcript.umbrellaIsLarge]) — the
 // condition under which it obeys the shared preference rather than its own head flag — and folded
 // says whichever of the two it obeys has it shut to its header line ([transcript.umbrellaFolded]).
+// The painter draws folded alone — every umbrella's header wears the fold's ▶/▼ and is a fold
+// target whatever its size (renderSuperGroup) — while large names which fold that is, so the key
+// still turns over when a threshold or preference edit carries the umbrella across the line.
 // Every other shape carries the zero value. It is one value rather than two bools because the two
 // travel together from the shape decision to the key and the painter ([resolvedBlock.fold]).
 type umbrellaFold struct {

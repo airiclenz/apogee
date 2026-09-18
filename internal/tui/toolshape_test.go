@@ -49,7 +49,7 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 
 	// Two differing one-line outputs neither sum nor agree, so the type row's aggregate is blank.
 	want := strings.Join([]string{
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		groupMemberLine("  ┕ Terminal (2) ⋯"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -60,7 +60,7 @@ func TestRenderGroupsOneLineOutputCalls(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
 	}
 	want = strings.Join([]string{
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Terminal (2) ⋯", glyphExpanded),
 		"  │ ┝ git rev-parse HEAD ⋯ abc1234",
 		"  │ ┕ pwd ⋯ /workspace/repos/apogee",
@@ -499,7 +499,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 				readCall(tr, "c3", "b.go", 1, 9, 0)
 			},
 			want: []string{
-				"✦ Tools (3 calls)",
+				"✦ Tools (3 calls) " + glyphExpanded,
 				groupMemberLine("  ┝ Read ⋯ 5 lines"),
 				groupMemberLine("  ┝ Terminal ⋯ exit 0"),
 				groupMemberLine("  ┕ Read ⋯ 9 lines"),
@@ -585,7 +585,7 @@ func TestRenderGroupBreakers(t *testing.T) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
 		}
 		want := strings.Join([]string{
-			"✦ Tools (2 calls)",
+			"✦ Tools (2 calls) " + glyphExpanded,
 			leaderEdgeRow("  ┕ Terminal (2) ⋯", glyphExpanded),
 			"  │ ┝ go build ⋯ done",
 			groupMemberLine("  │ ┕ go test ⋯ exit 0"),
@@ -718,14 +718,14 @@ func TestSkillGroupSitsBetweenTwoToolUmbrellas(t *testing.T) {
 	readCall(tr, "r4", "d.go", 1, 5, 0)
 
 	want := strings.Join([]string{
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		groupMemberLine("  ┕ Read (2) ⋯ 10 lines"),
 		"",
 		"✦ Skill (2)",
 		groupMemberLine("  ┝ Coding Standards ⋯"),
 		groupMemberLine("  ┕ Brew Release ⋯"),
 		"",
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		groupMemberLine("  ┕ Read (2) ⋯ 10 lines"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {

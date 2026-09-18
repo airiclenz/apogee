@@ -406,9 +406,9 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 	}
 }
 
-// The regression the fold's key terms guard: a large umbrella's ▼ and its click target are served
+// The regression the fold's key terms guard: an umbrella's ▶/▼ and the rows beneath it are served
 // from the cache, and the two things that move them — the shared preference, and a threshold edit
-// under an open preference that carries the umbrella across the line — flip no entry flag and
+// under a shut preference that carries the umbrella across the line — flip no entry flag and
 // append no entry; a SMALL umbrella's fold flips its head entry's own flag, which the key reads
 // through the same fold slot rather than spanFlags. Each is walked warm against a cold oracle, and
 // the flip is asserted to have painted differently so a key that ignored it could not pass by
@@ -432,6 +432,20 @@ func TestPaintCacheRepaintsWhenTheFoldFlips(t *testing.T) {
 		sameRender(t, what, got, coldRender(tr, th, 80, false))
 		return got
 	}
+	// Every umbrella's header is the fold's target at either size (renderSuperGroup), so the paint
+	// is asked for exactly one targetUmbrella line whether it stands folded or open.
+	umbrellaTargets := func(t *testing.T, got renderedTranscript, what string) {
+		t.Helper()
+		headers := 0
+		for _, target := range got.targets {
+			if target.kind == targetUmbrella {
+				headers++
+			}
+		}
+		if headers != 1 {
+			t.Errorf("%s: %d targetUmbrella lines; want the header alone", what, headers)
+		}
+	}
 
 	t.Run("the toolsOpen flip", func(t *testing.T) {
 		t.Parallel()
@@ -451,22 +465,20 @@ func TestPaintCacheRepaintsWhenTheFoldFlips(t *testing.T) {
 		}
 	})
 
-	t.Run("a toolsFoldOver change under toolsOpen = true", func(t *testing.T) {
+	t.Run("a toolsFoldOver change under toolsOpen = false", func(t *testing.T) {
 		t.Parallel()
 
 		tr := build(t)
-		tr.setToolsOpen(true)
-		large := check(t, "large and open", tr)
+		large := check(t, "large and folded at the default", tr)
+		umbrellaTargets(t, large, "large and folded")
 		if !tr.setToolsFoldOver(2) {
 			t.Fatal("setToolsFoldOver(2) = false; want the threshold to move")
 		}
-		small := check(t, "small again under the raised threshold", tr)
+		small := check(t, "small and open under the raised threshold", tr)
 		if equalLines(large.lines, small.lines) {
-			t.Error("the umbrella painted identically large and small — the raised threshold served the stale ▼")
+			t.Error("the umbrella painted identically large and small — the raised threshold served the stale ▶")
 		}
-		if targets := tr.renderView(th, 80, false, breadcrumbHint).targets; targets[len(targets)-3].kind != targetNone {
-			t.Errorf("small umbrella header target = %v; want targetNone with no child open", targets[len(targets)-3].kind)
-		}
+		umbrellaTargets(t, small, "small and open")
 	})
 
 	t.Run("a small umbrella's head-flag flip", func(t *testing.T) {

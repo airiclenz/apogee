@@ -131,19 +131,18 @@ const (
 //     (superMemberMarker) and by the very painter a plain group's members go through
 //     (renderGroupMember), so a member opens onto its body inside a type row exactly as it does
 //     inside a group — the sketch's 2nd step.
-//   - a SMALL umbrella's HEADER wears no state indicator of its own: its floor is its type
-//     rows, and a click there closes every open child instead (targetUmbrella). It is marked as a
-//     target only while something IS open, so a header with nothing to close keeps a click's
-//     selection meaning rather than offering an affordance that does nothing. Folded on its head
-//     entry's own flag ([transcript.umbrellaFolded]) it paints the header line alone, glyphless.
-//   - a LARGE umbrella — more type rows than `ui.tools-fold-over`
-//     ([transcript.umbrellaIsLarge]), whether or not a call is still open — folds to its header
-//     line under the shared `ui.tools-open` preference (fold.folded): the header alone, wearing a ▶ after its count the way a
-//     header-folding card does (renderToolBlock), and marked targetUmbrella so a click or ⏎ there
-//     opens it. Open, it paints its rows exactly as a small one does, wears a ▼, and is marked
-//     targetUmbrella whether or not a child is open, since the click now has a fold to move rather
-//     than children to close. The type-row and member state beneath a fold is untouched: what a
-//     reader opened stays open under the header and is there again when it unfolds.
+//   - EVERY umbrella's HEADER is a fold target and wears the fold's glyph: a ▶/▼ after its count
+//     the way a header-folding card does (renderToolBlock), ▼ while the rows are showing and ▶
+//     while the umbrella stands folded to its header line, and the header line is marked
+//     targetUmbrella whether small or large, open or shut, live or done, so a click or ⏎ there
+//     always has a fold to answer with. Which fold it is, the umbrella's SIZE says
+//     ([transcript.umbrellaFolded]): a LARGE one — more type rows than `ui.tools-fold-over`
+//     ([transcript.umbrellaIsLarge]) — follows the shared `ui.tools-open` preference, a SMALL one
+//     its head entry's own session-only flag; the painter asks only for the answer (fold.folded).
+//   - FOLDED, an umbrella paints its header line alone, its star live while a call in it is still
+//     open exactly as an open live header's is — nothing else on the line. The type-row and member
+//     state beneath a fold is untouched: what a reader opened stays open under the header and is
+//     there again when it unfolds.
 //
 // The count the header states is the number of CALLS, not of rows: a reader wants to know how much
 // work is folded away, and the rows already say how it divides. Its star is the block's, live while
@@ -161,11 +160,9 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 	}
 	label := th.toolLabel.Render(superGroupLabel) + " " +
 		th.toolIndicator.Render("("+plural(calls, superCallNoun)+")")
-	// A large umbrella's glyph sits after the count, the header-folding card's idiom
-	// (renderToolBlock): the indicator stays the row's last word.
-	if fold.large {
-		label += " " + th.toolIndicator.Render(stateIndicator(!fold.folded))
-	}
+	// The glyph sits after the count, the header-folding card's idiom (renderToolBlock): the
+	// indicator stays the row's last word.
+	label += " " + th.toolIndicator.Render(stateIndicator(!fold.folded))
 	var out blockPaint
 	if fold.folded {
 		out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetUmbrella)
@@ -174,14 +171,13 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 	room := toolRowCells(th, width)
 
 	var rows blockPaint
-	open, at := false, 0 // at: the run head's offset from the umbrella's own head
+	at := 0 // the run head's offset from the umbrella's own head
 	for i, r := range runs {
 		views := guardPromotions(th, r.views, room, superMemberMarker(true))
 		row := leaderRowIn(th, typeRowText(views), typeRowPaint(th, views),
 			runAggregate(views), branchMarker(i == len(runs)-1), room, r.expanded, noRemainder)
 		rows.addFor(at, []string{indicatorRow(th, row, width, stateIndicator(r.expanded))}, targetType)
 		if r.expanded {
-			open = true
 			for k, tv := range views {
 				lines, hides := renderGroupMember(th, tv, superMemberMarker(k == len(views)-1),
 					superMemberGutter, width, room, r.memberExpanded(k))
@@ -195,11 +191,7 @@ func renderSuperGroup(th theme, runs []toolRunView, width int, state blockState,
 		at += len(r.views)
 	}
 
-	header := targetNone
-	if open || fold.large {
-		header = targetUmbrella
-	}
-	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), header)
+	out.add(hangingWrap(th, th.toolHeader, state.star()+" ", label, width), targetUmbrella)
 	out.join(rows)
 	return out
 }

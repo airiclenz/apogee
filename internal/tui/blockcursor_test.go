@@ -95,16 +95,21 @@ func TestBlockCursorWalksOneStopPerSurface(t *testing.T) {
 }
 
 // TestBlockCursorWalksTheDeepestVisibleLevel is the umbrella's own claim (design call 7): the cursor
-// walks the same surfaces the mouse has, at whatever level the painter marked them, so a folded
-// super-group offers its type rows and nothing else — and opening one adds ITS members to the walk,
-// where a level that is folded away paints no lines and so has no stops at all.
+// walks the same surfaces the mouse has, at whatever level the painter marked them, so a
+// super-group shut to its type rows offers its header — the fold's own stop (targetUmbrella) — and
+// its type rows and nothing else; opening one adds ITS members to the walk, where a level that is
+// folded away paints no lines and so has no stops at all.
 func TestBlockCursorWalksTheDeepestVisibleLevel(t *testing.T) {
 	t.Parallel()
 
 	m := modelWithSuperGroup(t)
-	for _, line := range cursorStops(m.lineTargets) {
+	stops := cursorStops(m.lineTargets)
+	if len(stops) == 0 || m.lineTargets[stops[0]].kind != targetUmbrella {
+		t.Fatalf("a shut umbrella's first stop is %v, want its header as the fold's targetUmbrella", stops)
+	}
+	for _, line := range stops[1:] {
 		if got := m.lineTargets[line].kind; got != targetType {
-			t.Fatalf("a folded umbrella offers a %v stop at line %d, want its type rows alone", got, line)
+			t.Fatalf("a shut umbrella offers a %v stop at line %d, want its type rows alone past the header", got, line)
 		}
 	}
 

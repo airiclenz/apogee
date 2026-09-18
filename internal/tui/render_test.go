@@ -329,7 +329,7 @@ func TestTranscriptLayoutGolden(t *testing.T) {
 		"",
 		"✦ Reading the docs first.",
 		"",
-		"✦ Tools (8 calls)",
+		"✦ Tools (8 calls) " + glyphExpanded,
 		groupMemberLine("  ┝ Read (3) ⋯ 570 lines"),
 		leaderEdgeRow("  ┝ Terminal ⋯ exit 0", glyphExpanded),
 		leaderEdgeRow("  │ ┕ go test ./... ⋯ exit 0", glyphExpanded),

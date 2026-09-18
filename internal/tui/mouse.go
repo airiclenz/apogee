@@ -743,10 +743,10 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 //
 // A super-group's two extra kinds are the same rule at its two extra levels (renderSuperGroup): a
 // TYPE ROW flips the second state of the run it heads — its member rows, not their bodies — and the
-// UMBRELLA HEADER answers by the umbrella's size: a LARGE one at rest folds to its header line and
-// back under the one preference every large umbrella shares, written back as `ui.tools-open`
-// (toggleToolsFold), while a small or live one closes every open child beneath it rather than
-// toggling anything, its floor being the type rows (transcript.umbrellaIsLarge). A run view's TASK
+// UMBRELLA HEADER — marked on every umbrella, wearing the fold's ▶/▼ — answers by the umbrella's
+// size: a LARGE one folds to its header line and back under the one preference every large
+// umbrella shares, written back as `ui.tools-open` (toggleToolsFold), while a small one closes
+// every open child beneath it (transcript.umbrellaIsLarge). A run view's TASK
 // ROW is the same rule again at the level ADR 0063 added: it flips the fold of the task the viewed
 // run was handed, which is the view's own state and not the head's block state (render.go's rooted
 // paint marks the row, transcript.setTaskExpanded holds it).
@@ -831,7 +831,7 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	case targetUmbrella:
 		// A large umbrella's header is a fold, and flipping it is also a write of `ui.tools-open`
 		// (toggleToolsFold) — asked first for the task-list card's reason, one rule for the mouse
-		// and for ⏎; a small or live umbrella's header still closes its children instead.
+		// and for ⏎; a small umbrella's header still closes its children instead.
 		if m.transcript.umbrellaIsLarge(target.entry) {
 			m = m.toggleToolsFold()
 		} else if !m.transcript.closeSuperGroup(target.entry) {

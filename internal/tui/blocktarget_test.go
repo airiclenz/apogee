@@ -147,16 +147,19 @@ func TestRenderMarksTheWholeBlock(t *testing.T) {
 		{
 			// A run's calls carry no bodies (that is what made them groupable), so nothing under the
 			// umbrella hides a body — but the TYPE ROW hides the run's member rows, and that is what
-			// a click there folds open. The umbrella's own header stays inert while nothing is open,
-			// so it keeps a click's selection meaning.
-			name:  "a body-less run marks its type row and nothing else",
+			// a click there folds open. The umbrella's own header is the fold's target above it,
+			// wearing the fold's ▼ (renderSuperGroup), whether or not a child is open.
+			name:  "a body-less run marks its header and its type row",
 			width: 80,
 			build: func(t *testing.T, tr *transcript) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			want: []blockMark{{line: 1, kind: targetType, entry: 0,
-				text: groupMemberLine("  ┕ Read (2) ⋯ 196 lines")}},
+			want: []blockMark{
+				{line: 0, kind: targetUmbrella, entry: 0, text: "✦ Tools (2 calls) " + glyphExpanded},
+				{line: 1, kind: targetType, entry: 0,
+					text: groupMemberLine("  ┕ Read (2) ⋯ 196 lines")},
+			},
 		},
 		{
 			// The targetless shape is capped like every other: an unregistered tool's verbatim
@@ -702,7 +705,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRead(tr, "c2", "util.go", 0)
 			},
-			settled: "✦ Tools (2 calls)", flipped: "  Tools (2 calls)",
+			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "  Tools (2 calls) " + glyphExpanded,
 		},
 		{
 			name: "a same-type run whose calls have all landed settles",
@@ -710,7 +713,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				readCall(tr, "c2", "util.go", 1, 42, 0)
 			},
-			settled: "✦ Tools (2 calls)", flipped: "✦ Tools (2 calls)",
+			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "✦ Tools (2 calls) " + glyphExpanded,
 		},
 		{
 			// A run is live until its REPORT lands, whatever the span has already finished.
@@ -751,7 +754,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				openRun(tr, "c2", "go test ./...")
 			},
-			settled: "✦ Tools (2 calls)", flipped: "  Tools (2 calls)",
+			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "  Tools (2 calls) " + glyphExpanded,
 		},
 		{
 			name: "an umbrella whose calls have all landed settles",
@@ -759,7 +762,7 @@ func TestLiveBlockHeaderStarBlinks(t *testing.T) {
 				readCall(tr, "c1", "main.go", 1, 154, 0)
 				runCall(tr, "c2", "go test ./...", "PASS", 0)
 			},
-			settled: "✦ Tools (2 calls)", flipped: "✦ Tools (2 calls)",
+			settled: "✦ Tools (2 calls) " + glyphExpanded, flipped: "✦ Tools (2 calls) " + glyphExpanded,
 		},
 	}
 	for _, tc := range cases {

@@ -28,7 +28,7 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
 	}
 	want := strings.Join([]string{
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Read (2) ⋯", glyphExpanded),
 		"  │ ┝ README.md ⋯ 154 lines",
 		"  │ ┕ TODO.md ⋯",
@@ -41,7 +41,7 @@ func TestRenderGroupWithInFlightMember(t *testing.T) {
 		Content: "[File: TODO.md, 408 lines total, showing lines 1-408]\n…",
 		Summary: domain.ReadSpan{Start: 1, End: 408, Total: 408}}})
 	want = strings.Join([]string{
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Read (2) ⋯ 562 lines", glyphExpanded),
 		"  │ ┝ README.md ⋯ 154 lines",
 		"  │ ┕ TODO.md ⋯ 408 lines",
@@ -78,7 +78,7 @@ func TestRenderSingleCallSharesTheGroupShape(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
 	}
 	want = strings.Join([]string{
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Read (2) ⋯ 163 lines", glyphExpanded),
 		"  │ ┝ main.go ⋯ 154 lines",
 		"  │ ┕ a-much-longer-name.go ⋯ 9 lines",
@@ -854,7 +854,7 @@ func TestAnsweredAskUserBlocksNeverGroup(t *testing.T) {
 			t.Fatal("setTypeExpanded(0, true) = false; want the Ask User run's type row open")
 		}
 		want := strings.Join([]string{
-			"✦ Tools (2 calls)",
+			"✦ Tools (2 calls) " + glyphExpanded,
 			leaderEdgeRow("  ┕ Ask User (2) ⋯", glyphExpanded),
 			"  │ ┝ Ship it? ⋯",
 			"  │ ┕ Tag it? ⋯",

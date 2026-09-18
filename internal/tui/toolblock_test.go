@@ -22,7 +22,7 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 	readCall(tr, "c3", "ISSUES.md", 1, 8, 0)
 
 	want := strings.Join([]string{
-		"✦ Tools (3 calls)",
+		"✦ Tools (3 calls) " + glyphExpanded,
 		groupMemberLine("  ┕ Read (3) ⋯ 570 lines"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -33,7 +33,7 @@ func TestRenderGroupsConsecutiveSameLabelCalls(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
 	}
 	want = strings.Join([]string{
-		"✦ Tools (3 calls)",
+		"✦ Tools (3 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Read (3) ⋯ 570 lines", glyphExpanded),
 		"  │ ┝ README.md ⋯ 154 lines",
 		"  │ ┝ TODO.md ⋯ 408 lines",
@@ -58,7 +58,7 @@ func TestRenderGroupsInsideSubAgent(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Read run's type row open")
 	}
 	want := strings.Join([]string{
-		"│ ✦ Tools (2 calls)",
+		"│ ✦ Tools (2 calls) " + glyphExpanded,
 		"│ " + leaderEdgeRow("  ┕ Read (2) ⋯ 14 lines", glyphExpanded),
 		"│   │ ┝ a.go ⋯ 5 lines",
 		"│   │ ┕ bb.go ⋯ 9 lines",
@@ -83,7 +83,7 @@ func TestRenderGroupsDifferentToolsSharingALabel(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Replace run's type row open")
 	}
 	want := strings.Join([]string{
-		"✦ Tools (2 calls)",
+		"✦ Tools (2 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Replace (2) ⋯", glyphExpanded),
 		"  │ ┝ a.go ⋯ replaced text in a.go",
 		"  │ ┕ bb.go ⋯ applied 2 replacements to bb.go",
@@ -130,10 +130,10 @@ func TestRenderSplitsEditFromReplace(t *testing.T) {
 // opened to its own body. One transcript walks all three, so the goldens read as the steps a reader
 // actually takes rather than as three unrelated fixtures.
 //
-// The shape each step pins is the spec's: a header naming the umbrella and counting its CALLS and,
-// while the umbrella is small, no state indicator, since its floor is the type rows (the two LARGE
-// states — more type rows than `ui.tools-fold-over`, at rest — fold to that header under a ▶/▼
-// instead, and close this test); one row per consecutive run in time
+// The shape each step pins is the spec's: a header naming the umbrella, counting its CALLS and
+// wearing the fold's ▶/▼ — every umbrella folds to its header line, a SMALL one on its own head flag
+// and a LARGE one (more type rows than `ui.tools-fold-over`) under the shared preference, the fold
+// cases that close this test; one row per consecutive run in time
 // order, counting the run only where it holds more than one call; the run's aggregate in the outcome
 // slot ("14 lines" for the two reads, summed); member rows one level deeper under the │ gutter that
 // continues the row they opened out of; and an open member's body under a second gutter, closed by
@@ -154,7 +154,7 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		return tr
 	}
 	header := []string{
-		"✦ Tools (3 calls)",
+		"✦ Tools (3 calls) " + glyphExpanded,
 	}
 	readRowShut := groupMemberLine("  ┝ Read (2) ⋯ 14 lines")
 	readRowOpen := []string{
@@ -212,9 +212,47 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		}
 	})
 
-	// The two states only a LARGE umbrella has (transcript.umbrellaIsLarge): the fixture's two type
-	// rows stand over a threshold of 1, and the umbrella is at rest — every call done, no worker in
-	// flight — so the shared preference decides between the header line alone and the rows.
+	// A SMALL umbrella's fold is its head entry's own flag (transcript.setUmbrellaFolded): open, the
+	// header wears ▼ over every type row; folded, it is the header line alone under a ▶, and the type
+	// row a reader opened is untouched beneath it.
+	t.Run("small, open: ▼ over every type row", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		want := strings.Join(append(header,
+			readRowShut,
+			groupMemberLine("  ┕ Terminal ⋯ exit 0"),
+		), "\n")
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("open small umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if targets := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint).targets; len(targets) == 0 || targets[0].kind != targetUmbrella {
+			t.Errorf("open small header target = %+v; want targetUmbrella on the header line", targets)
+		}
+	})
+
+	t.Run("small, folded: the header line alone", func(t *testing.T) {
+		t.Parallel()
+
+		tr := build(t)
+		if !tr.setTypeExpanded(readHead, true) {
+			t.Fatalf("setTypeExpanded(%d, true) = false; want the Read run's type row open under the fold", readHead)
+		}
+		if !tr.setUmbrellaFolded(readHead, true) {
+			t.Fatalf("setUmbrellaFolded(%d, true) = false; want the small umbrella folded on its own flag", readHead)
+		}
+		want := "✦ Tools (3 calls) " + glyphCollapsed
+		if got := renderPlain(tr, 80); got != want {
+			t.Errorf("folded small umbrella mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+		}
+		if targets := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint).targets; len(targets) != 1 || targets[0].kind != targetUmbrella {
+			t.Errorf("folded small header targets = %+v; want one targetUmbrella line", targets)
+		}
+	})
+
+	// The two states a LARGE umbrella has (transcript.umbrellaIsLarge): the fixture's two type rows
+	// stand over a threshold of 1, so the shared preference decides between the header line alone
+	// and the rows — whatever its head flag holds and whether or not a call is still running.
 	t.Run("large, folded: the header line alone", func(t *testing.T) {
 		t.Parallel()
 
@@ -251,6 +289,33 @@ func TestRenderSuperGroupSketchStates(t *testing.T) {
 		}
 		if targets := tr.renderView(newTheme(scheme.Default()), 80, false, breadcrumbHint).targets; len(targets) == 0 || targets[0].kind != targetUmbrella {
 			t.Errorf("open large header target = %+v; want targetUmbrella on the header line", targets)
+		}
+	})
+
+	// A folded umbrella with a call still running is the header line alone with a LIVE star: it
+	// blinks by the frame's phase exactly as the open live header's does (blockState.live), and
+	// nothing else joins the line — the fold does not spring open for the running call.
+	t.Run("large, folded, live: the header alone under a blinking star", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		readCall(tr, "c1", "a.go", 1, 5, 0)
+		readCall(tr, "c2", "b.go", 1, 9, 0)
+		tr.apply(domain.ToolCallEvent{Call: domain.ToolCall{ID: "c3", Tool: "terminal",
+			Arguments: []byte(`{"command":"go test"}`)}})
+		tr.toolsFoldOver = 1
+		th := newTheme(scheme.Default())
+		for blink, want := range map[bool]string{
+			false: "✦ Tools (3 calls) " + glyphCollapsed,
+			true:  "  Tools (3 calls) " + glyphCollapsed,
+		} {
+			view := tr.renderView(th, 80, blink, breadcrumbHint)
+			if got := strings.TrimRight(strip(strings.Join(view.lines, "\n")), " "); got != want {
+				t.Errorf("folded live umbrella at blink=%t:\n--- got ---\n%s\n--- want ---\n%s", blink, got, want)
+			}
+			if len(view.targets) != 1 || view.targets[0].kind != targetUmbrella {
+				t.Errorf("folded live header targets at blink=%t = %+v; want one targetUmbrella line", blink, view.targets)
+			}
 		}
 	})
 }
@@ -294,7 +359,7 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Tools (3 calls)",
+		"✦ Tools (3 calls) " + glyphExpanded,
 		groupMemberLine("  ┕ Terminal (3) ⋯ exit 0"),
 	}, "\n")
 	if got := renderPlain(tr, 80); got != want {
@@ -305,7 +370,7 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 		t.Fatal("setTypeExpanded(0, true) = false; want the Terminal run's type row open")
 	}
 	want = strings.Join([]string{
-		"✦ Tools (3 calls)",
+		"✦ Tools (3 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Terminal (3) ⋯ exit 0", glyphExpanded),
 		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
 		groupMemberLine("  │ ┝ go vet ./... ⋯ exit 0"),
@@ -318,10 +383,10 @@ func TestRenderGroupsBodyCarryingCalls(t *testing.T) {
 
 // The count is the run's own arithmetic and is painted as such: it rides the TYPE ROW in the faint
 // indicator tone rather than in the label's bold gold, so a reader scanning the gold down the
-// left edge does not read "(2)" as part of the tool's name (design call 6). A small umbrella's header
-// wears no state indicator and takes no click — the type rows own their state, and the header's own
-// count is of CALLS; only a LARGE umbrella's header (more type rows than `ui.tools-fold-over`, at
-// rest) wears the fold's ▶/▼.
+// left edge does not read "(2)" as part of the tool's name (design call 6). The header's own count
+// is of CALLS, and the header wears the fold's ▶/▼ and is the block's fold target whatever the
+// umbrella's size: a SMALL one folds on its own head flag, a LARGE one (more type rows than
+// `ui.tools-fold-over`) under the shared preference.
 func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 	t.Parallel()
 
@@ -342,13 +407,20 @@ func TestGroupHeaderCountIsFaintAndInert(t *testing.T) {
 	if styled := th.toolLabel.Render("Read (2)"); strings.Contains(typeRow, styled) {
 		t.Errorf("type row %q paints the count in the label's own style", typeRow)
 	}
-	if strings.ContainsAny(strip(header), glyphCollapsed+glyphExpanded) {
-		t.Errorf("umbrella header %q wears a state indicator; the type rows own their state", strip(header))
+	if !strings.HasSuffix(strings.TrimRight(strip(header), " "), " "+glyphExpanded) {
+		t.Errorf("umbrella header %q does not wear the fold's %s as its last word", strip(header), glyphExpanded)
 	}
+	found := false
 	for _, mark := range blockMarks(t, tr, 80) {
 		if mark.line == 0 {
-			t.Errorf("umbrella header is a click target %+v; want none", mark)
+			found = true
+			if mark.kind != targetUmbrella {
+				t.Errorf("umbrella header mark = %+v; want targetUmbrella", mark)
+			}
 		}
+	}
+	if !found {
+		t.Error("umbrella header is no click target; want the line-0 targetUmbrella mark")
 	}
 }
 
@@ -433,7 +505,7 @@ func TestExpandedGroupMemberPaintsTheSketchShape(t *testing.T) {
 	}
 
 	want := strings.Join([]string{
-		"✦ Tools (3 calls)",
+		"✦ Tools (3 calls) " + glyphExpanded,
 		leaderEdgeRow("  ┕ Terminal (3) ⋯ exit 0", glyphExpanded),
 		groupMemberLine("  │ ┝ go build ./... ⋯ exit 0"),
 		leaderEdgeRow("  │ ┝ go vet ./... ⋯ exit 0", glyphExpanded),
