@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-09-18
+
 ### Added
 
 - `scripts/test-shards.sh` (`make test`) takes `APOGEE_TEST_RACE=0` to run the sharded suite without the race detector, for kernels where a `-race` binary cannot start (39-bit-VA arm64 rpi kernels: `FATAL: Found 39 - Supported 48`). The run announces it on stderr (`test-shards: race detector OFF (APOGEE_TEST_RACE=0) — this run does not stand in for make check`) and in its summary line (`==> go test (unraced): …`); any other value keeps `-race`, and the default plan is unchanged.
