@@ -1,6 +1,6 @@
 module github.com/airiclenz/apogee
 
-go 1.26.3
+go 1.26.6
 
 // v1.x was an accidental pre-production series; the project restarted at v0.x
 // (2026-07-23). proxy.golang.org retains the deleted v1.x tags immutably and
