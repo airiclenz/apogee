@@ -8,6 +8,15 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The three exact-merge sink tests no longer race their own coalescing window.** `TestTeaSinkEmitsEventsInOrder`,
+  `TestTeaSinkCoalescesOnlyWithinOneStream` and the flush-before table built their sink with a 1 ms
+  window, so a loaded CI runner could let the timer fire between two adjacent `Emit` calls and split
+  the pair (`captured 6 events; want 5`, CI on the v0.22.0 bump). Every event they assert on is flushed
+  by the non-token event that follows it, so they now use `newBufferingSink`, whose window never
+  expires; the two tests that prove the timer itself keep the short window.
+
 ## [0.22.0] — 2026-09-18
 
 ### Added

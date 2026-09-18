@@ -21,7 +21,9 @@ func newTestSink(t *testing.T) (*teaSink, *stubProgram) {
 
 // newBufferingSink builds a bound sink whose window outlives any test, so nothing it buffers can
 // reach the program by timer: whatever the program received got there because something flushed
-// the buffer explicitly. It is what the Step-boundary flush is proved with.
+// the buffer explicitly. It is what the Step-boundary flush is proved with — and what every test
+// that asserts an exact merge uses, because under a millisecond window a loaded runner can let
+// the timer fire between two adjacent Emits and split the pair (CI, 2026-09-18).
 func newBufferingSink(t *testing.T) (*teaSink, *stubProgram) {
 	t.Helper()
 	prog := newStubProgram()
@@ -60,7 +62,7 @@ func waitForEvents(t *testing.T, prog *stubProgram, n int) []domain.Event {
 // pair as one "hello", ahead of the StreamResetEvent that follows them.
 func TestTeaSinkEmitsEventsInOrder(t *testing.T) {
 	t.Parallel()
-	sink, prog := newTestSink(t)
+	sink, prog := newBufferingSink(t)
 
 	emitted := []domain.Event{
 		domain.TokenEvent{Text: "he"},
@@ -97,7 +99,7 @@ func TestTeaSinkEmitsEventsInOrder(t *testing.T) {
 // Turn flushes what was buffered and starts its own run — text never crosses a boundary.
 func TestTeaSinkCoalescesOnlyWithinOneStream(t *testing.T) {
 	t.Parallel()
-	sink, prog := newTestSink(t)
+	sink, prog := newBufferingSink(t)
 
 	for _, e := range []domain.Event{
 		domain.TokenEvent{EventBase: domain.EventBase{Depth: 0, Turn: 1}, Text: "pa"},
@@ -141,7 +143,7 @@ func TestTeaSinkFlushesPendingBeforeEveryOtherVariant(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			sink, prog := newTestSink(t)
+			sink, prog := newBufferingSink(t)
 
 			sink.Emit(domain.TokenEvent{Text: "buff"})
 			sink.Emit(domain.TokenEvent{Text: "ered"})
