@@ -857,14 +857,18 @@ preview of a checklist would fold away exactly the rows the reader keeps glancin
 state is ONE state shared by every task-list card in the transcript — a click on any of them, or
 `enter` at the block cursor, toggles them all — and it is remembered across sessions in
 `ui.task-list-open`. The Tools umbrella (`✦ Tools (N calls)`) is the second block that folds to its
-header, and only when it is **large** (2026-09-17): at rest — no call in flight, the Turn settled —
-with more type rows than `ui.tools-fold-over` (default `5`; `0` never folds one), it paints its
-counted header alone under a `▶`, or open under a `▼` over every type row, and the choice is ONE
-state shared by every large umbrella in the transcript — a click on any header, or `enter` at the
-block cursor on it, toggles them all — remembered across sessions in `ui.tools-open` beside
-`ui.task-list-open`, the type rows and members a reader had opened surviving beneath the fold. A
-small or live umbrella keeps its type rows as its floor, its header wearing no indicator, a click
-there closing every open child. Where the two rows go is the only thing the shape decides:
+header, and every umbrella does (2026-09-18): it paints its counted header alone under a `▶`, or
+open under a `▼` over every type row, and a click on the header, or `enter` at the block cursor on
+it, flips it, the type rows and members a reader had opened surviving beneath the fold. Size alone
+decides whose state that flip is. A **large** umbrella — more type rows than `ui.tools-fold-over`
+(default `5`; `0` makes none large), whatever the Turn is doing and wherever the umbrella sits, in
+the transcript or a run view, live or replayed — shares ONE state with every large umbrella in the
+transcript, the gesture on any of them toggling them all, remembered across sessions in
+`ui.tools-open` beside `ui.task-list-open`. A small umbrella folds on its own session-only flag,
+written nowhere, so it starts every session open; one that grows large follows the shared state from
+then on. A folded umbrella with a call in flight keeps the header an open one has — the blinking
+`✦`, the count climbing — and nothing else on the line. Where the two rows go is the only thing the
+shape decides:
 
 - **A call with a target** spends **one** of them on its row, and only that one — the leader shape
   fills the width exactly and cuts the target to make it, and the `+N more lines` count of what it

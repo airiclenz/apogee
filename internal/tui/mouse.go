@@ -745,8 +745,8 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 // TYPE ROW flips the second state of the run it heads — its member rows, not their bodies — and the
 // UMBRELLA HEADER — marked on every umbrella, wearing the fold's ▶/▼ — answers by the umbrella's
 // size: a LARGE one folds to its header line and back under the one preference every large
-// umbrella shares, written back as `ui.tools-open` (toggleToolsFold), while a small one closes
-// every open child beneath it (transcript.umbrellaIsLarge). A run view's TASK
+// umbrella shares, written back as `ui.tools-open` (toggleToolsFold), while a small one folds on
+// its own session-only head flag (transcript.umbrellaIsLarge, setUmbrellaFolded). A run view's TASK
 // ROW is the same rule again at the level ADR 0063 added: it flips the fold of the task the viewed
 // run was handed, which is the view's own state and not the head's block state (render.go's rooted
 // paint marks the row, transcript.setTaskExpanded holds it).

@@ -142,23 +142,35 @@ closer is drawn today.
   so). A card with no task row to fold over — an errored call, a cleared list —
   takes the ordinary targetless shape instead, so a failure is never folded
   away.
-- The umbrella folds by its **size**. A **large** umbrella — at rest (no call
-  in flight, the Turn settled) with more type rows than `ui.tools-fold-over`
-  (default `5`; `0` makes no umbrella large) — is the second block that folds
-  to its **header alone**: `✦ Tools (N calls) ▶`, no type row beneath, no
-  `+N more lines`, the call count saying what the fold holds ("Grouped tools
-  folded (large umbrella)" below). Open, it wears `▼` on the header and paints
-  its type rows exactly as a small one does; a click on the header, or `enter`
-  at the block cursor on it, toggles EVERY large umbrella in the transcript
-  together, and the state is remembered across sessions in `ui.tools-open`
-  (default `false` — a large umbrella starts folded). The fold covers the
-  rows: whatever type rows and members a reader had opened stay open beneath
-  the header and are there again when it unfolds. A **small** or **live**
-  umbrella keeps the earlier rule: its floor is its type rows, its header
-  wears no indicator, and clicking the header **closes every open child**
-  (2026-09-17; supersedes design call 9, which had the umbrella never fold to
-  one line and its click close children unconditionally — plan
-  `docs/plans/2026-09-17 - 01`).
+- The umbrella is the second block that folds to its **header alone**, and
+  EVERY umbrella does (2026-09-18). Every `✦ Tools (N calls)` header wears
+  `▶`/`▼`; a click on it, or `enter` at the block cursor on it, folds the
+  umbrella to `✦ Tools (N calls) ▶` — no type row beneath, no `+N more lines`,
+  the call count saying what the fold holds — or opens it again onto its type
+  rows under a `▼`, painted exactly as before. The fold covers the rows:
+  whatever type rows and members a reader had opened stay open beneath the
+  header and are there again when it unfolds. The rule has three parts, and
+  **size alone** drives them. (1) An umbrella is **large** when it has more
+  type rows than `ui.tools-fold-over` (default `5`; `0` makes no umbrella
+  large) — and nothing else enters: not whether the Turn is running, not
+  whether every call has returned, so the answer is the same at every depth,
+  in every view, live or replayed. (2) A large umbrella's fold is ONE state
+  shared by every large umbrella in the transcript: the gesture on any large
+  header toggles them all, and the state is remembered across sessions in
+  `ui.tools-open` (default `false` — a large umbrella starts folded; "Grouped
+  tools folded (large umbrella)" below). (3) A **small** umbrella folds on
+  its own flag — session-only, never written to `config.yaml`, never
+  serialized, so every small umbrella starts a session open ("Grouped tools
+  folded (small umbrella)" below); one that grows large follows the shared
+  preference from then on, its own flag ignored while it is large. A folded
+  umbrella with a call in flight paints its header exactly as an open one
+  with a call in flight does — the blinking `✦`, the `(N calls)` count
+  climbing — and nothing else on the line. (Supersedes the 2026-09-17 rule,
+  plan `docs/plans/2026-09-17 - 01`, under which only a large umbrella whose
+  Turn had settled folded, and a small one or one with a call in flight wore a
+  bare header whose click closed its open children — plan
+  `docs/plans/2026-09-18 - 01`. Design call 9, which had the umbrella never
+  fold to one line, was superseded then.)
 - Failure marking: the red right-slot summary only; no glyph or header color
   changes. Failures propagate upward as red `N errors` on type rows.
 - Keyboard: a **modal block cursor**. `alt+up`/`alt+down` enters transcript
@@ -210,7 +222,7 @@ One row per consecutive run, in time order. A row's
 `<tool-top-level-details>` aggregates its run.
 
 ```text
-✦ Tools (N calls)
+✦ Tools (N calls) ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┕ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -223,14 +235,14 @@ over a single type row. It keeps the row count of the retired `✦ Terminal (4)`
 group it replaced — one header, one row — and reads the same everywhere.
 
 ```text
-✦ Tools (4 calls)
+✦ Tools (4 calls) ▼
   ┕ Terminal (4) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ exit 0 ▶
 ```
 
 ## Grouped tools expanded 1st step (super-group)
 
 ```text
-✦ Tools (N calls)
+✦ Tools (N calls) ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
   │ ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -242,7 +254,7 @@ group it replaced — one header, one row — and reads the same everywhere.
 ## Grouped tools expanded 2nd step (super-group)
 
 ```text
-✦ Tools (N calls)
+✦ Tools (N calls) ▼
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
   ┝ <tool-type-header> (<group-count>) ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▼
   │ ┝ <tool-details> ⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯⋯ <tool-top-level-details> ▶
@@ -257,13 +269,27 @@ group it replaced — one header, one row — and reads the same everywhere.
 
 ## Grouped tools folded (large umbrella)
 
-A LARGE umbrella — at rest with more type rows than `ui.tools-fold-over` —
-folds to its header alone under `ui.tools-open`; the `▶` sits on the header
-and no type row is painted beneath it. Open, it is the "Grouped tools
-collapsed (super-group)" shape above with a `▼` after the count.
+A LARGE umbrella — more type rows than `ui.tools-fold-over`, whatever the Turn
+is doing and wherever the umbrella sits — folds to its header alone under the
+shared `ui.tools-open`; the `▶` sits on the header and no type row is painted
+beneath it. Open, it is the "Grouped tools collapsed (super-group)" shape
+above with its `▼` after the count. With a call in flight the `✦` blinks as it
+does on an open header; the line carries nothing else.
 
 ```text
 ✦ Tools (N calls) ▶
+```
+
+## Grouped tools folded (small umbrella)
+
+A SMALL umbrella — type rows at or under `ui.tools-fold-over` — folds to the
+same one line from a click or `enter` on its header, on a flag of its own:
+in-session only, written nowhere, so it starts every session open. The two
+folded shapes are indistinguishable on screen; only whose state the fold is
+differs.
+
+```text
+✦ Tools (2 calls) ▶
 ```
 
 ## Grouped Sub-agents

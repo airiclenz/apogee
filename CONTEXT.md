@@ -1110,7 +1110,8 @@ name: `server:` (ADR 0036 decision 2), `launch-profile:` under `remember-model:`
 `ui.task-list-open`, which the transcript's task-list fold records silently — the click or `enter`
 that folds every task-list card also writes the flip, only a failed write is mentioned (ADR 0035,
 2026-09-14 addendum) — and `ui.tools-open`, which the fold of a large `✦ Tools (N calls)` umbrella
-records the same silent way (ADR 0035, 2026-09-17 addendum). See
+records the same silent way (ADR 0035, 2026-09-17 addendum; a small umbrella's fold is view state
+and writes nothing — 2026-09-18 addendum). See
 [ADR 0035](docs/adr/0035-the-settings-surface-persists-one-key-per-deliberate-edit.md) (the
 persistence contract) and
 [ADR 0037](docs/adr/0037-every-settings-edit-applies-to-the-running-session.md) (the live apply),

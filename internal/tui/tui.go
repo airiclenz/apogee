@@ -1072,8 +1072,9 @@ type Options struct {
 	// ToolsOpen — the `ui.tools-fold-over` config key's value, already validated by the binary
 	// (internal/config's UISettings), so the renderer takes a count and never a spelling of one. The
 	// zero value is the documented "never": no umbrella has fewer than zero rows, so none is ever
-	// large under it, and a hand-built Options paints every umbrella exactly as it did before the
-	// fold existed. A `/settings` edit moves it mid-session (settingsApplyLocal).
+	// large under it, and a hand-built Options leaves every umbrella small — foldable from its header
+	// on its own session-only flag, never on ToolsOpen. A `/settings` edit moves it mid-session
+	// (settingsApplyLocal).
 	ToolsFoldOver int
 
 	// StallAfter is how long the ENGINE may go silent, mid-turn, before the status line reports the

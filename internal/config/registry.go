@@ -736,7 +736,7 @@ var KeyRegistry = bindSetters([]Key{
 		// the box is the point; what "large" means is the row below.
 		Path: "ui.tools-open", Kind: KindBool, Default: "false",
 		Editable: true,
-		Desc: "Large Tools umbrellas (more type rows than `ui.tools-fold-over`, at rest) start open; " +
+		Desc: "Large Tools umbrellas (more type rows than `ui.tools-fold-over`) start open; " +
 			"a click on one folds them all and records the choice here.",
 		Read: func(o Options) string { return boolValue(o.UI.ToolsOpen) },
 		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.ToolsOpen }),
@@ -749,7 +749,7 @@ var KeyRegistry = bindSetters([]Key{
 		Path: "ui.tools-fold-over", Kind: KindInt, Default: "5",
 		Editable: true,
 		Validate: validateToolsFoldOver,
-		Desc:     "Type rows a Tools umbrella may show before it folds to its header; 0 never folds.",
+		Desc:     "Type rows a Tools umbrella may show before it is large and obeys `ui.tools-open`; 0 makes none large.",
 		Read:     func(o Options) string { return strconv.Itoa(o.UI.ToolsFoldOver) },
 		Set:      landIn(uiOf, UISettings.Validate, strconv.Atoi, func(u *UISettings) *int { return &u.ToolsFoldOver }),
 	},

@@ -926,12 +926,13 @@ remember-model: true
 # the way you left this one. Default on.
 #
 # `tools-open` and `tools-fold-over` do the same for the `✦ Tools (N calls)` umbrella a burst of
-# tool calls is grouped under. An umbrella that has come to rest with more type rows than
-# `tools-fold-over` is *large*, and a large umbrella folds to its one header line unless `tools-open`
-# is true; clicking a large umbrella's header folds (or opens) every large umbrella and records the
-# flip in `tools-open`, silently, the way a task-list card does. Small umbrellas, and one still
-# running a call, keep the header they always had. `tools-fold-over: 0` means no umbrella is ever
-# large, so none ever folds.
+# tool calls is grouped under. Every umbrella folds to its one header line from a click on that
+# header, whether the Turn is running or finished. An umbrella with more type rows than
+# `tools-fold-over` is *large*, and a large umbrella is folded unless `tools-open` is true; clicking
+# a large umbrella's header folds (or opens) every large umbrella and records the flip in
+# `tools-open`, silently, the way a task-list card does. A small umbrella folds on its own, for the
+# session only — nothing is written, and it starts the next session open. `tools-fold-over: 0` means
+# no umbrella is ever large, so none follows `tools-open`.
 # Defaults: `tools-open: false`, `tools-fold-over: 5`.
 #
 ui:

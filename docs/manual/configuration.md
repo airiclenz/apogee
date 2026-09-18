@@ -675,15 +675,17 @@ silently, so the next session starts the way you left this one; only a write tha
 mentioned. The row shows in `/settings` like the rest, and a hand-edit applies live.
 
 `ui.tools-open` and `ui.tools-fold-over` do the same for the `✦ Tools (N calls)` umbrella a burst
-of tool calls is grouped under. An umbrella that has come to rest — no call still running — with
-more type rows than `ui.tools-fold-over` is *large*, and a large umbrella folds to its one header
-line unless `ui.tools-open` is on. `ui.tools-open` is **off by default**, so a large umbrella starts
-folded out of the box; like `ui.task-list-open` it is one choice for every large umbrella in the
-session, and it is written as well as read: clicking a large umbrella's header folds — or opens —
-them all and records the flip in `config.yaml` silently. Small umbrellas, and one still running a
-call, keep the header they always had, indicator-free. `ui.tools-fold-over` defaults to `5`; `0`
-means no umbrella is ever large, so none ever folds, and a value below zero is refused — in
-`/settings` at the keystroke, in the file at startup.
+of tool calls is grouped under. Every umbrella folds to its one header line — `▶` folded, `▼`
+open — from a click on that header, whether the Turn is running or finished, in the transcript or
+inside a sub-agent's run view. An umbrella with more type rows than `ui.tools-fold-over` is *large*,
+and a large umbrella is folded unless `ui.tools-open` is on. `ui.tools-open` is **off by default**,
+so a large umbrella starts folded out of the box; like `ui.task-list-open` it is one choice for
+every large umbrella in the session, and it is written as well as read: clicking a large umbrella's
+header folds — or opens — them all and records the flip in `config.yaml` silently. A small umbrella
+folds on its own, for this session only: nothing is written, and it starts the next session open.
+`ui.tools-fold-over` defaults to `5`; `0` means no umbrella is ever large, so none follows
+`ui.tools-open` (each still folds on its own from its header), and a value below zero is refused —
+in `/settings` at the keystroke, in the file at startup.
 
 `ui.color-scheme` names the palette the screen is drawn in. It defaults to `dark`, `light` is the
 other built-in, and any `~/.apogee/schemes/<name>.yaml` joins them under its own file name —

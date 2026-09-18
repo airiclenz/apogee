@@ -317,18 +317,19 @@ type UISettings struct {
 	// silently through the settings seam, so the choice outlives the session (ADR 0035 addendum).
 	// Screen-only, like skillSuggestions: nothing about it reaches the model.
 	TaskListOpen bool
-	// toolsOpen is whether a LARGE Tools umbrella in the transcript — one at rest with more type
-	// rows than toolsFoldOver — starts open (every type row painted) or folded to its counted
-	// `✦ Tools (N calls)` header. Default FALSE: a large umbrella is a finished burst of calls, and
-	// folding it out of the box is the point. ONE shared state for every large umbrella, and
-	// taskListOpen's whole posture otherwise: the renderer applies it to itself, the fold gesture on
-	// any umbrella writes the flip back here silently (ADR 0035 addendum), and nothing about it
-	// reaches the model. Small and live umbrellas are untouched by it.
+	// toolsOpen is whether a LARGE Tools umbrella in the transcript — one with more type rows than
+	// toolsFoldOver, by size alone, whatever the Turn is doing — starts open (every type row
+	// painted) or folded to its counted `✦ Tools (N calls)` header. Default FALSE: a large umbrella
+	// is a burst of calls, and folding it out of the box is the point. ONE shared state for every
+	// large umbrella, and taskListOpen's whole posture otherwise: the renderer applies it to itself,
+	// the fold gesture on any large umbrella writes the flip back here silently (ADR 0035 addendum),
+	// and nothing about it reaches the model. A small umbrella never reads it: it folds on its own
+	// session-only flag, which is written nowhere (ADR 0035, 2026-09-18 addendum).
 	ToolsOpen bool
 	// toolsFoldOver is how many type rows a Tools umbrella may show before it counts as large and
 	// obeys toolsOpen. Default 5. 0 is the documented "never": no umbrella has fewer than zero rows,
-	// so none is ever large and every one keeps the header it always had. Negative is meaningless
-	// and Validate refuses it.
+	// so none is ever large and every one folds on its own session-only flag alone. Negative is
+	// meaningless and Validate refuses it.
 	ToolsFoldOver int
 	// unparsedStallAfter is a `stall-after:` value time.ParseDuration could make nothing of, kept as
 	// it was written so Validate can name the text the human typed rather than the value it failed
