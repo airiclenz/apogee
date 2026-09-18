@@ -182,6 +182,8 @@ install: build
 # sizing), so the shards spend the box and a shard's own fan-out does not multiply the load.
 # scripts/test-shards.sh holds the reasoning and the shard plan; `go test -race -count=1 ./...`
 # remains the equivalent single-process run for a bisect or a one-off.
+# APOGEE_TEST_SLOW=1 is the slow-box plan (Raspberry-Pi class: four driven tests on the box at once);
+# APOGEE_TEST_RACE=0 drops -race for a kernel that cannot run it — both explained in the script's header.
 .PHONY: test
 test:
 	@./scripts/test-shards.sh $(ARGS)
@@ -307,6 +309,9 @@ dist:
 ## check: the Phase-2 acceptance gate (fmt-check, lint, build, vulncheck, race tests, ADR-0010, cross, --help)
 .PHONY: check
 check:
+# The gate is raced by definition: an unraced pass (APOGEE_TEST_RACE=0, a slow-box convenience
+# scripts/test-shards.sh offers) never stands in for it, so the `==> go test -race` echo below stays true.
+	@if [ "$${APOGEE_TEST_RACE:-}" = 0 ]; then echo "make check: APOGEE_TEST_RACE=0 is set; the gate runs raced — unset it, or run make test for an unraced pass" >&2; exit 1; fi
 	@echo "==> gofmt (must be empty)"
 	@out="$$(gofmt -l .)"; if [ -n "$$out" ]; then echo "needs gofmt:"; echo "$$out"; exit 1; fi
 # Plain `go vet ./...` has no step of its own: golangci-lint's standard set runs govet.

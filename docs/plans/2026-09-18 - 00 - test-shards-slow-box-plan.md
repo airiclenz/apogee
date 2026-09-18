@@ -96,7 +96,7 @@ PATH=/tmp/ncpu4:$PATH APOGEE_TEST_RACE=0 APOGEE_TEST_SLOW=1 APOGEE_TEST_SHARDS=2
 
 **Commit:** `build(test-shards): APOGEE_TEST_SLOW=1 is the slow-box plan — one shard per heavy package, four driven tests at once`
 
-## 3. The manual and the Makefile name both knobs and the kernel that needs them
+## 3. The manual and the Makefile name both knobs and the kernel that needs them — ✅ DONE (2026-09-18)
 
 **What:** Recast at the regression check (2026-09-18). Depends on items 1 and 2. `docs/manual/building.md` §"Testing": after the paragraph ending "…capped because a hosted runner is a 4 vCPU box where each race-enabled shard carries its own memory cost." add one paragraph (≤ 10 lines) covering: `APOGEE_TEST_SLOW=1` (what it sets, that it is explicit because core count cannot tell a slow box from CI's runner, that it is for a Raspberry-Pi-class box); `APOGEE_TEST_RACE=0` (drops the race detector; exists because the Raspberry Pi OS arm64 kernel has 39-bit virtual addresses and TSan requires 48 — `FATAL: Found 39 - Supported 48` — so no `-race` binary runs there; an unraced run is announced as such and is not the `make check` gate: race-enabled verification needs another box). Makefile `## test:` comment block: add two lines naming the two knobs and pointing at the script header for their meaning. `make check` is the raced gate by definition, so the Makefile `check` target refuses to run when `APOGEE_TEST_RACE=0` is set in the environment — before its first step, it exits 1 with the stderr line `make check: APOGEE_TEST_RACE=0 is set; the gate runs raced — unset it, or run make test for an unraced pass` — and its `==> go test -race (sharded — scripts/test-shards.sh)` echo stays truthful as a result. `.github/workflows/ci.yml` is not touched.
 

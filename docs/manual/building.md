@@ -116,6 +116,17 @@ reach for when bisecting or debugging a single test. CI runs `make test` under
 `APOGEE_TEST_SHARDS=2` — the same sharded form, capped because a hosted runner is a 4 vCPU
 box where each race-enabled shard carries its own memory cost.
 
+Two opt-in knobs make the same script runnable on a box the default plan overloads, such as
+a Raspberry Pi 4. `APOGEE_TEST_SLOW=1` is the slow-box plan: one shard per heavy package
+(an explicit `APOGEE_TEST_SHARDS` still wins), every process `-parallel 1`, the rest `-p 2` —
+at most four driven tests on the box at once. It is explicit rather than sized off the core
+count because a Pi and CI's 4 vCPU runner report the same `nproc` and differ 3–5× per core.
+`APOGEE_TEST_RACE=0` drops the race detector: the Raspberry Pi OS arm64 kernel has 39-bit
+virtual addresses and TSan requires 48 (`FATAL: Found 39 - Supported 48`), so no `-race`
+binary runs there at all. An unraced run announces itself on stderr and in its `==>` summary
+line, and it is not the `make check` gate — `make check` refuses to run with
+`APOGEE_TEST_RACE=0` set; race-enabled verification needs another box.
+
 ## Releasing
 
 Cutting a release is four acts, in this order, and only the first two are automated.
