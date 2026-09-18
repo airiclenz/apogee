@@ -31,6 +31,7 @@
 # Usage: scripts/test-shards.sh [extra go test flags ...]
 #   APOGEE_TEST_SHARDS=n   override the per-heavy-package shard count (default: sized off nproc)
 #   APOGEE_TEST_RACE=0     drop -race (announced on stderr and in the ==> line); any other value keeps it
+#   APOGEE_TEST_SLOW=1     slow box: 1 shard per heavy package (APOGEE_TEST_SHARDS still wins), every process -parallel 1, the rest -p 2
 
 set -uo pipefail
 
@@ -112,12 +113,21 @@ budget=$((ncpu - 1))
 # fan-out. Its package-level concurrency (-p) is left alone: the process is dominated by
 # linking fifty race binaries, and -p throttles the build too. The isolated
 # `go test -race ./cmd/apogee/` keeps `go test`'s default and the whole box.
+# The slow-box floor. APOGEE_TEST_SLOW=1 is an explicit knob rather than a bound sized off
+# nproc because core count cannot tell the boxes apart: a Raspberry Pi 4 and CI's 4-vCPU runner
+# both report 4 cores and differ 3–5x per core, and CI keeps the plan above. On the Pi the
+# default plan's ≈11 concurrent driven tests turn `submit`'s 5 s echo wait and the 2 s leak
+# grace red — load, not logic — where 4 at once (1 shard per heavy package, every process
+# -parallel 1, the rest -p 2) is the mix measured green. The rest's floor of 2 is overridden too.
+is_slow_box() { [ "${APOGEE_TEST_SLOW:-}" = 1 ]; }
 parallel_bound() { # jobs -> the -parallel value for each shard
+	if is_slow_box; then echo 1; return; fi
 	local p=$((budget / $1))
 	[ "$p" -ge 1 ] || p=1
 	echo "$p"
 }
 rest_parallel_bound() { # jobs -> the -parallel value for the remaining packages' process
+	if is_slow_box; then echo 1; return; fi
 	local p
 	p=$(parallel_bound "$1")
 	[ "$p" -ge 2 ] || p=2
@@ -218,7 +228,14 @@ plan_failed=0
 
 for idx in "${!HEAVY_PKGS[@]}"; do
 	pkg=${HEAVY_PKGS[$idx]}
-	n=${APOGEE_TEST_SHARDS:-$(( (budget * HEAVY_WEIGHT[idx] + 6) / 7 ))}
+	# The explicit override first, then the slow-box floor, then the budget formula.
+	if [ -n "${APOGEE_TEST_SHARDS:-}" ]; then
+		n=$APOGEE_TEST_SHARDS
+	elif is_slow_box; then
+		n=1
+	else
+		n=$(( (budget * HEAVY_WEIGHT[idx] + 6) / 7 ))
+	fi
 	[ "$n" -ge 1 ] || n=1
 
 	# The cache is keyed by the package's IMPORT path, because that is what `go test` prints on
@@ -316,7 +333,15 @@ parallel=$(parallel_bound $(( ${#shard_run[@]} + 1 )))
 rest_parallel=$(rest_parallel_bound $(( ${#shard_run[@]} + 1 )))
 echo "    each shard runs $parallel test(s) at a time, the rest $rest_parallel (-parallel: budget $budget over $(( ${#shard_run[@]} + 1 )) processes)"
 
-launch "$work/rest.log" "the remaining ${#rest[@]} packages" -- "$@" -parallel "$rest_parallel" "${rest[@]}"
+# Only the rest process takes -p: a heavy shard is a single-package process, and -p bounds
+# how many PACKAGES `go test` builds and runs at once.
+rest_package_bound=()
+if is_slow_box; then
+	echo "test-shards: slow box (APOGEE_TEST_SLOW=1): 1 shard per heavy package, every process -parallel 1, the rest -p 2" >&2
+	rest_package_bound=(-p 2)
+fi
+
+launch "$work/rest.log" "the remaining ${#rest[@]} packages" -- "$@" "${rest_package_bound[@]}" -parallel "$rest_parallel" "${rest[@]}"
 
 for s in "${!shard_run[@]}"; do
 	launch "$work/shard.$s.log" "${shard_pkg[$s]} shard $s" -- "$@" -parallel "$parallel" -run "${shard_run[$s]}" "${shard_pkg[$s]}"

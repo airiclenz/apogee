@@ -65,7 +65,10 @@ grep -c '==> go test -race:' scripts/test-shards.sh | grep -x 1
 
 **Commit:** `build(test-shards): APOGEE_TEST_RACE=0 runs the sharded suite unraced, announced on every line that names the run`
 
-## 2. `APOGEE_TEST_SLOW=1` caps the plan at four driven tests on the box
+## 2. `APOGEE_TEST_SLOW=1` caps the plan at four driven tests on the box — ✅ DONE (2026-09-18)
+
+NOTES (2026-09-18): the slow-box checks (the `is_slow_box` helper) sit in `parallel_bound`/`rest_parallel_bound` and the shard-count branch, and the rest's `-p 2` rides an array (`rest_package_bound`) expanded on the one launch line rather than a duplicated launch line — the plan's literal "gains `-p 2` before `-parallel`" holds in the traced invocation.
+NOTES (2026-09-18): default plan proven byte-identical to HEAD's on this box by diffing the `bash -x` `+ go test` traces of the HEAD script and the edited one under `APOGEE_TEST_RACE=0 -list '.*'`.
 
 **What:** Depends on item 1. In `scripts/test-shards.sh`, when `APOGEE_TEST_SLOW` is exactly `1`: (a) each heavy package's shard count `n` is 1 unless `APOGEE_TEST_SHARDS` is set (the explicit override keeps precedence — evaluate it first, then the slow floor, then the budget formula); (b) `parallel_bound` and `rest_parallel_bound` both return 1 (the rest process's floor of 2 is overridden, not kept); (c) the rest process's `launch` line gains `-p 2` before `-parallel` — heavy shards do not get `-p` (they are single-package processes). The knob is announced on stderr, right after the `each shard runs …` line: `test-shards: slow box (APOGEE_TEST_SLOW=1): 1 shard per heavy package, every process -parallel 1, the rest -p 2`. Add the knob to the `Usage:` header, one line, and a ≤ 6-line comment beside the parallel-bound comment stating why the floor is explicit rather than sized off `nproc` (a Pi 4 and a 4-vCPU CI runner report the same core count and differ 3–5× per core; the default plan's ≈11 concurrent driven tests on the Pi turn `submit`'s 5 s echo wait and the 2 s leak grace red — load, not logic — where 4 at once is green). Under any other value the script computes exactly what it computes today.
 
