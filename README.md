@@ -6,7 +6,7 @@
   </picture>
 </p>
 
-# apogee — an AI coding agent for local LLMs, in your terminal
+# apogee — an open-source AI coding agent for local LLMs, in your terminal
 
 <p align="center">
   <a href="https://github.com/airiclenz/apogee/releases/latest"><img src="https://img.shields.io/github/v/release/airiclenz/apogee?label=release" alt="Latest release"></a>
@@ -16,61 +16,54 @@
 </p>
 
 **apogee is an open-source AI coding agent that runs in your terminal and works with
-local LLMs.** Point it at a local model server — llama.cpp, Ollama, LM Studio, vLLM —
-and your code never leaves your machine: no API key, no cloud, works offline. Point it
-at any OpenAI-compatible cloud endpoint instead and the same agent runs there.
-
-Works with llama.cpp, Ollama, LM Studio, vLLM and OpenRouter, and ships tuned model
-profiles for Qwen3, Gemma 4, gpt-oss and MiniMax.
+local LLMs.** Point it at a local model server — llama.cpp, Ollama, LM Studio, vLLM — and
+your code never leaves your machine: no API key, no cloud, works offline. Point it at any
+OpenAI-compatible endpoint, at OpenRouter, or at Claude over the Anthropic API, and the
+same agent runs there. One binary for Windows, macOS and Linux.
 
 <p align="center">
   <img src="graphics/demo.gif" alt="apogee, an AI coding agent in the terminal, finding a failing Go test, fixing the bug and proving the tests pass — with a follow-up instruction typed mid-run, queued and delivered at the next tool boundary, the fix shown as a side-by-side diff, and a closing /undo preview that reverts nothing">
 </p>
 
 Either way you get a real coding agent: it reads your code, edits files, runs commands
-and tests, uses git, searches the web, and hands work to sub-agents — in a loop, until
-the task is done. It is a single binary on Windows, macOS and Linux, and it runs in any
-terminal, including the one inside VS Code, Zed, or your own IDE.
+and tests, uses git, searches the web, and hands work to sub-agents — in a loop, until the
+task is done. It runs in any terminal, including the one inside VS Code, Zed or your IDE.
 
 ## Why apogee
 
 Three things set it apart from other AI coding assistants.
 
-- **Small local models do real work here.** Most agents quietly assume a frontier
-  model. apogee gives every model a *floor*: seven always-on guards that catch what a
-  model gets wrong on its own. A malformed tool call is repaired and retried, a tool call
-  the model wrote out as JSON in its text instead of calling is run anyway, a call
-  the model keeps repeating is broken out of, an empty reply is retried, a model that
-  narrates instead of acting is told to act, a pointless re-read of a file it already
-  read is cut short, and a huge stale tool result is trimmed on its way back to the
-  model rather than in the conversation itself. Each only changes what the model sees *after its own mistake*, so they lift a
-  small model without getting in a big one's way — and each can be switched off. The
-  rule behind them is the whole project: nothing apogee puts in front of a model may
-  make that model perform worse than the bare loop, and anything more opinionated than
-  the floor has to earn its place on an eval bench before it ships turned on.
+- **Small local models do real work here.** Most agents quietly assume a frontier model.
+  apogee gives every model a *floor*: seven always-on guards that catch what a model gets
+  wrong on its own. A malformed tool call is repaired and retried; a tool call the model
+  wrote as JSON in its text is run anyway; a call it keeps repeating is broken out of; an
+  empty reply is retried; a model that narrates instead of acting is told to act; a
+  pointless re-read of a file is cut short; a huge stale tool result is trimmed on its way
+  back to the model. Each only changes what the model sees *after its own mistake*, so
+  they lift a small model without getting in a big one's way — and each can be switched
+  off. The rule behind them is the whole project: nothing apogee puts in front of a model
+  may make that model perform worse than the bare loop, and anything more opinionated
+  than the floor has to earn its place on an eval bench before it ships turned on.
 - **Autonomy fenced by the operating system, not by a prompt.** Four autonomy modes run
   from read-only Plan up to unsupervised Auto — and Auto is confined at the OS level on
-  all three platforms (Linux landlock, or user + mount namespaces via `bwrap` where the
-  kernel has no landlock; macOS seatbelt; a restricted Windows token), so
-  an unsupervised agent *cannot* write outside your workspace, rather than being asked
-  nicely not to. Where the OS genuinely cannot enforce the fence, apogee asks before
-  each command instead of running it unbounded.
-- **A complete agent, in a UI that gets out of your way.** The whole loop is here —
-  file edits, shell, git, tests, web, MCP servers, skills, parallel sub-agents — inside
-  a terminal UI built with care: type your next message while the model streams and
-  queue it into the running task, recall any prompt you have sent, fold away what you
-  are done reading, open any path it prints with a click, and undo an exchange's file changes one
+  all three platforms: Linux landlock, or user + mount namespaces via `bwrap` where the
+  kernel has no landlock; macOS seatbelt; a restricted Windows token. An unsupervised
+  agent *cannot* write outside your workspace. Where the OS cannot enforce the fence,
+  apogee asks before each command instead of running it unbounded.
+- **A complete agent, in a UI that gets out of your way.** The whole loop is here — file
+  edits, shell, git, tests, web, MCP servers, skills, parallel sub-agents — inside a
+  terminal UI built with care: type your next message while the model streams and queue
+  it into the running task, recall any prompt you have sent, fold away what you are done
+  reading, open any path it prints with a click, and undo an exchange's file changes one
   at a time — snapshot-backed, so a shell command's writes are in reach too, and it
   survives a relaunch.
 
-Under the hood apogee is an embeddable Go engine, and the terminal UI is its first
-front-end rather than its identity: `apogee headless`, `apogee daemon` and the eval
-bench are further front-ends over the same core.
+Under the hood apogee is an embeddable Go engine; the terminal UI is its first front-end,
+not its identity. `apogee headless`, `apogee daemon` and the eval bench run over the same core.
 
 ## Install
 
-Three ways in, and all three land the same thing: one static binary, no runtime beside
-it.
+Three ways in, and all three land the same thing: one static binary, no runtime beside it.
 
 **Homebrew — macOS and Linux:**
 
@@ -82,8 +75,8 @@ apogee --version
 ```
 
 The formula installs the prebuilt binary for your platform — nothing is compiled, no Go
-toolchain needed; `brew upgrade apogee` moves you to the next release. The `brew trust`
-line is what Homebrew 5.1+ wants before loading a third-party tap;
+toolchain needed; `brew upgrade apogee` moves you to the next release. `brew trust` is
+what Homebrew 5.1+ wants before loading a third-party tap;
 `brew untrust --tap airiclenz/tap` revokes it.
 
 **A prebuilt archive — Windows, macOS, or Linux, `amd64` or `arm64`.** Every release
@@ -105,13 +98,14 @@ apogee --version
 On Windows, download `apogee_<version>_windows_arm64.zip` (or `_amd64`), unpack it, and
 put `apogee.exe` somewhere on your `PATH`.
 
-The binaries are **not code-signed** yet: on macOS, a *browser* download is quarantined —
+The binaries are **not code-signed** yet. On macOS a *browser* download is quarantined —
 `xattr -d com.apple.quarantine ./apogee` clears that (the `curl` above never sets it) —
 and Windows SmartScreen may warn about an unrecognised publisher. `SHA256SUMS` is the
-check actually worth making.
+check worth making.
 
 **From source:** a clone plus `make build` — see
-[Building from source](docs/manual/building.md). `go install …@latest`, `@main` and `@<sha>` all work.
+[Building from source](docs/manual/building.md). `go install …@latest`, `@main` and
+`@<sha>` all work.
 
 ## Quick start
 
@@ -120,8 +114,8 @@ apogee
 ```
 
 On first run apogee writes a documented starter config to `~/.apogee/` and asks which
-server to talk to. Or skip the config entirely and point one session straight at a
-server — no GPU needed, a free OpenRouter model will do (a key is at
+server to talk to. Or skip the config and point one session straight at a server — no
+GPU needed, a free OpenRouter model will do (a key is at
 [openrouter.ai/keys](https://openrouter.ai/keys)):
 
 ```bash
@@ -135,26 +129,29 @@ or a local one:
 apogee --endpoint http://localhost:8080 --model qwen3-coder
 ```
 
-Then just describe what you want done. `Shift+Tab` cycles the autonomy mode — Plan
-(read-only except its own session scratch dir) → Ask-Before → Allow-Edits → Auto — and `--mode plan` starts there; `/` opens the command menu, `@`
-references a file, and a double-tap of `esc` — twice within one second, so a stray key
-cannot do it — stops a run. The full tour is in [the manual](docs/manual/README.md).
+Then describe what you want done. `Shift+Tab` cycles the autonomy mode — Plan →
+Ask-Before → Allow-Edits → Auto — and `--mode plan` starts there. `/` opens the command
+menu, `@` references a file, and a double-tap of `esc` within one second stops a run.
+The full tour is in [the manual](docs/manual/README.md).
 
 ## What apogee can do
 
-### Models and servers
+### Works with local models and cloud APIs
 
 - **Any OpenAI-compatible endpoint**, local or remote. A local llama.cpp, Ollama,
   LM Studio or vLLM server keeps every byte on your machine and needs no key.
+- **Claude over the Anthropic API.** A server entry with `wire: anthropic` speaks the
+  Messages API directly — the same tool loop and the same guards.
 - **Keys stay out of your config file.** A server entry can pull its key from a command
   or an environment variable, so the token lives in your password manager or keychain;
   apogee offers to move a plaintext key into your OS secret store on startup.
 - **Model profiles** adapt to models that don't speak native tool calls: tool menus
   injected as text, fenced or custom-regex calls parsed back out, thinking channels
-  stripped — while native models stay byte-identical on the wire. A profile can carry
-  its own tool list too, so a small model sees fewer, clearer tools.
+  stripped — while native models stay byte-identical on the wire. Profiles for Gemma,
+  gpt-oss, MiniMax and Qwen ship built in; a profile can carry its own tool list too, so
+  a small model sees fewer, clearer tools.
 - **Switch without restarting.** `/model` and `/server` move the session; `/effort` sets
-  how hard the model thinks, from the levels your model actually reports.
+  how hard the model thinks, from the levels your model reports.
 - **Sub-agents can run on a different server than you do** — a small model steering
   while a bigger one does the heavy reading, or the reverse. You choose the server, or
   let the model pick per job.
@@ -165,19 +162,18 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 ### The agent loop
 
 - **34 built-in tools** (30 on the default menu): read, write, edit, copy, move and
-  delete files, grep and find, git, terminal, Python, diagnostics, test runners, web fetch,
-  web search and raw HTTP, a task list the model keeps for itself, a question back to you,
-  skills the model loads for itself, and delegation to sub-agents.
+  delete files, grep and find, git, terminal, Python, diagnostics, test runners, web
+  fetch, web search and raw HTTP, a task list the model keeps for itself, a question back
+  to you, skills the model loads for itself, and delegation to sub-agents.
 - **Parallel sub-agents**, each with a context window of its own and a token, time and
   step budget; a job can be narrowed to read-only tools, and by default a sub-agent cannot
   delegate further. Open one as its own full screen to watch it work, and type to it while
   it runs.
-- **Skills** — short markdown playbooks you invoke with `/name`. apogee ships a few
+- **Skills** — short markdown playbooks you invoke with `/name`. apogee ships four
   (debugging, planning, code review, commit hygiene), reads your own from
-  `~/.apogee/skills`, and picks up skills a repository ships to everyone working in it.
-  As you type, it names the skills that clearly fit, up to three, above the input box;
-  `Tab` picks one. `/skills export` copies a shipped skill into your library to make it
-  your own.
+  `~/.apogee/skills`, and picks up skills a repository ships. As you type, it names the
+  skills that clearly fit above the input box; `Tab` picks one. `/skills export` copies a
+  shipped skill into your library to make it your own.
 - **Workspace context files** — an `AGENTS.md` at the workspace root goes into the system
   prompt on its own; `context-files:` picks the names, or turns it off.
 - **MCP servers** over stdio, SSE, or streamable-http, for tools apogee doesn't ship — with
@@ -185,8 +181,8 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 - **Reads your dependencies.** On a Go project the toolchain's `GOROOT` and module cache
   are readable, so the model can open the standard library and your modules, never write
   them.
-- **A Console family, off by default** — the REPLs, shells and dev servers a model
-  keeps alive across turns, for models that ask for them.
+- **A Console family, off by default** — the REPLs, shells and dev servers a model keeps
+  alive across turns, for models that ask for them.
 - **Long jobs don't fall off the context window.** apogee compacts the conversation,
   trims stale tool output, skips a re-read of a file that hasn't changed, and folds a
   sub-agent's own history while it works.
@@ -196,12 +192,13 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 
 - **Four autonomy modes** — Plan (reads code and git history; its own per-session scratch
   directory is the one place it writes), Ask-Before (asks before every write and command,
-  except into that scratch directory), Allow-Edits, and OS-confined Auto. `Shift+Tab` cycles
-  them at any time, mid-run included — or click the mode marker in the footer — and
-  `/confine` reports or changes
+  except into that scratch directory), Allow-Edits, and OS-confined Auto. `Shift+Tab`
+  cycles them at any time, mid-run included — or click the mode marker in the footer —
+  and `/confine` reports or changes
   [Auto's blast radius](docs/manual/configuration.md#auto-modes-blast-radius).
 - **A dangerous-action guard in every mode** — the genuinely destructive commands are
-  refused outright, and the merely alarming ones are put in front of you first.
+  refused outright, the merely alarming ones are put in front of you first, and a
+  `git commit` that would carry a secret asks you in every mode.
 - **Approvals you grant once mean what you think they mean**: they are scoped to the
   call you approved and honoured across the whole sub-agent tree, and the prompt shows
   the path a call really resolves to before you answer.
@@ -218,8 +215,8 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 ### The terminal UI
 
 - **Type — and select — while it works.** The prompt box stays live during a run: queue
-  your next message into the running task, walk back through every prompt you have sent,
-  select transcript text mid-stream.
+  your next message into the running task, or a slash command to run at the next idle;
+  walk back through every prompt you have sent; select transcript text mid-stream.
 - **Read what you want, hide what you don't.** Fold any block or group of tool calls,
   scroll with the keyboard or the mouse; paths are printed as plain text, so your
   terminal's own cmd/ctrl-click opens them.
@@ -237,22 +234,25 @@ cannot do it — stops a run. The full tour is in [the manual](docs/manual/READM
 
 - **Sessions that survive anything** — every completed turn autosaves;
   `apogee --continue` resumes where you left off, `/sessions` browses, renames and
-  deletes, and an interrupted task picks up with `/continue`. Optional retention rules
-  keep the store from growing for ever. See [Sessions](docs/manual/sessions.md).
+  deletes, `/fork` branches a new session from any earlier prompt, and an interrupted
+  task picks up with `/continue`. Optional retention rules keep the store from growing
+  for ever. See [Sessions](docs/manual/sessions.md).
 - **Scheduled prompts** — `/schedule` runs a prompt on a cycle while apogee is open;
   [`apogee daemon`](docs/manual/daemon.md) keeps standing schedules running under your
   OS's supervisor — `apogee daemon install` writes the systemd, launchd or Task Scheduler
   unit — every firing saved as a session you can browse.
 - **Scriptable** — [`apogee headless`](docs/manual/headless.md) runs one prompt
   unattended with clean stdout and meaningful exit codes, or with `--format json` a
-  versioned stream of event lines for a script to parse.
-- **Reactions** — run a command or POST a webhook when an exchange ends, a file changes or an
-  approval is waiting; a `gate:` entry can deny a tool call, or hand it to you, before it runs;
-  an `advise:` entry hands the model a fact about a call that just finished — fenced, capped,
-  never saved with the session. See [Reactions](docs/manual/reactions.md).
+  versioned stream of event lines for a script to parse (`--seams` adds one line per
+  loop seam, for debugging what fired where).
+- **Reactions** — run a command or POST a webhook when an exchange ends, a file changes
+  or an approval is waiting; a `gate:` entry can deny a tool call, or hand it to you,
+  before it runs; an `advise:` entry hands the model a fact about a call that just
+  finished — fenced, capped, never saved with the session. See
+  [Reactions](docs/manual/reactions.md).
 - **[`apogee probe`](docs/manual/probe.md)** reports what this host, model and terminal
-  can actually do — and what `config.yaml` resolves to — without running an agent or
-  calling a model.
+  can do, what `config.yaml` resolves to, and how many tokens apogee itself puts in front
+  of the model at turn 1 — without running an agent.
 - **Deliverables you actually see** — a finished report is opened on your desktop, or
   served over a one-off link when apogee runs on a remote box.
 
@@ -274,11 +274,11 @@ The [manual](docs/manual/README.md) carries the full reference:
 | Page | Covers |
 |---|---|
 | [Commands](docs/manual/commands.md) | Every in-chat command, skills, `@file` references, the keys, `/undo` and `/redo`, `/settings` |
-| [Sessions](docs/manual/sessions.md) | Saving, resuming, browsing, renaming conversations |
-| [Configuration](docs/manual/configuration.md) | `config.yaml` end to end: servers, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
-| [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did (`run:`), plus commands that advise the model on a tool result (`advise:`) or gate a tool call (`gate:`): the Moments, the payloads, exec posture, webhooks, migrating from `hooks:` |
-| [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model and terminal can do, and what the config file says |
-| [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts |
+| [Sessions](docs/manual/sessions.md) | Saving, resuming, forking, browsing, renaming conversations |
+| [Configuration](docs/manual/configuration.md) | `config.yaml` end to end: servers and wires, API keys, model profiles, tools, the floor guards, the system prompt, confinement |
+| [Reactions](docs/manual/reactions.md) | Commands and webhooks fired on what a session did (`run:`), commands that advise the model on a tool result (`advise:`) or gate a tool call (`gate:`), migrating from `hooks:` |
+| [`apogee probe`](docs/manual/probe.md) | Diagnosing what a host, model and terminal can do, what the config file says, and what the model is sent at turn 1 |
+| [`apogee headless`](docs/manual/headless.md) | One unattended prompt, for scripts; the JSON event lines |
 | [`apogee daemon`](docs/manual/daemon.md) | Standing schedules that outlive the session |
 | [Building from source](docs/manual/building.md) | Prerequisites, Makefile targets, cross-compilation |
 
@@ -296,10 +296,9 @@ and OS-confined Auto mode on all three platforms. What changed lately lives in t
 
 ## Why Go
 
-Portability is the point. Go cross-compiles to a single static binary with no runtime —
-the gold standard for "drop into any terminal on any OS" — and it lets one language
-cover both the agent and the bench that evaluates it. The TUI is built on the Charm
-stack (Bubble Tea, Lipgloss, Bubbles) with Cobra for the CLI.
+Portability is the point. Go cross-compiles to a single static binary with no runtime,
+and one language covers both the agent and the bench that evaluates it. The TUI is built
+on the Charm stack (Bubble Tea, Lipgloss, Bubbles) with Cobra for the CLI.
 
 ## License
 
