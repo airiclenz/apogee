@@ -43,3 +43,4 @@ live-config.yaml
 *.db
 .beads-credential-key
 .beads/proxieddb/
+.beads.gate.lock
