@@ -1799,7 +1799,7 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 		}
 	})
 
-	t.Run("the siblings and the header stay put", func(t *testing.T) {
+	t.Run("the header folds the umbrella and leaves the member's state alone", func(t *testing.T) {
 		t.Parallel()
 		m := modelWithToolGroup(t)
 		before := expandedFlags(m)
@@ -1813,16 +1813,22 @@ func TestGroupMemberClickTogglesOnlyThatMember(t *testing.T) {
 				t.Errorf("entry %d expanded = %v, want %v (only the clicked member may flip)", i, was, want)
 			}
 		}
-		// With a member open the umbrella's header IS a click target — the one that closes the lot —
-		// so the case that used to assert an inert header now asserts the close-all it became.
+		// The umbrella's header is a click target of its own — the fold — so a click there hides
+		// the open member beneath the header line without resetting it: a fold hides state.
 		header := typeRow(t, m) - 1
 		if m.lineTargets[header].kind != targetUmbrella {
 			t.Fatalf("setup: line %d is marked %v, not the umbrella header this case needs",
 				header, m.lineTargets[header].kind)
 		}
 		m = clickCell(t, m, 2, screenRow(t, m, header))
-		if m.transcript.entries[middle].expanded || m.transcript.entries[groupHead].typeExpanded {
-			t.Error("a click on the umbrella header left the run open; it closes all")
+		if !m.transcript.umbrellaFolded(groupHead) {
+			t.Fatal("a click on the umbrella header did not fold it")
+		}
+		if !m.transcript.entries[middle].expanded || !m.transcript.entries[groupHead].typeExpanded {
+			t.Error("the fold closed the member or its type row; a fold hides state, it does not reset it")
+		}
+		if body := strings.Join(m.lines, "\n"); strings.Contains(body, "no findings") {
+			t.Errorf("the folded umbrella still paints the open member's body:\n%s", body)
 		}
 	})
 }
@@ -3321,9 +3327,9 @@ func typeRowLine(t *testing.T, m Model, head int) int {
 	return -1
 }
 
-// umbrellaHeaderLine is the content line the umbrella's own header paints on. It is found by its
-// TEXT rather than by its mark, because the header is deliberately unmarked while nothing is open —
-// which is one of the things the test below asserts.
+// umbrellaHeaderLine is the content line the umbrella's own header paints on, found by its TEXT
+// rather than by its mark, so a test that goes on to assert the mark (targetUmbrella, on every
+// umbrella's header) is not reading its answer off the thing it asserts.
 func umbrellaHeaderLine(t *testing.T, m Model) int {
 	t.Helper()
 	for i, line := range m.lines {
@@ -3335,11 +3341,12 @@ func umbrellaHeaderLine(t *testing.T, m Model) int {
 	return -1
 }
 
-// TestSuperGroupClickTogglesEachLevel is the umbrella's whole interaction (design calls 6 and 9):
-// the deepest element under the pointer wins, so a click on a type row opens that RUN to its member
-// rows and a click on a member opens that CALL to its body, each leaving the other level alone; and
-// a click on the umbrella header — which toggles nothing, its floor being the type rows — closes
-// every open child at once.
+// TestSuperGroupClickTogglesEachLevel is the umbrella's whole interaction (design call 6, and
+// design call 9 as the ratified fold of plan "2026-09-18 - 01" superseded it): the deepest element
+// under the pointer wins, so a click on a type row opens that RUN to its member rows and a click on
+// a member opens that CALL to its body, each leaving the other level alone; and a click on the
+// umbrella header folds the whole umbrella to its header line — over whatever its children hold,
+// which is there again on the reopen — and back.
 func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 	t.Parallel()
 	// entries[0] is the prompt, so the two reads are entries 1..2 and the two Runs 3..4: one umbrella
@@ -3391,32 +3398,58 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 		}
 	})
 
-	t.Run("the header closes every open child", func(t *testing.T) {
+	t.Run("the header folds the umbrella over its open children and reopens it", func(t *testing.T) {
 		t.Parallel()
 		m := modelWithSuperGroup(t)
 		m = clickLine(t, m, typeRowLine(t, m, readRun))
 		m = clickLine(t, m, typeRowLine(t, m, runRun))
 		m = clickLine(t, m, memberRows(t, m, runRun)[0])
+		openState := make([]entry, len(m.transcript.entries))
+		copy(openState, m.transcript.entries)
 
 		m = clickLine(t, m, umbrellaHeaderLine(t, m))
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("after the header click the headers are %q, want the folded %q", got, want)
+		}
+		// The fold hides every row but the header: no type row and no member is left to click.
+		for i, target := range m.lineTargets {
+			if target.kind == targetType || target.kind == targetHeader {
+				t.Errorf("line %d is still marked %v under the fold: %q", i, target.kind, strip(m.lines[i]))
+			}
+		}
 		for i, e := range m.transcript.entries {
-			if e.expanded || e.typeExpanded {
-				t.Errorf("entry %d is still open after the header click (expanded=%v, type=%v)",
+			if e.expanded != openState[i].expanded || e.typeExpanded != openState[i].typeExpanded {
+				t.Errorf("entry %d changed under the fold (expanded=%v, type=%v); a fold hides state, it does not reset it",
 					i, e.expanded, e.typeExpanded)
+			}
+		}
+
+		m = clickLine(t, m, umbrellaHeaderLine(t, m))
+		body := strings.Join(m.lines, "\n")
+		for _, want := range []string{"a.go", "b.go", "built"} {
+			if !strings.Contains(body, want) {
+				t.Errorf("the reopened umbrella does not paint %q its open children held:\n%s", want, body)
 			}
 		}
 	})
 
-	t.Run("the shut header is a fold target", func(t *testing.T) {
+	t.Run("the shut header is a fold target too", func(t *testing.T) {
 		t.Parallel()
 		m := modelWithSuperGroup(t)
 		header := umbrellaHeaderLine(t, m)
 		if kind := m.lineTargets[header].kind; kind != targetUmbrella {
 			t.Errorf("the header of a shut umbrella is marked %v, want targetUmbrella", kind)
 		}
-		before := strings.Join(m.lines, "\n")
-		if got := strings.Join(clickLine(t, m, header).lines, "\n"); got != before {
-			t.Errorf("a click on the shut umbrella's header with nothing open repainted it:\n%s", got)
+		before := len(m.lines)
+		m = clickLine(t, m, header)
+		if !m.transcript.umbrellaFolded(readRun) {
+			t.Fatal("a click on the shut umbrella's header did not fold it; every umbrella folds")
+		}
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+			t.Errorf("headers = %q, want the folded %q", got, want)
+		}
+		if len(m.lines) >= before {
+			t.Errorf("the fold left %d lines where the open umbrella had %d; its type rows should be gone", len(m.lines), before)
 		}
 	})
 }
@@ -3585,6 +3618,106 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		}
 	})
 
+	// The fold is the umbrella's by its SIZE alone, so it moves while the Turn is still running and
+	// a call inside the umbrella is still open — the header paints live, star and count, and folds
+	// all the same — where the shipped rest gate left such an umbrella open with no toggle at all.
+	t.Run("while the Turn runs, with a call open in the umbrella", func(t *testing.T) {
+		t.Parallel()
+
+		log := &settingsWriteLog{}
+		opts := testOpts
+		opts.Settings = fakeSettingsHost{write: log.write}
+		opts.ToolsFoldOver = 1
+		m := newTestModelEng(t, &fakeEngine{}, opts)
+		m.input.SetValue("read the files, then check the build")
+		m = step(t, m, keyEnter()) // submit: the Turn is running from here on
+		if m.state != stateRunning {
+			t.Fatalf("setup: state = %v after a submit, want running", m.state)
+		}
+		m.transcript.reset()
+		m.transcript.addUser("read the files, then check the build", nil)
+		readCall(&m.transcript, "r1", "a.go", 1, 5, 0)
+		readCall(&m.transcript, "r2", "b.go", 1, 9, 0)
+		runCall(&m.transcript, "t1", "go build ./...", "ok\nbuilt", 0)
+		openCall(&m, "t2", "go test ./...") // still waiting for its result: the umbrella is live
+		m.refreshViewport()
+		const head = 1
+		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (4 calls) "+glyphCollapsed) {
+			t.Fatalf("setup: headers = %q, want one folded live header ending in %q", got, "Tools (4 calls) "+glyphCollapsed)
+		}
+		if !m.transcript.umbrellaIsLarge(head) {
+			t.Fatal("setup: the live umbrella is not large; its size alone decides")
+		}
+
+		m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, head)))
+
+		if got := umbrellaHeaders(t, m); len(got) != 1 || !strings.HasSuffix(got[0], "Tools (4 calls) "+glyphExpanded) {
+			t.Errorf("after the click the header is %q, want it open, ending in %q", got, glyphExpanded)
+		}
+		typeRowLine(t, m, head) // the type rows are listed again
+		if !m.opts.ToolsOpen || !m.transcript.toolsOpen {
+			t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v; the live umbrella did not flip the shared fold", m.opts.ToolsOpen, m.transcript.toolsOpen)
+		}
+		if want := []settingEdit{{path: "ui.tools-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
+			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
+		}
+		if m.state != stateRunning {
+			t.Errorf("state = %v after the toggle, want the Turn still running", m.state)
+		}
+	})
+
+	// The same fold reaches an umbrella INSIDE a sub-agent's run view — the one place a large
+	// umbrella ordinarily forms — and its toggle there is the same shared flip, written back.
+	t.Run("inside a run view", func(t *testing.T) {
+		t.Parallel()
+
+		log := &settingsWriteLog{}
+		opts := testOpts
+		opts.Settings = fakeSettingsHost{write: log.write}
+		m := modelWithRunUmbrella(t, opts)
+		const head = 2
+		m = enterOnLastBlock(t, m)
+		if got := m.viewedRun().spawn; got != "s1" {
+			t.Fatalf("setup: ⏎ on the delegation opened run %q; want its view", got)
+		}
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+			t.Fatalf("setup: the view paints headers %q, want the folded %q", got, want)
+		}
+
+		m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, head)))
+
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
+			t.Errorf("after the click the view paints %q, want the open %q", got, want)
+		}
+		typeRowLine(t, m, head)
+		if !m.opts.ToolsOpen {
+			t.Error("opts.ToolsOpen is still false after the click inside the view")
+		}
+		if want := []settingEdit{{path: "ui.tools-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
+			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
+		}
+		if !m.inRunView() {
+			t.Error("the toggle left the run view; a fold is not the way back up")
+		}
+
+		// ⏎ at the block cursor folds it back from inside the view too.
+		m = step(t, m, keyAltUp())
+		for m.lineTargets[m.cursor.line].kind != targetUmbrella || m.lineTargets[m.cursor.line].entry != head {
+			if m.cursor.line == 0 {
+				t.Fatal("the block cursor never reached the umbrella's header inside the view")
+			}
+			m = step(t, m, keyAltUp())
+		}
+		m = step(t, m, keyEnter())
+
+		if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
+			t.Errorf("after ⏎ on the header the view paints %q, want the folded %q", got, want)
+		}
+		if want := []settingEdit{{path: "ui.tools-open", value: "true"}, {path: "ui.tools-open", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
+			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
+		}
+	})
+
 	t.Run("a failed write warns once and the flip stands", func(t *testing.T) {
 		t.Parallel()
 
@@ -3613,39 +3746,92 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 	})
 }
 
-// TestSmallUmbrellaHeaderStillClosesChildren is the fold's floor: an umbrella with no more type
-// rows than the threshold is SMALL, and its header — wearing the fold's ▼ over its rows like every
-// umbrella's (renderSuperGroup) — keeps the click meaning it had, closing every open child
-// (transcript.closeSuperGroup), with the shared preference untouched and nothing written to the
-// settings seam.
-func TestSmallUmbrellaHeaderStillClosesChildren(t *testing.T) {
+// modelWithMixedUmbrellas builds a ready idle model over opts holding two SMALL umbrellas and one
+// LARGE one under a threshold of one type row, a prompt between each so they never join: two reads
+// (one type row, head 1), two Runs (one type row, head 4), then modelWithSuperGroup's reads-and-Runs
+// shape (two type rows, head 7) — the one that is large (transcript.umbrellaIsLarge). The prompts
+// are entries 0, 3 and 6.
+func modelWithMixedUmbrellas(t *testing.T, opts Options) Model {
+	t.Helper()
+	opts.ToolsFoldOver = 1
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m.transcript.reset()
+	m.transcript.addUser("read the files", nil)
+	readCall(&m.transcript, "a-r1", "a.go", 1, 5, 0)
+	readCall(&m.transcript, "a-r2", "b.go", 1, 9, 0)
+	m.transcript.addUser("check the build", nil)
+	runCall(&m.transcript, "b-t1", "go build ./...", "ok\nbuilt", 0)
+	runCall(&m.transcript, "b-t2", "go test ./...", "ok\nPASS", 0)
+	m.transcript.addUser("read the files, then check the build", nil)
+	readCall(&m.transcript, "c-r1", "a.go", 1, 5, 0)
+	readCall(&m.transcript, "c-r2", "b.go", 1, 9, 0)
+	runCall(&m.transcript, "c-t1", "go build ./...", "ok\nbuilt", 0)
+	runCall(&m.transcript, "c-t2", "go test ./...", "ok\nPASS", 0)
+	m.refreshViewport()
+	return m
+}
+
+// TestSmallUmbrellaHeaderFoldsItselfOnly is the small umbrella's fold: an umbrella with no more type
+// rows than the threshold folds to its header line on a click there like any other, but on its OWN
+// head flag (transcript.setUmbrellaFolded) — so the fold moves that umbrella alone, leaves the
+// shared preference and every other umbrella where they stood, writes nothing to the settings seam
+// and journals nothing, and hides the children opened beneath it without resetting them: they paint
+// again on the reopen.
+func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 	t.Parallel()
-	const readRun, runRun = 1, 3
+	const readsHead, runsHead, largeHead = 1, 4, 7
 
 	log := &settingsWriteLog{}
-	m := modelWithSuperGroup(t)
-	m.opts.Settings = fakeSettingsHost{write: log.write}
-	m.opts.ToolsFoldOver, m.transcript.toolsFoldOver = 2, 2 // two type rows: at the threshold, not over it
-	m.refreshViewport()
-	if got, want := umbrellaHeaders(t, m), []string{"✦ Tools (4 calls) " + glyphExpanded}; !reflect.DeepEqual(got, want) {
-		t.Fatalf("setup: headers = %q, want the open small header %q", got, want)
+	opts := testOpts
+	opts.Settings = fakeSettingsHost{write: log.write}
+	m := modelWithMixedUmbrellas(t, opts)
+	start := []string{
+		"✦ Tools (2 calls) " + glyphExpanded,
+		"✦ Tools (2 calls) " + glyphExpanded,
+		"✦ Tools (4 calls) " + glyphCollapsed,
 	}
-	m = clickCell(t, m, 4, screenRow(t, m, typeRowLine(t, m, readRun)))
-	m = clickCell(t, m, 4, screenRow(t, m, typeRowLine(t, m, runRun)))
-	m = clickCell(t, m, 4, screenRow(t, m, memberRows(t, m, runRun)[0]))
+	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, start) {
+		t.Fatalf("setup: headers = %q, want two open small ones over a folded large one %q", got, start)
+	}
+	m = clickCell(t, m, 4, screenRow(t, m, typeRowLine(t, m, runsHead)))
+	m = clickCell(t, m, 4, screenRow(t, m, memberRows(t, m, runsHead)[0]))
+	if !m.transcript.entries[runsHead].typeExpanded || !m.transcript.entries[runsHead].expanded {
+		t.Fatal("setup: the Runs type row and its first member did not open")
+	}
 
-	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLine(t, m)))
+	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, runsHead)))
 
-	for i, e := range m.transcript.entries {
-		if e.expanded || e.typeExpanded {
-			t.Errorf("entry %d is still open after the header click (expanded=%v, type=%v)", i, e.expanded, e.typeExpanded)
-		}
+	folded := []string{start[0], "✦ Tools (2 calls) " + glyphCollapsed, start[2]}
+	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, folded) {
+		t.Errorf("after the click on the Runs header the headers are %q, want that one alone folded %q", got, folded)
+	}
+	if m.transcript.umbrellaFolded(readsHead) || !m.transcript.umbrellaFolded(runsHead) || !m.transcript.umbrellaFolded(largeHead) {
+		t.Errorf("folded: reads=%v runs=%v large=%v; want only the clicked small umbrella to move (the large one stays under the shut preference)",
+			m.transcript.umbrellaFolded(readsHead), m.transcript.umbrellaFolded(runsHead), m.transcript.umbrellaFolded(largeHead))
 	}
 	if m.opts.ToolsOpen || m.transcript.toolsOpen {
-		t.Error("a small umbrella's header moved the shared fold; only a large one folds")
+		t.Error("a small umbrella's header moved the shared fold; only a large one's does")
 	}
 	if len(log.writes) != 0 || len(m.settingEdits) != 0 {
 		t.Errorf("writes = %+v, edits = %+v; want nothing written or journaled for a small umbrella", log.writes, m.settingEdits)
+	}
+	if !m.transcript.entries[runsHead].typeExpanded || !m.transcript.entries[runsHead].expanded {
+		t.Error("the fold closed the type row or the member beneath it; a fold hides state, it does not reset it")
+	}
+	if body := strings.Join(m.lines, "\n"); strings.Contains(body, "built") {
+		t.Errorf("the folded umbrella still paints its open member's body:\n%s", body)
+	}
+
+	m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, runsHead)))
+
+	if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, start) {
+		t.Errorf("after the reopen the headers are %q, want %q", got, start)
+	}
+	if body := strings.Join(m.lines, "\n"); !strings.Contains(body, "built") {
+		t.Errorf("the reopened umbrella does not paint the member it held open:\n%s", body)
+	}
+	if len(log.writes) != 0 {
+		t.Errorf("writes = %+v after the reopen; a small umbrella's fold is never persisted", log.writes)
 	}
 }
 

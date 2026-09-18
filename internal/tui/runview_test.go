@@ -30,6 +30,28 @@ func modelWithRun(t *testing.T) Model {
 	return m
 }
 
+// modelWithRunUmbrella is modelWithRun with a Tools umbrella INSIDE the delegation: two reads then two
+// Runs at depth 1 — modelWithSuperGroup's shape, one level down — under a threshold of one type
+// row, so the umbrella the run view paints is LARGE (transcript.umbrellaIsLarge) and answers to the
+// shared fold. It takes opts because the fold's write is the seam's (fakeSettingsHost), which
+// modelWithRun's testOpts never wire. The prompt is entries[0], the delegation heads at 1 and the
+// umbrella at 2.
+func modelWithRunUmbrella(t *testing.T, opts Options) Model {
+	t.Helper()
+	opts.ToolsFoldOver = 1
+	m := newTestModelEng(t, &fakeEngine{}, opts)
+	m.transcript.reset()
+	m.transcript.addUser("survey the repo", nil)
+	subAgentCall(&m.transcript, "s1", "survey", 0)
+	readCall(&m.transcript, "r1", "a.go", 1, 5, 1)
+	readCall(&m.transcript, "r2", "b.go", 1, 9, 1)
+	runCall(&m.transcript, "t1", "go build ./...", "ok\nbuilt", 1)
+	runCall(&m.transcript, "t2", "go test ./...", "ok\nPASS", 1)
+	subAgentReport(&m.transcript, "s1", "all clear", 0)
+	m.refreshViewport()
+	return m
+}
+
 // enterOnLastBlock is the keyboard route in: ⌥↑ enters the block cursor on the LAST stop and ⏎ acts
 // on what it stands on (blockcursor.go), which is the same reach a click takes.
 func enterOnLastBlock(t *testing.T, m Model) Model {

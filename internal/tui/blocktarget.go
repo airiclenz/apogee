@@ -41,10 +41,10 @@ package tui
 // expanded flag every other target flips, which is what lets a reader open a run to its member rows
 // and then open a member to its body. targetUmbrella is the umbrella header — marked on EVERY
 // umbrella, small or large, open or folded, live or done, wearing the fold's ▶/▼ after its count
-// (renderSuperGroup). Its click answers by the umbrella's size (transcript.umbrellaIsLarge): a LARGE
-// one folds to its header line and back under the shared `ui.tools-open` preference
-// (Model.toggleToolsFold), while a small one's click closes every open child beneath it
-// (transcript.closeSuperGroup).
+// (renderSuperGroup). Its click folds the umbrella to its header line and back, and which fold it
+// moves is answered by the umbrella's size (transcript.umbrellaIsLarge): a LARGE one follows the
+// shared `ui.tools-open` preference (Model.toggleToolsFold), a small one its own head flag alone
+// (transcript.setUmbrellaFolded), with every child's state left as it stood beneath either fold.
 type targetKind int
 
 const (

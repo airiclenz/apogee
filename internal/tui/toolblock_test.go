@@ -584,8 +584,8 @@ func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
 		t.Fatal("setup: entries[1] is not a toggleable block")
 	}
 
-	// Line 0 is the umbrella's header — a close-all target while a member is open — then the type
-	// row, then one row for the first member, six for the open one, one for the last.
+	// Line 0 is the umbrella's header — the fold's own target, marked on every umbrella — then the
+	// type row, then one row for the first member, six for the open one, one for the last.
 	marks := blockMarks(t, tr, 80)
 	want := []struct {
 		kind  targetKind

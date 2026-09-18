@@ -829,12 +829,14 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 			return m, nil
 		}
 	case targetUmbrella:
-		// A large umbrella's header is a fold, and flipping it is also a write of `ui.tools-open`
-		// (toggleToolsFold) — asked first for the task-list card's reason, one rule for the mouse
-		// and for ⏎; a small umbrella's header still closes its children instead.
+		// Every umbrella's header is a fold. A LARGE one's fold is the shared preference, and
+		// flipping it is also a write of `ui.tools-open` (toggleToolsFold) — asked first for the
+		// task-list card's reason, one rule for the mouse and for ⏎. A SMALL one folds on its own
+		// head flag alone (transcript.setUmbrellaFolded): in-session, written nowhere, leaving every
+		// child's state beneath it exactly as it stood for the reopen.
 		if m.transcript.umbrellaIsLarge(target.entry) {
 			m = m.toggleToolsFold()
-		} else if !m.transcript.closeSuperGroup(target.entry) {
+		} else if !m.transcript.setUmbrellaFolded(target.entry, !m.transcript.umbrellaFolded(target.entry)) {
 			return m, nil
 		}
 	default:
