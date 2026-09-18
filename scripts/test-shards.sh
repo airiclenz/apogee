@@ -30,6 +30,7 @@
 #
 # Usage: scripts/test-shards.sh [extra go test flags ...]
 #   APOGEE_TEST_SHARDS=n   override the per-heavy-package shard count (default: sized off nproc)
+#   APOGEE_TEST_RACE=0     drop -race (announced on stderr and in the ==> line); any other value keeps it
 
 set -uo pipefail
 
@@ -54,7 +55,15 @@ HEAVY_WEIGHT=(4 2) # cmd/apogee is 3–5x internal/tui by total test time; see a
 
 TIMINGS=.test-timings
 TIMINGS_SEED=scripts/test-timings.seed
-GOFLAGS_TEST=(-race -count=1)
+# APOGEE_TEST_RACE=0 drops -race for a kernel that cannot run the race detector — the 39-bit-VA
+# arm64 rpi kernels, where a race binary aborts at startup with `FATAL: Found 39 - Supported 48`
+# (the roster `-list` calls below included). A developer convenience, never a gate: `make check`
+# and CI stay raced, and the run says so on stderr and in its `==>` line.
+if [ "${APOGEE_TEST_RACE:-}" = 0 ]; then
+	GOFLAGS_TEST=(-count=1)
+else
+	GOFLAGS_TEST=(-race -count=1)
+fi
 
 # Which timings the packer reads: the last run's cache when there is one, else the committed
 # seed. Only the READ side falls back — the harvest at the end always rewrites .test-timings and
@@ -69,6 +78,9 @@ else
 	TIMINGS_SOURCE=""
 fi
 echo "test-shards: timings: ${TIMINGS_SOURCE:-none (equal costs)}" >&2
+if [ "${APOGEE_TEST_RACE:-}" = 0 ]; then
+	echo "test-shards: race detector OFF (APOGEE_TEST_RACE=0) — this run does not stand in for make check" >&2
+fi
 
 # The shard budget. One process per core minus one leaves the box a core for the `go build`
 # work every shard triggers; the floor of 2 keeps the split meaningful on a small machine, and
@@ -275,7 +287,11 @@ mapfile -t rest < <(
 # ---------------------------------------------------------------------------------------------
 # Run every shard at once.
 # ---------------------------------------------------------------------------------------------
-echo "==> go test -race: ${#shard_run[@]} shards + ${#rest[@]} other packages"
+if [ "${APOGEE_TEST_RACE:-}" = 0 ]; then
+	echo "==> go test (unraced): ${#shard_run[@]} shards + ${#rest[@]} other packages"
+else
+	echo "==> go test -race: ${#shard_run[@]} shards + ${#rest[@]} other packages"
+fi
 
 pids=() ; labels=() ; logs=()
 

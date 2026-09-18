@@ -34,7 +34,10 @@
 - CI configuration (`.github/workflows/ci.yml` keeps `APOGEE_TEST_SHARDS=2` and nothing else).
 - Re-seeding `scripts/test-timings.seed`.
 
-## 1. `APOGEE_TEST_RACE=0` runs the sharded suite without the race detector
+## 1. `APOGEE_TEST_RACE=0` runs the sharded suite without the race detector — ✅ DONE (2026-09-18)
+
+NOTES (2026-09-18): implemented on the Raspberry Pi 4 (39-bit VA) — the raced `-list` checks and the raced Acceptance count are TSan-capable box only and were not run here; the raced side is proven by the `bash -x` pair (first `+ go test` line carries `-race` unset and at `=1`) and the single `==> go test -race:` echo.
+NOTES (2026-09-18): pre-existing, not touched — on a TSan-incapable kernel the roster failure prints an empty diagnostic: `go test -race -list` writes `FATAL: ThreadSanitizer: unsupported VMA range` to stdout (captured in `list.raw`), and the script only cats `list.err`.
 
 **What:** In `scripts/test-shards.sh`, `GOFLAGS_TEST=(-race -count=1)` becomes conditional: when `APOGEE_TEST_RACE` is exactly `0`, `GOFLAGS_TEST=(-count=1)`; otherwise unchanged. The knob is announced twice, so an unraced run can never pass for a raced one in a log: a stderr line `test-shards: race detector OFF (APOGEE_TEST_RACE=0) — this run does not stand in for make check` printed right after the `test-shards: timings:` line, and the summary line `==> go test -race: N shards + M other packages` reads `==> go test (unraced): N shards + M other packages` in that mode. The `-list` roster call uses the same `GOFLAGS_TEST`, so it too runs unraced (a race binary aborts before listing on the kernel this is for). Timings are harvested as usual — the packer ranks, it does not compare absolutes (header comment already says so). Add the knob to the script's `Usage:` header block beside `APOGEE_TEST_SHARDS`, one line, and a ≤ 4-line comment at the conditional stating the kernel it exists for (39-bit VA arm64 rpi kernels: TSan `FATAL: Found 39 - Supported 48`) and that it is a developer convenience, never a gate — `make check` and CI stay raced.
 
