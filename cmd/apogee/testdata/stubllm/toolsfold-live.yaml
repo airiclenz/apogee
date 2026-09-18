@@ -1,0 +1,44 @@
+# The upstream the mid-Turn fold run talks to (TestE2EToolsUmbrellaFoldsWhileTheTurnRuns):
+# toolsfold.yaml's three reads with a `terminal` call after them, all four in one Turn. A driven run
+# boots in ask-before, so the terminal call is GATED: its approval pane holds the Turn open with the
+# umbrella's fourth type row live, which is exactly the state under test — a large umbrella folds by
+# its SIZE alone, whether or not the Turn has come to rest. The three reads land first because
+# dispatch runs at width 1 (internal/agent/dispatch.go): the gate stops the list where the terminal
+# call stands, with the rows above it already done.
+#
+# The wrap-up matches `tool_result: terminal`, not `grep`: with the terminal call last, the request
+# that follows the Turn carries the TERMINAL result as its last message (stubllm/log.go
+# lastToolResultName), so a `grep` matcher would never fire and the catch-all would answer. The
+# same turn answers the denial: a denied call still comes back as that call's result.
+#
+# Every turn matches on `when:` and repeats, as toolsfold.yaml's do; the title turn sits above the
+# prompt's own for smoke.yaml's reason (`auto-title:` is on by default).
+model: toolsfold-model
+turns:
+    # The session title, matched before the prompt's own turn.
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Workspace survey
+    # The wrap-up, once the terminal call — the last of the four — has its result, allowed or denied.
+    - when:
+        tool_result: terminal
+      repeat: true
+      text: The workspace is surveyed.
+    # The prompt: four calls in one list, each of a different tool, so the umbrella they fold under
+    # has four type rows — Read, List, Grep and Terminal — the last of them gated.
+    - when:
+        last_message: ^Survey the workspace
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+        - name: list_dir
+          arguments: '{"path":"."}'
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+        - name: terminal
+          arguments: '{"command":"echo done"}'
+    # Anything else — a Mechanism's own call, or a round the prompt does not claim.
+    - repeat: true
+      text: Nothing else to add.

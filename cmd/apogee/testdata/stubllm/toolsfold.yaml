@@ -3,7 +3,8 @@
 # Three different tools rather than three of one, because a type row is a same-label run — three
 # read_file calls would coalesce into one `Read (3)` row, and the fold under test is keyed on the
 # number of type rows, not of calls. All three are harmless reads (never `terminal`): a driven run
-# boots in ask-before, where a gated call would leave the umbrella live and the fold never comes.
+# boots in ask-before, where a gated call would hold the Turn open on its approval pane, and these
+# runs want the umbrella at its wrap-up; the gated shape is toolsfold-live.yaml's.
 #
 # Every turn matches on `when:` and repeats, because one of the runs spans TWO launches: the
 # session resumed with `--continue` replays the whole conversation, so an ordered script would have
