@@ -1055,16 +1055,17 @@ type Options struct {
 	// hand-edited file moves it mid-session the same way (settingsApplyLocal).
 	TaskListFolded bool
 
-	// ToolsOpen starts every LARGE Tools umbrella in the transcript — one at rest with more type
-	// rows than ToolsFoldOver ([transcript.umbrellaIsLarge]) — OPEN on its type rows rather than
+	// ToolsOpen starts every LARGE Tools umbrella in the transcript — one with more type rows than
+	// ToolsFoldOver ([transcript.umbrellaIsLarge]) — OPEN on its type rows rather than
 	// folded to its counted header: what the `ui.tools-open` config key selected, threaded through
 	// with the SAME polarity, unlike TaskListFolded, because the key defaults to false and so its
 	// zero value already means the auto-fold the umbrella ships with. It is one preference for
-	// every large umbrella and nothing else: an umbrella keeps no fold of its own, so the paint reads
-	// the shared value each frame, and a click or ⏎ on any large header flips it for all of them
-	// ([Model.toggleToolsFold]) and writes the key back through [SettingsHost] silently (ADR 0035
-	// addendum); a `/settings` edit or a hand-edited file moves it mid-session the same way
-	// (settingsApplyLocal). Small and live umbrellas paint exactly as they did without it.
+	// every large umbrella and nothing else: a large umbrella keeps no fold of its own, so the paint
+	// reads the shared value each frame, and a click or ⏎ on any large header flips it for all of
+	// them ([Model.toggleToolsFold]) and writes the key back through [SettingsHost] silently (ADR
+	// 0035 addendum); a `/settings` edit or a hand-edited file moves it mid-session the same way
+	// (settingsApplyLocal). A SMALL umbrella never reads it: it folds on its head entry's own
+	// session-only flag instead ([transcript.umbrellaFolded]).
 	ToolsOpen bool
 
 	// ToolsFoldOver is how many type rows a Tools umbrella may show before it is LARGE and obeys

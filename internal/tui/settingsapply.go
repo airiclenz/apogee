@@ -344,7 +344,7 @@ func parseStallAfter(value string) (time.Duration, error) {
 	return after, nil
 }
 
-// parseToolsFoldOver reads the `ui.tools-fold-over` row's value as the type-row count a resting
+// parseToolsFoldOver reads the `ui.tools-fold-over` row's value as the type-row count an
 // umbrella must exceed to be large, and refuses what a count cannot be — parseStallAfter's posture,
 // and for its reason: the parse restates internal/config's rather than calling it (ADR 0043), and
 // the whole contract is one strconv.Atoi and a floor of 0, the key's own spelling of "never".
@@ -514,7 +514,7 @@ func (m *Model) setToolsOpen(open bool) {
 	m.transcript.setToolsOpen(open)
 }
 
-// setToolsFoldOver moves the type-row threshold a resting umbrella is large above on both halves,
+// setToolsFoldOver moves the type-row threshold an umbrella is large above on both halves,
 // setToolsOpen's rule: the Option records the value, the transcript paints by it
 // ([transcript.setToolsFoldOver]). Only `ui.tools-fold-over`'s apply comes through here — no
 // gesture moves the threshold — but the same one-writer rule keeps the row and the paint agreeing.

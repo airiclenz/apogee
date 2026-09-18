@@ -56,10 +56,10 @@ func coldRender(tr *transcript, th theme, width int, blink bool) renderedTranscr
 		pendingRun: tr.pendingRun,
 		ws:         tr.ws,
 		root:       tr.root, // the oracle paints the same VIEW, not just the same entries
-		// the umbrella's fold inputs: the same preference and threshold, at the same rest
+		// the umbrella's fold inputs: the same preference and threshold; a small umbrella's own
+		// fold rides its head entry, which the borrowed entries already carry
 		toolsOpen:     tr.toolsOpen,
 		toolsFoldOver: tr.toolsFoldOver,
-		busy:          tr.busy,
 	}
 	return cold.renderView(th, width, blink, breadcrumbHint)
 }
@@ -409,8 +409,10 @@ func TestPaintCacheMatchesAColdRenderThroughEveryMutation(t *testing.T) {
 // The regression the fold's key terms guard: a large umbrella's ▼ and its click target are served
 // from the cache, and the two things that move them — the shared preference, and a threshold edit
 // under an open preference that carries the umbrella across the line — flip no entry flag and
-// append no entry. Each is walked warm against a cold oracle, and the flip is asserted to have
-// painted differently so a key that ignored it could not pass by painting the same thing twice.
+// append no entry; a SMALL umbrella's fold flips its head entry's own flag, which the key reads
+// through the same fold slot rather than spanFlags. Each is walked warm against a cold oracle, and
+// the flip is asserted to have painted differently so a key that ignored it could not pass by
+// painting the same thing twice.
 func TestPaintCacheRepaintsWhenTheFoldFlips(t *testing.T) {
 	t.Parallel()
 
@@ -464,6 +466,26 @@ func TestPaintCacheRepaintsWhenTheFoldFlips(t *testing.T) {
 		}
 		if targets := tr.renderView(th, 80, false, breadcrumbHint).targets; targets[len(targets)-3].kind != targetNone {
 			t.Errorf("small umbrella header target = %v; want targetNone with no child open", targets[len(targets)-3].kind)
+		}
+	})
+
+	t.Run("a small umbrella's head-flag flip", func(t *testing.T) {
+		t.Parallel()
+		const head = 1 // the prompt is entry 0; the umbrella's head is its first call
+
+		tr := build(t)
+		tr.setToolsFoldOver(2) // two type rows: at the threshold, so small
+		open := check(t, "small and open by default", tr)
+		if !tr.setUmbrellaFolded(head, true) {
+			t.Fatal("setUmbrellaFolded(head, true) = false; want the head flag to move")
+		}
+		folded := check(t, "folded on the head flag", tr)
+		if equalLines(open.lines, folded.lines) {
+			t.Error("the small umbrella painted identically open and folded — the head flag served the stale rows")
+		}
+		tr.setUmbrellaFolded(head, false)
+		if again := check(t, "opened again on the head flag", tr); !equalLines(open.lines, again.lines) {
+			t.Error("opening again painted something other than the first open paint")
 		}
 	})
 }

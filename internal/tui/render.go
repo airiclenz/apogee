@@ -152,8 +152,8 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 // fact about the frame ([Model.backHint]), not about the scrollback. A caller with no frame hands
 // the plain [breadcrumbHint]; empty paints the trail with no hint at all (breadcrumbRow).
 //
-// What this reads of the transcript — entries, the live buffer, root, the fold preferences and the
-// busy mirror — is under [transcript.generation]: every writer of those fields bumps it, and the
+// What this reads of the transcript — entries, the live buffer, root and the fold preferences — is
+// under [transcript.generation]: every writer of those fields bumps it, and the
 // Update tail repaints on the bump ([Model.settle], [frameKey]). A new field read here is a field
 // whose writers must touch.
 func (t *transcript) renderView(th theme, width int, blink bool, backHint string) renderedTranscript {
@@ -629,16 +629,16 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// over exactly them. Its per-entry state is in the paint key already: blockKey spans the
 	// whole umbrella and spanFlags packs both levels — a member's expanded at bit 0 and a run
 	// head's typeExpanded at bit 2 — so opening either level is a different key and a fresh
-	// paint (paintcache.go). Its FOLD is not per-entry: a large umbrella — at rest over more type
-	// rows than the threshold (umbrellaIsLarge) — folds to its header line under the one shared
-	// preference (toolsOpen), and both answers ride the block into the key (paintKey.large/folded)
-	// so a threshold edit or a preference flip is a fresh paint too.
+	// paint (paintcache.go). Its FOLD is answered by its size (umbrellaFolded): a large umbrella —
+	// more type rows than the threshold (umbrellaIsLarge) — folds to its header line under the one
+	// shared preference (toolsOpen), a small one on its head entry's own flag, and both answers ride
+	// the block into the key (paintKey.large/folded) so a threshold edit, a preference flip or the
+	// head flag's move is a fresh paint too.
 	if sup := toolSuperGroup(t.entries, head); len(sup) > 0 {
 		calls := sup.calls()
 		ins := root.inputs(t.entries[head : head+calls])
 		live := anyOpenCall(ins)
-		large := t.umbrellaIsLarge(head)
-		fold := umbrellaFold{large: large, folded: large && !t.toolsOpen}
+		fold := umbrellaFold{large: t.umbrellaIsLarge(head), folded: t.umbrellaFolded(head)}
 		return resolvedBlock{
 			shape: shapeToolSuper,
 			ins:   ins,

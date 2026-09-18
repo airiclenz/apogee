@@ -131,13 +131,14 @@ const (
 //     (superMemberMarker) and by the very painter a plain group's members go through
 //     (renderGroupMember), so a member opens onto its body inside a type row exactly as it does
 //     inside a group — the sketch's 2nd step.
-//   - a SMALL or live umbrella's HEADER wears no state indicator of its own: its floor is its type
+//   - a SMALL umbrella's HEADER wears no state indicator of its own: its floor is its type
 //     rows, and a click there closes every open child instead (targetUmbrella). It is marked as a
 //     target only while something IS open, so a header with nothing to close keeps a click's
-//     selection meaning rather than offering an affordance that does nothing.
-//   - a LARGE umbrella — at rest over more type rows than `ui.tools-fold-over`
-//     ([transcript.umbrellaIsLarge]) — folds to its header line under the shared `ui.tools-open`
-//     preference (fold.folded): the header alone, wearing a ▶ after its count the way a
+//     selection meaning rather than offering an affordance that does nothing. Folded on its head
+//     entry's own flag ([transcript.umbrellaFolded]) it paints the header line alone, glyphless.
+//   - a LARGE umbrella — more type rows than `ui.tools-fold-over`
+//     ([transcript.umbrellaIsLarge]), whether or not a call is still open — folds to its header
+//     line under the shared `ui.tools-open` preference (fold.folded): the header alone, wearing a ▶ after its count the way a
 //     header-folding card does (renderToolBlock), and marked targetUmbrella so a click or ⏎ there
 //     opens it. Open, it paints its rows exactly as a small one does, wears a ▼, and is marked
 //     targetUmbrella whether or not a child is open, since the click now has a fold to move rather

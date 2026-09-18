@@ -1958,9 +1958,6 @@ func (m *Model) resumeRunning() tea.Cmd {
 // delegate keep its own invitation).
 func (m *Model) markRunning() {
 	m.state = stateRunning
-	// The transcript mirrors the flip because a paint reads it: a large Tools umbrella folds only
-	// at rest, and "at rest" is the Turn's fact, not the members' (transcript.umbrellaIsLarge).
-	m.transcript.setBusy(true)
 }
 
 // stopWorker cancels the in-flight worker. The worker honours the cancel at the next
@@ -2030,9 +2027,6 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	// stop" on an already-idle status line for the rest of the window (handleKey's esc case).
 	m.lastEsc = time.Time{}
 	m.state = next
-	// The worker has unwound, so the Turn is at rest: the mirror a large umbrella's fold reads
-	// moves with the state (transcript.umbrellaIsLarge), and the layout below paints it.
-	m.transcript.setBusy(false)
 	// The box invites again from the next frame — nothing is running, so ⏎ sends — by the same
 	// derivation as every other state ([Model.legend]): a question that died with its Exchange has
 	// just let go of the box, and a run view still open behind it takes the box back right here.

@@ -193,14 +193,17 @@ type paintKey struct {
 	blink bool   // the frame's star phase, folded in ONLY while live — a settled block paints identically at either phase
 	flags string // one byte per covered entry: bit 0 expanded, bit 1 done, bit 2 typeExpanded (spanFlags)
 
-	// large and folded are a Tools umbrella's fold, and nothing else's: whether the umbrella is at
-	// rest over more type rows than the threshold ([transcript.umbrellaIsLarge]) and, if so, whether
-	// the shared preference has it shut to its header line (transcript.toolsOpen). Neither is an
-	// ENTRY state — no entry records the fold — so neither rides spanFlags; and both are named
-	// rather than the facts they are derived from because those are what the paint moves on: a
-	// `/settings` edit of the threshold under an open preference moves an umbrella across the line
-	// with no flag flipped and no entry appended, and a key that missed it would serve a header
-	// with a ▼ and a click target it no longer has.
+	// large and folded are a Tools umbrella's fold, and nothing else's: whether the umbrella has
+	// more type rows than the threshold ([transcript.umbrellaIsLarge]) and whether it stands shut to
+	// its header line — under the shared preference (transcript.toolsOpen) when large, on its head
+	// entry's own flag (entry.umbrellaFolded) when small, one answer either way
+	// ([transcript.umbrellaFolded], reaching the key as fold.folded). Neither rides spanFlags, the
+	// small fold's head flag deliberately included: both are named as the facts the paint moves on
+	// rather than as the facts they are derived from, because the shared preference and the
+	// threshold move a LARGE umbrella's fold with no entry flag flipped and no entry appended — a
+	// `/settings` edit of the threshold under an open preference carries an umbrella across the
+	// line — and a key that missed it would serve a header with a ▼ and a click target it no longer
+	// has. The small fold rides the same slot so both shapes' folds are keyed from one place.
 	large  bool
 	folded bool
 
@@ -225,7 +228,9 @@ type paintKey struct {
 // bits. The phase takes two bits rather than one because it has three states and each is a different paint:
 // a delegation not yet started, one running, and one whose child has reported ahead of the group's
 // result burst (entry.phase). Every per-entry view FACT
-// belongs here, whether or not a painter reads it yet: a state a key ignores is a stale paint served
+// belongs here, whether or not a painter reads it yet — the one exception is a small umbrella's
+// head fold (entry.umbrellaFolded), which reaches the key as [paintKey.folded], the slot a large
+// umbrella's fold already travels in: a state a key ignores is a stale paint served
 // after a click that changed something, and that is a failure no golden can see, since the paint it
 // asserts is the one the painter would have produced anyway.
 //
@@ -454,11 +459,11 @@ func blockKey(shape blockShape, ins []paintInput, th theme, width int, blink, li
 }
 
 // umbrellaFold is a Tools umbrella's fold as the paint key names it and the painter draws it: large
-// says the umbrella is at rest over more type rows than the threshold ([transcript.umbrellaIsLarge])
-// — the one condition under which it wears a ▶/▼ and obeys the shared preference — and folded says
-// that preference has it shut to its header line. folded implies large; every other shape, and a
-// small or live umbrella, carries the zero value. It is one value rather than two bools because
-// the two travel together from the shape decision to the key and the painter ([resolvedBlock.fold]).
+// says the umbrella has more type rows than the threshold ([transcript.umbrellaIsLarge]) — the
+// condition under which it obeys the shared preference rather than its own head flag — and folded
+// says whichever of the two it obeys has it shut to its header line ([transcript.umbrellaFolded]).
+// Every other shape carries the zero value. It is one value rather than two bools because the two
+// travel together from the shape decision to the key and the painter ([resolvedBlock.fold]).
 type umbrellaFold struct {
 	large  bool
 	folded bool
