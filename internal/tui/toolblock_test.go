@@ -567,8 +567,8 @@ func TestSeeLessFooterClosesAnOpenBody(t *testing.T) {
 // Every row an open member paints belongs to that member and says so: the marks name entry 1 down
 // the whole of it — first row, body and see-less row alike — while the siblings' single rows name
 // entries 0 and 2, the type row above them names the run's head as the row a click folds, and the
-// umbrella's own header — a click surface only while something below it is open — is the row that
-// closes the lot. This is the click surface the mouse then resolves against (mouse.go,
+// umbrella's own header — marked on every umbrella, open or shut, large or small — is the row that
+// folds the whole umbrella. This is the click surface the mouse then resolves against (mouse.go,
 // toggleBlockAt).
 func TestGroupMemberMarksNameTheirOwnCalls(t *testing.T) {
 	t.Parallel()
