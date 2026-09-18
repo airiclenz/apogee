@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
@@ -486,7 +488,10 @@ func TestEscape_RevertsAndRedoes_WithAndWithoutASnapshotter(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			root := t.TempDir()
-			outside := filepath.Join(t.TempDir(), "outside.txt")
+			// An approved escape records the permit's RESOLVED target (see Mutation), so the
+			// path is taken by its real spelling — on macOS t.TempDir() is reached through the
+			// /var → /private/var link, and the unresolved one would fail the permit check.
+			outside := filepath.Join(security.EvalRealPath(t.TempDir()), "outside.txt")
 			if err := os.WriteFile(outside, []byte("before"), 0o644); err != nil {
 				t.Fatalf("seed the escape target: %v", err)
 			}

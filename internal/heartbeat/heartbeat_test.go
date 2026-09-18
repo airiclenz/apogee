@@ -410,8 +410,8 @@ func TestBeatAnsweredSeparatesADeadBoxFromAnUnusableReply(t *testing.T) {
 			beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
 			if !beat.Answered {
-				t.Errorf("Answered = false on HTTP %d; the server replied, which is the whole "+
-					"distinction this field carries", tc.status)
+				t.Errorf("Answered = false on HTTP %d (failure: %q); the server replied, which is "+
+					"the whole distinction this field carries", tc.status, beat.Failure)
 			}
 			if beat.Reachable {
 				t.Errorf("Reachable = true on HTTP %d; no usable model list came back", tc.status)

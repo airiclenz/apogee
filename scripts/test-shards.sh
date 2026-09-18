@@ -297,7 +297,12 @@ done
 [ "$plan_failed" -eq 0 ] || exit 1
 
 # Everything not sharded, computed from `go list` so a new package joins the run by existing.
-mapfile -t rest < <(
+# A read loop rather than `mapfile`: macOS ships bash 3.2, where the builtin does not exist and
+# the plan would launch a rest process with no packages in it.
+rest=()
+while IFS= read -r p; do
+	rest+=("$p")
+done < <(
 	go list ./... | grep -vxF -f <(printf '%s\n' "${HEAVY_PKGS[@]}" | sed 's|^\./|github.com/airiclenz/apogee/|')
 )
 
@@ -334,14 +339,15 @@ rest_parallel=$(rest_parallel_bound $(( ${#shard_run[@]} + 1 )))
 echo "    each shard runs $parallel test(s) at a time, the rest $rest_parallel (-parallel: budget $budget over $(( ${#shard_run[@]} + 1 )) processes)"
 
 # Only the rest process takes -p: a heavy shard is a single-package process, and -p bounds
-# how many PACKAGES `go test` builds and runs at once.
+# how many PACKAGES `go test` builds and runs at once. Expanded below with the `[@]+` guard
+# because bash 3.2 (macOS) treats an empty array as unset under `set -u`.
 rest_package_bound=()
 if is_slow_box; then
 	echo "test-shards: slow box (APOGEE_TEST_SLOW=1): 1 shard per heavy package, every process -parallel 1, the rest -p 2" >&2
 	rest_package_bound=(-p 2)
 fi
 
-launch "$work/rest.log" "the remaining ${#rest[@]} packages" -- "$@" "${rest_package_bound[@]}" -parallel "$rest_parallel" "${rest[@]}"
+launch "$work/rest.log" "the remaining ${#rest[@]} packages" -- "$@" ${rest_package_bound[@]+"${rest_package_bound[@]}"} -parallel "$rest_parallel" "${rest[@]}"
 
 for s in "${!shard_run[@]}"; do
 	launch "$work/shard.$s.log" "${shard_pkg[$s]} shard $s" -- "$@" -parallel "$parallel" -run "${shard_run[$s]}" "${shard_pkg[$s]}"

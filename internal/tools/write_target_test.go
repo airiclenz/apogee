@@ -203,7 +203,10 @@ func TestWriteTargetNotFound(t *testing.T) {
 func TestWriteTargetNote(t *testing.T) {
 	t.Parallel()
 
-	root := t.TempDir()
+	// The root by its real path: the note discloses any difference between the named and the
+	// resolved target, and on macOS t.TempDir() itself sits behind the /var → /private/var link,
+	// which would put a note on the ordinary path for a reason the test is not about.
+	root := security.EvalRealPath(t.TempDir())
 	if err := os.Mkdir(filepath.Join(root, "real"), 0o755); err != nil {
 		t.Fatalf("mkdir: %v", err)
 	}

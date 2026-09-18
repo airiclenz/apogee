@@ -3804,12 +3804,22 @@ func TestHeadlessArmsTheSyncLaneOnTheFiringsSpec(t *testing.T) {
 // write landed: the engine stamps the resolved path onto the ToolResultEvent (WriteTarget), and
 // this is the proof that a headless Firing's Runner fires the Reaction off that Event alone, with
 // the payload naming the tool and the path the Event carried.
+//
+// The stub stamps WriteTarget the way the engine does — under the workspace's REAL path, since
+// dispatch resolves every target through the fence — and the payload's "workspace" is the same
+// real path (reactions.ResolveWorkspace). On macOS t.TempDir() lives under the /var → /private/var
+// link, so the unresolved spelling would make both assertions fail there for no fault of the code.
 func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 	requireHookShell(t)
 
 	marker := filepath.Join(t.TempDir(), "changed.json")
 	stub := &stubRunner{}
+	var workspace string
 	stub.emit = func(sink domain.EventSink) {
+		var err error
+		if workspace, err = reactions.ResolveWorkspace(stub.spec.Config.WorkspaceDir); err != nil {
+			t.Errorf("resolve workspace: %v", err)
+		}
 		sink.Emit(domain.ToolCallEvent{Call: domain.ToolCall{
 			ID:        "call-1",
 			Tool:      "write_file",
@@ -3818,7 +3828,7 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 		sink.Emit(domain.ToolResultEvent{
 			Result:      domain.ToolResult{CallID: "call-1"},
 			Tool:        "write_file",
-			WriteTarget: filepath.Join(stub.spec.Config.WorkspaceDir, "a.txt"),
+			WriteTarget: filepath.Join(workspace, "a.txt"),
 		})
 	}
 
@@ -3831,9 +3841,9 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 	if payload.Tool != "write_file" {
 		t.Errorf("the payload names the tool %q, want write_file", payload.Tool)
 	}
-	if payload.Workspace != stub.spec.Config.WorkspaceDir {
+	if payload.Workspace != workspace {
 		t.Errorf("the payload is rooted at %q, want the run's own workspace %q",
-			payload.Workspace, stub.spec.Config.WorkspaceDir)
+			payload.Workspace, workspace)
 	}
 	if want := filepath.Join(payload.Workspace, "a.txt"); payload.Path != want {
 		t.Errorf("the write landed at %q, want %q — the path the Event carried, under the run's "+
