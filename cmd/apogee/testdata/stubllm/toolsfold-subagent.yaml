@@ -1,0 +1,83 @@
+# The upstream the run-view fold tests talk to (e2e_toolsfold_subagent_test.go): one delegation,
+# and a child whose one Turn is toolsfold.yaml's three reads — Read, List and Grep, three type rows
+# under one `✦ Tools` umbrella INSIDE the child's run — followed by the child's report and the
+# parent's wrap-up. The umbrella under test therefore stands in a run view, one level below the
+# conversation, which is the one place a large umbrella ordinarily appears and the place the shipped
+# fold got wrong (plan 2026-09-18 - 01).
+#
+# The fixture carries TWO prompts so one file serves every shape the tests need. `Delegate the
+# survey` hands the child a task of three reads, so the run is over by the time the view is opened
+# (and again after a `--continue`). `Delegate the survey and the check` hands it the same three
+# reads with a `terminal` call after them: a driven run boots in ask-before, so the terminal call is
+# GATED and its approval pane holds the parent's Turn open with the child's umbrella at four type
+# rows, the last of them live — the view is opened over THAT. The two child tasks are told apart by
+# `last_message` on the task text, the longer one matched first so the shorter cannot take it.
+#
+# The child's reports match on its last tool result — `grep` for the three-read task, `terminal`
+# for the gated one, allowed or denied — for toolsfold-live.yaml's reason: dispatch runs at width 1
+# and the request that follows the Turn carries the LAST call's result as its last message. Neither
+# can be a parent's request, whose last result is always the `sub_agent` call.
+model: toolsfold-subagent-model
+turns:
+    # The session title, matched before the prompts' own turns (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Delegated survey
+    # The parent's wrap-up, once the delegation has reported. Matched before every other turn so a
+    # parent request can never be answered as a child's.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: The surveyor has reported.
+    # The child's report after the three-read task: its last result is the grep's.
+    - when:
+        tool_result: grep
+      repeat: true
+      text: Three reads made; nothing else to report.
+    # The child's report after the gated task: its last result is the terminal call's, allowed or
+    # denied — a denied call still comes back as that call's result.
+    - when:
+        tool_result: terminal
+      repeat: true
+      text: Four calls made; nothing else to report.
+    # The two delegations. The longer prompt stands first so the shorter one's prefix cannot take it.
+    - when:
+        last_message: ^Delegate the survey and the check
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the workspace and run the check","name":"surveyor"}'
+    - when:
+        last_message: ^Delegate the survey
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey the workspace","name":"surveyor"}'
+    # The CHILD's Turns, picked by the task the parent handed it. The gated task first: its text
+    # carries the other's whole, so the other's matcher would take it.
+    - when:
+        last_message: Survey the workspace and run the check
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+        - name: list_dir
+          arguments: '{"path":"."}'
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+        - name: terminal
+          arguments: '{"command":"echo done"}'
+    - when:
+        last_message: Survey the workspace
+      repeat: true
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+        - name: list_dir
+          arguments: '{"path":"."}'
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+    # Anything neither the parent nor the child claims.
+    - repeat: true
+      text: Nothing else to add.
