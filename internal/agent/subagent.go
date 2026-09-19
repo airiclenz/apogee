@@ -857,16 +857,22 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	// (continuationTask). Name, roster and output path are inherited from the entry wherever the
 	// call leaves them unset, so `continue` with a task is a complete call; and an unknown name is
 	// refused with the names that are retained, resolved BEFORE the seat and roster for the reason
-	// those are resolved before the child: a refusal costs no child. The task retained if this
-	// child caps again stays the ORIGINAL, so a second continuation composes over one fold, never a
-	// fold of a fold.
+	// those are resolved before the child: a refusal costs no child. A refusal also costs no FOLD
+	// (apogee-if9): the entry is taken here, ahead of the seat and roster refusals below — an
+	// inherited roster can be refused when the parent's menu changed since the cap — and every
+	// refusal between this take and the child's Submit gives it back (giveBack), so a corrected
+	// retry still finds the delegate it names; once Submit succeeds the child owns the fold, and a
+	// second cap retains it anew. The task retained if this child caps again stays the ORIGINAL,
+	// so a second continuation composes over one fold, never a fold of a fold.
 	task, retainTask := args.Task, args.Task
 	var inheritedName string
+	giveBack := func() {}
 	if args.Continue != "" {
 		prior, ok := a.retained.take(args.Continue)
 		if !ok {
 			return errorToolResult(call.ID, unknownContinueResult(args.Continue, a.retained.names())), dispatchDone
 		}
+		giveBack = func() { a.retained.retain(prior) }
 		task, retainTask = continuationTask(prior, args.Task), prior.task
 		if delegationName(args.Name) == "" {
 			args.Name, inheritedName = prior.name, prior.name
@@ -893,6 +899,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	if publishesSeatChoice(a.tools) {
 		asked, err := parseDelegationSeat(args.RunOn)
 		if err != nil {
+			giveBack()
 			return errorToolResult(call.ID, err.Error()), dispatchDone
 		}
 		seat = asked
@@ -903,11 +910,13 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	// is refused with a result naming it, which is the only correction the model can act on.
 	narrowed, err := a.requestedChildTools(args.Tools)
 	if err != nil {
+		giveBack()
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 
 	sub, err := a.newChildAgentOn(seat, call.ID, task, delegationName(args.Name))
 	if err != nil {
+		giveBack()
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
 	// Applied to the child's own registry rather than threaded through construction: the spawn
@@ -969,6 +978,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	}()
 
 	if err := sub.Submit(domain.UserInput{Text: task}); err != nil {
+		giveBack()
 		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
 	}
 	// The child is addressable for exactly as long as it runs: published under the id the model

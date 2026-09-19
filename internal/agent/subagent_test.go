@@ -4022,6 +4022,114 @@ func TestSubAgent_ContinueOfAnUnknownNameIsRefused(t *testing.T) {
 	}
 }
 
+// refusedContinueArgs is the sub_agent payload of a continuation the engine refuses on the call
+// alone — a `run_on` that names no seat, or a `tools` roster naming a tool the parent's menu lacks
+// — marshalled from the same struct continueArgs uses, so the refusal is provoked by the exact
+// argument the model would spell.
+func refusedContinueArgs(name, instructions, runOn string, roster tools.SubAgentRoster) string {
+	b, _ := json.Marshal(tools.SubAgentArgs{Task: instructions, Continue: name, RunOn: runOn, Tools: roster})
+	return string(b)
+}
+
+// seatChoiceSubAgentConfig is subAgentConfig with the sub_agent tool that PUBLISHES `run_on`
+// (seatChoiceRegistry's idiom): the only parent whose seat refusal fires at all — the plain tool
+// ignores an unpublished run_on rather than refusing it.
+func seatChoiceSubAgentConfig(t *testing.T, sink domain.EventSink, extra ...domain.Tool) domain.Config {
+	t.Helper()
+	cfg := baseConfig(sink)
+	cfg.Mode = domain.ModeAskBefore
+	reg := domain.NewToolRegistry()
+	if err := reg.Register(tools.NewSubAgentWith(tools.SubAgentOptions{SeatChoice: true})); err != nil {
+		t.Fatalf("register the seat-choice sub_agent: %v", err)
+	}
+	for _, tool := range extra {
+		if err := reg.Register(tool); err != nil {
+			t.Fatalf("register %q: %v", tool.Name(), err)
+		}
+	}
+	cfg.Tools = reg
+	return cfg
+}
+
+// TestSubAgent_ARefusedContinueKeepsTheRetainedDelegate is apogee-if9: a continuation the engine
+// refuses on the call alone — an invalid `run_on`, an unknown tool name — costs no fold. The entry
+// stays retained with its fold after the refusal, and a corrected continue spawns from it where the
+// pre-fix tree refused it as unknown.
+func TestSubAgent_ARefusedContinueKeepsTheRetainedDelegate(t *testing.T) {
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cases := []struct {
+		name    string
+		config  func(sink domain.EventSink) domain.Config
+		refused string
+		want    string
+	}{
+		{
+			name:    "invalid run_on",
+			config:  func(sink domain.EventSink) domain.Config { return seatChoiceSubAgentConfig(t, sink, reader) },
+			refused: refusedContinueArgs(retainedSurveyName, continueInstructions, "banana", tools.SubAgentRoster{}),
+			want:    `invalid run_on "banana": want "session" or "sub-agents-server"`,
+		},
+		{
+			name:    "unknown tool",
+			config:  func(sink domain.EventSink) domain.Config { return subAgentConfig(sink, domain.ModeAskBefore, reader) },
+			refused: refusedContinueArgs(retainedSurveyName, continueInstructions, "", tools.SubAgentRoster{Names: []string{"no_such_tool"}}),
+			want:    "sub_agent tools: unknown tool no_such_tool — name tools from your own menu",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// The refusal alone: the parent closes its Exchange right after it, so the retained
+			// set can be read as the refusal left it.
+			sink := &recordingSink{}
+			scripts := cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName)
+			scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, tc.refused), contentScript("parent done"))
+
+			a := runCappedSurveyParent(t, tc.config(sink), &requestLogResponder{scripts: scripts})
+
+			got, ok := subAgentResultFor(sink.events, "c2")
+			if !ok || !got.IsError || got.Content != tc.want {
+				t.Fatalf("refused continue result = %+v, want the error result %q", got, tc.want)
+			}
+			kept, ok := a.retained.lookup(retainedSurveyName)
+			if !ok {
+				t.Fatalf("the refusal forgot the delegate: nothing retained under %q; retained names = %v", retainedSurveyName, a.retained.names())
+			}
+			if kept.fold != childFoldSummary || kept.spawnCallID != "c1" {
+				t.Errorf("retained delegate after the refusal = %+v, want the capped entry with fold %q from c1", kept, childFoldSummary)
+			}
+
+			// The corrected retry, in the same Exchange as the refusal: it spawns from the fold and
+			// runs to completion on a fresh cap.
+			sink = &recordingSink{}
+			scripts = cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName)
+			scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, tc.refused))
+			scripts = append(scripts, toolCallScript("c3", tools.SubAgentToolName, continueArgs(retainedSurveyName, continueInstructions, 0)))
+			scripts = append(scripts, cappedChildTurns(2)...)
+			scripts = append(scripts, contentScript("the survey is now complete"), contentScript("parent done"))
+			responder := &requestLogResponder{scripts: scripts}
+
+			a = runCappedSurveyParent(t, tc.config(sink), responder)
+
+			completed, ok := subAgentResultFor(sink.events, "c3")
+			if !ok || completed.IsError || completed.Content != "the survey is now complete" {
+				t.Errorf("the corrected continue's result = %+v, want the child's completed report", completed)
+			}
+			// Request 8 is the continued child's opening (0: spawn, 1–3: turns, 4: fold, 5: wrap-up,
+			// 6: the refused continue, 7: the corrected continue, 8: the child's first Turn).
+			wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + childFoldSummary + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+			if len(responder.requests) < 9 {
+				t.Fatalf("%d upstream requests, want the corrected continue to have spawned a child (9+)", len(responder.requests))
+			}
+			if got := lastUserText(responder.requests[8]); got != wantTask {
+				t.Errorf("the continued child opened on\n%s\nwant\n%s", got, wantTask)
+			}
+			if names := a.retained.names(); len(names) != 0 {
+				t.Errorf("retained names = %v after the corrected continue completed, want none — the entry is consumed", names)
+			}
+		})
+	}
+}
+
 // TestSubAgent_AContinuedChildThatCapsAgainIsRetainedAnew pins the second cap: the continued child
 // is retained under the inherited name, with the ORIGINAL task (never the composed one, so a third
 // attempt composes over one fold), the inherited roster and output path, and the new spawn id; its

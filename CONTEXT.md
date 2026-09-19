@@ -725,10 +725,12 @@ this delegate: sub_agent with continue: "<name>"]` — and a `sub_agent` call ca
 under `[previous attempt — engine summary]` and the call's own `task` under `[continuation
 instructions]`; the name, roster and `output_path` are inherited wherever the call leaves them
 unset (an inherited name is re-announced for the new run), the latest capped child under that
-name wins, the entry is consumed by the continuation (a child that caps again is retained anew,
-under the same name and over the ORIGINAL task, so a second continuation composes over one fold,
-never a fold of a fold), and an unknown name is refused with an error result naming the retained
-names (`[no delegate named "<name>" to continue — retained: <a, b | none>]`). Each continuation
+name wins, the entry is consumed by the continuation that SPAWNS — a continue call refused on
+its own arguments (an invalid `run_on`, an unknown tool name) keeps it, so a corrected retry still
+finds it (a child that caps again is retained anew, under the same name and over the ORIGINAL
+task, so a second continuation composes over one fold, never a fold of a fold), and an unknown
+name is refused with an error result naming the retained names (`[no delegate named "<name>" to
+continue — retained: <a, b | none>]`). Each continuation
 is a new Run with a cap of its own — the engine puts no limit on how many times a delegation is
 continued, and an unnamed delegation, having no handle, is not retained. The cap
 also ANNOUNCES itself before it lands — the **step-budget notice** (2026-09-19, ADR 0077

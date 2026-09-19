@@ -310,7 +310,8 @@ summary and closing report follow]` over an authored body.
 name — until its own Exchange ends. A `sub_agent` call with `continue: "<name>"` spawns a **fresh
 child** whose opening task is the retained task, the fold under `[previous attempt — engine
 summary]` and the call's `task` under `[continuation instructions]`; name, roster and
-`output_path` are inherited where unset; the entry is consumed; an unknown name is refused with the
+`output_path` are inherited where unset; the entry is consumed by a continuation that spawns (a
+continue refused on its own arguments keeps it, apogee-if9); an unknown name is refused with the
 retained names. Each continuation is a new Run under `min(max_steps, delegate-max-steps)` — "only
 lowers" holds per Run — and the engine caps the number of continuations at nothing.
 
