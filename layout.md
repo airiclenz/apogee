@@ -2316,7 +2316,7 @@ draft and joins the staged band above the box as a `queued command: /verb` row, 
 idle, and the rest of the draft stays exactly as it was.
 The tag belongs to the moment rather than to the verb: while the engine is idle no row fills that
 cell, so the column collapses and the menu reads exactly as it does when nothing can be gated. The
-verbs that only report (`/version`, `/skills`, `/usage`, `/inspect`, `/thinking`, `/confine` with no
+verbs that only report (`/version`, `/help`, `/skills`, `/usage`, `/inspect`, `/thinking`, `/confine` with no
 arguments)
 run there and then, and
 so do `/schedule` and `/schedule-stop`, which touch no engine at all: a schedule fires as a run of

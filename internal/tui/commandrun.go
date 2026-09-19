@@ -430,6 +430,13 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		m.transcript.addNote("apogee " + m.opts.Version)
 		return m, nil
 
+	case "help":
+		// Synchronous like /version: print every verb of the registry with its summary and the key
+		// legend (help.go) as a transcript note — no upstream call, no worker. The legend reads the
+		// editor's key-disambiguation flag so it names the newline chord the box itself advertises.
+		m.transcript.addNote(helpNote(m.keyDisambiguation))
+		return m, nil
+
 	case "skills":
 		// Re-scan the source dirs and print the catalog as a note, or export a shipped skill into
 		// the global library (skillscmd.go routes the two; skills.go builds the report). No upstream

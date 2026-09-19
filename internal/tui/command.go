@@ -240,6 +240,12 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // the `ui.inspector` config key and offered whether or not that key is on: a verb withheld until a
 // key is set is a verb nobody finds the key for, and the pane's own first row names it.
 //
+// /help prints the registry itself as a transcript note (help.go): one line per row of this table
+// with its summary, then the key legend in the prompt box's own vocabulary. It reads only this
+// table and the editor's key-disambiguation flag, so it carries /usage's two flags for /usage's two
+// reasons — whileRunning because it calls nothing and touches no engine, and noRecall because a
+// recalled invocation would only spend a walk step on a line the human can retype.
+//
 // /sub-agents-server picks the `servers:` entry this session's DELEGATIONS run on (picker.go, ADR
 // 0045): bare it opens a picker over the configured entries, with a name it takes that entry, and
 // either way the choice is recorded as the `sub-agents-server:` key. It is /server's grammar — one
@@ -262,6 +268,7 @@ var commandSpecs = []commandSpec{
 	{name: "continue", summary: "ask the model to keep going", opensExchange: true},
 	{name: "effort", summary: "set how hard the model thinks — a picker of this model's levels", whileRunning: true, gatedByEffort: true},
 	{name: "fork", summary: "branch a new session from one of this session's prompts"},
+	{name: "help", summary: "list the commands and keys", whileRunning: true, noRecall: true},
 	{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true},
 	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
 	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},

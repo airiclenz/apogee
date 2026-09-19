@@ -250,7 +250,9 @@ docs/manual/reactions.md — the `advise:`/`gate:` rows and "Sending a webhook"/
 **Acceptance.** `go build ./... && go test ./internal/config/ -run 'Reaction|Webhook|Handler' -count=1 && ! grep -q 'argv list and nothing else' internal/config/reactions.go && ! grep -q 'discarded unread' docs/manual/reactions.md && ! grep -rqn 'argv only' README.md docs/manual/ docs/design/reaction-core-greenfield.md CONTEXT.md`
 **Commit:** `feat(config): advise: and gate: accept a webhook mapping`
 
-## 14. `/help` lists the commands and keys (apogee-rw6, /help row only)
+## 14. `/help` lists the commands and keys (apogee-rw6, /help row only) — ✅ DONE (2026-09-19)
+NOTES (2026-09-19): consequential edit — layout.md: made necessary by the `/help` row joining the reporting verbs (its line 2319 enumerates them; `/help` added).
+NOTES (2026-09-19): the legend line is prefixed `keys: ` and joined with ` · ` like the prompt box's legends; the key legend takes the editor's `keyDisambiguation` flag (the plan offered the flag or the legend string) and `help_test.go` pins each copied cell to the prompteditor.go constant it copies.
 
 **What.** Add `help` to `commandSpecs` (`internal/tui/command.go`, alphabetical between `fork` and `inspect`; summary `list the commands and keys`; `whileRunning: true`, `noRecall: true`) and `case "help"` in `runCommand` (`commandrun.go`) that `addNote`s `helpNote()` (new `internal/tui/help.go` + `doc.go` line): one `/name — summary` line per `commandSpecs` row, a blank line, then a fixed key legend in the idle legend's vocabulary (`⏎ send`, `⇧⏎ / ⌥⏎ newline`, `↑/↓ recall`, `esc esc stop`, `⌃c quit`, `⇧⇥ mode`, `PgUp/PgDn scroll`). Same note shape as `/skills` and `/version`. `docs/manual/commands.md` gains the row.
 **Regression guard.** The newline chord is per-terminal: `helpNote` takes the editor's idle legend (or its `keyDisambiguation` flag) and spells it as prompteditor.go:112-113 does — `⌥⏎ newline` until key disambiguation is confirmed, `⇧⏎/⌥⏎ newline` after — so /help never names a key the box does not deliver; the stop is spelled as the running legend does (`esc×2 stop`, prompteditor.go:114), not `esc esc`.

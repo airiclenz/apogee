@@ -924,7 +924,8 @@
 // world-changing call in flight per address, narrated while it blocks, with the next Beat rather
 // than the call's own return deciding what the world became, plus the start-up restore that enters
 // that same latch with whatever Launch profile the binary says this server was left on
-// ([LauncherHost.Restore], `remember-model:`); skills.go the browsing half of the
+// ([LauncherHost.Restore], `remember-model:`); help.go the /help note — every verb of commandSpecs
+// with its summary and the fixed key legend, spelled in the prompt box's vocabulary; skills.go the browsing half of the
 // skill flow — the /skills report, and [Model.knownSkillID], the single predicate the parser, the
 // inline accents and the merged "/" menu all resolve a token through, so the three can never
 // disagree about what a skill is, with skillscmd.go the verb's own argument grammar beside it and

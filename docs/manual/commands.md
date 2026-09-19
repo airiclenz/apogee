@@ -15,7 +15,7 @@ which case the menu completes it to `/command ` and waits for you to type them; 
 away, since bare they only open a picker or print a report. The menu stays open while the model is working, too —
 commands that need a quiet engine wear a `— runs at idle` tag for as long as the engine
 is busy, and picking one anyway **queues** it — it shows as a `queued command: /…` row above
-the box and runs as soon as the model is done — while `/version`, `/usage`,
+the box and runs as soon as the model is done — while `/version`, `/help`, `/usage`,
 `/inspect`, `/thinking`, `/effort`, `/schedule`, `/schedule-stop`, `/sub-agents-server`, `/skills`' listing and
 `/confine`'s status report answer immediately. Once the engine is idle that tag is gone from the menu entirely — there
 is nothing left for it to warn about. A token
@@ -29,6 +29,7 @@ a typo is visible before you send.
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
 | `/skills` | List the discovered skills — id, name, summary, any declared `triggers:`, and where each came from; `/skills export <id>` copies a skill apogee [ships](configuration.md#skills-apogee-ships--use-shipped-skills) into `~/.apogee/skills/<id>/` so you can edit it | ✅ listing only |
 | `/version` | Show the apogee version | ✅ |
+| `/help` | List every command with its one-line summary, then the key legend — `⏎ send`, the newline chord your terminal delivers (`⌥⏎`, or `⇧⏎/⌥⏎` once the enhanced keyboard protocol is negotiated), `↑/↓ recall`, `esc×2 stop`, `⌃c quit`, `⇧⇥ mode`, `PgUp/PgDn scroll` — as a transcript note | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache, and a `served:` line above the rows names the models the server actually answered with once a reply has carried one | ✅ |
 | `/inspect` | The request and response traffic of the recent model calls, **readable** by default — each request summarised as `N messages · N tools · model …` (`system + N messages` when the wire hoists the system prompt), each response as the passages its stream spells, thinking and reply as wrapped prose and every tool call named — on the anthropic wire also the served model, the stop reason and the token counts, which arrive as events of their own; `ctrl+r` flips the pane to the raw pretty-printed protocol and back. It opens on the newest record and follows it, so traffic arriving while the pane is open is shown until you scroll up off the end. With a sub-agent's run view open the pane shows that run's traffic alone and names it in its title — close the view for the whole ring. Armed by `ui.inspector` (off by default) | ✅ |
 | `/thinking` | The model's thinking as plain text — the reasoning it streams beside its answer, one record per completed turn, newest last, with no protocol and no prefixes. Opens on the newest record and follows it, so reasoning arriving while the pane is open is shown until you scroll up off the end; with a sub-agent's run view open it shows that run's thinking alone and names it in its title, and at the top level the main agent's alone. Always recorded, nothing to arm, nothing saved with the session | ✅ |
