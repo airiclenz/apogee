@@ -1020,31 +1020,35 @@ ui:
 # `context-fill-notice`, the engine's own built-in reaction — is refused: those are switched with
 # their own top-level key, not with a reactions: entry.
 #
-# `gate:` is the other action an entry can take: an argv LIST asked BEFORE a tool call runs, with
-# `on: [pre-tool-exec]` and nothing else under `on:`. The call reaches it as JSON on stdin (event,
-# reaction, tool, arguments) and it answers on stdout — the first line is allow, deny or ask, any
-# later lines are the reason (its first ~240 characters are kept). It runs as an approval stage
+# `gate:` is the other action an entry can take: an argv LIST — or the same webhook MAPPING `run:`
+# takes — asked BEFORE a tool call runs, with `on: [pre-tool-exec]` and nothing else under `on:`.
+# The call reaches a command as JSON on stdin and a webhook as the POST body (event, reaction,
+# tool, arguments) and it answers on stdout or in the reply body — the first line is allow, deny or
+# ask, any later lines are the reason (its first ~240 characters are kept). It runs as an approval stage
 # ahead of you, under bypass: too, with a default `timeout:` of 5s. The first deny ends the call and
 # the model reads only "tool call denied by reaction <id>", never the reason; the first ask forces
 # the approval prompt ("reaction <id> asks: <reason>"), which a headless run or the daemon denies
-# as "tool call denied by approver". An answer that is missing, malformed, late or crashed counts
-# as ask, never as allow, and allow changes nothing the mode already decided. An ask on a sub_agent
-# call is deferred to the child's own calls.
+# as "tool call denied by approver". An answer that is missing, malformed, late or crashed — or a
+# webhook reply that is not a 2xx — counts as ask, never as allow, and allow changes nothing the
+# mode already decided. An ask on a sub_agent call is deferred to the child's own calls.
 #
-# `advise:` is the third action: an argv LIST run AFTER a tool call finished, while the loop waits,
-# with `on: [post-tool-result]` (every call), `[file-changed]` (only a successful workspace write,
-# with the path) or both. The call reaches it as JSON on stdin (event, reaction, tool, arguments,
-# result) and what it prints on stdout — every configured secret's value redacted, output past
+# `advise:` is the third action: an argv LIST — or a webhook MAPPING — run AFTER a tool call
+# finished, while the loop waits, with `on: [post-tool-result]` (every call), `[file-changed]` (only
+# a successful workspace write, with the path) or both. The call reaches a command as JSON on stdin
+# and a webhook as the POST body (event, reaction, tool, arguments, result) and what it prints on
+# stdout, or answers in the reply body — every configured secret's value redacted, output past
 # 8 KiB cut — is appended to that call's result inside a fence the model reads:
 #   [advice — reaction <id> (user origin) at post-tool-result, turn 3] … [end advice — <id>]
 # The header is Apogee's, never the script's, and names the seam the advice was fenced at — the
 # stdin document's `event` is what names the entry's Moment (file-changed). The saved session is
 # written from the result as it stood before the fence, so a resume carries no advice. Default
 # `timeout:` 10s, and switched off under bypass:. It is fail-open: a command that prints nothing,
-# fails, times out or cannot be spawned changes nothing and is reported to you, each time. Print
-# facts (the file gofmt would rewrite, the failing test), not orders. Both `advise:` and `gate:`
-# run outside the mode ladder in every mode; with confine-to-workspace: on they run inside the
-# workspace box, and a host that cannot build one refuses to run them at all.
+# fails, times out or cannot be spawned — or a webhook that answers nothing, or with anything but a
+# 2xx — changes nothing and is reported to you, each time. Print facts (the file gofmt would
+# rewrite, the failing test), not orders. Both `advise:` and `gate:` commands run outside the mode
+# ladder in every mode; with confine-to-workspace: on they run inside the workspace box, and a host
+# that cannot build one refuses to run them at all. A webhook under either key spawns nothing, so
+# none of that applies to it: the request leaves over the network, as a `run:` webhook's does.
 #
 # `hooks:` was this key's earlier name. A config file that still carries one is folded into
 # reactions: at startup, once, and the change is announced with the backup it kept.

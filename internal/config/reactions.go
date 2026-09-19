@@ -28,7 +28,7 @@ const defaultReactionTimeout = 30 * time.Second
 // The mapping across to the core's value type is entryReactions', so the on-disk shape and the
 // values the engine fires stay independently evolvable (mcpServerConfig's rule).
 //
-// The three action keys are typed `any` and not yaml.Node ON PURPOSE. `run:` carries two shapes —
+// The three action keys are typed `any` and not yaml.Node ON PURPOSE. Each carries two shapes —
 // a sequence for a command, a mapping for a webhook — so the field has to hold either; a yaml.Node
 // would hold the line and column it was read at too, and [sameApartFrom] compares two parses of the
 // same file with reflect.DeepEqual, so a single spliced key anywhere above a `reactions:` block
@@ -78,8 +78,9 @@ const contextFillNoticeKey = "context-fill-notice"
 // on one entry resolve to an observe Reaction and a gate Reaction that [domain.SplitLanes] later
 // sends down their own lanes, and `run:` beside `advise:` to an observe Reaction and an advise
 // Reaction the same way. The id is checked against the names it may not take, every `on:` entry
-// is read as a Moment, each action key is turned into the handler that runs it — the two sync keys
-// take an argv list and nothing else — an absent `timeout:` takes the class default, and
+// is read as a Moment, each action key is turned into the handler that runs it — every key takes
+// the same two shapes, an argv list or a webhook mapping, and the class decides what the reply is
+// worth (ADR 0076 D2, bead apogee-1d8) — an absent `timeout:` takes the class default, and
 // `workspace:` is reduced to the one spelling both sides of the filter are compared as (ADR 0073
 // ratified call C — `~` expanded, absolute, symlinks evaluated). It reports the first thing it
 // cannot map, naming the entry, so a user with several Reactions is told which line to fix.
@@ -114,59 +115,24 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 	}
 
 	var mapped []domain.Reaction
-	if r.Run != nil {
-		handler, err := r.handler(id)
+	for _, action := range r.actionKeys() {
+		if action.value == nil {
+			continue
+		}
+		handler, err := handlerFor(id, action.key, action.value)
 		if err != nil {
 			return nil, err
 		}
-		timeout, err := r.classTimeout(id, defaultReactionTimeout)
+		timeout, err := r.classTimeout(id, action.defaultTimeout)
 		if err != nil {
 			return nil, err
 		}
 		mapped = append(mapped, domain.Reaction{
 			ID:        id,
 			Origin:    domain.OriginUser,
-			Class:     domain.ClassObserve,
+			Class:     action.class,
 			On:        slices.Clone(moments),
 			Handler:   handler,
-			Workspace: workspace,
-			Timeout:   timeout,
-		})
-	}
-	if r.Advise != nil {
-		argv, ok := argvList(r.Advise)
-		if !ok {
-			return nil, reactionEntryError(id, "advise: is an argv list")
-		}
-		timeout, err := r.classTimeout(id, domain.DefaultAdviseTimeout)
-		if err != nil {
-			return nil, err
-		}
-		mapped = append(mapped, domain.Reaction{
-			ID:        id,
-			Origin:    domain.OriginUser,
-			Class:     domain.ClassAdvise,
-			On:        slices.Clone(moments),
-			Handler:   domain.ArgvHandler{Argv: argv},
-			Workspace: workspace,
-			Timeout:   timeout,
-		})
-	}
-	if r.Gate != nil {
-		argv, ok := argvList(r.Gate)
-		if !ok {
-			return nil, reactionEntryError(id, "gate: is an argv list")
-		}
-		timeout, err := r.classTimeout(id, domain.DefaultGateTimeout)
-		if err != nil {
-			return nil, err
-		}
-		mapped = append(mapped, domain.Reaction{
-			ID:        id,
-			Origin:    domain.OriginUser,
-			Class:     domain.ClassGate,
-			On:        slices.Clone(moments),
-			Handler:   domain.ArgvHandler{Argv: argv},
 			Workspace: workspace,
 			Timeout:   timeout,
 		})
@@ -174,7 +140,7 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 	// An entry that spells no action key at all has been written against a schema apogee does not
 	// have, and `run:` is the key it most likely meant, so it earns that key's own sentence.
 	if len(mapped) == 0 {
-		return nil, runShapeError(id)
+		return nil, shapeError(id, actionKeyRun)
 	}
 
 	// The core's own refusal — every rule the Reaction value can break on its own, its command's
@@ -226,29 +192,59 @@ func (r reactionConfig) moments(id string) ([]domain.Moment, error) {
 	return moments, nil
 }
 
-// handler turns `run:` into the handler that runs it: a SEQUENCE of strings is the argv of a
-// command run out of process, and a MAPPING is a webhook POST. Anything else — a bare string, a
-// number — is refused with the one sentence that spells both shapes, since an entry that spelled
-// neither has been written against a schema apogee does not have.
+// The three action keys as they are spelled in the file. Each names its own class and is the word
+// the refusal a wrong shape earns is spelled with, so a user is told which line to fix.
+const (
+	actionKeyRun    = "run"
+	actionKeyAdvise = "advise"
+	actionKeyGate   = "gate"
+)
+
+// actionKey is one of the entry's three action keys with what the key alone decides: the class
+// the Reaction it arms fires as and the deadline it runs under when the entry spells no
+// `timeout:`. The handler's SHAPE is not the key's to decide — every key takes the same two.
+type actionKey struct {
+	key            string
+	value          any
+	class          domain.Class
+	defaultTimeout time.Duration
+}
+
+// actionKeys lists the entry's three action keys in the order the schema names them, spelled or
+// not, so entryReactions walks one path for all three and the observe Reaction always comes first
+// when an entry spells `run:` beside a sync key.
+func (r reactionConfig) actionKeys() []actionKey {
+	return []actionKey{
+		{key: actionKeyRun, value: r.Run, class: domain.ClassObserve, defaultTimeout: defaultReactionTimeout},
+		{key: actionKeyAdvise, value: r.Advise, class: domain.ClassAdvise, defaultTimeout: domain.DefaultAdviseTimeout},
+		{key: actionKeyGate, value: r.Gate, class: domain.ClassGate, defaultTimeout: domain.DefaultGateTimeout},
+	}
+}
+
+// handlerFor turns one action key's value into the handler that runs it: a SEQUENCE of strings is
+// the argv of a command run out of process, and a MAPPING is a webhook POST. The three keys share
+// this one path — a webhook advises or gates exactly as a command does, with the class deciding
+// what its reply is worth (ADR 0076 D2, bead apogee-1d8). Anything else — a bare string, a number —
+// is refused with the one sentence that spells both shapes under the key that carried it, since an
+// entry that spelled neither has been written against a schema apogee does not have.
 //
 // `headers-env:` maps a header name to the NAME of an environment variable holding its value, on
 // the `api-key-env` precedent, so a token never sits in the config file. No `${VAR}` interpolation
 // exists anywhere in this schema and none is introduced here.
-func (r reactionConfig) handler(id string) (domain.Handler, error) {
-	if run, ok := r.Run.(map[string]any); ok {
-		return webhookFromRun(id, run)
+func handlerFor(id, key string, value any) (domain.Handler, error) {
+	if mapping, ok := value.(map[string]any); ok {
+		return webhookFromMapping(id, key, mapping)
 	}
-	argv, ok := argvList(r.Run)
+	argv, ok := argvList(value)
 	if !ok {
-		return nil, runShapeError(id)
+		return nil, shapeError(id, key)
 	}
 	return domain.ArgvHandler{Argv: argv}, nil
 }
 
 // argvList reads a decoded YAML value as an argv: a sequence whose every element is text. It
-// reports whether the value is one, so each action key can name ITSELF in the sentence a wrong
-// shape earns — `run:` spells two shapes; `advise:` and `gate:` only this one (a webhook cannot
-// advise or gate, ADR 0076 D2).
+// reports whether the value is one, so the caller can spell the refusal under the action key that
+// carried the value.
 func argvList(value any) ([]string, bool) {
 	list, ok := value.([]any)
 	if !ok {
@@ -265,60 +261,64 @@ func argvList(value any) ([]string, bool) {
 	return argv, true
 }
 
-// webhookFromRun reads the webhook mapping's three keys. An unknown key is refused with the same
-// sentence a wrong shape earns — it lists exactly the keys the mapping takes — rather than being
-// dropped, so a misspelt `header-env:` is a startup refusal and not a token that never gets sent.
-func webhookFromRun(id string, run map[string]any) (domain.Handler, error) {
+// webhookFromMapping reads the webhook mapping's three keys under the action key that carried it.
+// An unknown key is refused with the same sentence a wrong shape earns — it lists exactly the keys
+// the mapping takes — rather than being dropped, so a misspelt `header-env:` is a startup refusal
+// and not a token that never gets sent.
+func webhookFromMapping(id, key string, mapping map[string]any) (domain.Handler, error) {
 	handler := domain.WebhookHandler{}
-	for key, value := range run {
-		switch key {
+	for field, value := range mapping {
+		switch field {
 		case "url":
 			text, ok := value.(string)
 			if !ok {
-				return nil, runShapeError(id)
+				return nil, shapeError(id, key)
 			}
 			handler.URL = text
 		case "headers":
-			headers, err := stringMap(id, value)
+			headers, err := stringMap(id, key, value)
 			if err != nil {
 				return nil, err
 			}
 			handler.Headers = headers
 		case "headers-env":
-			headers, err := stringMap(id, value)
+			headers, err := stringMap(id, key, value)
 			if err != nil {
 				return nil, err
 			}
 			handler.HeadersEnv = headers
 		default:
-			return nil, runShapeError(id)
+			return nil, shapeError(id, key)
 		}
 	}
 	return handler, nil
 }
 
-// stringMap reads one of the webhook's two header mappings, refusing a value that is not text.
-func stringMap(id string, value any) (map[string]string, error) {
+// stringMap reads one of the webhook's two header mappings, refusing a value that is not text
+// under the action key that carried the mapping.
+func stringMap(id, key string, value any) (map[string]string, error) {
 	raw, ok := value.(map[string]any)
 	if !ok {
-		return nil, runShapeError(id)
+		return nil, shapeError(id, key)
 	}
 	mapped := make(map[string]string, len(raw))
 	for name, text := range raw {
 		spelled, ok := text.(string)
 		if !ok {
-			return nil, runShapeError(id)
+			return nil, shapeError(id, key)
 		}
 		mapped[name] = spelled
 	}
 	return mapped, nil
 }
 
-// runShapeError is the one sentence every wrong `run:` earns, spelled once so the two shapes a
-// user may write are always listed together.
-func runShapeError(id string) error {
+// shapeError is the one sentence every wrong action-key value earns, spelled once so the two
+// shapes a user may write are always listed together under the key that carried the value:
+// `run: is an argv list or a webhook mapping {url:, headers:, headers-env:}`, and `advise:` and
+// `gate:` likewise.
+func shapeError(id, key string) error {
 	return reactionEntryError(id,
-		"run: is an argv list or a webhook mapping {url:, headers:, headers-env:}")
+		"%s: is an argv list or a webhook mapping {url:, headers:, headers-env:}", key)
 }
 
 // resolvedWorkspace reduces this entry's `workspace:` filter to its comparable spelling. An empty

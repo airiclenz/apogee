@@ -138,6 +138,19 @@ notifier beside it.
 > anything the model chose; §10.3's post-response row keeps its mode term. The sync lane's handlers are
 > argv only — a sync-lane webhook is bead `apogee-1d8`.
 >
+> *Amendment (2026-09-19, plan `2026-09-19 - 01` items 12–13, bead `apogee-1d8`):* the "argv only"
+> sentence is **superseded**. `advise:` and `gate:` take the same two shapes `run:` does — an argv
+> list or a webhook mapping `{url:, headers:, headers-env:}` — and one loader path serves all three
+> keys, refusing anything else by the key's own sentence (`advise: is an argv list or a webhook
+> mapping {url:, headers:, headers-env:}`). A sync-lane webhook POSTs the identical seam document
+> `runSyncArgv` writes to a command's stdin and hands the seam the reply body on the same terms: an
+> advise reply is redacted and capped downstream as stdout is, an empty body injects nothing; a gate
+> reply's first line is the verdict, parsed as stdout is, and a status code is never a verdict.
+> Every failure — non-2xx, transport, deadline, unset `headers-env:` — reads as a command's failure
+> does: advise fails open with one reported row, gate escalates to `ask`. The permit row above is the
+> argv handler's alone: a webhook spawns nothing, so it takes no permit and the confinement table
+> does not apply (contract §10.4). No URL guard is added, on parity with the observe webhook.
+>
 > *Amendment (2026-09-15, plan `2026-09-15 - 00` item 7):* the contract's §10.3 post-response row is
 > **retired** — `hookExecutionCtx` is deleted and no cascade installs a `SubprocessPermit` at any
 > Moment, in any mode. No shipped Reaction spawns at post-response (the row was a leftover of the

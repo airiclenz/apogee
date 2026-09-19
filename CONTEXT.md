@@ -1397,8 +1397,9 @@ a [Floor guard](#floor-guard), or a Go reaction the bench arms in-process throug
 **user**; its **class** is one column of the **Reaction surface** matrix. Its handler is one of
 seven kinds behind one sealed interface: five per-seam Go func types, one per seam **Moment**, so
 an engine reaction always names exactly one seam; and two out-of-process kinds a user entry arms —
-an `ArgvHandler` (a command, serving observe, advise and gate) and a `WebhookHandler` (a POST,
-serving observe alone) — whose `On` list spans Moments and is checked against the class. `Validate`
+an `ArgvHandler` (a command) and a `WebhookHandler` (a POST), each serving observe, advise and
+gate, the class deciding what the reply is worth — whose `On` list spans Moments and is checked
+against the class. `Validate`
 refuses an `On` list the handler cannot serve, an origin × class outside the matrix, and a missing
 id, origin, class or handler, and is answered ONCE, where the entry is built (the config layer's
 mapping for a `reactions:` file, the agent's arming step for `Config.Reactions`) — `Generation.Validate`
@@ -1429,15 +1430,19 @@ Runner's report line alone. Whichever lane fires it, an out-of-process handler r
 payload document, `domain.SeamPayload`: the identity block, the per-Moment members its Moment
 carries, and — on the sync lane alone — the call's `arguments` and `result`.
 A **user**-origin Reaction is one entry of the global `reactions:` list —
-`{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv>, gate: <argv>, workspace?, timeout?, enabled?}` —
+`{id, on: [moments], run: <argv | {url, headers, headers-env}>, advise: <argv | {url, …}>, gate: <argv | {url, …}>, workspace?, timeout?, enabled?}` —
 resolved into one `domain.Reaction` per action key it spells, sharing its id: `run:` at **observe**
 class, fired by the async lane (`internal/reactions`' own runner) on notices; `advise:` at
 **advise** class, fired by the agent's sync lane at `post-tool-result` or `file-changed` (the latter
-narrowing it to a successful write-tool call), its stdout secret-redacted (`tools.RedactSecrets`),
-capped and fenced as the trailer — one **Advice span**; and `gate:` at **gate** class, fired by the
-sync lane at `pre-tool-exec` only, as the **Gate stage**. `advise:` and `gate:` take an argv list
-alone — a mapping is refused with a sentence naming the key — as is an `on:` a key's class cannot
-take (a seam under `run:`, a notice under `gate:`, any Moment but the two under `advise:`), and
+narrowing it to a successful write-tool call), its stdout — or its webhook's reply body —
+secret-redacted (`tools.RedactSecrets`), capped and fenced as the trailer — one **Advice span**; and
+`gate:` at **gate** class, fired by the sync lane at `pre-tool-exec` only, as the **Gate stage**,
+its stdout's or reply body's first line the verdict. Every action key takes the same two shapes —
+an argv list or a webhook mapping — through one loader path (`handlerFor`); a bare string or a
+mapping key outside `{url, headers, headers-env}` is refused with a sentence naming the key
+(`advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`), as is an `on:` a
+key's class cannot take (a seam under `run:`, a notice under `gate:`, any Moment but the two under
+`advise:`), and
 `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
 **`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** applies

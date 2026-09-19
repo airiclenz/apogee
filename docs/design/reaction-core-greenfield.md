@@ -108,8 +108,9 @@ roll already models exactly this mapping.
 > validation error naming the boolean instead, never a second spelling. Engine origin is code — the
 > bench arms a Go reaction in-process through the facade (ADR 0076 D1), not through this key. The
 > entry schema is `id:` / `on:` / `run:` (polymorphic — a sequence is argv, a mapping is a webhook)
-> / `workspace:` / `timeout:` / `enabled:`; stage 3 shipped `advise:`/`gate:` (argv only — a
-> mapping is refused by sentence; webhooks for the sync lane are bead `apogee-1d8`), `advise:` on
+> / `workspace:` / `timeout:` / `enabled:`; stage 3 shipped `advise:`/`gate:` (argv at first; since
+> 2026-09-19 — bead `apogee-1d8`, ADR 0076 D8's dated amendment — both keys take the same two
+> shapes `run:` does, an argv list or a webhook mapping, through one loader path), `advise:` on
 > `post-tool-result` or `file-changed` and `gate:` on `pre-tool-exec`, both resolving beside `run:`
 > into one Reaction per key of one id.
 > This supersedes D10's "builtins appear by id with `enabled:`" and the original wording here.

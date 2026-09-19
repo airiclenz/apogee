@@ -464,15 +464,17 @@ conversation or the saved session. Its eleven moments are the six notices `excha
 `turn-finished`, `file-changed`, `approval-requested` (raised, before you answer),
 `approval-decided` (its verdict) and `error`, and the five seam-closing notices `pre-request-finished`,
 `post-response-finished`, `pre-tool-exec-finished`, `post-tool-result-finished` and
-`history-rewrite-finished`. The other two keys are the ones the loop waits on. An `advise:`
-reaction — an argv list, `on: [post-tool-result]`, `[file-changed]` or both, default `timeout:`
-10s — runs after a tool call finished, and what it prints (secrets redacted, capped at 8 KiB) is
-appended to that call's result inside a fence the model reads and the saved session never carries;
-it is off under `bypass:`, and a command that fails or prints nothing changes nothing:
+`history-rewrite-finished`. The other two keys are the ones the loop waits on, and each takes the
+same two shapes `run:` does — an argv list, or a webhook mapping whose reply body stands where the
+command's stdout would. An `advise:` reaction — `on: [post-tool-result]`, `[file-changed]` or both,
+default `timeout:` 10s — runs after a tool call finished, and what it prints or answers (secrets
+redacted, capped at 8 KiB) is appended to that call's result inside a fence the model reads and the
+saved session never carries; it is off under `bypass:`, and a command or webhook that fails or
+answers nothing changes nothing:
 `advise: ["sh", "-c", "gofmt -l \"$APOGEE_REACTION_PATH\""]` on `[file-changed]` tells the model
-which file it left unformatted. A `gate:` reaction — an argv list, `on: [pre-tool-exec]` — is asked
-before a tool call runs, as an approval stage ahead of you (under `bypass:` too, default
-`timeout:` 5s): the first line it prints is `allow`, `deny` or `ask`, the rest is its reason.
+which file it left unformatted. A `gate:` reaction — `on: [pre-tool-exec]` — is asked before a tool
+call runs, as an approval stage ahead of you (under `bypass:` too, default `timeout:` 5s): the
+first line it prints, or its webhook answers, is `allow`, `deny` or `ask`, the rest is its reason.
 `gate: ["check-tool-call"]` refuses the call with a `deny`, and the model reads only
 `tool call denied by reaction <id>`; an `ask` forces the approval prompt, `reaction <id> asks:
 <reason>`, which an unattended run denies; an answer that is missing, malformed, late or crashed

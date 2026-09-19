@@ -196,6 +196,81 @@ func laneIDs(lane []domain.Reaction) string {
 	return strings.Join(ids, " ")
 }
 
+// `advise:` and `gate:` take the same webhook mapping `run:` does (ADR 0076 D2, bead apogee-1d8):
+// a mapping under either key resolves to a [domain.WebhookHandler] carrying the url and both header
+// mappings, stamped with the key's class and the key's own default timeout when the entry spells
+// none. The two arm on the sync lane exactly as their argv twins do.
+func TestLoadFileConfigResolvesSyncWebhookMappings(t *testing.T) {
+	t.Parallel()
+
+	path := writeReactionsConfig(t, `
+reactions:
+  - id: coach
+    on: [post-tool-result]
+    advise:
+      url: https://hooks.example.com/advise
+      headers:
+        X-Source: apogee
+      headers-env:
+        Authorization: COACH_TOKEN
+  - id: warden
+    on: [pre-tool-exec]
+    gate:
+      url: https://hooks.example.com/gate
+    timeout: 2s
+`)
+
+	opts, err := LoadFileConfig(path, os.ReadFile, noNotify)
+	if err != nil {
+		t.Fatalf("LoadFileConfig: %v", err)
+	}
+
+	if len(opts.Reactions) != 2 {
+		t.Fatalf("resolved %d reactions; want the 2 the two entries arm: %+v", len(opts.Reactions), opts.Reactions)
+	}
+	coach, warden := opts.Reactions[0], opts.Reactions[1]
+	if coach.ID != "coach" || coach.Class != domain.ClassAdvise {
+		t.Errorf("first entry is %q/%s, want the advise reaction %q's `advise:` mapping arms",
+			coach.ID, coach.Class, "coach")
+	}
+	adviseHook, ok := coach.Handler.(domain.WebhookHandler)
+	if !ok {
+		t.Fatalf("first handler = %T; want a domain.WebhookHandler for an `advise:` mapping", coach.Handler)
+	}
+	if adviseHook.URL != "https://hooks.example.com/advise" {
+		t.Errorf("advise url = %q, want the one the mapping spells", adviseHook.URL)
+	}
+	if adviseHook.Headers["X-Source"] != "apogee" || adviseHook.HeadersEnv["Authorization"] != "COACH_TOKEN" {
+		t.Errorf("advise headers = %v / headers-env = %v, want the literal header and the variable NAME the "+
+			"mapping spells", adviseHook.Headers, adviseHook.HeadersEnv)
+	}
+	if coach.Timeout != domain.DefaultAdviseTimeout {
+		t.Errorf("advise timeout = %v, want the %v an advise entry spelling none takes",
+			coach.Timeout, domain.DefaultAdviseTimeout)
+	}
+
+	if warden.ID != "warden" || warden.Class != domain.ClassGate {
+		t.Errorf("second entry is %q/%s, want the gate reaction %q's `gate:` mapping arms",
+			warden.ID, warden.Class, "warden")
+	}
+	gateHook, ok := warden.Handler.(domain.WebhookHandler)
+	if !ok {
+		t.Fatalf("second handler = %T; want a domain.WebhookHandler for a `gate:` mapping", warden.Handler)
+	}
+	if gateHook.URL != "https://hooks.example.com/gate" {
+		t.Errorf("gate url = %q, want the one the mapping spells", gateHook.URL)
+	}
+	if warden.Timeout != 2*time.Second {
+		t.Errorf("gate timeout = %v, want the 2s the entry spells over the class default", warden.Timeout)
+	}
+
+	observe, sync := domain.SplitLanes(opts.Reactions)
+	if len(observe) != 0 || laneIDs(sync) != "coach warden" {
+		t.Errorf("lanes = observe %q / sync %q, want both webhooks on the sync lane and none on observe",
+			laneIDs(observe), laneIDs(sync))
+	}
+}
+
 // An empty or absent block resolves to no Reactions and no error: the lane is dormant by default,
 // exactly as `mcp-servers:` is. A block whose every entry is parked resolves the same way, so a
 // file that keeps its definitions without arming them is indistinguishable from one that has none.
@@ -251,12 +326,12 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 		{
 			name: "advise: is a bare string",
 			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise: say-something\n",
-			want: `reaction "coach": advise: is an argv list`,
+			want: `reaction "coach": advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
 		},
 		{
-			name: "advise: is a webhook mapping",
-			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise:\n      url: https://example.com/\n",
-			want: `reaction "coach": advise: is an argv list`,
+			name: "advise: is a webhook mapping carrying a key it does not have",
+			body: "reactions:\n  - id: coach\n    on: [post-tool-result]\n    advise:\n      url: https://example.com/\n      header-env:\n        A: B\n",
+			want: `reaction "coach": advise: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
 		},
 		{
 			name: "advise: is an empty argv list",
@@ -271,12 +346,12 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 		{
 			name: "gate: is a bare string",
 			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate: decide\n",
-			want: `reaction "warden": gate: is an argv list`,
+			want: `reaction "warden": gate: is an argv list or a webhook mapping {url:, headers:, headers-env:}`,
 		},
 		{
-			name: "gate: is a webhook mapping",
-			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate:\n      url: https://example.com/\n",
-			want: `reaction "warden": gate: is an argv list`,
+			name: "gate: is a webhook mapping whose url is not http",
+			body: "reactions:\n  - id: warden\n    on: [pre-tool-exec]\n    gate:\n      url: ftp://example.com/\n",
+			want: `invalid reaction "warden": gate: url: "ftp://example.com/" must be an absolute http:// or https:// URL`,
 		},
 		{
 			name: "gate: reacts at a Moment it cannot take",
