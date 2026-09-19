@@ -9,11 +9,13 @@
 // five notice Moments of the Reaction core (ADR 0076) — it runs after the fact, on the user's own
 // machine, outside confinement, as the user's config rather than a model action.
 //
-// One direction: this package imports internal/domain for the events it reads and
-// internal/security for path resolution, and nothing else in the tree — never internal/agent,
-// never internal/tools, never internal/tui. Every fact a firing needs rides the Event itself: the
-// file a tool call changed arrives on domain.ToolResultEvent.WriteTarget, stamped by the engine
-// from the one resolution its blast-radius ladder judged the call by, so no root injects anything.
+// One direction: this package imports internal/domain for the events it reads, internal/security
+// for path resolution, internal/userexec for the exec posture a Reaction's argv runs under and
+// internal/webhook for the one POST both lanes' webhooks send, and nothing else in the tree —
+// never internal/agent, never internal/tools, never internal/tui. Every fact a firing needs rides
+// the Event itself: the file a tool call changed arrives on domain.ToolResultEvent.WriteTarget,
+// stamped by the engine from the one resolution its blast-radius ladder judged the call by, so no
+// root injects anything.
 //
 // # The files, one line each
 //
@@ -35,5 +37,6 @@
 // action the entry configured, and the one JSON encoding both actions send. command.go runs a
 // Reaction's argv through internal/userexec — the api-key-cmd exec posture — with the payload on
 // stdin and the APOGEE_REACTION_* facts in the environment. webhook.go POSTs the same document to a
-// Reaction's URL, with the literal and environment-resolved headers it carries and no retry.
+// Reaction's URL through internal/webhook — the request the sync lane's `advise:`/`gate:` webhooks
+// share — and discards the reply.
 package reactions

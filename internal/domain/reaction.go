@@ -305,9 +305,12 @@ type ArgvHandler struct {
 	Argv []string
 }
 
-// WebhookHandler POSTs the Moment's payload to a URL when a NOTICE Moment fires — the other half
-// of the async observe lane (ADR 0076 D2). Unlike an ArgvHandler it takes class observe alone, so
-// its response is discarded: nothing an observe reaction returns reaches the model.
+// WebhookHandler POSTs the Moment's payload to a URL when a Moment fires — what a user's `run: url:`
+// mapping arms (ADR 0076 D2). It is the out-of-process twin of an ArgvHandler and serves the same
+// three of the user's classes, with the class deciding where it fires and what its reply is worth:
+// observe fires on notices and the reply is discarded — nothing an observe reaction returns reaches
+// the model; advise fires at post-tool-result or file-changed and the reply body becomes the fenced
+// trailer; gate fires at pre-tool-exec and the reply's first line is the verdict.
 type WebhookHandler struct {
 	// URL is the endpoint the payload is POSTed to.
 	URL string
@@ -338,19 +341,16 @@ func isAsyncHandler(h Handler) bool {
 	return false
 }
 
-// servesClass reports whether an out-of-process handler serves the class. An argv command serves
-// three of the user's cells — observe, advise and gate (ADR 0076 D2) — while a webhook serves
-// observe alone: its response is discarded, so it has no way to advise or to gate. It answers
-// only for the two out-of-process kinds; a Go handler is never asked, since its rule is the
-// per-seam one.
+// servesClass reports whether an out-of-process handler serves the class. A command and a webhook
+// alike serve three of the user's cells — observe, advise and gate (ADR 0076 D2): a command's
+// stdout and a webhook's reply body are read the same way, as nothing, a trailer or a verdict by
+// class. It answers only for the two out-of-process kinds; a Go handler is never asked, since its
+// rule is the per-seam one.
 func servesClass(h Handler, class Class) bool {
-	switch h.(type) {
-	case ArgvHandler:
-		return class == ClassObserve || class == ClassAdvise || class == ClassGate
-	case WebhookHandler:
-		return class == ClassObserve
+	if !isAsyncHandler(h) {
+		return false
 	}
-	return false
+	return class == ClassObserve || class == ClassAdvise || class == ClassGate
 }
 
 // ToolResultMoment is the post-tool-result seam's payload: the pair a PostToolResultFunc needs,
@@ -468,14 +468,15 @@ func (r Reaction) Validate() error {
 		return fmt.Errorf("%w %q: fires on no Moment", ErrInvalidReaction, r.ID)
 	}
 
-	// The sentence names observe as the class served because a webhook is the only handler a
-	// configuration can push into this refusal: an argv command already serves every class a user
-	// entry can carry, so the argv side is reachable from the engine's own arming alone.
+	// Both out-of-process kinds serve every class a USER entry can carry, so no configuration can
+	// reach this refusal: it holds for the engine's own arming alone, where an ArgvHandler or a
+	// WebhookHandler under a shape class occupies an allowed cell and would otherwise fail every
+	// Moment with the cascade's wrong-handler error rather than at arming.
 	async := isAsyncHandler(r.Handler)
 	if async && !servesClass(r.Handler, r.Class) {
 		return fmt.Errorf(
-			"%w %q: run: a command or webhook reacts as class %q, not %q",
-			ErrInvalidReaction, r.ID, ClassObserve, r.Class,
+			"%w %q: run: a command or webhook reacts as class %s, %s or %s, not %q",
+			ErrInvalidReaction, r.ID, ClassObserve, ClassAdvise, ClassGate, r.Class,
 		)
 	}
 
@@ -535,9 +536,11 @@ func (r Reaction) Validate() error {
 // whose value would silently be the empty string). A Go handler is a func and is always runnable.
 //
 // The command sentence names no config key on purpose: an ArgvHandler reaches here from `run:`,
-// `advise:` and `gate:` alike, while a webhook can only have been written under `run:`, so the
-// webhook sentences keep the key a user has to look for.
+// `advise:` and `gate:` alike. The webhook sentences name the key a user has to look for, and a
+// Reaction carries no key of its own, so it is derived from the class (handlerKey): the mapping is
+// written under `run:` for observe, `advise:` for advise and `gate:` for gate.
 func (r Reaction) validateHandlerRunnable() error {
+	key := handlerKey(r.Class)
 	switch handler := r.Handler.(type) {
 	case ArgvHandler:
 		if len(handler.Argv) == 0 || strings.TrimSpace(handler.Argv[0]) == "" {
@@ -551,15 +554,15 @@ func (r Reaction) validateHandlerRunnable() error {
 		switch {
 		case err != nil:
 			return fmt.Errorf(
-				"%w %q: run: url: %q is not a URL: %v", ErrInvalidReaction, r.ID, handler.URL, err,
+				"%w %q: %s url: %q is not a URL: %v", ErrInvalidReaction, r.ID, key, handler.URL, err,
 			)
 		case parsed.Scheme != "http" && parsed.Scheme != "https":
 			return fmt.Errorf(
-				"%w %q: run: url: %q must be an absolute http:// or https:// URL",
-				ErrInvalidReaction, r.ID, handler.URL,
+				"%w %q: %s url: %q must be an absolute http:// or https:// URL",
+				ErrInvalidReaction, r.ID, key, handler.URL,
 			)
 		case parsed.Host == "":
-			return fmt.Errorf("%w %q: run: url: %q names no host", ErrInvalidReaction, r.ID, handler.URL)
+			return fmt.Errorf("%w %q: %s url: %q names no host", ErrInvalidReaction, r.ID, key, handler.URL)
 		}
 		for header, envName := range handler.HeadersEnv {
 			if strings.TrimSpace(envName) == "" {
@@ -572,6 +575,21 @@ func (r Reaction) validateHandlerRunnable() error {
 		}
 	}
 	return nil
+}
+
+// handlerKey is the configuration key an out-of-process handler of the class is written under —
+// `run:` for observe, `advise:` for advise, `gate:` for gate — so a refusal can name the line a user
+// has to look for without the Reaction carrying the key itself. A class no user entry can take
+// reads as `run:`, the key the observe lane's mapping shares its shape with.
+func handlerKey(class Class) string {
+	switch class {
+	case ClassAdvise:
+		return "advise:"
+	case ClassGate:
+		return "gate:"
+	default:
+		return "run:"
+	}
 }
 
 // Generation is the whole live shape of the engine at one moment: the Floor enable set, Bypass,

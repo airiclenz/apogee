@@ -525,7 +525,27 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 			wantErr: `apogee: invalid reaction "notify": gate: reacts at pre-tool-exec; "pre-tool" is not it`,
 		},
 		{
-			name: "a webhook handler outside class observe is refused",
+			name: "a webhook handler advising at post-tool-result validates",
+			reaction: Reaction{
+				ID:      "advise",
+				Origin:  OriginUser,
+				Class:   ClassAdvise,
+				On:      []Moment{MomentPostToolResult, MomentFileChanged},
+				Handler: webhook,
+			},
+		},
+		{
+			name: "a webhook handler gating at pre-tool-exec validates",
+			reaction: Reaction{
+				ID:      "gate",
+				Origin:  OriginUser,
+				Class:   ClassGate,
+				On:      []Moment{MomentPreToolExec},
+				Handler: webhook,
+			},
+		},
+		{
+			name: "a webhook handler gating anywhere else is refused",
 			reaction: Reaction{
 				ID:      "notify",
 				Origin:  OriginUser,
@@ -533,7 +553,29 @@ func TestReactionValidateAppliesThePerClassRulesToAnAsyncHandler(t *testing.T) {
 				On:      []Moment{MomentTurnFinished},
 				Handler: webhook,
 			},
-			wantErr: `apogee: invalid reaction "notify": run: a command or webhook reacts as class "observe", not "gate"`,
+			wantErr: `apogee: invalid reaction "notify": gate: reacts at pre-tool-exec; "turn-finished" is not it`,
+		},
+		{
+			name: "an engine-origin argv handler under a shape class is refused",
+			reaction: Reaction{
+				ID:      "shaper",
+				Origin:  OriginEngine,
+				Class:   ClassShapeView,
+				On:      []Moment{MomentPreRequest},
+				Handler: argv,
+			},
+			wantErr: `apogee: invalid reaction "shaper": run: a command or webhook reacts as class observe, advise or gate, not "shape-view"`,
+		},
+		{
+			name: "an engine-origin webhook handler under a shape class is refused",
+			reaction: Reaction{
+				ID:      "shaper",
+				Origin:  OriginEngine,
+				Class:   ClassShapeWork,
+				On:      []Moment{MomentPreToolExec},
+				Handler: webhook,
+			},
+			wantErr: `apogee: invalid reaction "shaper": run: a command or webhook reacts as class observe, advise or gate, not "shape-work"`,
 		},
 	}
 
@@ -666,6 +708,48 @@ func TestReactionValidateRefusesAnUnrunnableHandler(t *testing.T) {
 			}
 			if got := err.Error(); got != c.wantErr {
 				t.Errorf("Validate() = %q, want %q", got, c.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateHandlerRunnableNamesTheKeyItChecks pins the key a webhook refusal names: a
+// domain.Reaction carries no configuration key, so the sentence derives it from the class — `run:`
+// for observe, `advise:` for advise, `gate:` for gate — and a user reading the refusal is sent to
+// the line they wrote. The observe rows stay byte-identical to the `run: url:` pins above.
+func TestValidateHandlerRunnableNamesTheKeyItChecks(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		class   Class
+		on      Moment
+		wantKey string
+	}{
+		{ClassObserve, MomentError, "run:"},
+		{ClassAdvise, MomentPostToolResult, "advise:"},
+		{ClassGate, MomentPreToolExec, "gate:"},
+	}
+
+	for _, c := range cases {
+		t.Run(string(c.class), func(t *testing.T) {
+			t.Parallel()
+
+			reaction := Reaction{
+				ID:      "hook",
+				Origin:  OriginUser,
+				Class:   c.class,
+				On:      []Moment{c.on},
+				Handler: WebhookHandler{URL: "example.test/hook"},
+			}
+
+			err := reaction.Validate()
+
+			want := fmt.Sprintf(
+				`apogee: invalid reaction "hook": %s url: "example.test/hook" must be an absolute http:// or https:// URL`,
+				c.wantKey,
+			)
+			if err == nil || err.Error() != want {
+				t.Errorf("Validate() = %v, want %q", err, want)
 			}
 		})
 	}

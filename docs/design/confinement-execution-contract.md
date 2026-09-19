@@ -1267,7 +1267,10 @@ The sync lane's row is the ratified permit row (plan `2026-09-09 - 01`, header d
 ADR 0076 D8 and this section): **a user-origin sync reaction spawns in every mode under a
 `SubprocessPermit`; `Confinement` = the workspace box when `confine-to-workspace` is on and the
 Confiner has caps, nil when it is off; on but no caps ⇒ no permit, the handler fails
-(`workspace confinement is unavailable on this host`) and gate ⇒ ask, advise ⇒ nothing.**
+(`workspace confinement is unavailable on this host`) and gate ⇒ ask, advise ⇒ nothing.** The row
+is the argv handler's: a sync reaction whose `advise:`/`gate:` mapping is a webhook (`run: url:`)
+takes no permit at all — nothing is spawned, the request leaves over the network under the same
+class deadline (`runSyncWebhook`, 2026-09-19), and the confinement table below does not apply to it.
 
 | `confine-to-workspace` | fs confinement caps | installed |
 |---|---|---|

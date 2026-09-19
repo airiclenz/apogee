@@ -481,42 +481,62 @@ func adviceOf(turn int, m domain.Moment, r domain.Reaction, out domain.Outcome) 
 	}, true
 }
 
-// adviseArgv is the USER half of the advise slot: one `advise:` entry's command runs out of
-// process while the loop waits, and what it printed becomes the trailer the model reads
-// (ADR 0076 D2, D6). It is called from the post-tool-result seam alone — the only Moment with a
-// closing tool result to fence a trailer onto.
+// adviseUser is the USER half of the advise slot: one `advise:` entry's command runs out of
+// process, or its webhook is POSTed to, while the loop waits, and what it answered becomes the
+// trailer the model reads (ADR 0076 D2, D6). It is called from the post-tool-result seam alone —
+// the only Moment with a closing tool result to fence a trailer onto — and dispatches on the
+// handler's KIND: a command's standard output and a webhook's reply body are the same text to
+// everything below.
 //
 // It is FAIL-OPEN in both directions it decides (D7), and each of them costs the Turn nothing: a
-// command that failed, timed out or was refused a permit contributes nothing and is reported once,
-// through the sync lane's own reporter and one "failed" firing; a command that printed nothing
-// contributes nothing, so an entry that only sometimes has something to say is silent the rest of
-// the time rather than injecting an empty fence. The third silence — a file-changed entry on a
-// call that changed no file — is decided BEFORE this route is reached (hearsCall), because it is
-// the whole advise class's rule and not the command's.
+// command that failed, timed out or was refused a permit — a webhook whose request failed, timed
+// out, was answered with a non-2xx or named an unset `headers-env:` variable — contributes nothing
+// and is reported once, through the sync lane's own reporter and one "failed" firing; a handler
+// that answered nothing contributes nothing, so an entry that only sometimes has something to say
+// is silent the rest of the time rather than injecting an empty fence. The third silence — a
+// file-changed entry on a call that changed no file — is decided BEFORE this route is reached
+// (hearsCall), because it is the whole advise class's rule and not the handler's.
 //
-// Standard output is REDACTED before it is anything else. It is the one place a configured
-// secret's value can re-enter apogee from a process the scrub kept it out of, and the redaction
-// has to land before the text is capped, fenced, booked as a firing's Detail, or written to a
-// transcript. The CAP is not applied here: every advise route meets it once, downstream, where the
-// span is collected (adviceOf), so no route can render a span that skipped it.
-func (a *Agent) adviseArgv(
+// The answer is REDACTED before it is anything else. It is the one place a configured secret's
+// value can re-enter apogee from a process the scrub kept it out of, or from a server the request
+// carried it to, and the redaction has to land before the text is capped, fenced, booked as a
+// firing's Detail, or written to a transcript. The CAP is not applied here: every advise route
+// meets it once, downstream, where the span is collected (adviceOf), so no route can render a span
+// that skipped it. The webhook's read is bounded at one byte past that cap (adviseReplyCap) — enough
+// for the downstream cap to see the reply ran over and mark the truncation, and no more, so a
+// server that streams without end cannot hold the Turn's memory.
+func (a *Agent) adviseUser(
 	ctx context.Context,
 	turn int,
 	r domain.Reaction,
 	doc domain.SeamPayload,
 ) (domain.Outcome, error) {
-	stdout, err := a.runSyncArgv(ctx, turn, r, doc)
+	var answer string
+	var err error
+	switch r.Handler.(type) {
+	case domain.ArgvHandler:
+		answer, err = a.runSyncArgv(ctx, turn, r, doc)
+	case domain.WebhookHandler:
+		answer, err = a.runSyncWebhook(ctx, turn, r, doc, adviseReplyCap)
+	default:
+		return domain.Outcome{}, wrongHandler(domain.MomentPostToolResult, r.Handler)
+	}
 	if err != nil {
 		a.reportReaction(turn, r.ID, doc.Event, err)
 		return domain.Outcome{}, nil
 	}
 
-	text := tools.RedactSecrets(stdout, a.cfg.SecretEnvVars)
+	text := tools.RedactSecrets(answer, a.cfg.SecretEnvVars)
 	if text == "" {
 		return domain.Outcome{}, nil
 	}
 	return domain.Outcome{Inject: text}, nil
 }
+
+// adviseReplyCap bounds the bytes read off an advise webhook's reply: the advice cap plus one, so
+// the downstream cap (adviceOf → domain.CapAdvice) still sees a reply that ran over and appends the
+// truncation marker, while nothing past that byte is ever held.
+const adviseReplyCap = domain.AdviceCap + 1
 
 // hearsCall is the advise lane's file-changed NARROWING — the half that pays for subscribes'
 // widening. It reports whether advise reaction r, which subscribes told the cascade fires at
@@ -693,15 +713,19 @@ func (a *Agent) seamPayload(turn int, m domain.Moment, payload any) (seamPayload
 				// whole class, so the narrowing that pays for it (hearsCall) has to hold for
 				// the whole class too — a Go advise handler and the user's command alike.
 				// The user's advise cell is then the one route that leaves the process: its
-				// handler is a command, not a Go func, so it is dispatched before the Go
-				// handler assertion rather than failing it.
+				// handler is a command or a webhook, not a Go func, so BOTH out-of-process
+				// kinds are dispatched here, before the Go handler assertion, rather than
+				// failing it — a kind left to fall through would lose every advise trailer
+				// for the call silently (fireCascade returns no advice, firePostToolResult
+				// drops the error).
 				if r.Class == domain.ClassAdvise {
 					path, hears := a.hearsCall(r, p)
 					if !hears {
 						return domain.Outcome{}, nil
 					}
-					if _, argv := r.Handler.(domain.ArgvHandler); argv {
-						return a.adviseArgv(ctx, turn, r, adviseDocument(p, path))
+					switch r.Handler.(type) {
+					case domain.ArgvHandler, domain.WebhookHandler:
+						return a.adviseUser(ctx, turn, r, adviseDocument(p, path))
 					}
 				}
 				fn, ok := r.Handler.(domain.PostToolResultFunc)

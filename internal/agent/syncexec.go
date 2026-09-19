@@ -4,22 +4,27 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tools"
+	"github.com/airiclenz/apogee/internal/webhook"
 )
 
 // The SYNC lane's out-of-process executor: the one door a user's `advise:` or `gate:` command is
-// spawned through while the loop waits on it (ADR 0076 D2, D7, D8;
-// docs/design/confinement-execution-contract.md §10.4).
+// spawned through, and its webhook POSTed through, while the loop waits on it (ADR 0076 D2, D7,
+// D8; docs/design/confinement-execution-contract.md §10.4).
 //
 // It is deliberately ONE deep module. Everything a sync reaction's command needs settling —
 // which permit it spawns under, whether a confinement box has to be built first, what deadline
 // it dies at, how its document reaches it, and what a failure is reported as — is settled here,
 // and the seams that call it (the advise slot at post-tool-result, the gate stage at
 // pre-tool-exec) see nothing but `(stdout, err)`. Neither seam should have to know that a permit
-// exists, and neither should be able to spawn a command any other way.
+// exists, and neither should be able to spawn a command any other way. The webhook door beside it
+// (runSyncWebhook) sends the SAME document as the POST body and hands the seam the reply body on
+// the same terms; it takes no permit, because nothing is spawned — the request leaves the process
+// over the network, as the observe lane's webhooks already do.
 
 // runSyncArgv runs one sync-lane reaction's command and returns what it wrote to standard output.
 //
@@ -30,10 +35,8 @@ import (
 // know: the permit (syncPermitCtx), the class default deadline, and the payload document.
 //
 // The caller fills the MOMENT's half of doc — the event, the tool, the path, the arguments, the
-// result — and this function stamps the IDENTITY half over it: which reaction fired, when, in
-// which workspace, and at what depth, turn and call id. Those are facts of the firing agent
-// rather than of the Moment, so a seam that forgets one cannot ship a document that misreports
-// the run.
+// result — and this function stamps the IDENTITY half over it (syncDocument): which reaction
+// fired, when, in which workspace, and at what depth, turn and call id.
 //
 // The error is the caller's whole account of a failure: a refused permit, a timeout, a non-zero
 // exit, a cancelled context and a wedged output pipe all arrive as one, and the funnel's message
@@ -61,16 +64,9 @@ func (a *Agent) runSyncArgv(
 		return "", err
 	}
 
-	doc.Reaction = r.ID
-	doc.Time = a.now().Format(time.RFC3339)
-	doc.Workspace = a.cfg.WorkspaceDir
-	doc.Depth = a.depth
-	doc.Turn = turn
-	doc.CallID = a.callID
-
-	document, err := json.Marshal(doc)
+	doc, document, err := a.syncDocument(turn, r, doc)
 	if err != nil {
-		return "", fmt.Errorf("apogee: reaction %q: %w", r.ID, err)
+		return "", err
 	}
 
 	return tools.RunHookSubprocess(
@@ -85,7 +81,75 @@ func (a *Agent) runSyncArgv(
 	)
 }
 
-// syncTimeout is the deadline one sync-lane reaction's command runs under: its entry's own
+// runSyncWebhook POSTs one sync-lane reaction's document to its webhook and returns the reply body,
+// read up to replyCap bytes — the caller's bound, because what a reply is worth is the class's
+// business: an advise reply is a trailer the downstream cap truncates, a gate reply is one verdict
+// line. The document is the one runSyncArgv writes to a command's stdin, identity half stamped
+// here too, so a script that learned to read it from a command reads the identical JSON off the
+// request body.
+//
+// No permit is taken: nothing is spawned, so the confinement contract's spawn posture
+// (docs/design/confinement-execution-contract.md §10.4) has nothing to say about the request, and
+// the deadline is the class's (syncTimeout) as it is for a command. Every failure — an unset
+// `headers-env:` variable, a transport error, the deadline, a non-2xx status — arrives as one error
+// worded by internal/webhook (never the URL, which may carry a token), for the classes to read as
+// they read a command's: an advise reaction contributes nothing, a gate escalates to ask.
+func (a *Agent) runSyncWebhook(
+	ctx context.Context,
+	turn int,
+	r domain.Reaction,
+	doc domain.SeamPayload,
+	replyCap int64,
+) (string, error) {
+	handler, ok := r.Handler.(domain.WebhookHandler)
+	if !ok {
+		return "", fmt.Errorf("apogee: reaction %q: the sync lane POSTs to a webhook, not a %T", r.ID, r.Handler)
+	}
+
+	_, document, err := a.syncDocument(turn, r, doc)
+	if err != nil {
+		return "", err
+	}
+
+	response, err := webhook.Post(ctx, handler, syncTimeout(r), document)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	reply, err := io.ReadAll(io.LimitReader(response.Body, replyCap))
+	if err != nil {
+		return "", webhook.PostFailure(syncTimeout(r), err)
+	}
+	return string(reply), nil
+}
+
+// syncDocument stamps the IDENTITY half of one sync-lane document — which reaction fired, when, in
+// which workspace, and at what depth, turn and call id — over the MOMENT's half the seam filled,
+// and renders the JSON both doors send. Those are facts of the firing agent rather than of the
+// Moment, so a seam that forgets one cannot ship a document that misreports the run. The stamped
+// document is returned beside its encoding because a command's environment (SeamPayload.Env) is
+// derived from the same fields.
+func (a *Agent) syncDocument(
+	turn int,
+	r domain.Reaction,
+	doc domain.SeamPayload,
+) (domain.SeamPayload, []byte, error) {
+	doc.Reaction = r.ID
+	doc.Time = a.now().Format(time.RFC3339)
+	doc.Workspace = a.cfg.WorkspaceDir
+	doc.Depth = a.depth
+	doc.Turn = turn
+	doc.CallID = a.callID
+
+	document, err := json.Marshal(doc)
+	if err != nil {
+		return doc, nil, fmt.Errorf("apogee: reaction %q: %w", r.ID, err)
+	}
+	return doc, document, nil
+}
+
+// syncTimeout is the deadline one sync-lane reaction's command or request runs under: its entry's own
 // `timeout:` when it set one, else the class default (domain.DefaultAdviseTimeout /
 // domain.DefaultGateTimeout). A class outside the sync lane cannot reach here — Generation.Validate
 // refuses it — so the advise default is the honest fallback for anything that is not a gate.

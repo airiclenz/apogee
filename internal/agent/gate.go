@@ -47,6 +47,11 @@ const (
 	// room for a sentence and not a paragraph, and it comes from a command whose output the
 	// engine does not control.
 	gateReasonRunes = 240
+
+	// gateReplyCap bounds the bytes read off a gate webhook's reply. The protocol is one verdict
+	// word on the first line and a sentence of reason after it, so anything a server sends past
+	// this is not an answer, and a server that streams without end must not hold the call.
+	gateReplyCap = 64 << 10
 )
 
 // applyGates folds the armed gate reactions' answers into one resolved tool call's verdict, and
@@ -120,7 +125,8 @@ func (a *Agent) gateReactions() []domain.Reaction {
 // askGate puts one pending call to one gate reaction and returns the answer the fold reads.
 //
 // A gate that could not answer — a command that failed, timed out, was refused a permit or wrote
-// something unreadable, and a Go handler that panicked — is reported once through the sync lane's
+// something unreadable, a webhook whose request failed or was answered with a non-2xx or nothing
+// readable, and a Go handler that panicked — is reported once through the sync lane's
 // own reporter (one operator line and one "failed" firing, item 4's shape) and then ASKS, naming
 // the failure so the human reads why they are being asked at all. That escalation is what makes a
 // broken gate safe: the surface a user armed to bound the model cannot be disarmed by breaking it.
@@ -137,8 +143,12 @@ func (a *Agent) askGate(ctx context.Context, turn int, r domain.Reaction, call d
 }
 
 // gateAnswer invokes one gate reaction's handler and reports its decision, or the error that
-// stands in for one. The two handler shapes are the two the domain admits for class gate: a
-// user's command over argv, and an engine or embedder's Go func reading Outcome.Gate.
+// stands in for one. The three handler shapes are the three the domain admits for class gate: a
+// user's command over argv, a user's webhook, and an engine or embedder's Go func reading
+// Outcome.Gate. The two out-of-process kinds answer through the same protocol — the first line of
+// what they wrote is the verdict (parseGateAnswer) — so a webhook's HTTP status is never a verdict:
+// a non-2xx is a failure the caller escalates to ask, and a 2xx with no readable first line is
+// exactly the same question.
 func (a *Agent) gateAnswer(
 	ctx context.Context,
 	turn int,
@@ -147,21 +157,33 @@ func (a *Agent) gateAnswer(
 ) (domain.GateDecision, error) {
 	switch h := r.Handler.(type) {
 	case domain.ArgvHandler:
-		stdout, err := a.runSyncArgv(ctx, turn, r, domain.SeamPayload{
-			Event: domain.MomentPreToolExec,
-			Tool:  call.Tool,
-			// Copied rather than referenced: the document outlives the call the cascade may
-			// still be reshaping, exactly as the advise route's does.
-			Arguments: append(json.RawMessage(nil), call.Arguments...),
-		})
+		stdout, err := a.runSyncArgv(ctx, turn, r, gateDocument(call))
 		if err != nil {
 			return domain.GateDecision{}, err
 		}
 		return parseGateAnswer(stdout)
+	case domain.WebhookHandler:
+		reply, err := a.runSyncWebhook(ctx, turn, r, gateDocument(call), gateReplyCap)
+		if err != nil {
+			return domain.GateDecision{}, err
+		}
+		return parseGateAnswer(reply)
 	case domain.PreToolExecFunc:
 		return a.callGateFunc(ctx, turn, r, h, call)
 	default:
 		return domain.GateDecision{}, fmt.Errorf("apogee: reaction %q: a gate cannot be a %T", r.ID, r.Handler)
+	}
+}
+
+// gateDocument is the MOMENT's half of the document a gate's command or webhook receives: the
+// pre-tool-exec Moment, the tool and its arguments. The executor stamps the identity half over it.
+func gateDocument(call domain.ToolCall) domain.SeamPayload {
+	return domain.SeamPayload{
+		Event: domain.MomentPreToolExec,
+		Tool:  call.Tool,
+		// Copied rather than referenced: the document outlives the call the cascade may still be
+		// reshaping, exactly as the advise route's does.
+		Arguments: append(json.RawMessage(nil), call.Arguments...),
 	}
 }
 

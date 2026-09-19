@@ -9,7 +9,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -474,4 +478,270 @@ func TestGateAskWithNoApproverRefuses(t *testing.T) {
 	if ran != 0 {
 		t.Errorf("the tool ran %d times, want 0", ran)
 	}
+}
+
+// userGateWebhook is one user-origin `gate:` entry over a webhook, as the reactions: file will
+// resolve it once the config accepts the mapping.
+func userGateWebhook(id string, handler domain.WebhookHandler) domain.Reaction {
+	return domain.Reaction{
+		ID:      id,
+		Origin:  domain.OriginUser,
+		Class:   domain.ClassGate,
+		On:      []domain.Moment{domain.MomentPreToolExec},
+		Handler: handler,
+	}
+}
+
+// gateEndpoint answers every POST with status and body, counting the hits and keeping the last
+// document it was sent.
+func gateEndpoint(t *testing.T, hits *atomic.Int64, got *domain.SeamPayload, status int, body string) *httptest.Server {
+	t.Helper()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		if got != nil {
+			_ = json.NewDecoder(r.Body).Decode(got)
+		}
+		w.WriteHeader(status)
+		_, _ = w.Write([]byte(body))
+	}))
+	t.Cleanup(server.Close)
+	return server
+}
+
+// A gate over a webhook answers through the same protocol as one over argv — the reply's first line
+// is the verdict, the rest the reason — and the fold reads it identically: deny refuses the call,
+// ask forces the Approver with the reason, allow leaves the ladder's verdict standing. The endpoint
+// receives the pre-tool-exec document naming the tool it is asked about.
+func TestGateWebhookAnswersAllowDenyAsk(t *testing.T) {
+	t.Parallel()
+
+	t.Run("deny", func(t *testing.T) {
+		t.Parallel()
+
+		var hits atomic.Int64
+		var got domain.SeamPayload
+		server := gateEndpoint(t, &hits, &got, http.StatusOK, "deny\nnot on my watch\n")
+		sink := &recordingSink{}
+		ran := 0
+		approver := &gateApprover{decision: domain.ApprovalAllow}
+		a := gateAgent(t, sink, approver, &ran, userGateWebhook("warden", domain.WebhookHandler{URL: server.URL}))
+
+		result, _ := prepareAndRun(a, readCallOnly())
+
+		if want := "tool call denied by reaction warden"; result.Content != want || !result.IsError {
+			t.Errorf("tool result = %+v, want the error %q", result, want)
+		}
+		if ran != 0 || len(approver.requests) != 0 {
+			t.Errorf("the tool ran %d times and the Approver was asked %d times, want 0 and 0", ran, len(approver.requests))
+		}
+		if got.Event != domain.MomentPreToolExec || got.Tool != "list_dir" || got.Reaction != "warden" {
+			t.Errorf("the endpoint received %+v, want the pre-tool-exec document for list_dir", got)
+		}
+		if booked := gateFirings(sink, "warden"); len(booked) != 1 || booked[0].Action != "deny" {
+			t.Errorf("firings = %+v, want one deny", booked)
+		}
+	})
+
+	t.Run("ask", func(t *testing.T) {
+		t.Parallel()
+
+		var hits atomic.Int64
+		server := gateEndpoint(t, &hits, nil, http.StatusOK, "ask\nlooks risky\n")
+		sink := &recordingSink{}
+		ran := 0
+		approver := &gateApprover{decision: domain.ApprovalAllow}
+		a := gateAgent(t, sink, approver, &ran, userGateWebhook("warden", domain.WebhookHandler{URL: server.URL}))
+
+		result, _ := prepareAndRun(a, readCallOnly())
+
+		if len(approver.requests) != 1 {
+			t.Fatalf("the Approver was consulted %d times, want 1", len(approver.requests))
+		}
+		if want := "reaction warden asks: looks risky"; approver.requests[0].Reason != want {
+			t.Errorf("Approval reason = %q, want %q", approver.requests[0].Reason, want)
+		}
+		if ran != 1 || result.IsError {
+			t.Errorf("the allowed call ran %d times, result %+v — want it executed once", ran, result)
+		}
+		if booked := gateFirings(sink, "warden"); len(booked) != 1 || booked[0].Action != "ask" {
+			t.Errorf("firings = %+v, want one ask", booked)
+		}
+	})
+
+	t.Run("allow", func(t *testing.T) {
+		t.Parallel()
+
+		var hits atomic.Int64
+		server := gateEndpoint(t, &hits, nil, http.StatusOK, "allow")
+		sink := &recordingSink{}
+		ran := 0
+		approver := &gateApprover{decision: domain.ApprovalAllow}
+		a := gateAgent(t, sink, approver, &ran, userGateWebhook("warden", domain.WebhookHandler{URL: server.URL}))
+
+		result, _ := prepareAndRun(a, readCallOnly())
+
+		if ran != 1 || result.IsError || len(approver.requests) != 0 {
+			t.Errorf("the free read ran %d times (result %+v) and asked %d times — want the ladder's own verdict",
+				ran, result, len(approver.requests))
+		}
+		if hits.Load() != 1 {
+			t.Errorf("the endpoint was called %d times, want 1", hits.Load())
+		}
+		if booked := gateFirings(sink, "warden"); len(booked) != 1 || booked[0].Action != "allow" {
+			t.Errorf("firings = %+v, want one allow", booked)
+		}
+	})
+}
+
+// A webhook gate that could not answer — a refused status, a dead endpoint, an unreadable or empty
+// reply, an unset `headers-env:` variable, a stalled endpoint — escalates to ask exactly as a
+// command that failed does: the human is asked, naming the failure, after one failed firing and
+// one operator line.
+func TestGateWebhookFailureEscalatesToAsk(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		handler func(t *testing.T) domain.WebhookHandler
+		timeout time.Duration
+		detail  string
+	}{
+		{
+			name: "a non-2xx status",
+			handler: func(t *testing.T) domain.WebhookHandler {
+				return domain.WebhookHandler{URL: gateEndpoint(t, new(atomic.Int64), nil, http.StatusInternalServerError, "deny").URL}
+			},
+			detail: "HTTP 500",
+		},
+		{
+			name: "an unreadable answer",
+			handler: func(t *testing.T) domain.WebhookHandler {
+				return domain.WebhookHandler{URL: gateEndpoint(t, new(atomic.Int64), nil, http.StatusOK, "maybe").URL}
+			},
+			detail: `answered "maybe"`,
+		},
+		{
+			name: "nothing at all",
+			handler: func(t *testing.T) domain.WebhookHandler {
+				return domain.WebhookHandler{URL: gateEndpoint(t, new(atomic.Int64), nil, http.StatusNoContent, "").URL}
+			},
+			detail: "printed nothing",
+		},
+		{
+			name: "an unset headers-env variable",
+			handler: func(t *testing.T) domain.WebhookHandler {
+				return domain.WebhookHandler{
+					URL:        gateEndpoint(t, new(atomic.Int64), nil, http.StatusOK, "allow").URL,
+					HeadersEnv: map[string]string{"Authorization": "APOGEE_TEST_GATE_ABSENT_TOKEN"},
+				}
+			},
+			detail: "APOGEE_TEST_GATE_ABSENT_TOKEN is not set",
+		},
+		{
+			name: "a dead endpoint",
+			handler: func(t *testing.T) domain.WebhookHandler {
+				server := httptest.NewServer(http.NotFoundHandler())
+				server.Close()
+				return domain.WebhookHandler{URL: server.URL}
+			},
+			detail: "POST failed",
+		},
+		{
+			name: "an endpoint that never answers",
+			handler: func(t *testing.T) domain.WebhookHandler {
+				release := make(chan struct{})
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					select {
+					case <-release:
+					case <-r.Context().Done():
+					}
+				}))
+				t.Cleanup(server.Close)
+				t.Cleanup(func() { close(release) })
+				return domain.WebhookHandler{URL: server.URL}
+			},
+			timeout: 150 * time.Millisecond,
+			detail:  "timed out after 150ms",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			sink := &recordingSink{}
+			approver := &gateApprover{decision: domain.ApprovalDeny}
+			gate := userGateWebhook("warden", tc.handler(t))
+			gate.Timeout = tc.timeout
+			a := gateAgent(t, sink, approver, nil, gate)
+			var reported []string
+			a.cfg.Report = func(msg string) { reported = append(reported, msg) }
+
+			prepareAndRun(a, readCallOnly())
+
+			if len(approver.requests) != 1 {
+				t.Fatalf("the Approver was consulted %d times, want 1", len(approver.requests))
+			}
+			reason := approver.requests[0].Reason
+			if want := "reaction warden asks: did not answer ("; !strings.HasPrefix(reason, want) || !strings.Contains(reason, tc.detail) {
+				t.Errorf("Approval reason = %q, want it to start %q and name %q", reason, want, tc.detail)
+			}
+			actions := make([]string, 0, 2)
+			for _, f := range gateFirings(sink, "warden") {
+				actions = append(actions, f.Action)
+			}
+			if len(actions) != 2 || actions[0] != actionFailed || actions[1] != "ask" {
+				t.Errorf("firings = %v, want the failure booked then the ask", actions)
+			}
+			if len(reported) != 1 || !strings.HasPrefix(reported[0], "reaction warden (pre-tool-exec): ") {
+				t.Errorf("reporter lines = %q, want one sync-lane failure line", reported)
+			}
+		})
+	}
+}
+
+// The HTTP status is never a verdict: a 403 whose body says allow is a FAILED request and asks, and
+// a 200 whose body says deny denies — the protocol is the first line of the reply and nothing else,
+// so "the endpoint refused the request" and "the endpoint said no" can never be confused.
+func TestGateWebhookIgnoresTheStatusCodeAsAVerdict(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a 403 saying allow asks", func(t *testing.T) {
+		t.Parallel()
+
+		server := gateEndpoint(t, new(atomic.Int64), nil, http.StatusForbidden, "allow\n")
+		sink := &recordingSink{}
+		ran := 0
+		approver := &gateApprover{decision: domain.ApprovalDeny}
+		a := gateAgent(t, sink, approver, &ran, userGateWebhook("warden", domain.WebhookHandler{URL: server.URL}))
+
+		prepareAndRun(a, readCallOnly())
+
+		if len(approver.requests) != 1 || !strings.Contains(approver.requests[0].Reason, "HTTP 403") {
+			t.Errorf("Approver requests = %+v, want one ask naming HTTP 403", approver.requests)
+		}
+		if ran != 0 {
+			t.Errorf("the tool ran %d times after the Approver denied, want 0", ran)
+		}
+	})
+
+	t.Run("a 200 saying deny denies", func(t *testing.T) {
+		t.Parallel()
+
+		server := gateEndpoint(t, new(atomic.Int64), nil, http.StatusOK, "deny\n")
+		sink := &recordingSink{}
+		ran := 0
+		approver := &gateApprover{decision: domain.ApprovalAllow}
+		a := gateAgent(t, sink, approver, &ran, userGateWebhook("warden", domain.WebhookHandler{URL: server.URL}))
+
+		result, _ := prepareAndRun(a, readCallOnly())
+
+		if want := "tool call denied by reaction warden"; result.Content != want {
+			t.Errorf("tool result = %q, want %q", result.Content, want)
+		}
+		if ran != 0 || len(approver.requests) != 0 {
+			t.Errorf("the tool ran %d times and the Approver was asked %d times, want 0 and 0", ran, len(approver.requests))
+		}
+	})
 }
