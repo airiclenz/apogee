@@ -273,10 +273,13 @@ _Avoid_: "title" (that is the **Session**'s — a delegation has a name, and no 
 
 **Parallel agents**:
 The per-server cap on how many sub-agents the top-level agent may run **concurrently**.
-Resolved per `servers:` entry, pin-else-discover-else-1: an explicit `parallel-agents: N`
+Resolved per `servers:` entry, pin-else-discover-else-floor: an explicit `parallel-agents: N`
 is a **pin** discovery never overrides (the `context-window` idiom); absent, the cap is
-discovered from the live server (`/props` `total_slots`); no signal means **1** — strictly
-serial, today's behavior. It is **structural, not a Mechanism** — it only executes calls
+discovered from the live server (`/props` `total_slots`); no signal means the entry's
+**floor** — **4** for a keyed entry (`api-key`/`api-key-cmd`/`api-key-env`, or
+`wire: anthropic`: a hosted server serves parallel requests as a matter of course), **1** —
+strictly serial — for any other, so `parallel-agents: 1` is how a keyed server is held
+serial (ADR 0039 D2 as amended 2026-09-19). It is **structural, not a Mechanism** — it only executes calls
 the model already made, so it is on under Bypass — but it is also the width of a guided
 decomposition **batch** (`min(cap, remaining)` delegations per Turn). More parallel agents
 means a **smaller window each**: a llama.cpp `--parallel N` server splits its context into

@@ -337,8 +337,9 @@ type LoopView interface {
 	Depth() int
 	// ParallelAgents reports how many sub_agent delegations the agent this reaction is firing
 	// inside may run AT ONCE — the bound server's Parallel agents cap (ADR 0039 decision 2,
-	// pin-else-discover-else-1) at Depth 0, and 1 at any deeper level, where a child's own
-	// delegations stay serial inline (decision 3). It is the width a reaction that
+	// pin-else-discover-else-floor, the floor 4 for a keyed server and 1 otherwise) at Depth 0,
+	// and 1 at any deeper level, where a child's own delegations stay serial inline
+	// (decision 3). It is the width a reaction that
 	// synthesizes delegations batches by, dispatching min(cap, remaining) per Turn (ADR 0039
 	// decision 2). A view built without one (a test
 	// fake, the degraded no-view Response) reports 0, which reads the same as 1 — strictly

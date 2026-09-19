@@ -178,8 +178,8 @@ per spawn — the note is for the MODEL, once, on the result of the call that as
   seat parameter in its own schema.
 - Fan-out width gains one case: a depth-0 reply whose `sub_agent` calls do not all share a seat is
   batched at `min(session cap, target cap)`. Everything else about ADR 0039 — the pin-else-
-  discover-else-1 cap, one width per reply, the depth-0 bound, per-child failure independence —
-  stands.
+  discover-else-floor cap (the floor 4 keyed, 1 otherwise since 2026-09-19), one width per reply,
+  the depth-0 bound, per-child failure independence — stands.
 - The Orientation block gains a Delegations line under `sub-agents-choice: model`, built from
   session-constant facts and omitted entirely under `fixed`, so ADR 0023 §6's per-session-constant
   and omit-what-you-do-not-have rules both hold.

@@ -51,16 +51,35 @@ Turn instead of one, with a quiescent boundary between batches (ADR 0014 amendme
 width everywhere, and cap 1 reproduces today's behavior exactly — the serialized floor
 still exists.
 
-**2 — The cap is pin-else-discover-else-1, named `parallel-agents`.** A `servers:` entry
+**2 — The cap is pin-else-discover-else-floor, named `parallel-agents`; the floor is 4 for a
+keyed server and 1 otherwise.** A `servers:` entry
 may carry `parallel-agents: N` (N ≥ 1); set, it is a **pin** discovery never overrides —
 the same idiom as `context-window`. Absent, the cap is discovered from the **live** server:
 `total_slots` in the `/props` response Apogee already fetches (one new field on the existing
 read; re-resolved by the same beats that rebind the window, ADR 0024/0028). No signal — a
-cloud server, a server without `/props` — means **1**: strictly today's serial behavior.
-Nothing changes for anyone until a server advertises slots or the owner opts in. The
+server without `/props`, a hosted endpoint that advertises no slot count — means the
+**floor**, and the floor is read from the entry's shape: a **keyed** entry (`api-key`,
+`api-key-cmd` or `api-key-env`, or one that speaks `wire: anthropic`) is a hosted server that
+serves parallel requests as a matter of course and falls to **4**; any other entry — an
+unkeyed LAN or loopback llama.cpp, the ephemeral `--endpoint` entry — falls to **1**, strictly
+serial. Nothing changes for an unkeyed server until it advertises slots or the owner opts in,
+and a keyed server is held serial by spelling it: `parallel-agents: 1`. The
 launcher's `ProfileParams.Parallel` is deliberately **not** a discovery source: fan-out
 only happens against a live server, and the live server's own `/props` is authoritative;
 a pre-launch number Apogee never needs would be a second source to keep consistent.
+
+> **Amended 2026-09-19 — the "else" rank is a keyed floor of 4, not 1 (apogee-9se; plan
+> `2026-09-19 - 01`, items 4–5).** As first written this decision read "no signal … means 1:
+> strictly today's serial behavior", and a hosted server — which advertises no `/props` — ran a
+> fan-out serial for hours because the absence of a signal was read as a width. The rank order is
+> unchanged: a pin is never overruled, discovery answers when nothing is pinned, and only the last
+> rank changed — `ResolveParallelAgents(pinned, discovered, floor)` takes the floor as an argument
+> and `DefaultParallelAgents(entry)` resolves it from the entry's key source and wire alone. The
+> endpoint's address plays no part: a keyed loopback entry (the one a `/model` profile load builds
+> when the launcher's config carries an api-key) reads 4 too, and since a send is refused until the
+> first heartbeat binds a model, the `total_slots` that beat reports outranks the 4 before any
+> delegation can run. Decision 1's "cap 1 reproduces today's behavior" still holds — it is now the
+> unkeyed default and the keyed pin, not the universal one.
 
 **3 — Concurrency is depth-0-only.** Only the top-level agent fans out; a child's own
 delegations run serially inline, exactly as before. This makes the deadlock structurally

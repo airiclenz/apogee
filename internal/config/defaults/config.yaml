@@ -158,11 +158,14 @@
 #              Optional, and it is a PIN — set it and nothing overrides it:
 #
 #                (absent)  ask the server: apogee uses the slot count it advertises. A server
-#                          that advertises none — a cloud endpoint, anything without /props —
-#                          means 1, one agent at a time: exactly today's behaviour, and what
-#                          you get until a server says otherwise.
-#                N         run at most N at once, whatever the server says. 1 keeps delegations
-#                          strictly serial.
+#                          that advertises none (anything without /props) falls to a default
+#                          read from the entry itself: 4 for a keyed server — one with an
+#                          api-key, api-key-cmd or api-key-env, or wire: anthropic — because a
+#                          hosted endpoint serves parallel requests as a matter of course; 1,
+#                          one agent at a time, for anything else, until that server says
+#                          otherwise.
+#                N         run at most N at once, whatever the server says. Serial on a keyed
+#                          server is spelled parallel-agents: 1.
 #
 #              Worth knowing before raising it: a llama.cpp server started with --parallel N
 #              splits its context window into N slots, so more parallel agents means a SMALLER

@@ -1186,9 +1186,14 @@ rather than how the server itself behaves — further down this section.
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
 is whatever the server says: a llama.cpp started with `--parallel N` advertises N slots
-and N becomes the cap; a server that advertises nothing runs delegations one at a time,
-as apogee always has. `parallel-agents: N` (a file-only key) sets the width yourself,
-and is a **pin** apogee never overrides. Mind the trade the server makes for you:
+and N becomes the cap. A server that advertises nothing falls to a default read from
+the entry itself: a **keyed** entry — one carrying `api-key`, `api-key-cmd` or
+`api-key-env`, or speaking `wire: anthropic` — is a hosted server that serves parallel
+requests as a matter of course, and runs up to **four** delegations at once; any other
+entry, an unkeyed LAN or loopback server or the `--endpoint` flag's, runs them one at a
+time, as apogee always has. `parallel-agents: N` (a file-only key) sets the width yourself,
+and is a **pin** apogee never overrides — `parallel-agents: 1` is how a keyed server is
+held serial. Mind the trade the server makes for you:
 `--parallel N` splits its context into N slots, so more parallel agents means a smaller
 window each — the per-slot number is the one apogee has always shown you. A sub-agent's
 own delegations stay one at a time. When a reply asks for more delegations than the
@@ -1198,13 +1203,16 @@ result of that group ends with one line stating the width the group actually ran
 so it does not read results that arrived in two waves as one. A group that fit inside
 the width carries no such line, and neither does a group in which a delegation was
 skipped, refused or never started. `apogee headless` resolves the cap the same way a
-session does: the pin if the entry carries one, and otherwise a single look at what the
-server advertises, taken once as the run is composed. A scheduled firing runs at the
+session does: the pin if the entry carries one, otherwise a single look at what the
+server advertises, taken once as the run is composed, and otherwise the entry's default
+above. A scheduled firing runs at the
 width the session it fires beneath is running at, read when it fires — so a `/server`
 switch carries the new server's cap into the next firing. A `/model` profile load that
-moves the session arrives at the new server's cap the same way; because the entry a
-profile load builds pins nothing, delegations run one at a time there until that
-server's own first heartbeat says how many slots it has.
+moves the session arrives at the new server's cap the same way: the entry a profile load
+builds pins nothing, so it starts at that entry's default — four when the launcher's
+config carries an api-key for the profile, one otherwise — and the server's own first
+heartbeat, which must bind a model before anything can be sent, replaces it with the
+slot count the server actually has.
 
 **Delegations can run on a server of their own.** The root `sub-agents-server:`
 key names the entry every delegation runs on: your conversation stays on the

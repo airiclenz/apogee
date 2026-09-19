@@ -92,7 +92,8 @@ the parent's posture (`CONTEXT.md`'s Sub-agent entry says the same). Only the se
 human reads waits.
 
 **5 — The receiving server's cap bounds the fan-out.** Routed ⇒ the flagged entry's cap
-(its pin, else its observed `total_slots`, else 1); fallback engaged ⇒ the parent server's
+(its pin, else its observed `total_slots`, else its floor — 4 for a keyed entry, 1 otherwise,
+ADR 0039 D2 as amended 2026-09-19); fallback engaged ⇒ the parent server's
 cap, as today. Guided decomposition's batch width follows the same number — ADR 0039's
 one-width-everywhere rule, with the width now sourced from the server actually holding the
 slots.
