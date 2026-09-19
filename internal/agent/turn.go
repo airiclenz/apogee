@@ -38,10 +38,11 @@ type turnLifecycle struct {
 	// change together and only for the request they compose: toolMenu returns no tools, buildRequest
 	// stamps the directive that says why they are gone and what to write instead, and step() takes
 	// the final-answer exit even if the reply asks for a tool anyway (loop.go). The Turn is
-	// tool-less with ONE exception: a delegation spawned with an `output_path` keeps write_file for
-	// exactly that file (Agent.outputPath, wrapUpWriter), so a capped child can still land the
-	// output it was asked for; every other call is still dropped, and a write elsewhere is refused
-	// (resolve, resolution.go). It is latched for exactly ONE request and released before the
+	// tool-less with ONE exception: write_file, once (wrapUpWriter), so a capped child can still
+	// save its report or partial output — and a delegation spawned with an `output_path` keeps it
+	// for exactly that file (Agent.outputPath), so the output it was asked for still lands; every
+	// other call is still dropped, and with a path named a write elsewhere is refused (resolve,
+	// resolution.go). It is latched for exactly ONE request and released before the
 	// capped Exchange returns, so it never outlives the Exchange that raised it. Transient like
 	// exchangeTurns: neither configured nor serialized, because a resumed session resumes at a
 	// boundary, never mid-wrap-up. Structural (ADR 0006), not a Reaction: no config key, and it

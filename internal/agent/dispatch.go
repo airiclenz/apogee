@@ -803,8 +803,9 @@ func (a *Agent) resolutionInput(tool domain.Tool, call domain.ToolCall, guard se
 
 // wrapUpOutput is the path resolve's wrap-up row keys on: the delegation's `output_path` as its
 // spawning call spelled it, on the wrap-up Turn that kept write_file for it (wrapUpWriter), and ""
-// on every other call — an ordinary Turn, or a wrap-up whose menu was withdrawn wholesale — so
-// the row is inert everywhere the exception is not in force.
+// on every other call — an ordinary Turn, a wrap-up whose menu was withdrawn wholesale, or a
+// wrap-up whose spawn named no path (Agent.outputPath is "" there) — so the row is inert
+// everywhere the narrowing is not in force.
 func (a *Agent) wrapUpOutput() string {
 	if !a.turns.wrappingUp() {
 		return ""

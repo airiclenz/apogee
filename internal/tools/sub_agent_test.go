@@ -229,11 +229,26 @@ func TestSubAgentArgsParsesTheOptionalMaxSteps(t *testing.T) {
 	}
 }
 
+// TestSubAgentDescriptionSaysWhenToPassOutputPath pins the other model-facing half (plan
+// 2026-09-18 - 00, item 5): the engine reads no path out of a task's text, so the tool's own
+// description is where the model is told to pass a file the task names as `output_path` — on
+// every variant, since the description is shared.
+func TestSubAgentDescriptionSaysWhenToPassOutputPath(t *testing.T) {
+	t.Parallel()
+
+	const want = "If the task names a file the sub-agent must write, pass it as output_path."
+	for _, tool := range []*SubAgent{NewSubAgent(), NewSubAgentWith(SubAgentOptions{SeatChoice: true})} {
+		if got := tool.Description(); !strings.HasSuffix(got, want) {
+			t.Errorf("%s description = %q, want it to end with %q", tool.Name(), got, want)
+		}
+	}
+}
+
 // TestSubAgentSchemaOffersAnOptionalOutputPath pins the model-facing half of the step-cap
 // writer (plan 2026-09-14 - 03, item 8): the published schema advertises a string `output_path`
 // property that stays OPTIONAL — a model that never names one keeps making valid calls and its
-// delegation's wrap-up stays tool-less — and whose description says what naming one buys: write_file
-// to that one path on the closing Turn.
+// delegation's wrap-up keeps one unnarrowed write — and whose description says what naming one
+// buys: write_file to that one path on the closing Turn.
 func TestSubAgentSchemaOffersAnOptionalOutputPath(t *testing.T) {
 	t.Parallel()
 

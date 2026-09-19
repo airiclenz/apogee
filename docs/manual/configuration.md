@@ -145,8 +145,8 @@ steps: 60 of 80 used — 20 left before the wrap-up Turn; write your output now
 per delegation, on the result that closes the turn reaching the threshold, and never for the
 session you are talking to, which has no step cap. A sub-agent that hears it can write its output
 while it still holds the tools to write it with, instead of discovering the cap on the wrap-up
-turn, where only a spawn-named `output_path` may still be written; a `sub_agent` call that lowered
-its own cap through `max_steps` is warned at three quarters of that lower number.
+turn, where a single `write_file` is all that remains; a `sub_agent` call that lowered its own cap
+through `max_steps` is warned at three quarters of that lower number.
 
 It is the context-fill notice's twin in every other respect
 ([ADR 0077](../adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md), 2026-09-15
@@ -794,16 +794,20 @@ agent receives says so in one line, so it learns the number instead of asking ag
 [`step-budget-notice:`](#step-budget-notice) on, the sub-agent is told once when three
 quarters of the ceiling are spent, so it can write its output before the tools go.
 
-The same call may name the file the sub-agent is expected to write through its
-`output_path` argument (a path in the same spelling `write_file` takes, relative to the
-workspace or absolute). It changes nothing about the task; what it buys is the ceiling: a
-sub-agent that hits its cap with an `output_path` named keeps `write_file` for exactly that
-one file on its final turn — the directive tells it so — and the engine runs that one write
-before ending the delegation, so the output it was asked for still lands. A write to any
-other path on that turn is refused, naming the one path allowed. Without `output_path` the
-final turn has no tools at all, as before; and a sub-agent running in plan mode, or one whose
-`tools:` roster dropped `write_file`, keeps none either — it is never told it may write
-something the mode would then refuse.
+A sub-agent that hits its cap keeps exactly one tool on its final turn: `write_file`, once,
+so it can save its report or partial output instead of losing it — the directive tells it so,
+and the engine runs that one write before ending the delegation; a second write on that turn
+is dropped. The write meets the mode like any other: `ask-before` still asks you, and a
+sub-agent running in plan mode, or one whose `tools:` roster dropped `write_file`, keeps no
+tool at all — it is never told it may write something the mode would then refuse. The same
+call may name the file the sub-agent is expected to write through its `output_path` argument
+(a path in the same spelling `write_file` takes, relative to the workspace or absolute). It
+changes nothing about the task; what it buys is the aim of that one write: a sub-agent that
+hits its cap with an `output_path` named keeps `write_file` for exactly that one file, so the
+output it was asked for still lands, and a write to any other path on that turn is refused,
+naming the one path allowed. The engine reads no path out of the task text, so when your
+task names a file the sub-agent must write, pass it as `output_path` too — the tool's own
+description says so.
 
 How **deep** delegation may nest is `delegate-max-depth:` (a file-only key). Your session
 is depth 0 and may hand work to a sub-agent; at the default of **1** the sub-agents it

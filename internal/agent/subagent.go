@@ -419,13 +419,15 @@ func capDelegateResult(body string) string {
 
 // outputMissing reports whether the delegation was spawned to write a file (Agent.outputPath)
 // that is absent once its run has ended. It answers false whenever the child was never in a
-// position to write it — no `output_path`, no write_file in its registry, or a Plan-mode child
-// whose ladder refuses every workspace write (the same three conditions wrapUpWriter reads) —
-// because a file the ladder forbade is not a fault of the child's; and false when the path exists
-// in any form. Only a certainly-absent file (fs.ErrNotExist) counts: a stat that fails some other
-// way is not evidence the child skipped its write.
+// position to write it — no `output_path` that resolved (outputTarget, which resolveOutputPath
+// sets only where the child's registry holds write_file), or a Plan-mode child whose ladder
+// refuses every workspace write — because a file the ladder forbade is not a fault of the child's;
+// and false when the path exists in any form. It reads those conditions itself rather than through
+// wrapUpWriter, which since the one-write wrap-up answers true without a target: a writer on the
+// menu is not a file the child was asked for. Only a certainly-absent file (fs.ErrNotExist)
+// counts: a stat that fails some other way is not evidence the child skipped its write.
 func (a *Agent) outputMissing() bool {
-	if _, ok := a.wrapUpWriter(); !ok {
+	if a.outputTarget == "" || a.Mode() == domain.ModePlan {
 		return false
 	}
 	_, err := os.Stat(a.outputTarget)
@@ -434,8 +436,8 @@ func (a *Agent) outputMissing() bool {
 
 // wrapUpMarker and wrapUpDirectiveFormat are the one-request directive a delegate stopped at its
 // step cap is handed for its closing report (turnLifecycle.wrapUp, loop.go): the request that
-// carries it carries no tools at all — bar write_file for a delegation spawned with an
-// `output_path`, which wrapUpOutputClauseFormat announces below — so the directive is the only
+// carries it carries no tools at all — bar the one write_file wrapUpWriter keeps, which
+// wrapUpOutputClauseFormat and wrapUpWriteClause announce below — so the directive is the only
 // thing that tells the child WHY its menu vanished and what to do with the reply it has left. It states the cause, the
 // prohibition and the ask — report to the agent that delegated the task, unfinished work included
 // — because a model that is merely given no tools narrates its next tool call instead of a result,
@@ -457,11 +459,13 @@ func (a *Agent) outputMissing() bool {
 // (wrapUpTokenDirectiveFormat, wrapUpTimeDirectiveFormat): the cause differs, the prohibition and
 // the ask do not, so the three share wrapUpDirectiveTail and wrapUpDirective picks by capHit.
 //
-// wrapUpOutputClauseFormat is the one clause appended AFTER the directive — never folded into it,
-// so the three formats above keep their arity and their pinned text — when, and only when, the
-// wrap-up keeps write_file for the delegation's `output_path` (wrapUpWriter): it names the one
-// path the child may still write, in the spelling its spawning call used (Agent.outputPath), so
-// the exception is announced exactly where the withdrawal is. %s is that path.
+// wrapUpOutputClauseFormat and wrapUpWriteClause are the one clause appended AFTER the directive —
+// never folded into it, so the three formats above keep their arity and their pinned text — when,
+// and only when, the wrap-up keeps write_file (wrapUpWriter), so the exception is announced exactly
+// where the withdrawal is. With a spawn-named `output_path` the clause names the one path the
+// child may still write, in the spelling its spawning call used (Agent.outputPath; %s is that
+// path); without one it offers the single write for the child's report or partial output, aimed
+// wherever the Mode admits.
 const (
 	wrapUpMarker = "no further tool calls are possible"
 
@@ -471,6 +475,8 @@ const (
 	wrapUpNoteTopic = "wrap-up"
 
 	wrapUpOutputClauseFormat = "\n\nYou may still call write_file once, for %s only."
+
+	wrapUpWriteClause = "\n\nYou may still call write_file once, to save your report or partial output before you reply."
 
 	wrapUpDirectiveTail = "no further tool calls are possible: the tools have been withdrawn for this final reply." +
 		"\n\nReport back to the agent that delegated this task now: what you found, what you " +
@@ -490,9 +496,10 @@ const (
 
 // wrapUpDirective renders the closing-report directive for the bound capHit names, with that
 // bound's applied value in the clause — the same number the human read in the ErrorEvent and the
-// parent reads in the result head, so all three tell one story. The output clause rides it only
+// parent reads in the result head, so all three tell one story. The write clause rides it only
 // when the wrap-up menu actually carries write_file (wrapUpWriter), so the child is never told it
-// may write a file the menu then withholds.
+// may write a file the menu then withholds — the output-path clause where the spawn named a path,
+// the plain one-write clause otherwise.
 func (a *Agent) wrapUpDirective() string {
 	var directive string
 	switch a.capHit {
@@ -503,10 +510,13 @@ func (a *Agent) wrapUpDirective() string {
 	default:
 		directive = fmt.Sprintf(wrapUpDirectiveFormat, a.stepCap)
 	}
-	if _, ok := a.wrapUpWriter(); ok {
-		directive += fmt.Sprintf(wrapUpOutputClauseFormat, a.outputPath)
+	if _, ok := a.wrapUpWriter(); !ok {
+		return directive
 	}
-	return directive
+	if a.outputTarget == "" {
+		return directive + wrapUpWriteClause
+	}
+	return directive + fmt.Sprintf(wrapUpOutputClauseFormat, a.outputPath)
 }
 
 // wrapUpOutputRefusalFormat is the error result a wrap-up write_file call gets when its target is
@@ -514,49 +524,53 @@ func (a *Agent) wrapUpDirective() string {
 // make, and the refusal names that path in the spelling the directive used. %s is Agent.outputPath.
 const wrapUpOutputRefusalFormat = "wrap-up: only %s may be written"
 
-// wrapUpWriter is the ONE tool the step-cap wrap-up Turn keeps, and whether it keeps it: write_file,
-// for a delegation spawned with an `output_path` (Agent.outputPath), so a capped child can still
-// land the file it was asked for. It answers false — and the wrap-up stays tool-less and
-// clause-less, never announced-then-refused — unless all three hold: the spawn named an output
-// path that resolved (outputTarget), this Agent's registry holds write_file (a `tools:` roster may
-// have dropped it), and its live Mode admits a workspace write at all — a Plan-mode child inherits
-// Plan, whose ladder row refuses the call, so offering it there would be a promise the ladder
-// breaks. It is read by the three wrap-up seams (toolMenu, wrapUpDirective, step's call filter)
-// and by resolve's wrap-up row through resolutionInput, so the offer and the permission cannot
-// drift apart.
+// wrapUpWriter is the ONE tool the step-cap wrap-up Turn keeps, and whether it keeps it:
+// write_file, so a capped child can still land its report, its partial output, or — for a
+// delegation spawned with an `output_path` (Agent.outputPath) — the file it was asked for, and
+// the parent is not handed a fabricated tool dump in place of work that only needed saving. It
+// answers false — and the wrap-up stays tool-less and clause-less, never announced-then-refused —
+// unless both hold: this Agent's registry holds write_file (a `tools:` roster may have dropped
+// it), and its live Mode admits a workspace write at all — a Plan-mode child inherits Plan, whose
+// ladder row refuses the call, so offering it there would be a promise the ladder breaks. An
+// `output_path` is no longer a condition (2026-09-18, superseding the 2026-09-14 "only when
+// named"): it narrows WHERE the one write may go, never whether there is one. It is read by the
+// three wrap-up seams (toolMenu, wrapUpDirective, step's call filter) and by resolve's wrap-up row
+// through resolutionInput, so the offer and the permission cannot drift apart.
 func (a *Agent) wrapUpWriter() (domain.Tool, bool) {
-	if a.outputTarget == "" || a.Mode() == domain.ModePlan {
+	if a.Mode() == domain.ModePlan {
 		return nil, false
 	}
 	return a.lookupTool(tools.WriteFileToolName)
 }
 
 // wrapUpCalls is the wrap-up Turn's call filter (step, loop.go): with write_file on the menu
-// (wrapUpWriter) it keeps the write_file calls the reply made — the FIRST one aimed at the output
-// path, judged by classifyWriteTarget's resolved target against Agent.outputTarget (two readings
-// of one resolver), plus every one aimed elsewhere — and drops the rest; with the menu withdrawn
-// wholesale it keeps nothing. The clause promised write_file "once, for <path> only"
-// (wrapUpOutputClauseFormat), so a second write to the output path is asking for something the
-// request said it cannot have: it is dropped undispatched like any other withdrawn call, and the
-// first write is the one that lands. A kept elsewhere-write is not yet permitted — the wrap-up
-// row of resolve refuses one aimed anywhere but the output path — it is merely dispatched, so
-// the refusal reaches the transcript instead of vanishing with the dropped calls.
+// (wrapUpWriter) it keeps the write_file calls the reply may make and drops everything else; with
+// the menu withdrawn wholesale it keeps nothing. The clause promised write_file "once"
+// (wrapUpWriteClause, wrapUpOutputClauseFormat), so a second write the clause already withdrew is
+// asking for something the request said it cannot have: it is dropped undispatched like any other
+// withdrawn call, and the first write is the one that lands. Without an output path that is the
+// FIRST write_file call, wherever it is aimed — the ladder decides whether it runs. With one, it
+// is the FIRST call aimed at the output path, judged by classifyWriteTarget's resolved target
+// against Agent.outputTarget (two readings of one resolver), plus every one aimed elsewhere: a
+// kept elsewhere-write is not permitted — the wrap-up row of resolve refuses one aimed anywhere
+// but the output path — it is merely dispatched, so the refusal reaches the transcript instead of
+// vanishing with the dropped calls.
 func (a *Agent) wrapUpCalls(calls []domain.ToolCall) []domain.ToolCall {
 	writer, ok := a.wrapUpWriter()
 	if !ok {
 		return nil
 	}
 	var kept []domain.ToolCall
-	outputWriteKept := false
+	writeKept := false
 	for _, call := range calls {
 		if call.Tool != tools.WriteFileToolName {
 			continue
 		}
-		if a.classifyWriteTarget(writer, call).real == a.outputTarget {
-			if outputWriteKept {
+		if a.outputTarget == "" || a.classifyWriteTarget(writer, call).real == a.outputTarget {
+			if writeKept {
 				continue
 			}
-			outputWriteKept = true
+			writeKept = true
 		}
 		kept = append(kept, call)
 	}
@@ -567,8 +581,8 @@ func (a *Agent) wrapUpCalls(calls []domain.ToolCall) []domain.ToolCall {
 // write_file's own target is classified by (tools.WorkspaceWriteTarget over the child's write_file
 // tool: workspace-joined, symlinks followed), so the wrap-up's comparison is between two readings
 // of one resolver. It sets nothing when the child holds no write_file — then there is no writer to
-// keep and no resolver to read — or when the path is not inspectable; either leaves the wrap-up
-// tool-less exactly as a spawn that named no path.
+// keep and no resolver to read — or when the path is not inspectable; either leaves the wrap-up's
+// one write unnarrowed exactly as a spawn that named no path.
 func (a *Agent) resolveOutputPath(path string) {
 	if path == "" {
 		return
@@ -832,7 +846,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	}
 	// AFTER the narrowing, because the output path is resolved through the child's own write_file
 	// and kept only where the child still holds one: a `tools:` roster that dropped the writer
-	// leaves the wrap-up tool-less, as it must (wrapUpWriter).
+	// leaves the wrap-up tool-less, as it must (wrapUpWriter), with no path to narrow it to.
 	sub.resolveOutputPath(args.OutputPath)
 	// The call's optional max_steps can only ever LOWER the configured cap: a model may say "this
 	// one is small, stop it sooner", never "let me run longer than the host allows". Both values

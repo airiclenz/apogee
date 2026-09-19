@@ -53,7 +53,10 @@ const (
 //
 // `output_path` is the file the delegation is expected to write. It changes nothing about the
 // task; it names the ONE file the child may still write on its step-cap wrap-up Turn, where every
-// other tool is withdrawn (turnLifecycle.wrapUp — plan 2026-09-14 - 03, item 8).
+// other tool is withdrawn (turnLifecycle.wrapUp — plan 2026-09-14 - 03, item 8). Without it that
+// Turn still keeps one write_file, aimed wherever the child's Mode admits (plan 2026-09-18 - 00,
+// item 5); the tool description tells the model when to name the path, because the engine reads
+// no path out of the task text.
 const subAgentSchemaTemplate = `{
   "type": "object",
   "required": ["task"],
@@ -97,7 +100,7 @@ var subAgentSpec = toolSpec{
 		"single result back. Use it to isolate a self-contained piece of work. " +
 		"You may call sub_agent several times in a single reply; sibling delegations run " +
 		"concurrently, so dispatch independent sub-tasks together in one reply rather than " +
-		"one per turn.",
+		"one per turn. If the task names a file the sub-agent must write, pass it as output_path.",
 	schema: subAgentSchema(false),
 }
 
@@ -134,8 +137,9 @@ var subAgentSpec = toolSpec{
 // write_file's `path` takes, relative to the workspace root or absolute. The task text is left
 // untouched by it; what it buys is the step-cap wrap-up: a capped child that named one keeps
 // write_file for exactly that path on its closing Turn, where every other tool is withdrawn (plan
-// 2026-09-14 - 03, item 8). Empty means the wrap-up stays tool-less. Never privilege: the write
-// still runs through the same fence and Mode the child's every other write does.
+// 2026-09-14 - 03, item 8). Empty leaves the wrap-up's one write_file unnarrowed (plan 2026-09-18
+// - 00, item 5). Never privilege: the write still runs through the same fence and Mode the child's
+// every other write does.
 type SubAgentArgs struct {
 	Task       string         `json:"task"`
 	Name       string         `json:"name"`

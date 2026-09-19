@@ -253,11 +253,13 @@ type resolutionInput struct {
 	maxDepth     int
 	// wrapUpOutput is the ONE path the step-cap wrap-up Turn may write — the delegation's
 	// `output_path` as its spawning call spelled it (Agent.outputPath) — and "" for every call
-	// outside a wrap-up that kept write_file (turnLifecycle.wrapUp, wrapUpWriter): no other call reaches
-	// the ladder from a wrap-up, because step() drops them undispatched. writesWrapUpOutput is
-	// precomputed by dispatch from the SAME on-disk resolution the three write-target facts above
-	// come from: whether this call is write_file AND its target resolves to that path
-	// (Agent.outputTarget). The wrap-up row refuses a call that has the first without the second.
+	// outside a wrap-up that kept write_file for a spawn-named path (turnLifecycle.wrapUp,
+	// wrapUpWriter), a wrap-up write with no such path included: that one write is admitted
+	// wherever the Mode admits it, on its ordinary row alone. No other call reaches the ladder from
+	// a wrap-up, because step() drops them undispatched. writesWrapUpOutput is precomputed by
+	// dispatch from the SAME on-disk resolution the three write-target facts above come from:
+	// whether this call is write_file AND its target resolves to that path (Agent.outputTarget).
+	// The wrap-up row refuses a call that has the first without the second.
 	wrapUpOutput       string
 	writesWrapUpOutput bool
 	// approverPresent reports whether an Approver is configured (a gate with none refuses).
@@ -276,6 +278,8 @@ type resolutionInput struct {
 //     dispatched is refused with a result naming the path (wrapUpOutputRefusalFormat). It sits
 //     above the ladder because it is narrower than every row there: the call still meets its
 //     ordinary row below, so an output path the Mode gates is gated exactly as any other write.
+//     The row is inert for a wrap-up whose spawn named no path: its one write_file meets the
+//     ladder as any other write does — Plan refuses it, Ask-Before prompts, Allow-Edits runs it.
 //  3. The sub_agent recursion point is Delegated, not run as a leaf. A Tier-2 force-approval
 //     is DELIBERATELY not applied to a Delegate (D3/ADR 0013): nothing executes at
 //     delegation, so the shared read-only floor re-fires on the child's own dangerous call.

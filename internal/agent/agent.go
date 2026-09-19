@@ -424,8 +424,9 @@ type Agent struct {
 	// refusal quote back to the model; outputTarget is that path resolved through the same write
 	// fence write_file's own target is (tools.WorkspaceWriteTarget: workspace-joined, symlinks
 	// followed), the spelling a wrap-up write_file call's target is compared against. It is not
-	// privilege and reaches no ladder row: what it buys is the one exception turnLifecycle.wrapUp
-	// documents. Structural like that latch: no config key, and it holds under Bypass.
+	// privilege and reaches no ladder row: what it buys is the narrowing of the one write
+	// turnLifecycle.wrapUp documents to that file. Structural like that latch: no config key, and
+	// it holds under Bypass.
 	outputPath   string
 	outputTarget string
 
@@ -833,9 +834,9 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 // (the child's own stream, at its Depth), then latches wrapUp for exactly one step(): the tool
 // menu is withdrawn and the request tells the delegate why its tools are gone and asks it to
 // report to the agent that delegated the task (subagent.go's wrapUpDirectiveFormat, loop.go's
-// three seams). The one tool that survives the withdrawal is write_file, and only for a
-// delegation spawned with an `output_path` (Agent.outputPath, wrapUpWriter): the request then
-// also says that file may still be written, and step() dispatches that one call before ending.
+// three seams). The one tool that survives the withdrawal is write_file, once (wrapUpWriter) —
+// for a delegation spawned with an `output_path` (Agent.outputPath) for exactly that file: the
+// request also says what may still be written, and step() dispatches that one call before ending.
 // What the parent reads is then AUTHORED rather than scavenged from whatever the
 // child happened to narrate alongside its last tool call.
 //

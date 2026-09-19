@@ -34,8 +34,9 @@ const (
 
 	// stepNoticeCap is the `delegate-max-steps:` the journeys pin; the notice fires on the Turn
 	// reaching ceil(0.75 × 4) = 3. stepNoticeTurns is how many of the child's tool results the
-	// stub sees as a request's LAST message — the cap's fourth closes the Turn that trips the cap,
-	// so the wrap-up request that follows it ends on the directive, not on it.
+	// stub sees as a request's LAST message short of the wrap-up — the cap's fourth closes the Turn
+	// that trips the cap, and the wrap-up request that follows ends on it with the directive fenced
+	// on as an engine note, which childToolMessages leaves out.
 	stepNoticeCap   = 4
 	stepNoticeTurns = 3
 
@@ -141,7 +142,9 @@ func TestE2EStepNoticeIsOffByDefault(t *testing.T) {
 // childToolMessages is the tool message each CHILD request ended on, in request order and each
 // once — the child's own view of the call that request followed — read off the requests whose
 // conversation carries the child's task and none of the parent's; a request ending on anything
-// but a tool result (the wrap-up's directive) contributes nothing.
+// but a tool result contributes nothing, and neither does the wrap-up request, whose tail is the
+// capping Turn's tool result with the wrap-up directive fenced on as an engine note — the
+// closing report's request, not a working Turn's.
 func childToolMessages(t *testing.T, stub *stubllm.Server) []string {
 	t.Helper()
 
@@ -158,7 +161,7 @@ func childToolMessages(t *testing.T, stub *stubllm.Server) []string {
 			continue
 		}
 		last := req.Messages[len(req.Messages)-1]
-		if last.ToolCallID == "" {
+		if last.ToolCallID == "" || strings.Contains(last.Content, domain.EngineNoteFencePrefix) {
 			continue
 		}
 		out = append(out, last.Content)

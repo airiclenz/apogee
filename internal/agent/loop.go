@@ -208,10 +208,10 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 
 	calls := resp.ToolCalls()
 	if a.turns.wrappingUp() {
-		// The wrap-up Turn (turnLifecycle.wrapUp) keeps at most ONE tool: write_file, for a delegation
-		// spawned with an `output_path`, and then only the calls aimed at that tool survive — the
-		// first write to the output path and any write aimed elsewhere (wrapUpCalls, subagent.go).
-		// Everything else the reply asked for — a second output-path write included — is asking
+		// The wrap-up Turn (turnLifecycle.wrapUp) keeps at most ONE tool: write_file, and then only
+		// the calls aimed at that tool survive — the first write_file call, or with a spawn-named
+		// `output_path` the first write to that path and any write aimed elsewhere (wrapUpCalls,
+		// subagent.go). Everything else the reply asked for — a second write included — is asking
 		// for something the request told it it cannot have, and a withdrawn menu that is still
 		// reachable is no withdrawal at all — so those calls are DROPPED undispatched here, and
 		// with the menu withdrawn wholesale that is every call.
@@ -854,8 +854,8 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// the reply ceiling newProjection stamps: after construction, before any pre-request hook,
 	// because it is the engine's own bound and must hold under Bypass, where no hook runs at all.
 	// It is the other half of the withdrawn menu toolMenu just returned — without it the child is
-	// left to guess why its tools vanished — and it carries the output clause exactly when that
-	// menu kept write_file for the delegation's `output_path` (wrapUpWriter). It rides the
+	// left to guess why its tools vanished — and it carries the write clause exactly when that
+	// menu kept write_file (wrapUpWriter). It rides the
 	// closing tool result of the capping Turn as an engine note (Request.NoteOnTail, the advise
 	// slot's seam under the engine's own fence — ADR 0076 D6 addendum): the tail is where the
 	// model reads next, whereas a sentence at the far end of a long system prompt is what a
@@ -1383,9 +1383,9 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 	// gone" means on a wire that carries no tool_choice — the seam renders no tool-instruction
 	// block for it and sends no native array. The withdrawal is the prohibition; step() drops any
 	// call a model makes anyway, so no path can reach a tool from here. The ONE exception is
-	// write_file for a delegation spawned with an `output_path` (wrapUpWriter, subagent.go): that
-	// menu is exactly the one tool, offered only where the child holds it and its Mode admits the
-	// write, and step() dispatches only calls to it — a write elsewhere is refused by resolve's
+	// write_file (wrapUpWriter, subagent.go): that menu is exactly the one tool, offered only
+	// where the child holds it and its Mode admits a write, and step() dispatches one call to it
+	// — for a delegation spawned with an `output_path` a write elsewhere is refused by resolve's
 	// wrap-up row, never run.
 	if a.turns.wrappingUp() {
 		writer, ok := a.wrapUpWriter()

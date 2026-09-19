@@ -23,10 +23,10 @@ turns:
       tool_calls:
         - name: sub_agent
           arguments: '{"task":"Survey the workspace files one at a time and describe them","name":"survey"}'
-    # The child's closing report on the tool-less wrap-up Turn the cap spends: the directive this
-    # matches rides the closing tool result as an engine note, which the tool-less wire degrades to
-    # a user message, so `last_message:` reads it. Listed ABOVE the child's tool turns to win that
-    # request.
+    # The child's closing report on the wrap-up Turn the cap spends: the directive this matches
+    # rides the closing tool result as an engine note, and `last_message:` reads it off the tool
+    # message (the menu keeps one write_file, so the wire does not degrade it). Listed ABOVE the
+    # child's tool turns to win that request.
     - when:
         last_message: no further tool calls are possible
       repeat: true

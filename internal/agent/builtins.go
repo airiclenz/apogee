@@ -241,10 +241,9 @@ func classedBuiltin(id, action string, class domain.Class, on domain.Moment, han
 //     salvaging the same text again would dispatch the call twice.
 //   - Never on a tool-less WRAP-UP Turn (turnLifecycle.wrapUp). That Turn is offered no menu at all and
 //     its reply is a closing report by construction: a call salvaged out of it would be a call
-//     the delegation had already been told it could not make. A wrap-up that kept write_file for
-//     the delegation's `output_path` (wrapUpWriter) is offered exactly that menu, and salvages
-//     against it like any other Turn — the one call it may still make is the one worth reading
-//     out of its text.
+//     the delegation had already been told it could not make. A wrap-up that kept write_file
+//     (wrapUpWriter) is offered exactly that menu, and salvages against it like any other Turn —
+//     the one call it may still make is the one worth reading out of its text.
 //
 // The menu it salvages AGAINST is the REQUEST's — resp.View().Tools(), what this Turn was
 // actually offered — and deliberately not registeredToolNames' whole registry, which is the

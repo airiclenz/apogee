@@ -665,8 +665,9 @@ hit, why its tools are gone, and asking it to report to the agent that delegated
 unfinished work included — not to continue the task, not to write what a tool would have
 printed — rides the closing tool result of the capping Turn as an **engine note**, fenced
 `[engine — wrap-up]` … `[end engine — wrap-up]` where the model reads next (the advise slot's
-seam under the engine's own header, ADR 0076 D6 addendum; the tool-less wire degrades that
-message to user role whole, so the fence reaches the model as the tail of a user message). Only
+seam under the engine's own header, ADR 0076 D6 addendum; where the menu is withdrawn wholesale
+the tool-less wire degrades that message to user role whole, so the fence reaches the model as
+the tail of a user message). Only
 when the tail is not a tool result does the directive fall back to the system prompt. That Turn
 is EXTRA — it sits outside the cap, so `delegate-max-steps: 3` still buys
 three working Turns plus this one reply. The fold IS the report: the parent receives it on every
@@ -675,14 +676,20 @@ report]` — the wrap-up's reply, or whatever the child last said out loud when 
 errors or answers with a tool call, or `(no visible text)` when it never spoke; a fold whose summary
 call faulted is replaced by `[engine summary unavailable — <cause>]` and the closing report
 still lands. The withdrawal has ONE exception
-(2026-09-15, reversing the 2026-09-01 tool-less call): a delegation whose `sub_agent` call named
+(2026-09-15, reversing the 2026-09-01 tool-less call; widened 2026-09-18 from "only when named"
+to every delegate): the wrap-up Turn keeps `write_file`, ONCE, so a capped child can save its
+report or partial output rather than lose it — the directive says so (`You may still call
+write_file once, to save your report or partial output before you reply.`), the engine dispatches
+the first `write_file` call before ending and drops any later one, and the write meets the
+Mode's ladder as any other (Ask-Before still prompts). A delegation whose `sub_agent` call named
 an `output_path` — the file it is expected to write, resolved through the same write fence as
-`write_file`'s own target — keeps `write_file` for exactly that path on the wrap-up Turn, the
-directive says so (`You may still call write_file once, for <path> only.`), the engine
-dispatches that one call before ending, and a `write_file` aimed anywhere else is refused with
-`wrap-up: only <path> may be written`. The exception is offered only where the child still holds
-`write_file` and its Mode admits a workspace write — a Plan-mode child's wrap-up stays tool-less
-— so it is never announced and then refused. The parent receives a non-error
+`write_file`'s own target — has that one write narrowed to exactly that path: the clause names
+it (`You may still call write_file once, for <path> only.`), and a `write_file` aimed anywhere
+else is refused with `wrap-up: only <path> may be written`. The engine reads no path out of the
+task text; the `sub_agent` description tells the model to pass a file the task names as
+`output_path`. The exception is offered only where the child still holds `write_file` and its
+Mode admits a workspace write — a Plan-mode child's wrap-up stays tool-less — so it is never
+announced and then refused. The parent receives a non-error
 result whose first line marks it partial and names the bound that tripped (`step cap`, `token
 budget` or `time limit`) — `[delegate stopped at its <bound>; partial result — engine summary
 and closing report follow]` — followed by that body, so Turns of real work are not thrown away,

@@ -227,7 +227,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		drv.WaitQuiet(settled)
 
 		// The child asked exactly four times: the three working Turns the cap allows, plus the one
-		// tool-less Turn the engine spends asking it to sum up. Its requests are the ones carrying
+		// closing Turn the engine spends asking it to sum up. Its requests are the ones carrying
 		// its task; the parent's and the title call's do not — and the engine's own fold of the
 		// child's conversation, which echoes the task, is counted apart (engineFoldRequests).
 		if got := childRequests(stub, childTask); got != 4 {
@@ -236,12 +236,16 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		if got := engineFoldRequests(stub, childTask); got != 1 {
 			t.Errorf("the engine folded the child's conversation %d times; a capped child is folded once, before its wrap-up", got)
 		}
-		// The wrap-up is the one request that offered NO tools, which is both how the child is told
-		// its tools are gone and why it could never have run a fourth: three requests carried the
-		// menu, the fourth carried none.
-		if got := childToolMenus(stub, childTask); !slices.Equal(got, []bool{true, true, true, false}) {
-			t.Errorf("the child's requests offered tools %v; want the three capped Turns armed and "+
-				"the wrap-up disarmed", got)
+		// The wrap-up's menu is withdrawn down to ONE tool: write_file, once, so a capped child can
+		// still save what it has (plan 2026-09-18 - 00, item 5) — three requests carried the full
+		// menu, the fourth carried exactly that tool, and the child could never have run a fourth
+		// working Turn on it. The scripted child spends the Turn on its report instead.
+		if got := childToolMenus(stub, childTask); !slices.Equal(got, []bool{true, true, true, true}) {
+			t.Errorf("the child's requests offered tools %v; want a menu on every request — the "+
+				"wrap-up's being write_file alone", got)
+		}
+		if last := lastChildRequest(stub, childTask); len(last.Tools) != 1 || last.Tools[0] != "write_file" {
+			t.Errorf("the wrap-up offered %v; want exactly write_file", last.Tools)
 		}
 		// And it never reached the turn where it would have spoken its own answer.
 		if strings.Contains(drv.Frame().String(), childFinalWords) {
@@ -324,9 +328,9 @@ func TestE2EDelegationStepCap(t *testing.T) {
 	// The output_path variant (plan 2026-09-14 - 03, item 8): the same capped child, spawned with
 	// the file it is expected to write. Its wrap-up keeps write_file for that one path, so the
 	// file EXISTS after the run — under allow-edits, where an in-workspace write needs no gate —
-	// and the wrap-up is the one request whose menu is armed with exactly that tool, which is why
-	// the no-output_path pin above (true, true, true, false) is this run's opposite on its last
-	// request.
+	// and the wrap-up's menu is armed with exactly that tool, as the plain run's is; what the
+	// path changes is the clause the directive ends on, and so which script turn the stub
+	// answers with.
 	t.Run("a capped child with an output path still writes it", func(t *testing.T) {
 		stub := stubllm.New(t, loadScript(t, "delegate-cap"))
 		drv := tuitest.NewDriver(t, e2eSize)
@@ -343,13 +347,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			t.Errorf("the child's requests offered tools %v; want the wrap-up armed with write_file "+
 				"for the output path", got)
 		}
-		reqs := stub.Requests()
-		last := reqs[len(reqs)-1]
-		for _, req := range reqs {
-			if requestCarriesTask(req, childTask) {
-				last = req
-			}
-		}
+		last := lastChildRequest(stub, childTask)
 		if len(last.Tools) != 1 || last.Tools[0] != "write_file" {
 			t.Errorf("the wrap-up offered %v; want exactly write_file", last.Tools)
 		}
@@ -712,9 +710,11 @@ func childRequests(stub *stubllm.Server, task string) int {
 }
 
 // childToolMenus reports, for each of the child's requests in order, whether it offered a tool menu
-// at all. A capped delegate's last request is the tool-less one the engine spends on its closing
-// report, so the run reads true, true, ..., false. The engine fold's request — tool-less too — is
-// not the child's and is left out (requestCarriesTask).
+// at all. A capped delegate's last request is the one the engine spends on its closing report,
+// whose menu is withdrawn down to write_file alone where the child holds it and its mode admits a
+// write — so under the default registry the run reads true on every request, and lastChildRequest
+// is what tells the wrap-up's one-tool menu from a working Turn's. The engine fold's request —
+// tool-less — is not the child's and is left out (requestCarriesTask).
 func childToolMenus(stub *stubllm.Server, task string) []bool {
 	var armed []bool
 	for _, req := range stub.Requests() {
@@ -723,6 +723,19 @@ func childToolMenus(stub *stubllm.Server, task string) []bool {
 		}
 	}
 	return armed
+}
+
+// lastChildRequest is the last request the stub answered that carries the child's task — a capped
+// delegate's wrap-up request — or the stub's last request when none does.
+func lastChildRequest(stub *stubllm.Server, task string) stubllm.Request {
+	reqs := stub.Requests()
+	last := reqs[len(reqs)-1]
+	for _, req := range reqs {
+		if requestCarriesTask(req, task) {
+			last = req
+		}
+	}
+	return last
 }
 
 // assertNoErrorTone fails when the row carrying marker holds any cell painted in the colour

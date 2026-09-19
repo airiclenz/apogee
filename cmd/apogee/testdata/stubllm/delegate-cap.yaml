@@ -46,13 +46,13 @@ turns:
       tool_calls:
         - name: sub_agent
           arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey","output_path":"survey.md"}'
-    # The output_path child's closing Turn: its wrap-up request still carries the directive AND the
-    # output clause, which only that variant's request carries — so this turn sits ABOVE the plain
-    # wrap-up turn to win the request that has the clause. The directive rides the closing tool
-    # result as an engine note (`[engine — wrap-up]`), so `last_message:` is what reads it; this
-    # variant keeps write_file on the menu, so that tail stays a tool message on the wire. It
-    # spends its one reply on the write it was told it may still make (a stubllm turn is one kind
-    # — a call here, not a report).
+    # The output_path child's closing Turn: its wrap-up request carries the directive AND the
+    # output-path clause naming survey.md, which only that variant's request carries — the plain
+    # wrap-up below carries the one-write clause instead, so the two never claim each other's
+    # request. The directive rides the closing tool result as an engine note (`[engine — wrap-up]`),
+    # so `last_message:` is what reads it; write_file stays on the menu, so that tail is a tool
+    # message on the wire. It spends its one reply on the write it was told it may still make (a
+    # stubllm turn is one kind — a call here, not a report).
     - when:
         last_message: You may still call write_file once, for survey\.md only
       repeat: true
@@ -68,14 +68,16 @@ turns:
         system: summarizing the work of a sub-agent for the agent that delegated
       repeat: true
       text: 'Engine fold: the delegate read a.txt and listed the workspace; the grep had not returned.'
-    # The child's closing report. The engine spends ONE extra tool-less Turn on a capped delegate,
-    # fencing the directive this matches onto the closing tool result — which the tool-less wire
-    # degrades to a user message, fence included, so `last_message:` reads it and no `tool_result:`
-    # turn below can claim it. It sits ABOVE the child's tool turns to win that request. Its
-    # wording is deliberately NOT the child's own final words, so a capped run and an uncapped one
-    # stay tellable apart in a frame.
+    # The child's closing report. The engine spends ONE extra Turn on a capped delegate, fencing the
+    # directive onto the closing tool result; without an output_path the menu keeps exactly one
+    # write_file and the directive ends on the plain one-write clause this matches (plan 2026-09-18
+    # - 00, item 5), so `last_message:` reads it off the tool message and no `tool_result:` turn
+    # below can claim it. It sits ABOVE the child's tool turns to win that request, and answers
+    # TEXT ONLY: the plain child reports rather than spending its write. Its wording is
+    # deliberately NOT the child's own final words, so a capped run and an uncapped one stay
+    # tellable apart in a frame.
     - when:
-        last_message: no further tool calls are possible
+        last_message: You may still call write_file once, to save your report or partial output before you reply
       repeat: true
       text: Stopped short — I read a.txt and listed the workspace; the grep never came back.
       token_delay: 1ms
