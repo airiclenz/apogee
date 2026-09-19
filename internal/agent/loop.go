@@ -404,9 +404,21 @@ func holdOffRestream(ctx context.Context) bool {
 // emits, which a streaming Driver already reads as "discard the partial reply, it is coming
 // again" — is the loop's to emit. A recovered re-stream is SILENT, exactly as a recovered
 // overflow fold is; the second fault, of any class, surfaces as every fault always did.
+//
+// One class of REPLY is re-sent too, at a raised ceiling: a reply the engine's own output cap cut
+// off (FinishLength) that carries reasoning but neither a tool call nor one visible token — a
+// reasoning model that spent the whole cap thinking. Its spend under the cap varies from pass to
+// pass and the same request has been seen answering on its second run (30a3b2df), so the Turn
+// re-sends the IDENTICAL request once with MaxTokens at capRetryFactor times the cap it just sent
+// (unclamped — the clamp bounds the engine's derivation, not a remedy for a reply it already saw
+// fail under it), spending its own latch (t.capRetrySpent) so neither the transient re-stream nor
+// a Reaction's Outcome{Retry} pays for it. It runs BEFORE the post-response Moment because the
+// cascade judges a reply the model meant, and a reply with nothing in it but reasoning is not one
+// yet; it is engine behaviour, so it holds under Bypass. The retried reply then takes the ordinary
+// path — a second cut-off faults through reviewedOutcome, naming the raised cap it hit.
 func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Response, turnOutcome, string) {
 	// The Turn's identity and its request, aliased for readability — everything below reads them
-	// unchanged, and the one write back to t is the re-stream latch.
+	// unchanged, and the only writes back to t are the two latches (re-stream and cap retry).
 	turn, req := t.turn, t.req
 	for attempt := 0; ; {
 		reply := a.streamResponse(ctx, turn, req)
@@ -453,6 +465,19 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 
 		resp := a.assembleResponse(turn, req.View(), reply, nativeCalls)
 
+		if !t.capRetrySpent && isCappedReasoningOnly(resp) {
+			// The Turn's one cap retry. Spend the latch first, so a second cut-off faults below
+			// however this attempt ends; tell observers the reasoning streamed so far is
+			// superseded; then raise the ceiling on the SAME request — SetSampling overwrites
+			// whatever a pre-request hook set, exactly as newProjection's stamp would have — and
+			// go round again. No hold-off: nothing upstream faulted, the model simply ran out.
+			t.capRetrySpent = true
+			a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
+			raised := capRetryFactor * a.sentOutputCap(req)
+			req.SetSampling(domain.SamplingParams{MaxTokens: &raised})
+			continue
+		}
+
 		// The post-response Moment: one cascade, whose builtin Floor guards run FIRST (ADR 0071)
 		// because they are engine behaviour every model runs with, so a looping or malformed
 		// response is repaired before anything armed above them looks at it. Whoever asks, the
@@ -467,7 +492,7 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			// A post-response reaction faulted (a panic is recovered into an ErrorEvent and the
 			// cascade goes on; only a returned error reaches here): the model did reply, so
 			// proceed with the response as reviewed so far rather than abandon.
-			return a.reviewedOutcome(turn, resp)
+			return a.reviewedOutcome(t, resp)
 		}
 		if out.Retry && attempt < maxPostResponseRetries {
 			// The retry attempts are counted HERE rather than in the loop header because the
@@ -477,7 +502,7 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			a.applyRetry(turn, req, resp, out.Inject)
 			continue
 		}
-		return a.reviewedOutcome(turn, resp)
+		return a.reviewedOutcome(t, resp)
 	}
 }
 
@@ -516,12 +541,25 @@ const emptyReplyErrFmt = "upstream returned an empty reply (finish: %s)"
 // 2026-08-12 incident spent 20,653 reasoning tokens and would have reported nothing but "empty").
 // So the message names the ceiling and, when the model reasoned, roughly what it spent under it:
 // those are the two numbers the remedy turns on — a larger max-output-tokens: for this server, or a
-// task small enough to answer inside the current one. It runs no retry itself (ADR 0046 decision 4)
-// but no longer claims one would fail: a reasoning model's spend under the cap varies from pass to
-// pass, and the same request has been seen answering on its second run (30a3b2df, 2026-09-14) —
-// so the last clause says a retry MAY succeed there, and leaves the choice to the reader.
+// task small enough to answer inside the current one. When the reply reasoned, the loop has already
+// re-sent the request once at a raised cap before this fault is reached (respondAndReview; ADR 0046
+// decision 4 as amended 2026-09-19) — a reasoning model's spend under the cap varies from pass to
+// pass, and the same request has been seen answering on its second run (30a3b2df, 2026-09-14) — so
+// the message then ends with cappedReplyRetriedTail, naming the raised cap the retry hit too: the
+// reader is told the cheap remedy was tried and where it got to. A reply with no reasoning never
+// retries and ends at the remedy.
 const cappedReplyErrFmt = "reply hit the output cap apogee set (%d tokens) with no visible text to " +
-	"show for it%s — raise max-output-tokens: for this server or narrow the task; a retry may succeed on a reasoning model"
+	"show for it%s — raise max-output-tokens: for this server or narrow the task%s"
+
+// cappedReplyRetriedTail is the last clause of cappedReplyErrFmt when the Turn spent its cap retry:
+// the number is the raised ceiling the re-sent request carried, so the reader knows the retry was
+// run and how far it was allowed to go.
+const cappedReplyRetriedTail = " — retried once at %d tokens and hit the cap again"
+
+// capRetryFactor is the multiplier the cap retry applies to the ceiling the capped request was sent
+// with: twice the room is the smallest raise that turns a reply which spent everything on reasoning
+// into one with room left to answer, without the retry costing an order of magnitude more.
+const capRetryFactor = 2
 
 // cappedDelegateReplyErrFmt is the fault text for a CHILD's reply that ran into the same ceiling
 // while carrying no tool call but visible text — the one case cappedReplyErrFmt above does not
@@ -555,16 +593,49 @@ const cappedDelegateReplyErrFmt = "delegate's reply hit the output cap apogee se
 // child's output-capped reply with no tool call faults even when it carries visible text, because
 // that text is a truncated answer no parent model can tell from a whole one. What the fault SAYS
 // splits by finish reason too (emptyReplyFault): a reply cut off at the engine's own output cap
-// names that cap instead of calling a 20k-token reply "empty". What the fault DOES is unchanged for
-// every reply and every depth — one ErrorEvent from source "loop", then turnFailed — so both splits
-// are messages, not a second control flow: no retry, no salvage of the reasoning, no Reaction.
-func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Response, turnOutcome, string) {
-	fault, faulted := a.replyFault(resp)
+// names that cap instead of calling a 20k-token reply "empty" — and, when the Turn already re-sent
+// the request at a raised cap (t.capRetrySpent, respondAndReview), names that raised cap too. What
+// the fault DOES is unchanged for every reply and every depth — one ErrorEvent from source "loop",
+// then turnFailed — so both splits are messages, not a second control flow: the one retry the loop
+// runs happened before this was reached, and here there is no salvage of the reasoning and no
+// Reaction.
+func (a *Agent) reviewedOutcome(t *turnRun, resp *domain.Response) (*domain.Response, turnOutcome, string) {
+	retriedAt := 0
+	if t.capRetrySpent {
+		retriedAt = a.sentOutputCap(t.req)
+	}
+	fault, faulted := a.replyFault(resp, retriedAt)
 	if !faulted {
 		return resp, turnOK, ""
 	}
-	a.emitLoopFault(turn, fault)
+	a.emitLoopFault(t.turn, fault)
 	return nil, turnFailed, ""
+}
+
+// isCappedReasoningOnly reports whether a reply is the one shape the cap retry re-sends for: cut
+// off at the output cap (FinishLength) with no tool call and no visible text, but with reasoning
+// present. A capped reply that never reasoned is not that shape — nothing about it says a second
+// pass would spend differently — and a reply with a tool call or visible text is not empty at all.
+func isCappedReasoningOnly(resp *domain.Response) bool {
+	if resp.FinishReason() != domain.FinishLength || len(resp.ToolCalls()) > 0 {
+		return false
+	}
+	if strings.TrimSpace(resp.Text()) != "" {
+		return false
+	}
+	_, reasoned := resp.Thinking()
+	return reasoned
+}
+
+// sentOutputCap is the reply ceiling the request carries right now — the loop's own stamp
+// (newProjection), a pre-request hook's override, or the cap retry's raise, whichever was set last.
+// Every request the loop builds is stamped, so the fallback to the loop's derivation is a guard
+// against a Request constructed elsewhere, not a path the loop takes.
+func (a *Agent) sentOutputCap(req *domain.Request) int {
+	if sent := req.State().Sampling.MaxTokens; sent != nil {
+		return *sent
+	}
+	return a.maxOutputTokens()
 }
 
 // replyFault decides whether a reviewed reply is a non-answer and, when it is, what the fault says.
@@ -578,13 +649,14 @@ func (a *Agent) reviewedOutcome(turn int, resp *domain.Response) (*domain.Respon
 // below carries no such number, so emptiness is judged before depth is. Only a reply that did carry
 // visible text reaches the DELEGATE rule: a child's (isDelegate) that hit the output cap faults
 // for that text — see cappedDelegateReplyErrFmt for why a truncated delegate answer cannot be
-// allowed to pose as the delegation's result.
-func (a *Agent) replyFault(resp *domain.Response) (string, bool) {
+// allowed to pose as the delegation's result. retriedAt is the raised cap the Turn's one cap retry
+// re-sent at, or 0 when no retry ran; only the empty capped wording reads it.
+func (a *Agent) replyFault(resp *domain.Response, retriedAt int) (string, bool) {
 	if len(resp.ToolCalls()) > 0 {
 		return "", false
 	}
 	if strings.TrimSpace(resp.Text()) == "" {
-		return a.emptyReplyFault(resp), true
+		return a.emptyReplyFault(resp, retriedAt), true
 	}
 	if a.isDelegate() && resp.FinishReason() == domain.FinishLength {
 		return fmt.Sprintf(cappedDelegateReplyErrFmt, a.maxOutputTokens()), true
@@ -615,8 +687,10 @@ func (a *Agent) emitLoopFault(turn int, err string) {
 // never the server's count of it — hence "roughly". And the cap named is the loop's own value for
 // this Agent, so a pre-request hook that overrode MaxTokens for that one request would leave the
 // message naming the engine's ceiling rather than the hook's; the engine's is the one an operator
-// can act on with max-output-tokens:.
-func (a *Agent) emptyReplyFault(resp *domain.Response) string {
+// can act on with max-output-tokens:. The raised cap the retry re-sent at (retriedAt, 0 when the
+// Turn ran none) is the exception: it is the number the request actually carried, because telling
+// the reader what the retry was allowed is the whole point of naming it.
+func (a *Agent) emptyReplyFault(resp *domain.Response, retriedAt int) string {
 	if resp.FinishReason() != domain.FinishLength {
 		return fmt.Sprintf(emptyReplyErrFmt, resp.FinishReason())
 	}
@@ -624,7 +698,11 @@ func (a *Agent) emptyReplyFault(resp *domain.Response) string {
 	if thinking, ok := resp.Thinking(); ok {
 		spent = fmt.Sprintf(", after roughly %d tokens of reasoning", a.tokens.EstimateTokens(len(thinking)))
 	}
-	return fmt.Sprintf(cappedReplyErrFmt, a.maxOutputTokens(), spent)
+	retried := ""
+	if retriedAt > 0 {
+		retried = fmt.Sprintf(cappedReplyRetriedTail, retriedAt)
+	}
+	return fmt.Sprintf(cappedReplyErrFmt, a.maxOutputTokens(), spent, retried)
 }
 
 // assembleResponse applies the model profile's parse seam to the collected completion (D5/D6).

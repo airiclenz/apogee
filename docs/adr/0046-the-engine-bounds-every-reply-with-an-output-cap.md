@@ -75,16 +75,35 @@ Upstream returned nothing": the model DID answer, at length, and the engine's ow
 it — so the fix is a bigger `max-output-tokens:` or a shorter task, not a retry. The turn still
 fails, from the same source, with the same outcome: a branch and a message, not a control-flow
 change. No partial-reply salvage (reasoning is not an answer, which is the existing guard's own
-reasoning) and no retry Mechanism (a retry re-runs the same request into the same ceiling).
+reasoning); the original text also ruled out any retry on the claim that one re-runs the same
+request into the same ceiling — struck 2026-09-19, see the two notes below.
 
-> **Superseded in part (2026-09-15, plan `2026-09-14 - 03` item 13).** The parenthetical's claim
-> that a retry "re-runs the same request into the same ceiling" — and the fault text's matching last
-> clause, "a retry meets the same ceiling" — is false for a reasoning model: its spend under the cap
-> varies from pass to pass, and the same request has been seen answering on its second run
-> (`30a3b2df`). The fault now ends "a retry may succeed on a reasoning model" and leaves the choice
-> to the reader. The decision itself stands: the engine still runs no retry Mechanism of its own (a
-> raised-cap retry is parked on `apogee-tfp`), and the capped-summary fault of `compact.go` keeps its
-> no-retry wording while naming the cap the summariser request was actually sent with.
+> **Superseded in part (2026-09-15, plan `2026-09-14 - 03` item 13).** The struck claim that a retry
+> "re-runs the same request into the same ceiling" — and the fault text's matching last clause, "a
+> retry meets the same ceiling" — is false for a reasoning model: its spend under the cap varies
+> from pass to pass, and the same request has been seen answering on its second run (`30a3b2df`).
+> The fault was changed to end "a retry may succeed on a reasoning model", leaving the choice to
+> the reader. The no-retry half of the decision stood at that date — the raised-cap retry was parked
+> on `apogee-tfp` — and the capped-summary fault of `compact.go` kept its no-retry wording while
+> naming the cap the summariser request was actually sent with. *Amended 2026-09-19:* the parked
+> retry has since landed (next note); the fault's "a retry may succeed" clause went with it.
+
+> **Superseded in part (2026-09-19, plan `2026-09-19 - 01` item 2, `apogee-tfp`).** The engine now
+> runs ONE retry of its own, in the loop and under Bypass, for exactly the reply this decision
+> describes when it also carries reasoning: finish reason `length`, no tool call, no visible text,
+> reasoning present. `respondAndReview` re-sends the identical request once with `MaxTokens` at
+> twice the cap the capped request was sent with — the loop's derived cap, or a pre-request
+> Reaction's override, whichever the request carried — unclamped, since the clamp bounds the
+> engine's derivation and not a remedy for a reply already seen to fail under it; it emits a
+> `StreamResetEvent` first so a streaming Driver discards the superseded reasoning, and it spends a
+> latch of its own (`turnRun.capRetrySpent`, beside the transient re-stream's `restreamSpent`) so no
+> other remedy's budget pays for it. It runs before the post-response Moment: a reasoning-only
+> reply is not yet a reply the cascade should judge. A second cut-off faults as before, and the fault
+> now ends `— retried once at N tokens and hit the cap again`, N being the raised cap. A capped
+> reply with NO reasoning is not retried (nothing about it says a second pass would spend
+> differently) and keeps the plain remedy; `cappedDelegateReplyErrFmt` (a truncated delegate answer)
+> and compaction's capped-summary fault stay no-retry. The "Retrying or continuing a reply that hit
+> the cap" rejection below is struck to the same extent.
 
 ## Considered and rejected
 
@@ -95,8 +114,10 @@ reasoning) and no retry Mechanism (a retry re-runs the same request into the sam
   the slot, and a delegation routed to a different server would carry the wrong one.
 - **Leaving it to a Mechanism** (or to `SamplingParams` and a hook): it would be absent in Bypass,
   which is where an unbudgeted session most needs the floor.
-- **Retrying or continuing a reply that hit the cap**: burns the same tokens again for the same
-  outcome; the honest failure is the cheaper answer and the one the operator can act on.
+- ~~**Retrying or continuing a reply that hit the cap**: burns the same tokens again for the same
+  outcome; the honest failure is the cheaper answer and the one the operator can act on.~~ *Struck
+  2026-09-19 for the retry half (decision 4's second note): a capped reasoning-only reply is
+  retried once at twice the cap. Continuing a reply stays rejected.*
 - **Salvaging the visible text of a cut-off reply**: a reasoning-only reply has none, and half an
   answer committed as a Turn is the blank-assistant-message failure wearing better clothes.
 - **Capping the auxiliaries too**: `internal/title/title.go` and `internal/agent/compact.go`

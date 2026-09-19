@@ -135,6 +135,16 @@ type turnRun struct {
 	// budget: maxPostResponseRetries bounds a Reaction-driven Outcome{Retry} and foldSpent bounds the
 	// overflow fold — different remedies for different failures, none of them spending another's.
 	restreamSpent bool
+
+	// capRetrySpent is the one-cap-retry-per-Turn latch: it flips once this Turn has re-sent its
+	// request at a raised output cap after a reply the engine's own ceiling cut off with reasoning
+	// but no visible text and no tool call — a reasoning model that spent the whole cap thinking
+	// (ADR 0046 decision 4 as amended 2026-09-19). One re-send at twice the cap is cheap next to
+	// the Turn faulting for a reply an identical retry has been seen to answer (30a3b2df); a second
+	// cut-off is not a spend that varies, so it faults naming the raised cap it hit too. Its own
+	// budget for the same reason restreamSpent is: a blip, a cap and a Reaction's Outcome{Retry}
+	// are different remedies, and none may spend another's.
+	capRetrySpent bool
 }
 
 // turnEnd names the five ways a Turn exits. One row per exit; end() is the whole table.

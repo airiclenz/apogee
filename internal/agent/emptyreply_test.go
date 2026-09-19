@@ -11,7 +11,9 @@ package agent
 // run "empty" names neither the cap nor what was burned reaching it — at every depth, so a child's
 // empty capped reply reports its reasoning spend too. A fourth pins the one place the guard judges
 // MORE than emptiness: on a delegate, a capped reply that carries visible text but no tool call
-// faults, because a truncated answer reaches a parent MODEL that cannot see the cut.
+// faults, because a truncated answer reaches a parent MODEL that cannot see the cut. A fifth pins
+// the one retry the loop runs before any of that judgment: a capped reply that REASONED is re-sent
+// once at twice the cap (apogee-tfp), on its own latch, and only a second cut-off reaches the fault.
 
 import (
 	"context"
@@ -143,28 +145,31 @@ func cutOffScript() stubllm.Turn {
 // key, and what the reasoning cost, while failing the Turn exactly as every other empty reply does.
 // The depth arm pins that this reading is not the main agent's alone: a CHILD that reasons itself
 // silent is the run whose spend a parent most needs named, and the delegate wording (which reports
-// no number) must not claim it just because the reply came from depth 1.
+// no number) must not claim it just because the reply came from depth 1. The reasoning rows script
+// TWO cut-off replies because a reasoning reply is re-sent once at twice the cap before it faults
+// (apogee-tfp), and the fault then names the raised cap too; the no-reasoning row is never retried
+// and keeps the one call and the plain remedy.
 func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 	tests := []struct {
 		name          string
 		depth         int
-		script        stubllm.Turn
+		scripts       []stubllm.Turn
 		wantReasoning bool
 	}{
 		{
 			name:          "a reply cut off mid-reasoning reports what it spent",
-			script:        cutOffScript(),
+			scripts:       []stubllm.Turn{cutOffScript(), cutOffScript()},
 			wantReasoning: true,
 		},
 		{
 			name:          "a cut-off reply with no reasoning at all still names the cap",
-			script:        stubllm.Turn{FinishReason: "length"},
+			scripts:       []stubllm.Turn{{FinishReason: "length"}},
 			wantReasoning: false,
 		},
 		{
 			name:          "a delegate cut off mid-reasoning reports what it spent too",
 			depth:         1,
-			script:        cutOffScript(),
+			scripts:       []stubllm.Turn{cutOffScript(), cutOffScript()},
 			wantReasoning: true,
 		},
 	}
@@ -174,7 +179,7 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 			sink := &recordingSink{}
 			cfg := baseConfig(sink)
 			cfg.Context.MaxContextTokens = 98304 // the incident's window: a 19,660-token derived cap
-			responder := scriptedResponder(t, tc.script)
+			responder := scriptedResponder(t, tc.scripts...)
 			a, err := newAgent(cfg, responder)
 			if err != nil {
 				t.Fatalf("newAgent: %v", err)
@@ -224,11 +229,173 @@ func TestCutOffReplyNamesTheOutputCap(t *testing.T) {
 			if got := a.conv.Len(); got != 1 {
 				t.Errorf("conv.Len() = %d, want 1 — only the user message survives a faulted Turn", got)
 			}
-			// Naming the cap changes the message, not the control flow: still no retry.
-			if got := len(responder.requests()); got != 1 {
-				t.Errorf("provider was called %d times, want 1 (the branch re-requests nothing)", got)
+			// Only a reply that reasoned is re-sent — once, at twice the cap — and only then does
+			// the fault name the raised cap; the no-reasoning row is one call and no such clause.
+			reqs := responder.requests()
+			if got := len(reqs); got != len(tc.scripts) {
+				t.Fatalf("provider was called %d times, want %d", got, len(tc.scripts))
+			}
+			retriedTail := fmt.Sprintf(cappedReplyRetriedTail, 2*19660)
+			if tc.wantReasoning {
+				if sent := reqs[1].Sampling.MaxTokens; sent == nil || *sent != 2*19660 {
+					t.Errorf("retry max_tokens = %v, want twice the cap sent (%d)", sent, 2*19660)
+				}
+				if !strings.HasSuffix(got, retriedTail) {
+					t.Errorf("ErrorEvent.Err = %q, want it to end with %q", got, retriedTail)
+				}
+			} else if strings.Contains(got, "retried once") {
+				t.Errorf("ErrorEvent.Err = %q, claims a retry the no-reasoning reply never ran", got)
 			}
 		})
+	}
+}
+
+// TestCappedReasoningReplyRetriesOnceAtTwiceTheCap pins the remedy the 30a3b2df incident asked for:
+// a reasoning reply the engine's own cap cut off before its first visible token is re-sent once,
+// identical, at twice the cap the request carried — the loop's derived cap or a pre-request
+// Reaction's own — and a reply that arrives on the retry commits with no fault at all. The
+// StreamResetEvent is what tells a streaming Driver the first attempt's reasoning is superseded.
+func TestCappedReasoningReplyRetriesOnceAtTwiceTheCap(t *testing.T) {
+	tests := []struct {
+		name      string
+		reactions []domain.Reaction
+		wantCap   int
+	}{
+		{name: "twice the loop's derived cap", wantCap: 2 * 19660},
+		{name: "twice a pre-request Reaction's cap", reactions: []domain.Reaction{cappingReaction(77)}, wantCap: 2 * 77},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			cfg := baseConfig(sink)
+			cfg.Context.MaxContextTokens = 98304 // a 19,660-token derived cap
+			cfg.Reactions = tc.reactions
+			responder := scriptedResponder(t, cutOffScript(), contentTurn("the audit found 14 issues"))
+
+			a := driveExchange(t, cfg, responder, "audit the repository")
+
+			reqs := responder.requests()
+			if len(reqs) != 2 {
+				t.Fatalf("provider was called %d times, want 2 (the capped reply and its one retry)", len(reqs))
+			}
+			if sent := reqs[1].Sampling.MaxTokens; sent == nil || *sent != tc.wantCap {
+				t.Errorf("retry max_tokens = %v, want %d", sent, tc.wantCap)
+			}
+			if got := countEvents[domain.StreamResetEvent](sink.events); got != 1 {
+				t.Errorf("StreamResetEvents = %d, want 1 — the retry supersedes the first attempt's reasoning", got)
+			}
+			if errs := errorEvents(sink.events); len(errs) != 0 {
+				t.Errorf("ErrorEvents = %v, want none — the retry answered", errs)
+			}
+			if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "the audit found 14 issues" {
+				t.Errorf("final MessageEvent = %+v (ok=%v), want the retry's answer", me, ok)
+			}
+			if got := a.conv.Len(); got != 2 {
+				t.Errorf("conv.Len() = %d, want 2 (user + the answer the retry produced)", got)
+			}
+		})
+	}
+}
+
+// TestCappedReasoningReplyFaultsNamingTheRaisedCap pins the give-up: a second cut-off after the one
+// retry faults the Turn as every empty capped reply always did, and the fault's last clause now says
+// what the loop did about it — retried once, at which cap — in place of the 2026-09-15 wording that
+// left the retry to the reader ("a retry may succeed on a reasoning model"). The remedy key and the
+// reasoning spend stay ahead of it.
+func TestCappedReasoningReplyFaultsNamingTheRaisedCap(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Context.MaxContextTokens = 98304
+	responder := scriptedResponder(t, cutOffScript(), cutOffScript())
+
+	a := driveExchange(t, cfg, responder, "audit the repository")
+
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 {
+		t.Fatalf("ErrorEvents = %d (%v), want exactly 1", len(errs), errs)
+	}
+	got := errs[0].Err
+	wantTail := " — raise max-output-tokens: for this server or narrow the task" +
+		fmt.Sprintf(cappedReplyRetriedTail, 2*19660)
+	if !strings.HasSuffix(got, wantTail) {
+		t.Errorf("ErrorEvent.Err = %q, want it to end with %q", got, wantTail)
+	}
+	if strings.Contains(got, "a retry may succeed") {
+		t.Errorf("ErrorEvent.Err = %q, still leaves to the reader the retry the loop now runs", got)
+	}
+	if !strings.Contains(got, "tokens of reasoning") {
+		t.Errorf("ErrorEvent.Err = %q, want the reasoning spend kept ahead of the retried clause", got)
+	}
+	if got := len(responder.requests()); got != 2 {
+		t.Errorf("provider was called %d times, want 2 — one retry, never a second", got)
+	}
+	if got := a.conv.Len(); got != 1 {
+		t.Errorf("conv.Len() = %d, want 1 — only the user message survives a faulted Turn", got)
+	}
+}
+
+// TestCapRetryLatchIsSeparateFromTheReStreamLatch pins that the cap retry has its own budget: a
+// Turn that spent its transient re-stream on a blip still gets its one cap retry, and the two
+// together cost exactly two StreamResetEvents and three provider calls — neither latch pays for the
+// other's remedy.
+func TestCapRetryLatchIsSeparateFromTheReStreamLatch(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Context.MaxContextTokens = 98304
+	responder := scriptedResponder(t,
+		retryableErrorTurn(transientFaultMsg), // the blip spends the re-stream latch
+		cutOffScript(),                        // the capped reasoning reply spends the cap retry
+		contentTurn("answered on the third pass"),
+	)
+
+	a := driveExchange(t, cfg, responder, "audit the repository")
+
+	if got := len(responder.requests()); got != 3 {
+		t.Fatalf("provider was called %d times, want 3 (blip, capped reply, cap retry)", got)
+	}
+	if got := countEvents[domain.StreamResetEvent](sink.events); got != 2 {
+		t.Errorf("StreamResetEvents = %d, want 2 — one per latch spent", got)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 0 {
+		t.Errorf("ErrorEvents = %v, want none — both remedies recovered", errs)
+	}
+	if me, ok := lastMessageEvent(sink.events); !ok || me.Text != "answered on the third pass" {
+		t.Errorf("final MessageEvent = %+v (ok=%v), want the recovered answer", me, ok)
+	}
+	if got := a.conv.Len(); got != 2 {
+		t.Errorf("conv.Len() = %d, want 2 (user + the recovered answer)", got)
+	}
+}
+
+// TestCappedReplyWithoutReasoningDoesNotRetry pins the trigger's reasoning clause: a capped reply
+// that never reasoned gives the loop no ground to expect a different spend on a second pass, so it
+// is not re-sent — one provider call, no StreamResetEvent, and a fault that claims no retry.
+func TestCappedReplyWithoutReasoningDoesNotRetry(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Context.MaxContextTokens = 98304
+	responder := scriptedResponder(t, stubllm.Turn{FinishReason: "length"})
+
+	driveExchange(t, cfg, responder, "audit the repository")
+
+	if got := len(responder.requests()); got != 1 {
+		t.Errorf("provider was called %d times, want 1 — no reasoning, no retry", got)
+	}
+	if got := countEvents[domain.StreamResetEvent](sink.events); got != 0 {
+		t.Errorf("StreamResetEvents = %d, want 0", got)
+	}
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 {
+		t.Fatalf("ErrorEvents = %d (%v), want exactly 1", len(errs), errs)
+	}
+	if strings.Contains(errs[0].Err, "retried once") {
+		t.Errorf("ErrorEvent.Err = %q, claims a retry that never ran", errs[0].Err)
+	}
+	if !strings.HasSuffix(errs[0].Err, "narrow the task") {
+		t.Errorf("ErrorEvent.Err = %q, want it to end at the remedy", errs[0].Err)
 	}
 }
 

@@ -900,7 +900,13 @@ thinking model can reason for an hour and hit the context wall instead of answer
 server, whatever its window says — which is how you let a cloud endpoint that advertises no
 window answer at length. A reply that runs into that ceiling with nothing visible to show
 for it fails the turn and names the cap and roughly what the reasoning cost, rather than
-reporting an empty reply: the remedy is a bigger ceiling or a smaller task, not a retry. A
+reporting an empty reply: the remedy is a bigger ceiling or a smaller task. One exception is
+tried for you first: when such a reply *reasoned* — a thinking model that spent the whole
+ceiling deciding what to say — apogee re-sends the same request once at twice the ceiling,
+because the same request has been seen answering on a second pass; the streamed reasoning is
+discarded and the retry streams in its place. If that one retry is cut off too, the turn fails
+as above and the message adds which raised cap it was retried at. A reply cut off without any
+reasoning is never retried. A
 **sub-agent** is held to a stricter rule, because its answer is read by a model rather than by
 you: a delegate's reply that runs into the ceiling without asking for a tool fails the turn
 even when it carries text, and the delegating agent is told the cap was the cause — a
