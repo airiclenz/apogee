@@ -1,8 +1,8 @@
 #!/bin/sh
-# commit-msg hook — strip Claude/Anthropic attribution from commit messages.
-#
-# Owner directive (2026-06-26): commit messages must NEVER contain a
-# "Co-authored-by: Claude" trailer (or any Claude/Anthropic attribution).
-# A previous history rewrite was required to remove these. This hook removes
-# them automatically from every commit, regardless of what produced the message.
-perl -i -ne 'print unless /^\s*Co-authored-by:.*(Claude|Anthropic)/i || /Generated with \[?Claude Code/i' "$1"
+# Refuse any commit message carrying AI attribution: a Co-Authored-By for an AI
+# would list it as a contributor on GitHub, and the other lines are noise.
+if grep -i -E -q '^(Co-Authored-By:.*(claude|anthropic|copilot|gpt|openai)|Claude-Session:|.*Generated with \[?Claude)' "$1"; then
+    echo "commit-msg: AI attribution line found — remove it:" >&2
+    grep -i -n -E '^(Co-Authored-By:.*(claude|anthropic|copilot|gpt|openai)|Claude-Session:|.*Generated with \[?Claude)' "$1" >&2
+    exit 1
+fi
