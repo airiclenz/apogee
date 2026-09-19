@@ -5,7 +5,9 @@ package agent
 // on the tool result that closes the Turn reaching three quarters of the cap and on no other, and
 // book no firing; the one-result tests (adviseOneCall) pin the edges one result at a time — a
 // second result of the same Turn, depth 0, an unbounded cap, Bypass, a rollback — and the fold
-// test proves a fold that swallowed the note has it told again.
+// test proves a fold that swallowed the note has it told again. The token-budget notice, its twin
+// for the token cap, is pinned by the same suite over the child's cumulative prompt tokens
+// (TestTokenNotice*), at the foot of this file.
 
 import (
 	"strings"
@@ -42,16 +44,22 @@ func stepNoticeRendered(line string) string {
 	return domain.RenderEngineNote(stepNoticeTopic, line)
 }
 
-// assertStepNoted asserts msg carries the notice's note and nothing else past body: the content
-// is body then the exact fence, and the ledger's one row is the engine note on the topic at the
-// offset the fence begins, naming no Reaction.
+// assertStepNoted asserts msg carries the step notice's note and nothing else past body: the
+// content is body then the exact fence, and the ledger's one row is the engine note on the topic
+// at the offset the fence begins, naming no Reaction.
 func assertStepNoted(t *testing.T, msg domain.Message, body, line string) {
 	t.Helper()
+	assertEngineNoted(t, msg, body, stepNoticeTopic, line)
+}
 
-	if want := body + stepNoticeRendered(line); msg.Content != want {
+// assertEngineNoted is assertStepNoted for any one engine-note topic.
+func assertEngineNoted(t *testing.T, msg domain.Message, body, topic, line string) {
+	t.Helper()
+
+	if want := body + domain.RenderEngineNote(topic, line); msg.Content != want {
 		t.Errorf("noted tool message =\n%q\nwant the body then the engine fence:\n%q", msg.Content, want)
 	}
-	want := domain.AdviceSpan{Origin: domain.OriginEngine, Offset: len(body), Topic: stepNoticeTopic}
+	want := domain.AdviceSpan{Origin: domain.OriginEngine, Offset: len(body), Topic: topic}
 	if len(msg.Advice) != 1 || msg.Advice[0] != want {
 		t.Errorf("ledger = %+v, want the one engine-note row %+v", msg.Advice, want)
 	}
@@ -388,5 +396,274 @@ func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		}
 		assertBare(t, 1, adviseOneCall(t, a, "two"), "two")
 		assertNoStepFiring(t, sink)
+	})
+}
+
+// ---------------------------------------------------------------------------
+// The token-budget notice: stepBudgetNotice's twin over the child's cumulative prompt tokens
+// (Agent.usage) against its token cap (`delegate-max-tokens`). The 2026-09-18 session's evidence:
+// a child at 10.7M of a 20M budget under a 1.3M working window heard nothing, because the fill
+// ladder measures one request against the window and the step notice counts Turns.
+
+// tokenNoticeChild is stepNoticeChild for the token cap: a depth-1 Agent whose usage tally already
+// reads spent prompt tokens — what the server's reports across its earlier Turns left it at — with
+// no step cap, so nothing but the token notice can fire.
+func tokenNoticeChild(t *testing.T, cfg domain.Config, tokenCap, spent int) *Agent {
+	t.Helper()
+
+	a := stepNoticeChild(t, cfg, 0)
+	a.tokenCap = tokenCap
+	a.usage.prompt = spent
+	return a
+}
+
+// tokenNoticeRendered is the exact fence the token notice appends.
+func tokenNoticeRendered(line string) string {
+	return domain.RenderEngineNote(tokenNoticeTopic, line)
+}
+
+// assertTokenNoted is assertStepNoted for the token notice's topic.
+func assertTokenNoted(t *testing.T, msg domain.Message, body, line string) {
+	t.Helper()
+	assertEngineNoted(t, msg, body, tokenNoticeTopic, line)
+}
+
+// assertNoTokenFiring asserts the token notice booked nothing: a structural note has no firing.
+func assertNoTokenFiring(t *testing.T, sink *recordingSink) {
+	t.Helper()
+
+	for _, fe := range firedAdvice(sink) {
+		if strings.Contains(fe.Reaction, "token") || strings.HasPrefix(fe.Detail, "token") {
+			t.Errorf("the stream booked a firing for the token notice, want none: %+v", fe)
+		}
+	}
+}
+
+const (
+	tokenCapTwentyMillion          = 20_000_000
+	tokenNoticeLineFifteenPointTwo = "tokens: 15.2M of 20.0M spent — 4.8M left before the wrap-up Turn; write your output now"
+	tokenNoticeLineSixteen         = "tokens: 16.0M of 20.0M spent — 4.0M left before the wrap-up Turn; write your output now"
+	tokenNoticeLineTwentySix       = "tokens: 26.0M of 20.0M spent — 0 left before the wrap-up Turn; write your output now"
+)
+
+// The whole contract through the loop: a child budgeted 20M whose Turns report 10M, 6M and 10M
+// prompt tokens hears the notice exactly once, on the tool result closing Turn 2 — the first
+// Turn whose cumulative spend (16M) reaches ceil(0.75 × 20M) = 15M — as the engine fence with the
+// M-tier figures and a ledger row on the topic, and nothing is booked. Turn 1's result lands bare
+// (10M is under the threshold) and Turn 3's too: past the threshold, but the note is still live.
+// Turn 3 takes the spend to 26M, so the token bound ends the run through the wrap-up.
+func TestTokenNoticeFiresOnceAtThreeQuartersOfTheCap(t *testing.T) {
+	sink := &recordingSink{}
+	scripts := append(spentChildTurns(10_000_000, 6_000_000, 10_000_000), contentScript(childFoldSummary), contentScript(childClosingReport))
+	responder := &requestLogResponder{scripts: scripts}
+	a, err := newAgent(stepNoticeConfig(sink), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.depth = 1
+	a.tokenCap = tokenCapTwentyMillion
+
+	res := runExchange(t, a, "trawl the repo")
+
+	if !res.StepCapped {
+		t.Fatalf("the child ended %+v, want it capped — the notice is measured against a budget the run meets", res)
+	}
+	if a.capHit != boundTokens {
+		t.Fatalf("the bound that ended the child = %v, want the token bound", a.capHit)
+	}
+	assertNoTokenFiring(t, sink)
+	msgs := toolMessages(a)
+	if len(msgs) != 3 {
+		t.Fatalf("conversation holds %d tool messages, want 3 — the Turns the budget allowed", len(msgs))
+	}
+	assertBare(t, 0, msgs[0], "package main")
+	assertTokenNoted(t, msgs[1], "package main", tokenNoticeLineSixteen)
+	assertBare(t, 2, msgs[2], "package main")
+}
+
+// The threshold is ceil(0.75 × cap) in tokens: the default 20M budget warns at 15M.
+func TestTokenNoticeThresholdIsThreeQuartersRoundedUp(t *testing.T) {
+	cases := map[int]int{1: 1, 2: 2, 4: 3, 1000: 750, 1001: 751, tokenCapTwentyMillion: 15_000_000}
+	for tokenCap, want := range cases {
+		if got := tokenNoticeThreshold(tokenCap); got != want {
+			t.Errorf("tokenNoticeThreshold(%d) = %d, want %d", tokenCap, got, want)
+		}
+	}
+}
+
+// A Turn with several tool calls commits once per call, and the token notice rides the FIRST
+// result of the threshold Turn alone: the second lands bare.
+func TestTokenNoticeRidesOneResultOfAManyCallTurn(t *testing.T) {
+	sink := &recordingSink{}
+	a := tokenNoticeChild(t, stepNoticeConfig(sink), tokenCapTwentyMillion, 15_200_000)
+
+	first := adviseOneCall(t, a, "one")
+	second := adviseOneCall(t, a, "two")
+
+	assertTokenNoted(t, first, "one", tokenNoticeLineFifteenPointTwo)
+	assertBare(t, 1, second, "two")
+	assertNoTokenFiring(t, sink)
+}
+
+// A cancelled Turn's rollback re-arms the token notice only when the dropped result is the one
+// the note rode, exactly as it does the step notice: the threshold Turn's re-attempt is told again.
+func TestTokenNoticeReArmsAfterARollback(t *testing.T) {
+	sink := &recordingSink{}
+	a := tokenNoticeChild(t, stepNoticeConfig(sink), tokenCapTwentyMillion, 15_200_000)
+	adviseOneCall(t, a, "one")
+	if a.tokenNoticeAt != 1 || !a.tokenNoticeLive {
+		t.Fatalf("the notice fired and latched (%d, %v), want Turn 1 live", a.tokenNoticeAt, a.tokenNoticeLive)
+	}
+
+	a.rearmNotices() // the rollback: the index still names the cancelled Turn
+
+	if a.tokenNoticeAt != 0 || a.tokenNoticeLive {
+		t.Fatalf("latch = (%d, %v) after the re-arm, want cleared", a.tokenNoticeAt, a.tokenNoticeLive)
+	}
+	assertTokenNoted(t, adviseOneCall(t, a, "one again"), "one again", tokenNoticeLineFifteenPointTwo)
+}
+
+// Silent everywhere it has nothing to say: at depth 0 (no cap), on an unbounded budget (cap 0),
+// and on a spend short of the threshold — 14.9M of 20M, where the 2026-09-18 child at 10.7M sat.
+func TestTokenNoticeIsSilentAtDepthZeroUnboundedAndUnderTheThreshold(t *testing.T) {
+	cases := []struct {
+		name     string
+		depth    int
+		tokenCap int
+		spent    int
+	}{
+		{name: "depth 0", depth: 0, tokenCap: tokenCapTwentyMillion, spent: 15_200_000},
+		{name: "unbounded budget", depth: 1, tokenCap: 0, spent: 15_200_000},
+		{name: "under the threshold", depth: 1, tokenCap: tokenCapTwentyMillion, spent: 14_900_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			a := tokenNoticeChild(t, stepNoticeConfig(sink), tc.tokenCap, tc.spent)
+			a.depth = tc.depth
+
+			msg := adviseOneCall(t, a, "body")
+
+			assertBare(t, 0, msg, "body")
+			assertNoTokenFiring(t, sink)
+		})
+	}
+}
+
+// Structural means on under Bypass, and never a rung on the Reaction ladder.
+func TestTokenNoticeFiresUnderBypassAndIsNoBuiltin(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := stepNoticeConfig(sink)
+	cfg.Bypass = true
+	a := tokenNoticeChild(t, cfg, tokenCapTwentyMillion, 15_200_000)
+
+	for _, id := range builtinIDs(a) {
+		if strings.Contains(id, "token") {
+			t.Errorf("builtins = %v, want no token-notice rung on the ladder", builtinIDs(a))
+		}
+	}
+	msg := adviseOneCall(t, a, "body")
+
+	assertTokenNoted(t, msg, "body", tokenNoticeLineFifteenPointTwo)
+	assertNoTokenFiring(t, sink)
+}
+
+// A fold between the notice Turn and the bound swallows the note with the history it sat in, and
+// the next tool result is told again: the child hears it on Turn 2 at 16M, Turn 3's request
+// overflows and the emergency fold replaces the conversation, and Turn 3's result — past the
+// threshold with no note live — carries it once more, at 26M of 20M with 0 left. Without the
+// re-arm in foldFor the post-fold result would land bare.
+func TestTokenNoticeIsToldAgainAfterAFoldSwallowedIt(t *testing.T) {
+	sink := &recordingSink{}
+	turns := spentChildTurns(10_000_000, 6_000_000, 10_000_000)
+	scripts := [][]provider.Delta{
+		turns[0], turns[1],
+		{{Kind: provider.DeltaContextOverflow, Err: "apogee: context window exceeded"}}, // Turn 3's first request
+		contentScript("FOLDED"), // the overflow fold's summary call
+		turns[2],                // Turn 3 re-sent over the folded conversation
+		contentScript(childFoldSummary),
+		contentScript(childClosingReport),
+	}
+	responder := &requestLogResponder{scripts: scripts}
+	cfg := stepNoticeConfig(sink)
+	cfg.Context.CompactionEnabled = true
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.depth = 1
+	a.tokenCap = tokenCapTwentyMillion
+
+	res := runExchange(t, a, "trawl the repo")
+
+	if !res.StepCapped {
+		t.Fatalf("the child ended %+v, want it capped", res)
+	}
+	if responder.calls != len(scripts) {
+		t.Fatalf("the upstream took %d requests, want %d — two Turns, the overflow, its fold, the re-sent Turn, the engine fold and the wrap-up", responder.calls, len(scripts))
+	}
+	overflowed := responder.requests[2].Messages
+	if tail := overflowed[len(overflowed)-1].Content; !strings.HasSuffix(tail, tokenNoticeRendered(tokenNoticeLineSixteen)) {
+		t.Errorf("the overflowed request's tail = %q, want Turn 2's result carrying the note", tail)
+	}
+	for _, msg := range responder.requests[4].Messages {
+		if strings.Contains(msg.Content, domain.EngineNoteFencePrefix+tokenNoticeTopic) {
+			t.Errorf("the re-sent request still carries the note in %q; the fold should have swallowed it", msg.Content)
+		}
+	}
+	msgs := toolMessages(a)
+	if len(msgs) != 1 {
+		t.Fatalf("conversation holds %d tool messages after the fold, want the one post-fold result", len(msgs))
+	}
+	assertTokenNoted(t, msgs[0], "package main", tokenNoticeLineTwentySix)
+	assertNoTokenFiring(t, sink)
+}
+
+// A prune that stubs the noted result swallows the token note as a fold does, and the next tool
+// result is told again — over a short noted body, where only Conversation.HasEngineNote's header
+// check can tell the engine the note is gone (see the step twin above). The control case keeps
+// the noted result inside the window: the latch stands and no second copy lands.
+func TestTokenNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
+	t.Run("the noted result is stubbed", func(t *testing.T) {
+		sink := &recordingSink{}
+		a := tokenNoticeChild(t, stepNoticePruneConfig(sink), tokenCapTwentyMillion, 15_200_000)
+		assertTokenNoted(t, adviseOneCall(t, a, "one"), "one", tokenNoticeLineFifteenPointTwo)
+		seedToolTurns(a, apogeectx.PruneKeepTurns, 4000) // the noted Turn is the one outside the kept window
+
+		a.autoPrune(1)
+
+		results := toolResultContents(a)
+		if !strings.HasPrefix(results[0], "[pruned:") {
+			t.Fatalf("the noted result = %q after the prune, want it stubbed", results[0])
+		}
+		if len(a.conv.At(1).Advice) == 0 {
+			t.Fatal("the stub dropped the ledger row; the test needs the row to survive so the header check alone re-arms")
+		}
+		if a.tokenNoticeLive {
+			t.Fatal("tokenNoticeLive still true after the prune stubbed the noted result, want the latch cleared")
+		}
+		assertTokenNoted(t, adviseOneCall(t, a, "two"), "two", tokenNoticeLineFifteenPointTwo)
+		assertNoTokenFiring(t, sink)
+	})
+	t.Run("the noted result stays inside the kept window", func(t *testing.T) {
+		sink := &recordingSink{}
+		a := tokenNoticeChild(t, stepNoticePruneConfig(sink), tokenCapTwentyMillion, 15_200_000)
+		seedToolTurns(a, apogeectx.PruneKeepTurns+1, 4000) // the oldest Turn is the one outside the window
+		assertTokenNoted(t, adviseOneCall(t, a, "one"), "one", tokenNoticeLineFifteenPointTwo)
+
+		a.autoPrune(1)
+
+		results := toolResultContents(a)
+		if !strings.HasPrefix(results[0], "[pruned:") {
+			t.Fatalf("the oldest result = %q after the prune, want it stubbed", results[0])
+		}
+		if last := results[len(results)-1]; !strings.HasSuffix(last, tokenNoticeRendered(tokenNoticeLineFifteenPointTwo)) {
+			t.Fatalf("the noted result = %q after the prune, want it kept whole", last)
+		}
+		if !a.tokenNoticeLive {
+			t.Fatal("tokenNoticeLive cleared by a prune that kept the noted result, want the latch standing")
+		}
+		assertBare(t, 1, adviseOneCall(t, a, "two"), "two")
+		assertNoTokenFiring(t, sink)
 	})
 }

@@ -846,6 +846,22 @@ receives the result marked as partial, its first line naming the limit (`token b
 starts, so a change applies to the sub-agents spawned after it and never to one already
 running; like the step ceiling, they bound sub-agents only.
 
+The token ceiling announces itself as the step ceiling does: the tool result that closes the
+turn at which the sub-agent's cumulative prompt tokens reach three quarters of
+`delegate-max-tokens:` — 15M at the default — carries one line fenced as the engine's own note
+(`[engine — token budget]`), beside the step line when both fall on the same result:
+
+```
+tokens: 15.2M of 20.0M spent — 4.8M left before the wrap-up Turn; write your output now
+```
+
+Like the step notice it has no key, stays on under `--bypass`, never fires for the session you
+are talking to or for an unbounded budget (`delegate-max-tokens: 0`), and fires again after a
+compaction folds the line away. It is not a rung of the context-fill notice: that one measures a
+single request against the window, this one the delegation's whole spend against its budget, so a
+sub-agent under a wide window can hear this notice while the fill notice stays silent. If a
+sub-agent's single requests are what run large, the lever is `working-window:`, not this ceiling.
+
 **What a sub-agent may call** is your agent's own menu, narrowed. Two tools never reach a
 sub-agent at any depth: `ask_user` and `present_document` are the seat at *your* prompt — a
 question put to you, a document opened for you — and a delegation has no such seat, so a

@@ -1543,7 +1543,10 @@ func pathWithin(abs, root string) bool {
 // own fence (Message.WithEngineNote): it is structural — consulted for every result on every
 // route, under Bypass too, booking no firing — and the fence header is what tells the model it
 // is the engine speaking and not a Reaction, which a delegate reading a source file full of
-// reaction prose has mistaken an advice fence for.
+// reaction prose has mistaken an advice fence for. Its token-budget twin (tokenBudgetNotice)
+// follows it, so the fence order on a closing result is fixed: tool output, advice, step note,
+// token note — and the wrap-up directive, stamped on the request tail at send time
+// (Request.NoteOnTail), always last.
 func (a *Agent) appendToolResult(
 	turn int,
 	call domain.ToolCall,
@@ -1568,6 +1571,9 @@ func (a *Agent) appendToolResult(
 	}
 	if text, fired := a.stepBudgetNotice(); fired {
 		msg = msg.WithEngineNote(stepNoticeTopic, text)
+	}
+	if text, fired := a.tokenBudgetNotice(); fired {
+		msg = msg.WithEngineNote(tokenNoticeTopic, text)
 	}
 	a.conv.Append(msg)
 	// The event carries the tool's own result, never the trailer: advice is a model-facing

@@ -51,12 +51,15 @@ func (a *Agent) autoPrune(turn int) {
 	if res.Pruned == 0 {
 		return
 	}
-	// The step-budget notice's latch is the note's own presence, never the Turn (stepnotice.go):
-	// a stub that replaced the noted result took the note with it — silently, since the ledger row
-	// may outlive the fence — so the notice re-arms here exactly as it does after a fold that
-	// swallowed it, and the next result past the threshold is told again.
+	// The step- and token-budget notices' latches are each note's own presence, never the Turn
+	// (stepnotice.go): a stub that replaced a noted result took the note with it — silently, since
+	// the ledger row may outlive the fence — so the notice re-arms here exactly as it does after a
+	// fold that swallowed it, and the next result past its threshold is told again.
 	if a.stepNoticeLive && !a.conv.HasEngineNote(stepNoticeTopic) {
 		a.rearmStepNotice()
+	}
+	if a.tokenNoticeLive && !a.conv.HasEngineNote(tokenNoticeTopic) {
+		a.rearmTokenNotice()
 	}
 	// The chars → tokens conversion happens HERE, once, on the same Budget the trigger read: the
 	// event carries a number the Driver renders verbatim, so no surface downstream has to hold a

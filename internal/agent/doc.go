@@ -48,9 +48,10 @@
 // notice (ADR 0077): the engine's first advise builtin, which tells the model at three rungs how
 // far its history has climbed toward the compaction line, as the trailer on the closing tool
 // result (prompts/context-fill-notice.txt, prompts/context-fill-wrap-up.txt); stepnotice.go is
-// the step-budget notice — no Reaction but an engine note, structural for every delegate — which
-// tells a child once at three quarters of its step cap to write its output, fenced on the closing
-// tool result by appendToolResult (prompts/step-notice.txt). syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
+// the step-budget notice and its token-budget twin — no Reaction but engine notes, structural for
+// every delegate — which tell a child once at three quarters of its step cap, and once at three
+// quarters of its token budget, to write its output, fenced on the closing tool result by
+// appendToolResult (prompts/step-notice.txt, prompts/token-notice.txt). syncexec.go is the SYNC lane's out-of-process executor — the one door a user's
 // advise or gate command is spawned through while the loop waits on it, owning the permit, the
 // class default deadline, the payload document and the failure report so the seams that call it
 // see only (stdout, err). wire.go is the

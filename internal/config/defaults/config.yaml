@@ -647,8 +647,10 @@ context-fill-notice: false
 # step ceiling can still burn through a fortune in tokens. This is the ceiling on that spend,
 # counted in PROMPT TOKENS across every request the sub-agent makes; when it is reached apogee ends
 # the delegation the same way the step ceiling does — one closing turn to sum up, the result
-# marked as partial. 0 lets a delegation spend unbounded. Config-file only (no flag or env).
-# Default: 20000000.
+# marked as partial. The sub-agent is told once, at three quarters of this ceiling, how much it
+# has spent and how much is left, so it can write its output while it still has its tools; a
+# sub-agent whose SINGLE requests run large is bounded by the working-window key, not by this one.
+# 0 lets a delegation spend unbounded. Config-file only (no flag or env). Default: 20000000.
 # delegate-max-tokens: 20000000
 
 # =============================================================================

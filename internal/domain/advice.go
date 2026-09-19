@@ -35,7 +35,8 @@ import (
 //
 // Topic is set on exactly one kind of row: an ENGINE NOTE (Message.WithEngineNote) — structural
 // text the engine itself fences onto a tool result, such as a capped delegate's wrap-up
-// directive. No Reaction produced it, so Reaction, Moment and Turn are zero on that row and
+// directive or its step- and token-budget notices (internal/agent, stepnotice.go). No Reaction
+// produced it, so Reaction, Moment and Turn are zero on that row and
 // Origin is OriginEngine; the fence it records is RenderEngineNote's, whose header names the
 // topic, never a Reaction id. It shares the ledger so the one strip (recordContent) and the one
 // staleness guard (dropStaleAdvice) cover everything a message carries past its own content.

@@ -263,9 +263,10 @@ var foldTable = [...]foldRow{
 //
 // What every fold that RAN leaves behind is done here once: the Replace, the bridge the row asks
 // for, the context-fill notice's ladder re-armed (rearmFillNotice), because the climb it
-// tracked was just folded away and the next result measures a new one, and the step-budget
-// notice's latch cleared (rearmStepNotice), because the note it guarded went with the folded
-// history and the next result past the threshold must carry it again. A fault leaves the
+// tracked was just folded away and the next result measures a new one, and the step- and
+// token-budget notices' latches cleared (rearmStepNotice, rearmTokenNotice), because the notes
+// they guarded went with the folded history and the next result past a threshold must carry its
+// note again. A fault leaves the
 // conversation untouched (Compact's guarantee) and a skip folded nothing, so neither re-arms — the
 // ladder still describes the history the model sees. A cancel is not a fault: it masquerades as
 // a stream error, so only ctx can tell them apart, and it ends silently — no latch, no event —
@@ -301,6 +302,7 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 	}
 	a.rearmFillNotice()
 	a.rearmStepNotice()
+	a.rearmTokenNotice()
 
 	if row.bridge == foldBridgeAlways || (row.bridge == foldBridgeInExchange && a.turns.inExchange) {
 		a.conv.Append(domain.Message{Role: domain.RoleUser, Content: overflowBridge})

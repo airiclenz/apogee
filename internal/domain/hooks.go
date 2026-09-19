@@ -887,7 +887,7 @@ func (c *Conversation) SetMessageContent(i int, content string) {
 }
 
 // HasEngineNote reports whether some message still carries an engine note on topic — the latch a
-// caller that lands a note once per conversation (the step-budget notice, internal/agent) reads
+// caller that lands a note once per conversation (the step- and token-budget notices, internal/agent) reads
 // after a rewrite it did not make. A ledger row alone is not proof the note stands: dropStaleAdvice
 // clears a ledger only when the content no longer reaches its first span, so a prune stub LONGER
 // than a short noted body keeps the row while the fence it recorded is gone. The row counts only
