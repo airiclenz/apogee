@@ -5,6 +5,7 @@ import (
 	"errors"
 	"iter"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -397,5 +398,68 @@ func TestRetainedDelegates_KeepsTheLatestUnderEachName(t *testing.T) {
 
 	if names := r.names(); len(names) != 0 {
 		t.Errorf("names after clear = %v, want none", names)
+	}
+}
+
+// TestDelegationLedger_RowsReadInSpawnOrderAndTheNoteNeedsTwoOrAFailure pins the ledger's own
+// contract: rows come back by spawn index whatever order they were recorded in, one completed
+// delegation alone renders no note, a second one or any non-completed one does, and clear forgets
+// everything including the spawn count.
+func TestDelegationLedger_RowsReadInSpawnOrderAndTheNoteNeedsTwoOrAFailure(t *testing.T) {
+	var l delegationLedger
+
+	l.reserve("c1")
+	l.reserve("c2")
+	first, second := l.open("c1"), l.open("c2")
+	if first != 1 || second != 2 {
+		t.Fatalf("open(c1), open(c2) = %d, %d; want the reserved indices 1 and 2", first, second)
+	}
+	l.record(delegationRecord{spawnIndex: second, callID: "c2", name: "Beta", outcome: delegationCompleted})
+	if _, ok := l.note(); ok {
+		t.Error("one completed delegation rendered a note; the coordinator gets that case right unaided")
+	}
+	l.record(delegationRecord{spawnIndex: first, callID: "c1", name: "Alpha", outcome: delegationFaulted, cause: "the upstream died"})
+
+	rows := l.rows()
+	if len(rows) != 2 || rows[0].callID != "c1" || rows[1].callID != "c2" {
+		t.Fatalf("rows = %+v, want c1 then c2 in spawn order, not recording order", rows)
+	}
+	note, ok := l.note()
+	want := delegationsNoteHead + "\n#1 Alpha — faulted: the upstream died — output none\n#2 Beta — completed — output none"
+	if !ok || note != want {
+		t.Errorf("note = %q, %v; want %q", note, ok, want)
+	}
+
+	l.clear()
+
+	if rows := l.rows(); len(rows) != 0 {
+		t.Errorf("rows after clear = %+v, want none", rows)
+	}
+	if got := l.open("c9"); got != 1 {
+		t.Errorf("first spawn index after clear = %d, want the count to restart at 1 for an unreserved call", got)
+	}
+}
+
+// TestDelegationLedger_OneFailureAloneIsNotable pins the other half of the trigger: a single
+// delegation that did not complete renders the note on its own.
+func TestDelegationLedger_OneFailureAloneIsNotable(t *testing.T) {
+	for _, outcome := range []delegationOutcome{delegationCapped, delegationFaulted, delegationCancelled, delegationRefused} {
+		var l delegationLedger
+		l.record(delegationRecord{spawnIndex: l.open("c1"), name: "Solo", outcome: outcome})
+		if note, ok := l.note(); !ok || !strings.Contains(note, "#1 Solo — "+string(outcome)) {
+			t.Errorf("%s: note = %q, %v; want the one row rendered", outcome, note, ok)
+		}
+	}
+}
+
+// TestDelegationLedger_CauseIsTheHeadLineClamped pins what a row quotes of a failure: its first
+// line only, trimmed, and cut at delegationCauseMaxRunes with an ellipsis.
+func TestDelegationLedger_CauseIsTheHeadLineClamped(t *testing.T) {
+	if got := delegationCause("first line \nsecond line"); got != "first line" {
+		t.Errorf("cause = %q, want the trimmed head line", got)
+	}
+	long := strings.Repeat("x", delegationCauseMaxRunes+5)
+	if got := delegationCause(long); got != strings.Repeat("x", delegationCauseMaxRunes)+"…" {
+		t.Errorf("cause = %q, want %d runes and the ellipsis", got, delegationCauseMaxRunes)
 	}
 }

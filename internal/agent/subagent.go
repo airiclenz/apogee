@@ -823,7 +823,24 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // released its resources, and still around it, so a panic raised inside that teardown is caught
 // here too. The ErrorEvent is stamped with this Agent's current Turn — the same value dispatchTools
 // carries as `turn` — read live because the signature stays the shared `(ctx, call)` one.
+//
+// That same defer is the ONE site the delegate ledger is written from (children.go, apogee-clb):
+// it runs last of all, after the recover has settled the named results, so every way out of this
+// frame — a refusal before any child exists, a cancel, a fault, a cap, a completion, a recovered
+// panic — is classified from the ToolResult and dispatchOutcome actually returned
+// (classifyDelegation) and lands as one row. The spawn index is taken FIRST, under the ledger's
+// lock — the one a pooled group reserved for this call in call order (dispatchGroup), else the next
+// — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
+// completion order is the model's call order; the row records the child's RESOLVED output target,
+// never the unresolved argument.
 func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result domain.ToolResult, outcome dispatchOutcome) {
+	var (
+		spawnIndex   = a.delegations.open(call.ID)
+		ledgerName   string
+		ledgerTarget string
+		ran          bool
+		res          domain.StepResult
+	)
 	defer func() {
 		if r := recover(); r != nil {
 			a.cfg.Events.Emit(domain.ErrorEvent{
@@ -834,6 +851,15 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
 			outcome = dispatchDone
 		}
+		ended, cause := classifyDelegation(result, outcome, ran, res)
+		a.delegations.record(delegationRecord{
+			spawnIndex: spawnIndex,
+			callID:     call.ID,
+			name:       delegationLabel(ledgerName, call),
+			outcome:    ended,
+			cause:      cause,
+			outputPath: ledgerTarget,
+		})
 	}()
 	if a.depth >= a.maxDepth() {
 		// Defensive floor: the tool is withheld from the menu at the bound, but refuse here
@@ -931,6 +957,12 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	// and kept only where the child still holds one: a `tools:` roster that dropped the writer
 	// leaves the wrap-up tool-less, as it must (wrapUpWriter), with no path to narrow it to.
 	sub.resolveOutputPath(args.OutputPath)
+	// The ledger's output column is the RESOLVED target, read by outputMissing's rule: a spawn that
+	// named no path, or a Plan-mode child whose ladder refuses every write, was never in a position
+	// to write and reads `none` rather than `missing`.
+	if sub.outputTarget != "" && sub.Mode() != domain.ModePlan {
+		ledgerTarget = sub.outputTarget
+	}
 	// The call's optional max_steps can only ever LOWER the configured cap: a model may say "this
 	// one is small, stop it sooner", never "let me run longer than the host allows". Both values
 	// must be positive for the request to bite — a request against an UNBOUNDED cap (0, the key
@@ -997,7 +1029,8 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	// worth having while the delegation is still on screen, so waiting for a completion before
 	// starting the work would buy a better label at the price of the thing it labels.
 	stopNaming = a.startDelegationNaming(ctx, call.ID, sub, &naming)
-	res, err := sub.Run(ctx)
+	ran = true
+	res, err = sub.Run(ctx)
 	// The namer is stopped and JOINED here, before the run is read, rather than left to the defer
 	// alone (whose copies are then no-ops): the name a capped child is retained under below must be
 	// the name it ended its run wearing, and the namer's late-drop check reads its context — still
@@ -1007,6 +1040,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 		stopNaming()
 	}
 	naming.Wait()
+	ledgerName = sub.displayName()
 	result, outcome = sub.delegationResult(call.ID, res, err)
 	// A child the engine stopped at a bound is RETAINED for the rest of this Exchange (P6): the
 	// fold and closing text the result carried, and everything the call asked for, so the parent
@@ -1026,6 +1060,46 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 		})
 	}
 	return result, outcome
+}
+
+// classifyDelegation reads how a delegation ended off what runSubAgent is returning for it — the
+// result, the dispatch outcome, whether the child's Run was reached (ran) and what it returned
+// (res) — into the ledger's outcome word and, for a fault or refusal, the head line of the result
+// that told the parent. A cancel is read first: it returns no result at all. An error result is
+// then a refusal when no child ever ran (every early return, and a Submit that failed) and a fault
+// otherwise — the child's own fault, a Run error, a recovered panic, or a completed reply the
+// engine would not hand over as a report (completedResult's error shapes). A non-error result is
+// capped when the child's Run said so and completed otherwise.
+func classifyDelegation(result domain.ToolResult, outcome dispatchOutcome, ran bool, res domain.StepResult) (delegationOutcome, string) {
+	switch {
+	case outcome == dispatchCancelled:
+		return delegationCancelled, ""
+	case result.IsError && !ran:
+		return delegationRefused, delegationCause(result.Content)
+	case result.IsError:
+		return delegationFaulted, delegationCause(result.Content)
+	case res.StepCapped:
+		return delegationCapped, ""
+	default:
+		return delegationCompleted, ""
+	}
+}
+
+// delegationLabel is the name a ledger row spells a delegation by: the display name the child
+// ended its run wearing (the call's own `name`, or the namer's), else the first line of the task
+// the call asked for — the Driver's own display fallback — else the call id, which is the one
+// handle a refused call with no readable task still has and the model itself minted.
+func delegationLabel(name string, call domain.ToolCall) string {
+	if name != "" {
+		return name
+	}
+	var args tools.SubAgentArgs
+	if json.Unmarshal(call.Arguments, &args) == nil {
+		if task := clampRunes(title.FirstLine(args.Task), title.MaxDelegateRunes); task != "" {
+			return task
+		}
+	}
+	return "call " + call.ID
 }
 
 // startDelegationNaming launches the ONE out-of-band completion that names a delegation the model

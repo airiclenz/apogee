@@ -356,6 +356,16 @@ to the **request projection only** — `NoteOnTail` notes the last message when 
 idempotently per topic, and reports false otherwise so the caller can fall back to
 `AppendToSystem` — so it never enters the conversation, the snapshot or an event.
 
+The second engine note on this seam is the **delegate ledger** (`[engine — delegations]`,
+2026-09-19, `apogee-clb`): once an Exchange holds two or more delegations or any one that did not
+complete, every request the coordinator builds carries, on its tail, one line per delegation in
+spawn order — `#<n> <name> — <completed|capped|faulted|cancelled|refused>[: <cause>] — output
+<present|missing|none>` — rendered per request from the host's own record of what each child did
+(`internal/agent/children.go`), with output presence read from the filesystem at render time. It
+states facts and asks nothing, is stamped ahead of the wrap-up directive so that directive stays on
+the very end, takes the same `AppendToSystem` fallback, and is structural: no key, no Reaction, on
+under Bypass, and — like every engine note — never in the conversation or the snapshot.
+
 The Rejected row "a dedicated tail message for every advise" is unaffected: the engine inserts no
 message after the tool result. On a tool-less request the wire degrades the noted tool message to
 user role whole, fence included — that user-role tail is the wire's rendering of one existing

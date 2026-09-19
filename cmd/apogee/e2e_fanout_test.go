@@ -67,7 +67,7 @@ func TestE2EFanOutTrailerStatesTheWidth(t *testing.T) {
 			t.Errorf("delegation %d's result carries the width line; only the last one states it: %q", i+1, result)
 		}
 	}
-	if last := results[2]; !strings.HasSuffix(strings.TrimRight(last, "\n"), fanOutWidthLine) {
+	if last := resultBody(results[2]); !strings.HasSuffix(strings.TrimRight(last, "\n"), fanOutWidthLine) {
 		t.Errorf("the last delegation's result does not end with the width line %q:\n%q", fanOutWidthLine, last)
 	}
 

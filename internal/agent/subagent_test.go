@@ -4206,3 +4206,408 @@ func TestSplitUserSteeredTrailer_AfterTheContinueLine(t *testing.T) {
 		t.Errorf("splitUserSteeredTrailer = %q, %q; want %q and the trailer", body, trailer, bodyText)
 	}
 }
+
+// ----------------------------------------------------------------------------
+// The delegate ledger (apogee-clb) — `[engine — delegations]` on the coordinator's request tail
+// ----------------------------------------------------------------------------
+//
+// runSubAgent records one row per delegation from its closing defer (children.go,
+// delegationLedger); buildRequest renders the rows as an engine note on every request tail once the
+// Exchange holds two delegations or one that did not complete, ahead of the wrap-up directive, with
+// the system prompt as the fallback for a tail that is not a tool result. Output presence is read
+// at render time from the child's RESOLVED target.
+
+// loggingResponder records every request it forwards to inner — a routedResponder has no log of
+// its own, and the ledger note is read off the parent's request tail.
+type loggingResponder struct {
+	inner    provider.Responder
+	mu       sync.Mutex
+	requests []provider.Request
+}
+
+func (l *loggingResponder) Stream(ctx context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	l.mu.Lock()
+	l.requests = append(l.requests, req)
+	l.mu.Unlock()
+	return l.inner.Stream(ctx, req)
+}
+
+// ledgerFence returns the delegations engine note fenced on the tail of req, or "" when the tail
+// carries none.
+func ledgerFence(req provider.Request) string {
+	if len(req.Messages) == 0 {
+		return ""
+	}
+	tail := req.Messages[len(req.Messages)-1].Content
+	open := domain.EngineNoteFencePrefix + delegationsNoteTopic + "]"
+	start := strings.Index(tail, open)
+	if start < 0 {
+		return ""
+	}
+	end := strings.Index(tail[start:], domain.EngineNoteFenceClosePrefix+delegationsNoteTopic+"]")
+	if end < 0 {
+		return tail[start:]
+	}
+	return tail[start : start+end]
+}
+
+// ledgerParentRequest returns the parent's request that follows its delegations: the last one the
+// responder logged whose asker is the human's text.
+func ledgerParentRequest(t *testing.T, requests []provider.Request, asker string) provider.Request {
+	t.Helper()
+	for i := len(requests) - 1; i >= 0; i-- {
+		if lastUserText(requests[i]) == asker {
+			return requests[i]
+		}
+	}
+	t.Fatalf("no request logged for %q", asker)
+	return provider.Request{}
+}
+
+// TestDelegationLedgerRecordsEveryOutcomeInSpawnOrder drives a depth-0 pool of three: Alpha is
+// held until a sibling has already been recorded, Beta faults on its first request, Gamma
+// completes. The rows come back #1 Alpha, #2 Beta, #3 Gamma — spawn order, not completion order —
+// with the fault's head line as Beta's cause, and the parent's next request carries them in that
+// order on its tail.
+func TestDelegationLedgerRecordsEveryOutcomeInSpawnOrder(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 3
+	spawn := []provider.Delta{
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c1", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentNamedArgs("task one", "Alpha")},
+		}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c2", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentNamedArgs("task two", "Beta")},
+		}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c3", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentNamedArgs("task three", "Gamma")},
+		}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+	var a *Agent
+	// Alpha's gate: its reply streams only once ANOTHER sibling's row is already in the ledger, so
+	// the first-spawned delegation is certainly not the first recorded.
+	holdAlpha := func(ctx context.Context) {
+		deadline := time.After(5 * time.Second)
+		for len(a.delegations.rows()) == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-deadline:
+				return
+			default:
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}
+	routed := newRoutedResponder().
+		route("delegate three things", nil, spawn).
+		route("delegate three things", nil, contentScript("parent done")).
+		route("task one", holdAlpha, contentScript("alpha found it")).
+		route("task two", nil, []provider.Delta{{Kind: provider.DeltaError, Err: "beta's upstream died"}}).
+		route("task three", nil, contentScript("gamma found it"))
+	up := &loggingResponder{inner: routed}
+
+	var err error
+	a, err = newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate three things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Fatalf("parent result = %+v, want a clean exchange-complete", res)
+	}
+
+	rows := a.delegations.rows()
+	if len(rows) != 3 {
+		t.Fatalf("rows = %+v, want three", rows)
+	}
+	wantNames := []string{"Alpha", "Beta", "Gamma"}
+	wantOutcomes := []delegationOutcome{delegationCompleted, delegationFaulted, delegationCompleted}
+	for i, r := range rows {
+		if r.spawnIndex != i+1 || r.name != wantNames[i] || r.outcome != wantOutcomes[i] {
+			t.Errorf("row %d = %+v, want #%d %s %s", i, r, i+1, wantNames[i], wantOutcomes[i])
+		}
+	}
+	if !strings.HasPrefix(rows[1].cause, subAgentFaultPrefix) {
+		t.Errorf("Beta's cause = %q, want the fault result's head line", rows[1].cause)
+	}
+	fence := ledgerFence(ledgerParentRequest(t, up.requests, "delegate three things"))
+	if fence == "" {
+		t.Fatal("the parent's request after the fan-out carries no delegations note on its tail")
+	}
+	alpha, beta, gamma := strings.Index(fence, "#1 Alpha — completed"), strings.Index(fence, "#2 Beta — faulted: "), strings.Index(fence, "#3 Gamma — completed")
+	if alpha < 0 || beta < 0 || gamma < 0 || !(alpha < beta && beta < gamma) {
+		t.Errorf("fence = %q, want the three rows in spawn order", fence)
+	}
+}
+
+// TestDelegationLedgerRecordsARefusedSibling pins the refusal row: a sub_agent call no child was
+// built for — here an empty task — is recorded as refused with the refusal's text as its cause,
+// labelled by its call id since it has neither a name nor a task, and one refusal alone puts the
+// note on the parent's next request.
+func TestDelegationLedgerRecordsARefusedSibling(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, `{"task":""}`),
+		contentScript("parent done"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "delegate nothing")
+
+	rows := a.delegations.rows()
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want the one refused row", rows)
+	}
+	want := delegationRecord{spawnIndex: 1, callID: "c1", name: "call c1", outcome: delegationRefused, cause: "sub_agent requires a non-empty task"}
+	if rows[0] != want {
+		t.Errorf("row = %+v, want %+v", rows[0], want)
+	}
+	fence := ledgerFence(responder.requests[1])
+	if !strings.Contains(fence, "#1 call c1 — refused: sub_agent requires a non-empty task — output none") {
+		t.Errorf("fence = %q, want the refused row", fence)
+	}
+}
+
+// TestDelegationLedgerNoteIsAbsentForOneCompletedDelegation pins the trigger's quiet case: one
+// delegation that completed is recorded but renders no note anywhere on the parent's next request.
+func TestDelegationLedgerNoteIsAbsentForOneCompletedDelegation(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "summarise the repo"),
+		contentScript("the repo is a Go TUI agent"),
+		contentScript("parent done"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "please summarise")
+
+	if rows := a.delegations.rows(); len(rows) != 1 || rows[0].outcome != delegationCompleted || rows[0].name != "summarise the repo" {
+		t.Fatalf("rows = %+v, want one completed row labelled by the task's first line", rows)
+	}
+	for i, req := range responder.requests {
+		for _, m := range req.Messages {
+			if strings.Contains(m.Content, delegationsNoteHead) || strings.Contains(m.Content, domain.EngineNoteFencePrefix+delegationsNoteTopic) {
+				t.Errorf("request %d carries the delegations note for one completed delegation: %q", i, m.Content)
+			}
+		}
+	}
+}
+
+// TestDelegationLedgerNoteRidesTheTailAfterAFault pins the placement on a real run: after one
+// faulted delegation the parent's next request ends on the sub_agent tool result, the note is
+// fenced onto that tail under the engine's own header with the fault's head line as the cause,
+// and the system prompt carries no copy of it.
+func TestDelegationLedgerNoteRidesTheTailAfterAFault(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "summarise the repo"),
+		{{Kind: provider.DeltaError, Err: "the upstream died"}},
+		contentScript("parent done"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "please summarise")
+
+	req := responder.requests[2]
+	tail := requestTail(t, req)
+	if tail.Role != string(domain.RoleTool) || tail.ToolCallID != "c1" {
+		t.Fatalf("tail = %+v, want the sub_agent tool result", tail)
+	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok || !sub.IsError {
+		t.Fatalf("sub_agent result = %+v, want the fault", sub)
+	}
+	row := "#1 summarise the repo — faulted: " + delegationCause(sub.Content) + " — output none"
+	if want := domain.RenderEngineNote(delegationsNoteTopic, delegationsNoteHead+"\n"+row); !strings.HasSuffix(tail.Content, want) {
+		t.Errorf("tail = %q, want it to end on the fence %q", tail.Content, want)
+	}
+	if strings.Contains(tail.Content, domain.AdviceFencePrefix) {
+		t.Errorf("tail = %q wears the advice fence; an engine note has its own header", tail.Content)
+	}
+	if got := requestSystemText(req); strings.Contains(got, delegationsNoteHead) {
+		t.Errorf("system text = %q, want no note there — it rides the tail", got)
+	}
+}
+
+// TestDelegationLedgerNoteRidesAheadOfTheWrapUp pins the order of the two engine notes on one
+// tail: a wrapping-up coordinator with a ledger to report stamps the delegations note first, so
+// the wrap-up directive stays on the very end where a capped child reads last.
+func TestDelegationLedgerNoteRidesAheadOfTheWrapUp(t *testing.T) {
+	a, _, _, _ := wrapUpAgent(t, true, contentScript("unused"))
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "coordinate the survey"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c2", Tool: tools.SubAgentToolName}}})
+	a.conv.Append(domain.Message{Role: domain.RoleTool, ToolCallID: "c2", Content: "beta's report"})
+	a.delegations.record(delegationRecord{spawnIndex: a.delegations.open("c1"), callID: "c1", name: "Alpha", outcome: delegationCompleted})
+	a.delegations.record(delegationRecord{spawnIndex: a.delegations.open("c2"), callID: "c2", name: "Beta", outcome: delegationCompleted})
+
+	req, _ := a.buildRequest(2)
+
+	msgs := req.State().Messages
+	tail := msgs[len(msgs)-1]
+	ledger := strings.Index(tail.Content, domain.EngineNoteFencePrefix+delegationsNoteTopic+"]")
+	wrapUp := strings.Index(tail.Content, domain.EngineNoteFencePrefix+wrapUpNoteTopic+"]")
+	if ledger < 0 || wrapUp < 0 || ledger > wrapUp {
+		t.Fatalf("tail = %q, want the delegations note before the wrap-up directive", tail.Content)
+	}
+	if !strings.HasSuffix(tail.Content, domain.EngineNoteFenceClosePrefix+wrapUpNoteTopic+"]") {
+		t.Errorf("tail = %q, want the wrap-up fence on the very end", tail.Content)
+	}
+	if !strings.Contains(tail.Content, "#1 Alpha — completed — output none\n#2 Beta — completed — output none") {
+		t.Errorf("tail = %q, want both rows in the delegations fence", tail.Content)
+	}
+}
+
+// TestDelegationLedgerNoteFallsBackToTheSystemPromptOnAnAssistantTail pins the other leg of the
+// placement: a request whose tail is not a tool result — the faulted-then-retried shape — cannot
+// take the note, so it lands in the system prompt through AppendToSystem and nothing is fenced.
+func TestDelegationLedgerNoteFallsBackToTheSystemPromptOnAnAssistantTail(t *testing.T) {
+	a, _, _, _ := wrapUpAgent(t, false, contentScript("unused"))
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "coordinate the survey"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "half a reply, then a fault"})
+	a.delegations.record(delegationRecord{spawnIndex: a.delegations.open("c1"), callID: "c1", name: "Alpha", outcome: delegationFaulted, cause: "died"})
+
+	req, _ := a.buildRequest(1)
+
+	msgs := req.State().Messages
+	want := delegationsNoteHead + "\n#1 Alpha — faulted: died — output none"
+	if got := requestSystemText(a.toProviderRequest(req)); !strings.Contains(got, want) {
+		t.Errorf("system text = %q, want the note %q — the fallback for a tail that is not a tool result", got, want)
+	}
+	if tail := msgs[len(msgs)-1]; tail.Role != domain.RoleAssistant || strings.Contains(tail.Content, domain.EngineNoteFencePrefix) {
+		t.Errorf("tail = %q (%s), want the assistant message untouched", tail.Content, tail.Role)
+	}
+	for _, m := range msgs {
+		if strings.Contains(m.Content, domain.EngineNoteFencePrefix) {
+			t.Errorf("a message carries the engine fence on the fallback path: %q", m.Content)
+		}
+	}
+}
+
+// TestDelegationLedgerReportsOutputPresenceAtRenderTime pins the output column: a capped
+// delegation spawned with an `output_path` it never wrote records the RESOLVED workspace target
+// (never the argument as spelled, which a stat against the process cwd would misreport) and reads
+// `missing` on the parent's next request; once the file exists the same ledger reads `present`,
+// because presence is read when the note is rendered, not when the row was recorded.
+func TestDelegationLedgerReportsOutputPresenceAtRenderTime(t *testing.T) {
+	a, responder, _, ws := outputPathAgent(t, domain.ModeAllowEdits, "out/report.md", contentScript(childClosingReport))
+
+	runExchange(t, a, "please research")
+
+	rows := a.delegations.rows()
+	if len(rows) != 1 || rows[0].outcome != delegationCapped {
+		t.Fatalf("rows = %+v, want one capped row", rows)
+	}
+	if want := filepath.Join(ws, "out", "report.md"); rows[0].outputPath != want {
+		t.Errorf("outputPath = %q, want the resolved target %q", rows[0].outputPath, want)
+	}
+	fence := ledgerFence(responder.requests[len(responder.requests)-1])
+	if !strings.Contains(fence, "#1 trawl the repo — capped — output missing") {
+		t.Errorf("fence = %q, want the capped row reading `output missing`", fence)
+	}
+
+	if err := os.MkdirAll(filepath.Join(ws, "out"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(ws, "out", "report.md"), []byte("late"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if note, ok := a.delegations.note(); !ok || !strings.Contains(note, "#1 trawl the repo — capped — output present") {
+		t.Errorf("note = %q, %v; want `output present` once the file exists", note, ok)
+	}
+}
+
+// TestDelegationLedgerIsForgottenAsTheNextExchangeOpens pins the lifetime: the rows a faulted
+// delegation left are cleared as the human's next message opens an Exchange, so that Exchange's
+// requests carry no note and a fresh delegation counts from #1 again.
+func TestDelegationLedgerIsForgottenAsTheNextExchangeOpens(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "summarise the repo"),
+		{{Kind: provider.DeltaError, Err: "the upstream died"}},
+		contentScript("parent done"),
+		contentScript("second exchange done"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	runExchange(t, a, "please summarise")
+	if rows := a.delegations.rows(); len(rows) != 1 {
+		t.Fatalf("rows after the first exchange = %+v, want one", rows)
+	}
+
+	runExchange(t, a, "and now something else")
+
+	if rows := a.delegations.rows(); len(rows) != 0 {
+		t.Errorf("rows after the next exchange opened = %+v, want none", rows)
+	}
+	for _, m := range responder.requests[3].Messages {
+		if strings.Contains(m.Content, delegationsNoteHead) {
+			t.Errorf("the next exchange's request carries the old ledger: %q", m.Content)
+		}
+	}
+	if got := a.delegations.open("c9"); got != 1 {
+		t.Errorf("next spawn index = %d, want 1 — the count restarts with the exchange", got)
+	}
+}
+
+// TestDelegationLedgerNoteNeverReachesTheRecord pins the note's ephemerality: it is a projection
+// onto the request alone, so neither the conversation's messages nor the session snapshot carry
+// the head line or the fence.
+func TestDelegationLedgerNoteNeverReachesTheRecord(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "summarise the repo"),
+		{{Kind: provider.DeltaError, Err: "the upstream died"}},
+		contentScript("parent done"),
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+
+	runExchange(t, a, "please summarise")
+
+	if fence := ledgerFence(responder.requests[2]); fence == "" {
+		t.Fatal("the request carried no delegations note; nothing to check against the record")
+	}
+	for _, m := range a.conv.Messages() {
+		if strings.Contains(m.Content, delegationsNoteHead) || len(m.Advice) != 0 {
+			t.Errorf("conversation message carries the note or a ledger row: %+v", m)
+		}
+	}
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	if strings.Contains(string(snap.State), delegationsNoteHead) || strings.Contains(string(snap.State), delegationsNoteTopic+"]") {
+		t.Errorf("snapshot carries the delegations note: %s", snap.State)
+	}
+}

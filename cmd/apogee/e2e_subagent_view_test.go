@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
@@ -498,12 +499,21 @@ func hasUserMessage(req stubllm.Request, text string) bool {
 func resultEndsWith(stub *stubllm.Server, suffix string) bool {
 	for _, req := range stub.Requests() {
 		for _, msg := range req.Messages {
-			if msg.Role == "tool" && strings.HasSuffix(strings.TrimRight(msg.Content, "\n"), suffix) {
+			if msg.Role == "tool" && strings.HasSuffix(strings.TrimRight(resultBody(msg.Content), "\n"), suffix) {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+// resultBody is a tool result's own content as it went over the wire, with every engine note the
+// request projection fenced onto its tail cut off — the delegate ledger (`[engine — delegations]`)
+// rides the closing result of a parent that delegated twice or lost a delegate, after the body's
+// own last line (ADR 0076, 2026-09-19 addendum), and a suffix assertion is about the body.
+func resultBody(content string) string {
+	body, _, _ := strings.Cut(content, "\n\n"+domain.EngineNoteFencePrefix)
+	return body
 }
 
 // TestE2ESubAgentViewRuleAnchor is assertLastBodyRow's own guard, asked of the pure scan the

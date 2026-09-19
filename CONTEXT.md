@@ -193,6 +193,17 @@ re-spawned: the call's `continue: "<name>"` argument names a capped delegation t
 retains — for the rest of its Exchange, in memory only — and spawns a fresh child from that run's
 engine fold under a cap of its own, with `task` as the continuation instructions; the retained
 name, `tools` and `output_path` are inherited wherever the call leaves them unset.
+The parent also reads the **delegate ledger** (2026-09-19, ADR 0076 addendum, `apogee-clb`): the
+engine's own row per delegation of the current Exchange — spawn order (the model's call order,
+reserved per pooled group), the delegation's name, its outcome (`completed | capped | faulted |
+cancelled | refused`, the last a call no child was built or started for), the head line of a fault
+or refusal, and the RESOLVED `output_path` target — rendered onto every request tail as the engine
+note `[engine — delegations]` … `[end engine — delegations]` (`#<n> <name> — <outcome>[: <cause>] —
+output <present|missing|none>`, presence read from disk at render time) once the Exchange holds
+two or more delegations or any that did not complete, ahead of the wrap-up directive, with the
+same system-prompt fallback for a tail that is not a tool result. Facts, no imperatives; structural
+(no key, on under Bypass); in memory only, cleared as the next Exchange opens beside the retained
+delegations, never in the conversation or the snapshot (`internal/agent/children.go`).
 The tool subset a child inherits is the parent's menu **minus the human's seat**: `ask_user`
 and `present_document` are withheld from every sub-agent at every depth (owner call,
 2026-09-14 — a delegation has no seat at the human's prompt; a child reports the question or

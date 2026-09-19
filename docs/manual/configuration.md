@@ -862,6 +862,30 @@ single request against the window, this one the delegation's whole spend against
 sub-agent under a wide window can hear this notice while the fill notice stays silent. If a
 sub-agent's single requests are what run large, the lever is `working-window:`, not this ceiling.
 
+Your agent is also **handed the engine's own record of its delegations**. A coordinator that
+delegates several times has been seen misremembering, turns later, which sub-agents faulted and
+which wrote the file they were asked for — so once an exchange holds two or more delegations, or
+any one that did not complete, every request your agent makes ends on one engine note
+(`[engine — delegations]`), one line per delegation in the order the calls were made:
+
+```
+delegations this exchange, as the engine recorded them (spawn order):
+#1 Alpha — completed — output present
+#2 Beta — faulted: sub-agent faulted before finishing the delegated task: … — output none
+#3 Gamma — capped — output missing
+```
+
+The name is the delegation's (`name`, or the generated one), else the first line of its task, else
+its call id; the outcome is one of `completed`, `capped`, `faulted`, `cancelled` or `refused` (a
+call no sub-agent was started for — an empty task, an unknown `continue`, a bad `tools` name);
+a faulted or refused row quotes the first line of the result that said so; and `output` reads
+the `output_path` the call named, checked on disk each time the note is rendered — `present`,
+`missing`, or `none` when the call named no path (or the sub-agent ran in plan mode, where it
+could not have written one). It states facts only and never tells your agent what to do about
+them. Like the budget notices it has no key, stays on under `--bypass`, and is a projection onto
+the request alone: nothing lands in the conversation or the session record, and your next
+message clears it. A single delegation that completed adds no note.
+
 **What a sub-agent may call** is your agent's own menu, narrowed. Two tools never reach a
 sub-agent at any depth: `ask_user` and `present_document` are the seat at *your* prompt — a
 question put to you, a document opened for you — and a delegation has no such seat, so a

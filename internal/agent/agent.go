@@ -388,6 +388,12 @@ type Agent struct {
 	// capped child is spawned from. Filled by runSubAgent after a capped child's result is read,
 	// cleared as the next Exchange opens (step), and never snapshotted (ADR 0022 D8).
 	retained retainedDelegates
+	// delegations is the ledger of every delegation THIS Agent spawned in its current Exchange —
+	// spawn order, outcome, cause and resolved output target (children.go, apogee-clb): what the
+	// `[engine — delegations]` note buildRequest stamps on the request tail is rendered from, once
+	// the Exchange holds two delegations or one that did not complete. Opened and recorded by
+	// runSubAgent, cleared beside retained as the next Exchange opens (step), never snapshotted.
+	delegations delegationLedger
 	// steered counts the mailbox messages that LANDED in this Agent while it ran as somebody's
 	// child — what its result tells the parent model about in the steered trailer
 	// (subagent.go, ADR 0063 D3). Unguarded on purpose: the child's own Step-driving goroutine is

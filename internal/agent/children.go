@@ -2,7 +2,12 @@ package agent
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io/fs"
+	"os"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -163,6 +168,199 @@ func (r *retainedDelegates) clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.byName = nil
+}
+
+// ----------------------------------------------------------------------------
+// The delegate ledger (apogee-clb) — what the engine saw every delegation of an Exchange do
+// ----------------------------------------------------------------------------
+//
+// A coordinator that delegates several times has been seen misremembering which delegates faulted
+// and which wrote their output: each result was read once, Turns ago, and the model's own recall of
+// them is what a later request is built on. The ledger is the host's record of the same facts —
+// one row per delegation the Exchange spawned, in spawn order — rendered onto every request tail
+// as an engine note (delegationsNoteTopic, Agent.buildRequest) once the Exchange holds two or more
+// delegations or any one that did not complete. It states facts and asks nothing: what to do about
+// a faulted delegate or a missing file is the coordinator's call, and a note that issued orders
+// would be a Reaction wearing the engine's header. Like retainedDelegates it lives in memory only,
+// is cleared as the next Exchange opens (Agent.step) and never reaches the session snapshot (ADR
+// 0022 D8): the note is a per-request projection, never a conversation message.
+
+// delegationOutcome is how one delegation ended, as the engine classified it from the result and
+// dispatch outcome runSubAgent returned — the five words the ledger's rows spell.
+type delegationOutcome string
+
+const (
+	// delegationCompleted is a child that ran to its own reply and reported it.
+	delegationCompleted delegationOutcome = "completed"
+	// delegationCapped is a child the engine stopped at a bound (step, token or time) and that
+	// handed back a partial result.
+	delegationCapped delegationOutcome = "capped"
+	// delegationFaulted is a child that ran and came back as an error result: an Upstream fault,
+	// a recovered panic, a loop-level Run error, or a reply the engine refused to hand over as a
+	// report (a missing output file, tool-call markup, a degenerate repeat).
+	delegationFaulted delegationOutcome = "faulted"
+	// delegationCancelled is a child the human stopped; its Turn was rolled back with the parent's.
+	delegationCancelled delegationOutcome = "cancelled"
+	// delegationRefused is a sub_agent call no child was ever built or started for: the depth
+	// bound, bad arguments, an unknown `continue`, a bad seat or roster, a construction or Submit
+	// failure — the parent read an error result and no delegation ran.
+	delegationRefused delegationOutcome = "refused"
+)
+
+// delegationRecord is ONE row of the ledger: the delegation's spawn order, the call it answered,
+// the label the parent model knows it by, how it ended and — for a faulted or refused one — the
+// head line of the text that said so. outputPath is the child's RESOLVED output target
+// (Agent.outputTarget: workspace-joined, symlinks followed), "" when the spawn named none or the
+// child ran in Plan mode, where no write was ever possible (as outputMissing reads it); presence
+// is read from the filesystem when the note is rendered, never at recording time, so a file a
+// later delegation or the coordinator itself wrote in between reads as present.
+type delegationRecord struct {
+	spawnIndex int
+	callID     string
+	name       string
+	outcome    delegationOutcome
+	cause      string
+	outputPath string
+}
+
+// delegationLedger is the ordered set of delegationRecords ONE Agent holds for its current
+// Exchange. It is guarded because the depth-0 fan-out spawns and reports from several pool workers
+// at once (ADR 0039). The spawn index is the order the parent model ISSUED its calls in: a pooled
+// group reserves one per delegation in call order before its workers start (reserve, dispatchGroup),
+// because the workers dequeue and finish in an order of their own; a width-1 delegation takes the
+// next index as its run opens (open). The render sorts by it.
+//
+// The zero value is ready to use.
+type delegationLedger struct {
+	mu       sync.Mutex
+	spawned  int
+	reserved map[string]int
+	records  []delegationRecord
+}
+
+// reserve takes the next spawn index for the sub_agent call callID ahead of its run — what a
+// pooled group does for each of its delegations in call order, so the numbers the note spells are
+// the model's own call order and not the pool's dequeue order. open hands the index back to the
+// run that answers that call.
+func (l *delegationLedger) reserve(callID string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.reserved == nil {
+		l.reserved = make(map[string]int, 1)
+	}
+	l.spawned++
+	l.reserved[callID] = l.spawned
+}
+
+// open returns the spawn index for the delegation answering callID as its run begins: the one
+// reserve set aside for it, consumed, or else the next fresh index. Indices are 1-based and count
+// every entry into runSubAgent, refused ones included.
+func (l *delegationLedger) open(callID string) int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if i, ok := l.reserved[callID]; ok {
+		delete(l.reserved, callID)
+		return i
+	}
+	l.spawned++
+	return l.spawned
+}
+
+// record appends one finished delegation's row.
+func (l *delegationLedger) record(r delegationRecord) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.records = append(l.records, r)
+}
+
+// rows returns a copy of the records in spawn order.
+func (l *delegationLedger) rows() []delegationRecord {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	out := make([]delegationRecord, len(l.records))
+	copy(out, l.records)
+	sort.Slice(out, func(i, j int) bool { return out[i].spawnIndex < out[j].spawnIndex })
+	return out
+}
+
+// clear forgets every row — the Exchange that owned them has ended.
+func (l *delegationLedger) clear() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.spawned = 0
+	l.reserved = nil
+	l.records = nil
+}
+
+// delegationsNoteTopic is the engine-note topic the ledger is fenced under on the request tail —
+// `[engine — delegations]` … `[end engine — delegations]` — and the key NoteOnTail's idempotence
+// reads.
+const delegationsNoteTopic = "delegations"
+
+// delegationsNoteHead is the first line of the note and the marker its AppendToSystem fallback
+// is keyed on (Agent.buildRequest): a system message already carrying it is not noted twice.
+const delegationsNoteHead = "delegations this exchange, as the engine recorded them (spawn order):"
+
+// delegationCauseMaxRunes bounds the cause a row quotes — the head line of a fault or refusal —
+// so one verbose failure cannot swell the note the coordinator reads on every request.
+const delegationCauseMaxRunes = 160
+
+// note renders the ledger as the engine note buildRequest stamps, and reports whether the ratified
+// trigger holds: two or more delegations this Exchange, or any one that did not complete. One
+// delegation that completed is the case the parent model gets right unaided, so no note rides
+// then. Each row reads `#<n> <name> — <outcome>[: <cause>] — output <present|missing|none>`;
+// presence is read here, at render time, by the same rule outputMissing applies to a capped
+// result: `missing` is a certainly-absent file (fs.ErrNotExist), anything else that resolved is
+// `present`, and a delegation with no resolved target reads `none`.
+func (l *delegationLedger) note() (string, bool) {
+	rows := l.rows()
+	notable := len(rows) >= 2
+	for _, r := range rows {
+		if r.outcome != delegationCompleted {
+			notable = true
+		}
+	}
+	if !notable {
+		return "", false
+	}
+	var b strings.Builder
+	b.WriteString(delegationsNoteHead)
+	for _, r := range rows {
+		b.WriteString("\n")
+		b.WriteString(r.render())
+	}
+	return b.String(), true
+}
+
+// render spells one row. The cause rides only where there is one (a fault or a refusal); the
+// other outcomes name themselves.
+func (r delegationRecord) render() string {
+	line := fmt.Sprintf("#%d %s — %s", r.spawnIndex, r.name, r.outcome)
+	if r.cause != "" {
+		line += ": " + r.cause
+	}
+	return line + " — output " + outputPresence(r.outputPath)
+}
+
+// outputPresence reads a delegation's output target off the filesystem at render time.
+func outputPresence(target string) string {
+	if target == "" {
+		return "none"
+	}
+	if _, err := os.Stat(target); errors.Is(err, fs.ErrNotExist) {
+		return "missing"
+	}
+	return "present"
+}
+
+// delegationCause is the head line of a fault or refusal result, clamped to delegationCauseMaxRunes,
+// so a row quotes what the parent already read at the top of that result and no more.
+func delegationCause(content string) string {
+	head := strings.TrimSpace(headLines(content, 1))
+	if clamped := clampRunes(head, delegationCauseMaxRunes); clamped != head {
+		return clamped + "…"
+	}
+	return head
 }
 
 // childMailbox holds the user messages queued for ONE agent while it runs as somebody's child,

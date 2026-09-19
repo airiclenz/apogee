@@ -338,6 +338,13 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 	slots := make([]dispatchSlot, len(calls))
 	for i, call := range calls {
 		slots[i] = a.prepareCall(ctx, turn, call, false)
+		// The delegate ledger numbers a delegation by the order the model issued its calls in
+		// (children.go): reserved here, in call order, before any worker can dequeue one — a
+		// pool's dequeue order is its own, and runSubAgent would otherwise take the next index
+		// as each worker happens to reach it.
+		if slots[i].verdict.kind == resolveDelegate {
+			a.delegations.reserve(call.ID)
+		}
 	}
 
 	a.runPool(ctx, turn, width, slots)

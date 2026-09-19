@@ -101,6 +101,7 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// site an Exchange opens: a continuation belongs to the Exchange that started the work it
 		// continues, and nothing outside the engine holds them (children.go, ADR 0022 D8).
 		a.retained.clear()
+		a.delegations.clear()
 		// The message itself — skill blocks, @file blocks, then the text — is composed by the
 		// helper an interjection shares (composeUserMessage), so both doors read identically.
 		a.conv.Append(a.composeUserMessage(ctx, turn, *in, false))
@@ -947,6 +948,19 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// Submitted on a user message, a faulted-then-retried assistant tail): AppendToSystem CREATES
 	// the system message when none exists, so a session with no configured prompt and no context
 	// files still carries the directive on that path.
+	//
+	// The delegate ledger (children.go, apogee-clb) rides the same seam by the same rule, and is
+	// stamped FIRST so the wrap-up directive stays on the very end where a capped child reads
+	// last. It is the host's record of what every delegation of this Exchange did — rendered per
+	// request, presence read at render time — for a coordinator that has been seen misremembering
+	// which delegates faulted or wrote their file; the trigger (two or more delegations, or any
+	// that did not complete) is the ledger's own (delegationLedger.note). Structural like the
+	// directive: no key, no Reaction, on under Bypass, and the system copy is the same fallback.
+	if note, ok := a.delegations.note(); ok {
+		if !req.NoteOnTail(delegationsNoteTopic, note) {
+			req.AppendToSystem(delegationsNoteHead, note)
+		}
+	}
 	if a.turns.wrappingUp() {
 		if directive := a.wrapUpDirective(); !req.NoteOnTail(wrapUpNoteTopic, directive) {
 			req.AppendToSystem(wrapUpMarker, directive)
