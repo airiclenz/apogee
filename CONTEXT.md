@@ -187,7 +187,12 @@ dangerous-action floor** (unloosenable one level down), and recursion is depth-b
 `delegate-max-depth` key (`Config.Delegation.MaxDepth`), default **1**: the top-level agent
 delegates and its delegates are never offered `sub_agent`; `2` lets a sub-agent delegate in turn
 (ADR 0013 decision 4, superseded 2026-09-15). A `max_steps` ask above `delegate-max-steps` is
-applied as the cap and the delegation's result says so in one appended line.
+applied as the cap and the delegation's result says so in one appended line. A delegation the
+engine stopped at a **Step cap** (or its token or time sibling) can be picked up again rather than
+re-spawned: the call's `continue: "<name>"` argument names a capped delegation the parent still
+retains — for the rest of its Exchange, in memory only — and spawns a fresh child from that run's
+engine fold under a cap of its own, with `task` as the continuation instructions; the retained
+name, `tools` and `output_path` are inherited wherever the call leaves them unset.
 The tool subset a child inherits is the parent's menu **minus the human's seat**: `ask_user`
 and `present_document` are withheld from every sub-agent at every depth (owner call,
 2026-09-14 — a delegation has no seat at the human's prompt; a child reports the question or
@@ -215,7 +220,8 @@ queue, so nothing is ever skipped there.
 What a delegation is CALLED is its **Delegation name**, and the rule is three-deep: the name its
 call gave — an optional `name` argument on the `sub_agent` call, normalised to a trimmed first
 line — else a **generated** one that lands once the run is under way, else the delegated task's
-first line. It is display identity only, never privilege.
+first line. It is display identity — and, for a capped delegation, the handle `continue` spells
+back — never privilege.
 A **running** child is **addressable**, and by the handle it already has: the spawning call-ID.
 `Agent.InterjectChild(spawnCallID, in)` appends a message to that child's engine-side **mailbox**,
 recursing into registered children so a grandchild is reachable from the top-level agent and
@@ -258,8 +264,9 @@ model gave — concurrent with the child and bounded by its lifetime, so a reply
 run finished is dropped. It is gated by the same `auto-title:` key that names a **Session**, silent
 on every failure, and announced as one `SubAgentNamedEvent` so every **Driver** folds the rename by
 the road it already reads its delegations on. It is **not a Mechanism** — it fires at no Hook
-point, runs under Bypass, and adds nothing to any model's context — and it is saved with the run,
-so a resumed session paints it. Ratified 2026-09-01
+point, runs under Bypass, and adds nothing to any model's context on its own (a capped
+delegation's result spells the name back as the `continue` handle, but that is the **Step cap**'s
+line, not the namer's) — and it is saved with the run, so a resumed session paints it. Ratified 2026-09-01
 ([ADR 0068](docs/adr/0068-unnamed-delegations-are-named-out-of-band-on-the-childs-upstream.md)).
 _Avoid_: "title" (that is the **Session**'s — a delegation has a name, and no `^r` to change it),
 "label", "sub-agent title".
@@ -647,7 +654,9 @@ The number of **Turns** a **delegate** may take in its one Exchange before the e
 the `delegate-max-steps` key, default **80**, `0` = unbounded. It bounds child agents ONLY: the
 main loop is the human's to stop, a delegate's is nobody's, and an uncapped delegation is how a
 single `/code-audit` run reached 633 Turns and a billion prompt tokens. A `sub_agent` call's
-optional `max_steps` argument may LOWER the cap for that one delegation, never raise it. Two
+optional `max_steps` argument may LOWER the cap for that one Run, never raise it — the rule is
+per Run, so a continuation (below) starts under `min(max_steps, delegate-max-steps)` of its own
+rather than the remainder of the Run it continues. Two
 sibling bounds ride the same path (`Config.Delegation.MaxTokens`, `.Timeout`): the
 `delegate-max-tokens` key, default **20000000**, bounds the child's cumulative PROMPT tokens
 (its own usage tally), and the `delegate-timeout` key, default **2h**, bounds the wall clock
@@ -703,7 +712,25 @@ the delegate's last reply reads as <tool-call markup | a file dump | a grep dump
 its next step>, not a finding; engine summary follows]` and the text follows the fold whole under
 `[delegate's closing report — read as narration, not a finding]`. The prefix is unchanged, so the
 TUI still reads the bound; blank text is the wordless path above, never a non-report; and no
-wording rule faults a finding — the closed acknowledgement list is the only text withheld. The cap
+wording rule faults a finding — the closed acknowledgement list is the only text withheld. A
+bound is not the end of the work, either (2026-09-18, P6): the parent **retains** every capped
+delegation that ended its run wearing a **Delegation name** (one its call gave or the namer
+generated; the task-first-line fallback is a Driver's display rule, not a name) — the task as the call spelled it, the
+`tools` roster and `output_path` it asked for, the fold, the closing text and the bound — **in
+memory only**, keyed by that name, for the rest of its own Exchange: the map is cleared as the next
+Exchange opens, nothing is serialised (ADR 0022 D8, ADR 0013 §5 stand), so a resumed session has
+nothing to continue. The capped result's last body note spells the handle back — `[to continue
+this delegate: sub_agent with continue: "<name>"]` — and a `sub_agent` call carrying
+`continue: "<name>"` spawns a **fresh child** whose opening task is the retained task, the fold
+under `[previous attempt — engine summary]` and the call's own `task` under `[continuation
+instructions]`; the name, roster and `output_path` are inherited wherever the call leaves them
+unset (an inherited name is re-announced for the new run), the latest capped child under that
+name wins, the entry is consumed by the continuation (a child that caps again is retained anew,
+under the same name and over the ORIGINAL task, so a second continuation composes over one fold,
+never a fold of a fold), and an unknown name is refused with an error result naming the retained
+names (`[no delegate named "<name>" to continue — retained: <a, b | none>]`). Each continuation
+is a new Run with a cap of its own — the engine puts no limit on how many times a delegation is
+continued, and an unnamed delegation, having no handle, is not retained. The cap
 also ANNOUNCES itself before it lands — the **step-budget notice** (2026-09-19, ADR 0077
 addendum): the tool result that closes the Turn reaching **ceil(0.75 × cap)** carries one engine
 note, fenced `[engine — step budget]` … `[end engine — step budget]` (never the advice fence — a

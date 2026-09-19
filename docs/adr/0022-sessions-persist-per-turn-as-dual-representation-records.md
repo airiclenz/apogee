@@ -479,3 +479,31 @@ running while it runs.
   would supersede part of ADR 0007, reach into ADR 0039's fan-out and change what a bench arm
   compares, so it needs its own grill rather than a clause in this addendum. ADR 0007's
   "the snapshot schema leaves room for a suspended sub-agent" is the door it would come through.
+
+## Addendum (2026-09-18) — a retained capped delegation is engine memory, never a record; D8 stands
+
+Plan `2026-09-18 - 00` (capped-delegate report loss) has the engine **fold** a delegated child's
+conversation when it hits a bound (`context.Summarize` under the delegate-fold brief — a summary
+call, not a Compaction: the child's history is untouched and no "context compacted" trace is
+written) and hand the parent that fold under `[engine summary]` on every capped result, and it lets
+the parent **continue** such a child — `sub_agent` with `continue: "<name>"` spawns a fresh child
+from the retained task plus that fold. To do so the parent Agent retains, per capped child that
+ended its run wearing a name, `{task, name, tools, output_path, fold, closing report, bound}` for
+the rest of its own Exchange (`internal/agent/children.go`, cleared as the next Exchange opens).
+
+**Decision 8 stands, and this is the case it was written for.** The retained entry is **live engine
+state, never session state**: nothing of it is serialised, the snapshot schema is untouched, and a
+session restored by `--resume`, `--continue` or the in-TUI live restore holds an empty retention —
+a `continue` after a resume is refused with `retained: none`, by design. What DOES persist is what
+always did: the capped result — head line, fold, closing report and the
+`[to continue this delegate: sub_agent with continue: "<name>"]` note — is a committed tool result in
+the parent's conversation, so the record carries everything the model was told, and a new
+delegation after a resume can quote the fold from the transcript. The child's own `Session` stays
+ephemeral; the fold is not a second record of it, it is a summary the engine authored INTO the
+parent's conversation. This supersedes the result body the archived plan
+`docs/plans/archived/2026-08-26 - 00 - delegate-token-runaway-plan.md` recorded — the child's last
+narrated text under a head saying so; it was scavenged narration then and is an authored fold now
+— and changes nothing about what is saved or
+when: the 2026-08-25 addendum's progress save still fires on the same child events during a
+continuation as during a first run, and its engine half is still the last quiescent-boundary
+snapshot, which never held a delegation in flight and holds no retained fold now.

@@ -281,3 +281,47 @@ Every rule of this ADR survives verbatim, now read per-child:
 New alongside, from ADR 0039: `EventBase` carries the spawning call-ID so interleaved child
 event streams stay attributable, and sink emission is serialized at the parent's single
 `EventSink` boundary.
+
+## Amendment (2026-09-18) — a capped child is folded, reported and CONTINUABLE; §5 stands
+
+Plan `2026-09-18 - 00` (capped-delegate report loss) changes what the recursion point hands back
+when a child hits a bound (`delegate-max-steps`, `delegate-max-tokens`, `delegate-timeout`), and
+adds a second way in — `sub_agent` with `continue: "<name>"`. None of it moves §5.
+
+**What the parent now receives at a bound.** The engine **folds** the child's conversation as it
+stands — a `context.Summarize` call under the delegate-fold brief, on the child's own model,
+booked `Maintenance` with the `DelegateFold` flag, no Turn — and that fold IS the report: every
+capped result carries it under `[engine summary]`, followed by the child's closing text under
+`[delegate's closing report]`. The wrap-up directive for that closing Turn rides the closing tool
+result of the capping Turn as an engine note (`[engine — wrap-up]` … `[end engine — wrap-up]`),
+the system-prompt copy remaining only the fallback when the tail is not a tool result; the
+closing Turn keeps `write_file` once (narrowed to `output_path` when the call named one); and a
+closing text that is tool output or narration rather than a finding is named as such in the head
+line, never dropped. The step-budget notice at ceil(0.75 × cap) is engine-structural at depth ≥ 1 —
+on under Bypass, no key (ADR 0077's `step-budget-notice` key is retired by its 2026-09-19 note).
+This supersedes the result shape of the archived plan
+`docs/plans/archived/2026-08-26 - 00 - delegate-token-runaway-plan.md` — a `[delegate stopped at
+its step cap (N steps); …]` head announcing that the child's last narrated text follows, over
+whatever that text happened to be — with `[delegate stopped at its <bound>; partial result — engine
+summary and closing report follow]` over an authored body.
+
+**Continuation.** The parent retains each capped child that ended its run wearing a name —
+`{task, name, tools, output_path, fold, closing report, bound}`, in memory, keyed by the delegation
+name — until its own Exchange ends. A `sub_agent` call with `continue: "<name>"` spawns a **fresh
+child** whose opening task is the retained task, the fold under `[previous attempt — engine
+summary]` and the call's `task` under `[continuation instructions]`; name, roster and
+`output_path` are inherited where unset; the entry is consumed; an unknown name is refused with the
+retained names. Each continuation is a new Run under `min(max_steps, delegate-max-steps)` — "only
+lowers" holds per Run — and the engine caps the number of continuations at nothing.
+
+**§5 stands, read against both.** A continuation is a new **atomic child Run inside a parent tool
+dispatch**, exactly as the first run was: the parent is mid-`sub_agent` while it runs, so no
+snapshot lands mid-child, a cancel rolls the whole parent Turn back to its pre-`sub_agent`
+boundary, and resume stays coarse — *before* or *after* a delegation, never inside one. Nothing
+here is nested stepping: the child is not suspended and resumed at its own boundary, it is
+**re-spawned** from a summary the engine authored, and the retained entry is engine memory that
+dies with the Exchange — it is not the "suspended sub-agent" slot ADR 0007 reserves, which stays
+empty. The fold itself is no boundary either: the child's history is untouched by the summary call,
+and its Exchange ends as it always did, cleanly, at the bound (`StepResult.StepCapped`). The
+2026-08-07 amendment is unchanged — a continuation issued in a reply beside other `sub_agent`
+calls fans out with them at depth 0, and the retention map is guarded for exactly that reason.
