@@ -886,6 +886,32 @@ func (c *Conversation) SetMessageContent(i int, content string) {
 	c.revision++
 }
 
+// HasEngineNote reports whether some message still carries an engine note on topic — the latch a
+// caller that lands a note once per conversation (the step-budget notice, internal/agent) reads
+// after a rewrite it did not make. A ledger row alone is not proof the note stands: dropStaleAdvice
+// clears a ledger only when the content no longer reaches its first span, so a prune stub LONGER
+// than a short noted body keeps the row while the fence it recorded is gone. The row counts only
+// while the content at its offset still opens with the header RenderEngineNote wrote — a stub never
+// does.
+func (c *Conversation) HasEngineNote(topic string) bool {
+	header := "\n\n" + EngineNoteFencePrefix + topic + "]"
+	for i := range c.messages {
+		m := &c.messages[i]
+		if !m.hasEngineNote(topic) {
+			continue
+		}
+		for _, span := range m.Advice {
+			if span.Origin != OriginEngine || span.Topic != topic || span.Offset > len(m.Content) {
+				continue
+			}
+			if strings.HasPrefix(m.Content[span.Offset:], header) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // DropRange drops messages in [start, end) — history truncation drops the middle,
 // keeping the prefix and a recent tail. Bounds are clamped; an empty range is a no-op.
 func (c *Conversation) DropRange(start, end int) {

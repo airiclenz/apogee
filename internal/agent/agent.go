@@ -358,7 +358,7 @@ type Agent struct {
 	turns          *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)
 	compacting     bool                // the fold re-entrancy guard, held by foldFor for every trigger (compact.go)
 	stepNoticeAt   int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the note rode, 0 = none — what a cancelled Turn's rollback compares against to know whether it dropped the note (rearmNotices)
-	stepNoticeLive bool                // and whether that note is still in the conversation: the latch the notice fires against, cleared by a fold that swallowed it (rearmStepNotice) so the next result is told again
+	stepNoticeLive bool                // and whether that note is still in the conversation: the latch the notice fires against, cleared by a fold or a prune stub that swallowed it (rearmStepNotice) so the next result is told again
 	depth          int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
 	callID         string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
 	consoleOwner   string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)

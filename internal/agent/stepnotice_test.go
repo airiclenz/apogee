@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
 )
@@ -319,4 +320,73 @@ func TestStepNoticeIsToldAgainAfterAFoldSwallowedIt(t *testing.T) {
 	}
 	assertStepNoted(t, msgs[0], "package main", stepNoticeLineFourOfFour)
 	assertNoStepFiring(t, sink)
+}
+
+// stepNoticePruneConfig is pruneConfig with the step-notice tool: a discovered window, Pruning
+// armed and the fold silenced, for a capped child whose old results the prune will stub.
+func stepNoticePruneConfig(sink domain.EventSink) domain.Config {
+	cfg := pruneConfig(sink)
+	cfg.Tools = stepNoticeConfig(sink).Tools
+	return cfg
+}
+
+// A prune that stubs the noted result swallows the note as a fold does, and the next tool result
+// is told again. The noted body here is a few bytes — SHORTER than the stub that replaces it — on
+// purpose: dropStaleAdvice clears a ledger only when the new content no longer reaches the note's
+// offset, so over a short body the stub keeps the ledger row, and only the header check behind
+// Conversation.HasEngineNote tells the engine the note is gone. The control case prunes an old
+// result while the noted one stays inside the kept window: the latch stands and the next result
+// carries no second copy.
+func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
+	t.Run("the noted result is stubbed", func(t *testing.T) {
+		sink := &recordingSink{}
+		a := stepNoticeChild(t, stepNoticePruneConfig(sink), 4)
+		a.turns.exchangeTurns = 2
+		noted := adviseOneCall(t, a, "one") // the noted result: index 1, the oldest tool result
+		assertStepNoted(t, noted, "one", stepNoticeLineThreeOfFour)
+		seedToolTurns(a, apogeectx.PruneKeepTurns, 4000) // ~16k chars, past the ~9.4k-char trigger; the noted Turn is the one outside the window
+		if !a.stepNoticeLive {
+			t.Fatal("the notice did not latch on the noted result")
+		}
+
+		a.autoPrune(1)
+
+		results := toolResultContents(a)
+		if !strings.HasPrefix(results[0], "[pruned:") {
+			t.Fatalf("the noted result = %q after the prune, want it stubbed", results[0])
+		}
+		if len(results[0]) <= len("one") {
+			t.Fatalf("stub %q is not longer than the noted body; the test needs the ledger row to survive dropStaleAdvice", results[0])
+		}
+		if len(a.conv.At(1).Advice) == 0 {
+			t.Fatal("the stub dropped the ledger row; the test needs the row to survive so the header check alone re-arms")
+		}
+		if a.stepNoticeLive {
+			t.Fatal("stepNoticeLive still true after the prune stubbed the noted result, want the latch cleared")
+		}
+		assertStepNoted(t, adviseOneCall(t, a, "two"), "two", stepNoticeLineThreeOfFour)
+		assertNoStepFiring(t, sink)
+	})
+	t.Run("the noted result stays inside the kept window", func(t *testing.T) {
+		sink := &recordingSink{}
+		a := stepNoticeChild(t, stepNoticePruneConfig(sink), 4)
+		seedToolTurns(a, apogeectx.PruneKeepTurns+1, 4000) // the oldest Turn is the one outside the window
+		a.turns.exchangeTurns = 2
+		assertStepNoted(t, adviseOneCall(t, a, "one"), "one", stepNoticeLineThreeOfFour)
+
+		a.autoPrune(1)
+
+		results := toolResultContents(a)
+		if !strings.HasPrefix(results[0], "[pruned:") {
+			t.Fatalf("the oldest result = %q after the prune, want it stubbed", results[0])
+		}
+		if last := results[len(results)-1]; !strings.HasSuffix(last, stepNoticeRendered(stepNoticeLineThreeOfFour)) {
+			t.Fatalf("the noted result = %q after the prune, want it kept whole", last)
+		}
+		if !a.stepNoticeLive {
+			t.Fatal("stepNoticeLive cleared by a prune that kept the noted result, want the latch standing")
+		}
+		assertBare(t, 1, adviseOneCall(t, a, "two"), "two")
+		assertNoStepFiring(t, sink)
+	})
 }

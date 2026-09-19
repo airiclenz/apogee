@@ -39,9 +39,11 @@ var stepNoticeLine = mustPrompt("step-notice.txt")
 // it lands ONCE: a Turn with several tool calls commits once per call, and the first result past
 // the threshold latches the note against every later result while it survives. The latch is the
 // note's own presence, not the Turn: a fold that swallowed the note clears it (rearmStepNotice,
-// foldFor) and the next result is told again, because the model no longer holds the line; a
-// cancelled Turn's rollback clears it only when the dropped result is the one the note rode
-// (rearmNotices), so a surviving note is never doubled.
+// foldFor) and the next result is told again, because the model no longer holds the line; a prune
+// whose stub replaced the noted result clears it the same way (autoPrune, which asks the
+// conversation whether the note still stands — Conversation.HasEngineNote — because the ledger
+// row can outlive the fence); a cancelled Turn's rollback clears it only when the dropped result
+// is the one the note rode (rearmNotices), so a surviving note is never doubled.
 //
 // Silent at depth 0 — a top-level Agent has no cap, and the main loop is the human's to stop — and
 // silent for an unbounded delegation (stepCap 0), where there is no cap to be three quarters of.
@@ -60,8 +62,9 @@ func (a *Agent) stepBudgetNotice() (string, bool) {
 
 // rearmStepNotice forgets the note: the conversation no longer carries it, so the next tool
 // result past the threshold is told again. Called after a fold that ran (foldFor), which replaced
-// the history the note sat in, and through rearmNotices on the rollback that dropped its result;
-// idempotent, so a Step-driven host that cancels the re-attempt too is harmless.
+// the history the note sat in, after a prune whose stub replaced the noted result (autoPrune), and
+// through rearmNotices on the rollback that dropped its result; idempotent, so a Step-driven host
+// that cancels the re-attempt too is harmless.
 func (a *Agent) rearmStepNotice() {
 	a.stepNoticeAt = 0
 	a.stepNoticeLive = false

@@ -955,3 +955,53 @@ func TestConversationAdviceSurvivesAPrunedMessage(t *testing.T) {
 		t.Errorf("pruned message JSON = %s, want the stub written whole", data)
 	}
 }
+
+// TestConversationHasEngineNote pins the query a once-per-conversation note latches on: true
+// for the topic a tool message carries, false for another topic, false once SetMessageContent
+// shortened the message below the note's offset (the ledger went with the fence), and false once
+// it replaced the message with a body LONGER than the offset that spells no header — the prune
+// stub over a short noted body, where the ledger row survives dropStaleAdvice and only the header
+// check tells the note is gone.
+func TestConversationHasEngineNote(t *testing.T) {
+	const topic = "step budget"
+	noted := Message{Role: RoleTool, Content: "ok", ToolCallID: "call-1"}.WithEngineNote(topic, "3 of 4 used")
+	build := func() *Conversation {
+		return NewConversation([]Message{
+			{Role: RoleUser, Content: "do it"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Tool: "read_file"}}},
+			noted,
+		})
+	}
+	stub := "[pruned: 1 lines from read_file main.go — re-run the call if you need it]"
+	if len(stub) <= noted.Advice[0].Offset {
+		t.Fatalf("stub of %d bytes must exceed the note's offset %d for the ledger row to survive", len(stub), noted.Advice[0].Offset)
+	}
+
+	cases := []struct {
+		name      string
+		rewritten bool   // SetMessageContent replaces the noted message with content
+		content   string // the replacement, when rewritten
+		topic     string
+		want      bool
+	}{
+		{name: "the noted topic", topic: topic, want: true},
+		{name: "another topic", topic: "wrap-up", want: false},
+		{name: "shortened below the offset", rewritten: true, content: "", topic: topic, want: false},
+		{name: "a longer body without the header", rewritten: true, content: stub, topic: topic, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			conv := build()
+			if tc.rewritten {
+				conv.SetMessageContent(2, tc.content)
+			}
+
+			if got := conv.HasEngineNote(tc.topic); got != tc.want {
+				t.Errorf("HasEngineNote(%q) = %v, want %v (content %q, ledger %+v)", tc.topic, got, tc.want, conv.At(2).Content, conv.At(2).Advice)
+			}
+			if tc.content == stub && len(conv.At(2).Advice) == 0 {
+				t.Errorf("the stub case lost its ledger row; the test needs the row to survive so the header check alone decides")
+			}
+		})
+	}
+}
