@@ -8,11 +8,15 @@
 // prefix verbatim. The transcript the summary call carries is bounded to a character
 // budget derived from the discovered context window (keep the prefix + a budgeted tail,
 // elide the middle) so the call cannot overflow at exactly the high fill /compact exists
-// to relieve. Agent.Compact drives it on demand (the /compact command). Its prompt text is not
-// written in Go: compact.go embeds the prompts/ directory, whose plain files — summary-instruction.txt
-// (the summarizer's system prompt), summary-tail-instruction.txt (what the transcript is for) and
-// summary-message-prefix.txt (the label on the folded summary) — hold the wording as editable prose
-// inside the same single binary.
+// to relieve. Agent.Compact drives it on demand (the /compact command). The summary call itself
+// is Summarize, which returns the text and touches no Conversation; a Brief selects its
+// instruction pair — BriefContinue (Compact's resume-ready brief) or BriefDelegateFold (a
+// capped sub-agent's conversation summarized for the agent that delegated it). Its prompt text
+// is not written in Go: compact.go embeds the prompts/ directory, whose plain files —
+// summary-instruction.txt (the summarizer's system prompt), summary-tail-instruction.txt (what
+// the transcript is for), summary-message-prefix.txt (the label on the folded summary),
+// delegate-fold-instruction.txt and delegate-fold-tail.txt (the delegate-fold brief's pair) —
+// hold the wording as editable prose inside the same single binary.
 //
 // Stale-tool-result Pruning is implemented (Prune, prune.go): the cheap, NON-generative
 // reducer that rewrites old tool results into a one-line stub naming the call that produced

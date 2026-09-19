@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -177,6 +178,83 @@ func TestCompactSendsSystemPromptAndTranscript(t *testing.T) {
 		if !strings.Contains(body, want) {
 			t.Errorf("transcript sent to the model is missing %q:\n%s", want, body)
 		}
+	}
+}
+
+// TestSummarizeLeavesMessagesAndConversationUntouched pins Summarize's non-mutating contract:
+// the slice it is handed reads the same afterwards, and a Conversation the slice was taken from
+// records no mutation (Revision unchanged) and keeps its length — the fold text is the only
+// output.
+func TestSummarizeLeavesMessagesAndConversationUntouched(t *testing.T) {
+	conv := convOf(
+		msg(domain.RoleUser, "audit the parser"),
+		msg(domain.RoleAssistant, "reading it"),
+		msg(domain.RoleUser, "and the lexer"),
+		msg(domain.RoleAssistant, "both read"),
+	)
+	msgs := conv.Messages()
+	before := append([]domain.Message(nil), msgs...)
+	revision := conv.Revision()
+	c := &fakeCompleter{reply: "  parser and lexer were read  "}
+
+	text, err := Summarize(context.Background(), c, msgs, conv.PrefixEnd(), 0, BriefDelegateFold)
+
+	if err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+	if text != "parser and lexer were read" {
+		t.Errorf("Summarize text = %q, want the trimmed reply", text)
+	}
+	if !reflect.DeepEqual(msgs, before) {
+		t.Errorf("Summarize changed its input slice:\n got %+v\nwant %+v", msgs, before)
+	}
+	if got := conv.Revision(); got != revision {
+		t.Errorf("Conversation.Revision = %d after Summarize, want %d (no mutation)", got, revision)
+	}
+	if conv.Len() != len(before) {
+		t.Errorf("Conversation.Len = %d after Summarize, want %d", conv.Len(), len(before))
+	}
+}
+
+// TestSummarizeDelegateFoldSendsExactRequest pins the delegate brief's request shape: exactly
+// the delegate-fold system prompt followed by one user message that is the rendered transcript,
+// the blank-line joiner and the delegate-fold tail — nothing of Compact's own brief leaks in.
+// The request's tool-lessness is not observable here (Completer.Complete takes only messages);
+// that fact is pinned at the engine's compactCompleter.
+func TestSummarizeDelegateFoldSendsExactRequest(t *testing.T) {
+	msgs := []domain.Message{
+		msg(domain.RoleUser, "find every caller of Fold"),
+		msg(domain.RoleAssistant, "searching"),
+		msg(domain.RoleUser, "go on"),
+		msg(domain.RoleAssistant, "three callers, in loop.go"),
+	}
+	c := &fakeCompleter{reply: "ok"}
+
+	if _, err := Summarize(context.Background(), c, msgs, 1, 0, BriefDelegateFold); err != nil {
+		t.Fatalf("Summarize: %v", err)
+	}
+
+	want := []domain.Message{
+		{Role: domain.RoleSystem, Content: delegateFoldInstruction},
+		{Role: domain.RoleUser, Content: renderBudgetedTranscript(msgs, 1, 0) + "\n\n" + delegateFoldTail},
+	}
+	if !reflect.DeepEqual(c.got, want) {
+		t.Errorf("delegate-fold request:\n got %+v\nwant %+v", c.got, want)
+	}
+}
+
+// TestSummarizeRejectsUnknownBrief pins the guard on the brief: a value that names no
+// instruction pair is an error before any upstream call, never a fold under a guessed prompt.
+func TestSummarizeRejectsUnknownBrief(t *testing.T) {
+	c := &fakeCompleter{reply: "never used"}
+
+	_, err := Summarize(context.Background(), c, []domain.Message{msg(domain.RoleUser, "x")}, 1, 0, Brief(99))
+
+	if err == nil {
+		t.Fatal("Summarize accepted an unknown Brief, want an error")
+	}
+	if c.calls != 0 {
+		t.Errorf("Completer calls = %d for an unknown Brief, want 0", c.calls)
 	}
 }
 

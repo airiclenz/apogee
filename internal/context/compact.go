@@ -37,8 +37,8 @@ const minCompactTail = 2
 
 // Compact summarizes conv in place: it keeps the protected prefix (PrefixEnd — leading system
 // messages and the first user message) verbatim, asks the model to summarize the whole
-// conversation, and Replaces the messages after the prefix with a single assistant summary
-// message. It is a no-op (Result.Skipped) when there are too few messages past the prefix.
+// conversation (Summarize under BriefContinue), and Replaces the messages after the prefix with
+// a single assistant summary message. It is a no-op (Result.Skipped) when there are too few messages past the prefix.
 //
 // maxTranscriptChars bounds the rendered transcript the summary call carries, so the call itself
 // cannot overflow at exactly the high context fill /compact exists to relieve (a full-transcript
@@ -61,21 +61,9 @@ func Compact(ctx context.Context, c Completer, conv *domain.Conversation, maxTra
 	}
 
 	msgs := conv.Messages()
-	// Give the model the conversation (prefix included) for the best summary, even though the
-	// prefix is kept verbatim below — the redundancy is cheap and the context helps. The
-	// rendering is budgeted so a high-fill transcript cannot overflow the summary call itself.
-	req := []domain.Message{
-		{Role: domain.RoleSystem, Content: summaryInstruction},
-		{Role: domain.RoleUser, Content: renderBudgetedTranscript(msgs, prefix, maxTranscriptChars) + "\n\n" + summaryTailInstruction},
-	}
-
-	text, err := c.Complete(ctx, req)
+	text, err := Summarize(ctx, c, msgs, prefix, maxTranscriptChars, BriefContinue)
 	if err != nil {
 		return Result{}, err
-	}
-	text = strings.TrimSpace(text)
-	if text == "" {
-		return Result{}, errEmptySummary
 	}
 
 	out := make([]domain.Message, 0, prefix+1)
@@ -83,6 +71,78 @@ func Compact(ctx context.Context, c Completer, conv *domain.Conversation, maxTra
 	out = append(out, summaryMessage(text))
 	conv.Replace(out)
 	return Result{Before: before, After: len(out)}, nil
+}
+
+// Brief selects the instruction pair a Summarize call carries — who the summary is for and
+// what it must preserve. The transcript rendering is the same under every Brief; only the
+// system prompt and the closing tail differ.
+type Brief int
+
+const (
+	// BriefContinue is Compact's brief: a resume-ready summary for the same agent, so it can
+	// carry on the conversation once the folded history is gone.
+	BriefContinue Brief = iota
+	// BriefDelegateFold summarizes a sub-agent's conversation for the agent that delegated the
+	// task: files read (by path), facts established, what was concluded, what remains
+	// unfinished — no file contents, path:line references. It stands in for the report a
+	// capped delegate never got to write.
+	BriefDelegateFold
+)
+
+// instructions returns the system prompt and the user-message tail the Brief selects, or an
+// error for a value that names no brief — a programming error at the call site, reported
+// rather than guessed at so a caller never folds under the wrong instruction.
+func (b Brief) instructions() (system, tail string, err error) {
+	switch b {
+	case BriefContinue:
+		return summaryInstruction, summaryTailInstruction, nil
+	case BriefDelegateFold:
+		return delegateFoldInstruction, delegateFoldTail, nil
+	default:
+		return "", "", fmt.Errorf("apogee: unknown summary brief %d", int(b))
+	}
+}
+
+// Summarize runs the summary call Compact is built on and returns the summary text, touching
+// nothing: msgs is read, never written, and no Conversation is involved — a caller that wants
+// the fold applied to its history uses Compact; one that wants the text for another purpose
+// (the engine's fold of a capped delegate's conversation, handed to the parent as the child's
+// report) calls this directly. The model is given the whole rendering, prefix included, for
+// the best summary — even where the caller keeps that prefix verbatim, the redundancy is cheap
+// and the context helps — and the rendering is budgeted by maxTranscriptChars exactly as
+// Compact documents, so a high-fill transcript cannot overflow the summary call itself.
+// prefixEnd is the protected prefix's length (Conversation.PrefixEnd for a conversation), kept
+// verbatim in the rendering when the middle is elided. brief selects the instruction pair.
+//
+// The returned text is trimmed of surrounding whitespace; an empty reply is an error
+// (errEmptySummary) rather than an empty string, as is a Completer error, a cancelled ctx or a
+// brief that names no instruction pair.
+func Summarize(
+	ctx context.Context,
+	c Completer,
+	msgs []domain.Message,
+	prefixEnd int,
+	maxTranscriptChars int,
+	brief Brief,
+) (string, error) {
+	system, tail, err := brief.instructions()
+	if err != nil {
+		return "", err
+	}
+	req := []domain.Message{
+		{Role: domain.RoleSystem, Content: system},
+		{Role: domain.RoleUser, Content: renderBudgetedTranscript(msgs, prefixEnd, maxTranscriptChars) + "\n\n" + tail},
+	}
+
+	text, err := c.Complete(ctx, req)
+	if err != nil {
+		return "", err
+	}
+	text = strings.TrimSpace(text)
+	if text == "" {
+		return "", errEmptySummary
+	}
+	return text, nil
 }
 
 // errEmptySummary is returned when the model produced no summary text — treated as a failure
@@ -123,6 +183,17 @@ var summaryInstruction = mustPrompt("summary-instruction.txt")
 // do with it. The blank-line joiner between the two stays in code — a trailing blank line in
 // an asset file is invisible to a reader and easily lost to an editor that trims it.
 var summaryTailInstruction = mustPrompt("summary-tail-instruction.txt")
+
+// delegateFoldInstruction is the system prompt of the BriefDelegateFold summary call
+// (prompts/delegate-fold-instruction.txt): it addresses the delegating agent, asks for files
+// by path, facts with path:line references, conclusions and what is unfinished, and forbids
+// reproducing file contents.
+var delegateFoldInstruction = mustPrompt("delegate-fold-instruction.txt")
+
+// delegateFoldTail closes the BriefDelegateFold call's user message
+// (prompts/delegate-fold-tail.txt), the way summaryTailInstruction closes Compact's; the
+// blank-line joiner between transcript and tail stays in code for the same reason.
+var delegateFoldTail = mustPrompt("delegate-fold-tail.txt")
 
 // summaryMessagePrefix labels the folded summary so it reads clearly in scrollback and
 // snapshots, and so the model sees it as prior context rather than a fresh instruction. The
