@@ -139,7 +139,8 @@ advise class survivable, and it answers the costs the findings document lists as
   cache survives the Turn;
 - spans are `ephemeral` and dropped on resume, so a replay never re-reads a stale SHA or timestamp;
 - the bench attributes effect to a reaction id, which is what makes any reaction benchable;
-- `/settings` can show "what the model saw this Turn".
+- `/advice` shows "what the model saw this Turn" (shipped 2026-09-20 as a report pane of its own —
+  ADR 0076 D6's `/settings` reading is superseded).
 
 ## 3. The policy matrix
 

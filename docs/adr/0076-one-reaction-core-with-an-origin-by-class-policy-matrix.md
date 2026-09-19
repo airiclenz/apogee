@@ -109,6 +109,17 @@ derived from provenance, so nothing out-of-process can forge an engine header; s
 **ephemeral**, dropped on resume, so a replay never re-reads a stale SHA or timestamp; the bench
 attributes effect by reaction id; `/settings` can show what the model saw this Turn.
 
+> *Amendment (2026-09-20, plan `2026-09-19 - 01` items 15–16, bead `apogee-d6t`):* the ledger's
+> human-facing surface is **`/advice`, not `/settings`** — the sentence above is superseded on that
+> point alone. `/settings` is a pane over the config key registry (its rows are the keys a session
+> resolved, ADR 0035), and what the model was handed is not a configuration value. The TUI folds
+> every `ReactionFiredEvent` whose action is `advise` (an armed advise entry, Detail = the capped
+> fenced text) or `notice` (the context-fill notice's rung, D7 addendum / ADR 0077) onto an advice
+> board and shows it as a fourth report pane beside `/thinking`, `/usage` and `/inspect`: the whole
+> session, grouped by run and Turn, each firing headed `<reaction> (<origin> origin) @ <moment>` —
+> the provenance row, in the pane's words. The verb re-opens on the newest firing and never toggles;
+> engine notes (the addendum below) fire no reaction and are absent from it.
+
 **7. Deadlines, cap and failure.** `advise` defaults to **10s** and is **fail-open** — no advice is
 just no advice. `gate` defaults to **5s** (it runs on every tool call) and on timeout or crash
 **escalates to ask**: a broken guard becomes a human question, never a silent allow and never a hard

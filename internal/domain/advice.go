@@ -20,7 +20,8 @@ import (
 //   - the fence header is derived from PROVENANCE, never from handler output, so nothing
 //     out-of-process can forge an engine header by printing one;
 //   - each injected span is recorded on the message it advised (Message.Advice), which is the
-//     provenance ledger a bench attributes effect through and /settings can show;
+//     provenance ledger a bench attributes effect through — the TUI's /advice pane shows the
+//     same rows to the human, read off the ReactionFiredEvent each injection books;
 //   - spans are EPHEMERAL: the session record is written from the content before the first
 //     fence, so a resumed conversation carries no advice and a replay never re-reads a stale
 //     SHA or timestamp.

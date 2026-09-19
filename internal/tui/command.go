@@ -261,6 +261,7 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // TestCommandSpecsReadAlphabetically pins it, so a row added out of place fails loudly instead of
 // quietly un-sorting the menu.
 var commandSpecs = []commandSpec{
+	{name: "advice", summary: "what advice the model saw, by Turn", whileRunning: true, noRecall: true},
 	{name: "clear", summary: "reset the model's memory of this session", noRecall: true},
 	{name: "color-scheme", summary: "list, switch or export the screen's colour schemes", takesArgs: true, parseArgs: verbGrammar(parseColorScheme)},
 	{name: "compact", summary: "summarise the conversation to reclaim context", opensExchange: true},

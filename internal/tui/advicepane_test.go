@@ -3,6 +3,7 @@ package tui
 import (
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"unsafe"
 
@@ -172,6 +173,117 @@ func TestAdvicePaneFollowsTheNewestFiring(t *testing.T) {
 	}
 	if last := spec.rows[len(spec.rows)-1][0]; last != "the newest advice" {
 		t.Errorf("the last row is %q, want the newest firing's detail", last)
+	}
+}
+
+// TestAdviceCommand pins the verb's whole contract: /advice opens the pane on the newest firing,
+// following, and drives no worker; a second /advice on the open pane does not toggle it shut but
+// RE-OPENS it — the follow a reader had detached by scrolling up is re-armed and the window is the
+// tail again, exactly as /thinking's verb behaves; and esc is what closes it. The verb is always
+// "show me the newest", never "hide it".
+func TestAdviceCommand(t *testing.T) {
+	t.Parallel()
+
+	t.Run("opens on the newest firing and drives no worker", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestModel(t)
+		m = m.foldEvent(advisedAt(runRef{}, 1, adviceActionAdvise, "style-check", domain.OriginUser, "keep the diff small"))
+		m.input.SetValue("/advice")
+		m, cmd := stepCmd(t, m, keyEnter())
+
+		if !m.advicePane.open || !m.advicePane.follow {
+			t.Fatalf("/advice pane = %+v; want it open and following", m.advicePane)
+		}
+		if m.state != stateIdle || cmd != nil {
+			t.Errorf("state = %v, cmd = %v; /advice drives no worker", m.state, cmd)
+		}
+		if !m.openPanes().has(paneAdvice) {
+			t.Error("the open pane is not in the frame's pane set — it would be drawn on rows nothing budgeted")
+		}
+		painted := strip(m.frameOverlays().advice)
+		for _, want := range []string{adviceTitle, "style-check (user origin) @ post-tool-result", "keep the diff small"} {
+			if !strings.Contains(painted, want) {
+				t.Errorf("the frame does not stack the pane it opened — %q missing:\n%s", want, painted)
+			}
+		}
+	})
+
+	t.Run("a second /advice re-arms the follow instead of toggling the pane shut", func(t *testing.T) {
+		t.Parallel()
+
+		m := advicePaneModel(t, 12)
+		m.input.SetValue("/advice")
+		m = step(t, m, keyEnter())
+		m = step(t, m, keyUp())
+		if m.advicePane.follow {
+			t.Fatal("scrolling up off the end did not detach the follow — the premise of the re-arm claim")
+		}
+
+		m.input.SetValue("/advice")
+		m = step(t, m, keyEnter())
+		if !m.advicePane.open {
+			t.Fatal("a second /advice closed the pane; the verb never toggles")
+		}
+		if !m.advicePane.follow {
+			t.Error("a second /advice did not re-arm the follow")
+		}
+		window := reportWindowOrFail(t, m, adviceReport)
+		if window.end != window.total {
+			t.Errorf("after a second /advice the pane shows rows [%d, %d) of %d, want the tail", window.start, window.end, window.total)
+		}
+	})
+
+	t.Run("esc closes it", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestModel(t)
+		m.input.SetValue("/advice")
+		m = step(t, m, keyEnter())
+		if !m.advicePane.open {
+			t.Fatal("/advice did not open the pane")
+		}
+		m = step(t, m, keyEsc())
+		if m.advicePane.open {
+			t.Error("esc did not close the pane")
+		}
+		if m.openPanes().has(paneAdvice) {
+			t.Error("the closed pane is still in the frame's pane set")
+		}
+	})
+}
+
+// TestAdviceOpensOnTheNewestFiring pins the verb's landing: with more firings than the pane can
+// seat, /advice opens on the LAST full window — the newest firing's Detail is the last row drawn
+// and the first firing is off the top — so a long session's pane says something on arrival instead
+// of asking for a hundred page-downs.
+func TestAdviceOpensOnTheNewestFiring(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	for i := range 40 {
+		m = m.foldEvent(advisedAt(runRef{}, i, adviceActionAdvise, "style-check", domain.OriginUser, "turn "+strconv.Itoa(i)+" advice"))
+	}
+	m.input.SetValue("/advice")
+	m = step(t, m, keyEnter())
+
+	window := reportWindowOrFail(t, m, adviceReport)
+	if window.end != window.total {
+		t.Fatalf("/advice opened on rows [%d, %d) of %d, want the tail", window.start, window.end, window.total)
+	}
+	if window.start == 0 {
+		t.Fatalf("the whole board fits in %d rows — the test premise needs more firings than the pane seats", window.total)
+	}
+	spec, seated := m.adviceSpec()
+	if !seated {
+		t.Fatal("the frame seated no /advice pane")
+	}
+	if last := spec.rows[len(spec.rows)-1][0]; last != "turn 39 advice" {
+		t.Errorf("the last drawn row is %q, want the newest firing's detail", last)
+	}
+	painted := strip(m.frameOverlays().advice)
+	if strings.Contains(painted, "turn 0 advice") {
+		t.Errorf("the oldest firing is drawn on an opened pane that should show the tail:\n%s", painted)
 	}
 }
 

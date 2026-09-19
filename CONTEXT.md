@@ -1471,7 +1471,9 @@ text inside is secret-redacted and capped at 8 KiB with a marker. `offset` is wh
 the first span's offset is the message as it stood before any advice — and that is what the
 **[Session record](#identity-and-shape)** keeps: a span is **ephemeral**, written to no record and
 gone on resume, so a replay never re-reads a stale SHA or timestamp. The bench attributes an advise
-reaction's effect by the span's reaction id; `/settings` can show what the model saw this Turn.
+reaction's effect by the span's reaction id; `/advice` shows what the model saw, by Turn — the
+TUI's fourth report pane, fed by the `ReactionFiredEvent` each injection books, never by the ledger
+itself (ADR 0076 D6, 2026-09-20 amendment).
 _Avoid_: "injection" (the system-prompt fold the trailer replaced), "advice message" (a trailer on
 the tool result, not a message of its own), "advice history" (nothing persists).
 

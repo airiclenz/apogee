@@ -223,10 +223,11 @@ The full tour is in [the manual](docs/manual/README.md).
 - **The mouse answers everything.** Every approval, picker, menu and browser takes two
   clicks — the first highlights, the second sends.
 - **Side-by-side diffs** for every file the agent writes.
-- **`/thinking`** shows the model's reasoning as plain text, **`/inspect`** (once
-  `ui.inspector` is on) shows every request and response, readable by default and raw on
-  `ctrl+r`, and **`/usage`** shows what the session cost — the main agent and each
-  sub-agent, cache hits included.
+- **`/thinking`** shows the model's reasoning as plain text, **`/advice`** shows what
+  your `advise:` reactions told it, by Turn, **`/inspect`** (once `ui.inspector` is on)
+  shows every request and response, readable by default and raw on `ctrl+r`, and
+  **`/usage`** shows what the session cost — the main agent and each sub-agent, cache
+  hits included.
 - **Colour schemes** as single YAML files, switchable live, with your own beside the
   built-in `dark` and `light`.
 

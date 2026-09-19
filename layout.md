@@ -1988,7 +1988,7 @@ streams while the pane is up is shown rather than landing below a frozen window,
 end is what stops that, and scrolling back down onto the last full window is what resumes it. Its
 keyboard is the `/usage` report's exactly: `esc`, `↑`/`↓` by a row, `PgUp`/`PgDn` by a window, and nothing else. There is no
 `ctrl+r` — one rendering is the point of the pane, and raw bytes are `/inspect`'s job. It is
-non-modal on the same terms as the other two reports: the box behind it stays live and every other
+non-modal on the same terms as the other three reports: the box behind it stays live and every other
 key, a printable one included, goes where it always went. The hint under the rows reads `↑/↓ scroll
 · esc close`. Its verb is safe while the agent works, which is when the thinking worth reading is
 being made.
@@ -2005,7 +2005,7 @@ onto a board that keeps its records whether or not the pane is drawn — reopene
 says exactly what it would have said — and of the windows onto retained state, prose a reader
 returns to yields before the evidence of a call that has just gone wrong.
 
-**The pointer works on it exactly as it does on the other two reports.** A click **outside** the box
+**The pointer works on it exactly as it does on the other three reports.** A click **outside** the box
 dismisses the pane and still lands where it was aimed, a click **inside** does nothing and is
 swallowed rather than dragging a selection across the transcript drawn under it, and the **wheel**
 scrolls the rows one per notch, clamped at the first row and the last full window — the two ends the

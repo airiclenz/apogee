@@ -1835,7 +1835,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 		// window is what it has to be spent inside of. The probe is the first row's verb, which a
 		// granted window always seats and no other part of the frame writes. The draft sits ABOVE the
 		// "/" being typed — the menu is a completion of the last line, not of the whole box.
-		{"autocomplete dropdown", false, "/clear", func(o frameOverlays) string { return o.dropdown },
+		{"autocomplete dropdown", false, "/advice", func(o frameOverlays) string { return o.dropdown },
 			func(t *testing.T, width, height, draft int) Model {
 				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 				value := "/"

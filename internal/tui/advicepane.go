@@ -196,6 +196,24 @@ func (m Model) adviceContent() reportContent {
 	}
 }
 
+// runAdviceCommand drives the /advice verb: it opens the pane and does nothing else. Synchronous
+// like /thinking, /usage and /inspect — no engine call, no worker, no I/O — and safe while a worker
+// works for the same reason: every firing it shows was folded onto this Model when the engine booked
+// it, and the advice a human wants to READ is advice the model is acting on right now.
+//
+// It does not toggle. A second /advice on an open pane RE-OPENS it — the top set past the last row
+// and the follow re-armed — exactly as [Model.runThinkingCommand] does, so the verb is always "show
+// me the newest" and never "hide it"; closing is esc or a click outside the box (reportKey,
+// handleReportClick). The top is set past the last row and the pane opens FOLLOWING
+// ([reportKind.follows]), so the window is the last full one on every paint ([Model.reportSpec])
+// and a firing arriving while the pane is up lands under a pane that shows it.
+func (m Model) runAdviceCommand() (tea.Model, tea.Cmd) {
+	rows, _ := m.adviceRows(m.thinkingWrapColumn())
+	m.advicePane = reportPane{open: true, top: len(rows), follow: true}
+	m.layout()
+	return m, nil
+}
+
 // The report module's functions under this pane's name (reportpane.go). Each one is the shared body
 // with adviceReport filled in: naming them here is what lets the frame, the keyboard and the pointer
 // go on addressing the /advice pane as itself while there is only one report left to maintain.
