@@ -490,7 +490,7 @@ func mandatoryEffortNote(model string) string {
 
 // applyPendingRebind binds a change that was captured while the engine was not the Update loop's to
 // re-point — a worker owned it, or a launcher verb owned the server it talks to. Both terminal folds
-// ARE the boundary Agent.Rebind demands — the same one AbortExchange and the idle save already use —
+// ARE the boundary Agent.Rebind demands — the same one SettleExchange and the idle save already use —
 // and the Msg travelling through the Bubble Tea channel is what establishes the happens-before in
 // both directions, which is why the engine's per-model bindings need no lock (ADR 0024). A no-op
 // when nothing was deferred.

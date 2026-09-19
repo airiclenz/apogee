@@ -1544,10 +1544,11 @@ func TestCancelHoldsWithSingleNote(t *testing.T) {
 }
 
 // TestCancelDropsADeliveredRow: the cancel lands AFTER the worker committed a row. Sent is sent
-// (owner ruling 2026-08-03) — the fold's AbortExchange drops that row from the conversation with the
-// rest of the scrapped Exchange and it stays dropped: the queue holds only the row the worker never
-// delivered, the hold note counts only that one, and the next ⏎ does not re-send what the model
-// already read. The transcript's ⧖ record stays put as the surviving evidence of that delivery.
+// (owner ruling 2026-08-03) — the fold's SettleExchange leaves that row where it was committed
+// (kept with the finished Turns, or dropped with a lone opening's rollback) and the queue never gets
+// it back: it holds only the row the worker never delivered, the hold note counts only that one, and
+// the next ⏎ does not re-send what the model already read. The transcript's ⧖ record stays put as
+// the surviving evidence of that delivery.
 func TestCancelDropsADeliveredRow(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{stepFn: scriptedSteps()}

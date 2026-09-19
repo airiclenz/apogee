@@ -475,10 +475,11 @@ func (m Model) popInterjection() (Model, tea.Cmd, bool) {
 // what makes a refused delivery degrade to "held" instead of "lost". An empty report (a drain that
 // delivered nothing) therefore correctly changes nothing at all.
 //
-// A folded row is committed history from here on. If a stop later scraps the Exchange it was
-// committed into (AbortExchange), the row dies with it exactly as every other message committed into
-// that Exchange does — it does not come back to the queue, and the ⧖ transcript block is the
-// surviving record of what the model read (sent is sent, owner ruling 2026-08-03).
+// A folded row is committed history from here on. If a stop later closes the Exchange it was
+// committed into (SettleExchange), the row shares the fate of every other message committed into
+// that Exchange — kept with the finished Turns, or dropped with a lone opening — and either way it
+// does not come back to the queue; the ⧖ transcript block is the record of what the model read
+// (sent is sent, owner ruling 2026-08-03).
 func (m *Model) foldInterjected(items []queuedInterjection) {
 	if len(items) == 0 {
 		return

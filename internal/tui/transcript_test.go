@@ -4188,9 +4188,11 @@ func TestForkPointsSkipFoldedPrompts(t *testing.T) {
 	})
 }
 
-// A scrapped prompt keeps its block in the scrollback but the engine dropped its Exchange, so it
-// is neither a point nor one of the prompts a later point's drop counts — and the mark that says
-// so survives the record, so a resumed transcript still skips it.
+// A scrapped prompt — one whose stop found no finished Turn to keep, so the settle fell back to the
+// rollback (the lone-opening case; a settled prompt carries no mark) — keeps its block in the
+// scrollback but the engine dropped its Exchange, so it is neither a point nor one of the prompts a
+// later point's drop counts — and the mark that says so survives the record, so a resumed transcript
+// still skips it.
 func TestForkPointsSkipCancelledPrompts(t *testing.T) {
 	t.Parallel()
 

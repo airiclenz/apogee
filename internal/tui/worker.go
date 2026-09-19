@@ -96,7 +96,7 @@ func startExchange(parent context.Context, eng Engine, input domain.UserInput, b
 // worker path as an Exchange. It returns the tea.Cmd the model schedules and the CancelFunc
 // the model stores (through [Model.enterRunning], with a nil mailbox) so Esc cancels the
 // in-flight compaction. A cancel surfaces as the shared
-// cancelledMsg (the model's cancel handling — AbortExchange is a safe no-op here); otherwise
+// cancelledMsg (the model's cancel handling — SettleExchange is a safe no-op here); otherwise
 // the terminal Msg is compactDoneMsg carrying whatever Compact reported.
 //
 // The outcome is classified from Compact's returned error, NOT a fresh ctx.Err() read: an Esc
@@ -152,9 +152,9 @@ func driveExchange(ctx context.Context, eng Engine, input domain.UserInput, box 
 
 // driveResume Steps an already-open Exchange to its quiescent boundary and returns the single
 // terminal Msg the model folds — driveExchange minus the Submit. It is the TUI counterpart of the
-// bench's re-Step resume path (AbortExchange's doc contrasts the two: the bench re-Steps to
+// bench's re-Step resume path (Agent.AbortExchange's doc contrasts the two: the bench re-Steps to
 // re-attempt a cancelled Turn; the TUI's /continue re-Steps to finish a session interrupted
-// mid-task). The restored engine is already inExchange, so re-Stepping continues the unfinished
+// mid-task, where its cancel fold settles the Exchange instead). The restored engine is already inExchange, so re-Stepping continues the unfinished
 // Turn rather than opening a new one; per-Turn notify, cancel, and terminal handling are identical
 // to driveExchange because both run stepToBoundary.
 func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func(tea.Msg), flush func()) tea.Msg {
@@ -249,20 +249,22 @@ func stepToBoundary(ctx context.Context, eng Engine, box *interjectBox, exchange
 // landed go out as ONE interjectedMsg before the Step, so the Update loop moves exactly them into
 // the transcript; an empty mailbox sends nothing at all.
 //
-// A CANCELLED ctx skips the drain outright, keeping rows out of an Exchange that is already doomed
-// (ADR 0025 decision 7). The Exchange this boundary would deliver into is about to be scrapped —
-// the model's cancelledMsg fold calls AbortExchange, which drops everything committed since the
-// Exchange opened, the interjections included — so committing rows here would take them out of the
-// mailbox to put them somewhere nothing survives. Skipping leaves them where the queue of record can
-// still see them: they never appear in a report, so the Model keeps them staged and the terminal
-// fold holds them for the next ⏎.
+// A CANCELLED ctx skips the drain outright, keeping rows out of an Exchange that is already being
+// stopped (ADR 0025 decision 7). The Exchange this boundary would deliver into is about to be
+// closed — the model's cancelledMsg fold calls SettleExchange, which keeps the finished Turns but
+// closes the Exchange to further work, and drops everything committed since the opening when no
+// Turn finished — so committing rows here would take them out of the mailbox to put them where no
+// model will act on them. Skipping leaves them where the queue of record can still see them: they
+// never appear in a report, so the Model keeps them staged and the terminal fold holds them for the
+// next ⏎.
 //
 // The check narrows the window rather than closing it, and it stands alone: a cancel landing after
-// it still commits into a doomed Exchange, and those rows die with the Exchange when the fold
-// scraps it. That is the accepted fate, not a defect to compensate for — sent is sent (owner ruling
-// 2026-08-03), and the ⧖ transcript block is what survives of a delivery the human watched happen.
-// What this check buys is a smaller window in which any row can meet it: wherever the cancel is
-// already visible here, the row stays on the queue of record instead.
+// it still commits into a stopping Exchange, and those rows are history once the fold closes it —
+// kept in the settled conversation or dropped with a lone opening, never re-queued. That is the
+// accepted fate, not a defect to compensate for — sent is sent (owner ruling 2026-08-03), and the
+// ⧖ transcript block is the record of a delivery the human watched happen. What this check buys is
+// a smaller window in which any row can meet it: wherever the cancel is already visible here, the
+// row stays on the queue of record instead.
 //
 // The first refusal STOPS the drain rather than skipping past it. An Interject error is a statement
 // about the Exchange (no open Exchange, or an input carrying nothing), not about that one row, so

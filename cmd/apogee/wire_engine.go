@@ -350,12 +350,23 @@ func (e *lateEngine) ClearContext() error {
 	return agent.ClearContext()
 }
 
-// AbortExchange discards a cancelled Exchange. Unbound it is a no-op rather than a refusal: it
-// answers nothing, it is called on a path that is already unwinding, and there is nothing to abort.
+// AbortExchange discards an interrupted Exchange (the /clear close). Unbound it is a no-op rather
+// than a refusal: it answers nothing, it is called on a path that is already unwinding, and there
+// is nothing to abort.
 func (e *lateEngine) AbortExchange() {
 	if agent := e.bound(); agent != nil {
 		agent.AbortExchange()
 	}
+}
+
+// SettleExchange closes a cancelled Exchange keeping its finished Turns (the cancel fold's close).
+// Unbound it is the same no-op AbortExchange is, reporting false: nothing was dropped because
+// there was nothing to close.
+func (e *lateEngine) SettleExchange() (dropped bool) {
+	if agent := e.bound(); agent != nil {
+		return agent.SettleExchange()
+	}
+	return false
 }
 
 // RestoreSession swaps a stored snapshot into the live Agent — which a pre-bound session does not

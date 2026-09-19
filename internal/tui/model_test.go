@@ -451,11 +451,12 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		}
 	})
 
-	t.Run("cancelledMsg discards the Exchange so the next input is accepted", func(t *testing.T) {
+	t.Run("cancelledMsg settles the Exchange so the next input is accepted", func(t *testing.T) {
 		t.Parallel()
-		// The post-Esc wedge regression: a cancel must tell the engine to abort the open
+		// The post-Esc wedge regression: a cancel must tell the engine to close the open
 		// Exchange, otherwise the engine stays inExchange and the next /clear or message is
-		// rejected with ErrInputPending.
+		// rejected with ErrInputPending. The close is the settle, never the abort: the Turns
+		// that finished before the stop are kept (TestCancelSettlesKeepingFinishedTurns).
 		eng := &fakeEngine{}
 		m := newModel(context.Background(), eng, testOpts, nil)
 		m = step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
@@ -464,8 +465,11 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		if m.state != stateIdle {
 			t.Fatalf("state = %v, want idle", m.state)
 		}
-		if got := eng.aborts(); got != 1 {
-			t.Fatalf("AbortExchange called %d times, want 1 (the cancel must discard the open Exchange)", got)
+		if got := eng.settles(); got != 1 {
+			t.Fatalf("SettleExchange called %d times, want 1 (the cancel must close the open Exchange)", got)
+		}
+		if got := eng.aborts(); got != 0 {
+			t.Fatalf("AbortExchange called %d times, want 0 (a cancel keeps the finished Turns)", got)
 		}
 	})
 
@@ -485,9 +489,9 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		}
 	})
 
-	t.Run("errMsg discards the open Exchange so the next input is accepted", func(t *testing.T) {
+	t.Run("errMsg settles the open Exchange so the next input is accepted", func(t *testing.T) {
 		t.Parallel()
-		// The error flavour of the post-Esc wedge: a loop fault must abort the open Exchange the
+		// The error flavour of the post-Esc wedge: a loop fault must close the open Exchange the
 		// same way a cancel does, otherwise a mid-Exchange Step error would leave the engine
 		// inExchange and the next /clear or message would be rejected with ErrInputPending. Latent
 		// today (Step surfaces faults as an ErrorEvent at a boundary), so this pins the guard.
@@ -499,8 +503,11 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 		if m.state != stateErrored {
 			t.Fatalf("state = %v, want errored", m.state)
 		}
-		if got := eng.aborts(); got != 1 {
-			t.Fatalf("AbortExchange called %d times, want 1 (a loop fault must discard the open Exchange)", got)
+		if got := eng.settles(); got != 1 {
+			t.Fatalf("SettleExchange called %d times, want 1 (a loop fault must close the open Exchange)", got)
+		}
+		if got := eng.aborts(); got != 0 {
+			t.Fatalf("AbortExchange called %d times, want 0 (a fault keeps the finished Turns too)", got)
 		}
 	})
 
@@ -520,26 +527,31 @@ func TestModelSeamMessageTransitions(t *testing.T) {
 }
 
 // TestCancelledMarkLandsOnlyOnTheTwoFolds pins WHERE the aborted mark a fork reads
-// (transcript.forkPoints) is set: on the two folds that scrap an Exchange — a cancel and a loop
-// fault — and nowhere else. An Exchange that faulted but closed on its own (an exchangeDoneMsg
-// with Faulted set) keeps its opening in the engine (turn.go endAbandoned), so its prompt reached
-// the wire, stays unmarked and still counts; a cancelled /compact drives no Exchange and marks
-// nothing.
+// (transcript.forkPoints) is set: on the two folds that settle an Exchange — a cancel and a loop
+// fault — and only when the settle reported the Exchange DROPPED, the lone-opening case with no
+// finished Turn to keep (the fake's settleDrops stands in for the engine's answer). A settle that
+// kept finished Turns leaves the prompt unmarked: the engine holds that Exchange, so it is a
+// fork point. An Exchange that faulted but closed on its own (an exchangeDoneMsg with Faulted set)
+// keeps its opening in the engine (turn.go endAbandoned), so its prompt reached the wire, stays
+// unmarked and still counts; a cancelled /compact drives no Exchange and marks nothing.
 func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
-		name string
-		msg  tea.Msg
-		want bool
+		name  string
+		msg   tea.Msg
+		drops bool // what SettleExchange reports: true ⇒ the lone opening fell back to the rollback
+		want  bool
 	}{
-		{name: "a cancel marks the prompt", msg: cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}}, want: true},
-		{name: "a loop fault marks the prompt", msg: errMsg{Err: errors.New("loop fault mid-exchange")}, want: true},
+		{name: "a cancel of a lone opening marks the prompt", msg: cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}}, drops: true, want: true},
+		{name: "a cancel that kept finished Turns leaves the prompt", msg: cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}}},
+		{name: "a loop fault of a lone opening marks the prompt", msg: errMsg{Err: errors.New("loop fault mid-exchange")}, drops: true, want: true},
+		{name: "a loop fault that kept finished Turns leaves the prompt", msg: errMsg{Err: errors.New("loop fault mid-exchange")}},
 		{name: "a faulted Exchange that closed keeps its prompt", msg: exchangeDoneMsg{Result: domain.StepResult{Status: domain.StatusExchangeComplete, Faulted: true}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			m := newTestModel(t)
+			m := newTestModelEng(t, &fakeEngine{settleDrops: tc.drops}, testOpts)
 			m.transcript.addUser("first", nil)
 			m.transcript.commitAssistant("done", runRef{})
 			m.transcript.addUser("second", nil)
@@ -574,7 +586,7 @@ func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 
 	t.Run("a cancelled /compact marks nothing", func(t *testing.T) {
 		t.Parallel()
-		m := newTestModel(t)
+		m := newTestModelEng(t, &fakeEngine{settleDrops: true}, testOpts) // even a "dropped" answer marks nothing without a mailbox
 		m.transcript.addUser("first", nil)
 		m.transcript.commitAssistant("done", runRef{})
 		m.worker.start(func() {}, nil) // the /compact worker drives no Exchange: no mailbox
@@ -586,6 +598,104 @@ func TestCancelledMarkLandsOnlyOnTheTwoFolds(t *testing.T) {
 			t.Error("a cancelled /compact marked the completed prompt")
 		}
 	})
+}
+
+// TestCancelSettlesKeepingFinishedTurns is the Stage A fix of apogee-2un at the TUI: Esc closes the
+// Exchange through SettleExchange, never AbortExchange, so the Turns that finished before the stop
+// stay in the engine's conversation. The fake reports "kept" (settleDrops false), and everything the
+// Model derives from that follows: the prompt carries no aborted mark and is a real fork point, and
+// the idle save persists the engine's snapshot — the record that used to be written with
+// `messages: null` now carries the kept Turns (the engine half is item 6's
+// TestSnapshot_RoundTripsASettledExchange).
+func TestCancelSettlesKeepingFinishedTurns(t *testing.T) {
+	t.Parallel()
+	marker := domain.Session{State: json.RawMessage(`{"settled":true}`)}
+	eng := &fakeEngine{snapshotFn: func() (domain.Session, error) { return marker, nil }}
+	host := &fakeSessionHost{}
+	m := newSessionModel(t, eng, host)
+	m.transcript.addUser("first", nil)
+	m.transcript.commitAssistant("done", runRef{})
+	m.transcript.addUser("second", nil)
+	startStubWorker(t, &m)
+
+	m, cmd := stepCmd(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+
+	if eng.settles() != 1 {
+		t.Fatalf("SettleExchange calls = %d, want 1", eng.settles())
+	}
+	if eng.aborts() != 0 {
+		t.Fatalf("AbortExchange calls = %d, want 0 — a cancel settles, only /clear aborts", eng.aborts())
+	}
+	for _, e := range m.transcript.entries {
+		if e.kind == entryUser && e.aborted {
+			t.Errorf("prompt %q carries the aborted mark; a settled Exchange stands in the engine", e.text)
+		}
+	}
+	if want := [][2]int{{1, 1}, {3, 0}}; !reflect.DeepEqual(forkDrops(m.transcript.forkPoints()), want) {
+		t.Errorf("forkPoints (index, drop) = %v, want %v — the settled prompt is a fork point", forkDrops(m.transcript.forkPoints()), want)
+	}
+	if !hasEntry(m, entryNote, "cancelled") {
+		t.Error("the cancelled note did not land")
+	}
+	if cmd == nil {
+		t.Fatal("the cancel fold scheduled no idle save")
+	}
+	drainCmd(t, m, cmd)
+	calls := host.savedCalls()
+	if len(calls) != 1 || string(calls[0].sess.State) != string(marker.State) {
+		t.Fatalf("idle save after the cancel = %+v; want one save of the engine's settled snapshot", calls)
+	}
+}
+
+// TestCancelOnALoneOpeningStillMarksAborted pins the fallback: when the stop finds no finished
+// Turn to keep, the engine's settle reports dropped and the Model marks the prompt as it always
+// did, so a fork counts it out.
+func TestCancelOnALoneOpeningStillMarksAborted(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{settleDrops: true}
+	m := newTestModelEng(t, eng, testOpts)
+	m.transcript.addUser("first", nil)
+	m.transcript.commitAssistant("done", runRef{})
+	m.transcript.addUser("second", nil)
+	startStubWorker(t, &m)
+
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+
+	if eng.settles() != 1 || eng.aborts() != 0 {
+		t.Fatalf("SettleExchange/AbortExchange calls = %d/%d, want 1/0 — the rollback is the engine's fallback inside the settle", eng.settles(), eng.aborts())
+	}
+	last := m.transcript.entries[len(m.transcript.entries)-2] // the prompt, before the cancelled note
+	if last.kind != entryUser || last.text != "second" || !last.aborted {
+		t.Errorf("entry before the note = kind %v text %q aborted %v; want the second prompt marked aborted", last.kind, last.text, last.aborted)
+	}
+	if want := [][2]int{{1, 0}}; !reflect.DeepEqual(forkDrops(m.transcript.forkPoints()), want) {
+		t.Errorf("forkPoints (index, drop) = %v, want %v — a dropped prompt is not a fork point", forkDrops(m.transcript.forkPoints()), want)
+	}
+}
+
+// TestLoopErrorSettlesTheExchange: the fault fold takes the same close as the cancel fold — the
+// finished Turns are kept and the prompt stays a fork point — and no abort is made.
+func TestLoopErrorSettlesTheExchange(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, testOpts)
+	m.transcript.addUser("first", nil)
+	startStubWorker(t, &m)
+
+	m = step(t, m, errMsg{Err: errors.New("loop fault mid-exchange")})
+
+	if m.state != stateErrored {
+		t.Fatalf("state = %v, want errored", m.state)
+	}
+	if eng.settles() != 1 || eng.aborts() != 0 {
+		t.Fatalf("SettleExchange/AbortExchange calls = %d/%d, want 1/0", eng.settles(), eng.aborts())
+	}
+	if m.transcript.entries[len(m.transcript.entries)-2].aborted {
+		t.Error("the prompt was marked aborted although the settle kept its Turns")
+	}
+	if want := [][2]int{{1, 0}}; !reflect.DeepEqual(forkDrops(m.transcript.forkPoints()), want) {
+		t.Errorf("forkPoints (index, drop) = %v, want %v", forkDrops(m.transcript.forkPoints()), want)
+	}
 }
 
 // ----------------------------------------------------------------------------
@@ -3537,9 +3647,10 @@ func TestContinueOnInterruptedResumesStepOnly(t *testing.T) {
 }
 
 // A fresh message typed on an interrupted session supersedes the stale half-Exchange: the Model
-// aborts the open Exchange first (synchronously, so a later Submit is accepted) and notes the
-// discard, then records the message and launches the normal worker.
-func TestSubmitOnInterruptedAbortsWithNote(t *testing.T) {
+// settles the open Exchange first (synchronously, so a later Submit is accepted) — keeping the
+// Turns that finished before the interruption, never aborting — and notes that they stand, then
+// records the message and launches the normal worker.
+func TestSubmitOnInterruptedSettlesWithNote(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{inExchange: true}
 	m := newTestModelEng(t, eng, testOpts)
@@ -3547,16 +3658,19 @@ func TestSubmitOnInterruptedAbortsWithNote(t *testing.T) {
 	m.input.SetValue("do something else instead")
 	m, cmd := stepCmd(t, m, keyEnter())
 
-	if eng.aborts() != 1 {
-		t.Fatalf("AbortExchange calls = %d, want 1 (a fresh message discards the interrupted work)", eng.aborts())
+	if eng.settles() != 1 {
+		t.Fatalf("SettleExchange calls = %d, want 1 (a fresh message closes the interrupted work keeping its finished steps)", eng.settles())
 	}
-	// The abort is synchronous; the Submit rides the worker Cmd (not run here), so it is still 0 —
-	// which is exactly what proves the abort precedes the Submit.
+	if eng.aborts() != 0 {
+		t.Fatalf("AbortExchange calls = %d, want 0 (only /clear throws the finished steps away)", eng.aborts())
+	}
+	// The settle is synchronous; the Submit rides the worker Cmd (not run here), so it is still 0 —
+	// which is exactly what proves the settle precedes the Submit.
 	if eng.submits() != 0 {
-		t.Errorf("Submit calls = %d immediately after enter, want 0 (abort-then-submit ordering)", eng.submits())
+		t.Errorf("Submit calls = %d immediately after enter, want 0 (settle-then-submit ordering)", eng.submits())
 	}
-	if !hasEntry(m, entryNote, "discarded the interrupted work — continuing fresh from your message") {
-		t.Error("the discard was not surfaced as a note")
+	if !hasEntry(m, entryNote, "closed the interrupted work — its finished steps stand; continuing from your message") {
+		t.Error("the settle was not surfaced as the note that says the finished steps stand")
 	}
 	if !hasEntry(m, entryUser, "do something else instead") {
 		t.Error("the fresh message was not recorded as a user block")
@@ -3568,7 +3682,9 @@ func TestSubmitOnInterruptedAbortsWithNote(t *testing.T) {
 
 // /clear on an interrupted session scraps the open Exchange before clearing — ClearContext refuses
 // mid-Exchange, so startNewSession aborts first — then resets the view to the re-seeded start-up box.
-func TestClearOnInterruptedAbortsThenClears(t *testing.T) {
+// It is the ONE close that still aborts where a cancel or a fresh message settles: the human asked
+// for the conversation to be gone, finished Turns included.
+func TestClearOnInterruptedStillAborts(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{inExchange: true}
 	m := newTestModelEng(t, eng, testOpts)
@@ -3579,6 +3695,9 @@ func TestClearOnInterruptedAbortsThenClears(t *testing.T) {
 
 	if eng.aborts() != 1 {
 		t.Fatalf("AbortExchange calls = %d, want 1 (an interrupted session must be scrapped before it can clear)", eng.aborts())
+	}
+	if eng.settles() != 0 {
+		t.Fatalf("SettleExchange calls = %d, want 0 (/clear throws the Exchange away, it does not settle it)", eng.settles())
 	}
 	if eng.clearCalls != 1 {
 		t.Fatalf("ClearContext calls = %d, want 1", eng.clearCalls)
@@ -3611,9 +3730,10 @@ func TestResumedMidExchangeShowsInterruptedNote(t *testing.T) {
 	}
 }
 
-// After a LIVE cancel (Esc, not an interrupted restore) the Model has already aborted the Exchange,
-// so InExchange is false and /continue stays the canned "Please continue" submit — it adds the
-// /continue user block, the tell-tale of the canned path the interrupted path omits.
+// After a LIVE cancel (Esc, not an interrupted restore) the Model has already settled the Exchange
+// — closed in the engine, its finished Turns kept in the conversation — so InExchange is false and
+// /continue stays the canned "Please continue" submit over a wire that still holds that work: it
+// adds the /continue user block, the tell-tale of the canned path the interrupted path omits.
 func TestContinueAfterLiveCancelStaysCanned(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{}

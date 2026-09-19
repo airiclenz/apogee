@@ -1105,12 +1105,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case cancelledMsg:
 		// The worker cancelled at a quiescent boundary and has returned, so the engine is the Update
-		// loop's to touch again (C1): discard the interrupted Exchange, run the commands queued
-		// meanwhile, and hold whatever messages were staged.
+		// loop's to touch again (C1): settle the interrupted Exchange (its finished Turns kept),
+		// run the commands queued meanwhile, and hold whatever messages were staged.
 		return m.foldCancelled()
 
 	case errMsg:
-		// A loop-level fault also returns the engine to the Update loop (C1): discard the
+		// A loop-level fault also returns the engine to the Update loop (C1): settle the
 		// interrupted Exchange, record the error, and hold whatever was staged.
 		return m.foldLoopError(msg)
 
@@ -1864,11 +1864,14 @@ func (m Model) submit() (tea.Model, tea.Cmd) {
 	}
 	if m.eng.InExchange() {
 		// The session was restored mid-task and the human typed a fresh message instead of
-		// /continue: their new intent supersedes the stale half-Exchange (Esc-parity). Scrap the
+		// /continue: their new intent supersedes the stale half-Exchange (Esc-parity). Settle the
 		// open Exchange so the Submit below is accepted — a Submit while InExchange is rejected with
-		// ErrInputPending — and note the discard so the dropped work is never a silent loss.
-		m.eng.AbortExchange()
-		m.transcript.addNote("discarded the interrupted work — continuing fresh from your message")
+		// ErrInputPending — keeping the Turns that finished before the interruption, exactly as the
+		// cancel fold does; only /clear throws them away. The note says the work stands and where
+		// the new message continues from. The restored prompt is not marked aborted here: the
+		// record's own mark (or its absence) already says what happened to it.
+		m.eng.SettleExchange()
+		m.transcript.addNote(interruptedSettledNote)
 	}
 	in := domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs}
 	// Where the /tokens sit in the text that is about to become the block — the parse's own offsets
@@ -2067,8 +2070,8 @@ func (m *Model) finishWorker(next uiState) tea.Cmd {
 	m.applyPendingRebind()
 	if next == stateIdle {
 		// A completed or cancelled Exchange settled at idle: persist the final conversation state
-		// (the per-Turn saves captured each Turn; this catches the closing boundary, including a
-		// cancel's post-AbortExchange rollback and any note the terminal handler just added).
+		// (the per-Turn saves captured each Turn; this catches the closing boundary, including the
+		// Turns a cancel's SettleExchange kept and any note the terminal handler just added).
 		return m.saveAtIdle()
 	}
 	return nil
@@ -2087,38 +2090,43 @@ func (m Model) foldHookNotice(msg hookNoticeMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// foldCancelled folds the worker's return from a cancel: the interrupted Exchange is discarded, the
-// streamed partial is committed, the "cancelled" note lands behind it, and a staged queue is held
-// rather than flushed.
+// foldCancelled folds the worker's return from a cancel: the interrupted Exchange is settled — its
+// finished Turns kept, only the cancelled one gone — the streamed partial is committed, the
+// "cancelled" note lands behind it, and a staged queue is held rather than flushed.
 //
 // The worker cancelled at a quiescent boundary and has returned, so the engine is the Update loop's
-// to touch again (C1). Discard the interrupted Exchange so the engine leaves its open-Exchange
+// to touch again (C1). Settle the interrupted Exchange so the engine leaves its open-Exchange
 // state: without this the Agent stays inExchange after a cancel and the next /clear or message is
-// rejected with ErrInputPending — the post-Esc wedge. Only the model's memory drops the scrapped
-// Exchange: what reached the screen stays in scrollback. Which is why the partial is COMMITTED
-// ([transcript.commitCancelled]) rather than left as the live preview it was — a preview belongs to
-// no entry, so the next user message would render above it; committed, the note stands after it and
-// the next message after both, and the session record keeps that same order.
+// rejected with ErrInputPending — the post-Esc wedge. Settling ([Engine.SettleExchange]) rather
+// than aborting is what keeps the work done before the stop: the tool Turns that finished stay in
+// the conversation with the cut marked on the last of them, and only an Exchange with no finished
+// Turn falls back to the rollback that drops its opening prompt. The model's memory and the screen
+// then agree about the kept Turns; the cancelled Turn's partial reached the screen only, which is
+// why it is COMMITTED ([transcript.commitCancelled]) rather than left as the live preview it was —
+// a preview belongs to no entry, so the next user message would render above it; committed, the
+// note stands after it and the next message after both, and the session record keeps that same
+// order.
 //
 // A stop is NOT a completion, so a staged queue is held rather than flushed: Esc stops everything,
 // including what was waiting to go out (ADR 0025). The note says so once, and ⏎ on the empty box is
 // what sends it afterwards. The COMMANDS queued meanwhile are the exception: they were never
-// addressed to the Exchange the stop scrapped, so they run at this idle (runDeferredCommands),
+// addressed to the Exchange the stop closed, so they run at this idle (runDeferredCommands),
 // before the hold is stated (amended 2026-09-14).
 //
-// "Held" covers exactly what the worker never DELIVERED. A row it did deliver was dropped from the
-// conversation by the AbortExchange below and stays dropped — sent is sent (owner ruling
-// 2026-08-03): it is not the queue's to hold back, and the ⧖ block beside the "cancelled" note is
-// the visible record of the model having read it before the Exchange was scrapped, not a claim that
-// it is still waiting to go out.
+// "Held" covers exactly what the worker never DELIVERED. A row it did deliver is committed history
+// — kept in the conversation with the settled Turns, or dropped with a lone opening's rollback —
+// and is never re-queued either way: sent is sent (owner ruling 2026-08-03). It is not the queue's
+// to hold back, and the ⧖ block beside the "cancelled" note is the visible record of the model
+// having read it before the stop, not a claim that it is still waiting to go out.
 func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
-	// The prompt that opened the scrapped Exchange is marked as never having reached a close, so a
-	// fork counts it out ([transcript.markAborted]). Only an Exchange worker has a mailbox: a
-	// cancelled /compact returns through here too, and it scrapped no prompt.
-	if m.worker.box != nil {
+	// Only an Exchange worker has a mailbox: a cancelled /compact returns through here too, and it
+	// closed no Exchange. The prompt is marked as never having reached the wire — so a fork counts
+	// it out ([transcript.markAborted]) — only when the settle fell back to the rollback that
+	// dropped it; a settled prompt's Exchange stands in the engine and is a real fork point.
+	dropped := m.eng.SettleExchange()
+	if m.worker.box != nil && dropped {
 		m.transcript.markAborted()
 	}
-	m.eng.AbortExchange()
 	m.transcript.commitCancelled()
 	m.transcript.addNote("cancelled")
 	cmd := m.finishWorker(stateIdle)
@@ -2131,15 +2139,17 @@ func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
 	return m, tea.Batch(cmd, drained)
 }
 
-// foldLoopError folds a loop-level fault: the interrupted Exchange is discarded, the error is
-// recorded for the errored state, and a staged queue is held rather than flushed.
+// foldLoopError folds a loop-level fault: the interrupted Exchange is settled (its finished Turns
+// kept), the error is recorded for the errored state, and a staged queue is held rather than
+// flushed.
 //
 // A loop-level fault returns the engine to the Update loop (C1), so — exactly as on a cancel —
-// discard the interrupted Exchange. Today Step never returns a mid-Exchange error (a fault surfaces
+// settle the interrupted Exchange. Today Step never returns a mid-Exchange error (a fault surfaces
 // as an ErrorEvent at a boundary), so this is a no-op guard, not a live path; but the moment Step
 // *can* fault mid-Exchange, the engine would stay inExchange and the next /clear or message would
 // be rejected with ErrInputPending — the same post-Esc wedge foldCancelled already prevents.
-// AbortExchange is a safe no-op at a quiescent boundary.
+// SettleExchange is a safe no-op at a quiescent boundary, and the prompt is marked aborted on the
+// same rule as there: only when the settle fell back to dropping it.
 //
 // A fault is not a completion either, so — exactly as on a cancel — a staged queue is held and
 // noted rather than flushed: sending the human's remarks into the wreckage of a failed Exchange is
@@ -2147,10 +2157,10 @@ func (m Model) foldCancelled() (tea.Model, tea.Cmd) {
 // the next. The commands queued before the fault wait with it — the errored state is not idle —
 // and run at that dismissing ⏎ (handleKey's stateErrored case), still ahead of any held message.
 func (m Model) foldLoopError(msg errMsg) (tea.Model, tea.Cmd) {
-	if m.worker.box != nil { // an Exchange worker's fault, not a /compact's (foldCancelled's gate)
+	dropped := m.eng.SettleExchange()
+	if m.worker.box != nil && dropped { // an Exchange worker's fault, not a /compact's (foldCancelled's gate)
 		m.transcript.markAborted()
 	}
-	m.eng.AbortExchange()
 	m.lastErr = msg.Err
 	m.transcript.addError("loop", msg.Err.Error(), runRef{})
 	cmd := m.finishWorker(stateErrored)

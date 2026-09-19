@@ -168,7 +168,9 @@ func (m Model) startNewSession() (tea.Model, tea.Cmd) {
 		// A session interrupted mid-task cannot be cleared — ClearContext refuses mid-Exchange with
 		// ErrInputPending — so scrap the open Exchange first. The save above already captured its
 		// mid-task state into history (where it stays resumable); this only drops the live engine's
-		// copy, exactly as a plain submit on an interrupted session does.
+		// copy. /clear is the ONE close that still aborts rather than settles: the human asked for
+		// the conversation to be gone, finished Turns included, where a cancel or a fresh message on
+		// the interrupted session keeps them (Engine.SettleExchange).
 		m.eng.AbortExchange()
 	}
 	if err := m.eng.ClearContext(); err != nil {

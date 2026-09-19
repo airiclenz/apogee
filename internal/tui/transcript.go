@@ -331,11 +331,14 @@ type entry struct {
 	tool        toolView
 	done        bool
 	// aborted is a depth-0 entryUser only: the Exchange this prompt opened was SCRAPPED before it
-	// completed — the human stopped it (foldCancelled) or the loop faulted (foldLoopError) — so
-	// the engine dropped the prompt with it (Agent.AbortExchange) and holds no Exchange for it.
-	// The scrollback keeps the block, as it keeps everything that reached the screen; the mark is
-	// what lets a fork count the prompts that reached the wire ([transcript.forkPoints]). It is
-	// persisted (session.Entry.Aborted) so a resumed transcript still skips it, and never painted.
+	// completed — the human stopped it (foldCancelled) or the loop faulted (foldLoopError) while
+	// it held no finished Turn, so the settle (Engine.SettleExchange) fell back to the rollback
+	// that dropped the prompt, and the engine holds no Exchange for it. A stop that found finished
+	// Turns keeps them, and its prompt stays unmarked: that Exchange stands in the engine. The
+	// scrollback keeps the block either way, as it keeps everything that reached the screen; the
+	// mark is what lets a fork count the prompts that reached the wire ([transcript.forkPoints]).
+	// It is persisted (session.Entry.Aborted) so a resumed transcript still skips it, and never
+	// painted.
 	aborted bool
 	// the head of a sub-agent run only: the delegation's lifecycle phase as its child reported it
 	// (domain.SubAgentPhaseEvent); view-only liveness beside done's pairing, never persisted
@@ -1023,11 +1026,13 @@ func (t *transcript) userTexts() []string {
 // markAborted marks the prompt whose Exchange was just scrapped: the LAST depth-0 entryUser, which
 // is the one an open Exchange always belongs to — a prompt is committed at submit and the next one
 // cannot be sent until the Exchange it opened has closed. Its two callers are the two folds that
-// abort an Exchange, foldCancelled and foldLoopError; a faulted Exchange that closed on its own
-// (an exchangeDoneMsg with Faulted set) is NOT marked, because the engine kept its opening
-// (turn.go endAbandoned) and the prompt did reach the wire. No-op on a transcript without a prompt
-// — a cancelled /compact reaches foldCancelled too, but its caller gates on the worker's mailbox
-// (an Exchange has one, a /compact does not) before reaching here.
+// settle an Exchange, foldCancelled and foldLoopError, and each calls it only when the settle
+// reported the Exchange DROPPED — a lone opening with no finished Turn to keep. A settled Exchange
+// that kept its Turns is not marked (the engine holds it, so the prompt is a fork point), and
+// neither is a faulted Exchange that closed on its own (an exchangeDoneMsg with Faulted set): the
+// engine kept its opening (turn.go endAbandoned) and the prompt did reach the wire. No-op on a
+// transcript without a prompt — a cancelled /compact reaches foldCancelled too, but its caller
+// gates on the worker's mailbox (an Exchange has one, a /compact does not) before reaching here.
 //
 // It touches nothing: the mark is never painted, so the repaint counter has nothing to see.
 func (t *transcript) markAborted() {
@@ -1065,7 +1070,8 @@ type forkPoint struct {
 //     lands after the prompt in the scrollback and the prompt reads as pre-fold; its Exchange is in
 //     fact intact, and not offering it is the conservative side of the rule;
 //   - a prompt whose Exchange was scrapped (entry.aborted): the engine dropped it, so it is not an
-//     Exchange to cut and not one to stand at.
+//     Exchange to cut and not one to stand at. A prompt whose cancelled Exchange was SETTLED with
+//     its finished Turns kept is not of this kind — the engine holds that Exchange, so it counts.
 //
 // nil on a session with no eligible prompt — empty, or every prompt folded — which is the
 // caller's cue for the "that stretch was folded" note. A record written before the aborted mark

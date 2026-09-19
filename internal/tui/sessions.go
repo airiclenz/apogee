@@ -97,8 +97,14 @@ const forkTagGlyph = "⑂"
 
 // interruptedNote is the transcript note appended when a resumed session was interrupted
 // mid-task (the engine reports InExchange after the restore). It tells the human how to pick the
-// work back up; the step-only /continue drive that actually resumes it is item 8's work.
-const interruptedNote = "this session was interrupted mid-task — /continue picks up where it left off; sending a new message discards the unfinished work"
+// work back up — /continue re-Steps the open Exchange (driveResume); a fresh message settles it
+// instead, keeping the finished steps ([Model.submit]'s InExchange branch, interruptedSettledNote).
+const interruptedNote = "this session was interrupted mid-task — /continue picks up where it left off; sending a new message keeps the finished steps and continues from there"
+
+// interruptedSettledNote is the transcript note appended when a fresh message on such a session
+// closed the interrupted Exchange (Engine.SettleExchange) instead of resuming it: the Turns that
+// finished before the interruption stand, and the new message continues from them.
+const interruptedSettledNote = "closed the interrupted work — its finished steps stand; continuing from your message"
 
 // progressSavedNote is the transcript note appended when a resumed record was written while a
 // delegation was still running (the progress save, ADR 0022's 2026-08-25 addendum) — the replay found

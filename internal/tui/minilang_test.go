@@ -458,8 +458,8 @@ func TestCompactDoneSkippedLeavesGaugeAndSaysNothing(t *testing.T) {
 }
 
 // A cancelled /compact folds nothing, so — unlike a committed compaction, which zeroes the
-// gauge — the cancel must leave ctxUsed exactly as it was, discard the open Exchange
-// (AbortExchange, so the next input is accepted), and record the "cancelled" note. The outcome
+// gauge — the cancel must leave ctxUsed exactly as it was, close the open Exchange
+// (SettleExchange, a no-op here, so the next input is accepted), and record the "cancelled" note. The outcome
 // is classified from Compact's error (startCompact), so a cancel never masquerades as a
 // gauge-resetting compaction.
 func TestCancelledCompactLeavesGaugeUntouched(t *testing.T) {
@@ -478,8 +478,8 @@ func TestCancelledCompactLeavesGaugeUntouched(t *testing.T) {
 	if m.ctxUsed != 4200 {
 		t.Errorf("ctxUsed = %d, want unchanged (a cancelled compact folded nothing)", m.ctxUsed)
 	}
-	if got := eng.aborts(); got != 1 {
-		t.Errorf("AbortExchange called %d times, want 1 (the cancel discards the open Exchange)", got)
+	if got := eng.settles(); got != 1 {
+		t.Errorf("SettleExchange called %d times, want 1 (the cancel closes the open Exchange)", got)
 	}
 	if got := plain(m.View()); !strings.Contains(got, "cancelled") {
 		t.Errorf("transcript missing the cancelled note:\n%s", got)

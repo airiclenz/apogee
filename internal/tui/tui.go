@@ -827,9 +827,9 @@ type DelegationHost interface {
 // with a fake engine. The worker goroutine is the only caller of the Exchange-driving
 // methods (Submit/Step, and Interject at the boundary between them); ClearContext/Compact
 // are driven from the Update goroutine but only at idle, when no worker runs — so the
-// single-driver contract holds (phase-2 detail plan §3 C1). Two calls stand outside it
-// deliberately, and both are engine-side-guarded rather than boundary-guarded: AbortExchange
-// and InterjectChild, which the Update goroutine may make while a worker drives.
+// single-driver contract holds (phase-2 detail plan §3 C1). Three calls stand outside it
+// deliberately, and all are engine-side-guarded rather than boundary-guarded: AbortExchange,
+// SettleExchange and InterjectChild, which the Update goroutine may make while a worker drives.
 type Engine interface {
 	// Submit enqueues user input to begin or continue an Exchange.
 	Submit(domain.UserInput) error
@@ -863,9 +863,9 @@ type Engine interface {
 	// tools, mode and confinement unchanged: addressing a child grants it nothing (ADR 0063).
 	//
 	// Unlike Interject above it is NOT the worker's call. It is the one engine call besides
-	// AbortExchange that the program goroutine may make while a worker drives the loop: a
-	// non-blocking enqueue onto a guarded mailbox that touches no conversation, so it needs
-	// neither the between-Steps boundary nor the single-driver contract.
+	// AbortExchange and SettleExchange that the program goroutine may make while a worker drives
+	// the loop: a non-blocking enqueue onto a guarded mailbox that touches no conversation, so it
+	// needs neither the between-Steps boundary nor the single-driver contract.
 	//
 	// It refuses with domain.ErrNoSuchChild when spawnCallID names no running sub-agent — the
 	// child finished, was cancelled, or never existed — and that refusal is the message's whole
@@ -876,11 +876,22 @@ type Engine interface {
 	// ClearContext drops the model's conversation history (the /clear command); the
 	// host's visible transcript is unaffected. Called only at idle (no worker running).
 	ClearContext() error
-	// AbortExchange discards an Exchange the user cancelled, returning the engine to a clean
-	// boundary the next Submit/ClearContext accepts. Called once the worker has returned its
-	// cancelledMsg (no worker owns the engine), so the post-Esc /clear or message is not
-	// rejected with ErrInputPending.
+	// AbortExchange discards an interrupted Exchange — every Turn it holds, the opening prompt
+	// included — returning the engine to a clean boundary the next Submit/ClearContext accepts.
+	// It is the explicit throw-away: /clear on an interrupted session, where the human asks for the
+	// Exchange to be gone. Called only once no worker owns the engine.
 	AbortExchange()
+	// SettleExchange closes an interrupted Exchange KEEPING the Turns that finished before the stop:
+	// the tool results stand in the conversation, the cut is marked on the last of them as an
+	// ephemeral engine note, and the engine returns to a clean boundary the next Submit accepts.
+	// When the Exchange holds no finished Turn — the lone opening prompt, or that plus an
+	// interjection the cancelled first Turn left behind — it falls back to AbortExchange's rollback
+	// and reports dropped = true; false means the Turns were kept. It is the cancel fold's close
+	// (foldCancelled, foldLoopError) and the close a fresh message on a restored interrupted
+	// session takes, so the post-Esc message is not rejected with ErrInputPending and the work done
+	// before the stop is not thrown away with the stop. A no-op returning false when no Exchange is
+	// open; like AbortExchange it is called only once no worker owns the engine.
+	SettleExchange() (dropped bool)
 	// RestoreSession swaps a stored snapshot into the LIVE Agent without a rebuild, so tools,
 	// Reactions, and MCP wiring stand (the in-TUI resume primitive the /sessions browser drives).
 	// Like ClearContext it is called only at idle (no worker running) and refuses mid-Exchange

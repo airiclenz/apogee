@@ -394,9 +394,10 @@
 // the delivery report moves exactly the rows that LANDED into the transcript as ⧖ blocks, and a
 // terminal boundary rules on whatever is left: flushed as ONE joined message on a natural
 // completion, HELD under a note after Esc or a fault, because Esc means stop everything. A stop
-// holds what was DELIVERED too — the worker skips a drain whose ctx is already cancelled, and the
-// cancel fold re-stages what it did deliver, since AbortExchange takes those rows out of the
-// conversation and nothing else would put them back (ADR 0025 decision 7, as amended). Keys reach
+// holds only what was never DELIVERED — the worker skips a drain whose ctx is already cancelled,
+// and a row it did deliver is history: kept with the finished Turns the cancel fold's
+// SettleExchange leaves in the conversation, or dropped with a lone opening, never re-staged (sent
+// is sent, ADR 0025 decision 7 as amended). Keys reach
 // the box wherever [Model.inputEditable] says so — the same predicate the mouse arbitrates by, which
 // is what keeps the keyboard and the mouse from disagreeing about which states are live — and the
 // cost is the deliberate one the plan named: single-key transcript scrolling while running, with
@@ -575,7 +576,7 @@
 // `context-window:` pin outrank the server's window forever without the renderer knowing a pin
 // exists — and a change is applied at once when the engine is idle, or stashed as a latest-wins
 // pendingRebind and applied at the next quiescent boundary when something else owns the engine:
-// finishWorker when a worker does (the boundary AbortExchange and the idle save use), and the
+// finishWorker when a worker does (the boundary SettleExchange and the idle save use), and the
 // actuation completion fold while a launcher verb owns the server the session talks to, since that
 // completion may re-point the session itself. [Model.applyRebind] then adopts what was actually BOUND
 // (never merely what was observed), restates the start-up box in place (transcript.refreshStartup —

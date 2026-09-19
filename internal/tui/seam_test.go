@@ -125,9 +125,11 @@ type fakeEngine struct {
 	effortOverride domain.ThinkingEffort   // the live session override ThinkingEffort reports as its first layer
 	effortProfile  domain.ThinkingEffort   // the bound profile's own effort — scripted, never moved from the TUI
 
-	clearCalls   int // records ClearContext calls (the /clear command)
-	abortCalls   int // records AbortExchange calls (discarding a cancelled Exchange)
-	compactCalls int // records Compact calls (the /compact command)
+	clearCalls   int  // records ClearContext calls (the /clear command)
+	abortCalls   int  // records AbortExchange calls (the /clear close of an interrupted Exchange)
+	settleCalls  int  // records SettleExchange calls (the cancel fold's close, keeping finished Turns)
+	settleDrops  bool // the value SettleExchange reports: true models the lone-opening fallback to abort
+	compactCalls int  // records Compact calls (the /compact command)
 
 	restoreCalls []domain.Session // records RestoreSession calls (the in-TUI resume primitive), in order
 	cutCalls     []int            // records CutSnapshot's drop counts (the /fork cut), in order
@@ -272,6 +274,17 @@ func (f *fakeEngine) AbortExchange() {
 	f.abortCalls++
 	f.inExchange = false // the real Agent returns to a clean boundary; InExchange reads false after
 	f.mu.Unlock()
+}
+
+// SettleExchange records the call and answers with the scripted settleDrops; the fake holds no
+// conversation, so whether finished Turns exist is the test's to say. Like the real Agent it
+// leaves the engine at a clean boundary either way.
+func (f *fakeEngine) SettleExchange() (dropped bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.settleCalls++
+	f.inExchange = false
+	return f.settleDrops
 }
 
 func (f *fakeEngine) RestoreSession(snap domain.Session) error {
@@ -445,11 +458,19 @@ func (f *fakeEngine) submits() int {
 	return len(f.submitted)
 }
 
-// aborts reports how many times AbortExchange was called (a cancel discarded the Exchange).
+// aborts reports how many times AbortExchange was called (/clear threw an interrupted Exchange away).
 func (f *fakeEngine) aborts() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.abortCalls
+}
+
+// settles reports how many times SettleExchange was called (a cancel closed the Exchange keeping
+// its finished Turns).
+func (f *fakeEngine) settles() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.settleCalls
 }
 
 // steps reports how many times Step was called.
