@@ -29,6 +29,13 @@ import (
 // per-session scratch dir is named by that id, of the scratch dirs too: it creates the active
 // session's dir at each identity boundary and tells the engine when it moves (scratchMoved).
 //
+// The host is also the session's live-instance holder (session.Store.Hold): it holds the record
+// Saves target from the record's birth — the first Save, or construction on a resumed record — for as
+// long as that identity is the active one, moves the hold at every identity boundary (Rotate releases,
+// Activate re-holds) and lets go of it at Close. A run that never saves therefore touches no disk,
+// and a second apogee asked to open the same record is refused at its door for as long as this one
+// lives (apogee-3b3).
+//
 // The mutable fields are mutex-guarded: Save runs on a Bubble Tea Cmd goroutine while ActiveID, the
 // browser verbs, and SetModel are driven from the Update loop, so the two can race.
 type sessionHost struct {
@@ -73,6 +80,16 @@ type sessionHost struct {
 	// first of them. An id is only a name; nothing reaches the store until a Save. "" falls
 	// back to Save minting on the spot, exactly the pre-scratch behaviour.
 	nextID string
+
+	// heldID is the id whose live-instance hold this host currently owns, "" when it holds none;
+	// release lets that hold go. The pair moves together (holdLocked / releaseLocked) and is
+	// guarded by mu like the identity it follows. The hold is taken at the record's BIRTH — the
+	// first Save, or construction on a resumed record — never at the mint, so a run that never
+	// saves creates no lock file, and it is kept, not re-taken, across every Save and Activate of
+	// the id already held: flock refuses a second open of the same path in one process with this
+	// process's own pid, so re-acquiring would refuse ourselves.
+	heldID  string
+	release func() error
 }
 
 // activeSession is the identity of the session Saves currently target: the id minted once (or
@@ -94,11 +111,16 @@ var _ tui.SessionHost = (*sessionHost)(nil)
 
 // newSessionHost builds the host over a store and the run's wiring facts. When resumed is non-nil
 // (a --resume/--continue start) the host begins ACTIVE on that record, so subsequent Saves update
-// its file in place — its id, CreatedAt, and Title carried over rather than a new session forked.
-// A fresh start instead PRE-MINTS the id its first Save will adopt (nextID), so the session's
-// scratch dir can exist before the first tool call. scratchRoot and scratchMoved wire the scratch
-// seam, snapshotsRoot and journalMoved the undo-store seam beside it ("" / nil disable either —
-// see the fields).
+// its file in place — its id, CreatedAt, and Title carried over rather than a new session forked —
+// and HOLDS it from here (holdLocked), the record having been born before this run. The door that
+// resolved the record (resolveResume) probed the hold and let go of it a moment ago, so this is the
+// one real hold of the run; the hold it cannot take — a second instance won that gap, or the lock
+// file could not be opened — is not a construction failure: the first Save re-attempts it and
+// reports the refusal, since Save is the first act that would write over the other instance's
+// record and the one with an error to return. A fresh start instead PRE-MINTS the id its first Save
+// will adopt (nextID), so the session's scratch dir can exist before the first tool call, and holds
+// nothing until that Save. scratchRoot and scratchMoved wire the scratch seam, snapshotsRoot and
+// journalMoved the undo-store seam beside it ("" / nil disable either — see the fields).
 func newSessionHost(store *session.Store, workspace, model string, resumed *session.Record,
 	scratchRoot string, scratchMoved func(dir string),
 	snapshotsRoot string, journalMoved func(id string)) *sessionHost {
@@ -112,10 +134,46 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 			createdAt: resumed.Meta.CreatedAt,
 			parentID:  resumed.Meta.ParentID,
 		}
+		_ = h.holdLocked(resumed.Meta.ID)
 		return h
 	}
 	h.nextID = session.NewID(h.now())
 	return h
+}
+
+// holdLocked makes id the session this host holds: a no-op when it is held already (the live hold
+// is kept, never re-taken — see heldID), otherwise the previous hold is released and id's taken
+// through the store. A refused or failed hold leaves the host holding nothing and is returned for the
+// caller to report or retry; the identity the caller adopted is unaffected. Callers hold h.mu.
+func (h *sessionHost) holdLocked(id string) error {
+	if h.release != nil && h.heldID == id {
+		return nil
+	}
+	h.releaseLocked()
+	release, err := h.store.Hold(id)
+	if err != nil {
+		return err
+	}
+	h.heldID, h.release = id, release
+	return nil
+}
+
+// releaseLocked lets go of whatever hold this host owns; a host holding nothing does nothing. The
+// release cannot fail in a way the host could repair — the descriptor closes and the kernel drops the
+// lock regardless — so its error is discarded. Callers hold h.mu.
+func (h *sessionHost) releaseLocked() {
+	if h.release != nil {
+		_ = h.release()
+	}
+	h.heldID, h.release = "", nil
+}
+
+// Close releases the host's live-instance hold — the end of the run, after the engine has closed, so
+// the record is free to resume elsewhere the moment this apogee is done writing it. Idempotent.
+func (h *sessionHost) Close() {
+	h.mu.Lock()
+	h.releaseLocked()
+	h.mu.Unlock()
 }
 
 // Save persists the active session, minting its id (and fixing its Title and CreatedAt) on the
@@ -127,6 +185,11 @@ func newSessionHost(store *session.Store, workspace, model string, resumed *sess
 // of a session's spend apart (session.Meta), and servedModels — the ids the upstream actually
 // answered with, which the renderer folds off the readings — is stored beside the bound Model
 // rather than in place of it, so the record says both what was asked for and what answered.
+//
+// The first Save is the record's birth and takes its live-instance hold (holdLocked); every later
+// Save of the same id finds the hold in place and keeps it. A hold that is refused — the record is
+// open in another apogee — or fails is this Save's error, returned BEFORE anything is written: two
+// instances never write one record.
 func (h *sessionHost) Save(
 	sess apogee.Session,
 	transcript []byte,
@@ -149,6 +212,10 @@ func (h *sessionHost) Save(
 	}
 	a := *h.active
 	model := h.model
+	if err := h.holdLocked(a.id); err != nil {
+		h.mu.Unlock()
+		return err
+	}
 	h.mu.Unlock()
 
 	return h.store.Save(session.Record{
@@ -186,9 +253,11 @@ func (h *sessionHost) SetModel(model string) {
 // /clear|/new boundary). Minting HERE rather than at that Save is what lets the new session's
 // scratch dir exist — created and pushed to the engine via scratchMoved — before the new
 // session's first tool call. It is idempotent on an already-inactive host (each call simply
-// re-mints).
+// re-mints). The closed session's live-instance hold goes with it: the record is another run's to
+// resume from here, and the fresh id holds nothing until its first Save.
 func (h *sessionHost) Rotate() {
 	h.mu.Lock()
+	h.releaseLocked()
 	h.active = nil
 	h.nextID = session.NewID(h.now())
 	id := h.nextID
@@ -211,10 +280,15 @@ func (h *sessionHost) Load(id string) (session.Record, error) {
 // Activate makes meta's session the one subsequent Saves update, replacing the current active
 // session rather than forking a new file — the /sessions resume flow calls it once RestoreSession
 // has confirmed the switch. Its id, Title, CreatedAt and ParentID carry over so a later Save
-// preserves them.
+// preserves them. The live-instance hold follows the identity: the outgoing session's hold is
+// released and the adopted record's taken — kept as it is when the adopted id is the one already
+// held (a resume of the active session). Activate reports nothing (tui.SessionHost), so a hold it
+// cannot take is left for the next Save to re-attempt and report — the Save is what would write
+// over the other instance's record, and it refuses before writing.
 func (h *sessionHost) Activate(meta session.Meta) {
 	h.mu.Lock()
 	h.active = &activeSession{id: meta.ID, title: meta.Title, createdAt: meta.CreatedAt, parentID: meta.ParentID}
+	_ = h.holdLocked(meta.ID)
 	h.mu.Unlock()
 	// The scratch dir follows the activation: the resumed session's own dir (re)exists and is
 	// what the engine fences the next tool call to.
@@ -438,8 +512,15 @@ func resolveResume(store *session.Store, resume string, continueSession bool, wo
 // store's id validation) any path the id spelled out. Re-minting makes the path-resumed
 // conversation a NEW session of this store, which is also what makes resuming a file from outside
 // the store — a repo-shipped session, a copied record — safe.
+//
+// A record resolved by id is probed for its live-instance hold (probeHold): one another apogee is
+// running is refused with the friendly line rather than opened twice. A path-resumed record is not —
+// its re-minted id is this run's own, held by no one.
 func resolveResumeArg(store *session.Store, arg string) (session.Record, error) {
 	if rec, err := store.Load(arg); err == nil {
+		if err := probeHold(store, rec.Meta.ID); err != nil {
+			return session.Record{}, err
+		}
 		return rec, nil
 	}
 	rec, err := store.LoadPath(arg)
@@ -454,7 +535,8 @@ func resolveResumeArg(store *session.Store, arg string) (session.Record, error) 
 // resolveContinue resumes the most recent session recorded for the resolved workspace — the
 // --continue convenience that needs no id. List returns metas newest-first, so the first record
 // whose Workspace matches is the newest; a workspace with none is a friendly error pointing at the
-// alternatives.
+// alternatives. The newest record is the one --continue means: when another apogee holds it the
+// start is refused with the friendly line (probeHold), never skipped to the workspace's next record.
 func resolveContinue(store *session.Store, workspace string) (session.Record, error) {
 	metas, err := store.List()
 	if err != nil {
@@ -462,12 +544,33 @@ func resolveContinue(store *session.Store, workspace string) (session.Record, er
 	}
 	for _, m := range metas {
 		if m.Workspace == workspace {
-			return store.Load(m.ID)
+			rec, err := store.Load(m.ID)
+			if err != nil {
+				return session.Record{}, err
+			}
+			if err := probeHold(store, m.ID); err != nil {
+				return session.Record{}, err
+			}
+			return rec, nil
 		}
 	}
 	return session.Record{}, fmt.Errorf(
 		"apogee: no saved sessions for this workspace (%s) — start one, or resume another with "+
 			"--resume <id> (see /sessions)", workspace)
+}
+
+// probeHold asks whether the record id may be opened by this run: the live-instance hold is taken
+// and released AT ONCE, so a refusal — the record is open in another apogee — surfaces at the door
+// as the *session.HeldError whose Error() is the line the start prints, while a record nobody holds
+// is left free for the host to take the one real hold at construction (newSessionHost). Probing
+// rather than holding here is what keeps the run to a single hold: a door that kept its lock would
+// refuse the host's own flock with this process's pid.
+func probeHold(store *session.Store, id string) error {
+	release, err := store.Hold(id)
+	if err != nil {
+		return err
+	}
+	return release()
 }
 
 // resumedSession projects a resolved store record onto the TUI's startup-replay payload, or nil for

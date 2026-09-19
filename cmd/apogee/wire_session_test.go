@@ -71,6 +71,9 @@ func TestSessionHostRoundTripsThroughResume(t *testing.T) {
 	if id == "" {
 		t.Fatal("host minted no id after a successful Save")
 	}
+	// The first run ends before the second resumes its record: a live host holds the session, and
+	// the resume door would refuse it (TestResolveResumeRefusesAHeldSessionWithTheFriendlyLine).
+	host.Close()
 
 	rec, err := resolveResume(store, id, false, "")
 	if err != nil {
@@ -613,7 +616,9 @@ func TestResolveContinuePicksWorkspaceNewest(t *testing.T) {
 }
 
 // saveAt persists one fresh session in workspace ws stamped at when (controlling both its id and
-// UpdatedAt), returning the minted id. Each call uses its own host so it mints a distinct session.
+// UpdatedAt), returning the minted id. Each call uses its own host so it mints a distinct session, and
+// closes that host once the record is down: the record stands for a run that has ENDED, free for the
+// test's own resume, prune or delete to take — a live host would hold it against them.
 func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title string) string {
 	t.Helper()
 	h := newSessionHost(store, ws, "m", nil, "", nil, "", nil)
@@ -621,6 +626,7 @@ func saveAt(t *testing.T, store *session.Store, ws string, when time.Time, title
 	if err := h.Save(apogee.Session{}, nil, title, 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
 		t.Fatalf("saveAt %q: %v", title, err)
 	}
+	h.Close()
 	return h.ActiveID()
 }
 
@@ -1070,4 +1076,188 @@ func snapshotDirAt(t *testing.T, root, id string, mtime time.Time) string {
 		t.Fatalf("Chtimes: %v", err)
 	}
 	return dir
+}
+
+// ----------------------------------------------------------------------------
+// The live-instance hold: one apogee per session (apogee-3b3)
+// ----------------------------------------------------------------------------
+
+// assertHeld reports whether the store's hold on id is live — a Hold of it is refused with this
+// process's own pid — or free, in which case the probe's own hold is released at once.
+func assertHeld(t *testing.T, store *session.Store, id string, want bool) {
+	t.Helper()
+	release, err := store.Hold(id)
+	if err == nil {
+		_ = release()
+	}
+	var held *session.HeldError
+	got := errors.As(err, &held)
+	if got != want {
+		t.Fatalf("hold on %q live = %v (Hold err %v), want %v", id, got, err, want)
+	}
+	if got && held.PID != os.Getpid() {
+		t.Errorf("the holder of %q is pid %d, want this process (%d)", id, held.PID, os.Getpid())
+	}
+}
+
+// lockFilesIn lists the `.lock` files a sessions directory holds; a directory that does not exist
+// holds none.
+func lockFilesIn(t *testing.T, dir string) []string {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		t.Fatalf("ReadDir: %v", err)
+	}
+	var locks []string
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".lock") {
+			locks = append(locks, e.Name())
+		}
+	}
+	return locks
+}
+
+// The hold is taken at the record's birth — the first Save — never at the mint, so a run that never
+// saves touches no disk; Close lets it go.
+func TestSessionHostHoldsAtTheFirstSaveAndReleasesOnClose(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "sessions")
+	store := session.NewStore(dir)
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+
+	if _, err := os.Stat(dir); !os.IsNotExist(err) {
+		t.Fatalf("a host that has not saved created the sessions dir (stat err = %v)", err)
+	}
+	minted := host.SessionID()
+	assertHeld(t, store, minted, false)
+
+	if err := host.Save(apogee.Session{}, nil, "first", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	id := host.ActiveID()
+	assertHeld(t, store, id, true)
+	if locks := lockFilesIn(t, dir); !slices.Equal(locks, []string{id + ".lock"}) {
+		t.Errorf("lock files after the first Save = %v, want [%s.lock]", locks, id)
+	}
+
+	// A second Save keeps the live hold rather than refusing itself.
+	if err := host.Save(apogee.Session{}, nil, "first", 2, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("second Save under the live hold: %v", err)
+	}
+
+	host.Close()
+	assertHeld(t, store, id, false)
+	host.Close() // idempotent
+	if _, err := os.Stat(filepath.Join(dir, id+".lock")); err != nil {
+		t.Errorf("Close removed the lock file (stat err = %v); only Delete may unlink it", err)
+	}
+}
+
+// Rotate releases the closed session's hold and holds nothing for the fresh id until its first Save;
+// Activate re-holds the adopted record, releasing the outgoing one — and Activate or Save of the id
+// already held keeps the live hold, never releasing and re-acquiring it.
+func TestSessionHostRotateReleasesAndActivateReHolds(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	if err := host.Save(apogee.Session{}, nil, "A", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save A: %v", err)
+	}
+	first := host.ActiveID()
+	assertHeld(t, store, first, true)
+
+	host.Rotate()
+	assertHeld(t, store, first, false)
+	assertHeld(t, store, host.SessionID(), false)
+
+	if err := host.Save(apogee.Session{}, nil, "B", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save B: %v", err)
+	}
+	second := host.ActiveID()
+	assertHeld(t, store, second, true)
+
+	rec, err := host.Load(first)
+	if err != nil {
+		t.Fatalf("Load(first): %v", err)
+	}
+	host.Activate(rec.Meta)
+	assertHeld(t, store, first, true)
+	assertHeld(t, store, second, false)
+
+	// The held id, adopted and saved again: the hold stays live throughout.
+	host.Activate(rec.Meta)
+	assertHeld(t, store, first, true)
+	if err := host.Save(apogee.Session{}, nil, "A", 2, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save of the held id: %v", err)
+	}
+	assertHeld(t, store, first, true)
+	host.Close()
+	assertHeld(t, store, first, false)
+}
+
+// --resume of a record another live apogee holds is refused with exactly the ratified line — by id
+// and by --continue alike — and the record is left as it was.
+func TestResolveResumeRefusesAHeldSessionWithTheFriendlyLine(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	id := saveAt(t, store, "/ws", time.Now(), "held elsewhere")
+	release, err := store.Hold(id) // the other instance
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	defer func() { _ = release() }()
+	want := fmt.Sprintf("session %s is open in another apogee (pid %d) — fork it to work alongside", id, os.Getpid())
+
+	if _, err := resolveResume(store, id, false, "/ws"); err == nil || err.Error() != want {
+		t.Errorf("resolveResume(--resume %s) err = %v; want %q", id, err, want)
+	}
+	if _, err := resolveResume(store, "", true, "/ws"); err == nil || err.Error() != want {
+		t.Errorf("resolveResume(--continue) err = %v; want %q", err, want)
+	}
+}
+
+// The doors probe and release: after a successful resolve nothing holds the record, so the host
+// built on it takes the one real hold at construction.
+func TestResolveResumeProbesAndReleasesForTheHostsHold(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(filepath.Join(t.TempDir(), "sessions"))
+	id := saveAt(t, store, "/ws", time.Now(), "free")
+
+	rec, err := resolveResume(store, id, false, "/ws")
+	if err != nil {
+		t.Fatalf("resolveResume: %v", err)
+	}
+	assertHeld(t, store, id, false)
+
+	host := newSessionHost(store, "/ws", "m", rec, "", nil, "", nil)
+	assertHeld(t, store, id, true)
+	if err := host.Save(apogee.Session{}, nil, "free", 2, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save on the resumed host: %v", err)
+	}
+	host.Close()
+	assertHeld(t, store, id, false)
+}
+
+// --continue means the workspace's NEWEST session: when that one is held it is refused, never
+// skipped for the next record of the workspace.
+func TestResolveContinueRefusesRatherThanSkips(t *testing.T) {
+	t.Parallel()
+	store := session.NewStore(t.TempDir())
+	base := time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC)
+	older := saveAt(t, store, "/ws", base, "older")
+	newest := saveAt(t, store, "/ws", base.Add(time.Hour), "newest")
+	release, err := store.Hold(newest)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	defer func() { _ = release() }()
+
+	rec, err := resolveContinue(store, "/ws")
+	var held *session.HeldError
+	if !errors.As(err, &held) || held.ID != newest {
+		t.Fatalf("resolveContinue = (%q, %v); want the newest record's HeldError, not a skip to %q", rec.Meta.ID, err, older)
+	}
 }

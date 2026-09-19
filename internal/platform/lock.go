@@ -73,8 +73,12 @@ func (e *LockHeldError) Error() string {
 //
 // The file is created when absent and is NEVER removed, not even on release — unlinking it
 // would let the next caller lock a deleted inode while another process still held the live one,
-// which is precisely the double-fire this lock exists to prevent. On success the caller's PID
-// is written into it, replacing whatever a previous holder left, so `cat` answers "who has it".
+// which is precisely the double-fire this lock exists to prevent. The one stated exception is a
+// session record's lock (internal/session, Store.Delete): it follows its record, unlinked only
+// after the record itself is gone and the hold released, and the race is benign there because
+// whoever locks the unlinked inode is holding a session that no longer exists. On success the
+// caller's PID is written into it, replacing whatever a previous holder left, so `cat` answers
+// "who has it".
 //
 // Errors: a *[LockHeldError] when another process holds the lock; a wrapped error naming the
 // path when the file could not be opened or the lock call failed for any other reason. release

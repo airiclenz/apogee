@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 )
 
 // sampleRecord is a fully-populated record for round-trip and update tests.
@@ -1316,5 +1317,203 @@ func TestPruneReportsFirstErrorOnACountOnlySweep(t *testing.T) {
 	want := []string{pruneNewID}
 	if got := storedIDs(t, st); !slices.Equal(got, want) {
 		t.Errorf("survivors = %v, want %v — only the newest record fits the budget", got, want)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The live-instance hold (apogee-3b3)
+// ----------------------------------------------------------------------------
+
+// holdStore is a store with one saved record, for the hold tests.
+func holdStore(t *testing.T) (*Store, string) {
+	t.Helper()
+	st := NewStore(filepath.Join(t.TempDir(), "sessions"))
+	const id = "20260919T120000Z-aaaa1111"
+	if err := st.Save(sampleRecord(id, pruneNow)); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	return st, id
+}
+
+// A held session refuses a second Hold — in one process with this process's own pid, since flock
+// belongs to the open file description — and is free again once the first holder releases.
+func TestStoreHoldRefusesASecondHolder(t *testing.T) {
+	t.Parallel()
+	st, id := holdStore(t)
+
+	release, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(st.dir, id+".lock")); err != nil {
+		t.Errorf("Hold left no %s.lock beside the record: %v", id, err)
+	}
+
+	_, err = st.Hold(id)
+	var held *HeldError
+	if !errors.As(err, &held) {
+		t.Fatalf("second Hold = %v, want a *HeldError", err)
+	}
+	if held.ID != id || held.PID != os.Getpid() {
+		t.Errorf("HeldError = {ID %q, PID %d}, want {%q, %d}", held.ID, held.PID, id, os.Getpid())
+	}
+	var lock *platform.LockHeldError
+	if !errors.As(err, &lock) {
+		t.Errorf("HeldError does not wrap the *platform.LockHeldError beneath it: %v", err)
+	}
+
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	again, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold after release = %v, want the hold back", err)
+	}
+	_ = again()
+	if entries := storedIDs(t, st); !slices.Equal(entries, []string{id}) {
+		t.Errorf("List after holding = %v, want only %q — a lock file never lists as a record", entries, id)
+	}
+}
+
+// Delete and Prune refuse a session another holder has: the record stands and its lock stays.
+func TestStoreDeleteRefusesAHeldSession(t *testing.T) {
+	t.Parallel()
+	st, id := holdStore(t)
+	release, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	defer func() { _ = release() }()
+
+	var held *HeldError
+	if err := st.Delete(id); !errors.As(err, &held) {
+		t.Fatalf("Delete of a held session = %v, want a *HeldError", err)
+	}
+	if _, err := os.Stat(filepath.Join(st.dir, id+".json")); err != nil {
+		t.Errorf("Delete removed the held record: %v", err)
+	}
+
+	st.now = func() time.Time { return pruneNow.Add(time.Hour) }
+	removed, err := st.Prune(Retention{MaxAge: time.Minute})
+	if !errors.As(err, &held) {
+		t.Errorf("Prune over a held session = %v, want its *HeldError as the first error", err)
+	}
+	if removed != 0 {
+		t.Errorf("Prune removed %d, want 0 — the held record is left standing", removed)
+	}
+	if got := storedIDs(t, st); !slices.Equal(got, []string{id}) {
+		t.Errorf("survivors = %v, want %q", got, id)
+	}
+}
+
+// Delete holds, removes the JSON, releases and only then unlinks <id>.lock — on every path: a
+// deleted record, a pruned one, a record that was never there and one that vanished under the
+// sweep all leave no lock behind, and the missing record's error is the ENOENT it always was.
+func TestStoreDeleteAndPruneRemoveTheLockAfterReleasing(t *testing.T) {
+	t.Parallel()
+	lockFiles := func(t *testing.T, st *Store) []string {
+		t.Helper()
+		entries, err := os.ReadDir(st.dir)
+		if err != nil {
+			t.Fatalf("ReadDir: %v", err)
+		}
+		var locks []string
+		for _, e := range entries {
+			if strings.HasSuffix(e.Name(), ".lock") {
+				locks = append(locks, e.Name())
+			}
+		}
+		return locks
+	}
+
+	t.Run("delete", func(t *testing.T) {
+		t.Parallel()
+		st, id := holdStore(t)
+		release, err := st.Hold(id)
+		if err != nil {
+			t.Fatalf("Hold: %v", err)
+		}
+		_ = release()
+		if err := st.Delete(id); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+		if locks := lockFiles(t, st); len(locks) != 0 {
+			t.Errorf("lock files after Delete = %v, want none", locks)
+		}
+		if got := storedIDs(t, st); len(got) != 0 {
+			t.Errorf("records after Delete = %v, want none", got)
+		}
+	})
+
+	t.Run("missing", func(t *testing.T) {
+		t.Parallel()
+		st := NewStore(filepath.Join(t.TempDir(), "sessions"))
+		err := st.Delete("no-such-session")
+		if !errors.Is(err, os.ErrNotExist) {
+			t.Fatalf("Delete of a missing record = %v, want ErrNotExist", err)
+		}
+		if locks := lockFiles(t, st); len(locks) != 0 {
+			t.Errorf("lock files after a failed Delete = %v, want none", locks)
+		}
+	})
+
+	t.Run("prune", func(t *testing.T) {
+		t.Parallel()
+		st := pruneStore(t, pruneAges)
+		vanished := filepath.Join(st.dir, pruneMidID+".json")
+		st.now = func() time.Time {
+			_ = os.Remove(vanished)
+			return pruneNow
+		}
+		removed, err := st.Prune(Retention{MaxAge: time.Minute})
+		if !errors.Is(err, os.ErrNotExist) || removed != 2 {
+			t.Fatalf("Prune = (%d, %v), want (2, the vanished record's ErrNotExist)", removed, err)
+		}
+		if locks := lockFiles(t, st); len(locks) != 0 {
+			t.Errorf("lock files after Prune = %v, want none — the vanished record's included", locks)
+		}
+	})
+}
+
+// HeldError.Error() is the line every door prints, with the pid clause omitted when unknown.
+func TestHeldErrorSpellsTheRatifiedLine(t *testing.T) {
+	t.Parallel()
+	const id = "20260919T120000Z-aaaa1111"
+	cases := []struct {
+		pid  int
+		want string
+	}{
+		{4242, "session " + id + " is open in another apogee (pid 4242) — fork it to work alongside"},
+		{0, "session " + id + " is open in another apogee — fork it to work alongside"},
+	}
+	for _, tc := range cases {
+		err := &HeldError{ID: id, PID: tc.pid}
+		if got := err.Error(); got != tc.want {
+			t.Errorf("HeldError{PID %d}.Error() = %q, want %q", tc.pid, got, tc.want)
+		}
+	}
+}
+
+// Hold refuses the ids Delete refuses, before any path is joined: a hostile id never names a lock
+// file outside the store.
+func TestStoreHoldRejectsUnsafeID(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	st := NewStore(filepath.Join(home, "sessions"))
+	for _, tc := range unsafeIDs {
+		release, err := st.Hold(tc.id)
+		if !errors.Is(err, ErrInvalidID) {
+			t.Errorf("Hold(%q) err = %v, want ErrInvalidID", tc.id, err)
+		}
+		if release != nil {
+			t.Errorf("Hold(%q) returned a release for a refused id", tc.id)
+			_ = release()
+		}
+	}
+	if _, err := os.Stat(filepath.Join(home, "sessions")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a refused Hold created the store directory (stat err = %v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "evil.lock")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("a traversal id reached outside the store (stat err = %v)", err)
 	}
 }

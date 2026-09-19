@@ -587,18 +587,13 @@ func (s *e2eSession) readWorkspaceFile(name string) string {
 }
 
 // sessionRecords lists the session record files this home holds, newest first is not promised —
-// what a caller asserts on is how many there are and how big they got.
+// what a caller asserts on is how many there are and how big they got. Only the `.json` records
+// count: the live-instance hold puts an `<id>.lock` beside a record — and does so BEFORE the first
+// Save lands the JSON — so a wait for "a record exists" that counted every entry would return on the
+// lock alone.
 func (s *e2eSession) sessionRecords() []os.DirEntry {
 	s.t.Helper()
-
-	entries, err := os.ReadDir(filepath.Join(s.home, "sessions"))
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil
-		}
-		s.t.Fatalf("read the session store: %v", err)
-	}
-	return entries
+	return sessionRecordsIn(s.t, s.home)
 }
 
 // compile-time proof that the launcher a driven run installs is the launcher type the root command

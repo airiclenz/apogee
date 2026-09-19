@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
@@ -55,6 +56,32 @@ var ErrInvalidID = errors.New("apogee: invalid session id")
 // maxIDLen bounds an id so that <id>.json stays inside the 255-byte name limit every
 // mainstream filesystem enforces. Minted ids are 25 bytes; the slack is for legacy stems.
 const maxIDLen = 200
+
+// HeldError is the refusal Hold, Delete and Prune return when another live apogee holds the
+// session: its record is open in a second instance, and resuming or removing it here would have two
+// writers over one file. It wraps the *platform.LockHeldError the OS lock answered with, so a caller
+// that wants the lock's own facts can errors.As to it, and its Error() IS the line every door prints
+// — the ratified sentence, with "(pid N)" omitted when the holder's file carried no readable pid.
+type HeldError struct {
+	// ID is the held session's id.
+	ID string
+	// PID is the holder's process id as its lock file recorded it, or 0 when unknown. Diagnostics
+	// only, exactly as platform.LockHeldError.PID is: the lock, not the number, says the holder lives.
+	PID int
+	// held is the OS lock's own refusal, kept for errors.As.
+	held *platform.LockHeldError
+}
+
+// Error renders the ratified refusal, naming the holder's pid only when the lock file carried one.
+func (e *HeldError) Error() string {
+	if e.PID <= 0 {
+		return fmt.Sprintf("session %s is open in another apogee — fork it to work alongside", e.ID)
+	}
+	return fmt.Sprintf("session %s is open in another apogee (pid %d) — fork it to work alongside", e.ID, e.PID)
+}
+
+// Unwrap exposes the *platform.LockHeldError beneath the refusal.
+func (e *HeldError) Unwrap() error { return e.held }
 
 // validateID reports whether id is usable as this store's filename stem: non-empty, no longer
 // than maxIDLen, a single path component (no separator of either OS, no ".", "..", traversal,
@@ -324,17 +351,75 @@ func (s *Store) loadPath(path string) (Record, error) {
 	return decodeRecord(data, path)
 }
 
+// Hold takes the live-instance hold on session id — the exclusive OS lock on <dir>/<id>.lock
+// (platform.AcquireLock: kernel-owned, dropped with the holder's descriptor, so a crash leaves no
+// stale state to judge — ADR 0034 D7) — and keeps it until release is called. It is the one
+// mechanism behind "one live instance per session": the host that runs a session holds it for the
+// session's whole life, and every door that would open the same record elsewhere — a --resume or
+// --continue start, a /sessions delete — asks Hold first and is refused with a *HeldError
+// while the holder lives. A second Hold of the same id in ONE process is refused too, with this
+// process's own pid: flock belongs to the open file description, not the process.
+//
+// An id that is not a safe filename component is refused with ErrInvalidID before it becomes a
+// path, exactly as Delete refuses it. The store directory is created on the way (save's own order),
+// since the lock file lives beside the record and a resumed record's hold may precede its first
+// Save. Any failure other than a held lock is returned wrapped, naming the id; release is nil on
+// every error and safe to call more than once on success.
+func (s *Store) Hold(id string) (release func() error, err error) {
+	if err := validateID(id); err != nil {
+		return nil, err
+	}
+	return s.hold(id)
+}
+
+// hold is Hold's body past the id check, shared with Delete, which has validated the id already.
+func (s *Store) hold(id string) (release func() error, err error) {
+	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
+		return nil, fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
+	}
+	unlock, err := platform.AcquireLock(s.lockPath(id))
+	if err != nil {
+		var held *platform.LockHeldError
+		if errors.As(err, &held) {
+			return nil, &HeldError{ID: id, PID: held.PID, held: held}
+		}
+		return nil, fmt.Errorf("apogee: hold session %q: %w", id, err)
+	}
+	return func() error { unlock(); return nil }, nil
+}
+
+// lockPath is the lock file a session's hold lives in, beside its record: <dir>/<id>.lock. scan
+// reads *.json only, so the lock files never list as records.
+func (s *Store) lockPath(id string) string { return filepath.Join(s.dir, id+".lock") }
+
 // Delete removes the record file for id. An id that is not a safe filename component is
 // refused with ErrInvalidID, so a record's declared id can never aim the browser's delete at a
 // file outside the store.
+//
+// The record is held first (Hold), so a session another live apogee is running is refused with a
+// *HeldError rather than deleted out from under it. The hold is released once the JSON is gone
+// and only THEN is <id>.lock removed — the one place a lock file is ever unlinked (the stated
+// exception in internal/platform/lock.go): its record is already gone, so a newcomer that locks the
+// unlinked inode in the gap is holding a session that no longer exists, which is benign. The lock
+// goes on every path, a missing record's included, so a failed delete leaves no lock behind; a
+// lock that was never there is not an error.
 func (s *Store) Delete(id string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if err := os.Remove(filepath.Join(s.dir, id+".json")); err != nil {
-		return fmt.Errorf("apogee: delete session %q: %w", id, err)
+	release, err := s.hold(id)
+	if err != nil {
+		return err
+	}
+	removeErr := os.Remove(filepath.Join(s.dir, id+".json"))
+	_ = release()
+	if err := os.Remove(s.lockPath(id)); err != nil && !errors.Is(err, os.ErrNotExist) && removeErr == nil {
+		return fmt.Errorf("apogee: delete session %q: remove its lock: %w", id, err)
+	}
+	if removeErr != nil {
+		return fmt.Errorf("apogee: delete session %q: %w", id, removeErr)
 	}
 	return nil
 }
@@ -354,9 +439,10 @@ type Retention struct {
 // id would take out the OTHER record, the live one the sweep meant to keep. MaxAge discards
 // records last updated before now-MaxAge; MaxCount then keeps the newest N. An id in keep is
 // never deleted, but it still occupies one of those N slots: the session being resumed is
-// retained, not exempted from the budget. Deletion goes through Delete, so the store lock and
-// the id validation apply. One failed delete does not abort the sweep — the first error is
-// returned alongside the count of what did go.
+// retained, not exempted from the budget. Deletion goes through Delete, so the store lock, the
+// id validation and the live-instance hold apply — a record another apogee is running is refused
+// (*HeldError) and left standing, never swept out from under it. One failed delete does not abort
+// the sweep — the first error is returned alongside the count of what did go.
 func (s *Store) Prune(r Retention, keep ...string) (int, error) {
 	if r.MaxAge <= 0 && r.MaxCount <= 0 {
 		return 0, nil

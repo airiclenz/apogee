@@ -767,7 +767,9 @@ func restoreNewestSession(t *testing.T, sess *e2eSession) *tuitest.Driver {
 // sessionRecordsIn lists the records a home's session store holds. It takes the HOME rather than a
 // session so both drivers can ask it: [e2eSession.sessionRecords] is the in-process form and a
 // ptySession has no twin. A store that does not exist yet is no records, not an error — a run that
-// has saved nothing has an empty store by definition.
+// has saved nothing has an empty store by definition. Only `.json` entries are records: the
+// live-instance hold's `<id>.lock` lands beside a record before its first Save does, and a wait for
+// the record must not be satisfied by the lock.
 func sessionRecordsIn(t *testing.T, home string) []os.DirEntry {
 	t.Helper()
 
@@ -778,7 +780,13 @@ func sessionRecordsIn(t *testing.T, home string) []os.DirEntry {
 		}
 		t.Fatalf("read the session store: %v", err)
 	}
-	return entries
+	records := make([]os.DirEntry, 0, len(entries))
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".json") {
+			records = append(records, e)
+		}
+	}
+	return records
 }
 
 // goldenRedactions are [e2eSession.Redactions] with the footer's whole tail past the model cell

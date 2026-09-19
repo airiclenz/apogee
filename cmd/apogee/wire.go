@@ -281,6 +281,12 @@ func (w *rootWiring) close() {
 		_ = w.engine.Close()
 	}
 
+	// The session's live-instance hold goes AFTER the engine: the record stays this run's until
+	// nothing here can write it any more, and is free to resume elsewhere the moment that is true.
+	if w.host != nil {
+		w.host.Close()
+	}
+
 	// Whatever set of MCP connections the holder is on NOW — which after a mid-session reconnect is
 	// not the set startup dialled.
 	if w.mcpSet != nil {
