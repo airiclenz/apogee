@@ -167,11 +167,23 @@ func (t writeTarget) notFound(err error, prefix string) string {
 	return notFoundOrRefusal(err, prefix, t.scope.root, workspaceRelative(t.input, t.scope.root), t.input)
 }
 
+// redirected reports whether the argument's OWN path went somewhere other than where it reads —
+// the one comparison both halves of the disclosure (ResolvedWriteTarget, note) decide on. It
+// compares Real against expected, the argument re-spelled under the root's real path, rather
+// than against Named: a workspace root that is itself reached through a symlink (macOS /tmp) makes
+// Real and Named differ on EVERY call, and that difference is the root's, not the argument's, so
+// disclosing it would put the note on the common path the contract keeps quiet. Only a link the
+// argument's path passes through of its own — a component or a final name — makes this true.
+func (t writeTarget) redirected() bool {
+	return t.Real != t.expected
+}
+
 // note is the RESULT-STRING half of the disclosure (ResolvedWriteTarget): the tail a write appends
 // to the sentence it reports, naming where the call really landed when that is not the path the
 // argument named — " → resolves to <Real>" — and "" for an ordinary call, so a result the model
 // reads grows nothing on the common path. A virtual-mount reference names no host path at all, so
-// there is nothing to disclose.
+// there is nothing to disclose. Whether there is something to say is redirected's answer; the
+// path it names is the fully resolved Real, the root's own link resolved along with the rest.
 //
 // Compute it BEFORE the write: the write replaces a symlinked final name with a regular file, so
 // afterwards nothing is left to say that the call went somewhere else, and the sentence would part
@@ -180,7 +192,7 @@ func (t writeTarget) note() string {
 	if _, _, isMount := virtualMountRef(t.input); isMount {
 		return ""
 	}
-	if t.Real == t.Named {
+	if !t.redirected() {
 		return ""
 	}
 	return " → resolves to " + t.Real

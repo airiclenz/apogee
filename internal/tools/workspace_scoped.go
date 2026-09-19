@@ -2,6 +2,7 @@ package tools
 
 import (
 	"path/filepath"
+	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -37,23 +38,37 @@ type workspaceScopedWriter interface {
 // the model's own argument NAMES (root-joined and cleaned, nothing followed), Real is that
 // path with every symlink resolved — where the write is classified to land.
 //
-// They differ exactly when the argument travels through something that is not the directory
-// it appears to be. That difference is the fact the operator is otherwise never told: the
-// pane, the tool card and the write's own result all quote the argument, so a `docs/` that
-// is a symlink out of the workspace reads as an in-workspace write right up to the moment it
-// lands elsewhere. Keeping both spellings on one value is what lets the disclosure be the
-// SAME resolution the gate decided from (ResolvedWriteTarget), rather than a second opinion
-// computed on the display side.
+// They differ whenever the argument travels through something that is not the directory it
+// appears to be — but not every difference is the operator's business. A workspace ROOT that is
+// itself reached through a symlink (macOS /tmp → /private/tmp, a `cd` through a link) puts a
+// difference between Named and Real on every path under it, and that difference says nothing
+// about the call: the argument went exactly where every other argument goes. The disclosure is
+// therefore about the argument's OWN travel: expected is the argument spelled under the root's
+// real path, and redirected (write_target.go) compares Real against it, so the root's own link
+// is folded out and only a symlink the argument's path passes through of its own — a `docs/`
+// that is a link out of the workspace — is named. That fact is the one the operator is otherwise
+// never told: the pane, the tool card and the write's own result all quote the argument, so such
+// a `docs/` reads as an in-workspace write right up to the moment it lands elsewhere. Keeping the
+// spellings on one value is what lets the disclosure be the SAME resolution the gate decided
+// from (ResolvedWriteTarget), rather than a second opinion computed on the display side.
 //
-// Beyond the two spellings the value carries the argument it was resolved FROM and the scope it
+// Beyond the spellings the value carries the argument it was resolved FROM and the scope it
 // was resolved UNDER (write_target.go): a write tool asks its writeScope once per call and then
 // reads, stats, discloses and writes through the value, so the verb's every reach for its path is
 // the one resolution dispatch classified. The marker's own root-only resolution
-// (resolveTargetUnbounded) fills only Named and Real; that is all classification and disclosure
-// read.
+// (resolveTargetUnbounded) fills only Named, Real and expected; that is all classification and
+// disclosure read. The undo journal and the lexical fences keep receiving Named: they relativise
+// against the CONFIGURED root, and a resolved spelling would read as an escape on a host whose
+// root is a link (journalTarget).
 type writeTarget struct {
 	Named string
 	Real  string
+
+	// expected is the argument's path spelled under the root's REAL path — what Real is when the
+	// argument itself travels through no link — for an argument lexically under the root, and
+	// Named itself otherwise (an absolute argument outside the root), so those keep today's
+	// comparison. Unexported: it exists only to be compared against Real (redirected).
+	expected string
 
 	// input is the argument as the model spelled it — what the fenced primitives take, and what a
 	// refusal quotes back.
@@ -82,12 +97,12 @@ func WorkspaceWriteTarget(t domain.Tool, call domain.ToolCall) (string, bool) {
 }
 
 // ResolvedWriteTarget is the DISCLOSURE half of the same seam: the absolute path this call's
-// write really lands on, returned ONLY when it differs from the path the argument names, and
-// "" whenever the two agree or the tool writes nothing inspectable. Empty therefore means
-// "the argument names its own target" — the ordinary case — so a surface that renders this
-// unconditionally says nothing extra about an ordinary write and names the redirection on the
-// one that is not (the `→ resolves to …` line the approval pane, the tool card and the write's
-// result string share).
+// write really lands on, returned ONLY when the argument's own path went somewhere else
+// (writeTarget.redirected), and "" whenever it did not or the tool writes nothing inspectable.
+// Empty therefore means "the argument names its own target" — the ordinary case, a workspace
+// root that is itself a symlink included — so a surface that renders this unconditionally says
+// nothing extra about an ordinary write and names the redirection on the one that is not (the
+// `→ resolves to …` line the approval pane, the tool card and the write's result string share).
 //
 // It is deliberately the SAME resolution WorkspaceWriteTarget hands dispatch, symlinked final
 // name included. That makes the surfaces agree with the gate by construction: the operator is
@@ -98,7 +113,7 @@ func WorkspaceWriteTarget(t domain.Tool, call domain.ToolCall) (string, bool) {
 // already took.
 func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
 	target, ok := writeTargetOf(t, call)
-	if !ok || target.Real == target.Named {
+	if !ok || !target.redirected() {
 		return ""
 	}
 	return target.Real
@@ -202,8 +217,12 @@ func destinationArgWriteTarget(call domain.ToolCall, root string) (writeTarget, 
 // out-of-workspace. An empty input yields ok=false (nothing inspectable to classify).
 //
 // It returns the path in both spellings (writeTarget): the root-joined name the argument
-// asked for, and that name resolved. This is the ONE place that sees the two, which is why
-// the disclosure is derived here rather than recomputed by each surface that renders it.
+// asked for, and that name resolved — plus the spelling the resolved name is EXPECTED to have
+// when the argument travels through no link of its own, which is the root's real path with the
+// argument's root-relative remainder joined on. This is the ONE place that sees the three, which
+// is why the disclosure is derived here rather than recomputed by each surface that renders it.
+// An argument that is not lexically under the root (an absolute path elsewhere) has no
+// remainder to re-spell, and its expected is Named: the comparison is then the plain one.
 func resolveTargetUnbounded(input, root string) (writeTarget, bool) {
 	if input == "" {
 		return writeTarget{}, false
@@ -212,5 +231,18 @@ func resolveTargetUnbounded(input, root string) (writeTarget, bool) {
 	if !filepath.IsAbs(input) {
 		named = filepath.Join(root, input)
 	}
-	return writeTarget{Named: named, Real: security.EvalRealPath(named)}, true
+	return writeTarget{Named: named, Real: security.EvalRealPath(named), expected: expectedTarget(named, root)}, true
+}
+
+// expectedTarget is the spelling named resolves to when nothing under the root redirects it: the
+// root's own real path with named's root-relative remainder joined on. named is returned
+// unchanged when it is not lexically under the cleaned root, so an argument outside the
+// workspace is compared as it is named.
+func expectedTarget(named, root string) string {
+	cleanRoot := filepath.Clean(root)
+	rel, err := filepath.Rel(cleanRoot, named)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return named
+	}
+	return filepath.Join(security.EvalRealPath(cleanRoot), rel)
 }

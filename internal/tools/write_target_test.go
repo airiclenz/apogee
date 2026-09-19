@@ -224,6 +224,81 @@ func TestWriteTargetNote(t *testing.T) {
 	if want := " → resolves to " + linked.Real; linked.note() != want || linked.Real == linked.Named {
 		t.Errorf("note through a symlink = %q, want %q", linked.note(), want)
 	}
+
+	// A workspace root that is ITSELF reached through a symlink (macOS /tmp → /private/tmp, a
+	// `cd` through a link) puts a difference between Named and Real on every path under it. That
+	// difference is the root's, not the argument's: the ordinary path stays quiet, a link the
+	// argument's own path passes through is still named — by its fully resolved path — and an
+	// absolute argument outside the root keeps the plain comparison.
+	base := security.EvalRealPath(t.TempDir())
+	realRoot := filepath.Join(base, "real-root")
+	linkRoot := filepath.Join(base, "link-root")
+	if err := os.MkdirAll(filepath.Join(realRoot, "real"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Fatalf("symlink root: %v", err)
+	}
+	if err := os.Symlink("real", filepath.Join(realRoot, "link")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	ordinary := workspaceTarget(t, linkRoot, filepath.Join("real", "f.txt"))
+	if got := ordinary.note(); got != "" {
+		t.Errorf("note on an ordinary path under a symlinked root = %q, want empty", got)
+	}
+	if ordinary.redirected() {
+		t.Errorf("redirected() on an ordinary path under a symlinked root = true, want false")
+	}
+	if want := filepath.Join(linkRoot, "real", "f.txt"); ordinary.Named != want {
+		t.Errorf("Named under a symlinked root = %q, want %q (the spelling the journal and the fences take)", ordinary.Named, want)
+	}
+	if want := filepath.Join(realRoot, "real", "f.txt"); ordinary.Real != want {
+		t.Errorf("Real under a symlinked root = %q, want %q", ordinary.Real, want)
+	}
+
+	through := workspaceTarget(t, linkRoot, filepath.Join("link", "f.txt"))
+	if want := " → resolves to " + filepath.Join(realRoot, "real", "f.txt"); through.note() != want {
+		t.Errorf("note through a per-file link under a symlinked root = %q, want %q", through.note(), want)
+	}
+	if !through.redirected() {
+		t.Errorf("redirected() through a per-file link under a symlinked root = false, want true")
+	}
+
+	outside := workspaceTarget(t, linkRoot, filepath.Join(base, "elsewhere.txt"))
+	if outside.expected != outside.Named {
+		t.Errorf("expected for an absolute argument outside the root = %q, want Named %q", outside.expected, outside.Named)
+	}
+	if outside.redirected() || outside.note() != "" {
+		t.Errorf("an absolute argument outside a symlinked root reads as redirected: note = %q", outside.note())
+	}
+}
+
+func TestResolvedTargetNoteIsQuietOnASymlinkedRoot(t *testing.T) {
+	t.Parallel()
+
+	// read_file's producer: a reader holds no writeTarget and reads the tail off the root-only
+	// spelling, so it must fold the root's own link out the same way the writers do.
+	base := security.EvalRealPath(t.TempDir())
+	realRoot := filepath.Join(base, "real-root")
+	linkRoot := filepath.Join(base, "link-root")
+	if err := os.MkdirAll(filepath.Join(realRoot, "real"), 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.Symlink(realRoot, linkRoot); err != nil {
+		t.Skipf("symlinks unavailable: %v", err)
+	}
+	if err := os.Symlink("real", filepath.Join(realRoot, "link")); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+
+	if got := resolvedTargetNote(filepath.Join("real", "f.txt"), linkRoot); got != "" {
+		t.Errorf("resolvedTargetNote on an ordinary path under a symlinked root = %q, want empty", got)
+	}
+	want := " → resolves to " + filepath.Join(realRoot, "real", "f.txt")
+	if got := resolvedTargetNote(filepath.Join("link", "f.txt"), linkRoot); got != want {
+		t.Errorf("resolvedTargetNote through a per-file link under a symlinked root = %q, want %q", got, want)
+	}
 }
 
 func TestWriteTargetWriteLandsAndJournals(t *testing.T) {
