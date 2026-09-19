@@ -324,6 +324,23 @@ the feature.
   > `deliverInterjections` stays and earns its keep on this reading too — it does not compensate for
   > the fate, it **narrows** it, keeping rows out of an Exchange that is already doomed wherever the
   > cancel is visible in time. A natural completion remains untouched.
+  >
+  > **Amended 2026-09-19 (`apogee-2un`, Stage A).** The engine's fate on Esc is no longer "discards
+  > it with the rest of the scrapped Exchange": the TUI's cancel and loop-error folds now close the
+  > Exchange with `Agent.SettleExchange`, which **keeps** the Turns that finished before the stop and
+  > marks the cut with an ephemeral `[engine — cancelled]` engine note on the last tool result. A
+  > row delivered *after* that tool result stays in the conversation with them — so the settled
+  > tail reads `[…, tool(note), user(Interjected)]` and the next Submit opens user→user, the tail a
+  > faulted Exchange already leaves (`endAbandoned`). The 2026-08-03 ruling therefore holds in a
+  > stronger form: **sent is sent**, and a delivered row is now not only *remembered by the
+  > transcript* but *kept by the model*. Two cases still drop the row: an Exchange with no finished
+  > Turn (the lone opening, or the opening plus the interjection Turn 0's cancel left behind) has
+  > no tool result to carry the note and falls through to `AbortExchange`'s rollback; and `/clear`
+  > on an interrupted session still calls `AbortExchange` outright — the explicit throw-away. The
+  > drain-skip in `deliverInterjections` stays: a row committed at a doomed boundary would now be a
+  > delivered message no Turn answers, so keeping it in the mailbox for the next `⏎` is still the
+  > better fate. The note is **live-session only** (ADR 0076 D6): a saved record and a resumed
+  > conversation hold the kept results and the kept row with no cut marker. Plan `2026-09-19 - 01`.
 - **A row is never silently lost and never delivered twice.** The drain is unconditional and the
   Model's display copy is the queue of record: a row the delivery report does not name stays staged
   and goes out at the terminal boundary instead. The Backspace pop withdraws from the mailbox first

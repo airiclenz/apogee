@@ -89,7 +89,13 @@ the status line says `press esc again to stop` for as long as it is armed — an
 `esc` inside that window stops the run. Let the window lapse and the gesture disarms
 itself, so a stray `esc` never kills a turn that is under way; a run that ends on its
 own inside the window disarms it too, so the hint never outlives what it offered to
-stop. The box
+stop. A stop keeps what the run had finished: the steps completed before it — the tool
+calls and their results — stay in the conversation and in the saved session, only the step
+under way is dropped, and the model is told at its next request that you stopped the run
+there, so it neither redoes that work nor mistakes its silence for an answer. A stop that
+finds nothing finished — the model had not completed a single step — leaves nothing behind
+instead: the prompt itself comes back out of the conversation, as if it had never been sent.
+Only `/clear` throws a stopped exchange away. The box
 advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond

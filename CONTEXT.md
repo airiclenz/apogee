@@ -644,11 +644,18 @@ fallback). An Exchange the human stopped mid-run closes **without an answer**
 message, the tool calls and their results, and any interjection delivered after the last
 result — and the cut is marked as an ephemeral `[engine — cancelled]` engine note on that last
 tool result, so the model's next request reads that the results above stand and the reply was
-not given; a saved record and a resumed conversation keep the results with no marker
-([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D6). An
-Exchange with no finished Turn has no tool result to carry the note and is scrapped instead
-(`Agent.AbortExchange`, the explicit throw-away `/clear` also takes), and a kept interjection
-leaves the next Submit opening user→user — the tail a faulted Exchange already leaves.
+not given. The marker is **live-session only**: a saved record and a resumed conversation hold
+the kept results — a closed Exchange with its finished Turns — and no marker
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D6;
+[ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md)'s
+2026-09-19 note). An Exchange with no finished Turn has no tool result to carry the note and is
+scrapped instead (`Agent.AbortExchange`, the explicit throw-away `/clear` also takes), and a kept
+interjection leaves the next Submit opening user→user — the tail a faulted Exchange already
+leaves ([ADR 0025](docs/adr/0025-interjections-commit-at-the-between-steps-boundary.md)'s
+2026-09-19 note). The TUI's cancel and loop-error folds and a fresh message on a restored
+interrupted session settle; a cancel inside a delegation pool still rolls the whole parent Turn
+back first ([ADR 0013](docs/adr/0013-the-sub-agent-orchestrator-is-the-recursion-point-with-isolated-live-guard-state.md)
+§5, Stage A of `apogee-2un`; a finer cut inside the pool is Stage B).
 
 **Step**:
 The bench/embedder primitive that advances the loop **one Turn** and returns at a

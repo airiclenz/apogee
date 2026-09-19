@@ -2,7 +2,9 @@
 
 Every conversation is a session, saved continuously: after each completed turn the
 session is written to `~/.apogee/sessions/` (asynchronously, best-effort), so a
-crash or `kill -9` costs at most the turn in flight. A closing save also runs when you
+crash or `kill -9` costs at most the turn in flight. Stopping a run with `esc` twice
+costs only the step under way: the steps that finished before the stop are saved with
+the session as it goes idle. A closing save also runs when you
 quit — `⌃c` twice mid-answer included, which waits for the worker to unwind and then
 writes what it had — and when `/clear` or `/new` closes the session into history. A turn that hands work to a
 sub-agent is saved as that work runs — a **progress save** fires when the
@@ -95,10 +97,15 @@ still remembers.
   starts from zero, in `/usage` and in its own record alike.
 - A session killed mid-task resumes to the last completed turn and says so;
   `/continue` then picks the unfinished work back up, while sending a new message
-  instead discards it and continues fresh. A delegation that was still running when
-  the session was written comes back marked **interrupted**, with a note saying the
-  sub-agent's unfinished work was not kept: `/continue` re-runs the step that
-  started it, and a new message discards it.
+  instead keeps the finished steps and continues from there — the transcript notes that
+  the interrupted work was closed and its finished steps stand. A delegation that was still
+  running when the session was written comes back marked **interrupted**, with a note
+  saying the sub-agent's unfinished work was not kept: `/continue` re-runs the step that
+  started it, and a new message discards that step alone. A run you stopped yourself with
+  `esc` twice is different: it is saved closed, with every step that finished before the
+  stop, so it resumes as an ordinary session with nothing to continue. The stop leaves no
+  mark in the saved session — the note that tells the model the run was stopped lives in
+  the running session only.
 - The session's **name is written on the top rule**, the hairline above the status
   line — `▔▔▔▔ the name ▔▔▔▔` — so a screen full of panes says which conversation
   each one is. It shows whatever named the session, from `/rename` or from the automatic

@@ -171,7 +171,10 @@ the engine only under one of two conditions.
   snapshot seams run straight on the `Update` goroutine because each is reached only where no
   worker is in flight: `ClearContext` (`/clear`) and the `Compact` launch decision are reached
   only from `submit` at `stateIdle` (`runCommand`); `AbortExchange` runs on `cancelledMsg` /
-  `errMsg`, i.e. *after* the worker has returned its terminal `Msg` and handed the engine back
+  `errMsg` (since 2026-09-19 `SettleExchange`, which keeps the finished Turns and falls back to
+  the abort's rollback only when none finished — `AbortExchange` itself is now `/clear`'s close
+  of an interrupted Exchange; ADR 0017's 2026-09-19 note), i.e. *after* the worker has returned
+  its terminal `Msg` and handed the engine back
   (the post-Esc / post-fault un-wedge — without it the Agent stays in-Exchange and the next
   `/clear` or message is refused with `ErrInputPending`); `Snapshot` runs from `quit` only on the
   `!busy()` path (`saveSession`; since 2026-08-02 that closing flush is `saveAtIdle`, which takes

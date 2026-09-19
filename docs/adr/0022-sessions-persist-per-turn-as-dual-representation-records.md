@@ -437,8 +437,8 @@ transcript.** A **progress save** fires on the depth-0 `sub_agent` `ToolCallEven
 being issued), on every `ToolResultEvent` at depth ≥ 1 (a child crossing a tool boundary), and on
 every `SubAgentPhaseEvent` reporting `SubAgentFinished`. Its engine half is not freshly taken: the
 Model caches the last **quiescent-boundary** snapshot — the idle `Snapshot()` taken immediately
-before each worker launch (after any `AbortExchange`, before `Submit`, so it can never carry
-`pendingInput` the TUI cannot resume), refreshed by each Turn's own `turnSnapshotMsg` and by a
+before each worker launch (after any `SettleExchange`/`AbortExchange` close, before `Submit`, so
+it can never carry `pendingInput` the TUI cannot resume), refreshed by each Turn's own `turnSnapshotMsg` and by a
 restored record's payload, dropped when `/clear` rotates the session. Its transcript half is
 **live**. Bursts collapse in the existing single-flight latest-wins write queue, so the cadence
 costs at most one in-flight write plus one pending, exactly as decision 1's saves do. Delegations
@@ -463,6 +463,25 @@ tool-call entry still open as *interrupted* and adds one note saying the unfinis
 kept. That rule also repairs the records cancelled Turns were already leaving behind, and it is a
 replay-time rule only: the live paint path is unchanged, so a running delegation still paints as
 running while it runs.
+
+> **Amended 2026-09-19 (`apogee-2un`, Stage A).** Two readings of "discards it" above are now
+> narrower. **A live cancel no longer empties the record.** `Esc` twice used to close the Exchange
+> with `AbortExchange`, dropping every finished Turn along with the cancelled one — the idle save
+> after the stop then wrote `messages: null` (48 sessions). The cancel and loop-error folds now
+> close it with `Agent.SettleExchange`: the record written at idle holds a **closed** Exchange —
+> the opening message and every Turn that finished before the stop — and only the cancelled Turn's
+> in-flight work is gone, exactly what `endCancelled` rolled back. The cut is marked in the live
+> conversation as an ephemeral `[engine — cancelled]` engine note on the last tool result, and
+> that marker is **live-session only**: `Advice` is `json:"-"` and `recordContent` strips it (ADR
+> 0076 D6), so the record and a resumed conversation carry the kept results and no marker.
+> **A new message on a restored open Exchange settles it.** A record that still holds an open
+> Turn — a session killed mid-task, or progress-saved mid-delegation — resumes as before
+> (rollback to the pre-request boundary, `/continue` re-runs the Step), but sending a new message
+> now settles the Exchange instead of aborting it: the Turns that finished before the interruption
+> stand and the new message continues from them; "discards it" is true of the unfinished Step
+> alone. `/clear` on such a session still aborts — the explicit throw-away. An Exchange with no
+> finished Turn has no tool result to carry the note and is still rolled back whole; a
+> `session.Aborted` mark lands only there. Plan `2026-09-19 - 01`.
 
 **The bound, as now stated.** A crash loses at most one Turn of **engine** state; of the
 **scrollback** it loses at most the work since the last child tool boundary.

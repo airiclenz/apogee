@@ -282,8 +282,9 @@ func TestResumeDrainsBeforeItsFirstStep(t *testing.T) {
 
 // TestCancelledDriveSkipsTheDrain is the first half of "Esc discards nothing" (ADR 0025 decision 7):
 // a cancel that has already landed when the worker reaches a between-Steps boundary must not commit
-// the mailbox into the Exchange it is about to scrap — AbortExchange drops everything committed
-// there, so the rows would be sent by nobody and held by nobody. Skipped, they stay in the mailbox,
+// the mailbox into the Exchange the stop is about to close — settled, a row committed there would
+// stand as a delivered message no Turn ever answers; rolled back (no finished Turn), it would be
+// dropped outright — either way sent by nobody and held by nobody. Skipped, they stay in the mailbox,
 // are never reported, and so are never taken off the display queue: the terminal fold holds them for
 // the next ⏎. The uncancelled counterpart is every other drain test above, which passes a live ctx.
 func TestCancelledDriveSkipsTheDrain(t *testing.T) {
@@ -304,7 +305,7 @@ func TestCancelledDriveSkipsTheDrain(t *testing.T) {
 		t.Fatalf("terminal msg = %T; want cancelledMsg", msg)
 	}
 	if got := eng.interjections(); len(got) != 0 {
-		t.Errorf("Interject calls = %+v; want none — the Exchange is about to be scrapped", got)
+		t.Errorf("Interject calls = %+v; want none — the stop is about to close the Exchange", got)
 	}
 	if _, seen := rec.delivered(t); seen {
 		t.Error("a delivery was reported on a cancelled drive; the Model would take the row off the queue for it")

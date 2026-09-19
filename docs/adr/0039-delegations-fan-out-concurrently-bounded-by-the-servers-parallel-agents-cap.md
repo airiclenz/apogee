@@ -109,6 +109,13 @@ unchanged** (ADR 0013 §5): Esc signals every in-flight child, waits for them to
 rolls the whole parent Turn back — no worse than today's serial N-in-one-Turn, where a
 cancel during child 2 already discards child 1.
 
+> **Amended 2026-09-19 (`apogee-2un`, Stage A).** The pool's cancel rule is untouched — Esc still
+> signals every in-flight child, waits, and rolls the whole parent Turn back. What Stage A changes
+> is the Exchange close *after* that rollback: the host settles it (`Agent.SettleExchange`) instead
+> of aborting it, so the Turns that finished before the delegating one are kept and the saved
+> record holds them (ADR 0013 §5's 2026-09-19 note; ADR 0022's). A finer cut inside the pool —
+> keeping the children that finished before the Esc — is Stage B and stays on `apogee-2un`.
+
 > **Amended 2026-09-14 — the pool yields its queued slots to a pending message.** A slot
 > waiting behind the cap is not owed a run. When a user message is staged for the top-level
 > agent (`Config.InterjectionPending`, the host's mailbox read as a predicate — [ADR 0025](0025-interjections-commit-at-the-between-steps-boundary.md),

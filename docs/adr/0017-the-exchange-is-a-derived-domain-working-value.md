@@ -96,6 +96,17 @@ with its Exchange" invariant — called from `completeTurn`'s `StatusExchangeCom
 remains open there, so it truncates-then-restores the deferred queue exactly as F6 specifies.
 Pure concentration — same observable behaviour, one place to read it.
 
+> **Amended 2026-09-19 (`apogee-2un`, Stage A).** The caller list gains a fourth end:
+> `turnLifecycle.settle`, the engine half of `Agent.SettleExchange`. Where `AbortExchange` rolls
+> the whole Exchange back to `exchangeStart` (the explicit throw-away — `/clear` on an interrupted
+> session), `SettleExchange` closes a cancelled Exchange *keeping* the Turns that finished before
+> the stop: it marks the cut as an ephemeral `[engine — cancelled]` note on the Exchange's last
+> tool result, then calls the same `closeExchange` — so the "a deferral dies with its Exchange"
+> invariant holds for a settled Exchange exactly as for an aborted one. An Exchange with no
+> finished Turn has no tool result to carry the note and falls through to `abort`. The TUI's
+> cancel and loop-error folds and a fresh message on a restored interrupted session settle; only
+> `/clear` still aborts. Plan `2026-09-19 - 01`.
+
 **4. `ExchangeView` is not exported at the root.** Its consumers are internal — Mechanisms are
 curated ([ADR 0002](0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)), not an
 open extension point that external code builds against. The public

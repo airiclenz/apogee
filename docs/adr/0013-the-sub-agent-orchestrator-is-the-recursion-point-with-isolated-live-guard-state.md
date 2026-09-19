@@ -126,6 +126,18 @@ coarse by design — *before* or *after* a sub-agent, never inside it. Nested st
 (suspend/resume a sub-agent at its own boundary) is a later, snapshot-schema-additive change
 behind the same single-shot driver seam.
 
+> **Amended 2026-09-19 (`apogee-2un`, Stage A).** (b) is unchanged: a cancel mid-sub-agent — or
+> mid-pool, per the 2026-08-07 amendment — still rolls the whole parent Turn back to its
+> pre-`sub_agent` boundary with no partial result. What Stage A changes is what happens to the
+> **Exchange** after that rollback. The host used to close it with `AbortExchange`, which dropped
+> every Turn the Exchange held, the opening prompt included (48 sessions saved `messages: null`);
+> it now closes it with `Agent.SettleExchange`, which keeps the Turns that finished *before* the
+> cancelled one and marks the cut with an ephemeral `[engine — cancelled]` engine note on the last
+> tool result (ADR 0076 D6 — the saved record holds the kept results and no marker). So a cancel
+> during child 2 of a pool still discards child 1's result with the rest of that Turn, but the
+> Turns before the delegating one stand. A finer cut inside the pool — keeping the children that
+> finished before the Esc — is Stage B and stays on `apogee-2un`. Plan `2026-09-19 - 01`.
+
 ## Considered options
 
 - **Thread `Guards` verbatim (share breaker + audit + floor)** — *rejected* (the carried
