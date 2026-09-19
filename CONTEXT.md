@@ -653,12 +653,22 @@ sibling bounds ride the same path (`Config.Delegation.MaxTokens`, `.Timeout`): t
 (its own usage tally), and the `delegate-timeout` key, default **2h**, bounds the wall clock
 from the child's first request; `0` disables either, and both are read at spawn. On a step,
 token or time bound the child's Exchange ends **cleanly, not faulted** (`StepResult.StepCapped`)
-— but not before the engine spends one further Turn on the child's CLOSING REPORT: that
-request goes out with the tool menu withdrawn, telling the delegate which bound it hit, why its
-tools are gone, and asking it to report to the agent that delegated the task, unfinished work
+— but not before two things happen. First the **engine fold**: the engine summarizes the
+child's whole conversation as it stands at the bound (`context.Summarize` under the
+delegate-fold brief — files read by path, facts established with `path:line` references, what
+was concluded, what remains unfinished; no file contents) on the child's own model and budget.
+It is a summary call, not a Compaction: the child's history is untouched, its usage is booked
+`Maintenance` with the `DelegateFold` flag so no "context compacted" trace is written, and it is
+no Turn. Then the engine spends one further Turn on the child's CLOSING REPORT: that request
+goes out with the tool menu withdrawn, telling the delegate which bound it hit, why its tools
+are gone, and asking it to report to the agent that delegated the task, unfinished work
 included. That Turn is EXTRA — it sits outside the cap, so `delegate-max-steps: 3` still buys
-three working Turns plus this one reply — and when it faults, errors or answers with a tool
-call the result falls back to the child's last visible text. The withdrawal has ONE exception
+three working Turns plus this one reply. The fold IS the report: the parent receives it on every
+bound under `[engine summary]`, and the child's closing text follows under `[delegate's closing
+report]` — the wrap-up's reply, or whatever the child last said out loud when that Turn faults,
+errors or answers with a tool call, or `(no visible text)` when it never spoke; a fold whose summary
+call faulted is replaced by `[engine summary unavailable — <cause>]` and the closing report
+still lands. The withdrawal has ONE exception
 (2026-09-15, reversing the 2026-09-01 tool-less call): a delegation whose `sub_agent` call named
 an `output_path` — the file it is expected to write, resolved through the same write fence as
 `write_file`'s own target — keeps `write_file` for exactly that path on the wrap-up Turn, the
@@ -668,7 +678,8 @@ dispatches that one call before ending, and a `write_file` aimed anywhere else i
 `write_file` and its Mode admits a workspace write — a Plan-mode child's wrap-up stays tool-less
 — so it is never announced and then refused. The parent receives a non-error
 result whose first line marks it partial and names the bound that tripped (`step cap`, `token
-budget` or `time limit`), followed by that report, so Turns of real work are not thrown away,
+budget` or `time limit`) — `[delegate stopped at its <bound>; partial result — engine summary
+and closing report follow]` — followed by that body, so Turns of real work are not thrown away,
 and what the parent reads is authored rather than scavenged from whatever the child happened to
 narrate alongside its last tool call. It is a **structural floor**
 ([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), not an armed **Reaction** —

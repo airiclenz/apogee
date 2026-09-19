@@ -335,7 +335,7 @@ func TestTurnEventMarksTheStepCappedChildBoundary(t *testing.T) {
 
 			scripts := []stubllm.Turn{subAgentCallTurn("c1", "trawl the repo")}
 			scripts = append(scripts, narratedChildTurns(3)...)
-			scripts = append(scripts, tc.wrapUp, contentTurn("parent done"))
+			scripts = append(scripts, contentTurn(childFoldSummary), tc.wrapUp, contentTurn("parent done"))
 
 			a, err := newAgent(cfg, scriptedResponder(t, scripts...))
 			if err != nil {

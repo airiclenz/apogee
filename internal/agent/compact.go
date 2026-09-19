@@ -277,7 +277,7 @@ func (a *Agent) foldFor(ctx context.Context, turn int, kind foldKind) foldResult
 	a.compacting = true
 	defer func() { a.compacting = false }()
 
-	res, err := apogeectx.Compact(ctx, compactCompleter{a}, &a.conv, a.compactTranscriptChars())
+	res, err := apogeectx.Compact(ctx, compactCompleter{a: a}, &a.conv, a.compactTranscriptChars())
 	if err != nil {
 		if ctx.Err() != nil {
 			return foldResult{end: foldEndCancelled, err: ctx.Err()}
@@ -567,7 +567,15 @@ const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server
 // (ADR 0050), on EffortDialectOpenAI because "off" is a documented FLOOR there rather than an off
 // switch (it lands as `minimal`), and on EffortDialectOff because nothing effort-shaped reaches
 // the wire at all. The dialect itself is never touched here.
-type compactCompleter struct{ a *Agent }
+//
+// delegateFold marks the completer the ENGINE FOLD of a capped delegate runs on (Agent.foldForParent):
+// the same call in every respect — model, budget, dialect, sampling, the Maintenance accounting —
+// except that its UsageEvent also carries domain.UsageEvent.DelegateFold, because that fold
+// replaces nothing in the conversation and a Driver must not trace it as a Compaction.
+type compactCompleter struct {
+	a            *Agent
+	delegateFold bool
+}
 
 func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (string, error) {
 	// The summarizer request runs no Reactions, so nothing fires against it.
@@ -632,6 +640,7 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 			usage.PromptTokens, usage.CompletionTokens, usage.TotalTokens, usage.CachedPromptTokens,
 		)
 		event.Maintenance = true
+		event.DelegateFold = c.delegateFold
 		c.a.cfg.Events.Emit(event)
 	}
 

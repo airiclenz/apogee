@@ -37,10 +37,11 @@ const (
 	liveDelegateOutputCap = 16384
 	// liveParentGrowthCeiling is the most, in tokens, a capped delegation may cost the parent's
 	// context. A child that ran to its cap may have read hundreds of thousands of tokens; what
-	// reaches the parent is one marker line plus the closing report the child was asked to keep
-	// to its findings (the tool-less wrap-up Turn, finishAtStepCap), and this is the bound that
-	// says so.
-	liveParentGrowthCeiling = 4096
+	// reaches the parent is one marker line, the engine's fold of the child's conversation — a
+	// summary call bounded at compactMaxTokens (4096) — and the closing report the child was asked
+	// to keep to its findings (the tool-less wrap-up Turn, finishAtStepCap), and this is the bound
+	// that says so: the fold's whole reserve plus the same again for the report and the heads.
+	liveParentGrowthCeiling = 2 * compactMaxTokens
 )
 
 // liveDelegateTask is the delegated task: a real one that invites an unbounded number of
@@ -300,12 +301,21 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 			turns, liveDelegateStepCap)
 	}
 
-	// The closing report itself: a real model told why its tools are gone and asked to sum up
-	// says something, so the marker is followed by text — and never by the stand-in the fallback
-	// path supplies when the child produced none.
-	report := strings.TrimSpace(strings.TrimPrefix(result.Content, marker+"\n"))
-	if report == "" || report == stepCapNoTextMarker {
-		t.Errorf("delegation result = %q, want a closing report after the marker — the capped child "+
+	// The body: the engine's own fold of the child's conversation first, under its sub-head — the
+	// summary call ran on a real server and produced text, never the unavailable marker — and then
+	// the closing report itself under its own: a real model told why its tools are gone and asked
+	// to sum up says something, so that sub-head is followed by text — and never by the stand-in
+	// the fallback path supplies when the child produced none.
+	body := strings.TrimPrefix(result.Content, marker+"\n")
+	fold, report, split := strings.Cut(body, "\n\n"+closingReportHead+"\n")
+	if !split || !strings.HasPrefix(fold, engineSummaryHead+"\n") {
+		t.Fatalf("delegation result = %q, want %q + the fold, then %q + the closing report", result.Content, engineSummaryHead, closingReportHead)
+	}
+	if summary := strings.TrimSpace(strings.TrimPrefix(fold, engineSummaryHead+"\n")); summary == "" || strings.HasPrefix(summary, "[engine summary unavailable") {
+		t.Errorf("engine summary = %q, want the fold a live server wrote over the child's conversation", summary)
+	}
+	if report = strings.TrimSpace(report); report == "" || report == stepCapNoTextMarker {
+		t.Errorf("delegation result = %q, want a closing report under its sub-head — the capped child "+
 			"was given a tool-less Turn and asked to report back, so this fell through to the "+
 			"pre-cap fallback", result.Content)
 	}

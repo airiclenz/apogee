@@ -836,7 +836,7 @@ const (
 )
 
 // delegationBoundHead matches the marker line a delegation stopped at one of its BOUNDS opens with
-// — "[delegate stopped at its step cap (3 steps); partial result — its last visible text follows]",
+// — "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]",
 // or the same shape naming its token budget or its time limit (internal/agent's
 // stepCapResultFormat, tokenCapResultFormat and timeCapResultFormat) — anchored at the START, where
 // the engine writes it, so a line the child itself printed cannot be read as the marker. The one

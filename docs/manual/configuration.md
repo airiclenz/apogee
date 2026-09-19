@@ -769,10 +769,18 @@ decides it is finished, and a model that keeps deciding otherwise can spend an u
 number of tokens on a single delegation. `delegate-max-steps:` (a file-only key) is the
 ceiling, counted in **turns** — one request plus the tools it asked for — after which
 apogee ends the delegation cleanly and hands your agent what the sub-agent produced so
-far, marked as partial. It does not cut the sub-agent off mid-sentence, though: first
-it takes the tools away, tells the sub-agent why, and spends one further turn — an
-extra one, outside the ceiling — asking it to sum up what it found and what it left
-unfinished, so what your agent receives is a report rather than an interrupted sentence.
+far, marked as partial. It does not cut the sub-agent off mid-sentence, though. First
+apogee itself writes the report: it summarizes the sub-agent's whole conversation as it
+stands — the files it read, the facts it established, what it concluded, what it left
+unfinished — on the sub-agent's own model, and that summary reaches your agent under an
+`[engine summary]` heading on every capped delegation, whatever the sub-agent says next.
+Then it takes the tools away, tells the sub-agent why, and spends one further turn — an
+extra one, outside the ceiling — asking it to sum up in its own words; that reply follows
+under `[delegate's closing report]`, so what your agent receives is a report either way
+rather than an interrupted sentence, and a sub-agent that answers its last turn with
+something other than a report costs your agent nothing it could have read. The summary
+call spends tokens like a compaction does and counts toward the session's totals, but
+nothing is compacted: the sub-agent's conversation is left as it was.
 The default is **80**; `0` lets a delegation run unbounded, which is what it did before
 this key existed. It bounds sub-agents only, never the session you are talking to. A
 `sub_agent` call may ask for a lower ceiling of its own through its `max_steps` argument;
@@ -808,10 +816,10 @@ its clock. `delegate-max-tokens:` is the ceiling in **prompt tokens** across eve
 the sub-agent makes (default **20000000**), and `delegate-timeout:` is the ceiling on the
 **wall clock**, counted from the sub-agent's first request, as a length of time like `2h`
 or `30m` (default **2h**). Either one, when reached, ends the delegation exactly as the step
-ceiling does — the tools are taken away, the sub-agent is told which limit it hit and spends
-one closing turn summing up, and your agent receives the result marked as partial, its
-first line naming the limit (`token budget` or `time limit`) so it learns which knob its
-next delegation is up against. `0` switches either off. Both are read when a delegation
+ceiling does — apogee summarizes what the sub-agent has, the tools are taken away, the
+sub-agent is told which limit it hit and spends one closing turn summing up, and your agent
+receives the result marked as partial, its first line naming the limit (`token budget` or
+`time limit`) so it learns which knob its next delegation is up against. `0` switches either off. Both are read when a delegation
 starts, so a change applies to the sub-agents spawned after it and never to one already
 running; like the step ceiling, they bound sub-agents only.
 

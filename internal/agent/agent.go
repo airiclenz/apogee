@@ -410,6 +410,12 @@ type Agent struct {
 	timeCap  time.Duration
 	capStart time.Time
 	capHit   delegateBound
+	// capFold is the ENGINE FOLD of this Agent's conversation, written at the bound capHit names
+	// before the wrap-up Turn is spent (foldForParent) and read into the capped result under
+	// `[engine summary]` (delegationResult) — the report the parent receives whatever the child's
+	// closing reply turns out to be. Empty until a bound is hit; the unavailable marker
+	// (engineFoldUnavailableFormat) when the summary call faulted.
+	capFold string
 
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
 	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by
@@ -854,14 +860,22 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 // The last two are the ratified fallback: a cap is never reported to the parent as a failure. That
 // is also why Faulted must be CLEARED and not merely joined by StepCapped — delegationResult tests
 // Faulted BEFORE StepCapped (subagent.go), so a still-faulted boundary would reach the parent as
-// the error result this path exists to avoid. It then hands the parent exactly today's result:
-// lastVisibleText(), else stepCapNoTextMarker.
+// the error result this path exists to avoid. It then hands the parent the engine fold under
+// `[engine summary]` and, under `[delegate's closing report]`, lastVisibleText() else
+// stepCapNoTextMarker.
+//
+// The ENGINE FOLD comes first, before the wrap-up Turn is spent (foldForParent): the report the
+// parent reads is authored by the engine from the conversation as it stands at the bound, so a
+// wrap-up that faults, answers with a tool call or narrates instead of reporting costs the parent
+// nothing it could have read.
 func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) domain.StepResult {
 	a.cfg.Events.Emit(domain.ErrorEvent{
 		EventBase: a.base(last.TurnIndex),
 		Source:    "loop",
 		Err:       a.boundErrText(),
 	})
+
+	a.capFold = a.foldForParent(ctx)
 
 	defer a.turns.capped()()
 
@@ -879,6 +893,38 @@ func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) dom
 		res.StepCapped = true
 		return res
 	}
+}
+
+// foldForParent runs the ENGINE FOLD of a capped delegate's conversation — the summary the parent
+// reads under `[engine summary]` whatever the wrap-up Turn then produces (delegationResult). It is
+// context.Summarize under the delegate-fold brief over the whole conversation as it stands at the
+// bound, on the child's own completer (compactCompleter — its model, budget and dialect; the usage
+// booked Maintenance and flagged DelegateFold, never a TurnEvent), and it touches NOTHING else: the
+// conversation is not replaced, a.compacting is not taken and the fold-fault latch
+// (turns.foldFaulted) is never set, because this is not a Compaction — the child's history stands
+// exactly as it was for the wrap-up Turn that follows. A cancelled ctx skips the call, before or
+// during it (finishAtStepCap returns the cancel and nothing surfaces to the parent); any other
+// fault becomes the unavailable marker naming its cause, so the parent still reads the closing
+// report under a head that says the summary is missing rather than a body missing a part.
+func (a *Agent) foldForParent(ctx context.Context) string {
+	if ctx.Err() != nil {
+		return ""
+	}
+	text, err := apogeectx.Summarize(
+		ctx,
+		compactCompleter{a: a, delegateFold: true},
+		a.conv.Messages(),
+		a.conv.PrefixEnd(),
+		a.compactTranscriptChars(),
+		apogeectx.BriefDelegateFold,
+	)
+	if err != nil {
+		if ctx.Err() != nil {
+			return ""
+		}
+		return fmt.Sprintf(engineFoldUnavailableFormat, err)
+	}
+	return text
 }
 
 // AbortExchange discards an interrupted Exchange and returns the Agent to a clean quiescent

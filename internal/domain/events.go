@@ -440,6 +440,13 @@ func (e RefClippedEvent) Notice() string {
 // live gauge or a tokens/sec clock MUST skip a Maintenance event; a reader of the
 // cumulative totals accepts it, which is what keeps session usage honest across a fold.
 //
+// DelegateFold marks the one Maintenance reading that is NOT a Compaction: the engine's fold of
+// a capped delegate's conversation, written for the parent as the summary a delegate stopped at
+// a bound never got to report (agent.finishAtStepCap). The call spends tokens exactly as a
+// Compaction does, so Maintenance is set too and the readings above treat it alike — but the
+// emitting agent's conversation is left untouched, so a Driver that writes a "context compacted"
+// trace off a Maintenance reading MUST skip one carrying this flag: nothing was compacted.
+//
 // Model is the model the EMITTING agent is bound to — the id it puts on the wire, not a
 // display spelling — so a reading says which model produced it as well as how big it was. It
 // rides here rather than on a lifecycle event because it is a property OF the reading: a
@@ -481,8 +488,9 @@ type UsageEvent struct {
 	// — and informational on the fill field's.
 	Cumulative Usage
 
-	Maintenance bool
-	ServedModel string
+	Maintenance  bool
+	DelegateFold bool
+	ServedModel  string
 }
 
 // AuditEvent surfaces one append-only audit record — a tool call, the guardrail

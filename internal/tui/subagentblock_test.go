@@ -1602,9 +1602,9 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 // userSteeredTrailer are unexported, and this package reads them off the output by shape): they are
 // what a human reads, so a rename over there has to fail here.
 const (
-	envelopeCapMarker   = "[delegate stopped at its step cap (3 steps); partial result — its last visible text follows]"
-	envelopeTokenMarker = "[delegate stopped at its token budget (20000000 tokens); partial result — its last visible text follows]"
-	envelopeTimeMarker  = "[delegate stopped at its time limit (2h0m); partial result — its last visible text follows]"
+	envelopeCapMarker   = "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]"
+	envelopeTokenMarker = "[delegate stopped at its token budget (20000000 tokens); partial result — engine summary and closing report follow]"
+	envelopeTimeMarker  = "[delegate stopped at its time limit (2h0m); partial result — engine summary and closing report follow]"
 	envelopeFaultLine   = "sub-agent faulted before finishing the delegated task: the upstream died"
 	envelopeSteeredOne  = "\n\n(the user sent 1 message to this sub-agent while it ran)"
 	envelopeSteeredTwo  = "\n\n(the user sent 2 messages to this sub-agent while it ran)"

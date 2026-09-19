@@ -45,13 +45,19 @@ const (
 	outputCapPrompt = "Delegate the survey with an output file."
 	// childTask is the delegate's own instruction, and it is how a child's requests are told from
 	// the parent's: every message of the child's conversation carries it and none of the parent's
-	// does.
-	childTask       = "Read the workspace files one at a time"
-	interruptedCall = "interrupted — the run did not finish"
-	progressSaved   = "saved while a delegation was still running"
-	resumedNote     = "resumed: "
-	stepCapErrLead  = "delegate stopped at its step cap (3 steps)"
-	stepCapErrTail  = "raise delegate-max-steps"
+	// does. The engine fold's request carries it too — its user message is the child's rendered
+	// transcript — and is told apart by its system prompt instead (foldInstructionPhrase).
+	childTask = "Read the workspace files one at a time"
+	// foldInstructionPhrase is a phrase of the delegate-fold instruction
+	// (internal/context/prompts/delegate-fold-instruction.txt), the system prompt of the one request
+	// a capped child's run makes that is not the child's own: the engine's summary call over its
+	// conversation, spent before the wrap-up Turn. childRequests and childToolMenus leave it out.
+	foldInstructionPhrase = "summarizing the work of a sub-agent for the agent that delegated"
+	interruptedCall       = "interrupted — the run did not finish"
+	progressSaved         = "saved while a delegation was still running"
+	resumedNote           = "resumed: "
+	stepCapErrLead        = "delegate stopped at its step cap (3 steps)"
+	stepCapErrTail        = "raise delegate-max-steps"
 	// stepCapSlot is what the CONVERSATION's own row says about a capped delegation — the outcome
 	// slot internal/tui words from the result envelope the engine wrapped the partial answer in
 	// (delegationVerdict). It is the parent-side half of the same fact stepCapErrLead is the
@@ -222,9 +228,13 @@ func TestE2EDelegationStepCap(t *testing.T) {
 
 		// The child asked exactly four times: the three working Turns the cap allows, plus the one
 		// tool-less Turn the engine spends asking it to sum up. Its requests are the ones carrying
-		// its task; the parent's and the title call's do not.
+		// its task; the parent's and the title call's do not — and the engine's own fold of the
+		// child's conversation, which echoes the task, is counted apart (engineFoldRequests).
 		if got := childRequests(stub, childTask); got != 4 {
 			t.Errorf("the child made %d requests; a cap of 3 turns allows 3 plus one wrap-up", got)
+		}
+		if got := engineFoldRequests(stub, childTask); got != 1 {
+			t.Errorf("the engine folded the child's conversation %d times; a capped child is folded once, before its wrap-up", got)
 		}
 		// The wrap-up is the one request that offered NO tools, which is both how the child is told
 		// its tools are gone and why it could never have run a fourth: three requests carried the
@@ -336,11 +346,8 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		reqs := stub.Requests()
 		last := reqs[len(reqs)-1]
 		for _, req := range reqs {
-			for _, msg := range req.Messages {
-				if strings.Contains(msg.Content, childTask) {
-					last = req
-					break
-				}
+			if requestCarriesTask(req, childTask) {
+				last = req
 			}
 		}
 		if len(last.Tools) != 1 || last.Tools[0] != "write_file" {
@@ -589,14 +596,48 @@ func TestE2EDelegateReadOnlyRosterReachesTheChild(t *testing.T) {
 
 // requestCarriesTask reports whether req belongs to the conversation a delegate was handed the task
 // in. It is [childRequests]' discrimination asked of ONE request, for a case that needs the requests
-// themselves rather than a count of them.
+// themselves rather than a count of them. The engine fold's request carries the task too (its user
+// message is the child's rendered transcript) and is NOT the child's: isEngineFold tells it apart.
 func requestCarriesTask(req stubllm.Request, task string) bool {
+	if isEngineFold(req) {
+		return false
+	}
 	for _, msg := range req.Messages {
 		if strings.Contains(msg.Content, task) {
 			return true
 		}
 	}
 	return false
+}
+
+// isEngineFold reports whether req is the engine's fold of a capped delegate's conversation — the
+// one request in a capped run whose system prompt is the delegate-fold instruction rather than the
+// child's own.
+func isEngineFold(req stubllm.Request) bool {
+	for _, msg := range req.Messages {
+		if msg.Role == "system" && strings.Contains(msg.Content, foldInstructionPhrase) {
+			return true
+		}
+	}
+	return false
+}
+
+// engineFoldRequests counts the engine-fold requests made over a child's conversation — the ones
+// carrying task that requestCarriesTask leaves out.
+func engineFoldRequests(stub *stubllm.Server, task string) int {
+	n := 0
+	for _, req := range stub.Requests() {
+		if !isEngineFold(req) {
+			continue
+		}
+		for _, msg := range req.Messages {
+			if strings.Contains(msg.Content, task) {
+				n++
+				break
+			}
+		}
+	}
+	return n
 }
 
 // ----------------------------------------------------------------------------
@@ -658,15 +699,13 @@ func goldenRedactions(sess *e2eSession) []tuitest.Redaction {
 }
 
 // childRequests counts the requests the stub answered that carry task in one of their messages —
-// the delegate's own conversation, told apart from the parent's by the task it was given.
+// the delegate's own conversation, told apart from the parent's by the task it was given and from
+// the engine fold's request by its system prompt (requestCarriesTask).
 func childRequests(stub *stubllm.Server, task string) int {
 	n := 0
 	for _, req := range stub.Requests() {
-		for _, msg := range req.Messages {
-			if strings.Contains(msg.Content, task) {
-				n++
-				break
-			}
+		if requestCarriesTask(req, task) {
+			n++
 		}
 	}
 	return n
@@ -674,15 +713,13 @@ func childRequests(stub *stubllm.Server, task string) int {
 
 // childToolMenus reports, for each of the child's requests in order, whether it offered a tool menu
 // at all. A capped delegate's last request is the tool-less one the engine spends on its closing
-// report, so the run reads true, true, ..., false.
+// report, so the run reads true, true, ..., false. The engine fold's request — tool-less too — is
+// not the child's and is left out (requestCarriesTask).
 func childToolMenus(stub *stubllm.Server, task string) []bool {
 	var armed []bool
 	for _, req := range stub.Requests() {
-		for _, msg := range req.Messages {
-			if strings.Contains(msg.Content, task) {
-				armed = append(armed, len(req.Tools) > 0)
-				break
-			}
+		if requestCarriesTask(req, task) {
+			armed = append(armed, len(req.Tools) > 0)
 		}
 	}
 	return armed

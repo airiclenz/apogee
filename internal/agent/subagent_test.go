@@ -1323,9 +1323,51 @@ func subAgentArgsCapped(task string, maxSteps int) string {
 }
 
 // childClosingReport is what a capped delegate answers its tool-less wrap-up request with — the
-// report the parent reads under the partial marker, distinct from every narration the child wrote
-// during its capped Turns so a test can tell the authored text from the scavenged one.
+// report the parent reads under the closing-report sub-head, distinct from every narration the
+// child wrote during its capped Turns so a test can tell the authored text from the scavenged one.
 const childClosingReport = "I read two files; the third is unread and the survey is unfinished."
+
+// childFoldSummary is what the scripted upstream answers the ENGINE FOLD with — the summary call
+// finishAtStepCap makes over the child's conversation before the wrap-up Turn (foldForParent). Every
+// capped child in this package answers it FIRST, then the wrap-up: a bound costs the upstream one
+// fold request plus one wrap-up request beyond the working Turns. Its wording is distinct from the
+// closing report so a test can tell which sub-head each landed under.
+const childFoldSummary = "Engine fold: the delegate read files 0 and 1; file 2 is unread."
+
+// cappedResult renders the exact result a capped delegation hands its parent: the head, the engine
+// summary under its sub-head, a blank line, then the closing text under its own.
+func cappedResult(head, fold, closing string) string {
+	return head + "\n" + engineSummaryHead + "\n" + fold + "\n\n" + closingReportHead + "\n" + closing
+}
+
+// foldScript is the fold reply with a server-reported usage, so the fold's one UsageEvent is emitted
+// and a test can read the flags it carries.
+func foldScript(prompt, completion int) []provider.Delta {
+	script := contentScript(childFoldSummary)
+	script[len(script)-1].Usage = &provider.Usage{PromptTokens: prompt, CompletionTokens: completion, TotalTokens: prompt + completion}
+	return script
+}
+
+// engineFoldUsage returns the Maintenance UsageEvents at depth that carry the DelegateFold flag —
+// the engine fold's own accounting, told apart from a Compaction's by that flag.
+func engineFoldUsage(events []domain.Event, depth int) []domain.UsageEvent {
+	var out []domain.UsageEvent
+	for _, e := range events {
+		if ev, ok := e.(domain.UsageEvent); ok && ev.Depth == depth && ev.Maintenance && ev.DelegateFold {
+			out = append(out, ev)
+		}
+	}
+	return out
+}
+
+// requestSystemContains reports whether req's system text (requestSystemText) carries phrase.
+func requestSystemContains(req provider.Request, phrase string) bool {
+	return strings.Contains(requestSystemText(req), phrase)
+}
+
+// foldInstructionPhrase is a phrase of internal/context's delegate-fold-instruction.txt, the system
+// prompt the engine fold's request carries and nothing else does.
+const foldInstructionPhrase = "summarizing the work of a sub-agent for the agent that delegated"
 
 // countCapErrors returns how many ErrorEvents at the given Depth name the step cap.
 func countCapErrors(events []domain.Event, depth int) int {
@@ -1341,14 +1383,18 @@ func countCapErrors(events []domain.Event, depth int) int {
 
 // TestRunEndsTheExchangeAtTheStepCap pins the bound at its enforcement site: an Agent with a cap
 // that keeps asking for tools has its Exchange ENDED by Run, on a clean StatusExchangeComplete
-// boundary marked StepCapped and NOT Faulted, after exactly cap working Turns PLUS the one
-// tool-less wrap-up Turn the cap spends on a closing report (finishAtStepCap).
+// boundary marked StepCapped and NOT Faulted, after exactly cap working Turns PLUS the engine fold's
+// summary call and the one tool-less wrap-up Turn the cap spends on a closing report
+// (finishAtStepCap).
 func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
 
-	responder := &requestLogResponder{scripts: cappedChildTurns(10)}
+	// Three working Turns, then the fold's reply and the wrap-up's: a child that would keep asking
+	// for tools is what the cap ends, so the fourth working Turn is never scripted.
+	scripts := append(cappedChildTurns(3), contentScript(childFoldSummary), contentScript(childClosingReport))
+	responder := &requestLogResponder{scripts: scripts}
 	a, err := newAgent(cfg, responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -1372,19 +1418,23 @@ func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 	if res.Faulted {
 		t.Error("Faulted set on a capped Exchange; the cap is not a failure")
 	}
-	// Three working Turns and then ONE more: the wrap-up Turn is EXTRA and uncounted, so the cap
-	// still buys the three requests it names and the fourth is the closing report.
-	if responder.calls != 4 {
-		t.Errorf("upstream calls = %d, want 4 — three working Turns plus the wrap-up", responder.calls)
+	// Three working Turns and then TWO more requests: the engine fold's summary call, then the
+	// wrap-up Turn — both EXTRA and uncounted, so the cap still buys the three requests it names.
+	if responder.calls != 5 {
+		t.Errorf("upstream calls = %d, want 5 — three working Turns, the fold and the wrap-up", responder.calls)
 	}
-	if got := len(responder.requests[3].Tools); got != 0 {
+	if fold := responder.requests[3]; len(fold.Tools) != 0 || !requestSystemContains(fold, foldInstructionPhrase) {
+		t.Errorf("the fourth request = %+v, want the engine fold: no tools and the delegate-fold instruction as its system prompt", fold.Messages)
+	}
+	if got := len(responder.requests[4].Tools); got != 0 {
 		t.Errorf("the wrap-up request carries %d tools, want 0 — the menu is withdrawn for it", got)
 	}
 	// The counter names the next Turn: the wrap-up ends through endExchangeDone, which advances
 	// once for it, so a capped child ends at cap+1 — the index encodeState stores (state.go) and a
-	// resume reads back must match the Turns actually taken, no more and no fewer.
+	// resume reads back must match the Turns actually taken, no more and no fewer. The fold is not a
+	// Turn and advances nothing.
 	if a.turns.index != 4 {
-		t.Errorf("turn index = %d, want 4 — cap Turns plus the wrap-up, advanced exactly once each", a.turns.index)
+		t.Errorf("turn index = %d, want 4 — cap Turns plus the wrap-up, advanced exactly once each; the fold is no Turn", a.turns.index)
 	}
 	if got := countCapErrors(sink.events, 0); got != 1 {
 		t.Errorf("step-cap ErrorEvents = %d, want exactly 1", got)
@@ -1398,9 +1448,11 @@ func TestRunEndsTheExchangeAtTheStepCap(t *testing.T) {
 }
 
 // TestSubAgent_StepCapReturnsAPartialResultToTheParent proves the parent's side of the bound: a
-// delegation stopped at its cap is NOT an error result — it carries the marker line plus the
-// closing report the tool-less wrap-up Turn authored — and the parent's own Turn continues to a
-// normal Exchange end.
+// delegation stopped at its cap is NOT an error result — it carries the marker line, the engine's
+// own fold of the child's conversation under `[engine summary]`, and the closing report the
+// tool-less wrap-up Turn authored under `[delegate's closing report]` — and the parent's own Turn
+// continues to a normal Exchange end. The fold's summary call is accounted as Maintenance with the
+// DelegateFold flag and is no Turn: the child's TurnEvents are its working Turns plus the wrap-up.
 func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
@@ -1409,8 +1461,10 @@ func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
 
 	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
 	scripts = append(scripts, cappedChildTurns(3)...)
-	// The child's 4th request is the wrap-up: its menu is gone, so what it answers with is the
+	// The child's 4th request is the engine fold — the summary the parent reads whatever the
+	// wrap-up produces — and its 5th the wrap-up: its menu is gone, so what it answers with is the
 	// report the parent reads rather than narration scavenged from a tool round.
+	scripts = append(scripts, foldScript(700, 40))
 	scripts = append(scripts, contentScript(childClosingReport))
 	scripts = append(scripts, contentScript("parent done"))
 	responder := &requestLogResponder{scripts: scripts}
@@ -1443,17 +1497,33 @@ func TestSubAgent_StepCapReturnsAPartialResultToTheParent(t *testing.T) {
 	if sub.IsError {
 		t.Errorf("sub_agent result IsError = true for a capped delegation; the partial work stands: %q", sub.Content)
 	}
-	marker := fmt.Sprintf(stepCapResultFormat, 3)
-	if !strings.HasPrefix(sub.Content, marker+"\n") {
-		t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, marker)
+	if want := cappedResult(fmt.Sprintf(stepCapResultFormat, 3), childFoldSummary, childClosingReport); sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q — head, engine summary, closing report", sub.Content, want)
 	}
-	if !strings.HasSuffix(sub.Content, childClosingReport) {
-		t.Errorf("sub_agent result = %q, want it to end with the wrap-up reply %q", sub.Content, childClosingReport)
+	// The fold request: tool-less, under the delegate-fold instruction, and answered before the
+	// wrap-up — so the summary is in hand whatever the wrap-up then does.
+	if fold := responder.requests[len(scripts)-3]; len(fold.Tools) != 0 || !requestSystemContains(fold, foldInstructionPhrase) {
+		t.Errorf("the fold request = %+v, want no tools and the delegate-fold instruction as its system prompt", fold.Messages)
 	}
 	// The wrap-up request itself: the child's last one, sent with the menu withdrawn — which is
 	// what makes the report a report instead of a fourth tool call.
 	if got := len(responder.requests[len(scripts)-2].Tools); got != 0 {
 		t.Errorf("the wrap-up request carries %d tools, want 0", got)
+	}
+	// The fold's accounting: one Maintenance reading flagged as the engine fold on the child's
+	// stream, and no Turn for it — the child's TurnEvents are its three working Turns plus the
+	// wrap-up, exactly as before the fold existed.
+	if folds := engineFoldUsage(sink.events, 1); len(folds) != 1 || folds[0].PromptTokens != 700 {
+		t.Errorf("engine-fold UsageEvents at Depth 1 = %+v, want exactly one Maintenance reading flagged DelegateFold with the fold's 700 prompt tokens", folds)
+	}
+	childTurns := 0
+	for _, te := range turnEvents(sink.events) {
+		if te.Depth == 1 {
+			childTurns++
+		}
+	}
+	if childTurns != 4 {
+		t.Errorf("child TurnEvents = %d, want 4 — three working Turns and the wrap-up; the fold is no Turn", childTurns)
 	}
 	// The human sees the cause on the child's own stream, once, and it says what happens next.
 	if got := countCapErrors(sink.events, 1); got != 1 {
@@ -1476,6 +1546,7 @@ func TestSubAgent_StepCapFallsBackWhenTheWrapUpFaults(t *testing.T) {
 
 	scripts := []stubllm.Turn{subAgentCallTurn("c1", "trawl the repo")}
 	scripts = append(scripts, narratedChildTurns(3)...)
+	scripts = append(scripts, contentTurn(childFoldSummary))
 	scripts = append(scripts, errorScript("upstream exploded on the wrap-up"))
 	scripts = append(scripts, contentTurn("parent done"))
 
@@ -1503,9 +1574,59 @@ func TestSubAgent_StepCapFallsBackWhenTheWrapUpFaults(t *testing.T) {
 	if strings.Contains(sub.Content, subAgentFaultPrefix) {
 		t.Errorf("sub_agent result = %q, want the step-cap result, not the fault result", sub.Content)
 	}
-	marker := fmt.Sprintf(stepCapResultFormat, 3)
-	if want := marker + "\n" + "reading file 2"; sub.Content != want {
-		t.Errorf("sub_agent result = %q, want %q — the pre-cap last visible text", sub.Content, want)
+	if want := cappedResult(fmt.Sprintf(stepCapResultFormat, 3), childFoldSummary, "reading file 2"); sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q — the engine summary, then the pre-cap last visible text as the closing report", sub.Content, want)
+	}
+}
+
+// TestSubAgent_StepCapReportsAnUnavailableEngineFold drives the fold's own fallback: the summary
+// call is a best effort like the wrap-up, so a fault on it must neither fail the delegation nor
+// cost the parent the closing report — the engine-summary sub-head carries the unavailable marker
+// naming the cause, and the report the wrap-up then authors lands under its own sub-head as ever.
+func TestSubAgent_StepCapReportsAnUnavailableEngineFold(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+
+	scripts := []stubllm.Turn{subAgentCallTurn("c1", "trawl the repo")}
+	scripts = append(scripts, narratedChildTurns(3)...)
+	scripts = append(scripts, errorScript("summarizer exploded"))
+	scripts = append(scripts, contentTurn(childClosingReport))
+	scripts = append(scripts, contentTurn("parent done"))
+
+	a, err := newAgent(cfg, scriptedResponder(t, scripts...))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	_ = a.Submit(domain.UserInput{Text: "please research"})
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Errorf("parent result = %+v, want a clean exchange-complete — a failed fold is the child's, not the parent's", res)
+	}
+	sub, ok := lastSubAgentResult(sink.events)
+	if !ok {
+		t.Fatal("no sub_agent tool result emitted")
+	}
+	if sub.IsError {
+		t.Errorf("sub_agent result IsError = true after a faulted fold; the cap is never reported as a failure: %q", sub.Content)
+	}
+	head := fmt.Sprintf(stepCapResultFormat, 3) + "\n" + engineSummaryHead + "\n[engine summary unavailable — "
+	if !strings.HasPrefix(sub.Content, head) || !strings.Contains(sub.Content, "summarizer exploded") {
+		t.Errorf("sub_agent result = %q, want it to open with %q and name the fold's cause", sub.Content, head)
+	}
+	if !strings.HasSuffix(sub.Content, "\n\n"+closingReportHead+"\n"+childClosingReport) {
+		t.Errorf("sub_agent result = %q, want the closing report under its sub-head after the unavailable marker", sub.Content)
+	}
+	if !hasErrorContaining(sink.events, 1, "step cap") {
+		t.Error("no ErrorEvent at Depth 1 names the cap; the fold's fault must not displace the cap's own notice")
+	}
+	if got := countCapErrors(sink.events, 1); got != 1 {
+		t.Errorf("step-cap ErrorEvents at Depth 1 = %d, want exactly 1", got)
 	}
 }
 
@@ -1524,6 +1645,7 @@ func TestSubAgent_StepCapMarksAWordlessDelegate(t *testing.T) {
 		toolCallTurn("t0", "read_thing", `{"n":0}`), // no visible text on either child Turn
 		toolCallTurn("t1", "read_thing", `{"n":1}`), // (arguments differ per Turn so the tool-loop
 		//                                                breaker guard reads no identical repeat)
+		contentTurn(childFoldSummary), // the engine fold, answered whatever the child said
 		// …and none on the wrap-up either: a child that answers its closing request with nothing
 		// but another tool call commits no assistant message, so there is still nothing to show.
 		toolCallTurn("t2", "read_thing", `{"n":2}`),
@@ -1542,8 +1664,8 @@ func TestSubAgent_StepCapMarksAWordlessDelegate(t *testing.T) {
 	if !ok {
 		t.Fatal("no sub_agent tool result emitted")
 	}
-	if want := fmt.Sprintf(stepCapResultFormat, 2) + "\n" + stepCapNoTextMarker; sub.Content != want {
-		t.Errorf("sub_agent result = %q, want %q", sub.Content, want)
+	if want := cappedResult(fmt.Sprintf(stepCapResultFormat, 2), childFoldSummary, stepCapNoTextMarker); sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q — the engine summary, then the no-text marker under the closing-report sub-head", sub.Content, want)
 	}
 	if strings.Contains(sub.Content, "completed") {
 		t.Errorf("sub_agent result = %q — a capped delegation must never be reported as completed", sub.Content)
@@ -1612,15 +1734,15 @@ func steppingClock(start time.Time, step time.Duration) func() time.Time {
 }
 
 // runBoundedDelegation drives one delegation of a parent built on cfg whose child spends the
-// scripted Turns, then answers the wrap-up with childClosingReport and lets the parent finish. It
-// returns the recorded events, the sub_agent result and the responder, for the bound tests below
-// to read their own marker off.
+// scripted Turns, then answers the engine fold with childFoldSummary and the wrap-up with
+// childClosingReport, and lets the parent finish. It returns the recorded events, the sub_agent
+// result and the responder, for the bound tests below to read their own marker off.
 func runBoundedDelegation(t *testing.T, cfg domain.Config, sink *recordingSink, now func() time.Time,
 	childTurns [][]provider.Delta) (domain.ToolResult, *requestLogResponder) {
 	t.Helper()
 	scripts := [][]provider.Delta{subAgentCallScript("c1", "trawl the repo")}
 	scripts = append(scripts, childTurns...)
-	scripts = append(scripts, contentScript(childClosingReport), contentScript("parent done"))
+	scripts = append(scripts, contentScript(childFoldSummary), contentScript(childClosingReport), contentScript("parent done"))
 	responder := &requestLogResponder{scripts: scripts}
 	a, err := newAgent(cfg, responder)
 	if err != nil {
@@ -1640,7 +1762,7 @@ func runBoundedDelegation(t *testing.T, cfg domain.Config, sink *recordingSink, 
 		t.Errorf("parent result = %+v, want a clean uncapped exchange-complete", res)
 	}
 	if responder.calls != len(scripts) {
-		t.Errorf("upstream calls = %d, want %d — the bound ends the child after its scripted Turns and one wrap-up",
+		t.Errorf("upstream calls = %d, want %d — the bound ends the child after its scripted Turns, one fold and one wrap-up",
 			responder.calls, len(scripts))
 	}
 	sub, ok := lastSubAgentResult(sink.events)
@@ -1668,12 +1790,8 @@ func TestSubAgent_TokenBudgetEndsTheChildThroughTheWrapUp(t *testing.T) {
 	if sub.IsError {
 		t.Errorf("sub_agent result IsError = true for a delegation stopped at its token budget: %q", sub.Content)
 	}
-	marker := fmt.Sprintf(tokenCapResultFormat, 20_000_000)
-	if !strings.HasPrefix(sub.Content, marker+"\n") {
-		t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, marker)
-	}
-	if !strings.HasSuffix(sub.Content, childClosingReport) {
-		t.Errorf("sub_agent result = %q, want it to end with the wrap-up reply", sub.Content)
+	if want := cappedResult(fmt.Sprintf(tokenCapResultFormat, 20_000_000), childFoldSummary, childClosingReport); sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q — the token head, the engine summary, the wrap-up reply", sub.Content, want)
 	}
 	wrapUp := responder.requests[len(responder.requests)-2]
 	if got := len(wrapUp.Tools); got != 0 {
@@ -1710,9 +1828,8 @@ func TestSubAgent_TimeLimitEndsTheChildThroughTheWrapUp(t *testing.T) {
 	if sub.IsError {
 		t.Errorf("sub_agent result IsError = true for a delegation stopped at its time limit: %q", sub.Content)
 	}
-	marker := fmt.Sprintf(timeCapResultFormat, "2h0m")
-	if !strings.HasPrefix(sub.Content, marker+"\n") {
-		t.Errorf("sub_agent result = %q, want it to open with %q", sub.Content, marker)
+	if want := cappedResult(fmt.Sprintf(timeCapResultFormat, "2h0m"), childFoldSummary, childClosingReport); sub.Content != want {
+		t.Errorf("sub_agent result = %q, want %q — the time head, the engine summary, the wrap-up reply", sub.Content, want)
 	}
 	wrapUp := responder.requests[len(responder.requests)-2]
 	if got := len(wrapUp.Tools); got != 0 {
@@ -1798,9 +1915,10 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 			scripts := []stubllm.Turn{
 				toolCallTurn("c1", tools.SubAgentToolName, subAgentArgsCapped("trawl the repo", tc.requested)),
 			}
-			// wantSteps working Turns plus the one tool-less wrap-up Turn the cap spends: the
-			// bound governs the WORK, and the closing report is extra however low it is set.
-			scripts = append(scripts, narratedChildTurns(tc.wantSteps+1)...)
+			// wantSteps working Turns, then the engine fold and the one tool-less wrap-up Turn the
+			// cap spends: the bound governs the WORK, and both are extra however low it is set.
+			scripts = append(scripts, narratedChildTurns(tc.wantSteps)...)
+			scripts = append(scripts, contentTurn(childFoldSummary), contentTurn(childClosingReport))
 			scripts = append(scripts, contentTurn("parent done"))
 			responder := scriptedResponder(t, scripts...)
 
@@ -1814,7 +1932,7 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 			}
 
 			if responder.calls() != len(scripts) {
-				t.Errorf("upstream calls = %d, want %d — the child ran a different number of Turns than the effective cap plus its wrap-up",
+				t.Errorf("upstream calls = %d, want %d — the child ran a different number of Turns than the effective cap plus its fold and wrap-up",
 					responder.calls(), len(scripts))
 			}
 			sub, ok := lastSubAgentResult(sink.events)
@@ -2525,9 +2643,9 @@ func TestUserSteeredTrailer_SingularAndPlural(t *testing.T) {
 
 // outputPathAgent builds a parent in mode over a real workspace with a real write_file tool and
 // the fake reader, capped at two child Turns, whose one delegation names outputPath (or none, for
-// ""). The scripts are the child's two capped Turns, then the wrap-up reply given, then the
-// parent's close. It returns the parent, the responder that logs every request the tree sent,
-// the sink, and the workspace root the output path resolves against.
+// ""). The scripts are the child's two capped Turns, the engine fold's reply, then the wrap-up
+// reply given, then the parent's close. It returns the parent, the responder that logs every
+// request the tree sent, the sink, and the workspace root the output path resolves against.
 func outputPathAgent(t *testing.T, mode domain.Mode, outputPath string, wrapUp []provider.Delta) (*Agent, *requestLogResponder, *recordingSink, string) {
 	t.Helper()
 
@@ -2544,7 +2662,7 @@ func outputPathAgent(t *testing.T, mode domain.Mode, outputPath string, wrapUp [
 	}
 	scripts := [][]provider.Delta{toolCallScript("c1", tools.SubAgentToolName, string(call))}
 	scripts = append(scripts, cappedChildTurns(2)...)
-	scripts = append(scripts, wrapUp, contentScript("parent done"))
+	scripts = append(scripts, contentScript(childFoldSummary), wrapUp, contentScript("parent done"))
 	responder := &requestLogResponder{scripts: scripts}
 
 	a, err := newAgent(cfg, responder)
@@ -2555,11 +2673,11 @@ func outputPathAgent(t *testing.T, mode domain.Mode, outputPath string, wrapUp [
 }
 
 // wrapUpRequest is the child's wrap-up request in a two-Turn capped delegation: the parent's
-// opening request, two child Turns, then this one.
+// opening request, two child Turns, the engine fold's request, then this one.
 func wrapUpRequest(t *testing.T, responder *requestLogResponder) provider.Request {
 	t.Helper()
 
-	const wrapUpIndex = 3
+	const wrapUpIndex = 4
 	if len(responder.requests) <= wrapUpIndex {
 		t.Fatalf("requests = %d, want the wrap-up at index %d", len(responder.requests), wrapUpIndex)
 	}
@@ -2625,9 +2743,10 @@ func TestSubAgent_OutputPathKeepsWriteFileInTheWrapUp(t *testing.T) {
 	if sub.IsError || !strings.HasPrefix(sub.Content, head+"\n") || !strings.HasSuffix(sub.Content, childClosingReport) {
 		t.Errorf("sub_agent result = %q, want a non-error capped result carrying the closing report", sub.Content)
 	}
-	// The wrap-up bought one request, never a further working Turn: the child asked three times.
-	if got := len(responder.requests); got != 5 {
-		t.Errorf("requests = %d, want 5 — parent, two capped child Turns, the wrap-up, the parent's close", got)
+	// The fold and the wrap-up bought one request each, never a further working Turn: the child
+	// asked four times.
+	if got := len(responder.requests); got != 6 {
+		t.Errorf("requests = %d, want 6 — parent, two capped child Turns, the fold, the wrap-up, the parent's close", got)
 	}
 }
 
@@ -2872,7 +2991,7 @@ func TestSubAgent_CappedChildWithoutItsOutputCarriesTheNote(t *testing.T) {
 	if !ok {
 		t.Fatal("no sub_agent tool result emitted")
 	}
-	want := fmt.Sprintf(stepCapResultFormat, 2) + "\n" + childClosingReport + "\n" + fmt.Sprintf(missingOutputNoteFormat, "out/report.md")
+	want := cappedResult(fmt.Sprintf(stepCapResultFormat, 2), childFoldSummary, childClosingReport) + "\n" + fmt.Sprintf(missingOutputNoteFormat, "out/report.md")
 	if sub.IsError || sub.Content != want {
 		t.Errorf("sub_agent result = %+v, want the non-error capped result %q", sub, want)
 	}

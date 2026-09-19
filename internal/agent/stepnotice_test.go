@@ -53,7 +53,10 @@ func stepNoticeFirings(sink *recordingSink) []domain.ReactionFiredEvent {
 // text, and the firing books the step and the cap. The results of Turns 1, 2 and 4 land bare.
 func TestStepNoticeFiresOnceOnTheThirdTurnOfACapOfFour(t *testing.T) {
 	sink := &recordingSink{}
-	responder := &requestLogResponder{scripts: cappedChildTurns(10)}
+	// Four working Turns, then the engine fold's reply and the wrap-up's — the two requests a
+	// bound spends past the cap (finishAtStepCap).
+	scripts := append(cappedChildTurns(4), contentScript(childFoldSummary), contentScript(childClosingReport))
+	responder := &requestLogResponder{scripts: scripts}
 	a, err := newAgent(stepNoticeConfig(sink), responder)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

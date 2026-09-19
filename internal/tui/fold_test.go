@@ -836,6 +836,34 @@ func TestFoldStatsWritesTheFoldsTraceAtEveryDepth(t *testing.T) {
 	}
 }
 
+// TestFoldStatsWritesNoTraceForADelegatesEngineFold pins the other exception to the reading-keyed
+// rule: the engine's fold of a capped delegate's conversation (domain.UsageEvent.DelegateFold)
+// emits the same Maintenance reading a Compaction does — the summary call spent real tokens and the
+// totals must take it — but it replaced nothing in the child's history, so no "context compacted"
+// note may be written under the run: a trace there would report a fold that never happened.
+func TestFoldStatsWritesNoTraceForADelegatesEngineFold(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+
+	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{ID: "s1", Tool: "sub_agent",
+		Arguments: []byte(`{"task":"survey the tests"}`)}})
+	m = m.foldEvent(domain.SubAgentPhaseEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+		Phase: domain.SubAgentStarted})
+	engineFold := mainUsage(6000, 300, 6300, 7000, 500, 7500, 3)
+	engineFold.EventBase = domain.EventBase{Depth: 1, CallID: "s1"}
+	engineFold.Maintenance = true
+	engineFold.DelegateFold = true
+
+	m = m.foldEvent(engineFold)
+
+	if notes := compactedNotes(m); len(notes) != 0 {
+		t.Errorf("the engine fold's reading left %d compacted notes, want none — the child's conversation was not folded: %+v", len(notes), notes)
+	}
+	if !m.transcript.hasOpenToolCall() {
+		t.Error("the delegation was closed by its child's engine fold; a reading is not a result")
+	}
+}
+
 // TestCompactCommandLeavesExactlyOneTrace pins the one exception to the reading-keyed rule: the
 // /compact worker's summary call emits the same maintenance reading an automatic fold does, but
 // its terminal Msg is what says whether the fold LANDED (a skip and a fault carry the same reading

@@ -142,9 +142,12 @@ func (m Model) foldStats(e domain.Event) Model {
 		// quiescent Turn boundary, the main agent's at an Exchange opening — because the fold itself
 		// is quiet on success (agent/compact.go, autoCompact). So the reading is where the fold's
 		// trace is written, at the depth that folded (transcript.addCompacted), ahead of the depth
-		// guard below. The /compact worker's own reading is the exception: its terminal Msg writes
-		// the note (foldCompactDone), and a second one here would say the fold happened twice.
-		if e.Maintenance && !(e.Depth == 0 && m.acts.at(runRef{}).act.kind == actCompacting) {
+		// guard below. Two readings are the exception: the /compact worker's own, whose terminal
+		// Msg writes the note (foldCompactDone) so a second one here would say the fold happened
+		// twice; and the ENGINE FOLD of a capped delegate (domain.UsageEvent.DelegateFold), which
+		// spends a summary call like a Compaction but replaces nothing in the child's conversation
+		// — a trace would report a fold that never happened.
+		if e.Maintenance && !e.DelegateFold && !(e.Depth == 0 && m.acts.at(runRef{}).act.kind == actCompacting) {
 			m.transcript.addCompacted(runOf(e.EventBase))
 		}
 		if e.Depth != 0 {

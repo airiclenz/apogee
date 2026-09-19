@@ -83,14 +83,16 @@ const stepCapClampNoteFormat = "[max_steps %d requested; the configured cap is %
 // stepCapResultFormat is the marker line the PARENT model receives when a delegation ended at its
 // step cap (Agent.stepCap): a NON-error result whose first line says the answer that follows is
 // partial, so the parent can re-delegate a narrower task instead of treating a half-finished
-// investigation as the finding. What follows it is the child's last visible text, which since
-// finishAtStepCap (agent.go) is normally its CLOSING REPORT — the wrap-up Turn's reply, tool-less
-// bar write_file to a spawn-named `output_path` (Agent.outputPath) —
-// and falls back to whatever it last said out loud when that Turn produced nothing. The line
-// itself is unchanged either way: it promises a partial result, and a report of unfinished work is
-// exactly that. It is a package constant, pinned by test, because the parent model reads it as the
-// contract for what the rest of the result is. %d is the cap actually applied.
-const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — its last visible text follows]"
+// investigation as the finding. What follows it is the body cappedResultBody renders: the ENGINE
+// SUMMARY — the engine's own fold of the child's conversation at the bound (Agent.foldForParent),
+// which the parent receives on every bound — and then the child's CLOSING REPORT, which since
+// finishAtStepCap (agent.go) is normally the wrap-up Turn's reply, tool-less bar write_file to a
+// spawn-named `output_path` (Agent.outputPath), and falls back to whatever the child last said out
+// loud when that Turn produced nothing. The line itself is unchanged either way: it promises a
+// partial result, and a summary of unfinished work is exactly that. It is a package constant,
+// pinned by test, because the parent model reads it as the contract for what the rest of the
+// result is. %d is the cap actually applied.
+const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — engine summary and closing report follow]"
 
 // tokenCapResultFormat and timeCapResultFormat are stepCapResultFormat for the two other bounds a
 // delegate runs under (Agent.tokenCap, Agent.timeCap): the same shape — a non-error head promising
@@ -100,9 +102,26 @@ const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); parti
 // contract for the rest of the result. %d is the token budget applied; %s is the time limit,
 // spelled by boundDurationText.
 const (
-	tokenCapResultFormat = "[delegate stopped at its token budget (%d tokens); partial result — its last visible text follows]"
-	timeCapResultFormat  = "[delegate stopped at its time limit (%s); partial result — its last visible text follows]"
+	tokenCapResultFormat = "[delegate stopped at its token budget (%d tokens); partial result — engine summary and closing report follow]"
+	timeCapResultFormat  = "[delegate stopped at its time limit (%s); partial result — engine summary and closing report follow]"
 )
+
+// The two sub-heads of a capped result's body, in the order cappedResultBody writes them under the
+// head line. engineSummaryHead opens the ENGINE FOLD (Agent.capFold): the summary the engine
+// authored from the child's conversation at the bound, which the parent receives on every bound
+// whatever the wrap-up Turn then produced. closingReportHead opens the child's own closing text —
+// its wrap-up reply, or its last visible text when that Turn produced none, or
+// stepCapNoTextMarker when it never spoke. Both are package constants, pinned by test, because the
+// parent model reads them as the contract for which part of the body is whose.
+const (
+	engineSummaryHead = "[engine summary]"
+	closingReportHead = "[delegate's closing report]"
+)
+
+// engineFoldUnavailableFormat stands in for the engine fold when its summary call faulted
+// (Agent.foldForParent): the parent still reads the closing report under a head that says the
+// summary is MISSING and why, rather than a body silently missing its first part. %v is the cause.
+const engineFoldUnavailableFormat = "[engine summary unavailable — %v]"
 
 // capResultHead is the marker line a capped delegation's result opens with, for the bound capHit
 // names — the receiver is the CHILD, as in delegationResult.
@@ -127,11 +146,11 @@ const subAgentFaultPrefix = "sub-agent faulted before finishing the delegated ta
 // said in full before causes travelled.
 const subAgentFaultNoCause = "its exchange was abandoned (see the preceding error), so no result was produced"
 
-// stepCapNoTextMarker stands in for the child's last visible text when it produced none — a
-// delegate that spent every capped Turn calling tools and never wrote a word, and whose wrap-up
+// stepCapNoTextMarker stands in for the child's closing report when it produced no visible text —
+// a delegate that spent every capped Turn calling tools and never wrote a word, and whose wrap-up
 // Turn then faulted or answered with nothing but another tool call. The marker keeps the result
-// intelligible: the parent is told the delegation was stopped AND that it has nothing to show,
-// rather than being handed a bare marker line with an empty body.
+// intelligible: the parent is told, under closingReportHead, that the child itself had nothing to
+// show — the engine summary above it is what it reads instead.
 const stepCapNoTextMarker = "(no visible text)"
 
 // The three shapes a FINISHED child's closing text is checked against before it is handed to the
@@ -813,23 +832,24 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	case res.StepCapped:
 		// The engine STOPPED the child at one of its bounds (Agent.Run) — the step cap, or the
 		// token or time bound that takes the same path with its own head line (capResultHead) —
-		// it was still asking for tools, so what it has is partial. That is not a failure and must not be reported as one: an error
-		// result would throw away Turns of real work. So the parent gets a NON-error result whose
-		// first line is the marker saying the answer below is partial, followed by whatever the
-		// child last said out loud. The child's own ErrorEvent already told the human the cap hit.
+		// it was still asking for tools, so what it has is partial. That is not a failure and must
+		// not be reported as one: an error result would throw away Turns of real work. So the
+		// parent gets a NON-error result whose first line is the marker saying the answer below is
+		// partial, followed by the body cappedResultBody renders: the engine's own fold of the
+		// child's conversation, then whatever the child last said out loud. The child's own
+		// ErrorEvent already told the human the cap hit.
 		//
-		// That last visible text is normally the child's CLOSING REPORT: finishAtStepCap spends one
+		// The fold is the report (Agent.foldForParent, written before the wrap-up Turn): it reaches
+		// the parent on every bound, so the closing text is a second reading rather than the only
+		// one. That text is normally the child's CLOSING REPORT: finishAtStepCap spends one
 		// tool-less Turn (bar write_file to a spawn-named `output_path`) asking the capped delegate
-		// to sum up, and its reply is the last thing committed (agent.go). This branch is also the fallback for that Turn going wrong — a
-		// faulted or text-less wrap-up arrives here with Faulted cleared, and the pre-cap text (or
-		// stepCapNoTextMarker) answers exactly as it did before the wrap-up existed.
-		text := a.lastVisibleText()
-		if text == "" {
-			text = stepCapNoTextMarker
-		}
+		// to sum up, and its reply is the last thing committed (agent.go). This branch is also the
+		// fallback for that Turn going wrong — a faulted or text-less wrap-up arrives here with
+		// Faulted cleared, and the pre-cap text (or stepCapNoTextMarker) stands under the
+		// closing-report sub-head exactly as it did before the wrap-up existed.
 		result = domain.ToolResult{
 			CallID:  callID,
-			Content: a.capResultHead() + "\n" + text,
+			Content: a.capResultHead() + "\n" + a.cappedResultBody(),
 			IsError: false,
 		}
 	default:
@@ -1410,6 +1430,18 @@ func (a *Agent) finalMessageText() string {
 		return text
 	}
 	return "(sub-agent completed with no final message)"
+}
+
+// cappedResultBody renders the body of a capped delegation's result, under the head line
+// capResultHead writes: the engine fold under engineSummaryHead, a blank line, then the child's
+// closing text under closingReportHead — lastVisibleText, else stepCapNoTextMarker for a child
+// that never spoke. The receiver is the CHILD, as in delegationResult.
+func (a *Agent) cappedResultBody() string {
+	text := a.lastVisibleText()
+	if text == "" {
+		text = stepCapNoTextMarker
+	}
+	return engineSummaryHead + "\n" + a.capFold + "\n\n" + closingReportHead + "\n" + text
 }
 
 // lastVisibleText returns the text of the last assistant message that carried any — the child's

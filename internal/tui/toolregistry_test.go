@@ -181,6 +181,41 @@ func TestGrepBranchRowShowsTheSearchedPath(t *testing.T) {
 	}
 }
 
+// The three head lines the engine writes on a bounded delegation's result, in the spelling that
+// ships since the body became `[engine summary]` + fold + `[delegate's closing report]` + text
+// (internal/agent's stepCapResultFormat, tokenCapResultFormat, timeCapResultFormat): each still
+// reads as its bound through delegationBoundHead — the prefix the recogniser anchors on did not
+// move — and the body sub-heads beneath it never do, because the head is matched at the START.
+func TestDelegationBoundHeadReadsEveryBoundsHead(t *testing.T) {
+	t.Parallel()
+
+	const body = "\n[engine summary]\nThe delegate read a.txt and b.txt; c.txt is unread.\n\n[delegate's closing report]\nI had read two files so far"
+	cases := []struct {
+		name string
+		head string
+		want string
+	}{
+		{"step cap", "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]", "stopped at its step cap"},
+		{"token budget", "[delegate stopped at its token budget (20000000 tokens); partial result — engine summary and closing report follow]", "stopped at its token budget"},
+		{"time limit", "[delegate stopped at its time limit (2h0m); partial result — engine summary and closing report follow]", "stopped at its time limit"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if !delegationBoundHead.MatchString(tc.head) {
+				t.Errorf("delegationBoundHead does not match %q", tc.head)
+			}
+			if got := delegationVerdict(tc.head + body); got != tc.want {
+				t.Errorf("delegationVerdict = %q, want %q", got, tc.want)
+			}
+		})
+	}
+	if got := delegationVerdict("The child said:" + body); got != delegationDoneVerdict {
+		t.Errorf("a body sub-head with no bound head above it reads %q, want %q", got, delegationDoneVerdict)
+	}
+}
+
 // The ADR 0069 routing note — the line a delegation's result gains when its call asked for the
 // Sub-agent server and ran on the session server instead — is APPENDED to the result BODY. Both
 // recognisers that word a delegation's slot read the envelope from a fixed end of that body:
