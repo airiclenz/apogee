@@ -1609,8 +1609,11 @@ const (
 	// stepCapNonReportFormat): the same prefix, a different tail — the row reads the bound off it.
 	envelopeNonReportMarker = "[delegate stopped at its step cap (3 steps); no closing report — the delegate's last reply reads as narration of its next step, not a finding; engine summary follows]"
 	envelopeFaultLine       = "sub-agent faulted before finishing the delegated task: the upstream died"
-	envelopeSteeredOne      = "\n\n(the user sent 1 message to this sub-agent while it ran)"
-	envelopeSteeredTwo      = "\n\n(the user sent 2 messages to this sub-agent while it ran)"
+	// envelopeContinueLine is the body note a retained capped result ends on (internal/agent's
+	// continueLineFormat, plan 2026-09-18 - 00, item 9): the last line of the BODY, above the trailer.
+	envelopeContinueLine = "\n[to continue this delegate: sub_agent with continue: \"survey\"]"
+	envelopeSteeredOne   = "\n\n(the user sent 1 message to this sub-agent while it ran)"
+	envelopeSteeredTwo   = "\n\n(the user sent 2 messages to this sub-agent while it ran)"
 )
 
 // A run collapses to ONE row in the parent's conversation (collapsedSubAgentView), so that row is
@@ -1678,6 +1681,11 @@ func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
 		{
 			name:    "a capped run that was steered says both",
 			content: envelopeCapMarker + "\nI had read two files so far" + envelopeSteeredOne,
+			want:    "stopped at its step cap · steered by 1 message",
+		},
+		{
+			name:    "a retained capped run's continue line leaves both readable",
+			content: envelopeCapMarker + "\nI had read two files so far" + envelopeContinueLine + envelopeSteeredOne,
 			want:    "stopped at its step cap · steered by 1 message",
 		},
 		{

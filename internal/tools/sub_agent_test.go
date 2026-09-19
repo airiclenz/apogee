@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // Compile-time proof sub_agent declares its prompt-carrying arguments (domain.PromptTool).
@@ -99,16 +100,38 @@ func TestSubAgentSchemaAsksForADelegationName(t *testing.T) {
 }
 
 // TestSubAgentDeclaresBothArgumentsAsDelegationPrompts pins WHICH arguments the guard is
-// allowed to look away from. Both of sub_agent's arguments are prose for the child — the task
-// and the display name — so both are declared; a third argument added later is inspected by
-// default until it is deliberately listed here.
+// allowed to look away from. Three of sub_agent's arguments are prose for the child — the task,
+// the display name, and `continue`, which spells a display name back (plan 2026-09-18 - 00, item
+// 9) — so all three are declared; another argument added later is inspected by default until it is
+// deliberately listed here.
 func TestSubAgentDeclaresBothArgumentsAsDelegationPrompts(t *testing.T) {
 	t.Parallel()
 
 	got := domain.PromptArgKeys(NewSubAgent())
 
-	if want := []string{"task", "name"}; !slices.Equal(got, want) {
+	if want := []string{"task", "name", "continue"}; !slices.Equal(got, want) {
 		t.Errorf("PromptArgKeys = %v, want %v", got, want)
+	}
+}
+
+// TestSubAgentContinueNamingAGuardedPathPassesTheGuard is why `continue` is on that list: the
+// capped result tells the model to spell the delegation's name back, and a name may carry a
+// guarded spelling ("audit .git/config"). sub_agent is not read-only, so an undeclared `continue`
+// would trip the write-git-control-plane rule on the very call the engine asked for.
+func TestSubAgentContinueNamingAGuardedPathPassesTheGuard(t *testing.T) {
+	t.Parallel()
+
+	tool := NewSubAgent()
+	call := domain.ToolCall{
+		ID:        "c1",
+		Tool:      SubAgentToolName,
+		Arguments: json.RawMessage(`{"task":"carry on where the previous attempt stopped","continue":"audit .git/config"}`),
+	}
+
+	got := security.DefaultDangerousActionGuard().Inspect(call, tool, nil)
+
+	if got.Tier != security.TierNone {
+		t.Errorf("Inspect(continue: \"audit .git/config\") = %+v, want TierNone — continue is a delegation prompt", got)
 	}
 }
 
@@ -308,7 +331,8 @@ func TestSubAgentArgsParsesTheOptionalOutputPath(t *testing.T) {
 // shipped before seat choice existed (ADR 0069), plus the two schema floors — `minLength` on task,
 // `minimum` on max_steps — and the rewritten max_steps description that landed with them (plan
 // 2026-09-14 - 03, item 4), plus the `tools` roster property (item 5 of the same plan) and the
-// `output_path` property (item 8 — the three items change the plain schema once, together). It is spelled out here rather than derived, because "byte-identical" is
+// `output_path` property (item 8 — the three items change the plain schema once, together), plus
+// the `continue` handle (plan 2026-09-18 - 00, item 9). It is spelled out here rather than derived, because "byte-identical" is
 // the whole claim: the plain variant is prefill on every request of every session that never
 // enables the choice, so a stray comma or a reordered property in the shared template would be paid
 // for by every model that was never offered a seat — and would break the KV-cache prefix of a
@@ -321,6 +345,7 @@ const wantPlainSubAgentSchema = `{
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
     "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."},
     "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."},
+    "continue": {"type": "string", "description": "optional; the name of a delegate that stopped at a bound earlier in this conversation. The sub-agent restarts from that run's engine summary with a fresh step cap; task says what to do next."},
     "output_path": {"type": "string", "description": "optional; the file the sub-agent is expected to write, relative to the workspace root or absolute. If it hits its step cap, write_file to this one path stays available for its final reply."}
   }
 }`

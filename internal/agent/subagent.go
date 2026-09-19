@@ -145,6 +145,50 @@ const (
 // summary is MISSING and why, rather than a body silently missing its first part. %v is the cause.
 const engineFoldUnavailableFormat = "[engine summary unavailable — %v]"
 
+// continueLineFormat is the body note a CAPPED delegation's result carries when the parent retained
+// the child (P6 of plan 2026-09-18 - 00): the one line that tells the parent model the handle it can
+// spell back — `sub_agent` with `continue` naming the delegation — instead of re-spawning the work
+// from nothing. It rides the note slot delegationResult fills after the missing-output, seat and
+// clamp notes and before the user-steered trailer, so the head line stays the first line every
+// reader anchors on. Written only when the child ended its run wearing a name, because an unnamed
+// delegation is not retained (retainedDelegates.retain) and there would be nothing to continue. %q
+// is the post-join display name, exactly as the retention keys it.
+const continueLineFormat = "[to continue this delegate: sub_agent with continue: %q]"
+
+// The two heads of a continued child's opening task (continuationTask): the retained task as the
+// spawning call spelled it, then the engine fold of the capped attempt under
+// previousAttemptHead, then what the parent now asks for under continuationInstructionsHead. They
+// are package constants because the child reads them as the contract for which part of its task is
+// whose — the work, what an earlier run of it found, and what to do next.
+const (
+	previousAttemptHead          = "[previous attempt — engine summary]"
+	continuationInstructionsHead = "[continuation instructions]"
+)
+
+// unknownContinueFormat is the error result a `continue` naming NO retained delegation is refused
+// with: the name as the call spelled it, then the names that ARE retained — the only correction the
+// model can act on — or unknownContinueNone when nothing is. %q is the asked name, %s the list.
+const (
+	unknownContinueFormat = "[no delegate named %q to continue — retained: %s]"
+	unknownContinueNone   = "none"
+)
+
+// continuationTask composes the opening task of a child continued from prior: the retained task,
+// the fold the capped attempt left, and the instructions the continuing call carries in `task`.
+func continuationTask(prior retainedDelegate, instructions string) string {
+	return prior.task + "\n\n" + previousAttemptHead + "\n" + prior.fold + "\n\n" + continuationInstructionsHead + "\n" + instructions
+}
+
+// unknownContinueResult renders the refusal for a `continue` naming no retained delegation, listing
+// the names retained in sorted order (retainedDelegates.names).
+func unknownContinueResult(asked string, retained []string) string {
+	list := unknownContinueNone
+	if len(retained) > 0 {
+		list = strings.Join(retained, ", ")
+	}
+	return fmt.Sprintf(unknownContinueFormat, asked, list)
+}
+
 // capResultHead is the marker line a capped delegation's result opens with, for the bound capHit
 // names — the receiver is the CHILD, as in delegationResult. shape is what closingShapeOf judged
 // the child's closing text to be: the plain head for a report (or for no text at all), the
@@ -805,6 +849,36 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), dispatchDone
 	}
 
+	// A CONTINUATION (P6 of plan 2026-09-18 - 00): the call names a delegation this Agent retained
+	// after the engine stopped it at a bound, and the child built below starts from that run's
+	// engine fold instead of from nothing. The entry is CONSUMED — a fold is continued once, and a
+	// continued child that caps again is retained anew under the same name — and the call's own
+	// `task` becomes the continuation instructions under the retained task and fold
+	// (continuationTask). Name, roster and output path are inherited from the entry wherever the
+	// call leaves them unset, so `continue` with a task is a complete call; and an unknown name is
+	// refused with the names that are retained, resolved BEFORE the seat and roster for the reason
+	// those are resolved before the child: a refusal costs no child. The task retained if this
+	// child caps again stays the ORIGINAL, so a second continuation composes over one fold, never a
+	// fold of a fold.
+	task, retainTask := args.Task, args.Task
+	var inheritedName string
+	if args.Continue != "" {
+		prior, ok := a.retained.take(args.Continue)
+		if !ok {
+			return errorToolResult(call.ID, unknownContinueResult(args.Continue, a.retained.names())), dispatchDone
+		}
+		task, retainTask = continuationTask(prior, args.Task), prior.task
+		if delegationName(args.Name) == "" {
+			args.Name, inheritedName = prior.name, prior.name
+		}
+		if !args.Tools.IsSet() {
+			args.Tools = prior.tools
+		}
+		if args.OutputPath == "" {
+			args.OutputPath = prior.outputPath
+		}
+	}
+
 	// The seat this one delegation runs on (ADR 0069), resolved BEFORE anything is built so an
 	// unparseable ask costs no child: it is refused with a result naming the two spellings, which
 	// is the only place the model can be told it read the menu wrong.
@@ -832,7 +906,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 
-	sub, err := a.newChildAgentOn(seat, call.ID, args.Task, delegationName(args.Name))
+	sub, err := a.newChildAgentOn(seat, call.ID, task, delegationName(args.Name))
 	if err != nil {
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
 	}
@@ -894,13 +968,21 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 		_ = sub.Close()
 	}()
 
-	if err := sub.Submit(domain.UserInput{Text: args.Task}); err != nil {
+	if err := sub.Submit(domain.UserInput{Text: task}); err != nil {
 		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
 	}
 	// The child is addressable for exactly as long as it runs: published under the id the model
 	// chose for this call — the same id the child stamps on every Event it emits, so a Driver
 	// addresses it by the identity it already paints (ADR 0063 D1).
 	a.children.register(call.ID, sub)
+	// A name a continuation INHERITED is re-announced for the new spawn id: the call that spawned
+	// this child named nothing, so every Driver reads its block off the call's `task` — the
+	// continuation instructions — until told the name the continued delegation already wears. It is
+	// the one rename that is not the namer's (ADR 0068), and it reaches the same readers by the same
+	// event, stamped with the child's identity as every rename is.
+	if inheritedName != "" {
+		a.emitSubAgentNamed(a.turns.index, call.ID, inheritedName)
+	}
 	// Named CONCURRENTLY with the run it names, and only once the child is addressable: the name is
 	// worth having while the delegation is still on screen, so waiting for a completion before
 	// starting the work would buy a better label at the price of the thing it labels.
@@ -923,7 +1005,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	// model has been told (ADR 0068); an unnamed one has no handle and is not retained.
 	if res.StepCapped {
 		a.retained.retain(retainedDelegate{
-			task:          args.Task,
+			task:          retainTask,
 			name:          sub.displayName(),
 			tools:         args.Tools,
 			outputPath:    args.OutputPath,
@@ -1092,6 +1174,15 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// ended, and must learn it below the head line, never in front of it.
 	if a.capRequested > 0 {
 		result.Content += "\n" + fmt.Sprintf(stepCapClampNoteFormat, a.capRequested, a.stepCap, a.stepCap)
+	}
+	// And the continue line, LAST of the body notes, for a capped child the parent retains — one
+	// that ended its run wearing a name (runSubAgent joins the namer before rendering this, so the
+	// name read here is the one the retention keys on). A completed child has nothing to continue
+	// from and an unnamed one has no handle, so neither carries it.
+	if res.StepCapped {
+		if name := a.displayName(); name != "" {
+			result.Content += "\n" + fmt.Sprintf(continueLineFormat, name)
+		}
 	}
 
 	// The parent notice, appended once for EVERY outcome that produces a result (ADR 0063 D3) —

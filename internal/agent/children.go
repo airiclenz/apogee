@@ -132,6 +132,19 @@ func (r *retainedDelegates) lookup(name string) (retainedDelegate, bool) {
 	return d, ok
 }
 
+// take returns the capped delegation retained under name and FORGETS it: a continuation consumes
+// the entry it starts from, so the same fold is never continued twice — the continued child is
+// retained anew, under the same name, if it caps again.
+func (r *retainedDelegates) take(name string) (retainedDelegate, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	d, ok := r.byName[name]
+	if ok {
+		delete(r.byName, name)
+	}
+	return d, ok
+}
+
 // names returns the retained names, sorted, so a refusal that lists them reads the same on every
 // run. Empty when nothing is retained.
 func (r *retainedDelegates) names() []string {

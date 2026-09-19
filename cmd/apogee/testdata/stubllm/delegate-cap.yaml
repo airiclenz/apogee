@@ -14,6 +14,27 @@ turns:
         last_message: The user's first request
       repeat: true
       text: Delegated survey
+    # The continuation (plan 2026-09-18 - 00, item 9) — a delegation under its OWN name, so that the
+    # continue line its capped result carries is one no other prompt's result does. The parent
+    # retains a capped child only until its Exchange ends, so the continue call below has to come
+    # from the parent's very next Turn, inside the same Exchange, never from a later prompt.
+    - when:
+        last_message: ^Delegate the survey and continue it
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey to continue"}'
+    # The parent, reading THAT capped result: the continue line names the handle, and the parent
+    # spells it back with a task that says what to do next and nothing else — name, roster and
+    # output path are inherited from what it retained. It sits ABOVE the generic parent wrap-up
+    # below, which would otherwise answer this result with text; the tail is the tool result, so
+    # `last_message:` is what reads the line off it.
+    - when:
+        last_message: 'to continue this delegate: sub_agent with continue: "survey to continue"'
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Carry on from the engine summary: read what is left and finish the survey","continue":"survey to continue"}'
     # The parent's wrap-up once a delegation has reported. Matched BEFORE the child turns below so a
     # parent request can never be answered as a child's.
     - when:
@@ -37,6 +58,18 @@ turns:
       tool_calls:
         - name: sub_agent
           arguments: '{"task":"Read the workspace files one at a time and describe them","name":"survey","max_steps":50}'
+    # The CONTINUED child's opening Turn. Its first user message is the composed task — the retained
+    # task, the engine fold under `[previous attempt — engine summary]`, then the parent's new
+    # instructions under `[continuation instructions]` — which ECHOES the original task, so this
+    # turn sits ABOVE the child's unanchored task-keyed turn below to win the request first. It
+    # answers with a completed report: a continuation runs on a fresh cap, and this one needs no
+    # further tool call to finish.
+    - when:
+        last_message: \[continuation instructions\]
+      repeat: true
+      text: Survey finished on the continuation — a.txt says hello; nothing else was left to read.
+      token_delay: 1ms
+      chunk_runes: 6
     # The output_path variant (plan 2026-09-14 - 03, item 8) — the same delegation, naming the file
     # it is expected to write. A capped child that named one keeps write_file for exactly that path
     # on its wrap-up Turn.

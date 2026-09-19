@@ -43,6 +43,11 @@ const (
 	capPrompt       = "Delegate the survey to a sub-agent."
 	raisedCapPrompt = "Delegate it again with a raised cap in the call."
 	outputCapPrompt = "Delegate the survey with an output file."
+	// continuePrompt delegates the survey under a name of its own and has the parent continue it
+	// from the capped result, inside the same Exchange (plan 2026-09-18 - 00, item 9): the fixture
+	// answers that result by spelling `continue: "survey to continue"` back with a task and nothing
+	// else.
+	continuePrompt = "Delegate the survey and continue it."
 	// childTask is the delegate's own instruction, and it is how a child's requests are told from
 	// the parent's: every message of the child's conversation carries it and none of the parent's
 	// does. The engine fold's request carries it too — its user message is the child's rendered
@@ -68,6 +73,14 @@ const (
 	// asking it to sum up. It is deliberately not childFinalWords: a frame carrying one and not the
 	// other is proof of which of the two runs — capped or unbounded — produced it.
 	childReportWords = "Stopped short — I read a.txt and listed the workspace"
+	// The continuation's three engine lines (internal/agent's continueLineFormat, previousAttemptHead
+	// and continuationInstructionsHead) and the CONTINUED child's own closing words — its report on
+	// the fresh cap, distinct from every capped wording above.
+	continueLine              = `[to continue this delegate: sub_agent with continue: "survey to continue"]`
+	previousAttemptHead       = "[previous attempt — engine summary]"
+	continuationInstructions  = "[continuation instructions]"
+	childContinuedWords       = "Survey finished on the continuation"
+	childContinuedInstruction = "Carry on from the engine summary"
 )
 
 // ----------------------------------------------------------------------------
@@ -319,6 +332,69 @@ func TestE2EDelegationStepCap(t *testing.T) {
 			t.Errorf("the second delegation made %d child requests; max_steps: 50 must not raise a "+
 				"cap of 3, which allows 3 plus one wrap-up", got-before)
 		}
+
+		if err := sess.Quit(); err != nil {
+			t.Fatalf("the run returned %v; want a clean quit", err)
+		}
+	})
+
+	// The continuation (plan 2026-09-18 - 00, item 9): the capped result tells the parent the handle,
+	// the parent spells it back through `continue` with a task and nothing else, and a FRESH child
+	// opens on the retained task, the engine fold and those instructions — wearing the continued
+	// delegation's name, on a fresh cap — and runs to a completed result.
+	t.Run("a capped delegation is continued from its fold", func(t *testing.T) {
+		stub := stubllm.New(t, loadScript(t, "delegate-cap"))
+		drv := tuitest.NewDriver(t, e2eSize)
+		sess := launchTUIConfigured(t, drv, stub, "delegate-max-steps: 3\n")
+
+		submit(drv, continuePrompt)
+		drv.WaitText("The delegate handed back what it had.")
+		drv.WaitQuiet(settled)
+
+		// The capped result the parent read carries the handle as its last body line — the line
+		// the fixture's continue turn is keyed on, so reaching the parent's wrap-up at all proves it
+		// was read; this pins its exact spelling.
+		if !anyRequestMentions(stub, continueLine) {
+			t.Errorf("no request the parent made carries the continue line %q", continueLine)
+		}
+
+		// The continued child opened on the composed task — the retained task, the fold under its
+		// head, the parent's instructions under theirs — and on nothing else: one request, no fold
+		// of its own, because it finished on its first Turn.
+		if got := childRequests(stub, continuationInstructions); got != 1 {
+			t.Errorf("the continued child made %d requests; it finishes on its first Turn", got)
+		}
+		opening := lastChildRequest(stub, continuationInstructions)
+		for _, want := range []string{childTask, previousAttemptHead, "Engine fold: the delegate read a.txt", childContinuedInstruction} {
+			if !strings.Contains(opening.Messages[len(opening.Messages)-1].Content, want) {
+				t.Errorf("the continued child's opening message lacks %q:\n%s", want, opening.Messages[len(opening.Messages)-1].Content)
+			}
+		}
+		if got := engineFoldRequests(stub, childTask); got != 1 {
+			t.Errorf("the engine folded %d times across both runs; only the capped run is folded", got)
+		}
+
+		// The conversation: a second run row, wearing the inherited name rather than the continue
+		// call's task, and finished — not stopped short.
+		collapsed := drv.Frame()
+		if got := rowsContaining(collapsed, "survey to continue ✓"); got != 2 {
+			t.Fatalf("the conversation carries %d run rows named survey, want the capped run's and the continued run's:\n%s", got, collapsed)
+		}
+		last := lastRowContaining(t, collapsed, "survey to continue ✓")
+		if !strings.Contains(last, "done") || strings.Contains(last, stepCapSlot) {
+			t.Errorf("the continued run's row reads %q, want it finished, not stopped short", last)
+		}
+		if strings.Contains(flatten(collapsed.String()), flatten(childContinuedInstruction)) {
+			t.Errorf("the continued run wears the continue call's task instead of the inherited name:\n%s", collapsed)
+		}
+
+		openLastRun(drv)
+		flat := flatten(scrollTranscript(drv))
+		if !strings.Contains(flat, flatten(childContinuedWords)) {
+			t.Errorf("the continued run's view does not carry its completed report:\n%s", flat)
+		}
+		drv.Press(tuitest.Esc)
+		drv.WaitQuiet(settled)
 
 		if err := sess.Quit(); err != nil {
 			t.Fatalf("the run returned %v; want a clean quit", err)
@@ -618,6 +694,35 @@ func isEngineFold(req stubllm.Request) bool {
 		}
 	}
 	return false
+}
+
+// anyRequestMentions reports whether any message of any request the stub answered carries text.
+func anyRequestMentions(stub *stubllm.Server, text string) bool {
+	for _, req := range stub.Requests() {
+		for _, msg := range req.Messages {
+			if strings.Contains(msg.Content, text) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// lastRowContaining is the LAST row of f holding want, failing the test with the whole frame when
+// no row does — the second run's row, where a conversation carries two runs of one name.
+func lastRowContaining(t *testing.T, f tuitest.Frame, want string) string {
+	t.Helper()
+
+	last := ""
+	for _, row := range f.Rows() {
+		if strings.Contains(row, want) {
+			last = row
+		}
+	}
+	if last == "" {
+		t.Fatalf("no row carries %q:\n%s", want, f)
+	}
+	return last
 }
 
 // engineFoldRequests counts the engine-fold requests made over a child's conversation — the ones

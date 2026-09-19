@@ -210,7 +210,9 @@ type SubAgentPhaseEvent struct {
 // SubAgentNamedEvent reports that a delegation the model left unnamed has just been GIVEN a name by
 // the out-of-band naming call (ADR 0068). It is emitted exactly once per generated name, and never
 // for a delegation whose sub_agent call named itself: a name the model gave always wins, so there
-// is nothing to announce.
+// is nothing to announce. The one other sender is a CONTINUATION (a sub_agent call with `continue`
+// and no `name`): the fresh child inherits the name of the capped delegation it picks up, and that
+// name is announced once for the new spawn so every reader wears it from the start.
 //
 // Its EventBase is the CHILD run's identity, exactly as SubAgentPhaseEvent's is: Depth is the
 // child's nesting level and CallID the id of the sub_agent call that spawned it — the same stamp

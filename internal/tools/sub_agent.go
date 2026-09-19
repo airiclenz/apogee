@@ -57,6 +57,12 @@ const (
 // Turn still keeps one write_file, aimed wherever the child's Mode admits (plan 2026-09-18 - 00,
 // item 5); the tool description tells the model when to name the path, because the engine reads
 // no path out of the task text.
+//
+// `continue` names a delegation this conversation retained after the engine stopped it at a bound
+// (plan 2026-09-18 - 00, P6): the sub-agent restarts from that run's engine fold on a fresh cap,
+// and `task` says what to do next. It sits before `output_path` and after `tools` — the properties
+// the continuation inherits when the call leaves them unset — so the model reads the handle beside
+// the arguments it stands in for.
 const subAgentSchemaTemplate = `{
   "type": "object",
   "required": ["task"],
@@ -65,6 +71,7 @@ const subAgentSchemaTemplate = `{
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
     "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."},
     "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."},
+    "continue": {"type": "string", "description": "optional; the name of a delegate that stopped at a bound earlier in this conversation. The sub-agent restarts from that run's engine summary with a fresh step cap; task says what to do next."},
     "output_path": {"type": "string", "description": "optional; the file the sub-agent is expected to write, relative to the workspace root or absolute. If it hits its step cap, write_file to this one path stays available for its final reply."}%s
   }
 }`
@@ -140,12 +147,21 @@ var subAgentSpec = toolSpec{
 // 2026-09-14 - 03, item 8). Empty leaves the wrap-up's one write_file unnarrowed (plan 2026-09-18
 // - 00, item 5). Never privilege: the write still runs through the same fence and Mode the child's
 // every other write does.
+//
+// Continue is the display name of a delegation the engine stopped at a bound earlier in the same
+// Exchange — the handle the capped result itself told the model to spell back (plan 2026-09-18 -
+// 00, P6). The orchestrator spawns a FRESH child whose opening context is the retained task plus
+// that run's engine fold, with Task as the continuation instructions, and inherits Name, Tools and
+// OutputPath from the retained entry wherever this call leaves them unset. A name nothing is
+// retained under is refused with a result listing the retained names. Empty is an ordinary spawn.
+// Like Name it is prose for the child, never privilege, and never a key the engine serialises.
 type SubAgentArgs struct {
 	Task       string         `json:"task"`
 	Name       string         `json:"name"`
 	MaxSteps   int            `json:"max_steps"`
 	RunOn      string         `json:"run_on"`
 	Tools      SubAgentRoster `json:"tools"`
+	Continue   string         `json:"continue"`
 	OutputPath string         `json:"output_path"`
 }
 
@@ -256,14 +272,17 @@ func NewSubAgentWith(opts SubAgentOptions) *SubAgent {
 // that published no `run_on` is a value the model could not have been told about.
 func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
 
-// PromptArgKeys declares `task` and `name` as delegation prompts (domain.PromptTool): both
-// carry prose written FOR the nested agent, never an action this host performs. The
+// PromptArgKeys declares `task`, `name` and `continue` as delegation prompts (domain.PromptTool):
+// all three carry prose written FOR the nested agent, never an action this host performs. The
 // dangerous-action guard therefore matches no rule against their text — a task that merely
 // NAMES a guarded path ("report on the readable git surfaces — .git/config") is a
 // description, and every tool call the child makes off the back of it is inspected at its
-// own action site, one level down. `max_steps`, `run_on` and `tools` are NOT declared: none of
-// them carries prose, so none needs an exemption from a guard that matches rules against text.
-func (t *SubAgent) PromptArgKeys() []string { return []string{"task", "name"} }
+// own action site, one level down. `continue` is on the list because it spells a NAME back — the
+// same prose that rode `name`, and a name the capped result itself told the model to repeat, so a
+// guard tripping on it ("audit .git/config") would refuse the very call the engine asked for.
+// `max_steps`, `run_on` and `tools` are NOT declared: none of them carries prose, so none needs an
+// exemption from a guard that matches rules against text.
+func (t *SubAgent) PromptArgKeys() []string { return []string{"task", "name", "continue"} }
 
 // Execute is never reached on the real path: dispatch recognises SubAgentToolName as the
 // recursion point and drives a nested Agent instead. Reaching it means the recursion point

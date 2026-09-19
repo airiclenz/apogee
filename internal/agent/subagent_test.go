@@ -3884,3 +3884,217 @@ func TestFanOut_CappedChildrenAreRetainedFromThePool(t *testing.T) {
 		}
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Continuing a capped delegation (plan 2026-09-18 - 00, item 9 / P6b)
+// ----------------------------------------------------------------------------
+//
+// `sub_agent` with `continue: "<name>"` spawns a FRESH child from the retained entry: its opening
+// task is the retained task, the engine fold of the capped attempt and the call's own task as the
+// continuation instructions; name, roster and output path are inherited where the call leaves them
+// unset; the entry is consumed; and the capped result itself carries the line that tells the
+// parent model the handle to spell back.
+
+// continueInstructions is what the parent asks the continued child to do next.
+const continueInstructions = "read the remaining file and finish the survey"
+
+// continueArgs is the sub_agent payload of a continuation that sets nothing but the handle and the
+// instructions — the shape that inherits everything else from the retained entry.
+func continueArgs(name, instructions string, maxSteps int) string {
+	b, _ := json.Marshal(tools.SubAgentArgs{Task: instructions, Continue: name, MaxSteps: maxSteps})
+	return string(b)
+}
+
+// subAgentResultFor returns the ToolResultEvent answering the sub_agent call callID, at any depth.
+func subAgentResultFor(events []domain.Event, callID string) (domain.ToolResult, bool) {
+	for _, e := range events {
+		if ev, ok := e.(domain.ToolResultEvent); ok && ev.Result.CallID == callID {
+			return ev.Result, true
+		}
+	}
+	return domain.ToolResult{}, false
+}
+
+// namingsOf returns every SubAgentNamedEvent on the sink, in emission order.
+func namingsOf(events []domain.Event) []domain.SubAgentNamedEvent {
+	var named []domain.SubAgentNamedEvent
+	for _, e := range events {
+		if ne, ok := e.(domain.SubAgentNamedEvent); ok {
+			named = append(named, ne)
+		}
+	}
+	return named
+}
+
+// requestToolNames returns the names of the tools req offered, in menu order.
+func requestToolNames(req provider.Request) []string {
+	names := make([]string, 0, len(req.Tools))
+	for _, tool := range req.Tools {
+		names = append(names, tool.Name)
+	}
+	return names
+}
+
+// TestSubAgent_ContinueSpawnsAChildFromTheFoldWithAFreshCap drives cap → continue → completion:
+// the continued child's first request opens on the retained task, the fold and the instructions;
+// the call that named no `name` inherits the retained one and announces it for the new spawn id;
+// the roster inherited from the entry narrows the child's menu; the entry is consumed; and the
+// child, on a fresh cap, runs to completion where the first attempt could not.
+func TestSubAgent_ContinueSpawnsAChildFromTheFoldWithAFreshCap(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName)
+	scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, continueInstructions, 0)))
+	scripts = append(scripts, cappedChildTurns(2)...)
+	scripts = append(scripts, contentScript("the survey is now complete"), contentScript("parent done"))
+	responder := &requestLogResponder{scripts: scripts}
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), responder)
+
+	// The capped result told the parent the handle, as the last body note.
+	capped, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the capped delegation c1")
+	}
+	wantCapped := cappedResult(fmt.Sprintf(stepCapResultFormat, 3), childFoldSummary, childClosingReport) +
+		"\n" + fmt.Sprintf(continueLineFormat, retainedSurveyName)
+	if capped.Content != wantCapped {
+		t.Errorf("capped result =\n%s\nwant\n%s", capped.Content, wantCapped)
+	}
+	// The continued child's opening request: call 6 (0: spawn, 1–3: turns, 4: fold, 5: wrap-up,
+	// 6: the continue call, 7: the child's first Turn).
+	opening := responder.requests[7]
+	wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + childFoldSummary + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+	if got := lastUserText(opening); got != wantTask {
+		t.Errorf("the continued child opened on\n%s\nwant\n%s", got, wantTask)
+	}
+	if got := requestToolNames(opening); !slices.Equal(got, []string{"read_thing"}) {
+		t.Errorf("the continued child's menu = %v, want the inherited roster [read_thing]", got)
+	}
+	if named := namingsOf(sink.events); len(named) != 1 || named[0].CallID != "c2" || named[0].Name != retainedSurveyName || named[0].Depth != 1 {
+		t.Errorf("SubAgentNamedEvents = %+v, want one announcing %q for the new spawn c2 at depth 1", named, retainedSurveyName)
+	}
+	completed, ok := subAgentResultFor(sink.events, "c2")
+	if !ok || completed.IsError || completed.Content != "the survey is now complete" {
+		t.Errorf("the continued child's result = %+v, want its completed report on a fresh cap", completed)
+	}
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v after the continuation completed, want none — the entry is consumed", names)
+	}
+}
+
+// TestSubAgent_ContinueOfAnUnknownNameIsRefused pins the refusal, exact text: the asked name and
+// the names retained — or "none" — because the list is the only correction the model can act on.
+func TestSubAgent_ContinueOfAnUnknownNameIsRefused(t *testing.T) {
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cases := []struct {
+		name    string
+		scripts [][]provider.Delta
+		want    string
+	}{
+		{
+			name: "one retained",
+			scripts: append(cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName),
+				toolCallScript("c2", tools.SubAgentToolName, continueArgs("Nope", continueInstructions, 0)),
+				contentScript("parent done")),
+			want: `[no delegate named "Nope" to continue — retained: Repo Survey]`,
+		},
+		{
+			name: "nothing retained",
+			scripts: [][]provider.Delta{
+				toolCallScript("c2", tools.SubAgentToolName, continueArgs("Nope", continueInstructions, 0)),
+				contentScript("parent done"),
+			},
+			want: `[no delegate named "Nope" to continue — retained: none]`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+
+			runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: tc.scripts})
+
+			got, ok := subAgentResultFor(sink.events, "c2")
+			if !ok || !got.IsError || got.Content != tc.want {
+				t.Errorf("continue result = %+v, want the error result %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSubAgent_AContinuedChildThatCapsAgainIsRetainedAnew pins the second cap: the continued child
+// is retained under the inherited name, with the ORIGINAL task (never the composed one, so a third
+// attempt composes over one fold), the inherited roster and output path, and the new spawn id; its
+// result carries the clamp note — max_steps is clamped exactly as on a fresh spawn — and then the
+// continue line, in that order, so the notes stay ahead of the handle.
+func TestSubAgent_AContinuedChildThatCapsAgainIsRetainedAnew(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName)
+	scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, continueInstructions, 50)))
+	scripts = append(scripts, cappedChildTurns(3)...)
+	scripts = append(scripts, foldScript(700, 40), contentScript(childClosingReport), contentScript("parent done"))
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+
+	got, ok := a.retained.lookup(retainedSurveyName)
+	if !ok {
+		t.Fatalf("the continued child is not retained under %q; retained names = %v", retainedSurveyName, a.retained.names())
+	}
+	want := retainedDelegate{
+		task:          retainedSurveyTask,
+		name:          retainedSurveyName,
+		tools:         tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath:    "notes/survey.md",
+		fold:          childFoldSummary,
+		closingReport: childClosingReport,
+		bound:         boundSteps,
+		spawnCallID:   "c2",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("retained delegate = %+v, want %+v", got, want)
+	}
+	second, ok := subAgentResultFor(sink.events, "c2")
+	if !ok {
+		t.Fatal("no result answered the continued delegation c2")
+	}
+	wantSecond := cappedResult(fmt.Sprintf(stepCapResultFormat, 3), childFoldSummary, childClosingReport) +
+		"\n" + fmt.Sprintf(stepCapClampNoteFormat, 50, 3, 3) +
+		"\n" + fmt.Sprintf(continueLineFormat, retainedSurveyName)
+	if second.Content != wantSecond {
+		t.Errorf("the continued child's capped result =\n%s\nwant\n%s", second.Content, wantSecond)
+	}
+}
+
+// TestSubAgent_CompletedResultCarriesNoContinueLine is the floor: a named delegation that ran to
+// completion is not retained, so its result offers no handle.
+func TestSubAgent_CompletedResultCarriesNoContinueLine(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName)),
+		contentScript("the survey is complete"),
+		contentScript("parent done"),
+	}
+
+	runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+
+	got, ok := subAgentResultFor(sink.events, "c1")
+	if !ok || got.Content != "the survey is complete" {
+		t.Errorf("completed result = %+v, want the child's report alone, no continue line", got)
+	}
+}
+
+// TestSplitUserSteeredTrailer_AfterTheContinueLine pins that the continue line, the last body note,
+// leaves the trailer recognisable: the split still lands between the two.
+func TestSplitUserSteeredTrailer_AfterTheContinueLine(t *testing.T) {
+	t.Parallel()
+	bodyText := "report\n" + fmt.Sprintf(continueLineFormat, retainedSurveyName)
+	content := bodyText + userSteeredTrailerSeparator + userSteeredTrailerSingular
+
+	body, trailer := splitUserSteeredTrailer(content)
+
+	if body != bodyText || trailer != userSteeredTrailerSeparator+userSteeredTrailerSingular {
+		t.Errorf("splitUserSteeredTrailer = %q, %q; want %q and the trailer", body, trailer, bodyText)
+	}
+}

@@ -683,7 +683,9 @@ func (a *Agent) emitSubAgentPhase(
 	})
 }
 
-// emitSubAgentNamed surfaces the ONE rename a generated delegation name produces (ADR 0068). It is
+// emitSubAgentNamed surfaces the ONE rename a generated delegation name produces (ADR 0068) — and
+// the one other rename the engine makes, the name a CONTINUED delegation inherits from the capped
+// run it picks up (runSubAgent, plan 2026-09-18 - 00, P6), announced for the new spawn id. It is
 // stamped exactly as emitSubAgentPhase stamps a lifecycle boundary — the CHILD's identity, one
 // level deeper than this Agent and under the spawning call's id — because a reader applies the
 // rename to the run those events opened, which under a fan-out is one member of several. Turn is
