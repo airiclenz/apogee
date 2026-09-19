@@ -48,7 +48,7 @@
 
 **Out of scope:** `apogee-2un` Stage B; `apogee-37s`; a URL guard for any webhook class; lowering `defaultDelegateMaxTokens`; a per-call absolute context notice; `apogee-rw6`'s other rows; every bench-gated, other-OS or grill-gated bead.
 
-## 1. demorig: verify the ffmpeg/ffprobe/gifsicle adapters on this host (apogee-bxi)
+## 1. demorig: verify the ffmpeg/ffprobe/gifsicle adapters on this host (apogee-bxi) — ✅ DONE (2026-09-19)
 
 **What.** Verification; no code unless it fails. `sudo apt-get install -y gifsicle`; run the gated `TestFfmpegAdapters` (`cmd/demorig/align_test.go`); then one real render with a synthesised take: `S=$(mktemp -d); ffmpeg -v error -f lavfi -i color=c=black:s=2500x1360:r=24:d=3.4 -f lavfi -i testsrc=s=2500x1360:r=24:d=86.6 -filter_complex "[0][1]concat=n=2:v=1:a=0" -pix_fmt yuv420p $S/take.mp4 && go run ./cmd/demorig render graphics/demo/storyboards/hero.yaml $S/take.mp4 cmd/demorig/testdata/session-hero.json -o $S/hero.gif`. Expect the summary line `<path>  <size>  <secs>s`, a 1250 px-wide GIF, no `warning:` on stderr, `optimizeGIF` taken. Record tool versions in a dated `NOTES` line here. On failure fix the adapter (`align.go`/`filtergraph.go`/`render.go`, golden `cmd/demorig/testdata/filtergraph-hero.txt`).
 **Files:** cmd/demorig/align.go, cmd/demorig/filtergraph.go, cmd/demorig/render.go (only on failure); this plan's NOTES line.
@@ -56,6 +56,9 @@
 **Tests.** `TestFfmpegAdapters` un-skipped; `TestRenderCommand_DryRun` green.
 **Acceptance.** `which gifsicle && go test ./cmd/demorig/ -run 'TestFfmpegAdapters|TestRenderCommand' -v 2>&1 | grep -q '^--- PASS: TestFfmpegAdapters'`; the render above exits 0 and `ffprobe -v error -show_entries stream=width -of csv=p=0 $S/hero.gif` prints `1250`.
 **Commit:** `test(demorig): verify the ffmpeg, ffprobe and gifsicle adapters against the live tools`
+NOTES (2026-09-19): verified on this host (Linux 6.18.50 rpi-2712, arm64) with ffmpeg 7.1.5-0+deb13u1+rpt2, ffprobe 7.1.5-0+deb13u1+rpt2, gifsicle 1.96 (Debian trixie 1.96-1); `TestFfmpegAdapters` ran un-skipped and passed (0.30s), `TestRenderCommand_DryRun` passed; the synthesised-take render exited 0 with summary `<path>  66M  72.71s`, a 1250 px-wide GIF (`ffprobe` width `1250`), empty stderr (no `warning:`), and `optimizeGIF` was taken (gifsicle invoked as `-O3 --lossy=80 -o <out>.opt <out>`, proven through a logging wrapper ahead on PATH). No adapter change needed.
+NOTES (2026-09-19): deviation — `sudo apt-get install -y gifsicle` could not run (this session has no passwordless sudo); gifsicle was instead fetched with `apt-get download gifsicle` (the same trixie 1.96-1 package apt would install), unpacked with `dpkg -x` into the session scratchpad and prepended to PATH for the verification only. gifsicle is therefore still absent from the system PATH; run `sudo apt-get install -y gifsicle` once to make the optimize pass happen on ordinary renders.
+NOTES (2026-09-19): the 66M output is the `testsrc` pattern's high-entropy noise, not an adapter defect — a real terminal take compresses far smaller; the encode took ~4m50s on this host.
 
 ## 2. Retry a capped no-text reply once at a raised cap (apogee-tfp)
 
