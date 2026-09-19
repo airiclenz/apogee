@@ -499,8 +499,9 @@ func (m Model) browserWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // deleteSession queues the removal of id and the re-list that follows it, so the browser refreshes
 // without the deleted row. It goes through the record-write queue (model.go) rather than straight
 // onto a Cmd goroutine: a delete racing the per-Turn save can otherwise remove a record the
-// already-dispatched save then re-creates. The delete is best-effort — a failure just leaves the
-// row on the re-list.
+// already-dispatched save then re-creates. A failure leaves the row on the re-list and is noted
+// with the host's words (foldRecordWrite) — a record open in another apogee is the one the host
+// refuses to remove.
 func (m *Model) deleteSession(id string) tea.Cmd {
 	return m.scheduleWrite(recordWrite{kind: writeDelete, id: id, relist: true})
 }
@@ -539,9 +540,11 @@ func (m Model) loadSession(id string) tea.Cmd {
 }
 
 // resumeLoaded restores a loaded record into the live engine and repaints its scrollback. On a
-// restore error the view AND the host's active session are left untouched (the locked "a fresh view
-// must never lie about the engine" rule) and the failure is noted — because Load did not activate,
-// the outgoing conversation keeps saving to its own file. Only on success does it QUEUE the
+// load or restore error the view AND the host's active session are left untouched (the locked "a
+// fresh view must never lie about the engine" rule) and the failure is noted — because Load did not
+// activate, the outgoing conversation keeps saving to its own file. A record open in another apogee
+// is refused by the host as a load error, so its refusal — the host's own line, naming the fork as
+// the way to work alongside — is what the load note carries. Only on success does it QUEUE the
 // activation of the loaded session (redirecting future saves, once everything already queued against
 // the outgoing record has landed) and reset the view like startNewSession — reseed the start-up box, repaint the stored scrollback (a decode failure or a
 // legacy empty blob degrades to an honest no-scrollback note), relight the gauge from the stored

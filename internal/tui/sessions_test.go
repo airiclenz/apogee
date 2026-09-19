@@ -452,6 +452,105 @@ func TestSessionBrowserResumeErrorLeavesActiveSessionUntouched(t *testing.T) {
 	}
 }
 
+// A /sessions resume of a record another apogee has open is refused at the host's Load, and the
+// browser says so with the host's own line — the ratified refusal, naming the fork as the way to
+// work alongside — while the view and the active session stay exactly as they were (apogee-3b3).
+// The refusal crosses the seam as a plain error: the renderer prints it, it never spells it.
+func TestSessionBrowserResumeOfAHeldSessionNotesAndStays(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	host.activeID = "current"
+	storeMeta(host, "sess-1", "held elsewhere", "/ws/a", time.Now(), 0, nil)
+	host.loadErr = &session.HeldError{ID: "sess-1", PID: 4242}
+	eng := &fakeEngine{}
+	m := newBrowserModel(t, eng, host, "/ws/a")
+	seedConversation(&m)
+	before := len(m.transcript.entries)
+
+	m = openBrowser(t, m)
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = foldResume(t, m, cmd)
+
+	want := "could not load session: session sess-1 is open in another apogee (pid 4242) — fork it to work alongside"
+	if !hasEntry(m, entryNote, want) {
+		t.Errorf("a refused resume did not note the host's line; want %q in %v", want, noteTexts(m))
+	}
+	if len(eng.restores()) != 0 {
+		t.Error("a refused load still reached RestoreSession")
+	}
+	if !hasEntry(m, entryUser, seededUserText) || len(m.transcript.entries) != before+1 {
+		t.Errorf("the refused resume disturbed the view: entries = %d, want %d (+1 note only)", len(m.transcript.entries), before+1)
+	}
+	if host.ActiveID() != "current" {
+		t.Errorf("active session after a refused resume = %q, want the untouched %q", host.ActiveID(), "current")
+	}
+}
+
+// A /sessions delete of a record another apogee has open is refused by the host and noted with the
+// same line; the row stays on the re-list and the browser stays open over it (apogee-3b3).
+func TestSessionBrowserDeleteOfAHeldSessionNotesAndStays(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	now := time.Now()
+	storeMeta(host, "sess-1", "held elsewhere", "/ws/a", now, 0, nil)
+	storeMeta(host, "sess-2", "another one", "/ws/a", now.Add(-time.Hour), 0, nil)
+	host.deleteErr = &session.HeldError{ID: "sess-1", PID: 4242}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m) // sess-1 is newest, so it is selected first
+
+	m = step(t, m, keyCtrl('d'))
+	m, cmd := stepCmd(t, m, keyRune('y'))
+	if cmd == nil {
+		t.Fatal("y dispatched no record write")
+	}
+	m = runWrites(t, m, cmd) // the delete, then the re-list it carries
+
+	want := "could not delete session: session sess-1 is open in another apogee (pid 4242) — fork it to work alongside"
+	if !hasEntry(m, entryNote, want) {
+		t.Errorf("a refused delete did not note the host's line; want %q in %v", want, noteTexts(m))
+	}
+	if _, kept := host.stored["sess-1"]; !kept {
+		t.Error("the refused delete removed the record anyway")
+	}
+	if !m.sessionBrowser.open {
+		t.Error("the browser closed over a refused delete; want it open with the row still listed")
+	}
+	if rows := m.sessionBrowserView().metas; len(rows) != 2 || rows[0].ID != "sess-1" {
+		t.Errorf("rows after the refused delete = %v, want sess-1 still first of two", rows)
+	}
+}
+
+// ⏎ on the current session's own row reloads it without a refusal: the hold guards against OTHER
+// instances, so the host neither probes nor refuses an id it holds itself — the browser path notes
+// the resume and nothing about another apogee.
+func TestSessionBrowserResumeOfTheCurrentSessionReloads(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	host.activeID = "sess-1"
+	storeMeta(host, "sess-1", "the current one", "/ws/a", time.Now(), 0, nil)
+	eng := &fakeEngine{}
+	m := newBrowserModel(t, eng, host, "/ws/a")
+
+	m = openBrowser(t, m)
+	m, cmd := stepCmd(t, m, keyEnter())
+	m = foldResume(t, m, cmd)
+
+	if !hasEntry(m, entryNote, "") {
+		t.Fatal("the self-resume folded no note at all")
+	}
+	for _, text := range noteTexts(m) {
+		if strings.Contains(text, "could not load session") || strings.Contains(text, "another apogee") {
+			t.Errorf("the self-resume was refused: %q", text)
+		}
+	}
+	if len(eng.restores()) != 1 {
+		t.Errorf("RestoreSession calls = %d, want 1 for the reload", len(eng.restores()))
+	}
+	if host.ActiveID() != "sess-1" {
+		t.Errorf("active session after the self-resume = %q, want sess-1", host.ActiveID())
+	}
+}
+
 // d arms an inline confirm and y deletes; deleting the ACTIVE session rotates the host and notes
 // that the live conversation lives on.
 func TestSessionBrowserDeleteActiveRotates(t *testing.T) {

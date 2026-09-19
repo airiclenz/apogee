@@ -1261,3 +1261,132 @@ func TestResolveContinueRefusesRatherThanSkips(t *testing.T) {
 		t.Fatalf("resolveContinue = (%q, %v); want the newest record's HeldError, not a skip to %q", rec.Meta.ID, err, older)
 	}
 }
+
+// The /sessions doors: Load takes the record's hold and PARKS it for the Activate a successful
+// restore queues, which adopts it rather than acquiring afresh; a parked hold nobody adopts is
+// released by Rotate, Close, Delete of that id or the next Load; a fork's child reaches Activate
+// with no Load and is held afresh; and the hold guards only against OTHER instances — a Load of the
+// active id, or of the id already parked, neither probes nor parks, and Activate of it keeps the
+// live hold. A record another apogee holds is refused as Load's error, with the ratified line.
+func TestSessionHostLoadParksTheHoldForActivate(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "sessions")
+	store := session.NewStore(dir)
+	first := saveAt(t, store, "/ws", time.Date(2026, 9, 19, 12, 0, 0, 0, time.UTC), "first")
+	third := saveAt(t, store, "/ws", time.Date(2026, 9, 19, 13, 0, 0, 0, time.UTC), "third")
+	host := newSessionHost(store, "/ws", "m", nil, "", nil, "", nil)
+	if err := host.Save(apogee.Session{}, nil, "second", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	second := host.ActiveID()
+
+	t.Run("Load parks and Activate adopts", func(t *testing.T) {
+		rec, err := host.Load(first)
+		if err != nil {
+			t.Fatalf("Load(first): %v", err)
+		}
+		assertHeld(t, store, first, true)
+		assertHeld(t, store, second, true) // parked beside the live hold, not in place of it
+		if host.ActiveID() != second {
+			t.Fatalf("Load moved the active session to %q", host.ActiveID())
+		}
+		host.Activate(rec.Meta)
+		assertHeld(t, store, first, true)
+		assertHeld(t, store, second, false)
+		host.mu.Lock()
+		adopted := host.heldID == first && host.pendingID == "" && host.pendingRelease == nil
+		host.mu.Unlock()
+		if !adopted {
+			t.Error("Activate did not adopt the parked hold as the live one")
+		}
+	})
+
+	t.Run("Rotate, the next Load and Close release an unadopted hold", func(t *testing.T) {
+		if _, err := host.Load(third); err != nil {
+			t.Fatalf("Load(third): %v", err)
+		}
+		assertHeld(t, store, third, true)
+		host.Rotate()
+		assertHeld(t, store, third, false)
+		assertHeld(t, store, first, false)
+
+		if _, err := host.Load(third); err != nil {
+			t.Fatalf("Load(third) again: %v", err)
+		}
+		if _, err := host.Load(first); err != nil {
+			t.Fatalf("Load(first): %v", err)
+		}
+		assertHeld(t, store, third, false) // the next Load let the earlier parked hold go
+		assertHeld(t, store, first, true)
+
+		host.Close()
+		assertHeld(t, store, first, false)
+	})
+
+	t.Run("a fork's child is held afresh at Activate", func(t *testing.T) {
+		if err := host.Save(apogee.Session{}, nil, "parent", 1, 0, session.Usage{}, session.Usage{}, nil); err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		parent := host.ActiveID()
+		child, err := host.Fork(session.Meta{}, apogee.Session{}, nil, "child")
+		if err != nil {
+			t.Fatalf("Fork: %v", err)
+		}
+		host.Activate(child) // no Load preceded it: the resume fold took the fork's own record
+		assertHeld(t, store, child.ID, true)
+		assertHeld(t, store, parent, false)
+	})
+
+	t.Run("self-resume neither probes nor parks", func(t *testing.T) {
+		active := host.ActiveID()
+		rec, err := host.Load(active)
+		if err != nil {
+			t.Fatalf("Load of the active id was refused: %v", err)
+		}
+		host.mu.Lock()
+		parked := host.pendingID
+		host.mu.Unlock()
+		if parked != "" {
+			t.Errorf("Load of the active id parked a hold on %q", parked)
+		}
+		host.Activate(rec.Meta)
+		assertHeld(t, store, active, true)
+
+		// An id already parked is not probed a second time either — that probe would refuse ourselves.
+		if _, err := host.Load(first); err != nil {
+			t.Fatalf("Load(first): %v", err)
+		}
+		if _, err := host.Load(first); err != nil {
+			t.Errorf("a second Load of the parked id was refused: %v", err)
+		}
+		assertHeld(t, store, first, true)
+	})
+
+	t.Run("Delete after a failed restore releases the parked hold", func(t *testing.T) {
+		// first is parked from the arm above and was never adopted: the restore "failed".
+		if err := host.Delete(first); err != nil {
+			t.Fatalf("Delete of the parked id: %v", err)
+		}
+		if _, err := store.Load(first); err == nil {
+			t.Error("the record survived its Delete")
+		}
+		if locks := lockFilesIn(t, dir); slices.Contains(locks, first+".lock") {
+			t.Errorf("Delete left the parked hold's lock file behind: %v", locks)
+		}
+	})
+
+	t.Run("a record another apogee holds is refused at Load", func(t *testing.T) {
+		release, err := store.Hold(third) // the other instance
+		if err != nil {
+			t.Fatalf("Hold: %v", err)
+		}
+		defer func() { _ = release() }()
+		want := fmt.Sprintf("session %s is open in another apogee (pid %d) — fork it to work alongside", third, os.Getpid())
+		_, err = host.Load(third)
+		var held *session.HeldError
+		if !errors.As(err, &held) || err.Error() != want {
+			t.Errorf("Load(held) err = %v; want the HeldError %q", err, want)
+		}
+	})
+	host.Close()
+}

@@ -90,6 +90,16 @@ type sessionHost struct {
 	// process's own pid, so re-acquiring would refuse ourselves.
 	heldID  string
 	release func() error
+
+	// pendingID / pendingRelease is the hold Load PARKED for the Activate the /sessions resume flow
+	// queues once the live restore has succeeded: Load takes it — so a record another apogee holds
+	// is refused at the browser as a Load error, before anything is restored — and Activate of the
+	// same id ADOPTS it rather than acquiring afresh (a second flock on the path would refuse this
+	// process's own pid). A parked hold nobody adopts — the restore failed, the human moved on — is
+	// released at the next identity boundary: Rotate, Close, Delete of that id, or the next Load.
+	// "" ⇒ nothing parked. Guarded by mu like the hold it precedes.
+	pendingID      string
+	pendingRelease func() error
 }
 
 // activeSession is the identity of the session Saves currently target: the id minted once (or
@@ -168,10 +178,30 @@ func (h *sessionHost) releaseLocked() {
 	h.heldID, h.release = "", nil
 }
 
-// Close releases the host's live-instance hold — the end of the run, after the engine has closed, so
-// the record is free to resume elsewhere the moment this apogee is done writing it. Idempotent.
+// releasePendingLocked lets go of the hold Load parked and nobody adopted (see pendingID); a host
+// with nothing parked does nothing. Its error is discarded for releaseLocked's reason. Callers hold
+// h.mu.
+func (h *sessionHost) releasePendingLocked() {
+	if h.pendingRelease != nil {
+		_ = h.pendingRelease()
+	}
+	h.pendingID, h.pendingRelease = "", nil
+}
+
+// holdsLocked reports whether id is one this host holds already — the live hold or the parked one —
+// so a Load of it neither probes nor parks: the hold guards against OTHER instances, and a second
+// flock on a path this process holds would refuse with this process's own pid. Callers hold h.mu.
+func (h *sessionHost) holdsLocked(id string) bool {
+	return (h.release != nil && h.heldID == id) || (h.active != nil && h.active.id == id) ||
+		(h.pendingRelease != nil && h.pendingID == id)
+}
+
+// Close releases the host's live-instance hold — and any hold Load parked that no Activate adopted —
+// at the end of the run, after the engine has closed, so the record is free to resume elsewhere the
+// moment this apogee is done writing it. Idempotent.
 func (h *sessionHost) Close() {
 	h.mu.Lock()
+	h.releasePendingLocked()
 	h.releaseLocked()
 	h.mu.Unlock()
 }
@@ -254,9 +284,11 @@ func (h *sessionHost) SetModel(model string) {
 // scratch dir exist — created and pushed to the engine via scratchMoved — before the new
 // session's first tool call. It is idempotent on an already-inactive host (each call simply
 // re-mints). The closed session's live-instance hold goes with it: the record is another run's to
-// resume from here, and the fresh id holds nothing until its first Save.
+// resume from here, and the fresh id holds nothing until its first Save. A hold Load parked that no
+// Activate adopted goes too — the boundary is the human moving on from that resume.
 func (h *sessionHost) Rotate() {
 	h.mu.Lock()
+	h.releasePendingLocked()
 	h.releaseLocked()
 	h.active = nil
 	h.nextID = session.NewID(h.now())
@@ -273,22 +305,55 @@ func (h *sessionHost) List() ([]session.Meta, error) { return h.store.List() }
 // Activate so the /sessions resume flow switches which file Saves target only after the live
 // RestoreSession has succeeded — a restore that then fails leaves the current session's file
 // untouched (subsequent Saves keep updating it, not the loaded one).
+//
+// Load is where the /sessions door refuses a record another apogee holds: the live-instance hold
+// is taken here and PARKED (pendingID) for the Activate that follows a successful restore to adopt,
+// so a held record is refused as this Load's error — the *session.HeldError whose Error() is the
+// line the browser notes — before anything is restored, and the one real hold is never taken twice.
+// A hold parked by an earlier Load that nothing adopted is released first. An id this host holds
+// already — the active session's, or the one parked — is neither probed nor parked (holdsLocked):
+// the hold guards against other instances, and re-taking it would refuse this process's own pid.
 func (h *sessionHost) Load(id string) (session.Record, error) {
-	return h.store.Load(id)
+	rec, err := h.store.Load(id)
+	if err != nil {
+		return session.Record{}, err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.holdsLocked(id) {
+		return rec, nil
+	}
+	h.releasePendingLocked()
+	release, err := h.store.Hold(id)
+	if err != nil {
+		return session.Record{}, err
+	}
+	h.pendingID, h.pendingRelease = id, release
+	return rec, nil
 }
 
 // Activate makes meta's session the one subsequent Saves update, replacing the current active
 // session rather than forking a new file — the /sessions resume flow calls it once RestoreSession
 // has confirmed the switch. Its id, Title, CreatedAt and ParentID carry over so a later Save
 // preserves them. The live-instance hold follows the identity: the outgoing session's hold is
-// released and the adopted record's taken — kept as it is when the adopted id is the one already
-// held (a resume of the active session). Activate reports nothing (tui.SessionHost), so a hold it
-// cannot take is left for the next Save to re-attempt and report — the Save is what would write
-// over the other instance's record, and it refuses before writing.
+// released and the adopted record's taken — ADOPTED from the hold Load parked for this Activate
+// when it is there (pendingID), acquired afresh when it is not (a fork's child reaches the resume
+// flow without a Load), and kept as it is when the adopted id is the one already held (a resume of
+// the active session). A parked hold on some OTHER id is released: it was for an Activate that never
+// came. Activate reports nothing (tui.SessionHost), so a hold it cannot take is left for the next
+// Save to re-attempt and report — the Save is what would write over the other instance's record,
+// and it refuses before writing.
 func (h *sessionHost) Activate(meta session.Meta) {
 	h.mu.Lock()
 	h.active = &activeSession{id: meta.ID, title: meta.Title, createdAt: meta.CreatedAt, parentID: meta.ParentID}
-	_ = h.holdLocked(meta.ID)
+	if h.pendingRelease != nil && h.pendingID == meta.ID {
+		h.releaseLocked()
+		h.heldID, h.release = h.pendingID, h.pendingRelease
+		h.pendingID, h.pendingRelease = "", nil
+	} else {
+		h.releasePendingLocked()
+		_ = h.holdLocked(meta.ID)
+	}
 	h.mu.Unlock()
 	// The scratch dir follows the activation: the resumed session's own dir (re)exists and is
 	// what the engine fences the next tool call to.
@@ -356,8 +421,16 @@ func (h *sessionHost) SessionID() string {
 // objects image a conversation that no longer exists, so keeping them would leave a store nothing
 // can ever open again (ADR 0074 decision 13). The store goes only once the record actually did, and
 // its removal is best-effort — a failed removal is not a failed delete, and the boot sweep
-// (gcSnapshotDirs) collects whatever is left behind.
+// (gcSnapshotDirs) collects whatever is left behind. A hold Load parked on this very id — a resume
+// whose restore failed, now being deleted instead — is released first, so the store's own hold
+// (Store.Delete) does not refuse this process; a record another apogee holds is refused by the store
+// with the *session.HeldError the browser notes.
 func (h *sessionHost) Delete(id string) error {
+	h.mu.Lock()
+	if h.pendingRelease != nil && h.pendingID == id {
+		h.releasePendingLocked()
+	}
+	h.mu.Unlock()
 	if err := h.store.Delete(id); err != nil {
 		return err
 	}

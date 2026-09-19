@@ -84,14 +84,17 @@ type SessionHost interface {
 	// Load returns a stored record WITHOUT changing which session is active. Activation is
 	// deferred to Activate so the /sessions resume flow can switch which file Saves target only
 	// after the live RestoreSession has confirmed the switch — a restore that then fails must
-	// leave the current session untouched.
+	// leave the current session untouched. A record another live apogee has open is refused HERE,
+	// as Load's error, whose Error() is the line the renderer notes verbatim — the host owns the
+	// hold and the wording alike; the renderer only carries the error across.
 	Load(id string) (session.Record, error)
 	// Activate makes meta's session the target of subsequent Saves, replacing the current active
 	// session (the loaded file continues in place rather than forking a new one). The resume flow
 	// calls it only once RestoreSession has succeeded, so a failed restore never redirects saves
 	// away from the live conversation.
 	Activate(meta session.Meta)
-	// Delete removes a stored session's file.
+	// Delete removes a stored session's file. A record another live apogee has open is refused
+	// with an error whose Error() the renderer notes verbatim, as for Load.
 	Delete(id string) error
 	// Rename sets a stored session's title.
 	Rename(id, title string) error

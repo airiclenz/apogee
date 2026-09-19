@@ -28,6 +28,18 @@ still remembers.
   `⏎` resumes, `^r` renames inline, `^d` deletes after a confirm, `^a` toggles
   between this workspace and all workspaces. The verbs are chords precisely so
   the letters are free to type with — every selector pop-up filters as you type.
+- A session is **held** by the apogee that has it open, from the moment its record
+  first reaches disk until that apogee exits, so two instances can never write one
+  record. Opening a held session anywhere else — `--resume`, `--continue`, the
+  browser's `⏎` — or deleting it with `^d` is refused with one line:
+  `session <id> is open in another apogee (pid N) — fork it to work alongside`
+  (the pid is omitted when it is not known). `--continue` refuses rather than
+  quietly opening the workspace's next-newest session; in the browser the refusal
+  is a transcript note and the conversation you are in is untouched. To work on a
+  held session's history from a second terminal, [`/fork`](commands.md) it from the
+  instance that holds it — the fork is a new record nobody holds — or `--resume` the
+  fork's id. The hold is the kernel's own lock on a `<id>.lock` file beside the
+  record; it dies with the process, so a crash or `kill -9` leaves nothing to clean up.
   A new session names itself: on its first prompt apogee asks the
   model, in a single call off to the side of the conversation, for a short title
   (`auto-title:`, a key with no flag and no environment variable, on by default). With that off — or when the

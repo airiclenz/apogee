@@ -454,8 +454,13 @@ instead of ending at the previous tool call — and a resumed one closes those s
 *interrupted*. Each of the three schema versions is rejected/degraded only by its owning layer
 (store / TUI / engine). Agent mode, approvals, Confinement, and MCP connections are **not** in the
 record — live host state, re-confirmed on resume
-(ADR [0008](docs/adr/0008-stateless-tools-and-non-forkable-external-effects.md)).
-See [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
+(ADR [0008](docs/adr/0008-stateless-tools-and-non-forkable-external-effects.md)). A record is
+**held** by the live instance that has it open (`session.Store.Hold`: the kernel's advisory lock on
+`<id>.lock` beside the record, taken at the record's birth and released when that apogee exits or
+moves to another session), so every door into it from a second instance — `--resume`,
+`--continue`, the browser's resume and delete — is refused with `session <id> is open in another
+apogee (pid N) — fork it to work alongside`; the hold guards only against *other* instances, and
+`/fork` is the way to work alongside. See [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
 _Avoid_: "session file" for the Session itself (the *record* is the file; the Session is its
 engine payload), "history" (that is the browser's list of records, not one Session — and it is not
 [Prompt recall](#turns-and-stepping) either, which is the prompt box's own list of sent inputs).

@@ -108,6 +108,28 @@ unique (a UTC-second stamp plus random suffix), so clobbering requires the *same
 resumed into two instances. That is documented and accepted; a cross-instance file lock is a
 recorded `ISSUES.md` follow-on, not built here.
 
+> **Superseded 2026-09-19 (`apogee-3b3`, plan `2026-09-19 - 01` items 10 and 11).** The lock is
+> built: a live session is **held** by the instance that has it open. `session.Store.Hold` takes
+> the kernel's advisory lock (`platform.AcquireLock`, the daemon's own mechanism — ADR 0034 D7) on
+> `<sessions>/<id>.lock` beside the record; there is no stale state to reap, because the lock dies
+> with the process. The hold is taken at the record's *birth* — the first Save, or construction on
+> a `--resume`/`--continue` record — never at the mint, so a run that never saves touches no disk;
+> it moves with the identity (`Rotate` releases, `Activate` re-holds, `Close` lets go) and is kept,
+> not re-taken, across every Save of the id already held. Every door refuses a held record with one
+> line, `session <id> is open in another apogee (pid N) — fork it to work alongside` (`(pid N)`
+> omitted when the lock file carried none): `--resume` and `--continue` probe-and-release at the
+> door so the host takes the one real hold at construction, and `--continue` never skips to the
+> workspace's next record; `/sessions` ⏎ and `^d` are refused by the host's `Load` and `Delete`,
+> which the browser notes verbatim with the view and the active session untouched. The `/sessions`
+> resume parks its hold: `Load` takes it, `Activate` adopts it once the live restore has succeeded,
+> and an unadopted one — the restore failed — is released by `Rotate`, `Close`, `Delete` of that
+> id or the next `Load`. The hold guards only against *other* instances: a `Load` of the active id
+> or of the id already parked neither probes nor parks, and `Activate` of it keeps the live hold.
+> `Delete`/`Prune` hold first, remove the JSON, release, and only then unlink `<id>.lock` — the one
+> stated exception to `AcquireLock`'s "never removed" rule, benign because the record is already
+> gone. `/fork` is the sanctioned way to work alongside a live session: the child is a new record
+> nobody holds.
+
 **8. What is deliberately NOT session state.** The record carries the conversation and the
 scrollback and nothing else about the live host. **Agent mode, the allow-for-session approval
 cache, confinement, and MCP connections are not serialized** — they are live host state,
@@ -146,7 +168,8 @@ finishes an interrupted task. `apogee.Resume` (rebuild-at-startup) is unchanged 
   session *in place*; `/clear`/`/new` is the explicit "start a fresh one".
 - **A cross-instance file lock now.** Deferred: ids are per-instance unique so the only clobber
   is the same session opened twice, a narrow case. Documented as last-write-wins with a recorded
-  TODO rather than shipping a lock nobody has yet needed.
+  TODO rather than shipping a lock nobody has yet needed. *Superseded 2026-09-19 (`apogee-3b3`):*
+  the lock shipped as the live-session hold — see decision 7's note.
 - **LLM-generated titles.** Rejected for v1: the first-user-message heuristic (≤50 chars,
   word-boundary truncate) costs no tokens and is renameable inline. An LLM title is an additive
   follow-on, not a dependency of the feature.
@@ -226,7 +249,9 @@ shortly after it is born.
   **`--resume <id-or-path>`**, **scrollback replay on resume**, and **interrupted-task
   `/continue`** — closing the P1 "Session management UI" parity gap.
 - **Retention/pruning and a cross-instance lock are recorded TODOs**, deliberately out of this
-  plan. There is no auto-pruning: manual `^d` only.
+  plan. There is no auto-pruning: manual `^d` only. *Amended:* both have since shipped — retention
+  under the `sessions:` block (`max-age`, `max-count`), and the lock as the live-session hold of
+  decision 7's 2026-09-19 note (`apogee-3b3`).
 - **The bench is untouched.** `session.Store`'s new API stays embeddable and the bench keeps
   composing `Snapshot`/`Encode` directly (ADR 0001) — no bench code depends on the store.
 

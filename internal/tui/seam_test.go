@@ -527,6 +527,9 @@ type fakeSessionHost struct {
 	stored  map[string]session.Record
 	listErr error
 	loadErr error
+	// deleteErr scripts a Delete refusal — the host's HeldError for a record another apogee has
+	// open — leaving the record in place, as the real host does.
+	deleteErr error
 }
 
 // seed adds a record to the fake store so the /sessions browser can list/load it.
@@ -607,6 +610,9 @@ func (h *fakeSessionHost) Activate(meta session.Meta) {
 func (h *fakeSessionHost) Delete(id string) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	if h.deleteErr != nil {
+		return h.deleteErr
+	}
 	delete(h.stored, id)
 	return nil
 }
