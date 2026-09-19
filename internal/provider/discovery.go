@@ -84,9 +84,10 @@ type ModelInfo struct {
 	// PER SLOT (ADR 0024's per-slot honesty) and this is how many of them there are.
 	//
 	// It is the DISCOVERY half of the Parallel agents cap (ADR 0039 decision 2): a host whose server
-	// entry pins no `parallel-agents:` resolves the cap from this number, and falls back to 1 —
-	// strictly serial — when it is 0. Nothing here decides that; the number is reported and the
-	// resolution belongs to whoever configured the pin.
+	// entry pins no `parallel-agents:` resolves the cap from this number, and falls back to the
+	// entry's default width when it is 0 — 1, strictly serial, for an unkeyed entry, 4 for a keyed
+	// one. Nothing here decides that; the number is reported and the resolution belongs to whoever
+	// configured the entry.
 	TotalSlots int
 
 	// EffortSupport is what the same two probes said about the ACTIVE model's thinking-effort

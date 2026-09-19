@@ -410,9 +410,9 @@ type Config struct {
 	//
 	// It is a property of the SERVER rather than of the session — a llama.cpp server serves
 	// `--parallel N` requests at once, each in its own slot — so the host resolves it per bound
-	// server (the entry's `parallel-agents:` pin, else that server's /props total_slots, else 1) and
-	// re-states it when the session moves. An embedder sets it directly; 0 is the safe default that
-	// asks for nothing.
+	// server (the entry's `parallel-agents:` pin, else that server's /props total_slots, else the
+	// entry's default width — 4 for a keyed entry, 1 otherwise) and re-states it when the session
+	// moves. An embedder sets it directly; 0 is the safe default that asks for nothing.
 	ParallelAgents int
 
 	// Budget / Compaction knobs (context/) are structural and load-bearing — they

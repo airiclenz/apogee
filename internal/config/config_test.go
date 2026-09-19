@@ -5586,9 +5586,10 @@ func TestApplyConfigRecordsOverrideSources(t *testing.T) {
 	}
 }
 
-// The Parallel agents cap has three ranks and no fourth (ADR 0039 decision 2): a pin is never
-// overruled, discovery answers when nothing is pinned, and 1 — strictly serial, today's behaviour —
-// is what a session falls back to when neither can say.
+// The Parallel agents cap has three ranks and no fourth (ADR 0039 decision 2, amended 2026-09-19):
+// a pin is never overruled, discovery answers when nothing is pinned, and the entry's own floor —
+// 1, strictly serial, for a server nobody described; 4 for a keyed one — is what a session falls
+// back to when neither can say.
 func TestResolveParallelAgents(t *testing.T) {
 	t.Parallel()
 
@@ -5596,20 +5597,71 @@ func TestResolveParallelAgents(t *testing.T) {
 		name       string
 		pinned     int
 		discovered int
+		floor      int
 		want       int
 	}{
-		{name: "pin beats discovery", pinned: 2, discovered: 8, want: 2},
-		{name: "a pin of 1 is still a pin", pinned: 1, discovered: 8, want: 1},
-		{name: "discovery beats the default", pinned: 0, discovered: 4, want: 4},
-		{name: "neither says anything", pinned: 0, discovered: 0, want: 1},
-		{name: "a nonsense pin falls through", pinned: -3, discovered: 4, want: 4},
-		{name: "a nonsense slot count falls through", pinned: 0, discovered: -1, want: 1},
+		{name: "pin beats discovery", pinned: 2, discovered: 8, floor: 1, want: 2},
+		{name: "a pin of 1 is still a pin", pinned: 1, discovered: 8, floor: 1, want: 1},
+		{name: "discovery beats the default", pinned: 0, discovered: 4, floor: 1, want: 4},
+		{name: "neither says anything", pinned: 0, discovered: 0, floor: 1, want: 1},
+		{name: "a nonsense pin falls through", pinned: -3, discovered: 4, floor: 1, want: 4},
+		{name: "a nonsense slot count falls through", pinned: 0, discovered: -1, floor: 1, want: 1},
+		{name: "a keyed entry's floor is 4", pinned: 0, discovered: 0, floor: 4, want: 4},
+		{name: "a keyed entry keeps what discovery says", pinned: 0, discovered: 2, floor: 4, want: 2},
+		{name: "a keyed entry pinned to 1 stays 1", pinned: 1, discovered: 0, floor: 4, want: 1},
+		{name: "an unkeyed non-loopback entry stays 1", pinned: 0, discovered: 0, floor: 1, want: 1},
+		{name: "a floor of 0 reads 1", pinned: 0, discovered: 0, floor: 0, want: 1},
+		{name: "a nonsense floor reads 1", pinned: 0, discovered: 0, floor: -2, want: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := ResolveParallelAgents(tt.pinned, tt.discovered); got != tt.want {
-				t.Errorf("ResolveParallelAgents(%d, %d) = %d, want %d", tt.pinned, tt.discovered, got, tt.want)
+			if got := ResolveParallelAgents(tt.pinned, tt.discovered, tt.floor); got != tt.want {
+				t.Errorf("ResolveParallelAgents(%d, %d, %d) = %d, want %d",
+					tt.pinned, tt.discovered, tt.floor, got, tt.want)
+			}
+		})
+	}
+}
+
+// The floor follows the KEY SOURCE, not the address: an entry that names a key any of the three ways,
+// or speaks `wire: anthropic` — which ValidateServers lets stand keyless, a proxy in front — is a
+// hosted server and reads 4; an unkeyed entry, on the LAN, on loopback or the ephemeral `--endpoint`
+// one, reads 1. The launcher-built entry a `/model` profile load moves onto (launcher.go: name,
+// endpoint and the launcher's own api-key, nothing else) is the loopback case in both shapes: keyless
+// it stays serial, and with a key it reads four like any other keyed entry — the beat that binds its
+// model reports the server's `total_slots` before a delegation can run.
+func TestDefaultParallelAgentsFollowsTheKeySource(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		entry ServerEntry
+		want  int
+	}{
+		{name: "a literal key", entry: ServerEntry{Name: "hosted", Endpoint: "https://api.example.com/v1",
+			APIKey: "sk-rented", PlaintextKeyOK: true}, want: 4},
+		{name: "a key command", entry: ServerEntry{Name: "hosted", Endpoint: "https://api.example.com/v1",
+			APIKeyCmd: "pass show hosted"}, want: 4},
+		{name: "a key from the environment", entry: ServerEntry{Name: "hosted",
+			Endpoint: "https://api.example.com/v1", APIKeyEnv: "HOSTED_API_KEY"}, want: 4},
+		{name: "a keyless anthropic wire", entry: ServerEntry{Name: "claude-box",
+			Endpoint: "https://api.anthropic.com", Wire: "anthropic"}, want: 4},
+		{name: "an unkeyed LAN server", entry: ServerEntry{Name: "workstation",
+			Endpoint: "http://192.168.64.1:1111"}, want: 1},
+		{name: "an unkeyed loopback server", entry: ServerEntry{Name: "here",
+			Endpoint: "http://127.0.0.1:1111"}, want: 1},
+		{name: "the ephemeral --endpoint entry", entry: ServerEntry{Endpoint: "http://10.0.0.7:8080"}, want: 1},
+		{name: "the launcher-built loopback entry without a key", entry: ServerEntry{Name: "qwen-32b",
+			Endpoint: "http://127.0.0.1:1111"}, want: 1},
+		{name: "the launcher-built loopback entry with the launcher's key", entry: ServerEntry{Name: "qwen-32b",
+			Endpoint: "http://127.0.0.1:1111", APIKey: "launcher-token"}, want: 4},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := DefaultParallelAgents(tt.entry); got != tt.want {
+				t.Errorf("DefaultParallelAgents(%+v) = %d, want %d", tt.entry, got, tt.want)
 			}
 		})
 	}

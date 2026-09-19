@@ -11,7 +11,10 @@ package main
 // variable, so a difference in what the screen shows is a difference the switch produced. The pin
 // rather than a discovered `total_slots` is what the width comes from here because a stub upstream
 // serves no `/props` to discover one from, and teaching it one would test the discovery half instead
-// of the arrival half these runs are about.
+// of the arrival half these runs are about. The control run has a second arm that differs from the
+// first by a KEY rather than a pin: an entry that names an `api-key:` is a hosted server, and a
+// hosted server that neither pins nor advertises a width fans out at four (ADR 0039 decision 2 as
+// amended 2026-09-19, config.DefaultParallelAgents) — so the same two delegations stand together.
 //
 // What is asserted is what a human watching would see: the delegation rows in the transcript. Two of
 // them standing at once, neither queued, is a fan-out; one of them standing alone for as long as the
@@ -34,9 +37,16 @@ const (
 	parallelFanOutServer = "fanout"
 
 	// parallelPin is the second entry's `parallel-agents:` line — the whole difference between the
-	// two runs — and parallelNoPin is the same entry without it.
+	// two runs — and parallelNoPin is the same entry without it. parallelKeyed is the control run's
+	// other arm: no pin, but a key — spelled as a plaintext `api-key:` with `plaintext-key-ok: true`
+	// so the ADR 0047 migration offer stays quiet and the screen holds only the delegation rows.
 	parallelPin   = "    parallel-agents: 2\n"
 	parallelNoPin = ""
+	parallelKeyed = "    api-key: " + fanOutKey + "\n    plaintext-key-ok: true\n"
+
+	// fanOutKey is the key the keyed arm's fan-out server demands of every request, so a fan-out
+	// that stands on screen there is one whose children carried the entry's key to the server.
+	fanOutKey = "fanout-token"
 
 	// fanOutPrompt is the prompt parallel-two-delegations.yaml answers with two `sub_agent` calls,
 	// and firstDelegate/secondDelegate are the names those calls carry — the words the delegation
@@ -78,17 +88,7 @@ func TestE2EParallelDelegationsFollowAServerSwitch(t *testing.T) {
 	switchToFanOutServer(t, drv, fanOut)
 	submit(drv, fanOutPrompt)
 
-	// Both children are asking the fan-out server before either has answered, which is what "at
-	// once" means on the wire: neither request can ever complete, so a second one arriving is a
-	// second child genuinely running beside the first.
-	drv.WaitFor(func() bool { return childRequests(fanOut, childHalfTask) >= 2 },
-		tuitest.Awaiting("both delegates to be asking the server the session moved to"))
-
-	// And what the human sees is the same fact: two delegation rows standing together, neither of
-	// them the queued row a fan-out narrower than its group would leave behind.
-	awaitPane(t, drv, "two delegation rows on screen at once, neither queued", func(f tuitest.Frame) bool {
-		return frameHas(f, firstDelegate) && frameHas(f, secondDelegate) && !frameHas(f, scheduledWord)
-	})
+	awaitBothDelegatesRunning(t, drv, fanOut)
 
 	// The whole fan-out ran on the server the session arrived at, not the one it left.
 	if got := len(start.Requests()); got != 0 {
@@ -100,53 +100,101 @@ func TestE2EParallelDelegationsFollowAServerSwitch(t *testing.T) {
 }
 
 // TestE2EParallelDelegationsStaySerialWithoutThePin is the control: the same session, the same reply
-// and the same two delegations, onto an entry that pins nothing. The cap resolves to the serial
-// floor, so the second delegation is not announced at all while the first is still working.
+// and the same two delegations, onto an entry that pins nothing. Its two arms differ by a key. The
+// unkeyed entry resolves to the serial floor, so the second delegation is not announced at all while
+// the first is still working; the keyed one is a hosted server and reads four when nothing pins or
+// advertises a width, so both delegations stand on screen together exactly as under the pin. The
+// fixture emits exactly two `sub_agent` calls, so "four in flight" is unobservable here — two rows
+// standing at once, neither queued, is the whole of what a width above one shows.
 func TestE2EParallelDelegationsStaySerialWithoutThePin(t *testing.T) {
 	t.Parallel()
 
-	start, fanOut, drv := launchParallelSession(t, parallelNoPin)
+	t.Run("unkeyed", func(t *testing.T) {
+		t.Parallel()
 
-	switchToFanOutServer(t, drv, fanOut)
-	submit(drv, fanOutPrompt)
+		start, fanOut, drv := launchParallelSession(t, parallelNoPin)
 
-	drv.WaitFor(func() bool { return childRequests(fanOut, childHalfTask) >= 1 },
-		tuitest.Awaiting("the first delegate to reach the server the session moved to"))
-	awaitPane(t, drv, "the first delegation's row", func(f tuitest.Frame) bool {
-		return frameHas(f, firstDelegate)
+		switchToFanOutServer(t, drv, fanOut)
+		submit(drv, fanOutPrompt)
+
+		drv.WaitFor(func() bool { return childRequests(fanOut, childHalfTask) >= 1 },
+			tuitest.Awaiting("the first delegate to reach the server the session moved to"))
+		awaitPane(t, drv, "the first delegation's row", func(f tuitest.Frame) bool {
+			return frameHas(f, firstDelegate)
+		})
+
+		paneNeverShows(t, drv, "the second delegation while the first is still working", func(f tuitest.Frame) bool {
+			return frameHas(f, secondDelegate)
+		})
+		if got := childRequests(fanOut, childHalfTask); got != 1 {
+			t.Errorf("%d delegates asked the server; a serial fan-out runs one at a time", got)
+		}
+		if got := len(start.Requests()); got != 0 {
+			t.Errorf("the server the session left answered %d requests after the switch", got)
+		}
+
+		drv.Kill()
 	})
 
-	paneNeverShows(t, drv, "the second delegation while the first is still working", func(f tuitest.Frame) bool {
-		return frameHas(f, secondDelegate)
-	})
-	if got := childRequests(fanOut, childHalfTask); got != 1 {
-		t.Errorf("%d delegates asked the server; a serial fan-out runs one at a time", got)
-	}
-	if got := len(start.Requests()); got != 0 {
-		t.Errorf("the server the session left answered %d requests after the switch", got)
-	}
+	t.Run("keyed", func(t *testing.T) {
+		t.Parallel()
 
-	drv.Kill()
+		start, fanOut, drv := launchParallelSession(t, parallelKeyed, stubllm.WithAPIKey(fanOutKey))
+
+		switchToFanOutServer(t, drv, fanOut)
+		submit(drv, fanOutPrompt)
+
+		awaitBothDelegatesRunning(t, drv, fanOut)
+
+		if got := len(start.Requests()); got != 0 {
+			t.Errorf("the server the session left answered %d requests after the switch", got)
+		}
+
+		drv.Kill()
+	})
+}
+
+// awaitBothDelegatesRunning waits for the two delegations to be running at once, on the wire and on
+// the screen — the whole of what a width above one looks like from outside.
+func awaitBothDelegatesRunning(t *testing.T, drv *tuitest.Driver, fanOut *stubllm.Server) {
+	t.Helper()
+
+	// Both children are asking the fan-out server before either has answered, which is what "at
+	// once" means on the wire: neither request can ever complete, so a second one arriving is a
+	// second child genuinely running beside the first.
+	drv.WaitFor(func() bool { return childRequests(fanOut, childHalfTask) >= 2 },
+		tuitest.Awaiting("both delegates to be asking the server the session moved to"))
+
+	// And what the human sees is the same fact: two delegation rows standing together, neither of
+	// them the queued row a fan-out narrower than its group would leave behind.
+	awaitPane(t, drv, "two delegation rows on screen at once, neither queued", func(f tuitest.Frame) bool {
+		return frameHas(f, firstDelegate) && frameHas(f, secondDelegate) && !frameHas(f, scheduledWord)
+	})
 }
 
 // launchParallelSession starts a driven run on the START server, with the fan-out server configured
-// beside it and pin appended to its entry. It returns once the session is up and idle.
+// beside it — built with fanOutOpts, so an arm can gate it on a key — and entryLines appended to its
+// entry. It returns once the session is up and idle.
 //
 // The start server's script is one turn it is never asked to play: the first prompt is typed AFTER
 // the switch, so every request in these runs — the session title, the fan-out reply and both
 // children — belongs to the server the session moved to, and both tests assert that the one it left
 // answered nothing.
-func launchParallelSession(t *testing.T, pin string) (start, fanOut *stubllm.Server, drv *tuitest.Driver) {
+func launchParallelSession(
+	t *testing.T,
+	entryLines string,
+	fanOutOpts ...stubllm.Option,
+) (start, fanOut *stubllm.Server, drv *tuitest.Driver) {
 	t.Helper()
 
 	start = stubllm.New(t, stubllm.Script{
 		Model: "start-model",
 		Turns: []stubllm.Turn{{Repeat: true, Text: "The session should not be asking me anything."}},
 	})
-	fanOut = stubllm.New(t, fanOutScript(t))
+	fanOut = stubllm.New(t, fanOutScript(t), fanOutOpts...)
 
 	drv = tuitest.NewDriver(t, parallelSize)
-	launchTUIOn(t, drv, start, parallelHome(t, start, fanOut, pin), "")
+	launchTUIOn(t, drv, start, parallelHome(t, start, fanOut, entryLines), "")
 	waitIdle(drv)
 	drv.WaitQuiet(settled)
 	return start, fanOut, drv
@@ -168,13 +216,13 @@ func fanOutScript(t *testing.T) stubllm.Script {
 }
 
 // parallelHome writes an apogee home with BOTH servers in its `servers:` list, the session starting
-// on the first, and pin appended to the second's entry.
+// on the first, and entryLines — a pin, a key, or nothing — appended to the second's entry.
 //
 // It is spelled out here rather than taken from [e2eHome] for the reason [launcherHome] is: the key
 // under test sits INSIDE a `servers:` entry, and no line appended to the file afterwards can reach in
 // there. The list is also the reason the run needs a home of its own at all — e2eHome writes exactly
 // one server, and a switch needs somewhere to go.
-func parallelHome(t *testing.T, start, fanOut *stubllm.Server, pin string) string {
+func parallelHome(t *testing.T, start, fanOut *stubllm.Server, entryLines string) string {
 	t.Helper()
 
 	body := "servers:\n" +
@@ -184,7 +232,7 @@ func parallelHome(t *testing.T, start, fanOut *stubllm.Server, pin string) strin
 		"  - name: " + parallelFanOutServer + "\n" +
 		"    endpoint: " + fanOut.URL + "\n" +
 		"    model: " + fanOut.Model + "\n" +
-		pin +
+		entryLines +
 		"server: " + parallelStartServer + "\n"
 	home := t.TempDir()
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {

@@ -311,8 +311,9 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// forgotten, because a slot count is a fact about one server. It lives HERE, in the shared fold,
 	// rather than at either caller, because every arrival that is not a bind goes through this move —
 	// a `/server` switch and a profile load alike — and one follow per arrival is the whole rule. An
-	// entry that pins nothing (a profile load's does not) resolves to the serial floor 1 until the new
-	// server's own first beat widens it, which is the honest width for a server no entry describes.
+	// entry that pins nothing (a profile load's does not) resolves to its default width — 1 for an
+	// unkeyed server, 4 for a keyed one (config.DefaultParallelAgents) — until the new server's own
+	// first beat says how wide it really is.
 	m.caps.follow(entry)
 	// What the display adopts: the endpoint now on the wire, the alias the footer calls it, and the
 	// very window the engine was just handed, so the gauge and the Budget cannot describe different
@@ -421,7 +422,9 @@ type parallelAgentsSetter interface {
 // server's own `total_slots`, which only a landed beat can report. Holding them apart and resolving
 // at the point of install is what lets either arrive first — a pinned entry is capped before the
 // first beat, an unpinned one the moment discovery answers — without a second, subtly different
-// resolution growing beside ResolveParallelAgents.
+// resolution growing beside ResolveParallelAgents. The third fact, the entry's default width, comes
+// with the entry too and is held beside the pin for the one reader that has no entry in hand
+// (current, below).
 //
 // It remembers the bound entry's NAME for one job: a `servers:` list the human edits mid-session
 // (ADR 0037) has to be able to move the cap of the server the session is ALREADY on, and a name is
@@ -446,12 +449,18 @@ type parallelAgentsCap struct {
 	// carrying the retired server's width onto the new one is exactly the bug that would be
 	// invisible.
 	observed int
+	// floor is the width the bound entry falls to when neither the pin nor a beat can say
+	// (config.DefaultParallelAgents: 4 for a keyed entry, 1 otherwise). It is set from the entry at
+	// every follow and relist rather than re-derived on read, because current's caller holds no
+	// entry — a Firing's binding clears the key fields (wire_settings.go firingBinding) — and 0
+	// until something is bound, which ResolveParallelAgents reads as 1.
+	floor int
 
 	engine parallelAgentsSetter
 }
 
 // newParallelAgentsCap builds the holder over the engine seam a resolved cap is pushed through.
-// Nothing is bound yet, so the cap it would resolve is 1 — the serial floor a session with no server
+// Nothing is bound yet, so the cap it would resolve is 1 — the serial width a session with no server
 // honestly runs at.
 func newParallelAgentsCap(engine parallelAgentsSetter) *parallelAgentsCap {
 	return &parallelAgentsCap{engine: engine}
@@ -468,7 +477,8 @@ func newParallelAgentsCap(engine parallelAgentsSetter) *parallelAgentsCap {
 func (c *parallelAgentsCap) follow(entry config.ServerEntry) int {
 	c.mu.Lock()
 	c.name, c.pinned, c.observed = entry.Name, entry.ParallelAgents, 0
-	width := config.ResolveParallelAgents(c.pinned, c.observed)
+	c.floor = config.DefaultParallelAgents(entry)
+	width := config.ResolveParallelAgents(c.pinned, c.observed, c.floor)
 	c.mu.Unlock()
 	c.engine.SetParallelAgents(width)
 	return width
@@ -487,7 +497,7 @@ func (c *parallelAgentsCap) observe(slots int) int {
 	if slots > 0 {
 		c.observed = slots
 	}
-	width := config.ResolveParallelAgents(c.pinned, c.observed)
+	width := config.ResolveParallelAgents(c.pinned, c.observed, c.floor)
 	c.mu.Unlock()
 	c.engine.SetParallelAgents(width)
 	return width
@@ -507,23 +517,25 @@ func (c *parallelAgentsCap) observe(slots int) int {
 func (c *parallelAgentsCap) current() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return config.ResolveParallelAgents(c.pinned, c.observed)
+	return config.ResolveParallelAgents(c.pinned, c.observed, c.floor)
 }
 
 // relist re-resolves the cap from a re-read `servers:` list (ADR 0037's live apply): the entry that
-// still carries the bound server's name supplies the pin, and the observed slot count is KEPT —
-// nothing about the server changed, only what the file says about it. A list that no longer names
-// this session's server leaves the cap exactly where it was, which is the same posture the switch
-// list takes toward an entry the human deleted while the session was on it.
+// still carries the bound server's name supplies the pin and the default width — a key source
+// edited in or out moves the floor with it — and the observed slot count is KEPT — nothing about
+// the server changed, only what the file says about it. A list that no longer names this session's
+// server leaves the cap exactly where it was, which is the same posture the switch list takes
+// toward an entry the human deleted while the session was on it.
 func (c *parallelAgentsCap) relist(entries []config.ServerEntry) int {
 	c.mu.Lock()
 	for _, e := range entries {
 		if e.Name != "" && e.Name == c.name {
 			c.pinned = e.ParallelAgents
+			c.floor = config.DefaultParallelAgents(e)
 			break
 		}
 	}
-	width := config.ResolveParallelAgents(c.pinned, c.observed)
+	width := config.ResolveParallelAgents(c.pinned, c.observed, c.floor)
 	c.mu.Unlock()
 	c.engine.SetParallelAgents(width)
 	return width

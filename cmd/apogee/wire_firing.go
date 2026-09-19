@@ -367,7 +367,8 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// How wide this run may fan its delegations out — the same cap a session resolves, so every
 	// Driver reaches the same engine behaviour (ADR 0031; the resolution itself is ADR 0039 decision
 	// 2). The pin is the BOUND entry's own `parallel-agents:`, and ResolveParallelAgents never lets
-	// what the beat saw overrule it.
+	// what the beat saw overrule it; a keyed entry that neither pins nor advertises a width runs
+	// four (config.DefaultParallelAgents), an unkeyed one runs one.
 	slots := beat.TotalSlots
 
 	// The wire shape this run expresses a thinking-effort intent in (ADR 0060). A session takes it
@@ -402,7 +403,8 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// the same five words on this side of the boundary (internal/agent's toProviderDialect
 	// converts them back at the wire seam, where the provider package holds no domain import).
 	cfg.EffortDialect = domain.EffortDialect(effortDialect)
-	cfg.ParallelAgents = config.ResolveParallelAgents(in.entry.ParallelAgents, slots)
+	cfg.ParallelAgents = config.ResolveParallelAgents(in.entry.ParallelAgents, slots,
+		config.DefaultParallelAgents(in.entry))
 
 	// The Reaction Runner this Driver built for this ONE Firing, installed as the run's Event sink
 	// (ADR 0073 §2). It is assigned after the literal rather than inside it because a nil

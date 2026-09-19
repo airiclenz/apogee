@@ -812,7 +812,8 @@ func (d *delegationWiring) Retarget(name string) error {
 // the session's own bindings already follow: the file's pin is a statement about the server that
 // discovery may not overrule, the beat answers whatever the file left open, and the last rank is the
 // honest floor. So `model:` outranks the model the beat found bound, `context-window:` outranks the
-// window /props reported, and `parallel-agents:` outranks the slot count — that last one through
+// window /props reported, and `parallel-agents:` outranks the slot count, which outranks the entry's
+// own default width (four for a keyed entry, one otherwise) — those last through
 // config.ResolveParallelAgents itself, so the Sub-agent server's width is resolved by the very
 // function the session's own cap is resolved by (ADR 0039: one width everywhere).
 //
@@ -886,9 +887,10 @@ func resolveDelegationTarget(
 		// purpose: an entry that states no share leaves the child on the share the PARENT resolved,
 		// which already IS the top-level key when nobody overrode it (subagent.go).
 		ResponseReserveFraction: entry.ResponseReserve,
-		ParallelAgents:          config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots),
-		Profile:                 profile,
-		EffortDialect:           dialect,
-		Bypass:                  entry.Bypass,
+		ParallelAgents: config.ResolveParallelAgents(entry.ParallelAgents, observed.TotalSlots,
+			config.DefaultParallelAgents(entry)),
+		Profile:       profile,
+		EffortDialect: dialect,
+		Bypass:        entry.Bypass,
 	}
 }

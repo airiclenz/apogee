@@ -661,8 +661,10 @@ func TestLoadProfileCrossAddressFollowsTheProfile(t *testing.T) {
 // The fan-out cap follows the profile's server like every other arrival (ADR 0039), because the load
 // commits the same shared move a `/server` switch does. A Launch profile's entry pins no
 // `parallel-agents:` and its server has not beaten yet, so the honest width on the other side is the
-// serial floor: neither the departed entry's pin nor the retired server's slot count travels, and the
-// new server's own first beat is what widens it.
+// entry's own floor — four here, because the launcher's config carries an api-key and the entry the
+// load builds is keyed with it (config.DefaultParallelAgents): neither the departed entry's pin nor
+// the retired server's slot count travels, and the new server's own first beat is what sets the
+// width it really has.
 func TestLoadProfileMoveReFollowsTheParallelAgentsCap(t *testing.T) {
 	t.Parallel()
 
@@ -685,17 +687,17 @@ func TestLoadProfileMoveReFollowsTheParallelAgentsCap(t *testing.T) {
 		t.Fatalf("committing the resolved move: %v", err)
 	}
 
-	if got := widths.last(); got != 1 {
-		t.Errorf("the width the committed move pushed = %d; want the serial floor 1 — the departed "+
+	if got := widths.last(); got != 4 {
+		t.Errorf("the width the committed move pushed = %d; want the keyed floor 4 — the departed "+
 			"entry's pin was dropped and its observed slot count forgotten", got)
 	}
-	if got := wiring.caps.current(); got != 1 {
-		t.Errorf("caps.current() = %d; want 1 — a server no `servers:` entry describes runs serial "+
-			"until it reports its own slots", got)
+	if got := wiring.caps.current(); got != 4 {
+		t.Errorf("caps.current() = %d; want 4 — a keyed server no `servers:` entry describes runs at "+
+			"the keyed default until it reports its own slots", got)
 	}
-	if got := wiring.caps.observe(4); got != 4 {
-		t.Errorf("cap after the new server's first beat named 4 slots = %d; want 4 — the profile's "+
-			"own server is what widens it", got)
+	if got := wiring.caps.observe(2); got != 2 {
+		t.Errorf("cap after the new server's first beat named 2 slots = %d; want 2 — the profile's "+
+			"own server is what sets it, over the default", got)
 	}
 }
 

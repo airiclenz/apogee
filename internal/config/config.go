@@ -1773,13 +1773,17 @@ type UnconfinedHost struct {
 // states, not four:
 //
 //   - absent (or 0, which yaml cannot tell from absent) ⇒ discover: the live server's `/props`
-//     `total_slots`, and 1 — today's strictly serial behaviour — when it advertises nothing.
-//   - N ≥ 1 ⇒ pin N, whatever the server says.
+//     `total_slots`, and the entry's default width (DefaultParallelAgents) when it advertises
+//     nothing — 4 for a KEYED entry (`api-key:`, `api-key-cmd:`, `api-key-env:` or `wire:
+//     anthropic`, the shape a hosted server takes), 1 — strictly serial — for an unkeyed one.
+//   - N ≥ 1 ⇒ pin N, whatever the server says; a pin of 1 is how a keyed server is held serial.
 //   - negative ⇒ refused by ValidateServers; there is no meaning to give it.
 //
 // The trade the number buys is the server operator's and worth saying out loud: more parallel
 // agents means a smaller context window each, since `--parallel N` splits one window into N slots
-// (ADR 0024 — Apogee's numbers are per-slot-honest either way).
+// (ADR 0024 — Apogee's numbers are per-slot-honest either way). A hosted server has no such split
+// to protect — its slots are the provider's, not one machine's window — which is why its silence
+// is read as four rather than one (ADR 0039 decision 2, amended 2026-09-19).
 //
 // Bypass is this entry's DELEGATION POSTURE (ADR 0045 decision 2), in the top-level key's shape
 // verbatim: "delegations to this server run with this". A present key replaces the value the child
@@ -2198,24 +2202,60 @@ func SubAgentsServerTarget(entries []ServerEntry, name string) (ServerEntry, boo
 
 // ResolveParallelAgents answers the one question ADR 0039 decision 2 asks about a bound server: how
 // many sub-agents may run against it at once. pinned is that server entry's `parallel-agents:` value
-// (0 when the key is absent, which yaml cannot tell from an explicit 0) and discovered is what the
-// live server's `/props` reported as `total_slots` (0 when nothing was observed, or nothing asked).
+// (0 when the key is absent, which yaml cannot tell from an explicit 0), discovered is what the
+// live server's `/props` reported as `total_slots` (0 when nothing was observed, or nothing asked),
+// and floor is the width the entry falls to when neither can say — DefaultParallelAgents of the
+// entry the session is on, which the caller resolves because the entry is in its hands and not in
+// this function's.
 //
 // It is the `context-window:` idiom, and the ranks are the whole of the decision: a PIN is never
-// overruled by discovery, discovery answers when nothing is pinned, and 1 — strictly serial, exactly
-// today's behaviour — is what a session falls back to when neither can say. There is no fourth
-// answer and deliberately no "0 means unlimited": a width nobody bounded is a width that outruns the
-// server's slots, and the honest floor for an unknown server is one agent at a time.
+// overruled by discovery, discovery answers when nothing is pinned, and the floor is what a session
+// falls back to when neither can say — 1, strictly serial, for a server nobody described, and 4 for
+// a keyed one (see DefaultParallelAgents for why). There is no fourth answer and deliberately no "0
+// means unlimited": a width nobody bounded is a width that outruns the server's slots, and the
+// honest floor for an unknown server is one agent at a time.
 //
-// Both inputs are guarded rather than trusted: ValidateServers already refuses a negative pin at
-// startup, and a server is free to advertise nonsense, so anything below 1 simply falls through to
-// the next rank.
-func ResolveParallelAgents(pinned, discovered int) int {
+// Every input is guarded rather than trusted: ValidateServers already refuses a negative pin at
+// startup, a server is free to advertise nonsense, and a caller holding no entry at all hands a zero
+// floor, so anything below 1 simply falls through to the next rank — and a floor below 1 reads as 1,
+// the serial width that has never been wrong.
+func ResolveParallelAgents(pinned, discovered, floor int) int {
 	if pinned >= 1 {
 		return pinned
 	}
 	if discovered >= 1 {
 		return discovered
+	}
+	if floor >= 1 {
+		return floor
+	}
+	return 1
+}
+
+// defaultKeyedParallelAgents is the width a keyed server runs its delegations at when nothing pins
+// or advertises one: the fan-out a hosted provider serves without a per-machine window to split, and
+// the width the defect this constant closes ran serial for — a fan-out that took fifteen hours on a
+// hosted server because "no signal" was read as one (apogee-9se).
+const defaultKeyedParallelAgents = 4
+
+// DefaultParallelAgents is the width a session on e falls back to when neither its `parallel-agents:`
+// pin nor its server's advertised slot count can say — the last rank of ResolveParallelAgents,
+// resolved from the entry because the rank is a property of the ENTRY'S SHAPE: a keyed server is a
+// hosted one, and a hosted server serves parallel requests as a matter of course.
+//
+// Keyed means the entry names a key source (`api-key:`, `api-key-cmd:` or `api-key-env:` — the same
+// three keySourceOf reads) or speaks `wire: anthropic`, the Messages wire only hosted servers
+// speak; the wire counts on its own because ValidateServers requires no key source on it, and an
+// anthropic entry fronted by a keyless proxy is still a hosted server. Everything else — an unkeyed
+// LAN or loopback llama.cpp, the ephemeral `--endpoint` entry — stays at 1, strictly serial, unless
+// the server itself advertises slots. The endpoint's address plays no part: a keyed entry on
+// loopback (a `/model` profile load whose launcher carries an api-key builds one, launcher.go) reads
+// four too — and since a send is refused until the first beat binds a model, the `total_slots` that
+// beat reports outranks the four before a delegation can run; only a keyed loopback server that
+// advertises no slot count keeps it, which is the shape a local proxy to a hosted server takes.
+func DefaultParallelAgents(e ServerEntry) int {
+	if keySourceOf(e).kind() != keySourceNone || e.Wire == "anthropic" {
+		return defaultKeyedParallelAgents
 	}
 	return 1
 }

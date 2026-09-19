@@ -902,8 +902,9 @@ func (s *parallelAgentsSpy) last() int {
 
 // The cap follows the SERVER (ADR 0039 decision 2), which is the whole reason it is re-stated at
 // every arrival: a `/server` switch onto a pinned entry installs that entry's pin, a switch onto an
-// unpinned one starts serial, and the slot count the retired server advertised is forgotten rather
-// than carried onto a machine that never claimed it.
+// unpinned one starts at that entry's own floor — serial for an unkeyed server, four for a keyed one
+// — and the slot count the retired server advertised is forgotten rather than carried onto a machine
+// that never claimed it.
 func TestParallelAgentsCapFollowsTheBoundServer(t *testing.T) {
 	t.Parallel()
 
@@ -924,7 +925,7 @@ func TestParallelAgentsCapFollowsTheBoundServer(t *testing.T) {
 	// Onto an unpinned server: nothing is claimed, so the floor is serial — and the 2 slots the
 	// previous server reported must play no part in it.
 	if got := caps.follow(config.ServerEntry{Name: "open"}); got != 1 {
-		t.Errorf("follow(unpinned) = %d, want 1 — an unknown server runs one agent at a time", got)
+		t.Errorf("follow(unpinned) = %d, want 1 — an unknown unkeyed server runs one agent at a time", got)
 	}
 	// …until its own first beat says how wide it is.
 	if got := caps.observe(3); got != 3 {
@@ -933,6 +934,20 @@ func TestParallelAgentsCapFollowsTheBoundServer(t *testing.T) {
 	// A beat that could name no width is not evidence the server shrank.
 	if got := caps.observe(0); got != 3 {
 		t.Errorf("observe(0) = %d, want the last 3 — a silent beat is not an observation", got)
+	}
+
+	// Onto an unpinned KEYED server: a hosted server's silence reads four, not one — and the retired
+	// server's 3 slots are forgotten here exactly as above.
+	if got := caps.follow(config.ServerEntry{Name: "hosted", APIKeyEnv: "HOSTED_API_KEY"}); got != 4 {
+		t.Errorf("follow(unpinned keyed) = %d, want the keyed default 4", got)
+	}
+	// …and what the server itself advertises still outranks that default, downward too.
+	if got := caps.observe(2); got != 2 {
+		t.Errorf("observe(2) on a keyed entry = %d, want the discovered 2 — discovery outranks the default", got)
+	}
+	// A keyed entry pinned to 1 is held serial: the pin is how a hosted server is kept one at a time.
+	if got := caps.follow(config.ServerEntry{Name: "hosted", APIKeyEnv: "HOSTED_API_KEY", ParallelAgents: 1}); got != 1 {
+		t.Errorf("follow(keyed, pinned 1) = %d, want the pin 1", got)
 	}
 }
 
@@ -961,6 +976,17 @@ func TestParallelAgentsCapRelistMovesThePinInPlace(t *testing.T) {
 	}
 	if spy.last() != 6 {
 		t.Errorf("installed %v; want every re-resolution pushed at the engine", spy.widths)
+	}
+
+	// The floor moves with the file too: a key edited onto the bound entry makes it a keyed server,
+	// so a session whose server never advertised a width goes from one to four in place.
+	silent := newParallelAgentsCap(spy)
+	silent.follow(config.ServerEntry{Name: "quiet"})
+	if got := silent.relist([]config.ServerEntry{{Name: "quiet", APIKey: "sk-now-keyed", PlaintextKeyOK: true}}); got != 4 {
+		t.Errorf("relist with a key edited in = %d, want the keyed default 4", got)
+	}
+	if got := silent.relist([]config.ServerEntry{{Name: "quiet"}}); got != 1 {
+		t.Errorf("relist with the key removed = %d, want 1 — an unkeyed server with no width is serial", got)
 	}
 }
 

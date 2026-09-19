@@ -390,8 +390,9 @@ func firstStringArgument(arguments json.RawMessage) string {
 //
 // It never reports an error, and it replaced two probes that each asked the same server the same
 // question at the same moment: a server without /props, an unreachable one, a cancelled context all
-// answer the zero Beat, whose slot count ResolveParallelAgents turns into the serial floor a run
-// with no signal has always had and whose dialect is the historical `chat_template_kwargs` shape
+// answer the zero Beat, whose slot count ResolveParallelAgents turns into the entry's own default
+// width — one for an unkeyed server, four for a keyed one (config.DefaultParallelAgents) — and
+// whose dialect is the historical `chat_template_kwargs` shape
 // every unattended run spoke before the seam existed. What the failure MEANS is on the Beat itself
 // (Failure, Answered, Throttled) for the Driver that gates on it.
 //
