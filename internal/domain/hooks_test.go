@@ -956,6 +956,42 @@ func TestConversationAdviceSurvivesAPrunedMessage(t *testing.T) {
 	}
 }
 
+// TestConversationNoteMessage pins the history-side note: NoteMessage fences the text onto the
+// message at the index as an engine note on the topic — content, ledger row and revision all
+// move — and an out-of-range index changes nothing.
+func TestConversationNoteMessage(t *testing.T) {
+	const topic = "cancelled"
+	conv := NewConversation([]Message{
+		{Role: RoleUser, Content: "do it"},
+		{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "call-1", Tool: "read_file"}}},
+		{Role: RoleTool, Content: "ok", ToolCallID: "call-1"},
+	})
+	before := conv.Revision()
+
+	conv.NoteMessage(2, topic, "the run stopped here")
+
+	noted := conv.At(2)
+	if want := "ok" + RenderEngineNote(topic, "the run stopped here"); noted.Content != want {
+		t.Errorf("noted content = %q, want %q", noted.Content, want)
+	}
+	if len(noted.Advice) != 1 || noted.Advice[0].Topic != topic || noted.Advice[0].Origin != OriginEngine || noted.Advice[0].Offset != len("ok") {
+		t.Errorf("ledger = %+v, want one engine row on %q at offset 2", noted.Advice, topic)
+	}
+	if !conv.HasEngineNote(topic) {
+		t.Error("HasEngineNote does not see the note NoteMessage landed")
+	}
+	if conv.Revision() == before {
+		t.Error("NoteMessage did not bump the revision")
+	}
+
+	after := conv.Revision()
+	conv.NoteMessage(3, topic, "out of range")
+	conv.NoteMessage(-1, topic, "out of range")
+	if conv.Revision() != after || conv.Len() != 3 {
+		t.Errorf("an out-of-range NoteMessage changed the conversation (revision %d → %d, len %d)", after, conv.Revision(), conv.Len())
+	}
+}
+
 // TestConversationHasEngineNote pins the query a once-per-conversation note latches on: true
 // for the topic a tool message carries, false for another topic, false once SetMessageContent
 // shortened the message below the note's offset (the ledger went with the fence), and false once

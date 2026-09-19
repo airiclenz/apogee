@@ -244,6 +244,108 @@ func TestAbortExchangeDropsInterjections(t *testing.T) {
 	}
 }
 
+// TestSettleExchange_InterjectedWithoutAToolResultFallsBackToAbort pins the embedder-reachable
+// shape with no finished Turn: Turn 0 cancelled leaves the Exchange open, Interject refuses only
+// outside one, so the history can read [user(opening), user(Interjected)] — and with no tool
+// result to carry the cut, settle scraps it as abort does.
+func TestSettleExchange_InterjectedWithoutAToolResultFallsBackToAbort(t *testing.T) {
+	responder := &blockAtResponder{
+		scripts: [][]provider.Delta{toolCallScript("c1", "lookup", "{}")},
+		blockAt: 0,
+		started: make(chan struct{}),
+	}
+	a, err := newAgent(interjectConfig(&recordingSink{}), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+	if res, err := a.Step(ctx); err != nil || res.Status != domain.StatusCancelled {
+		t.Fatalf("Step 0 = %+v, %v; want StatusCancelled", res, err)
+	}
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "also the tests"}); err != nil {
+		t.Fatalf("Interject: %v", err)
+	}
+	if got := a.conv.Len(); got != 2 {
+		t.Fatalf("fixture holds %d messages, want 2 (opening + interjection)", got)
+	}
+
+	dropped := a.SettleExchange()
+
+	if !dropped {
+		t.Error("SettleExchange reported the Exchange kept; without a tool result it must fall back to abort")
+	}
+	if got := a.conv.Len(); got != 0 {
+		t.Errorf("after settle the conversation has %d messages, want 0", got)
+	}
+	if a.InExchange() {
+		t.Error("SettleExchange left the Exchange open")
+	}
+}
+
+// TestSettleExchange_KeepsADeliveredInterjectionAfterTheNote pins the other interjection fate: a
+// remark delivered after the finished Turn survives the cancelled Turn's rollback
+// (TestInterjectSurvivesCancelledTurn) and survives settle too — the cut rides the tool result
+// BEFORE it, so the kept history ends […, tool(note), user(Interjected)] and the next Submit
+// opens user→user, the tail an abandoned Exchange already leaves.
+func TestSettleExchange_KeepsADeliveredInterjectionAfterTheNote(t *testing.T) {
+	responder := &blockAtResponder{
+		scripts: [][]provider.Delta{toolCallScript("c1", "lookup", "{}")},
+		blockAt: 1,
+		started: make(chan struct{}),
+	}
+	a, err := newAgent(interjectConfig(&recordingSink{}), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res, err := a.Step(context.Background()); err != nil || res.Status != domain.StatusTurnComplete {
+		t.Fatalf("Step 0 = %+v, %v; want StatusTurnComplete", res, err)
+	}
+	if err := a.Interject(context.Background(), domain.UserInput{Text: "wait — also the tests"}); err != nil {
+		t.Fatalf("Interject: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+	if res, err := a.Step(ctx); err != nil || res.Status != domain.StatusCancelled {
+		t.Fatalf("Step 1 = %+v, %v; want StatusCancelled", res, err)
+	}
+
+	dropped := a.SettleExchange()
+
+	if dropped {
+		t.Fatal("SettleExchange reported the Exchange dropped; a finished Turn must be kept")
+	}
+	if got := a.conv.Len(); got != 4 {
+		t.Fatalf("after settle the conversation has %d messages, want 4 (user, tool call, tool result, interjection)", got)
+	}
+	noted := a.conv.At(2)
+	if noted.Role != domain.RoleTool || !strings.Contains(noted.Content, settledExchangeMarker) {
+		t.Errorf("the cut must ride the tool result before the interjection; message 2 = %+v", noted)
+	}
+	tail := a.conv.At(3)
+	if !tail.Interjected || tail.Content != "wait — also the tests" {
+		t.Errorf("settle dropped or rewrote the delivered interjection; tail = %+v", tail)
+	}
+	if a.InExchange() {
+		t.Error("SettleExchange left the Exchange open")
+	}
+	if err := a.Submit(domain.UserInput{Text: "next"}); err != nil {
+		t.Errorf("Submit after settle: %v, want accepted", err)
+	}
+}
+
 // TestInterjectPersistsAcrossSnapshotRestore proves the marker is durable: it rides the
 // conversation's own marshal into a Session and comes back marked, so a session saved
 // mid-task and restored later still derives the same Exchange opening.

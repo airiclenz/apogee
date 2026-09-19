@@ -37,7 +37,7 @@
 // with the inline thinking already lifted out — and the observer hook the Turn streams live
 // through. turn.go is turnLifecycle, the
 // Turn/Exchange state between quiescent boundaries (ADR 0007) and the exits that mutate the
-// conversation. floorguards.go is what the Floor guards keep outside internal/floor
+// conversation, the settled Exchange's cut note among them (prompts/cancelled-note.txt). floorguards.go is what the Floor guards keep outside internal/floor
 // (ADR 0071): the reserved guard ids and the config keys and action labels a guard is known
 // by. reactions.go is the Reaction dispatcher that succeeded the
 // two ladders it replaced (ADR 0076): the one fire every seam calls, its two legs, the Bypass

@@ -252,9 +252,10 @@ func (l *turnLifecycle) end(t *turnRun, how turnEnd) domain.StepResult {
 // closeExchange ends the open Exchange — the ONE engine-side owner of Exchange end (ADR 0017
 // §3). It flips inExchange (re-opening Submit) and clears the deferred Response-Action queue,
 // owning the F6 invariant: a deferral dies with its Exchange — a directive deferred for this
-// flow's next request must never ride into a different Exchange's. Its callers are the three
+// flow's next request must never ride into a different Exchange's. Its callers are the
 // Exchange ends: end()'s endExchangeDone row (a final no-tool reply), its endAbandoned row (a
-// faulted Turn), and AbortExchange (the host scrapping the Exchange). endCancelled is
+// faulted Turn), its endStepCapped fallback, and the host's two ways of ending a cancelled
+// Exchange — AbortExchange (scrapping it) and SettleExchange (keeping its finished Turns). endCancelled is
 // deliberately NOT one — a cancelled Turn leaves the Exchange open for the resume re-attempt
 // and truncates-then-restores the deferred queue instead (F6(b)). Being the one owner is what
 // lets the undo journal hang its closing capture here through the observer: four Exchange ends, one
@@ -332,7 +333,8 @@ func (l *turnLifecycle) open() *domain.UserInput {
 // abort scraps the open Exchange (Agent.AbortExchange's engine half): it rolls the conversation
 // back to the boundary the Exchange began at — dropping the un-answered user message and any tool
 // Turns committed so far — re-arms the context-fill ladder, closes the Exchange and drops any
-// input queued behind it. No-op when no Exchange is open.
+// input queued behind it. No-op when no Exchange is open. It is the explicit throw-away; settle
+// is the exit that keeps the finished Turns.
 //
 // The ladder re-arms because the tool results the scrapped Exchange committed go with it —
 // including the one that carried a context-fill notice — so the climb ends here as it does after
@@ -348,6 +350,55 @@ func (l *turnLifecycle) abort() {
 	l.rearmFill()
 	l.closeExchange()
 	l.pendingInput = nil
+}
+
+// cancelledNoteTopic is the engine-note topic a settled Exchange's cut is fenced under —
+// `[engine — cancelled]` … `[end engine — cancelled]` — and the Topic its ledger row carries.
+const cancelledNoteTopic = "cancelled"
+
+// cancelledNoteLine is the cut's text (prompts/cancelled-note.txt): the model reading the next
+// request learns that the tool results above it stand and that the reply after them was never
+// given, so it neither re-does the finished work nor mistakes its own silence for an answer.
+var cancelledNoteLine = mustPrompt("cancelled-note.txt")
+
+// settle closes a cancelled Exchange KEEPING its finished Turns (Agent.SettleExchange's engine
+// half) — the exit for "the human moved on", where abort is the explicit throw-away. A cancelled
+// Turn's rollback (endCancelled) has already dropped the in-flight Turn, so what stands past
+// exchangeStart is the opening user message and the tool Turns that completed before the stop;
+// dropping those too (abort) is what saved 48 sessions as `messages: null`. When the Exchange
+// holds a finished Turn — a RoleTool message past exchangeStart — the history stays, the
+// cut is marked as an engine note on the LAST tool result (cancelledNoteTopic; ephemeral, so
+// the saved record keeps the results and no marker) and the Exchange closes; any interjection
+// delivered after that tool result stays too, so the next Submit opens user→user exactly as an
+// abandoned Exchange's tail already does (endAbandoned). Without a finished Turn there is no
+// tool result to carry the note, so the lone opening — or the opening plus an interjection
+// Turn 0's cancel left behind — falls through to abort. The fill ladder is NOT re-armed: the
+// kept results are still the ones the model has seen, so the climb they measured stands.
+// dropped reports which way it went: true means abort ran. No-op when no Exchange is open.
+func (l *turnLifecycle) settle() (dropped bool) {
+	if !l.inExchange {
+		return false
+	}
+	last := l.lastToolResult()
+	if last < 0 {
+		l.abort()
+		return true
+	}
+	l.conv.NoteMessage(last, cancelledNoteTopic, cancelledNoteLine)
+	l.closeExchange()
+	l.pendingInput = nil
+	return false
+}
+
+// lastToolResult returns the index of the last RoleTool message past the open Exchange's
+// boundary — the message a settled Exchange's cut rides — or -1 when the Exchange holds none.
+func (l *turnLifecycle) lastToolResult() int {
+	for i := l.conv.Len() - 1; i > l.exchangeStart; i-- {
+		if l.conv.At(i).Role == domain.RoleTool {
+			return i
+		}
+	}
+	return -1
 }
 
 // capped latches the wrap-up Turn (wrapUp) a delegate stopped at its step cap is given and returns

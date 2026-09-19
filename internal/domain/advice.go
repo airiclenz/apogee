@@ -35,7 +35,8 @@ import (
 //
 // Topic is set on exactly one kind of row: an ENGINE NOTE (Message.WithEngineNote) — structural
 // text the engine itself fences onto a tool result, such as a capped delegate's wrap-up
-// directive or its step- and token-budget notices (internal/agent, stepnotice.go). No Reaction
+// directive, its step- and token-budget notices (internal/agent, stepnotice.go) or the cut a
+// settled Exchange marks on its last tool result (internal/agent, turn.go). No Reaction
 // produced it, so Reaction, Moment and Turn are zero on that row and
 // Origin is OriginEngine; the fence it records is RenderEngineNote's, whose header names the
 // topic, never a Reaction id. It shares the ledger so the one strip (recordContent) and the one
@@ -134,6 +135,22 @@ func (m Message) hasEngineNote(topic string) bool {
 		}
 	}
 	return false
+}
+
+// NoteMessage fences text onto the committed message at index i as an engine note on topic
+// (Message.WithEngineNote) — the history-side counterpart of Request.NoteOnTail, for a note that
+// must ride a message already in the conversation rather than a request under construction: a
+// settled Exchange's cut on its last tool result (internal/agent, turnLifecycle.settle). The
+// ledger row it records is what keeps the note ephemeral — recordContent strips it from the
+// session record and dropStaleAdvice retires it with a rewrite — so a noted history is a noted
+// history only for the live conversation. An out-of-range i is ignored; a fresh note bumps the
+// revision like every other mutation.
+func (c *Conversation) NoteMessage(i int, topic, text string) {
+	if i < 0 || i >= len(c.messages) {
+		return
+	}
+	c.messages[i] = c.messages[i].WithEngineNote(topic, text)
+	c.revision++
 }
 
 // WithAdvice returns a copy of m whose Content carries text as a rendered advice fence and

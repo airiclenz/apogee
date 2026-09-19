@@ -567,6 +567,163 @@ func TestAbortExchange_NoExchangeIsNoop(t *testing.T) {
 	}
 }
 
+// settledExchangeMarker is the fence a settled Exchange's cut opens with on its last tool result.
+const settledExchangeMarker = domain.EngineNoteFencePrefix + "cancelled]"
+
+// cancelledMidTurnAgent runs Turn 0 (a completed tool Turn) and cancels Turn 1 while its reply
+// streams — the shape SettleExchange exists for: a finished Turn in history, the in-flight one
+// rolled back, the Exchange still open.
+func cancelledMidTurnAgent(t *testing.T) *Agent {
+	t.Helper()
+	responder := &blockAtResponder{
+		scripts: [][]provider.Delta{toolCallScript("c1", "lookup", "{}")},
+		blockAt: 1,
+		started: make(chan struct{}),
+	}
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res, err := a.Step(context.Background()); err != nil || res.Status != domain.StatusTurnComplete {
+		t.Fatalf("Step 0 = %+v, %v; want StatusTurnComplete", res, err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+	res, err := a.Step(ctx)
+	if err != nil {
+		t.Fatalf("Step 1 returned a loop error on cancel: %v", err)
+	}
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("Step 1 status = %q, want %q", res.Status, domain.StatusCancelled)
+	}
+	return a
+}
+
+// TestSettleExchange_KeepsFinishedTurnsAndNotesTheCut is the defect apogee-2un Stage A closes:
+// a stop after a finished Turn keeps that Turn — the opening user message, the tool call and its
+// result stay — and marks the cut as an `[engine — cancelled]` note on the last tool result, so
+// the next request the model reads says the results stand and the reply was not given; the
+// Exchange closes and the next Submit is accepted.
+func TestSettleExchange_KeepsFinishedTurnsAndNotesTheCut(t *testing.T) {
+	a := cancelledMidTurnAgent(t)
+
+	dropped := a.SettleExchange()
+
+	if dropped {
+		t.Fatal("SettleExchange reported the Exchange dropped; a finished Turn must be kept")
+	}
+	if got := a.conv.Len(); got != 3 {
+		t.Fatalf("after settle the conversation has %d messages, want 3 (user, tool call, tool result)", got)
+	}
+	last := a.conv.At(2)
+	if last.Role != domain.RoleTool {
+		t.Fatalf("last message role = %q, want %q", last.Role, domain.RoleTool)
+	}
+	if !strings.Contains(last.Content, settledExchangeMarker) || !strings.Contains(last.Content, cancelledNoteLine) {
+		t.Errorf("last tool result carries no cancelled note; content = %q", last.Content)
+	}
+	if !strings.HasPrefix(last.Content, "42") {
+		t.Errorf("the tool's own output must precede the note; content = %q", last.Content)
+	}
+	if a.InExchange() {
+		t.Error("SettleExchange left the Exchange open")
+	}
+
+	// The next Exchange reads the kept Turn and the cut on the wire.
+	upstream := echoResponder(t, "carrying on")
+	a.upstream = upstream
+	if err := a.Submit(domain.UserInput{Text: "next"}); err != nil {
+		t.Fatalf("Submit after settle: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run after settle: %v", err)
+	}
+	var noted bool
+	for _, m := range upstream.last().Messages {
+		if m.Role == "tool" && strings.Contains(m.Content, settledExchangeMarker) {
+			noted = true
+		}
+	}
+	if !noted {
+		t.Errorf("the next request carried no noted tool result; messages = %+v", upstream.last().Messages)
+	}
+}
+
+// TestSettleExchange_LoneUserMessageFallsBackToAbort pins the fall-through: with no finished Turn
+// there is no tool result to carry the cut, so a stop during Turn 0 scraps the lone opening user
+// message exactly as AbortExchange does — and says so.
+func TestSettleExchange_LoneUserMessageFallsBackToAbort(t *testing.T) {
+	sink := &recordingSink{}
+	started := make(chan struct{})
+	cfg := configWithTools(sink, blockingTool{name: "block", started: started})
+	a, err := newAgent(cfg, scriptedResponder(t, toolCallTurn("c1", "block", "{}")))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "run the slow tool"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-started
+		cancel()
+	}()
+	if res, err := a.Step(ctx); err != nil || res.Status != domain.StatusCancelled {
+		t.Fatalf("Step = %+v, %v; want StatusCancelled", res, err)
+	}
+
+	dropped := a.SettleExchange()
+
+	if !dropped {
+		t.Error("SettleExchange reported the Exchange kept; a lone user message must fall back to abort")
+	}
+	if got := a.conv.Len(); got != 0 {
+		t.Errorf("after settle the conversation has %d messages, want 0", got)
+	}
+	if a.InExchange() {
+		t.Error("SettleExchange left the Exchange open")
+	}
+	if err := a.Submit(domain.UserInput{Text: "start over"}); err != nil {
+		t.Errorf("Submit after settle: %v, want accepted", err)
+	}
+}
+
+// TestSettleExchange_NoExchangeIsNoop proves SettleExchange leaves a quiescent Agent with no
+// open Exchange untouched — no note lands on a finished Exchange's tool result.
+func TestSettleExchange_NoExchangeIsNoop(t *testing.T) {
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "ok"})
+	a, err := newAgent(cfg, scriptedResponder(t, toolCallTurn("c1", "lookup", "{}"), contentTurn("done")))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "hello"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	before := a.conv.Len()
+
+	dropped := a.SettleExchange()
+
+	if dropped {
+		t.Error("SettleExchange reported a drop with no open Exchange")
+	}
+	if got := a.conv.Len(); got != before {
+		t.Errorf("SettleExchange changed the conversation with no open Exchange (had %d, now %d)", before, got)
+	}
+	if a.conv.HasEngineNote(cancelledNoteTopic) {
+		t.Error("SettleExchange noted a tool result with no open Exchange")
+	}
+}
+
 // panickingTool panics in Execute — the input for the recover-at-extension-boundary guarantee.
 type panickingTool struct{ name string }
 

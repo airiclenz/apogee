@@ -150,6 +150,67 @@ func TestSnapshot_PreservesReasoningContent(t *testing.T) {
 	assertReasoning(t, &b.conv)
 }
 
+// TestSnapshot_RoundTripsASettledExchange is where "the saved record keeps the finished Turns"
+// is observed: a settled Exchange's snapshot carries the opening user message, the tool call and
+// its result — the very messages AbortExchange used to drop (48 sessions saved `messages: null`)
+// — and carries NO cut marker, because the `[engine — cancelled]` note is ephemeral (ADR 0076 D6:
+// the record is written from the content before the first fence). A resumed Agent holds the
+// same three messages unnoted, closed, and accepts the next Submit.
+func TestSnapshot_RoundTripsASettledExchange(t *testing.T) {
+	a := cancelledMidTurnAgent(t)
+	if a.SettleExchange() {
+		t.Fatal("SettleExchange dropped the Exchange; the fixture holds a finished Turn")
+	}
+
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	var st struct {
+		Conversation struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		} `json:"conversation"`
+		InExchange bool `json:"inExchange"`
+	}
+	if err := json.Unmarshal(snap.State, &st); err != nil {
+		t.Fatalf("Unmarshal snapshot state: %v", err)
+	}
+	if got := len(st.Conversation.Messages); got != 3 {
+		t.Fatalf("the record holds %d messages, want 3 (the finished Turn is kept)", got)
+	}
+	if st.InExchange {
+		t.Error("the record says the Exchange is still open")
+	}
+	if strings.Contains(string(snap.State), settledExchangeMarker) {
+		t.Errorf("the record carries the cut marker; the note must be ephemeral\n%s", snap.State)
+	}
+	if last := st.Conversation.Messages[2]; last.Role != "tool" || last.Content != "42" {
+		t.Errorf("recorded tool result = %+v, want role tool with the bare output %q", last, "42")
+	}
+
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
+	b, err := resumeAgent(cfg, snap, echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	if got := b.conv.Len(); got != 3 {
+		t.Fatalf("resumed conversation has %d messages, want 3", got)
+	}
+	if b.conv.HasEngineNote(cancelledNoteTopic) {
+		t.Error("the resumed conversation carries the cut marker; the note must not survive a record")
+	}
+	if b.InExchange() {
+		t.Error("the resumed Agent reports an open Exchange; settle closed it")
+	}
+	if err := b.Submit(domain.UserInput{Text: "next"}); err != nil {
+		t.Errorf("Submit after resume: %v, want accepted", err)
+	}
+}
+
 // TestSnapshot_RoundTripsExchangeBoundaryForAbort pins the ADR 0017 §2 fallback: the snapshot
 // keeps writing exchangeStart — the cached rollback boundary is load-bearing, because a
 // mid-Exchange history rewrite (a lab `HistoryRewriter`) can drop the open Exchange's opening user message, so the

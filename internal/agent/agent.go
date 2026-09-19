@@ -943,12 +943,28 @@ func (a *Agent) foldForParent(ctx context.Context) string {
 //
 // It is the interactive host's counterpart to the Step-driven resume path. After a cancel,
 // Step leaves the Exchange OPEN on purpose so a Step-driven host (the bench) re-Steps to
-// re-attempt the Turn (see end()'s endCancelled row, turn.go). A host with no resume affordance — the TUI, where Esc
-// means "stop, scrap it" — calls this instead, so the next /clear or message is accepted
-// rather than rejected with ErrInputPending. Like Snapshot, it is valid only at a quiescent
-// boundary: no worker may be driving the Agent when it is called (the host calls it only after
-// the worker has returned its cancellation), preserving the single-goroutine contract.
+// re-attempt the Turn (see end()'s endCancelled row, turn.go). A host with no resume affordance
+// calls one of the two closes instead, so the next /clear or message is accepted rather than
+// rejected with ErrInputPending. Abort is the explicit throw-away — /clear, where the human asks
+// for the Exchange to be gone; SettleExchange is "the human moved on" — the stop itself, after
+// which the work done so far still counts — and keeps the finished Turns. Like Snapshot, both
+// are valid only at a quiescent boundary: no worker may be driving the Agent when either is
+// called (the host calls them only after the worker has returned its cancellation), preserving
+// the single-goroutine contract.
 func (a *Agent) AbortExchange() { a.turns.abort() }
+
+// SettleExchange closes an interrupted Exchange keeping the Turns that finished before the stop
+// (turnLifecycle.settle). The cancelled Turn itself is already rolled back (end()'s endCancelled
+// row); what SettleExchange decides is the fate of the rest. When the Exchange holds a finished
+// Turn, the conversation stays as it stands and the cut is marked on its last tool result as an
+// `[engine — cancelled]` note — the model's next request reads that the results above stand and
+// the reply was not given — and the note is ephemeral: a saved record and a resumed conversation
+// keep the tool results with no marker (ADR 0076 D6). When it holds nothing beyond the opening
+// user message (or that plus an interjection with no tool result to carry the note), it falls
+// back to AbortExchange's rollback. dropped reports which: true when the Exchange was scrapped,
+// false when its Turns were kept. It is a no-op returning false when no Exchange is open, and
+// like AbortExchange it is valid only at a quiescent boundary.
+func (a *Agent) SettleExchange() (dropped bool) { return a.turns.settle() }
 
 // exchangeBoundary returns the conversation index the open Exchange began at — the rollback
 // target AbortExchange drops from and the boundary the snapshot round-trips. It is the ONE

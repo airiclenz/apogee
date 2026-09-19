@@ -639,7 +639,16 @@ exception: the abort-rollback boundary stays a cached field read through
 `Agent.exchangeBoundary()`, because a mid-Exchange truncation can drop the opening user
 message the derivation would need
 ([ADR 0017](docs/adr/0017-the-exchange-is-a-derived-domain-working-value.md) §2's recorded
-fallback).
+fallback). An Exchange the human stopped mid-run closes **without an answer**
+(`Agent.SettleExchange`): the Turns that finished before the stop stay — the opening user
+message, the tool calls and their results, and any interjection delivered after the last
+result — and the cut is marked as an ephemeral `[engine — cancelled]` engine note on that last
+tool result, so the model's next request reads that the results above stand and the reply was
+not given; a saved record and a resumed conversation keep the results with no marker
+([ADR 0076](docs/adr/0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) D6). An
+Exchange with no finished Turn has no tool result to carry the note and is scrapped instead
+(`Agent.AbortExchange`, the explicit throw-away `/clear` also takes), and a kept interjection
+leaves the next Submit opening user→user — the tail a faulted Exchange already leaves.
 
 **Step**:
 The bench/embedder primitive that advances the loop **one Turn** and returns at a
