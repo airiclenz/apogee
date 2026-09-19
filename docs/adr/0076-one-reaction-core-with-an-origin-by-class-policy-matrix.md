@@ -332,3 +332,32 @@ amendment note. This closes bead `apogee-jwf`.
 rewritten. Bead `apogee-pjx` narrows to the stage-2 scope above; stage 2b and stage 3 get their own
 beads. `CONTEXT.md`'s glossary work belongs to the stage-2 plan, not here, so it does not collide
 with stage 1 item 20, which is in flight.
+
+## Addendum — 2026-09-19: D6's seam also carries engine-structural text, under its own header
+
+D6 placed advise text as a fenced trailer on the closing tool result because that position is
+role-safe, prefix-cache-friendly and away from host-authored orientation. The same three properties
+are what a per-request **engine** instruction needs when it must sit where the model reads next
+rather than at the far end of a long system prompt — the first case is a capped delegate's wrap-up
+directive, which a child stamped only in the system prompt was seen ignoring as it narrated its
+next tool call instead of reporting. The seam therefore now carries two kinds of text:
+
+- an **advise span**, fenced `[advice — reaction <id> (<origin> origin) at <moment>, turn N]`, whose
+  header is derived from the Reaction's provenance (D6 unchanged);
+- an **engine note**, fenced `[engine — <topic>]` … `[end engine — <topic>]`
+  (`domain.RenderEngineNote`, `Message.WithEngineNote`, `Request.NoteOnTail`), whose header names
+  the engine's own topic and never a Reaction id — so the model tells a structural instruction from
+  a Reaction's advice by the header alone, and no Reaction can wear the engine's header.
+
+Both are rows of the one provenance ledger (`Message.Advice`; an engine note's row carries `Topic`
+and `OriginEngine`, no Reaction, Moment or Turn), so the one session-record strip and the one
+staleness guard cover both, and an engine note is as ephemeral as advice. An engine note is applied
+to the **request projection only** — `NoteOnTail` notes the last message when it is a tool result,
+idempotently per topic, and reports false otherwise so the caller can fall back to
+`AppendToSystem` — so it never enters the conversation, the snapshot or an event.
+
+The Rejected row "a dedicated tail message for every advise" is unaffected: the engine inserts no
+message after the tool result. On a tool-less request the wire degrades the noted tool message to
+user role whole, fence included — that user-role tail is the wire's rendering of one existing
+message, not a new message the engine appended, which is the case the row rejects.
+

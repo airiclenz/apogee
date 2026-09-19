@@ -507,6 +507,30 @@ func (r *Request) AppendToSystem(marker, text string) (injected bool) {
 	return true
 }
 
+// NoteOnTail fences text onto the request's last message as an engine note on topic
+// (Message.WithEngineNote) when that message is a tool result, and reports whether the note is
+// on the tail. It is the engine's own placement for a per-request structural instruction that
+// must sit where the model reads it — after the closing tool result of the Turn, not at the far
+// end of the system prompt — and it stays role-safe: the note rides the tool message, and a
+// wire that offers no tools degrades that message to user role whole, fence included, so no new
+// message is inserted after a tool result. A tail that is not a tool result (a user message, or
+// an assistant message on a faulted-then-retried shape) is left alone and false is returned, so
+// the caller can fall back to AppendToSystem. Idempotent on topic: a tail already carrying a
+// note on topic is not noted twice and the revision is not bumped, yet true is still returned —
+// the note IS on the tail. A fresh note bumps the revision like every other mutation.
+func (r *Request) NoteOnTail(topic, text string) bool {
+	n := len(r.messages)
+	if n == 0 || r.messages[n-1].Role != RoleTool {
+		return false
+	}
+	if r.messages[n-1].hasEngineNote(topic) {
+		return true
+	}
+	r.messages[n-1] = r.messages[n-1].WithEngineNote(topic, text)
+	r.revision++
+	return true
+}
+
 // InjectContext inserts a user message at the role-safe position: appended to the
 // system prompt if the conversation ends in a tool result (a user message after a
 // tool result breaks strict chat templates); appended at the end if it ends in an

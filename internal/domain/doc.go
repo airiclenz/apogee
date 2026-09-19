@@ -52,8 +52,9 @@
 // the Budget's pure token arithmetic — the ONE chars-to-token conversion every estimator and
 // token-gated reader delegates to. advice.go is the advise slot's substrate — the AdviceSpan
 // of the provenance ledger a Message carries, the fence rendered from that provenance rather
-// than from handler output, the 8 KiB cap, and the strip that keeps a span out of every
-// session record (ADR 0076 D6).
+// than from handler output, the 8 KiB cap, the engine note the engine fences onto a tool
+// result under its own header on the same ledger, and the strip that keeps every row out of
+// every session record (ADR 0076 D6 and its 2026-09-19 addendum).
 //
 // The Reaction core. reaction.go is the one vocabulary every seam speaks
 // (ADR 0076): the Moment set with its seam and notice halves, the Origin and Class axes of

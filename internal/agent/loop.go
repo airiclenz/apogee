@@ -855,12 +855,20 @@ func (a *Agent) buildRequest(turn int) (*domain.Request, []string) {
 	// because it is the engine's own bound and must hold under Bypass, where no hook runs at all.
 	// It is the other half of the withdrawn menu toolMenu just returned — without it the child is
 	// left to guess why its tools vanished — and it carries the output clause exactly when that
-	// menu kept write_file for the delegation's `output_path` (wrapUpWriter). It is per-request
-	// and stands alone — not a standingBlocks row: AppendToSystem CREATES the system message when
-	// none exists, so a session with no configured prompt and no context files still carries the
-	// directive.
+	// menu kept write_file for the delegation's `output_path` (wrapUpWriter). It rides the
+	// closing tool result of the capping Turn as an engine note (Request.NoteOnTail, the advise
+	// slot's seam under the engine's own fence — ADR 0076 D6 addendum): the tail is where the
+	// model reads next, whereas a sentence at the far end of a long system prompt is what a
+	// capped child ignored when it narrated its next tool call instead of reporting. It is
+	// per-request and stands alone — never in the conversation, never a standingBlocks row. The
+	// system copy remains only as the FALLBACK for a tail that is not a tool result (a wrap-up
+	// Submitted on a user message, a faulted-then-retried assistant tail): AppendToSystem CREATES
+	// the system message when none exists, so a session with no configured prompt and no context
+	// files still carries the directive on that path.
 	if a.turns.wrappingUp() {
-		req.AppendToSystem(wrapUpMarker, a.wrapUpDirective())
+		if directive := a.wrapUpDirective(); !req.NoteOnTail(wrapUpNoteTopic, directive) {
+			req.AppendToSystem(wrapUpMarker, directive)
+		}
 	}
 	deferred, ok := a.conv.TakeDeferred()
 	if ok {

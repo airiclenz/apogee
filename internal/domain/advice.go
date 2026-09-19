@@ -11,7 +11,11 @@ import (
 //
 // An advise Reaction returns text the model sees. For a tool-shaped Moment the text lands as
 // a fenced trailer on the closing tool result, so the request prefix is untouched and a local
-// server's prefix cache survives the Turn. Three facts hold this together and live here:
+// server's prefix cache survives the Turn. The engine rides the same seam for its own
+// structural text — an ENGINE NOTE (RenderEngineNote, Message.WithEngineNote), fenced under its
+// own header on the closing tool result of a request that needs it (a capped delegate's wrap-up
+// directive, Request.NoteOnTail) and recorded on the same ledger, so one strip and one staleness
+// guard cover both. Three facts hold this together and live here:
 //
 //   - the fence header is derived from PROVENANCE, never from handler output, so nothing
 //     out-of-process can forge an engine header by printing one;
@@ -28,12 +32,20 @@ import (
 // starts — so Content[:Offset] is the message as it stood before any advice, and the first
 // span's Offset is the cut the session-record strip makes. A ledger is append-ordered:
 // spans[0] is the earliest injection, hence the earliest cut.
+//
+// Topic is set on exactly one kind of row: an ENGINE NOTE (Message.WithEngineNote) — structural
+// text the engine itself fences onto a tool result, such as a capped delegate's wrap-up
+// directive. No Reaction produced it, so Reaction, Moment and Turn are zero on that row and
+// Origin is OriginEngine; the fence it records is RenderEngineNote's, whose header names the
+// topic, never a Reaction id. It shares the ledger so the one strip (recordContent) and the one
+// staleness guard (dropStaleAdvice) cover everything a message carries past its own content.
 type AdviceSpan struct {
 	Reaction string
 	Origin   Origin
 	Moment   Moment
 	Turn     int
 	Offset   int
+	Topic    string
 }
 
 // AdviceCap is the byte ceiling on one advise handler's text (ADR 0076 D7). Output past it is
@@ -52,6 +64,16 @@ const adviceTruncationMarker = "\n[advice truncated at 8 KiB]"
 const (
 	AdviceFencePrefix      = "[advice — reaction "
 	AdviceFenceClosePrefix = "[end advice — "
+)
+
+// EngineNoteFencePrefix and EngineNoteFenceClosePrefix open the two structural lines of an engine
+// note's fence (RenderEngineNote): `[engine — <topic>]` … `[end engine — <topic>]`. It is a fence
+// of its own, deliberately NOT the advice fence: that header names the Reaction that spoke, and an
+// engine note has none — what it names is the engine's own topic, so the model can tell a
+// structural instruction from a Reaction's advice by the header alone.
+const (
+	EngineNoteFencePrefix      = "[engine — "
+	EngineNoteFenceClosePrefix = "[end engine — "
 )
 
 // RenderAdvice renders one advice span as the fenced block appended to a message's Content.
@@ -80,6 +102,37 @@ func CapAdvice(text string) string {
 		cut--
 	}
 	return text[:cut] + adviceTruncationMarker
+}
+
+// RenderEngineNote renders one engine note as the fenced block appended to a message's Content:
+// a blank line, the header naming topic, text verbatim, and the closing line naming topic again.
+// The header is built here from the caller's topic — never from text — so a note's body that
+// prints its own header lands inside the fence, exactly as RenderAdvice fences a handler's.
+func RenderEngineNote(topic, text string) string {
+	return "\n\n" + EngineNoteFencePrefix + topic + "]\n" + text + "\n" + EngineNoteFenceClosePrefix + topic + "]"
+}
+
+// WithEngineNote returns a copy of m whose Content carries text as a rendered engine-note fence
+// (RenderEngineNote) and whose ledger records the note — an AdviceSpan with Topic set and
+// Origin OriginEngine — at the offset that fence begins, so recordContent strips it with the
+// advice and dropStaleAdvice retires it with the advice. The ledger is copied, as WithAdvice
+// copies it. It never checks for an earlier note on the same topic: that is the request's
+// business (Request.NoteOnTail), which owns the idempotency.
+func (m Message) WithEngineNote(topic, text string) Message {
+	span := AdviceSpan{Origin: OriginEngine, Offset: len(m.Content), Topic: topic}
+	m.Content += RenderEngineNote(topic, text)
+	m.Advice = append(append([]AdviceSpan(nil), m.Advice...), span)
+	return m
+}
+
+// hasEngineNote reports whether m's ledger already carries an engine note on topic.
+func (m Message) hasEngineNote(topic string) bool {
+	for _, span := range m.Advice {
+		if span.Topic == topic {
+			return true
+		}
+	}
+	return false
 }
 
 // WithAdvice returns a copy of m whose Content carries text as a rendered advice fence and

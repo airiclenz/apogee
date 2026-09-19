@@ -660,9 +660,15 @@ was concluded, what remains unfinished; no file contents) on the child's own mod
 It is a summary call, not a Compaction: the child's history is untouched, its usage is booked
 `Maintenance` with the `DelegateFold` flag so no "context compacted" trace is written, and it is
 no Turn. Then the engine spends one further Turn on the child's CLOSING REPORT: that request
-goes out with the tool menu withdrawn, telling the delegate which bound it hit, why its tools
-are gone, and asking it to report to the agent that delegated the task, unfinished work
-included. That Turn is EXTRA — it sits outside the cap, so `delegate-max-steps: 3` still buys
+goes out with the tool menu withdrawn, and the directive telling the delegate which bound it
+hit, why its tools are gone, and asking it to report to the agent that delegated the task,
+unfinished work included — not to continue the task, not to write what a tool would have
+printed — rides the closing tool result of the capping Turn as an **engine note**, fenced
+`[engine — wrap-up]` … `[end engine — wrap-up]` where the model reads next (the advise slot's
+seam under the engine's own header, ADR 0076 D6 addendum; the tool-less wire degrades that
+message to user role whole, so the fence reaches the model as the tail of a user message). Only
+when the tail is not a tool result does the directive fall back to the system prompt. That Turn
+is EXTRA — it sits outside the cap, so `delegate-max-steps: 3` still buys
 three working Turns plus this one reply. The fold IS the report: the parent receives it on every
 bound under `[engine summary]`, and the child's closing text follows under `[delegate's closing
 report]` — the wrap-up's reply, or whatever the child last said out loud when that Turn faults,

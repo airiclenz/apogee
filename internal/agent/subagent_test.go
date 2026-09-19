@@ -1956,8 +1956,8 @@ func TestSubAgent_TokenBudgetEndsTheChildThroughTheWrapUp(t *testing.T) {
 	if got := len(wrapUp.Tools); got != 0 {
 		t.Errorf("the wrap-up request carries %d tools, want 0", got)
 	}
-	if directive := fmt.Sprintf(wrapUpTokenDirectiveFormat, 20_000_000); !strings.Contains(wrapUp.Messages[0].Content, directive) {
-		t.Errorf("wrap-up system content = %q, want the token directive %q", wrapUp.Messages[0].Content, directive)
+	if directive := fmt.Sprintf(wrapUpTokenDirectiveFormat, 20_000_000); !strings.HasSuffix(requestTail(t, wrapUp).Content, domain.RenderEngineNote(wrapUpNoteTopic, directive)) {
+		t.Errorf("wrap-up tail = %q, want the closing tool result carrying the token directive %q", requestTail(t, wrapUp).Content, directive)
 	}
 	if !hasErrorContaining(sink.events, 1, "token budget (20000000 tokens)") ||
 		!hasErrorContaining(sink.events, 1, "raise delegate-max-tokens") {
@@ -1994,8 +1994,8 @@ func TestSubAgent_TimeLimitEndsTheChildThroughTheWrapUp(t *testing.T) {
 	if got := len(wrapUp.Tools); got != 0 {
 		t.Errorf("the wrap-up request carries %d tools, want 0", got)
 	}
-	if directive := fmt.Sprintf(wrapUpTimeDirectiveFormat, "2h0m"); !strings.Contains(wrapUp.Messages[0].Content, directive) {
-		t.Errorf("wrap-up system content = %q, want the time directive %q", wrapUp.Messages[0].Content, directive)
+	if directive := fmt.Sprintf(wrapUpTimeDirectiveFormat, "2h0m"); !strings.HasSuffix(requestTail(t, wrapUp).Content, domain.RenderEngineNote(wrapUpNoteTopic, directive)) {
+		t.Errorf("wrap-up tail = %q, want the closing tool result carrying the time directive %q", requestTail(t, wrapUp).Content, directive)
 	}
 	if !hasErrorContaining(sink.events, 1, "time limit (2h0m)") ||
 		!hasErrorContaining(sink.events, 1, "raise delegate-timeout") {
@@ -2843,6 +2843,82 @@ func wrapUpRequest(t *testing.T, responder *requestLogResponder) provider.Reques
 	return responder.requests[wrapUpIndex]
 }
 
+// requestTail returns the last message of a request the loop sent — where the wrap-up directive
+// rides when that message is the capping Turn's closing tool result (Request.NoteOnTail).
+func requestTail(t *testing.T, req provider.Request) provider.Message {
+	t.Helper()
+
+	if len(req.Messages) == 0 {
+		t.Fatal("request carries no messages")
+	}
+	return req.Messages[len(req.Messages)-1]
+}
+
+// TestWrapUpDirectiveRidesTheClosingToolResult pins the placement on a REAL capped run, whose
+// wrap-up request ends on the capping Turn's tool result: the directive is fenced onto that tail
+// as the engine note — under the engine's own header, after the tool's output — and the system
+// prompt carries no copy of it. The one-message-per-Turn shape of the request is untouched: no
+// message is added after the tool result.
+func TestWrapUpDirectiveRidesTheClosingToolResult(t *testing.T) {
+	a, responder, _, _ := outputPathAgent(t, domain.ModeAllowEdits, "", contentScript(childClosingReport))
+
+	runExchange(t, a, "please research")
+
+	req := wrapUpRequest(t, responder)
+	tail := requestTail(t, req)
+	if tail.Role != string(domain.RoleTool) || tail.ToolCallID == "" {
+		t.Fatalf("tail = %+v, want the capping Turn's tool result", tail)
+	}
+	directive := fmt.Sprintf(wrapUpDirectiveFormat, 2)
+	body, fence, cut := strings.Cut(tail.Content, "\n\n"+domain.EngineNoteFencePrefix)
+	if !cut || body != "package main" {
+		t.Fatalf("tail = %q, want the tool's own output %q followed by the engine fence", tail.Content, "package main")
+	}
+	if want := strings.TrimPrefix(domain.RenderEngineNote(wrapUpNoteTopic, directive), "\n\n"+domain.EngineNoteFencePrefix); fence != want {
+		t.Errorf("fence = %q, want %q", fence, want)
+	}
+	if strings.Contains(tail.Content, domain.AdviceFencePrefix) {
+		t.Errorf("tail = %q wears the advice fence; an engine note has its own header", tail.Content)
+	}
+	if got := requestSystemText(req); strings.Contains(got, wrapUpMarker) {
+		t.Errorf("system text = %q, want no directive there — it rides the tail", got)
+	}
+	// The one request before it — the engine fold's — and every working Turn's carry no note.
+	for i, earlier := range responder.requests[:4] {
+		for _, m := range earlier.Messages {
+			if strings.Contains(m.Content, domain.EngineNoteFencePrefix) {
+				t.Errorf("request %d carries an engine note before the wrap-up: %q", i, m.Content)
+			}
+		}
+	}
+}
+
+// TestWrapUpDirectiveFallsBackToTheSystemPromptOnAnAssistantTail pins the other leg of the
+// placement: a wrap-up request whose tail is NOT a tool result — here the faulted-then-retried
+// shape, where the conversation ends on the assistant's half-reply — cannot take the note, so the
+// directive lands in the system prompt through AppendToSystem, and nothing is fenced anywhere.
+func TestWrapUpDirectiveFallsBackToTheSystemPromptOnAnAssistantTail(t *testing.T) {
+	a, _, _, _ := wrapUpAgent(t, true, contentScript("here is what I found"))
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "trawl the repo"})
+	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "half a reply, then a fault"})
+
+	req, _ := a.buildRequest(1)
+
+	msgs := req.State().Messages
+	want := fmt.Sprintf(wrapUpDirectiveFormat, 3)
+	if got := requestSystemText(a.toProviderRequest(req)); !strings.Contains(got, want) {
+		t.Errorf("system text = %q, want the directive %q — the fallback for a tail that is not a tool result", got, want)
+	}
+	if tail := msgs[len(msgs)-1]; tail.Role != domain.RoleAssistant || strings.Contains(tail.Content, domain.EngineNoteFencePrefix) {
+		t.Errorf("tail = %q (%s), want the assistant message untouched", tail.Content, tail.Role)
+	}
+	for _, m := range msgs {
+		if strings.Contains(m.Content, domain.EngineNoteFencePrefix) {
+			t.Errorf("a message carries the engine fence on the fallback path: %q", m.Content)
+		}
+	}
+}
+
 // wrapUpWriteResults returns every tool result a child (Depth 1) committed for the named tool.
 func wrapUpWriteResults(events []domain.Event, tool string) []domain.ToolResult {
 	ids := map[string]bool{}
@@ -2878,8 +2954,12 @@ func TestSubAgent_OutputPathKeepsWriteFileInTheWrapUp(t *testing.T) {
 		t.Fatalf("wrap-up menu = %+v, want exactly write_file", req.Tools)
 	}
 	want := fmt.Sprintf(wrapUpDirectiveFormat, 2) + fmt.Sprintf(wrapUpOutputClauseFormat, "out/report.md")
-	if got := requestSystemText(req); !strings.Contains(got, want) {
-		t.Errorf("system text = %q, want it to contain the directive followed by the output clause %q", got, want)
+	tail := requestTail(t, req)
+	if tail.Role != string(domain.RoleTool) || !strings.HasSuffix(tail.Content, domain.RenderEngineNote(wrapUpNoteTopic, want)) {
+		t.Errorf("tail = %q (%s), want the closing tool result carrying the directive followed by the output clause %q as its engine note", tail.Content, tail.Role, want)
+	}
+	if got := requestSystemText(req); strings.Contains(got, wrapUpMarker) {
+		t.Errorf("system text = %q carries the directive; with a tool-result tail it rides the tail, not the system prompt", got)
 	}
 
 	body, err := os.ReadFile(filepath.Join(ws, "out", "report.md"))
@@ -3019,12 +3099,19 @@ func TestSubAgent_WrapUpStaysToolLessWithoutAnOutputPath(t *testing.T) {
 	if len(req.Tools) != 0 {
 		t.Errorf("wrap-up menu = %+v, want none without an output path", req.Tools)
 	}
-	got := requestSystemText(req)
-	if want := fmt.Sprintf(wrapUpDirectiveFormat, 2); !strings.Contains(got, want) {
-		t.Errorf("system text = %q, want the plain directive %q", got, want)
+	// The responder logs the seam request, ahead of the wire: the tail is still the tool message
+	// here, and it is the tool-less wire (provider.formatMessage) that degrades it to user role,
+	// fence included — pinned in internal/provider's wire tests.
+	tail := requestTail(t, req)
+	if want := fmt.Sprintf(wrapUpDirectiveFormat, 2); tail.Role != string(domain.RoleTool) ||
+		!strings.HasSuffix(tail.Content, domain.RenderEngineNote(wrapUpNoteTopic, want)) {
+		t.Errorf("tail = %q (%s), want the closing tool result carrying the plain directive %q as its engine note", tail.Content, tail.Role, want)
 	}
-	if strings.Contains(got, "You may still call write_file") {
-		t.Errorf("system text = %q carries the output clause without an output path", got)
+	if strings.Contains(tail.Content, "You may still call write_file") {
+		t.Errorf("tail = %q carries the output clause without an output path", tail.Content)
+	}
+	if got := requestSystemText(req); strings.Contains(got, wrapUpMarker) {
+		t.Errorf("system text = %q carries the directive; with a tool-result tail it rides the tail, not the system prompt", got)
 	}
 	if results := wrapUpWriteResults(sink.events, tools.WriteFileToolName); len(results) != 0 {
 		t.Errorf("write_file results = %+v, want none — a withdrawn menu is not reachable", results)
@@ -3049,8 +3136,8 @@ func TestSubAgent_PlanModeWrapUpOffersNoWriter(t *testing.T) {
 	if len(req.Tools) != 0 {
 		t.Errorf("wrap-up menu = %+v, want none in Plan mode", req.Tools)
 	}
-	if got := requestSystemText(req); strings.Contains(got, "You may still call write_file") {
-		t.Errorf("system text = %q carries the output clause for a Plan-mode child", got)
+	if tail := requestTail(t, req); strings.Contains(tail.Content, "You may still call write_file") {
+		t.Errorf("tail = %q carries the output clause for a Plan-mode child", tail.Content)
 	}
 	if results := wrapUpWriteResults(sink.events, tools.WriteFileToolName); len(results) != 0 {
 		t.Errorf("write_file results = %+v, want none in Plan mode", results)
@@ -3288,8 +3375,11 @@ func assistantMessages(a *Agent) []domain.Message {
 }
 
 // TestWrapUpRequestWithdrawsToolsAndSaysWhy pins the shape of the one request the latch composes:
-// zero tools on the wire and a system message carrying the directive with the cap's own number,
-// in a session that configured no system prompt at all.
+// zero tools on the wire and the directive with the cap's own number, in a session that configured
+// no system prompt at all. This run Submits, so its one request ends on the USER message — a tail
+// that takes no engine note — which makes it the SYSTEM-FALLBACK pin: AppendToSystem creates the
+// system message for the directive. The tool-result-tail placement is pinned on a real capped run
+// (TestWrapUpDirectiveRidesTheClosingToolResult).
 func TestWrapUpRequestWithdrawsToolsAndSaysWhy(t *testing.T) {
 	a, responder, _, _ := wrapUpAgent(t, true, contentScript("here is what I found"))
 
@@ -3305,6 +3395,9 @@ func TestWrapUpRequestWithdrawsToolsAndSaysWhy(t *testing.T) {
 	want := fmt.Sprintf(wrapUpDirectiveFormat, 3)
 	if got := requestSystemText(req); !strings.Contains(got, want) {
 		t.Errorf("system text = %q, want it to contain the wrap-up directive %q", got, want)
+	}
+	if tail := requestTail(t, req); tail.Role != string(domain.RoleUser) || strings.Contains(tail.Content, domain.EngineNoteFencePrefix) {
+		t.Errorf("tail = %q (%s), want the user message untouched — a user tail takes no engine note", tail.Content, tail.Role)
 	}
 }
 

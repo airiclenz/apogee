@@ -75,7 +75,8 @@ func (l *liveEventLog) snapshot() []domain.Event {
 }
 
 // budgetProbe is a pre-request Reaction that records the Budget every request was built under,
-// and the size of the tool menu it carried, keyed by the Depth of the agent that built it. It is
+// the size of the tool menu it carried and the content of its last message, keyed by the Depth
+// of the agent that built it. It is
 // the only seam a test has onto a CHILD's Budget and menu: the child Agent is constructed inside
 // runSubAgent and closed there, so nothing outside the delegation ever holds it, while its
 // requests all pass through here. Only buildRequest's requests reach a pre-request Reaction — the
@@ -88,6 +89,7 @@ type budgetProbe struct {
 	mu    sync.Mutex
 	seen  map[int][]domain.Budget
 	menus map[int][]int
+	tails map[int][]string
 }
 
 // reaction arms the probe as a pre-request Reaction on Config.Reactions.
@@ -107,8 +109,12 @@ func (p *budgetProbe) reaction() domain.Reaction {
 			if p.menus == nil {
 				p.menus = make(map[int][]int)
 			}
+			if p.tails == nil {
+				p.tails = make(map[int][]string)
+			}
 			p.seen[view.Depth()] = append(p.seen[view.Depth()], view.Budget())
 			p.menus[view.Depth()] = append(p.menus[view.Depth()], len(view.Tools()))
+			p.tails[view.Depth()] = append(p.tails[view.Depth()], lastMessageContent(view.Conversation()))
 			return domain.Outcome{}, nil
 		}),
 	}
@@ -127,6 +133,22 @@ func (p *budgetProbe) menuSizesAt(depth int) []int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return append([]int(nil), p.menus[depth]...)
+}
+
+// tailsAt returns the last message's content of each request recorded for agents at the given
+// nesting depth, in request order.
+func (p *budgetProbe) tailsAt(depth int) []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return append([]string(nil), p.tails[depth]...)
+}
+
+// lastMessageContent is the content of the newest message a request carries, "" for none.
+func lastMessageContent(conv domain.ConversationView) string {
+	if conv.Len() == 0 {
+		return ""
+	}
+	return conv.At(conv.Len() - 1).Content
 }
 
 // childTurns counts the Turns a delegation actually took, from the events it emitted: the
@@ -346,6 +368,18 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 	if !armed {
 		t.Errorf("the child's requests before the wrap-up offered no tools either (menu sizes in "+
 			"request order: %v); the withdrawal is only meaningful against an armed menu", menus)
+	}
+	// And the directive rides that request's TAIL — the capping Turn's closing tool result, fenced
+	// as the engine note (Request.NoteOnTail) — not its system prompt: a real child's last request
+	// ends on a tool result, so the fallback never fires here.
+	tails := probe.tailsAt(1)
+	if len(tails) != len(menus) {
+		t.Fatalf("the budget probe recorded %d tails against %d menus at Depth 1", len(tails), len(menus))
+	}
+	if last := tails[len(tails)-1]; !strings.Contains(last, domain.EngineNoteFencePrefix+wrapUpNoteTopic+"]") ||
+		!strings.Contains(last, wrapUpMarker) {
+		t.Errorf("the child's wrap-up request ends on %q, want the closing tool result carrying the "+
+			"wrap-up directive under the engine fence", last)
 	}
 
 	// 2. The child worked in the WINDOW the server advertises and the ROOM the key allows: its

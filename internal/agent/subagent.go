@@ -432,20 +432,26 @@ func (a *Agent) outputMissing() bool {
 	return errors.Is(err, fs.ErrNotExist)
 }
 
-// wrapUpMarker and wrapUpDirectiveFormat are the one-request system directive a delegate stopped
-// at its step cap is handed for its closing report (turnLifecycle.wrapUp, loop.go): the request that
+// wrapUpMarker and wrapUpDirectiveFormat are the one-request directive a delegate stopped at its
+// step cap is handed for its closing report (turnLifecycle.wrapUp, loop.go): the request that
 // carries it carries no tools at all — bar write_file for a delegation spawned with an
 // `output_path`, which wrapUpOutputClauseFormat announces below — so the directive is the only
 // thing that tells the child WHY its menu vanished and what to do with the reply it has left. It states the cause, the
 // prohibition and the ask — report to the agent that delegated the task, unfinished work included
 // — because a model that is merely given no tools narrates its next tool call instead of a result,
-// which is exactly the scavenged text this replaces.
+// which is exactly the scavenged text this replaces. The tail spells out the two ways that reply
+// goes wrong — continuing the task, and writing what a tool would have printed — because a capped
+// child's closing text has been seen doing both (a fabricated tool dump the parent then read as a
+// finding), and names how the reply is read: as the report, nothing else.
 //
-// The marker is a phrase INSIDE the directive, as AppendToSystem's idempotency contract requires
-// (domain/hooks.go). %d is the cap actually applied (Agent.stepCap) — the same number the human
-// reads in stepCapErrFormat and the parent reads in stepCapResultFormat, so all three tell one
-// story. Package constants, pinned by test, because the child reads them as the contract for its
-// last reply.
+// It rides the closing tool result of the capping Turn as an engine note under wrapUpNoteTopic
+// (buildRequest → Request.NoteOnTail), where the model reads next; the system prompt carries it
+// only on the fallback — a tail that is not a tool result — through AppendToSystem, whose
+// idempotency contract needs the marker to be a phrase INSIDE the directive (domain/hooks.go).
+// %d is the cap actually applied (Agent.stepCap) — the same number the human reads in
+// stepCapErrFormat and the parent reads in stepCapResultFormat, so all three tell one story.
+// Package constants, pinned by test, because the child reads them as the contract for its last
+// reply.
 //
 // The token and time bounds hand the child the same directive with their own opening clause
 // (wrapUpTokenDirectiveFormat, wrapUpTimeDirectiveFormat): the cause differs, the prohibition and
@@ -459,12 +465,18 @@ func (a *Agent) outputMissing() bool {
 const (
 	wrapUpMarker = "no further tool calls are possible"
 
+	// wrapUpNoteTopic is the engine-note topic the directive is fenced under on the closing tool
+	// result — `[engine — wrap-up]` … `[end engine — wrap-up]` — and the key NoteOnTail's
+	// idempotency runs on.
+	wrapUpNoteTopic = "wrap-up"
+
 	wrapUpOutputClauseFormat = "\n\nYou may still call write_file once, for %s only."
 
 	wrapUpDirectiveTail = "no further tool calls are possible: the tools have been withdrawn for this final reply." +
 		"\n\nReport back to the agent that delegated this task now: what you found, what you " +
 		"concluded, and what remains unfinished. This is your only remaining reply — anything you " +
-		"do not write here is lost."
+		"do not write here is lost. Do not continue the task. Do not write what a tool would have " +
+		"printed — your reply is read as your report, nothing else."
 
 	wrapUpDirectiveFormat = "You have reached the step limit for this delegation (%d steps) and " +
 		wrapUpDirectiveTail
