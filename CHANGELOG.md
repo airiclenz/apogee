@@ -30,6 +30,10 @@ point is a **minor** bump, not a breaking change.
 
 - Docs: `CONTEXT.md` (**Step cap**, **Sub-agent**, **Delegation name**), the manual's delegation section and ADR 0013/0022 addenda (2026-09-18) describe the engine fold, the fenced wrap-up, the one wrap-up write, the structural step notice and `sub_agent`'s `continue: "<name>"` — retained in memory for the Exchange only, a fresh cap per Run, nothing to continue after a resume; ADR 0013 §5 and ADR 0022 D8 stand.
 
+- Tests: `TestAnthropicParseSSE_ReplyTextIsCapped` pins the 8 MiB reply-text cap on the anthropic wire for both `text_delta` and `thinking_delta` — one non-retryable `DeltaError` naming the limit, no `DeltaDone`, nothing past the cap delivered, and the parser stops reading at the error; the openai cap tests share the assertion through `assertReplyTextCapDeltas` (closes `apogee-2kj`).
+
+- Tests: `TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly` reads the Generation off the two Agents `probe context --live` builds — the as-configured one carries the user's advise Reaction on its sync lane with Bypass off, the second an empty lane with Bypass on — through a new package-level construction seam `newProbeAgent`, guarded by the serial-seam test automatically (closes `apogee-n5k`).
+
 ### Fixed
 
 - **The three exact-merge sink tests no longer race their own coalescing window.** `TestTeaSinkEmitsEventsInOrder`,
@@ -38,6 +42,12 @@ point is a **minor** bump, not a breaking change.
   the pair (`captured 6 events; want 5`, CI on the v0.22.0 bump). Every event they assert on is flushed
   by the non-token event that follows it, so they now use `newBufferingSink`, whose window never
   expires; the two tests that prove the timer itself keep the short window.
+
+- `sub_agent continue` no longer forgets the retained delegate when the continuation call itself is refused (a bad `run_on`, an unknown tool name): the fold stays retained and a corrected retry continues from it.
+
+- A capped delegate whose step-budget note was pruned away with an old tool result is told the note again on its next result; previously the engine believed the note still stood.
+
+- **Fixed:** The `→ resolves to` disclosure no longer appears on every write and read when the workspace itself is reached through a symlink (macOS `/tmp`, `/var`): it names only a target whose own path went somewhere else.
 
 ## [0.22.0] — 2026-09-18
 
