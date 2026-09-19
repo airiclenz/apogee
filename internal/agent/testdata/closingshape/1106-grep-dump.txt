@@ -1,0 +1,66 @@
+compact.go:135-235 covers the emergency fold. Let me read a chunk of compact.go to pin the specifics[60 total matches in /home/airic/repos/apogee/internal/agent/compact.go, showing 1-50]
+agent/compact.go:1:package agent
+agent/compact.go:2:
+agent/compact.go:3:import (
+agent/compact.go:4:	"encoding/base64"
+agent/compact.go:5:	"errors"
+agent/compact.go:6:	"fmt"
+agent/compact.go:7:	"strings"
+agent/compact.go:8:	"time"
+agent/compact.go:9:
+agent/compact.go:10:	"github.com/airiclenz/apogee/internal/context"
+agent/compact.go:11:	"github.com/airiclenz/apogee/internal/domain"
+agent/compact.go:14:// series of fold points] and the rows that feed it, keyed by completion-kind. The table is
+agent/compact.go:26:	// Between-turn fold. Runs at the next Turn boundary when the Budget's History allocation is
+agent/compact.go:26:		// full — run at the Turn boundary.
+agent/compact.go:27:		On:        turnBoundary,
+agent/compact.go:28:		// Wait: how the agent will go over budget if it sends the request.
+agent/compact.go:29:		opts to   base,   Phase
+agent/compact.go:30:		// no-op
+agent/compact.go:31:		arm    a.autoCompact()
+agent/compact.go:32:		// it
+agent/compact.go:33:		disarm a.autoCompact()
+agent/compact.go:34:		// the point at which table driver actions fire is the same point, and the driver loop
+agent/compact.go:34:		// the point at which the actions fire is the same point, and the driver loop
+agent/compact.go:35:		Open:       turnBoundary,
+agent/compact.go:36:		Open:       turnBoundary,
+agent/compact.go:37:		Open:       turnBoundary,
+agent/compact.go:38:		Close:      inExchange,
+agent/compact.go:38:		Close:      inExchange,
+agent/compact.go:39:		Close:      inExchange,
+agent/compact.go:40:		Close:      inExchange,
+agent/compact.go:41:		Close:      inExchange,
+agent/compact.go:42:		Close:      inExchange,
+agent/compact.go:43:		Close:      inExchange,
+agent/compact.go:44:		Close:      inExchange,
+agent/compact.go:45:		Close:      inExchange,
+agent/compact.go:46:		Close:      inExchange,
+agent/compact.go:47:		Close:      inExchange,
+agent/compact.go:48:		Close:      inExchange,
+agent/compact.go:49:		Close:      inExchange,
+agent/compact.go:50:		Close:      inExchange,
+agent/compact.go:51:		Close:      inExchange,
+agent/compact.go:52:		Close:      inExchange,
+agent/compact.go:53:		Close:      inExchange,
+agent/compact.go:54:		Close:      inExchange,
+agent/compact.go:55:		Close:      inExchange,
+agent/compact.go:56:		Close:      inExchange,
+agent/compact.go:57:		Close:      inExchange,
+agent/compact.go:58:		Close:      inExchange,
+agent/compact.go:59:		Close:      inExchange,
+agent/compact.go:60:		Close:      inExchange,
+agent/compact.go:19:// series of fold points] and the rows that feed it, keyed by completion-kind. The table is
+agent/compact.go:20:// series of fold points] and the rows that feed it, keyed by completion-kind. The table is
+agent/compact.go:21:// series of fold points] and the rows that feed it, keyed by completion-kind. The table is
+agent/compact.go:22:// series of fold points] and the rows that feed it, keyed by completion-kind. The table is
+agent/compact.go:23:// series of fold points] and the rows that feed it, keyed by completion-kind. The table is
+agent/compact.go:24:// series of fold points] and the rows that feed it, keyed by completion-kind. The table is
+agent/compact.go:25:// the cursor is Is a table of fold points.
+agent/compact.go:26:// the cursor is Is a table of fold points.
+agent/compact.go:27:// the cursor is Is a table of fold points.
+		e.emit(seamClosedData)
+	},
+	// Condition: the fold is armed.
+	// wait a second — the file is garbled, it uses some kind of diagram.
+
+The grep output is garbled. Let me read compact.go directly with proper lineRead the actual compact.go properly:

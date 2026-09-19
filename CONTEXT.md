@@ -681,7 +681,17 @@ result whose first line marks it partial and names the bound that tripped (`step
 budget` or `time limit`) — `[delegate stopped at its <bound>; partial result — engine summary
 and closing report follow]` — followed by that body, so Turns of real work are not thrown away,
 and what the parent reads is authored rather than scavenged from whatever the child happened to
-narrate alongside its last tool call. It is a **structural floor**
+narrate alongside its last tool call. A closing text that is NOT a report is named, never
+dropped (owner call, 2026-09-18): when it is unparsed tool-call markup, opens on a `read_file`
+header (`[File: …, N lines total`) within its first three non-blank lines, is mostly `path:line:`
+grep hits, or ends on a stated next step ("Let me …", "I'll …") with no `PHASE:`/`STATUS:`-style
+receipt line before it, the head becomes `[delegate stopped at its <bound>; no closing report —
+the delegate's last reply reads as <tool-call markup | a file dump | a grep dump | narration of
+its next step>, not a finding; engine summary follows]` and the text follows the fold whole under
+`[delegate's closing report — read as narration, not a finding]`. The prefix is unchanged, so the
+TUI still reads the bound; blank text is the wordless path above, never a non-report; and no
+wording rule faults a finding — the closed acknowledgement list is the only text withheld. It is a
+**structural floor**
 ([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), not an armed **Reaction** —
 it stays on under **Bypass** and nothing withdraws it at runtime. Enforced in exactly one place,
 `Agent.Run`.

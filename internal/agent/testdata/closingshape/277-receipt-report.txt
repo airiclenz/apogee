@@ -1,0 +1,6 @@
+PHASE: work
+STATUS: BLOCKED
+OUT: NOT WRITTEN — step cap hit before writing /home/airic/repos/apogee/docs/skill-runs/refocus/2026-09-18/planned.md
+SUMMARY: The 2026-09-18 test-shards slow-box plan is mid-implementation: item 2 (APOGEE_TEST_SLOW=1) sits uncommitted in scripts/test-shards.sh.
+COUNTS: in-flight=1 open-items=60 todos=23 issues=0 prs=0
+FLAG: bd has no DB — register read from .beads/issues.jsonl (export 2026-09-17, likely lags closed trail: CHANGELOG marks 80n/y72/htf/ig7/pqs/2c0 Fixed); delete my untracked scripts/.head-test-shards.tmp.sh

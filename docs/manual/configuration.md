@@ -778,7 +778,12 @@ Then it takes the tools away, tells the sub-agent why, and spends one further tu
 extra one, outside the ceiling — asking it to sum up in its own words; that reply follows
 under `[delegate's closing report]`, so what your agent receives is a report either way
 rather than an interrupted sentence, and a sub-agent that answers its last turn with
-something other than a report costs your agent nothing it could have read. The summary
+something other than a report costs your agent nothing it could have read: when that reply
+is tool output or narration instead — pasted tool-call markup, a file it just read, a grep
+dump, or a "Let me look at …" next step — the result's first line says so (`no closing
+report — the delegate's last reply reads as a file dump, not a finding`), the text still
+follows under `[delegate's closing report — read as narration, not a finding]`, and your
+agent reads the engine summary as the finding. The summary
 call spends tokens like a compaction does and counts toward the session's totals, but
 nothing is compacted: the sub-agent's conversation is left as it was.
 The default is **80**; `0` lets a delegation run unbounded, which is what it did before

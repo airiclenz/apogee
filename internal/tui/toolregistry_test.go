@@ -216,6 +216,42 @@ func TestDelegationBoundHeadReadsEveryBoundsHead(t *testing.T) {
 	}
 }
 
+// The NON-REPORT variant of each bound's head (internal/agent's stepCapNonReportFormat and
+// siblings, plan 2026-09-18 - 00 item 3): the engine writes it when a capped child's closing text
+// reads as tool output or narration rather than a report, worded by shape — `tool-call markup`, `a
+// file dump`, `a grep dump`, `narration of its next step`. The prefix delegationBoundHead anchors on
+// is unchanged, so every variant still reads as its bound and never as `done`; the narration
+// sub-head beneath it is body, matched by nothing.
+func TestDelegationBoundHeadReadsTheNonReportVariants(t *testing.T) {
+	t.Parallel()
+
+	const body = "\n[engine summary]\nThe delegate read a.txt and b.txt; c.txt is unread.\n\n[delegate's closing report — read as narration, not a finding]\nLet me look at c.txt next."
+	bounds := []struct {
+		bound string
+		want  string
+	}{
+		{"step cap (3 steps)", "stopped at its step cap"},
+		{"token budget (20000000 tokens)", "stopped at its token budget"},
+		{"time limit (2h0m)", "stopped at its time limit"},
+	}
+	shapes := []string{"tool-call markup", "a file dump", "a grep dump", "narration of its next step"}
+	for _, b := range bounds {
+		for _, shape := range shapes {
+			head := "[delegate stopped at its " + b.bound + "; no closing report — the delegate's last reply reads as " + shape + ", not a finding; engine summary follows]"
+			t.Run(b.want+"/"+shape, func(t *testing.T) {
+				t.Parallel()
+
+				if !delegationBoundHead.MatchString(head) {
+					t.Errorf("delegationBoundHead does not match %q", head)
+				}
+				if got := delegationVerdict(head + body); got != b.want {
+					t.Errorf("delegationVerdict = %q, want %q", got, b.want)
+				}
+			})
+		}
+	}
+}
+
 // The ADR 0069 routing note — the line a delegation's result gains when its call asked for the
 // Sub-agent server and ran on the session server instead — is APPENDED to the result BODY. Both
 // recognisers that word a delegation's slot read the envelope from a fixed end of that body:

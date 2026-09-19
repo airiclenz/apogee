@@ -1605,9 +1605,12 @@ const (
 	envelopeCapMarker   = "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]"
 	envelopeTokenMarker = "[delegate stopped at its token budget (20000000 tokens); partial result — engine summary and closing report follow]"
 	envelopeTimeMarker  = "[delegate stopped at its time limit (2h0m); partial result — engine summary and closing report follow]"
-	envelopeFaultLine   = "sub-agent faulted before finishing the delegated task: the upstream died"
-	envelopeSteeredOne  = "\n\n(the user sent 1 message to this sub-agent while it ran)"
-	envelopeSteeredTwo  = "\n\n(the user sent 2 messages to this sub-agent while it ran)"
+	// envelopeNonReportMarker is the step-cap head's NON-REPORT variant (internal/agent's
+	// stepCapNonReportFormat): the same prefix, a different tail — the row reads the bound off it.
+	envelopeNonReportMarker = "[delegate stopped at its step cap (3 steps); no closing report — the delegate's last reply reads as narration of its next step, not a finding; engine summary follows]"
+	envelopeFaultLine       = "sub-agent faulted before finishing the delegated task: the upstream died"
+	envelopeSteeredOne      = "\n\n(the user sent 1 message to this sub-agent while it ran)"
+	envelopeSteeredTwo      = "\n\n(the user sent 2 messages to this sub-agent while it ran)"
 )
 
 // A run collapses to ONE row in the parent's conversation (collapsedSubAgentView), so that row is
@@ -1661,6 +1664,11 @@ func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
 			name:    "a run stopped at its time limit names that bound, never done",
 			content: envelopeTimeMarker + "\nI had read two files so far",
 			want:    "stopped at its time limit",
+		},
+		{
+			name:    "a capped run whose closing text was no report still says it was stopped short",
+			content: envelopeNonReportMarker + "\n[engine summary]\nRead two files.\n\n[delegate's closing report — read as narration, not a finding]\nLet me read the third.",
+			want:    "stopped at its step cap",
 		},
 		{
 			name:    "a steered run says how many messages reached it",
@@ -1717,6 +1725,7 @@ func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
 		{"the cap marker quoted mid-report", "The child said:\n" + envelopeCapMarker},
 		{"the token marker quoted mid-report", "The child said:\n" + envelopeTokenMarker},
 		{"the time marker quoted mid-report", "The child said:\n" + envelopeTimeMarker},
+		{"the non-report marker quoted mid-report", "The child said:\n" + envelopeNonReportMarker},
 		{"the notice quoted mid-report", "The child said:" + envelopeSteeredTwo + "\nand carried on"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

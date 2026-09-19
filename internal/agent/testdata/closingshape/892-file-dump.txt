@@ -1,0 +1,6 @@
+[File: /home/airic/repos/apogee/internal/tools/sub_agent.go, 209 lines total, showing lines 60-130]
+
+[File: /home/airic/repos/apogee/internal/agent/subagent.go, 1438 lines total, showing lines 630-680]
+
+[File: /home/airic/repos/apogee/internal/agent/subagent.go, 1438 lines total, showing lines 600-630]
+[File: /home/airic/repos/apogee/internal/agent/subagent.go, 1438 lines total, showing lines 1240-1300]
