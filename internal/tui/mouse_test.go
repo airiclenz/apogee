@@ -4404,14 +4404,14 @@ func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 // TestPointerPanesWalkInTheClickChainOrder pins the table's order literally: it is the CLICK-CHAIN
-// order — settings, then the report trio in the order the slot draws them, then the two modals, the
+// order — settings, then the four reports in the order the slot draws them, then the two modals, the
 // prompt slot and the dropdown — and NOT the slot's stacking order (transcriptSlotPanes), which puts
-// the prompt first. The report trio is asked before the modal half and the prompt after it because a
+// the prompt first. The reports are asked before the modal half and the prompt after it because a
 // click on a lower report dismisses the one above it before it reaches it, and no pane is entered
 // twice: a pane asked twice would be dismissed by its own first answer.
 func TestPointerPanesWalkInTheClickChainOrder(t *testing.T) {
 	t.Parallel()
-	want := []framePane{paneSettings, paneUsage, paneInspector, paneThinking, paneBrowser, panePicker, panePrompt, paneDropdown}
+	want := []framePane{paneSettings, paneUsage, paneInspector, paneThinking, paneAdvice, paneBrowser, panePicker, panePrompt, paneDropdown}
 
 	if len(pointerPanes) != len(want) {
 		t.Fatalf("pointerPanes holds %d entries, want the %d panes of the click chain", len(pointerPanes), len(want))

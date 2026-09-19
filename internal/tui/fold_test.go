@@ -37,7 +37,7 @@ func statsOf(m Model) statsFold {
 }
 
 // foldCase is one Event variant and everything foldEvent does with it on a fresh Model. A row
-// that expects nothing at all (an audit record, a fired mechanism outside the debug view) is
+// that expects nothing at all (an audit record, a guard's firing outside the debug view) is
 // stated as such deliberately: "this variant is inert in the view" is the documentation the
 // three separate switches never carried in one place.
 type foldCase struct {
@@ -246,12 +246,15 @@ func foldCases() []foldCase {
 			event: domain.TurnEvent{Status: domain.StatusExchangeComplete},
 		},
 		{
-			name: "ReactionFiredEvent is inert outside the debug view",
-			// Nothing here, and deliberately: a Reaction firing is engine behaviour correcting the
+			name: "ReactionFiredEvent is inert outside the debug view and the advice board",
+			// Nothing here, and deliberately: a guard's firing is engine behaviour correcting the
 			// model's own failure or shaping what it sees, not user news the way a prune pass is
 			// (ADR 0071, ADR 0076 D1). It is recorded in the hidden debug view
-			// (transcript.addReaction, pinned in transcript_test.go) and nowhere else, so a default
-			// fold shows no entry, no phrase and no stats.
+			// (transcript.addReaction, pinned in transcript_test.go), so a default fold shows no
+			// entry, no phrase and no stats. The one firing shape the view DOES keep is the advise
+			// kind — Action "advise" or "notice", the text the model was handed — which lands on
+			// the /advice board (Model.foldAdvice, pinned in advicepane_test.go) and on nothing
+			// else; this row's retry is not one and touches the board no more than the transcript.
 			event: domain.ReactionFiredEvent{
 				Reaction: "tool-call-repair",
 				Origin:   domain.OriginEngine,

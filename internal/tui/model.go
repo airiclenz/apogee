@@ -219,6 +219,21 @@ type Model struct {
 	// its own name rather than an alias of one: nothing else names this pane's state.
 	thinkingPane reportPane
 
+	// advicePane is the /advice pane's state (advicepane.go): whether the view of advise firings is
+	// up, how far its row list is scrolled and whether it is following the tail. The same plain values
+	// under the same posture as its three siblings (ADR 0011) — the rows are derived from the advice
+	// board at render time, so there is nothing here to keep in step with them — and driven in every
+	// state, because the verb is whileRunning and the pane reads Model state only.
+	advicePane reportPane
+
+	// advice is the /advice pane's board (advicepane.go): every advise firing the session's agents
+	// handed their model — a user `advise:` entry's fenced text, the context-fill notice's rung — as
+	// the fold recorded them off domain.ReactionFiredEvent, oldest first, bounded to the newest
+	// maxAdviceRecords. It sits BESIDE the transcript like the wire ring above: a firing is not a
+	// conversation entry and disturbs no entry pairing, and it is rebuilt rather than appended into,
+	// so it rides safely in the value-copied Model (ADR 0011).
+	advice []adviceRecord
+
 	// wire is the Inspector's bounded ring: the most recent maxWireRecords halves of an Upstream
 	// round-trip, as the fold recorded them (foldWire). Each half carries the wire stream it came
 	// from — the (depth, callID) pair of the agent that made the call — because the one ring holds
@@ -1444,6 +1459,14 @@ var keyClaimOrder = []keyClaimant{
 		claim: paneClaim(Model.thinkingKey),
 	},
 	{
+		// The /advice pane claims the report's five keys and no sixth — one rendering, no ctrl+r
+		// (advicepane.go) — on the same non-modal terms as the three panes above it, and sits beside
+		// them for the same reason: a pane that owns the keyboard answers its own esc first, and the
+		// esc that closes a report opened inside a run view is the esc the human means for it.
+		name:  "advice pane",
+		claim: paneClaim(Model.adviceKey),
+	},
+	{
 		// An open run view claims exactly one key — esc, which goes one level up (runview.go, ADR
 		// 0063) — and lets every other key fall through, so typing, scrolling and the block cursor's
 		// own gestures work inside a view exactly as they do outside it.
@@ -2549,7 +2572,7 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 
 // frameOverlays holds the blocks View stacks between the transcript and the input box: the
 // approval or ask prompt, the /sessions browser, the /model | /server picker, the /settings
-// configuration pane, the three report panes, the autocomplete dropdown, and the staged-interjection
+// configuration pane, the four report panes, the autocomplete dropdown, and the staged-interjection
 // strip. Each field is "" when its overlay is closed.
 //
 // They sit in two slots, and every one of them is FLUSH on the chrome its slot abuts: the ones named
@@ -2571,6 +2594,7 @@ type frameOverlays struct {
 	usage     string // the /usage token-accounting report (usage.go)
 	inspector string // the /inspect raw-protocol pane (inspector.go)
 	thinking  string // the /thinking plain-reasoning pane (thinkingpane.go)
+	advice    string // the /advice pane of advise firings (advicepane.go)
 	dropdown  string // the command / @file / skill autocomplete
 	queued    string // the staged-interjection strip (ADR 0025)
 	hint      string // the skill-suggestion row closing the band above the box (ADR 0061)
@@ -2581,7 +2605,7 @@ type frameOverlays struct {
 // rather than measured.
 func (o frameOverlays) height() int {
 	rows := 0
-	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.inspector, o.thinking, o.dropdown, o.queued, o.hint} {
+	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.inspector, o.thinking, o.advice, o.dropdown, o.queued, o.hint} {
 		if block != "" {
 			rows += lipgloss.Height(block)
 		}
@@ -2617,6 +2641,7 @@ func (m Model) frameOverlays() frameOverlays {
 	o.usage = m.renderUsage()
 	o.inspector = m.renderInspector()
 	o.thinking = m.renderThinking()
+	o.advice = m.renderAdvice()
 	o.dropdown = m.renderAutocomplete()
 	o.queued = m.renderPendingInterjections()
 	o.hint = m.renderSkillHints()
@@ -2642,7 +2667,7 @@ func (m Model) transcriptRows() int {
 
 // transcriptSlotPanes is the frame's transcript-side overlay slot, in the ONE order View stacks it:
 // the approval-or-ask prompt, the /sessions browser, the /model | /server picker, the /settings pane,
-// then the three reports that close it. Every rectangle in the slot begins below the blocks BEFORE it in
+// then the four reports that close it. Every rectangle in the slot begins below the blocks BEFORE it in
 // this run, so the order is stated HERE, once: View walks it to paint (stackTranscriptSlot) and every
 // rect the pointer asks is a lookup into what that walk published (frameSpans). The two hand-written
 // `above` slices this replaced already differed by one element, and View's own appends were a third
@@ -2665,14 +2690,14 @@ func (m Model) transcriptRows() int {
 // nearest the chrome — so the surface the human is answering keeps the position it has when the report
 // is not up. The /inspect pane sits under the report it is shaped after, for that same reason: its
 // verb is whileRunning as well, and the surface being answered keeps its position when the
-// raw-protocol view is opened over it. The /thinking pane closes the slot on the same terms, nearest
-// the chrome of them all.
+// raw-protocol view is opened over it. The /thinking pane follows on the same terms, and the /advice
+// pane closes the slot, nearest the chrome of them all.
 //
 // It is a list of its own rather than a reading of the framePane constants, whose order is the order
 // panes GIVE WAY in (framePane) — a different question that happens to have the same answer today. The
 // autocomplete dropdown and the staged band are in the OTHER slot, above the input box, and are no
 // part of this arithmetic.
-var transcriptSlotPanes = []framePane{panePrompt, paneBrowser, panePicker, paneSettings, paneUsage, paneInspector, paneThinking}
+var transcriptSlotPanes = []framePane{panePrompt, paneBrowser, panePicker, paneSettings, paneUsage, paneInspector, paneThinking, paneAdvice}
 
 // blockSpan is where one block of the composed frame landed: the screen row its first line is drawn on
 // and how many rows it takes, so the block owns the rows [y0, y0+rows). The zero value says the block
@@ -2884,7 +2909,7 @@ func (m Model) View() tea.View {
 	// does not know or care which side of the slot it falls on.
 	rows = append(rows, "")
 	// Then the transcript-side overlay slot — the approval or ask prompt, the /sessions browser, the
-	// picker, the /settings pane and the three reports — stacked in the one order the frame states for
+	// picker, the /settings pane and the four reports — stacked in the one order the frame states for
 	// it and starting directly below that gap row. The walk also PUBLISHES where each pane landed and
 	// which row it ended above; View has no use for the spans because it is painting, and the pointer
 	// reads them off the same composition rather than re-deriving a prefix sum per pane
@@ -3935,6 +3960,11 @@ const transcriptReserve = 3
 // board (thinking.go) that keeps every record whether or not the pane is drawn, and it yields
 // before the raw-protocol view because its rows are prose a reader returns to rather than the
 // evidence of a call that has just gone wrong.
+//
+// The /advice pane sits under THAT, above only the dropdown, on the same reasoning again: a window
+// onto a retained board (advicepane.go) that keeps every firing whether or not the pane is drawn,
+// and a record of what the model was TOLD rather than of what it is thinking now — the reading a
+// reader comes back to last.
 type framePane int
 
 const (
@@ -3945,13 +3975,20 @@ const (
 	paneUsage                      // the /usage token-accounting report
 	paneInspector                  // the /inspect raw-protocol pane
 	paneThinking                   // the /thinking plain-reasoning pane
+	paneAdvice                     // the /advice pane of advise firings
 	paneDropdown                   // the command / @file / skill autocomplete
 	paneKinds                      // not a pane: the count, so a plan can hold one grant per kind
 )
 
 // framePaneSet is the set of boxed overlays open in one frame — the siblings an allocation has to
-// divide the window between.
-type framePaneSet uint8
+// divide the window between. One bit per framePane, so its width is a ceiling on how many panes the
+// frame can declare; the guard below makes that ceiling a build error rather than a pane whose bit
+// is silently shifted off the end and never seated.
+type framePaneSet uint16
+
+// A framePane past the set's width would compile and never be seated: the array length goes
+// negative the day paneKinds outgrows the sixteen bits, so the build fails there instead.
+var _ [16 - paneKinds]struct{}
 
 // with returns the set including p.
 func (s framePaneSet) with(p framePane) framePaneSet { return s | 1<<p }
@@ -3985,6 +4022,9 @@ func (m Model) openPanes() framePaneSet {
 	}
 	if m.thinkingPane.open {
 		s = s.with(paneThinking)
+	}
+	if m.advicePane.open {
+		s = s.with(paneAdvice)
 	}
 	if m.autocomplete.active && len(m.autocomplete.items) > 0 {
 		s = s.with(paneDropdown)

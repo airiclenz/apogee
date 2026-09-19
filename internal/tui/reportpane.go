@@ -7,14 +7,14 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The read-only report panes — one module behind /usage, /inspect and /thinking
+// The read-only report panes — one module behind /usage, /inspect, /thinking and /advice
 // ----------------------------------------------------------------------------
 //
 // A REPORT is the frame's lightest kind of overlay: a scrolled list of rows that answers a question
-// the human asked and decides nothing. Three of them exist — the /usage token accounting (usage.go),
-// the /inspect raw-protocol view (inspector.go) and the /thinking plain-reasoning pane
-// (thinkingpane.go) — and everything about them except their ROWS is the same pane, so it is written
-// once here and named three times there.
+// the human asked and decides nothing. Four of them exist — the /usage token accounting (usage.go),
+// the /inspect raw-protocol view (inspector.go), the /thinking plain-reasoning pane
+// (thinkingpane.go) and the /advice pane of advise firings (advicepane.go) — and everything about
+// them except their ROWS is the same pane, so it is written once here and named four times there.
 //
 // What a report is, stated once:
 //
@@ -31,7 +31,7 @@ import (
 //     shorter list corrects itself the first time it is moved instead of drifting.
 //   - Its scroll is clamped to the last FULL window rather than to the last row, so a report scrolled
 //     to its end shows a full pane of rows.
-//   - It FOLLOWS the tail while it is left at the end — /inspect and /thinking do ([reportKind.follows]),
+//   - It FOLLOWS the tail while it is left at the end — /inspect, /thinking and /advice do ([reportKind.follows]),
 //     /usage keeps the clamp alone — so rows arriving under an open pane are shown rather than
 //     landing below a frozen window, and scrolling up off the end is what stops it. It is the
 //     transcript's own behaviour ([Model.detached], model.go) under a report's smaller contract.
@@ -65,7 +65,7 @@ import (
 // reportKind names one of the read-only report panes. It is this module's ONE parameter: every
 // function here takes it, resolves the pane's state and its content through it, and is otherwise the
 // same code for all of them — which is what keeps "what a report does" a single answer rather than
-// three copies that drift a key at a time.
+// four copies that drift a key at a time.
 //
 // The four functions that resolve something THROUGH a kind — [reportKind.pane], [Model.reportState],
 // [Model.reportContent] and [reportKind.follows] — are exhaustive switches with a panicking default
@@ -73,13 +73,14 @@ import (
 // and painted ANOTHER pane's state or content inside its own box: a wrong pane rather than a build
 // error. The default is unreachable for every declared kind: TestReportKindsResolveDistinctly walks
 // the kinds through all four to keep it so, and because that walk runs from reportKind(0) to
-// reportKinds rather than a hand-written list, a fourth report is covered the day it is declared.
+// reportKinds rather than a hand-written list, a fifth report is covered the day it is declared.
 type reportKind int
 
 const (
 	usageReport    reportKind = iota // /usage — the session's token accounting (usage.go)
 	inspectReport                    // /inspect — the raw wire traffic (inspector.go)
 	thinkingReport                   // /thinking — the model's plain reasoning (thinkingpane.go)
+	adviceReport                     // /advice — every advise firing the model was handed (advicepane.go)
 	reportKinds                      // not a kind: the count, so a walk over the reports needs no hand-written list
 )
 
@@ -93,6 +94,8 @@ func (r reportKind) pane() framePane {
 		return paneInspector
 	case thinkingReport:
 		return paneThinking
+	case adviceReport:
+		return paneAdvice
 	default:
 		panic(fmt.Sprintf("tui: no frame pane for report kind %d", r))
 	}
@@ -116,10 +119,11 @@ type reportPane struct {
 // watches a frozen window. It is the report module's ONE statement of that scope, read by the three
 // functions that arm it or honour it ([Model.reportKey], [Model.reportWheel], [Model.reportSpec]).
 //
-// /inspect and /thinking follow, because they are windows onto a stream a reader opens WHILE it is
-// arriving — reasoning and wire traffic land under the pane as the agent works, and a pane that
-// froze on the record it opened on would say nothing about the call the reader is watching. It is
-// the transcript's own behaviour ([Model.detached], model.go) under a report's smaller contract.
+// /inspect, /thinking and /advice follow, because they are windows onto a stream a reader opens
+// WHILE it is arriving — reasoning, wire traffic and advise firings land under the pane as the
+// agent works, and a pane that froze on the record it opened on would say nothing about the call
+// the reader is watching. It is the transcript's own behaviour ([Model.detached], model.go) under a
+// report's smaller contract.
 //
 // /usage does not. Its rows grow too — a delegate row per run that reports a count, plus the session
 // total (usageRows) — so this is a scope and not a statement about a static pane: it is a reading of
@@ -127,13 +131,13 @@ type reportPane struct {
 // stays the clamp-only one it has always had.
 //
 // It is an exhaustive switch with a panicking default for the reason its three siblings are
-// (reportKind's doc): a fourth report has to state its own answer here rather than inherit /usage's
+// (reportKind's doc): a fifth report has to state its own answer here rather than inherit /usage's
 // by falling through.
 func (r reportKind) follows() bool {
 	switch r {
 	case usageReport:
 		return false
-	case inspectReport, thinkingReport:
+	case inspectReport, thinkingReport, adviceReport:
 		return true
 	default:
 		panic(fmt.Sprintf("tui: no follow answer for report kind %d", r))
@@ -154,6 +158,8 @@ func (m *Model) reportState(r reportKind) *reportPane {
 		return &m.inspector
 	case thinkingReport:
 		return &m.thinkingPane
+	case adviceReport:
+		return &m.advicePane
 	default:
 		panic(fmt.Sprintf("tui: no pane state for report kind %d", r))
 	}
@@ -186,6 +192,8 @@ func (m Model) reportContent(r reportKind) reportContent {
 		return m.inspectContent()
 	case thinkingReport:
 		return m.thinkingContent()
+	case adviceReport:
+		return m.adviceContent()
 	default:
 		panic(fmt.Sprintf("tui: no content for report kind %d", r))
 	}
@@ -289,7 +297,7 @@ func (m Model) dismissReport(r reportKind) Model {
 // for the page keys — byPage rather than a number, because how big a page is is the frame's answer for
 // this paint and not this table's. ok is false for every key a report does not scroll on.
 //
-// One table for both panes: they answer to the same four keys with the same two step sizes, and a
+// One table for every report: they answer to the same four keys with the same two step sizes, and a
 // second table would be a place for them to drift apart one key at a time.
 func reportScrollStep(key string) (step int, byPage, ok bool) {
 	switch key {
@@ -382,6 +390,8 @@ func (o frameOverlays) block(p framePane) string {
 		return o.inspector
 	case paneThinking:
 		return o.thinking
+	case paneAdvice:
+		return o.advice
 	case paneDropdown:
 		return o.dropdown
 	}

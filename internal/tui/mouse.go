@@ -419,8 +419,8 @@ type pointerPane struct {
 // nothing a frame needs to carry.
 //
 // The order: the /settings pane is asked FIRST because it is the frame's one full-height pane, drawn
-// over the transcript for exactly its own rows. The report trio — /usage, /inspect, /thinking — is
-// asked next, in the order the slot draws them, because the reports are the only panes of that slot
+// over the transcript for exactly its own rows. The four reports — /usage, /inspect, /thinking,
+// /advice — are asked next, in the order the slot draws them, because the reports are the only panes of that slot
 // that can be up TOGETHER (View): a click on the /inspect pane dismisses the /usage report before it
 // reaches it, and what makes that safe is the pre-click frame, not the geometry (reportpane.go). The
 // /sessions browser opens the MODAL half of the chain, asked first of the modals because it is the
@@ -438,6 +438,7 @@ var pointerPanes = []pointerPane{
 	reportPointer(usageReport),
 	reportPointer(inspectReport),
 	reportPointer(thinkingReport),
+	reportPointer(adviceReport),
 	{pane: paneBrowser, click: Model.handleBrowserClick, wheel: Model.browserWheel},
 	{pane: panePicker, click: Model.handlePickerClick, wheel: Model.pickerWheel},
 	{pane: panePrompt, click: promptPointerClick, wheel: Model.promptWheel},
@@ -531,10 +532,10 @@ func promptPointerClick(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bo
 // would stop a run, or stop the run itself: those meanings are esc's, and a stray of the pointer's
 // never carries them. Beyond that a pane picks between the two answers the currency already has. A
 // pane with nothing to decide DISMISSES, and what it does with the click AFTER that is the pane's
-// kind: the report trio does not claim, so the click goes on to whatever it named, while the two
+// kind: the reports do not claim, so the click goes on to whatever it named, while the two
 // MODAL lists — the picker and the /sessions browser — dismiss AND CLAIM, because a modal is what the
 // human was looking at and the click that closed it is spent on closing it. The "/" | "@" DROPDOWN
-// dismisses and CONTINUES, the report trio's answer, because it is the one list that is not modal at
+// dismisses and CONTINUES, the reports' answer, because it is the one list that is not modal at
 // all: it hangs over a chat box the human is still typing in, so the click that closed it is very
 // often the click that seats the caret in that box — and it decides nothing, the next keystroke in
 // the box deriving it back. A DECISION pane — the
@@ -1825,8 +1826,8 @@ func (m Model) highlightTranscript(view string) string {
 
 // foldMouseWheel routes one wheel notch: to whichever open pane holds the pointer, and to the
 // transcript everywhere else. The chain asks every pane the frame can have open, in the one order
-// pointerPanes holds — the /settings pane (settingsWheel), the /usage, /inspect and /thinking
-// reports (reportWheel), the /sessions browser (browserWheel), the /model | /server picker
+// pointerPanes holds — the /settings pane (settingsWheel), the /usage, /inspect, /thinking and
+// /advice reports (reportWheel), the /sessions browser (browserWheel), the /model | /server picker
 // (pickerWheel), the approval menu and the ask offering (promptWheel), the "/" | "@" autocomplete
 // dropdown (dropdownWheel) — and each one takes the notch only when the pointer is inside its own
 // rectangle.

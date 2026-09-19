@@ -260,14 +260,14 @@
 // ([Model.settingsPaint], whose geometry is the painter's own — renderPopupPlaced reports where the
 // rows landed rather than the mouse re-deriving it) — and, where the multi-line prompt field has
 // replaced that list, the field itself, over all of its rows ([Model.settingsTextPaint], which reads
-// the same placement plus the wrap the painter chose). A FOURTH, a FIFTH and a SIXTH join them while
-// /usage, /inspect and /thinking are open, and they are ONE rectangle written once (reportpane.go),
-// not three: a report has
+// the same placement plus the wrap the painter chose). A FOURTH, a FIFTH, a SIXTH and a SEVENTH join
+// them while /usage, /inspect, /thinking and /advice are open, and they are ONE rectangle written once
+// (reportpane.go), not four: a report has
 // nothing to select, so a click inside it is only swallowed, a click outside dismisses it and then
 // goes on to whatever it named, and the wheel scrolls its rows ([Model.reportWindow], reading the
 // same painter's placement). They are also the panes that can be up TOGETHER, so they are asked in
-// the order the slot draws them — the report first, the raw-protocol pane next, the thinking pane
-// last. The five that were wheel-only close the set — the /sessions browser, the /model | /server
+// the order the slot draws them — the report first, the raw-protocol pane next, the thinking pane,
+// the advice pane last. The five that were wheel-only close the set — the /sessions browser, the /model | /server
 // picker, the ask prompt, the approval prompt and the "/" | "@" dropdown — and they are one
 // rectangle written once as well: [popupPaneHit] maps a screen row through the painter's OWN
 // placement (popup.go) for every boxed pane, so the row a click names is the row the painter drew
@@ -513,6 +513,17 @@
 // delegation's alone under a run view, applied to the committed records and the in-flight one
 // alike, with the live record at the TAIL — its own arrival position under the board's newest-last
 // order, so a fan-out's partial text is never seated between records that completed after it began.
+//
+// advicepane.go is the /advice pane and the board behind it in one file: every advise firing the
+// session's agents handed their model — a user `advise:` entry's capped fenced text, the
+// context-fill notice's rung — folded off domain.ReactionFiredEvent by Action ("advise" and
+// "notice" alone; a guard's retry or intercept is the debug view's, and the engine's structural
+// notes fire no reaction and are absent), oldest first and bounded to the newest maxAdviceRecords
+// ([Model.foldAdvice], [Model.advice]). The pane reads that board as /thinking reads its own: one
+// heading per run of firings sharing a run and a Turn, in [Model.thinkingHeading]'s spelling, then
+// per firing a `<reaction> (<origin> origin) @ <moment>` row and its Detail wrapped at the pane's
+// real width ([Model.thinkingWrapColumn]). Whole session, every run, no scoping under a run view:
+// what the model was TOLD is a question asked of the session.
 //
 // spinner.go paints the glyph that phrase runs beside, and the animation is this package's own
 // rather than a charm.land/bubbles/v2/spinner widget: the widget renders frames[i] through one
@@ -909,12 +920,12 @@
 // `ui.inspector` arms the capture, folded beside the transcript rather than into it (a wire record
 // is not a conversation entry), shown in the /usage report's shape and paired request-to-reply
 // within one (depth, callID) wire stream, since the one ring interleaves every run's traffic;
-// reportpane.go the pane those two and /thinking ARE — the reportPane value ({open, top, follow,
-// raw}, the follow pinning /inspect and /thinking to the tail as the transcript is), the key
-// contract, the dismiss, the budget→render path and the whole mouse family (rect, window, click,
-// wheel), written once and named three times, with every rectangle in the transcript-side slot a
+// reportpane.go the pane those two, /thinking and /advice ARE — the reportPane value ({open, top,
+// follow, raw}, the follow pinning /inspect, /thinking and /advice to the tail as the transcript
+// is), the key contract, the dismiss, the budget→render path and the whole mouse family (rect,
+// window, click, wheel), written once and named four times, with every rectangle in the transcript-side slot a
 // lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix
-// sum of its own; popup.go the one bordered pane every overlay — those four, the autocomplete
+// sum of its own; popup.go the one bordered pane every overlay — those five, the autocomplete
 // dropdown, the ask and approval prompts — is painted through, and the [popupPlacement] it hands
 // back with each paint is where the pointer READS that pane: which line the row block starts on and
 // how many lines each row took, walked by [popupPlacement.rowAt], so the package holds one mapping

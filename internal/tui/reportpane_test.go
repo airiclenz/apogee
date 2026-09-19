@@ -10,7 +10,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// The shared report pane — /usage, /inspect and /thinking through one body (reportpane.go)
+// The shared report pane — /usage, /inspect, /thinking and /advice through one body (reportpane.go)
 // ----------------------------------------------------------------------------
 //
 // The assertions below drive the reports through the SHARED functions rather than through the names
@@ -33,6 +33,7 @@ func reportCases(t *testing.T) []reportCase {
 		{name: "/usage", kind: usageReport, model: usageReportModel(t, 40)},
 		{name: "/inspect", kind: inspectReport, model: inspectorPaneModel(t, 40)},
 		{name: "/thinking", kind: thinkingReport, model: thinkingPaneModel(t, 40)},
+		{name: "/advice", kind: adviceReport, model: advicePaneModel(t, 40)},
 	}
 }
 
@@ -82,6 +83,7 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 		usageReport:    usageTitle,
 		inspectReport:  inspectorTitle,
 		thinkingReport: thinkingTitle,
+		adviceReport:   adviceTitle,
 	} {
 		if got := m.reportContent(want).title; got != name {
 			t.Errorf("report %d is titled %q, want %q — the kind resolves to another pane's content", want, got, name)
@@ -92,6 +94,7 @@ func TestReportKindsResolveDistinctly(t *testing.T) {
 		usageReport:    false,
 		inspectReport:  true,
 		thinkingReport: true,
+		adviceReport:   true,
 	} {
 		if got := follows[kind]; got != want {
 			t.Errorf("report %d follows %t, want %t — a report's follow scope flipped in silence", kind, got, want)
@@ -313,6 +316,7 @@ func TestFrameOverlayBlocksAnswerForEveryPane(t *testing.T) {
 	}
 	ov.inspector = "inspector"
 	ov.thinking = "thinking"
+	ov.advice = "advice"
 
 	for p, want := range map[framePane]string{
 		panePrompt:    ov.prompt,
@@ -322,6 +326,7 @@ func TestFrameOverlayBlocksAnswerForEveryPane(t *testing.T) {
 		paneUsage:     ov.usage,
 		paneInspector: ov.inspector,
 		paneThinking:  ov.thinking,
+		paneAdvice:    ov.advice,
 		paneDropdown:  ov.dropdown,
 	} {
 		if got := ov.block(p); got != want {
@@ -364,7 +369,7 @@ type followCase struct {
 	grow  func(t *testing.T, m Model) Model
 }
 
-// followCases opens each of the two reports that follow. /usage is not among them and has its own
+// followCases opens every report that follows the tail. /usage is not among them and has its own
 // test below: it keeps the clamp alone (reportKind.follows).
 func followCases(t *testing.T) []followCase {
 	t.Helper()
@@ -388,6 +393,15 @@ func followCases(t *testing.T) []followCase {
 			grow: func(t *testing.T, m Model) Model {
 				t.Helper()
 				return growThinkingRecords(t, m, 6)
+			},
+		},
+		{
+			name:  "/advice",
+			kind:  adviceReport,
+			model: advicePaneModel(t, 6),
+			grow: func(t *testing.T, m Model) Model {
+				t.Helper()
+				return growAdviceRecords(t, m, 6)
 			},
 		},
 	}
@@ -433,6 +447,27 @@ func growThinkingRecords(t *testing.T, m Model, first int) Model {
 		m = m.foldEvent(reasoningAt(runRef{}, i, "record "+strconv.Itoa(i)+" reasoning"))
 		m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, i)})
 		if rows, _ := m.thinkingRows(m.thinkingWrapColumn()); len(rows)-before > reportSeats(spec) {
+			return m
+		}
+	}
+}
+
+// growAdviceRecords folds advise firings onto the board until the pane's row list has grown by more
+// than a full window. The board caps at maxAdviceRecords, far above what this needs.
+func growAdviceRecords(t *testing.T, m Model, first int) Model {
+	t.Helper()
+	spec, seated := m.reportSpec(adviceReport, m.reportContent(adviceReport))
+	if !seated {
+		t.Fatal("the frame seated no /advice pane to grow under")
+	}
+	before := len(spec.rows)
+	for i := first; ; i++ {
+		if i >= maxAdviceRecords {
+			t.Fatalf("the board's %d-record cap was reached before the list grew a full window of %d rows",
+				maxAdviceRecords, reportSeats(spec))
+		}
+		m = m.foldEvent(advisedAt(runRef{}, i, adviceActionAdvise, "style-check", domain.OriginUser, "advice "+strconv.Itoa(i)))
+		if rows, _ := m.adviceRows(m.thinkingWrapColumn()); len(rows)-before > reportSeats(spec) {
 			return m
 		}
 	}

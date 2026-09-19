@@ -216,7 +216,7 @@ func TestEffortPickerAcceptDrivesTheEngineDoor(t *testing.T) {
 			name:     "auto sits under a reported set too",
 			support:  reported,
 			override: domain.EffortHigh,
-			down:     3, // past the three reported levels
+			down:     3, // past the three levels the server reported
 			wantSet:  []domain.ThinkingEffort{""},
 			wantNote: "thinking effort: the model's own default (session override: —; profile: —)",
 		},

@@ -105,7 +105,7 @@ are load-bearing rather than decorative and every shipped scheme is tested for t
 
 **Every pane above the input box takes its rows from the transcript.** The approval and ask
 prompts, the `/sessions` browser, the `/model` | `/server` picker, the `/settings` pane, the
-`/usage` report, the `/inspect` wire-traffic pane, the `/thinking` pane, the `/` and
+`/usage` report, the `/inspect` wire-traffic pane, the `/thinking` pane, the `/advice` pane, the `/` and
 `@` dropdown, the staged-interjection band and the skill-suggestion row all sit in the frame between the session area and the bottom chrome,
 and the session area is what shrinks to seat them. The frame is composed from ONE derivation of
 how many rows are left over, so the rows the transcript is drawn on, the rows a mouse click may
@@ -139,7 +139,7 @@ and whether the click is spent on closing it:
 
 | Pane | A click outside it |
 | --- | --- |
-| `/usage`, `/inspect`, `/thinking` | dismisses the pane, and the click still lands where it was aimed |
+| `/usage`, `/inspect`, `/thinking`, `/advice` | dismisses the pane, and the click still lands where it was aimed |
 | `/sessions` browser, `/model` \| `/server` picker | dismisses the pane, and the click is spent on that — these two are modal |
 | `/` \| `@` dropdown | dismisses the menu, and the click still lands where it was aimed — the menu decides nothing, and the next keystroke re-derives it |
 | approval prompt, ask prompt | leaves the question standing and is not the pane's at all: it seats the caret, starts a transcript drag, opens the mode picker, exactly as it would with no prompt up |
@@ -182,6 +182,8 @@ doing.** The **session area** goes first and goes to nothing; then the **skill-s
 which is advice about a message that has not been sent yet; then the **staged band**, which is a
 reminder rather than a control, and whose count the status line is carrying anyway; then the
 **`/` and `@` dropdown**, which a keystroke opened and a keystroke dismisses; then the
+**`/advice` pane**, a window onto a board that keeps every advise firing whether or not the pane is
+drawn, and a record of what the model was told rather than of what it is thinking now; then the
 **`/thinking` pane**, a window onto a board that keeps every turn's reasoning whether or not the
 pane is drawn, and prose a reader comes back to rather than the evidence of a call that has just
 gone wrong; then the **`/inspect` wire-traffic pane**, a window onto a ring that keeps its records whether or not the
@@ -633,7 +635,7 @@ column stay a single column.
 
 **Every overflowing popup carries the same bar.** A bordered pane whose list is longer than the
 window it was granted paints those same two weights down the last column *inside* its border —
-the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, `/thinking`, the dropdown,
+the picker, the session browser, `/settings` and its sub-lists, `/usage`, `/inspect`, `/thinking`, `/advice`, the dropdown,
 the approval and ask prompts alike, because a windowed list that gives no sign of what it is holding
 back is the same omission wherever it is drawn. The column is reserved **only while the list
 overflows**: a pane whose rows all fit keeps its full inner width, so the bar appearing is itself
@@ -1998,17 +2000,75 @@ reasoning into one arrival-ordered stream, and a reader who has not opened a chi
 the agent they are talking to. There is no key for the scope and no manual filter: opening a run is
 what narrows it, and closing the view is what widens it back.
 
-**In the give-way order it sits below the `/inspect` pane**, above only the dropdown. It is a window
+**In the give-way order it sits below the `/inspect` pane**, above the `/advice` pane and the dropdown. It is a window
 onto a board that keeps its records whether or not the pane is drawn — reopened on a taller window it
-says exactly what it would have said — and of the two windows onto retained state, prose a reader
+says exactly what it would have said — and of the windows onto retained state, prose a reader
 returns to yields before the evidence of a call that has just gone wrong.
 
 **The pointer works on it exactly as it does on the other two reports.** A click **outside** the box
 dismisses the pane and still lands where it was aimed, a click **inside** does nothing and is
 swallowed rather than dragging a selection across the transcript drawn under it, and the **wheel**
 scrolls the rows one per notch, clamped at the first row and the last full window — the two ends the
-keys stop at — and it detaches and re-attaches the follow at those ends exactly as they do. It is asked LAST of the three reports, in the slot's own draw order, so a click aimed
-here dismisses the panes above it first.
+keys stop at — and it detaches and re-attaches the follow at those ends exactly as they do. It is asked THIRD of the four reports, in the slot's own draw order, so a click aimed
+here dismisses the panes above it first; the `/advice` pane is asked after this one.
+
+---
+
+## The `/advice` popup
+
+**What it shows.** `/advice` opens a bordered pane in the same transcript-side slot holding every
+**advise firing** the session's agents handed their model — the text a user `advise:` reaction
+injected under its `[advice — …]` fence on a tool result, and the context-fill notice's rung — one
+record per firing, newest last. It is the view for the question the transcript cannot answer because
+the transcript never carried the advice at all: what the model was **told** beside the results it
+read. The engine's own structural notes — the step notice, the token-budget notice, the delegations
+ledger, the cancelled cut — are not in it: no reaction fires to write them, so nothing books them,
+and `/inspect` is where their bytes are read.
+
+**It is always recording, and there is nothing to arm.** Every firing the engine reports with the
+action `advise` or `notice` lands on the board; a Floor guard's retry or intercept does not, because
+that is the engine correcting the model rather than advice the model read. Nothing the board keeps is
+sent back to the model, written into the transcript or saved with the session — it is a board beside
+the conversation, and a resumed session opens with it empty.
+
+**One heading, then the firings.** Each run of firings from one agent in one turn stands under one
+heading row — `turn 4` for the main agent, `repo-scout · turn 2` for a delegation, the very words the
+`/thinking` pane spells — and under it each firing opens with one plain row naming what fired,
+`context-fill-notice (engine origin) @ post-tool-result` or `style-check (user origin) @
+post-tool-result`, followed by the text it carried, wrapped, every continuation row indented two
+spaces so a wrap reads as a wrap. The text is what the model saw: for a user reaction the fenced
+advice exactly as it was capped for the fence, for the notice the rung it reached (`rung 2 (75%)`).
+A firing that carried no text is its naming row alone. With nothing recorded the pane draws one row —
+`no advice recorded yet` — rather than an empty box.
+
+**The rows are wrapped to the pane's own width**, by the same rule and the same column as the
+`/thinking` pane, for the same reason: popup rows are truncated at the border and never re-wrapped,
+and this pane has no second rendering to recover a cut line from. What it holds is bounded rather than
+complete — the board keeps its 256 most recent firings and the oldest is dropped — because a user
+`advise:` fires on every tool call and it lives in the frame and not on disk.
+
+**It shows the whole session.** Unlike `/thinking`, a run view does not narrow it: a delegation's
+firings are named by their run in the heading and shown beside the main agent's, because the question
+is asked of the session and not of the agent on screen.
+
+**It opens on the newest firing**, on the last full window, and **follows** it exactly as `/thinking`
+does: a firing that lands while the pane is up is shown rather than landing below a frozen window,
+scrolling up off the end is what stops that, and scrolling back down onto the last full window is
+what resumes it. Its keyboard is the `/thinking` pane's exactly: `esc`, `↑`/`↓` by a row,
+`PgUp`/`PgDn` by a window, and nothing else — no `ctrl+r`, one rendering. It is non-modal on the same
+terms as the other three reports: the box behind it stays live and every other key, a printable one
+included, goes where it always went. The hint under the rows reads `↑/↓ scroll · esc close`.
+
+**In the give-way order it sits below the `/thinking` pane**, above only the dropdown: a window onto a
+board that keeps its firings whether or not the pane is drawn, and of the windows onto retained state
+the one a reader returns to last.
+
+**The pointer works on it exactly as it does on the other three reports.** A click **outside** the
+box dismisses the pane and still lands where it was aimed, a click **inside** does nothing and is
+swallowed, and the **wheel** scrolls the rows one per notch, clamped at the first row and the last
+full window, detaching and re-attaching the follow at those ends as the keys do. It is asked LAST of
+the four reports, in the slot's own draw order, so a click aimed here dismisses the panes above it
+first.
 
 ---
 
