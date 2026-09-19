@@ -618,15 +618,6 @@ tool-call-salvage: true
 # Set this to true to try it on your own work.
 context-fill-notice: false
 
-# Tell a sub-agent when its step budget is running out. With this on, a delegated sub-agent gets one
-# line on a tool result the moment it has used three quarters of the turns `delegate-max-steps`
-# allows it — how many it has used, how many are left, and that it should write its output now,
-# while it still has its tools — so it is not surprised by the tool-less wrap-up turn at the cap.
-# The main session never hears it: it has no step cap. Like `context-fill-notice` above it is NOT a
-# Floor guard, it starts off, and Bypass turns it off with the rest of its class. Set this to true
-# to try it on your own delegations.
-step-budget-notice: false
-
 # =============================================================================
 # How far a delegated sub-agent may run. A sub-agent works its task in one exchange of its own, and
 # nothing about that exchange is yours to watch: it reads, greps and edits until it decides it is
@@ -1021,8 +1012,8 @@ ui:
 # environment variable at send time (`headers-env:`, the api-key-env spelling), so a token you send
 # with a reaction never has to sit in this file. Two more spellings are its own: `enabled: false`
 # parks an entry without deleting it, and an id that is one of the seven Floor-guard keys — or
-# `context-fill-notice` and `step-budget-notice`, the engine's own built-in reactions — is refused:
-# those are switched with their own top-level key, not with a reactions: entry.
+# `context-fill-notice`, the engine's own built-in reaction — is refused: those are switched with
+# their own top-level key, not with a reactions: entry.
 #
 # `gate:` is the other action an entry can take: an argv LIST asked BEFORE a tool call runs, with
 # `on: [pre-tool-exec]` and nothing else under `on:`. The call reaches it as JSON on stdin (event,

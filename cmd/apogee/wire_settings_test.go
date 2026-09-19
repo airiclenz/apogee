@@ -569,51 +569,12 @@ func TestContextFillNoticeRowAppliesOneGeneration(t *testing.T) {
 	}
 }
 
-// The `step-budget-notice` row is the notice row's twin (ADR 0077 addendum): one more field of the
-// same generation, moved without the negation, carrying everything the session already had.
-func TestStepBudgetNoticeRowAppliesOneGeneration(t *testing.T) {
+// The step-budget notice has no row: it is structural for every delegate (ADR 0077, 2026-09-19
+// addendum), so the settings table carries no arm for its retired key and the pane cannot offer it.
+func TestStepBudgetNoticeHasNoSettingsRow(t *testing.T) {
 	t.Parallel()
-	spy := &applySettingSpy{}
-	live := newLiveSettings(config.Options{
-		ToolUseEnforcer:       true,
-		EmptyResponseRecovery: true,
-		ToolCallRepair:        true,
-		ToolCallSalvage:       true,
-		ToolLoopBreaker:       true,
-		ToolResultCap:         true,
-		ReadCache:             false,
-		Bypass:                true,
-		ContextFillNotice:     true,
-		Reactions:             []domain.Reaction{hookEntry("boot", reactions.TurnFinished)},
-	})
-	apply := applySettingFor(settingsApplier{engine: spy, live: live})
-
-	if _, err := apply("step-budget-notice", "true"); err != nil {
-		t.Fatalf("apply step-budget-notice=true: %v", err)
-	}
-	if len(spy.generations) != 1 {
-		t.Fatalf("SetReactions = %+v, want exactly one generation", spy.generations)
-	}
-	gen := spy.generations[0]
-	if !gen.StepBudgetNotice || !gen.ContextFillNotice || !gen.Bypass || gen.Floor != (apogee.FloorConfig{DisableReadCache: true}) || len(gen.Observe) != 1 {
-		t.Errorf("generation = %+v, want the step switch on with the fill switch, Bypass, the opted-out guard and the armed list untouched", gen)
-	}
-
-	if _, err := apply("step-budget-notice", "false"); err != nil {
-		t.Fatalf("apply step-budget-notice=false: %v", err)
-	}
-	if len(spy.generations) != 2 || spy.generations[1].StepBudgetNotice {
-		t.Errorf("SetReactions after the second apply = %+v, want a second generation with the switch off", spy.generations)
-	}
-	if got := live.options(); got.StepBudgetNotice || !got.ContextFillNotice {
-		t.Errorf("options() = step-budget-notice:%v context-fill-notice:%v, want false/true", got.StepBudgetNotice, got.ContextFillNotice)
-	}
-	entry, ok := settingsEntryFor("step-budget-notice")
-	if !ok {
-		t.Fatal("the settings table has no `step-budget-notice` arm")
-	}
-	if entry.reaches(settingsApplier{engine: spy}) {
-		t.Error("the step-budget-notice arm claims to reach a Driver with no live holder")
+	if _, ok := settingsEntryFor("step-budget-notice"); ok {
+		t.Error("the settings table has a `step-budget-notice` arm; the switch is retired")
 	}
 }
 
@@ -1277,7 +1238,6 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		AutoCompact:       true,
 		PruneToolResults:  true,
 		ContextFillNotice: true,
-		StepBudgetNotice:  true,
 		DelegateMaxSteps:  40,
 		DelegateMaxDepth:  2,
 		DelegateMaxTokens: 100_000,
@@ -1397,15 +1357,6 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				t.Helper()
 				if opts.ContextFillNotice {
 					t.Error("ContextFillNotice = true, want the switch the session turned off")
-				}
-			},
-		},
-		{
-			name: "step-budget-notice", key: "step-budget-notice", value: "false",
-			want: func(t *testing.T, opts config.Options) {
-				t.Helper()
-				if opts.StepBudgetNotice {
-					t.Error("StepBudgetNotice = true, want the switch the session turned off")
 				}
 			},
 		},
@@ -3984,13 +3935,9 @@ func TestLiveSettingsGenerationCarriesTheContextFillNotice(t *testing.T) {
 	t.Parallel()
 
 	for _, want := range []bool{false, true} {
-		live := newLiveSettings(config.Options{ContextFillNotice: want, StepBudgetNotice: want})
+		live := newLiveSettings(config.Options{ContextFillNotice: want})
 		if got := live.generation().ContextFillNotice; got != want {
 			t.Errorf("generation().ContextFillNotice = %v; want the seeded %v", got, want)
-		}
-		// And its twin, seeded the same way (ADR 0077 addendum).
-		if got := live.generation().StepBudgetNotice; got != want {
-			t.Errorf("generation().StepBudgetNotice = %v; want the seeded %v", got, want)
 		}
 	}
 }

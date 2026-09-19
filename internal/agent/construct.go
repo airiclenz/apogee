@@ -102,11 +102,11 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 		cfg:                cfg,
 		upstream:           up,
 		tools:              resolveTools(cfg),
-		ownsToolSet:        composesDefaultRoster(cfg),                                                                                                                // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
-		mode:               cfg.Mode,                                                                                                                                  // seed the live, swappable mode from the construction config
-		confineToWorkspace: cfg.ConfineToWorkspace,                                                                                                                    // likewise the live, swappable blast-radius flag (/confine)
-		scratchDir:         cfg.ScratchDir,                                                                                                                            // and the live, session-following scratch root (SetScratchDir)
-		gen:                domain.Generation{Bypass: cfg.Bypass, Floor: cfg.Floor, ContextFillNotice: cfg.ContextFillNotice, StepBudgetNotice: cfg.StepBudgetNotice}, // and the live Generation the settings surface swaps whole: Bypass and the two notice switches beside the Floor enable set (SetReactions, ADR 0076 A8, ADR 0077) …
+		ownsToolSet:        composesDefaultRoster(cfg),                                                                        // …and whether the engine may RE-compose it when the model's roster axis changes (ADR 0057)
+		mode:               cfg.Mode,                                                                                          // seed the live, swappable mode from the construction config
+		confineToWorkspace: cfg.ConfineToWorkspace,                                                                            // likewise the live, swappable blast-radius flag (/confine)
+		scratchDir:         cfg.ScratchDir,                                                                                    // and the live, session-following scratch root (SetScratchDir)
+		gen:                domain.Generation{Bypass: cfg.Bypass, Floor: cfg.Floor, ContextFillNotice: cfg.ContextFillNotice}, // and the live Generation the settings surface swaps whole: Bypass and the notice switch beside the Floor enable set (SetReactions, ADR 0076 A8, ADR 0077) …
 		compaction:         cfg.Context.CompactionEnabled,
 		prune:              cfg.Context.PruneToolResults,
 		contextFileNames:   cfg.ContextFiles,

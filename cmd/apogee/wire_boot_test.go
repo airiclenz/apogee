@@ -838,35 +838,6 @@ func TestBootConfigCarriesTheContextFillNotice(t *testing.T) {
 	}
 }
 
-// The `step-budget-notice` key is the notice's twin on the same trip (ADR 0077 addendum): carried
-// positively, on when the session switched it on and off when it said nothing.
-func TestBootConfigCarriesTheStepBudgetNotice(t *testing.T) {
-	t.Parallel()
-	for _, want := range []bool{false, true} {
-		t.Run(fmt.Sprintf("step-budget-notice=%v", want), func(t *testing.T) {
-			t.Parallel()
-			opts := config.Options{
-				Mode:             "ask-before",
-				Workspace:        t.TempDir(),
-				ConfigDir:        t.TempDir(),
-				StepBudgetNotice: want,
-			}
-			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
-			if err != nil {
-				t.Fatalf("resolveRoots: %v", err)
-			}
-			w := newRootWiring(opts, apogee.ModeAskBefore, roots)
-			t.Cleanup(w.close)
-			if err := w.resolveConfig(); err != nil {
-				t.Fatalf("resolveConfig: %v", err)
-			}
-			if w.cfg.StepBudgetNotice != want {
-				t.Errorf("Config.StepBudgetNotice = %v; want the threaded %v", w.cfg.StepBudgetNotice, want)
-			}
-		})
-	}
-}
-
 // And the whole trip, as the TUI Driver walks it: a home whose file says `context-fill-notice: true`
 // resolves a Config with the switch on, the composition root seeds the engine holder's generation
 // from that Config and binds the startup server (wireSession), and that bind replays the generation
@@ -894,31 +865,6 @@ func TestWireSessionBindsTheContextFillNoticeOntoTheAgent(t *testing.T) {
 			// and the `/settings` row both report what the session is running.
 			if got := w.live.options().ContextFillNotice; got != want {
 				t.Errorf("live options().ContextFillNotice = %v; want the file's %v", got, want)
-			}
-		})
-	}
-}
-
-// The step-budget notice's switch walks the same trip onto the bound Agent and the settings host
-// (ADR 0077 addendum), for the same reason: the replay is the step that could lose it.
-func TestWireSessionBindsTheStepBudgetNoticeOntoTheAgent(t *testing.T) {
-	t.Parallel()
-	for _, want := range []bool{false, true} {
-		t.Run(fmt.Sprintf("step-budget-notice=%v", want), func(t *testing.T) {
-			t.Parallel()
-			w := urlGuardWiring(t, config.Options{StepBudgetNotice: want})
-			if err := w.wireSession(context.Background()); err != nil {
-				t.Fatalf("wireSession: %v", err)
-			}
-			agent := w.engine.bound()
-			if agent == nil {
-				t.Fatal("wireSession left the engine unbound; the startup server was not bound")
-			}
-			if got := agent.Generation().StepBudgetNotice; got != want {
-				t.Errorf("the bound Agent's Generation().StepBudgetNotice = %v; want the file's %v", got, want)
-			}
-			if got := w.live.options().StepBudgetNotice; got != want {
-				t.Errorf("live options().StepBudgetNotice = %v; want the file's %v", got, want)
 			}
 		})
 	}

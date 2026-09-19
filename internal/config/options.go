@@ -240,13 +240,6 @@ type Options struct {
 	// with no negation.
 	ContextFillNotice bool
 
-	// StepBudgetNotice switches on the engine's step-budget notice (ADR 0077, 2026-09-15 addendum):
-	// ContextFillNotice's twin — the advise line that tells a sub-agent, once, when it has spent
-	// three quarters of its `delegate-max-steps`, so it writes its output while it still holds its
-	// tools. NOT a Floor guard, default FALSE, file-only, handed to apogee.Config.StepBudgetNotice as
-	// is.
-	StepBudgetNotice bool
-
 	// UndoSnapshots keeps the snapshot-backed undo store: the workspace imaged around each
 	// exchange in a git object database of the session's own, so `/undo` survives a relaunch and
 	// covers writes that never passed through apogee's write funnel (ADR 0074). Off leaves ADR

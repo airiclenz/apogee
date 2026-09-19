@@ -73,12 +73,6 @@ func FloorGuardKeys() []string { return slices.Clone(floorGuardKeys) }
 // list stays the seven — and its refusal says so.
 const contextFillNoticeKey = "context-fill-notice"
 
-// stepBudgetNoticeKey is contextFillNoticeKey's twin for the engine's step-budget notice (ADR 0077,
-// 2026-09-15 addendum) — the config key, the id its builtin advise Reaction fires under
-// (internal/agent's stepnotice.go), refused as an entry's `id:` on the same terms and kept out of
-// floorGuardKeys for the same reason.
-const stepBudgetNoticeKey = "step-budget-notice"
-
 // entryReactions maps one on-disk entry onto the user-origin Reactions it arms — ONE per action key
 // it spells, all carrying the entry's id, `on:` list and `workspace:` filter, so `run:` and `gate:`
 // on one entry resolve to an observe Reaction and a gate Reaction that [domain.SplitLanes] later
@@ -105,7 +99,7 @@ func (r reactionConfig) entryReactions() ([]domain.Reaction, error) {
 		return nil, reactionEntryError(id,
 			"that is the Floor guard %s: — set the top-level key, not a reactions: entry", id)
 	}
-	if id == contextFillNoticeKey || id == stepBudgetNoticeKey {
+	if id == contextFillNoticeKey {
 		return nil, reactionEntryError(id,
 			"that is the built-in engine reaction %s: — set the top-level key, not a reactions: entry", id)
 	}

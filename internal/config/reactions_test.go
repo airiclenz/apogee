@@ -294,11 +294,6 @@ func TestLoadFileConfigRefusesMalformedReactions(t *testing.T) {
 			want: `reaction "context-fill-notice": that is the built-in engine reaction context-fill-notice: — set the top-level key, not a reactions: entry`,
 		},
 		{
-			name: "the id is the step-budget notice's key",
-			body: "reactions:\n  - id: step-budget-notice\n    on: [post-tool-result]\n    advise: [\"true\"]\n",
-			want: `reaction "step-budget-notice": that is the built-in engine reaction step-budget-notice: — set the top-level key, not a reactions: entry`,
-		},
-		{
 			name: "on: names a seam",
 			body: "reactions:\n  - id: shaper\n    on: [pre-request]\n    run: [\"true\"]\n",
 			want: `invalid reaction "shaper": run: reacts to notices; "pre-request" is a seam`,
@@ -359,11 +354,10 @@ func TestFloorGuardKeysAreRegistryKeys(t *testing.T) {
 	if slices.Contains(floorGuardKeys, contextFillNoticeKey) {
 		t.Errorf("floorGuardKeys names %q; the notice is not a Floor guard", contextFillNoticeKey)
 	}
-	if _, ok := LookupKey(stepBudgetNoticeKey); !ok {
-		t.Errorf("stepBudgetNoticeKey %q is no registry key", stepBudgetNoticeKey)
-	}
-	if slices.Contains(floorGuardKeys, stepBudgetNoticeKey) {
-		t.Errorf("floorGuardKeys names %q; the notice is not a Floor guard", stepBudgetNoticeKey)
+	// The step-budget notice has no key: it is structural, and its retired spelling is the
+	// unknown-key walk's exemption (unknownkeys.go), never a registry row.
+	if _, ok := LookupKey(stepBudgetNoticeKey); ok {
+		t.Errorf("stepBudgetNoticeKey %q is a registry key; the switch is retired", stepBudgetNoticeKey)
 	}
 }
 

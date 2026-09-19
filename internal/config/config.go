@@ -796,14 +796,6 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// Default OFF for context-fill-notice's reason: the step-budget notice steers a sub-agent.
-		row: mustKey("step-budget-notice"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.StepBudgetNotice = fc.StepBudgetNotice != nil && *fc.StepBudgetNotice
-			return nil
-		},
-	},
-	{
 		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
 		// absence of one, so presence cannot stand in for the positive value the way it does there.
 		row: mustKey("delegate-max-steps"),
@@ -1515,12 +1507,6 @@ type fileConfig struct {
 	// auto-compact's reason, and — unlike the Floor — taken away by Bypass with the rest of the
 	// advise class.
 	ContextFillNotice *bool `yaml:"context-fill-notice"`
-	// StepBudgetNotice gates the engine's STEP-BUDGET NOTICE (ADR 0077, 2026-09-15 addendum):
-	// ContextFillNotice's twin, the advise line that tells a sub-agent once, at three quarters of
-	// its `delegate-max-steps`, to write its output now. Not a Floor guard, so absent ⇒ OFF, and
-	// only an explicit `step-budget-notice: true` switches it on; file-only, a pointer, and taken
-	// away by Bypass with the rest of the advise class.
-	StepBudgetNotice *bool `yaml:"step-budget-notice"`
 	// DelegateMaxSteps bounds a CHILD agent's one Exchange, in Turns: the engine ends the
 	// delegation when it reaches this many Turns and hands the parent what the child has.
 	// File-only (no flag/env), like auto-compact above it, and a POINTER for auto-compact's

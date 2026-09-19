@@ -71,7 +71,7 @@ func assertNoStepFiring(t *testing.T, sink *recordingSink) {
 	t.Helper()
 
 	for _, fe := range firedAdvice(sink) {
-		if fe.Reaction == stepBudgetNoticeID || strings.HasPrefix(fe.Detail, "step ") {
+		if strings.Contains(fe.Reaction, "step") || strings.HasPrefix(fe.Detail, "step ") {
 			t.Errorf("the stream booked a firing for the step notice, want none: %+v", fe)
 		}
 	}
@@ -259,8 +259,10 @@ func TestStepNoticeFiresUnderBypassAndIsNoBuiltin(t *testing.T) {
 	a := stepNoticeChild(t, cfg, 4)
 	a.turns.exchangeTurns = 2
 
-	if armed := builtinIDs(a); contains(armed, stepBudgetNoticeID) {
-		t.Errorf("builtins = %v, want no step-notice rung on the ladder", armed)
+	for _, id := range builtinIDs(a) {
+		if strings.Contains(id, "step") {
+			t.Errorf("builtins = %v, want no step-notice rung on the ladder", builtinIDs(a))
+		}
 	}
 	msg := adviseOneCall(t, a, "body")
 

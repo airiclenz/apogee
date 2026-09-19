@@ -17,10 +17,6 @@ import (
 // reading `[advice — reaction …]` on a read_file result as part of the file it read, and the
 // fence header is the one thing that tells a structural instruction from a Reaction's advice.
 
-// stepBudgetNoticeID is the `step-budget-notice` key's spelling, still reserved against a user
-// reaction of that name (reservedIDs) while the key exists; the key and this id go together.
-const stepBudgetNoticeID = "step-budget-notice"
-
 // stepNoticeTopic is the engine-note topic the notice is fenced under on the closing tool result
 // — `[engine — step budget]` … `[end engine — step budget]` — and the Topic its ledger row carries.
 const stepNoticeTopic = "step budget"

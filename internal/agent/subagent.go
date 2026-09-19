@@ -1207,8 +1207,6 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	//                              the same floor the parent is running (ADR 0071) —
 	childCfg.ContextFillNotice = gen.ContextFillNotice // and its context-fill notice switch, so a
 	//                                                    child inherits the notice (ADR 0077 D1) —
-	childCfg.StepBudgetNotice = gen.StepBudgetNotice // and the retired step-budget switch beside it, carried
-	//                                                  unread: the notice is structural (stepnotice.go)
 	childCfg.Context.CompactionEnabled = a.compactionEnabled() // and the auto-Compaction and Pruning gates,
 	childCfg.Context.PruneToolResults = a.pruneEnabled()       // which the settings surface may have swapped
 	// The context-file NAMES are deliberately NOT re-read from the live list: the child copies the

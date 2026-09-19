@@ -17,9 +17,8 @@ result inside a fence apogee writes, so the model reads it as advice from you an
 tool's own output. A `gate:` entry (class **gate**) is asked, before a tool call runs, whether the
 call may — and it can say `deny`, or `ask` to put the call to you, but never approve a call on
 your behalf. A Floor guard is the engine's own `shape (view)` Reaction — it fires on a Moment
-inside the loop and rewrites what the model sees — and the engine's own `advise` Reactions are the
-[context-fill notice](configuration.md#context-fill-notice) and the
-[step-budget notice](configuration.md#step-budget-notice), each of which appends its line to a tool
+inside the loop and rewrites what the model sees — and the engine's own `advise` Reaction is the
+[context-fill notice](configuration.md#context-fill-notice), which appends its line to a tool
 result the way an `advise:` entry does; yours fires on your own machine, as your
 configuration rather than a model action. Of the five in-loop seams, a `gate:` entry reacts at
 `pre-tool-exec` and an `advise:` entry at `post-tool-result` (or its `file-changed` narrowing);
@@ -62,7 +61,7 @@ reactions:
 
 | Key | Meaning |
 |---|---|
-| `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id, and so are `context-fill-notice` and `step-budget-notice`, the engine's own built-in advise reactions — each is switched with its own top-level key, not with an entry here. |
+| `id:` | Required, and unique in the list. It is the payload's `reaction` field and what every failure notice reports, so two entries called `notify` would report as one. One of the seven Floor-guard keys is refused as an id, and so is `context-fill-notice`, the engine's own built-in advise reaction — it is switched with its own top-level key, not with an entry here. |
 | `on:` | Required, at least one. A `run:` entry reacts to the eleven notices below; an `advise:` entry reacts at `post-tool-result` or `file-changed`; a `gate:` entry reacts at the `pre-tool-exec` **seam** and nowhere else. A spelling outside that vocabulary is refused at startup, and so is a Moment a key cannot take — a seam under `run:`, a notice other than `file-changed` under `advise:`, anything but `pre-tool-exec` under `gate:` — by a sentence naming the key and what it does take: `advise: reacts at post-tool-result or file-changed; "turn-finished" is neither`. The list is shared by every action key the entry spells, so each of them must be able to take all of it. |
 | `run:` | The entry's observe action, in either of two shapes. A **list** is an argv: `run[0]` is the program, the rest are its arguments, passed word for word. A **mapping** `{url:, headers:, headers-env:}` is a webhook the payload is POSTed to. |
 | `workspace:` | Optional. Scopes the entry to one workspace; unset means every workspace. |
@@ -319,9 +318,9 @@ silent the rest of the time; one that failed, timed out (default `timeout:` `10s
 be spawned contributes nothing and is reported to you, each time it fails; a `file-changed`
 entry on a call that changed no file neither runs nor reports. Under `bypass:` the
 entry is switched off entirely, like every other Reaction that shapes what the model sees — the
-engine's own [context-fill notice](configuration.md#context-fill-notice) and
-[step-budget notice](configuration.md#step-budget-notice) included, even with their keys on — so a
-Bypass run reads exactly what the bare loop would.
+engine's own [context-fill notice](configuration.md#context-fill-notice) included, even with its
+key on — so a Bypass run reads exactly what the bare loop would. (A sub-agent's step-budget
+notice is not a Reaction but part of its cap, so it stays.)
 
 Write a script that **returns facts, not imperatives**: the files `gofmt` would rewrite, the
 failing test's name, the line a linter flagged. The fence tells the model who spoke; it does not

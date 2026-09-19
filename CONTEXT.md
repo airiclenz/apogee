@@ -703,7 +703,17 @@ the delegate's last reply reads as <tool-call markup | a file dump | a grep dump
 its next step>, not a finding; engine summary follows]` and the text follows the fold whole under
 `[delegate's closing report — read as narration, not a finding]`. The prefix is unchanged, so the
 TUI still reads the bound; blank text is the wordless path above, never a non-report; and no
-wording rule faults a finding — the closed acknowledgement list is the only text withheld. It is a
+wording rule faults a finding — the closed acknowledgement list is the only text withheld. The cap
+also ANNOUNCES itself before it lands — the **step-budget notice** (2026-09-19, ADR 0077
+addendum): the tool result that closes the Turn reaching **ceil(0.75 × cap)** carries one engine
+note, fenced `[engine — step budget]` … `[end engine — step budget]` (never the advice fence — a
+delegate has been seen reading an advice fence on a `read_file` result as part of the file),
+`steps: N of M used — K left before the wrap-up Turn; write your output now`, so the child writes
+while it still holds its tools. It fires ONCE per delegation while its copy survives in the
+history — a fold that swallowed it re-arms it, as a fold re-arms the fill notice — silent at depth
+0 and for an unbounded delegation, and it is part of the bound's contract, not a Reaction: no key,
+no Reaction id, no firing booked, on under Bypass (the `step-budget-notice` key of the 2026-09-15
+addendum is retired; a file still carrying it is ignored without an unknown-key notice). It is a
 **structural floor**
 ([ADR 0006](docs/adr/0006-bypass-mode-is-the-mechanisms-off-floor.md)), not an armed **Reaction** —
 it stays on under **Bypass** and nothing withdraws it at runtime. Enforced in exactly one place,
@@ -1358,9 +1368,9 @@ alone — a mapping is refused with a sentence naming the key — as is an `on:`
 take (a seam under `run:`, a notice under `gate:`, any Moment but the two under `advise:`), and
 `enabled: false` **parks** an entry: it stays in the file
 and is dropped at resolve, so nothing arms it. The whole live shape swaps as one
-**`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice, StepBudgetNotice}` — which a **Driver** applies
+**`Generation`** — `{Floor, Bypass, Observe, Sync, ContextFillNotice}` — which a **Driver** applies
 in one act to the agent (which takes Floor, Bypass, Sync and the
-**[Context-fill notice](#reactions-and-moments)** and step-budget notice switches) and to the runner (which takes Observe), so
+**[Context-fill notice](#reactions-and-moments)** switch) and to the runner (which takes Observe), so
 nothing downstream reads a half-swapped state; it is the single idiom that replaced `SetBypass` and `SetFloor`;
 the runner keeps `Replace` as the observe half's swap primitive, now
 called only from the Driver's `SetReactions`

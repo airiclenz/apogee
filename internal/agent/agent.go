@@ -1244,9 +1244,8 @@ func (a *Agent) closeUndoGroup() {
 // rather than self-skipping at fire time (the enable set, ADR 0076 A8): the firing sequence is
 // identical either way, a disabled guard having booked nothing before. It is rebuilt only when
 // one of the two actually MOVED — a Bypass-only swap leaves the slice exactly as it was, so a
-// ladder installed in place of the seven guards survives one. gen.StepBudgetNotice is carried
-// through unread: the step-budget notice is structural (stepnotice.go), and the field waits on
-// the `step-budget-notice` key's retirement.
+// ladder installed in place of the seven guards survives one. The step-budget notice has no
+// switch here: it is structural (stepnotice.go).
 //
 // Bypass takes effect at the next fire, as it always has: the gate is consulted per armed
 // Reaction per Moment (bypassSkips), so a Turn already mid-flight starts honouring the new value
@@ -1280,12 +1279,12 @@ func (a *Agent) installGeneration(gen domain.Generation) {
 		a.builtins = a.buildBuiltins(gen.Floor, gen.ContextFillNotice)
 	}
 	a.gen.Floor, a.gen.Bypass, a.gen.Sync = gen.Floor, gen.Bypass, gen.Sync
-	a.gen.ContextFillNotice, a.gen.StepBudgetNotice = gen.ContextFillNotice, gen.StepBudgetNotice
+	a.gen.ContextFillNotice = gen.ContextFillNotice
 }
 
 // Generation reports the live Generation this Agent is running — the Floor enable set, Bypass,
-// the two notice switches and the sync lane as SetReactions last installed them, seeded at
-// construction from cfg.Floor, cfg.Bypass, cfg.ContextFillNotice and cfg.StepBudgetNotice with an empty Sync
+// the notice switch and the sync lane as SetReactions last installed them, seeded at
+// construction from cfg.Floor, cfg.Bypass and cfg.ContextFillNotice with an empty Sync
 // (Config.Reactions is the OTHER route and is not folded in here). Observe is always empty: the
 // agent never holds the observe lane.
 //

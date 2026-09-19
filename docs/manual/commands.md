@@ -575,8 +575,7 @@ the same way.
 they are on already — so each is an `on`/`off` row in the pane's **Session** section, edited in place
 like any other boolean and applied to the running session: `tool-call-repair`, `tool-call-salvage`,
 `tool-loop-breaker`, `empty-response-recovery`, `tool-use-enforcer`, `read-cache` and
-`tool-result-cap`. The [`context-fill-notice`](configuration.md#context-fill-notice) and
-[`step-budget-notice`](configuration.md#step-budget-notice) rows beside them are the same kind of
-row — `on`/`off`, applied to the running session the moment you commit it — but neither is a Floor
-guard and both start `off`.
+`tool-result-cap`. The [`context-fill-notice`](configuration.md#context-fill-notice) row beside
+them is the same kind of row — `on`/`off`, applied to the running session the moment you commit it
+— but it is not a Floor guard and starts `off`.
 

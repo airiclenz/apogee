@@ -747,17 +747,17 @@ func wrongHandler(m domain.Moment, h domain.Handler) error {
 // all key on the ID, so a reaction sharing a builtin's name makes every attribution ambiguous.
 //
 // The set is guardIDs — ALL seven guard keys, not the enable set the ladder currently holds
-// (floorguards.go) — plus the context-fill notice's id (fillnotice.go) and, while its key exists,
-// the step-budget notice's (stepnotice.go), on the same terms. A builtin the user switched off still owns its name: arming an entry under it would be
+// (floorguards.go) — plus the context-fill notice's id (fillnotice.go), on the same terms. The
+// step-budget notice is not in it: a structural engine note (stepnotice.go) has no Reaction id to
+// collide with. A builtin the user switched off still owns its name: arming an entry under it would be
 // answered by the builtin again the moment its switch moves back. The map is fresh per call, so a
 // caller may grow it with the ids it arms.
 func reservedIDs() map[string]bool {
-	taken := make(map[string]bool, len(guardIDs)+2)
+	taken := make(map[string]bool, len(guardIDs)+1)
 	for _, id := range guardIDs {
 		taken[id] = true
 	}
 	taken[contextFillNoticeID] = true
-	taken[stepBudgetNoticeID] = true
 	return taken
 }
 

@@ -89,9 +89,9 @@ type liveSettings struct {
 	// contextFileNames below).
 	now config.Options
 
-	// The Reaction surface the engine seam takes — the Floor gates, `bypass:`, the two notice
-	// switches and the two Reaction lanes in the ONE value a live swap carries (ADR 0076 A8) — is not
-	// held beside now but DERIVED from it (generation, generationOf): the seven Floor keys, the switches
+	// The Reaction surface the engine seam takes — the Floor gates, `bypass:`, the notice
+	// switch and the two Reaction lanes in the ONE value a live swap carries (ADR 0076 A8) — is not
+	// held beside now but DERIVED from it (generation, generationOf): the seven Floor keys, the switch
 	// and the `reactions:` list are all keys on now, so there is nothing a second value could remember
 	// that this one does not, and a mirror kept beside it was one more place two edits could come to
 	// disagree. The Floor gates are spelled NEGATIVE in the derived value, the engine's own spelling,
@@ -582,7 +582,7 @@ func (s *liveSettings) generation() apogee.Generation {
 
 // generationOf is the one projection from the session's configuration onto the Generation the
 // engine seam takes (SetReactions, ADR 0076 A8): the seven positive Floor keys through their one
-// negation seam, `bypass:` and the two notice switches as is, and the resolved `reactions:` list
+// negation seam, `bypass:` and the notice switch as is, and the resolved `reactions:` list
 // divided into the observe rows the Runner fires and the sync rows the Agent runs. Both composition
 // roots read the seed through it and every writer below hands its answer back through it, so a
 // partial edit knows where the fields it does not touch stand without a second value remembering
@@ -593,7 +593,6 @@ func generationOf(o config.Options) apogee.Generation {
 		Floor:             floorFromOptions(o),
 		Bypass:            o.Bypass,
 		ContextFillNotice: o.ContextFillNotice,
-		StepBudgetNotice:  o.StepBudgetNotice,
 		Observe:           observe,
 		Sync:              sync,
 	}
@@ -703,15 +702,6 @@ func (s *liveSettings) setContextFillNotice(on bool) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.now.ContextFillNotice = on
-	return generationOf(s.now)
-}
-
-// setStepBudgetNotice is setContextFillNotice for the `step-budget-notice:` switch — the same
-// field-of-one-generation shape, for the same reason, and likewise never a Floor key.
-func (s *liveSettings) setStepBudgetNotice(on bool) apogee.Generation {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.now.StepBudgetNotice = on
 	return generationOf(s.now)
 }
 
@@ -1268,12 +1258,6 @@ var settingsTable = []settingsEntry{
 		key:     "context-fill-notice",
 		reaches: reachesTheEngineAndTheHolder,
 		apply:   applyContextFillNotice,
-	},
-	// The step-budget notice's switch, the row above's twin (ADR 0077, 2026-09-15 addendum).
-	{
-		key:     "step-budget-notice",
-		reaches: reachesTheEngineAndTheHolder,
-		apply:   applyStepBudgetNotice,
 	},
 	{
 		key: "delegate-max-steps",
@@ -1844,17 +1828,6 @@ func applyContextFillNotice(a settingsApplier, key, value string) (string, error
 	return "", a.engine.SetReactions(a.live.setContextFillNotice(landed.ContextFillNotice))
 }
 
-// applyStepBudgetNotice is the `step-budget-notice:` row's apply, on applyContextFillNotice's terms
-// exactly: the switch is written onto the holder and the whole generation pushed at the single
-// engine seam, which rebuilds its builtin ladder from the moved switch.
-func applyStepBudgetNotice(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	return "", a.engine.SetReactions(a.live.setStepBudgetNotice(landed.StepBudgetNotice))
-}
-
 // reachesTheEngine reports whether the anytime-safe mutator class is composed: the keys that are
 // PUSHED at the engine and are in force the moment their apply returns.
 func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
@@ -1862,7 +1835,7 @@ func reachesTheEngine(a settingsApplier) bool { return a.engine != nil }
 // reachesTheEngineAndTheHolder reports whether the engine and the startup snapshot's mutable half
 // are BOTH composed — the pair the two `context-files.` rows need, since either row installs the
 // switch and the names together and only the holder remembers the half the row did not carry, and
-// the pair the seven Floor-guard rows, the `bypass` row and the two notice rows need for
+// the pair the seven Floor-guard rows, the `bypass` row and the notice row need for
 // the same shape of reason: SetReactions takes one whole Generation and only the holder remembers
 // the fields those rows did not carry.
 func reachesTheEngineAndTheHolder(a settingsApplier) bool { return a.engine != nil && a.live != nil }

@@ -90,15 +90,6 @@ type Config struct {
 	// surface swaps whole; a child inherits the parent's LIVE value at spawn.
 	ContextFillNotice bool
 
-	// StepBudgetNotice switches the engine's step-budget notice on (ADR 0077, 2026-09-15 addendum):
-	// ContextFillNotice's twin — an engine-origin ADVISE Reaction on post-tool-result, off by
-	// default, off under Bypass, beside Bypass rather than inside Floor, the construction seed of
-	// Generation.StepBudgetNotice, inherited live at spawn — that tells a CHILD agent, once, when
-	// it has spent three quarters of the Turns its step cap allows (Delegation.MaxSteps), so it
-	// writes its output while it still holds the tools to. A top-level Agent, which has no cap,
-	// never hears it.
-	StepBudgetNotice bool
-
 	// ConfineToWorkspace tunes Auto's blast radius (ADR 0012); meaningful only in Auto.
 	// true (the default) fences subprocess writes to the workspace under OS confinement
 	// (network open, MCP gated); false ("I am the sandbox") runs Auto unconfined, safe

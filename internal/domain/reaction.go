@@ -597,15 +597,10 @@ type Generation struct {
 	// the agent rebuilds its builtin ladder when it moves, so the notice is absent from the ladder
 	// rather than self-skipping while it is off.
 	ContextFillNotice bool
-	// StepBudgetNotice switches the engine's step-budget notice on (ADR 0077, 2026-09-15 addendum):
-	// the second builtin of class advise, ContextFillNotice's twin in every respect — off by
-	// default, not a Floor guard, an enable-set input the ladder is rebuilt from — which tells a
-	// child agent once when it has spent three quarters of its step cap.
-	StepBudgetNotice bool
 }
 
 // Validate reports whether the Generation is well formed, wrapping ErrInvalidReaction with what
-// is wrong. Floor, Bypass and the two notice switches are booleans and cannot be malformed, so every
+// is wrong. Floor, Bypass and the notice switch are booleans and cannot be malformed, so every
 // check is about the two lanes: each entry takes a class its lane accepts — observe for the
 // Runner's lane, advise or gate for the sync lane, which is the user's alone — and no two entries
 // WITHIN one lane share an ID, which is what a firing is reported under. The same ID may appear in

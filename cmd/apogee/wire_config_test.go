@@ -40,7 +40,6 @@ func projectionOptions(t *testing.T) config.Options {
 		ToolUseEnforcer:    true,
 		ToolLoopBreaker:    true,
 		ContextFillNotice:  true,
-		StepBudgetNotice:   true,
 		Servers: []config.ServerEntry{
 			{Name: "box", Endpoint: "http://box.example/v1", APIKeyEnv: "BOX_KEY"},
 		},
@@ -113,9 +112,8 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 	if got.Floor != want.Floor {
 		t.Errorf("Config.Floor = %+v, want %+v", got.Floor, want.Floor)
 	}
-	if got.ContextFillNotice != want.ContextFillNotice || got.StepBudgetNotice != want.StepBudgetNotice {
-		t.Errorf("Config notices = (%v, %v), want (%v, %v)",
-			got.ContextFillNotice, got.StepBudgetNotice, want.ContextFillNotice, want.StepBudgetNotice)
+	if got.ContextFillNotice != want.ContextFillNotice {
+		t.Errorf("Config.ContextFillNotice = %v, want %v", got.ContextFillNotice, want.ContextFillNotice)
 	}
 }
 

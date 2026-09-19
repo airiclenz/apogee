@@ -105,11 +105,12 @@ func TestSetReactionsRefusesAMalformedGeneration(t *testing.T) {
 	}
 }
 
-// A sync entry may not take a builtin's name: the seven Floor-guard keys, the context-fill notice
-// and the still-reserved `step-budget-notice` id
-// are reserved on the live route exactly as they are on Config.Reactions (armReactions), switched on
-// or off — a guard the user disabled still owns its id, because the moment its switch moves back the
-// builtin would answer under it again. The refusal installs nothing.
+// A sync entry may not take a builtin's name: the seven Floor-guard keys and the context-fill
+// notice are reserved on the live route exactly as they are on Config.Reactions (armReactions),
+// switched on or off — a guard the user disabled still owns its id, because the moment its switch
+// moves back the builtin would answer under it again. The refusal installs nothing. The
+// step-budget notice's old key is NOT reserved any more: the notice is a structural engine note
+// with no Reaction id (stepnotice.go), so a user entry of that name arms like any other.
 func TestSetReactionsRefusesAReservedBuiltinID(t *testing.T) {
 	t.Parallel()
 
@@ -122,7 +123,7 @@ func TestSetReactionsRefusesAReservedBuiltinID(t *testing.T) {
 	t.Cleanup(func() { _ = a.Close() })
 	mustSetReactions(t, a, syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny})))
 
-	for _, id := range []string{guardToolLoopBreaker, guardReadCache, contextFillNoticeID, stepBudgetNoticeID} {
+	for _, id := range []string{guardToolLoopBreaker, guardReadCache, contextFillNoticeID} {
 		t.Run(id, func(t *testing.T) {
 			err := a.SetReactions(syncGen(a, goGate(id, domain.GateDecision{Verdict: domain.GateAllow})))
 
@@ -138,6 +139,17 @@ func TestSetReactionsRefusesAReservedBuiltinID(t *testing.T) {
 			}
 		})
 	}
+	t.Run("step-budget-notice", func(t *testing.T) {
+		const id = "step-budget-notice"
+		gen := syncGen(a, goGate(id, domain.GateDecision{Verdict: domain.GateAllow}))
+		mustSetReactions(t, a, gen)
+
+		got := a.Generation()
+		if len(got.Sync) != 1 || got.Sync[0].ID != id {
+			t.Errorf("after the swap Sync = %+v, want the %q entry armed: the id is no builtin's", got.Sync, id)
+		}
+		mustSetReactions(t, a, syncGen(a, goGate("warden", domain.GateDecision{Verdict: domain.GateDeny})))
+	})
 }
 
 // A swap ARMS an advise entry: the tool result committed before it carries the tool's own output,

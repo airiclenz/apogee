@@ -129,7 +129,6 @@ func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
 		{Floor: domain.FloorConfig{DisableReadCache: true, DisableToolResultCap: true}},
 		{Bypass: true},
 		{ContextFillNotice: true},
-		{StepBudgetNotice: true},
 	}
 
 	var wg sync.WaitGroup
@@ -154,11 +153,11 @@ func TestSetReactionsSwapsFloorAndBypassAtomically(t *testing.T) {
 	}()
 	wg.Wait()
 
-	// The last generation installed is what the Agent runs, all four switches of it.
-	want := domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableToolCallSalvage: true}, ContextFillNotice: true, StepBudgetNotice: true}
+	// The last generation installed is what the Agent runs, all three switches of it.
+	want := domain.Generation{Bypass: true, Floor: domain.FloorConfig{DisableToolCallSalvage: true}, ContextFillNotice: true}
 	mustSetReactions(t, a, want)
 	got := a.Generation()
-	if got.Floor != want.Floor || got.Bypass != want.Bypass || got.ContextFillNotice != want.ContextFillNotice || got.StepBudgetNotice != want.StepBudgetNotice {
+	if got.Floor != want.Floor || got.Bypass != want.Bypass || got.ContextFillNotice != want.ContextFillNotice {
 		t.Errorf("Generation() = %+v, want %+v", got, want)
 	}
 	if ids := builtinIDs(a); slices.Contains(ids, guardToolCallSalvage) {

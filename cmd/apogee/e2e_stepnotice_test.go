@@ -44,8 +44,8 @@ const (
 	stepNoticeLine = "steps: 3 of 4 used — 1 left before the wrap-up Turn; write your output now"
 
 	// stepNoticeConfig is the `extraConfig` the notice journey runs with: the pinned cap and
-	// nothing else — no `step-budget-notice` key, because the notice is structural and the
-	// key-absent home is the positive journey.
+	// nothing else — the notice is structural and has no switch, so the cap alone is the
+	// positive journey.
 	stepNoticeConfig = "delegate-max-steps: 4\n"
 )
 

@@ -66,14 +66,28 @@ func unknownKeys(data []byte) []keyAt {
 // serverEntryType is the struct the retired `sub-agents:` flag is exempted on (walkUnknownKeys).
 var serverEntryType = reflect.TypeOf(ServerEntry{})
 
+// fileConfigType is the struct the retired top-level `step-budget-notice:` key is exempted on
+// (walkUnknownKeys).
+var fileConfigType = reflect.TypeOf(fileConfig{})
+
+// stepBudgetNoticeKey is the retired top-level switch of the engine's step-budget notice (ADR 0077,
+// 2026-09-15 addendum; superseded 2026-09-19): the notice is structural for every delegate now, so
+// the key has no field to land on, and a home config seeded from the old starter template still
+// carries `step-budget-notice: false`. It is exempted from the walk, never stripped: the startup
+// strips beside dropRetiredSubAgentsFlags back up and rewrite the file, and the exemption is
+// read-only — startup and a live re-read alike print nothing and rewrite nothing.
+const stepBudgetNoticeKey = "step-budget-notice"
+
 // walkUnknownKeys reports into found every key of one mapping node that typ (a config struct) has
 // no yaml tag for, and recurses into the values the schema descends into.
 //
-// One key is passed over without a notice: `servers[N].sub-agents`, the retired ADR 0045 flag
-// (subAgentsKey). The legacy migration does not consume it — only the consented TUI offer strips
+// Two keys are passed over without a notice. `servers[N].sub-agents` is the retired ADR 0045 flag
+// (subAgentsKey): the legacy migration does not consume it — only the consented TUI offer strips
 // it, and a declined offer leaves it in place (configmigrate.go, ADR 0035) — so without the
 // exemption every start of such a config would print an unknown-key line beside the offer, and
-// headless and daemon starts, which raise no offer, would print it forever.
+// headless and daemon starts, which raise no offer, would print it forever. The top-level
+// `step-budget-notice` (stepBudgetNoticeKey) is exempted on the same terms: nothing consumes it,
+// and the old starter template wrote it into every home.
 func walkUnknownKeys(node *yaml.Node, typ reflect.Type, prefix string, found *[]keyAt) {
 	fields := make(map[string]reflect.StructField, typ.NumField())
 	for _, sk := range schemaKeys(typ) {
@@ -88,6 +102,9 @@ func walkUnknownKeys(node *yaml.Node, typ reflect.Type, prefix string, found *[]
 		}
 		name := keyNode.Value
 		if typ == serverEntryType && name == subAgentsKey {
+			continue
+		}
+		if typ == fileConfigType && name == stepBudgetNoticeKey {
 			continue
 		}
 		path := joinKeyPath(prefix, name)

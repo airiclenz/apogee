@@ -11,7 +11,8 @@ import (
 
 // TestUnknownKeysWalksTheSchemaAsDeepAsItGoes pins what the walk reports, and — the half that
 // matters as much — what it does not: a key under an any-typed action, the retired `sub-agents:`
-// flag, and a document with no root mapping all walk to nothing.
+// flag, the retired top-level `step-budget-notice:` switch, and a document with no root mapping
+// all walk to nothing.
 func TestUnknownKeysWalksTheSchemaAsDeepAsItGoes(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -58,6 +59,16 @@ func TestUnknownKeysWalksTheSchemaAsDeepAsItGoes(t *testing.T) {
 			name:  "the exemption is the servers entry's alone",
 			given: "sub-agents: true\n",
 			want:  []keyAt{{key: "sub-agents", line: 1}},
+		},
+		{
+			name:  "the retired step-budget-notice switch is exempt at the top level",
+			given: "step-budget-notice: true\n",
+			want:  nil,
+		},
+		{
+			name:  "the step-budget-notice exemption is the top level's alone",
+			given: "ui:\n  step-budget-notice: true\n",
+			want:  []keyAt{{key: "ui.step-budget-notice", line: 2}},
 		},
 		{
 			name:  "an empty file walks to nothing",
@@ -171,6 +182,48 @@ func TestParseConfigFileNeverReportsAKeyTheMigrationOwns(t *testing.T) {
 				if strings.Contains(n, "unknown key") {
 					t.Errorf("a key the migration owns was reported as unknown: %q", n)
 				}
+			}
+		})
+	}
+}
+
+// TestParseConfigFileIgnoresTheRetiredStepBudgetNotice pins the retired switch's whole contract at
+// the loader, on the startup pass and the live re-read alike: a home seeded from the old starter
+// template loads without error, without an unknown-key notice, without a value to land — the
+// schema has no field for it — and without the file being rewritten, because the exemption
+// (walkUnknownKeys) is read-only where the startup strips beside it back up and rewrite.
+func TestParseConfigFileIgnoresTheRetiredStepBudgetNotice(t *testing.T) {
+	t.Parallel()
+	const given = "servers:\n  - name: box\n    endpoint: http://box:1111\nserver: box\n" +
+		"context-fill-notice: false\nstep-budget-notice: true\n"
+	for _, mayMigrate := range []bool{true, false} {
+		t.Run(fmt.Sprintf("mayMigrate=%v", mayMigrate), func(t *testing.T) {
+			t.Parallel()
+			path := writeMigrationConfig(t, given)
+			var notices []string
+			fc, err := parseConfigFile(path, os.ReadFile, func(s string) { notices = append(notices, s) }, mayMigrate)
+			if err != nil {
+				t.Fatalf("parseConfigFile: %v", err)
+			}
+			if len(notices) != 0 {
+				t.Errorf("parseConfigFile announced %q; want silence on the retired key", notices)
+			}
+			var opts Options
+			if err := applyFile(&opts, fc); err != nil {
+				t.Fatalf("applyFile: %v", err)
+			}
+			if opts.ContextFillNotice {
+				t.Error("the neighbouring context-fill-notice: false was not read as false")
+			}
+			after, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatalf("read back: %v", err)
+			}
+			if string(after) != given {
+				t.Errorf("the file was rewritten:\n%s\nwant it byte-identical to the input", after)
+			}
+			if entries, _ := os.ReadDir(filepath.Dir(path)); len(entries) != 1 {
+				t.Errorf("the home holds %d entries after the read; want the one config, no backup", len(entries))
 			}
 		})
 	}
