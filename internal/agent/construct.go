@@ -128,15 +128,15 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	} else {
 		d.seed(a)
 	}
-	// The engine's own Reactions — the Floor guards cfg.Floor leaves ON, and the context-fill and
-	// step-budget notices when cfg.ContextFillNotice / cfg.StepBudgetNotice switch them on — are
+	// The engine's own Reactions — the Floor guards cfg.Floor leaves ON, and the context-fill
+	// notice when cfg.ContextFillNotice switches it on — are
 	// built HERE, after the literal, because each handler closes over this Agent. The ladder is the
 	// ENABLE SET (ADR 0076 A8): a guard whose opt-out is set is absent from it, and SetReactions
 	// rebuilds it whenever the live Floor or a notice switch moves. The host's own Reactions are
 	// validated against ALL SEVEN guard keys whatever the enable set holds (armReactions): an
 	// ill-formed entry, or one reusing a guard's or a sibling's ID, fails construction rather than
 	// firing under a name something else already answers to.
-	a.builtins = a.buildBuiltins(cfg.Floor, cfg.ContextFillNotice, cfg.StepBudgetNotice)
+	a.builtins = a.buildBuiltins(cfg.Floor, cfg.ContextFillNotice)
 	armed, err := armReactions(cfg.Reactions)
 	if err != nil {
 		return nil, err
@@ -156,7 +156,7 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	// owns the moment an Exchange ends and the moment a cancelled Turn is rolled back, the Agent
 	// owns what each costs — the undo journal's closing capture (ADR 0074) and the two notices
 	// that rode the tool results the rollback drops, the context-fill ladder (ADR 0077 D4) and the
-	// step-budget notice's Turn latch (stepnotice.go).
+	// step-budget notice's latch (stepnotice.go).
 	a.turns = &turnLifecycle{
 		conv:     &a.conv,
 		observer: a,

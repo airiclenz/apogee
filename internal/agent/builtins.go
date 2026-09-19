@@ -10,9 +10,9 @@ import (
 	"github.com/airiclenz/apogee/internal/processing"
 )
 
-// The engine's builtin Reactions: the seven Floor guards (ADR 0071, ADR 0076 D1) and, each behind
-// its own switch, the two engine notices — the context-fill notice (ADR 0077) and the step-budget
-// notice (its 2026-09-15 addendum). Each guard is a domain.Reaction of engine
+// The engine's builtin Reactions: the seven Floor guards (ADR 0071, ADR 0076 D1) and, behind its
+// own switch, the context-fill notice (ADR 0077). The step-budget notice is NOT one of them: it
+// is an engine note appendToolResult applies structurally (stepnotice.go). Each guard is a domain.Reaction of engine
 // origin and shape-view class, holding a thin handler that calls the unchanged internal/floor
 // policy function. The policy stays in internal/floor byte-for-byte; what lives here is only the
 // engine's half — when the guard is consulted, what its firing is called, and what it books.
@@ -20,11 +20,11 @@ import (
 // They are built into Agent.builtins at construction and are never entries of Config.Reactions:
 // a builtin fires FIRST at its Moment. A Floor guard is never switched off by Bypass, which is
 // the whole difference between the floor a model always gets and everything armed above it; the
-// two notices are the builtins Bypass does switch off, because they are class advise — each
-// steers the model rather than correcting what it sees — and Bypass is the promise that nothing
-// of that class speaks (ADR 0077 D1, bypassSkips).
+// fill notice is the builtin Bypass does switch off, because it is class advise — it steers the
+// model rather than correcting what it sees — and Bypass is the promise that nothing of that
+// class speaks (ADR 0077 D1, bypassSkips).
 //
-// The ladder is an ENABLE SET (ADR 0076 A8): a guard whose gate is off — or a notice while its
+// The ladder is an ENABLE SET (ADR 0076 A8): a guard whose gate is off — or the notice while its
 // switch is off — is ABSENT from the slice buildBuiltins returns rather than
 // present-and-self-skipping, so no handler consults a Floor gate at fire time. The firing
 // sequence is identical either way — a disabled guard booked nothing before — and the ladder is
@@ -156,21 +156,19 @@ func FloorGuardKeys() []string {
 	return keys
 }
 
-// buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON and, each when
-// its switch is, the context-fill notice and the step-budget notice — in the order they fire: the
-// floorGuards table's order, whose doc gives the reasons, then the two notices.
+// buildBuiltins returns this Agent's builtin Reactions — the guards gates leaves ON and, when its
+// switch is, the context-fill notice — in the order they fire: the floorGuards table's order,
+// whose doc gives the reasons, then the notice.
 //
 // gates is the enable set's input, read ONCE here: a guard whose opt-out is set is skipped over,
 // which is the whole of how a Floor gate is honoured now. The relative order of the guards that
 // survive is untouched, so switching one off never reshuffles the rest. notice is the
-// context-fill notice's switch (Generation.ContextFillNotice, ADR 0077) and stepNotice the
-// step-budget notice's (Generation.StepBudgetNotice), read the same way: a notice belongs after
-// the guards when it is on and is absent otherwise. The notices are the LAST builtins because they
-// are the ones that speak rather than correct: what each says is measured over the tool result as
-// the guards ahead of it left it — the fill notice first, since its line measures the result's
-// size, and the step notice after it, whose count the fill line does not move.
-func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice, stepNotice bool) []armedReaction {
-	ladder := make([]armedReaction, 0, len(floorGuards)+2)
+// context-fill notice's switch (Generation.ContextFillNotice, ADR 0077), read the same way: the
+// notice belongs after the guards when it is on and is absent otherwise. It is the LAST builtin
+// because it is the one that speaks rather than corrects: what it says is measured over the tool
+// result as the guards ahead of it left it, since its line measures the result's size.
+func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice bool) []armedReaction {
+	ladder := make([]armedReaction, 0, len(floorGuards)+1)
 	enabled := func(off bool, r armedReaction) {
 		if !off {
 			ladder = append(ladder, r)
@@ -182,9 +180,6 @@ func (a *Agent) buildBuiltins(gates domain.FloorConfig, notice, stepNotice bool)
 	enabled(!notice,
 		classedBuiltin(contextFillNoticeID, actionNotice, domain.ClassAdvise, domain.MomentPostToolResult,
 			domain.PostToolResultFunc(a.contextFillNotice)))
-	enabled(!stepNotice,
-		classedBuiltin(stepBudgetNoticeID, actionNotice, domain.ClassAdvise, domain.MomentPostToolResult,
-			domain.PostToolResultFunc(a.stepBudgetNotice)))
 	return ladder
 }
 
@@ -210,7 +205,7 @@ func engineBuiltin(id, action string, on domain.Moment, handler domain.Handler) 
 }
 
 // classedBuiltin builds one builtin of the class named: engineBuiltin's general form, which the
-// two notices — engine origin, class advise (ADR 0077) — are the callers of beside it.
+// context-fill notice — engine origin, class advise (ADR 0077) — is the caller of beside it.
 //
 // The Moment is passed rather than read off the handler because the handler's own seam is
 // domain's seal, unexported outside it; Reaction.Validate re-checks the two agree, so a builtin

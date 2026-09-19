@@ -354,16 +354,17 @@ type Agent struct {
 	// cached). newAgent always supplies it; nil is an inactive floor, never an error.
 	tree *treeSnapshotter
 
-	conv         domain.Conversation // serializable conversation state (ADR 0001)
-	turns        *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)
-	compacting   bool                // the fold re-entrancy guard, held by foldFor for every trigger (compact.go)
-	stepNoticeAt int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the notice rode, 0 = none; latches the notice against that Turn's further tool results, and a cancelled Turn's rollback re-arms it (rearmStepNotice)
-	depth        int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
-	callID       string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
-	consoleOwner string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
-	task         string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
-	seatFallback bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so. False for every other spawn, the absent ask included
-	capRequested int                 // the `max_steps` this delegation's spawning call asked for when it was ABOVE the configured step cap and was applied as the cap instead (runSubAgent): delegationResult appends the clamp note that says so. 0 for every other spawn — no ask, a lower ask that bound, an ask against an unbounded cap
+	conv           domain.Conversation // serializable conversation state (ADR 0001)
+	turns          *turnLifecycle      // owns the Turn/Exchange lifecycle state whole — index, inExchange, exchangeStart, the pending input, the wrap-up, fold and context-fill latches, the last fault — and the verbs that mutate it (internal/agent/turn.go)
+	compacting     bool                // the fold re-entrancy guard, held by foldFor for every trigger (compact.go)
+	stepNoticeAt   int                 // step-budget notice (stepnotice.go): the 1-based index of the Turn the note rode, 0 = none — what a cancelled Turn's rollback compares against to know whether it dropped the note (rearmNotices)
+	stepNoticeLive bool                // and whether that note is still in the conversation: the latch the notice fires against, cleared by a fold that swallowed it (rearmStepNotice) so the next result is told again
+	depth          int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
+	callID         string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
+	consoleOwner   string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
+	task           string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
+	seatFallback   bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so. False for every other spawn, the absent ask included
+	capRequested   int                 // the `max_steps` this delegation's spawning call asked for when it was ABOVE the configured step cap and was applied as the cap instead (runSubAgent): delegationResult appends the clamp note that says so. 0 for every other spawn — no ask, a lower ask that bound, an ask against an unbounded cap
 
 	// nameMu guards name, which is the ONE identity field a running Agent may see replaced under
 	// it: a delegation the model left unnamed is named out of band, by a completion that lands while
@@ -1238,12 +1239,14 @@ func (a *Agent) closeUndoGroup() {
 // The error wraps domain.ErrInvalidReaction and names the entry, which is the sentence a settings
 // row shows the human.
 //
-// The builtin ladder is REBUILT from gen.Floor, gen.ContextFillNotice and gen.StepBudgetNotice,
-// because a Floor guard whose boolean is off — or a notice while its switch is off — is absent
-// from the ladder rather than self-skipping at fire time (the enable set, ADR 0076 A8): the firing
-// sequence is identical either way, a disabled guard having booked nothing before. It is rebuilt
-// only when one of the three actually MOVED — a Bypass-only swap leaves the slice exactly as it
-// was, so a ladder installed in place of the seven guards survives one.
+// The builtin ladder is REBUILT from gen.Floor and gen.ContextFillNotice, because a Floor guard
+// whose boolean is off — or the fill notice while its switch is off — is absent from the ladder
+// rather than self-skipping at fire time (the enable set, ADR 0076 A8): the firing sequence is
+// identical either way, a disabled guard having booked nothing before. It is rebuilt only when
+// one of the two actually MOVED — a Bypass-only swap leaves the slice exactly as it was, so a
+// ladder installed in place of the seven guards survives one. gen.StepBudgetNotice is carried
+// through unread: the step-budget notice is structural (stepnotice.go), and the field waits on
+// the `step-budget-notice` key's retirement.
 //
 // Bypass takes effect at the next fire, as it always has: the gate is consulted per armed
 // Reaction per Moment (bypassSkips), so a Turn already mid-flight starts honouring the new value
@@ -1273,8 +1276,8 @@ func (a *Agent) SetReactions(gen domain.Generation) error {
 func (a *Agent) installGeneration(gen domain.Generation) {
 	a.genMu.Lock()
 	defer a.genMu.Unlock()
-	if gen.Floor != a.gen.Floor || gen.ContextFillNotice != a.gen.ContextFillNotice || gen.StepBudgetNotice != a.gen.StepBudgetNotice {
-		a.builtins = a.buildBuiltins(gen.Floor, gen.ContextFillNotice, gen.StepBudgetNotice)
+	if gen.Floor != a.gen.Floor || gen.ContextFillNotice != a.gen.ContextFillNotice {
+		a.builtins = a.buildBuiltins(gen.Floor, gen.ContextFillNotice)
 	}
 	a.gen.Floor, a.gen.Bypass, a.gen.Sync = gen.Floor, gen.Bypass, gen.Sync
 	a.gen.ContextFillNotice, a.gen.StepBudgetNotice = gen.ContextFillNotice, gen.StepBudgetNotice

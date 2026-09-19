@@ -1,12 +1,12 @@
 package main
 
-// The step-budget notice end to end (ADR 0077 addendum): a real `apogee headless` run over a stub
-// whose Exchange delegates once to a child capped at four Turns, asserted on what the STUB
-// received — the child's own tool messages, which are the model's view — because a notice that
-// was booked but never rendered onto the wire would look identical from inside the Agent. The
-// unit tests in internal/agent pin the threshold to the Turn; what these prove is the announced
-// surface: the exact fence and line a child on a real run is handed, once, on the result closing
-// its third Turn, and nothing at all when the key is absent.
+// The step-budget notice end to end: a real `apogee headless` run over a stub whose Exchange
+// delegates once to a child capped at four Turns, asserted on what the STUB received — the
+// child's own tool messages, which are the model's view — because a note applied in the Agent but
+// never rendered onto the wire would look identical from inside it. The unit tests in
+// internal/agent pin the threshold to the Turn; what this proves is the announced surface: the
+// exact engine fence and line a child on a real run is handed, once, on the result closing its
+// third Turn, with no key set — the notice is structural for every delegate.
 
 import (
 	"bytes"
@@ -21,9 +21,8 @@ import (
 )
 
 const (
-	// stepNoticeName is the reaction id the notice's fence, its firing line and its `/settings`
-	// row are keyed by.
-	stepNoticeName = "step-budget-notice"
+	// stepNoticeTopic is the engine-note topic the notice is fenced under.
+	stepNoticeTopic = "step budget"
 
 	// stepNoticePrompt is the prompt the script's delegating turn answers (testdata/stubllm/step-notice.yaml).
 	stepNoticePrompt = "Delegate the survey to a sub-agent."
@@ -41,22 +40,22 @@ const (
 	stepNoticeTurns = 3
 
 	// stepNoticeLine is the exact line the notice writes at that cap
-	// (internal/agent/prompts/step-budget-notice.txt).
+	// (internal/agent/prompts/step-notice.txt).
 	stepNoticeLine = "steps: 3 of 4 used — 1 left before the wrap-up Turn; write your output now"
 
-	// stepNoticeConfig is the `extraConfig` a notice journey runs with: the pinned cap and the key
-	// switched on; stepNoticeOffConfig is the same home with the key ABSENT — the shipped default.
-	stepNoticeConfig    = "delegate-max-steps: 4\n" + stepNoticeName + ": true\n"
-	stepNoticeOffConfig = "delegate-max-steps: 4\n"
+	// stepNoticeConfig is the `extraConfig` the notice journey runs with: the pinned cap and
+	// nothing else — no `step-budget-notice` key, because the notice is structural and the
+	// key-absent home is the positive journey.
+	stepNoticeConfig = "delegate-max-steps: 4\n"
 )
 
 // stepNoticeFence is the substring every fence of the notice's own opens with.
-var stepNoticeFence = domain.AdviceFencePrefix + stepNoticeName
+var stepNoticeFence = domain.EngineNoteFencePrefix + stepNoticeTopic
 
-// TestE2EStepNoticeReachesTheChild is the announced-surface journey: with the key on, the third
-// tool message the child read ends with the exact shipped trailer — the fence domain.RenderAdvice
-// composes for the notice, engine origin, at post-tool-result, on the child's Turn 2 (its third)
-// — around the rendered line, and no other child tool message carries the notice's fence at all.
+// TestE2EStepNoticeReachesTheChild is the announced-surface journey: with no key set, the third
+// tool message the child read ends with the exact shipped fence — the engine note
+// domain.RenderEngineNote composes on the notice's topic — around the rendered line, carries no
+// advice fence at all, and no other child tool message carries the notice's fence.
 func TestE2EStepNoticeReachesTheChild(t *testing.T) {
 	stub := stubllm.New(t, loadScript(t, "step-notice"))
 	headlessStepNotice(t, stub, stepNoticeConfig)
@@ -76,66 +75,15 @@ func TestE2EStepNoticeReachesTheChild(t *testing.T) {
 	}
 
 	got := msgs[2]
-	want := domain.RenderAdvice(domain.AdviceSpan{
-		Reaction: stepNoticeName,
-		Origin:   domain.OriginEngine,
-		Moment:   domain.MomentPostToolResult,
-		Turn:     2,
-	}, stepNoticeLine)
+	want := domain.RenderEngineNote(stepNoticeTopic, stepNoticeLine)
 	if !strings.HasSuffix(got, want) {
-		t.Errorf("the child's third tool message reached the model as\n%q\nwant it to end with the trailer\n%q", got, want)
+		t.Errorf("the child's third tool message reached the model as\n%q\nwant it to end with the engine note\n%q", got, want)
 	}
-	if n := strings.Count(got, adviceFenceMark); n != 1 {
-		t.Errorf("the child's third tool message carries %d advice fences, want exactly the notice's one:\n%s", n, got)
+	if n := strings.Count(got, stepNoticeFence); n != 1 {
+		t.Errorf("the child's third tool message carries %d step-budget fences, want exactly one:\n%s", n, got)
 	}
-}
-
-// TestE2EStepNoticeBooksOneFiring is the same run read off the Event stream: `--format json`
-// carries exactly one `reaction_fired` line for the notice, at the child's depth, booked under the
-// `notice` action with the step and the cap as its detail.
-func TestE2EStepNoticeBooksOneFiring(t *testing.T) {
-	stub := stubllm.New(t, loadScript(t, "step-notice"))
-	stdout := headlessStepNotice(t, stub, stepNoticeConfig, "--format", formatJSON)
-
-	var fired []int
-	lines := jsonEventLines(t, stdout)
-	for i, line := range lines {
-		if line["event"] != "reaction_fired" || stringMember(t, i, line, "reaction") != stepNoticeName {
-			continue
-		}
-		fired = append(fired, i)
-	}
-	if len(fired) != 1 {
-		t.Fatalf("the stream booked %d firings for %s; want one (lines %v)", len(fired), stepNoticeName, fired)
-	}
-	i := fired[0]
-	if action, detail := stringMember(t, i, lines[i], "action"), stringMember(t, i, lines[i], "detail"); action != "notice" || detail != "step 3 of 4" {
-		t.Errorf("the firing books action %q detail %q; want notice / \"step 3 of 4\"", action, detail)
-	}
-	if depth := envelopeNumber(t, i, lines[i], "depth"); depth != 1 {
-		t.Errorf("the firing carries depth %v; want the child's 1", depth)
-	}
-}
-
-// TestE2EStepNoticeIsOffByDefault is the shipped default: the same capped delegation in a home
-// that never names the key hands the child every result whole and fenceless. The three child tool
-// messages are the positive control — the child reached its third Turn, so a silent run is the
-// switch and not a short delegation.
-func TestE2EStepNoticeIsOffByDefault(t *testing.T) {
-	stub := stubllm.New(t, loadScript(t, "step-notice"))
-	headlessStepNotice(t, stub, stepNoticeOffConfig)
-
-	msgs := childToolMessages(t, stub)
-	if len(msgs) != stepNoticeTurns {
-		t.Fatalf("the child read %d tool messages, want %d, so a silent run proves nothing", len(msgs), stepNoticeTurns)
-	}
-	for n, req := range stub.Requests() {
-		for _, msg := range req.Messages {
-			if strings.Contains(msg.Content, stepNoticeFence) {
-				t.Errorf("request %d carries a %q message with the notice's fence; the key is absent, "+
-					"so the notice is off:\n%s", n+1, msg.Role, msg.Content)
-			}
-		}
+	if strings.Contains(got, adviceFenceMark) {
+		t.Errorf("the child's third tool message carries an advice fence; the notice is the engine's, not a Reaction's:\n%s", got)
 	}
 }
 
@@ -144,7 +92,8 @@ func TestE2EStepNoticeIsOffByDefault(t *testing.T) {
 // conversation carries the child's task and none of the parent's; a request ending on anything
 // but a tool result contributes nothing, and neither does the wrap-up request, whose tail is the
 // capping Turn's tool result with the wrap-up directive fenced on as an engine note — the
-// closing report's request, not a working Turn's.
+// closing report's request, not a working Turn's. Only THAT note is skipped: the step-budget
+// notice is an engine note too, and the result it rides is a working Turn's that counts.
 func childToolMessages(t *testing.T, stub *stubllm.Server) []string {
 	t.Helper()
 
@@ -161,7 +110,7 @@ func childToolMessages(t *testing.T, stub *stubllm.Server) []string {
 			continue
 		}
 		last := req.Messages[len(req.Messages)-1]
-		if last.ToolCallID == "" || strings.Contains(last.Content, domain.EngineNoteFencePrefix) {
+		if last.ToolCallID == "" || strings.Contains(last.Content, domain.EngineNoteFencePrefix+"wrap-up]") {
 			continue
 		}
 		out = append(out, last.Content)

@@ -1,4 +1,4 @@
-# The upstream the step-budget notice journeys talk to (ADR 0077 addendum): one `apogee headless`
+# The upstream the step-budget notice journey talks to: one `apogee headless`
 # run whose Exchange delegates ONCE to a child that would keep calling tools past its cap, so that a
 # `delegate-max-steps: 4` is a cap the child meets and the notice's threshold — ceil(0.75 × 4) = 3 —
 # is a Turn it reaches. The child's chain is picked by what its last Turn produced rather than by

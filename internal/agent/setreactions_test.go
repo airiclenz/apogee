@@ -105,7 +105,8 @@ func TestSetReactionsRefusesAMalformedGeneration(t *testing.T) {
 	}
 }
 
-// A sync entry may not take a builtin's name: the seven Floor-guard keys and the two engine notices
+// A sync entry may not take a builtin's name: the seven Floor-guard keys, the context-fill notice
+// and the still-reserved `step-budget-notice` id
 // are reserved on the live route exactly as they are on Config.Reactions (armReactions), switched on
 // or off — a guard the user disabled still owns its id, because the moment its switch moves back the
 // builtin would answer under it again. The refusal installs nothing.

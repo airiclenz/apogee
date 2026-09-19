@@ -1536,6 +1536,12 @@ func pathWithin(abs, root string) bool {
 // advised is the post-tool-result cascade's advise slot (reactions.go) — the spans this result's
 // message carries as a fenced trailer, nil for the two routes that commit a result no cascade ran
 // on (a pre-tool-exec fault, a hook-failed delegation slot).
+//
+// The step-budget notice (stepnotice.go) lands here too, AFTER the advice and under the engine's
+// own fence (Message.WithEngineNote): it is structural — consulted for every result on every
+// route, under Bypass too, booking no firing — and the fence header is what tells the model it
+// is the engine speaking and not a Reaction, which a delegate reading a source file full of
+// reaction prose has mistaken an advice fence for.
 func (a *Agent) appendToolResult(
 	turn int,
 	call domain.ToolCall,
@@ -1557,6 +1563,9 @@ func (a *Agent) appendToolResult(
 	// ledger keeps pointing at its own fence however many spans land.
 	for _, adv := range advised {
 		msg = msg.WithAdvice(adv.span, adv.text)
+	}
+	if text, fired := a.stepBudgetNotice(); fired {
+		msg = msg.WithEngineNote(stepNoticeTopic, text)
 	}
 	a.conv.Append(msg)
 	// The event carries the tool's own result, never the trailer: advice is a model-facing

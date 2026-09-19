@@ -17,7 +17,7 @@ import (
 // another removing none.
 func TestFloorGuardTableGatesEachGuardByItsOwnField(t *testing.T) {
 	a, _ := ladderAgent(t, nil, nil)
-	full := builtinKeys(a.buildBuiltins(domain.FloorConfig{}, false, false))
+	full := builtinKeys(a.buildBuiltins(domain.FloorConfig{}, false))
 	if !slices.Equal(full, guardIDs) {
 		t.Fatalf("the full ladder = %v, want guardIDs %v", full, guardIDs)
 	}
@@ -30,7 +30,7 @@ func TestFloorGuardTableGatesEachGuardByItsOwnField(t *testing.T) {
 	for i := 0; i < fields.NumField(); i++ {
 		var gates domain.FloorConfig
 		reflect.ValueOf(&gates).Elem().Field(i).SetBool(true)
-		keys := builtinKeys(a.buildBuiltins(gates, false, false))
+		keys := builtinKeys(a.buildBuiltins(gates, false))
 		missing := make([]string, 0, 1)
 		for _, key := range guardIDs {
 			if !slices.Contains(keys, key) {

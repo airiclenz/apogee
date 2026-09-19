@@ -2860,7 +2860,10 @@ func requestTail(t *testing.T, req provider.Request) provider.Message {
 // as the engine note — under the engine's own header, after the tool's output — and the system
 // prompt carries no copy of it. The one-message-per-Turn shape of the request is untouched: no
 // message is added after the tool result. The child holds write_file under Allow-Edits, so the
-// directive carries the one-write clause (item 5); the clause rides inside the same fence.
+// directive carries the one-write clause (item 5); the clause rides inside the same fence. At a
+// cap of 2 the step-budget notice (stepnotice.go) rides the same result — ceil(0.75 × 2) is the
+// capping Turn — as the engine note committed with it, so the tail stacks the two notes in the
+// order they landed: the tool's output, the step note, then the wrap-up on the very end.
 func TestWrapUpDirectiveRidesTheClosingToolResult(t *testing.T) {
 	a, responder, _, _ := outputPathAgent(t, domain.ModeAllowEdits, "", contentScript(childClosingReport))
 
@@ -2876,7 +2879,8 @@ func TestWrapUpDirectiveRidesTheClosingToolResult(t *testing.T) {
 	if !cut || body != "package main" {
 		t.Fatalf("tail = %q, want the tool's own output %q followed by the engine fence", tail.Content, "package main")
 	}
-	if want := strings.TrimPrefix(domain.RenderEngineNote(wrapUpNoteTopic, directive), "\n\n"+domain.EngineNoteFencePrefix); fence != want {
+	stepNote := strings.TrimPrefix(domain.RenderEngineNote(stepNoticeTopic, "steps: 2 of 2 used — 0 left before the wrap-up Turn; write your output now"), "\n\n"+domain.EngineNoteFencePrefix)
+	if want := stepNote + domain.RenderEngineNote(wrapUpNoteTopic, directive); fence != want {
 		t.Errorf("fence = %q, want %q", fence, want)
 	}
 	if strings.Contains(tail.Content, domain.AdviceFencePrefix) {
@@ -2885,11 +2889,12 @@ func TestWrapUpDirectiveRidesTheClosingToolResult(t *testing.T) {
 	if got := requestSystemText(req); strings.Contains(got, wrapUpMarker) {
 		t.Errorf("system text = %q, want no directive there — it rides the tail", got)
 	}
-	// The one request before it — the engine fold's — and every working Turn's carry no note.
+	// The one request before it — the engine fold's — and every working Turn's carry no
+	// wrap-up note: the directive is the wrap-up request's alone.
 	for i, earlier := range responder.requests[:4] {
 		for _, m := range earlier.Messages {
-			if strings.Contains(m.Content, domain.EngineNoteFencePrefix) {
-				t.Errorf("request %d carries an engine note before the wrap-up: %q", i, m.Content)
+			if strings.Contains(m.Content, domain.EngineNoteFencePrefix+wrapUpNoteTopic) {
+				t.Errorf("request %d carries the wrap-up note before the wrap-up: %q", i, m.Content)
 			}
 		}
 	}

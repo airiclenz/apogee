@@ -82,8 +82,8 @@ type turnLifecycle struct {
 	// (turnRolledBack, fired by end()'s endCancelled row). It is an interface rather than an Agent
 	// for the same reason conv is a pointer: this type owns the moments and knows nothing of what
 	// an Agent wants to do about them — the undo journal's closing capture hangs off the first
-	// (Agent.closeUndoGroup, agent.go), the context-fill ladder's and step-budget notice's re-arm
-	// off the second (Agent.rearmNotices, stepnotice.go) — and neither fire site carries a context
+	// (Agent.closeUndoGroup, agent.go), the context-fill ladder's re-arm and the step-budget
+	// note's latch off the second (Agent.rearmNotices, stepnotice.go) — and neither fire site carries a context
 	// or an Agent to hand one. nil is inert, never an error — a bare lifecycle in a unit test has
 	// no Agent behind it, and an engine that records nothing simply hangs nothing here.
 	observer exchangeObserver
