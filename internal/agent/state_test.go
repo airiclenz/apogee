@@ -642,3 +642,28 @@ func TestCutSessionResumes(t *testing.T) {
 		t.Errorf("Submit on the resumed cut: %v", err)
 	}
 }
+
+// TestSnapshot_NeverCarriesRetainedDelegates pins ADR 0022 D8 for the capped delegations a parent
+// retains (plan 2026-09-18 - 00, item 8): they live in memory for one Exchange and the session
+// payload is byte-identical with and without them.
+func TestSnapshot_NeverCarriesRetainedDelegates(t *testing.T) {
+	sink := &recordingSink{}
+	a, err := newAgent(baseConfig(sink), scriptedResponder(t))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	before, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	a.retained.retain(retainedDelegate{task: "trawl the repo", name: "Repo Survey", fold: "the fold", spawnCallID: "c1"})
+	after, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot with a retained delegation: %v", err)
+	}
+
+	if string(before.State) != string(after.State) {
+		t.Errorf("session state changed once a delegation was retained:\nbefore = %s\nafter  = %s", before.State, after.State)
+	}
+}

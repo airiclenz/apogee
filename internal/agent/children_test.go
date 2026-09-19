@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"slices"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -368,5 +369,33 @@ func TestInterjectChild_PendingMailboxSkipsAGrandchild(t *testing.T) {
 	msgs := responder.requests[2].Messages
 	if last := msgs[len(msgs)-1]; last.Role != string(domain.RoleUser) || last.Content != remark {
 		t.Errorf("child's second request ends with %+v, want the queued remark %q", last, remark)
+	}
+}
+
+// TestRetainedDelegates_KeepsTheLatestUnderEachName pins the set's contract: a name maps to the
+// latest capped delegation retained under it, an unnamed one is never kept, names come back sorted,
+// and clear forgets everything.
+func TestRetainedDelegates_KeepsTheLatestUnderEachName(t *testing.T) {
+	var r retainedDelegates
+
+	r.retain(retainedDelegate{name: "Beta", spawnCallID: "c1"})
+	r.retain(retainedDelegate{name: "Alpha", spawnCallID: "c2"})
+	r.retain(retainedDelegate{name: "Beta", spawnCallID: "c3"})
+	r.retain(retainedDelegate{name: "", spawnCallID: "c4"})
+
+	if names := r.names(); !slices.Equal(names, []string{"Alpha", "Beta"}) {
+		t.Errorf("names = %v, want the two named entries, sorted", names)
+	}
+	if got, ok := r.lookup("Beta"); !ok || got.spawnCallID != "c3" {
+		t.Errorf("lookup(Beta) = %+v, %v; want the latest entry c3", got, ok)
+	}
+	if _, ok := r.lookup(""); ok {
+		t.Error("an unnamed delegation was retained; it has no handle a continuation could name")
+	}
+
+	r.clear()
+
+	if names := r.names(); len(names) != 0 {
+		t.Errorf("names after clear = %v, want none", names)
 	}
 }

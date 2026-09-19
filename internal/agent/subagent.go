@@ -906,7 +906,34 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	// starting the work would buy a better label at the price of the thing it labels.
 	stopNaming = a.startDelegationNaming(ctx, call.ID, sub, &naming)
 	res, err := sub.Run(ctx)
-	return sub.delegationResult(call.ID, res, err)
+	// The namer is stopped and JOINED here, before the run is read, rather than left to the defer
+	// alone (whose copies are then no-ops): the name a capped child is retained under below must be
+	// the name it ended its run wearing, and the namer's late-drop check reads its context — still
+	// live while the result was rendered ahead of the defer — so a reply landing during that
+	// rendering would have renamed a delegation the retention had already read under the old name.
+	if stopNaming != nil {
+		stopNaming()
+	}
+	naming.Wait()
+	result, outcome = sub.delegationResult(call.ID, res, err)
+	// A child the engine stopped at a bound is RETAINED for the rest of this Exchange (P6): the
+	// fold and closing text the result carried, and everything the call asked for, so the parent
+	// can continue the work from the fold rather than re-spawn it from nothing. Read AFTER the
+	// namer is joined, so a delegation named out of band is retained under the name the parent
+	// model has been told (ADR 0068); an unnamed one has no handle and is not retained.
+	if res.StepCapped {
+		a.retained.retain(retainedDelegate{
+			task:          args.Task,
+			name:          sub.displayName(),
+			tools:         args.Tools,
+			outputPath:    args.OutputPath,
+			fold:          sub.capFold,
+			closingReport: sub.lastVisibleText(),
+			bound:         sub.capHit,
+			spawnCallID:   call.ID,
+		})
+	}
+	return result, outcome
 }
 
 // startDelegationNaming launches the ONE out-of-band completion that names a delegation the model

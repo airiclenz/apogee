@@ -8,6 +8,7 @@ import (
 	"iter"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"sync"
@@ -3571,5 +3572,315 @@ func TestWrapUpWithBlankTextCommitsNothing(t *testing.T) {
 	}
 	if hasEvent[domain.MessageEvent](sink.events) {
 		t.Error("MessageEvent emitted for a whitespace-only wrap-up reply")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Retention of a capped delegation (plan 2026-09-18 - 00, item 8 / P6a)
+// ----------------------------------------------------------------------------
+//
+// A child the engine stopped at a bound is kept by its parent — task, roster, output path, fold,
+// closing text and the bound — under the name it ended its run wearing, for the rest of the
+// parent's Exchange. These tests drive runSubAgent and read the retained set through the seam a
+// continuation will read it by (Agent.retained).
+
+// retainedSurveyTask and retainedSurveyName are the delegation the retention tests spawn.
+const (
+	retainedSurveyTask = "trawl the repo"
+	retainedSurveyName = "Repo Survey"
+)
+
+// cappedSurveyArgs is the sub_agent payload of a delegation that names everything a continuation
+// needs to carry over: a name, a roster and an output path beside the task.
+func cappedSurveyArgs(task, name string) string {
+	b, _ := json.Marshal(tools.SubAgentArgs{
+		Task:       task,
+		Name:       name,
+		Tools:      tools.SubAgentRoster{Names: []string{"read_thing"}},
+		OutputPath: "notes/survey.md",
+	})
+	return string(b)
+}
+
+// cappedSurveyScripts is the upstream script of one delegation capped at three steps: the spawning
+// call, three working Turns, the engine fold, the wrap-up — the parent's own closing reply is the
+// caller's to append.
+func cappedSurveyScripts(callID, task, name string) [][]provider.Delta {
+	scripts := [][]provider.Delta{toolCallScript(callID, tools.SubAgentToolName, cappedSurveyArgs(task, name))}
+	scripts = append(scripts, cappedChildTurns(3)...)
+	scripts = append(scripts, foldScript(700, 40))
+	return append(scripts, contentScript(childClosingReport))
+}
+
+// runCappedSurveyParent builds a parent at a three-step delegate cap over scripts, runs it to its
+// boundary and fails on anything but a clean parent Exchange.
+func runCappedSurveyParent(t *testing.T, cfg domain.Config, responder provider.Responder) *Agent {
+	t.Helper()
+	cfg.Delegation.MaxSteps = 3
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted || res.StepCapped {
+		t.Fatalf("parent result = %+v, want a clean uncapped exchange-complete", res)
+	}
+	return a
+}
+
+// TestSubAgent_CappedChildIsRetainedWithItsFold pins what the parent keeps of a capped delegation:
+// every field a continuation is spawned from, copied from the call and the child's capped result,
+// under the name the call gave it.
+func TestSubAgent_CappedChildIsRetainedWithItsFold(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := append(cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName), contentScript("parent done"))
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+
+	got, ok := a.retained.lookup(retainedSurveyName)
+	if !ok {
+		t.Fatalf("no delegation retained under %q; retained names = %v", retainedSurveyName, a.retained.names())
+	}
+	want := retainedDelegate{
+		task:          retainedSurveyTask,
+		name:          retainedSurveyName,
+		tools:         tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath:    "notes/survey.md",
+		fold:          childFoldSummary,
+		closingReport: childClosingReport,
+		bound:         boundSteps,
+		spawnCallID:   "c1",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("retained delegate = %+v, want %+v", got, want)
+	}
+	if names := a.retained.names(); !slices.Equal(names, []string{retainedSurveyName}) {
+		t.Errorf("retained names = %v, want exactly %q", names, retainedSurveyName)
+	}
+}
+
+// TestSubAgent_CompletedChildIsNotRetained is the floor: a delegation that ran to completion has
+// nothing to continue from, so the parent keeps nothing of it.
+func TestSubAgent_CompletedChildIsNotRetained(t *testing.T) {
+	sink := &recordingSink{}
+	scripts := [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName)),
+		contentScript("the survey is complete"),
+		contentScript("parent done"),
+	}
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore), &requestLogResponder{scripts: scripts})
+
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v after a completed delegation, want none", names)
+	}
+}
+
+// TestSubAgent_LatestCappedChildIsRetainedUnderTheSharedName pins the replacement rule: two capped delegations the
+// parent named alike are two attempts at one piece of work, and the later one is what a
+// continuation picks up from.
+func TestSubAgent_LatestCappedChildIsRetainedUnderTheSharedName(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := cappedSurveyScripts("c1", "survey part one", retainedSurveyName)
+	scripts = append(scripts, cappedSurveyScripts("c2", "survey part two", retainedSurveyName)...)
+	scripts = append(scripts, contentScript("parent done"))
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+
+	got, ok := a.retained.lookup(retainedSurveyName)
+	if !ok {
+		t.Fatalf("no delegation retained under %q", retainedSurveyName)
+	}
+	if got.spawnCallID != "c2" || got.task != "survey part two" {
+		t.Errorf("retained under %q = call %q task %q, want the latest capped child c2 / %q",
+			retainedSurveyName, got.spawnCallID, got.task, "survey part two")
+	}
+	if names := a.retained.names(); len(names) != 1 {
+		t.Errorf("retained names = %v, want the one name both children shared", names)
+	}
+}
+
+// TestSubAgent_RetainedChildIsForgottenAsTheNextExchangeOpens pins the lifetime: a capped delegation is held for the
+// rest of the Exchange that spawned it and forgotten as the next one opens.
+func TestSubAgent_RetainedChildIsForgottenAsTheNextExchangeOpens(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := append(cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName), contentScript("parent done"))
+	scripts = append(scripts, contentScript("second done"))
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+	if _, ok := a.retained.lookup(retainedSurveyName); !ok {
+		t.Fatalf("the capped delegation is not retained at the end of its own Exchange")
+	}
+
+	if err := a.Submit(domain.UserInput{Text: "something else"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v after a new Exchange opened, want none", names)
+	}
+}
+
+// gatedNamer is a DelegationNamer that answers only once its gate opens — the namer whose reply
+// arrives late in the run, after the child has already hit its bound — and gives up on its
+// context like a real host would.
+type gatedNamer struct {
+	open  chan struct{}
+	reply string
+}
+
+func (n gatedNamer) NameDelegation(ctx context.Context, _ domain.DelegationNaming) (string, error) {
+	select {
+	case <-n.open:
+		return n.reply, nil
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+}
+
+// TestSubAgent_ANamerThatAnswersAfterTheCapStillNamesTheRetainedChild pins the join: a delegation
+// the model left unnamed is named out of band (ADR 0068), and a name that lands after the cap but
+// before the run ends is the name the parent retains it under — the namer is joined before the
+// retention reads the child's name, so the entry never wears a stale empty name while the parent
+// model has been told the generated one.
+func TestSubAgent_ANamerThatAnswersAfterTheCapStillNamesTheRetainedChild(t *testing.T) {
+	sink := newLockedSink()
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	capped := make(chan struct{})
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Namer = gatedNamer{open: capped, reply: retainedSurveyName}
+	scripts := append(cappedSurveyScripts("c1", retainedSurveyTask, ""), contentScript("parent done"))
+	responder := &requestLogResponder{scripts: scripts}
+	// Call 4 is the engine fold — the bound has been hit — which is when the namer is let answer;
+	// call 5 is the wrap-up, held until the rename has landed so the run ends wearing the name.
+	responder.before = func(call int) {
+		switch call {
+		case 4:
+			close(capped)
+		case 5:
+			sink.awaitRename()
+		}
+	}
+
+	a := runCappedSurveyParent(t, cfg, responder)
+
+	if named := sink.namings(); len(named) != 1 || named[0].Name != retainedSurveyName {
+		t.Fatalf("SubAgentNamedEvents = %+v, want the one rename to %q", named, retainedSurveyName)
+	}
+	got, ok := a.retained.lookup(retainedSurveyName)
+	if !ok {
+		t.Fatalf("no delegation retained under the generated name %q; retained names = %v", retainedSurveyName, a.retained.names())
+	}
+	if got.task != retainedSurveyTask || got.fold != childFoldSummary {
+		t.Errorf("retained delegate = %+v, want the capped child's task and fold", got)
+	}
+}
+
+// taskRoutedResponder answers each request from the queue registered for the key its last user
+// message equals or CONTAINS — the engine fold's request carries the child's transcript as its user
+// message, so a capped child's fold is routed to the same queue as its Turns. It is the fan-out
+// twin of routedResponder for children that hit a bound.
+type taskRoutedResponder struct {
+	mu     sync.Mutex
+	keys   []string
+	routes map[string][][]provider.Delta
+}
+
+func newTaskRoutedResponder() *taskRoutedResponder {
+	return &taskRoutedResponder{routes: map[string][][]provider.Delta{}}
+}
+
+// route appends the scripted Turns for the agent whose last user message is, or contains, key.
+func (r *taskRoutedResponder) route(key string, scripts ...[]provider.Delta) *taskRoutedResponder {
+	if _, seen := r.routes[key]; !seen {
+		r.keys = append(r.keys, key)
+	}
+	r.routes[key] = append(r.routes[key], scripts...)
+	return r
+}
+
+func (r *taskRoutedResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	asker := lastUserText(req)
+	r.mu.Lock()
+	script := []provider.Delta{{Kind: provider.DeltaError, Err: "taskRoutedResponder: no script for " + asker}}
+	for _, key := range r.keys {
+		if asker != key && !strings.Contains(asker, key) {
+			continue
+		}
+		if queue := r.routes[key]; len(queue) > 0 {
+			script, r.routes[key] = queue[0], queue[1:]
+		}
+		break
+	}
+	r.mu.Unlock()
+	return func(yield func(provider.Delta) bool) {
+		for _, d := range script {
+			if !yield(d) {
+				return
+			}
+		}
+	}
+}
+
+// TestFanOut_CappedChildrenAreRetainedFromThePool drives two capped delegations through the depth-0
+// pool at once (ADR 0039): both are retained under their own names, from two pool workers writing
+// the parent's set concurrently — which -race judges.
+func TestFanOut_CappedChildrenAreRetainedFromThePool(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.ParallelAgents = 2
+	cfg.Delegation.MaxSteps = 2
+	spawn := []provider.Delta{
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c1", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentNamedArgs("task one", "Alpha")},
+		}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c2", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentNamedArgs("task two", "Beta")},
+		}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+	childScripts := append(cappedChildTurns(2), foldScript(700, 40), contentScript(childClosingReport))
+	up := newTaskRoutedResponder().
+		route("delegate two things", spawn, contentScript("parent done")).
+		route("task one", childScripts...).
+		route("task two", childScripts...)
+
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Fatalf("parent result = %+v, want a clean exchange-complete", res)
+	}
+
+	if names := a.retained.names(); !slices.Equal(names, []string{"Alpha", "Beta"}) {
+		t.Fatalf("retained names = %v, want both capped children, Alpha and Beta", names)
+	}
+	for name, want := range map[string]string{"Alpha": "c1", "Beta": "c2"} {
+		if got, _ := a.retained.lookup(name); got.spawnCallID != want || got.fold != childFoldSummary {
+			t.Errorf("retained %q = %+v, want call %q with the engine fold", name, got, want)
+		}
 	}
 }

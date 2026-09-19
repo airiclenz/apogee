@@ -381,6 +381,11 @@ type Agent struct {
 	// parent's registry and delivered out of the child's mailbox, by the child's own Run.
 	children childRegistry
 	mailbox  childMailbox
+	// retained is the set of capped delegations THIS Agent keeps for the rest of its Exchange,
+	// keyed by delegation name (children.go, plan 2026-09-18 - 00 P6): what a continuation of a
+	// capped child is spawned from. Filled by runSubAgent after a capped child's result is read,
+	// cleared as the next Exchange opens (step), and never snapshotted (ADR 0022 D8).
+	retained retainedDelegates
 	// steered counts the mailbox messages that LANDED in this Agent while it ran as somebody's
 	// child — what its result tells the parent model about in the steered trailer
 	// (subagent.go, ADR 0063 D3). Unguarded on purpose: the child's own Step-driving goroutine is
