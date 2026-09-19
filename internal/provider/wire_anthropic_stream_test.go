@@ -269,6 +269,54 @@ func TestAnthropicParseSSE_ConsumerBreakStopsTheRead(t *testing.T) {
 	}
 }
 
+// TestAnthropicParseSSE_ReplyTextIsCapped pins maxReplyTextBytes on this wire, the way
+// TestStream_ReplyTextIsCapped and TestStream_ThinkingCountsTowardTheCap pin it on the openai
+// wire: an endless text or thinking block ends at the byte cap with the one non-retryable
+// DeltaError, the crossing fragment is never yielded, and the parser stops reading there — the
+// error is the last delta even though the body runs on past it.
+func TestAnthropicParseSSE_ReplyTextIsCapped(t *testing.T) {
+	t.Parallel()
+
+	const chunkBytes = 64 << 10
+	maxChunks := maxReplyTextBytes/chunkBytes + 32
+	chunk := strings.Repeat("a", chunkBytes)
+
+	tests := []struct {
+		name       string
+		blockStart string
+		delta      string
+	}{
+		{
+			name:       "text_delta",
+			blockStart: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`,
+			delta:      `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"` + chunk + `"}}`,
+		},
+		{
+			name:       "thinking_delta",
+			blockStart: `{"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}`,
+			delta:      `{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"` + chunk + `"}}`,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var body strings.Builder
+			body.WriteString("event: content_block_start\ndata: " + tc.blockStart + "\n\n")
+			for range maxChunks {
+				body.WriteString("event: content_block_delta\ndata: " + tc.delta + "\n\n")
+			}
+
+			deltas := parseAnthropicSSE(t, body.String())
+
+			assertReplyTextCapDeltas(t, deltas)
+			if last := deltas[len(deltas)-1]; last.Kind != DeltaError {
+				t.Errorf("last delta is %v, want the cap's DeltaError — the parser read on past it", last.Kind)
+			}
+		})
+	}
+}
+
 // TestAnthropicWireSelectsTheCodec pins that WithWire(WireAnthropic) is served by the anthropic
 // codec, now that the codec has its parser: the Client reports the wire and the codec holds the
 // Client it renders in-band errors through.

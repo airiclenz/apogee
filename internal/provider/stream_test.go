@@ -944,12 +944,20 @@ func chunkedTextServer(field string) *httptest.Server {
 }
 
 // assertReplyTextCapFires drains a stream from srv and asserts the reply-text cap is what
-// ended it: exactly one terminal DeltaError naming the limit, not retryable, no Done at all,
-// and no more text handed to the consumer than the cap allows.
+// ended it (assertReplyTextCapDeltas).
 func assertReplyTextCapFires(t *testing.T, srv *httptest.Server) {
 	t.Helper()
 
 	deltas := collectStream(NewClient(srv.URL, "m"), Request{})
+
+	assertReplyTextCapDeltas(t, deltas)
+}
+
+// assertReplyTextCapDeltas asserts the reply-text cap is what ended the stream that yielded
+// deltas, whichever wire parsed it: exactly one terminal DeltaError naming the limit, not
+// retryable, no Done at all, and no more text handed to the consumer than the cap allows.
+func assertReplyTextCapDeltas(t *testing.T, deltas []Delta) {
+	t.Helper()
 
 	var errorCount, doneCount, delivered int
 	var terminal Delta
