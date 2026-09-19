@@ -93,7 +93,9 @@ NOTES (2026-09-19): race evidence deferred: no-TSan host
 **Acceptance:** `go build ./... && go test ./internal/provider/ -run 'ReplyTextIsCapped|ThinkingCountsTowardTheCap' -p 2 -parallel 2`
 **Commit:** `test(provider): pin the 8 MiB reply-text cap on the anthropic wire`
 
-## 5. `probe context --live` asserts the first Agent's armed sync lane (`apogee-n5k`)
+## 5. `probe context --live` asserts the first Agent's armed sync lane (`apogee-n5k`) — ✅ DONE (2026-09-19)
+
+NOTES (2026-09-19): race evidence deferred: no-TSan host (acceptance run without `-race` per the plan's execution-host note).
 
 **What:** Close `apogee-n5k`: `measureTurn1` (`cmd/apogee/probecontext.go`) arms the "as configured" Agent's lane via `gen := a.Generation(); gen.Sync = sync; a.SetReactions(gen)` and the Bypass Agent via `gen.Bypass = true`, but `TestProbeContextLiveSendsTwiceWhenReactionsArmed` (`probecontext_test.go`) proves it only by request count — a user advise Reaction fires at `post-tool-result`/`file-changed`, so the wire cannot show the lane. Binding shape: add the package-level seam `var newProbeAgent = apogee.New` beside `errProbeContextNeedsEndpoint` and call it from `measureTurn1` and `readContextCost` (house idiom: `acquireDaemonLock`, `probeKeyStore`). The `*apogee.Agent` is closed before `measureTurn1` returns; `Agent.Close` leaves `a.gen` untouched and `Generation()` only takes `genMu`, so the test reads it after the command returns. The existing test keeps its count assertion and its comment gains one sentence pointing at the new test.
 **Files:** `cmd/apogee/probecontext.go`, `cmd/apogee/probecontext_test.go`

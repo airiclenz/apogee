@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
@@ -275,7 +277,8 @@ func TestProbeContextLiveCarriesTheCachedShare(t *testing.T) {
 // and print both measured columns with the delta line, while an observe-only config sends once.
 // The two requests carry the same fixed prompt: a user's advise Reaction fires at post-tool-result
 // or file-changed, neither of which precedes Turn 1, so the wire cannot show the lane armed — the
-// count and the columns are the claim.
+// count and the columns are the claim. That the lane IS armed, and on the first Agent only, is
+// read off the Agents themselves in TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly.
 func TestProbeContextLiveSendsTwiceWhenReactionsArmed(t *testing.T) {
 	t.Parallel()
 	workspace := probeContextWorkspace(t)
@@ -329,6 +332,53 @@ func TestProbeContextLiveSendsTwiceWhenReactionsArmed(t *testing.T) {
 			t.Errorf("the stub saw %d request(s); an observe-only config sends once:\n%v", len(got), got)
 		}
 	})
+}
+
+// TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly proves what the request count above
+// cannot: the as-configured Agent carries the user's advise Reaction on its sync lane with Bypass
+// off, and the Bypass Agent carries an empty lane with Bypass on. The Agents are collected through
+// the newProbeAgent seam and their Generation is read after the command returns — Agent.Close
+// leaves it untouched. Serial: it swaps a package seam (TestNoParallelTestSwapsAPackageSeam).
+func TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly(t *testing.T) {
+	var agents []*apogee.Agent
+	prev := newProbeAgent
+	newProbeAgent = func(cfg apogee.Config) (*apogee.Agent, error) {
+		a, err := apogee.New(cfg)
+		if err == nil {
+			agents = append(agents, a)
+		}
+		return a, err
+	}
+	t.Cleanup(func() { newProbeAgent = prev })
+	workspace := probeContextWorkspace(t)
+	stub := probeContextLiveStub(t, stubllm.Usage{Prompt: 800, Completion: 1})
+	home := eventLinesHome(t, stub.URL, stub.Model)
+	appendHomeConfig(t, home,
+		"reactions:\n"+
+			"  - id: lint\n    on: [post-tool-result]\n    advise: [\"true\"]\n")
+
+	runProbeContext(t, home, workspace, stub.URL, "--live")
+
+	if len(agents) != 2 {
+		t.Fatalf("the command built %d Agent(s); an armed config builds two, the as-configured one and the Bypass one", len(agents))
+	}
+	configured := agents[0].Generation()
+	if configured.Bypass {
+		t.Errorf("the as-configured Agent has Bypass on")
+	}
+	if len(configured.Sync) != 1 {
+		t.Fatalf("the as-configured Agent's sync lane holds %d Reaction(s), want the one advise Reaction: %+v", len(configured.Sync), configured.Sync)
+	}
+	if got := configured.Sync[0]; got.ID != "lint" || got.Class != domain.ClassAdvise {
+		t.Errorf("the as-configured Agent's sync lane holds id=%q class=%q, want lint/advise", got.ID, got.Class)
+	}
+	bypass := agents[1].Generation()
+	if !bypass.Bypass {
+		t.Errorf("the second Agent has Bypass off; the second reading is the first with the model-shaping classes off")
+	}
+	if len(bypass.Sync) != 0 {
+		t.Errorf("the Bypass Agent's sync lane holds %d Reaction(s), want none: %+v", len(bypass.Sync), bypass.Sync)
+	}
 }
 
 // TestProbeContextLiveNeverRunsATool pins the mechanism that keeps a tool off the floor: a reply

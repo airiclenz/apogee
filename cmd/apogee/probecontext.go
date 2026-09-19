@@ -31,6 +31,13 @@ var errProbeContextNeedsEndpoint = errors.New(
 	"apogee probe context: no server to compose against — name the servers: entry with server: in " +
 		"config.yaml or APOGEE_SERVER, or pass --endpoint (nothing is sent to it)")
 
+// newProbeAgent constructs the Agent an estimate or a live reading is taken off. A seam because
+// the lane measureTurn1 arms is not on the wire — a user's advise Reaction fires at
+// post-tool-result or file-changed, neither of which precedes Turn 1 — so a test proves it by
+// reading the Generation off the Agents built, and the Agent is closed before the command returns.
+// Package-level, swapped only by a serial test (seams_guard_test.go).
+var newProbeAgent = apogee.New
+
 // errProbeContextLiveNeedsModel is the refusal when --live has no model to send as: the startup
 // entry names none, --model was not passed, and the server's own listing names no active model —
 // the same absence probe model refuses on (errProbeModelNeedsLabel), for the same reason: the
@@ -280,7 +287,7 @@ func measureTurn1(ctx context.Context, cfg apogee.Config, sync []domain.Reaction
 	cfg.Events = sink
 	cfg.Context.MaxOutputTokens = probeContextLiveReplyCap
 
-	a, err := apogee.New(cfg)
+	a, err := newProbeAgent(cfg)
 	if err != nil {
 		return turn1Reading{}, fmt.Errorf("apogee probe context --live: construct the agent: %w", err)
 	}
@@ -400,7 +407,7 @@ func probeContextConfig(opts config.Options, roots stateRoots, mode domain.Mode,
 // bound to the configured endpoint, which does not dial at construction — takes the idle report,
 // and closes the Agent. It never Steps, so nothing reaches the wire.
 func readContextCost(cfg apogee.Config) (domain.ContextCost, error) {
-	a, err := apogee.New(cfg)
+	a, err := newProbeAgent(cfg)
 	if err != nil {
 		return domain.ContextCost{}, fmt.Errorf("apogee probe context: construct the agent: %w", err)
 	}
