@@ -35,6 +35,16 @@ type Config struct {
 	// server is a different invocation.
 	APIKey string
 
+	// StreamIdleTimeout bounds how long a streamed reply may stay SILENT — waiting for its
+	// headers, or between two chunks — before the provider client cuts it and the loop re-streams
+	// the request as a transient fault; bytes of any kind (reasoning deltas, keep-alive comments)
+	// reset the clock. It rides every dial the engine makes — construction, a `/server` switch, a
+	// routed spawn — so the session client and a child's carry it alike. ZERO DISABLES the cut:
+	// an embedder's zero Config waits for as long as the server takes, and the engine never sees
+	// the provider client's own default. The host folds in the `stream-idle-timeout:` key
+	// (default 10m; 0 = off); an embedder sets it directly.
+	StreamIdleTimeout time.Duration
+
 	// ServerName and ServerDescription name the Upstream in the HUMAN's words — the `servers:`
 	// entry this session is bound to and the free-text `description:` beside it (ADR 0069). They
 	// are display facts and never dial facts: nothing routes, authenticates or budgets by them, so

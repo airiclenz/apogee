@@ -560,6 +560,17 @@ var KeyRegistry = bindSetters([]Key{
 		Set:  land(ParseDelegateTimeout, func(o *Options) *time.Duration { return &o.DelegateTimeout }),
 	},
 	{
+		// A length of time, delegate-timeout's posture exactly: the kind carries the shape, the hook
+		// carries the contract, and `0` is a VALUE (off) rather than an absent key.
+		Path: "stream-idle-timeout", Kind: KindString, Default: defaultStreamIdleTimeoutText,
+		Editable: true,
+		Validate: validateStreamIdleTimeout,
+		Desc: "How long a streamed reply may stay silent before apogee cuts it and re-sends the " +
+			"request; 0 waits for as long as the server takes; takes effect at the next start.",
+		Read: func(o Options) string { return o.StreamIdleTimeout.String() },
+		Set:  land(ParseStreamIdleTimeout, func(o *Options) *time.Duration { return &o.StreamIdleTimeout }),
+	},
+	{
 		Path: "undo-snapshots", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +
@@ -1090,6 +1101,48 @@ func ParseDelegateTimeout(value string) (time.Duration, error) {
 // through the loader's own reading (ParseDelegateTimeout) rather than a second time.ParseDuration.
 func validateDelegateTimeout(value string) error {
 	_, err := ParseDelegateTimeout(value)
+	return err
+}
+
+// defaultStreamIdleTimeoutText is the built-in bound on how long a streamed reply may stay SILENT —
+// before its headers or between two chunks — before the engine cuts it and re-sends the request,
+// as the config file spells it; defaultStreamIdleTimeout is the same bound resolved. Ten minutes
+// clears every remote provider's keep-alive cadence and most local prefills, and a reasoning model
+// that is still thinking is not silent: its reasoning deltas count as activity. The registry row
+// advertises it and the loader resolves an unstated key to it, so the two cannot drift apart; the
+// provider client's own default is the same ten minutes, which the host folds in rather than
+// relies on (a zero engine Config field DISABLES the cut).
+const defaultStreamIdleTimeoutText = "10m"
+
+var defaultStreamIdleTimeout = mustParseDuration(defaultStreamIdleTimeoutText)
+
+// ParseStreamIdleTimeout reads a `stream-idle-timeout:` value into the duration it bounds, on
+// ParseDelegateTimeout's contract: the empty value is the default (an absent key's reading), `0`
+// is off — the stream then waits for as long as the server takes, which is what a local server
+// whose prefill outruns the default wants — and text no duration can be made of, or a negative
+// one, is refused with the key named. It is the ONE reading of the key, shared by the loader's
+// accessor, the registry's validate hook and the live apply; exported for that third caller.
+func ParseStreamIdleTimeout(value string) (time.Duration, error) {
+	text := strings.TrimSpace(value)
+	if text == "" {
+		return defaultStreamIdleTimeout, nil
+	}
+	d, err := time.ParseDuration(text)
+	if err != nil {
+		return 0, fmt.Errorf("apogee: invalid stream-idle-timeout %q: want a length of time like 10m or 30s, "+
+			"or 0 to wait for as long as the server takes", value)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("apogee: invalid stream-idle-timeout %s: want 0 or more, where 0 waits for "+
+			"as long as the server takes", d)
+	}
+	return d, nil
+}
+
+// validateStreamIdleTimeout refuses a `stream-idle-timeout:` that is not a length of time to allow,
+// through the loader's own reading (ParseStreamIdleTimeout) rather than a second time.ParseDuration.
+func validateStreamIdleTimeout(value string) error {
+	_, err := ParseStreamIdleTimeout(value)
 	return err
 }
 

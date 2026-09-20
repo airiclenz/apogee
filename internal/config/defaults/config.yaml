@@ -680,6 +680,19 @@ context-fill-notice: false
 # delegate-timeout: 2h
 
 # =============================================================================
+# How long a streamed reply may stay silent. A server that stops sending — before its first byte
+# or in the middle of a reply — used to hold your agent, or a sub-agent nobody watches, until Esc
+# or delegate-timeout; this is the ceiling on that silence, as a length of time like 10m or 30s.
+# When it is reached apogee cuts the stream and sends the same request again, under the same
+# budget an upstream error is re-sent with, so a stalled server costs a few minutes rather than
+# the delegation. Bytes of any kind reset the clock: a reasoning model that is still thinking is
+# not silent, and a server's keep-alive comments count too, so a long reply is never cut, only a
+# stalled one. A local server whose prompt processing takes longer than this before the first
+# token arrives sets it longer, or 0 to wait for as long as the server takes. Config-file only
+# (no flag or env). Default: 10m.
+# stream-idle-timeout: 10m
+
+# =============================================================================
 # Snapshot the workspace for /undo. With this on, apogee images your whole workspace around each
 # exchange — once immediately before the exchange's first write-capable tool call, once when the
 # exchange ends — into a small object database of that session's own under ~/.apogee/snapshots/.

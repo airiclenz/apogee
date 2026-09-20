@@ -712,12 +712,12 @@ const startupOnlyContract = "takes effect at the next start."
 // every time an external edit starts (ADR 0041 decision 1); the other five are read once, while
 // the session is being built, and say so in their Descriptions. `ui.inspector`,
 // `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
-// `delegate-timeout`, `working-window` and `undo-snapshots` still mirror their value onto the live holder for the
+// `delegate-timeout`, `stream-idle-timeout`, `working-window` and `undo-snapshots` still mirror their value onto the live holder for the
 // Firings a session raises, and do nothing at all where a Driver composed none — which is why they
 // are exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{
 	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "delegate-fanout-rounds",
-	"delegate-max-depth", "delegate-max-tokens", "delegate-timeout",
+	"delegate-max-depth", "delegate-max-tokens", "delegate-timeout", "stream-idle-timeout",
 	"working-window", "undo-snapshots", "sessions.max-age", "sessions.max-count",
 }
 
@@ -726,7 +726,7 @@ var settingKeysWithNoMemberToReach = []string{
 // the provider client is constructed, `response-reserve` is read into the budget the session opens
 // with, `undo-snapshots` decides whether the session's undo store is opened while its id is minted,
 // and `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
-// `delegate-timeout` and `working-window` are fields of the Config the engine was constructed with, so this session
+// `delegate-timeout`, `stream-idle-timeout` and `working-window` are fields of the Config the engine was constructed with, so this session
 // genuinely cannot move any of them — but the file the next one starts from HAS moved,
 // which is the whole of what the key promises. Refusing would report a failed apply over a
 // save that did exactly that, which is the defect this pins.
@@ -743,6 +743,7 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 		{key: "delegate-max-depth", value: "2"},
 		{key: "delegate-max-tokens", value: "5000000"},
 		{key: "delegate-timeout", value: "30m"},
+		{key: "stream-idle-timeout", value: "30s"},
 		{key: "working-window", value: "200000"},
 		{key: "undo-snapshots", value: "false"},
 	}
@@ -772,6 +773,61 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 			if !strings.HasSuffix(row.Desc, startupOnlyContract) {
 				t.Errorf("Description = %q, want it to end %q: the silent row leaves the header to say when",
 					row.Desc, startupOnlyContract)
+			}
+		})
+	}
+}
+
+// `stream-idle-timeout` has ONE reading — config.ParseStreamIdleTimeout — on delegate-timeout's contract
+// below: an empty value resolves to the row's declared default, `0` is disabled, a stated bound lands,
+// and a value the parser refuses is refused in the parser's own words with the live holder left where
+// it was.
+func TestApplyStreamIdleTimeoutReadsThroughTheOneParser(t *testing.T) {
+	t.Parallel()
+	row, ok := config.LookupKey("stream-idle-timeout")
+	if !ok {
+		t.Fatal("no registry row for stream-idle-timeout")
+	}
+	declared, err := time.ParseDuration(row.Default)
+	if err != nil {
+		t.Fatalf("the registry default %q is no duration: %v", row.Default, err)
+	}
+
+	tests := []struct {
+		name, value string
+		want        time.Duration
+		wantErr     string
+	}{
+		{name: "an empty value is the built-in default", value: "", want: declared},
+		{name: "0 is disabled", value: "0", want: 0},
+		{name: "a stated bound", value: "30s", want: 30 * time.Second},
+		{name: "text that is no duration is refused", value: "soon", wantErr: `invalid stream-idle-timeout "soon"`},
+		{name: "a negative bound is refused", value: "-5m", wantErr: "invalid stream-idle-timeout -5m0s"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			live := newLiveSettings(config.Options{StreamIdleTimeout: 2 * time.Minute})
+
+			note, err := applyStreamIdleTimeout(settingsApplier{live: live}, "stream-idle-timeout", tt.value)
+
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("apply stream-idle-timeout=%q: err = %v, want it to contain %q", tt.value, err, tt.wantErr)
+				}
+				if got := live.options().StreamIdleTimeout; got != 2*time.Minute {
+					t.Errorf("StreamIdleTimeout = %v after a refusal, want the 2m the session held", got)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("apply stream-idle-timeout=%q: %v", tt.value, err)
+			}
+			if note != "" {
+				t.Errorf("note = %q, want none", note)
+			}
+			if got := live.options().StreamIdleTimeout; got != tt.want {
+				t.Errorf("StreamIdleTimeout = %v, want %v", got, tt.want)
 			}
 		})
 	}
@@ -1244,6 +1300,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		DelegateMaxDepth:     2,
 		DelegateMaxTokens:    100_000,
 		DelegateTimeout:      10 * time.Minute,
+		StreamIdleTimeout:    2 * time.Minute,
 		WorkingWindow:        8192,
 		UndoSnapshots:        true,
 		ContextFiles:         []string{"AGENTS.md"},
@@ -1414,6 +1471,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				t.Helper()
 				if got := opts.DelegateTimeout; got != 30*time.Minute {
 					t.Errorf("DelegateTimeout = %v, want the limit the session set (30m)", got)
+				}
+			},
+		},
+		{
+			name: "stream-idle-timeout", key: "stream-idle-timeout", value: "30s",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.StreamIdleTimeout; got != 30*time.Second {
+					t.Errorf("StreamIdleTimeout = %v, want the bound the session set (30s)", got)
 				}
 			},
 		},

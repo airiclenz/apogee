@@ -769,6 +769,56 @@ func TestBootConfigCarriesTheDelegateFanOutRounds(t *testing.T) {
 	}
 }
 
+// The `stream-idle-timeout:` key reaches the engine the way the delegation bounds do: the boot phase
+// folds opts.StreamIdleTimeout into Config.StreamIdleTimeout verbatim — the loader's 10m when the
+// key is absent, and an explicit 0 (disabled) included — so the silence bound every dial carries is
+// the file's number and nothing re-derives it. The default is asserted through the loader rather
+// than a bare Options because a zero Config field DISABLES the cut: what proves a session carries
+// the ten minutes is the key's absence resolving to them before the fold, not the fold alone.
+func TestBootConfigCarriesTheStreamIdleTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		file string
+		want time.Duration
+	}{
+		{name: "absent", file: "", want: 10 * time.Minute},
+		{name: "zero", file: "stream-idle-timeout: 0\n", want: 0},
+		{name: "stated", file: "stream-idle-timeout: 30s\n", want: 30 * time.Second},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			// One server, because the load refuses a file that names none; the key under test
+			// rides beside it.
+			file := "server: box\nservers:\n  - name: box\n    endpoint: http://127.0.0.1:1111\n" + tt.file
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(file), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			opts := config.Options{Mode: "ask-before", Workspace: t.TempDir(), ConfigDir: home}
+			if err := config.ApplyConfig(&opts, func(string) bool { return false },
+				func(string) string { return "" }, os.ReadFile, func(string) {}); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.StreamIdleTimeout != tt.want {
+				t.Fatalf("opts.StreamIdleTimeout = %v after the load; want %v", opts.StreamIdleTimeout, tt.want)
+			}
+			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+			t.Cleanup(w.close)
+			if err := w.resolveConfig(); err != nil {
+				t.Fatalf("resolveConfig: %v", err)
+			}
+			if w.cfg.StreamIdleTimeout != tt.want {
+				t.Errorf("Config.StreamIdleTimeout = %v; want the threaded %v", w.cfg.StreamIdleTimeout, tt.want)
+			}
+		})
+	}
+}
+
 // The `prune-tool-results:` key reaches the engine seam it gates: the boot phase folds
 // opts.PruneToolResults into ContextConfig.PruneToolResults verbatim, so a file that opts out
 // (`prune-tool-results: false`) leaves an Agent that never prunes. It is threaded rather than

@@ -970,6 +970,21 @@ you: a delegate's reply that runs into the ceiling without asking for a tool fai
 even when it carries text, and the delegating agent is told the cap was the cause — a
 truncated answer is never passed back as the delegated result.
 
+Every streamed reply is also **watched for silence**. A server that stops sending — before
+its first byte, or in the middle of a reply — used to hold your agent, or a sub-agent nobody
+watches, until Esc or `delegate-timeout:`; `stream-idle-timeout:` (a file-only key, a length
+of time like `10m` or `30s`) is the ceiling on that silence, at a default of **10m**. When
+it is reached apogee cuts the stream and re-sends the same request, under the same
+re-stream budget a transient upstream error is re-sent with, so a stalled server costs a
+few minutes rather than the delegation. Bytes of any kind reset the clock: a reasoning model
+that is still thinking is not silent — its reasoning counts as activity — and a server's
+keep-alive comments count too, so a long reply is never cut, only a stalled one. A local server whose prompt processing takes longer than the default before
+its first token arrives sets a longer value, or `0` to wait for as long as the server takes.
+It is read when the session (or a sub-agent) is built, so an edit applies at the next start.
+One consequence to know: a sub-agent that faults is summarised for your agent before its
+error result lands, and that summary runs under one more idle window, so the result may
+arrive up to one `stream-idle-timeout:` after the fault.
+
 **How hard a model thinks** is a property of the model, so it rides its profile: a
 `model-profiles:` entry's `thinking:` block takes `effort:` — `off`, `low`, `medium` and
 `high`, plus the wider levels some servers report: `minimal`, `xhigh`, `max`, and `none`

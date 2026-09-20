@@ -274,6 +274,14 @@ type Options struct {
 	// composition root folds it into apogee.Config.Delegation.Timeout.
 	DelegateTimeout time.Duration
 
+	// streamIdleTimeout bounds how long a streamed reply may stay SILENT — before its headers or
+	// between two chunks — before the engine cuts it and re-sends the request (default 10m; 0 = the
+	// stream waits for as long as the server takes), loaded from the config file only and resolved
+	// to a DURATION here, delegate-timeout's posture. ApplyConfig sets it from settings; the
+	// composition root folds it into apogee.Config.StreamIdleTimeout, whose zero DISABLES the cut —
+	// so the default is folded in rather than left to the provider client.
+	StreamIdleTimeout time.Duration
+
 	// autoTitle gates the automatic session-naming call — the cosmetic out-of-band completion that
 	// names a new Session record from its first prompt (default true), loaded from the config file
 	// only. ApplyConfig sets it from settings; runRoot folds it into tui.Options.AutoTitle. It gates

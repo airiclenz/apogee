@@ -38,6 +38,7 @@ func projectionOptions(t *testing.T) config.Options {
 		DelegateMaxDepth:     2,
 		DelegateMaxTokens:    4096,
 		DelegateTimeout:      90 * time.Second,
+		StreamIdleTimeout:    45 * time.Second,
 		ToolUseEnforcer:      true,
 		ToolLoopBreaker:      true,
 		ContextFillNotice:    true,
@@ -109,6 +110,9 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 	}
 	if got.Delegation != want.Delegation {
 		t.Errorf("Config.Delegation = %+v, want %+v", got.Delegation, want.Delegation)
+	}
+	if got.StreamIdleTimeout != want.StreamIdleTimeout {
+		t.Errorf("Config.StreamIdleTimeout = %v, want %v", got.StreamIdleTimeout, want.StreamIdleTimeout)
 	}
 	if got.Floor != want.Floor {
 		t.Errorf("Config.Floor = %+v, want %+v", got.Floor, want.Floor)

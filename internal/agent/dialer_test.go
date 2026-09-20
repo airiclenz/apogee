@@ -11,17 +11,20 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
 // dialRecord is what the fake Dialer noted about one dial: the three facts a constructor, a switch
 // or a routed spawn has to hand the seam TOGETHER — the wire target, the model bound on it and the
-// key it carries — and the wire the Options asked the client to speak, read back off a Client built
-// from those Options (provider.Option is opaque, and Client.Wire is its one accessor).
+// key it carries — and what the Options asked the client for, read back off a Client built from
+// those Options (provider.Option is opaque; Client.Wire and Client.StreamIdleTimeout are its
+// accessors): the wire it speaks and the silence bound its streams run under.
 type dialRecord struct {
 	endpoint, model, apiKey string
 	wire                    provider.Wire
+	idle                    time.Duration
 }
 
 // fakeDialer is the test double behind WithDialer. It records every dial in order and answers each
@@ -47,11 +50,15 @@ func dialerTo(up provider.Responder) *fakeDialer {
 
 // dial is the Dialer the fake is installed as (WithDialer(d.dial)). The provider Options arm no
 // client — an in-process Responder has none — but they are applied to a throwaway one so the wire
-// they carry is recorded: that is the only way to observe what a real dial would have spoken.
+// and the idle bound they carry are recorded: that is the only way to observe what a real dial
+// would have spoken, and how long it would have let the server stay silent.
 func (d *fakeDialer) dial(endpoint, model, apiKey string, opts ...provider.Option) provider.Responder {
-	wire := provider.NewClient("", "", opts...).Wire()
+	client := provider.NewClient("", "", opts...)
 	d.mu.Lock()
-	d.dials = append(d.dials, dialRecord{endpoint: endpoint, model: model, apiKey: apiKey, wire: wire})
+	d.dials = append(d.dials, dialRecord{
+		endpoint: endpoint, model: model, apiKey: apiKey,
+		wire: client.Wire(), idle: client.StreamIdleTimeout(),
+	})
 	d.mu.Unlock()
 	return d.answer(endpoint)
 }
@@ -72,7 +79,10 @@ func (d *fakeDialer) dialled() []dialRecord {
 // The wire is a per-server fact (ADR 0078), so the three seats deliberately differ: the session
 // starts on an anthropic entry, the routed target names NO wire — and the child dials openai, the
 // target's own folded answer, never the parent's anthropic — and the switch arrives on an
-// anthropic server again, the spec's value replacing whatever the retired client spoke.
+// anthropic server again, the spec's value replacing whatever the retired client spoke. The
+// stream idle bound is the opposite kind of fact — the session's, not a server's — so every dial
+// carries cfg.StreamIdleTimeout unchanged: the session's, the routed child's (and grandchild's),
+// and the switched client's alike.
 func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	t.Parallel()
 
@@ -99,6 +109,7 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	cfg.APIKey = "session-key"
 	cfg.Model = "smart-70b"
 	cfg.Wire = "anthropic"
+	cfg.StreamIdleTimeout = 45 * time.Second
 	cfg.Delegation.MaxDepth = 2 // room for the grandchild below
 	a, err := New(cfg, WithDialer(dialer.dial))
 	if err != nil {
@@ -137,11 +148,12 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 		t.Errorf("Config.Wire after the switch = %q, want the spec's %q mirrored, so a later dial speaks it", a.cfg.Wire, "anthropic")
 	}
 
+	idle := cfg.StreamIdleTimeout
 	want := []dialRecord{
-		{endpoint: sessionEndpoint, model: "smart-70b", apiKey: "session-key", wire: provider.WireAnthropic},
-		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI}, // the target's own unnamed wire, not the parent's
-		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI},
-		{endpoint: switchedEndpoint, model: "", apiKey: "new-key", wire: provider.WireAnthropic}, // a switch binds NO model (ADR 0024)
+		{endpoint: sessionEndpoint, model: "smart-70b", apiKey: "session-key", wire: provider.WireAnthropic, idle: idle},
+		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI, idle: idle}, // the target's own unnamed wire, not the parent's
+		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI, idle: idle},
+		{endpoint: switchedEndpoint, model: "", apiKey: "new-key", wire: provider.WireAnthropic, idle: idle}, // a switch binds NO model (ADR 0024)
 	}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
 		t.Errorf("dials through the seam = %+v, want %+v", got, want)
@@ -150,12 +162,13 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 
 // TestResumeDialsThroughTheDialer: Resume is the second constructor that dials, and it takes the
 // same Option — a resumed session's client is the injected Dialer's answer, dialled with the
-// Config's own seat facts.
+// Config's own seat facts, the stream idle bound among them.
 func TestResumeDialsThroughTheDialer(t *testing.T) {
 	t.Parallel()
 
 	cfg := baseConfig(&recordingSink{})
 	cfg.APIKey = "resumed-key"
+	cfg.StreamIdleTimeout = 45 * time.Second
 	seed, err := newAgent(cfg, echoResponder(t, "hello"))
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
@@ -176,7 +189,7 @@ func TestResumeDialsThroughTheDialer(t *testing.T) {
 	if b.upstream != resumed {
 		t.Errorf("Resume bound %T as the Upstream, want the Dialer's answer", b.upstream)
 	}
-	want := []dialRecord{{endpoint: cfg.Endpoint, model: cfg.Model, apiKey: "resumed-key", wire: provider.WireOpenAI}}
+	want := []dialRecord{{endpoint: cfg.Endpoint, model: cfg.Model, apiKey: "resumed-key", wire: provider.WireOpenAI, idle: cfg.StreamIdleTimeout}}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
 		t.Errorf("dials through the seam = %+v, want %+v", got, want)
 	}

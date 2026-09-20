@@ -160,6 +160,12 @@ func projectConfig(
 			MaxTokens:    opts.DelegateMaxTokens,
 			Timeout:      opts.DelegateTimeout,
 		},
+		// How long a streamed reply may stay silent before the engine cuts it and re-sends the
+		// request: the `stream-idle-timeout` key (default 10m; 0 ⇒ the stream waits for as long
+		// as the server takes). Folded in rather than left to the provider client's own default,
+		// because a zero engine Config field DISABLES the cut — so a session carries the ten
+		// minutes unless the human set 0, and a Firing nobody watches is cut the same way.
+		StreamIdleTimeout: opts.StreamIdleTimeout,
 		// Which Floor guards this run goes WITHOUT (ADR 0071). The seven keys are positive in the
 		// file and negative at the engine, and floorFromOptions is the one place that turns one
 		// spelling into the other — so a guard the human took away, in the file or in `/settings`,

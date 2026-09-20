@@ -1291,6 +1291,12 @@ var settingsTable = []settingsEntry{
 		apply:   applyDelegateTimeout,
 	},
 	{
+		key: "stream-idle-timeout",
+		// As delegate-max-steps above: no member, no seam, no re-resolution.
+		reaches: reachesWithoutAMember,
+		apply:   applyStreamIdleTimeout,
+	},
+	{
 		key:     "undo-snapshots",
 		reaches: reachesWithoutAMember,
 		apply:   applyUndoSnapshots,
@@ -1746,6 +1752,24 @@ func applyDelegateTimeout(a settingsApplier, key, value string) (string, error) 
 	}
 	if a.live != nil {
 		a.live.update(func(o *config.Options) { o.DelegateTimeout = landed.DelegateTimeout })
+	}
+	return "", nil
+}
+
+// applyStreamIdleTimeout is `stream-idle-timeout:`, on applyDelegateTimeout's footing exactly: the
+// bound is a field of the Config an Agent was CONSTRUCTED with — it rides the provider client every
+// dial builds — so the write is the whole of the apply for this session, and the mirror onto the
+// holder is what bounds the streams of the Firings it raises. Landed through the row whose
+// validator and landing are both the ONE parser of the key (config.ParseStreamIdleTimeout): an
+// empty value is the built-in default, `0` is off, and a negative one is refused in the parser's
+// own words.
+func applyStreamIdleTimeout(a settingsApplier, key, value string) (string, error) {
+	landed, err := landSetting(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.update(func(o *config.Options) { o.StreamIdleTimeout = landed.StreamIdleTimeout })
 	}
 	return "", nil
 }

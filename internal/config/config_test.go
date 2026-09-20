@@ -180,6 +180,16 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.DelegateTimeout = 0 },
 		},
 		{
+			name: "stream-idle-timeout is file-only, a duration, and defaults 10m",
+			file: fileConfig{StreamIdleTimeout: strptr("30s")},
+			want: func(o *Options) { o.StreamIdleTimeout = 30 * time.Second },
+		},
+		{
+			name: "an explicit stream-idle-timeout: 0 stays 0 — the documented spelling of disabled",
+			file: fileConfig{StreamIdleTimeout: strptr("0")},
+			want: func(o *Options) { o.StreamIdleTimeout = 0 },
+		},
+		{
 			name: "auto-title is file-only and defaults true",
 			file: fileConfig{AutoTitle: boolptr(false)},
 			want: func(o *Options) { o.AutoTitle = false },
@@ -368,6 +378,7 @@ func wantDefaults() Options {
 		DelegateMaxDepth:     defaultDelegateMaxDepth,
 		DelegateMaxTokens:    defaultDelegateMaxTokens,
 		DelegateTimeout:      defaultDelegateTimeout,
+		StreamIdleTimeout:    defaultStreamIdleTimeout,
 		AutoTitle:            true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
@@ -605,6 +616,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"DelegateMaxDepth":     true,
 		"DelegateMaxTokens":    true,
 		"DelegateTimeout":      true,
+		"StreamIdleTimeout":    true,
 		"UseShippedSkills":     true,
 		"UseDefaultPrompt":     true,
 		"AutoTitle":            true, "RememberModel": true,
@@ -666,6 +678,7 @@ func everyKeyFileConfig() fileConfig {
 		DelegateMaxDepth:     2,
 		DelegateMaxTokens:    intptr(5_000_000),
 		DelegateTimeout:      strptr("30m"),
+		StreamIdleTimeout:    strptr("30s"),
 		RememberModel:        boolptr(false),
 		ContextWindow:        64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
@@ -2239,6 +2252,49 @@ func TestApplyConfigDelegateTimeout(t *testing.T) {
 	}
 }
 
+// The stream-idle-timeout key parses into opts.streamIdleTimeout as a DURATION, delegate-timeout's
+// posture: an absent key resolves to the built-in 10m, an explicit 0 is disabled — the stream then
+// waits for as long as the server takes — and text no duration can be made of, or a negative one,
+// is a startup error that names the key and quotes the value as written, rather than a silence
+// bound that quietly resolved to the default. The opts → Config.StreamIdleTimeout threading is
+// the composition root's, pinned by TestBootConfigCarriesTheStreamIdleTimeout in wire_boot_test.go.
+func TestApplyConfigStreamIdleTimeout(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		file    string
+		want    time.Duration
+		wantErr string
+	}{
+		{name: "a stated bound", file: "stream-idle-timeout: 30s\n", want: 30 * time.Second},
+		{name: "an absent key takes the built-in default", file: "", want: defaultStreamIdleTimeout},
+		{name: "an explicit 0 is disabled", file: "stream-idle-timeout: 0\n", want: 0},
+		{name: "text that is no duration is refused", file: "stream-idle-timeout: soon\n", wantErr: `invalid stream-idle-timeout "soon"`},
+		{name: "a negative bound is refused", file: "stream-idle-timeout: -5m\n", wantErr: "invalid stream-idle-timeout -5m0s"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ApplyConfig error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.StreamIdleTimeout != tt.want {
+				t.Errorf("opts.streamIdleTimeout = %s; want %s", opts.StreamIdleTimeout, tt.want)
+			}
+		})
+	}
+}
+
 // The file pass refuses through the registry rows: a string-spelled key whose value the row's Set
 // admits nothing of is refused at the pass itself, so startup (ApplyConfig) and a live re-read of
 // the same file (LoadFileConfig — every `/settings` apply under a running session) refuse it in
@@ -2253,6 +2309,7 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 		wantPath string
 	}{
 		{name: "delegate-timeout", file: "delegate-timeout: 5x\n", wantErr: `apogee: invalid delegate-timeout "5x": want a length of time like 2h or 30m, or 0 to let a delegation run unbounded`},
+		{name: "stream-idle-timeout", file: "stream-idle-timeout: 5x\n", wantErr: `apogee: invalid stream-idle-timeout "5x": want a length of time like 10m or 30s, or 0 to wait for as long as the server takes`},
 		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: `apogee: invalid cursor-shape: unknown cursor shape "sideways" (known shapes: block, underline, bar)`},
 		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana" — it takes "fixed" (the sub-agents-server: key alone picks where a delegation runs) or "model" (the top-level model may say run_on per delegation)`},
 	} {
@@ -2288,6 +2345,7 @@ func TestDelegateBoundSettingKeyValidators(t *testing.T) {
 	}{
 		{"delegate-max-tokens", []string{"0", "20000000"}, []string{"-1", "lots"}, "0 or more"},
 		{"delegate-timeout", []string{"0", "2h", "30m"}, []string{"soon", "-5m"}, "delegate-timeout"},
+		{"stream-idle-timeout", []string{"0", "10m", "30s"}, []string{"soon", "-5m"}, "stream-idle-timeout"},
 	} {
 		row, ok := LookupKey(tc.key)
 		if !ok || row.Validate == nil {

@@ -859,6 +859,20 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// delegate-timeout's shape and reason: a duration's text on disk, an absent key resolving
+		// to the default, an explicit `0` off, and text no duration can be made of refused HERE
+		// through the row — a silence bound that quietly resolved to the default would cut a slow
+		// server's stream under a limit nobody set.
+		row: mustKey("stream-idle-timeout"),
+		fromFile: func(o *Options, fc fileConfig) error {
+			o.StreamIdleTimeout = defaultStreamIdleTimeout
+			if fc.StreamIdleTimeout == nil {
+				return nil
+			}
+			return mustKey("stream-idle-timeout").Set(*fc.StreamIdleTimeout, o)
+		},
+	},
+	{
 		row: mustKey("undo-snapshots"),
 		fromFile: func(o *Options, fc fileConfig) error {
 			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
@@ -1550,6 +1564,14 @@ type fileConfig struct {
 	// by the startup pass when no duration can be made of it. It feeds
 	// domain.Config.Delegation.Timeout.
 	DelegateTimeout *string `yaml:"delegate-timeout"`
+	// StreamIdleTimeout bounds how long a streamed reply may stay SILENT — before its headers or
+	// between two chunks — before the engine cuts it as a transient fault and re-sends the request,
+	// as time.ParseDuration spells one (`10m`, `30s`; default 10m; `0` = wait for as long as the
+	// server takes). File-only (no flag/env), and a string pointer for DelegateTimeout's reason: the
+	// text is resolved to a duration by the accessor (ParseStreamIdleTimeout) and refused, quoted as
+	// written, by the startup pass when no duration can be made of it. It feeds
+	// domain.Config.StreamIdleTimeout.
+	StreamIdleTimeout *string `yaml:"stream-idle-timeout"`
 	// UndoSnapshots gates the SNAPSHOT-backed undo store (ADR 0074): with it on, apogee images the
 	// workspace around each exchange in a git object database of the session's own, outside the
 	// workspace, so `/undo` survives a relaunch and reaches writes that never went through apogee's
