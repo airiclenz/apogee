@@ -25,10 +25,10 @@ muted-bright: "#b2b2b2" # the muted tone one step up: the text of an EXPANDED to
 diff-add-bg: "#08456d" # the band an added diff body line sits on — the signal moved to the background, so the text over it keeps the plain detail tone; a deep turquoise, quiet enough to read muted text against
 diff-del-bg: "#5a161e" # the band a removed diff body line sits on — `diff-add-bg`'s red counterpart, so the turquoise-vs-red pairing survives red-green-weak vision
 error: "#f85149"       # recovered-fault notices
-success: "#5eead4"     # the ✓ on a finished sub-agent and any other "this came off" marker — error's counterpart, a bright turquoise in `diff-add-bg`'s family so outcome and diff speak one hue language
+success: "#43d389"     # the ✓ on a finished sub-agent and any other "this came off" marker — error's counterpart, a bright turquoise in `diff-add-bg`'s family so outcome and diff speak one hue language
 warning: "#d7af5f"     # a condition worth noticing that is not a fault (the status line's quiet qualifier before the activity clock) — a desaturated gold pitched between `muted` and `error`: read past the dim, short of the alarm
 code: "#70BBFF"        # inline `code` + fenced code blocks
-tool-header: "#E0D090" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — gold, so the blocks apogee ran read apart from the code it prints
+tool-header: "#aea580" # a tool-call block's header label (Run, List Dir, Sub-Agent, …) and the sub-agent rail that hangs off it — gold, so the blocks apogee ran read apart from the code it prints
 
 # --- autonomy modes ----------------------------------------------------------------
 # The footer's mode markers, warming up the privilege ladder (least → most autonomous).
