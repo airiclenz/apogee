@@ -10,6 +10,48 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **A silent upstream is cut by a stream idle timeout and surfaces as a retryable fault.** `Client.Stream`
+  now has two deadlines: the caller's ctx and an idle window (`provider.WithStreamIdleTimeout`,
+  default 10m, `0` disables; read back through `Client.StreamIdleTimeout`). An upstream that sends
+  nothing for the whole window — before its response headers or between two body reads — is cut and
+  the stream ends in a `DeltaError` marked `Retryable`, rendered `apogee: read stream: upstream stream
+  idle for 10m0s` (mid-body) or `apogee: await response: upstream stream idle for 10m0s` (pre-header),
+  so the loop re-streams it exactly as it does a mid-stream EOF or an in-band 502. Bytes of any kind
+  reset the clock — reasoning deltas and SSE keep-alive comments count as activity — so a long
+  generation is never cut, only a stalled one. The cut sits at the body layer beneath the capture
+  tee, so both wires inherit it and a wire record ends where the parse did; `isTransientReadError`
+  names the idle cut as its third transient class. This supersedes the 2026-08 record "The caller's
+  context is documented and pinned as the stream's only deadline" (`Stream` added no inter-chunk
+  idle timeout for the sake of a slow local prefill): a local server whose prefill exceeds ten
+  minutes now sets `stream-idle-timeout: 0` or a longer window.
+
+- **`stream-idle-timeout` config key** (plan 2026-09-20 - 04, item 2). A new file-only duration key
+  on `delegate-timeout`'s footing (registry row, `/settings` row, `Options.StreamIdleTimeout`,
+  `Config.StreamIdleTimeout`, one parser `config.ParseStreamIdleTimeout` shared by the loader, the
+  validator and the live apply), default **10m**: how long a streamed reply may stay silent — before
+  its headers or between two chunks — before the engine cuts it and re-sends the request as a
+  transient fault; bytes of any kind (reasoning deltas, keep-alive comments) count as activity. `0`
+  disables the cut and waits for as long as the server takes — the remedy for a local server whose
+  prefill outruns the default; text no duration can be made of, or a negative value, is refused at
+  startup and on a live re-read in one sentence naming the key. The engine's `dialOptions` now
+  appends `provider.WithStreamIdleTimeout(cfg.StreamIdleTimeout)` at every dial — construction,
+  Resume, a `/server` switch and a routed spawn — so the session client and a child's carry the same
+  bound; a zero engine Config field disables the cut (an embedder's bare Config waits), and the host
+  folds the key's default in so a TUI session or a Firing always carries the ten minutes unless the
+  file says `0`. Documented in the config template and `docs/manual/configuration.md`, including the
+  faulted-delegate worst case (item 5): a faulted sub-agent's summary runs under one more idle
+  window, so its error result may land up to one `stream-idle-timeout` after the fault.
+
+- A Turn now re-streams a transient upstream fault (an in-band 429/5xx, a mid-stream cut, a stream the idle timeout cut) up to three times per Turn instead of once, waiting 1 s, then 2 s, then 4 s before each re-send; the compaction summary's re-stream shares the same budget and ladder. The fault that finds the budget spent surfaces exactly as before. (`turnRun.restreamsSpent`, `Agent.restreamBudget`, `restreamHoldoffFor`; ADR 0046 amended.)
+
+- `re-stream-budget:` (file-only, default `3`, `0` = never) sets how many times one Turn re-sends its request after a transient upstream fault — an in-band 5xx/429, a mid-stream cut, a `stream-idle-timeout:` cut — before the Turn fails, with the hold-off doubling between attempts (1 s, 2 s, 4 s); a delegate's Turn and the compaction summary share it. The engine reads `Config.RestreamBudget` as a pointer — nil keeps its default of three, so an embedder's zero Config still re-streams — and the host folds the file's number in, so a `re-stream-budget: 0` reads as 0 rather than "unset". A negative value is refused at startup and at `/settings` in the row's own sentence.
+
+- A sub-agent that faults is now **retained like a capped one** (bead apogee-60x): the engine folds what it had done before the fault (no wrap-up Turn — the fold is the only model call, run under one `stream-idle-timeout:` of its own, so the error result lands at most one idle window late), the error result keeps its fault head and ends on the `[to continue this delegate: sub_agent with continue: "<name>"]` line, and `sub_agent` with `continue` picks the work up from that summary instead of re-spawning it from nothing. A sub-agent that faulted on its very first request is kept without a fold request, its summary the `[engine summary unavailable — the delegate completed no Turn]` marker; a fold that itself fails or exceeds its bound keeps the marker naming the cause. A cancel still unwinds the whole delegation and retains nothing; an unnamed delegation still has no handle. The `continue` argument's description now reads "stopped at a bound or faulted".
+
+- A sub-agent that faults after writing its `output_path` now tells the parent so: the error result carries `[draft output at <output_path> written before the fault]` (in the call's spelling) ahead of the continue line, so a draft on disk is read or continued from rather than mistaken for lost work. A file that was already there before the spawn earns no note; the capped path's missing-output note is unchanged.
+
+- **ADR 0082 records the upstream-stall resilience wave** (`apogee-60x`, closed) — the idle cut at the body layer (`stream-idle-timeout:`, 10m, bytes of any kind are activity, superseding the 0.18.0 "only deadline" record), the per-Turn re-stream budget with its doubling hold-off (`re-stream-budget:`, 3, superseding the 0.14.0 single re-stream), faulted-delegate retention as an extension of the capped child's (fold only, no wrap-up, a cancel still unwinds) and the floor argument. ADR 0039 decision 4, ADR 0046 decision 4's re-stream note and ADR 0013's 2026-09-18 amendment carry dated notes pointing at it; `CONTEXT.md` names the budget under *Turns and stepping* and ties the retained fault to it in the P6 paragraph.
+
 - **`delegate-fanout-rounds` config key** (plan 2026-09-20 - 00, item 1). A new file-only integer key, default **2**, on `delegate-max-steps`'s footing (registry row, `/settings` row, `Options.DelegateFanOutRounds`, `DelegationConfig.FanOutRounds`): the number of rounds of the server's `parallel-agents` width one reply may fan out before its remaining `sub_agent` calls are refused and must be delegated again; `0` switches the ceiling off, a negative value is refused. This item lands the key and its documentation (config template, `docs/manual/configuration.md`); the ceiling itself, which reads `Config.Delegation.FanOutRounds`, lands with item 2.
 
 - **A reply's fan-out is bounded by a ceiling** (plan 2026-09-20 - 00). One reply may fan out at most `delegate-fanout-rounds` × the stated delegation width `sub_agent` calls (the Sub-agent server's latched cap, else the session server's; 1 on a delegate — so the ceiling applies at every depth, with no floor): the first ceiling calls in emitted order run as before, and every later `sub_agent` call in the reply is refused on its own row — a finished phase alone, no audit record — with the constant result `sub-agent not started: this reply fanned out N delegations and the ceiling is C (R rounds × width W) — the first C ran; delegate the rest again once their results are in`. The overflow is never held and re-issued by the engine; the coordinator delegates it again once the round it got has reported. Leaf tools in the same reply are never counted; pre-emption by a queued message still decides among the calls that run; a group with a refused slot states no width line; the delegate ledger books each refused call as `refused`, numbered behind the calls that ran. `delegate-fanout-rounds: 0` switches the ceiling off. The width the ceiling multiplies is the ONE width the engine states to the model (`statedDelegationWidth`): latched per seat — seeded from the session server's cap and moved by `/server` or a heartbeat that discovers its slots; the far width written when a usable Sub-agent server first states its cap, kept across a target-down beat and forgotten when `/sub-agents-server` moves the key. Closes the 2026-09-20 `/code-audit` session's 56-dispatch reply, of which 35 never started.
