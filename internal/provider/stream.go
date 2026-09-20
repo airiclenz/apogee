@@ -12,6 +12,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync/atomic"
+	"time"
 )
 
 // DeltaKind tags a streamed Delta. The set mirrors the TS oracle's CompletionDelta union
@@ -58,8 +60,10 @@ type Delta struct {
 	Err   string
 	// Retryable is meaningful only on DeltaError: it reports that the fault's class is one
 	// the client would have retried had it arrived as an HTTP status (429, 5xx, or an
-	// aggregator's "provider_unavailable"), or a body read that ended in a mid-stream EOF or a
-	// network timeout, so the caller may re-stream the same request. It is never set on
+	// aggregator's "provider_unavailable"), or a body read that ended in a mid-stream EOF, a
+	// network timeout or the idle cut (errStreamIdle — an upstream silent for the whole
+	// WithStreamIdleTimeout window, before its headers or mid-body), so the caller may
+	// re-stream the same request. It is never set on
 	// DeltaContextOverflow — a prompt too long stays too long — nor on the text-cap overflow,
 	// and the provider itself never acts on it, because retrying mid-stream is the loop's call.
 	Retryable bool
@@ -76,15 +80,23 @@ type Delta struct {
 // DeltaError / DeltaContextOverflow rather than a Go error, so the consumer drives a
 // single range loop (matching the TS AsyncIterable). The HTTP request is issued lazily on
 // first iteration; the body and the request context are released when the range ends
-// (whether drained or broken early). The caller's ctx is the stream's only deadline — there
-// is no inter-chunk idle timeout — and a cancelled or expired ctx ends the body read and
-// surfaces as a terminal DeltaError. Content plus reasoning is capped at maxReplyTextBytes;
-// crossing it ends the stream with a non-retryable terminal DeltaError. A body read that fails
-// before the terminator — the connection dropped mid-chunk (io.ErrUnexpectedEOF) or a network
-// timeout — is a terminal DeltaError marked Retryable, so the loop can re-stream it the way it
-// re-streams an in-band 502; a chunk that fails to decode is skipped and counted, never dropped
-// silently (Delta.MalformedChunks), and a stream that decoded nothing at all but skipped some is
-// a fault naming that count rather than an empty Done.
+// (whether drained or broken early). The stream has two deadlines: the caller's ctx — a
+// cancelled or expired ctx ends the body read and surfaces as a terminal DeltaError — and the
+// idle timeout (WithStreamIdleTimeout, 10m by default; 0 disables it). An upstream that stays
+// SILENT for the whole idle window, whether before its response headers or between two body
+// reads, is cut and surfaces as a terminal DeltaError marked Retryable (errStreamIdle); bytes of
+// any kind — reasoning deltas, SSE keep-alive comments — reset the clock, so a slow generation
+// is never cut, only a stalled one. That default supersedes the 2026-08 record (CHANGELOG.md,
+// "The caller's context is documented and pinned as the stream's only deadline") that Stream
+// added no inter-chunk idle timeout for the sake of a slow local prefill: that persona now sets
+// stream-idle-timeout to 0 or to a longer window. Content plus reasoning is capped at
+// maxReplyTextBytes; crossing it ends the stream with a non-retryable terminal DeltaError. A
+// body read that fails before the terminator — the connection dropped mid-chunk
+// (io.ErrUnexpectedEOF), a network timeout or the idle cut — is a terminal DeltaError marked
+// Retryable, so the loop can re-stream it the way it re-streams an in-band 502; a chunk that
+// fails to decode is skipped and counted, never dropped silently (Delta.MalformedChunks), and a
+// stream that decoded nothing at all but skipped some is a fault naming that count rather than
+// an empty Done.
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
@@ -95,8 +107,26 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		}
 
 		// Streaming is not bounded by a per-attempt timeout — a long generation is not a
-		// fault; retries cover only connection/status before the first byte.
-		resp, cancel, err := c.send(ctx, body, 0)
+		// fault; retries cover only connection/status before the first byte. The idle window
+		// bounds the wait for headers instead: the whole of send — attempts and hold-offs —
+		// runs under a child ctx the headers timer cancels, and a stall it cut is reported as
+		// the idle fault, never as a caller cancel.
+		headersCtx, cancelHeaders := context.WithCancel(ctx)
+		defer cancelHeaders()
+		headers := newIdleTimer(c.streamIdleTimeout, cancelHeaders)
+		resp, cancel, err := c.send(headersCtx, body, 0)
+		if headers.stopOrFired() && ctx.Err() == nil {
+			if err == nil {
+				cancel()
+				_ = resp.Body.Close()
+			}
+			yield(Delta{
+				Kind:      DeltaError,
+				Err:       fmt.Sprintf("apogee: await response: %v", idleFault(c.streamIdleTimeout)),
+				Retryable: true,
+			})
+			return
+		}
 		if err != nil {
 			yield(Delta{Kind: DeltaError, Err: err.Error()})
 			return
@@ -109,20 +139,118 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			return
 		}
 
+		// The body layer's idle cut sits beneath the capture tee, so both codecs inherit it and
+		// the observer's record ends where the codec's parse did: the reader closes the body when
+		// the window elapses with no byte read, the pending Read unblocks, and the codec sees
+		// errStreamIdle through scanner.Err — the one place both wires render a read fault.
+		stream := io.Reader(resp.Body)
+		if c.streamIdleTimeout > 0 {
+			idle := newIdleBody(resp.Body, c.streamIdleTimeout)
+			defer idle.stop()
+			stream = idle
+		}
+
 		// Wire capture, when armed: tee the body as it is read and hand the observer one record
 		// on whichever return ends the parse — [DONE], an in-band error, a read fault, a consumer
 		// that broke, or the server closing. The codec never sees the observer: the tee sits in
 		// front of it, so the capture is the same whichever wire is parsing. Unarmed, not a byte
 		// is kept.
-		stream := io.Reader(resp.Body)
 		if c.wireObserver != nil {
 			var raw bytes.Buffer
-			stream = io.TeeReader(resp.Body, &raw)
+			stream = io.TeeReader(stream, &raw)
 			defer func() { c.observeWire(WireResponse, c.streamCapture(raw.Bytes())) }()
 		}
 		c.codec.parseSSE(stream, carriedEffort, yield)
 	}
 }
+
+// errStreamIdle is the sentinel behind the idle cut. It carries no `apogee:` prefix because
+// every path that renders it supplies its own — the codecs' `apogee: read stream: %v` over
+// scanner.Err, the pre-header `apogee: await response: %v` — so the rendered fault reads
+// `apogee: read stream: upstream stream idle for 10m0s`, not doubled.
+var errStreamIdle = errors.New("upstream stream idle")
+
+// idleFault is the error one idle cut reports: errStreamIdle wrapped with the window that
+// elapsed, so errors.Is still matches the sentinel and the text names the bound crossed.
+func idleFault(window time.Duration) error {
+	return fmt.Errorf("%w for %s", errStreamIdle, window)
+}
+
+// idleTimer is one armed idle window: a timer that runs fire when the window elapses, and the
+// record that it did — set BEFORE fire runs, so whoever fire unblocks reads it as fired. A
+// disarmed idleTimer (idle timeout off) has no timer and never reports fired.
+type idleTimer struct {
+	timer *time.Timer
+	fired atomic.Bool
+}
+
+// newIdleTimer arms an idleTimer over window, running fire when it elapses; a window of 0 (idle
+// timeout off) returns a disarmed one.
+func newIdleTimer(window time.Duration, fire func()) *idleTimer {
+	t := &idleTimer{}
+	if window > 0 {
+		t.timer = time.AfterFunc(window, func() {
+			t.fired.Store(true)
+			fire()
+		})
+	}
+	return t
+}
+
+// reset re-arms the window from now.
+func (t *idleTimer) reset(window time.Duration) {
+	if t.timer != nil {
+		t.timer.Reset(window)
+	}
+}
+
+// stopOrFired stops the timer and reports whether it had already fired.
+func (t *idleTimer) stopOrFired() bool {
+	if t.timer == nil {
+		return false
+	}
+	t.timer.Stop()
+	return t.fired.Load()
+}
+
+// idleBody is a response body under the idle cut: every Read that returns bytes re-arms the
+// window; a window that elapses closes the underlying body so a pending Read unblocks, and
+// that read's error — or the next read's, on a body the timer closed between reads — is
+// replaced by the idle fault. A private type, so the cut lives in one place beneath both
+// codecs.
+type idleBody struct {
+	body   io.ReadCloser
+	window time.Duration
+	idle   *idleTimer
+}
+
+// newIdleBody wraps body under a window > 0, arming the timer at once: the clock starts at the
+// headers, the last bytes the upstream is known to have sent.
+func newIdleBody(body io.ReadCloser, window time.Duration) *idleBody {
+	return &idleBody{
+		body:   body,
+		window: window,
+		idle:   newIdleTimer(window, func() { _ = body.Close() }),
+	}
+}
+
+// Read reads from the body, re-arming the window on every read that succeeded, and reports the
+// idle fault in place of the transport's own error once the window has fired.
+func (b *idleBody) Read(p []byte) (int, error) {
+	n, err := b.body.Read(p)
+	if err == nil {
+		b.idle.reset(b.window)
+		return n, nil
+	}
+	if b.idle.fired.Load() {
+		return n, idleFault(b.window)
+	}
+	return n, err
+}
+
+// stop disarms the window once the range ends, so the timer cannot close a body the caller has
+// already released.
+func (b *idleBody) stop() { b.idle.stopOrFired() }
 
 // streamCapture is what a WireResponse record holds for a stream: on the openai wire the
 // `data:` payloads joined by newlines, the shape WireRecord documents and the Inspector reads
@@ -228,13 +356,15 @@ func malformedChunksNote(count int) string {
 }
 
 // isTransientReadError reports whether a body-read fault is one the same request can be expected
-// to survive: the connection closed mid-chunk (io.ErrUnexpectedEOF — a server or a proxy dropping
-// the stream) or a network timeout. Every other read fault — a line past the scanner's buffer,
-// a broken transport — stays non-retryable. A cancelled or expired ctx surfaces through here
-// too (an expired one even reads as a timeout), but the loop checks ctx.Err() before it ever
-// consults Retryable, so the verdict is moot for it.
+// to survive — three classes: the connection closed mid-chunk (io.ErrUnexpectedEOF — a server or
+// a proxy dropping the stream), a network timeout, or the idle cut (errStreamIdle — an upstream
+// silent for the whole idle window, which is how a stalled proxy or a dead generation shows up
+// before any 504 does). Every other read fault — a line past the scanner's buffer, a broken
+// transport — stays non-retryable. A cancelled or expired ctx surfaces through here too (an
+// expired one even reads as a timeout), but the loop checks ctx.Err() before it ever consults
+// Retryable, so the verdict is moot for it.
 func isTransientReadError(err error) bool {
-	if errors.Is(err, io.ErrUnexpectedEOF) {
+	if errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, errStreamIdle) {
 		return true
 	}
 	var netErr net.Error

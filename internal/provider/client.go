@@ -53,6 +53,12 @@ const (
 	defaultMaxRetries     = 2
 	defaultRetryBaseDelay = 200 * time.Millisecond
 
+	// defaultStreamIdleTimeout is how long Stream lets an upstream sit silent — before its
+	// headers or between two body reads — before cutting it as a retryable fault. Ten minutes
+	// clears every remote provider's keep-alive cadence and most local prefills; a local server
+	// whose prefill runs longer disables it with WithStreamIdleTimeout(0) or sets a longer one.
+	defaultStreamIdleTimeout = 10 * time.Minute
+
 	// retry429BaseDelay is the backoff base for a rate-limited (429) attempt that carried no
 	// Retry-After header. A rate limit is a "come back later", not a transport blip, so retrying
 	// it at the 200ms transport base only burns the budget before the window reopens.
@@ -156,6 +162,7 @@ type Client struct {
 	maxRetries        int
 	retryBaseDelay    time.Duration
 	requestTimeout    time.Duration    // per-attempt bound for Respond; 0 ⇒ caller's ctx governs
+	streamIdleTimeout time.Duration    // silence bound for Stream (see WithStreamIdleTimeout); 0 ⇒ off
 	discoveryDeadline time.Duration    // bound for one Discover call; 0 ⇒ the discoveryTimeout default
 	wireObserver      func(WireRecord) // nil ⇒ no wire capture at all (see WithWireObserver)
 
@@ -238,6 +245,17 @@ func WithRetryBaseDelay(d time.Duration) Option { return func(c *Client) { c.ret
 // generation is not a fault.
 func WithRequestTimeout(d time.Duration) Option { return func(c *Client) { c.requestTimeout = d } }
 
+// WithStreamIdleTimeout bounds how long a streaming call may sit SILENT — waiting for the
+// response headers, or between two body reads — before Stream cuts it and surfaces a
+// retryable DeltaError (default defaultStreamIdleTimeout, 10m; 0 disables, leaving the caller's
+// ctx as the stream's only deadline). Bytes of any kind reset the clock — reasoning deltas and
+// SSE keep-alive comments count as activity — so a long generation is never cut, only a stalled
+// one. Respond is not governed by it: WithRequestTimeout bounds that path. Read back through
+// Client.StreamIdleTimeout.
+func WithStreamIdleTimeout(d time.Duration) Option {
+	return func(c *Client) { c.streamIdleTimeout = d }
+}
+
 // WithDiscoveryTimeout bounds one Discover call — both probes together — so a hung server cannot
 // stall construction (default 5s; zero or negative keeps the default). A test that stacks many
 // loopback servers under a race-instrumented shard passes a generous bound so the row it is
@@ -305,8 +323,9 @@ func NewClient(baseURL, model string, opts ...Option) *Client {
 				return http.ErrUseLastResponse
 			},
 		},
-		maxRetries:     defaultMaxRetries,
-		retryBaseDelay: defaultRetryBaseDelay,
+		maxRetries:        defaultMaxRetries,
+		retryBaseDelay:    defaultRetryBaseDelay,
+		streamIdleTimeout: defaultStreamIdleTimeout,
 	}
 	for _, opt := range opts {
 		opt(c)
@@ -328,6 +347,10 @@ func (c *Client) selectCodec() (Wire, wireCodec) {
 // Wire reports the protocol this Client speaks — the WithWire selection after the unknown
 // fold, so it is always a Wire the Client has a codec for.
 func (c *Client) Wire() Wire { return c.wire }
+
+// StreamIdleTimeout reports the silence bound Stream enforces — the WithStreamIdleTimeout
+// selection, or the 10m default; 0 means no idle cut.
+func (c *Client) StreamIdleTimeout() time.Duration { return c.streamIdleTimeout }
 
 var (
 	_ Responder = (*Client)(nil)

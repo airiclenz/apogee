@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -1019,10 +1020,11 @@ func TestStream_ThinkingCountsTowardTheCap(t *testing.T) {
 	}
 }
 
-// TestStream_CtxCancelEndsTheBody pins the contract Stream documents: the caller's ctx is the
-// stream's only deadline. There is no idle timeout, so a server that goes silent mid-reply
-// hangs until the caller cancels — and that cancel must end the body read, surface as a
-// terminal DeltaError, and close the connection the handler is sitting on.
+// TestStream_CtxCancelEndsTheBody pins the first of the stream's two deadlines: the caller's
+// ctx. A server that goes silent mid-reply is held by the idle timeout (the 10m default here,
+// far beyond this test) until the caller cancels — and that cancel must end the body read,
+// surface as a terminal DeltaError, and close the connection the handler is sitting on. The
+// second deadline, the idle cut itself, is TestStream_IdleTimeoutCutsASilentBody's.
 func TestStream_CtxCancelEndsTheBody(t *testing.T) {
 	t.Parallel()
 
@@ -1348,5 +1350,302 @@ data: [DONE]
 	}
 	if deltas != 0 || thinking != "" {
 		t.Errorf("thinking = %q over %d deltas, want none — a non-string reasoning is no reasoning", thinking, deltas)
+	}
+}
+
+// holdServer returns a server whose handler writes body — when there is one — and flushes it,
+// then holds the connection open, silent, until the client goes away or the returned stop func
+// releases it (and closes the server). An empty body holds BEFORE the headers: nothing is written,
+// so the client sits waiting for the response line. Stop is safe to call from a defer after a
+// failed assertion — the release runs first, so Close cannot deadlock on the handler.
+func holdServer(body string) (*httptest.Server, func()) {
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if body != "" {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, body)
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+		select {
+		case <-r.Context().Done():
+		case <-release:
+		}
+	}))
+	var once sync.Once
+	return srv, func() {
+		once.Do(func() { close(release) })
+		srv.Close()
+	}
+}
+
+// dripServer returns a server that writes line every interval for the whole of span, flushing
+// each one, then ends the stream with [DONE] — activity that must hold an idle window shorter
+// than span open.
+func dripServer(line string, interval, span time.Duration) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		for end := time.Now().Add(span); time.Now().Before(end); time.Sleep(interval) {
+			_, _ = io.WriteString(w, line)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		_, _ = io.WriteString(w, "data: [DONE]\n\n")
+	}))
+}
+
+// streamAsync drives a Stream on its own goroutine and hands back the channel its deltas arrive
+// on, closed when the range ends — for a test that must act (cancel, wait) mid-stream.
+func streamAsync(ctx context.Context, client *Client) <-chan Delta {
+	streamed := make(chan Delta, 16)
+	go func() {
+		defer close(streamed)
+		for delta := range client.Stream(ctx, Request{}) {
+			streamed <- delta
+		}
+	}()
+	return streamed
+}
+
+// drainWithin collects every delta until the channel closes, failing the test when that takes
+// longer than limit.
+func drainWithin(t *testing.T, streamed <-chan Delta, limit time.Duration) []Delta {
+	t.Helper()
+	var got []Delta
+	deadline := time.After(limit)
+	for {
+		select {
+		case delta, open := <-streamed:
+			if !open {
+				return got
+			}
+			got = append(got, delta)
+		case <-deadline:
+			t.Fatalf("the stream did not end within %s; deltas so far: %+v", limit, got)
+		}
+	}
+}
+
+// idleCutBody is a content chunk followed by an open tool-call fragment — the shape whose
+// content must reach the consumer live while the unfinished call must not be flushed by the
+// cut.
+const idleCutBody = `data: {"choices":[{"delta":{"content":"Hel"}}]}
+
+data: {"choices":[{"delta":{"tool_calls":[{"id":"tc_1","function":{"name":"grep","arguments":"{\"q\":"}}]}}]}
+
+`
+
+// assertIdleCut checks the terminal delta of a stream the idle timeout cut: a Retryable
+// DeltaError whose text is exactly the read-stream rendering of the idle sentinel, with no
+// `apogee:` doubled and no Done anywhere.
+func assertIdleCut(t *testing.T, deltas []Delta, window time.Duration) {
+	t.Helper()
+	if len(deltas) == 0 {
+		t.Fatal("the cut stream yielded nothing")
+	}
+	for _, d := range deltas {
+		if d.Kind == DeltaDone {
+			t.Fatalf("an idle-cut stream ended in a Done: %+v", d)
+		}
+	}
+	fault := deltas[len(deltas)-1]
+	if fault.Kind != DeltaError {
+		t.Fatalf("last delta = %+v, want the terminal idle fault", fault)
+	}
+	if !fault.Retryable {
+		t.Errorf("idle fault %q is not Retryable; the idle cut is the class the loop re-streams", fault.Err)
+	}
+	want := fmt.Sprintf("apogee: read stream: upstream stream idle for %s", window)
+	if fault.Err != want {
+		t.Errorf("idle fault = %q, want exactly %q", fault.Err, want)
+	}
+}
+
+// TestStream_IdleTimeoutCutsASilentBody pins the idle cut at the body layer: the content
+// streamed before the upstream fell silent arrives live, the tool-call fragment still open at the
+// cut is NOT flushed, and the sequence ends with a Retryable DeltaError rendered exactly as the
+// codec's read fault over the idle sentinel.
+func TestStream_IdleTimeoutCutsASilentBody(t *testing.T) {
+	t.Parallel()
+
+	const window = 50 * time.Millisecond
+	srv, stop := holdServer(idleCutBody)
+	defer stop()
+
+	deltas := collectStream(NewClient(srv.URL, "m", WithStreamIdleTimeout(window)), Request{})
+
+	var content string
+	for _, d := range deltas {
+		switch d.Kind {
+		case DeltaContent:
+			content += d.Content
+		case DeltaToolCall:
+			t.Errorf("the open tool-call fragment was flushed by the cut: %+v", d.ToolCall)
+		}
+	}
+	if content != "Hel" {
+		t.Errorf("content before the cut = %q, want Hel", content)
+	}
+	assertIdleCut(t, deltas, window)
+}
+
+// TestStream_IdleTimeoutCutsTheAnthropicWire proves the cut sits beneath the codec: the same
+// silent body on the anthropic wire is cut and rendered identically.
+func TestStream_IdleTimeoutCutsTheAnthropicWire(t *testing.T) {
+	t.Parallel()
+
+	const window = 50 * time.Millisecond
+	const body = "event: content_block_delta\n" +
+		`data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hel"}}` + "\n\n"
+	srv, stop := holdServer(body)
+	defer stop()
+
+	client := NewClient(srv.URL, "m", WithWire(WireAnthropic), WithStreamIdleTimeout(window))
+	deltas := collectStream(client, Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if len(deltas) == 0 || deltas[0].Kind != DeltaContent || deltas[0].Content != "Hel" {
+		t.Errorf("first delta = %+v, want the content streamed before the cut", deltas)
+	}
+	assertIdleCut(t, deltas, window)
+}
+
+// TestClientStreamIdleTimeoutDefaultsAndOverrides pins the option's contract: 10m unless set,
+// and 0 when disabled.
+func TestClientStreamIdleTimeoutDefaultsAndOverrides(t *testing.T) {
+	t.Parallel()
+
+	if got := NewClient("http://unused.invalid", "m").StreamIdleTimeout(); got != 10*time.Minute {
+		t.Errorf("default StreamIdleTimeout() = %s, want 10m", got)
+	}
+	if got := NewClient("http://unused.invalid", "m", WithStreamIdleTimeout(0)).StreamIdleTimeout(); got != 0 {
+		t.Errorf("WithStreamIdleTimeout(0) reports %s, want 0", got)
+	}
+	if got := NewClient("http://unused.invalid", "m", WithStreamIdleTimeout(time.Second)).StreamIdleTimeout(); got != time.Second {
+		t.Errorf("WithStreamIdleTimeout(1s) reports %s, want 1s", got)
+	}
+}
+
+// assertDripHoldsWindow pins that bytes of the given kind reset the window: a server dripping
+// line at an interval well inside a window shorter than the span it drips over is never cut,
+// and ends in a Done. The drip is far inside the window so a scheduling hiccup on a loaded box
+// cannot fail the check; wantKind, when set, is a delta kind the drip must have yielded.
+func assertDripHoldsWindow(t *testing.T, line string, wantKind DeltaKind) {
+	t.Helper()
+	const (
+		window   = 100 * time.Millisecond
+		interval = 10 * time.Millisecond
+		span     = 300 * time.Millisecond
+	)
+	srv := dripServer(line, interval, span)
+	defer srv.Close()
+
+	deltas := collectStream(NewClient(srv.URL, "m", WithStreamIdleTimeout(window)), Request{})
+
+	var seen int
+	for _, d := range deltas {
+		if d.Kind == DeltaError {
+			t.Fatalf("the dripping stream was cut: %+v", d)
+		}
+		if wantKind != "" && d.Kind == wantKind {
+			seen++
+		}
+	}
+	if last := deltas[len(deltas)-1]; last.Kind != DeltaDone {
+		t.Errorf("last delta = %+v, want Done", last)
+	}
+	if wantKind != "" && seen == 0 {
+		t.Errorf("no %s delta arrived from the drip", wantKind)
+	}
+}
+
+// TestStream_IdleTimeoutCountsReasoningAsActivity: reasoning deltas hold the window open, and
+// arrive as thinking deltas.
+func TestStream_IdleTimeoutCountsReasoningAsActivity(t *testing.T) {
+	t.Parallel()
+
+	assertDripHoldsWindow(t, `data: {"choices":[{"delta":{"reasoning_content":"."}}]}`+"\n\n", DeltaThinking)
+}
+
+// TestStream_IdleTimeoutCountsSSECommentsAsActivity: `: keep-alive` comment lines — bytes the
+// codec never yields — hold the window open all the same.
+func TestStream_IdleTimeoutCountsSSECommentsAsActivity(t *testing.T) {
+	t.Parallel()
+
+	assertDripHoldsWindow(t, ": keep-alive\n\n", "")
+}
+
+// TestStream_IdleTimeoutCutsAPreHeaderStall pins the same window over the wait for headers: a
+// server that accepts the connection and never answers is cut, and the fault is the idle one —
+// Retryable, naming the window — never a caller cancel, which is what the child ctx that cut it
+// would otherwise read as.
+func TestStream_IdleTimeoutCutsAPreHeaderStall(t *testing.T) {
+	t.Parallel()
+
+	const window = 50 * time.Millisecond
+	srv, stop := holdServer("")
+	defer stop()
+
+	deltas := collectStream(NewClient(srv.URL, "m", WithStreamIdleTimeout(window)), Request{})
+
+	if len(deltas) != 1 {
+		t.Fatalf("deltas = %+v, want exactly the terminal fault", deltas)
+	}
+	fault := deltas[0]
+	if fault.Kind != DeltaError || !fault.Retryable {
+		t.Fatalf("delta = %+v, want a Retryable DeltaError", fault)
+	}
+	if !strings.Contains(fault.Err, "upstream stream idle for 50ms") || strings.Contains(fault.Err, "context canceled") {
+		t.Errorf("pre-header fault = %q, want the idle wording, not a caller cancel", fault.Err)
+	}
+}
+
+// TestStream_IdleTimeoutOffWaitsForCtx pins WithStreamIdleTimeout(0): with the cut disabled, a
+// silent upstream — mid-body or before its headers — ends only when the caller cancels.
+func TestStream_IdleTimeoutOffWaitsForCtx(t *testing.T) {
+	t.Parallel()
+
+	rows := []struct {
+		name string
+		body string
+	}{
+		{"silent body", `data: {"choices":[{"delta":{"content":"hi"}}]}` + "\n\n"},
+		{"before headers", ""},
+	}
+	for _, row := range rows {
+		t.Run(row.name, func(t *testing.T) {
+			t.Parallel()
+
+			srv, stop := holdServer(row.body)
+			defer stop()
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+
+			streamed := streamAsync(ctx, NewClient(srv.URL, "m", WithStreamIdleTimeout(0)))
+			var got []Delta
+			settle := time.After(200 * time.Millisecond)
+			for waiting := true; waiting; {
+				select {
+				case delta, open := <-streamed:
+					if !open || delta.Kind == DeltaError {
+						t.Fatalf("the stream ended before the ctx was cancelled: open=%v %+v", open, delta)
+					}
+					got = append(got, delta)
+				case <-settle:
+					waiting = false
+				}
+			}
+			cancel()
+			got = append(got, drainWithin(t, streamed, 2*time.Second)...)
+
+			if row.body != "" && (len(got) < 2 || got[0].Kind != DeltaContent) {
+				t.Errorf("deltas = %+v, want the content then the cancel fault", got)
+			}
+			if terminal := got[len(got)-1]; terminal.Kind != DeltaError || terminal.Retryable {
+				t.Errorf("terminal delta = %+v, want the non-retryable ctx-cancel fault", terminal)
+			}
+		})
 	}
 }
