@@ -101,7 +101,9 @@ group is one step of your agent's until the last of them returns. While such a g
 running the first `esc`'s hint says what the second would cost and names the alternative —
 `press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them` (or
 `1 finished delegation`), or, when none has finished yet and some are still waiting for a
-slot, `press esc again to stop — ⏎ a message instead skips the 5 queued`. Sending a message
+slot, `press esc again to stop — ⏎ a message instead skips the 5 queued`. Either long form
+shows only where the status line has room for the whole sentence; on a row too narrow for it
+the hint falls back to the plain `press esc again to stop`, never a truncated half. Sending a message
 instead of the second `esc` keeps everything: the running sub-agents finish, the ones not yet
 started are skipped and the model is told so, and your message lands once the running ones
 finish — the queue rule above. A stop that
