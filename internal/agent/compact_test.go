@@ -888,19 +888,21 @@ func TestCompactKeepsASummaryCutAtTheCapAndMarksIt(t *testing.T) {
 	}
 }
 
-// flakySummaryResponder faults the FIRST summary call with a transient in-band error and answers
-// every later one with the canned summary — the aggregator that swapped its routed provider out
-// partway through a fold. It counts the summary calls so a test can see the re-stream happen.
+// flakySummaryResponder faults the first faultCalls summary calls with the scripted deltas and
+// answers every later one with the canned summary — the aggregator that swapped its routed
+// provider out partway through a fold. It counts the summary calls so a test can see each
+// re-stream happen.
 type flakySummaryResponder struct {
 	summary      string
 	summaryCalls int
-	faults       []provider.Delta // the script for the first summary call
+	faultCalls   int              // how many leading summary calls fault
+	faults       []provider.Delta // the script for each faulting summary call
 }
 
 func (r *flakySummaryResponder) Stream(_ context.Context, req provider.Request) iter.Seq[provider.Delta] {
 	if len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "compacting a conversation") {
 		r.summaryCalls++
-		if r.summaryCalls == 1 {
+		if r.summaryCalls <= r.faultCalls {
 			return scriptedDeltas(r.faults).Stream(context.Background(), req)
 		}
 		return streamReply(r.summary)
@@ -908,41 +910,66 @@ func (r *flakySummaryResponder) Stream(_ context.Context, req provider.Request) 
 	return streamReply("done")
 }
 
-// TestCompactRestreamsOnceOnATransientSummaryFault pins the fix for the fold's dropped
-// Delta.Retryable: a transient in-band fault during the summary call is re-streamed once, so the
-// conversation folds on the second summary and the upstream saw two summary requests — a momentary
-// 502 no longer fails the fold (and, on the automatic trigger, no longer latches compactFailed for
-// the Exchange). Nothing streamed into the transcript, so no StreamResetEvent rides the recovery.
-// A NON-transient fault keeps failing the fold on its first appearance, and a second transient
-// fault surfaces as every fault always did — the re-stream is spent once.
-func TestCompactRestreamsOnceOnATransientSummaryFault(t *testing.T) {
+// TestCompactRestreamsUpToTheBudgetOnATransientSummaryFault pins the fix for the fold's dropped
+// Delta.Retryable: a transient in-band fault during the summary call is re-streamed, under the
+// same budget a Turn's re-stream spends, so the conversation folds on the summary that lands and
+// the upstream saw one request per attempt — a momentary 502 no longer fails the fold (and, on the
+// automatic trigger, no longer latches compactFailed for the Exchange). Nothing streamed into the
+// transcript, so no StreamResetEvent rides the recovery. The budget's edge: one more transient
+// fault than the budget allows surfaces as every fault always did, and the conversation is left
+// untouched.
+func TestCompactRestreamsUpToTheBudgetOnATransientSummaryFault(t *testing.T) {
 	shortRestreamHoldoff(t)
 
-	sink := &recordingSink{}
-	up := &flakySummaryResponder{summary: "FOLDED", faults: retryableErrorScript(transientFaultMsg)}
-	a, err := newAgent(baseConfig(sink), up)
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
+	tests := []struct {
+		name       string
+		faultCalls int
+		wantFold   bool
+		wantCalls  int
+	}{
+		{name: "one blip is re-streamed and the second summary folds", faultCalls: 1, wantFold: true, wantCalls: 2},
+		{name: "three blips are ridden out and the fourth summary folds", faultCalls: defaultRestreamBudget, wantFold: true, wantCalls: 4},
+		{name: "a fourth blip has spent the budget and fails the fold", faultCalls: defaultRestreamBudget + 1, wantFold: false, wantCalls: 4},
 	}
-	seedFoldable(a)
-	before := a.conv.Len()
 
-	skipped, err := a.Compact(context.Background())
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			up := &flakySummaryResponder{summary: "FOLDED", faultCalls: tc.faultCalls, faults: retryableErrorScript(transientFaultMsg)}
+			a, err := newAgent(baseConfig(sink), up)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			seedFoldable(a)
+			before := a.conv.Len()
 
-	if err != nil {
-		t.Fatalf("Compact: %v, want the fold to recover from one transient fault", err)
-	}
-	if skipped {
-		t.Fatal("Compact skipped a foldable conversation; want the fold so a summary was written")
-	}
-	if up.summaryCalls != 2 {
-		t.Errorf("summary calls = %d, want 2 (the faulted stream and its one re-stream)", up.summaryCalls)
-	}
-	if a.conv.Len() >= before {
-		t.Errorf("conv Len = %d, want fewer than %d: the second summary must fold", a.conv.Len(), before)
-	}
-	if n := countEvents[domain.StreamResetEvent](sink.events); n != 0 {
-		t.Errorf("StreamResetEvents = %d, want 0: nothing streamed, so nothing to discard", n)
+			skipped, err := a.Compact(context.Background())
+
+			if up.summaryCalls != tc.wantCalls {
+				t.Errorf("summary calls = %d, want %d (the faulted streams and their re-streams)", up.summaryCalls, tc.wantCalls)
+			}
+			if n := countEvents[domain.StreamResetEvent](sink.events); n != 0 {
+				t.Errorf("StreamResetEvents = %d, want 0: nothing streamed, so nothing to discard", n)
+			}
+			if !tc.wantFold {
+				if err == nil {
+					t.Fatal("Compact err = nil, want the fault past the budget surfaced")
+				}
+				if a.conv.Len() != before {
+					t.Errorf("conv mutated on a faulted compaction: Len = %d, want %d", a.conv.Len(), before)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("Compact: %v, want the fold to recover from %d transient faults", err, tc.faultCalls)
+			}
+			if skipped {
+				t.Fatal("Compact skipped a foldable conversation; want the fold so a summary was written")
+			}
+			if a.conv.Len() >= before {
+				t.Errorf("conv Len = %d, want fewer than %d: the summary that landed must fold", a.conv.Len(), before)
+			}
+		})
 	}
 }
 
@@ -952,7 +979,7 @@ func TestCompactRestreamsOnceOnATransientSummaryFault(t *testing.T) {
 func TestCompactDoesNotRestreamAPlainSummaryFault(t *testing.T) {
 	shortRestreamHoldoff(t)
 
-	up := &flakySummaryResponder{summary: "FOLDED", faults: []provider.Delta{{Kind: provider.DeltaError, Err: "boom"}}}
+	up := &flakySummaryResponder{summary: "FOLDED", faultCalls: 1, faults: []provider.Delta{{Kind: provider.DeltaError, Err: "boom"}}}
 	a, err := newAgent(baseConfig(&recordingSink{}), up)
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)

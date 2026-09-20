@@ -104,6 +104,12 @@ request into the same ceiling — struck 2026-09-19, see the two notes below.
 > differently) and keeps the plain remedy; `cappedDelegateReplyErrFmt` (a truncated delegate answer)
 > and compaction's capped-summary fault stay no-retry. The "Retrying or continuing a reply that hit
 > the cap" rejection below is struck to the same extent.
+>
+> **Amended (2026-09-20, plan `2026-09-20 - 04` item 3).** The transient re-stream's latch named
+> above, `restreamSpent`, is history: a Turn now re-streams a transient fault up to a per-Turn
+> budget (`turnRun.restreamsSpent` against `Agent.restreamBudget`, three by default) with a
+> doubling hold-off before each re-send. `capRetrySpent` stays a latch of its own beside that
+> counter; the separation of budgets this note records is unchanged.
 
 ## Considered and rejected
 

@@ -2,8 +2,10 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
@@ -103,11 +105,11 @@ func TestCancelInsideRestreamHoldOffStaysResumable(t *testing.T) {
 // with — which arrives at the loop marked Retryable exactly like the in-band 502.
 const eofFaultMsg = "apogee: read stream: unexpected EOF"
 
-// TestRespondAndReviewReStreamsAMidStreamEOFOnce pins that a mid-stream EOF rides the same one
-// re-stream per Turn as a transient in-band error: the Turn re-sends the request once, the second
-// reply commits, and the recovered Turn stays quiet — one StreamResetEvent, no ErrorEvent. It used
-// to fail the Turn on the spot, because the read fault carried no Retryable verdict.
-func TestRespondAndReviewReStreamsAMidStreamEOFOnce(t *testing.T) {
+// TestRespondAndReviewReStreamsAMidStreamEOF pins that a mid-stream EOF rides the same per-Turn
+// re-stream budget as a transient in-band error: the Turn re-sends the request, the second reply
+// commits, and the recovered Turn stays quiet — one StreamResetEvent, no ErrorEvent. It used to
+// fail the Turn on the spot, because the read fault carried no Retryable verdict.
+func TestRespondAndReviewReStreamsAMidStreamEOF(t *testing.T) {
 	shortRestreamHoldoff(t)
 
 	sink := &recordingSink{}
@@ -136,14 +138,75 @@ func TestRespondAndReviewReStreamsAMidStreamEOFOnce(t *testing.T) {
 	if responder.calls() != 2 {
 		t.Errorf("Upstream calls = %d, want 2 — one cut stream, one re-stream", responder.calls())
 	}
-	if !run.restreamSpent {
-		t.Error("restreamSpent = false, want true — the EOF spends the Turn's one re-stream")
+	if run.restreamsSpent != 1 {
+		t.Errorf("restreamsSpent = %d, want 1 — the EOF spends one of the Turn's re-streams", run.restreamsSpent)
 	}
 	if got := countEvents[domain.StreamResetEvent](sink.events); got != 1 {
 		t.Errorf("StreamResetEvents = %d, want 1 — the tokens streamed before the cut are superseded", got)
 	}
 	if errs := errorEvents(sink.events); len(errs) != 0 {
 		t.Errorf("ErrorEvents = %v, want none — a recovered re-stream is silent", errs)
+	}
+}
+
+// TestRestreamHoldoffLadder pins the hold-off ladder on the pure function, where the wall clock
+// cannot blur it: the first re-stream keeps the base wait every re-stream used to get, and each
+// later one waits twice the one before — 1×, 2×, 4× of restreamHoldoff for the three re-streams
+// the default budget allows.
+func TestRestreamHoldoffLadder(t *testing.T) {
+	tests := []struct {
+		rung int
+		want time.Duration
+	}{
+		{rung: 0, want: restreamHoldoff},
+		{rung: 1, want: 2 * restreamHoldoff},
+		{rung: 2, want: 4 * restreamHoldoff},
+	}
+
+	for _, tc := range tests {
+		t.Run(fmt.Sprintf("re-stream %d", tc.rung), func(t *testing.T) {
+			if got := restreamHoldoffFor(tc.rung); got != tc.want {
+				t.Errorf("restreamHoldoffFor(%d) = %v, want %v", tc.rung, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestReStreamBudgetZeroNeverReStreams pins the budget's floor: a Turn with no re-stream left
+// fails on the first transient fault exactly as a plain fault fails — one Upstream call, no
+// StreamResetEvent, the fault surfaced as the Turn's ErrorEvent. Until the `re-stream-budget:`
+// key reaches Config the only zero the loop can meet is a counter already at the budget, so the
+// test walks that counter to it; the same branch decides both.
+func TestReStreamBudgetZeroNeverReStreams(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	const blip = "provider swapped out"
+	sink := &recordingSink{}
+	responder := scriptedResponder(t,
+		retryableErrorTurn(blip), // transient, but there is no budget to spend on it
+		contentTurn("unreached"),
+	)
+	a, err := newAgent(baseConfig(sink), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	req, _ := a.buildRequest(0)
+	run := &turnRun{turn: 0, req: req, restreamsSpent: a.restreamBudget()}
+
+	resp, outcome, _ := a.respondAndReview(context.Background(), run)
+
+	if outcome != turnFailed || resp != nil {
+		t.Fatalf("outcome = %v, resp = %+v; want turnFailed with no response — nothing left to re-stream with", outcome, resp)
+	}
+	if responder.calls() != 1 {
+		t.Errorf("Upstream calls = %d, want 1 — a spent budget never re-streams", responder.calls())
+	}
+	if got := countEvents[domain.StreamResetEvent](sink.events); got != 0 {
+		t.Errorf("StreamResetEvents = %d, want 0 — no re-stream was announced", got)
+	}
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 || !strings.Contains(errs[0].Err, blip) {
+		t.Errorf("ErrorEvents = %v, want exactly the transient fault surfaced", errs)
 	}
 }
 

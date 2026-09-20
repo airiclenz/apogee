@@ -550,8 +550,9 @@ const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server
 // request projection (toProviderRequest) and the loop's Delta collector (collectCompletion, with
 // no observer); a cancelled ctx or a terminal stream fault surfaces as an error, so the reducer
 // leaves the conversation untouched and — having no completed call to account for — emits nothing.
-// One fault is re-streamed before it surfaces: a TRANSIENT one (Delta.Retryable), re-sent once
-// after the Turn's own hold-off, so a momentary 502 during a summary no longer fails the fold.
+// A TRANSIENT fault (Delta.Retryable) is re-streamed before it surfaces, under the Turn's own
+// re-stream budget and doubling hold-off, so a momentary 502 during a summary no longer fails the
+// fold.
 //
 // The summary call asks for NO reasoning, whatever the session's effort resolves to. Compaction is
 // maintenance, not a Turn: the summarizer does a mechanical job under a bounded output cap
@@ -599,15 +600,18 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	// `effort: off` in its profile counts as having asked even on a dialect the override skips.
 	askedForNoReasoning := preq.ThinkingEffort == provider.EffortOff
 
-	// One summary stream, re-streamed ONCE on a TRANSIENT fault (Delta.Retryable — an in-band 502
-	// an aggregator wrapped in an HTTP 200, a body cut mid-stream), after the same hold-off the Turn's
-	// re-stream waits (holdOffRestream). Silently: nothing streamed into the transcript, so there is
-	// no StreamResetEvent to emit, and a fold that recovers is a fold like any other. Before this
+	// One summary stream, re-streamed on a TRANSIENT fault (Delta.Retryable — an in-band 502 an
+	// aggregator wrapped in an HTTP 200, a body cut mid-stream or by the idle timeout) up to the
+	// same budget a Turn's re-stream spends (restreamBudget), after the same doubling hold-off it
+	// waits (holdOffRestream) — on a counter of its own, because a fold is not the Turn whose
+	// request it runs beside. Silently: nothing streamed into the transcript, so there is no
+	// StreamResetEvent to emit, and a fold that recovers is a fold like any other. Before this
 	// re-stream a momentary 502 during a summary faulted the fold and latched compactFailed for the
 	// rest of the Exchange (foldFaulted) — a stand-down meant for a history that cannot shrink, not
-	// for a blip. The second fault, of any class, surfaces as every fault always did.
+	// for a blip. The fault that finds the budget spent, of any class, surfaces as every fault
+	// always did.
 	var summary completion
-	for restreamed := false; ; {
+	for restreamed := 0; ; {
 		summary = c.a.collectCompletion(ctx, preq, nil)
 		if ctx.Err() != nil {
 			return "", ctx.Err() // a cancel masquerades as a stream error; ctx wins (as in respondAndReview)
@@ -615,9 +619,10 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 		if !summary.failed {
 			break
 		}
-		if summary.retryable && !restreamed {
-			restreamed = true
-			if holdOffRestream(ctx) {
+		if summary.retryable && restreamed < c.a.restreamBudget() {
+			rung := restreamed
+			restreamed++
+			if holdOffRestream(ctx, rung) {
 				continue
 			}
 			// The wait ended on a cancel, not the clock: route it as the cancel it is, never as the

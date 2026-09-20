@@ -860,7 +860,7 @@ func TestSubAgent_TransientChildBlipStaysInsideTheDelegation(t *testing.T) {
 	a, err := newAgent(cfg, scriptedResponder(t,
 		subAgentCallTurn("c1", "summarise the repo"),
 		retryableErrorTurn(transientFaultMsg), // the child's only Turn hits a transient blip
-		contentTurn(childAnswer),              // ... and its one re-stream lands
+		contentTurn(childAnswer),              // ... and its re-stream lands, well inside the budget
 		contentTurn("parent done"),
 	))
 	if err != nil {

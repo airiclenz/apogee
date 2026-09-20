@@ -336,9 +336,9 @@ func TestCappedReasoningReplyFaultsNamingTheRaisedCap(t *testing.T) {
 }
 
 // TestCapRetryLatchIsSeparateFromTheReStreamLatch pins that the cap retry has its own budget: a
-// Turn that spent its transient re-stream on a blip still gets its one cap retry, and the two
-// together cost exactly two StreamResetEvents and three provider calls — neither latch pays for the
-// other's remedy.
+// Turn that spent a re-stream of its budget on a blip still gets its one cap retry, and the two
+// together cost exactly two StreamResetEvents and three provider calls — neither the re-stream
+// counter nor the cap latch pays for the other's remedy.
 func TestCapRetryLatchIsSeparateFromTheReStreamLatch(t *testing.T) {
 	shortRestreamHoldoff(t)
 
@@ -346,7 +346,7 @@ func TestCapRetryLatchIsSeparateFromTheReStreamLatch(t *testing.T) {
 	cfg := baseConfig(sink)
 	cfg.Context.MaxContextTokens = 98304
 	responder := scriptedResponder(t,
-		retryableErrorTurn(transientFaultMsg), // the blip spends the re-stream latch
+		retryableErrorTurn(transientFaultMsg), // the blip spends one re-stream of the budget
 		cutOffScript(),                        // the capped reasoning reply spends the cap retry
 		contentTurn("answered on the third pass"),
 	)

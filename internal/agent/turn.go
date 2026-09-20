@@ -126,15 +126,18 @@ type turnRun struct {
 	// recovery existed: the same sanitized ErrorEvent, the same abandoned Exchange.
 	foldSpent bool
 
-	// restreamSpent is the one-re-stream-per-Turn latch: it flips once this Turn has re-sent its
+	// restreamsSpent counts the re-streams this Turn has spent: how many times it has re-sent its
 	// request after a TRANSIENT Upstream fault — one whose class the provider would have retried
 	// at the HTTP layer (429, 5xx, an aggregator's provider_unavailable) but which arrived in-band
-	// on a 200 mid-stream, past every retry the client could make. One re-send costs a momentary
-	// blip a stutter instead of the whole exchange; a second fault of any class is not a blip, so
-	// it surfaces exactly as it did before the re-stream existed. The latch is deliberately its own
-	// budget: maxPostResponseRetries bounds a Reaction-driven Outcome{Retry} and foldSpent bounds the
-	// overflow fold — different remedies for different failures, none of them spending another's.
-	restreamSpent bool
+	// on a 200 mid-stream, past every retry the client could make, or a stream the idle timeout
+	// cut. Each re-send costs a momentary blip a stutter instead of the whole exchange, and the
+	// respond phase re-sends while the count is under the Turn's budget (Agent.restreamBudget),
+	// holding off longer before each one (restreamHoldoffFor); the fault that finds the budget
+	// spent, of any class, surfaces exactly as it did before the re-stream existed. The counter
+	// is deliberately its own budget: maxPostResponseRetries bounds a Reaction-driven
+	// Outcome{Retry} and foldSpent bounds the overflow fold — different remedies for different
+	// failures, none of them spending another's.
+	restreamsSpent int
 
 	// capRetrySpent is the one-cap-retry-per-Turn latch: it flips once this Turn has re-sent its
 	// request at a raised output cap after a reply the engine's own ceiling cut off with reasoning
@@ -142,7 +145,7 @@ type turnRun struct {
 	// (ADR 0046 decision 4 as amended 2026-09-19). One re-send at twice the cap is cheap next to
 	// the Turn faulting for a reply an identical retry has been seen to answer (30a3b2df); a second
 	// cut-off is not a spend that varies, so it faults naming the raised cap it hit too. Its own
-	// budget for the same reason restreamSpent is: a blip, a cap and a Reaction's Outcome{Retry}
+	// budget for the same reason restreamsSpent is: a blip, a cap and a Reaction's Outcome{Retry}
 	// are different remedies, and none may spend another's.
 	capRetrySpent bool
 }

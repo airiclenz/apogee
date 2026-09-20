@@ -43,9 +43,10 @@ var errHookPanicked = errors.New("apogee: extension boundary recovered a panic")
 // history (emergencyFold) and re-sends the same Turn once before falling back to that same clean
 // boundary — and the same fold also runs PREDICTIVELY, before the request is sent, when the
 // estimate already says it cannot fit, the two sharing one fold per Turn. And a TRANSIENT in-band
-// fault (a 429/5xx/provider_unavailable an aggregator wrapped in an HTTP 200 mid-stream): the
-// respond phase re-streams the same request once, on its own per-Turn latch, before the fault
-// surfaces exactly as it always did.
+// fault (a 429/5xx/provider_unavailable an aggregator wrapped in an HTTP 200 mid-stream, a stream
+// the idle timeout cut): the respond phase re-streams the same request up to its own per-Turn
+// budget, holding off longer before each re-send, before the fault surfaces exactly as it always
+// did.
 func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	turn := a.turns.index
 	t := &turnRun{turn: turn, start: time.Now()}
@@ -353,19 +354,40 @@ const (
 	turnOverflowed                    // the request did not fit the model's context window — NOT surfaced; the caller owns the ErrorEvent
 )
 
-// restreamHoldoff is how long the respond phase waits before re-streaming a transient in-band
-// fault: long enough for the momentary condition behind it — an aggregator swapping out the
-// provider it routed to, a server shedding load — to pass, short enough that a human watching the
-// stream reads it as a stutter rather than a stall. One fixed wait, not a backoff: there is only
-// ever one re-stream to space out. It is a var solely so the loop's tests need not sit through it;
-// nothing outside a test writes it.
+// defaultRestreamBudget is how many times one Turn re-sends its request after a transient
+// Upstream fault before the fault surfaces: three, so a dead upstream costs a Turn a bounded
+// number of idle windows rather than one blip's worth of patience, and a routed provider being
+// swapped out upstream has more than one hold-off to finish in.
+const defaultRestreamBudget = 3
+
+// restreamBudget reports how many re-streams one Turn may spend on transient faults — the same
+// budget at every depth, and the one the compaction summary's re-stream shares. It reads
+// defaultRestreamBudget until the `re-stream-budget:` key reaches Config.
+func (a *Agent) restreamBudget() int {
+	return defaultRestreamBudget
+}
+
+// restreamHoldoff is the base of the ladder the respond phase waits out before re-streaming a
+// transient in-band fault: long enough for the momentary condition behind it — an aggregator
+// swapping out the provider it routed to, a server shedding load — to pass, short enough that a
+// human watching the stream reads the first re-stream as a stutter rather than a stall. Each
+// further re-stream in the same Turn doubles it (restreamHoldoffFor), so a condition that outlasts
+// one wait gets a longer one before the next attempt instead of three stutters in a row. It is a
+// var solely so the loop's tests need not sit through it; nothing outside a test writes it.
 var restreamHoldoff = time.Second
 
-// holdOffRestream waits restreamHoldoff and reports whether the wait completed — false means ctx
-// was cancelled first, and the caller must route the cancel rather than re-stream into a context
-// that is already gone.
-func holdOffRestream(ctx context.Context) bool {
-	timer := time.NewTimer(restreamHoldoff)
+// restreamHoldoffFor returns the wait before the Turn's re-stream number n, counted from zero:
+// restreamHoldoff doubled n times, so the first re-stream keeps the base wait and each later one
+// waits twice as long as the one before.
+func restreamHoldoffFor(n int) time.Duration {
+	return restreamHoldoff << n
+}
+
+// holdOffRestream waits restreamHoldoffFor(n) and reports whether the wait completed — false
+// means ctx was cancelled first, and the caller must route the cancel rather than re-stream into
+// a context that is already gone.
+func holdOffRestream(ctx context.Context, n int) bool {
+	timer := time.NewTimer(restreamHoldoffFor(n))
 	defer timer.Stop()
 	select {
 	case <-ctx.Done():
@@ -399,12 +421,14 @@ func holdOffRestream(ctx context.Context) bool {
 // One class of fault is re-streamed rather than surfaced: a TRANSIENT fault (the provider's
 // Retryable verdict — a 429/5xx/provider_unavailable an aggregator wrapped in an HTTP 200
 // partway through the stream, or a body cut mid-stream by an EOF or a network timeout — both
-// past where the client's own HTTP retries can reach). The Turn re-sends the SAME request once
-// (t.restreamSpent) at every depth — a child gets the one re-stream depth 0 gets — and only the loop
-// does it: the provider stays a wire, and StreamResetEvent — the same signal an Outcome{Retry}
-// emits, which a streaming Driver already reads as "discard the partial reply, it is coming
-// again" — is the loop's to emit. A recovered re-stream is SILENT, exactly as a recovered
-// overflow fold is; the second fault, of any class, surfaces as every fault always did.
+// past where the client's own HTTP retries can reach, or a stream the idle timeout cut). The Turn
+// re-sends the SAME request up to its re-stream budget (t.restreamsSpent against restreamBudget),
+// waiting out a doubling hold-off before each re-send, at every depth — a child gets the budget
+// depth 0 gets — and only the loop does it: the provider stays a wire, and StreamResetEvent — the
+// same signal an Outcome{Retry} emits, which a streaming Driver already reads as "discard the
+// partial reply, it is coming again" — is the loop's to emit, once per re-stream. A recovered
+// re-stream is SILENT, exactly as a recovered overflow fold is; the fault that finds the budget
+// spent, of any class, surfaces as every fault always did.
 //
 // One class of REPLY is re-sent too, at a raised ceiling: a reply the engine's own output cap cut
 // off (FinishLength) that carries reasoning but neither a tool call nor one visible token — a
@@ -419,7 +443,7 @@ func holdOffRestream(ctx context.Context) bool {
 // path — a second cut-off faults through reviewedOutcome, naming the raised cap it hit.
 func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Response, turnOutcome, string) {
 	// The Turn's identity and its request, aliased for readability — everything below reads them
-	// unchanged, and the only writes back to t are the two latches (re-stream and cap retry).
+	// unchanged, and the only writes back to t are the re-stream counter and the cap-retry latch.
 	turn, req := t.turn, t.req
 	for attempt := 0; ; {
 		reply := a.streamResponse(ctx, turn, req)
@@ -430,15 +454,18 @@ func (a *Agent) respondAndReview(ctx context.Context, t *turnRun) (*domain.Respo
 			if reply.overflow {
 				return nil, turnOverflowed, reply.errMsg
 			}
-			if reply.retryable && !t.restreamSpent {
-				// The Turn's one re-stream. Spend the latch first, so the second fault takes the
-				// give-up path below however this attempt ends, then tell observers the tokens
-				// streamed before the fault are superseded and hold off long enough for a routed
-				// provider to be swapped out upstream. A cancel arriving during that wait is a
-				// cancel like any other — routed just below, never fallen through to the fault.
-				t.restreamSpent = true
+			if reply.retryable && t.restreamsSpent < a.restreamBudget() {
+				// One of the Turn's budgeted re-streams. Spend the counter first, so a fault past
+				// the budget takes the give-up path below however this attempt ends, then tell
+				// observers the tokens streamed before the fault are superseded and hold off long
+				// enough for a routed provider to be swapped out upstream — the rung is the count
+				// BEFORE the spend, so the first re-stream waits the base hold-off and each later
+				// one twice the previous. A cancel arriving during that wait is a cancel like any
+				// other — routed just below, never fallen through to the fault.
+				rung := t.restreamsSpent
+				t.restreamsSpent++
 				a.cfg.Events.Emit(domain.StreamResetEvent{EventBase: a.base(turn)})
-				if holdOffRestream(ctx) {
+				if holdOffRestream(ctx, rung) {
 					continue
 				}
 				if ctx.Err() != nil {

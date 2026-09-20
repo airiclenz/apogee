@@ -8,7 +8,7 @@ package agent
 // wired in.
 //
 // The transient seam (at the foot of this file) is the second fault the respond phase can act on:
-// an in-band error whose CLASS the provider marked retryable, which the Turn re-streams once.
+// an in-band error whose CLASS the provider marked retryable, which the Turn re-streams up to its per-Turn budget.
 
 import (
 	"context"
@@ -222,7 +222,7 @@ func TestOverflowGiveUpNamesTheWindowRemedy(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// The transient seam: one re-stream per Turn
+// The transient seam: a re-stream budget per Turn
 // ---------------------------------------------------------------------------
 
 // transientFaultMsg is the sanitized text the provider builds for the in-band 502 an aggregator
@@ -285,13 +285,15 @@ func lastFaultMsg(scripts []stubllm.Turn) string {
 	return msg
 }
 
-// TestRespondAndReviewReStreamsATransientFaultOnce pins the recovery and both its edges. A fault
-// the provider classed transient re-sends the SAME request once, and a second attempt that lands
-// completes the Turn SILENTLY — one StreamResetEvent, so a streaming Driver discards the partial
-// reply, and no ErrorEvent, because nothing reached the user that they must act on (the
-// overflow-recovery precedent). The two edges keep today's behaviour byte-for-byte: a second
-// transient fault gives up, and a fault that was never transient never re-streams at all.
-func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
+// TestRespondAndReviewReStreamsATransientFaultUpToTheBudget pins the recovery and its edges. A
+// fault the provider classed transient re-sends the SAME request, up to the Turn's re-stream
+// budget (three), and an attempt that lands completes the Turn SILENTLY — one StreamResetEvent
+// per re-stream, so a streaming Driver discards the partial reply, and no ErrorEvent, because
+// nothing reached the user that they must act on (the overflow-recovery precedent). The edges: a
+// fourth transient fault has spent the budget and gives up naming that last fault, and a fault
+// that was never transient never re-streams at all. Under shortRestreamHoldoff the wall clock says
+// nothing about the ladder — TestRestreamHoldoffLadder pins the rungs on the pure function.
+func TestRespondAndReviewReStreamsATransientFaultUpToTheBudget(t *testing.T) {
 	shortRestreamHoldoff(t)
 
 	tests := []struct {
@@ -313,11 +315,30 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 			wantErrors:  0,
 		},
 		{
-			name:        "a second transient fault gives up exactly as today",
-			scripts:     []stubllm.Turn{retryableErrorTurn("first blip"), retryableErrorTurn("second blip")},
+			name: "three transient faults are ridden out and the fourth attempt lands",
+			scripts: []stubllm.Turn{
+				retryableErrorTurn("first blip"),
+				retryableErrorTurn("second blip"),
+				retryableErrorTurn("third blip"),
+				contentTurn("recovered"),
+			},
+			wantOutcome: turnOK,
+			wantText:    "recovered",
+			wantCalls:   4,
+			wantResets:  3,
+			wantErrors:  0,
+		},
+		{
+			name: "a fourth transient fault has spent the budget and gives up",
+			scripts: []stubllm.Turn{
+				retryableErrorTurn("first blip"),
+				retryableErrorTurn("second blip"),
+				retryableErrorTurn("third blip"),
+				retryableErrorTurn("fourth blip"),
+			},
 			wantOutcome: turnFailed,
-			wantCalls:   2,
-			wantResets:  1,
+			wantCalls:   4,
+			wantResets:  3,
 			wantErrors:  1,
 		},
 		{
@@ -357,7 +378,7 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 				t.Errorf("resp = %+v, want the re-streamed reply %q", resp, tc.wantText)
 			}
 			if responder.calls() != tc.wantCalls {
-				t.Errorf("Upstream calls = %d, want %d — the Turn re-streams at most once", responder.calls(), tc.wantCalls)
+				t.Errorf("Upstream calls = %d, want %d — the Turn re-streams at most %d times", responder.calls(), tc.wantCalls, defaultRestreamBudget)
 			}
 			if got := countEvents[domain.StreamResetEvent](sink.events); got != tc.wantResets {
 				t.Errorf("StreamResetEvents = %d, want %d", got, tc.wantResets)
@@ -370,17 +391,18 @@ func TestRespondAndReviewReStreamsATransientFaultOnce(t *testing.T) {
 				t.Errorf("ErrorEvent = {Source:%q Err:%q}, want {Source:%q Err:…%q…} — the last attempt's fault",
 					errs[0].Source, errs[0].Err, "loop", lastFaultMsg(tc.scripts))
 			}
-			if wantSpent := tc.wantResets == 1; run.restreamSpent != wantSpent {
-				t.Errorf("restreamSpent = %v, want %v", run.restreamSpent, wantSpent)
+			if run.restreamsSpent != tc.wantResets {
+				t.Errorf("restreamsSpent = %d, want %d — one spend per StreamResetEvent", run.restreamsSpent, tc.wantResets)
 			}
 		})
 	}
 }
 
-// TestReStreamLatchIsPerTurn proves the latch is scoped to the Turn rather than the session: a
-// later Turn that hits its own blip re-streams again instead of inheriting a spent latch. Session-
-// scoping it would leave every Turn after the first recovered stutter with no recovery at all.
-func TestReStreamLatchIsPerTurn(t *testing.T) {
+// TestReStreamBudgetIsPerTurn proves the budget is scoped to the Turn rather than the session: a
+// later Turn that hits its own blip re-streams again instead of inheriting a spent counter.
+// Session-scoping it would leave every Turn after the first few recovered stutters with no
+// recovery at all.
+func TestReStreamBudgetIsPerTurn(t *testing.T) {
 	shortRestreamHoldoff(t)
 
 	sink := &recordingSink{}
@@ -407,7 +429,7 @@ func TestReStreamLatchIsPerTurn(t *testing.T) {
 	}
 
 	if got := countEvents[domain.StreamResetEvent](sink.events); got != 2 {
-		t.Errorf("StreamResetEvents = %d, want 2 — each Turn spends its own latch", got)
+		t.Errorf("StreamResetEvents = %d, want 2 — each Turn spends its own budget", got)
 	}
 	if errs := errorEvents(sink.events); len(errs) != 0 {
 		t.Errorf("ErrorEvents = %v, want none — both Turns recovered", errs)
