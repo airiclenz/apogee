@@ -122,6 +122,19 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The file watcher measures its settle on the clock, not on the tick.** `filewatch.Watcher` computed
+  `reportAt` from the ticker's timestamp, and a tick received late carries the time it was due rather
+  than the time it was taken, so a poll goroutine held off the CPU for most of a Settle counted the
+  stall as quiet time and reported a change the moment it first looked — on a real save, the
+  half-written document the delay exists to skip. That is what made `TestWatchCoalescesABurstIntoOneReport`
+  and `TestTwoWatchersReportOnlyTheirOwnFile` red on the loaded `-race` CI runner (`a change was reported
+  when the burst had already been reported once`, 2026-09-18 and 2026-09-20): with the stale tick the
+  effective settle shrank to a tick or two, and the test's second write landed after it. The poll now
+  reads `time.Now()` at the observation. `TestWatchSettlesOnTheClockNotTheTick` (unix) stages the
+  stall for real — the test process is `SIGSTOP`ped while a child rewrites the file and continued once
+  the pending tick is older than the Settle — and pins that a second write inside the Settle still
+  coalesces.
+
 - **The three exact-merge sink tests no longer race their own coalescing window.** `TestTeaSinkEmitsEventsInOrder`,
   `TestTeaSinkCoalescesOnlyWithinOneStream` and the flush-before table built their sink with a 1 ms
   window, so a loaded CI runner could let the timer fire between two adjacent `Emit` calls and split

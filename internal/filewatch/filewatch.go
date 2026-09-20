@@ -145,17 +145,21 @@ func (w *Watcher) poll(last fileState) {
 	defer ticker.Stop()
 
 	// reportAt is when the pending change becomes reportable, and the zero time means nothing is
-	// pending. Every further change pushes it out, which is the coalescing.
+	// pending. Every further change pushes it out, which is the coalescing. It is measured on the
+	// clock at the observation, never on the tick's own timestamp: a tick received late carries the
+	// time it was due, so a goroutine held off the CPU for most of a Settle would otherwise count
+	// the stall as quiet time and report the change the moment it first looked at it.
 	var reportAt time.Time
 	for {
 		select {
 		case <-w.stop:
 			return
-		case now := <-ticker.C:
+		case <-ticker.C:
 			current, ok := w.sample()
 			if !ok {
 				continue
 			}
+			now := time.Now()
 			if !current.equal(last) {
 				last = current
 				reportAt = now.Add(w.Settle)
