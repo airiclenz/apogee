@@ -144,18 +144,21 @@ func projectConfig(
 			PruneToolResults:  opts.PruneToolResults,
 		},
 		// How far a delegation may run before the engine ends it: the `delegate-max-steps` key
-		// (default 80; 0 ⇒ unbounded, what a delegation cost before the cap existed), how deep
-		// delegation may nest: `delegate-max-depth` (default 1 — the session delegates, its
-		// delegates do not), and what one delegation may spend in prompt tokens and wall clock:
-		// `delegate-max-tokens` (default 20M) and `delegate-timeout` (default 2h), 0 disabling
-		// either. Read off the one Options both Drivers are raised with, so a delegate is bounded
-		// the same whether a human is watching or not — and a Firing runs while nobody watches,
-		// which is exactly the case a runaway delegation must not be able to become.
+		// (default 80; 0 ⇒ unbounded, what a delegation cost before the cap existed), how many
+		// delegations one reply may fan out: `delegate-fanout-rounds` (default 2 rounds of the
+		// width; 0 ⇒ no ceiling), how deep delegation may nest: `delegate-max-depth` (default 1 —
+		// the session delegates, its delegates do not), and what one delegation may spend in
+		// prompt tokens and wall clock: `delegate-max-tokens` (default 20M) and `delegate-timeout`
+		// (default 2h), 0 disabling either. Read off the one Options both Drivers are raised with,
+		// so a delegate is bounded the same whether a human is watching or not — and a Firing runs
+		// while nobody watches, which is exactly the case a runaway delegation must not be able to
+		// become.
 		Delegation: apogee.DelegationConfig{
-			MaxSteps:  opts.DelegateMaxSteps,
-			MaxDepth:  opts.DelegateMaxDepth,
-			MaxTokens: opts.DelegateMaxTokens,
-			Timeout:   opts.DelegateTimeout,
+			MaxSteps:     opts.DelegateMaxSteps,
+			FanOutRounds: opts.DelegateFanOutRounds,
+			MaxDepth:     opts.DelegateMaxDepth,
+			MaxTokens:    opts.DelegateMaxTokens,
+			Timeout:      opts.DelegateTimeout,
 		},
 		// Which Floor guards this run goes WITHOUT (ADR 0071). The seven keys are positive in the
 		// file and negative at the engine, and floorFromOptions is the one place that turns one

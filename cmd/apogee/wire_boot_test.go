@@ -738,6 +738,37 @@ func TestBootConfigCarriesTheDelegateStepCap(t *testing.T) {
 	}
 }
 
+// The `delegate-fanout-rounds:` key reaches the engine the way the step cap does: the boot phase
+// folds opts.DelegateFanOutRounds into Config.Delegation.FanOutRounds verbatim, an explicit 0 (no
+// ceiling) included, so the ceiling a reply's fan-out is held to is the file's number and nothing
+// re-derives it.
+func TestBootConfigCarriesTheDelegateFanOutRounds(t *testing.T) {
+	t.Parallel()
+	for _, want := range []int{3, 0} {
+		t.Run(strconv.Itoa(want), func(t *testing.T) {
+			t.Parallel()
+			opts := config.Options{
+				Mode:                 "ask-before",
+				Workspace:            t.TempDir(),
+				ConfigDir:            t.TempDir(),
+				DelegateFanOutRounds: want,
+			}
+			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+			t.Cleanup(w.close)
+			if err := w.resolveConfig(); err != nil {
+				t.Fatalf("resolveConfig: %v", err)
+			}
+			if w.cfg.Delegation.FanOutRounds != want {
+				t.Errorf("Config.Delegation.FanOutRounds = %d; want the threaded %d", w.cfg.Delegation.FanOutRounds, want)
+			}
+		})
+	}
+}
+
 // The `prune-tool-results:` key reaches the engine seam it gates: the boot phase folds
 // opts.PruneToolResults into ContextConfig.PruneToolResults verbatim, so a file that opts out
 // (`prune-tool-results: false`) leaves an Agent that never prunes. It is threaded rather than

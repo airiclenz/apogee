@@ -1267,6 +1267,12 @@ var settingsTable = []settingsEntry{
 		apply:   applyDelegateMaxSteps,
 	},
 	{
+		key: "delegate-fanout-rounds",
+		// As delegate-max-steps above: no member, no seam, no re-resolution.
+		reaches: reachesWithoutAMember,
+		apply:   applyDelegateFanOutRounds,
+	},
+	{
 		key: "delegate-max-depth",
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
@@ -1675,6 +1681,22 @@ func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error)
 	}
 	if a.live != nil {
 		a.live.update(func(o *config.Options) { o.DelegateMaxSteps = landed.DelegateMaxSteps })
+	}
+	return "", nil
+}
+
+// applyDelegateFanOutRounds is `delegate-fanout-rounds:`, on applyDelegateMaxSteps's footing
+// exactly: the ceiling is a field of the Config an Agent was CONSTRUCTED with, so the write is the
+// whole of the apply for this session, and the mirror onto the holder is what bounds the fan-out of
+// the Firings it raises. Success, no note, the Description's "takes effect at the next start"
+// carrying the promise; the value is parsed because a value that is to be recorded has to be read.
+func applyDelegateFanOutRounds(a settingsApplier, key, value string) (string, error) {
+	landed, err := landSetting(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.update(func(o *config.Options) { o.DelegateFanOutRounds = landed.DelegateFanOutRounds })
 	}
 	return "", nil
 }

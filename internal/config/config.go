@@ -808,6 +808,17 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no ceiling").
+		row: mustKey("delegate-fanout-rounds"),
+		fromFile: func(o *Options, fc fileConfig) error {
+			o.DelegateFanOutRounds = defaultDelegateFanOutRounds
+			if fc.DelegateFanOutRounds != nil && *fc.DelegateFanOutRounds >= 0 {
+				o.DelegateFanOutRounds = *fc.DelegateFanOutRounds
+			}
+			return nil
+		},
+	},
+	{
 		// A plain int on disk: 0 is not a value here (the bound is at least 1), so an absent key
 		// and a 0 resolve alike, to the default — the settings surface refuses the 0 outright.
 		row: mustKey("delegate-max-depth"),
@@ -1515,6 +1526,13 @@ type fileConfig struct {
 	// It feeds domain.Config.Delegation.MaxSteps; the `sub_agent` tool can lower it for one
 	// delegation but never raise it.
 	DelegateMaxSteps *int `yaml:"delegate-max-steps"`
+	// DelegateFanOutRounds bounds how many delegations ONE reply may fan out, in rounds of the
+	// server's parallel-agents width: the calls past rounds × width are refused and must be
+	// delegated again. File-only (no flag/env), and a pointer for DelegateMaxSteps's reason: an
+	// explicit `delegate-fanout-rounds: 0` is the documented spelling of "no ceiling", which a
+	// plain int could not tell from an absent key (the built-in 2). It feeds
+	// domain.Config.Delegation.FanOutRounds.
+	DelegateFanOutRounds *int `yaml:"delegate-fanout-rounds"`
 	// DelegateMaxDepth bounds how deep delegation may NEST: the session (depth 0) delegates, and a
 	// delegate at this depth is never offered `sub_agent`. File-only (no flag/env), and a plain
 	// int rather than a pointer because 0 is not a value here — the bound is at least 1, so an

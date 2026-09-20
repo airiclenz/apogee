@@ -145,6 +145,16 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.DelegateMaxSteps = 0 },
 		},
 		{
+			name: "delegate-fanout-rounds is file-only and defaults 2",
+			file: fileConfig{DelegateFanOutRounds: intptr(3)},
+			want: func(o *Options) { o.DelegateFanOutRounds = 3 },
+		},
+		{
+			name: "an explicit delegate-fanout-rounds: 0 stays 0 — the documented spelling of no ceiling",
+			file: fileConfig{DelegateFanOutRounds: intptr(0)},
+			want: func(o *Options) { o.DelegateFanOutRounds = 0 },
+		},
+		{
 			name: "delegate-max-depth is file-only and defaults 1",
 			file: fileConfig{DelegateMaxDepth: 2},
 			want: func(o *Options) { o.DelegateMaxDepth = 2 },
@@ -349,15 +359,16 @@ func wantDefaults() Options {
 		ToolUseEnforcer:  true, EmptyResponseRecovery: true, ToolCallRepair: true,
 		ToolCallSalvage: true,
 		ToolLoopBreaker: true, ToolResultCap: true, ReadCache: true,
-		UndoSnapshots:     true,
-		SubAgentsChoice:   SubAgentsChoiceFixed,
-		UseShippedSkills:  true,
-		UseDefaultPrompt:  true,
-		DelegateMaxSteps:  defaultDelegateMaxSteps,
-		DelegateMaxDepth:  defaultDelegateMaxDepth,
-		DelegateMaxTokens: defaultDelegateMaxTokens,
-		DelegateTimeout:   defaultDelegateTimeout,
-		AutoTitle:         true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
+		UndoSnapshots:        true,
+		SubAgentsChoice:      SubAgentsChoiceFixed,
+		UseShippedSkills:     true,
+		UseDefaultPrompt:     true,
+		DelegateMaxSteps:     defaultDelegateMaxSteps,
+		DelegateFanOutRounds: defaultDelegateFanOutRounds,
+		DelegateMaxDepth:     defaultDelegateMaxDepth,
+		DelegateMaxTokens:    defaultDelegateMaxTokens,
+		DelegateTimeout:      defaultDelegateTimeout,
+		AutoTitle:            true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
 }
@@ -587,15 +598,16 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"ToolUseEnforcer": true, "EmptyResponseRecovery": true, "ToolCallRepair": true,
 		"ToolCallSalvage": true,
 		"ToolLoopBreaker": true, "ToolResultCap": true, "ReadCache": true,
-		"ContextFillNotice": true,
-		"UndoSnapshots":     true,
-		"DelegateMaxSteps":  true,
-		"DelegateMaxDepth":  true,
-		"DelegateMaxTokens": true,
-		"DelegateTimeout":   true,
-		"UseShippedSkills":  true,
-		"UseDefaultPrompt":  true,
-		"AutoTitle":         true, "RememberModel": true,
+		"ContextFillNotice":    true,
+		"UndoSnapshots":        true,
+		"DelegateMaxSteps":     true,
+		"DelegateFanOutRounds": true,
+		"DelegateMaxDepth":     true,
+		"DelegateMaxTokens":    true,
+		"DelegateTimeout":      true,
+		"UseShippedSkills":     true,
+		"UseDefaultPrompt":     true,
+		"AutoTitle":            true, "RememberModel": true,
 		"ContextWindow": true, "WorkingWindow": true, "ResponseReserve": true, "MCPServers": true, "Reactions": true,
 		"ToolsDisabled": true,
 		"URLAllowHosts": true, "URLDenyHosts": true, "ModelProfiles": true,
@@ -645,16 +657,17 @@ func everyKeyFileConfig() fileConfig {
 		ToolCallRepair: boolptr(false), ToolCallSalvage: boolptr(false),
 		ToolLoopBreaker: boolptr(false),
 		ToolResultCap:   boolptr(false), ReadCache: boolptr(false),
-		ContextFillNotice: boolptr(true),
-		UndoSnapshots:     boolptr(false),
-		UseShippedSkills:  boolptr(false),
-		UseDefaultPrompt:  boolptr(false),
-		DelegateMaxSteps:  intptr(12),
-		DelegateMaxDepth:  2,
-		DelegateMaxTokens: intptr(5_000_000),
-		DelegateTimeout:   strptr("30m"),
-		RememberModel:     boolptr(false),
-		ContextWindow:     64000, WorkingWindow: 32000, ResponseReserve: 0.3,
+		ContextFillNotice:    boolptr(true),
+		UndoSnapshots:        boolptr(false),
+		UseShippedSkills:     boolptr(false),
+		UseDefaultPrompt:     boolptr(false),
+		DelegateMaxSteps:     intptr(12),
+		DelegateFanOutRounds: intptr(3),
+		DelegateMaxDepth:     2,
+		DelegateMaxTokens:    intptr(5_000_000),
+		DelegateTimeout:      strptr("30m"),
+		RememberModel:        boolptr(false),
+		ContextWindow:        64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
 		Reactions: []reactionConfig{{ID: "bell", On: []string{"error"},
 			Run: []any{"true"}}},
@@ -2059,6 +2072,39 @@ func TestApplyConfigDelegateMaxSteps(t *testing.T) {
 			}
 			if opts.DelegateMaxSteps != tt.want {
 				t.Errorf("opts.delegateMaxSteps = %d; want %d", opts.DelegateMaxSteps, tt.want)
+			}
+		})
+	}
+}
+
+// The delegate-fanout-rounds key parses into opts.delegateFanOutRounds on delegate-max-steps's
+// footing: a file-only key (no flag/env), a pointer on disk, and the same three states — a stated
+// round count, an absent key resolving to the built-in default, and an explicit 0 that stays 0
+// because "no ceiling" is a value here rather than the absence of one. The downstream opts →
+// Config.Delegation.FanOutRounds threading is the composition root's, pinned by
+// TestBootConfigCarriesTheDelegateFanOutRounds in wire_boot_test.go.
+func TestApplyConfigDelegateFanOutRounds(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		file string
+		want int
+	}{
+		{"a stated round count", "delegate-fanout-rounds: 3\n", 3},
+		{"an absent key takes the built-in default", "", defaultDelegateFanOutRounds},
+		{"an explicit 0 is no ceiling, not absent", "delegate-fanout-rounds: 0\n", 0},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.DelegateFanOutRounds != tt.want {
+				t.Errorf("opts.delegateFanOutRounds = %d; want %d", opts.DelegateFanOutRounds, tt.want)
 			}
 		})
 	}

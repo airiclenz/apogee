@@ -556,6 +556,8 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"working-window", "lots", "0 or more"},
 		{"delegate-max-steps", "-1", "0 or more"},
 		{"delegate-max-steps", "eighty", "0 or more"},
+		{"delegate-fanout-rounds", "-1", "0 or more"},
+		{"delegate-fanout-rounds", "two", "0 or more"},
 		{"delegate-max-depth", "0", "at least 1"},
 		{"delegate-max-depth", "deep", "at least 1"},
 		{"delegate-max-tokens", "-1", "0 or more"},
@@ -617,6 +619,9 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		// default, which the settings surface has to be able to write back.
 		{"delegate-max-steps", "0"},
 		{"delegate-max-steps", "80"},
+		// 0 is the documented spelling of "no ceiling", and 2 is the shipped default.
+		{"delegate-fanout-rounds", "0"},
+		{"delegate-fanout-rounds", "2"},
 		// 1 is the shipped default, and 2 is the one deeper bound a human is likely to write.
 		{"delegate-max-depth", "1"},
 		{"delegate-max-depth", "2"},
@@ -863,7 +868,7 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"tool-call-repair": "ToolCallRepair", "tool-call-salvage": "ToolCallSalvage",
 		"tool-loop-breaker": "ToolLoopBreaker", "tool-result-cap": "ToolResultCap",
 		"read-cache": "ReadCache", "context-fill-notice": "ContextFillNotice",
-		"delegate-max-steps": "DelegateMaxSteps",
+		"delegate-max-steps": "DelegateMaxSteps", "delegate-fanout-rounds": "DelegateFanOutRounds",
 		"delegate-max-depth": "DelegateMaxDepth", "delegate-max-tokens": "DelegateMaxTokens",
 		"delegate-timeout": "DelegateTimeout", "undo-snapshots": "UndoSnapshots",
 		"auto-title": "AutoTitle", "remember-model": "RememberModel",

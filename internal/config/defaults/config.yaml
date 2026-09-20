@@ -634,6 +634,20 @@ context-fill-notice: false
 # delegate-max-steps: 80
 
 # =============================================================================
+# How many delegations one reply may fan out. A reply that spawns sub-agents spawns them as a
+# group: they run side by side, as many at once as the server has parallel-agents width for, and
+# the group returns to your agent together — so a reply that asks for fifty delegations on a
+# width-4 server keeps your agent blind for as long as fifty delegations take, and an Esc drops the
+# lot. This is the ceiling on that group, counted in ROUNDS of the width: at 2, the default, a reply
+# on a width-4 server may fan out 8, and every sub_agent call past the eighth is refused with a
+# result that says so, for your agent to delegate again once the first eight have reported. It is
+# relative to the width rather than a fixed count because the width is what one round costs in
+# time: two rounds is two rounds on any server. A server with no parallel-agents width has width
+# 1, so its ceiling is the round count itself. 0 switches the ceiling off, which is what a reply
+# could do before this key existed. Config-file only (no flag or env). Default: 2.
+# delegate-fanout-rounds: 2
+
+# =============================================================================
 # How deep delegation may nest. Your session is depth 0 and may hand work to a sub-agent; this
 # number says how many levels down that may go. At 1, the default, the sub-agents your session
 # spawns get no sub_agent tool of their own, so every delegation is one level deep and every

@@ -52,7 +52,10 @@
 - A `delegate-max-steps` ceiling key; the owner's own `~/.apogee/config.yaml`.
 - Any version identifier.
 
-## 1. `delegate-fanout-rounds` config key
+## 1. `delegate-fanout-rounds` config key — ✅ DONE (2026-09-20)
+
+NOTES (2026-09-20): the "wire_config: DelegationConfig.FanOutRounds reads the option" test lives in `cmd/apogee/wire_boot_test.go` (`TestBootConfigCarriesTheDelegateFanOutRounds`, beside the step-cap threading test it mirrors) and `cmd/apogee/wire_config_test.go`'s projection fixture gains `DelegateFanOutRounds: 3` so the `Config.Delegation` equality covers the new field — neither test file is on the item's Files list; the plan named the tested behaviour but no test file for it.
+NOTES (2026-09-20): `TestManualDocumentsEverySettingsKey`, `TestTemplateMentionsEveryRegistryKey`, `TestRegistryFollowsTheTemplateOrder` and `TestSettingsTableIsInRegistryOrder` all pass with the row placed between `delegate-max-steps` and `delegate-max-depth`; the manual paragraph sits between the two keys' paragraphs in the same section and cross-links the `parallel-agents:` prose under "The servers you run models on".
 
 **What:** Add the file-only integer key `delegate-fanout-rounds` (default 2, `0` = ceiling off, negative refused) on the exact footing of `delegate-max-steps`: registry row (`Editable: true`, `Validate`, `Desc: "Rounds of the server's parallel-agents width one reply may fan out (calls past rounds × width are refused and must be delegated again); 0 switches the ceiling off; takes effect at the next start."`), `Options.DelegateFanOutRounds`, a pointer `FileConfig` field (0 is a value), the config.go landing row, the `/settings` row with `reachesWithoutAMember` and an `applyDelegateFanOutRounds` mirroring `applyDelegateMaxSteps`, and `domain.DelegationConfig.FanOutRounds` folded in `cmd/apogee/wire_config.go` beside `MaxSteps`. Document the key in `internal/config/defaults/config.yaml` directly under the `delegate-max-steps` block, in the template's voice (what it bounds, why relative to width, the `0` spelling). Any test that pins the registry's key list, the defaults template's documented keys or the `/settings` row set is extended, not skipped.
 

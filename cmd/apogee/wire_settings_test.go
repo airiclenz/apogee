@@ -711,13 +711,13 @@ const startupOnlyContract = "takes effect at the next start."
 // Driver could have been composed without. `editor` is re-read off a fresh projection of the file
 // every time an external edit starts (ADR 0041 decision 1); the other five are read once, while
 // the session is being built, and say so in their Descriptions. `ui.inspector`,
-// `delegate-max-steps`, `delegate-max-depth`, `delegate-max-tokens`, `delegate-timeout`,
-// `working-window` and `undo-snapshots` still mirror their value onto the live holder for the
+// `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
+// `delegate-timeout`, `working-window` and `undo-snapshots` still mirror their value onto the live holder for the
 // Firings a session raises, and do nothing at all where a Driver composed none — which is why they
 // are exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{
-	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "delegate-max-depth",
-	"delegate-max-tokens", "delegate-timeout",
+	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "delegate-fanout-rounds",
+	"delegate-max-depth", "delegate-max-tokens", "delegate-timeout",
 	"working-window", "undo-snapshots", "sessions.max-age", "sessions.max-count",
 }
 
@@ -725,8 +725,8 @@ var settingKeysWithNoMemberToReach = []string{
 // that must not refuse either. `ui.inspector` decides whether a wire observer is installed while
 // the provider client is constructed, `response-reserve` is read into the budget the session opens
 // with, `undo-snapshots` decides whether the session's undo store is opened while its id is minted,
-// and `delegate-max-steps`, `delegate-max-depth`, `delegate-max-tokens`, `delegate-timeout` and
-// `working-window` are fields of the Config the engine was constructed with, so this session
+// and `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
+// `delegate-timeout` and `working-window` are fields of the Config the engine was constructed with, so this session
 // genuinely cannot move any of them — but the file the next one starts from HAS moved,
 // which is the whole of what the key promises. Refusing would report a failed apply over a
 // save that did exactly that, which is the defect this pins.
@@ -739,6 +739,7 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 		{key: "ui.inspector", value: "true"},
 		{key: "response-reserve", value: "0.25"},
 		{key: "delegate-max-steps", value: "40"},
+		{key: "delegate-fanout-rounds", value: "3"},
 		{key: "delegate-max-depth", value: "2"},
 		{key: "delegate-max-tokens", value: "5000000"},
 		{key: "delegate-timeout", value: "30m"},
@@ -1230,22 +1231,23 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 	// moves OFF: a value that came back unchanged would be the launch snapshot showing through rather
 	// than the apply landing.
 	boot := config.Options{
-		SubAgentsChoice:   config.SubAgentsChoiceFixed,
-		WebSearchEndpoint: "https://boot.example.com/s",
-		ToolsDisabled:     []string{"python_exec"},
-		URLAllowHosts:     []string{"boot.example.com"},
-		URLDenyHosts:      []string{"metadata.internal"},
-		AutoCompact:       true,
-		PruneToolResults:  true,
-		ContextFillNotice: true,
-		DelegateMaxSteps:  40,
-		DelegateMaxDepth:  2,
-		DelegateMaxTokens: 100_000,
-		DelegateTimeout:   10 * time.Minute,
-		WorkingWindow:     8192,
-		UndoSnapshots:     true,
-		ContextFiles:      []string{"AGENTS.md"},
-		Servers:           []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
+		SubAgentsChoice:      config.SubAgentsChoiceFixed,
+		WebSearchEndpoint:    "https://boot.example.com/s",
+		ToolsDisabled:        []string{"python_exec"},
+		URLAllowHosts:        []string{"boot.example.com"},
+		URLDenyHosts:         []string{"metadata.internal"},
+		AutoCompact:          true,
+		PruneToolResults:     true,
+		ContextFillNotice:    true,
+		DelegateMaxSteps:     40,
+		DelegateFanOutRounds: 3,
+		DelegateMaxDepth:     2,
+		DelegateMaxTokens:    100_000,
+		DelegateTimeout:      10 * time.Minute,
+		WorkingWindow:        8192,
+		UndoSnapshots:        true,
+		ContextFiles:         []string{"AGENTS.md"},
+		Servers:              []config.ServerEntry{{Name: "here", Endpoint: "http://127.0.0.1:1111"}},
 		// The `reactions:` list is the one key here that NO case below edits, and it is in the snapshot
 		// for exactly that reason: its own apply is a whole-list swap tested beside the arm, so what
 		// this test owes it is the other half — a holder nobody edited hands back the list the run
@@ -1376,6 +1378,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				t.Helper()
 				if got := opts.DelegateMaxSteps; got != 80 {
 					t.Errorf("DelegateMaxSteps = %d, want the bound the session set (80)", got)
+				}
+			},
+		},
+		{
+			name: "delegate-fanout-rounds", key: "delegate-fanout-rounds", value: "5",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.DelegateFanOutRounds; got != 5 {
+					t.Errorf("DelegateFanOutRounds = %d, want the ceiling the session set (5)", got)
 				}
 			},
 		},
@@ -1975,9 +1986,9 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 	})
 }
 
-// The five int rows take the same empty value the same way, end to end through applySettingFor: an
-// emptied `context-window`, `working-window`, `delegate-max-steps`, `delegate-max-depth` or
-// `delegate-max-tokens` is landed as the row's own Default (landSetting) and mirrored onto the holder
+// The six int rows take the same empty value the same way, end to end through applySettingFor: an
+// emptied `context-window`, `working-window`, `delegate-max-steps`, `delegate-fanout-rounds`,
+// `delegate-max-depth` or `delegate-max-tokens` is landed as the row's own Default (landSetting) and mirrored onto the holder
 // — so a session that launched with a pin or a bound reads the built-in a fresh start without the
 // key would, rather than standing on the number it launched with. Whitespace is the same empty
 // value. The two window keys ride the rebind, which is silent while nothing is bound
@@ -1991,6 +2002,7 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 		{key: "context-window", read: func(o config.Options) int { return o.ContextWindow }},
 		{key: "working-window", read: func(o config.Options) int { return o.WorkingWindow }},
 		{key: "delegate-max-steps", read: func(o config.Options) int { return o.DelegateMaxSteps }},
+		{key: "delegate-fanout-rounds", read: func(o config.Options) int { return o.DelegateFanOutRounds }},
 		{key: "delegate-max-depth", read: func(o config.Options) int { return o.DelegateMaxDepth }},
 		{key: "delegate-max-tokens", read: func(o config.Options) int { return o.DelegateMaxTokens }},
 	}
@@ -2009,7 +2021,7 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 				// Seeded off every row's Default, so a landed Default is a MOVE the read can see.
 				live := newLiveSettings(config.Options{
 					ContextWindow: 4096, WorkingWindow: 8192,
-					DelegateMaxSteps: 7, DelegateMaxDepth: 3, DelegateMaxTokens: 5000,
+					DelegateMaxSteps: 7, DelegateFanOutRounds: 9, DelegateMaxDepth: 3, DelegateMaxTokens: 5000,
 				})
 				if got := row.read(live.options()); got == want {
 					t.Fatalf("%s seeded at its Default %d; the seed must differ for the landing to show", row.key, got)

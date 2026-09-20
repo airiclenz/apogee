@@ -492,6 +492,13 @@ type DelegationConfig struct {
 	// engine ends it; 0 = unbounded. The host folds in the `delegate-max-steps:` key
 	// (default 80); an embedder sets it directly.
 	MaxSteps int
+	// FanOutRounds bounds how many delegations ONE reply may fan out, in rounds of the width the
+	// reply is sized by (the server's parallel-agents cap; 1 on a delegate): the first
+	// rounds × width `sub_agent` calls run, and every later one in the reply is refused with an
+	// error-shaped result telling the model to delegate it again once the group has reported;
+	// 0 = no ceiling. It applies at every depth. The host folds in the `delegate-fanout-rounds:`
+	// key (default 2); an embedder sets it directly.
+	FanOutRounds int
 	// MaxDepth bounds the recursion: a child at this depth is never offered `sub_agent` and the
 	// recursion point refuses a spawn from it (the top-level agent is depth 0, so 1 = the top-level
 	// agent delegates and its delegates do not). 0 reads as the built-in default of 1 — never as

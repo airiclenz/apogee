@@ -252,6 +252,12 @@ type Options struct {
 	// human's to stop.
 	DelegateMaxSteps int
 
+	// delegateFanOutRounds bounds how many delegations ONE reply may fan out, in rounds of the
+	// server's parallel-agents width (default 2; 0 = no ceiling), loaded from the config file only.
+	// ApplyConfig sets it from settings; the composition root folds it into
+	// apogee.Config.Delegation.FanOutRounds. Calls past rounds × width are refused, never queued.
+	DelegateFanOutRounds int
+
 	// delegateMaxDepth bounds how deep delegation may nest (default 1: the session delegates,
 	// its delegates do not; at least 1), loaded from the config file only. ApplyConfig sets it
 	// from settings; the composition root folds it into apogee.Config.Delegation.MaxDepth.

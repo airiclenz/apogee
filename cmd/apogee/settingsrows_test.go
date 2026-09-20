@@ -55,6 +55,7 @@ func fabricatedSettings() config.Options {
 		ContextFillNotice:     true,
 		UndoSnapshots:         true,
 		DelegateMaxSteps:      40,
+		DelegateFanOutRounds:  3,
 		DelegateMaxDepth:      2,
 		DelegateMaxTokens:     5000000,
 		DelegateTimeout:       90 * time.Minute,
@@ -408,6 +409,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"context-fill-notice":     "true",  // opted IN in the fixture: a default-off row reports the value, never the default
 		"undo-snapshots":          "true",
 		"delegate-max-steps":      "40",
+		"delegate-fanout-rounds":  "3",
 		"delegate-max-depth":      "2",
 		"delegate-max-tokens":     "5000000",
 		"delegate-timeout":        "1h30m0s", // a duration prints itself, ui.stall-after's spelling

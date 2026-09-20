@@ -519,6 +519,16 @@ var KeyRegistry = bindSetters([]Key{
 		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateMaxSteps }),
 	},
 	{
+		Path: "delegate-fanout-rounds", Kind: KindInt, Default: strconv.Itoa(defaultDelegateFanOutRounds),
+		Editable: true,
+		Validate: validateDelegateFanOutRounds,
+		Desc: "Rounds of the server's parallel-agents width one reply may fan out (calls past " +
+			"rounds × width are refused and must be delegated again); 0 switches the ceiling off; " +
+			"takes effect at the next start.",
+		Read: func(o Options) string { return strconv.Itoa(o.DelegateFanOutRounds) },
+		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateFanOutRounds }),
+	},
+	{
 		Path: "delegate-max-depth", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxDepth),
 		Editable: true,
 		Validate: validateDelegateMaxDepth,
@@ -978,6 +988,25 @@ func validateDelegateMaxSteps(value string) error {
 	if err != nil || n < 0 {
 		return fmt.Errorf("apogee: invalid delegate-max-steps %q: want a Turn count of 0 or more "+
 			"(0 lets a delegation run unbounded; %d is the default)", value, defaultDelegateMaxSteps)
+	}
+	return nil
+}
+
+// defaultDelegateFanOutRounds is the built-in bound on how many delegations ONE reply may fan out,
+// counted in rounds of the server's parallel-agents width: at width 4 a reply may spawn 8, and the
+// ninth is refused and must be delegated again once the first eight have reported. The registry
+// row advertises it and the loader resolves an unstated key to it, so the two cannot drift apart.
+const defaultDelegateFanOutRounds = 2
+
+// validateDelegateFanOutRounds refuses a negative round count. Zero is the documented spelling of
+// "no ceiling" — what a reply could fan out before the key existed — and a positive value is the
+// number of width-sized rounds a reply may fill before its remaining sub_agent calls are refused;
+// a negative one would reach the loop as a ceiling every reply has already exceeded.
+func validateDelegateFanOutRounds(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("apogee: invalid delegate-fanout-rounds %q: want a round count of 0 or more "+
+			"(0 switches the fan-out ceiling off; %d is the default)", value, defaultDelegateFanOutRounds)
 	}
 	return nil
 }

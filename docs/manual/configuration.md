@@ -825,6 +825,22 @@ one exchange only: your next message clears it, nothing is written to the sessio
 session resumed with `--continue` or `--resume` has nothing to continue — the capped result's
 engine summary is still in the conversation, and a new delegation can quote it.
 
+How **many** delegations one reply may fan out is `delegate-fanout-rounds:` (a file-only
+key). A reply that spawns sub-agents spawns them as a group: they run side by side, as many
+at once as the server's width allows (`parallel-agents:`, under [The servers you run models
+on](#the-servers-you-run-models-on) further down this page), and the group returns to your
+agent together — so a reply that asks for fifty delegations on a width-4 server keeps your
+agent blind for as long as fifty delegations take, and an Esc drops the lot. This key is
+the ceiling on that group, counted in **rounds** of the width: at the default of **2**, a
+reply on a width-4 server may fan out 8, and every `sub_agent` call past the eighth is
+refused with a result that says so — how many the reply fanned out, what the ceiling is and
+why — for your agent to delegate again once the first eight have reported. It is relative
+to the width rather than a fixed count because the width is what one round costs in time:
+two rounds is two rounds on any server. A server with no width has width 1 (an unkeyed
+local server, or a sub-agent's own delegations, which run one at a time), so its ceiling is
+the round count itself, and the ceiling applies at every depth. `0` switches it off, which
+is what a reply could do before this key existed.
+
 How **deep** delegation may nest is `delegate-max-depth:` (a file-only key). Your session
 is depth 0 and may hand work to a sub-agent; at the default of **1** the sub-agents it
 spawns get no `sub_agent` tool of their own, so every delegation is one level deep and
