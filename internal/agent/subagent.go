@@ -145,10 +145,11 @@ const (
 // summary is MISSING and why, rather than a body silently missing its first part. %v is the cause.
 const engineFoldUnavailableFormat = "[engine summary unavailable — %v]"
 
-// continueLineFormat is the body note a CAPPED delegation's result carries when the parent retained
-// the child (P6 of plan 2026-09-18 - 00): the one line that tells the parent model the handle it can
-// spell back — `sub_agent` with `continue` naming the delegation — instead of re-spawning the work
-// from nothing. It rides the note slot delegationResult fills after the missing-output, seat and
+// continueLineFormat is the body note a CAPPED or FAULTED delegation's result carries when the
+// parent retained the child (P6 of plan 2026-09-18 - 00; faults since ADR 0082): the one line that
+// tells the parent model the handle it can spell back — `sub_agent` with `continue` naming the
+// delegation — instead of re-spawning the work from nothing. It rides the note slot
+// delegationResult fills after the missing-output, seat and
 // clamp notes and before the user-steered trailer, so the head line stays the first line every
 // reader anchors on. Written only when the child ended its run wearing a name, because an unnamed
 // delegation is not retained (retainedDelegates.retain) and there would be nothing to continue. %q
@@ -156,7 +157,7 @@ const engineFoldUnavailableFormat = "[engine summary unavailable — %v]"
 const continueLineFormat = "[to continue this delegate: sub_agent with continue: %q]"
 
 // The two heads of a continued child's opening task (continuationTask): the retained task as the
-// spawning call spelled it, then the engine fold of the capped attempt under
+// spawning call spelled it, then the engine fold of the capped or faulted attempt under
 // previousAttemptHead, then what the parent now asks for under continuationInstructionsHead. They
 // are package constants because the child reads them as the contract for which part of its task is
 // whose — the work, what an earlier run of it found, and what to do next.
@@ -174,7 +175,9 @@ const (
 )
 
 // continuationTask composes the opening task of a child continued from prior: the retained task,
-// the fold the capped attempt left, and the instructions the continuing call carries in `task`.
+// the fold the capped or faulted attempt left (the engineFoldUnavailableFormat marker when that
+// fold could not be made — never an empty body under the head), and the instructions the
+// continuing call carries in `task`.
 func continuationTask(prior retainedDelegate, instructions string) string {
 	return prior.task + "\n\n" + previousAttemptHead + "\n" + prior.fold + "\n\n" + continuationInstructionsHead + "\n" + instructions
 }
@@ -1024,7 +1027,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	ran = true
 	res, err = sub.Run(ctx)
 	// The namer is stopped and JOINED here, before the run is read, rather than left to the defer
-	// alone (whose copies are then no-ops): the name a capped child is retained under below must be
+	// alone (whose copies are then no-ops): the name a retained child is kept under below must be
 	// the name it ended its run wearing, and the namer's late-drop check reads its context — still
 	// live while the result was rendered ahead of the defer — so a reply landing during that
 	// rendering would have renamed a delegation the retention had already read under the old name.
@@ -1034,12 +1037,18 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	naming.Wait()
 	ledgerName = sub.displayName()
 	result, outcome = sub.delegationResult(call.ID, res, err)
-	// A child the engine stopped at a bound is RETAINED for the rest of this Exchange (P6): the
+	// A child the engine stopped at a bound is RETAINED for the rest of this Exchange (P6) — the
 	// fold and closing text the result carried, and everything the call asked for, so the parent
-	// can continue the work from the fold rather than re-spawn it from nothing. Read AFTER the
-	// namer is joined, so a delegation named out of band is retained under the name the parent
-	// model has been told (ADR 0068); an unnamed one has no handle and is not retained.
-	if res.StepCapped {
+	// can continue the work from the fold rather than re-spawn it from nothing. A child whose
+	// Exchange FAULTED with the parent's ctx still live is retained the same way (ADR 0082): its
+	// fold was written at the fault (Agent.finishAtFault) and its last words stand as the closing
+	// text, so the Turns it spent before its upstream died are continued from rather than lost —
+	// the error result stays an error result, and only gains the continue line. A CANCEL is still
+	// neither: it returns no result and retains nothing, so the contract at the head of this file
+	// — no partial result surfaces and no snapshot lands mid-sub-agent — holds unchanged. Read
+	// AFTER the namer is joined, so a delegation named out of band is retained under the name the
+	// parent model has been told (ADR 0068); an unnamed one has no handle and is not retained.
+	if res.StepCapped || res.Faulted {
 		a.retained.retain(retainedDelegate{
 			task:          retainTask,
 			name:          sub.displayName(),
@@ -1278,11 +1287,13 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	if a.capRequested > 0 {
 		result.Content += "\n" + fmt.Sprintf(stepCapClampNoteFormat, a.capRequested, a.stepCap, a.stepCap)
 	}
-	// And the continue line, LAST of the body notes, for a capped child the parent retains — one
-	// that ended its run wearing a name (runSubAgent joins the namer before rendering this, so the
-	// name read here is the one the retention keys on). A completed child has nothing to continue
-	// from and an unnamed one has no handle, so neither carries it.
-	if res.StepCapped {
+	// And the continue line, LAST of the body notes, for a capped or faulted child the parent
+	// retains — one that ended its run wearing a name (runSubAgent joins the namer before rendering
+	// this, so the name read here is the one the retention keys on). A completed child has nothing
+	// to continue from and an unnamed one has no handle, so neither carries it. On the fault path
+	// it rides the ERROR result: the head still says the delegation faulted and why, and the line
+	// below it says the work is not lost.
+	if res.StepCapped || res.Faulted {
 		if name := a.displayName(); name != "" {
 			result.Content += "\n" + fmt.Sprintf(continueLineFormat, name)
 		}

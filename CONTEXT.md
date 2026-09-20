@@ -188,8 +188,9 @@ dangerous-action floor** (unloosenable one level down), and recursion is depth-b
 delegates and its delegates are never offered `sub_agent`; `2` lets a sub-agent delegate in turn
 (ADR 0013 decision 4, superseded 2026-09-15). A `max_steps` ask above `delegate-max-steps` is
 applied as the cap and the delegation's result says so in one appended line. A delegation the
-engine stopped at a **Step cap** (or its token or time sibling) can be picked up again rather than
-re-spawned: the call's `continue: "<name>"` argument names a capped delegation the parent still
+engine stopped at a **Step cap** (or its token or time sibling), or whose Exchange **faulted**
+(ADR 0082), can be picked up again rather than re-spawned: the call's `continue: "<name>"`
+argument names a capped or faulted delegation the parent still
 retains — for the rest of its Exchange, in memory only — and spawns a fresh child from that run's
 engine fold under a cap of its own, with `task` as the continuation instructions; the retained
 name, `tools` and `output_path` are inherited wherever the call leaves them unset.
@@ -232,8 +233,8 @@ queue, so nothing is ever skipped there.
 What a delegation is CALLED is its **Delegation name**, and the rule is three-deep: the name its
 call gave — an optional `name` argument on the `sub_agent` call, normalised to a trimmed first
 line — else a **generated** one that lands once the run is under way, else the delegated task's
-first line. It is display identity — and, for a capped delegation, the handle `continue` spells
-back — never privilege.
+first line. It is display identity — and, for a capped or faulted delegation, the handle
+`continue` spells back — never privilege.
 A **running** child is **addressable**, and by the handle it already has: the spawning call-ID.
 `Agent.InterjectChild(spawnCallID, in)` appends a message to that child's engine-side **mailbox**,
 recursing into registered children so a grandchild is reachable from the top-level agent and
@@ -778,15 +779,23 @@ generated; the task-first-line fallback is a Driver's display rule, not a name) 
 `tools` roster and `output_path` it asked for, the fold, the closing text and the bound — **in
 memory only**, keyed by that name, for the rest of its own Exchange: the map is cleared as the next
 Exchange opens, nothing is serialised (ADR 0022 D8, ADR 0013 §5 stand), so a resumed session has
-nothing to continue. The capped result's last body note spells the handle back — `[to continue
+nothing to continue. A **faulted** delegation is retained the same way (2026-09-20, ADR 0082,
+`apogee-60x`): its Run ends abandoned with the parent's ctx still live, the engine writes the fold
+at the fault — no wrap-up Turn, the fold is the only model call, under one `stream-idle-timeout`
+of its own so the error result lands at most one idle window late; a child that completed no Turn
+is retained without a fold request, its fold the unavailable marker saying so, and a fold that
+fails retains the marker naming the cause — and its last narration stands as the closing text;
+the error result keeps its fault head and gains the continue line. A cancel still unwinds the
+whole delegation and retains nothing (D2). The capped or faulted result's last body note spells
+the handle back — `[to continue
 this delegate: sub_agent with continue: "<name>"]` — and a `sub_agent` call carrying
 `continue: "<name>"` spawns a **fresh child** whose opening task is the retained task, the fold
 under `[previous attempt — engine summary]` and the call's own `task` under `[continuation
 instructions]`; the name, roster and `output_path` are inherited wherever the call leaves them
-unset (an inherited name is re-announced for the new run), the latest capped child under that
-name wins, the entry is consumed by the continuation that SPAWNS — a continue call refused on
-its own arguments (an invalid `run_on`, an unknown tool name) keeps it, so a corrected retry still
-finds it (a child that caps again is retained anew, under the same name and over the ORIGINAL
+unset (an inherited name is re-announced for the new run), the latest capped or faulted child
+under that name wins, the entry is consumed by the continuation that SPAWNS — a continue call
+refused on its own arguments (an invalid `run_on`, an unknown tool name) keeps it, so a corrected
+retry still finds it (a child that caps or faults again is retained anew, under the same name and over the ORIGINAL
 task, so a second continuation composes over one fold, never a fold of a fold), and an unknown
 name is refused with an error result naming the retained names (`[no delegate named "<name>" to
 continue — retained: <a, b | none>]`). Each continuation

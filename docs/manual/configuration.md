@@ -798,17 +798,22 @@ naming the one path allowed. The engine reads no path out of the task text, so w
 task names a file the sub-agent must write, pass it as `output_path` too — the tool's own
 description says so.
 
-A capped delegation can also be **continued** rather than delegated again from scratch. For
-the rest of the exchange it happened in, your agent keeps what a capped sub-agent left behind —
-its task, its `tools:` roster and `output_path`, the engine summary and the closing report — under
-the delegation's name, and the capped result ends on the line that says so:
+A capped or faulted delegation can also be **continued** rather than delegated again from
+scratch. For the rest of the exchange it happened in, your agent keeps what a capped sub-agent
+left behind — its task, its `tools:` roster and `output_path`, the engine summary and the closing
+report — under the delegation's name, and the capped result ends on the line that says so:
 
 ```
 [to continue this delegate: sub_agent with continue: "<name>"]
 ```
 
-A `sub_agent` call carrying `continue: "<name>"` starts a **fresh** sub-agent whose opening
-task is the original task, then the engine summary of the capped run under
+A sub-agent that **faults** — its server dies mid-task, say — is kept the same way: the engine
+summarises what it had done before the fault (a sub-agent that faulted on its very first request
+is kept with a note that there was nothing to summarise), its error result still names the fault
+first and then ends on the same line, and the turns it spent are continued from rather than lost.
+Only a fault is kept, not a cancel: Esc during a delegation still unwinds the whole call and keeps
+nothing. A `sub_agent` call carrying `continue: "<name>"` starts a **fresh** sub-agent whose
+opening task is the original task, then the engine summary of the capped or faulted run under
 `[previous attempt — engine summary]`, then whatever the call's own `task` asks for under
 `[continuation instructions]` — so it reads what the earlier run found instead of reading the
 same files again. Everything the call leaves unset is inherited: the name (re-announced, so its
@@ -816,13 +821,13 @@ run block wears the name it continues), the `tools` roster and the `output_path`
 is a fresh one — `max_steps` lowers the ceiling for that one run, and a continuation is a new run,
 so it gets `delegate-max-steps:` again (or the lower `max_steps` it asks for), never the
 remainder of the run it continues; there is no limit on how many times a delegation may be
-continued, and one that hits its cap again is kept anew under the same name, always over the
-original task, so a second continuation never summarizes a summary. The name is the handle:
+continued, and one that hits its cap or faults again is kept anew under the same name, always
+over the original task, so a second continuation never summarizes a summary. The name is the handle:
 a delegation that ended without one (no `name` on the call and no generated name — see the
 [sessions page](sessions.md)) is not kept, and a `continue` naming nothing your agent holds is
 refused with an error result listing the names it does. What is kept lives in memory for that
 one exchange only: your next message clears it, nothing is written to the session record, so a
-session resumed with `--continue` or `--resume` has nothing to continue — the capped result's
+session resumed with `--continue` or `--resume` has nothing to continue — a capped result's
 engine summary is still in the conversation, and a new delegation can quote it.
 
 How **many** delegations one reply may fan out is `delegate-fanout-rounds:` (a file-only

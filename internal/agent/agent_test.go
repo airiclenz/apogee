@@ -420,3 +420,88 @@ func TestIsDelegate_TopLevelFalseChildTrue(t *testing.T) {
 		t.Error("a delegate answers isDelegate() = false, want true")
 	}
 }
+
+// TestFinishAtFaultEmitsNoErrorEventOfItsOwn pins the fault exit's silence: a delegate whose
+// Exchange faults after a completed Turn is folded for the retention (Agent.finishAtFault — one
+// summary request past the fault), but the loop's own ErrorEvent stays the only one on the child's
+// stream, and the boundary is returned faulted exactly as before.
+func TestFinishAtFaultEmitsNoErrorEventOfItsOwn(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	responder := scriptedResponder(t, faultedDelegationScripts()...)
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var childErrors []domain.ErrorEvent
+	for _, ev := range errorEvents(sink.events) {
+		if ev.Depth == 1 {
+			childErrors = append(childErrors, ev)
+		}
+	}
+	if len(childErrors) != 1 || childErrors[0].Source != "loop" {
+		t.Errorf("child ErrorEvents = %+v, want exactly the loop's one", childErrors)
+	}
+	// Spawn, the child's Turn, its faulting request, the fold, the parent's close: the fold is the
+	// one request the fault exit adds.
+	if got := len(responder.requests()); got != 5 {
+		t.Errorf("the upstream saw %d requests, want 5 (one fold past the fault)", got)
+	}
+	var faulted []domain.TurnEvent
+	for _, te := range turnEvents(sink.events) {
+		if te.Depth == 1 && te.Faulted {
+			faulted = append(faulted, te)
+		}
+	}
+	if len(faulted) != 1 || faulted[0].Status != domain.StatusExchangeComplete {
+		t.Errorf("child faulted TurnEvents = %+v, want exactly one, on the abandoned Exchange's boundary", faulted)
+	}
+}
+
+// TestFinishAtFaultIsATopLevelExemption keeps Run's top-level exemption: the Agent the host drives
+// has no parent to retain it, so its fault — even after a completed Turn — makes no fold request
+// and reaches the boundary exactly as it always did.
+func TestFinishAtFaultIsATopLevelExemption(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	responder := scriptedResponder(t,
+		toolCallTurn("t1", "read_thing", `{}`),
+		errorScript("upstream: connection reset by peer"),
+		contentTurn("unreached"),
+	)
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "read the thing"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	res, err := a.Run(context.Background())
+
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || !res.Faulted {
+		t.Errorf("Run result = %+v, want the faulted boundary", res)
+	}
+	if got := len(responder.requests()); got != 2 {
+		t.Errorf("the upstream saw %d requests, want 2 — a top-level fault is never folded", got)
+	}
+	if a.capFold != "" {
+		t.Errorf("capFold = %q on a top-level Agent, want empty", a.capFold)
+	}
+	if errs := errorEvents(sink.events); len(errs) != 1 {
+		t.Errorf("ErrorEvents = %+v, want exactly the loop's one", errs)
+	}
+}

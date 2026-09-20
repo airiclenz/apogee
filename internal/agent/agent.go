@@ -434,8 +434,11 @@ type Agent struct {
 	// capFold is the ENGINE FOLD of this Agent's conversation, written at the bound capHit names
 	// before the wrap-up Turn is spent (foldForParent) and read into the capped result under
 	// `[engine summary]` (delegationResult) — the report the parent receives whatever the child's
-	// closing reply turns out to be. Empty until a bound is hit; the unavailable marker
-	// (engineFoldUnavailableFormat) when the summary call faulted.
+	// closing reply turns out to be. A delegate whose Exchange FAULTED writes it too
+	// (finishAtFault): there it reaches no result, only the retention a continuation reads it
+	// from (runSubAgent). Empty until a bound or a fault; the unavailable marker
+	// (engineFoldUnavailableFormat) when the summary call faulted, or was never made because the
+	// faulted delegate had completed no Turn.
 	capFold string
 
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
@@ -812,7 +815,10 @@ func (a *Agent) emitTurn(res domain.StepResult) {
 // one further tool-less Turn (bar write_file to a spawn-named `output_path` — Agent.outputPath) to
 // report what it has (finishAtStepCap), and the boundary returned
 // carries StepCapped. A Step-driving host is not capped — it decides when to stop stepping itself
-// — and neither is a top-level Agent, whose caps are always 0.
+// — and neither is a top-level Agent, whose caps are always 0. A child's FAULT leaves the loop
+// through finishAtFault on the way out: the boundary is returned exactly as it was, but the fold
+// a continuation needs is written first, so the parent can retain the faulted child as it retains
+// a capped one (runSubAgent) — a top-level Run is exempt from that too.
 func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 	// The time bound counts from the child's first request, which this Run is about to make; the
 	// reading is taken once, so a resumed loop never restarts the clock.
@@ -823,6 +829,9 @@ func (a *Agent) Run(ctx context.Context) (domain.StepResult, error) {
 		res, err := a.step(ctx)
 		a.emitTurn(res)
 		if err != nil || res.Status != domain.StatusTurnComplete {
+			if err == nil {
+				a.finishAtFault(ctx, res)
+			}
 			return res, err
 		}
 		// The delegate step cap, counted and enforced HERE and nowhere else (stepCap): step() is
@@ -897,7 +906,7 @@ func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) dom
 		Err:       a.boundErrText(),
 	})
 
-	a.capFold = a.foldForParent(ctx)
+	a.capFold = a.foldForParent(ctx, 0)
 
 	defer a.turns.capped()()
 
@@ -917,20 +926,74 @@ func (a *Agent) finishAtStepCap(ctx context.Context, last domain.StepResult) dom
 	}
 }
 
-// foldForParent runs the ENGINE FOLD of a capped delegate's conversation — the summary the parent
-// reads under `[engine summary]` whatever the wrap-up Turn then produces (delegationResult). It is
+// finishAtFault is the FAULTED delegate's counterpart to finishAtStepCap, run by Run as a child's
+// Exchange ends abandoned (res.Faulted): it writes the engine fold of the conversation as it stands
+// at the fault (capFold, foldForParent) so the parent can RETAIN the child exactly as it retains a
+// capped one (runSubAgent) and continue the work from the fold rather than re-spawn it from
+// nothing — a delegate that spent an hour of tool rounds before its upstream died is worth that
+// much (bead apogee-60x, ADR 0082). Nothing else changes: res.Faulted stays true, the result the
+// parent reads is still the error result (delegationResult) and the loop's own ErrorEvent is the
+// only one emitted — this spends no wrap-up Turn, because a faulted delegate has no Turn to
+// spend, and emits no marker of its own.
+//
+// Three gates, each keeping a settled contract:
+//
+//   - a.isDelegate() — a top-level Run (headless Firing, the TUI) folds nothing, keeping Run's
+//     top-level exemption: its caps are 0 and its faults are the human's to read;
+//   - ctx.Err() == nil — a cancel still unwinds the whole delegation (subagent.go, D2): nothing
+//     is folded and nothing is retained;
+//   - a completed Turn — a child that faulted on its FIRST request has no history worth a
+//     summary call, so no fold request is made and capFold is set to the unavailable marker
+//     saying so, because continuationTask renders the fold under its head unconditionally and a
+//     fresh child must never read an empty body there.
+//
+// The fold runs under the ONE bound Config.StreamIdleTimeout states (0 = none), read off the
+// parent ctx for the cancel exit: the summary call is itself a stream that may stall and be
+// re-streamed (compactCompleter.Complete), so unbounded it could cost two idle windows before
+// the error result lands; bounded it costs at most one, the case the manual states, and a fold
+// that exceeds it retains the unavailable marker naming the bound.
+func (a *Agent) finishAtFault(ctx context.Context, res domain.StepResult) {
+	if !a.isDelegate() || !res.Faulted || ctx.Err() != nil {
+		return
+	}
+	if a.turns.exchangeTurns == 0 {
+		a.capFold = fmt.Sprintf(engineFoldUnavailableFormat, zeroTurnFoldCause)
+		return
+	}
+	a.capFold = a.foldForParent(ctx, a.cfg.StreamIdleTimeout)
+}
+
+// zeroTurnFoldCause is the cause the unavailable marker names when finishAtFault skipped the fold
+// because the faulted delegate had completed no Turn.
+const zeroTurnFoldCause = "the delegate completed no Turn"
+
+// foldForParent runs the ENGINE FOLD of a capped or faulted delegate's conversation — the summary
+// the parent reads under `[engine summary]` whatever the wrap-up Turn then produces
+// (delegationResult), or continues a retained delegate from (continuationTask). It is
 // context.Summarize under the delegate-fold brief over the whole conversation as it stands at the
 // bound, on the child's own completer (compactCompleter — its model, budget and dialect; the usage
 // booked Maintenance and flagged DelegateFold, never a TurnEvent), and it touches NOTHING else: the
 // conversation is not replaced, a.compacting is not taken and the fold-fault latch
 // (turns.foldFaulted) is never set, because this is not a Compaction — the child's history stands
-// exactly as it was for the wrap-up Turn that follows. A cancelled ctx skips the call, before or
-// during it (finishAtStepCap returns the cancel and nothing surfaces to the parent); any other
-// fault becomes the unavailable marker naming its cause, so the parent still reads the closing
-// report under a head that says the summary is missing rather than a body missing a part.
-func (a *Agent) foldForParent(ctx context.Context) string {
-	if ctx.Err() != nil {
+// exactly as it was for the wrap-up Turn that follows. A cancelled parent ctx skips the call,
+// before or during it (finishAtStepCap returns the cancel and nothing surfaces to the parent); any
+// other fault becomes the unavailable marker naming its cause, so the parent still reads the
+// closing report under a head that says the summary is missing rather than a body missing a part.
+//
+// bound, when positive, is a deadline of the fold's own, derived from parent: the summary call is
+// cut when it is reached and the marker names the bound — the cancel exit reads PARENT, never the
+// derived ctx, so a timed-out fold is reported as unavailable and not mistaken for a cancel. Zero
+// runs the fold under the parent ctx alone, which is what the cap path asks for: its wrap-up Turn
+// follows and the child's own bounds have already been checked.
+func (a *Agent) foldForParent(parent context.Context, bound time.Duration) string {
+	if parent.Err() != nil {
 		return ""
+	}
+	ctx := parent
+	if bound > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(parent, bound)
+		defer cancel()
 	}
 	text, err := apogeectx.Summarize(
 		ctx,
@@ -941,13 +1004,20 @@ func (a *Agent) foldForParent(ctx context.Context) string {
 		apogeectx.BriefDelegateFold,
 	)
 	if err != nil {
-		if ctx.Err() != nil {
+		if parent.Err() != nil {
 			return ""
+		}
+		if ctx.Err() != nil {
+			return fmt.Sprintf(engineFoldUnavailableFormat, fmt.Sprintf(foldBoundExceededFormat, boundDurationText(bound)))
 		}
 		return fmt.Sprintf(engineFoldUnavailableFormat, err)
 	}
 	return text
 }
+
+// foldBoundExceededFormat is the cause the unavailable marker names when a bounded fold
+// (foldForParent) ran past its bound; %s is the bound as boundDurationText spells it.
+const foldBoundExceededFormat = "the summary call exceeded its %s bound"
 
 // AbortExchange discards an interrupted Exchange and returns the Agent to a clean quiescent
 // boundary that accepts the next Submit. It rolls the conversation back to the boundary the

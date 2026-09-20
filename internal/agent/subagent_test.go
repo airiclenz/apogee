@@ -790,12 +790,15 @@ const staleChildText = "starting on it — reading the entry point first"
 
 // faultedDelegationScripts drives one delegation whose child narrates, calls a tool, and then
 // hits an Upstream fault on its next Turn — the child's Exchange is ABANDONED, which closes on
-// the same StatusExchangeComplete a real completion returns. The parent then finishes.
+// the same StatusExchangeComplete a real completion returns. The child completed a Turn before
+// the fault, so the engine folds its conversation for the retention (Agent.finishAtFault) before
+// the parent finishes.
 func faultedDelegationScripts() []stubllm.Turn {
 	return []stubllm.Turn{
 		subAgentCallTurn("c1", "summarise the repo"),
 		narratedToolCallTurn("c2", "read_thing", `{}`, staleChildText), // a model that narrates before acting
 		errorScript("upstream: connection reset by peer"),              // the child's next Turn faults
+		contentTurn(childFoldSummary),                                  // the engine fold of the faulted child
 		contentTurn("parent done"),
 	}
 }
@@ -4218,6 +4221,267 @@ func TestSubAgent_CompletedResultCarriesNoContinueLine(t *testing.T) {
 	got, ok := subAgentResultFor(sink.events, "c1")
 	if !ok || got.Content != "the survey is complete" {
 		t.Errorf("completed result = %+v, want the child's report alone, no continue line", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Retention of a FAULTED delegation (plan 2026-09-20 - 04, item 5; ADR 0082)
+// ----------------------------------------------------------------------------
+//
+// A child whose Exchange faulted with the parent still live is retained exactly as a capped one:
+// the engine folds its conversation at the fault (Agent.finishAtFault), the error result gains the
+// continue line, and a `continue` spawns a fresh child from that fold. A cancel still unwinds the
+// whole delegation and retains nothing; an unnamed delegation still has no handle.
+
+// faultedSurveyScripts is the upstream script of one named delegation that spends two working
+// Turns and then faults on its third request: the spawning call, the two Turns, the fault, then
+// the fold reply the engine's summary call is answered with — the parent's own turns follow.
+func faultedSurveyScripts(callID, task, name string, fold []provider.Delta) [][]provider.Delta {
+	scripts := [][]provider.Delta{toolCallScript(callID, tools.SubAgentToolName, cappedSurveyArgs(task, name))}
+	scripts = append(scripts, cappedChildTurns(2)...)
+	scripts = append(scripts, []provider.Delta{{Kind: provider.DeltaError, Err: "the upstream died"}})
+	return append(scripts, fold)
+}
+
+// assertFaultedResultContinuable fails unless result is the ERROR result of a faulted delegation
+// named name whose last body line is the continue line.
+func assertFaultedResultContinuable(t *testing.T, result domain.ToolResult, name string) {
+	t.Helper()
+	if !result.IsError || !strings.HasPrefix(result.Content, subAgentFaultPrefix) {
+		t.Fatalf("faulted result = %+v, want an error result opening on %q", result, subAgentFaultPrefix)
+	}
+	if want := "\n" + fmt.Sprintf(continueLineFormat, name); !strings.HasSuffix(result.Content, want) {
+		t.Errorf("faulted result =\n%s\nwant it to end on %q", result.Content, want)
+	}
+}
+
+// TestSubAgent_FaultedDelegateIsRetainedAndContinuable drives fault → continue → completion: the
+// error result ends on the continue line, the child is retained with the fold the engine wrote at
+// the fault, and the continued child's first request opens on the retained task, that fold and the
+// instructions — the same opening a capped child's continuation reads.
+func TestSubAgent_FaultedDelegateIsRetainedAndContinuable(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := faultedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName, foldScript(700, 40))
+	scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, continueInstructions, 0)))
+	scripts = append(scripts, contentScript("the survey is now complete"), contentScript("parent done"))
+	responder := &requestLogResponder{scripts: scripts}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	// The retention is read as the continue call is about to be answered — after the faulted
+	// child was retained, before the continuation consumes the entry.
+	var retained retainedDelegate
+	var wasRetained bool
+	responder.before = func(call int) {
+		if call == 5 {
+			retained, wasRetained = a.retained.lookup(retainedSurveyName)
+		}
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	res, err := a.Run(context.Background())
+
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Fatalf("parent result = %+v, want a clean exchange-complete (the child's fault must not fault the parent)", res)
+	}
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	if !strings.Contains(faulted.Content, "the upstream died") {
+		t.Errorf("faulted result = %q, want the fault's cause in it", faulted.Content)
+	}
+	if !wasRetained {
+		t.Fatal("the faulted delegation was not retained before the continue call")
+	}
+	want := retainedDelegate{
+		task:          retainedSurveyTask,
+		name:          retainedSurveyName,
+		tools:         tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath:    "notes/survey.md",
+		fold:          childFoldSummary,
+		closingReport: "reading file 1",
+		spawnCallID:   "c1",
+	}
+	if !reflect.DeepEqual(retained, want) {
+		t.Errorf("retained delegate = %+v, want %+v", retained, want)
+	}
+	// The continued child's opening request: call 5 (0: spawn, 1–2: turns, 3: the fault, 4: the
+	// fold, 5: the continue call, 6: the child's first Turn).
+	opening := responder.requests[6]
+	wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + childFoldSummary + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+	if got := lastUserText(opening); got != wantTask {
+		t.Errorf("the continued child opened on\n%s\nwant\n%s", got, wantTask)
+	}
+	completed, ok := subAgentResultFor(sink.events, "c2")
+	if !ok || completed.IsError || completed.Content != "the survey is now complete" {
+		t.Errorf("the continued child's result = %+v, want its completed report", completed)
+	}
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v after the continuation completed, want none — the entry is consumed", names)
+	}
+}
+
+// TestSubAgent_FaultedDelegateFoldFailureRetainsTheUnavailableMarker keeps the cap path's fold
+// contract on the fault path: a summary call that faults too retains the unavailable marker naming
+// its cause, the error result still carries the continue line, and the continuation's task shows
+// that marker under the previous-attempt head rather than an empty body.
+func TestSubAgent_FaultedDelegateFoldFailureRetainsTheUnavailableMarker(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := faultedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName, []provider.Delta{{Kind: provider.DeltaError, Err: "summarizer exploded"}})
+	scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, continueInstructions, 0)))
+	scripts = append(scripts, contentScript("the survey is now complete"), contentScript("parent done"))
+	responder := &requestLogResponder{scripts: scripts}
+
+	runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), responder)
+
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	opening := lastUserText(responder.requests[6])
+	head := previousAttemptHead + "\n[engine summary unavailable — "
+	if !strings.Contains(opening, head) || !strings.Contains(opening, "summarizer exploded") {
+		t.Errorf("the continued child opened on\n%s\nwant the unavailable marker naming the summarizer's fault under %q", opening, previousAttemptHead)
+	}
+}
+
+// TestSubAgent_ZeroTurnFaultedDelegateSkipsTheFold pins the zero-Turn gate: a child that faults on
+// its FIRST request has no history worth a summary call, so none is made; it is still retained
+// with its closing text (none) and the continue line, and the continuation's task carries the
+// unavailable marker naming the reason under the previous-attempt head — never an empty body.
+func TestSubAgent_ZeroTurnFaultedDelegateSkipsTheFold(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName)),
+		{{Kind: provider.DeltaError, Err: "the upstream died"}}, // the child's first request faults
+		toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, continueInstructions, 0)),
+		contentScript("the survey is now complete"),
+		contentScript("parent done"),
+	}
+	responder := &requestLogResponder{scripts: scripts}
+
+	runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), responder)
+
+	if got := len(responder.requests); got != 5 {
+		t.Fatalf("the upstream saw %d requests, want 5 — no fold request for a child that completed no Turn", got)
+	}
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	opening := lastUserText(responder.requests[3])
+	wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + fmt.Sprintf(engineFoldUnavailableFormat, zeroTurnFoldCause) + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+	if opening != wantTask {
+		t.Errorf("the continued child opened on\n%s\nwant\n%s", opening, wantTask)
+	}
+}
+
+// TestSubAgent_FaultedDelegateFoldIsBounded pins the fold's own deadline: a summary call that
+// stalls past Config.StreamIdleTimeout while the parent ctx stays live is cut, the marker names the
+// bound, and the error result lands with the continue line — not "" and not a cancel.
+func TestSubAgent_FaultedDelegateFoldIsBounded(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.StreamIdleTimeout = 20 * time.Millisecond
+	scripts := faultedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName, nil)
+	scripts = append(scripts, contentScript("parent done"))
+	responder := &blockAtResponder{scripts: scripts, blockAt: 4, started: make(chan struct{})} // call 4 is the fold
+
+	a := runCappedSurveyParent(t, cfg, responder)
+
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	retained, ok := a.retained.lookup(retainedSurveyName)
+	if !ok {
+		t.Fatalf("no delegation retained under %q", retainedSurveyName)
+	}
+	want := fmt.Sprintf(engineFoldUnavailableFormat, fmt.Sprintf(foldBoundExceededFormat, "20ms"))
+	if retained.fold != want {
+		t.Errorf("retained fold = %q, want %q", retained.fold, want)
+	}
+}
+
+// TestSubAgent_CancelledDelegateIsNotRetained keeps D2: a cancel while the child runs unwinds the
+// whole delegation — no fold, no result, no retained name, so nothing to continue.
+func TestSubAgent_CancelledDelegateIsNotRetained(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	scripts := [][]provider.Delta{toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName))}
+	scripts = append(scripts, cappedChildTurns(1)...)
+	responder := &blockAtResponder{scripts: scripts, blockAt: 2, started: make(chan struct{})} // the child's second Turn blocks
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("parent result = %+v, want a cancel", res)
+	}
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v after a cancel, want none", names)
+	}
+	if got := responder.calls; got != 3 {
+		t.Errorf("the upstream saw %d calls, want 3 — no fold request after a cancel", got)
+	}
+	if _, ok := subAgentResultFor(sink.events, "c1"); ok {
+		t.Error("a cancelled delegation surfaced a result")
+	}
+}
+
+// TestSubAgent_UnnamedFaultedDelegateIsNotRetained is the floor the cap path shares: a faulted
+// delegation that ended its run without a name has no handle, so it is not retained and its error
+// result carries no continue line.
+func TestSubAgent_UnnamedFaultedDelegateIsNotRetained(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := [][]provider.Delta{subAgentCallScript("c1", retainedSurveyTask)}
+	scripts = append(scripts, cappedChildTurns(2)...)
+	scripts = append(scripts, []provider.Delta{{Kind: provider.DeltaError, Err: "the upstream died"}}, foldScript(700, 40), contentScript("parent done"))
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok || !faulted.IsError {
+		t.Fatalf("faulted result = %+v, want an error result", faulted)
+	}
+	if strings.Contains(faulted.Content, "to continue this delegate") {
+		t.Errorf("faulted result = %q, carries a continue line for a delegation nothing is retained under", faulted.Content)
+	}
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v, want none — an unnamed delegation has no handle", names)
 	}
 }
 

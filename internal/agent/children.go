@@ -83,25 +83,26 @@ func (r *childRegistry) all() []*Agent {
 }
 
 // retainedDelegate is what a parent keeps of ONE delegation the engine stopped at a bound (plan
-// 2026-09-18 - 00, P6): everything a continuation needs to spawn a fresh child that picks up where
-// the capped one left off — the task and roster the spawning call asked for, the output path it
-// named, the engine fold and closing text the capped result carried, and which bound ended it.
-// It is a value: every field is copied at retention, after the child's run has been read and
-// reported, so nothing here aliases a child that runSubAgent's defer is about to close.
+// 2026-09-18 - 00, P6), or that FAULTED with the parent still live (ADR 0082): everything a
+// continuation needs to spawn a fresh child that picks up where the capped or faulted one left
+// off — the task and roster the spawning call asked for, the output path it named, the engine
+// fold and closing text the child left, and which bound ended it. It is a value: every field is
+// copied at retention, after the child's run has been read and reported, so nothing here aliases
+// a child that runSubAgent's defer is about to close.
 type retainedDelegate struct {
 	task          string               // the delegated task, as the spawning call spelled it
 	name          string               // the display name the child ended its run wearing — the key it is retained under
 	tools         tools.SubAgentRoster // the `tools` argument as the call asked it, unresolved: re-resolved against the parent's menu on a continuation
 	outputPath    string               // the `output_path` argument as the call spelled it; "" when it named none
-	fold          string               // the engine fold the capped result carried under `[engine summary]` (Agent.capFold)
-	closingReport string               // the child's closing text as the capped result forwarded it (Agent.lastVisibleText); "" for a wordless child
-	bound         delegateBound        // which bound ended the child (Agent.capHit)
-	spawnCallID   string               // the sub_agent call the capped child answered
+	fold          string               // the engine fold written at the bound or the fault (Agent.capFold) — under `[engine summary]` in a capped result, retained only for a faulted one
+	closingReport string               // the child's last words (Agent.lastVisibleText): the closing text a capped result forwarded, the last narration a faulted child committed; "" for a wordless child
+	bound         delegateBound        // which bound ended a capped child (Agent.capHit); the zero value for a faulted one, which no bound ended
+	spawnCallID   string               // the sub_agent call the retained child answered
 }
 
-// retainedDelegates is the set of capped delegations ONE Agent holds for the rest of its Exchange,
-// keyed by delegation name — the handle the parent model already knows a delegation by, and the
-// only one it can spell back. It exists in memory only: the map is cleared as the next Exchange
+// retainedDelegates is the set of capped or faulted delegations ONE Agent holds for the rest of
+// its Exchange, keyed by delegation name — the handle the parent model already knows a delegation
+// by, and the only one it can spell back. It exists in memory only: the map is cleared as the next Exchange
 // opens (Agent.step) and never reaches the session snapshot (ADR 0022 D8, ADR 0013 §5 — a
 // delegation is opaque to everything outside the engine, and a continuation belongs to the
 // Exchange that started the work it continues). It is guarded because the depth-0 fan-out retains
@@ -113,7 +114,7 @@ type retainedDelegates struct {
 	byName map[string]retainedDelegate
 }
 
-// retain keeps d under its name. The same name replaces an earlier entry: two capped children a
+// retain keeps d under its name. The same name replaces an earlier entry: two retained children a
 // parent named alike are two attempts at one piece of work, and the latest is the one a
 // continuation should pick up from. An unnamed delegation (d.name == "") is not retained — there is
 // no handle a continuation could name it by.
@@ -129,7 +130,7 @@ func (r *retainedDelegates) retain(d retainedDelegate) {
 	r.byName[d.name] = d
 }
 
-// lookup returns the capped delegation retained under name.
+// lookup returns the delegation retained under name.
 func (r *retainedDelegates) lookup(name string) (retainedDelegate, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -137,9 +138,9 @@ func (r *retainedDelegates) lookup(name string) (retainedDelegate, bool) {
 	return d, ok
 }
 
-// take returns the capped delegation retained under name and FORGETS it: a continuation consumes
+// take returns the delegation retained under name and FORGETS it: a continuation consumes
 // the entry it starts from, so the same fold is never continued twice — the continued child is
-// retained anew, under the same name, if it caps again.
+// retained anew, under the same name, if it caps or faults again.
 func (r *retainedDelegates) take(name string) (retainedDelegate, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
