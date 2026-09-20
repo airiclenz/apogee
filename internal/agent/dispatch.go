@@ -634,10 +634,13 @@ func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 //
 // Engine-composed and no steering (ADR 0023 2026-08-25 amendment): the line reports the width the
 // group actually ran under — the once-per-reply snapshot fanOutWidthFor took at dispatch — and
-// says nothing about what the model should do with it. The orientation block is deliberately not
-// where it lives: the width can change per reply (a latched Delegation target, a mixed-seat group)
-// while the orientation facts are session-constant (ADR 0069 decisions 4 and 6). The arguments are
-// K (the delegations past the width), N (the group's size) and W (the width).
+// says nothing about what the model should do with it. It is deliberately not the orientation
+// block's number: the width a group RAN at can change per reply (a mixed-seat group takes the
+// smaller cap, a target that dropped mid-session), while the width the orientation block's
+// Delegation bounds STATE is the latched-per-seat statedDelegationWidth — moved only by the
+// human's doors and a cap's first statement (ADR 0069 decision 6 as superseded in part
+// 2026-09-20) — so this line is the account of the run and that bullet the promise before it. The
+// arguments are K (the delegations past the width), N (the group's size) and W (the width).
 const fanOutWidthNoteFormat = "[%d of this group's %d delegations ran after the others finished — the width is %d]"
 
 // fanOutWidthNote renders the delegation-width line for a group of `group` delegations that ran

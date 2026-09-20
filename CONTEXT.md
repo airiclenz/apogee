@@ -216,7 +216,8 @@ or an array of tool names — always intersected with the parent's roster, never
 When one reply carries several `sub_agent` calls, the **top-level** agent runs them
 **concurrently** up to the server's **Parallel agents** cap (depth-0 only — a sub-agent's
 own delegations run serially inline; a reply split across **Delegation seats** takes the
-smaller of the two caps); every event a sub-agent emits carries the **call-ID**
+smaller of the two caps), and only up to the **Fan-out ceiling** — the `sub_agent` calls past it
+are refused, not queued; every event a sub-agent emits carries the **call-ID**
 of the `sub_agent` call that spawned it, so interleaved streams stay attributable
 ([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
 A delegation the group has **not started** when an **Interjection** is staged for its parent is
@@ -304,6 +305,29 @@ oversubscribed, and never a pool per seat. See
 _Avoid_: "slots" (the server's own term for its side of the trade), "concurrency limit"
 (names the bound, not the thing bounded), "fan-out width" (fan-out is the act; this is the
 cap).
+
+**Fan-out ceiling**:
+How many `sub_agent` calls ONE reply may fan out before the rest are refused:
+`delegate-fanout-rounds` (a file-only key, default **2**; `0` switches it off) **rounds** of the
+width the engine states to the model — the **Sub-agent server**'s cap once it has stated one since
+the seat last moved, else the session server's **Parallel agents** cap, and **1** on a sub-agent.
+The first `rounds × width` `sub_agent` calls in emitted order run as any group does; every later
+one in the reply commits, in call order, the tool result `sub-agent not started: this reply fanned
+out N delegations and the ceiling is C (R rounds × width W) — the first C ran; delegate the rest
+again once their results are in` with a finished phase and no started one — the **Interjection**
+skip's shape — takes a `refused` row in the **delegate ledger**, and leaves the group without a
+width line (the refusal already names the width). Leaf tools in the same reply are never counted.
+Relative to the width because the width is what one round costs in time: two rounds is two rounds
+on any server. There is deliberately **no floor** and it applies at **every depth**: an unkeyed
+local server has width 1, so at the default rounds a reply of three delegations there refuses the
+third, and a sub-agent's own ceiling is the round count itself. Refused rather than held and
+re-issued by the engine: the bound exists so a coordinator cannot commit itself to more work than
+it can read a result of before the group returns (the 2026-09-20 session it closes fanned 56 out at
+width 4, 35 never started, and lost the lot to one Esc), and the model is told the ceiling before
+its first call by the **Orientation block**'s `Delegation bounds:` line and the `max_steps`
+schema text. Ratified 2026-09-20 (ADR 0039, amended the same day).
+_Avoid_: "fan-out cap" (the cap is the width; this is a count of rounds of it), "delegation
+limit" (says nothing about what is bounded — calls per reply, not per session).
 
 **Sub-agent server**:
 The `servers:` entry the root `sub-agents-server:` key names — the server **every delegation
@@ -1085,7 +1109,12 @@ work space, not a cache with an invalidation story).
 **Orientation block**:
 The engine-composed part of the **standing system content** that states the host facts a model
 needs to get oriented — the **workspace** path, its **Scratch dir**, the `/tmp` caveat, the
-read-only library roots with the tools that reach them, and — only under `sub-agents-choice:
+read-only library roots with the tools that reach them, a **Delegation bounds** line whenever
+`sub_agent` is on the roster — `up to W run at once; a reply may fan out at most C — calls past
+that are refused and must be delegated again; a reply's whole group returns together; each
+delegate is capped at S Turns (a max_steps above that is clamped)`, the width the latched
+per-seat number the **Fan-out ceiling** multiplies, the ceiling and cap clauses omitted when
+their key is `0` — and — only under `sub-agents-choice:
 model` — a **Delegations** line describing both **Delegation seats** symmetrically (each seat's
 entry name, its `description:`, its `model:` pin and the bound session model) so the model can
 choose a `run_on`. It is **harness text, not persona text**:
@@ -1101,7 +1130,9 @@ one) → context files → mechanism directives → tool block — so no workspa
 repo file cannot open with a forged copy the
 real one then reads as a correction of; every fact it states moves only on a session-level door, so it is prefix-KV-cache safe between them —
 the Delegations line carries no availability state and moves only on the human doors (`/server`,
-`/model`, `/sub-agents-server`), the way the **Scratch dir** moves at a session boundary (the
+`/model`, `/sub-agents-server`), the Delegation bounds' width is latched per seat and moves only on
+those doors and on a cap's first statement — never on a target-down beat (ADR 0069 decision 6,
+superseded in part 2026-09-20) — the way the **Scratch dir** moves at a session boundary (the
 **Mode** gated the scratch line for one day, 2026-09-14, until ADR 0012's second loosen made Plan
 write there too; the mode is no longer an input). A
 fact the session does not have is omitted rather than rendered empty. See

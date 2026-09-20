@@ -1711,7 +1711,20 @@ context files (below), or both — apogee places its own short **orientation blo
 right after your prompt, ahead of any workspace context files, naming the workspace,
 this session's scratch directory (in every mode — Plan included, since the scratch
 directory is the one place Plan may write) and any read-only library roots the model
-may read from. In **Plan** it carries one bullet more, `Mode: plan — …`, naming what
+may read from. Whenever the model has the `sub_agent` tool it carries a `Delegation
+bounds:` bullet too, so the model knows the shape of a fan-out before its first call —
+how many delegations run at once (the server's `parallel-agents:` width, or the
+sub-agents server's once it has reported one), how many one reply may fan out before the
+rest are refused (`delegate-fanout-rounds:` rounds of that width; the clause is absent
+when the key is `0`), that a reply's whole group returns together, and the step cap each
+delegate runs under (`delegate-max-steps:`; absent when `0`), with the note that a
+`max_steps` above it is clamped:
+
+    - Delegation bounds: up to 4 run at once; a reply may fan out at most 8 — calls past that are refused and must be delegated again; a reply's whole group returns together; each delegate is capped at 80 Turns (a max_steps above that is clamped).
+
+The width in that line moves only where you move it — `/server`, `/sub-agents-server` —
+and when a server first reports its slot count, never when one merely goes down and
+comes back. In **Plan** it carries one bullet more, `Mode: plan — …`, naming what
 the mode withholds — `terminal`, `run_tests`, `python_exec`, `web_fetch`, `web_search`,
 `http_request` and MCP tools — and asking the model to report what it would run instead;
 the other three rungs, which withhold nothing the prompt promises, carry no such line.

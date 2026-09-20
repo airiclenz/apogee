@@ -326,6 +326,11 @@ summary]` and the call's `task` under `[continuation instructions]`; name, roste
 continue refused on its own arguments keeps it, apogee-if9); an unknown name is refused with the
 retained names. Each continuation is a new Run under `min(max_steps, delegate-max-steps)` — "only
 lowers" holds per Run — and the engine caps the number of continuations at nothing.
+Since 2026-09-20 (plan `2026-09-20 - 00`) the cap is announced before the first call — the
+orientation block's `Delegation bounds:` line states `each delegate is capped at S Turns (a
+max_steps above that is clamped)` — and the `SubAgentStarted` phase event carries the applied cap
+and the cap the call asked for (`StepCap`, `CapRequested`), so a Driver can show the human what a
+running child runs under.
 
 **§5 stands, read against both.** A continuation is a new **atomic child Run inside a parent tool
 dispatch**, exactly as the first run was: the parent is mid-`sub_agent` while it runs, so no

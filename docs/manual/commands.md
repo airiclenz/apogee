@@ -94,7 +94,17 @@ own inside the window disarms it too, so the hint never outlives what it offered
 stop. A stop keeps what the run had finished: the steps completed before it — the tool
 calls and their results — stay in the conversation and in the saved session, only the step
 under way is dropped, and the model is told at its next request that you stopped the run
-there, so it neither redoes that work nor mistakes its silence for an answer. A stop that
+there, so it neither redoes that work nor mistakes its silence for an answer. One thing a
+stop does not keep: a group of delegations still in flight is dropped **whole**, the
+sub-agents that had already finished along with the ones still running, because the whole
+group is one step of your agent's until the last of them returns. While such a group is
+running the first `esc`'s hint says what the second would cost and names the alternative —
+`press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them` (or
+`1 finished delegation`), or, when none has finished yet and some are still waiting for a
+slot, `press esc again to stop — ⏎ a message instead skips the 5 queued`. Sending a message
+instead of the second `esc` keeps everything: the running sub-agents finish, the ones not yet
+started are skipped and the model is told so, and your message lands once the running ones
+finish — the queue rule above. A stop that
 finds nothing finished — the model had not completed a single step — leaves nothing behind
 instead: the prompt itself comes back out of the conversation, as if it had never been sent.
 Only `/clear` throws a stopped exchange away. The box

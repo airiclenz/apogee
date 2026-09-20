@@ -100,6 +100,17 @@ exception; the scratch-dir move is the precedent for a fact that changes only at
 boundary. An unusable target is not withheld from the model — it is reported by decision 8's note,
 after the fact, where it costs no cache.
 
+> **Superseded in part 2026-09-20 (plan `2026-09-20 - 00`, item 4; ADR 0039's 2026-09-20 note).** The
+> orientation block now carries a `Delegation bounds:` line whose first clause states a width — `up
+> to W run at once` — and the width is a number a heartbeat may discover. "No beat-driven text of any
+> kind" is kept for the Delegations line and relaxed for ONE latched-per-seat number
+> (`statedDelegationWidth`): the far server's cap once it has stated one since the seat last moved,
+> else the session server's. It moves only on the human's doors (`/server`, `/sub-agents-server`) and
+> on a cap's FIRST statement — a heartbeat's slot discovery, the far server's first stated cap — and
+> never on a target-down beat, so a flapping far server cannot flap the prompt; the beat that re-states
+> an unchanged cap re-renders the block byte-identical. Availability state stays out of the block, as
+> written above.
+
 **7 — A mixed reply is sized by the smaller cap; a single-seat reply keeps its seat's cap — this
 amends [ADR 0039](0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)
 decision 3.** One depth-0 reply may now fan out to both seats at once, which ADR 0039 never had to

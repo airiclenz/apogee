@@ -100,7 +100,8 @@ release-while-delegating budget is additive, if evidence ever wants it.
 **4 — Execution semantics preserve every existing per-child rule.** In a mixed reply,
 **leaf tools run first, in emitted order** — a write a child depends on lands before
 children start — then the `sub_agent` group fans out through a pool bounded by the cap
-(more calls than cap queue for free slots). Each child keeps ADR 0013's whole contract:
+(more calls than cap queue for free slots, up to the fan-out ceiling of the 2026-09-20 note below —
+the calls past that ceiling are refused, never queued). Each child keeps ADR 0013's whole contract:
 per-call disposition one level down, isolated guard state, tighten-only live mode, panic
 recovery at its own boundary. **Failures are independent**: a child's error, breaker trip,
 or denied approval becomes that child's tool result; siblings run to completion and the
@@ -115,6 +116,8 @@ cancel during child 2 already discards child 1.
 > of aborting it, so the Turns that finished before the delegating one are kept and the saved
 > record holds them (ADR 0013 §5's 2026-09-19 note; ADR 0022's). A finer cut inside the pool —
 > keeping the children that finished before the Esc — is Stage B and stays on `apogee-2un`.
+> Since 2026-09-20 the fan-out ceiling (the note after next) bounds what Stage B would recover to
+> at most one round — `delegate-fanout-rounds × width` — so the loss it parks is no longer unbounded.
 
 > **Amended 2026-09-14 — the pool yields its queued slots to a pending message.** A slot
 > waiting behind the cap is not owed a run. When a user message is staged for the top-level
@@ -131,6 +134,44 @@ cancel during child 2 already discards child 1.
 > by a message** — this decision's cancel rule stands untouched: Esc is still the only cancel,
 > and it still rolls the whole parent Turn back. Firings keep waiting for a quiescent host
 > (ADR 0033 D7). Implemented by `docs/plans/2026-09-14 - 01`.
+
+> **Amended 2026-09-20 — a reply's fan-out is bounded by a ceiling.** A reply is no longer free to
+> fan out every `sub_agent` call it emits, the calls past the width queuing until a worker frees:
+> the first `delegate-fanout-rounds × width` `sub_agent` calls in emitted order run as before (a
+> file-only key, default **2** rounds; `0` switches the ceiling off), and every later `sub_agent`
+> call in the reply is **refused** at dispatch, in the 2026-09-14 skip's shape — a finished phase
+> alone, no started phase, no audit entry, committed in call order — with the constant-format
+> error-shaped result `sub-agent not started: this reply fanned out %d delegations and the ceiling
+> is %d (%d rounds × width %d) — the first %d ran; delegate the rest again once their results are
+> in`. Leaf tools in the same reply are never counted or refused, and pre-emption still decides at
+> dequeue among the calls that run. A refused call takes a `refused` row in the delegate ledger
+> (`refusePastCeiling`'s own write, its cause the result's head line, numbered behind the slots
+> that ran), and a group with a refused slot states no width line — the refusal already names the
+> width. The `width` is the one the engine STATES to the model (`statedDelegationWidth`): the
+> Sub-agent server's cap once it has stated one since the seat last moved, else the session
+> server's, and 1 on a delegate — so the ceiling applies at **every depth** (a delegate's ceiling is
+> `rounds` outright) and there is deliberately **no floor**: an unkeyed, unpinned local server has
+> width 1, so at the default rounds a reply of three delegations there refuses the third (owner,
+> 2026-09-20: "no floor, apply at every depth"). Decisions 1 and 2 are superseded in wording for
+> the ceiling: "cap 1 reproduces today's behavior exactly" and "nothing changes for an unkeyed
+> server until it advertises slots or the owner opts in" now hold for the **width** only. The
+> overflow is refused rather than held back and re-issued by the engine: the session this closes
+> (2026-09-20, a 56-dispatch reply at width 4 — 35 never started, the coordinator blind for 1h41m
+> and the whole Turn rolled back on Esc) is a coordinator committing itself to more than it can read
+> a single result of before the group returns, and an engine that quietly re-issued the overflow
+> would preserve exactly that; refused, the coordinator is told in its own results, in the same
+> words every time, and decides what to delegate again once the round it did get has reported. The
+> bounds are announced before the first call: the orientation block gains `- Delegation bounds: up
+> to W run at once; a reply may fan out at most C — calls past that are refused and must be
+> delegated again; a reply's whole group returns together; each delegate is capped at S Turns (a
+> max_steps above that is clamped).` whenever `sub_agent` is on the roster (the ceiling and cap
+> clauses omitted when their key is `0`), and the `max_steps` schema text points at it. That width
+> clause supersedes [ADR 0069](0069-the-top-level-model-picks-the-delegation-seat.md) decision 6's
+> "no beat-driven text of any kind" for ONE latched-per-seat number: it is moved only by the human's
+> doors (`/server`, `/sub-agents-server`) and a cap's first statement (a heartbeat's slot discovery,
+> the far server's first stated cap), never by a target-down beat — and `fanOutWidthNoteFormat`'s
+> width line remains the account of what a group actually RAN at, which may differ per reply.
+> Implemented by `docs/plans/2026-09-20 - 00`.
 
 **5 — Child streams are identified by the spawning call-ID.** `EventBase` gains the ID of
 the `sub_agent` tool call that spawned the emitting agent, stamped at child construction
