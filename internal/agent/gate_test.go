@@ -111,7 +111,7 @@ func readCallOnly() domain.ToolCall {
 // committing it — the seam these tests observe the gate fold at — and returns the result the call
 // reached and how it ended.
 func prepareAndRun(a *Agent, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
-	slot := a.prepareCall(context.Background(), 0, call, true)
+	slot := a.prepareCall(context.Background(), 0, call, true, 0, 1)
 	a.runCall(context.Background(), 0, &slot)
 	return slot.result, slot.outcome
 }
@@ -409,7 +409,7 @@ func TestGateOnADelegation(t *testing.T) {
 		a := gateAgent(t, sink, &gateApprover{decision: domain.ApprovalAllow}, nil,
 			userGate("warden", "/bin/sh", "-c", `printf 'ask\nlooks risky\n'`))
 
-		slot := a.prepareCall(context.Background(), 0, delegation, true)
+		slot := a.prepareCall(context.Background(), 0, delegation, true, 0, 1)
 
 		if !slot.run || slot.verdict.kind != resolveDelegate {
 			t.Fatalf("slot = run:%v kind:%v, want the delegation to proceed", slot.run, slot.verdict.kind)
@@ -430,7 +430,7 @@ func TestGateOnADelegation(t *testing.T) {
 		a := gateAgent(t, sink, &gateApprover{decision: domain.ApprovalAllow}, nil,
 			userGate("warden", "/bin/sh", "-c", "echo deny"))
 
-		slot := a.prepareCall(context.Background(), 0, delegation, true)
+		slot := a.prepareCall(context.Background(), 0, delegation, true, 0, 1)
 
 		if slot.run {
 			t.Fatal("the delegation ran despite a denying gate")

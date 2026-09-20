@@ -158,8 +158,17 @@ func (l *delegationLatch) snapshot() *DelegationTarget {
 //
 // Calling it on a sub-agent is legal but re-routes the WHOLE tree, holder being shared: hosts push
 // to the top-level Agent they constructed.
+//
+// A usable target also STATES the far server's width for the number the engine tells the model
+// (statedDelegationWidth, agent.go): the fan-out ceiling's multiplier and the orientation block's
+// bounds. Only a non-nil target writes it — a nil one is a target-down beat, and the stated width
+// stands across it — so the model-facing number moves when a cap is first stated and not when the
+// far server flaps; the human's `/sub-agents-server` door (SetDelegationSeat) is what forgets it.
 func (a *Agent) SetDelegationTarget(target *DelegationTarget) {
 	a.delegation.set(target)
+	if target != nil {
+		a.stateFarWidth(target.ParallelAgents)
+	}
 }
 
 // delegationTarget snapshots the tree's current Delegation target for one spawn, nil meaning

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"iter"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -1268,5 +1269,369 @@ func TestSplitUserSteeredTrailer(t *testing.T) {
 				t.Errorf("splitUserSteeredTrailer(%q) = %q, %q; want %q, %q", tc.content, body, trailer, tc.body, tc.trailer)
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The fan-out ceiling (plan 2026-09-20 - 00 item 2)
+// ----------------------------------------------------------------------------
+//
+// A reply may fan out at most `delegate-fanout-rounds` × the stated width delegations; every later
+// sub_agent call in the reply is refused with the ceiling result, on its own row, before pre-emption
+// or the pool ever sees it. The tests below read the committed results and the lifecycle phases
+// off the sink exactly as a Driver and the parent model do, and the delegate ledger off the Agent,
+// because the refused rows are the ceiling's own write.
+
+// manyFanOutParent builds a parent whose reply delegates n tasks ("task 1" … "task n") at the given
+// session cap and fan-out rounds, every child answering "child <i> done". reactions are armed on
+// the parent as given — the ceiling tests use one to watch the pre-tool-exec Moment.
+func manyFanOutParent(
+	t *testing.T,
+	sink domain.EventSink,
+	sessionCap, rounds, n int,
+	reactions ...domain.Reaction,
+) *Agent {
+	t.Helper()
+	pairs := make([][2]string, 0, n)
+	for i := 1; i <= n; i++ {
+		pairs = append(pairs, [2]string{fmt.Sprintf("c%d", i), fmt.Sprintf("task %d", i)})
+	}
+	up := newRoutedResponder().
+		route("delegate many things", nil, fanOutScript(pairs...)).
+		route("delegate many things", nil, contentScript("parent done"))
+	for i := 1; i <= n; i++ {
+		up.route(fmt.Sprintf("task %d", i), nil, contentScript(fmt.Sprintf("child %d done", i)))
+	}
+
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = sessionCap
+	cfg.Delegation.FanOutRounds = rounds
+	cfg.Reactions = reactions
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate many things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	return a
+}
+
+// preToolExecWatcher is a pre-tool-exec Reaction that records the id of every call it was fired
+// for, so a test can prove the Moment fired for a call the ceiling then refused.
+func preToolExecWatcher(seen *[]string, mu *sync.Mutex) domain.Reaction {
+	return domain.Reaction{
+		ID:     "watch",
+		Origin: domain.OriginEngine,
+		Class:  domain.ClassShapeWork,
+		On:     []domain.Moment{domain.MomentPreToolExec},
+		Handler: domain.PreToolExecFunc(
+			func(_ context.Context, _ domain.LoopView, edit *domain.ToolCallEdit) (domain.Outcome, error) {
+				mu.Lock()
+				*seen = append(*seen, edit.ID())
+				mu.Unlock()
+				return domain.Outcome{}, nil
+			}),
+	}
+}
+
+// eventIndex is the position in events of the first depth-0 ToolCallEvent for callID, or -1.
+func eventIndex(events []domain.Event, callID string) int {
+	for i, e := range events {
+		if ce, ok := e.(domain.ToolCallEvent); ok && ce.Depth == 0 && ce.Call.ID == callID {
+			return i
+		}
+	}
+	return -1
+}
+
+// finishedIndex is the position in events of the finished phase for callID, or -1.
+func finishedIndex(events []domain.Event, callID string) int {
+	for i, e := range events {
+		if pe, ok := e.(domain.SubAgentPhaseEvent); ok && pe.CallID == callID && pe.Phase == domain.SubAgentFinished {
+			return i
+		}
+	}
+	return -1
+}
+
+// assertCeilingRefusal pins the whole account of a delegation refused past the ceiling: its
+// committed result is exactly want as an error, its ToolCallEvent was surfaced and the
+// pre-tool-exec Moment fired for it before the refusal, its bracket is ONE finished phase carrying
+// that result, and no audit record was booked.
+func assertCeilingRefusal(t *testing.T, events []domain.Event, seen []string, result domain.ToolResult, want string) {
+	t.Helper()
+	if !result.IsError || result.Content != want {
+		t.Errorf("%s result = %+v, want exactly the ceiling refusal as an error result:\n%s", result.CallID, result, want)
+	}
+	call, finished := eventIndex(events, result.CallID), finishedIndex(events, result.CallID)
+	if call < 0 || finished < 0 || call > finished {
+		t.Errorf("%s ToolCallEvent at %d, finished phase at %d; want the call surfaced before the refusal", result.CallID, call, finished)
+	}
+	if !slices.Contains(seen, result.CallID) {
+		t.Errorf("the pre-tool-exec Moment never fired for %s; a refused call still crosses it", result.CallID)
+	}
+	phases := phasesFor(events, result.CallID)
+	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished {
+		t.Fatalf("%s phases = %+v, want exactly one finished phase and no started one", result.CallID, phases)
+	}
+	if phases[0].Cancelled || phases[0].Result.Content != want {
+		t.Errorf("%s finished phase = %+v, want the refusal result and not Cancelled", result.CallID, phases[0])
+	}
+	for _, ae := range auditEvents(events) {
+		if ae.CallID == result.CallID {
+			t.Errorf("%s was audit-recorded (%+v); a child that never ran books no record", result.CallID, ae)
+		}
+	}
+}
+
+// TestStatedDelegationWidth_LatchesPerSeat pins the one width seam the engine states: seeded from
+// cfg.ParallelAgents and moved by SetParallelAgents; the far width written by a non-nil
+// SetDelegationTarget, kept across a nil one and across a session-width beat, cleared by
+// SetDelegationSeat; and 1 on a delegate whatever is latched.
+func TestStatedDelegationWidth_LatchesPerSeat(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 2
+	a, err := newAgent(cfg, newRoutedResponder())
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if got := a.statedDelegationWidth(); got != 2 {
+		t.Errorf("stated width at construction = %d, want cfg.ParallelAgents 2", got)
+	}
+
+	a.SetParallelAgents(3)
+	if got := a.statedDelegationWidth(); got != 3 {
+		t.Errorf("stated width after SetParallelAgents(3) = %d, want 3", got)
+	}
+
+	a.SetDelegationTarget(gruntTarget(gruntEndpoint, 5))
+	if got := a.statedDelegationWidth(); got != 5 {
+		t.Errorf("stated width with a five-slot target latched = %d, want the far width 5", got)
+	}
+	a.SetDelegationTarget(nil)
+	if got := a.statedDelegationWidth(); got != 5 {
+		t.Errorf("stated width across a target-down beat = %d, want the far width 5 kept", got)
+	}
+	a.SetParallelAgents(1)
+	if got := a.statedDelegationWidth(); got != 5 {
+		t.Errorf("stated width across a session-width beat = %d, want the far width 5 kept", got)
+	}
+
+	a.SetDelegationSeat(nil)
+	if got := a.statedDelegationWidth(); got != 1 {
+		t.Errorf("stated width after the seat moved = %d, want the session width 1", got)
+	}
+
+	a.SetDelegationTarget(gruntTarget(gruntEndpoint, 0))
+	if got := a.statedDelegationWidth(); got != 1 {
+		t.Errorf("stated width with a serial target latched = %d, want 1, never below", got)
+	}
+
+	a.SetParallelAgents(4)
+	a.depth = 1
+	if got := a.statedDelegationWidth(); got != 1 {
+		t.Errorf("stated width on a delegate = %d, want 1 (a child's delegations run serially)", got)
+	}
+}
+
+// TestFanOut_CeilingReadsTheLatchedFarWidth pins the ceiling's multiplier as the STATED width: a
+// far target latched at 3 with the session at 1 gives two rounds a ceiling of 6, and it stays 6
+// across a target-down beat, because the number the model is told does not follow a flap.
+func TestFanOut_CeilingReadsTheLatchedFarWidth(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 1
+	cfg.Delegation.FanOutRounds = 2
+	a, err := newAgent(cfg, newRoutedResponder())
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if got := a.fanOutCeiling(); got != 2 {
+		t.Errorf("ceiling at session width 1 = %d, want 2", got)
+	}
+
+	a.SetDelegationTarget(gruntTarget(gruntEndpoint, 3))
+	if got := a.fanOutCeiling(); got != 6 {
+		t.Errorf("ceiling with a three-slot target latched = %d, want 6", got)
+	}
+	a.SetDelegationTarget(nil)
+	if got := a.fanOutCeiling(); got != 6 {
+		t.Errorf("ceiling across a target-down beat = %d, want 6 kept", got)
+	}
+
+	a.cfg.Delegation.FanOutRounds = 0
+	if got := a.fanOutCeiling(); got != 0 {
+		t.Errorf("ceiling at rounds 0 = %d, want 0 (no ceiling)", got)
+	}
+}
+
+// TestFanOut_CeilingRefusesTheCallsPastIt is the item's core: ten delegations at width 4 under two
+// rounds. The first eight run and commit in call order; the ninth and tenth carry the exact
+// refusal — each still surfaced as a call and crossed by the pre-tool-exec Moment before it — with
+// a finished phase alone, no width line anywhere, and the ledger's rows 9 and 10 `refused` behind
+// the eight reserved slots.
+func TestFanOut_CeilingRefusesTheCallsPastIt(t *testing.T) {
+	sink := &recordingSink{}
+	var seen []string
+	var mu sync.Mutex
+
+	a := manyFanOutParent(t, sink, 4, 2, 10, preToolExecWatcher(&seen, &mu))
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete {
+		t.Fatalf("parent status = %q, want the Exchange to complete", res.Status)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 10 {
+		t.Fatalf("depth-0 tool results = %d, want 10 (the refused slots still commit)", len(results))
+	}
+	for i := 0; i < 8; i++ {
+		want := fmt.Sprintf("child %d done", i+1)
+		if results[i].CallID != fmt.Sprintf("c%d", i+1) || results[i].IsError || !strings.Contains(results[i].Content, want) {
+			t.Errorf("result %d = %+v, want c%d's real result %q in call order", i+1, results[i], i+1, want)
+		}
+		if phases := phasesFor(sink.events, results[i].CallID); len(phases) != 2 || phases[0].Phase != domain.SubAgentStarted {
+			t.Errorf("%s phases = %+v, want a started/finished pair for a child that ran", results[i].CallID, phases)
+		}
+	}
+	const want = "sub-agent not started: this reply fanned out 10 delegations and the ceiling is 8 (2 rounds × width 4) — the first 8 ran; delegate the rest again once their results are in"
+	mu.Lock()
+	fired := slices.Clone(seen)
+	mu.Unlock()
+	for _, r := range results[8:] {
+		assertCeilingRefusal(t, sink.events, fired, r, want)
+	}
+	if results[8].CallID != "c9" || results[9].CallID != "c10" {
+		t.Errorf("refused results committed as %q,%q; want c9 then c10", results[8].CallID, results[9].CallID)
+	}
+	assertNoWidthNote(t, results)
+
+	rows := a.delegations.rows()
+	if len(rows) != 10 {
+		t.Fatalf("ledger rows = %d, want 10 (eight ran, two refused)", len(rows))
+	}
+	for i, r := range rows[8:] {
+		spawn := i + 9
+		if r.spawnIndex != spawn || r.callID != fmt.Sprintf("c%d", spawn) || r.outcome != delegationRefused {
+			t.Errorf("ledger row %d = %+v, want #%d c%d refused", spawn, r, spawn, spawn)
+		}
+		if r.cause != delegationCause(want) {
+			t.Errorf("ledger row %d cause = %q, want the refusal's head line", spawn, r.cause)
+		}
+	}
+}
+
+// TestFanOut_CeilingOffRunsEveryCall pins the off switch: rounds 0 is no ceiling, so ten
+// delegations at width 4 all run and all report.
+func TestFanOut_CeilingOffRunsEveryCall(t *testing.T) {
+	sink := &recordingSink{}
+
+	a := manyFanOutParent(t, sink, 4, 0, 10)
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 10 {
+		t.Fatalf("depth-0 tool results = %d, want 10", len(results))
+	}
+	for i, r := range results {
+		if r.IsError || !strings.Contains(r.Content, fmt.Sprintf("child %d done", i+1)) {
+			t.Errorf("%s result = %+v, want the real result (a call was refused with the ceiling off)", r.CallID, r)
+		}
+	}
+}
+
+// TestDispatchSerially_CeilingAppliesAtDepthOne pins "at every depth": a delegate's stated width
+// is 1, so under two rounds its own reply of three delegations runs two grandchildren and refuses
+// the third with `width 1`. The depth bound is raised to 2 so the grandchildren can exist at all.
+func TestDispatchSerially_CeilingAppliesAtDepthOne(t *testing.T) {
+	sink := &recordingSink{}
+	up := newRoutedResponder().
+		route("delegate two things", nil, fanOutScript([2]string{"c1", "the middle task"})).
+		route("the middle task", nil, fanOutScript([2]string{"g1", "leaf one"}, [2]string{"g2", "leaf two"}, [2]string{"g3", "leaf three"})).
+		route("leaf one", nil, contentScript("leaf one done")).
+		route("leaf two", nil, contentScript("leaf two done")).
+		route("leaf three", nil, contentScript("leaf three done")).
+		route("the middle task", nil, contentScript("middle done")).
+		route("delegate two things", nil, contentScript("parent done"))
+
+	a := fanOutAgent(t, sink, 4, up)
+	a.cfg.Delegation.MaxDepth = 2
+	a.cfg.Delegation.FanOutRounds = 2
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var results []domain.ToolResult
+	for _, e := range sink.events {
+		if re, ok := e.(domain.ToolResultEvent); ok && re.Depth == 1 {
+			results = append(results, re.Result)
+		}
+	}
+	if len(results) != 3 {
+		t.Fatalf("depth-1 tool results = %d, want 3", len(results))
+	}
+	for i, want := range []string{"leaf one done", "leaf two done"} {
+		if results[i].IsError || !strings.Contains(results[i].Content, want) {
+			t.Errorf("%s result = %+v, want the real result %q", results[i].CallID, results[i], want)
+		}
+	}
+	const want = "sub-agent not started: this reply fanned out 3 delegations and the ceiling is 2 (2 rounds × width 1) — the first 2 ran; delegate the rest again once their results are in"
+	if results[2].CallID != "g3" || !results[2].IsError || results[2].Content != want {
+		t.Errorf("g3 result = %+v, want exactly the depth-1 refusal:\n%s", results[2], want)
+	}
+}
+
+// TestFanOut_LeafToolsNeverCountTowardTheCeiling pins the partition: a reply of three leaf calls
+// and two delegations at width 1 under two rounds runs every one of them — the leaves are neither
+// counted nor refused, and the delegations are indexed among themselves.
+func TestFanOut_LeafToolsNeverCountTowardTheCeiling(t *testing.T) {
+	sink := &recordingSink{}
+	looked := 0
+	reply := []provider.Delta{
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{ID: "t1", Type: "function", Function: provider.FunctionCall{Name: "look", Arguments: `{}`}}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{ID: "c1", Type: "function", Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentArgs("task one")}}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{ID: "t2", Type: "function", Function: provider.FunctionCall{Name: "look", Arguments: `{}`}}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{ID: "c2", Type: "function", Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentArgs("task two")}}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{ID: "t3", Type: "function", Function: provider.FunctionCall{Name: "look", Arguments: `{}`}}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+	up := newRoutedResponder().
+		route("delegate two things", nil, reply).
+		route("task one", nil, contentScript("child one done")).
+		route("task two", nil, contentScript("child two done")).
+		route("delegate two things", nil, contentScript("parent done"))
+
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "look", readOnly: true, ran: &looked, result: "looked"})
+	cfg.ParallelAgents = 1
+	cfg.Delegation.FanOutRounds = 2
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if looked != 3 {
+		t.Errorf("the leaf tool ran %d times, want 3 (a leaf was counted toward the ceiling)", looked)
+	}
+	results := subAgentResults(sink.events)
+	if len(results) != 5 {
+		t.Fatalf("depth-0 tool results = %d, want 5", len(results))
+	}
+	for _, r := range results {
+		if r.IsError {
+			t.Errorf("%s result = %+v, want no refusal in a reply of two delegations", r.CallID, r)
+		}
 	}
 }

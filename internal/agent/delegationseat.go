@@ -57,10 +57,17 @@ type DelegationSeat struct {
 //
 // The seat is offered at depth 0 only (ADR 0069 decision 3), so this is a top-level Agent's door:
 // a child renders no Delegations line and is handed no seat of its own.
+//
+// It is also the door that FORGETS the far width statedDelegationWidth latched from the last
+// usable target (agent.go): the key moved, so the width the old server stated describes a box
+// delegations no longer go to, and the session width answers until the new server's first beat
+// states its own. A target-down beat never forgets it — that is what keeps the stated number off
+// the heartbeat's clock.
 func (a *Agent) SetDelegationSeat(seat *DelegationSeat) {
 	a.seatMu.Lock()
 	a.seat = seat
 	a.seatMu.Unlock()
+	a.forgetFarWidth()
 }
 
 // subAgentsSeat snapshots the installed Sub-agent-server facts for one render, nil meaning none is

@@ -198,6 +198,32 @@ func (a *Agent) askedSeat(call domain.ToolCall) delegationSeat {
 	return seat
 }
 
+// fanOutCeiling reports how many sub_agent delegations ONE reply may fan out before the rest are
+// refused (refusePastCeiling): `delegate-fanout-rounds` rounds of the width the engine STATES for
+// this agent (statedDelegationWidth — the far server's latched cap, else the session server's, 1
+// on a delegate), or 0 for no ceiling when rounds is 0. It is the enforced number and the
+// announced one at once — the orientation block's delegation bounds read the same function — so
+// what the model is told it may fan out is exactly what dispatch lets through.
+//
+// There is deliberately NO floor and the rule applies at every depth (owner, 2026-09-20): an
+// unkeyed, unpinned local server has width 1, so at the default two rounds a reply of three
+// delegations there refuses the third, and a delegate's ceiling is `rounds` outright. The ceiling
+// is a bound on how much one reply may commit the coordinator to before it reads a single result —
+// the 56-dispatch reply this closes had 35 that never started — and a floor would re-open that on
+// the narrow servers where it costs the most.
+func (a *Agent) fanOutCeiling() int {
+	return fanOutCeilingOf(a.cfg.Delegation.FanOutRounds, a.statedDelegationWidth())
+}
+
+// fanOutCeilingOf is the one formula behind fanOutCeiling — rounds × width, 0 when rounds is 0 —
+// kept apart so the refusal text (fanOutCeilingResult) states the very number it enforces.
+func fanOutCeilingOf(rounds, width int) int {
+	if rounds <= 0 {
+		return 0
+	}
+	return rounds * width
+}
+
 // delegationWidth reports how many sub_agent delegations THIS agent may run at once,
 // independent of any particular reply: the resolved Parallel agents cap at depth 0, and 1
 // everywhere else.
@@ -292,6 +318,11 @@ type dispatchSlot struct {
 	// clears it too, so commitCall treats the skipped slot exactly as a refused one: no audit
 	// record for a child that never ran.
 	run bool
+	// ceilingRefused marks a delegation refused past the reply's fan-out ceiling
+	// (refusePastCeiling): it holds its final result like a skipped slot, and it is the one refusal
+	// dispatchGroup books a delegate-ledger row for itself — the call never enters runSubAgent, the
+	// ledger's own site, and the model's next request must still count it (children.go).
+	ceilingRefused bool
 	// delegated marks a child that ran to a result: runCall sets it as the child returns, and
 	// commitCall books the audit record it earns — on the dispatching goroutine, in call order.
 	// A leaf's arms book their own record inside runCall (executeRun, executeGate, executeConfine),
@@ -314,18 +345,26 @@ type dispatchSlot struct {
 // Width 1 is the per-call loop: prepare, run and commit each call before the next is looked at,
 // so a call's result is in history before its successor's ToolCallEvent — the path every leaf
 // group takes, and a delegation group's whenever fanOutWidthFor says 1 (cap < 2, a delegate, or a
-// single call). Above 1 the whole group is prepared, then run through a pool of width workers,
-// then committed in emitted-call order — a delegation is atomic within the parent Turn, so a
-// cancelled group is dropped whole, unappended, after the join (ADR 0013 §5).
+// single call). Above 1 the whole group is prepared — the calls within the fan-out ceiling to a
+// verdict, the calls past it to their refusal (refusePastCeiling) — then run through a pool of
+// width workers, then committed in emitted-call order — a delegation is atomic within the parent
+// Turn, so a cancelled group is dropped whole, unappended, after the join (ADR 0013 §5).
 //
 // A group wider than its width states that width once, on its last committed result
 // (fanOutWidthNote) — decided here, after the join, because whether every slot ran is only known
 // once the pool has dequeued them all: a slot the pool skipped for a pending interjection clears
-// its run flag at dequeue, and such a group carries no width line at all.
+// its run flag at dequeue, and such a group carries no width line at all. A group with a slot
+// refused past the ceiling carries none either — the refusal already names the width.
+//
+// A ceiling-refused slot's delegate-ledger row is booked HERE, at either width, because the call
+// never reaches runSubAgent, the ledger's own site (children.go): after the width-1 prepare, or
+// after the whole pooled group has been prepared and its running slots reserved, so the refused
+// rows number behind every slot that runs, in the model's own call order.
 func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []domain.ToolCall) dispatchOutcome {
 	if width <= 1 {
-		for _, call := range calls {
-			slot := a.prepareCall(ctx, turn, call, true)
+		for i, call := range calls {
+			slot := a.prepareCall(ctx, turn, call, true, i, len(calls))
+			a.recordCeilingRefusal(&slot)
 			a.runCall(ctx, turn, &slot)
 			if slot.outcome == dispatchCancelled {
 				return dispatchCancelled
@@ -337,7 +376,7 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 
 	slots := make([]dispatchSlot, len(calls))
 	for i, call := range calls {
-		slots[i] = a.prepareCall(ctx, turn, call, false)
+		slots[i] = a.prepareCall(ctx, turn, call, false, i, len(calls))
 		// The delegate ledger numbers a delegation by the order the model issued its calls in
 		// (children.go): reserved here, in call order, before any worker can dequeue one — a
 		// pool's dequeue order is its own, and runSubAgent would otherwise take the next index
@@ -345,6 +384,9 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 		if slots[i].verdict.kind == resolveDelegate {
 			a.delegations.reserve(call.ID)
 		}
+	}
+	for i := range slots {
+		a.recordCeilingRefusal(&slots[i])
 	}
 
 	a.runPool(ctx, turn, width, slots)
@@ -377,6 +419,13 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 // means — and the shared read-only dangerous-action floor still re-fires on every call a child
 // actually makes (ADR 0013 D3).
 //
+// index and group are the call's position within its group and the group's size — for a
+// delegation, its index among the reply's delegations in emitted order — which is what the
+// fan-out ceiling is keyed on (refusePastCeiling): the check sits right after the pre-tool-exec
+// Moment, at both widths, so every call past the ceiling still surfaces its ToolCallEvent and
+// fires its Moment, then takes its refusal on its own row in every Driver. It runs BEFORE the
+// pre-emption check, so pre-emption decides only among the calls the ceiling let through.
+//
 // preempt says whether a pending user message pre-empts a delegation HERE — the width-1 rule,
 // where a delegation about to be reached is the one about to start — rather than at the pool's
 // dequeue (runPool). Either way the check sits after pre-tool-exec and before the lookup, so a
@@ -397,7 +446,13 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 // ladder's verdict standing (gate.go). This function holds no ladder, guard-tier or demote
 // decision of its own: resolve() decides, and a Refuse is carried out here because it has
 // nothing to run; every other verdict is runCall's.
-func (a *Agent) prepareCall(ctx context.Context, turn int, call domain.ToolCall, preempt bool) dispatchSlot {
+func (a *Agent) prepareCall(
+	ctx context.Context,
+	turn int,
+	call domain.ToolCall,
+	preempt bool,
+	index, group int,
+) dispatchSlot {
 	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
 
 	// The pre-tool-exec Moment: reactions reshape the pending call through the shared
@@ -413,6 +468,9 @@ func (a *Agent) prepareCall(ctx context.Context, turn int, call domain.ToolCall,
 	}
 
 	slot := dispatchSlot{call: call}
+	if a.refusePastCeiling(turn, index, group, &slot) {
+		return slot
+	}
 	if preempt && a.preemptDelegation(turn, &slot) {
 		return slot
 	}
@@ -458,8 +516,54 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 		return false
 	}
 	slot.run = false
-	slot.result = a.skipDelegation(turn, slot.call)
+	slot.result = a.skipDelegation(turn, slot.call, skippedDelegationResult(slot.call.ID))
 	return true
+}
+
+// refusePastCeiling is the one rule by which a reply's fan-out is bounded (ADR 0039, amended
+// 2026-09-20): when the slot is a sub_agent call sitting at or past the fan-out ceiling in its
+// group — index counts from 0, so the first `ceiling` delegations in emitted order run as they
+// always have — the slot takes the ceiling refusal and its finished phase at once
+// (skipDelegation's path: no started phase, no audit record, the run flag cleared), and true is
+// returned. A leaf tool is never counted or refused, whatever its group holds, and a ceiling of 0
+// (rounds 0) refuses nothing.
+//
+// The overflow is REFUSED rather than held back and re-issued by the engine (owner, 2026-09-20):
+// the coordinator that asked for more than the ceiling is told so in its own results, in the same
+// words every time, and decides what to delegate again once the round it did get has reported.
+// The rounds and the stated width are read once, here, so the text names the very ceiling that
+// refused the call.
+func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bool {
+	if !isSubAgentCall(slot.call) {
+		return false
+	}
+	rounds, width := a.cfg.Delegation.FanOutRounds, a.statedDelegationWidth()
+	ceiling := fanOutCeilingOf(rounds, width)
+	if ceiling <= 0 || index < ceiling {
+		return false
+	}
+	slot.run = false
+	slot.ceilingRefused = true
+	slot.result = a.skipDelegation(turn, slot.call, fanOutCeilingResult(slot.call.ID, group, rounds, width))
+	return true
+}
+
+// recordCeilingRefusal books the delegate-ledger row a ceiling-refused slot is owed (children.go)
+// and does nothing for any other slot. It is the ceiling's OWN write, and the ledger's second site
+// after runSubAgent's defer (subagent.go): opened and recorded on the dispatching goroutine, so a
+// pooled group's refused rows take their indices after every reserved slot. The row reads as any
+// refusal does — `refused`, the result's head line as its cause, the call's label as its name.
+func (a *Agent) recordCeilingRefusal(slot *dispatchSlot) {
+	if !slot.ceilingRefused {
+		return
+	}
+	a.delegations.record(delegationRecord{
+		spawnIndex: a.delegations.open(slot.call.ID),
+		callID:     slot.call.ID,
+		name:       delegationLabel("", slot.call),
+		outcome:    delegationRefused,
+		cause:      delegationCause(slot.result.Content),
+	})
 }
 
 // runCall executes one prepared slot's verdict and leaves the result and outcome on the slot; a
@@ -520,11 +624,13 @@ func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 
 // fanOutWidthNoteFormat is the ONE structural fact a fan-out states to the parent model about HOW
 // its group ran: when a reply asked for more delegations than the width the group ran under, the
-// slots past the width waited for a worker — so their results arrived after the others finished,
+// slots past the width — up to the fan-out ceiling, past which a slot is refused instead
+// (refusePastCeiling) — waited for a worker, so their results arrived after the others finished,
 // and the model reading the burst of results as "all at once" would be reading a fact that is not
 // so. It is stated exactly once per group, as the last line of the group's LAST committed result's
 // body, and only for a group whose every slot actually ran (fanOutWidthNote's caller): a group with
-// a skipped, refused or hook-failed slot did not run N delegations, so the count would be a lie.
+// a skipped, refused or hook-failed slot did not run N delegations, so the count would be a lie —
+// and a group with a ceiling-refused slot has already had its width named by the refusal.
 //
 // Engine-composed and no steering (ADR 0023 2026-08-25 amendment): the line reports the width the
 // group actually ran under — the once-per-reply snapshot fanOutWidthFor took at dispatch — and
@@ -606,6 +712,22 @@ func skippedDelegationResult(callID string) domain.ToolResult {
 	return errorToolResult(callID, skippedDelegationContent)
 }
 
+// fanOutCeilingResultFormat is the whole tool result a delegation refused past the reply's fan-out
+// ceiling carries (refusePastCeiling), in the pre-emption result's shape — the same `sub-agent not
+// started:` head, so a Driver and the model read the two unstarted kinds alike — and a constant
+// format for the pre-emption's reason: it is the model's only account of a child that never ran,
+// so it says the same thing every time and names every number the model needs to act on it. The
+// arguments are N (the reply's delegations), C (the ceiling), R (the rounds), W (the width the
+// ceiling is R rounds of) and C again (how many of the N ran).
+const fanOutCeilingResultFormat = "sub-agent not started: this reply fanned out %d delegations and the ceiling is %d (%d rounds × width %d) — the first %d ran; delegate the rest again once their results are in"
+
+// fanOutCeilingResult renders the ceiling refusal for one call of a reply of `group` delegations, the
+// ceiling computed by the one formula that refused it (fanOutCeilingOf).
+func fanOutCeilingResult(callID string, group, rounds, width int) domain.ToolResult {
+	ceiling := fanOutCeilingOf(rounds, width)
+	return errorToolResult(callID, fmt.Sprintf(fanOutCeilingResultFormat, group, ceiling, rounds, width, ceiling))
+}
+
 // interjectionPending answers whether a user message is waiting for this Agent's next boundary —
 // the one predicate that decides a delegation about to start is skipped instead. It is one rule
 // for every depth: at the top level it is the host's Config.InterjectionPending seam (nil ⇒ never),
@@ -621,13 +743,13 @@ func (a *Agent) interjectionPending() bool {
 	return a.cfg.InterjectionPending()
 }
 
-// skipDelegation pre-empts one delegation that has not started: it emits the finished phase that
-// closes the child's bracket without a started one — carrying the skip result, not Cancelled,
-// since nothing is rolled back — and returns that result for the caller to commit in call order.
-// preemptDelegation is its one caller, at either width, so a lone delegation is skipped exactly as
-// a pooled one.
-func (a *Agent) skipDelegation(turn int, call domain.ToolCall) domain.ToolResult {
-	result := skippedDelegationResult(call.ID)
+// skipDelegation closes one delegation that has not started with result: it emits the finished
+// phase that closes the child's bracket without a started one — carrying that result, not
+// Cancelled, since nothing is rolled back — and returns it for the caller to commit in call order.
+// Its callers are the two ways a delegation is settled before it starts, preemptDelegation (a
+// queued message) and refusePastCeiling (the fan-out ceiling), at either width, so a lone
+// delegation is closed exactly as a pooled one.
+func (a *Agent) skipDelegation(turn int, call domain.ToolCall, result domain.ToolResult) domain.ToolResult {
 	a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, result, false)
 	return result
 }
@@ -667,7 +789,8 @@ func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCal
 //
 // runDelegation brackets every child with the started/finished pair whatever width it ran under,
 // so nothing that runs is ever left looking queued. A delegation skipped for a pending
-// interjection reports a finished phase alone (skipDelegation): it never started.
+// interjection, or refused past the reply's fan-out ceiling, reports a finished phase alone
+// (skipDelegation): it never started.
 //
 // cancelled marks a finished phase that closes a ROLLED-BACK delegation rather than a reported one
 // (ADR 0075 decision 12). It rides the event so an observer can tell the two apart; a started phase

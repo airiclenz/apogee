@@ -450,12 +450,18 @@ func rowsContaining(f tuitest.Frame, want string) int {
 // The value is `auto` — the launcher's own default config path, taken verbatim. Nothing reads that
 // path: the fake below answers loadConfig with a parsed fixture whatever it is handed, which is
 // exactly what keeps this test off whatever launcher config the developer's machine may hold.
+//
+// `delegate-fanout-rounds: 0` switches the fan-out ceiling off: the moved session's width is 1
+// (no pin, no `/props`), so at the default two rounds fanout.yaml's third delegation would be
+// refused — and step 12 is about the launcher move keeping the session delegating, not about the
+// ceiling. It is a top-level key, so a launcher move does not touch it.
 func launcherHome(t *testing.T, stub *stubllm.Server) string {
 	t.Helper()
 
 	home := t.TempDir()
 	body := "servers:\n  - name: probe-target\n    endpoint: " + stub.URL +
-		"\n    model: " + stub.Model + "\n    llama-launcher: auto\nserver: probe-target\n"
+		"\n    model: " + stub.Model + "\n    llama-launcher: auto\nserver: probe-target\n" +
+		"delegate-fanout-rounds: 0\n"
 	if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write the launcher home's config: %v", err)
 	}

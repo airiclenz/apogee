@@ -185,6 +185,13 @@ type Agent struct {
 	// construction seed.
 	parallelAgentsMu sync.RWMutex
 	parallelAgents   int // live depth-0 fan-out width; seeded from cfg.ParallelAgents, swappable via SetParallelAgents
+	// farWidth is the SUB-AGENT SERVER's width as the last usable Delegation target stated it — the
+	// second field of the stated-width seam (statedDelegationWidth), latched PER SEAT beside
+	// parallelAgents and guarded by the same mutex. It is written only by a non-nil
+	// SetDelegationTarget, KEPT across a nil one (a target-down beat is a flap, not a door) and
+	// cleared by SetDelegationSeat, the human's `/sub-agents-server` door; 0 means no far width has
+	// been stated since the seat last moved, so the session width answers.
+	farWidth int
 
 	// delegation is the Delegation-target latch — the Sub-agent server every delegation in this
 	// tree routes to, or nil for today's parent-inheriting spawn (ADR 0045 —
@@ -1466,6 +1473,51 @@ func (a *Agent) parallelAgentsCap() int {
 	a.parallelAgentsMu.RLock()
 	defer a.parallelAgentsMu.RUnlock()
 	return a.parallelAgents
+}
+
+// statedDelegationWidth is the ONE width seam the engine STATES to the model — the fan-out
+// ceiling's multiplier (fanOutCeiling, dispatch.go) and the orientation block's delegation
+// bounds read it and nothing else — as distinct from the width a pool actually RUNS at, which
+// fanOutWidthFor sizes per reply from the live latch. The two are kept apart on purpose: the
+// enforced number and the announced number must agree with each other, and a number the model
+// is told must not move on every heartbeat (ADR 0023 §6), so this one is LATCHED per seat rather
+// than read live. It answers the far width when a usable Delegation target has stated one since
+// the seat last moved (farWidth), else the session server's width, and 1 on a delegate — a
+// child's own delegations run serially inline (ADR 0039 decision 3). Never below 1: it is the
+// width of a group that runs, and a group runs at least one at a time.
+//
+// The doors it moves on are the human's and a cap's first statement: SetParallelAgents (a
+// `/server` switch, a heartbeat that discovers the session server's slots), a non-nil
+// SetDelegationTarget (the far server's cap, stated once and then re-stated identically each
+// beat) and SetDelegationSeat (`/sub-agents-server`, which forgets the far width so the next
+// beat states the new server's). A target-down beat — SetDelegationTarget(nil) — is deliberately
+// not a door: the far width stands across it, so a flapping far server cannot flap the number.
+func (a *Agent) statedDelegationWidth() int {
+	if a.isDelegate() {
+		return 1
+	}
+	a.parallelAgentsMu.RLock()
+	defer a.parallelAgentsMu.RUnlock()
+	if a.farWidth > 0 {
+		return a.farWidth
+	}
+	return max(a.parallelAgents, 1)
+}
+
+// stateFarWidth latches the Sub-agent server's width for statedDelegationWidth, floored at 1 so a
+// serial far server is told apart from no statement at all (farWidth's zero).
+func (a *Agent) stateFarWidth(width int) {
+	a.parallelAgentsMu.Lock()
+	a.farWidth = max(width, 1)
+	a.parallelAgentsMu.Unlock()
+}
+
+// forgetFarWidth clears the latched far width, so the session width answers until the next usable
+// target states one — what the human's `/sub-agents-server` door does (SetDelegationSeat).
+func (a *Agent) forgetFarWidth() {
+	a.parallelAgentsMu.Lock()
+	a.farWidth = 0
+	a.parallelAgentsMu.Unlock()
 }
 
 // contextFileList reports the live context-file names under the lock. The returned slice is never

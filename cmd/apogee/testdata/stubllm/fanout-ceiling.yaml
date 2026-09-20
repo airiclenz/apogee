@@ -1,0 +1,36 @@
+model: fanout-ceiling-model
+turns:
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: All ten reported.
+    - when:
+        last_message: ^Fan out ten
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Count the alpha files","name":"alpha"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the beta files","name":"beta"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the gamma files","name":"gamma"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the delta files","name":"delta"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the epsilon files","name":"epsilon"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the zeta files","name":"zeta"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the eta files","name":"eta"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the theta files","name":"theta"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the iota files","name":"iota"}'
+        - name: sub_agent
+          arguments: '{"task":"Count the kappa files","name":"kappa"}'
+    - when:
+        last_message: ^Count the
+      repeat: true
+      text: One file.
+    - repeat: true
+      text: Nothing else to add.

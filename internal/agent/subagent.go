@@ -824,11 +824,13 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // here too. The ErrorEvent is stamped with this Agent's current Turn — the same value dispatchTools
 // carries as `turn` — read live because the signature stays the shared `(ctx, call)` one.
 //
-// That same defer is the ONE site the delegate ledger is written from (children.go, apogee-clb):
-// it runs last of all, after the recover has settled the named results, so every way out of this
-// frame — a refusal before any child exists, a cancel, a fault, a cap, a completion, a recovered
-// panic — is classified from the ToolResult and dispatchOutcome actually returned
-// (classifyDelegation) and lands as one row. The spawn index is taken FIRST, under the ledger's
+// That same defer is the ONE site the delegate ledger is written from for a call that REACHES this
+// frame (children.go, apogee-clb): it runs last of all, after the recover has settled the named
+// results, so every way out of this frame — a refusal before any child exists, a cancel, a fault, a
+// cap, a completion, a recovered panic — is classified from the ToolResult and dispatchOutcome
+// actually returned (classifyDelegation) and lands as one row. The one call that never reaches it
+// is a delegation refused past the reply's fan-out ceiling, and dispatchGroup books that row itself
+// (recordCeilingRefusal, dispatch.go) — the ceiling's own second site. The spawn index is taken FIRST, under the ledger's
 // lock — the one a pooled group reserved for this call in call order (dispatchGroup), else the next
 // — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
 // completion order is the model's call order; the row records the child's RESOLVED output target,

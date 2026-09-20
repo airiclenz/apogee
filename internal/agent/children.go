@@ -254,7 +254,10 @@ func (l *delegationLedger) reserve(callID string) {
 
 // open returns the spawn index for the delegation answering callID as its run begins: the one
 // reserve set aside for it, consumed, or else the next fresh index. Indices are 1-based and count
-// every entry into runSubAgent, refused ones included.
+// every entry into runSubAgent, refused ones included — and every call refused past the reply's
+// fan-out ceiling, which never enters runSubAgent and is opened and recorded by dispatchGroup
+// itself (recordCeilingRefusal), after a pooled group's running slots have been reserved, so the
+// refused rows number behind them.
 func (l *delegationLedger) open(callID string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
