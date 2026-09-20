@@ -819,6 +819,59 @@ func TestBootConfigCarriesTheStreamIdleTimeout(t *testing.T) {
 	}
 }
 
+// The `re-stream-budget:` key reaches the engine as a POINTER whose value is the file's number: the
+// boot phase folds the loader's reading of opts.RestreamBudget into Config.RestreamBudget — the 3
+// the loader lands when the key is absent, and an explicit 0 (never re-stream) included — so the
+// engine never falls back to its own nil default under the host, and a `re-stream-budget: 0` reads
+// as 0 rather than "unset". Asserted through the loader, as the idle timeout is, because the fold
+// alone cannot show that an absent key lands the number rather than a nil.
+func TestBootConfigCarriesTheRestreamBudget(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		file string
+		want int
+	}{
+		{name: "absent", file: "", want: 3},
+		{name: "zero", file: "re-stream-budget: 0\n", want: 0},
+		{name: "stated", file: "re-stream-budget: 1\n", want: 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := t.TempDir()
+			// One server, because the load refuses a file that names none; the key under test
+			// rides beside it.
+			file := "server: box\nservers:\n  - name: box\n    endpoint: http://127.0.0.1:1111\n" + tt.file
+			if err := os.WriteFile(filepath.Join(home, "config.yaml"), []byte(file), 0o600); err != nil {
+				t.Fatalf("write config: %v", err)
+			}
+			opts := config.Options{Mode: "ask-before", Workspace: t.TempDir(), ConfigDir: home}
+			if err := config.ApplyConfig(&opts, func(string) bool { return false },
+				func(string) string { return "" }, os.ReadFile, func(string) {}); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.RestreamBudget != tt.want {
+				t.Fatalf("opts.RestreamBudget = %d after the load; want %d", opts.RestreamBudget, tt.want)
+			}
+			roots, err := resolveRoots(opts.ConfigDir, opts.Workspace)
+			if err != nil {
+				t.Fatalf("resolveRoots: %v", err)
+			}
+			w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+			t.Cleanup(w.close)
+			if err := w.resolveConfig(); err != nil {
+				t.Fatalf("resolveConfig: %v", err)
+			}
+			if w.cfg.RestreamBudget == nil {
+				t.Fatalf("Config.RestreamBudget = nil; want a pointer to the threaded %d", tt.want)
+			}
+			if *w.cfg.RestreamBudget != tt.want {
+				t.Errorf("*Config.RestreamBudget = %d; want the threaded %d", *w.cfg.RestreamBudget, tt.want)
+			}
+		})
+	}
+}
+
 // The `prune-tool-results:` key reaches the engine seam it gates: the boot phase folds
 // opts.PruneToolResults into ContextConfig.PruneToolResults verbatim, so a file that opts out
 // (`prune-tool-results: false`) leaves an Agent that never prunes. It is threaded rather than

@@ -190,6 +190,16 @@ func TestResolvePrecedence(t *testing.T) {
 			want: func(o *Options) { o.StreamIdleTimeout = 0 },
 		},
 		{
+			name: "re-stream-budget is file-only and defaults 3",
+			file: fileConfig{RestreamBudget: intptr(1)},
+			want: func(o *Options) { o.RestreamBudget = 1 },
+		},
+		{
+			name: "an explicit re-stream-budget: 0 stays 0 — the documented spelling of never",
+			file: fileConfig{RestreamBudget: intptr(0)},
+			want: func(o *Options) { o.RestreamBudget = 0 },
+		},
+		{
 			name: "auto-title is file-only and defaults true",
 			file: fileConfig{AutoTitle: boolptr(false)},
 			want: func(o *Options) { o.AutoTitle = false },
@@ -379,6 +389,7 @@ func wantDefaults() Options {
 		DelegateMaxTokens:    defaultDelegateMaxTokens,
 		DelegateTimeout:      defaultDelegateTimeout,
 		StreamIdleTimeout:    defaultStreamIdleTimeout,
+		RestreamBudget:       defaultRestreamBudget,
 		AutoTitle:            true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
@@ -617,6 +628,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"DelegateMaxTokens":    true,
 		"DelegateTimeout":      true,
 		"StreamIdleTimeout":    true,
+		"RestreamBudget":       true,
 		"UseShippedSkills":     true,
 		"UseDefaultPrompt":     true,
 		"AutoTitle":            true, "RememberModel": true,
@@ -679,6 +691,7 @@ func everyKeyFileConfig() fileConfig {
 		DelegateMaxTokens:    intptr(5_000_000),
 		DelegateTimeout:      strptr("30m"),
 		StreamIdleTimeout:    strptr("30s"),
+		RestreamBudget:       intptr(1),
 		RememberModel:        boolptr(false),
 		ContextWindow:        64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
@@ -2295,6 +2308,47 @@ func TestApplyConfigStreamIdleTimeout(t *testing.T) {
 	}
 }
 
+// The re-stream-budget key parses into opts.restreamBudget as a COUNT, delegate-fanout-rounds's
+// posture: an absent key resolves to the built-in 3, an explicit 0 lands as 0 — "never re-stream",
+// a value and not "unset" — and a negative one is a startup error naming the key, rather than a
+// budget that quietly resolved to the default. The opts → Config.RestreamBudget threading is the
+// composition root's, pinned by TestBootConfigCarriesTheRestreamBudget in wire_boot_test.go.
+func TestApplyConfigRestreamBudget(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name    string
+		file    string
+		want    int
+		wantErr string
+	}{
+		{name: "a stated budget", file: "re-stream-budget: 1\n", want: 1},
+		{name: "an absent key takes the built-in default", file: "", want: defaultRestreamBudget},
+		{name: "an explicit 0 lands as 0, never re-stream", file: "re-stream-budget: 0\n", want: 0},
+		{name: "a negative budget is refused", file: "re-stream-budget: -1\n", wantErr: `invalid re-stream-budget "-1"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tt.file)
+			opts := Options{ConfigDir: home}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("ApplyConfig error = %v, want it to contain %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.RestreamBudget != tt.want {
+				t.Errorf("opts.restreamBudget = %d; want %d", opts.RestreamBudget, tt.want)
+			}
+		})
+	}
+}
+
 // The file pass refuses through the registry rows: a string-spelled key whose value the row's Set
 // admits nothing of is refused at the pass itself, so startup (ApplyConfig) and a live re-read of
 // the same file (LoadFileConfig — every `/settings` apply under a running session) refuse it in
@@ -2310,6 +2364,7 @@ func TestFilePassRefusesThroughTheRows(t *testing.T) {
 	}{
 		{name: "delegate-timeout", file: "delegate-timeout: 5x\n", wantErr: `apogee: invalid delegate-timeout "5x": want a length of time like 2h or 30m, or 0 to let a delegation run unbounded`},
 		{name: "stream-idle-timeout", file: "stream-idle-timeout: 5x\n", wantErr: `apogee: invalid stream-idle-timeout "5x": want a length of time like 10m or 30s, or 0 to wait for as long as the server takes`},
+		{name: "re-stream-budget", file: "re-stream-budget: -1\n", wantErr: `apogee: invalid re-stream-budget "-1": want a count of 0 or more (0 never re-streams; 3 is the default)`},
 		{name: "cursor-shape", file: "cursor-shape: sideways\n", wantErr: `apogee: invalid cursor-shape: unknown cursor shape "sideways" (known shapes: block, underline, bar)`},
 		{name: "sub-agents-choice", file: "sub-agents-choice: banana\n", wantErr: `apogee: invalid sub-agents-choice: "banana" — it takes "fixed" (the sub-agents-server: key alone picks where a delegation runs) or "model" (the top-level model may say run_on per delegation)`},
 	} {

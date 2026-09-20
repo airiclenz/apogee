@@ -565,6 +565,8 @@ func TestSettingKeyValidatorsRefuseWhatStartupWouldRefuse(t *testing.T) {
 		{"delegate-timeout", "-5m", "0 or more"},
 		{"stream-idle-timeout", "soon", "length of time"},
 		{"stream-idle-timeout", "-5m", "0 or more"},
+		{"re-stream-budget", "-1", "0 or more"},
+		{"re-stream-budget", "lots", "0 or more"},
 		{"present.port", "70000", "0-65535"},
 		{"mode", "yolo", "invalid --mode"},
 		{"ui.spinner", "twirl", "invalid ui.spinner"},
@@ -635,6 +637,9 @@ func TestSettingKeyValidatorsAcceptTheirDocumentedShapes(t *testing.T) {
 		// 0 is the documented spelling of "disabled", and 10m is the shipped default.
 		{"stream-idle-timeout", "0"},
 		{"stream-idle-timeout", "10m"},
+		// 0 is the documented spelling of "never re-stream", and 3 is the shipped default.
+		{"re-stream-budget", "0"},
+		{"re-stream-budget", "3"},
 		{"present.port", "0"},
 		{"present.port", "8080"},
 		{"mode", string(domain.ModeAuto)},
@@ -875,7 +880,8 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 		"read-cache": "ReadCache", "context-fill-notice": "ContextFillNotice",
 		"delegate-max-steps": "DelegateMaxSteps", "delegate-fanout-rounds": "DelegateFanOutRounds",
 		"delegate-max-depth": "DelegateMaxDepth", "delegate-max-tokens": "DelegateMaxTokens",
-		"delegate-timeout": "DelegateTimeout", "stream-idle-timeout": "StreamIdleTimeout", "undo-snapshots": "UndoSnapshots",
+		"delegate-timeout": "DelegateTimeout", "stream-idle-timeout": "StreamIdleTimeout",
+		"re-stream-budget": "RestreamBudget", "undo-snapshots": "UndoSnapshots",
 		"auto-title": "AutoTitle", "remember-model": "RememberModel",
 		"context-window": "ContextWindow", "working-window": "WorkingWindow",
 		"response-reserve":  "ResponseReserve",

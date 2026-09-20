@@ -166,6 +166,12 @@ func projectConfig(
 		// because a zero engine Config field DISABLES the cut — so a session carries the ten
 		// minutes unless the human set 0, and a Firing nobody watches is cut the same way.
 		StreamIdleTimeout: opts.StreamIdleTimeout,
+		// How many times one Turn re-sends its request after a transient upstream fault before the
+		// Turn fails: the `re-stream-budget` key (default 3; 0 ⇒ never). Folded in as a POINTER
+		// because the engine reads a nil field as its own default of three and a pointer to 0 as
+		// "never" — the loader has already landed the file's number (the default when the key is
+		// absent), so what is folded in is always the file's reading.
+		RestreamBudget: &opts.RestreamBudget,
 		// Which Floor guards this run goes WITHOUT (ADR 0071). The seven keys are positive in the
 		// file and negative at the engine, and floorFromOptions is the one place that turns one
 		// spelling into the other — so a guard the human took away, in the file or in `/settings`,

@@ -712,13 +712,13 @@ const startupOnlyContract = "takes effect at the next start."
 // every time an external edit starts (ADR 0041 decision 1); the other five are read once, while
 // the session is being built, and say so in their Descriptions. `ui.inspector`,
 // `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
-// `delegate-timeout`, `stream-idle-timeout`, `working-window` and `undo-snapshots` still mirror their value onto the live holder for the
+// `delegate-timeout`, `stream-idle-timeout`, `re-stream-budget`, `working-window` and `undo-snapshots` still mirror their value onto the live holder for the
 // Firings a session raises, and do nothing at all where a Driver composed none — which is why they
 // are exempt rather than reaching for one.
 var settingKeysWithNoMemberToReach = []string{
 	"editor", "ui.inspector", "response-reserve", "delegate-max-steps", "delegate-fanout-rounds",
 	"delegate-max-depth", "delegate-max-tokens", "delegate-timeout", "stream-idle-timeout",
-	"working-window", "undo-snapshots", "sessions.max-age", "sessions.max-count",
+	"re-stream-budget", "working-window", "undo-snapshots", "sessions.max-age", "sessions.max-count",
 }
 
 // The five START-UP-only keys are `editor`'s counter-case from the other side: keys with no seam
@@ -726,7 +726,7 @@ var settingKeysWithNoMemberToReach = []string{
 // the provider client is constructed, `response-reserve` is read into the budget the session opens
 // with, `undo-snapshots` decides whether the session's undo store is opened while its id is minted,
 // and `delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
-// `delegate-timeout`, `stream-idle-timeout` and `working-window` are fields of the Config the engine was constructed with, so this session
+// `delegate-timeout`, `stream-idle-timeout`, `re-stream-budget` and `working-window` are fields of the Config the engine was constructed with, so this session
 // genuinely cannot move any of them — but the file the next one starts from HAS moved,
 // which is the whole of what the key promises. Refusing would report a failed apply over a
 // save that did exactly that, which is the defect this pins.
@@ -744,6 +744,7 @@ func TestApplySettingAcceptsTheStartupOnlyKeys(t *testing.T) {
 		{key: "delegate-max-tokens", value: "5000000"},
 		{key: "delegate-timeout", value: "30m"},
 		{key: "stream-idle-timeout", value: "30s"},
+		{key: "re-stream-budget", value: "1"},
 		{key: "working-window", value: "200000"},
 		{key: "undo-snapshots", value: "false"},
 	}
@@ -1301,6 +1302,7 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 		DelegateMaxTokens:    100_000,
 		DelegateTimeout:      10 * time.Minute,
 		StreamIdleTimeout:    2 * time.Minute,
+		RestreamBudget:       2,
 		WorkingWindow:        8192,
 		UndoSnapshots:        true,
 		ContextFiles:         []string{"AGENTS.md"},
@@ -1480,6 +1482,15 @@ func TestLiveSettingsOptionsFollowEveryApply(t *testing.T) {
 				t.Helper()
 				if got := opts.StreamIdleTimeout; got != 30*time.Second {
 					t.Errorf("StreamIdleTimeout = %v, want the bound the session set (30s)", got)
+				}
+			},
+		},
+		{
+			name: "re-stream-budget", key: "re-stream-budget", value: "0",
+			want: func(t *testing.T, opts config.Options) {
+				t.Helper()
+				if got := opts.RestreamBudget; got != 0 {
+					t.Errorf("RestreamBudget = %d, want the 0 the session set — never re-stream", got)
 				}
 			},
 		},
@@ -2052,9 +2063,9 @@ func TestApplySettingOnAnEmptyValueResolvesTheBuiltInDefault(t *testing.T) {
 	})
 }
 
-// The six int rows take the same empty value the same way, end to end through applySettingFor: an
+// The seven int rows take the same empty value the same way, end to end through applySettingFor: an
 // emptied `context-window`, `working-window`, `delegate-max-steps`, `delegate-fanout-rounds`,
-// `delegate-max-depth` or `delegate-max-tokens` is landed as the row's own Default (landSetting) and mirrored onto the holder
+// `delegate-max-depth`, `delegate-max-tokens` or `re-stream-budget` is landed as the row's own Default (landSetting) and mirrored onto the holder
 // — so a session that launched with a pin or a bound reads the built-in a fresh start without the
 // key would, rather than standing on the number it launched with. Whitespace is the same empty
 // value. The two window keys ride the rebind, which is silent while nothing is bound
@@ -2071,6 +2082,7 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 		{key: "delegate-fanout-rounds", read: func(o config.Options) int { return o.DelegateFanOutRounds }},
 		{key: "delegate-max-depth", read: func(o config.Options) int { return o.DelegateMaxDepth }},
 		{key: "delegate-max-tokens", read: func(o config.Options) int { return o.DelegateMaxTokens }},
+		{key: "re-stream-budget", read: func(o config.Options) int { return o.RestreamBudget }},
 	}
 	for _, row := range rows {
 		for _, value := range []string{"", "  "} {
@@ -2088,6 +2100,7 @@ func TestApplySettingOnAnEmptyIntValueLandsTheRowDefault(t *testing.T) {
 				live := newLiveSettings(config.Options{
 					ContextWindow: 4096, WorkingWindow: 8192,
 					DelegateMaxSteps: 7, DelegateFanOutRounds: 9, DelegateMaxDepth: 3, DelegateMaxTokens: 5000,
+					RestreamBudget: 1,
 				})
 				if got := row.read(live.options()); got == want {
 					t.Fatalf("%s seeded at its Default %d; the seed must differ for the landing to show", row.key, got)

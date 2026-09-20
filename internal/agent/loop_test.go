@@ -210,6 +210,97 @@ func TestReStreamBudgetZeroNeverReStreams(t *testing.T) {
 	}
 }
 
+// TestReStreamBudgetNilConfigDefaultsToThree pins the pointer contract of Config.RestreamBudget:
+// the nil an embedder's zero Config and baseConfig carry is the engine's default of three — three
+// transient faults are ridden out and the fourth attempt lands — while a pointer to 0 is a VALUE,
+// "never re-stream": the first transient fault fails the Turn on the spot. The two cases share one
+// script so the only difference between them is the budget the Config carries.
+func TestReStreamBudgetNilConfigDefaultsToThree(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	zero := 0
+	tests := []struct {
+		name        string
+		budget      *int
+		wantOutcome turnOutcome
+		wantCalls   int
+		wantResets  int
+	}{
+		{name: "a nil budget rides out three faults", budget: nil, wantOutcome: turnOK, wantCalls: 4, wantResets: 3},
+		{name: "a pointer to 0 never re-streams", budget: &zero, wantOutcome: turnFailed, wantCalls: 1, wantResets: 0},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			responder := scriptedResponder(t,
+				retryableErrorTurn("first blip"),
+				retryableErrorTurn("second blip"),
+				retryableErrorTurn("third blip"),
+				contentTurn("recovered"),
+			)
+			cfg := baseConfig(sink)
+			cfg.RestreamBudget = tc.budget
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			req, _ := a.buildRequest(0)
+			run := &turnRun{turn: 0, req: req}
+
+			_, outcome, _ := a.respondAndReview(context.Background(), run)
+
+			if outcome != tc.wantOutcome {
+				t.Fatalf("outcome = %v, want %v", outcome, tc.wantOutcome)
+			}
+			if responder.calls() != tc.wantCalls {
+				t.Errorf("Upstream calls = %d, want %d", responder.calls(), tc.wantCalls)
+			}
+			if got := countEvents[domain.StreamResetEvent](sink.events); got != tc.wantResets {
+				t.Errorf("StreamResetEvents = %d, want %d — one per re-stream", got, tc.wantResets)
+			}
+		})
+	}
+}
+
+// TestReStreamBudgetComesFromConfig pins that the budget the Turn spends is the Config's number and
+// not the engine's constant: a Config carrying 1 re-streams once and the second transient fault
+// fails the Turn — two requests, one StreamResetEvent, the second fault surfaced.
+func TestReStreamBudgetComesFromConfig(t *testing.T) {
+	shortRestreamHoldoff(t)
+
+	one := 1
+	sink := &recordingSink{}
+	responder := scriptedResponder(t,
+		retryableErrorTurn("first blip"),  // spends the one re-stream
+		retryableErrorTurn("second blip"), // nothing left to spend
+		contentTurn("unreached"),
+	)
+	cfg := baseConfig(sink)
+	cfg.RestreamBudget = &one
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	req, _ := a.buildRequest(0)
+	run := &turnRun{turn: 0, req: req}
+
+	resp, outcome, _ := a.respondAndReview(context.Background(), run)
+
+	if outcome != turnFailed || resp != nil {
+		t.Fatalf("outcome = %v, resp = %+v; want turnFailed with no response — the budget of 1 is spent", outcome, resp)
+	}
+	if responder.calls() != 2 {
+		t.Errorf("Upstream calls = %d, want 2 — one fault, one re-stream, then the Turn fails", responder.calls())
+	}
+	if got := countEvents[domain.StreamResetEvent](sink.events); got != 1 {
+		t.Errorf("StreamResetEvents = %d, want 1 — the one re-stream announced", got)
+	}
+	errs := errorEvents(sink.events)
+	if len(errs) != 1 || !strings.Contains(errs[0].Err, "second blip") {
+		t.Errorf("ErrorEvents = %v, want exactly the second fault surfaced", errs)
+	}
+}
+
 // TestRestreamHoldOffThatElapsesStillReStreams is the untouched half of the same branch: when the
 // wait ends because it EXPIRED rather than because the ctx died, the Turn re-streams exactly as it
 // always did. Without this the fix above could pass by never re-streaming at all.

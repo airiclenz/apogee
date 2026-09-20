@@ -60,6 +60,7 @@ func fabricatedSettings() config.Options {
 		DelegateMaxTokens:     5000000,
 		DelegateTimeout:       90 * time.Minute,
 		StreamIdleTimeout:     45 * time.Second,
+		RestreamBudget:        1,
 		AutoTitle:             false,
 		RememberModel:         true,
 		ContextWindow:         32768,
@@ -415,6 +416,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"delegate-max-tokens":     "5000000",
 		"delegate-timeout":        "1h30m0s", // a duration prints itself, ui.stall-after's spelling
 		"stream-idle-timeout":     "45s",
+		"re-stream-budget":        "1",
 		"auto-title":              "false",
 		"remember-model":          "true",
 		"context-window":          "32768",

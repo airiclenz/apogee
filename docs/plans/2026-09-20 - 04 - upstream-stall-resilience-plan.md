@@ -119,7 +119,12 @@ NOTES (2026-09-20): retry per verifier FIX — `overflow_test.go:11` and `:225` 
 
 **Commit:** `feat(agent): a Turn re-streams a transient fault up to a budget with a doubling hold-off`
 
-## 4. `re-stream-budget` config key, end to end
+## 4. `re-stream-budget` config key, end to end — ✅ DONE (2026-09-20)
+
+NOTES (2026-09-20): the loader row lands the key through the registry's `Set` (stream-idle-timeout's shape) rather than the `delegate-fanout-rounds` copy-if-`>= 0` shape the plan named, so `re-stream-budget: -1` is REFUSED at startup with the row's sentence — the plan's `-1 refused` test — where the fanout-rounds shape would have silently kept the default.
+NOTES (2026-09-20): `TestReStreamBudgetNilConfigDefaultsToThree` and `TestReStreamBudgetComesFromConfig` drive `respondAndReview` directly (the shape of item 3's `TestReStreamBudgetZeroNeverReStreams`) under `shortRestreamHoldoff`; the nil/`&0` pair share one four-turn script so only the Config differs.
+NOTES (2026-09-20): `go test -race` is unsupported on this box (ThreadSanitizer "unsupported VMA range"); acceptance ran without the race detector.
+NOTES (2026-09-20): retry on the verifier's FIX — the manual's combined worst case now reads "just over 40 minutes at the defaults" ((3+1) × 10m + 7 s = 40 min 7 s); the first attempt's "47 minutes" mis-added the ladder; the paragraph was reflowed to the manual's wrap width.
 
 **What:** add the `re-stream-budget` key (`KindInt`, `Default: "3"`, `Editable: true`, validate `>= 0`, `Desc` "How many times one Turn re-sends a request after a transient upstream fault before the Turn fails; 0 never re-streams; takes effect at the next start") through the same eleven files as item 2, plus `domain.Config.RestreamBudget *int` (nil → `defaultRestreamBudget` 3, `&0` → never) folded in by `cmd/apogee/wire_config.go` as `RestreamBudget: &opts.RestreamBudget`; the `Options` field stays a plain int with the loader landing 3 when the key is absent (the config.go:814-817 `delegate-fanout-rounds` pattern), and item 3's `a.restreamBudget()` accessor dereferences it (nil → 3). Manual paragraph in `docs/manual/configuration.md` names the ladder (1 s, 2 s, 4 s), that a cut by `stream-idle-timeout` and an in-band 5xx/429 both count, that the delegate depth shares the same budget, and the combined worst case: a dead upstream costs a Turn up to (budget+1) × `stream-idle-timeout` + 7 s before the Turn fails, versus hanging until Esc or `delegate-timeout` today. Depends on items 2 and 3.
 

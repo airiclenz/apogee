@@ -873,6 +873,20 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// A pointer on disk, delegate-fanout-rounds's reason: 0 is a VALUE here ("never re-stream").
+		// Landed through the row rather than copied, stream-idle-timeout's reason: a negative
+		// budget is refused HERE in the row's own sentence — a Turn whose budget quietly resolved
+		// to the default would ride out faults nobody asked it to.
+		row: mustKey("re-stream-budget"),
+		fromFile: func(o *Options, fc fileConfig) error {
+			o.RestreamBudget = defaultRestreamBudget
+			if fc.RestreamBudget == nil {
+				return nil
+			}
+			return mustKey("re-stream-budget").Set(strconv.Itoa(*fc.RestreamBudget), o)
+		},
+	},
+	{
 		row: mustKey("undo-snapshots"),
 		fromFile: func(o *Options, fc fileConfig) error {
 			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
@@ -1572,6 +1586,12 @@ type fileConfig struct {
 	// written, by the startup pass when no duration can be made of it. It feeds
 	// domain.Config.StreamIdleTimeout.
 	StreamIdleTimeout *string `yaml:"stream-idle-timeout"`
+	// RestreamBudget is how many times one Turn re-sends its request after a transient upstream
+	// fault — an in-band 5xx/429, a mid-stream cut, a stream-idle-timeout cut — before the Turn
+	// fails. File-only (no flag/env), and a pointer for DelegateFanOutRounds's reason: an explicit
+	// `re-stream-budget: 0` is the documented spelling of "never re-stream", which a plain int could
+	// not tell from an absent key (the built-in 3). It feeds domain.Config.RestreamBudget.
+	RestreamBudget *int `yaml:"re-stream-budget"`
 	// UndoSnapshots gates the SNAPSHOT-backed undo store (ADR 0074): with it on, apogee images the
 	// workspace around each exchange in a git object database of the session's own, outside the
 	// workspace, so `/undo` survives a relaunch and reaches writes that never went through apogee's

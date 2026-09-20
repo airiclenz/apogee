@@ -362,9 +362,14 @@ const defaultRestreamBudget = 3
 
 // restreamBudget reports how many re-streams one Turn may spend on transient faults — the same
 // budget at every depth, and the one the compaction summary's re-stream shares. It reads
-// defaultRestreamBudget until the `re-stream-budget:` key reaches Config.
+// Config.RestreamBudget, whose nil (an embedder's zero Config, every test Config) is
+// defaultRestreamBudget and whose pointer to 0 never re-streams; a negative value is a budget
+// already spent, which the `re-stream-budget:` row refuses before it can reach here.
 func (a *Agent) restreamBudget() int {
-	return defaultRestreamBudget
+	if a.cfg.RestreamBudget == nil {
+		return defaultRestreamBudget
+	}
+	return *a.cfg.RestreamBudget
 }
 
 // restreamHoldoff is the base of the ladder the respond phase waits out before re-streaming a

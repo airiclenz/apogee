@@ -985,6 +985,21 @@ One consequence to know: a sub-agent that faults is summarised for your agent be
 error result lands, and that summary runs under one more idle window, so the result may
 arrive up to one `stream-idle-timeout:` after the fault.
 
+A transient upstream fault is **ridden out, not surfaced**. An error the server calls
+temporary (a 5xx or 429), a connection dropped mid-reply, and a stream cut by
+`stream-idle-timeout:` all count the same: apogee holds off and sends the same request
+again, and only a fault past the budget fails the Turn. `re-stream-budget:` (a file-only
+key) is that count, at a default of **3**, and the hold-off doubles between attempts — 1 s,
+then 2 s, then 4 s — so a provider being swapped out has more than one blip's worth of
+patience to finish in. A sub-agent's Turn shares the same budget at every depth, and so does
+the summary apogee writes when it compacts a long session. The combined worst case is what
+the two keys buy you: a server that has gone silent for good costs a Turn up to (budget + 1)
+× `stream-idle-timeout:` plus the 7 s of hold-offs before the Turn fails — just over 40
+minutes at the defaults — versus hanging until Esc or `delegate-timeout:` before either key
+existed. `0` never re-sends: the first transient fault fails the Turn. Like
+`stream-idle-timeout:`, it is read when the session (or a sub-agent) is built, so an edit
+applies at the next start.
+
 **How hard a model thinks** is a property of the model, so it rides its profile: a
 `model-profiles:` entry's `thinking:` block takes `effort:` — `off`, `low`, `medium` and
 `high`, plus the wider levels some servers report: `minimal`, `xhigh`, `max`, and `none`

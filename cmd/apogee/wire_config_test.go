@@ -39,6 +39,7 @@ func projectionOptions(t *testing.T) config.Options {
 		DelegateMaxTokens:    4096,
 		DelegateTimeout:      90 * time.Second,
 		StreamIdleTimeout:    45 * time.Second,
+		RestreamBudget:       1,
 		ToolUseEnforcer:      true,
 		ToolLoopBreaker:      true,
 		ContextFillNotice:    true,
@@ -113,6 +114,11 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 	}
 	if got.StreamIdleTimeout != want.StreamIdleTimeout {
 		t.Errorf("Config.StreamIdleTimeout = %v, want %v", got.StreamIdleTimeout, want.StreamIdleTimeout)
+	}
+	// A pointer at the engine, so the VALUE is compared: nil would read as the engine's own
+	// default and hide a fold-in that dropped the key.
+	if got.RestreamBudget == nil || want.RestreamBudget == nil || *got.RestreamBudget != *want.RestreamBudget {
+		t.Errorf("Config.RestreamBudget = %v, want %v (both non-nil)", got.RestreamBudget, want.RestreamBudget)
 	}
 	if got.Floor != want.Floor {
 		t.Errorf("Config.Floor = %+v, want %+v", got.Floor, want.Floor)

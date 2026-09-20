@@ -282,6 +282,13 @@ type Options struct {
 	// so the default is folded in rather than left to the provider client.
 	StreamIdleTimeout time.Duration
 
+	// restreamBudget is how many times one Turn re-sends its request after a transient upstream
+	// fault before the Turn fails (default 3; 0 = never re-stream), loaded from the config file
+	// only, delegate-fanout-rounds's posture: a plain int here, because the loader lands the
+	// default when the key is absent. ApplyConfig sets it from settings; the composition root folds
+	// its ADDRESS into apogee.Config.RestreamBudget, whose nil keeps the engine's own default.
+	RestreamBudget int
+
 	// autoTitle gates the automatic session-naming call — the cosmetic out-of-band completion that
 	// names a new Session record from its first prompt (default true), loaded from the config file
 	// only. ApplyConfig sets it from settings; runRoot folds it into tui.Options.AutoTitle. It gates

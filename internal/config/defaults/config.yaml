@@ -693,6 +693,18 @@ context-fill-notice: false
 # stream-idle-timeout: 10m
 
 # =============================================================================
+# How many times one Turn rides out a transient upstream fault. An upstream error the server calls
+# temporary (a 5xx or 429), a connection dropped mid-reply, or a stream cut by stream-idle-timeout
+# does not fail your agent's Turn on the spot: apogee sends the same request again after a short
+# hold-off that doubles each time (1s, 2s, 4s), and only a fault past this count fails the Turn.
+# It applies at every depth — a sub-agent's Turn shares the same budget — and to the summary
+# apogee writes when it compacts a long session. With stream-idle-timeout at its default, a server
+# that has gone silent for good costs a Turn up to (budget + 1) idle windows plus the hold-offs
+# before it fails, rather than holding your agent until Esc or delegate-timeout. 0 never re-sends:
+# the first transient fault fails the Turn. Config-file only (no flag or env). Default: 3.
+# re-stream-budget: 3
+
+# =============================================================================
 # Snapshot the workspace for /undo. With this on, apogee images your whole workspace around each
 # exchange — once immediately before the exchange's first write-capable tool call, once when the
 # exchange ends — into a small object database of that session's own under ~/.apogee/snapshots/.

@@ -571,6 +571,17 @@ var KeyRegistry = bindSetters([]Key{
 		Set:  land(ParseStreamIdleTimeout, func(o *Options) *time.Duration { return &o.StreamIdleTimeout }),
 	},
 	{
+		// A count, delegate-fanout-rounds's posture: 0 is a VALUE (never re-stream) rather than an
+		// absent key, and a negative one is refused at the row.
+		Path: "re-stream-budget", Kind: KindInt, Default: strconv.Itoa(defaultRestreamBudget),
+		Editable: true,
+		Validate: validateRestreamBudget,
+		Desc: "How many times one Turn re-sends a request after a transient upstream fault before " +
+			"the Turn fails; 0 never re-streams; takes effect at the next start.",
+		Read: func(o Options) string { return strconv.Itoa(o.RestreamBudget) },
+		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.RestreamBudget }),
+	},
+	{
 		Path: "undo-snapshots", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +
@@ -1144,6 +1155,27 @@ func ParseStreamIdleTimeout(value string) (time.Duration, error) {
 func validateStreamIdleTimeout(value string) error {
 	_, err := ParseStreamIdleTimeout(value)
 	return err
+}
+
+// defaultRestreamBudget is the built-in count of how many times one Turn re-sends its request after
+// a transient upstream fault — an in-band 5xx/429, a mid-stream cut, a stream-idle-timeout cut —
+// before the Turn fails: three, with the hold-off doubling between attempts (1 s, 2 s, 4 s), so a
+// dead upstream costs a Turn a bounded number of idle windows rather than one blip's worth of
+// patience. The registry row advertises it and the loader resolves an unstated key to it, so the
+// two cannot drift apart; the engine's own default (internal/agent defaultRestreamBudget) is the
+// same three, read when the host folds no value in.
+const defaultRestreamBudget = 3
+
+// validateRestreamBudget refuses a negative count. Zero is the documented spelling of "never
+// re-stream" — the first transient fault fails the Turn — and a positive value is how many faults
+// one Turn rides out; a negative one would reach the loop as a budget every Turn has already spent.
+func validateRestreamBudget(value string) error {
+	n, err := strconv.Atoi(value)
+	if err != nil || n < 0 {
+		return fmt.Errorf("apogee: invalid re-stream-budget %q: want a count of 0 or more "+
+			"(0 never re-streams; %d is the default)", value, defaultRestreamBudget)
+	}
+	return nil
 }
 
 // validateResponseReserve refuses a reply share the Budget could not spend, through the same check

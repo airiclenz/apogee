@@ -1297,6 +1297,12 @@ var settingsTable = []settingsEntry{
 		apply:   applyStreamIdleTimeout,
 	},
 	{
+		key: "re-stream-budget",
+		// As delegate-max-steps above: no member, no seam, no re-resolution.
+		reaches: reachesWithoutAMember,
+		apply:   applyRestreamBudget,
+	},
+	{
 		key:     "undo-snapshots",
 		reaches: reachesWithoutAMember,
 		apply:   applyUndoSnapshots,
@@ -1770,6 +1776,22 @@ func applyStreamIdleTimeout(a settingsApplier, key, value string) (string, error
 	}
 	if a.live != nil {
 		a.live.update(func(o *config.Options) { o.StreamIdleTimeout = landed.StreamIdleTimeout })
+	}
+	return "", nil
+}
+
+// applyRestreamBudget is `re-stream-budget:`, on applyDelegateFanOutRounds's footing exactly: the
+// budget is a field of the Config an Agent was CONSTRUCTED with, so the write is the whole of the
+// apply for this session, and the mirror onto the holder is what bounds the re-streams of the
+// Firings it raises. Success, no note, the Description's "takes effect at the next start" carrying
+// the promise; the value is parsed because a value that is to be recorded has to be read.
+func applyRestreamBudget(a settingsApplier, key, value string) (string, error) {
+	landed, err := landSetting(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.update(func(o *config.Options) { o.RestreamBudget = landed.RestreamBudget })
 	}
 	return "", nil
 }

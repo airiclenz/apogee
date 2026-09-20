@@ -45,6 +45,16 @@ type Config struct {
 	// (default 10m; 0 = off); an embedder sets it directly.
 	StreamIdleTimeout time.Duration
 
+	// RestreamBudget is how many times one Turn re-sends its request after a transient Upstream
+	// fault — an in-band 5xx/429, a mid-stream cut, a StreamIdleTimeout cut — before the Turn
+	// fails, with the hold-off doubling between attempts (1 s, 2 s, 4 s). It is a POINTER so that
+	// the zero Config keeps a re-stream: nil is the engine's default of three (an embedder's zero
+	// Config, and every test Config, ride out three faults — contrast StreamIdleTimeout, whose
+	// zero disables the cut), and a pointer to 0 never re-streams. It applies at every depth — a
+	// delegate's Turn and the compaction summary's re-stream share it. The host folds in the
+	// `re-stream-budget:` key (default 3; 0 = never); an embedder sets it directly.
+	RestreamBudget *int
+
 	// ServerName and ServerDescription name the Upstream in the HUMAN's words — the `servers:`
 	// entry this session is bound to and the free-text `description:` beside it (ADR 0069). They
 	// are display facts and never dial facts: nothing routes, authenticates or budgets by them, so
