@@ -153,7 +153,9 @@ NOTES (2026-09-20): the finished-phase helper `subAgentPhaseFinished` and `subAg
 
 **Commit:** `feat(tui): a running sub-agent row shows the step cap it runs under and the cap it asked for`
 
-## 6. The first-Esc hint names what a second Esc discards
+## 6. The first-Esc hint names what a second Esc discards — ✅ DONE (2026-09-20)
+NOTES (2026-09-20): the fan-out reading (`transcript.inFlightFanOut`, `entry.neverStarted`, `unstartedDelegationPrefix`) lives in `internal/tui/transcript.go` beside `subAgentGroupAt` rather than in `model.go` — it is a reading of the transcript's entries and phases, and `model.go` is the coordinator file; the plan's Files list named only model.go.
+NOTES (2026-09-20): consequential edit — internal/tui/runview_test.go: made necessary by `statusRight` taking the slot's room (`statusRight(room int)`, handed by `statusLine`); its three `m.statusRight()` calls now pass `m.width`, assertions unchanged.
 
 **What:** Recast at the regression check (2026-09-20). In `internal/tui/model.go` `statusRight`, while `lastEsc` is primed AND the open Turn holds a pooled `sub_agent` group (two or more `sub_agent` heads of the open Turn, none `done`), the hint reads, by the heads' phases: with `F ≥ 1` finished (`phase == SubAgentFinished && !done`): `press esc again to stop — drops F finished delegation(s); ⏎ a message keeps them` (`delegation` singular for F = 1, `delegations` otherwise); with `F = 0` and `Q ≥ 1` queued (`phase == ""`): `press esc again to stop — ⏎ a message instead skips the Q queued`; otherwise the hint is today's `press esc again to stop`. The status line's existing right-slot truncation applies; no new row. Record the two wordings in `layout.md` beside the existing hint.
 

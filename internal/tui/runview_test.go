@@ -528,13 +528,13 @@ func TestRunViewStatusSlotOffersTheWayBack(t *testing.T) {
 
 	m := modelWithRun(t)
 	startStubWorker(t, &m)
-	if got := plainSlot(m.statusRight()); got != "esc×2 stop" {
+	if got := plainSlot(m.statusRight(m.width)); got != "esc×2 stop" {
 		t.Fatalf("setup: the top level's right slot is %q; want the stop gesture", got)
 	}
 
 	m = enterOnLastBlock(t, m)
 
-	if got := plainSlot(m.statusRight()); got != breadcrumbHint {
+	if got := plainSlot(m.statusRight(m.width)); got != breadcrumbHint {
 		t.Errorf("the right slot inside a view is %q; want %q — the key it actually has", got, breadcrumbHint)
 	}
 }
@@ -1019,7 +1019,7 @@ func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
 			if !strings.Contains(under, trail) {
 				t.Errorf("the header is %q under %s; want it to keep the trail %q — where the reader is is still true", under, tc.name, trail)
 			}
-			if got := plainSlot(m.statusRight()); strings.Contains(got, breadcrumbHint) {
+			if got := plainSlot(m.statusRight(m.width)); strings.Contains(got, breadcrumbHint) {
 				t.Errorf("the status slot is %q under %s; the two rows advertise one key and must fall silent together", got, tc.name)
 			}
 

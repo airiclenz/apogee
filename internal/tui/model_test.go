@@ -954,6 +954,131 @@ func TestModelStopKeys(t *testing.T) {
 	})
 }
 
+// armedEscModel is a running model with the esc stop gesture ARMED over a transcript built by
+// build — the frame whose right slot the armed-esc hint holds. width is the window the hint is
+// composed for.
+func armedEscModel(t *testing.T, width int, build func(tr *transcript)) Model {
+	t.Helper()
+	m := newTestModel(t)
+	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 24})
+	startStubWorker(t, &m)
+	build(&m.transcript)
+	return step(t, m, keyEsc())
+}
+
+// fanOutOf builds one top-level fan-out of finished, running and queued members, in that order —
+// each finished member carrying its FINISHED phase and none its paired result, as a pooled group
+// stands before its burst (ADR 0039 decision 4).
+func fanOutOf(finished, running, queued int) func(tr *transcript) {
+	return func(tr *transcript) {
+		n := 0
+		for i := 0; i < finished; i++ {
+			n++
+			id := fmt.Sprintf("f%d", n)
+			subAgentCall(tr, id, "survey", 0)
+			subAgentStarted(tr, id, 1)
+			subAgentPhaseFinished(tr, id, "done")
+		}
+		for i := 0; i < running; i++ {
+			n++
+			id := fmt.Sprintf("r%d", n)
+			subAgentCall(tr, id, "survey", 0)
+			subAgentStarted(tr, id, 1)
+		}
+		for i := 0; i < queued; i++ {
+			n++
+			subAgentCall(tr, fmt.Sprintf("q%d", n), "survey", 0)
+		}
+	}
+}
+
+// TestEscStopHintNamesWhatASecondEscDiscards pins the armed-esc hint's three wordings: while a
+// pooled fan-out holds finished delegations the hint says how many reports a second esc drops and
+// that a queued message keeps them; while it holds only queued ones it says a queued message skips
+// them instead; and a lone delegation, or a model with nothing delegated, keeps the plain hint.
+func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
+	t.Parallel()
+	const wide = 200
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  string
+	}{
+		{"finished 3 / running 4 / queued 1 drops the three", fanOutOf(3, 4, 1),
+			"press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them"},
+		{"finished 1 reads the singular", fanOutOf(1, 2, 0),
+			"press esc again to stop — drops 1 finished delegation; ⏎ a message keeps them"},
+		{"finished 0 / queued 5 reads the skips wording", fanOutOf(0, 2, 5),
+			"press esc again to stop — ⏎ a message instead skips the 5 queued"},
+		{"finished 0 / queued 0 is the plain hint", fanOutOf(0, 3, 0), "press esc again to stop"},
+		{"a lone delegation is the plain hint", fanOutOf(0, 0, 1), "press esc again to stop"},
+		{"an idle model is the plain hint", func(*transcript) {}, "press esc again to stop"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			m := armedEscModel(t, wide, tc.build)
+			if got := plainSlot(m.statusRight(m.width)); got != tc.want {
+				t.Errorf("statusRight = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// The long form reaches the rendered row where it fits, margin and all.
+	t.Run("the long form lands on a wide status line", func(t *testing.T) {
+		t.Parallel()
+		m := armedEscModel(t, wide, fanOutOf(3, 4, 1))
+		assertStatusRightTail(t, m, "press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them"+bodyIndent)
+	})
+
+	// A group whose result burst has landed is over: the Turn it belonged to is not the one a
+	// stop would discard, however the phases read.
+	t.Run("a burst group is the plain hint", func(t *testing.T) {
+		t.Parallel()
+		m := armedEscModel(t, wide, func(tr *transcript) {
+			fanOutOf(2, 0, 0)(tr)
+			subAgentReport(tr, "f1", "done", 0)
+			subAgentReport(tr, "f2", "done", 0)
+		})
+		if got := plainSlot(m.statusRight(m.width)); got != "press esc again to stop" {
+			t.Errorf("statusRight = %q, want the plain hint once the group's results are paired", got)
+		}
+	})
+}
+
+// TestEscStopHintFallsBackWhereTheLongFormDoesNotFit proves the long form is composed only where
+// the row has room for it: at newTestModel's 80 columns, with the running phrase in the left slot,
+// the rendered row ends in the plain hint — asserted through the rendered cells, since it is the
+// row's own arithmetic, not statusRight's, that decides the room.
+func TestEscStopHintFallsBackWhereTheLongFormDoesNotFit(t *testing.T) {
+	t.Parallel()
+	m := armedEscModel(t, 80, fanOutOf(3, 4, 1))
+	if got := statusCells(t, m); strings.Contains(got, "drops 3") {
+		t.Fatalf("the long form was composed onto an 80-column row:\n%s", got)
+	}
+	assertStatusRightTail(t, m, "press esc again to stop"+bodyIndent)
+}
+
+// TestEscStopHintIgnoresDelegationsThatNeverStarted proves a head whose result opens with the
+// engine's `sub-agent not started:` prefix — a pre-empted or ceiling-refused delegation, closed
+// through its finished phase without ever running — is neither finished work nor a queued job:
+// eight running or finished members and two refused ones count as the eight alone.
+func TestEscStopHintIgnoresDelegationsThatNeverStarted(t *testing.T) {
+	t.Parallel()
+	m := armedEscModel(t, 200, func(tr *transcript) {
+		fanOutOf(3, 5, 0)(tr)
+		skippedDelegation(tr, "x1", "extra", false)
+		skippedDelegation(tr, "x2", "extra", false)
+	})
+	finished, queued, ok := m.transcript.inFlightFanOut()
+	if !ok || finished != 3 || queued != 0 {
+		t.Errorf("inFlightFanOut = (%d, %d, %v), want (3, 0, true): the two refused heads must count as neither", finished, queued, ok)
+	}
+	if got := plainSlot(m.statusRight(m.width)); got != "press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them" {
+		t.Errorf("statusRight = %q", got)
+	}
+}
+
 // ----------------------------------------------------------------------------
 // The Approval UI (phase-2 detail plan §4 P2.4; ADR 0004 — the C3 face)
 // ----------------------------------------------------------------------------

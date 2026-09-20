@@ -1460,7 +1460,14 @@ and where `░` draws the empty half of the ten-cell track: on screen those cell
 dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc×2 stop`
 while a turn runs, `esc back` while a run view is open, `enter dismiss` after an error, the
 primed-`ctrl+c` and armed-`esc` lines), and
-the mouse-copy flash. Whichever one is showing, it
+the mouse-copy flash. The armed-`esc` line reads `press esc again to stop`, and while a pooled
+sub-agent group is in flight in the open Turn it says what the second press would cost: `press esc
+again to stop — drops 3 finished delegations; ⏎ a message keeps them` where members have already
+reported (`1 finished delegation` for one), or `press esc again to stop — ⏎ a message instead skips
+the 5 queued` where none has and members are still queued behind the cap. Either long form is
+composed only where the row has room for the whole sentence — a row too tight for it falls back to
+the plain line, never to a clipped one — and a delegation the engine settled before it started (its
+result opens `sub-agent not started:`) counts as neither finished nor queued. Whichever one is showing, it
 ends **two columns short of the window edge** (`bodyIndent`) — the mirror of the two columns the
 left slot leads with, and the same column the footer's mode marker below it ends in, so the
 gauge's last track cell in the sketch sits directly above the last character of `ask before`. The

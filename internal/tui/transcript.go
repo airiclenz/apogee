@@ -2188,6 +2188,76 @@ func subAgentGroupAt(entries []entry, i int) (group []groupBlock, pos int, ok bo
 	return ownGroupAt(entries, i, subAgentToolName)
 }
 
+// unstartedDelegationPrefix opens the result of a delegation the engine settled BEFORE it started —
+// pre-empted by a queued user message or refused past the reply's fan-out ceiling
+// (internal/agent/dispatch.go's skippedDelegationContent and fanOutCeilingResultFormat, ADR 0039).
+// It is restated here because this package cannot read the engine's constants: the two unstarted
+// kinds share the head so a reader can tell them from a child's own failure, and a rewording over
+// there has to fail the test that pins it here.
+const unstartedDelegationPrefix = "sub-agent not started:"
+
+// neverStarted reports whether a run head's result says its child never ran — the pre-emption and
+// the ceiling refusal, which are the only results opening with unstartedDelegationPrefix. Such a
+// head is neither finished work nor a queued job, whatever its phase says: the engine closes it
+// through its finished phase alone (skipDelegation), so a count that read the phase would take a
+// refused delegation for a report a stop discards. The result's head line is the first line of the
+// body the failure laid out (absorbFailure): a sub_agent head carries no body of its own before its
+// result, and the prompt an expanded row shows above the result is composed at paint time
+// (subAgentPromptDetails), never stored.
+func (e entry) neverStarted() bool {
+	if !e.headsRun() {
+		return false
+	}
+	lines := e.tool.Details.all()
+	return len(lines) > 0 && strings.HasPrefix(lines[0].Text, unstartedDelegationPrefix)
+}
+
+// inFlightFanOut counts the open Turn's POOLED delegations by what a stop would do to them: the
+// members that have finished and handed their report back (their result not yet paired, so a
+// stop's rollback still discards it), and the members still queued behind the Parallel agents cap
+// (a queued user message would skip those instead of stopping the run — preemptDelegation). ok
+// is false wherever no such group is in flight: no top-level delegation at all, a lone one (the
+// group floor is two, as everywhere — ownGroup), or a group whose result burst has already
+// landed on any member (done) — that group is over and belongs to a finished Turn.
+//
+// The group is the one the most recent top-level run head belongs to (subAgentGroupAt) — a
+// fan-out is one reply's calls, adjacent at depth 0 — and the count reads each head's phase
+// exactly as the row does (subAgentReported, subAgentScheduled): finished is the FINISHED phase,
+// queued is no phase at all. A head whose child never started ([entry.neverStarted]) is neither,
+// and is left out of both.
+func (t *transcript) inFlightFanOut() (finished, queued int, ok bool) {
+	head := -1
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if e := &t.entries[i]; e.depth == 0 && e.headsRun() {
+			head = i
+			break
+		}
+	}
+	if head < 0 {
+		return 0, 0, false
+	}
+	group, _, ok := subAgentGroupAt(t.entries, head)
+	if !ok {
+		return 0, 0, false
+	}
+	for _, member := range group {
+		e := &t.entries[member.at]
+		if e.done {
+			return 0, 0, false
+		}
+		if e.neverStarted() {
+			continue
+		}
+		switch e.phase {
+		case domain.SubAgentFinished:
+			finished++
+		case "":
+			queued++
+		}
+	}
+	return finished, queued, true
+}
+
 // prevSibling is the index of the entry standing at entries[i]'s own depth immediately before it —
 // the head of the block that ends where i begins — or −1 when i opens its level. Everything nested
 // deeper than i belongs to whatever block precedes it, so the walk skips it whole.

@@ -3591,7 +3591,12 @@ func (m Model) statusLine() string {
 	// An empty slot gets no margin: the justify gap already paints black to the last column, so two
 	// orphan cells would move nothing. The gap arithmetic below reads the widened right slot, so
 	// the too-narrow drop simply happens two columns earlier — the margin's honest price.
-	right := m.statusRight()
+	//
+	// The slot is composed knowing the room the left slot leaves it — the window less the left
+	// slot, the margin and the one-column gap the drop below insists on — because one occupant has
+	// a long and a short form and picks between them by that room (escStopHint); every other
+	// occupant ignores it and is dropped whole below as before.
+	right := m.statusRight(m.width - m.th.measure.Width(left) - len(bodyIndent) - 1)
 	if right != "" {
 		right += m.th.statusBar.Render(bodyIndent)
 	}
@@ -3791,6 +3796,53 @@ func (m Model) runningPhrase(view runRef, now time.Time, quiet bool) string {
 	}
 }
 
+// escStopHintPlain is the armed-esc hint as it always read: a second press inside escStopWindow
+// stops the run. It is the whole hint wherever nothing pooled is in flight, and the fallback of the
+// two longer forms below where the row has no room for them.
+const escStopHintPlain = "press esc again to stop"
+
+// escStopHintDropsFormat is the armed-esc hint while a pooled fan-out holds finished delegations
+// whose reports the stop's rollback would discard (its arguments: the count, and `delegation` or
+// `delegations` for it): what a second esc throws away, and that a queued message keeps it — the
+// message waits for the group to join and the reports land with the Turn (ADR 0025, ADR 0039).
+const escStopHintDropsFormat = "press esc again to stop — drops %d finished %s; ⏎ a message keeps them"
+
+// escStopHintSkipsFormat is the armed-esc hint while a pooled fan-out holds no finished delegation
+// yet but does hold QUEUED ones (its argument: how many): a queued message pre-empts those
+// instead of stopping anything (preemptDelegation), which is the alternative the human is choosing
+// against with a second esc.
+const escStopHintSkipsFormat = "press esc again to stop — ⏎ a message instead skips the %d queued"
+
+// escStopHint words the armed-esc hint for the room the slot has. While a pooled sub_agent group
+// is in flight in the open Turn (transcript.inFlightFanOut) the hint says what a second esc would
+// discard and what queuing a message does instead — the finished form first, since discarding
+// finished work is the costlier fact, and the queued form only when nothing has finished — and it
+// says so only where the whole sentence fits: a long form the slot would drop whole (statusLine)
+// or the row would truncate to "drops 3 fin…" states neither fact, so a row too tight for it falls
+// back to the plain hint, exactly as the quiet qualifier falls back to the plain running phrase
+// (statusLeft). At width 1 the queued form can name a single queued head; that is true there too.
+func (m Model) escStopHint(room int) string {
+	finished, queued, ok := m.transcript.inFlightFanOut()
+	if !ok {
+		return escStopHintPlain
+	}
+	var long string
+	switch {
+	case finished == 1:
+		long = fmt.Sprintf(escStopHintDropsFormat, finished, "delegation")
+	case finished > 1:
+		long = fmt.Sprintf(escStopHintDropsFormat, finished, "delegations")
+	case queued >= 1:
+		long = fmt.Sprintf(escStopHintSkipsFormat, queued)
+	default:
+		return escStopHintPlain
+	}
+	if m.th.measure.Width(long) > room {
+		return escStopHintPlain
+	}
+	return long
+}
+
 // quietQualifier is the stall guard's whole surface: the word, and the separator that hangs it off
 // the running phrase (runningPhrase). It says nothing about how long, and nothing about what the
 // silence means — a 43k-token prompt is legitimately silent for a minute or two, so the honest
@@ -3802,15 +3854,18 @@ const quietQualifier = " · quiet"
 // folds a turn's total into ctxUsed (or after /clear and /compact zero it) — so the hint shows
 // before any usage is measured and the gauge takes the slot the moment it is. Every branch
 // returns its occupant flush — statusLine appends the trailing margin at one seam, so the whole
-// slot moves together and no branch has to remember an inset of its own.
-func (m Model) statusRight() string {
+// slot moves together and no branch has to remember an inset of its own. room is the columns the
+// slot may spend (statusLine), read by the one occupant that has a longer form to offer
+// (escStopHint); the others are composed as they are and dropped whole by statusLine if they
+// do not fit.
+func (m Model) statusRight(room int) string {
 	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
 	if !m.lastCtrlC.IsZero() {
 		return m.th.statusBar.Render("press ctrl+c again to quit")
 	}
 	// A primed Esc takes it next: tell the human a second press inside the window stops the run.
 	if !m.lastEsc.IsZero() {
-		return m.th.statusBar.Render("press esc again to stop")
+		return m.th.statusBar.Render(m.escStopHint(room))
 	}
 	// A fresh flash — a mouse-copy confirmation, or a child-message refusal raised inside a run
 	// view (interject.go) — briefly takes the slot (flashClearMsg clears it).
