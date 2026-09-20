@@ -173,6 +173,20 @@ cancel during child 2 already discards child 1.
 > width line remains the account of what a group actually RAN at, which may differ per reply.
 > Implemented by `docs/plans/2026-09-20 - 00`.
 
+> **Amended 2026-09-20 (`apogee-60x`, [ADR 0082](0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md)).**
+> "Failures are independent: a child's error, breaker trip, or denied approval becomes that
+> child's tool result" — the independence stands (siblings run to completion, the parent's next
+> primary call sees all N results), but a fault is no longer that result and nothing more. A child
+> whose Run ends `Faulted` with the parent's ctx still live is folded at the fault
+> (`finishAtFault`) and **retained** exactly as a capped one is, and its error result — the head
+> still names the fault — carries, in the slots the cap path already ships, a draft note naming a
+> spawn-named `output_path` the child wrote before the fault and the continue line
+> `[to continue this delegate: sub_agent with continue: "<name>"]`. A cancel still unwinds the
+> whole delegation and retains nothing (the cancel rule above, ADR 0013 §5). The breaker trip and
+> the denied approval in that sentence are tool results inside the child's own Turn, never a
+> fault of its Run, and are untouched; a refused call never spawned a child and is retained by
+> nothing.
+
 **5 — Child streams are identified by the spawning call-ID.** `EventBase` gains the ID of
 the `sub_agent` tool call that spawned the emitting agent, stamped at child construction
 exactly as `Depth` is today; top-level events carry none. Every consumer keys off it: the

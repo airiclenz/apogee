@@ -343,3 +343,14 @@ empty. The fold itself is no boundary either: the child's history is untouched b
 and its Exchange ends as it always did, cleanly, at the bound (`StepResult.StepCapped`). The
 2026-08-07 amendment is unchanged — a continuation issued in a reply beside other `sub_agent`
 calls fans out with them at depth 0, and the retention map is guarded for exactly that reason.
+
+> **Amended 2026-09-20 (`apogee-60x`, [ADR 0082](0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md)).**
+> Retention is the capped OR faulted child's. A child whose Run ends `Faulted` with the parent's
+> ctx still live — its Turn's re-stream budget spent, or a fault that was never transient — is
+> folded at the fault (`finishAtFault`: the same summary call, no wrap-up Turn, under one
+> `stream-idle-timeout` of its own; a child that completed no Turn keeps the unavailable marker in
+> the fold's place) and retained under its name with the same entry shape, so `continue: "<name>"`
+> re-spawns it from the fold as it re-spawns a capped one. Its result stays the ERROR result — the
+> fault head, then the draft note when a spawn-named `output_path` was written before the fault,
+> then the continue line. §5 is unmoved: a cancel unwinds the whole delegation and retains
+> nothing, and the heading's "capped child" reads "capped or faulted child" from this date.

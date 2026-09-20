@@ -669,7 +669,15 @@ One iteration of the loop — a single *primary* Upstream call and the work that
 to a Turn, not a Turn of its own. The unit of self-regulation and of bench measurement. The
 Turn's lifecycle — its opening, its one permitted overflow fold, and its five exits (complete,
 Exchange-complete, abandoned, cancelled, step-capped) — is owned by the loop's `turnLifecycle` module
-(`internal/agent/turn.go`), the way the Exchange anchors on `ExchangeView`.
+(`internal/agent/turn.go`), the way the Exchange anchors on `ExchangeView`. A Turn also rides out a
+**transient** Upstream fault itself — an in-band 5xx/429, a connection cut mid-reply, a stream
+`stream-idle-timeout` (default **10m**, `0` = off; bytes of any kind are activity) cut for silence
+— by re-sending the same request up to a per-Turn **re-stream budget** (`re-stream-budget`,
+default **3**, `0` = never; the same at every depth, and shared by the compaction summary on a
+counter of its own) with a hold-off that doubles before each re-send (1 s, 2 s, 4 s), silently when
+it lands, so only the fault that finds the budget spent faults the Turn
+([ADR 0082](docs/adr/0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md));
+this is not the Reaction correction re-stream, which repairs a tool call within the same Turn.
 
 **Exchange**:
 One user input through to the final no-tool response — usually several Turns. The
@@ -786,7 +794,12 @@ of its own so the error result lands at most one idle window late; a child that 
 is retained without a fold request, its fold the unavailable marker saying so, and a fold that
 fails retains the marker naming the cause — and its last narration stands as the closing text;
 the error result keeps its fault head and gains the continue line. A cancel still unwinds the
-whole delegation and retains nothing (D2). The capped or faulted result's last body note spells
+whole delegation and retains nothing (D2). The fault that reaches retention is one the child's
+Turn has already ridden out to its **re-stream budget** — the same three re-sends under the
+doubling hold-off depth 0 gets, each idle window counted — so a retained faulted delegate is one
+whose Upstream stayed down past that budget, never one that met a blip
+([ADR 0082](docs/adr/0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md)).
+The capped or faulted result's last body note spells
 the handle back — `[to continue
 this delegate: sub_agent with continue: "<name>"]` — and a `sub_agent` call carrying
 `continue: "<name>"` spawns a **fresh child** whose opening task is the retained task, the fold

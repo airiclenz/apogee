@@ -105,11 +105,12 @@ request into the same ceiling — struck 2026-09-19, see the two notes below.
 > and compaction's capped-summary fault stay no-retry. The "Retrying or continuing a reply that hit
 > the cap" rejection below is struck to the same extent.
 >
-> **Amended (2026-09-20, plan `2026-09-20 - 04` item 3).** The transient re-stream's latch named
-> above, `restreamSpent`, is history: a Turn now re-streams a transient fault up to a per-Turn
-> budget (`turnRun.restreamsSpent` against `Agent.restreamBudget`, three by default) with a
-> doubling hold-off before each re-send. `capRetrySpent` stays a latch of its own beside that
-> counter; the separation of budgets this note records is unchanged.
+> **Amended (2026-09-20, plan `2026-09-20 - 04` item 3; recorded by [ADR 0082](0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md)).**
+> The transient re-stream's latch named above, `restreamSpent`, is history: a Turn now re-streams
+> a transient fault up to a per-Turn budget (`turnRun.restreamsSpent` against
+> `Agent.restreamBudget`, three by default, the `re-stream-budget:` key) with a doubling hold-off
+> before each re-send. `capRetrySpent` stays a latch of its own beside that counter; the
+> separation of budgets this note records is unchanged.
 
 ## Considered and rejected
 
