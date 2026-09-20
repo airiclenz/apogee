@@ -176,6 +176,27 @@ func TestAdvicePaneFollowsTheNewestFiring(t *testing.T) {
 	}
 }
 
+// TestDismissingTheAdvicePaneDropsTheScroll pins the other half of where the verb lands: closing the
+// pane takes the scroll with it, so the next /advice opens on the newest firing again rather than on
+// the window the last reading was left at. Both ways of closing spend dismissAdvice's one body
+// (dismissReport), so proving it here proves it for esc and for a click outside alike.
+func TestDismissingTheAdvicePaneDropsTheScroll(t *testing.T) {
+	t.Parallel()
+
+	m := advicePaneModel(t, 40)
+	m.advicePane.top = 7
+
+	closed := m.dismissAdvice()
+
+	if closed.advicePane.open {
+		t.Error("the dismissed pane is still on the frame")
+	}
+	if closed.advicePane.top != 0 {
+		t.Errorf("top = %d after dismissal, want 0 — the next /advice opens on the newest firing",
+			closed.advicePane.top)
+	}
+}
+
 // TestAdviceCommand pins the verb's whole contract: /advice opens the pane on the newest firing,
 // following, and drives no worker; a second /advice on the open pane does not toggle it shut but
 // RE-OPENS it — the follow a reader had detached by scrolling up is re-armed and the window is the
