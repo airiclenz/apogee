@@ -2116,6 +2116,34 @@ func TestSubAgent_MaxStepsArgumentOnlyLowersTheCap(t *testing.T) {
 	}
 }
 
+// TestResolveStepCap pins the one clamp rule both readers share — runSubAgent seeding the child
+// and runDelegation stamping the started phase: an ask only ever lowers a positive configured
+// cap, an ask above it is applied as the cap and reported back as the ask, and an ask against an
+// unbounded cap (0) or no ask at all leaves the configured value alone and reports nothing.
+func TestResolveStepCap(t *testing.T) {
+	cases := []struct {
+		name                     string
+		configured, asked        int
+		wantApplied, wantRequest int
+	}{
+		{"below the cap binds", 80, 40, 40, 0},
+		{"at the cap is the cap", 80, 80, 80, 0},
+		{"above the cap is clamped and remembered", 80, 120, 80, 120},
+		{"an ask against an unbounded cap is ignored", 0, 40, 0, 0},
+		{"no ask keeps the configured cap", 80, 0, 80, 0},
+		{"no ask against an unbounded cap stays unbounded", 0, 0, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			applied, requested := resolveStepCap(tc.configured, tc.asked)
+			if applied != tc.wantApplied || requested != tc.wantRequest {
+				t.Errorf("resolveStepCap(%d, %d) = (%d, %d), want (%d, %d)",
+					tc.configured, tc.asked, applied, requested, tc.wantApplied, tc.wantRequest)
+			}
+		})
+	}
+}
+
 // TestStepCapNeverBoundsTheMainAgent holds the delegates-only line: the key is set, the top-level
 // Agent takes more Turns than it, and nothing stops it — the main loop is the human's to stop.
 func TestStepCapNeverBoundsTheMainAgent(t *testing.T) {

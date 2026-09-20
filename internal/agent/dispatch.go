@@ -750,7 +750,7 @@ func (a *Agent) interjectionPending() bool {
 // queued message) and refusePastCeiling (the fan-out ceiling), at either width, so a lone
 // delegation is closed exactly as a pooled one.
 func (a *Agent) skipDelegation(turn int, call domain.ToolCall, result domain.ToolResult) domain.ToolResult {
-	a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, result, false)
+	a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
 	return result
 }
 
@@ -772,14 +772,32 @@ func (a *Agent) skipDelegation(turn int, call domain.ToolCall, result domain.Too
 // bound holds even if the call is reached by another route. The audit record is NOT booked here:
 // it is commitCall's, on the dispatching goroutine (dispatchSlot.delegated).
 func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
-	a.emitSubAgentPhase(turn, call, domain.SubAgentStarted, domain.ToolResult{}, false)
+	applied, requested := a.stepCapFor(call)
+	a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{
+		Phase:        domain.SubAgentStarted,
+		StepCap:      applied,
+		CapRequested: requested,
+	})
 	result, outcome := a.runSubAgent(ctx, call)
 	if outcome == dispatchCancelled {
-		a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, domain.ToolResult{}, true)
+		a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Cancelled: true})
 		return result, dispatchCancelled
 	}
-	a.emitSubAgentPhase(turn, call, domain.SubAgentFinished, result, false)
+	a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
 	return result, dispatchDone
+}
+
+// stepCapFor reports the step cap one sub_agent call's child will run under and the ask it clamps
+// (resolveStepCap against the configured delegate cap), for the started phase event to carry: the
+// same rule runSubAgent applies when it seeds the child, read here BEFORE the child exists so the
+// phase that announces it can state the bound. A call whose arguments do not parse asked for
+// nothing — runSubAgent refuses it on its own account before a child exists.
+func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
+	var args tools.SubAgentArgs
+	if err := json.Unmarshal(call.Arguments, &args); err != nil {
+		return resolveStepCap(a.cfg.Delegation.MaxSteps, 0)
+	}
+	return resolveStepCap(a.cfg.Delegation.MaxSteps, args.MaxSteps)
 }
 
 // emitSubAgentPhase surfaces one delegation lifecycle boundary. The event is stamped with the
@@ -792,25 +810,17 @@ func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCal
 // interjection, or refused past the reply's fan-out ceiling, reports a finished phase alone
 // (skipDelegation): it never started.
 //
-// cancelled marks a finished phase that closes a ROLLED-BACK delegation rather than a reported one
+// The caller fills what the phase carries — Phase, and Result or Cancelled on a finished one,
+// StepCap and CapRequested on a started one (stepCapFor) — and this stamps the identity.
+// Cancelled marks a finished phase that closes a ROLLED-BACK delegation rather than a reported one
 // (ADR 0075 decision 12). It rides the event so an observer can tell the two apart; a started phase
 // is never cancelled.
-func (a *Agent) emitSubAgentPhase(
-	turn int,
-	call domain.ToolCall,
-	phase domain.SubAgentPhase,
-	result domain.ToolResult,
-	cancelled bool,
-) {
+func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, event domain.SubAgentPhaseEvent) {
 	base := a.base(turn)
 	base.Depth++
 	base.CallID = call.ID
-	a.cfg.Events.Emit(domain.SubAgentPhaseEvent{
-		EventBase: base,
-		Phase:     phase,
-		Result:    result,
-		Cancelled: cancelled,
-	})
+	event.EventBase = base
+	a.cfg.Events.Emit(event)
 }
 
 // emitSubAgentNamed surfaces the ONE rename a generated delegation name produces (ADR 0068) — and

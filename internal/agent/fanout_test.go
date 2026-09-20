@@ -1635,3 +1635,70 @@ func TestFanOut_LeafToolsNeverCountTowardTheCeiling(t *testing.T) {
 		}
 	}
 }
+
+// TestFanOut_StartedPhaseCarriesTheAppliedCap pins the step-cap facts a delegation's started
+// phase carries for a Driver (domain.SubAgentPhaseEvent.StepCap / CapRequested): the cap the
+// child runs under, and the ask it clamped only when the ask was above the configured cap — the
+// same rule runSubAgent seeds the child with (resolveStepCap), read before the child exists. The
+// finished phase carries neither.
+func TestFanOut_StartedPhaseCarriesTheAppliedCap(t *testing.T) {
+	sink := &recordingSink{}
+	calls := []provider.Delta{
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c1", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentArgsCapped("task one", 120)},
+		}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c2", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentArgsCapped("task two", 40)},
+		}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c3", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentArgs("task three")},
+		}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+	up := newRoutedResponder().
+		route("delegate three things", nil, calls).
+		route("task one", nil, contentScript("child one done")).
+		route("task two", nil, contentScript("child two done")).
+		route("task three", nil, contentScript("child three done")).
+		route("delegate three things", nil, contentScript("parent done"))
+
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.ParallelAgents = 3
+	cfg.Delegation.MaxSteps = 80
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate three things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	cases := []struct {
+		callID             string
+		stepCap, requested int
+	}{
+		{"c1", 80, 120}, // asked above the cap: clamped, and the ask remembered
+		{"c2", 40, 0},   // asked below the cap: the ask binds and nothing was clamped
+		{"c3", 80, 0},   // asked nothing: the configured cap
+	}
+	for _, tc := range cases {
+		phases := phasesFor(sink.events, tc.callID)
+		if len(phases) != 2 || phases[0].Phase != domain.SubAgentStarted || phases[1].Phase != domain.SubAgentFinished {
+			t.Fatalf("%s phases = %+v, want a started/finished pair", tc.callID, phases)
+		}
+		if phases[0].StepCap != tc.stepCap || phases[0].CapRequested != tc.requested {
+			t.Errorf("%s started phase caps = (StepCap %d, CapRequested %d), want (%d, %d)",
+				tc.callID, phases[0].StepCap, phases[0].CapRequested, tc.stepCap, tc.requested)
+		}
+		if phases[1].StepCap != 0 || phases[1].CapRequested != 0 {
+			t.Errorf("%s finished phase caps = (%d, %d), want both 0 — the facts ride the started phase only",
+				tc.callID, phases[1].StepCap, phases[1].CapRequested)
+		}
+	}
+}

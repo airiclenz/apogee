@@ -200,11 +200,21 @@ const (
 // a report. A consumer that treats finished as "the child reported" must therefore ask this first:
 // a cancelled finished has nothing to fold and nothing to mark done. It is always false on
 // SubAgentStarted.
+//
+// StepCap and CapRequested are the child's step-cap facts, set on SubAgentStarted only and zero on
+// every finished phase: StepCap is the cap the child actually runs under (the configured
+// delegate cap, or the call's lower `max_steps`), 0 when it is unbounded; CapRequested is the
+// `max_steps` the call asked for ONLY when that ask was above a positive configured cap and was
+// clamped to it, 0 otherwise — no ask, an ask that bound, or an ask against an unbounded cap. They
+// let a Driver show the human the bound a delegate was spawned under while it runs; the model's
+// own account of the clamp stays on the result.
 type SubAgentPhaseEvent struct {
 	EventBase
-	Phase     SubAgentPhase
-	Result    ToolResult
-	Cancelled bool
+	Phase        SubAgentPhase
+	Result       ToolResult
+	Cancelled    bool
+	StepCap      int
+	CapRequested int
 }
 
 // SubAgentNamedEvent reports that a delegation the model left unnamed has just been GIVEN a name by

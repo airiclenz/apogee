@@ -965,21 +965,11 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	if sub.outputTarget != "" && sub.Mode() != domain.ModePlan {
 		ledgerTarget = sub.outputTarget
 	}
-	// The call's optional max_steps can only ever LOWER the configured cap: a model may say "this
-	// one is small, stop it sooner", never "let me run longer than the host allows". Both values
-	// must be positive for the request to bite — a request against an UNBOUNDED cap (0, the key
-	// switched off) is ignored, because the host turning the bound off is a deliberate posture
-	// the model does not get to reinstate per call. A request ABOVE a positive cap is applied as
-	// the cap and REMEMBERED, so the result can say so (delegationResult): the clamp used to be
-	// silent, and a parent that never hears its ask was cut keeps asking.
-	if args.MaxSteps > 0 && sub.stepCap > 0 {
-		switch {
-		case args.MaxSteps < sub.stepCap:
-			sub.stepCap = args.MaxSteps
-		case args.MaxSteps > sub.stepCap:
-			sub.capRequested = args.MaxSteps
-		}
-	}
+	// The call's optional max_steps against the cap the child was seeded with (resolveStepCap —
+	// the same rule runDelegation applied to the started phase event). A continuation takes the
+	// same road: its fresh child was seeded from the same key and its call's max_steps clamps the
+	// same way.
+	sub.stepCap, sub.capRequested = resolveStepCap(sub.stepCap, args.MaxSteps)
 	// The out-of-band namer's two handles, declared ABOVE the reaping defer so that defer can stop
 	// and join the naming goroutine before anything the child owns is torn down (ADR 0068). Both
 	// stay zero when no naming starts — every early return below, a named delegation, and a nil
@@ -1085,6 +1075,33 @@ func classifyDelegation(result domain.ToolResult, outcome dispatchOutcome, ran b
 	default:
 		return delegationCompleted, ""
 	}
+}
+
+// resolveStepCap applies a sub_agent call's optional `max_steps` (asked) to the delegate cap the
+// host configured, and reports the cap the child runs under plus the ask it had to clamp. It is
+// the ONE rule for both readers — runSubAgent, which seeds the child with it, and runDelegation,
+// which puts it on the started phase event (domain.SubAgentPhaseEvent) — so the bound a Driver
+// shows is the bound the child runs under.
+//
+// The ask can only ever LOWER the configured cap: a model may say "this one is small, stop it
+// sooner", never "let me run longer than the host allows". Both values must be positive for the
+// ask to bite — an ask against an UNBOUNDED cap (0, the key switched off) is ignored, because the
+// host turning the bound off is a deliberate posture the model does not get to reinstate per
+// call. An ask ABOVE a positive cap is applied as the cap and REMEMBERED in the second value, so
+// the result can say so (delegationResult, stepCapClampNoteFormat): the clamp used to be silent,
+// and a parent that never hears its ask was cut keeps asking. That second value is 0 for every
+// other spawn — no ask, a lower ask that bound, an ask against an unbounded cap.
+func resolveStepCap(configured, asked int) (applied, requested int) {
+	if asked <= 0 || configured <= 0 {
+		return configured, 0
+	}
+	if asked < configured {
+		return asked, 0
+	}
+	if asked > configured {
+		return configured, asked
+	}
+	return configured, 0
 }
 
 // delegationLabel is the name a ledger row spells a delegation by: the display name the child
