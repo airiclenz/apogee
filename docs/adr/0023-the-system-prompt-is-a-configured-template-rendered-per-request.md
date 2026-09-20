@@ -316,6 +316,19 @@ mechanism directives → tool block**.
   rides in every mode as the reversal above left it. The block therefore moves on the human's
   own Shift+Tab as well — the same keypress `{{mode}}` already re-encodes the prefix on — and
   on no door of its own.
+  *Note (2026-09-20):* the block gains a **Delegation bounds** bullet between the roots line and
+  the Delegations line, rendered whenever `sub_agent` is on the agent's roster: `- Delegation
+  bounds: up to 4 run at once; a reply may fan out at most 8 — calls past that are refused and
+  must be delegated again; a reply's whole group returns together; each delegate is capped at
+  80 Turns (a max_steps above that is clamped).` (the ceiling clause dropped under
+  `delegate-fanout-rounds: 0`, the cap clause under `delegate-max-steps: 0`). Its inputs join
+  the list: the rounds and the step cap are Config; the width — and the ceiling it multiplies
+  into — is the number the engine STATES (`statedDelegationWidth`, ADR 0039 amendment
+  2026-09-20), which is **latched per seat**, never read live, so it moves only on the human's
+  own `/server` and `/sub-agents-server` doors and on a cap's first statement (the heartbeat
+  that discovers the session server's slots; the first usable Delegation target's width) —
+  never on a target-down beat, never on a re-stated cap. The `max_steps` schema text points
+  the model at this line for the configured cap, as `run_on`'s points at the Delegations line.
 - **§7 unchanged.** `newChildAgent` copies `cfg` wholesale and the child renders its own
   `standingSystem`, so a sub-agent gets the block with no carve-out and no wiring of its own.
 - **The shipped template drops what the block now carries.** `defaults/config.yaml` no longer

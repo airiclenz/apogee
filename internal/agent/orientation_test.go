@@ -98,7 +98,9 @@ func TestOrientation_ReachesTheWire(t *testing.T) {
 }
 
 // TestOrientation_OmitsFactsTheSessionDoesNotHave: no scratch dir and no read roots leaves the
-// workspace bullet alone — an absent fact is omitted, never rendered as an empty path.
+// workspace bullet alone — an absent fact is omitted, never rendered as an empty path. The one
+// other bullet the block carries is the Delegation bounds line: the workspace seeds the default
+// roster, which holds sub_agent, and a session that can delegate always has a width to state.
 func TestOrientation_OmitsFactsTheSessionDoesNotHave(t *testing.T) {
 	cfg := orientationConfig(t) // no ScratchDir, nil ExtraReadRoots
 
@@ -114,8 +116,8 @@ func TestOrientation_OmitsFactsTheSessionDoesNotHave(t *testing.T) {
 			t.Errorf("block states %q with nothing to name it: %q", unwanted, block)
 		}
 	}
-	if lines := strings.Count(block, "\n") + 1; lines != 2 {
-		t.Errorf("block has %d lines, want the header plus one bullet: %q", lines, block)
+	if lines := strings.Count(block, "\n") + 1; lines != 3 {
+		t.Errorf("block has %d lines, want the header, the workspace bullet and the bounds bullet: %q", lines, block)
 	}
 }
 
@@ -600,13 +602,15 @@ func fullSeat() *DelegationSeat {
 // TestOrientation_PlainToolStatesNoDelegationsBullet is the regression guard, pinned as the WHOLE
 // rendered block: a session whose sub_agent publishes no `run_on` — every session under
 // `sub-agents-choice: fixed`, which is the default — renders exactly the bullets it rendered before
-// seat choice existed, in the order it rendered them.
+// seat choice existed, in the order it rendered them, plus the Delegation bounds line the default
+// roster's sub_agent earns it (plan 2026-09-20 - 00, item 4) — that line is gated on the tool, not
+// on the seat choice, so the plain tool states it too.
 //
 // The expectation is composed from the asset rather than spelled out, which is this file's standing
 // convention (the prose may be tightened; the SHAPE may not): what it pins is that no bullet was
 // added, dropped or reordered, and that the Delegations line stays behind its gate.
 func TestOrientation_PlainToolStatesNoDelegationsBullet(t *testing.T) {
-	cfg := orientationConfig(t) // no tool registry at all: nothing published `run_on`
+	cfg := orientationConfig(t) // no injected registry: the default roster's plain sub_agent, no `run_on`
 	cfg.ScratchDir = orientationScratchDir
 	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot} }
 
@@ -617,6 +621,9 @@ func TestOrientation_PlainToolStatesNoDelegationsBullet(t *testing.T) {
 		fmt.Sprintf(orientationTemplate[orientationWorkspaceLine], orientationWorkspaceDir),
 		fmt.Sprintf(orientationTemplate[orientationScratchLine], orientationScratchDir),
 		fmt.Sprintf(orientationTemplate[orientationRootsLine], orientationFirstRoot),
+		// baseConfig states no width, no rounds and no step cap: width 1, no ceiling, no cap.
+		fmt.Sprintf(orientationTemplate[orientationDelegationBoundsLine],
+			"up to 1 run at once; a reply's whole group returns together"),
 	}, "\n")
 
 	if got := a.orientationBlock(); got != want {
@@ -751,15 +758,25 @@ func TestOrientation_DelegationsBulletFollowsAServerSwitch(t *testing.T) {
 // stops answering, and none of that may reach the standing system message — a prompt that churned
 // per beat would cost the prefix cache the very stability the rule promises. An unusable target is
 // the delegation result's note to tell, not the prompt's.
+//
+// The Delegation bounds line is held to the same rule with one number the beat COULD move — the
+// stated width (plan 2026-09-20 - 00, item 4). It is latched per seat (statedDelegationWidth): a
+// usable target states the far width once, and neither the beat that finds the far server down nor
+// the session-server beat that re-states its own cap beside it — the production heartbeat runs
+// SetParallelAgents unconditionally, every Interval — moves it. So the block is rendered AFTER the
+// target has latched, and every beat after that must leave it byte-identical.
 func TestOrientation_DelegationsBulletIsConstantAcrossABeat(t *testing.T) {
 	a := seatOrientationAgent(t)
 	a.SetDelegationSeat(fullSeat())
+	a.SetDelegationTarget(routedTarget()) // the first usable beat: the far width is stated once
 
 	landed := a.orientationBlock()
 	a.SetDelegationTarget(nil) // the beat that finds the far server down
 	down := a.orientationBlock()
 	a.SetDelegationTarget(routedTarget()) // and the one that finds it back
 	up := a.orientationBlock()
+	a.SetParallelAgents(a.parallelAgentsCap()) // the session server's beat, re-stating its own cap
+	restated := a.orientationBlock()
 
 	if down != landed {
 		t.Errorf("a target-down beat moved the block:\ngot  %q\nwant %q", down, landed)
@@ -767,8 +784,14 @@ func TestOrientation_DelegationsBulletIsConstantAcrossABeat(t *testing.T) {
 	if up != landed {
 		t.Errorf("a target-up beat moved the block:\ngot  %q\nwant %q", up, landed)
 	}
+	if restated != landed {
+		t.Errorf("a SetParallelAgents beat moved the block:\ngot  %q\nwant %q", restated, landed)
+	}
 	if !strings.Contains(landed, delegationsLabel) {
 		t.Fatalf("the block under test states no Delegations bullet at all: %q", landed)
+	}
+	if want := delegationBoundsLabel + "up to 3 run at once"; !strings.Contains(landed, want) {
+		t.Fatalf("the block under test does not state the latched far width %q: %q", want, landed)
 	}
 }
 
@@ -784,5 +807,79 @@ func TestOrientation_DelegationsBulletReachesTheWire(t *testing.T) {
 
 	if want := `run_on "sub-agents-server" = ` + orientationSeatModel + " on " + orientationSeatName; !strings.Contains(got, want) {
 		t.Errorf("the wire's system message is missing the far seat %q:\n%q", want, got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The Delegation bounds bullet (plan 2026-09-20 - 00, item 4 — the model is told the numbers)
+// ----------------------------------------------------------------------------
+//
+// The bullet exists so a reply is composed against the width, the fan-out ceiling and the step cap
+// the engine enforces rather than discovering them from a refusal. What these pin: the exact line
+// with every clause on, the two clauses that drop when their key is off, and the roster gate — a
+// delegate at the depth bound holds no sub_agent and is told nothing about a tool it cannot call.
+
+// delegationBoundsLabel is the bullet's label alone — enough to say whether the line is rendered at
+// all without restating a clause.
+const delegationBoundsLabel = "- Delegation bounds: "
+
+// TestOrientation_DelegationBoundsStateWidthCeilingAndCap is the bullet doing its job, pinned on
+// the WIRE rather than on the render: width 4 under two rounds is a ceiling of 8, the delegate cap
+// is 80, and the line the provider receives says exactly that — binding text, tested byte for byte.
+func TestOrientation_DelegationBoundsStateWidthCeilingAndCap(t *testing.T) {
+	cfg := orientationConfig(t) // the default roster: sub_agent on the menu
+	cfg.ParallelAgents = 4
+	cfg.Delegation.FanOutRounds = 2
+	cfg.Delegation.MaxSteps = 80
+	responder := echoResponder(t, "All done.")
+	a := newProfileAgent(t, cfg, responder)
+
+	got := seedSystemMessage(t, a, responder, "hi")
+
+	want := "- Delegation bounds: up to 4 run at once; a reply may fan out at most 8 — calls past " +
+		"that are refused and must be delegated again; a reply's whole group returns together; " +
+		"each delegate is capped at 80 Turns (a max_steps above that is clamped)."
+	if !strings.Contains(got, want) {
+		t.Errorf("the wire's system message is missing the bounds bullet %q:\n%q", want, got)
+	}
+}
+
+// TestOrientation_DelegationBoundsOmitTheCeilingAndCapClausesWhenOff: `delegate-fanout-rounds: 0`
+// is no ceiling and `delegate-max-steps: 0` is no cap, and a bound that is off is DROPPED rather
+// than stated as a zero — the block's rule everywhere. The width and the returns-together fact
+// stay: a session that can delegate always has both.
+func TestOrientation_DelegationBoundsOmitTheCeilingAndCapClausesWhenOff(t *testing.T) {
+	cfg := orientationConfig(t)
+	cfg.ParallelAgents = 4
+	cfg.Delegation.FanOutRounds = 0
+	cfg.Delegation.MaxSteps = 0
+	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
+
+	block := a.orientationBlock()
+
+	want := "- Delegation bounds: up to 4 run at once; a reply's whole group returns together."
+	if !strings.Contains(block, want) {
+		t.Errorf("block is missing the two-clause bounds bullet %q:\n%q", want, block)
+	}
+}
+
+// TestOrientation_DelegationBoundsLineAbsentWithoutSubAgent: the roster is the gate. A delegate at
+// the depth bound is built without sub_agent (defaultSubAgentTools), so its own block states no
+// bounds — a bound on a tool it cannot call would be noise — while the parent that spawned it does.
+func TestOrientation_DelegationBoundsLineAbsentWithoutSubAgent(t *testing.T) {
+	cfg := orientationConfig(t) // Delegation.MaxDepth 0 reads as 1: the child is AT the bound
+	cfg.Delegation.FanOutRounds = 2
+	cfg.Delegation.MaxSteps = 80
+	parent := newProfileAgent(t, cfg, echoResponder(t, "All done."))
+	child, err := parent.newChildAgent("call_sub", "a delegated task", "")
+	if err != nil {
+		t.Fatalf("newChildAgent: %v", err)
+	}
+
+	if block := parent.orientationBlock(); !strings.Contains(block, delegationBoundsLabel) {
+		t.Fatalf("the parent's own block states no Delegation bounds bullet: %q", block)
+	}
+	if block := child.orientationBlock(); strings.Contains(block, delegationBoundsLabel) {
+		t.Errorf("the child's block states bounds on a tool it does not hold: %q", block)
 	}
 }

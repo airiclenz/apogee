@@ -210,6 +210,12 @@ func TestSubAgentSchemaOffersAnOptionalMaxSteps(t *testing.T) {
 	if !strings.Contains(desc, "clamped") {
 		t.Errorf("max_steps description = %q, want it to say a request above the cap is CLAMPED and announced", desc)
 	}
+	// The cap itself is session state the schema cannot know, so the description sends the model
+	// to the orientation block's Delegation bounds line — the one place the configured number is
+	// stated — the way `run_on` sends it to the Delegations line (plan 2026-09-20 - 00, item 4).
+	if want := "see the Delegation bounds line of the host orientation for the configured cap"; !strings.Contains(desc, want) {
+		t.Errorf("max_steps description = %q, want it to point at the orientation's Delegation bounds line: %q", desc, want)
+	}
 	// The two schema floors are text the model reads, never a check the engine runs: a `max_steps`
 	// of 0 was never a way to ask for "unbounded", and a task shorter than a sentence is not a
 	// delegation. Pinned as numbers so a hand edit cannot quietly turn them into strings.
@@ -332,7 +338,8 @@ func TestSubAgentArgsParsesTheOptionalOutputPath(t *testing.T) {
 // `minimum` on max_steps — and the rewritten max_steps description that landed with them (plan
 // 2026-09-14 - 03, item 4), plus the `tools` roster property (item 5 of the same plan) and the
 // `output_path` property (item 8 — the three items change the plain schema once, together), plus
-// the `continue` handle (plan 2026-09-18 - 00, item 9). It is spelled out here rather than derived, because "byte-identical" is
+// the `continue` handle (plan 2026-09-18 - 00, item 9), with the max_steps description pointing at
+// the orientation's Delegation bounds line (plan 2026-09-20 - 00, item 4). It is spelled out here rather than derived, because "byte-identical" is
 // the whole claim: the plain variant is prefill on every request of every session that never
 // enables the choice, so a stray comma or a reordered property in the shared template would be paid
 // for by every model that was never offered a seat — and would break the KV-cache prefix of a
@@ -343,7 +350,7 @@ const wantPlainSubAgentSchema = `{
   "properties": {
     "task": {"type": "string", "minLength": 20, "description": "The focused sub-task to delegate to a nested agent. Describe it self-containedly: the sub-agent starts with a fresh conversation and reports a single result back."},
     "name": {"type": "string", "description": "Short name for this delegation, shown in the UI: 2–4 words naming the job, e.g. \"scout config keys\". Give one."},
-    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns. A request above the configured cap is clamped to it, and the result says so."},
+    "max_steps": {"type": "integer", "minimum": 1, "description": "optional; a lower cap for this delegation only, in Turns — see the Delegation bounds line of the host orientation for the configured cap; a request above it is clamped and the result says so."},
     "tools": {"type": ["string", "array"], "items": {"type": "string"}, "description": "optional; narrow the sub-agent's tools: the string \"read-only\" for the read-only set, or an array of tool names from your own menu. It can only remove tools, never add them; an unknown name is refused."},
     "continue": {"type": "string", "description": "optional; the name of a delegate that stopped at a bound earlier in this conversation. The sub-agent restarts from that run's engine summary with a fresh step cap; task says what to do next."},
     "output_path": {"type": "string", "description": "optional; the file the sub-agent is expected to write, relative to the workspace root or absolute. If it hits its step cap, write_file to this one path stays available for its final reply."}

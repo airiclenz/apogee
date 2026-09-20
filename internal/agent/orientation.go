@@ -7,8 +7,11 @@ package agent
 // reach and, in Plan, which tool families the mode withholds — as harness text the engine
 // composes itself, so no edit to the user-editable
 // prompt template can lose them and no install seeded before the facts existed is left without
-// them. Where the host offers the model a Delegation seat (ADR 0069) it states that too — what
-// each of the two seats IS — because a choice between two opaque labels is not a choice.
+// them. Where the model holds the sub_agent tool it states the delegation bounds — the width, the
+// fan-out ceiling and the step cap the engine enforces — so the first call is composed against the
+// numbers rather than discovered from a refusal; and where the host offers the model a Delegation
+// seat (ADR 0069) it states that too — what each of the two seats IS — because a choice between
+// two opaque labels is not a choice.
 //
 // Position is a SECURITY property, not a matter of taste: the block is plain text and a
 // workspace context file is repo-controlled prose. With the blocks ahead of it, a hostile
@@ -30,10 +33,10 @@ import (
 
 // The orientation asset (prompts/orientation.txt) is POSITIONAL: line 0 is the header and every
 // line after it is one bullet. Each rendered bullet is a template carrying exactly one %s — the
-// path or paths it names, the Delegations bullet's rendered seat clauses, or the Mode bullet's
-// scratch-writers clause; the context-files bullet is a literal line with no verb at all — it
-// names a header shape rather than a path. The constants below are those line numbers, and
-// orientationLineCount is the shape the loader
+// path or paths it names, the Delegation bounds bullet's rendered clauses, the Delegations
+// bullet's rendered seat clauses, or the Mode bullet's scratch-writers clause; the context-files
+// bullet is a literal line with no verb at all — it names a header shape rather than a path. The
+// constants below are those line numbers, and orientationLineCount is the shape the loader
 // enforces — a bullet added to the asset without a constant beside it fails the build's first test
 // run rather than rendering as a stray line.
 //
@@ -48,10 +51,22 @@ const (
 	orientationWorkspaceLine
 	orientationScratchLine
 	orientationRootsLine
+	orientationDelegationBoundsLine
 	orientationDelegationsLine
 	orientationPlanLine
 	orientationContextFilesLine
 	orientationLineCount
+)
+
+// The Delegation bounds bullet's clauses (delegationBounds), each carrying exactly one number: the
+// stated width, the fan-out ceiling, and the delegate step cap. The group clause carries none — it
+// is the standing fact that a pooled reply's results arrive together (ADR 0039), stated beside the
+// numbers because it is what makes the ceiling a bound on blind waiting rather than on work.
+const (
+	delegationWidthClause   = "up to %d run at once"
+	delegationCeilingClause = "a reply may fan out at most %d — calls past that are refused and must be delegated again"
+	delegationGroupClause   = "a reply's whole group returns together"
+	delegationStepCapClause = "each delegate is capped at %d Turns (a max_steps above that is clamped)"
 )
 
 // planScratchWritersClause is the Mode bullet's one %s: the clause stating that Plan runs Apogee's
@@ -126,9 +141,11 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 // which is one early re-encode and never a per-turn one), the scratch dir moves only at a
 // session boundary, the context-file cache is
 // refilled only at one too (ADR 0026 §5), the Delegation seats move only on the human's own
-// `/server`, `/model` and `/sub-agents-server` doors, and the mode moves only on the human's own
-// Shift+Tab — so the block is prefix-cache-stable between those doors, exactly like the
-// {{scratch}} and {{mode}} placeholders it stands beside. The mode re-joined the block's inputs
+// `/server`, `/model` and `/sub-agents-server` doors, the Delegation bounds' width is LATCHED per
+// seat (statedDelegationWidth) and so moves only on those same doors and on a heartbeat's slot
+// discovery — a cap's first statement, never a flap; its rounds and step cap are Config — and the
+// mode moves only on the human's own Shift+Tab — so the block is prefix-cache-stable between
+// those doors, exactly like the {{scratch}} and {{mode}} placeholders it stands beside. The mode re-joined the block's inputs
 // on 2026-09-15 (it had gated the scratch bullet for one day on 2026-09-14, from the Plan omission
 // to the second loosen, and then left again): a flip into or out of Plan re-encodes the prefix
 // from the Mode bullet down, which is the re-encode {{mode}} already pays for on the same
@@ -149,6 +166,9 @@ func (a *Agent) orientationBlock() string {
 			))
 		}
 	}
+	if bounds := a.delegationBounds(); bounds != "" {
+		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationDelegationBoundsLine], bounds))
+	}
 	if seats := a.delegationSeats(); seats != "" {
 		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationDelegationsLine], seats))
 	}
@@ -166,6 +186,43 @@ func (a *Agent) orientationBlock() string {
 		return ""
 	}
 	return orientationTemplate[orientationHeaderLine] + "\n" + strings.Join(bullets, "\n")
+}
+
+// delegationBounds renders the clause list the Delegation bounds bullet states — the numbers the
+// engine enforces on this agent's delegations, told to the model before its first sub_agent call
+// so a reply is composed against them rather than against a refusal — or "" when the bullet is
+// not rendered at all.
+//
+// The ROSTER is the gate: the bullet is rendered exactly when this Agent's own tool set holds
+// sub_agent, whichever variant — a delegate below the depth bound holds the plain one and is told
+// its own bounds (width 1, ceiling `rounds`), a delegate AT the bound holds none and is told
+// nothing, since a bound on a tool it cannot call is noise. A nil roster is a tool-less Agent and
+// reports nothing, as publishesSeatChoice does.
+//
+// The clauses, in order: the width (always — a group runs at least one at a time), the fan-out
+// ceiling (only with `delegate-fanout-rounds` on — 0 is no ceiling and no clause), the
+// returns-together fact (always), and the step cap (only with `delegate-max-steps` on — 0 is
+// unbounded and no clause). The width and the ceiling read the same seams dispatch enforces by —
+// statedDelegationWidth and fanOutCeiling — so what the model is told is exactly what
+// refusePastCeiling lets through, and a clause with nothing to bound is DROPPED rather than
+// rendered as a zero, the block's rule everywhere.
+func (a *Agent) delegationBounds() string {
+	if a.tools == nil {
+		return ""
+	}
+	if _, ok := a.tools.Lookup(tools.SubAgentToolName); !ok {
+		return ""
+	}
+	clauses := make([]string, 0, 4)
+	clauses = append(clauses, fmt.Sprintf(delegationWidthClause, a.statedDelegationWidth()))
+	if ceiling := a.fanOutCeiling(); ceiling > 0 {
+		clauses = append(clauses, fmt.Sprintf(delegationCeilingClause, ceiling))
+	}
+	clauses = append(clauses, delegationGroupClause)
+	if steps := a.cfg.Delegation.MaxSteps; steps > 0 {
+		clauses = append(clauses, fmt.Sprintf(delegationStepCapClause, steps))
+	}
+	return strings.Join(clauses, "; ")
 }
 
 // delegationSeats renders the clause list the Delegations bullet states — what each value of the
