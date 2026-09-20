@@ -178,7 +178,11 @@ NOTES (2026-09-20): `go test -race` is unsupported on this box (ThreadSanitizer 
 
 **Commit:** `feat(agent): a faulted delegate is retained and its result carries the continue line`
 
-## 6. The fault result names a surviving draft at `output_path`
+## 6. The fault result names a surviving draft at `output_path` — ✅ DONE (2026-09-20)
+
+NOTES (2026-09-20): `internal/agent/agent.go` added to the item's files — the pre-spawn stat the regression guard names (`outputBefore`, an `outputBaseline` of presence + mtime) has to live on the child `Agent` struct, which is declared there, because `delegationResult` is the child's method and reads it after `sub.Run`; `runSubAgent` records it through `sub.recordOutputBaseline()` beside the ledger-target line, and `draftOutputSurvives` reads the post-run stat against it.
+NOTES (2026-09-20): `TestSubAgent_CappedResultKeepsTheMissingOutputNote` is table-driven over both cap outcomes — output absent (missing note, byte-exact) and output written by the wrap-up (no note at all) — since the absent case alone would duplicate `TestSubAgent_CappedChildWithoutItsOutputCarriesTheNote`; the written case is what pins the draft note as fault-only.
+NOTES (2026-09-20): `go test -race` is unsupported on this box (ThreadSanitizer "unsupported VMA range"); acceptance ran without the race detector.
 
 **What:** in `internal/agent/subagent.go` `delegationResult`, `case res.Faulted`: when the child's `outputTarget` is non-empty and `os.Stat` finds a regular file there that the child wrote during its run, append the note `[draft output at <path> written before the fault]` (`draftOutputNoteFormat`, printing `a.outputPath` — the call's spelling, the same `missingOutputNoteFormat` uses) in the note slot before the continue line item 5 adds (that line stays LAST of the body notes); when the file is absent or predates the spawn, no note (the cap path's `missingOutputNoteFormat` stays cap-only). Manual: one sentence in `docs/manual/configuration.md`'s `output_path` paragraph stating the fault result points at a draft that exists. Item 5 and this item both edit `delegationResult` — this item lands after 5.
 

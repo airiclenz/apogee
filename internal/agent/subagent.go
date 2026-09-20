@@ -149,7 +149,7 @@ const engineFoldUnavailableFormat = "[engine summary unavailable — %v]"
 // parent retained the child (P6 of plan 2026-09-18 - 00; faults since ADR 0082): the one line that
 // tells the parent model the handle it can spell back — `sub_agent` with `continue` naming the
 // delegation — instead of re-spawning the work from nothing. It rides the note slot
-// delegationResult fills after the missing-output, seat and
+// delegationResult fills after the missing-output (or draft-output), seat and
 // clamp notes and before the user-steered trailer, so the head line stays the first line every
 // reader anchors on. Written only when the child ended its run wearing a name, because an unnamed
 // delegation is not retained (retainedDelegates.retain) and there would be nothing to continue. %q
@@ -252,6 +252,12 @@ const (
 	// non-error shape and the partial marker first (the TUI reads the head): the note is appended
 	// in the SeatFallbackNote slot, a body note like the clamp line. %s is Agent.outputPath.
 	missingOutputNoteFormat = "[delegate ended without writing %s]"
+	// draftOutputNoteFormat is the converse on a FAULTED child: its spawn-named file IS there and
+	// the child wrote it during its run (draftOutputSurvives), so the parent learns from the error
+	// result that the work is not all lost — the draft sits at the path the call named, ready to
+	// be read or continued from. It rides the same slot the missing-output note does, before the
+	// continue line. %s is Agent.outputPath, in the call's spelling.
+	draftOutputNoteFormat = "[draft output at %s written before the fault]"
 	// markupResultHead heads the error result of a child whose closing text is an unparsed
 	// tool call (floor.HasToolCallMarkup) — a call the wire never carried, not a report.
 	markupResultHead = "sub-agent reply is unparsed tool-call markup, not a report"
@@ -479,6 +485,48 @@ func (a *Agent) outputMissing() bool {
 	}
 	_, err := os.Stat(a.outputTarget)
 	return errors.Is(err, fs.ErrNotExist)
+}
+
+// outputBaseline is the state of a delegate's spawn-named output file (Agent.outputTarget) just
+// before its Run (Agent.outputBefore): whether something was there, and if so when it was last
+// written. It is what draftOutputSurvives compares the file's state after the run against, so
+// that only a file the child itself wrote counts as its draft.
+type outputBaseline struct {
+	present bool
+	modTime time.Time
+}
+
+// recordOutputBaseline stats the spawn-named output target before the child's Run and keeps what
+// it finds (outputBefore). A stat that fails in any way reads as "nothing there": a file that
+// then turns up after the run can only have been written during it. It records nothing for a
+// delegation whose spawn named no path that resolved.
+func (a *Agent) recordOutputBaseline() {
+	a.outputBefore = outputBaseline{}
+	if a.outputTarget == "" {
+		return
+	}
+	info, err := os.Stat(a.outputTarget)
+	if err != nil {
+		return
+	}
+	a.outputBefore = outputBaseline{present: true, modTime: info.ModTime()}
+}
+
+// draftOutputSurvives reports whether the delegation's spawn-named output file holds a draft the
+// child wrote during its run — the fact a FAULTED delegation's result carries as its draft note
+// (draftOutputNoteFormat). It answers true only for a regular file at outputTarget that was
+// absent at the baseline runSubAgent recorded (recordOutputBaseline) or whose modification
+// time has advanced since: a file that was there before the spawn and was never rewritten is not
+// a draft of this child's, and a stat that fails is not evidence of one.
+func (a *Agent) draftOutputSurvives() bool {
+	if a.outputTarget == "" {
+		return false
+	}
+	info, err := os.Stat(a.outputTarget)
+	if err != nil || !info.Mode().IsRegular() {
+		return false
+	}
+	return !a.outputBefore.present || info.ModTime().After(a.outputBefore.modTime)
 }
 
 // wrapUpMarker and wrapUpDirectiveFormat are the one-request directive a delegate stopped at its
@@ -968,6 +1016,11 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	if sub.outputTarget != "" && sub.Mode() != domain.ModePlan {
 		ledgerTarget = sub.outputTarget
 	}
+	// And the file's state BEFORE the child runs, the reference a faulted child's draft note is
+	// read against (draftOutputSurvives): the same pre/post pair the ledger column reads presence
+	// from at render time, so a file that predates the spawn is never reported as the child's
+	// draft.
+	sub.recordOutputBaseline()
 	// The call's optional max_steps against the cap the child was seeded with (resolveStepCap —
 	// the same rule runDelegation applied to the started phase event). A continuation takes the
 	// same road: its fresh child was seeded from the same key and its call's max_steps clamps the
@@ -1277,6 +1330,14 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// write was answered with an error result above instead (completedResult).
 	if res.StepCapped && a.outputMissing() {
 		result.Content += "\n" + fmt.Sprintf(missingOutputNoteFormat, a.outputPath)
+	}
+	// Its converse rides the same slot on a FAULTED child: the spawn-named file is there and the
+	// child wrote it during its run, so the error result points the parent at the draft the fault
+	// left behind (ADR 0082) — a file that predates the spawn earns no note (draftOutputSurvives).
+	// The head still says the delegation faulted; the note, like the continue line below it, says
+	// what survived.
+	if res.Faulted && a.draftOutputSurvives() {
+		result.Content += "\n" + fmt.Sprintf(draftOutputNoteFormat, a.outputPath)
 	}
 	if a.seatFallback {
 		result.Content += "\n" + SeatFallbackNote

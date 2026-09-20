@@ -453,6 +453,11 @@ type Agent struct {
 	// it holds under Bypass.
 	outputPath   string
 	outputTarget string
+	// outputBefore is what outputTarget looked like just before this delegate's Run, recorded by
+	// runSubAgent (recordOutputBaseline): the reference a FAULTED delegate's result reads its
+	// draft note against (draftOutputSurvives), so a file that was already there when the child
+	// was spawned is never reported as a draft the child wrote.
+	outputBefore outputBaseline
 
 	// midExchangeCompaction lifts shouldAutoCompact's Exchange-boundary-only gate (S2) for this
 	// Agent, so the estimate-driven fold may also run at a quiescent TURN boundary — the top of

@@ -3345,6 +3345,154 @@ func TestSubAgent_CappedChildWithoutItsOutputCarriesTheNote(t *testing.T) {
 	}
 }
 
+// draftOutputPath is the `output_path` the faulted-draft tests spawn their delegation with, in the
+// call's own spelling — the spelling the draft note must quote back.
+const draftOutputPath = "out/report.md"
+
+// faultedOutputPathAgent builds a parent in Allow-Edits over a real workspace with a real
+// write_file tool, whose one NAMED delegation names draftOutputPath and whose child plays the
+// given scripts — its working Turns, the fault and, where it completed a Turn, the engine fold —
+// before the parent closes. It returns the parent, the sink and the workspace root.
+func faultedOutputPathAgent(t *testing.T, child ...[]provider.Delta) (*Agent, *recordingSink, string) {
+	t.Helper()
+
+	ws := t.TempDir()
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAllowEdits, reader, tools.NewWriteFile(ws))
+	cfg.WorkspaceDir = ws
+
+	call, err := json.Marshal(tools.SubAgentArgs{Task: retainedSurveyTask, Name: retainedSurveyName, OutputPath: draftOutputPath})
+	if err != nil {
+		t.Fatalf("marshal sub_agent args: %v", err)
+	}
+	scripts := [][]provider.Delta{toolCallScript("c1", tools.SubAgentToolName, string(call))}
+	scripts = append(scripts, child...)
+	scripts = append(scripts, contentScript("parent done"))
+
+	a, err := newAgent(cfg, &requestLogResponder{scripts: scripts})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	return a, sink, ws
+}
+
+// childFault is the non-retryable upstream fault that abandons a child's Exchange mid-task.
+func childFault() []provider.Delta {
+	return []provider.Delta{{Kind: provider.DeltaError, Err: "the upstream died"}}
+}
+
+// TestSubAgent_FaultResultNamesTheSurvivingDraft drives the draft note whole: a child that writes
+// its `output_path` through the real write_file tool and then faults hands the parent an error
+// result that still names the fault first, and whose body notes end on the draft note — in the
+// call's spelling of the path — followed by the continue line.
+func TestSubAgent_FaultResultNamesTheSurvivingDraft(t *testing.T) {
+	a, sink, ws := faultedOutputPathAgent(t,
+		narratedToolCallScript("w0", tools.WriteFileToolName,
+			`{"path":"out/report.md","content":"the survey so far"}`, "writing the draft"),
+		childFault(),
+		contentScript(childFoldSummary))
+
+	runExchange(t, a, "please research")
+
+	if _, err := os.Stat(filepath.Join(ws, "out", "report.md")); err != nil {
+		t.Fatalf("the child's write did not land: %v", err)
+	}
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	want := "\n" + fmt.Sprintf(draftOutputNoteFormat, draftOutputPath) + "\n" + fmt.Sprintf(continueLineFormat, retainedSurveyName)
+	if !strings.HasSuffix(faulted.Content, want) {
+		t.Errorf("faulted result =\n%s\nwant its body notes to end on the draft note then the continue line %q", faulted.Content, want)
+	}
+}
+
+// TestSubAgent_FaultResultWithoutADraftHasNoNote is the control: the same fault after a Turn
+// that wrote nothing carries no draft note, only the fault and the continue line.
+func TestSubAgent_FaultResultWithoutADraftHasNoNote(t *testing.T) {
+	a, sink, _ := faultedOutputPathAgent(t,
+		narratedToolCallScript("t0", "read_thing", `{"n":0}`, "reading file 0"),
+		childFault(),
+		contentScript(childFoldSummary))
+
+	runExchange(t, a, "please research")
+
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	if strings.Contains(faulted.Content, "draft output") {
+		t.Errorf("faulted result =\n%s\ncarries a draft note, but the child wrote nothing", faulted.Content)
+	}
+}
+
+// TestSubAgent_FaultResultIgnoresAPreExistingFile pins the baseline: a file that was already at
+// the `output_path` before the spawn is not a draft of the child's, so a child that faults on its
+// first request — having written nothing — earns no draft note although the file is there.
+func TestSubAgent_FaultResultIgnoresAPreExistingFile(t *testing.T) {
+	a, sink, ws := faultedOutputPathAgent(t, childFault()) // zero Turns: no fold request follows
+	target := filepath.Join(ws, "out", "report.md")
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(target, []byte("left here before the spawn"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	runExchange(t, a, "please research")
+
+	faulted, ok := subAgentResultFor(sink.events, "c1")
+	if !ok {
+		t.Fatal("no result answered the faulted delegation c1")
+	}
+	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
+	if strings.Contains(faulted.Content, "draft output") {
+		t.Errorf("faulted result =\n%s\ncarries a draft note for a file that predates the spawn", faulted.Content)
+	}
+}
+
+// TestSubAgent_CappedResultKeepsTheMissingOutputNote pins the cap path against the draft note: a
+// capped child's result carries the missing-output note when its file is absent and no note at
+// all when the wrap-up wrote it — the draft note is the fault result's alone.
+func TestSubAgent_CappedResultKeepsTheMissingOutputNote(t *testing.T) {
+	head := fmt.Sprintf(stepCapResultFormat, 2)
+	cases := []struct {
+		name   string
+		wrapUp []provider.Delta
+		want   string
+	}{
+		{
+			name:   "the output is absent",
+			wrapUp: contentScript(childClosingReport),
+			want:   cappedResult(head, childFoldSummary, childClosingReport) + "\n" + fmt.Sprintf(missingOutputNoteFormat, draftOutputPath),
+		},
+		{
+			name: "the output was written",
+			wrapUp: narratedToolCallScript("w0", tools.WriteFileToolName,
+				`{"path":"out/report.md","content":"the survey so far"}`, childClosingReport),
+			want: cappedResult(head, childFoldSummary, childClosingReport),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a, _, sink, _ := outputPathAgent(t, domain.ModeAllowEdits, draftOutputPath, tc.wrapUp)
+
+			runExchange(t, a, "please research")
+
+			sub, ok := lastSubAgentResult(sink.events)
+			if !ok {
+				t.Fatal("no sub_agent tool result emitted")
+			}
+			if sub.IsError || sub.Content != tc.want {
+				t.Errorf("sub_agent result = %+v, want the non-error capped result %q", sub, tc.want)
+			}
+		})
+	}
+}
+
 // completedOutputPathAgent builds a parent in Allow-Edits over a real workspace with a real
 // write_file tool, whose one delegation names out/report.md and whose child runs to COMPLETION
 // (no cap) through the given scripts before the parent closes. It returns the parent, the sink

@@ -794,9 +794,12 @@ call may name the file the sub-agent is expected to write through its `output_pa
 changes nothing about the task; what it buys is the aim of that one write: a sub-agent that
 hits its cap with an `output_path` named keeps `write_file` for exactly that one file, so the
 output it was asked for still lands, and a write to any other path on that turn is refused,
-naming the one path allowed. The engine reads no path out of the task text, so when your
-task names a file the sub-agent must write, pass it as `output_path` too — the tool's own
-description says so.
+naming the one path allowed. A sub-agent that **faults** after writing that file leaves a
+draft behind, and its error result says so — `[draft output at <output_path> written before
+the fault]` — so a file that exists is never mistaken for work that was lost (a file that was
+already there before the sub-agent started earns no such line). The engine reads no path out
+of the task text, so when your task names a file the sub-agent must write, pass it as
+`output_path` too — the tool's own description says so.
 
 A capped or faulted delegation can also be **continued** rather than delegated again from
 scratch. For the rest of the exchange it happened in, your agent keeps what a capped sub-agent
