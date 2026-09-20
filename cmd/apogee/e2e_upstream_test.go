@@ -2,10 +2,12 @@ package main
 
 // The transient-stream seam end to end: a real `apogee headless` against a stubllm server whose
 // reply dies mid-stream (testdata/stubllm/upstream-eof.yaml, a `cut` turn that kills the TCP
-// connection). The engine's one re-stream per Turn was granted to an in-band 502 alone; a body cut
-// by an EOF used to fail the Turn on the spot. Both cases below pay the loop's unexported 1 s
-// restreamHoldoff on every re-stream — it is production code and this package cannot shorten it —
-// so each costs at least a second of wall clock.
+// connection). A Turn re-streams a transient fault up to its `re-stream-budget` (3 by default, ADR
+// 0082) with a doubling hold-off — 1 s, 2 s, 4 s — and the fault after the budget abandons the Turn;
+// a body cut by an EOF used to fail the Turn on the spot, when only an in-band 502 was re-streamed.
+// Every re-stream below pays the loop's unexported restreamHoldoff ladder — it is production code
+// and this package cannot shorten it — so the tests state a small budget in the run's config where
+// the default's 7 s of hold-off would buy nothing the ladder's unit tests do not already pin.
 
 import (
 	"bytes"
@@ -21,13 +23,14 @@ import (
 // upstreamPrompt is what the headless run asks; the stub answers by position, so the text is free.
 const upstreamPrompt = "Say hello."
 
-// TestE2EUpstreamEOFIsRetriedOnce: turn 1 is cut three runes in, turn 2 is the whole answer. The
+// TestE2EUpstreamEOFIsReStreamed: turn 1 is cut three runes in, turn 2 is the whole answer. The
 // answer on stdout is turn 2's text — never the three runes streamed before the cut — and the stub
-// saw exactly two requests: the cut stream and its one re-stream.
-func TestE2EUpstreamEOFIsRetriedOnce(t *testing.T) {
+// saw exactly two requests: the cut stream and the re-stream that answered it, under the default
+// budget.
+func TestE2EUpstreamEOFIsReStreamed(t *testing.T) {
 	stub := stubllm.New(t, loadScript(t, "upstream-eof"))
 
-	stdout, stderr, err := headlessUpstream(t, stub)
+	stdout, stderr, err := headlessUpstream(t, stub, "")
 
 	if err != nil {
 		t.Fatalf("headless: %v\n%s", err, stderr)
@@ -37,19 +40,22 @@ func TestE2EUpstreamEOFIsRetriedOnce(t *testing.T) {
 		t.Errorf("stdout = %q, want the re-streamed reply alone", got)
 	}
 	if got := len(stub.Requests()); got != 2 {
-		t.Errorf("stub saw %d requests, want 2 — the cut stream and its one re-stream", got)
+		t.Errorf("stub saw %d requests, want 2 — the cut stream and its re-stream", got)
 	}
 }
 
-// TestE2EUpstreamEOFTwiceFaults: the same cut turn twice. The second cut lands on a Turn whose one
-// re-stream is spent, so the run's final Turn is abandoned with the read fault as its reason, and
-// a third request never happens.
-func TestE2EUpstreamEOFTwiceFaults(t *testing.T) {
+// TestE2EUpstreamEOFPastTheBudgetFaults: the cut turn three times under `re-stream-budget: 2`. The
+// first two cuts are re-streamed (the stub sees requests 2 and 3); the third lands on a Turn whose
+// budget is spent, so the run's final Turn is abandoned with the read fault as its reason and a
+// fourth request never happens — the budget is a count of re-streams, and the fault past it ends
+// the Turn.
+func TestE2EUpstreamEOFPastTheBudgetFaults(t *testing.T) {
 	script := loadScript(t, "upstream-eof")
-	script.Turns = []stubllm.Turn{script.Turns[0], script.Turns[0]}
+	cut := script.Turns[0]
+	script.Turns = []stubllm.Turn{cut, cut, cut}
 	stub := stubllm.New(t, script)
 
-	stdout, stderr, err := headlessUpstream(t, stub)
+	stdout, stderr, err := headlessUpstream(t, stub, "re-stream-budget: 2\n")
 
 	if err == nil {
 		t.Fatalf("headless returned no error; want the abandoned-Turn fault\nstdout: %q\nstderr: %s", stdout, stderr)
@@ -60,15 +66,41 @@ func TestE2EUpstreamEOFTwiceFaults(t *testing.T) {
 			t.Errorf("headless error %q lacks %q", err, want)
 		}
 	}
-	if got := len(stub.Requests()); got != 2 {
-		t.Errorf("stub saw %d requests, want 2 — one re-stream, never a third attempt", got)
+	if got := len(stub.Requests()); got != 3 {
+		t.Errorf("stub saw %d requests, want 3 — the cut stream and the budget's two re-streams, never a fourth attempt", got)
+	}
+}
+
+// TestE2EUpstreamEOFBudgetZeroNeverReStreams: `re-stream-budget: 0` is the documented spelling of
+// "never re-stream". The one cut is the fault that abandons the Turn, and the stub sees that single
+// request — no hold-off is paid, because no re-stream is ever set up.
+func TestE2EUpstreamEOFBudgetZeroNeverReStreams(t *testing.T) {
+	script := loadScript(t, "upstream-eof")
+	script.Turns = []stubllm.Turn{script.Turns[0]}
+	stub := stubllm.New(t, script)
+
+	stdout, stderr, err := headlessUpstream(t, stub, "re-stream-budget: 0\n")
+
+	if err == nil {
+		t.Fatalf("headless returned no error; want the abandoned-Turn fault\nstdout: %q\nstderr: %s", stdout, stderr)
+	}
+	stub.AssertConsumed(t)
+	for _, want := range []string{"final turn was abandoned", "read stream", "unexpected EOF"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("headless error %q lacks %q", err, want)
+		}
+	}
+	if got := len(stub.Requests()); got != 1 {
+		t.Errorf("stub saw %d requests, want 1 — a budget of 0 never re-streams", got)
 	}
 }
 
 // headlessUpstream runs one real `apogee headless` against stub in a home of its own and returns
-// what reached stdout and stderr with the command's error. The runner is the real one, restored
-// after: a canned runner would prove nothing about the stream the engine consumes.
-func headlessUpstream(t *testing.T, stub *stubllm.Server) (stdout, stderr string, err error) {
+// what reached stdout and stderr with the command's error. extraConfig is appended to the home's
+// config.yaml verbatim — a `re-stream-budget:` line, or "" for the defaults. The runner is the
+// real one, restored after: a canned runner would prove nothing about the stream the engine
+// consumes.
+func headlessUpstream(t *testing.T, stub *stubllm.Server, extraConfig string) (stdout, stderr string, err error) {
 	t.Helper()
 
 	prev := runOnce
@@ -78,7 +110,15 @@ func headlessUpstream(t *testing.T, stub *stubllm.Server) (stdout, stderr string
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
 
-	home := eventLinesHome(t, stub.URL, stub.Model)
+	home := t.TempDir()
+	writeConfigHome(t, home,
+		"context-window: 32768\n"+
+			extraConfig+
+			"servers:\n"+
+			"  - name: stub\n"+
+			"    endpoint: "+stub.URL+"\n"+
+			"    model: "+stub.Model+"\n"+
+			"server: stub\n")
 	cmd := newHeadlessCommand()
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
