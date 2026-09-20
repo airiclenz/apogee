@@ -673,6 +673,13 @@ func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
 // is last, after the gist, because it is the rarest cell on the row: it appears only while routing
 // is on AND the target is bound to another model, so a reader who sees it is reading a line they
 // already know to be unusual — where the count and the fill are on every row and earn the left.
+//
+// While the run WORKS the line trails the step cap the child runs under (subAgentStepCap) — the one
+// cell that is a bound rather than a reading, and so the one a finished row has no use for: once
+// the child has reported, how far it was allowed to go is history the slot's verdict already tells
+// (`· stopped at its step cap` where the bound is what ended it). It is composed here rather than
+// in the painter because this line is composed for every spanned member, reported or not, so the
+// gate on having reported has to stand where the cells are joined.
 func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 	calls := 0
 	for i := range span {
@@ -689,6 +696,9 @@ func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 	}
 	if model := subAgentModel(head); model != "" {
 		text += " · " + model
+	}
+	if bound := subAgentStepCap(head); bound != "" && !subAgentReported(head) {
+		text += " · " + bound
 	}
 	summary := quotedSummary(detailLine{Text: text})
 	// The verdict is the HEAD's OWN (branchSummary.failed), carried onto the composed reading rather
@@ -733,6 +743,33 @@ func subAgentFill(head paintInput) string {
 		return ""
 	}
 	return format.Tokens(head.ctxUsed) + "/" + format.Tokens(head.ctxLimit)
+}
+
+// stepCapAskedFormat spells the cap a delegation ASKED for beside the one it runs under, where the
+// ask was above the configured cap and clamped to it — "80 steps (120 asked)".
+const stepCapAskedFormat = "%s (%d asked)"
+
+// subAgentStepCap spells the step cap a running delegation's row wears, or nothing at all: the cap
+// the child actually runs under — the configured delegate cap, or the call's own lower `max_steps`
+// — as `80 steps`, and `80 steps (120 asked)` where the call asked for more than the configured cap
+// and was clamped to it. Both are the facts the child's STARTED phase carried (entry.stepCap,
+// entry.capRequested; domain.SubAgentPhaseEvent), so a row wears them the moment it has a summary
+// line to carry them — its first tool call — and the human sees the bound a delegate was spawned
+// under while it runs, where the model's own account of the clamp waits for the result
+// (internal/agent's stepCapClampNoteFormat).
+//
+// An unbounded child (cap 0) paints no cell: there is no bound to state, and the row reads exactly
+// as it did before the cap existed — which is also what a phase-less producer paints, a hand-built
+// test transcript or a record replayed from a session, whose delegations are all finished anyway.
+func subAgentStepCap(head paintInput) string {
+	if head.stepCap <= 0 {
+		return ""
+	}
+	bound := plural(head.stepCap, "step")
+	if head.capRequested > 0 {
+		return fmt.Sprintf(stepCapAskedFormat, bound, head.capRequested)
+	}
+	return bound
 }
 
 // delegatingSummary is the one live word a working run's summary can add: its child is not doing the

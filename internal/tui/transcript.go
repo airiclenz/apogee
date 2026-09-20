@@ -343,6 +343,13 @@ type entry struct {
 	// the head of a sub-agent run only: the delegation's lifecycle phase as its child reported it
 	// (domain.SubAgentPhaseEvent); view-only liveness beside done's pairing, never persisted
 	phase domain.SubAgentPhase
+	// the head of a sub-agent run only: the step cap the child runs under and the `max_steps` it
+	// asked for where that ask was clamped (domain.SubAgentPhaseEvent.StepCap / CapRequested),
+	// folded off its STARTED phase (addSubAgentPhase) and worn by its running row alone
+	// (subAgentStepCap); 0 = unbounded / nothing asked. View-only and never persisted for phase's
+	// reasons: a replayed record's delegations are all finished, and a finished row wears no cap.
+	stepCap      int
+	capRequested int
 	// view-only block state: false = collapsed (the default); never persisted. A header-folding
 	// card is the one entry not born collapsed: it is seeded from the shared task-list fold
 	// (taskListOpen) and moves with every other such card (setTaskListOpen).
@@ -1577,6 +1584,12 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 // holds, and an event naming no such block (a phase for a run this view never saw) folds nothing
 // onto any head.
 //
+// The STARTED phase also lands the child's step-cap facts on the head (entry.stepCap,
+// entry.capRequested): the cap it actually runs under and the ask that was clamped to it, which the
+// running row wears once the child has a call behind it (subAgentStepCap). They ride the phase
+// rather than a signal of their own because the phase is the moment they become true — a queued
+// delegation has no cap yet, and a finished one has nothing left to be capped.
+//
 // A CANCELLED finished folds nothing onto the head either, and deliberately does not even record the
 // phase. That phase exists to close the bracket for a log reader (ADR 0075 decision 12); on screen
 // the delegation was rolled back, so it carries no report to enrich with and must keep reading as
@@ -1597,6 +1610,9 @@ func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 		}
 		t.touch()
 		en.phase = e.Phase
+		if e.Phase == domain.SubAgentStarted {
+			en.stepCap, en.capRequested = e.StepCap, e.CapRequested
+		}
 		if e.Phase == domain.SubAgentFinished && !en.done {
 			en.tool.enrichWithResult(e.Result, t.ws)
 		}

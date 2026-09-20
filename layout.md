@@ -1047,15 +1047,22 @@ beneath it — every inner block — is elided, to be read in the run's own view
 delegation's name** when the call gave one, and the delegated task's first line when it did not, so
 a fan-out reads as what each child is *for* rather than as several openings of one instruction. The
 name is clipped and escape-stripped exactly as a task line is, and an unnamed delegation's header
-is unchanged. Its summary is `N tool calls · <used>/<window>`, carried in the row's outcome slot,
-and while the run works that is the whole of it: the line does **not** name the call in flight. It
+is unchanged. Its summary is `N tool calls · <used>/<window> · 80 steps`, carried in the row's
+outcome slot, and while the run works that is the whole of it: the line does **not** name the call
+in flight. It
 used to — the verb and shortened target of the open call, re-read on every frame — and that one
 cell changed several times a second beside two that held still, which made the least durable thing
 on the row the loudest one. Nothing it said is lost: every call it named has a block of its own
 inside the run, one click away. The single live word the line still adds is **`· delegating`**,
 and only while the most recent call open in the span is itself a sub-agent — the child has passed
 the work on and has nothing of its own in flight, which is the one live fact its own blocks cannot
-stand in for, the nested run they would show being collapsed too. Once the report arrives the slot
+stand in for, the nested run they would show being collapsed too. The trailing cell is the **step
+cap** the child runs under, as its started phase carried it — `· 80 steps` for the configured
+delegate cap or the call's own lower `max_steps`, `· 80 steps (120 asked)` where the call asked for
+more than the configured cap and was clamped to it, and no cell at all for an unbounded child. The
+row wears it from the child's first tool call, which is what gives it a summary line to carry it,
+and only while the run works: a finished row ends on its gist, the bound being history once the
+child has reported. Once the report arrives the slot
 carries the **report's first line**, or `· done` where the report was long enough to become a
 body — unless the engine wrapped that report in an **outcome envelope**, which takes the slot
 instead: `· stopped at its step cap` where the step cap stopped the run mid-task (`· stopped at

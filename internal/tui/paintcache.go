@@ -88,6 +88,14 @@ type entryState struct {
 	ctxUsed  int
 	ctxLimit int
 	ctxModel string
+
+	// the head of a sub-agent run only: the step cap the child runs under and the ask that was
+	// clamped to it (entry.stepCap, entry.capRequested), worn by the running row alone
+	// (subAgentStepCap). Neither is a term of the key: both land on the head in the one fold that
+	// flips its phase to started (transcript.addSubAgentPhase), so the phase bit spanFlags already
+	// packs turns the key over in the same breath, and nothing moves them afterwards.
+	stepCap      int
+	capRequested int
 }
 
 // paintInput is one entry as a PAINTER may see it: exactly the fields the block painters are
@@ -125,7 +133,8 @@ type paintInput struct {
 func (e entry) painted() paintInput {
 	return paintInput{
 		e.kind, e.depth, e.text, e.tool, e.skillSpans, e.presented, e.startup,
-		entryState{e.expanded, e.done, e.typeExpanded, e.phase, e.ctxUsed, e.ctxLimit, e.ctxModel},
+		entryState{e.expanded, e.done, e.typeExpanded, e.phase, e.ctxUsed, e.ctxLimit, e.ctxModel,
+			e.stepCap, e.capRequested},
 	}
 }
 

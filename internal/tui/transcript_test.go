@@ -1446,6 +1446,28 @@ func subAgentStarted(tr *transcript, id string, depth int) {
 	})
 }
 
+// subAgentStartedUnder is subAgentStarted with the step-cap facts the engine's started phase carries
+// (domain.SubAgentPhaseEvent.StepCap / CapRequested): the cap the child runs under, and the ask that
+// was clamped to it — 0 for none.
+func subAgentStartedUnder(tr *transcript, id string, depth, stepCap, asked int) {
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase:    domain.EventBase{Depth: depth, CallID: id},
+		Phase:        domain.SubAgentStarted,
+		StepCap:      stepCap,
+		CapRequested: asked,
+	})
+}
+
+// subAgentPhaseFinished folds a delegation's own FINISHED phase carrying its report — the early
+// signal a fan-out member is over ahead of the group's result burst (ADR 0039 decision 4).
+func subAgentPhaseFinished(tr *transcript, id, report string) {
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: id},
+		Phase:     domain.SubAgentFinished,
+		Result:    domain.ToolResult{CallID: id, Content: report},
+	})
+}
+
 // subAgentReport folds a run's report back into its head, which is what ends the run: the head is
 // done from there on, and its collapsed summary switches from the live tempo to the report's gist.
 // A run built without one is a run still working.
@@ -1695,6 +1717,126 @@ func TestSubAgentSummaryTempi(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSubAgentRunningRowWearsItsStepCap pins the trailing cell a RUNNING delegation's summary gains
+// from the step-cap facts its started phase carried (subAgentStepCap): `· 80 steps` for the cap the
+// child runs under, `· 80 steps (120 asked)` where the call asked for more than the configured cap
+// and was clamped, and nothing at all for an unbounded child — that row reads byte-for-byte as it
+// did before the cap existed. The cell is the running reading's alone: a FINISHED member's line ends
+// on its gist, whatever cap it ran under, because the bound is history once the child has reported.
+// The row wears the cell from the child's first tool call, which is what gives it a summary line to
+// carry it (renderSubAgentGroup's bare head view for a started, unspanned child has none).
+func TestSubAgentRunningRowWearsItsStepCap(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		build func(tr *transcript)
+		want  string
+	}{
+		{
+			name: "the cap it runs under, and the ask that was clamped to it",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentStartedUnder(tr, "s1", 1, 80, 120)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 12000, 32768)
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 12k/32k · 80 steps (120 asked)"),
+		},
+		{
+			name: "the cap alone where nothing was clamped",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentStartedUnder(tr, "s1", 1, 80, 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 12000, 32768)
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 12k/32k · 80 steps"),
+		},
+		{
+			name: "one step is spelled singular",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentStartedUnder(tr, "s1", 1, 1, 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 1 step"),
+		},
+		{
+			name: "an unbounded child paints today's reading unchanged",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentStartedUnder(tr, "s1", 1, 0, 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 12000, 32768)
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 1 tool call · 12k/32k"),
+		},
+		{
+			name: "the cap trails the one live word",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentStartedUnder(tr, "s1", 1, 80, 0)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentCall(tr, "s2", "read the tests", 1) // open: the child is waiting on its own child
+			},
+			want: groupMemberLine("  ┕ survey the tests ⋯ 2 tool calls · delegating · 80 steps"),
+		},
+		{
+			name: "a finished member wears no cap",
+			build: func(tr *transcript) {
+				subAgentCall(tr, "s1", "survey the tests", 0)
+				subAgentStartedUnder(tr, "s1", 1, 80, 120)
+				readCall(tr, "c1", "a.go", 1, 5, 1)
+				subAgentUsage(tr, 1, 12000, 32768)
+				subAgentPhaseFinished(tr, "s1", "Found 4 gaps")
+			},
+			want: groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · 12k/32k · Found 4 gaps"),
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{}
+			tc.build(tr)
+
+			branch := strings.Split(renderPlain(tr, 80), "\n")[1]
+			if branch != tc.want {
+				t.Errorf("summary line = %q; want %q", branch, tc.want)
+			}
+		})
+	}
+
+	// The cap is view-only: a record carries finished delegations and no phase, so a resumed
+	// scrollback paints exactly what it painted before the cap existed.
+	t.Run("a resumed record paints unchanged", func(t *testing.T) {
+		t.Parallel()
+		live := &transcript{}
+		subAgentCall(live, "s1", "survey the tests", 0)
+		subAgentStartedUnder(live, "s1", 1, 80, 120)
+		readCall(live, "c1", "a.go", 1, 5, 1)
+		subAgentUsage(live, 1, 12000, 32768)
+		subAgentReport(live, "s1", "Found 4 gaps", 0)
+		blob, err := encodeTranscript(live)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		entries, err := decodeTranscript(blob)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		resumed := &transcript{}
+		resumed.replay(entries)
+
+		want := groupMemberLine("  ┕ survey the tests ✓ ⋯ 1 tool call · 12k/32k · Found 4 gaps")
+		if branch := strings.Split(renderPlain(resumed, 80), "\n")[1]; branch != want {
+			t.Errorf("resumed summary line = %q; want %q", branch, want)
+		}
+		if strings.Contains(renderPlain(resumed, 80), "steps") {
+			t.Errorf("a resumed record wears a step cap:\n%s", renderPlain(resumed, 80))
+		}
+	})
 }
 
 // TestSubAgentCountIsTransitive proves the one number covers the whole run: the span holds every

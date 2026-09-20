@@ -134,7 +134,11 @@ cmd/apogee/wire_verbs.go — rootWiring.beat; cmd/apogee/upstream.go — paralle
 
 **Commit:** `feat(agent): the orientation block states the delegation bounds — width, fan-out ceiling and step cap`
 
-## 5. The running sub-agent row wears its step cap
+## 5. The running sub-agent row wears its step cap — ✅ DONE (2026-09-20)
+NOTES (2026-09-20): the cap cell is the summary's LAST cell — after the `· delegating` word and the routed-model cell — per the plan's "one trailing segment"; `TestSubAgentRunningRowWearsItsStepCap` pins `2 tool calls · delegating · 80 steps`.
+NOTES (2026-09-20): a cap of 1 is spelled `· 1 step` (through the package's `plural`), pinned by a table row; the plan's binding `· 80 steps` form is unchanged.
+NOTES (2026-09-20): no golden needed refreshing — the only frame golden painting a delegation (`cmd/apogee/testdata/frames/t04-step-cap-block.txt`) shows a finished row, which wears no cap; the hand-built running-row tests carry no StepCap and paint byte-for-byte as before.
+NOTES (2026-09-20): the finished-phase helper `subAgentPhaseFinished` and `subAgentStartedUnder` were added beside `subAgentStarted` in transcript_test.go for both new tests to share.
 
 **What:** Depends on item 3. In `internal/tui/transcript.go`, `addSubAgentPhase` folds `StepCap`/`CapRequested` off a Started phase onto the head entry as view-only fields beside `phase` (never persisted — a replayed record's rows are finished). In `internal/tui/subagentblock.go` the RUNNING reading gains one trailing segment: `N tool calls · <used>/<window> · 80 steps`, or `· 80 steps (120 asked)` when a request was clamped; nothing when `StepCap` is 0. The scheduled row (`scheduled`) and the finished reading are unchanged. Update `docs/layout/tool-layout.md` "Grouped Sub-agents" running-row rule and any golden that paints a running delegation.
 

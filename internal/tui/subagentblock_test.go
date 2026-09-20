@@ -282,6 +282,39 @@ func TestSubAgentMemberDoneOnItsOwnFinishedPhase(t *testing.T) {
 	}
 }
 
+// TestSubAgentGroupRunningRowsWearTheCap pins the step-cap cell across a folded group's three
+// readings at once (renderSubAgentGroup): a RUNNING member with a call behind it trails the cap its
+// started phase carried (`· 80 steps (120 asked)`), a FINISHED member ends on its gist with no cap
+// however it was bounded, and a SCHEDULED member says the one word — no cap, because no child is
+// running under one yet. A started member with nothing behind it stands as the bare head view and
+// wears no cell either: the row takes the cap from the child's first tool call, which is what gives
+// it a summary line to carry it.
+func TestSubAgentGroupRunningRowsWearTheCap(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	subAgentCall(tr, "s1", "survey", 0)
+	subAgentStartedUnder(tr, "s1", 1, 80, 120)
+	readCall(tr, "rs1", "a.go", 1, 5, 1)
+	subAgentPhaseFinished(tr, "s1", "done surveying")
+	subAgentCall(tr, "s2", "build", 0)
+	subAgentStartedUnder(tr, "s2", 1, 80, 120)
+	readCall(tr, "rs2", "b.go", 1, 5, 1)
+	subAgentCall(tr, "s3", "lint", 0)
+	subAgentStartedUnder(tr, "s3", 1, 80, 0)
+	subAgentCall(tr, "s4", "check", 0)
+
+	want := strings.Join([]string{
+		"✦ Sub-Agent (4)",
+		groupMemberLine("  ┝ survey ✓ ⋯ 1 tool call · done surveying"),
+		groupMemberLine("  ┝ build ⋯ 1 tool call · 80 steps (120 asked)"),
+		groupMemberLine("  ┝ lint ⋯"),
+		groupMemberLine("  ┕ check ⋯ scheduled"),
+	}, "\n")
+	if got := renderPlain(tr, 80); got != want {
+		t.Errorf("group mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
+	}
+}
+
 // A fan-out wider than the Parallel agents cap emits every delegation's call up front and starts
 // only as many children as it has slots (ADR 0039), so the rows past the cap stand for work that has
 // not begun. This is what such a row says and what it does: the one word "scheduled" in the outcome
