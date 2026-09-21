@@ -60,6 +60,7 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/session"
@@ -87,8 +88,27 @@ var _ tui.Engine = (*apogee.Agent)(nil)
 // build their backend from it — runRoot (wire_boot.go), `apogee headless` (headless.go) and the
 // daemon (daemonfire.go) — and the three confinement sentences a host says for itself
 // (probe.DegradedNotice, probe.ResidualNotice, the unattended Auto refusal) are therefore all
-// drivable from one place, on every host, in both directions.
+// drivable from one place, on every host, in both directions. None of the three reads it directly
+// any more: each takes its backend's constructor as a dependency (headlessDeps, daemonDeps,
+// rootDeps), and only a nil one falls back to this var.
 var newConfiner = platform.NewConfiner
+
+// rootDeps is what the TUI's boot takes from its host rather than deciding for itself: the runner
+// a Firing raised inside the session is handed to, and the constructor of the confinement backend
+// the session is fenced by — the same two facts, for the same reason, as headlessDeps (headless.go)
+// and daemonDeps (daemonfire.go): both are properties of the MACHINE and the PROCESS the session
+// happens to run in, so a driven run injects them through newRootCommandWith rather than swapping a
+// seam under the whole package.
+//
+// A nil field is the production value, resolved where it is used and never at construction: a nil
+// runner leaves rootWiring.runner nil and raise reads the runOnce var when a Firing is raised; a
+// nil confiner reads the newConfiner var when newRootWiring builds the backend.
+type rootDeps struct {
+	// runner is what a Firing raised inside this session runs through (firingInputs.runner).
+	runner func(context.Context, run.Spec) (run.Result, error)
+	// confiner builds this host's confinement backend, once per run.
+	confiner func() apogee.Confiner
+}
 
 // hookCloseGrace is how long a root gives its Reaction Runner to finish what it is already running
 // before the context cancels the rest. It is the SAME five seconds at every root — this session, a
@@ -103,8 +123,16 @@ const hookCloseGrace = 5 * time.Second
 
 // runRoot is the root command's body: parse the mode, resolve the state roots, build a
 // Config, construct (or resume) the Agent through the public surface, and launch the UI.
-// Each of those is a named phase over one wiring, and this is the whole sequence.
+// Each of those is a named phase over one wiring, and this is the whole sequence. The runner and
+// the confinement backend are the production ones; runRootWith is the same body with both stated.
 func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
+	return runRootWith(ctx, opts, launch, rootDeps{})
+}
+
+// runRootWith is runRoot with the host's runner and Confiner constructor stated by the caller
+// (rootDeps). Zero deps resolve to the production values; a driven run hands its own through
+// newRootCommandWith.
+func runRootWith(ctx context.Context, opts config.Options, launch launcher, deps rootDeps) error {
 	mode, err := domain.ParseMode(opts.Mode)
 	if err != nil {
 		return err
@@ -121,7 +149,7 @@ func runRoot(ctx context.Context, opts config.Options, launch launcher) error {
 
 	// The facilities this run owns for its whole life, and — in one defer, before the first
 	// fallible step — the teardown for everything the phases below reach (wire_boot.go).
-	w := newRootWiring(opts, mode, roots)
+	w := newRootWiringWith(opts, mode, roots, deps)
 	defer w.close()
 
 	// The base Config the session is constructed from, and the sentences this host's confinement
@@ -196,6 +224,10 @@ type rootWiring struct {
 	bridge       *tui.Bridge
 	presentation *livePresentation
 	confiner     domain.Confiner
+	// runner is what a Firing raised inside this session is handed to once its gates have passed —
+	// the boot's half of rootDeps, held so the `/schedule` wiring can read it where it composes its
+	// firingInputs. nil is the production value, resolved by raise when the Firing is raised.
+	runner func(context.Context, run.Spec) (run.Result, error)
 	// hooks is this session's Reaction Runner (ADR 0073): the observe-only decorator installed as
 	// Config.Events over the Bridge's own sink, so every engine Event reaches the renderer first and
 	// whatever the `reactions:` list subscribes to is fired off the engine's path afterwards. It is

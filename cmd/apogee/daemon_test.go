@@ -30,14 +30,19 @@ import (
 // daemonHarness is one `apogee daemon` invocation with every seam onto the host replaced: the
 // runner, so nothing is sent; the confinement backend, so the Auto verdict is the test's rather
 // than the kernel's; the slot probe, so no Firing dials a server; and the lock, so a test daemon
-// never contends with whatever the machine's real one holds. Tests here replace package-level vars
-// and so never call t.Parallel, exactly as the headless and daemon-firing tests do.
+// never contends with whatever the machine's real one holds. The runner and the backend travel as
+// the daemon's dependencies (deps); the lock, the clock and the watch are still package-level vars
+// this harness swaps, so tests here never call t.Parallel.
 type daemonHarness struct {
 	home      string
 	dir       string
 	schedules string
 	runner    *stubRunner
-	clock     *fakeDaemonClock
+	// deps is what run hands runDaemonWith — the stubRunner above and a fenceable stand-in backend
+	// by default. A test whose question is about another runner or another capability matrix writes
+	// the field after newDaemonHarness and before run.
+	deps  daemonDeps
+	clock *fakeDaemonClock
 	// signals is what a test signals the daemon through; it is buffered so a test can queue the
 	// stop before the daemon reaches its wait.
 	signals chan os.Signal
@@ -78,11 +83,12 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		errOut:    &syncBuffer{},
 		changes:   make(chan struct{}, 1),
 	}
+	h.deps = daemonDeps{
+		runner:   h.runner.once,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	}
 
-	prevRunner, prevConfiner := runOnce, newConfiner
 	prevLock, prevClock, prevWatch := acquireDaemonLock, daemonClock, watchSchedules
-	runOnce = h.runner.once
-	newConfiner = func() apogee.Confiner { return fenceableHost }
 	acquireDaemonLock = func(path string) (func(), error) {
 		h.locked = path
 		return func() { h.released = true }, nil
@@ -93,7 +99,6 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		return h.changes, func() { h.stopped = true }
 	}
 	t.Cleanup(func() {
-		runOnce, newConfiner = prevRunner, prevConfiner
 		acquireDaemonLock, daemonClock, watchSchedules = prevLock, prevClock, prevWatch
 	})
 	return h
@@ -122,10 +127,11 @@ func (h *daemonHarness) save(t *testing.T, body string) {
 // yields the error it ended with. Nothing is signalled here — the caller decides when to stop.
 //
 // The daemon still dies with the test that ran it: a test that fails before it waits would otherwise
-// leave the daemon — and the Scheduler goroutines it fires through runOnce — running while
-// newDaemonHarness's earlier-registered Cleanup restores that seam under them, which is the data race
-// apogee-5tn recorded. The Cleanup is registered HERE, after that restore, so LIFO joins the daemon
-// first; on the ordinary path the caller's wait has already returned and it costs nothing.
+// leave the daemon — and the Scheduler goroutines it fires through — running while
+// newDaemonHarness's earlier-registered Cleanup restores the clock and watch seams under them, which
+// is the data race apogee-5tn recorded. The Cleanup is registered HERE, after that restore, so LIFO
+// joins the daemon first; on the ordinary path the caller's wait has already returned and it costs
+// nothing.
 func (h *daemonHarness) run(t *testing.T) func() error {
 	t.Helper()
 
@@ -133,8 +139,8 @@ func (h *daemonHarness) run(t *testing.T) func() error {
 	done := make(chan error, 1)
 	finished := make(chan struct{})
 	go func() {
-		done <- runDaemon(context.Background(), &opts, func(string) bool { return false },
-			h.out, h.errOut, h.signals)
+		done <- runDaemonWith(context.Background(), &opts, func(string) bool { return false },
+			h.out, h.errOut, h.signals, h.deps)
 		close(finished)
 	}()
 	t.Cleanup(func() {
@@ -401,7 +407,7 @@ func TestDaemonDisclosesTheFenceResidualAtStartup(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newDaemonHarness(t)
-			newConfiner = func() apogee.Confiner { return fakeConfiner{caps: tc.caps} }
+			h.deps.confiner = func() apogee.Confiner { return fakeConfiner{caps: tc.caps} }
 			h.writeSchedules(t, oneScheduleYAML(t.TempDir()))
 
 			h.stop()
@@ -555,7 +561,7 @@ func TestDaemonSecondSignalCancelsTheFiringInFlight(t *testing.T) {
 	// A runner that blocks until its context is cancelled: the Firing is in flight for exactly as
 	// long as the shutdown lets it be.
 	firing := make(chan struct{})
-	runOnce = func(ctx context.Context, _ run.Spec) (run.Result, error) {
+	h.deps.runner = func(ctx context.Context, _ run.Spec) (run.Result, error) {
 		close(firing)
 		<-ctx.Done()
 		return run.Result{}, ctx.Err()
@@ -588,7 +594,7 @@ func TestDaemonGraceExpiryCancelsTheFiringInFlight(t *testing.T) {
 	// A runner that blocks until its context is cancelled: nothing but the grace expiring ends
 	// this firing.
 	firing := make(chan struct{})
-	runOnce = func(ctx context.Context, _ run.Spec) (run.Result, error) {
+	h.deps.runner = func(ctx context.Context, _ run.Spec) (run.Result, error) {
 		close(firing)
 		<-ctx.Done()
 		return run.Result{}, ctx.Err()
@@ -625,7 +631,7 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 			{Name: "fronted", Endpoint: testServerEndpoint, LlamaLauncher: "auto"},
 		},
 	}
-	wiring, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now})
+	wiring, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now}, h.deps)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -665,7 +671,7 @@ func TestDaemonHostLooksUpTheStartupDefault(t *testing.T) {
 func TestDaemonHostRefusesAModelOnTheLauncherFrontedDefault(t *testing.T) {
 	h := newDaemonHarness(t)
 	opts := config.Options{ConfigDir: h.home, StartupEntry: config.ServerEntry{LlamaLauncher: "auto"}}
-	wiring, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now})
+	wiring, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now}, h.deps)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -682,9 +688,9 @@ func TestDaemonHostRefusesAModelOnTheLauncherFrontedDefault(t *testing.T) {
 // same verdict `apogee headless` reaches, through the same function.
 func TestDaemonHostRefusesAutoOnAHostThatCannotFence(t *testing.T) {
 	h := newDaemonHarness(t)
-	newConfiner = func() apogee.Confiner { return fakeConfiner{} }
+	h.deps.confiner = func() apogee.Confiner { return fakeConfiner{} }
 	opts := config.Options{ConfigDir: h.home, ConfineToWorkspace: true}
-	wiring, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now})
+	wiring, err := newDaemonWiring(opts, &daemonLog{out: h.out, now: time.Now}, h.deps)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}
@@ -851,7 +857,7 @@ func newReloadHarness(t *testing.T, body string) *reloadHarness {
 		t.Fatalf("resolve the config: %v", err)
 	}
 	log := &daemonLog{out: h.out, now: time.Now}
-	wiring, err := newDaemonWiring(opts, log)
+	wiring, err := newDaemonWiring(opts, log, h.deps)
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}

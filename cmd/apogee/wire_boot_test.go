@@ -477,13 +477,12 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 // fence but leaves a write-class access open (landlock ABI 1–2 and truncate(2)) — which is the
 // degradation notice's mirror in FSWrite and so can never accompany it.
 //
-// Every cell is dictated through the [newConfiner] seam rather than read off this machine's real
-// backend: what a kernel can fence decides which branch speaks, so a host-derived expectation only
-// ever drives the one cell that host happens to be in — and leaves the silent half of each branch,
-// which is where a deleted print hides, unasserted on every machine.
+// Every cell is dictated through the boot's confiner dependency (rootDeps) rather than read off
+// this machine's real backend: what a kernel can fence decides which branch speaks, so a
+// host-derived expectation only ever drives the one cell that host happens to be in — and leaves
+// the silent half of each branch, which is where a deleted print hides, unasserted on every machine.
 func TestRunRootConfinementStartupNotices(t *testing.T) {
-	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr, and the confiner
-	// seam below is package state.
+	// Deliberately NOT parallel: captureStderr swaps the process-global os.Stderr.
 	const (
 		unconfinedWarning = "running UNCONFINED"
 		degradedNotice    = "auto mode is gating terminal commands"
@@ -519,10 +518,7 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			prevConfiner := newConfiner
-			newConfiner = func() apogee.Confiner { return fakeConfiner{caps: tt.caps} }
-			t.Cleanup(func() { newConfiner = prevConfiner })
-
+			deps := rootDeps{confiner: func() apogee.Confiner { return fakeConfiner{caps: tt.caps} }}
 			rec := &recordingLauncher{}
 			opts := config.Options{
 				Endpoint:           "http://127.0.0.1:1111",
@@ -535,7 +531,7 @@ func TestRunRootConfinementStartupNotices(t *testing.T) {
 
 			var runErr error
 			stderr := captureStderr(t, func() {
-				runErr = runRoot(context.Background(), opts, rec.launch)
+				runErr = runRootWith(context.Background(), opts, rec.launch, deps)
 			})
 
 			if runErr != nil {

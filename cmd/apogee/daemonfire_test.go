@@ -27,12 +27,12 @@ import (
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// daemonFireHarness is one daemon's wiring with the two seams onto the host replaced — the runner,
-// so nothing is sent, and the confinement backend, so the composition is the same on a kernel that
-// can fence and one that cannot — and its server REAL: a scripted upstream every `servers:` entry
-// the harness was built with points at, so the one beat a Firing takes (observeServer) dials a box
-// that answers. Every test in this file goes through it, which is why none of them calls t.Parallel
-// — they replace package-level vars, exactly as the headless and schedule composition tests do.
+// daemonFireHarness is one daemon's wiring with the two facts about the host stated by the test —
+// the runner, so nothing is sent, and the confinement backend, so the composition is the same on a
+// kernel that can fence and one that cannot — and its server REAL: a scripted upstream every
+// `servers:` entry the harness was built with points at, so the one beat a Firing takes
+// (observeServer) dials a box that answers. Both facts reach the wiring as its dependencies
+// (daemonDeps), never through a package var; the tests are left serial as they were written.
 type daemonFireHarness struct {
 	wiring *daemonWiring
 	runner *stubRunner
@@ -79,12 +79,10 @@ func newDaemonFireHarnessOn(t *testing.T, opts config.Options, upstream *stubllm
 		logged:   &bytes.Buffer{},
 	}
 
-	prevRunner, prevConfiner := runOnce, newConfiner
-	runOnce = harness.runner.once
-	newConfiner = func() apogee.Confiner { return fenceableHost }
-	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
-
-	wiring, err := newDaemonWiring(opts, &daemonLog{out: harness.logged, now: time.Now})
+	wiring, err := newDaemonWiring(opts, &daemonLog{out: harness.logged, now: time.Now}, daemonDeps{
+		runner:   harness.runner.once,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	})
 	if err != nil {
 		t.Fatalf("newDaemonWiring: %v", err)
 	}

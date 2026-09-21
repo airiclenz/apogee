@@ -100,10 +100,10 @@ func exitCodeFor(err error) int {
 
 // runOnce is the seam onto the shared runner. `apogee headless` is a thin CLI over internal/run —
 // argument parsing and exit codes, not a second runner (ADR 0033, decision 6) — and this variable
-// is the point the daemon's, the boot's and `/schedule`'s tests still replace, so prompt
-// resolution, composition, output routing and exit codes are all provable without a live model.
-// `apogee headless` itself no longer reads it directly: its runner arrives as a dependency
-// (headlessDeps), and only a nil one falls back to this var. Production never reassigns it.
+// is the point `/schedule`'s tests and the e2e stragglers still replace, so prompt resolution,
+// composition, output routing and exit codes are all provable without a live model. No Driver
+// reads it directly any more: each takes its runner as a dependency (headlessDeps, daemonDeps,
+// rootDeps), and only a nil one falls back to this var. Production never reassigns it.
 var runOnce = run.Once
 
 // headlessDeps is what `apogee headless` takes from its host rather than deciding for itself: the

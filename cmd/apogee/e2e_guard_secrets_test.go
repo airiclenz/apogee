@@ -45,11 +45,11 @@ const (
 // same finding, and the real index is untouched: `.env` is still untracked afterwards, because the
 // shadow staging never wrote to it.
 func TestE2EGuardSecretsForcesALookAtTheCommit(t *testing.T) {
-	installFenceableConfiner(t)
+	deps, _ := installFenceableConfiner(t)
 	ws := secretsRepoWorkspace(t, ".env", secretsEnvLine)
 	stub := stubllm.New(t, loadScript(t, "guard-secrets"))
 	drv := tuitest.NewDriver(t, tuitest.Size{W: 140, H: 30})
-	sess := launchTUIIn(t, drv, stub, ws, "", "--mode", "auto")
+	sess := launchTUIInWith(t, drv, stub, ws, "", deps, "--mode", "auto")
 
 	submit(drv, secretsCommitPrompt)
 	pane := awaitForcedPane(drv)
@@ -87,11 +87,11 @@ func TestE2EGuardSecretsForcesALookAtTheCommit(t *testing.T) {
 // is the secrets pre-check — on a host that cannot fence, Auto would gate the git child for
 // `subprocess execution`, a reason that has nothing to do with secrets.
 func TestE2EGuardSecretsCleanCommitNeedsNoLook(t *testing.T) {
-	installFenceableConfiner(t)
+	deps, _ := installFenceableConfiner(t)
 	ws := secretsRepoWorkspace(t, "notes.txt", "a line of prose\n")
 	stub := stubllm.New(t, loadScript(t, "guard-secrets"))
 	drv := tuitest.NewDriver(t, tuitest.Size{W: 140, H: 30})
-	sess := launchTUIIn(t, drv, stub, ws, "", "--mode", "auto")
+	sess := launchTUIInWith(t, drv, stub, ws, "", deps, "--mode", "auto")
 
 	// The wrap-up arriving is the claim: a pane would have held the call — and the whole run —
 	// until somebody answered it, and nobody here does.

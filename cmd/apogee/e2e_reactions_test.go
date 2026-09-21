@@ -413,11 +413,10 @@ func TestDaemonFiringFiresHooks(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "hooks"))
 	h := newDaemonHarness(t)
-	// The harness installs a stub runner; this test wants the composition — and restores what it
-	// found, so the swap cannot outlive the case under `go test -shuffle`.
-	prev := runOnce
-	runOnce = run.Once
-	t.Cleanup(func() { runOnce = prev })
+	// The harness hands the daemon a stub runner; this test wants the composition, so the dependency
+	// the daemon is run with is the production runner instead — a field of this test's own harness,
+	// which nothing has to restore.
+	h.deps.runner = run.Once
 	writeConfigHome(t, h.home, hookBlockOf(
 		"  - id: "+hooksSinkName+"\n"+
 			"    on: [turn-finished]\n"+

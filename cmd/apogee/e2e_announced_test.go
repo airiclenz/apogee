@@ -409,13 +409,13 @@ func TestE2EAnnouncedScratchDirRunsUnpromptedInAuto(t *testing.T) {
 	// developer's own apogee home. It is denied below, but the home it would reach is a temp one
 	// either way.
 	guardHome(t)
-	installFenceableConfiner(t)
+	deps, _ := installFenceableConfiner(t)
 
 	stub := stubllm.New(t, loadScript(t, "announced-scratch"))
 	fx := announcedSkillFixture(t, stub)
 	appendHomeConfig(t, fx.home, announcedStandingPrompt)
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUIOn(t, drv, stub, fx.home, fx.ws, "--mode", "auto")
+	sess := launchTUIOnWith(t, drv, stub, fx.home, fx.ws, deps, "--mode", "auto")
 	panes := watchApprovalPanes(t, drv)
 
 	submit(drv, announcedScratchPrompt)
@@ -494,13 +494,13 @@ const announcedScratchCachesPrompt = "Show me where the toolchain caches live."
 // true (subprocess.ScratchEnv), and a seed that pointed anywhere else fails here.
 func TestE2EAnnouncedScratchDirHoldsTheToolchainCaches(t *testing.T) {
 	guardHome(t)
-	installFenceableConfiner(t)
+	deps, _ := installFenceableConfiner(t)
 
 	stub := stubllm.New(t, loadScript(t, "announced-scratch-caches"))
 	fx := announcedSkillFixture(t, stub)
 	appendHomeConfig(t, fx.home, announcedStandingPrompt)
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUIOn(t, drv, stub, fx.home, fx.ws, "--mode", "auto")
+	sess := launchTUIOnWith(t, drv, stub, fx.home, fx.ws, deps, "--mode", "auto")
 	panes := watchApprovalPanes(t, drv)
 
 	submit(drv, announcedScratchCachesPrompt)
@@ -558,19 +558,20 @@ func TestE2EAnnouncedScratchDirHoldsTheToolchainCaches(t *testing.T) {
 // confines nothing, which is the right trade for a fixture asserting PROMPTING. The fence itself
 // has its own suite (confinement_e2e_test.go).
 //
-// The result says which of the two the run got — true for the host's real backend — so a caller
-// asserting on what a REAL box did to a confined command can tell a run where one was there from a
-// run where the stand-in confined nothing. Callers asserting prompting alone ignore it.
-func installFenceableConfiner(t *testing.T) (real bool) {
+// The deps are what the launch hands the boot (launchTUIInWith, launchTUIOnWith): zero on a host
+// that fences, so the run takes the production backend, and the stand-in's constructor on one that
+// cannot. Nothing process-wide is swapped, so the runs that take them are as parallel-safe as any
+// other driven launch. The bool says which of the two the run got — true for the host's real
+// backend — so a caller asserting on what a REAL box did to a confined command can tell a run
+// where one was there from a run where the stand-in confined nothing. Callers asserting prompting
+// alone ignore it.
+func installFenceableConfiner(t *testing.T) (deps rootDeps, real bool) {
 	t.Helper()
 
 	if platform.NewConfiner().Capabilities().FSWrite {
-		return true
+		return rootDeps{}, true
 	}
-	previous := newConfiner
-	newConfiner = func() apogee.Confiner { return fenceableHost }
-	t.Cleanup(func() { newConfiner = previous })
-	return false
+	return rootDeps{confiner: func() apogee.Confiner { return fenceableHost }}, false
 }
 
 // announcedScratchExport lifts the scratch dir back out of the command the model sent. The `\S+` is
@@ -917,7 +918,7 @@ const announcedWorkspaceCanary = "canary-9d4e.txt"
 // need a REAL box to mean anything: where the fixture swapped in fenceableHost the bookkeeping git
 // was never confined, so the test logs that and judges the rest.
 func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
-	realBox := installFenceableConfiner(t)
+	deps, realBox := installFenceableConfiner(t)
 
 	// The tree the project really lives in, and the name apogee is given for it.
 	tree := e2eWorkspace(t)
@@ -926,7 +927,7 @@ func TestE2EAnnouncedWorkspaceThroughASymlink(t *testing.T) {
 
 	stub := stubllm.New(t, loadScript(t, "announced-workspace"))
 	drv := tuitest.NewDriver(t, e2eSize)
-	sess := launchTUIIn(t, drv, stub, ws, announcedStandingPrompt, "--mode", "auto")
+	sess := launchTUIInWith(t, drv, stub, ws, announcedStandingPrompt, deps, "--mode", "auto")
 	panes := watchApprovalPanes(t, drv)
 
 	submit(drv, announcedWorkspacePrompt)

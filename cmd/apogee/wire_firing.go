@@ -115,10 +115,10 @@ type firingInputs struct {
 	// runner is what the composed Firing is handed to once both gates have passed — run.Once in
 	// production, a recording stub in a composition test that captures the run.Spec and runs
 	// nothing (ADR 0033 decision 6 names the runner an injected seam, and ~40 tests observe the
-	// composition through it). A Driver that holds its runner as a dependency (headless) passes it
-	// through here; nil falls back to the package's runOnce var, read at the moment the Firing is
-	// raised and never captured earlier, so the daemon, `/schedule` and the boot keep the seam they
-	// still swap until they take their runner as a dependency too.
+	// composition through it). A Driver that holds its runner as a dependency (headless, the
+	// daemon, the boot) passes it through here; nil falls back to the package's runOnce var, read at
+	// the moment the Firing is raised and never captured earlier, so `/schedule` keeps the seam it
+	// still swaps until it takes its runner as a dependency too.
 	runner func(context.Context, run.Spec) (run.Result, error)
 }
 

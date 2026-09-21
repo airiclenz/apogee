@@ -44,6 +44,11 @@ type e2eSession struct {
 	ws   string
 	stub *stubllm.Server
 	args []string
+	// deps is what every launch of this session hands the root command (rootDeps): zero for the
+	// production runner and backend, or the caps-only stand-in installFenceableConfiner answers
+	// with on a host that cannot fence. Held on the session rather than passed per launch so a
+	// Relaunch boots on the same host facts the first run did.
+	deps rootDeps
 
 	drv  *tuitest.Driver
 	out  strings.Builder
@@ -78,11 +83,20 @@ func launchTUIConfigured(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server
 func launchTUIIn(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ws, extraConfig string,
 	args ...string) *e2eSession {
 	t.Helper()
+	return launchTUIInWith(t, drv, stub, ws, extraConfig, rootDeps{}, args...)
+}
+
+// launchTUIInWith is [launchTUIIn] with the host facts the boot takes as dependencies stated by the
+// caller (rootDeps) — the door a run under installFenceableConfiner comes through. Zero deps are
+// the production runner and backend, which is what every other launch wants.
+func launchTUIInWith(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ws, extraConfig string,
+	deps rootDeps, args ...string) *e2eSession {
+	t.Helper()
 
 	e2eGuards(t)
 	home := e2eHome(t, stub)
 	appendHomeConfig(t, home, extraConfig)
-	return startSession(t, drv, stub, home, ws, args...)
+	return startSession(t, drv, stub, home, ws, deps, args...)
 }
 
 // launchTUIOn is [launchTUIIn] on a HOME the caller wrote, for the one key no helper can add after
@@ -93,9 +107,17 @@ func launchTUIIn(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ws, ex
 func launchTUIOn(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, ws string,
 	args ...string) *e2eSession {
 	t.Helper()
+	return launchTUIOnWith(t, drv, stub, home, ws, rootDeps{}, args...)
+}
+
+// launchTUIOnWith is [launchTUIOn] with the boot's dependencies stated by the caller (rootDeps), as
+// [launchTUIInWith] is for launchTUIIn.
+func launchTUIOnWith(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, ws string,
+	deps rootDeps, args ...string) *e2eSession {
+	t.Helper()
 
 	e2eGuards(t)
-	return startSession(t, drv, stub, home, ws, args...)
+	return startSession(t, drv, stub, home, ws, deps, args...)
 }
 
 // e2eGuards is what every driven launch registers before it creates anything: the leak check and
@@ -114,15 +136,16 @@ func e2eGuards(t *testing.T) {
 }
 
 // startSession builds the session around a home and a workspace and starts its first launch. An
-// empty ws takes the seeded scratch one.
+// empty ws takes the seeded scratch one; deps are the host facts every launch of the session hands
+// the root command.
 func startSession(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, ws string,
-	args ...string) *e2eSession {
+	deps rootDeps, args ...string) *e2eSession {
 	t.Helper()
 
 	if ws == "" {
 		ws = e2eWorkspace(t)
 	}
-	s := &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args}
+	s := &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args, deps: deps}
 	s.start(drv)
 	return s
 }
@@ -166,7 +189,7 @@ func (s *e2eSession) start(drv *tuitest.Driver) {
 		return err
 	}
 
-	cmd := newRootCommand(launch)
+	cmd := newRootCommandWith(launch, s.deps)
 	cmd.SetArgs(append([]string{"--config", s.home, "--workspace", s.ws}, s.args...))
 	cmd.SetOut(&s.out)
 	cmd.SetErr(&s.out)

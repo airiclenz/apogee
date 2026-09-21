@@ -27,7 +27,19 @@ type launcher func(ctx context.Context, eng tui.Engine, br *tui.Bridge, opts tui
 // tests pass fakes. Registering children never changes the bare invocation: the root
 // keeps its own RunE and `Args: cobra.NoArgs`, so `apogee` with no arguments opens the
 // TUI exactly as before and an unrecognised word still fails as an unknown command.
+//
+// The runner and the confinement backend are the production ones; newRootCommandWith is the
+// same command with both stated.
 func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
+	return newRootCommandWith(launch, rootDeps{}, subs...)
+}
+
+// newRootCommandWith is newRootCommand with the host's runner and Confiner constructor stated by
+// the caller (rootDeps). It is the door a driven e2e run comes through: a fixture whose question is
+// about GATING rather than fencing hands the boot a caps-only backend for the host it happens to
+// run on, without a package var swapped for the test's duration. Production comes through
+// newRootCommand, whose zero deps resolve to the production values.
+func newRootCommandWith(launch launcher, deps rootDeps, subs ...*cobra.Command) *cobra.Command {
 	var opts config.Options
 
 	cmd := &cobra.Command{
@@ -95,7 +107,7 @@ func newRootCommand(launch launcher, subs ...*cobra.Command) *cobra.Command {
 			// The TUI now paints immediately and the heartbeat fires its first beat from Init, so
 			// discovery is late and continuous rather than early and once (ADR 0024, decision 8):
 			// the same beat that late-seeds a cold start refreshes a running one.
-			return runRoot(cmd.Context(), opts, launch)
+			return runRootWith(cmd.Context(), opts, launch, deps)
 		},
 	}
 

@@ -53,9 +53,17 @@ func shouldPrewarmLabelWalk(mode apogee.Mode, confineToWorkspace, fsWrite bool) 
 // newRootWiring opens the run: the four host facilities that outlive everything below them, in the
 // order the composition root has always built them. Nothing here can fail and nothing here reaches
 // the network — which is why runRoot can register the teardown for all of it in one defer before
-// the first fallible step.
+// the first fallible step. The runner and the confinement backend are the production ones;
+// newRootWiringWith is the same opening with both stated.
 func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *rootWiring {
-	w := &rootWiring{opts: opts, mode: mode, roots: roots}
+	return newRootWiringWith(opts, mode, roots, rootDeps{})
+}
+
+// newRootWiringWith is newRootWiring with the host's runner and Confiner constructor stated by the
+// caller (rootDeps): a boot test dictates the backend's capability matrix through it and asks its
+// gating question on every host. Zero deps resolve to the production values.
+func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, deps rootDeps) *rootWiring {
+	w := &rootWiring{opts: opts, mode: mode, roots: roots, runner: deps.runner}
 
 	// The one key resolver this run has. Every seam that needs a server's API key — the startup
 	// Config below, the bind, a `/server` switch, the Sub-agent server's beat — resolves through
@@ -112,11 +120,16 @@ func newRootWiring(opts config.Options, mode apogee.Mode, roots stateRoots) *roo
 	// probes once at construction, so this is the same value the engine's dispatch disposition will
 	// consult.
 	//
-	// It comes through the [newConfiner] seam every Driver builds its backend from (wire.go), for
-	// that seam's own reason: what a backend can enforce is a property of the MACHINE, so
-	// a fixture whose question is about GATING rather than fencing dictates the capability matrix
-	// and asks its question on every host. Production never reassigns it.
-	w.confiner = newConfiner()
+	// It is built through the constructor the host handed this boot (rootDeps), for the reason
+	// that dependency exists: what a backend can enforce is a property of the MACHINE, so a fixture
+	// whose question is about GATING rather than fencing dictates the capability matrix and asks
+	// its question on every host. A nil constructor is the production route, read from the
+	// [newConfiner] seam here and not earlier.
+	buildConfiner := deps.confiner
+	if buildConfiner == nil {
+		buildConfiner = newConfiner
+	}
+	w.confiner = buildConfiner()
 
 	return w
 }

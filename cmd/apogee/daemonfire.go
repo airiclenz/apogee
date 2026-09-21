@@ -25,6 +25,7 @@ import (
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/reactions"
+	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/session"
@@ -59,13 +60,19 @@ type daemonWiring struct {
 	// daemon's lifetime, so a `api-key-cmd:` runs once per entry rather than once per Firing — it
 	// is goroutine-safe, which is what lets Firings on different Schedules share it.
 	keys *config.KeyResolver
-	// confiner is this host's confinement backend, built once through the newConfiner seam. A
-	// Firing takes it whatever its mode: an Auto entry is fenced by it, and a Plan entry's terminal
-	// commands are confined by the same posture a session's are. Whether this host may run Auto
-	// unattended at all was ruled on at VALIDATION (internal/daemon's Host.Confinement), where the
-	// refusal could name the entry, so nothing here re-asks. [daemonWiring.closeConfiner] is the
-	// other end of it: a backend that has to put the disk back is torn down when the daemon stops.
+	// confiner is this host's confinement backend, built once by newDaemonWiring through the
+	// constructor the daemon was handed (daemonDeps). A Firing takes it whatever its mode: an Auto
+	// entry is fenced by it, and a Plan entry's terminal commands are confined by the same posture a
+	// session's are. Whether this host may run Auto unattended at all was ruled on at VALIDATION
+	// (internal/daemon's Host.Confinement), where the refusal could name the entry, so nothing here
+	// re-asks. [daemonWiring.closeConfiner] is the other end of it: a backend that has to put the
+	// disk back is torn down when the daemon stops.
 	confiner apogee.Confiner
+	// runner is what every Firing of this daemon is handed to once its gates have passed
+	// (firingInputs.runner) — the daemon's half of daemonDeps, carried here because fire runs on the
+	// Scheduler's goroutines long after runDaemon's arguments are gone. nil is the production value,
+	// resolved by raise when the Firing is raised.
+	runner func(context.Context, run.Spec) (run.Result, error)
 	// store is the shared sessions store every Firing's record lands in, so a schedule's runs are
 	// browsable in /sessions beside the conversations and headless runs on this host (ADR 0034).
 	store *session.Store
@@ -95,6 +102,24 @@ type daemonWiring struct {
 	prewarmed map[string]struct{}
 }
 
+// daemonDeps is what `apogee daemon` takes from its host rather than deciding for itself: the
+// runner its Firings are handed to, and the constructor of the confinement backend they are fenced
+// by — the same two facts, for the same reason, as headlessDeps (headless.go): both are properties
+// of the MACHINE and the PROCESS the daemon happens to run in, so a test injects them through
+// runDaemonWith or newDaemonWiring rather than swapping a seam under the whole package.
+//
+// A nil field is the production value, resolved where it is used and never at construction: a nil
+// runner leaves daemonWiring.runner nil and raise reads the runOnce var when a Firing is raised; a
+// nil confiner reads the newConfiner var when newDaemonWiring builds the backend. The vars, rather
+// than run.Once and platform.NewConfiner, for as long as `/schedule` and the e2e stragglers still
+// swap them — a daemon test that shares a helper with them must see the same value.
+type daemonDeps struct {
+	// runner is what a Firing runs through once its gates have passed (firingInputs.runner).
+	runner func(context.Context, run.Spec) (run.Result, error)
+	// confiner builds this host's confinement backend, once per daemon.
+	confiner func() apogee.Confiner
+}
+
 // newDaemonWiring resolves everything about the HOST that every Firing of this daemon shares, and
 // fails before a clock is started when any of it is wrong: a root it cannot resolve is a defect in
 // the config the daemon must report at startup rather than at 3am in a saved record.
@@ -103,8 +128,10 @@ type daemonWiring struct {
 // same [daemonWiring.adopt] call every later reload makes.
 //
 // The log is the caller's, not this function's: a Firing narrates through the same stream the
-// lifecycle lines land on, and the daemon owns when that stream is opened.
-func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, error) {
+// lifecycle lines land on, and the daemon owns when that stream is opened. So are the deps: the
+// runner and the backend constructor are the host's to state (daemonDeps), and zero deps are the
+// production values.
+func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*daemonWiring, error) {
 	roots, err := resolveRoots(opts.ConfigDir, "")
 	if err != nil {
 		return nil, err
@@ -131,6 +158,13 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, error)
 	// it.
 	gcSnapshotDirs(roots.snapshots, store, time.Now())
 
+	// The backend is built through the constructor the host handed this daemon (daemonDeps); a nil
+	// one is the production route, read from the newConfiner seam here and not earlier.
+	buildConfiner := deps.confiner
+	if buildConfiner == nil {
+		buildConfiner = newConfiner
+	}
+
 	return &daemonWiring{
 		opts: opts,
 		// The key resolver is built ROOTLESS because the `api-key-cmd:` exec fence is judged per
@@ -139,7 +173,8 @@ func newDaemonWiring(opts config.Options, log *daemonLog) (*daemonWiring, error)
 		// command against — firingConfig names the Firing's own roots.workspace on every
 		// resolution (KeyResolver.ResolveWithin), memoised keys included.
 		keys:      config.NewKeyResolver(""),
-		confiner:  newConfiner(),
+		confiner:  buildConfiner(),
+		runner:    deps.runner,
 		store:     store,
 		log:       log,
 		adopted:   make(map[string]daemon.Entry),
@@ -337,6 +372,7 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		keys:     w.keys,
 		roots:    roots,
 		confiner: w.confiner,
+		runner:   w.runner,
 		model:    entry.Run.Model,
 		mode:     f.Mode,
 		// The Scheduler's own clock, so the id this Firing is filed under is minted off the same

@@ -204,14 +204,14 @@ func TestE2EHostileToolResultsKeepOneRowPerEntry(t *testing.T) {
 // when the run's backend reports fs-write; a host that cannot fence would say "commands cannot be
 // fenced here" instead and fail the step for a reason that has nothing to do with wrapping. So the
 // run takes installFenceableConfiner's stand-in where it must — the test asserts wrapping, not the
-// fence — and, because that helper swaps a package var, it is serial like the announced tests.
+// fence — handed to the boot as its confiner dependency; it is left serial like the announced tests.
 func TestE2EHostileWrapsUnderItsOwnIndent(t *testing.T) {
-	installFenceableConfiner(t)
+	deps, _ := installFenceableConfiner(t)
 
 	ws := hostileWorkspace(t)
 	stub := stubllm.New(t, loadScript(t, "hostile"))
 	drv := tuitest.NewDriver(t, narrowHostileSize)
-	sess := launchTUIIn(t, drv, stub, ws, "")
+	sess := launchTUIInWith(t, drv, stub, ws, "", deps)
 	red := ansiRed(t)
 
 	// Step 6 — the `mode` row's value sub-list. The sentence beside `auto` does NOT wrap: this pane

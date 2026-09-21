@@ -156,14 +156,24 @@ func newDaemonCommand() *cobra.Command {
 // runDaemon is the command's whole body, taking its signals and its streams as arguments so the
 // lifecycle is drivable without a process to send a real signal to. It returns nil for a clean
 // stop and an error for every startup refusal — a held lock, a config that will not resolve, a
-// schedules file that will not validate — which main turns into exit 1.
+// schedules file that will not validate — which main turns into exit 1. The runner and the
+// confinement backend are the production ones; runDaemonWith is the same body with both stated.
+func runDaemon(ctx context.Context, opts *config.Options, changed func(string) bool,
+	out, errOut io.Writer, signals <-chan os.Signal) error {
+	return runDaemonWith(ctx, opts, changed, out, errOut, signals, daemonDeps{})
+}
+
+// runDaemonWith is runDaemon with the host's runner and Confiner constructor stated by the caller
+// (daemonDeps). It is the door a test comes through: a stubRunner that records what each Firing
+// composed, or a fakeConfiner whose capability matrix the test dictates — neither needing a package
+// var swapped for the test's duration. Zero deps resolve to the production values.
 //
 // The order below is the order the refusals are worth making in. Configuration first, because a
 // daemon that cannot say which server it talks to has nothing to schedule; the lock before the
 // confinement backend, so a second daemon refuses without building anything; the file after the
 // lock, because validating it is only useful for the daemon that is going to run it.
-func runDaemon(ctx context.Context, opts *config.Options, changed func(string) bool,
-	out, errOut io.Writer, signals <-chan os.Signal) error {
+func runDaemonWith(ctx context.Context, opts *config.Options, changed func(string) bool,
+	out, errOut io.Writer, signals <-chan os.Signal, deps daemonDeps) error {
 	// The same resolution a session performs (flag > env > file > default), so a Firing runs against
 	// the server, and with the Reactions, a session on this host would (ADR 0031). Notices go to
 	// stderr; the daemon's own narration goes to stdout, which is what a supervisor journals.
@@ -208,7 +218,7 @@ func runDaemon(ctx context.Context, opts *config.Options, changed func(string) b
 
 	// The host half of every Firing — the confinement backend, the key resolver, the sessions
 	// store — resolved once, because config.yaml is read once (ADR 0055).
-	wiring, err := newDaemonWiring(*opts, log)
+	wiring, err := newDaemonWiring(*opts, log, deps)
 	if err != nil {
 		return err
 	}
