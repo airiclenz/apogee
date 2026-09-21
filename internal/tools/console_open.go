@@ -43,8 +43,8 @@ type consoleOpenArgs struct {
 const consoleTermVar = "TERM=dumb"
 
 // openConsole starts the Console a call assembled (a package var so a test can capture the exact
-// argv, environment and confinement this tool builds — the seam runTerminalSubprocess already is
-// for the one-shot tools).
+// argv, environment and confinement this tool builds — the door execHost.run already is for
+// the one-shot tools).
 var openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
 	return registry.Open(spec)
 }

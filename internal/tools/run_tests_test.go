@@ -31,30 +31,24 @@ func writeProject(t *testing.T, files map[string]string) string {
 	return root
 }
 
-// runTestsCall drives the tool over root with the given arguments.
+// runTestsCall drives the tool over root with the given arguments, on the real operating system.
 func runTestsCall(t *testing.T, root string, args map[string]any) domain.ToolResult {
 	t.Helper()
-	res, err := NewRunTests(root, nil).Execute(context.Background(), domain.ToolCall{
+	return runTestsCallOn(t, root, defaultExecHost(), args)
+}
+
+// runTestsCallOn is runTestsCall with the host the tool launches through supplied — one carrying
+// a fake look or a recording run, so the call neither depends on the test host's PATH nor starts
+// a runner.
+func runTestsCallOn(t *testing.T, root string, host execHost, args map[string]any) domain.ToolResult {
+	t.Helper()
+	res, err := newRunTests(root, nil, host).Execute(context.Background(), domain.ToolCall{
 		ID: "c1", Tool: "run_tests", Arguments: jsonArgs(t, args),
 	})
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 	}
 	return res
-}
-
-// withCapturedTestRun swaps the runner subprocess for one that records the spec and launches
-// nothing, so a test can pin the exact argv and environment the tool builds.
-func withCapturedTestRun(t *testing.T) *subprocess.SubprocessSpec {
-	t.Helper()
-	orig := runTestsSubprocess
-	var captured subprocess.SubprocessSpec
-	runTestsSubprocess = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
-		captured = spec
-		return subprocess.SubprocessResult{}, nil
-	}
-	t.Cleanup(func() { runTestsSubprocess = orig })
-	return &captured
 }
 
 // TestRunTestsDetectsRunnerByMarkerPrecedence pins ratified call 6: which runner a project gets is
@@ -333,12 +327,9 @@ func TestRunTestsRefusesArgumentsItCannotSafelyPass(t *testing.T) {
 // runner this project uses, so an absent executable is a clear result naming both, never a crash
 // and never a hard dependency.
 func TestRunTestsMissingRunnerProgramDegradesGracefully(t *testing.T) {
-	original := lookTestProgram
-	lookTestProgram = func(string) (string, error) { return "", exec.ErrNotFound }
-	t.Cleanup(func() { lookTestProgram = original })
-
+	t.Parallel()
 	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
-	res := runTestsCall(t, root, nil)
+	res := runTestsCallOn(t, root, fakeLookHost(false, ""), nil)
 	if !res.IsError {
 		t.Fatalf("a missing runner must be an error result: %q", res.Content)
 	}
@@ -355,19 +346,17 @@ func TestRunTestsMissingRunnerProgramDegradesGracefully(t *testing.T) {
 // suite actually needs) still travels. This is the targeted removal terminal and python_exec make,
 // not git's allowlist.
 func TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment(t *testing.T) {
-	// Not parallel: t.Setenv, plus the package-level program/runner swaps.
+	// Not parallel: t.Setenv.
 	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
 	t.Setenv("APOGEE_ENDPOINT", "http://192.0.2.1:1111")
 	// A resolver pointing outside the workspace, so neither the exec fence nor the host's own
 	// toolchain decides whether this test runs.
 	program := filepath.Join(t.TempDir(), "go")
-	original := lookTestProgram
-	lookTestProgram = func(string) (string, error) { return program, nil }
-	t.Cleanup(func() { lookTestProgram = original })
-	captured := withCapturedTestRun(t)
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, program)
 
 	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
-	runTestsCall(t, root, nil)
+	runTestsCallOn(t, root, h, nil)
 
 	if captured.Env == nil {
 		t.Fatal("spec.Env is nil: the runner would inherit the parent environment whole, credentials included")
@@ -393,19 +382,17 @@ func TestRunTestsDropsApogeeCredentialsFromTheRunnerEnvironment(t *testing.T) {
 // exported into the shell apogee was started from (ADR 0047) — is dropped from the runner's
 // environment too, while the toolchain variables a suite needs still travel.
 func TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment(t *testing.T) {
-	// Not parallel: t.Setenv, plus the package-level program/runner swaps.
+	// Not parallel: t.Setenv.
 	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
 	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
 	// A resolver pointing outside the workspace, so neither the exec fence nor the host's own
 	// toolchain decides whether this test runs.
 	program := filepath.Join(t.TempDir(), "go")
-	original := lookTestProgram
-	lookTestProgram = func(string) (string, error) { return program, nil }
-	t.Cleanup(func() { lookTestProgram = original })
-	captured := withCapturedTestRun(t)
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, program)
 
 	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
-	res, err := NewRunTests(root, []string{"apogee_test_provider_key"}).Execute(context.Background(), domain.ToolCall{
+	res, err := newRunTests(root, []string{"apogee_test_provider_key"}, h).Execute(context.Background(), domain.ToolCall{
 		ID: "c1", Tool: "run_tests", Arguments: jsonArgs(t, nil),
 	})
 	if err != nil {
@@ -538,7 +525,7 @@ func firstLineOf(s string) string {
 // graceful posture the tool itself takes (§3a).
 func requireGo(t *testing.T) {
 	t.Helper()
-	if _, err := lookTestProgram("go"); err != nil {
+	if _, err := exec.LookPath("go"); err != nil {
 		t.Skip("no go toolchain on PATH")
 	}
 }

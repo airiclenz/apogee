@@ -49,7 +49,8 @@ func prependPATH(t *testing.T, dir string) {
 // "not available" and goes looking for an install, when the cause is a workspace-resident entry
 // on their own PATH.
 func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
-	// No t.Parallel anywhere below: each case swaps a package-level look* var.
+	// No t.Parallel anywhere below: the git and diagnostics rows still swap a package-level
+	// look* var, and the two shell rows plant their program through t.Setenv.
 	tests := []struct {
 		name string
 		// run plants a program inside root, points the tool's resolver at it, and returns
@@ -76,8 +77,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 			name: "python_exec",
 			run: func(t *testing.T, root string) (string, string, bool) {
 				planted := plantExecutable(t, root, ".venv/bin/python3")
-				withFakeInterpreter(t, true, planted)
-				res, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)"))
+				res, err := newPythonExec(root, nil, fakeLookHost(true, planted)).Execute(context.Background(), pythonCall("c1", "print(1)"))
 				if err != nil {
 					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 				}
@@ -92,10 +92,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 					t.Fatalf("write go.mod: %v", err)
 				}
 				planted := plantExecutable(t, root, "node_modules/.bin/go")
-				original := lookTestProgram
-				lookTestProgram = func(string) (string, error) { return planted, nil }
-				t.Cleanup(func() { lookTestProgram = original })
-				res := runTestsCall(t, root, nil)
+				res := runTestsCallOn(t, root, fakeLookHost(true, planted), nil)
 				return planted, res.Content, res.IsError
 			},
 			wantError: true,
@@ -169,11 +166,11 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 // The refusal must not reuse the graceful "no Python interpreter found" wording — that message
 // describes a host without Python and would send the operator installing one they already have.
 func TestPythonExecRefusesAnInRepoVirtualenvByName(t *testing.T) {
+	t.Parallel()
 	root := tempRoot(t)
 	venv := plantExecutable(t, root, ".venv/bin/python3")
-	withFakeInterpreter(t, true, venv)
 
-	res, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)"))
+	res, err := newPythonExec(root, nil, fakeLookHost(true, venv)).Execute(context.Background(), pythonCall("c1", "print(1)"))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 	}
@@ -194,20 +191,22 @@ func TestPythonExecRefusesAnInRepoVirtualenvByName(t *testing.T) {
 // would run an interpreter the operator never chose and swallow the one sentence that names the
 // in-workspace PATH entry they must fix.
 func TestPythonExecRefusalIsTerminalAcrossTheCandidates(t *testing.T) {
+	t.Parallel()
 	root := tempRoot(t)
 	planted := plantExecutable(t, root, ".venv/bin/python3")
 	clean := plantExecutable(t, t.TempDir(), "python")
 
-	original := lookInterpreter
-	lookInterpreter = func(name string) (string, error) {
+	// A per-name look: fakeLookHost answers one path for every candidate, and this test needs
+	// python3 planted and python clean, so it sets the host's look itself.
+	h := defaultExecHost()
+	h.look = func(name string) (string, error) {
 		if name == "python3" {
 			return planted, nil
 		}
 		return clean, nil
 	}
-	t.Cleanup(func() { lookInterpreter = original })
 
-	res, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)"))
+	res, err := newPythonExec(root, nil, h).Execute(context.Background(), pythonCall("c1", "print(1)"))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 	}
@@ -226,15 +225,15 @@ func TestPythonExecRefusalIsTerminalAcrossTheCandidates(t *testing.T) {
 // on the call context is part of the fence: an extra writable path is as model-writable as the
 // workspace, and a program planted there is the same attack.
 func TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot(t *testing.T) {
+	t.Parallel()
 	root := tempRoot(t)
 	extra := tempRoot(t)
 	planted := plantExecutable(t, extra, "python3")
-	withFakeInterpreter(t, true, planted)
 
 	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
 		Box: domain.ConfinementBox{WorkspaceRoot: root, WritablePaths: []string{extra}},
 	})
-	res, err := NewPythonExec(root, nil).Execute(ctx, pythonCall("c1", "print(1)"))
+	res, err := newPythonExec(root, nil, fakeLookHost(true, planted)).Execute(ctx, pythonCall("c1", "print(1)"))
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 	}
@@ -249,10 +248,10 @@ func TestExecFenceCoversTheConfinementBoxNotOnlyTheRoot(t *testing.T) {
 // against a working directory that is the workspace itself — which is the resolution this item
 // took away from os/exec.
 func TestTerminalResolvesTheShellToAnAbsoluteProgram(t *testing.T) {
-	// Not parallel: withCapturedTerminalRun swaps a package-level var.
-	captured := withCapturedTerminalRun(t)
+	t.Parallel()
+	h, captured := capturedRunHost(t)
 
-	res, err := NewTerminal(tempRoot(t), nil).Execute(context.Background(), terminalCall("c1", "echo hi"))
+	res, err := newTerminal(tempRoot(t), nil, h).Execute(context.Background(), terminalCall("c1", "echo hi"))
 
 	if err != nil {
 		t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)

@@ -163,8 +163,11 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 // on a confined run, the output cap and the timeout clamp
 // (docs/design/confinement-execution-contract.md). The execution tools build the core's
 // subprocess.SubprocessSpec directly and read its subprocess.SubprocessResult back; what this
-// funnel adds is the one seam every tool and the hook door go through, which is what the tests'
-// package-var seams (runTerminalSubprocess, runPythonSubprocess, runTestsSubprocess) capture.
+// funnel adds is the one door the remaining in-package callers (diagnostics, git and the hook
+// door) go through; the tools built on an execHost (terminal, python_exec, run_tests) launch
+// through execHost.run instead — the same subprocess.RunSubprocess in production, and a recorder
+// in a test (capturedRunHost), which is how a test pins the exact spec a tool builds without
+// swapping a package-level var.
 //
 // Two of the spec's fields carry a rule of this package's own. Env: EVERY tool that runs
 // something for the MODEL sets it — none of them inherits whole. git and the Go toolchain take an

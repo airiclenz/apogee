@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -38,12 +37,6 @@ type pythonExecArgs struct {
 // pythonCandidates are the interpreter names probed on PATH, in preference order. A detected
 // interpreter is used; none found is a graceful "unavailable" result, never a hard dep (§3a).
 var pythonCandidates = []string{"python3", "python"}
-
-// lookInterpreter is the PATH lookup security.ResolveProgram performs for one interpreter name
-// (a package var so a test can inject a fake resolver). It carries the resolver's own look
-// shape — the absolute path and a nil error, or exec.LookPath's error when that name is absent —
-// so the candidate order lives in the caller's loop rather than inside the lookup.
-var lookInterpreter = exec.LookPath
 
 // The load-path policy: the workspace never precedes the standard library on sys.path.
 //
@@ -93,12 +86,13 @@ const (
 )
 
 // interpreterVersion reports interp's own (major, minor) version, with ok=false when the probe
-// could not be run or its output could not be read. workspaceRoot is the box the probe's own
-// PATH is scoped out of (pythonVersionSpec), through h's shell rules. It is a package var so a
-// test can pin either side of the 3.11 boundary without depending on the Python the host
+// could not be run or its output could not be read. The probe is one more subprocess of the
+// tool's host (t.host.run), with its own PATH scoped out of the workspace through the host's
+// shell rules (pythonVersionSpec) — so a test pins either side of the 3.11 boundary by handing
+// the tool a host whose run answers the probe's argv, never by depending on the Python the host
 // happens to ship.
-var interpreterVersion = func(h execHost, ctx context.Context, interp, workspaceRoot string, secretEnv []string) (major, minor int, ok bool) {
-	res, err := runSubprocess(ctx, pythonVersionSpec(h, interp, workspaceRoot, secretEnv))
+func (t *PythonExec) interpreterVersion(ctx context.Context, interp string) (major, minor int, ok bool) {
+	res, err := t.host.run(ctx, pythonVersionSpec(t.host, interp, t.root, t.secretEnv))
 	if err != nil || res.ExitCode != 0 {
 		return 0, 0, false
 	}
@@ -167,10 +161,6 @@ func pythonArgv(interp string, isolate bool) []string {
 	}
 	return []string{interp, "-"}
 }
-
-// runPythonSubprocess runs the interpreter (a package var so a test can capture the exact argv
-// and environment this tool builds without launching one).
-var runPythonSubprocess = runSubprocess
 
 // PythonExec runs a one-shot Python script through a detected interpreter (python3, then
 // python), feeding the source on stdin so no temp file is left behind. It is a SubprocessTool
@@ -245,7 +235,7 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	var interp string
 	box := confinementBox(ctx)
 	for _, candidate := range pythonCandidates {
-		path, err := security.ResolveProgram(lookInterpreter, candidate, t.root, box)
+		path, err := security.ResolveProgram(t.host.look, candidate, t.root, box)
 		if err == nil {
 			interp = path
 			break
@@ -271,13 +261,13 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// Both are decided here rather than in the snippet, so nothing is injected into the `code`
 	// the operator approved.
 	spec := subprocess.SubprocessSpec{
-		Argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(t.host, ctx, interp, t.root, t.secretEnv))),
+		Argv:    pythonArgv(interp, !honoursSafePath(t.interpreterVersion(ctx, interp))),
 		Dir:     dir,
 		Timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		Stdin:   args.Code,
 		Env:     t.host.subprocessEnvScopedPath(t.root, t.secretEnv, pythonSafePathVar),
 	}
-	res, err := runPythonSubprocess(ctx, spec)
+	res, err := t.host.run(ctx, spec)
 	if err != nil {
 		return domain.ToolResult{}, err
 	}

@@ -127,12 +127,12 @@ func TestTerminal_DropsApogeeCredentialsFromTheChildEnvironment(t *testing.T) {
 // environment too, while the operator's other variables still travel. Asserted on the captured
 // spec, so it holds on every platform.
 func TestTerminal_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *testing.T) {
-	// Not parallel: t.Setenv, plus the package-level runner swap.
+	// Not parallel: t.Setenv.
 	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
 	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
 
-	captured := withCapturedTerminalRun(t)
-	term := NewTerminal(t.TempDir(), []string{"apogee_test_provider_key"})
+	h, captured := capturedRunHost(t)
+	term := newTerminal(t.TempDir(), []string{"apogee_test_provider_key"}, h)
 	if _, err := term.Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
@@ -144,26 +144,12 @@ func TestTerminal_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *testin
 	}
 }
 
-// withCapturedTerminalRun swaps the shell runner for one that records the spec and launches
-// nothing, so a test can pin the exact environment the tool builds on every platform.
-func withCapturedTerminalRun(t *testing.T) *subprocess.SubprocessSpec {
-	t.Helper()
-	orig := runTerminalSubprocess
-	var captured subprocess.SubprocessSpec
-	runTerminalSubprocess = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
-		captured = spec
-		return subprocess.SubprocessResult{}, nil
-	}
-	t.Cleanup(func() { runTerminalSubprocess = orig })
-	return &captured
-}
-
 // TestTerminal_ScopesTheWorkspaceOffTheChildPATH pins the second subtraction the shell tool makes
 // from the operator's environment (the first is apogee's credentials): a PATH entry that resolves
 // inside the workspace is dropped, so a `git` or a `curl` the model planted in the box cannot be
 // what the command line — or anything it spawns — resolves. Everything else is still inherited.
 func TestTerminal_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
-	// Not parallel: t.Setenv, plus the package-level runner swap.
+	// Not parallel: t.Setenv.
 	root := t.TempDir()
 	path, inside, outside := workspacePATH(t, root)
 	// The tool RESOLVES its shell on this PATH before it builds the spec (execHost.shellArgv), so
@@ -176,8 +162,8 @@ func TestTerminal_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
 	t.Setenv("PATH", path+string(os.PathListSeparator)+filepath.Dir(shell))
 	t.Setenv("APOGEE_TERMINAL_ENV_PROBE", "kept")
 
-	captured := withCapturedTerminalRun(t)
-	if _, err := NewTerminal(root, nil).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
+	h, captured := capturedRunHost(t)
+	if _, err := newTerminal(root, nil, h).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
 	entries := envPathEntries(t, captured.Env)
@@ -617,14 +603,13 @@ func TestSubprocessToolResultShellHint(t *testing.T) {
 
 // TestTerminal_PrependsFailFastPreambleToThePOSIXLine pins where the preamble lands: the
 // spec's argv carries the composed preamble ahead of the model's own line, verbatim.
-//
-// Not parallel: it swaps the package-level runner.
 func TestTerminal_PrependsFailFastPreambleToThePOSIXLine(t *testing.T) {
+	t.Parallel()
 	if !hostShellIsPOSIX() {
 		t.Skip("POSIX shell path; the cmd.exe path is pinned by TestTerminal_NoPreambleOnRawCmdLines")
 	}
-	captured := withCapturedTerminalRun(t)
-	if _, err := NewTerminal(t.TempDir(), nil).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
+	h, captured := capturedRunHost(t)
+	if _, err := newTerminal(t.TempDir(), nil, h).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
 	want := platform.FailFastPreamble() + "echo hi"
@@ -635,15 +620,14 @@ func TestTerminal_PrependsFailFastPreambleToThePOSIXLine(t *testing.T) {
 
 // TestTerminal_NoPreambleOnRawCmdLines drives Execute under the Windows raw-command-line
 // convention and asserts the line reaches spec construction verbatim: cmd.exe has no
-// `set -e` analogue, so the fail-fast preamble is POSIX-only by design.
-//
-// Not parallel: the Windows rules ride in on the tool's execHost, but withCapturedTerminalRun
-// still swaps the package-level runner beside parallel readers.
+// `set -e` analogue, so the fail-fast preamble is POSIX-only by design. The Windows rules and
+// the recording runner both ride in on the tool's own execHost, so nothing package-wide is
+// swapped.
 func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
-	h := defaultExecHost()
+	t.Parallel()
+	h, captured := capturedRunHost(t)
 	h.shell = rawCmdlineHost{Host: h.shell}
 
-	captured := withCapturedTerminalRun(t)
 	if _, err := newTerminal(t.TempDir(), nil, h).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}

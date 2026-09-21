@@ -1,10 +1,49 @@
 package tools
 
 import (
+	"context"
+	"os/exec"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/platform"
+	"github.com/airiclenz/apogee/internal/subprocess"
 )
+
+// capturedRunHost returns the real host with its run replaced by a recorder: the spec a tool
+// hands it lands in the returned pointer and nothing is launched, so a test pins the exact argv
+// and environment the tool builds on every platform. The host is a value the test owns, so the
+// test can run in parallel with every other reader of the real operating system.
+func capturedRunHost(t *testing.T) (execHost, *subprocess.SubprocessSpec) {
+	t.Helper()
+	h := defaultExecHost()
+	var captured subprocess.SubprocessSpec
+	h.run = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		captured = spec
+		return subprocess.SubprocessResult{}, nil
+	}
+	return h, &captured
+}
+
+// fakeLook is a PATH lookup that answers path for EVERY name (found), or exec.LookPath's
+// not-found error for every name (!found). It fakes the LOOK alone, never the fence
+// security.ResolveProgram applies to what the look answers — a planted path still gets refused.
+// A test that needs a per-name answer sets the host's look itself; the field is a func.
+func fakeLook(found bool, path string) func(string) (string, error) {
+	return func(string) (string, error) {
+		if !found {
+			return "", exec.ErrNotFound
+		}
+		return path, nil
+	}
+}
+
+// fakeLookHost returns the real host with its look replaced by fakeLook(found, path), so a tool
+// resolves its program without depending on the test host's PATH.
+func fakeLookHost(found bool, path string) execHost {
+	h := defaultExecHost()
+	h.look = fakeLook(found, path)
+	return h
+}
 
 // markerHost is a platform.Host a test can recognise by identity: two execHost values cannot be
 // compared (func fields, and the real Host's rule table carries a slice), but an interface

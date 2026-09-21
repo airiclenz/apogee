@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -249,7 +248,7 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		return errorResult(call.ID, errMsg), nil
 	}
 
-	program, err := security.ResolveProgram(lookTestProgram, runner.program, t.root, confinementBox(ctx))
+	program, err := security.ResolveProgram(t.host.look, runner.program, t.root, confinementBox(ctx))
 	if err != nil {
 		// A runner the model can write is the plant-then-exec chain itself —
 		// node_modules/.bin ahead of the system entries is the everyday shape of it. The
@@ -271,7 +270,7 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// runs that work in the user's shell — but the runner it starts is repo-authored code, which
 	// under this threat model is untrusted bytes with no business reading the key apogee talks to
 	// its inference server with.
-	res, err := runTestsSubprocess(ctx, subprocess.SubprocessSpec{
+	res, err := t.host.run(ctx, subprocess.SubprocessSpec{
 		Argv:    append([]string{program}, runnerArgs...),
 		Dir:     t.root,
 		Timeout: runTestsTimeout,
@@ -391,17 +390,6 @@ func detectNPMTest(root string) bool {
 	}
 	return strings.TrimSpace(pkg.Scripts.Test) != ""
 }
-
-// lookTestProgram is the PATH lookup security.ResolveProgram performs for a runner's executable
-// (a package var so a test can inject a fake resolver). It carries the resolver's own look
-// shape — the absolute path and a nil error, or exec.LookPath's error when the runner is
-// absent, which Execute maps to the clear "not available" result (§3a).
-var lookTestProgram = exec.LookPath
-
-// runTestsSubprocess runs the detected test runner (a package var so a test can capture the exact
-// argv and environment this tool builds without launching one — the shape runPythonSubprocess
-// already uses).
-var runTestsSubprocess = runSubprocess
 
 // displayCommand renders the command that produced a result, as the model would type it into
 // terminal — the closing note names it so "I need the whole log" has an obvious next step.

@@ -21,43 +21,29 @@ func pythonCall(id, code string) domain.ToolCall {
 	return domain.ToolCall{ID: id, Tool: "python_exec", Arguments: []byte(fmt.Sprintf(`{"code":%q}`, code))}
 }
 
-// withFakeInterpreter swaps lookInterpreter for the duration of a test (restored on cleanup),
-// so the graceful-degradation path is exercisable without depending on the host's PATH. Every
-// candidate name gets the same answer; it fakes the LOOK alone, never the fence
-// security.ResolveProgram applies to what the look answers.
-func withFakeInterpreter(t *testing.T, found bool, path string) {
-	t.Helper()
-	orig := lookInterpreter
-	lookInterpreter = func(string) (string, error) {
-		if !found {
-			return "", exec.ErrNotFound
-		}
-		return path, nil
-	}
-	t.Cleanup(func() { lookInterpreter = orig })
+// isPythonVersionProbe reports whether spec is the interpreter version probe python_exec runs
+// ahead of the snippet (pythonVersionSpec's argv), which is how a run fake tells the probe from
+// the snippet it is meant to record.
+func isPythonVersionProbe(spec subprocess.SubprocessSpec) bool {
+	return len(spec.Argv) == 3 && spec.Argv[1] == "-c" && spec.Argv[2] == pythonVersionProgram
 }
 
-// withFakePythonVersion pins what the version probe reports, so the isolation decision is
+// withFakePythonVersion returns h with its run answering the version probe by argv — a clean
+// "major.minor" line when ok, a failed probe otherwise — and handing every other spec (the
+// snippet) to h's own run. It pins what the probe reports, so the isolation decision is
 // testable on either side of the 3.11 boundary without depending on the Python the host ships.
-func withFakePythonVersion(t *testing.T, major, minor int, ok bool) {
-	t.Helper()
-	orig := interpreterVersion
-	interpreterVersion = func(execHost, context.Context, string, string, []string) (int, int, bool) { return major, minor, ok }
-	t.Cleanup(func() { interpreterVersion = orig })
-}
-
-// withCapturedPythonRun swaps the interpreter runner for one that records the spec and launches
-// nothing, so a test can pin the exact argv and environment the tool builds.
-func withCapturedPythonRun(t *testing.T) *subprocess.SubprocessSpec {
-	t.Helper()
-	orig := runPythonSubprocess
-	var captured subprocess.SubprocessSpec
-	runPythonSubprocess = func(_ context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
-		captured = spec
-		return subprocess.SubprocessResult{}, nil
+func withFakePythonVersion(h execHost, major, minor int, ok bool) execHost {
+	next := h.run
+	h.run = func(ctx context.Context, spec subprocess.SubprocessSpec) (subprocess.SubprocessResult, error) {
+		if !isPythonVersionProbe(spec) {
+			return next(ctx, spec)
+		}
+		if !ok {
+			return subprocess.SubprocessResult{ExitCode: 1}, nil
+		}
+		return subprocess.SubprocessResult{CombinedOutput: fmt.Sprintf("%d.%d\n", major, minor)}, nil
 	}
-	t.Cleanup(func() { runPythonSubprocess = orig })
-	return &captured
+	return h
 }
 
 // envValue returns the value of key in a "KEY=value" environment, and whether it is present.
@@ -110,10 +96,8 @@ func TestPythonExec_Markers(t *testing.T) {
 }
 
 func TestPythonExec_GracefulWhenAbsent(t *testing.T) {
-	// Not parallel: withFakeInterpreter swaps the package-level lookInterpreter var, which
-	// the parallel run-tests read — a non-parallel test completes before they resume.
-	withFakeInterpreter(t, false, "")
-	py := NewPythonExec(t.TempDir(), nil)
+	t.Parallel()
+	py := newPythonExec(t.TempDir(), nil, fakeLookHost(false, ""))
 	res, err := py.Execute(context.Background(), pythonCall("c1", "print(1)"))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil (absence must degrade gracefully, not crash)", err)
@@ -207,9 +191,8 @@ func TestPythonExec_RunsUnderConfine(t *testing.T) {
 }
 
 func TestPythonExec_ConfinementUnavailablePropagates(t *testing.T) {
-	// Not parallel: withFakeInterpreter swaps the package-level lookInterpreter var.
-	withFakeInterpreter(t, true, "/usr/bin/python3")
-	py := NewPythonExec(t.TempDir(), nil)
+	t.Parallel()
+	py := newPythonExec(t.TempDir(), nil, fakeLookHost(true, "/usr/bin/python3"))
 	conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true}
 	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
 		Confiner: conf,
@@ -228,6 +211,7 @@ func TestPythonExec_ConfinementUnavailablePropagates(t *testing.T) {
 // depend on which Python the CI host happens to ship — and an UNKNOWN version isolates, which is
 // the fail-closed direction (an unreadable version is not evidence of a modern interpreter).
 func TestPythonExec_IsolationFollowsTheInterpreterVersion(t *testing.T) {
+	t.Parallel()
 	const interp = "/usr/bin/python3"
 	cases := []struct {
 		name         string
@@ -244,13 +228,12 @@ func TestPythonExec_IsolationFollowsTheInterpreterVersion(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			// Not parallel: these swap package-level vars (lookInterpreter, interpreterVersion,
-			// runPythonSubprocess) that the parallel run-tests read.
-			withFakeInterpreter(t, true, interp)
-			withFakePythonVersion(t, tc.major, tc.minor, tc.known)
-			captured := withCapturedPythonRun(t)
+			t.Parallel()
+			h, captured := capturedRunHost(t)
+			h.look = fakeLook(true, interp)
+			h = withFakePythonVersion(h, tc.major, tc.minor, tc.known)
 
-			if _, err := NewPythonExec(t.TempDir(), nil).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
+			if _, err := newPythonExec(t.TempDir(), nil, h).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 				t.Fatalf("Execute err = %v, want nil", err)
 			}
 			if got := captured.Argv; !slices.Equal(got, tc.wantArgv) {
@@ -270,14 +253,14 @@ func TestPythonExec_IsolationFollowsTheInterpreterVersion(t *testing.T) {
 // not travel into a model-chosen snippet, while the rest of the operator's environment does —
 // this is a targeted removal of apogee's secrets, not git's allowlist.
 func TestPythonExec_DropsApogeeCredentialsFromTheChildEnvironment(t *testing.T) {
-	// Not parallel: t.Setenv, plus the package-level interpreter/runner swaps.
+	// Not parallel: t.Setenv.
 	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
 	t.Setenv("APOGEE_ENDPOINT", "http://192.0.2.1:1111")
-	withFakeInterpreter(t, true, "/usr/bin/python3")
-	withFakePythonVersion(t, 3, 12, true)
-	captured := withCapturedPythonRun(t)
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, "/usr/bin/python3")
+	h = withFakePythonVersion(h, 3, 12, true)
 
-	if _, err := NewPythonExec(t.TempDir(), nil).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
+	if _, err := newPythonExec(t.TempDir(), nil, h).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
 	if value, ok := envValue(captured.Env, "APOGEE_API_KEY"); ok {
@@ -301,14 +284,14 @@ func TestPythonExec_DropsApogeeCredentialsFromTheChildEnvironment(t *testing.T) 
 // exported into the shell apogee was started from (ADR 0047) — is dropped from the snippet's
 // environment too, while the operator's other variables still travel.
 func TestPythonExec_DropsTheConfiguredSecretNamesFromTheChildEnvironment(t *testing.T) {
-	// Not parallel: t.Setenv, plus the package-level interpreter/runner swaps.
+	// Not parallel: t.Setenv.
 	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
 	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
-	withFakeInterpreter(t, true, "/usr/bin/python3")
-	withFakePythonVersion(t, 3, 12, true)
-	captured := withCapturedPythonRun(t)
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, "/usr/bin/python3")
+	h = withFakePythonVersion(h, 3, 12, true)
 
-	py := NewPythonExec(t.TempDir(), []string{"apogee_test_provider_key"})
+	py := newPythonExec(t.TempDir(), []string{"apogee_test_provider_key"}, h)
 	if _, err := py.Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
@@ -337,16 +320,16 @@ func TestPythonVersionSpec_DropsTheConfiguredSecretNames(t *testing.T) {
 // inherits the operator's environment, but its PATH cannot name a directory the model can write —
 // otherwise a planted .venv/bin becomes the `git` or the `curl` the snippet shells out to.
 func TestPythonExec_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
-	// Not parallel: t.Setenv, plus the package-level interpreter/runner swaps.
+	// Not parallel: t.Setenv.
 	root := t.TempDir()
 	path, inside, outside := workspacePATH(t, root)
 	t.Setenv("PATH", path)
 	t.Setenv("APOGEE_PYTHON_ENV_PROBE", "kept")
-	withFakeInterpreter(t, true, filepath.Join(outside, "python3"))
-	withFakePythonVersion(t, 3, 12, true)
-	captured := withCapturedPythonRun(t)
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, filepath.Join(outside, "python3"))
+	h = withFakePythonVersion(h, 3, 12, true)
 
-	if _, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
+	if _, err := newPythonExec(root, nil, h).Execute(context.Background(), pythonCall("c1", "print(1)")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
 	entries := envPathEntries(t, captured.Env)
@@ -427,7 +410,7 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 
 	var interp string
 	for _, candidate := range pythonCandidates {
-		path, err := lookInterpreter(candidate)
+		path, err := exec.LookPath(candidate)
 		if err != nil {
 			continue
 		}
@@ -437,9 +420,11 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 	if interp == "" {
 		t.Skip("no Python interpreter on PATH; the stdlib-shadowing mechanism cannot be exercised here")
 	}
-	// No workspace root: this probe only reports which mechanism the run below exercises, so
-	// there is no box to scope its PATH out of.
-	major, minor, known := interpreterVersion(defaultExecHost(), context.Background(), interp, "", nil)
+	root := t.TempDir()
+	py := NewPythonExec(root, nil)
+	// The tool's own probe, over the same workspace the run below uses: it only reports which
+	// mechanism that run exercises.
+	major, minor, known := py.interpreterVersion(context.Background(), interp)
 	if !known {
 		t.Logf("%s did not report a version; the run below exercises the -I fallback", interp)
 	} else {
@@ -447,14 +432,13 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 			map[bool]string{true: "PYTHONSAFEPATH", false: "the -I fallback"}[honoursSafePath(major, minor, known)])
 	}
 
-	root := t.TempDir()
 	marker := filepath.Join(root, "SHADOWED")
 	shadow := "import os\nopen(" + strconv.Quote(marker) + ", \"w\").write(\"x\")\n"
 	if err := os.WriteFile(filepath.Join(root, "json.py"), []byte(shadow), 0o600); err != nil {
 		t.Fatalf("write the shadowing json.py: %v", err)
 	}
 
-	res, err := NewPythonExec(root, nil).Execute(context.Background(), pythonCall("c1", "import json; print(json.__file__)"))
+	res, err := py.Execute(context.Background(), pythonCall("c1", "import json; print(json.__file__)"))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}

@@ -102,11 +102,6 @@ func (t *Terminal) Subprocess() bool { return true }
 // the line writes rather than every word it names.
 func (t *Terminal) ShellCommandKeys() []string { return []string{"command"} }
 
-// runTerminalSubprocess runs the shell command (a package var so a test can capture the exact
-// argv and environment this tool builds without launching one — the shape python_exec and
-// run_tests already use).
-var runTerminalSubprocess = runSubprocess
-
 // Execute runs the command line through the platform shell, honouring ctx cancellation and
 // the confinement handle the disposition installed (if any). A command line the target shell
 // could not parse (preflightCommandLine — POSIX sh only), a working directory that escapes
@@ -170,7 +165,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		// model plant the programs its own command line then executes.
 		Env: t.host.subprocessEnvScopedPath(t.root, t.secretEnv),
 	}
-	res, err := runTerminalSubprocess(ctx, spec)
+	res, err := t.host.run(ctx, spec)
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
