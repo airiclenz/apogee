@@ -61,12 +61,22 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   essentials, PATH scoped away from the workspace as `gitexec.SafeEnv` scopes git's, and `cfg.Env` is
   appended last either way. The launched process is held in a **process group** (POSIX) / **Job Object**
   (Windows) via `platform.NewProcessTeardown`, and `Close` reaps that container after the session's
-  own shutdown, so a descendant the server spawned cannot outlive the session — the SDK's
-  spec-shaped shutdown signals the leader alone. That `Cmd` carries a **session-scoped cancellable
-  context** (never the connect ctx, which would kill every server the moment `Connect` returned)
-  that `Close` cancels once the SDK's shutdown ladder is spent: it is what arms `cmd.Cancel` and
+  own shutdown, so a descendant the server spawned cannot outlive the session — apogee's
+  spec-shaped shutdown ladder (`stdinLadder.Close`) signals the leader alone. That `Cmd` carries a
+  **session-scoped cancellable context** (never the connect ctx, which would kill every server the
+  moment `Connect` returned) that `Close` cancels once that ladder is spent: it is what arms `cmd.Cancel` and
   `cmd.WaitDelay`, so a server that outlives the ladder is killed as a group and the drain after it
   is bounded by `platform.ProcessWaitDelay` rather than left open-ended.
+- **A stdio server's output is read through a 4 MiB line-bounded reader** (2026-09-21). The launch
+  rides apogee's own `stdioTransport` rather than the SDK's `CommandTransport`: the same start-free
+  shape and the same shutdown ladder (`stdinLadder.Close` re-implements the SDK's close-stdin → wait
+  → SIGTERM → wait → SIGKILL → wait order), but the server's stdout is wrapped in a
+  `lineBoundedReader` under the SDK's `IOTransport`. One newline-delimited message may not exceed
+  `maxMCPMessageBytes` (4 MiB): a line past it fails the read with `apogee: mcp message exceeds
+  the 4 MiB limit`, the SDK retires the in-flight call with that error — the model sees an error
+  result naming it, never the oversize text — and the session is dead from then on (a following
+  call fails too; `Close` still runs the ladder and reaps the tree). The reader knows nothing of
+  MCP, so an HTTP body can be bounded with the same type.
 
 Every tool **description, schema, and result** the client surfaces is untrusted input: it is passed
 to the model and rendered, **never executed or interpreted** as a command by Apogee.

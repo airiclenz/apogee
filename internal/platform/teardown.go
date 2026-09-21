@@ -88,8 +88,8 @@ type ProcessTeardown interface {
 // cmd.WaitDelay, which is why it lives here rather than once per build tag. The bound is only real
 // on a Cmd whose context is eventually cancelled — the execution tools' subprocesses, cancelled
 // with the run, and an MCP stdio server, whose Cmd carries a session-scoped cancellable context
-// that mcp.Client.Close cancels once the SDK's own shutdown ladder is spent (internal/mcp's
-// buildStdioTransport). It is a var rather than a const so a test can shrink it and exercise the
+// that mcp.Client.Close cancels once apogee's own stdio shutdown ladder is spent (internal/mcp's
+// stdinLadder.Close). It is a var rather than a const so a test can shrink it and exercise the
 // drain-wedged path in milliseconds; production never reassigns it.
 var ProcessWaitDelay = 5 * time.Second
 

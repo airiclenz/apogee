@@ -44,10 +44,10 @@ type Client struct {
 // liveSession is one connected server: the SDK session, plus — for a stdio server — the process
 // this client launched, the teardown holding that process's whole tree, and the cancel ending the
 // Cmd's own context. All three are nil for the two HTTP transports, which launch nothing. They are
-// kept beside the session because the SDK's spec-shaped shutdown reaches the LEADER alone (stdin
-// close, wait, SIGTERM, SIGKILL of cmd.Process): anything the server spawned is only reachable
-// through the group / Job Object, and nothing at all bounds the wait once that ladder is spent
-// unless the Cmd's context is cancelled (buildStdioTransport).
+// kept beside the session because apogee's spec-shaped shutdown ladder (stdinLadder.Close) reaches
+// the LEADER alone (stdin close, wait, SIGTERM, SIGKILL of cmd.Process): anything the server
+// spawned is only reachable through the group / Job Object, and nothing at all bounds the wait once
+// that ladder is spent unless the Cmd's context is cancelled (buildStdioTransport).
 type liveSession struct {
 	session *mcpsdk.ClientSession
 	cmd     *exec.Cmd
@@ -145,7 +145,7 @@ func Admit(servers []ServerConfig, guard security.URLGuard) (admitted []ServerCo
 // back). The session is recorded BEFORE listing tools so a list failure still tears the
 // just-opened session down on rollback.
 //
-// A stdio server's process exists from the moment the SDK's transport started it, so the teardown
+// A stdio server's process exists from the moment stdioTransport.Connect started it, so the teardown
 // takes it as soon as Connect returns — the same sub-millisecond Windows window the tools funnel
 // documents (platform.NewProcessTeardown), since no OS lets a process be created directly into a
 // job. A handshake that FAILED never yields a session to record, so its process and the teardown's
@@ -226,12 +226,13 @@ func (c *Client) Tools() []domain.Tool {
 // or connection survives).
 //
 // The order per session is the session FIRST, the Cmd's context second, the process tree third, and
-// it is load-bearing. ClientSession.Close is the spec-shaped stdio shutdown — close stdin, wait,
-// SIGTERM, SIGKILL — which gives a well-behaved server the chance to exit cleanly and flush, but
-// reaches the LEADER alone: anything it spawned outlives it. Cancelling the Cmd's context once that
-// ladder has been spent is what arms cmd.Cancel and cmd.WaitDelay (buildStdioTransport), so a
-// server that outlived the shutdown is killed as a group and the drain that follows is bounded
-// (platform.ProcessWaitDelay) rather than leaving the SDK's cmd.Wait blocked for good. The
+// it is load-bearing. ClientSession.Close runs apogee's spec-shaped stdio shutdown ladder
+// (stdinLadder.Close — close stdin, wait, SIGTERM, SIGKILL), which gives a well-behaved server the
+// chance to exit cleanly and flush, but reaches the LEADER alone: anything it spawned outlives it.
+// Cancelling the Cmd's context once that ladder has been spent is what arms cmd.Cancel and
+// cmd.WaitDelay (buildStdioTransport), so a server that outlived the shutdown is killed as a group
+// and the drain that follows is bounded (platform.ProcessWaitDelay) rather than leaving the
+// ladder's cmd.Wait blocked for good. The
 // teardown's Reap then kills the group (POSIX) or terminates the Job Object (Windows), which is the
 // only thing that reaches those descendants, and Release drops the handle the teardown has owned
 // since before the process existed. Reaping first would turn every clean shutdown into a kill.

@@ -31,7 +31,7 @@ import (
 // external binary, no separate build step. TestMain re-execs THIS test binary as the
 // fixture server when runAsServerEnv is set; the stdio tests launch it via ServerConfig's
 // Command pointing at os.Executable(). This exercises the whole live path Connect builds
-// (buildTransport(stdio) → CommandTransport → ListTools → CallTool → Close) deterministically,
+// (buildTransport(stdio) → stdioTransport → ListTools → CallTool → Close) deterministically,
 // so the suite is hermetic and runs everywhere `go test` does (the SDK's own stdio-test idiom).
 
 const (
@@ -92,6 +92,29 @@ func runFixtureServer() {
 	)
 
 	server.AddTool(
+		&mcpsdk.Tool{
+			Name:        "bloat",
+			Description: "Return a text content of size bytes.",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{"size": map[string]any{"type": "integer"}},
+			},
+		},
+		func(_ context.Context, req *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			// The one tool whose reply is sized by the caller: the oversize-response test asks
+			// for a text past maxMCPMessageBytes so the line the server writes cannot fit the
+			// client's bound.
+			var args struct {
+				Size int `json:"size"`
+			}
+			_ = json.Unmarshal(req.Params.Arguments, &args)
+			return &mcpsdk.CallToolResult{
+				Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: strings.Repeat("x", args.Size)}},
+			}, nil
+		},
+	)
+
+	server.AddTool(
 		&mcpsdk.Tool{Name: "spawn", Description: "Start a long-lived descendant and report its pid.", InputSchema: map[string]any{"type": "object"}},
 		func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
 			// A descendant in the SERVER'S OWN process group — not detached — which is what the
@@ -113,9 +136,10 @@ func runFixtureServer() {
 	}
 }
 
-// runWedgedFixtureServer serves the same stdio fixture, but refuses every polite rung of the SDK's
-// shutdown ladder: it ignores SIGTERM, it does not exit when the client closes its stdin (the
-// server runs on a goroutine the process outlives), and it holds stdout open until it is killed.
+// runWedgedFixtureServer serves the same stdio fixture, but refuses every polite rung of apogee's
+// shutdown ladder (stdinLadder.Close): it ignores SIGTERM, it does not exit when the client closes
+// its stdin (the server runs on a goroutine the process outlives), and it holds stdout open until
+// it is killed.
 // That is what a badly behaved stdio server looks like from the client's side — the shape the
 // bounded drain exists for.
 func runWedgedFixtureServer() {
@@ -250,6 +274,52 @@ func TestExecute_ServerToolErrorIsErrorResult(t *testing.T) {
 	}
 }
 
+// TestExecute_OversizeResponseEndsTheConnection proves the read half of the 2026-09-20 audit's
+// "an MCP server's response is read with no size cap": a reply whose line runs past
+// maxMCPMessageBytes is never buffered whole. The bounded reader fails the stream, the SDK retires
+// the call with that error — surfaced to the model as an error result that names the failure and
+// carries none of the 4 MiB text — and the session is dead from then on, so a following call fails
+// too. The process's own allocation stays well under the reply's size, which is the memory claim.
+// Before the bound the same call returned a non-error result carrying the whole 4 MiB.
+//
+// The allocation is measured on the process, so this test must stay serial (no t.Parallel).
+func TestExecute_OversizeResponseEndsTheConnection(t *testing.T) {
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	c := connectFixture(t)
+	bloat := findTool(t, c.Tools(), "fixture__bloat")
+	echo := findTool(t, c.Tools(), "fixture__echo")
+	args := json.RawMessage(`{"size": ` + strconv.Itoa(maxMCPMessageBytes+1) + `}`)
+
+	res, err := bloat.Execute(context.Background(), domain.ToolCall{ID: "b", Tool: "fixture__bloat", Arguments: args})
+
+	if err != nil {
+		t.Fatalf("bloat.Execute returned a Go error: %v", err)
+	}
+	if !res.IsError {
+		t.Fatalf("bloat result IsError=false with %d bytes of content, want an error result", len(res.Content))
+	}
+	if len(res.Content) > 1024 || strings.Contains(res.Content, strings.Repeat("x", 64)) {
+		t.Fatalf("bloat result carries the oversize text (%d bytes), want the failure alone", len(res.Content))
+	}
+	if !strings.Contains(res.Content, errMCPMessageTooLarge.Error()) && !strings.Contains(res.Content, "client is closing") {
+		t.Fatalf("bloat result = %q, want it to name the bound or the closed connection", res.Content)
+	}
+
+	next, err := echo.Execute(context.Background(), domain.ToolCall{ID: "e", Tool: "fixture__echo", Arguments: json.RawMessage(`{"text":"still there?"}`)})
+
+	if err != nil {
+		t.Fatalf("echo.Execute after the oversize reply returned a Go error: %v", err)
+	}
+	if !next.IsError {
+		t.Fatalf("echo after the oversize reply = %q, want an error result: the session must be dead", next.Content)
+	}
+	runtime.ReadMemStats(&after)
+	if delta := after.TotalAlloc - before.TotalAlloc; delta > 32<<20 {
+		t.Fatalf("the oversize reply cost %d bytes of allocation, want under 32 MiB", delta)
+	}
+}
+
 // TestExecute_CancelledContextIsGoError proves a cancelled context is the one case Execute
 // returns a Go error (ADR 0007), not an error tool-result.
 func TestExecute_CancelledContextIsGoError(t *testing.T) {
@@ -313,10 +383,10 @@ func TestConnect_RefusesAStdioServerInsideTheWorkspace(t *testing.T) {
 }
 
 // TestClose_ReapsTheStdioServersDescendants proves F-42's fix: Close reaps the launched server's
-// whole process TREE, not the leader alone. The SDK's spec-shaped shutdown (close stdin, wait,
-// SIGTERM, SIGKILL) signals cmd.Process only, so before the process group a server that
-// backgrounded anything left it running past the session — an unsupervised process a session
-// teardown reported as clean.
+// whole process TREE, not the leader alone. Apogee's spec-shaped shutdown ladder (close stdin,
+// wait, SIGTERM, SIGKILL — stdinLadder.Close) signals cmd.Process only, so before the process
+// group a server that backgrounded anything left it running past the session — an unsupervised
+// process a session teardown reported as clean.
 func TestClose_ReapsTheStdioServersDescendants(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX process groups; the Windows Job Object half of the same seam is verified on the owner's box")
@@ -359,7 +429,7 @@ func TestClose_ReapsTheStdioServersDescendants(t *testing.T) {
 
 // TestClose_BoundsTheDrainOfAWedgedStdioServer proves the drain bound the teardown seam advertises
 // (platform.ProcessWaitDelay) now reaches an MCP stdio server: the Cmd is built on a session-scoped
-// cancellable context that Close cancels once the SDK's shutdown ladder is spent, so cmd.Cancel and
+// cancellable context that Close cancels once apogee's shutdown ladder is spent, so cmd.Cancel and
 // cmd.WaitDelay fire instead of sitting inert on a context.Background Cmd nothing ever cancels.
 // The fixture refuses the whole polite ladder — stdin close ignored, SIGTERM ignored, stdout held
 // open — and Close must still return inside that ladder's own bound plus ProcessWaitDelay (both
@@ -401,7 +471,7 @@ func TestClose_BoundsTheDrainOfAWedgedStdioServer(t *testing.T) {
 }
 
 // TestBuildStdioTransport_CancelArmsTheCmdsTeardown pins the other half of the same wiring, the
-// half the end-to-end test above cannot separate (the SDK's ladder ends in a SIGKILL of its own, so
+// half the end-to-end test above cannot separate (apogee's ladder ends in a SIGKILL of its own, so
 // it bounds the wedged server either way): the CancelFunc buildStdioTransport returns is what arms
 // cmd.Cancel and cmd.WaitDelay. It starts the wedged fixture directly — no SDK, no session, a
 // process that ignores SIGTERM and never exits on its own — parks a goroutine in cmd.Wait, and
@@ -585,8 +655,8 @@ func TestConnect_StdioServerLaunchesUnderAnEmptyEnvAllowlist(t *testing.T) {
 }
 
 // assertNoGoroutineIn fails unless every goroutine naming frame has left it before the deadline.
-// It polls rather than sampling once: the SDK parks its own goroutine in cmd.Wait for as long as
-// the shutdown ladder runs, so the claim is about what SURVIVES Close, not about one instant.
+// It polls rather than sampling once: stdinLadder.Close parks its own goroutine in cmd.Wait for as
+// long as the shutdown ladder runs, so the claim is about what SURVIVES Close, not about one instant.
 func assertNoGoroutineIn(t *testing.T, frame string, within time.Duration) {
 	t.Helper()
 	deadline := time.Now().Add(within)

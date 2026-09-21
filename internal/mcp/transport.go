@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -122,9 +123,12 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 	}
 }
 
-// buildStdioTransport launches the configured local command and speaks over its stdin/stdout
-// (CommandTransport). The command is the host's choice (a trusted launch — no URL floor); an
-// empty command is refused so a misconfigured server fails loudly rather than launching nothing.
+// buildStdioTransport prepares the configured local command and returns the stdioTransport that
+// launches it and speaks over its stdin/stdout. The command is the host's choice (a trusted launch
+// — no URL floor); an empty command is refused so a misconfigured server fails loudly rather than
+// launching nothing. The transport is START-FREE: the process exists only once the SDK's
+// Client.Connect runs the transport's Connect, which is what lets a test build the Cmd and inspect
+// or start it itself.
 //
 // The command is resolved on PATH through the exec fence (security.ResolveProgram), so what is
 // launched is an ABSOLUTE program that does not live inside the workspace: a server binary the
@@ -137,12 +141,13 @@ func buildTransport(ctx context.Context, cfg ServerConfig, guard security.URLGua
 //
 // The returned ProcessTeardown holds the launched process's whole tree — a POSIX process group, a
 // Windows Job Object — so Client.Close reaps every descendant the server spawned rather than only
-// the leader the SDK's own shutdown signals. The Cmd carries a CANCELLABLE context, returned beside
-// it, because platform.NewProcessTeardown wires both cmd.Cancel (the process-group kill) and
-// cmd.WaitDelay (the post-exit drain bound) — and exec.Cmd.Start refuses a non-nil Cancel on a Cmd
-// built without a context. Neither fires while that context is live, so the cancel is what makes
-// them real: Client.Close runs it once the SDK's spec-shaped shutdown has returned, bounding a
-// server that outlived it rather than leaving the SDK's cmd.Wait blocked with nothing behind it.
+// the leader apogee's own shutdown ladder (stdinLadder.Close) signals. The Cmd carries a
+// CANCELLABLE context, returned beside it, because platform.NewProcessTeardown wires both
+// cmd.Cancel (the process-group kill) and cmd.WaitDelay (the post-exit drain bound) — and
+// exec.Cmd.Start refuses a non-nil Cancel on a Cmd built without a context. Neither fires while
+// that context is live, so the cancel is what makes them real: Client.Close runs it once the
+// ladder has returned, bounding a server that outlived it rather than leaving the ladder's
+// cmd.Wait blocked with nothing behind it.
 // The context is derived from context.Background, never the connect ctx — a stdio server's
 // lifetime is the SESSION, and binding it to the sweep that dialled it would kill every server the
 // moment Connect returned.
@@ -177,11 +182,11 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 	case len(cfg.Env) > 0:
 		cmd.Env = append(cmd.Environ(), cfg.Env...)
 	}
-	// Built before the SDK starts the command, as the facility requires: on POSIX the process
-	// group is a fork-time property of the Cmd, and on Windows the Job Object has to exist before
-	// there is a process to assign to it.
+	// Built before the transport starts the command, as the facility requires: on POSIX the
+	// process group is a fork-time property of the Cmd, and on Windows the Job Object has to exist
+	// before there is a process to assign to it.
 	td := platform.NewProcessTeardown(cmd)
-	return &mcpsdk.CommandTransport{Command: cmd, TerminateDuration: stdioTerminateDuration}, cmd, td, cancel, nil
+	return &stdioTransport{cmd: cmd, terminateDuration: stdioTerminateDuration}, cmd, td, cancel, nil
 }
 
 // stdioHost is the platform facility a stdio server's env-allowlist is scoped through (the
@@ -189,11 +194,105 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 // package var so a test can substitute a fake, the idiom internal/tools' shellHost follows.
 var stdioHost platform.Host = platform.Current()
 
-// stdioTerminateDuration is how long the SDK's stdio shutdown waits at each rung of its ladder
-// (stdin close → SIGTERM → SIGKILL) before escalating. Zero means the SDK's own 5s default, which
-// is what production runs on: it is a package var only to give the drain test a seam short enough
-// to run in milliseconds (a test that shrinks it must not run in parallel).
+// stdioTerminateDuration is how long apogee's stdio shutdown ladder (stdinLadder.Close) waits at
+// each rung (stdin close → SIGTERM → SIGKILL) before escalating. Zero — or any non-positive value —
+// means defaultStdioTerminateDuration, which is what production runs on: it is a package var only
+// to give the drain test a seam short enough to run in milliseconds (a test that shrinks it must
+// not run in parallel).
 var stdioTerminateDuration time.Duration
+
+// defaultStdioTerminateDuration is the rung wait a non-positive stdioTerminateDuration maps to:
+// 5s, the value the SDK's own CommandTransport defaults to, so replacing that transport with
+// stdioTransport changed nothing about how long a clean shutdown is given.
+const defaultStdioTerminateDuration = 5 * time.Second
+
+// stdioTransport is apogee's replacement for the SDK's CommandTransport: the same launch-and-speak
+// shape, with the server's stdout read through a lineBoundedReader so one message can never grow
+// past maxMCPMessageBytes (bounded.go), and the shutdown ladder apogee's own (stdinLadder). It is
+// built start-free by buildStdioTransport; Connect is what starts the process.
+type stdioTransport struct {
+	cmd               *exec.Cmd
+	terminateDuration time.Duration
+}
+
+// Connect takes the Cmd's stdout and stdin pipes, starts the process and connects the SDK's
+// IOTransport over them. A failed Start returns before any session exists, which is what lets
+// connectOne reap the never-launched process's teardown. The reader is NopCloser-wrapped, as the
+// SDK's CommandTransport wraps it: closing the connection is the stdin ladder alone, never a close
+// of the stdout pipe, so a server is asked to exit before it is signalled.
+func (t *stdioTransport) Connect(ctx context.Context) (mcpsdk.Connection, error) {
+	stdout, err := t.cmd.StdoutPipe()
+	if err != nil {
+		return nil, err
+	}
+	stdin, err := t.cmd.StdinPipe()
+	if err != nil {
+		return nil, err
+	}
+	if err := t.cmd.Start(); err != nil {
+		return nil, err
+	}
+	terminate := t.terminateDuration
+	if terminate <= 0 {
+		terminate = defaultStdioTerminateDuration
+	}
+	transport := &mcpsdk.IOTransport{
+		Reader: io.NopCloser(&lineBoundedReader{r: stdout, max: maxMCPMessageBytes}),
+		Writer: &stdinLadder{cmd: t.cmd, stdin: stdin, terminateDuration: terminate},
+	}
+	return transport.Connect(ctx)
+}
+
+// stdinLadder is the write half of a stdio connection: writes go to the server's stdin, and Close
+// is the spec-shaped shutdown ladder — the SDK's pipeRWC.Close (mcp/cmd.go:62-99 at v1.6.1)
+// re-implemented here so the connection's close stays exactly what it was under CommandTransport.
+type stdinLadder struct {
+	cmd               *exec.Cmd
+	stdin             io.WriteCloser
+	terminateDuration time.Duration
+}
+
+// Write hands p to the server's stdin.
+func (s *stdinLadder) Write(p []byte) (int, error) {
+	return s.stdin.Write(p)
+}
+
+// Close runs the stdio shutdown ladder the spec prescribes, in the SDK's pipeRWC.Close order:
+// close stdin → wait up to terminateDuration for the server to exit → SIGTERM → wait again →
+// SIGKILL → wait again. cmd.Wait runs once, in a goroutine, so each rung can give up on it
+// without losing the exit; a failed SIGTERM skips its wait and escalates at once (the SDK's
+// Windows behaviour, where the signal is unsupported). The ladder reaches the LEADER alone —
+// Client.Close cancels the Cmd's context and reaps the process group after it returns.
+func (s *stdinLadder) Close() error {
+	if err := s.stdin.Close(); err != nil {
+		return fmt.Errorf("closing stdin: %w", err)
+	}
+	exited := make(chan error, 1)
+	go func() { exited <- s.cmd.Wait() }()
+	wait := func() (bool, error) {
+		select {
+		case err := <-exited:
+			return true, err
+		case <-time.After(s.terminateDuration):
+			return false, nil
+		}
+	}
+	if done, err := wait(); done {
+		return err
+	}
+	if err := s.cmd.Process.Signal(syscall.SIGTERM); err == nil {
+		if done, err := wait(); done {
+			return err
+		}
+	}
+	if err := s.cmd.Process.Kill(); err != nil {
+		return err
+	}
+	if done, err := wait(); done {
+		return err
+	}
+	return errors.New("unresponsive subprocess")
+}
 
 // buildSSETransport builds an SSE client transport after vetting the endpoint, over an
 // http.Client pinned to that endpoint's own addresses.
