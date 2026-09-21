@@ -541,6 +541,90 @@ func TestCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+// racingWindow is how long the racing tests keep Emit colliding with a reload or a close: long
+// enough that the pre-fix send on a closed queue is provoked within a handful of runs, short
+// enough that `-race -count=20` stays quick.
+const racingWindow = 200 * time.Millisecond
+
+// TestEmitRacingReplaceNeverPanics — a reload closes the old generation's queues while the engine
+// is still emitting against that generation: a firing that loaded the old set before the swap
+// lands on a counted drop, never on a closed channel (audit 2026-09-20, High). The executor is
+// ungated on purpose: no blocked worker is needed to provoke the collision, and a gated one would
+// hold the last generation open past closeRunner's grace.
+func TestEmitRacingReplaceNeverPanics(t *testing.T) {
+	t.Parallel()
+
+	exec := newFakeExecutor()
+	runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
+		Workspace: t.TempDir(), Exec: exec,
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	deadline := time.Now().Add(racingWindow)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for turn := 1; time.Now().Before(deadline); turn++ {
+			runner.Emit(turnEvent(turn))
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for generation := 1; time.Now().Before(deadline); generation++ {
+			fresh := []domain.Reaction{commandHook("notify", TurnFinished)}
+			if err := runner.Replace(fresh); err != nil {
+				t.Errorf("Replace (generation %d): %v", generation, err)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
+	wg.Wait()
+
+	closeRunner(t, runner)
+}
+
+// TestEmitRacingCloseNeverPanics — the same collision at shutdown: Close swaps in the empty
+// generation and drains the last one while Emit is mid-flight against it. One Close is one race
+// window, so the test opens a fresh Runner per round for the whole window.
+func TestEmitRacingCloseNeverPanics(t *testing.T) {
+	t.Parallel()
+
+	deadline := time.Now().Add(racingWindow)
+	for round := 1; time.Now().Before(deadline); round++ {
+		exec := newFakeExecutor()
+		runner, err := New([]domain.Reaction{commandHook("notify", TurnFinished)}, Options{
+			Workspace: t.TempDir(), Exec: exec,
+		})
+		if err != nil {
+			t.Fatalf("New (round %d): %v", round, err)
+		}
+
+		stop := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for turn := 1; ; turn++ {
+				select {
+				case <-stop:
+					return
+				default:
+					runner.Emit(turnEvent(turn))
+				}
+			}
+		}()
+		// Let the emitter reach its stride before the close lands under it.
+		time.Sleep(time.Millisecond)
+		closeRunner(t, runner)
+		close(stop)
+		wg.Wait()
+	}
+}
+
 // TestRunnerWithNoHooksTouchesNothing is the regression guard: with an empty active set the
 // Runner forwards and returns — a stamped write result fires nothing and reaches no executor.
 // Replacing a file-changed Reaction in rebuilds the subscribed set, and the very next write result

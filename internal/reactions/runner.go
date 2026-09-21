@@ -101,7 +101,10 @@ type Runner struct {
 
 	// active is the live set of workers and the matcher built over their subscribed events.
 	// Emit loads it without a lock; Replace and Close swap it, so a reload never blocks the
-	// engine and an in-flight Emit finishes against a consistent set.
+	// engine and an in-flight Emit finishes against a consistent set. The pointer decides WHICH
+	// generation an Emit fans out to; whether that generation's queues are still open is the
+	// generation's own business (hookSet.mu), because the Emit that loaded the old pointer is
+	// still running when the swap lands and would otherwise send on a queue the drain closed.
 	active atomic.Pointer[hookSet]
 
 	// swapMu serializes the set swaps themselves — two concurrent Replaces, or a Replace racing
@@ -126,6 +129,14 @@ type hookSet struct {
 	workers []*worker
 	ctx     context.Context
 	cancel  context.CancelFunc
+
+	// mu pairs with Runner.active: fanOut holds it shared across its sends, drainSet holds it
+	// exclusively while it sets closed and closes the queues. A firing that loaded this set
+	// before a swap therefore either lands before the queues close or sees closed and is
+	// counted as dropped — it never sends on a closed channel. The write side is held for the
+	// close calls alone, microseconds, so Emit's never-blocks contract holds in substance.
+	mu     sync.RWMutex
+	closed bool
 }
 
 // worker is one active entry and its queue. lastFailure is touched only by the worker's own
@@ -212,7 +223,22 @@ func (r *Runner) Emit(e domain.Event) {
 // fanOut hands one firing to every worker subscribing to its event, stamping the identity fields
 // only the Runner knows. The send is non-blocking by construction: a full queue drops the NEWEST
 // firing, because the older ones are already the ones a script is working through.
+//
+// It runs under the set's read lock: the atomic pointer told Emit which generation this is, the
+// lock tells fanOut whether that generation's queues are still open. A set a drain has already
+// closed takes the firing as a counted drop — silently, because the queue was never full and a
+// reload must not announce one; the total still reaches the drain's final drop line.
 func (r *Runner) fanOut(set *hookSet, f firing, now string) {
+	set.mu.RLock()
+	defer set.mu.RUnlock()
+	if set.closed {
+		for _, w := range set.workers {
+			if w.events[f.Event] {
+				w.dropped.Add(1)
+			}
+		}
+		return
+	}
 	for _, w := range set.workers {
 		if !w.events[f.Event] {
 			continue
@@ -373,11 +399,16 @@ func (r *Runner) runOne(set *hookSet, w *worker, payload domain.SeamPayload) {
 }
 
 // drainSet closes every queue, waits for the workers until ctx expires, then cancels what is
-// still running and states each Reaction's drop total.
+// still running and states each Reaction's drop total. The queues are closed under the set's
+// write lock, after the closed bit is set, so an Emit still fanning out against this generation
+// cannot send into the close (see hookSet.mu); the wait itself runs unlocked.
 func (r *Runner) drainSet(set *hookSet, ctx context.Context) error {
+	set.mu.Lock()
+	set.closed = true
 	for _, w := range set.workers {
 		close(w.queue)
 	}
+	set.mu.Unlock()
 	var expired bool
 	for _, w := range set.workers {
 		select {
