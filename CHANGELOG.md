@@ -122,6 +122,14 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **`TestDispatchMintsTheWriteEscapePermit` no longer reads red under a temp dir inside `~/.apogee`.**
+  Its "no gate" cells (confine off, a declared writable path, a remembered allow-for-session) hold
+  only where the target is governed by the workspace fence alone, and a write under the control
+  plane is a forced approval floor (ADR 0049 §4) — so a `TMPDIR`/`GOTMPDIR` under `~/.apogee`
+  failed three cells for a reason that is not the seam under test (the 2026-09-20 audit's "CI gate
+  deterministically red" finding; CI itself was green). The out-of-workspace cells now draw their
+  target from `outsideDir`, which skips with the reason when the temp dir sits under `~/.apogee`.
+
 - **The file watcher measures its settle on the clock, not on the tick.** `filewatch.Watcher` computed
   `reportAt` from the ticker's timestamp, and a tick received late carries the time it was due rather
   than the time it was taken, so a poll goroutine held off the CPU for most of a Settle counted the

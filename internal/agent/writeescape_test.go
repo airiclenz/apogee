@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -197,6 +198,21 @@ func TestWriteEscapeCtxInstallsOnlyWhatTheVerdictCarries(t *testing.T) {
 	}
 }
 
+// outsideDir is an out-of-workspace target dir for the permit cells. The cells that assert "no
+// gate" (confine off, a declared writable path, a remembered allow) hold only where the target is
+// governed by the workspace fence alone — and `~/.apogee` never is: a write under the control
+// plane is a forced approval floor (ADR 0049 §4, internal/security/rules.go). A TMPDIR/GOTMPDIR
+// under `~/.apogee` therefore turns those cells red for a reason that is not the seam under test,
+// so the cell skips and names the reason instead of failing on it (2026-09-20 audit).
+func outsideDir(t *testing.T) string {
+	t.Helper()
+	dir := realPath(t, t.TempDir())
+	if strings.Contains(filepath.ToSlash(dir)+"/", "/.apogee/") {
+		t.Skipf("temp dir %s sits under apogee's control plane, whose writes always gate; point TMPDIR elsewhere", dir)
+	}
+	return dir
+}
+
 // TestDispatchMintsTheWriteEscapePermit is the seam end to end: a full Turn drives one write_file
 // call through the real dispatch — hooks, guardrails, Resolution, Approval — and the tool reports
 // what its execution context carried. Every case pins both facts that matter, whether the tool
@@ -206,8 +222,8 @@ func TestDispatchMintsTheWriteEscapePermit(t *testing.T) {
 
 	t.Run("an approved out-of-workspace gate hands over the disclosed target", func(t *testing.T) {
 		t.Parallel()
-		ws, outside := t.TempDir(), t.TempDir()
-		want := filepath.Join(realPath(t, outside), "notes.md")
+		ws, outside := t.TempDir(), outsideDir(t)
+		want := filepath.Join(outside, "notes.md")
 
 		probe, sink := &escapeProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
 		cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, probe)
@@ -223,8 +239,8 @@ func TestDispatchMintsTheWriteEscapePermit(t *testing.T) {
 
 	t.Run("a remembered allow-for-session mints the same target with no second prompt", func(t *testing.T) {
 		t.Parallel()
-		ws, outside := t.TempDir(), t.TempDir()
-		want := filepath.Join(realPath(t, outside), "notes.md")
+		ws, outside := t.TempDir(), outsideDir(t)
+		want := filepath.Join(outside, "notes.md")
 
 		probe, sink := &escapeProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
 		approver := &fakeApprover{decision: domain.ApprovalAllowForSession}
@@ -245,8 +261,8 @@ func TestDispatchMintsTheWriteEscapePermit(t *testing.T) {
 
 	t.Run("a denied gate hands over nothing and never runs the tool", func(t *testing.T) {
 		t.Parallel()
-		ws, outside := t.TempDir(), t.TempDir()
-		target := filepath.Join(realPath(t, outside), "notes.md")
+		ws, outside := t.TempDir(), outsideDir(t)
+		target := filepath.Join(outside, "notes.md")
 
 		probe, sink := &escapeProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
 		cfg := configWithTools(sink, probe)
@@ -269,8 +285,8 @@ func TestDispatchMintsTheWriteEscapePermit(t *testing.T) {
 		// A scheduled Firing runs in Auto with an Approver that refuses every gate (internal/run).
 		// The permit changes nothing about that: an unattended out-of-workspace write still gates,
 		// and a gate nobody allows never reaches an execution, let alone a permit.
-		ws, outside := t.TempDir(), t.TempDir()
-		target := filepath.Join(realPath(t, outside), "notes.md")
+		ws, outside := t.TempDir(), outsideDir(t)
+		target := filepath.Join(outside, "notes.md")
 
 		probe, sink := &escapeProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
 		cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, probe)
@@ -285,8 +301,8 @@ func TestDispatchMintsTheWriteEscapePermit(t *testing.T) {
 
 	t.Run("auto with confine-to-workspace off mints without gating", func(t *testing.T) {
 		t.Parallel()
-		ws, outside := t.TempDir(), t.TempDir()
-		want := filepath.Join(realPath(t, outside), "notes.md")
+		ws, outside := t.TempDir(), outsideDir(t)
+		want := filepath.Join(outside, "notes.md")
 
 		probe, sink := &escapeProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
 		cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, false, ws, probe)
@@ -303,8 +319,8 @@ func TestDispatchMintsTheWriteEscapePermit(t *testing.T) {
 
 	t.Run("a declared writable path classifies in-fence and mints", func(t *testing.T) {
 		t.Parallel()
-		ws, writable := t.TempDir(), t.TempDir()
-		want := filepath.Join(realPath(t, writable), "notes.md")
+		ws, writable := t.TempDir(), outsideDir(t)
+		want := filepath.Join(writable, "notes.md")
 
 		probe, sink := &escapeProbe{WriteFile: tools.NewWriteFile(ws)}, &recordingSink{}
 		cfg := autoConfigWS(sink, &fakeConfiner{caps: capsBoth()}, true, ws, probe)
