@@ -2,15 +2,13 @@ package probe_test
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os/exec"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // fakeConfiner is a Confiner whose capability matrix the test dictates — the seam that makes
@@ -22,35 +20,13 @@ func (f fakeConfiner) Capabilities() domain.ConfinementCaps { return f.caps }
 
 func (fakeConfiner) Confine(context.Context, domain.ConfinementBox, *exec.Cmd) error { return nil }
 
-// upstreamServer serves an OpenAI-compatible /v1/models, and llama.cpp's /props only when
-// props is non-empty — the two server SHAPES the report must distinguish: a llama.cpp server
-// that reports a runtime context window, and a bare OpenAI-compatible one that has no /props
-// at all (404).
-func upstreamServer(t *testing.T, models, props string) *httptest.Server {
-	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, models)
-		case "/props":
-			if props == "" {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, props)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
-
-const (
-	openAIModels  = `{"data":[{"id":"loaded-model","context_length":32768},{"id":"other-model"}]}`
-	llamaCppProps = `{"default_generation_settings":{"n_ctx":8192}}`
+// Every upstream here is a discovery-only stubllm Script advertising openAIModels, with or
+// without llamaCppProps — the two server SHAPES the report must distinguish: a llama.cpp server
+// that reports a runtime context window, and a bare OpenAI-compatible one that has no /props at
+// all (404, which a nil Props scripts). Both fixtures are read-only.
+var (
+	openAIModels  = []stubllm.DiscoveredModel{{ID: "loaded-model", ContextLength: 32768}, {ID: "other-model"}}
+	llamaCppProps = &stubllm.Props{NCtx: 8192}
 )
 
 // The report states the host facts it was given and the confinement verdict it derived, on a
@@ -58,7 +34,7 @@ const (
 // the gating case — must not appear.
 func TestReportCapableHostAndLlamaCppEndpoint(t *testing.T) {
 	t.Parallel()
-	srv := upstreamServer(t, openAIModels, llamaCppProps)
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: openAIModels, Props: llamaCppProps}})
 
 	report := probe.GatherHost(context.Background(), probe.Inputs{
 		GOOS:               "linux",
@@ -97,7 +73,7 @@ func TestReportCapableHostAndLlamaCppEndpoint(t *testing.T) {
 // report says which probe found nothing, rather than blaming the endpoint as a whole.
 func TestReportBareOpenAIEndpoint(t *testing.T) {
 	t.Parallel()
-	srv := upstreamServer(t, openAIModels, "")
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: openAIModels}})
 
 	report := probe.GatherHost(context.Background(), probe.Inputs{
 		Confiner:           fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
@@ -124,7 +100,7 @@ func TestReportBareOpenAIEndpoint(t *testing.T) {
 // implying the server is not llama.cpp.
 func TestReportUnreachableEndpoint(t *testing.T) {
 	t.Parallel()
-	srv := upstreamServer(t, openAIModels, "")
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: openAIModels}})
 	url := srv.URL
 	srv.Close() // the port is now closed: the probe's dial is refused
 
@@ -169,8 +145,8 @@ func TestHostReportNamesAPIKeyPresence(t *testing.T) {
 	t.Parallel()
 	const secret = "sk-super-secret-token"
 
-	reachable := upstreamServer(t, openAIModels, llamaCppProps)
-	unreachable := upstreamServer(t, openAIModels, "")
+	reachable := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: openAIModels, Props: llamaCppProps}})
+	unreachable := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: openAIModels}})
 	closedURL := unreachable.URL
 	unreachable.Close() // the port is now closed: the probe's dial is refused
 

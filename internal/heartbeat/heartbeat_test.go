@@ -2,47 +2,28 @@ package heartbeat
 
 import (
 	"context"
-	"io"
 	"net/http"
-	"net/http/httptest"
 	"slices"
-	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// discoveryServer serves the two paths one beat reads — GET /v1/models and llama.cpp's GET
-// /props — from canned payloads, and 404s everything else. An empty propsPayload makes /props
-// 404 too, which is the bare-OpenAI-shaped server that reports no runtime window. Shape copied
-// from internal/provider/discovery_test.go.
-func discoveryServer(t *testing.T, modelsPayload, propsPayload string) *httptest.Server {
-	t.Helper()
-
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = io.WriteString(w, modelsPayload)
-		case "/props":
-			if propsPayload == "" {
-				w.WriteHeader(http.StatusNotFound)
-				return
-			}
-			_, _ = io.WriteString(w, propsPayload)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv
-}
+// Every upstream here is a discovery-only stubllm Script: the two paths one beat reads — GET
+// /v1/models and llama.cpp's GET /props — are what its Discovery block advertises, and a nil
+// Props makes /props 404, which is the bare-OpenAI-shaped server that reports no runtime window.
 
 func TestBeatCarriesDiscovery(t *testing.T) {
 	t.Parallel()
 
-	srv := discoveryServer(t,
-		`{"data":[{"id":"model-a","name":"Model A","context_length":32768},{"id":"model-b","name":"Model B","context_length":8192}]}`,
-		`{"default_generation_settings":{"n_ctx":16384}}`)
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{
+			{ID: "model-a", Name: "Model A", ContextLength: 32768},
+			{ID: "model-b", Name: "Model B", ContextLength: 8192},
+		},
+		Props: &stubllm.Props{NCtx: 16384},
+	}})
 
 	beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
@@ -76,8 +57,10 @@ func TestBeatCarriesTotalSlots(t *testing.T) {
 
 	t.Run("reported", func(t *testing.T) {
 		t.Parallel()
-		srv := discoveryServer(t, `{"data":[{"id":"m","context_length":32768}]}`,
-			`{"default_generation_settings":{"n_ctx":16384},"total_slots":4}`)
+		srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+			Models: []stubllm.DiscoveredModel{{ID: "m", ContextLength: 32768}},
+			Props:  &stubllm.Props{NCtx: 16384, TotalSlots: 4},
+		}})
 
 		beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
@@ -91,7 +74,9 @@ func TestBeatCarriesTotalSlots(t *testing.T) {
 
 	t.Run("not reported", func(t *testing.T) {
 		t.Parallel()
-		srv := discoveryServer(t, `{"data":[{"id":"m","context_length":32768}]}`, "")
+		srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+			Models: []stubllm.DiscoveredModel{{ID: "m", ContextLength: 32768}},
+		}})
 
 		beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
@@ -109,25 +94,29 @@ func TestBeatCarriesTotalSlots(t *testing.T) {
 func TestBeatCarriesEffortSupport(t *testing.T) {
 	t.Parallel()
 
-	const plainModels = `{"data":[{"id":"m","context_length":32768}]}`
+	plainModels := []stubllm.DiscoveredModel{{ID: "m", ContextLength: 32768}}
 
 	tests := []struct {
-		name   string
-		models string
-		props  string
-		want   provider.EffortSupport
+		name      string
+		discovery stubllm.Discovery
+		want      provider.EffortSupport
 	}{
 		{
-			name:   "a chat template naming the dial rides the beat as the kwargs dialect",
-			models: plainModels,
-			props:  `{"default_generation_settings":{"n_ctx":16384},"chat_template":"{% if reasoning_effort %}...{% endif %}"}`,
-			want:   provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
+			name: "a chat template naming the dial rides the beat as the kwargs dialect",
+			discovery: stubllm.Discovery{
+				Models: plainModels,
+				Props:  &stubllm.Props{NCtx: 16384, ChatTemplate: "{% if reasoning_effort %}...{% endif %}"},
+			},
+			want: provider.EffortSupport{Supported: true, Dialect: provider.EffortDialectKwargs},
 		},
 		{
 			name: "an advertised reasoning object rides the beat with its set and default",
-			models: `{"data":[{"id":"m","context_length":32768,` +
-				`"reasoning":{"supported_efforts":["low","high"],"default_effort":"high"}}]}`,
-			props: "",
+			discovery: stubllm.Discovery{
+				Models: []stubllm.DiscoveredModel{{
+					ID: "m", ContextLength: 32768,
+					Reasoning: &stubllm.ModelReasoning{SupportedEfforts: []string{"low", "high"}, DefaultEffort: "high"},
+				}},
+			},
 			want: provider.EffortSupport{
 				Supported: true,
 				Dialect:   provider.EffortDialectReasoning,
@@ -136,17 +125,19 @@ func TestBeatCarriesEffortSupport(t *testing.T) {
 			},
 		},
 		{
-			name:   "a server with neither tell beats an unsupported dial",
-			models: plainModels,
-			props:  `{"default_generation_settings":{"n_ctx":16384}}`,
-			want:   provider.EffortSupport{},
+			name: "a server with neither tell beats an unsupported dial",
+			discovery: stubllm.Discovery{
+				Models: plainModels,
+				Props:  &stubllm.Props{NCtx: 16384},
+			},
+			want: provider.EffortSupport{},
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			srv := discoveryServer(t, tt.models, tt.props)
+			srv := stubllm.New(t, stubllm.Script{Discovery: tt.discovery})
 
 			beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
@@ -162,7 +153,9 @@ func TestBeatCarriesEffortSupport(t *testing.T) {
 func TestBeatHintPinsActiveWindow(t *testing.T) {
 	t.Parallel()
 
-	srv := discoveryServer(t, `{"data":[{"id":"small","context_length":4096},{"id":"large","context_length":128000}]}`, "")
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "small", ContextLength: 4096}, {ID: "large", ContextLength: 128000}},
+	}})
 
 	beat := NewMonitor(srv.URL, "large", "").Beat(context.Background())
 
@@ -176,7 +169,9 @@ func TestBeatHintPinsActiveWindow(t *testing.T) {
 func TestBeatUnadvertisedHintStaysActive(t *testing.T) {
 	t.Parallel()
 
-	srv := discoveryServer(t, `{"data":[{"id":"served","context_length":4096},{"id":"other","context_length":8192}]}`, "")
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "served", ContextLength: 4096}, {ID: "other", ContextLength: 8192}},
+	}})
 
 	beat := NewMonitor(srv.URL, "unloaded", "").Beat(context.Background())
 
@@ -200,9 +195,11 @@ func TestBeatUnadvertisedHintStaysActive(t *testing.T) {
 func TestSetModelMovesTheDiscoveryHint(t *testing.T) {
 	t.Parallel()
 
-	// No /props payload, so nothing overrides the advertised windows: the window the beat reports
-	// is the hinted model's own, which is exactly what has to move with the hint.
-	srv := discoveryServer(t, `{"data":[{"id":"model-a","context_length":32768},{"id":"model-b","context_length":8192}]}`, "")
+	// No /props, so nothing overrides the advertised windows: the window the beat reports is the
+	// hinted model's own, which is exactly what has to move with the hint.
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "model-a", ContextLength: 32768}, {ID: "model-b", ContextLength: 8192}},
+	}})
 
 	monitor := NewMonitor(srv.URL, "model-a", "")
 
@@ -225,32 +222,21 @@ func TestSetModelMovesTheDiscoveryHint(t *testing.T) {
 func TestMonitorSendsAPIKey(t *testing.T) {
 	t.Parallel()
 
-	var mu sync.Mutex
-	var authorizations []string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		mu.Lock()
-		authorizations = append(authorizations, r.Header.Get("Authorization"))
-		mu.Unlock()
-		if r.URL.Path != "/v1/models" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_, _ = io.WriteString(w, `{"data":[{"id":"model-a","context_length":4096}]}`)
-	}))
-	t.Cleanup(srv.Close)
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "model-a", ContextLength: 4096}},
+	}}, stubllm.WithAPIKey("tok"))
 
 	beat := NewMonitor(srv.URL, "", "tok").Beat(context.Background())
 
 	if !beat.Reachable {
 		t.Fatalf("Reachable = false against a keyed server (Failure = %q)", beat.Failure)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if len(authorizations) == 0 {
+	probes := srv.Probes()
+	if len(probes) == 0 {
 		t.Fatal("the beat sent no request at all")
 	}
-	for i, got := range authorizations {
-		if got != "Bearer tok" {
+	for i, probe := range probes {
+		if got := probe.Header.Get("Authorization"); got != "Bearer tok" {
 			t.Errorf("request %d carried Authorization %q, want %q", i, got, "Bearer tok")
 		}
 	}
@@ -262,36 +248,28 @@ func TestMonitorSendsAPIKey(t *testing.T) {
 func TestMonitorWithoutAPIKeySendsNoAuthHeader(t *testing.T) {
 	t.Parallel()
 
-	var mu sync.Mutex
-	var authorized bool
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if _, ok := r.Header["Authorization"]; ok {
-			mu.Lock()
-			authorized = true
-			mu.Unlock()
-		}
-		if r.URL.Path != "/v1/models" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_, _ = io.WriteString(w, `{"data":[{"id":"model-a","context_length":4096}]}`)
-	}))
-	t.Cleanup(srv.Close)
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "model-a", ContextLength: 4096}},
+	}})
 
 	if beat := NewMonitor(srv.URL, "", "").Beat(context.Background()); !beat.Reachable {
 		t.Fatalf("Reachable = false (Failure = %q)", beat.Failure)
 	}
-	mu.Lock()
-	defer mu.Unlock()
-	if authorized {
-		t.Error("an empty api key still sent an Authorization header")
+	probes := srv.Probes()
+	if len(probes) == 0 {
+		t.Fatal("the beat sent no request at all")
+	}
+	for i, probe := range probes {
+		if _, ok := probe.Header["Authorization"]; ok {
+			t.Errorf("request %d (%s) still carried an Authorization header on an empty api key", i, probe.Path)
+		}
 	}
 }
 
 func TestBeatUnreachableIsObservation(t *testing.T) {
 	t.Parallel()
 
-	srv := discoveryServer(t, `{"data":[{"id":"model-a"}]}`, "")
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: []stubllm.DiscoveredModel{{ID: "model-a"}}}})
 	endpoint := srv.URL
 	srv.Close() // nothing listens on that port any more
 
@@ -316,7 +294,9 @@ func TestBeatUnreachableIsObservation(t *testing.T) {
 func TestNewMonitorPassesProviderOptionsToDiscovery(t *testing.T) {
 	t.Parallel()
 
-	srv := discoveryServer(t, `{"data":[{"id":"m","context_length":32768}]}`, "")
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "m", ContextLength: 32768}},
+	}})
 
 	beat := NewMonitor(srv.URL, "", "", provider.WithEffortDialect(provider.EffortDialectOpenAI)).
 		Beat(context.Background())
@@ -344,10 +324,7 @@ func TestBeatMarksA429Throttled(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				w.WriteHeader(tc.status)
-			}))
-			t.Cleanup(srv.Close)
+			srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Status: tc.status}})
 
 			beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
@@ -375,7 +352,7 @@ func TestBeatAnsweredSeparatesADeadBoxFromAnUnusableReply(t *testing.T) {
 	t.Run("a refused dial answered nothing", func(t *testing.T) {
 		t.Parallel()
 
-		srv := discoveryServer(t, `{"data":[{"id":"model-a"}]}`, "")
+		srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: []stubllm.DiscoveredModel{{ID: "model-a"}}}})
 		endpoint := srv.URL
 		srv.Close() // nothing listens on that port any more
 
@@ -402,10 +379,7 @@ func TestBeatAnsweredSeparatesADeadBoxFromAnUnusableReply(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-				w.WriteHeader(tc.status)
-			}))
-			t.Cleanup(srv.Close)
+			srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Status: tc.status}})
 
 			beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 
@@ -425,7 +399,7 @@ func TestBeatAnsweredSeparatesADeadBoxFromAnUnusableReply(t *testing.T) {
 	t.Run("a usable model list answered", func(t *testing.T) {
 		t.Parallel()
 
-		srv := discoveryServer(t, `{"data":[{"id":"model-a"}]}`, "")
+		srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Models: []stubllm.DiscoveredModel{{ID: "model-a"}}}})
 
 		beat := NewMonitor(srv.URL, "", "").Beat(context.Background())
 

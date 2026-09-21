@@ -142,7 +142,13 @@ scripts the upstream like every other test instead of a handler of its own (ADR 
 
 A Script with a non-zero `discovery:` block may carry no `turns:` at all — a discovery-only
 fixture drives a probe, never a completion — while a Script that scripts nothing is still refused
-with "a script needs at least one turn".
+with "a script needs at least one turn". The heartbeat Monitor's tests (`internal/heartbeat`) and
+`apogee probe`'s discovery and report tests (`internal/probe`) are written this way: the window, the
+slot count, the effort tell and a 429 are all a `Discovery{…}` block, a keyed server is
+`WithAPIKey`, a dead box is `Close()` before the beat, and what the probe was sent under is read
+from `Probes()`. The one hand-rolled
+discovery handler that stays is `internal/provider/discovery_test.go` — the parser's own wire
+contract, which has to see payload bytes the stub would never write.
 
 ```yaml
 discovery:
