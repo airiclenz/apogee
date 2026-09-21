@@ -2,10 +2,12 @@ package doctext
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -238,8 +240,59 @@ func hostilePDF(t *testing.T, objects ...string) []byte {
 // stream's exact byte count or the parser reads the wrong span, so it is computed rather than
 // written by hand.
 func contentStream(text string) string {
-	body := "BT\n/F1 24 Tf\n72 720 Td\n(" + text + ") Tj\nET"
+	body := contentBody(text)
 	return fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(body), body)
+}
+
+// contentBody renders one page's text as the operators of a content stream.
+func contentBody(text string) string {
+	return "BT\n/F1 24 Tf\n72 720 Td\n(" + text + ") Tj\nET"
+}
+
+// deflatedStream renders body as a FlateDecode stream object body — the way every real producer
+// writes page content — with the extra dictionary entries it is given spliced in before /Length.
+func deflatedStream(t *testing.T, body string, entries ...string) string {
+	t.Helper()
+
+	var compressed bytes.Buffer
+	writer := zlib.NewWriter(&compressed)
+	if _, err := writer.Write([]byte(body)); err != nil {
+		t.Fatalf("deflate the stream body: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close the deflater: %v", err)
+	}
+	return flateStreamObject(compressed.Bytes(), entries...)
+}
+
+// deflatedZeros returns the deflated form of `inflated` zero bytes, streamed through the
+// deflater in chunks so the test never holds the inflated bytes itself: eighty mebibytes of
+// zeros deflate to about eighty kibibytes, which is exactly the shape of a decompression bomb.
+func deflatedZeros(t *testing.T, inflated int) []byte {
+	t.Helper()
+
+	const chunk = 1 << 16
+
+	var compressed bytes.Buffer
+	writer := zlib.NewWriter(&compressed)
+	zeros := make([]byte, chunk)
+	for written := 0; written < inflated; written += chunk {
+		if _, err := writer.Write(zeros[:min(chunk, inflated-written)]); err != nil {
+			t.Fatalf("deflate the zeros: %v", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close the deflater: %v", err)
+	}
+	return compressed.Bytes()
+}
+
+// flateStreamObject wraps deflated bytes as a stream object body whose dictionary names
+// /FlateDecode, with any extra entries — a /Type, a /Subtype, a /DecodeParms — written first.
+func flateStreamObject(deflated []byte, entries ...string) string {
+	dictionary := strings.Join(append(append([]string{}, entries...),
+		fmt.Sprintf("/Length %d /Filter /FlateDecode", len(deflated))), " ")
+	return fmt.Sprintf("<< %s >>\nstream\n%s\nendstream", dictionary, deflated)
 }
 
 // textObjectsStream renders one page whose text is written as one text object (BT … ET) per
@@ -666,5 +719,243 @@ func TestExtractPDF_JoinsOneTextObjectPerWord(t *testing.T) {
 	}
 	if want := "[Page 1]\n\nHello joined world.\nNext line"; text != want {
 		t.Errorf("text = %q, want %q", text, want)
+	}
+}
+
+// TestExtractPDF_RefusesAnInflateBomb pins the pre-flight inflate budget (audit 2026-09-20, the
+// PDF memory-bomb finding): a page whose untyped content stream inflates to eighty mebibytes from
+// eighty kibibytes on disk is refused with the budget named, and refusing it costs the process
+// nothing like the inflated size. The allocation is measured in this serial test — no
+// t.Parallel(), so no sibling's allocations land in the delta — with a ceiling loose enough for
+// the parse and the fixture and far below the bomb.
+func TestExtractPDF_RefusesAnInflateBomb(t *testing.T) {
+	const (
+		inflated     = 80 << 20
+		allocCeiling = 128 << 20
+	)
+
+	data := onePagePDF(t, flateStreamObject(deflatedZeros(t, inflated)))
+	if len(data) > 256<<10 {
+		t.Fatalf("fixture is %d bytes, want a bomb far smaller than what it inflates to", len(data))
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+	runtime.ReadMemStats(&after)
+
+	if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
+		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+	}
+	if text != "" || pages != 0 {
+		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+	}
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > allocCeiling {
+		t.Errorf("refusing the bomb allocated %d bytes, want under %d: the stream was materialised",
+			allocated, allocCeiling)
+	}
+}
+
+// TestExtractPDF_ReadsADeclaredSizeAsTheLexerDoes pins the /Size guard to the parser's own
+// lexing: a NUL or a % comment between the key and its digits is whitespace to the lexer, so
+// the number it allocates from is the same one the guard must read. Before this, the guard
+// matched only ASCII whitespace and a NUL hid the count from it.
+func TestExtractPDF_ReadsADeclaredSizeAsTheLexerDoes(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		separator string
+	}{
+		{name: "a NUL between key and digits", separator: "\x00"},
+		{name: "a comment between key and digits", separator: "%comment\n"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			readable := hostilePDF(t,
+				"<< /Type /Catalog /Pages 2 0 R >>",
+				"<< /Type /Pages /Kids [] /Count 0 >>")
+			data := bytes.Replace(readable, []byte("/Size 3"), []byte("/Size"+testCase.separator+"1000000"), 1)
+			if bytes.Equal(data, readable) {
+				t.Fatalf("the fixture's trailer no longer spells /Size 3; the test rewrites nothing")
+			}
+
+			_, _, failMessage := ExtractPDF(context.Background(), data, 0)
+
+			if want := fmt.Sprintf(pdfAbsurdSizeFormat, "1000000", len(data)); !strings.Contains(failMessage, want) {
+				t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+			}
+		})
+	}
+}
+
+// TestExtractPDF_RefusesAnAbsurdXrefFieldWidth pins the /W bound and its scope: a
+// cross-reference stream's /W sizes the row the parser allocates and is refused when a field is
+// wider than any integer, while a CIDFont's glyph-width /W — a different key in a different
+// dictionary — is never read as one.
+func TestExtractPDF_RefusesAnAbsurdXrefFieldWidth(t *testing.T) {
+	t.Parallel()
+
+	t.Run("an xref stream's /W is bounded", func(t *testing.T) {
+		t.Parallel()
+
+		const crossReferenceRow = "00000000"
+		xrefStream := fmt.Sprintf("<< /Type /XRef /Size 4 /W [1 2000000000 1] /Root 1 0 R /Length %d >>"+
+			"\nstream\n%s\nendstream", len(crossReferenceRow), crossReferenceRow)
+		data := hostilePDF(t,
+			"<< /Type /Catalog /Pages 2 0 R >>",
+			"<< /Type /Pages /Kids [] /Count 0 >>",
+			xrefStream)
+
+		text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+		if want := fmt.Sprintf(pdfXrefWidthCause, "1 2000000000 1"); !strings.Contains(failMessage, want) {
+			t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+		}
+		if text != "" || pages != 0 {
+			t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+		}
+	})
+
+	t.Run("a CIDFont's /W is not", func(t *testing.T) {
+		t.Parallel()
+
+		data := hostilePDF(t,
+			"<< /Type /Catalog /Pages 2 0 R >>",
+			"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+			"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+			"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"+
+				" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+			contentStream("Glyph widths"),
+			"<< /Type /Font /Subtype /CIDFontType2 /BaseFont /Arial /W [32 126 600] >>")
+
+		text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+		if failMessage != "" {
+			t.Fatalf("ExtractPDF failed: %s", failMessage)
+		}
+		if pages != 1 || !strings.Contains(text, "Glyph widths") {
+			t.Errorf("text = %q, pages = %d, want the page's own text", text, pages)
+		}
+	})
+}
+
+// TestExtractPDF_RefusesAnAbsurdPredictorWidth pins the /Columns bound: the parser's PNG
+// predictor allocates two rows of /Columns bytes before it reads the stream, so a row of two
+// billion columns is refused before it can.
+func TestExtractPDF_RefusesAnAbsurdPredictorWidth(t *testing.T) {
+	t.Parallel()
+
+	data := onePagePDF(t, deflatedStream(t, contentBody("Predicted"),
+		"/DecodeParms << /Predictor 12 /Columns 2000000000 >>"))
+
+	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if want := fmt.Sprintf(pdfPredictorCause, "2000000000"); !strings.Contains(failMessage, want) {
+		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+	}
+	if text != "" || pages != 0 {
+		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+	}
+}
+
+// TestExtractPDF_ReadsADeflatedPage is the pre-flight's success path: a legitimately deflated
+// content stream — the shape every real producer writes — is charged, stays within the budget
+// and extracts exactly as an uncompressed one does.
+func TestExtractPDF_ReadsADeflatedPage(t *testing.T) {
+	t.Parallel()
+
+	data := onePagePDF(t, deflatedStream(t, contentBody("Deflated Apogee")))
+
+	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if failMessage != "" {
+		t.Fatalf("ExtractPDF failed: %s", failMessage)
+	}
+	if pages != 1 {
+		t.Errorf("pages = %d, want 1", pages)
+	}
+	if !strings.Contains(text, "Deflated Apogee") {
+		t.Errorf("text = %q, want the page's own words", text)
+	}
+}
+
+// TestExtractPDF_LeavesUndecodedStreamsUncharged pins the charge rule's other half: a typed
+// stream the text path never decodes — an image XObject, an attached file — inflates past the
+// whole budget and costs the document nothing, because the parser never inflates it either.
+func TestExtractPDF_LeavesUndecodedStreamsUncharged(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name    string
+		entries []string
+	}{
+		{name: "an image XObject", entries: []string{
+			"/Type /XObject /Subtype /Image /Width 8 /Height 8 /ColorSpace /DeviceGray /BitsPerComponent 8"}},
+		{name: "an attached file", entries: []string{"/Type /EmbeddedFile"}},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			data := hostilePDF(t,
+				"<< /Type /Catalog /Pages 2 0 R >>",
+				"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+				"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+				"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"+
+					" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+				contentStream("Beside a large stream"),
+				flateStreamObject(deflatedZeros(t, 200<<20), testCase.entries...))
+			if len(data) > 256<<10 || len(data) < 128<<10 {
+				t.Fatalf("fixture is %d bytes, want about two hundred kibibytes", len(data))
+			}
+
+			text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+			if failMessage != "" {
+				t.Fatalf("ExtractPDF failed: %s", failMessage)
+			}
+			if pages != 1 || !strings.Contains(text, "Beside a large stream") {
+				t.Errorf("text = %q, pages = %d, want the page's own text", text, pages)
+			}
+		})
+	}
+}
+
+// TestExtractPDF_ChargesAnXrefStreamWhateverItsLabel pins that the type wins over the label: an
+// xref stream is decoded whatever else its dictionary says, so a /Subtype /Image written beside
+// /Type /XRef exempts nothing and the bomb behind it is still caught.
+func TestExtractPDF_ChargesAnXrefStreamWhateverItsLabel(t *testing.T) {
+	t.Parallel()
+
+	data := hostilePDF(t,
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [] /Count 0 >>",
+		flateStreamObject(deflatedZeros(t, 80<<20), "/Type /XRef /Subtype /Image /Size 4 /W [1 2 1] /Root 1 0 R"))
+
+	_, _, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
+		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+	}
+}
+
+// TestExtractPDF_ChargesAContentStreamWhateverItsLabel pins the reference half of the charge
+// rule: a stream the page's /Contents names is page content whatever /Type or /Subtype it wears,
+// because the parser decodes what /Contents points at and never reads the label — so the label
+// exempts nothing and a bomb relabelled as an image is still caught.
+func TestExtractPDF_ChargesAContentStreamWhateverItsLabel(t *testing.T) {
+	t.Parallel()
+
+	data := onePagePDF(t, flateStreamObject(deflatedZeros(t, 80<<20), "/Type /XObject /Subtype /Image"))
+
+	_, _, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
+		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
 	}
 }

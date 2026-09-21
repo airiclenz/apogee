@@ -2,7 +2,9 @@ package doctext
 
 import (
 	"bytes"
+	"compress/zlib"
 	"context"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -33,7 +35,10 @@ import (
 // before a single object is read; a /Kids array referencing its own node walks forever. So the
 // declared object count is checked against the file's length before the parser sees it, the walk
 // is capped, and every read the parser makes is charged against a budget and a context
-// (audit 2026-08-25 — C-07, F-25, F-26).
+// (audit 2026-08-25 — C-07, F-25, F-26). The same holds for what a stream says about ITSELF: a
+// FlateDecode stream inflates to whatever it was written to, a predictor row and a
+// cross-reference row are allocated at their declared widths, so those are pre-flighted over
+// the raw bytes too, before the parser can act on them (audit 2026-09-20 — see preflightPDF).
 
 const (
 	// pdfNoTextMessage is what the model reads when the document parsed cleanly and yielded no
@@ -79,6 +84,15 @@ const (
 	// numbers are quoted because the refusal is only convincing with them side by side.
 	pdfAbsurdSizeFormat = "declares %s objects in %d bytes"
 
+	// pdfInflatedCause, pdfPredictorCause and pdfXrefWidthCause word the three pre-flight refusals
+	// (see preflightPDF): the document's decoded streams inflate past the budget, a predictor row
+	// is wider than any image, or a cross-reference row is wider than any integer. The first
+	// quotes the budget because the model can act on "too big"; the other two quote the declared
+	// number because, as with pdfAbsurdSizeFormat, the refusal is only convincing with it.
+	pdfInflatedCause  = "inflated content exceeds the %d MiB budget"
+	pdfPredictorCause = "declares a predictor row of %s columns"
+	pdfXrefWidthCause = "declares cross-reference field widths of [%s]"
+
 	// pdfPagesOmittedFormat is the last block of a walk that stopped before the document's final
 	// page: the range that was not extracted and why. It is a BLOCK rather than a failure because
 	// the pages above it are real text the model can use — the marker exists so the model reads
@@ -113,6 +127,27 @@ const (
 	// page at all. Two hundred thousand reads is a hundred per page at the page cap: generous for a
 	// real document, finite for a cyclic one.
 	pdfMaxReads = 200_000
+
+	// pdfMaxInflatedBytes bounds how far the streams the text path decodes may inflate, summed
+	// over the whole document (see preflightPDF). The parser inflates a FlateDecode stream with no
+	// ceiling but the stream's own, so an 80 KiB file can ask for gigabytes; 64 MiB of decoded
+	// content is far past any document's page text, cross-reference and object streams together.
+	pdfMaxInflatedBytes = 64 << 20
+
+	// pdfInflateChunk is how many inflated bytes are drained at a time while measuring a stream
+	// against pdfMaxInflatedBytes — the interval at which cancellation is read.
+	pdfInflateChunk = 1 << 20
+
+	// pdfMaxPredictorColumns bounds /Columns in a stream's /DecodeParms: the parser's PNG
+	// predictor allocates two rows of that many bytes before it reads a byte of the stream.
+	// Sixty-four thousand columns is wider than any image a document carries.
+	pdfMaxPredictorColumns = 1 << 16
+
+	// pdfMaxXrefFieldWidth and pdfMaxXrefRowWidth bound a cross-reference stream's /W array: the
+	// parser allocates one row of the summed widths, and decodeInt reads each field as a
+	// big-endian integer, which is never wider than eight bytes.
+	pdfMaxXrefFieldWidth = 8
+	pdfMaxXrefRowWidth   = 24
 )
 
 // pdfMagic is the signature every PDF file opens with. Detection is a content sniff and nothing
@@ -167,6 +202,9 @@ func ExtractPDF(ctx context.Context, data []byte, maxTextBytes int) (text string
 
 	if refusal := refuseAbsurdObjectCount(data); refusal != "" {
 		return "", 0, refusal
+	}
+	if cause := preflightPDF(ctx, data); cause != "" {
+		return "", 0, fmt.Sprintf(pdfUnreadableFormat, cause)
 	}
 
 	reader, err := pdf.NewReader(source, int64(len(data)))
@@ -417,16 +455,6 @@ func (b *budgetedReaderAt) failureFor(reported any) string {
 	return fmt.Sprintf(pdfUnreadableFormat, reported)
 }
 
-// pdfDeclaredSize matches every /Size entry in the RAW bytes — the trailer's and any xref-stream
-// dictionary's alike, because both size the cross-reference table the parser allocates before it
-// reads a single object (read.go:233,392). The scan is over the bytes rather than the parsed
-// document for the same reason: by the time the parser could report the number, it has already
-// allocated for it. It is applied only OUTSIDE stream bodies (see withoutStreamBodies): a
-// dictionary keying the xref table always precedes its stream keyword, so every /Size that sizes
-// an allocation stays covered, while compressed or otherwise arbitrary stream CONTENT — an image,
-// an embedded font, another PDF — cannot spell one by accident.
-var pdfDeclaredSize = regexp.MustCompile(`/Size\s+(\d+)`)
-
 // pdfStreamBody matches one stream object's body: the `stream` keyword — never the tail of
 // `endstream`, which the word boundary excludes — its mandatory end-of-line, and every byte up to
 // the nearest `endstream`.
@@ -452,20 +480,489 @@ func withoutStreamBodies(data []byte) [][]byte {
 // than its own bytes could hold, or "" when every declared count is possible. The bound is the
 // loosest sound one — one byte per object, where the smallest real object costs about twenty —
 // so it refuses impossible documents and nothing a real producer emits.
+//
+// Every /Size in the RAW bytes is read — the trailer's and any xref-stream dictionary's alike,
+// because both size the cross-reference table the parser allocates before it reads a single
+// object (read.go:233,392). The scan is over the bytes rather than the parsed document for the
+// same reason: by the time the parser could report the number, it has already allocated for it.
+// It is applied only OUTSIDE stream bodies (see withoutStreamBodies): a dictionary keying the
+// xref table always precedes its stream keyword, so every /Size that sizes an allocation stays
+// covered, while compressed or otherwise arbitrary stream CONTENT — an image, an embedded font,
+// another PDF — cannot spell one by accident.
 func refuseAbsurdObjectCount(data []byte) string {
-	for _, span := range withoutStreamBodies(data) {
-		for _, match := range pdfDeclaredSize.FindAllSubmatch(span, -1) {
-			declared := string(match[1])
-			// A count too long for uint64 is refused on its digits alone: a file that cannot hold
-			// 2^64 objects cannot hold more than that either.
-			size, err := strconv.ParseUint(declared, 10, 64)
-			if err == nil && size <= uint64(len(data)) {
-				continue
-			}
+	for _, declared := range declaredIntegers(data, "Size") {
+		// A count too long for uint64 is refused on its digits alone: a file that cannot hold
+		// 2^64 objects cannot hold more than that either.
+		if exceedsBound(declared, int64(len(data))) {
 			return fmt.Sprintf(pdfUnreadableFormat, fmt.Sprintf(pdfAbsurdSizeFormat, declared, len(data)))
 		}
 	}
 	return ""
+}
+
+// preflightPDF returns the cause of a refusal when the document's raw bytes name an allocation
+// or an inflation the parser must not be allowed to make, or "" when it may run. It sits between
+// refuseAbsurdObjectCount and pdf.NewReader and bounds the three numbers that guard does not: how
+// far the FlateDecode streams the text path decodes inflate (read.go applyFilter inflates a
+// stream with no ceiling but the stream's own), how wide a predictor row is (a pngUpReader
+// allocates two buffers of /Columns bytes each), and how wide a cross-reference row is (read.go
+// readXrefStreamData allocates the sum of /W). Every bound is read the way the parser's lexer
+// would read it, so a comment or a NUL between a key and its number hides nothing.
+//
+// The inflate budget is ONE budget for the whole document, charged only to the streams the text
+// path decodes — see chargesInflation for the rule — so a document that embeds a large image or
+// font goes uncharged for it while a bomb wired as page content is caught before the parser
+// materialises it. A stream that fails to inflate is skipped, not refused: the parser will report
+// it. A page dictionary compressed inside an object stream hides its /Contents reference from
+// this raw scan; that gap is known and bounded — an object stream is itself charged.
+func preflightPDF(ctx context.Context, data []byte) string {
+	for _, columns := range declaredIntegers(data, "Columns") {
+		if exceedsBound(columns, pdfMaxPredictorColumns) {
+			return fmt.Sprintf(pdfPredictorCause, columns)
+		}
+	}
+
+	objects := indexPDFObjects(data)
+	decoded := decodedReferences(data, objects)
+	remaining := int64(pdfMaxInflatedBytes)
+	for _, object := range objects {
+		if object.body == nil {
+			continue
+		}
+		if cause := refuseAbsurdXrefWidths(object.value); cause != "" {
+			return cause
+		}
+		if !chargesInflation(object, decoded) {
+			continue
+		}
+		inflated := inflatedSize(ctx, object.body, countPDFNames(object.value, "FlateDecode"), remaining)
+		if ctx.Err() != nil {
+			return pdfCancelledCause
+		}
+		if inflated > remaining {
+			return fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20)
+		}
+		remaining -= inflated
+	}
+	return ""
+}
+
+// pdfObject is one `N G obj` header the raw scan found outside every stream body: its number,
+// the bytes that follow the keyword — the whole dictionary for a stream object, the leading
+// value for any other — and, for a stream object, the body between `stream` and `endstream`.
+type pdfObject struct {
+	number int64
+	value  []byte
+	body   []byte
+}
+
+// indexPDFObjects lists every object header in the document, in file order, pairing the last
+// header before each stream keyword with that stream's body. A stream whose keyword follows no
+// header is unreachable — the cross-reference table addresses objects by their headers — so it
+// is not listed and never charged.
+func indexPDFObjects(data []byte) []pdfObject {
+	bodies := pdfStreamBody.FindAllIndex(data, -1)
+
+	var objects []pdfObject
+	cursor := 0
+	for gap := 0; gap <= len(bodies); gap++ {
+		gapEnd := len(data)
+		if gap < len(bodies) {
+			gapEnd = bodies[gap][0]
+		}
+		headers := pdfObjectHeaders(data[cursor:gapEnd])
+		for index, header := range headers {
+			valueEnd := gapEnd
+			if index+1 < len(headers) {
+				valueEnd = cursor + headers[index+1].start
+			}
+			object := pdfObject{number: header.number, value: data[cursor+header.end : valueEnd]}
+			if index == len(headers)-1 && gap < len(bodies) {
+				object.body = streamBodyBytes(data, bodies[gap])
+			}
+			objects = append(objects, object)
+		}
+		if gap < len(bodies) {
+			cursor = bodies[gap][1]
+		}
+	}
+	return objects
+}
+
+// streamBodyBytes returns the content bytes of one pdfStreamBody match: what lies between the
+// keyword's end-of-line and `endstream`.
+func streamBodyBytes(data []byte, match []int) []byte {
+	start := match[0] + len("stream")
+	if data[start] == '\r' {
+		start++
+	}
+	start++
+	return data[start : match[1]-len("endstream")]
+}
+
+// pdfObjectHeader locates one `N G obj` keyword in a span: the object number, the index of its
+// first digit and the index just past `obj`.
+type pdfObjectHeader struct {
+	number     int64
+	start, end int
+}
+
+// pdfObjectHeaders finds every `N G obj` header in span, in order. The keyword is matched as a
+// token — `endobj` does not end in one — and the two integers before it must be whole tokens
+// too, so `19 0 obj` is object nineteen and never nine.
+func pdfObjectHeaders(span []byte) []pdfObjectHeader {
+	const keyword = "obj"
+
+	var headers []pdfObjectHeader
+	for from := 0; ; {
+		at := bytes.Index(span[from:], []byte(keyword))
+		if at < 0 {
+			return headers
+		}
+		at += from
+		from = at + len(keyword)
+		if from < len(span) && isPDFRegular(span[from]) {
+			continue
+		}
+		generationEnd := skipPDFSpaceBackwards(span, at)
+		generationStart := skipPDFDigitsBackwards(span, generationEnd)
+		numberEnd := skipPDFSpaceBackwards(span, generationStart)
+		numberStart := skipPDFDigitsBackwards(span, numberEnd)
+		if generationStart == generationEnd || numberStart == numberEnd ||
+			generationStart == numberEnd || numberStart > 0 && isPDFRegular(span[numberStart-1]) {
+			continue
+		}
+		number, err := strconv.ParseInt(string(span[numberStart:numberEnd]), 10, 64)
+		if err != nil {
+			continue
+		}
+		headers = append(headers, pdfObjectHeader{number: number, start: numberStart, end: from})
+	}
+}
+
+// decodedReferences collects the numbers of every object a /Contents or /ToUnicode key names —
+// the two ways the text path reaches a stream by reference (page.go GetPlainText, readCmap).
+// A direct reference, an inline array of references and a reference to an array object are all
+// read; the array object is resolved one level, because that is how far the parser looks.
+func decodedReferences(data []byte, objects []pdfObject) map[int64]bool {
+	byNumber := make(map[int64]pdfObject, len(objects))
+	for _, object := range objects {
+		byNumber[object.number] = object
+	}
+
+	named := map[int64]bool{}
+	for _, span := range withoutStreamBodies(data) {
+		for _, key := range []string{"Contents", "ToUnicode"} {
+			for _, site := range pdfNameSites(span, key) {
+				for _, number := range pdfReferencesAt(span, site) {
+					named[number] = true
+					if object, ok := byNumber[number]; ok && object.body == nil {
+						for _, member := range pdfReferencesAt(object.value, 0) {
+							named[member] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	return named
+}
+
+// chargesInflation decides whether a stream's inflation counts against the document's budget:
+// only a FlateDecode stream the text path will decode does. An untyped stream — page content is
+// untyped — is always charged. A stream whose dictionary carries a /Type or /Subtype is charged
+// when its type is one the parser decodes (/XRef, /ObjStm, /CMap) or a /Contents or /ToUnicode
+// reference names it, and skipped otherwise: an image or form XObject, an embedded font, an
+// attached file. Type and reference win over any label, so a /Subtype /Image on an xref stream
+// exempts nothing.
+func chargesInflation(object pdfObject, decoded map[int64]bool) bool {
+	if countPDFNames(object.value, "FlateDecode") == 0 {
+		return false
+	}
+	if len(pdfNameSites(object.value, "Type")) == 0 && len(pdfNameSites(object.value, "Subtype")) == 0 {
+		return true
+	}
+	switch pdfNameValue(object.value, "Type") {
+	case "XRef", "ObjStm", "CMap":
+		return true
+	}
+	return decoded[object.number]
+}
+
+// refuseAbsurdXrefWidths returns the cause for a cross-reference stream dictionary whose /W
+// array sizes a row the parser must not allocate, or "". Only a dictionary naming /Type /XRef
+// is read: a CIDFont's glyph-width /W is a different key in a different dictionary and is never
+// read as one. Each field is at most eight bytes — decodeInt reads a big-endian integer, and no
+// integer is wider — and a row at most twenty-four.
+func refuseAbsurdXrefWidths(dictionary []byte) string {
+	if pdfNameValue(dictionary, "Type") != "XRef" {
+		return ""
+	}
+	for _, site := range pdfNameSites(dictionary, "W") {
+		widths, ok := pdfIntegerArrayAt(dictionary, site)
+		if !ok {
+			continue
+		}
+		var row int64
+		for _, width := range widths {
+			if exceedsBound(width, pdfMaxXrefFieldWidth) {
+				return fmt.Sprintf(pdfXrefWidthCause, strings.Join(widths, " "))
+			}
+			field, _ := strconv.ParseInt(width, 10, 64)
+			row += field
+		}
+		if row > pdfMaxXrefRowWidth {
+			return fmt.Sprintf(pdfXrefWidthCause, strings.Join(widths, " "))
+		}
+	}
+	return ""
+}
+
+// inflatedSize reports how many bytes body inflates to through the given number of zlib layers,
+// reading no further than limit+1 bytes so a bomb is never materialised: a result above limit
+// means "more than the budget", never the exact count. An inflate error — the bytes were not
+// zlib, or ran out early — ends the count where it stands; the parser will report the error,
+// and what inflated before it is still charged. Cancellation is read between chunks and reported
+// through the context, which the caller consults.
+func inflatedSize(ctx context.Context, body []byte, layers int, limit int64) int64 {
+	var reader io.Reader = bytes.NewReader(body)
+	for range layers {
+		inflater, err := zlib.NewReader(reader)
+		if err != nil {
+			return 0
+		}
+		reader = inflater
+	}
+
+	var total int64
+	for total <= limit && ctx.Err() == nil {
+		count, err := io.CopyN(io.Discard, reader, pdfInflateChunk)
+		total += count
+		if err != nil {
+			break
+		}
+	}
+	return total
+}
+
+// declaredIntegers returns, as digit strings, the value written after every `/key` outside the
+// document's stream bodies, read the way the parser's lexer reads it: whitespace — NUL, TAB, LF,
+// FF, CR and SP — and % comments between the key and its digits are skipped. A key followed by
+// anything but digits declares no integer and is not listed; the parser will refuse it as a type
+// error without allocating for it.
+func declaredIntegers(data []byte, key string) []string {
+	var values []string
+	for _, span := range withoutStreamBodies(data) {
+		for _, site := range pdfNameSites(span, key) {
+			if digits, _ := readPDFDigits(span, site); digits != "" {
+				values = append(values, digits)
+			}
+		}
+	}
+	return values
+}
+
+// exceedsBound reports whether a digit string names an integer above bound — including one too
+// long for int64, which is above every bound this file sets.
+func exceedsBound(digits string, bound int64) bool {
+	value, err := strconv.ParseInt(digits, 10, 64)
+	return err != nil || value > bound
+}
+
+// pdfNameSites returns the index just past every `/key` name token in span. A name is read the
+// way the lexer reads it — its regular bytes up to the next whitespace or delimiter, with `#xx`
+// hex escapes decoded — so `/Size` is found as `/Siz#65` and never inside `/Sizes`.
+func pdfNameSites(span []byte, key string) []int {
+	var sites []int
+	for from := 0; ; {
+		at := bytes.IndexByte(span[from:], '/')
+		if at < 0 {
+			return sites
+		}
+		name, end := readPDFName(span, from+at+1)
+		if name == key {
+			sites = append(sites, end)
+		}
+		from = end
+	}
+}
+
+// countPDFNames reports how many times the `/key` name token occurs in span.
+func countPDFNames(span []byte, key string) int {
+	return len(pdfNameSites(span, key))
+}
+
+// pdfNameValue returns the name written as the value of the first `/key` in span — "XRef" for
+// `/Type /XRef` — or "" when the key is absent or its value is not a name.
+func pdfNameValue(span []byte, key string) string {
+	sites := pdfNameSites(span, key)
+	if len(sites) == 0 {
+		return ""
+	}
+	at := skipPDFSpace(span, sites[0])
+	if at >= len(span) || span[at] != '/' {
+		return ""
+	}
+	value, _ := readPDFName(span, at+1)
+	return value
+}
+
+// readPDFName decodes the name whose first byte (after its slash) is at `at`, returning it and
+// the index just past it. A malformed `#` escape ends the name where it stands.
+func readPDFName(span []byte, at int) (string, int) {
+	var name []byte
+	for at < len(span) && isPDFRegular(span[at]) {
+		if span[at] != '#' {
+			name = append(name, span[at])
+			at++
+			continue
+		}
+		if at+2 >= len(span) {
+			break
+		}
+		escaped, err := hex.DecodeString(string(span[at+1 : at+3]))
+		if err != nil {
+			break
+		}
+		name = append(name, escaped...)
+		at += 3
+	}
+	return string(name), at
+}
+
+// pdfReferencesAt reads the object references written at `at`: one `N G R`, or an inline array
+// of them. It returns nil when what is written there is neither — an annotation's /Contents is
+// a string, and a string names no object.
+func pdfReferencesAt(span []byte, at int) []int64 {
+	at = skipPDFSpace(span, at)
+	if at < len(span) && span[at] == '[' {
+		var members []int64
+		at++
+		for {
+			number, next, ok := readPDFReference(span, at)
+			if !ok {
+				return members
+			}
+			members = append(members, number)
+			at = next
+		}
+	}
+	number, _, ok := readPDFReference(span, at)
+	if !ok {
+		return nil
+	}
+	return []int64{number}
+}
+
+// readPDFReference reads one `N G R` at `at`, returning the object number, the index just past
+// the `R`, and whether a reference was there at all.
+func readPDFReference(span []byte, at int) (int64, int, bool) {
+	number, next := readPDFDigits(span, at)
+	generation, next := readPDFDigits(span, next)
+	next = skipPDFSpace(span, next)
+	if number == "" || generation == "" || next >= len(span) || span[next] != 'R' {
+		return 0, at, false
+	}
+	value, err := strconv.ParseInt(number, 10, 64)
+	if err != nil {
+		return 0, at, false
+	}
+	return value, next + 1, true
+}
+
+// pdfIntegerArrayAt reads an array of integers written at `at` — `[1 2 1]` — as digit strings,
+// and reports false when what is written there is not one.
+func pdfIntegerArrayAt(span []byte, at int) ([]string, bool) {
+	at = skipPDFSpace(span, at)
+	if at >= len(span) || span[at] != '[' {
+		return nil, false
+	}
+	at++
+	var members []string
+	for {
+		digits, next := readPDFDigits(span, at)
+		if digits == "" {
+			break
+		}
+		members = append(members, digits)
+		at = next
+	}
+	at = skipPDFSpace(span, at)
+	if at >= len(span) || span[at] != ']' {
+		return nil, false
+	}
+	return members, true
+}
+
+// readPDFDigits returns the run of decimal digits that follows `at` once whitespace and comments
+// are skipped, and the index just past it; "" when no digit is there.
+func readPDFDigits(span []byte, at int) (string, int) {
+	at = skipPDFSpace(span, at)
+	end := at
+	for end < len(span) && isPDFDigit(span[end]) {
+		end++
+	}
+	return string(span[at:end]), end
+}
+
+// skipPDFSpace returns the index of the first byte at or after `at` that is neither whitespace
+// nor part of a % comment — exactly what the parser's lexer skips before every token (lex.go).
+func skipPDFSpace(span []byte, at int) int {
+	for at < len(span) {
+		switch {
+		case isPDFSpace(span[at]):
+			at++
+		case span[at] == '%':
+			for at < len(span) && span[at] != '\r' && span[at] != '\n' {
+				at++
+			}
+		default:
+			return at
+		}
+	}
+	return at
+}
+
+// skipPDFSpaceBackwards returns the index just past the last non-whitespace byte before `at`.
+func skipPDFSpaceBackwards(span []byte, at int) int {
+	for at > 0 && isPDFSpace(span[at-1]) {
+		at--
+	}
+	return at
+}
+
+// skipPDFDigitsBackwards returns the index of the first digit of the run that ends at `at`.
+func skipPDFDigitsBackwards(span []byte, at int) int {
+	for at > 0 && isPDFDigit(span[at-1]) {
+		at--
+	}
+	return at
+}
+
+// isPDFSpace, isPDFDelimiter, isPDFRegular and isPDFDigit are the lexer's byte classes
+// (lex.go isSpace, isDelim): a name or keyword token is a run of regular bytes.
+func isPDFSpace(b byte) bool {
+	switch b {
+	case '\x00', '\t', '\n', '\f', '\r', ' ':
+		return true
+	}
+	return false
+}
+
+func isPDFDelimiter(b byte) bool {
+	switch b {
+	case '<', '>', '(', ')', '[', ']', '{', '}', '/', '%':
+		return true
+	}
+	return false
+}
+
+func isPDFRegular(b byte) bool {
+	return !isPDFSpace(b) && !isPDFDelimiter(b)
+}
+
+func isPDFDigit(b byte) bool {
+	return b >= '0' && b <= '9'
 }
 
 // PDFAnnotation is the parenthetical every header quotes for an extracted document: the format,
