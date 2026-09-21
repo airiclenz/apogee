@@ -16,7 +16,9 @@
 //     by a confined subprocess) is refused, not followed (closes the H1 symlink-swap race).
 //     A bounded read goes through SafeOpen, which returns the pinned handle itself: the
 //     caller fstats and limit-reads the very descriptor it opened, so the size bound
-//     shares the guarantee (see the SCOPE note in safeio.go).
+//     shares the guarantee (see the SCOPE note in safeio.go). SafeOpen hands back only a
+//     regular file or a directory — a pipe, socket or device is refused (ErrNotRegular)
+//     from a non-blocking open, so a planted FIFO cannot wedge the reading tool.
 //     A symlink that stays INSIDE the root is a separate question, because the fence has
 //     no reason to refuse it and following it still moves the operation off the path the
 //     operator approved: writes REFUSE a parent chain that crosses one (ErrSymlinkedParent
@@ -117,7 +119,11 @@
 // SafeCopyFileFrom's destination) and to no chain it merely reads. All but one pin every end at the SAME
 // (workspace) root; SafeCopyFileFrom is the exception that pins a root at each end, because a
 // copy's source is a read and may come from a read-only root the destination fence knows nothing
-// about — its write half is bounded by the destination root exactly as the others are.
+// about — its write half is bounded by the destination root exactly as the others are. SafeOpen
+// returns only a regular file or a directory (ErrNotRegular for a pipe, socket or device) and
+// opens non-blocking so a planted FIFO cannot wedge it: safeio_open_unix.go is that flag,
+// syscall.O_NONBLOCK, for every non-Windows target; safeio_open_windows.go is its zero on
+// Windows, which has no such flag and no pipe inside a workspace tree.
 // writepermit.go is the fence's one exception and the whole of it: the approved escape target
 // (ADR 0049). openMutationRoot — the single place every mutating primitive above decides which
 // root bounds it — plus the re-resolution that reproduces dispatch's classification rather than

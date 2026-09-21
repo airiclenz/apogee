@@ -153,9 +153,14 @@ func readFileErrorMessage(err error, path string) string {
 //
 // A workspace root that will not open is answered in its OWN words, ahead of both: the file
 // the model named may well exist, and "file not found" would send it hunting for a path while
-// the real fault — a root deleted or made unreadable under the session — goes unsaid.
+// the real fault — a root deleted or made unreadable under the session — goes unsaid. So is a
+// name that leads to a pipe, a socket or a device (security.ErrNotRegular): the thing exists,
+// and "not found" would invite a retry on a name no read can ever return bytes for.
 func escapeOrMessage(err error, absent string) string {
 	if errors.Is(err, security.ErrRootInaccessible) {
+		return err.Error()
+	}
+	if errors.Is(err, security.ErrNotRegular) {
 		return err.Error()
 	}
 	if errors.Is(err, ErrPathEscape) {

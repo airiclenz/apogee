@@ -358,10 +358,27 @@ func SafeReadFile(root, input string) ([]byte, error) {
 	return data, nil
 }
 
+// ErrNotRegular is returned when SafeOpen reaches something that is neither a regular file nor a
+// directory — a named pipe, a socket, a device. It is deliberately NOT ErrPathEscape: nothing left
+// the workspace, the name simply does not lead to bytes a read tool can bound and return. Callers
+// that render errors for the model pass it through verbatim, so the refusal is never disguised as
+// absence.
+var ErrNotRegular = errors.New("not a regular file")
+
 // SafeOpen opens input (relative to root, or absolute-inside-root) for reading, with the
 // workspace fence enforced at OPEN time through an os.Root pinned at root, so a symlinked
 // component pointing outside the root is refused rather than followed. A path escape
 // returns an error wrapping ErrPathEscape and nothing is opened.
+//
+// Only a regular file or a directory comes back open. The name is opened O_NONBLOCK, because a
+// blocking open of a FIFO with no writer never returns and would wedge the calling tool before
+// any fstat could see what it was — a planted pipe in the workspace is the case (2026-09-20
+// audit). The opened descriptor is then fstatted, and a named pipe, a socket or a device is closed
+// again and refused with an error wrapping ErrNotRegular. A UNIX socket never reaches that gate:
+// open(2) itself refuses it (ENXIO) and the error passes through as an ordinary I/O failure.
+// The flag stays on the descriptor: read(2) and getdents ignore O_NONBLOCK on a regular file and
+// a directory, which TestSafeOpen_RegularFileStillReadsBlocking and TestSafeOpen_DirectoryStillOpens
+// prove, so the handle reads exactly as a blocking one would.
 //
 // The returned handle PINS THE FILE'S IDENTITY: what is statted and read through it is the
 // file that was opened, regardless of any rename after — which is what makes a size bound
@@ -379,9 +396,18 @@ func SafeOpen(root, input string) (*os.File, error) {
 	}
 	defer func() { _ = r.Close() }()
 
-	f, err := r.Open(rel)
+	f, err := r.OpenFile(rel, os.O_RDONLY|openNonblock, 0)
 	if err != nil {
 		return nil, mapRootEscape(err)
+	}
+	info, err := f.Stat()
+	if err != nil {
+		_ = f.Close()
+		return nil, err
+	}
+	if info.Mode()&(os.ModeNamedPipe|os.ModeSocket|os.ModeDevice|os.ModeCharDevice) != 0 {
+		_ = f.Close()
+		return nil, fmt.Errorf("%w: %s", ErrNotRegular, input)
 	}
 	return f, nil
 }
