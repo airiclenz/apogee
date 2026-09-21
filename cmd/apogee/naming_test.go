@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -92,14 +93,22 @@ func TestDelegationNamerBuildsTheCallOnTheChildsUpstream(t *testing.T) {
 	}
 }
 
+// anthropicTitleRecorder is what anthropicTitleServer saw: the path and headers of every request,
+// in order.
+type anthropicTitleRecorder struct {
+	mu    sync.Mutex
+	paths []string
+	seen  []http.Header
+}
+
 // anthropicTitleServer is a naming upstream on the anthropic wire: it answers POST /v1/messages
 // with a Messages-shaped reply and records the path and headers of what it saw, so a test can
 // prove which PROTOCOL the naming client spoke — an openai-wired client would POST
 // /v1/chat/completions under a bearer token and be answered 404 here.
-func anthropicTitleServer(t *testing.T, reply string) (*httptest.Server, *anthropicUpstream) {
+func anthropicTitleServer(t *testing.T, reply string) (*httptest.Server, *anthropicTitleRecorder) {
 	t.Helper()
-	up := &anthropicUpstream{}
-	up.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	up := &anthropicTitleRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		up.mu.Lock()
 		up.paths = append(up.paths, r.URL.Path)
 		up.seen = append(up.seen, r.Header.Clone())
@@ -111,8 +120,8 @@ func anthropicTitleServer(t *testing.T, reply string) (*httptest.Server, *anthro
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"type":"message","role":"assistant","content":[{"type":"text","text":"`+reply+`"}],"stop_reason":"end_turn"}`)
 	}))
-	t.Cleanup(up.Close)
-	return up.Server, up
+	t.Cleanup(srv.Close)
+	return srv, up
 }
 
 // The naming client speaks the binding's WIRE (ADR 0078): a child routed to an anthropic entry is

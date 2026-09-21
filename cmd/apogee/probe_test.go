@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // runProbe executes one probe invocation against a hermetic apogee home and workspace and
@@ -32,22 +31,22 @@ func runProbe(t *testing.T, cmd *cobra.Command, configHome, workspace string, ar
 	return out.String()
 }
 
+// probeUpstream scripts a stubllm upstream that advertises one model with a 4096-token window and
+// scripts no /props — a bare OpenAI-compatible server — and no Turns, so a host probe that strays
+// into the battery is refused and logged rather than answered.
+func probeUpstream(t *testing.T, modelID string) *stubllm.Server {
+	t.Helper()
+	return stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: modelID, ContextLength: 4096}},
+	}})
+}
+
 // The command reports the host WITHOUT running an agent and against a live endpoint: it names
 // the backend that answered on this machine, the roots it resolved, and the discovery outcome.
-// The endpoint is an httptest server, so the /v1/models + /props probes are the real ones.
+// The endpoint is a stubllm server, so the /v1/models + /props probes are the real ones.
 func TestProbeCommandReportsTheHost(t *testing.T) {
 	t.Parallel()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = io.WriteString(w, `{"data":[{"id":"probe-model","context_length":4096}]}`)
-		case "/props":
-			w.WriteHeader(http.StatusNotFound) // a bare OpenAI-compatible server
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
+	srv := probeUpstream(t, "probe-model")
 
 	configHome := upstreamHome(t, srv.URL)
 	report := runProbe(t, newProbeCommand(), configHome, t.TempDir())
@@ -98,14 +97,7 @@ func TestProbeHostChildMatchesTheParent(t *testing.T) {
 // except in a test that has called SetOut. Asserting on Cobra's buffers cannot catch that —
 // hence the process's own stdout and stderr here, with no out writer wired.
 func TestProbeHostReportLandsOnTheProcessStdout(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/models" {
-			_, _ = io.WriteString(w, `{"data":[{"id":"probe-model","context_length":4096}]}`)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound)
-	}))
-	defer srv.Close()
+	srv := probeUpstream(t, "probe-model")
 
 	configHome, workspace := upstreamHome(t, srv.URL), t.TempDir()
 	var runErr error
@@ -133,20 +125,9 @@ func TestProbeHostReportLandsOnTheProcessStdout(t *testing.T) {
 // judging it. The sink strips (internal/sanitize); the `active:` line still names the model.
 func TestProbeCommandReportStripsTerminalEscapes(t *testing.T) {
 	t.Parallel()
-	// JSON-ENCODED rather than pasted between quotes: a literal ESC or BEL in a JSON string is a
-	// syntax error, so discovery would fail before the id could reach the report.
-	advertised, err := json.Marshal("\x1b]8;;mailto:evil\aqwen-\u202e3")
-	if err != nil {
-		t.Fatalf("encode advertised model id: %v", err)
-	}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/v1/models" {
-			_, _ = io.WriteString(w, `{"data":[{"id":`+string(advertised)+`,"context_length":4096}]}`)
-			return
-		}
-		w.WriteHeader(http.StatusNotFound) // a bare OpenAI-compatible server
-	}))
-	defer srv.Close()
+	// The stub JSON-encodes the id it advertises: a literal ESC or BEL pasted into a JSON string
+	// would be a syntax error, and discovery would fail before the id could reach the report.
+	srv := probeUpstream(t, "\x1b]8;;mailto:evil\aqwen-\u202e3")
 
 	report := runProbe(t, newProbeCommand(), upstreamHome(t, srv.URL), t.TempDir())
 

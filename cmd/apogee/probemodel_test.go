@@ -16,6 +16,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/sanitize"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // modelUpstream is a fake OpenAI-compatible server that passes the whole capability battery. It
@@ -582,8 +583,7 @@ func TestProbeModelRefusesBeforeSpendingTokens(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			var chatCalls int
-			srv := discoveryUpstream(t, tc.status, tc.body, &chatCalls)
+			srv := discoveryUpstream(t, tc.status, tc.body)
 			configHome := upstreamHome(t, srv.URL)
 
 			err := probeModelRefusal(t, configHome)
@@ -591,34 +591,21 @@ func TestProbeModelRefusesBeforeSpendingTokens(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.wantErr) {
 				t.Errorf("error = %v; want the refusal to name %q", err, tc.wantErr)
 			}
-			if chatCalls != 0 {
-				t.Errorf("the refusal spent %d battery call(s); the gate must land before the first one", chatCalls)
+			if n := len(srv.Requests()); n != 0 {
+				t.Errorf("the refusal spent %d battery call(s); the gate must land before the first one", n)
 			}
 			assertHomeHoldsOnlyConfig(t, configHome, "a refused probe")
 		})
 	}
 }
 
-// discoveryUpstream is a fake Upstream whose /v1/models answers with status and body, and which
-// counts every battery call it is asked for — that counter is what turns "the command failed"
-// into "the command failed before spending anything".
-func discoveryUpstream(t *testing.T, status int, body string, chatCalls *int) *httptest.Server {
+// discoveryUpstream scripts a stubllm upstream whose /v1/models answers with status and body
+// verbatim and which scripts no Turns, so every battery call it is asked for is refused and
+// logged — that log is what turns "the command failed" into "the command failed before spending
+// anything".
+func discoveryUpstream(t *testing.T, status int, body string) *stubllm.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(status)
-			_, _ = w.Write([]byte(body))
-		case "/v1/chat/completions":
-			*chatCalls++
-			w.WriteHeader(http.StatusInternalServerError)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	return stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Status: status, Body: body}})
 }
 
 // probeModelRefusal runs `apogee probe model` against a hermetic apogee home EXPECTING a refusal
@@ -643,25 +630,17 @@ func probeModelRefusal(t *testing.T, configHome string, args ...string) error {
 // port answering (ADR 0021 §1).
 func TestBareProbeNeverRunsTheBattery(t *testing.T) {
 	t.Parallel()
-	var chatCalls int
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.URL.Path {
-		case "/v1/models":
-			_, _ = w.Write([]byte(`{"data":[{"id":"battery-model"}]}`))
-		case "/v1/chat/completions":
-			chatCalls++
-			w.WriteHeader(http.StatusInternalServerError)
-		default:
-			w.WriteHeader(http.StatusNotFound)
-		}
-	}))
-	defer srv.Close()
+	// Discovery-only: a Script with no Turns refuses and logs every chat call, so the log is the
+	// count of battery calls the free half made.
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "battery-model"}},
+	}})
 
 	configHome := upstreamHome(t, srv.URL)
 	_ = runProbe(t, newProbeCommand(), configHome, t.TempDir())
 
-	if chatCalls != 0 {
-		t.Errorf("bare `apogee probe` made %d chat call(s); the host half must call no model", chatCalls)
+	if n := len(srv.Requests()); n != 0 {
+		t.Errorf("bare `apogee probe` made %d chat call(s); the host half must call no model", n)
 	}
 	assertHomeHoldsOnlyConfig(t, configHome, "bare `apogee probe`")
 }

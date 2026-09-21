@@ -2,15 +2,10 @@ package main
 
 import (
 	"context"
-	"io"
-	"net/http"
-	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"reflect"
-	"strconv"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/airiclenz/apogee"
@@ -18,24 +13,19 @@ import (
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
-// upstreamServer serves the one path a beat reads — GET /v1/models — advertising a single model id
-// and 404ing everything else (llama.cpp's /props included, so nothing overrides the advertised
-// window). Two of them are how a swapped Monitor is told apart at the seam: the beat's ActiveModel
-// names which server answered.
-func upstreamServer(t *testing.T, modelID string, window int) *httptest.Server {
+// upstreamServer scripts a stubllm upstream that advertises a single model id on GET /v1/models —
+// the one path a beat reads — and scripts no /props (a bare OpenAI-compatible server, so nothing
+// overrides the advertised window) and no Turns. Two of them are how a swapped Monitor is told
+// apart at the seam: the beat's ActiveModel names which server answered.
+func upstreamServer(t *testing.T, modelID string, window int) *stubllm.Server {
 	t.Helper()
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/v1/models" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_, _ = io.WriteString(w, `{"data":[{"id":"`+modelID+`","context_length":`+strconv.Itoa(window)+`}]}`)
-	}))
-	t.Cleanup(srv.Close)
-	return srv
+	return stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: modelID, ContextLength: window}},
+	}})
 }
 
 // serverActsOf is what the projected [tui.ServerHost] says it performs, with an unwired seam
@@ -328,51 +318,43 @@ func TestRunRootSwitchServerRepointsTheSession(t *testing.T) {
 	}
 }
 
-// anthropicUpstream serves the Messages API's GET /v1/models — the one probe the anthropic wire
-// makes — and records, per request, the headers a wire is told apart by. Every other path 404s,
-// so a /props probe made by mistake shows up in the recorded paths rather than passing silently.
+// anthropicUpstream is a stubllm upstream read through the anthropic wire: GET /v1/models — the
+// one probe that wire makes — is answered in the Messages list shape because the request carries
+// `anthropic-version`, and the stub's discovery log keeps, per probe, the headers a wire is told
+// apart by. A /props probe made by mistake 404s (the Script scripts none) and still lands in that
+// log, so it shows up in the recorded paths rather than passing silently.
 type anthropicUpstream struct {
-	*httptest.Server
-	mu    sync.Mutex
-	paths []string
-	seen  []http.Header
+	*stubllm.Server
 }
 
 func newAnthropicUpstream(t *testing.T, modelID string) *anthropicUpstream {
 	t.Helper()
-	up := &anthropicUpstream{}
-	up.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		up.mu.Lock()
-		up.paths = append(up.paths, r.URL.Path)
-		up.seen = append(up.seen, r.Header.Clone())
-		up.mu.Unlock()
-		if r.URL.Path != "/v1/models" {
-			w.WriteHeader(http.StatusNotFound)
-			return
-		}
-		_, _ = io.WriteString(w, `{"data":[{"type":"model","id":"`+modelID+`","display_name":"`+modelID+`"}],"has_more":false}`)
-	}))
-	t.Cleanup(up.Close)
-	return up
+	return &anthropicUpstream{Server: stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: modelID, DisplayName: modelID}},
+	}})}
 }
 
-// assertAnthropicRequests checks that every request the fake saw carried the anthropic wire's
-// headers under the given key, no bearer token, and asked only for /v1/models.
+// assertAnthropicRequests checks that every probe the stub saw carried the anthropic wire's
+// headers under the given key, no bearer token, and asked only for /v1/models — and that no
+// completion was asked for at all.
 func (up *anthropicUpstream) assertAnthropicRequests(t *testing.T, apiKey string) {
 	t.Helper()
-	up.mu.Lock()
-	defer up.mu.Unlock()
-	if len(up.seen) == 0 {
+	probes := up.Probes()
+	if len(probes) == 0 {
 		t.Fatal("the fake server saw no request at all")
 	}
-	for i, h := range up.seen {
-		if up.paths[i] != "/v1/models" {
-			t.Errorf("request %d asked %q; an anthropic Monitor asks only GET /v1/models", i, up.paths[i])
+	for i, p := range probes {
+		if p.Path != "/v1/models" {
+			t.Errorf("request %d asked %q; an anthropic Monitor asks only GET /v1/models", i, p.Path)
 		}
+		h := p.Header
 		if h.Get("x-api-key") != apiKey || h.Get("anthropic-version") == "" || h.Get("Authorization") != "" {
 			t.Errorf("request %d carried x-api-key=%q anthropic-version=%q Authorization=%q; want the anthropic headers under %q and no bearer",
 				i, h.Get("x-api-key"), h.Get("anthropic-version"), h.Get("Authorization"), apiKey)
 		}
+	}
+	if n := len(up.Requests()); n != 0 {
+		t.Errorf("the fake server saw %d completion request(s); an anthropic Monitor asks only GET /v1/models", n)
 	}
 }
 
