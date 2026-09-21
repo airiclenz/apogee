@@ -1150,6 +1150,18 @@ thinking would land in the visible reply. `harmony` is the gpt-oss channel form,
 which needs no tokens at all. `style:` is orthogonal to the `effort:` key beside it, described above:
 `style:` only says how reasoning *arrives*, `effort:` says how much of it to ask for.
 
+**`thinking:`'s `pre-opened:`** is a bool beside `start:` and `end:`, false unless you set it, for
+a model whose chat template opens the thinking channel *before the model's first byte*: the reply
+then carries only the `end:` token and never its own `start:`, so an ordinary delimited profile
+would read everything before that closer as the visible answer. With `pre-opened: true` apogee
+treats the reply as mid-think from its first byte and holds the live stream until the first closer
+lands — or until the server hands the reasoning over in a wire field of its own, which means it
+consumed the pre-opened span itself — and keeps that text as reasoning. It is read under
+`delimited` only; `pre-opened: true` beside any other style is a startup error naming the key. The
+built-in `minimax-m3` entry carries it, so a `minimax-m3` entry of your own that spells
+`style: delimited` — which replaces the built-in's whole channel style — needs to spell
+`pre-opened: true` too to keep the hold.
+
 ```yaml
 # ~/.apogee/config.yaml
 model-profiles:
@@ -1158,6 +1170,7 @@ model-profiles:
       style: delimited
       start: "<mm:think>"
       end: "</mm:think>"
+      pre-opened: true           # its template opens the channel; the reply carries only the closer
   my-xml-model:
     tool-call-format: custom-regex
     tool-call-pattern: '<tool_call>\s*(?<name>[\w.-]+)\s*(?<args>\{.*?\})\s*</tool_call>'

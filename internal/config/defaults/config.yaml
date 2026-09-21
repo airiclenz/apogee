@@ -1128,7 +1128,7 @@ ui:
 #
 #   gemma        delimited <think> … </think> reasoning
 #   gpt-oss      harmony channels
-#   minimax-m3   delimited <mm:think> … </mm:think> reasoning
+#   minimax-m3   delimited <mm:think> … </mm:think> reasoning, pre-opened by its chat template
 #   qwen3.8      no wire shape — a ROSTER: the Console family above, enabled for this model alone
 #
 # A BUILT-IN match announces itself, at startup and at every switch —
@@ -1165,6 +1165,12 @@ ui:
 #                                           model ACTUALLY emits (the tokens vary per build, not
 #                                           just per family)
 #                      harmony            — gpt-oss channels, which need no tokens
+#     pre-opened       false (the default) | true — true when the model's chat template opens the
+#                      channel BEFORE the model's first byte, so a reply carries only the end:
+#                      token and never its own start: (minimax-m3's shape): apogee then holds the
+#                      live stream until that closer lands, treating everything before it as
+#                      reasoning. Read under delimited only; true beside another style is a
+#                      startup error.
 #     effort           off | low | medium | high, plus the wider levels some servers report:
 #                      minimal | xhigh | max, and none (the OpenRouter spelling of off) — how
 #                      hard this model is asked to think, forwarded to the server's chat
@@ -1207,6 +1213,7 @@ ui:
 #       style: delimited
 #       start: "<mm:think>"
 #       end: "</mm:think>"
+#       pre-opened: true            # the template opens the channel; only the closer is emitted
 #       effort: medium              # leave it out entirely for the model's own default
 #   my-fenced-model:
 #     tool-call-format: markdown-fenced

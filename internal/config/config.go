@@ -2766,6 +2766,10 @@ type thinkingConfig struct {
 	Start  string `yaml:"start"`
 	End    string `yaml:"end"`
 	Effort string `yaml:"effort"`
+	// PreOpened is `pre-opened:` — the chat template opens the channel before the model's first
+	// byte, so the reply carries only the closer (minimax-m3's shape). It only means something
+	// under the delimited style, and validateThinkingAxes refuses it beside any other.
+	PreOpened bool `yaml:"pre-opened"`
 }
 
 // toModelProfile maps the on-disk model-profile schema onto the domain.ModelProfile value the
@@ -2778,10 +2782,11 @@ func (p modelProfileConfig) toModelProfile() domain.ModelProfile {
 		ToolCallFormat: domain.ToolCallFormat(p.ToolCallFormat),
 		Pattern:        p.ToolCallPattern,
 		Thinking: domain.ThinkingProfile{
-			Style:  domain.ThinkingStyle(p.Thinking.Style),
-			Start:  p.Thinking.Start,
-			End:    p.Thinking.End,
-			Effort: domain.ThinkingEffort(p.Thinking.Effort),
+			Style:     domain.ThinkingStyle(p.Thinking.Style),
+			Start:     p.Thinking.Start,
+			End:       p.Thinking.End,
+			PreOpened: p.Thinking.PreOpened,
+			Effort:    domain.ThinkingEffort(p.Thinking.Effort),
 		},
 		Tools: p.Tools.toolRosterDelta(),
 	}
@@ -2856,8 +2861,9 @@ func validateToolCallPattern(pattern, toolCallPattern string) error {
 }
 
 // validateThinkingAxes checks one profile's thinking half: the style against the three strippers the
-// parse seam builds, the delimited style against the token pair it strips with, and the effort
-// against the vocabulary the wire mappings know (ADR 0050, widened by ADR 0060).
+// parse seam builds, the delimited style against the token pair it strips with, the pre-opened flag
+// against the one style that reads it, and the effort against the vocabulary the wire mappings know
+// (ADR 0050, widened by ADR 0060).
 func validateThinkingAxes(pattern string, t thinkingConfig) error {
 	if !isKnownThinkingStyle(t.Style) {
 		return fmt.Errorf("apogee: invalid model-profiles.%s.thinking.style %q: want none, "+
@@ -2865,6 +2871,9 @@ func validateThinkingAxes(pattern string, t thinkingConfig) error {
 			pattern, t.Style)
 	}
 	if err := validateDelimitedTokens(pattern, t); err != nil {
+		return err
+	}
+	if err := validatePreOpened(pattern, t); err != nil {
 		return err
 	}
 	if effort := domain.ThinkingEffort(t.Effort); !effort.Valid() {
@@ -2899,6 +2908,22 @@ func validateDelimitedTokens(pattern string, t thinkingConfig) error {
 		"missing either half strips nothing and the thinking lands in the visible reply — set both to "+
 		"the tokens the model actually emits, or pick a style that needs none",
 		pattern, strings.Join(missing, " and "))
+}
+
+// validatePreOpened refuses `pre-opened: true` beside any style other than delimited. The flag is
+// read by the delimited stripper alone — it is the delimited channel that the chat template opens
+// ahead of the model's first byte, leaving the reply with only its End token — so under another
+// style it is inert, and unlike a stray token pair (which validateDelimitedTokens leaves alone) it
+// is a claim about the reply's shape that the profile then never acts on: the user who wrote it
+// expects the live stream held, and would watch the reasoning land in the visible reply instead.
+func validatePreOpened(pattern string, t thinkingConfig) error {
+	if !t.PreOpened || domain.ThinkingStyle(t.Style) == domain.ThinkingDelimited {
+		return nil
+	}
+	return fmt.Errorf("apogee: model-profiles.%s.thinking.pre-opened needs style: delimited — only "+
+		"the delimited stripper holds the live stream until the channel's first closer, so the flag "+
+		"beside any other style does nothing — set style: delimited with its start: and end: "+
+		"tokens, or drop the flag", pattern)
 }
 
 // isKnownThinkingStyle reports whether s names one of the three strippers the parse seam can build,

@@ -5268,6 +5268,83 @@ func TestApplyConfigModelProfileEffort(t *testing.T) {
 	}
 }
 
+// The thinking block's `pre-opened:` reaches the domain profile as ThinkingProfile.PreOpened — the
+// flag that marks a chat template opening the channel before the model's first byte, so the loop
+// holds the live stream until the first closer (item 12 of the 2026-09-21 audit plan) — and an
+// entry that leaves the key out keeps it false. It is only read by the delimited stripper, so a
+// `pre-opened: true` beside any other style is a LOAD error naming the key path and the one style
+// it needs, in the shape the block's other refusals take.
+func TestApplyConfigModelProfileThinkingPreOpened(t *testing.T) {
+	t.Parallel()
+
+	t.Run("pre-opened: true under delimited reaches the profile", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "")
+		const configYAML = `model-profiles:
+  minimax-m3:
+    thinking:
+      style: delimited
+      start: "<mm:think>"
+      end: "</mm:think>"
+      pre-opened: true
+  gemma:
+    thinking:
+      style: delimited
+      start: "<think>"
+      end: "</think>"
+`
+		writeConfigHome(t, home, configYAML)
+		opts := Options{ConfigDir: home}
+		if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+			t.Fatalf("ApplyConfig: %v", err)
+		}
+
+		want := []profiles.Entry{
+			{
+				Pattern: "gemma",
+				Profile: domain.ModelProfile{
+					Thinking: domain.ThinkingProfile{Style: domain.ThinkingDelimited, Start: "<think>", End: "</think>"},
+				},
+			},
+			{
+				Pattern: "minimax-m3",
+				Profile: domain.ModelProfile{
+					Thinking: domain.ThinkingProfile{
+						Style:     domain.ThinkingDelimited,
+						Start:     "<mm:think>",
+						End:       "</mm:think>",
+						PreOpened: true,
+					},
+				},
+			},
+		}
+		if !reflect.DeepEqual(opts.ModelProfiles, want) {
+			t.Errorf("opts.modelProfiles = %+v; want %+v", opts.ModelProfiles, want)
+		}
+	})
+
+	t.Run("pre-opened: true beside another style is refused", func(t *testing.T) {
+		t.Parallel()
+		home := testConfigHome(t, "")
+		const configYAML = `model-profiles:
+  gpt-oss:
+    thinking:
+      style: harmony
+      pre-opened: true
+`
+		writeConfigHome(t, home, configYAML)
+		opts := Options{ConfigDir: home}
+		err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify)
+		if err == nil {
+			t.Fatal("pre-opened: true under style: harmony — want a load error, got nil")
+		}
+		const wantMsg = "model-profiles.gpt-oss.thinking.pre-opened needs style: delimited"
+		if !strings.Contains(err.Error(), wantMsg) {
+			t.Errorf("error %q does not carry %q", err, wantMsg)
+		}
+	})
+}
+
 // Every axis of a `model-profiles:` entry is checked at LOAD, and a bad value on any of them is a
 // startup error rather than a silently-dropped setting — because each one fails invisibly further
 // down: an unknown format or style fails the first Rebind naming no config key, a pattern that does

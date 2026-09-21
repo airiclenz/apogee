@@ -224,7 +224,11 @@ internal/profiles/match.go — Resolve; internal/profiles/match_test.go — Test
 **Acceptance.** `go build ./... && go test ./internal/processing/... ./internal/profiles/... && go test ./internal/agent/... -run 'Stream_|SetProfile'`
 **Commit:** `fix(processing): a pre-opened thinking channel holds the live stream until its first closer; minimax-m3 ships pre-opened`
 
-## 13. `thinking.pre-opened:` — the on-disk key, its validation and the manual
+## 13. `thinking.pre-opened:` — the on-disk key, its validation and the manual — ✅ DONE (2026-09-21)
+
+NOTES (2026-09-21): no registry row added — the `model-profiles` `KindStructured` row (internal/config/registry.go:853) terminates walkSchema's descent, so the new leaf needs none; TestRegistryIsBijectionWithFileConfig passes unchanged.
+NOTES (2026-09-21): the template's commented `minimax-m3` example and the manual's example spell `pre-opened: true` (not the `false` the item text names) beside a `pre-opened … false (the default) | true` line in the axis vocabulary: the shipped `minimax-m3` entry is pre-opened since item 12 and `profiles.Resolve` replaces the whole channel style when a user entry spells `style:`, so a copy of that example without the flag would silently wipe the hold. The built-in table's `minimax-m3` summary line in the template gained ", pre-opened by its chat template" for the same reason.
+NOTES (2026-09-21): pre-item the new test fails on the missing field, not on an unknown key — the YAML decoder does not refuse `pre-opened:` unknown, as the item admitted either might hold.
 
 **What.** `feat(config)`: depends on item 12. `internal/config/config.go`: `thinkingConfig` gains `PreOpened bool `yaml:"pre-opened"``; `toModelProfile` maps it; `validateModelProfiles` refuses `pre-opened: true` with any `style` other than `delimited` (message `model-profiles.<name>.thinking.pre-opened needs style: delimited`, shaped like the block's existing refusals). `internal/config/defaults/config.yaml` (:1131-1142 thinking block): a commented `pre-opened: false` line with a one-line explanation. `docs/manual/configuration.md` model-profiles section: one paragraph on the key beside `start:`/`end:`. The registry needs no new row (the `model-profiles` structured row carries the block — check and say so in a NOTES line if a row is required).
 **Files:** internal/config/config.go, internal/config/config_test.go, internal/config/defaults/config.yaml, docs/manual/configuration.md
