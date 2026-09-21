@@ -1454,6 +1454,69 @@ func TestStoreDeleteRefusesAHeldSession(t *testing.T) {
 	}
 }
 
+// Rename refuses a session another holder has, exactly as Delete does: the *HeldError comes back
+// unchanged and the title on disk is untouched.
+func TestStoreRenameRefusesAHeldSession(t *testing.T) {
+	t.Parallel()
+	st, id := holdStore(t)
+	release, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	defer func() { _ = release() }()
+	other := NewStore(st.dir)
+
+	var held *HeldError
+	if err := other.Rename(id, "renamed elsewhere"); !errors.As(err, &held) {
+		t.Fatalf("Rename of a held session = %v, want a *HeldError", err)
+	}
+	if held.ID != id || held.PID != os.Getpid() {
+		t.Errorf("HeldError = {ID %q, PID %d}, want {%q, %d}", held.ID, held.PID, id, os.Getpid())
+	}
+	rec, err := st.Load(id)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.Meta.Title != sampleRecord(id, pruneNow).Meta.Title {
+		t.Errorf("title after a refused Rename = %q, want the stored title untouched", rec.Meta.Title)
+	}
+}
+
+// A store's own hold is honoured: the live session its host holds for the session's whole life is
+// renamed under that hold rather than refused by a second flock from the same process. Once the
+// hold is released, a second holder sees the record free again.
+func TestStoreRenameRunsUnderItsOwnHold(t *testing.T) {
+	t.Parallel()
+	st, id := holdStore(t)
+	release, err := st.Hold(id)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+
+	if err := st.Rename(id, "x"); err != nil {
+		t.Fatalf("Rename under the store's own hold = %v, want it to run", err)
+	}
+	rec, err := st.Load(id)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if rec.Meta.Title != "x" {
+		t.Errorf("title after Rename = %q, want %q", rec.Meta.Title, "x")
+	}
+	if _, err := st.Hold(id); !errors.As(err, new(*HeldError)) {
+		t.Errorf("second Hold after the rename = %v, want the live hold still refusing it", err)
+	}
+
+	if err := release(); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	again, err := NewStore(st.dir).Hold(id)
+	if err != nil {
+		t.Fatalf("Hold after release = %v, want the hold back — the rename left no hold behind", err)
+	}
+	_ = again()
+}
+
 // Delete holds, removes the JSON, releases and only then unlinks <id>.lock — on every path: a
 // deleted record, a pruned one, a record that was never there and one that vanished under the
 // sweep all leave no lock behind, and the missing record's error is the ENOENT it always was.

@@ -69,9 +69,9 @@ var ErrInvalidID = errors.New("apogee: invalid session id")
 // mainstream filesystem enforces. Minted ids are 25 bytes; the slack is for legacy stems.
 const maxIDLen = 200
 
-// HeldError is the refusal Hold, Delete and Prune return when another live apogee holds the
-// session: its record is open in a second instance, and resuming or removing it here would have two
-// writers over one file. It wraps the *platform.LockHeldError the OS lock answered with, so a caller
+// HeldError is the refusal Hold, Delete, Prune and Rename return when another live apogee holds
+// the session: its record is open in a second instance, and resuming, removing or retitling it here
+// would have two writers over one file. It wraps the *platform.LockHeldError the OS lock answered with, so a caller
 // that wants the lock's own facts can errors.As to it, and its Error() IS the line every door prints
 // — the ratified sentence, with "(pid N)" omitted when the holder's file carried no readable pid.
 type HeldError struct {
@@ -227,6 +227,14 @@ type Store struct {
 	// The readers (List, Load, LoadPath) stay unguarded: atomicWrite renames a complete file into
 	// place, so a reader sees either the whole old record or the whole new one, never a torn one.
 	mu sync.Mutex
+
+	// held is the set of ids THIS store currently holds (hold inserts, its release deletes), so
+	// Rename can tell the live session its own host holds — the hold that lasts the session's
+	// whole life — from one a second apogee holds, and run under the former instead of refusing
+	// itself. It lives under heldMu, never mu: Delete calls hold and release with mu already
+	// taken, so guarding the map with mu would deadlock the very writer that shares it.
+	heldMu sync.Mutex
+	held   map[string]struct{}
 }
 
 // NewStore returns a Store rooted at dir. The directory is created lazily on the first Save
@@ -395,7 +403,7 @@ func readRecordFile(path string) ([]byte, error) {
 // stale state to judge — ADR 0034 D7) — and keeps it until release is called. It is the one
 // mechanism behind "one live instance per session": the host that runs a session holds it for the
 // session's whole life, and every door that would open the same record elsewhere — a --resume or
-// --continue start, a /sessions delete — asks Hold first and is refused with a *HeldError
+// --continue start, a /sessions delete or rename — asks Hold first and is refused with a *HeldError
 // while the holder lives. A second Hold of the same id in ONE process is refused too, with this
 // process's own pid: flock belongs to the open file description, not the process.
 //
@@ -411,7 +419,9 @@ func (s *Store) Hold(id string) (release func() error, err error) {
 	return s.hold(id)
 }
 
-// hold is Hold's body past the id check, shared with Delete, which has validated the id already.
+// hold is Hold's body past the id check, shared with Delete and Rename, which have validated the id
+// already. A hold taken is recorded in held until its release runs, so Rename can recognise the
+// store's own hold.
 func (s *Store) hold(id string) (release func() error, err error) {
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
 		return nil, fmt.Errorf("apogee: create sessions directory %q: %w", s.dir, err)
@@ -424,7 +434,33 @@ func (s *Store) hold(id string) (release func() error, err error) {
 		}
 		return nil, fmt.Errorf("apogee: hold session %q: %w", id, err)
 	}
-	return func() error { unlock(); return nil }, nil
+	s.heldMu.Lock()
+	if s.held == nil {
+		s.held = make(map[string]struct{})
+	}
+	s.held[id] = struct{}{}
+	s.heldMu.Unlock()
+	// once keeps a second release from deleting a hold a later holder of the same id has since
+	// recorded: the lock is dropped only once, so the map entry is too.
+	var once sync.Once
+	return func() error {
+		once.Do(func() {
+			unlock()
+			s.heldMu.Lock()
+			delete(s.held, id)
+			s.heldMu.Unlock()
+		})
+		return nil
+	}, nil
+}
+
+// holdsItself reports whether this store already holds id — the check Rename makes before taking a
+// hold of its own. hold and Hold never consult it: a second flock in one process stays refused.
+func (s *Store) holdsItself(id string) bool {
+	s.heldMu.Lock()
+	defer s.heldMu.Unlock()
+	_, ok := s.held[id]
+	return ok
 }
 
 // lockPath is the lock file a session's hold lives in, beside its record: <dir>/<id>.lock. scan
@@ -545,13 +581,25 @@ func (s *Store) Prune(r Retention, keep ...string) (int, error) {
 //
 // The read and the write happen under ONE hold of the store lock, which is the point: a Save that
 // slipped between them would be overwritten by the record this call read before it — reverting the
-// session by a whole Turn, since Save replaces the record wholesale (audit 2026-08-01).
+// session by a whole Turn, since Save replaces the record wholesale (audit 2026-08-01). The store
+// lock is the floor inside one process; across processes the record is held first, as Delete holds
+// it, so a rename of a session another live apogee is running is refused with a *HeldError rather
+// than rolling that instance's next Save back by the same Turn (audit 2026-09-20). The one hold
+// honoured is this store's own: the live session its host holds for the session's whole life
+// (Hold) is renamed under that hold, since a second flock from the same process would refuse it.
 func (s *Store) Rename(id, title string) error {
 	if err := validateID(id); err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if !s.holdsItself(id) {
+		release, err := s.hold(id)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = release() }()
+	}
 	rec, err := s.loadPath(filepath.Join(s.dir, id+".json"))
 	if err != nil {
 		return err

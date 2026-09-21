@@ -429,24 +429,29 @@ func (m *Model) saveComplete(err error) tea.Cmd {
 
 // foldRecordWrite folds a finished Rename, Delete, Rotate, Activate or Fork: it releases the
 // single-flight latch, dispatches whatever waited behind it, and re-lists for the browser verbs that
-// asked to repaint over the result. The rename and the two retargets are best-effort — a rename that
-// did not stick leaves the old title on the re-list, and neither retarget can fail — so nothing is
-// said about their failure; a fork is the one the human is waiting on, and its own fold speaks
-// (foldFork, fork.go). A delete that did not happen leaves its row on the re-list AND is noted with
-// the host's own words: the one delete the host refuses is of a record another apogee holds, and
-// the refusal it returns is the line that says so and what to do instead (session.HeldError).
+// asked to repaint over the result. The two retargets are best-effort — neither can fail — so nothing
+// is said about them; a fork is the one the human is waiting on, and its own fold speaks (foldFork,
+// fork.go). A delete that did not happen leaves its row on the re-list AND is noted with the host's
+// own words: the one delete the host refuses is of a record another apogee holds, and the refusal it
+// returns is the line that says so and what to do instead (session.HeldError). The browser's
+// explicit rename (renameSession) is noted the same way on the same refusal — the human asked for
+// the title and would otherwise see the old one on the re-list with no word why.
 //
-// The one failure that is NOT simply swallowed is a quiet title write. Its apply path branches on
-// ActiveID(), which the host mints at the START of the first Save, before the atomic write has put
-// the file on disk; a title answering in that window — or any time saves have been failing — renames
-// a record that is not there, and used to be discarded on the spot. Re-stashing it applies it at the
-// next successful save instead (flushPendingTitle), so the window costs a delay rather than the name.
+// The quiet title write (retryTitle) says nothing on failure, but is NOT simply swallowed either.
+// Its apply path branches on ActiveID(), which the host mints at the START of the first Save, before
+// the atomic write has put the file on disk; a title answering in that window — or any time saves
+// have been failing — renames a record that is not there, and used to be discarded on the spot.
+// Re-stashing it applies it at the next successful save instead (flushPendingTitle), so the window
+// costs a delay rather than the name.
 func (m *Model) foldRecordWrite(msg recordWriteDoneMsg) tea.Cmd {
 	if msg.err != nil && msg.write.retryTitle {
 		// What may go back on the stash is the stash's own rule (titleStash.restash): a stash already
 		// holding something wins, and an automatic title a human has since outranked is dropped
 		// rather than retried.
 		m.pendingTitle.restash(msg.write.title, msg.write.source, m.titleTouched)
+	}
+	if msg.err != nil && msg.write.kind == writeRename && !msg.write.retryTitle {
+		m.transcript.addNote("could not rename session: " + msg.err.Error())
 	}
 	if msg.err != nil && msg.write.kind == writeDelete {
 		m.transcript.addNote("could not delete session: " + msg.err.Error())

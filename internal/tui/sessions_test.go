@@ -520,6 +520,43 @@ func TestSessionBrowserDeleteOfAHeldSessionNotesAndStays(t *testing.T) {
 	}
 }
 
+// A ^r rename of a record another apogee has open is refused by the host and noted with the same
+// line as a refused delete; the old title stays on the re-list and the browser stays open over it.
+func TestSessionBrowserRenameOfAHeldSessionNotesAndStays(t *testing.T) {
+	t.Parallel()
+	host := &fakeSessionHost{}
+	now := time.Now()
+	storeMeta(host, "sess-1", "held elsewhere", "/ws/a", now, 0, nil)
+	storeMeta(host, "sess-2", "another one", "/ws/a", now.Add(-time.Hour), 0, nil)
+	host.renameErr = &session.HeldError{ID: "sess-1", PID: 4242}
+	m := newBrowserModel(t, &fakeEngine{}, host, "/ws/a")
+	m = openBrowser(t, m) // sess-1 is newest, so it is selected first
+
+	m = step(t, m, keyCtrl('r'))
+	for _, r := range " v2" {
+		m = step(t, m, keyRune(r))
+	}
+	m, cmd := stepCmd(t, m, keyEnter())
+	if cmd == nil {
+		t.Fatal("committing the rename dispatched no record write")
+	}
+	m = runWrites(t, m, cmd) // the rename, then the re-list it carries
+
+	want := "could not rename session: session sess-1 is open in another apogee (pid 4242) — fork it to work alongside"
+	if !hasEntry(m, entryNote, want) {
+		t.Errorf("a refused rename did not note the host's line; want %q in %v", want, noteTexts(m))
+	}
+	if got := host.stored["sess-1"].Meta.Title; got != "held elsewhere" {
+		t.Errorf("the refused rename changed the stored title to %q", got)
+	}
+	if !m.sessionBrowser.open {
+		t.Error("the browser closed over a refused rename; want it open with the row still listed")
+	}
+	if rows := m.sessionBrowserView().metas; len(rows) != 2 || rows[0].ID != "sess-1" || rows[0].Title != "held elsewhere" {
+		t.Errorf("rows after the refused rename = %v, want sess-1 still first of two under its old title", rows)
+	}
+}
+
 // ⏎ on the current session's own row reloads it without a refusal: the hold guards against OTHER
 // instances, so the host neither probes nor refuses an id it holds itself — the browser path notes
 // the resume and nothing about another apogee.

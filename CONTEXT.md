@@ -483,7 +483,7 @@ record — live host state, re-confirmed on resume
 **held** by the live instance that has it open (`session.Store.Hold`: the kernel's advisory lock on
 `<id>.lock` beside the record, taken at the record's birth and released when that apogee exits or
 moves to another session), so every door into it from a second instance — `--resume`,
-`--continue`, the browser's resume and delete — is refused with `session <id> is open in another
+`--continue`, the browser's resume, rename and delete — is refused with `session <id> is open in another
 apogee (pid N) — fork it to work alongside`; the hold guards only against *other* instances, and
 `/fork` is the way to work alongside. See [ADR 0022](docs/adr/0022-sessions-persist-per-turn-as-dual-representation-records.md).
 _Avoid_: "session file" for the Session itself (the *record* is the file; the Session is its

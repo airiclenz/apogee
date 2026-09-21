@@ -31,7 +31,7 @@ still remembers.
 - A session is **held** by the apogee that has it open, from the moment its record
   first reaches disk until that apogee exits, so two instances can never write one
   record. Opening a held session anywhere else — `--resume`, `--continue`, the
-  browser's `⏎` — or deleting it with `^d` is refused with one line:
+  browser's `⏎` — or renaming it with `^r` or deleting it with `^d` is refused with one line:
   `session <id> is open in another apogee (pid N) — fork it to work alongside`
   (the pid is omitted when it is not known). `--continue` refuses rather than
   quietly opening the workspace's next-newest session; in the browser the refusal
