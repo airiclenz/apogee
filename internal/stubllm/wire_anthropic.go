@@ -40,6 +40,30 @@ const (
 	deltaInputJSON  = "input_json_delta"
 )
 
+// anthropicModelsReply is the GET /v1/models payload in the Messages API's list shape: a `data`
+// array of typed entries and a `has_more` page marker, with `display_name` where the OpenAI
+// shape says `name` and none of the window or reasoning members.
+type anthropicModelsReply struct {
+	Data    []anthropicModelEntry `json:"data"`
+	HasMore bool                  `json:"has_more"`
+}
+
+// anthropicModelEntry is one advertised model in the Messages API's shape.
+type anthropicModelEntry struct {
+	Type        string `json:"type"`
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name,omitempty"`
+}
+
+// anthropicModels renders the advertised list in the Messages API's shape.
+func anthropicModels(models []DiscoveredModel) anthropicModelsReply {
+	reply := anthropicModelsReply{Data: make([]anthropicModelEntry, 0, len(models))}
+	for _, model := range models {
+		reply.Data = append(reply.Data, anthropicModelEntry{Type: "model", ID: model.ID, DisplayName: model.DisplayName})
+	}
+	return reply
+}
+
 // anthropicRequest is the subset of the POST /v1/messages request the stub reads: enough to
 // log what was asked, to match a Turn against it, and to choose the reply shape. The sampling
 // pointers keep the absent-versus-zero distinction chatRequest keeps.

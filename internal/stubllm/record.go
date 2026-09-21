@@ -21,8 +21,10 @@ import (
 	"time"
 )
 
-// chatCompletionsPath is the one proxied path whose traffic becomes a Turn; every other /v1/
-// path (the models probe, llama.cpp's /v1/props) is forwarded and forgotten.
+// chatCompletionsPath is the one proxied path whose traffic becomes a Turn. The two discovery
+// probes (modelsPath, and llama.cpp's propsPath — the one path off /v1/ the proxy forwards) are
+// captured into the Script's Discovery block instead; every other /v1/ path is forwarded and
+// forgotten.
 const chatCompletionsPath = "/v1/chat/completions"
 
 // doneSentinel is the payload of the event that terminates an SSE reply. It carries no delta,
@@ -37,15 +39,17 @@ const recordedFileMode = 0o644
 // as a decision where `token_delay: 10.372413ms` reads as a mistake.
 const timingGrain = 10 * time.Microsecond
 
-// Recorder is a recording proxy: it forwards /v1/* to a real upstream and writes what it saw
-// back out as a [Script], so a fixture comes from a server that genuinely behaves that way
-// rather than from a developer's memory of the wire format.
+// Recorder is a recording proxy: it forwards /v1/* (and llama.cpp's /props) to a real upstream
+// and writes what it saw back out as a [Script], so a fixture comes from a server that
+// genuinely behaves that way rather than from a developer's memory of the wire format.
 //
 // It is an [http.Handler]. Mount it on a listener, point apogee (or any OpenAI-compatible
 // client) at that address, drive the run, then [Recorder.Close] to write the fixture. Every
 // completed /v1/chat/completions request becomes one Turn, pre-filled with a `when:` matcher
 // over the request's last message, so a recorded script answers a replayed run in the same
-// places even when the ordering shifts.
+// places even when the ordering shifts. What the upstream answered the two discovery probes
+// with — the model list, the launch facts, or a refusal — lands in the Script's [Discovery]
+// block, so a replay advertises what the recorded server did.
 //
 // Recording is an explicit act performed by a human at a command line (`stubllm record`), never
 // something a `go test` run does: a test that silently re-records its own fixture cannot fail.
@@ -54,10 +58,11 @@ type Recorder struct {
 	out      string
 	proxy    *httputil.ReverseProxy
 
-	mu    sync.Mutex
-	model string
-	next  int
-	turns map[int]Turn
+	mu        sync.Mutex
+	model     string
+	discovery Discovery
+	next      int
+	turns     map[int]Turn
 	// inflight is how many begun requests have not yet filed their Turn. A client stops reading
 	// the moment it sees the last event it cares about, so it can be back in its caller's hands
 	// while this proxy is still a Read away from the EOF that files the reply — see
@@ -104,22 +109,28 @@ func NewRecorder(upstream, out string) (*Recorder, error) {
 	return recorder, nil
 }
 
-// ServeHTTP proxies one request. Paths outside /v1/ are refused rather than forwarded: the
+// ServeHTTP proxies one request. Paths outside /v1/ are refused rather than forwarded — the
 // recorder stands in for an OpenAI-compatible server and nothing else, and a client reaching
-// for another path has the wrong address.
+// for another path has the wrong address — with the one exception of llama.cpp's /props, which
+// apogee probes beside /v1/models and whose answer the fixture should carry.
 func (r *Recorder) ServeHTTP(w http.ResponseWriter, request *http.Request) {
-	if !strings.HasPrefix(request.URL.Path, "/v1/") {
+	path := request.URL.Path
+	if !strings.HasPrefix(path, "/v1/") && path != propsPath {
 		http.NotFound(w, request)
 		return
 	}
-	if request.Method == http.MethodPost && request.URL.Path == chatCompletionsPath {
+	switch {
+	case request.Method == http.MethodPost && path == chatCompletionsPath:
 		request = r.begin(request)
+	case request.Method == http.MethodGet && (path == modelsPath || path == propsPath):
+		request = r.beginProbe(request)
 	}
 	r.proxy.ServeHTTP(w, request)
 }
 
-// Script is what has been recorded so far: the model the requests named and one Turn per
-// completed request, in the order the requests arrived.
+// Script is what has been recorded so far: the model the requests named, what the upstream
+// answered the discovery probes with, and one Turn per completed request, in the order the
+// requests arrived.
 func (r *Recorder) Script() Script {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -129,7 +140,7 @@ func (r *Recorder) Script() Script {
 	for _, n := range numbers {
 		turns = append(turns, r.turns[n])
 	}
-	return Script{Model: r.model, Turns: turns}
+	return Script{Model: r.model, Discovery: r.discovery, Turns: turns}
 }
 
 // Close writes the recorded Script to the output path, under a header naming where it came
@@ -193,6 +204,18 @@ func (r *Recorder) begin(request *http.Request) *http.Request {
 	return request.WithContext(context.WithValue(request.Context(), captureKey{}, entry))
 }
 
+// beginProbe hands a discovery GET back with a capture attached for the reply half to fill in.
+// A probe takes no turn number — it is not a Turn — but it does count as in flight, so a
+// fixture closed the instant the client returned still carries the probe's answer.
+func (r *Recorder) beginProbe(request *http.Request) *http.Request {
+	entry := &capture{path: request.URL.Path}
+	r.mu.Lock()
+	r.inflight++
+	r.mu.Unlock()
+
+	return request.WithContext(context.WithValue(request.Context(), captureKey{}, entry))
+}
+
 // capture attaches the recording reader to a reply on its way back to the client. It runs as
 // the proxy's ModifyResponse, which is the only place with both the status and the body still
 // unread.
@@ -213,9 +236,15 @@ func (r *Recorder) capture(reply *http.Response) error {
 	return nil
 }
 
-// finish files a completed reply as its Turn, keyed by the request's arrival number so
-// overlapping requests still land in the script in the order the upstream saw them.
+// finish files a completed reply: a probe's answer into the Discovery block, a completion as
+// its Turn keyed by the request's arrival number so overlapping requests still land in the
+// script in the order the upstream saw them.
 func (r *Recorder) finish(entry *capture) {
+	if entry.path != "" {
+		r.fileProbe(entry)
+		r.settle(entry)
+		return
+	}
 	turn := entry.turn()
 
 	r.mu.Lock()
@@ -224,9 +253,39 @@ func (r *Recorder) finish(entry *capture) {
 	r.settle(entry)
 }
 
+// fileProbe reads a discovery reply into the Discovery block: a 200 from /v1/models is the
+// advertised list, any other status is recorded as the refusal it was, and a 200 from /props is
+// the launch facts — a /props that 404s (a server that is not llama.cpp) leaves Props nil, which
+// replays as the same 404. A reply that does not decode is dropped rather than guessed at: the
+// fixture then advertises the Script's model, as an unrecorded one does.
+func (r *Recorder) fileProbe(entry *capture) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	switch entry.path {
+	case modelsPath:
+		if entry.status != http.StatusOK {
+			r.discovery.Status, r.discovery.Body = entry.status, entry.body.String()
+			return
+		}
+		var reply modelsReply
+		if err := json.Unmarshal(entry.body.Bytes(), &reply); err == nil {
+			r.discovery.Models = reply.discovered()
+		}
+	case propsPath:
+		if entry.status != http.StatusOK {
+			return
+		}
+		var reply propsReply
+		if err := json.Unmarshal(entry.body.Bytes(), &reply); err == nil {
+			r.discovery.Props = reply.props()
+		}
+	}
+}
+
 // settle marks a request as no longer in flight, exactly once and whatever became of it. nil and
 // a capture already settled are both no-ops: the proxy can reach its error handler after a reply
-// was captured, and a request outside /v1/chat/completions carries no capture at all.
+// was captured, and a request that is neither a completion nor a probe carries no capture at all.
 func (r *Recorder) settle(entry *capture) {
 	if entry == nil {
 		return
@@ -271,9 +330,11 @@ func captureOf(request *http.Request) *capture {
 }
 
 // capture is one request/reply pair in flight: what was asked, and the reply bytes as they
-// arrive with the times they arrived at.
+// arrive with the times they arrived at. A discovery probe's capture carries its path and no
+// turn number; a completion's carries the reverse.
 type capture struct {
 	n           int
+	path        string
 	settled     sync.Once
 	lastMessage string
 	status      int

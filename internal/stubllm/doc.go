@@ -8,7 +8,10 @@
 // terminal usage object with the cached-prompt breakdown, plain HTTP failures, a stall, a
 // mid-stream connection loss and an in-band upstream error. The same Script answers on
 // POST /v1/messages in the Messages API's shapes — event-typed SSE with content blocks, or a
-// whole message — so a fixture is written once whichever wire the code under test dials.
+// whole message — so a fixture is written once whichever wire the code under test dials. A
+// Script's [Discovery] block is what the server advertises to the two probes apogee makes
+// before its first completion — the model list on GET /v1/models, rendered in the list shape of
+// the wire that asked, and llama.cpp's launch facts on GET /props — or a refused or held probe.
 // Nothing about apogee is imported here — the stub is a server, and the code under test
 // reaches it through internal/provider exactly as it reaches a real one.
 //
@@ -29,18 +32,22 @@
 //
 // # Files
 //
-//   - script.go — the Script/Turn/Match/Usage/HTTPReply/Cut/InBandError types, their YAML form,
-//     and validation.
+//   - script.go — the Script/Turn/Match/Usage/HTTPReply/Cut/InBandError types, the Discovery
+//     block a Script advertises, their YAML form, and validation.
 //   - match.go — which Turn answers which request: ordered by default, a `when:` turn first;
 //     and what that Turn's captures lift out of the request before it is played.
-//   - server.go — the HTTP surface: /v1/models, /v1/chat/completions and /v1/messages, SSE and
-//     whole replies on both wires, and the `await:` gate a test opens to order one turn's
-//     reply behind something apogee did.
+//   - server.go — the HTTP surface: the /v1/models and /props probes, /v1/chat/completions and
+//     /v1/messages, SSE and whole replies on both wires, and the `await:` gate a test opens to
+//     order one turn's reply behind something apogee did.
 //   - transport.go — the in-process transport: the same Handler served over a pipe instead of
 //     a socket, for an engine test that plays a Script without listening.
-//   - wire.go — the literal OpenAI request/reply JSON the server reads and writes.
-//   - wire_anthropic.go — the literal Anthropic Messages request/reply JSON, and the reduction
-//     of a Messages request to the same neutral log entry the chat route records.
-//   - log.go — the request log every served request lands in, and the assertions over it.
-//   - record.go — the recording proxy that turns a real server's traffic into a Script.
+//   - wire.go — the literal OpenAI request/reply JSON the server reads and writes, the
+//     /v1/models list and /props payloads included.
+//   - wire_anthropic.go — the literal Anthropic Messages request/reply JSON, its /v1/models
+//     list shape, and the reduction of a Messages request to the same neutral log entry the
+//     chat route records.
+//   - log.go — the request log every served request lands in, the probe log the discovery
+//     GETs land in, and the assertions over them.
+//   - record.go — the recording proxy that turns a real server's traffic — its discovery
+//     answers included — into a Script.
 package stubllm

@@ -5,15 +5,104 @@ package stubllm
 // wirejson.go apart from client.go: the schema is a contract with real servers and reads best
 // as one uninterrupted list, while the code around it is about timing and framing.
 
-// modelsReply is the GET /v1/models payload.
+// modelsReply is the GET /v1/models payload in the OpenAI list shape.
 type modelsReply struct {
 	Object string       `json:"object"`
 	Data   []modelEntry `json:"data"`
 }
 
+// modelEntry is one advertised model: the OpenAI members every server writes, plus the
+// optional ones internal/provider reads — OpenRouter's `name`, `context_length` and
+// `reasoning`, llama.cpp's `meta.n_ctx_train`. The optional members are omitted when unset so
+// a Script that names only an id renders the minimal entry a plain OpenAI server sends, and
+// `reasoning` is a pointer because its PRESENCE is the tell the client reads.
 type modelEntry struct {
-	ID     string `json:"id"`
-	Object string `json:"object"`
+	ID            string         `json:"id"`
+	Object        string         `json:"object"`
+	Name          string         `json:"name,omitempty"`
+	ContextLength int            `json:"context_length,omitempty"`
+	Meta          *modelMeta     `json:"meta,omitempty"`
+	Reasoning     *reasoningWire `json:"reasoning,omitempty"`
+}
+
+// modelMeta is llama.cpp's per-model `meta` object; the training window is the one member read.
+type modelMeta struct {
+	NCtxTrain int `json:"n_ctx_train"`
+}
+
+// reasoningWire is the per-model `reasoning` object, as OpenRouter writes it.
+type reasoningWire struct {
+	SupportedEfforts []string `json:"supported_efforts,omitempty"`
+	DefaultEffort    string   `json:"default_effort,omitempty"`
+	Mandatory        bool     `json:"mandatory,omitempty"`
+}
+
+// propsReply is the GET /props payload: the subset of llama.cpp's that internal/provider reads.
+type propsReply struct {
+	DefaultGenerationSettings struct {
+		NCtx int `json:"n_ctx"`
+	} `json:"default_generation_settings"`
+	TotalSlots   int    `json:"total_slots"`
+	ChatTemplate string `json:"chat_template"`
+}
+
+// openAIModels renders the advertised list in the OpenAI shape.
+func openAIModels(models []DiscoveredModel) modelsReply {
+	reply := modelsReply{Object: "list", Data: make([]modelEntry, 0, len(models))}
+	for _, model := range models {
+		entry := modelEntry{ID: model.ID, Object: "model", Name: model.Name, ContextLength: model.ContextLength}
+		if model.NCtxTrain != 0 {
+			entry.Meta = &modelMeta{NCtxTrain: model.NCtxTrain}
+		}
+		if model.Reasoning != nil {
+			entry.Reasoning = &reasoningWire{
+				SupportedEfforts: model.Reasoning.SupportedEfforts,
+				DefaultEffort:    model.Reasoning.DefaultEffort,
+				Mandatory:        model.Reasoning.Mandatory,
+			}
+		}
+		reply.Data = append(reply.Data, entry)
+	}
+	return reply
+}
+
+// reply renders the scripted launch facts as the /props payload.
+func (p Props) reply() propsReply {
+	var reply propsReply
+	reply.DefaultGenerationSettings.NCtx = p.NCtx
+	reply.TotalSlots = p.TotalSlots
+	reply.ChatTemplate = p.ChatTemplate
+	return reply
+}
+
+// discovered reads a recorded OpenAI-shaped list back into the Script's form, which is how a
+// real server's self-description reaches a fixture.
+func (r modelsReply) discovered() []DiscoveredModel {
+	models := make([]DiscoveredModel, 0, len(r.Data))
+	for _, entry := range r.Data {
+		model := DiscoveredModel{ID: entry.ID, Name: entry.Name, ContextLength: entry.ContextLength}
+		if entry.Meta != nil {
+			model.NCtxTrain = entry.Meta.NCtxTrain
+		}
+		if entry.Reasoning != nil {
+			model.Reasoning = &ModelReasoning{
+				SupportedEfforts: entry.Reasoning.SupportedEfforts,
+				DefaultEffort:    entry.Reasoning.DefaultEffort,
+				Mandatory:        entry.Reasoning.Mandatory,
+			}
+		}
+		models = append(models, model)
+	}
+	return models
+}
+
+// props reads a recorded /props payload back into the Script's form.
+func (r propsReply) props() *Props {
+	return &Props{
+		NCtx:         r.DefaultGenerationSettings.NCtx,
+		TotalSlots:   r.TotalSlots,
+		ChatTemplate: r.ChatTemplate,
+	}
 }
 
 // chatRequest is the subset of the POST /v1/chat/completions request the stub reads: enough to

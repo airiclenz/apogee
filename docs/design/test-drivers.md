@@ -72,19 +72,28 @@ with the mapped `stop_reason` (`end_turn` / `tool_use` / `max_tokens`) and `mess
 whole message on the non-streamed path; the `{"type":"error","error":{…}}` body for an
 `error` turn, its scripted code rendered as the API's class slug (the default 502 is
 `overloaded_error`, so it stays retryable); a `cut` kills the connection where `message_delta`
-would go. `GET /v1/models` serves discovery for both. The recorder (`stubllm record`) stays a
-chat-completions proxy.
+would go. `GET /v1/models` serves discovery for both, in the list shape of the wire that asked
+(see [Discovery](#discovery)); `GET /props` serves llama.cpp's launch facts on both. The recorder
+(`stubllm record`) stays a chat-completions proxy.
 
 ### The script format
 
-A `Script` is a model id and an ordered list of `Turn`s. The Go structs carry `yaml:"…"` tags, so
-a fixture on disk and a `Script` built in a test are one format; `stubllm.Load(path)` /
-`stubllm.Parse(data)` read it and `stubllm.Marshal` writes it. Parsing is strict — an unknown key
-is an error, because a misspelled `chunk_rune:` would otherwise stream with the default chunking
-and the test would pass for the wrong reason.
+A `Script` is a model id, what the server advertises to the discovery probes (the optional
+`discovery:` block — see [Discovery](#discovery)) and an ordered list of `Turn`s. The Go structs
+carry `yaml:"…"` tags, so a fixture on disk and a `Script` built in a test are one format;
+`stubllm.Load(path)` / `stubllm.Parse(data)` read it and `stubllm.Marshal` writes it. Parsing is
+strict — an unknown key is an error, because a misspelled `chunk_rune:` would otherwise stream
+with the default chunking and the test would pass for the wrong reason.
 
 ```yaml
 model: stub-model
+discovery:
+  models:
+    - id: stub-model
+      context_length: 32768
+  props:
+    n_ctx: 8192
+    total_slots: 2
 turns:
   - reasoning: "The user wants the file list."
     tool_calls:
@@ -102,6 +111,47 @@ turns:
 
 That script is loaded and parsed by `internal/stubllm/script_test.go`, so it cannot rot away from
 the format it documents.
+
+### Discovery
+
+Before its first completion apogee probes a server twice — `GET /v1/models` for the model list
+and the active model, then llama.cpp's `GET /props` for the runtime window, the slot count and
+the chat template's thinking-effort tell (`internal/provider/discovery.go`). The `discovery:`
+block scripts what those probes see, so a test about what apogee makes of a server's
+self-description — a window, a fan-out width, an effort dial, a server that is still loading —
+scripts the upstream like every other test instead of a handler of its own (ADR 0062).
+
+- `models:` — the list `/v1/models` advertises. Each entry carries exactly the members the client
+  reads: `id`, `name`, `display_name`, `context_length`, `n_ctx_train` and the per-model
+  `reasoning:` object (`supported_efforts`, `default_effort`, `mandatory`) whose mere presence is
+  the effort tell — `reasoning: {}` scripts a dial with no vocabulary. Rendered in the OpenAI list
+  shape (`{object: list, data: [{id, object: model, name, context_length, meta: {n_ctx_train},
+  reasoning}]}`), or — when the probe carries the `anthropic-version` header every Messages
+  client sends — in the Messages list shape (`{data: [{type: model, id, display_name}], has_more:
+  false}`), so one Script serves both wires. Empty means the one entry the Script's `model:` names,
+  which is what every fixture written before the block existed advertised.
+- `props:` — `n_ctx`, `total_slots`, `chat_template`, served on `GET /props` as
+  `{default_generation_settings: {n_ctx}, total_slots, chat_template}`; all three are written even
+  when zero, as a real llama.cpp writes them. Absent, `/props` 404s — what every server that is
+  not llama.cpp answers, and what the client tolerates.
+- `status:` and `body:` — answer `GET /v1/models` with that status and body instead of the list:
+  the 503 a loading server gives, the 401 a wrong key gets. `status:` is an HTTP status, so a
+  value below 100 is a parse error.
+- `hang: true` — hold `GET /v1/models` until the client gives up, writing nothing; refused beside
+  `status:`. The probe is logged before it blocks (see [The request log](#the-request-log)).
+
+A Script with a non-zero `discovery:` block may carry no `turns:` at all — a discovery-only
+fixture drives a probe, never a completion — while a Script that scripts nothing is still refused
+with "a script needs at least one turn".
+
+```yaml
+discovery:
+  models:
+    - id: qwen3-30b
+      n_ctx_train: 40960
+      reasoning: {supported_efforts: [low, medium, high], default_effort: medium}
+  props: {n_ctx: 32768, total_slots: 4, chat_template: "{% if enable_thinking %}…"}
+```
 
 ### Turn kinds
 
@@ -236,6 +286,12 @@ actually sent, in order, and which turn answered it.
   `reasoning_effort` or the Messages wire's `output_config.effort`, recorded verbatim — so a
   test about "what did the engine ask the sampler for" reads the log instead of a fake that
   captured the request before the client shaped it.
+- `server.Probes() []Probe` — the discovery GETs (`/v1/models`, `/props`), each with its `Path`,
+  the `Header`s it carried and `At`. They are logged apart from completions: `Requests()`, its
+  numbering and `LastMessage` stay about what the agent asked the model, so a test counting a
+  run's requests never sees discovery among them, while a test about discovery reads the headers
+  apogee probed under (the key, the `anthropic-version`) and sees a `hang: true` probe arrive
+  while it is still held.
 - `server.LastMessage(n)` — the text of request *n*'s last message; the shortest way to assert
   what was asked.
 - `server.Unmatched()` — the requests the script did not anticipate.
@@ -263,7 +319,8 @@ script, a taken port — exits **1** with just the error.
 ### Recording a fixture
 
 A fixture is something you **capture**, not something you write. `record` stands between a client
-and a real server, forwards `/v1/*` verbatim, and writes everything it saw as a Script:
+and a real server, forwards `/v1/*` verbatim — plus llama.cpp's `/props`, the one path off `/v1/`
+it lets through, because apogee probes it — and writes everything it saw as a Script:
 
 ```console
 $ stubllm record --upstream http://127.0.0.1:1111 --out smoke.yaml
@@ -282,7 +339,10 @@ between deltas as `token_delay`, the median delta size as `chunk_runes`), and a 
 an `http` turn. A non-streamed reply is recorded as a text turn with no `token_delay` — there were
 no chunks to space out. `model` is taken from the first request. Every turn gets a `when:`
 matcher over that request's last message, regexp-quoted, so the fixture answers the same question
-in the same way even when a replayed run reorders its requests.
+in the same way even when a replayed run reorders its requests. What the upstream answered the
+two discovery probes with lands in the `discovery:` block — a 200 from `/v1/models` as `models:`,
+any other status as `status:`/`body:`, a 200 from `/props` as `props:` (a 404 leaves it unset) —
+so the replay advertises what the recorded server did.
 
 The medians are the point: they make one recording reproduce the server's *behaviour* rather than
 one run's jitter. A recorded delay is rounded to 10 µs, because `token_delay: 10.37ms` reads as a
@@ -849,7 +909,7 @@ accepted proxies with no open work.
 | Colour and tone of a run (T-15) | PTY for the real terminal's SGR, or in-process `Frame.StyleRuns` — assert the run, never the raw escape. The scheme's own role is the comparand (`scheme.Default().Error`), so "painted red" means the failure role and not any red | `TestE2EOutcomeTonePTY`; `TestE2EOutcomeSlotsCarryTheToolsVerdict`; `TestE2EOutcomeCancelledDelegationCarriesTheFailureTone` | Whether the reader's own terminal theme renders that colour legibly |
 | A diff body's elision rule (T-15) | in-process — the rule is a ROW that is nothing but `⋯`, counted across a paged walk of the expanded block, since a twelve-line file's diff is taller than the terminal. The leader every tool row runs to its outcome slot is the same glyph and is not a rule: it has text either side of it | `TestE2EOutcomeSlotsCarryTheToolsVerdict` | — |
 | The rung, the blast radius and the rows that read them (T-16) | in-process — the footer's mode marker (`footerRow` + `StyleRuns` for the `unconfined` tone), the `/confine` notes, and the `/settings` `mode` and `confine-to-workspace` rows walked to by registry path. The word the host earns is read from `apogee probe`, never assumed | `TestE2ELiveStateFollowsTheRunningSession` | — |
-| A launcher profile move (T-16) | in-process — the package var `liveLauncherOps` takes the bridge's own `fakeLauncher` behind the REAL wiring, so the picker's rows, the load and the rebind through `sessionMover` all run; a second stubllm server IS the profile's address, and its request log is what says the session moved | `TestE2ELiveStateLauncherMoveKeepsTheSessionWorking` | More than one delegation live at once after the move: the fan-out width resolves from the entry's pin and the server's `total_slots`, and stubllm answers no `/props`, so a moved session's cap is 1. The re-follow itself is unit-covered (`upstream_test.go`) |
+| A launcher profile move (T-16) | in-process — the package var `liveLauncherOps` takes the bridge's own `fakeLauncher` behind the REAL wiring, so the picker's rows, the load and the rebind through `sessionMover` all run; a second stubllm server IS the profile's address, and its request log is what says the session moved | `TestE2ELiveStateLauncherMoveKeepsTheSessionWorking` | More than one delegation live at once after the move: the fan-out width resolves from the entry's pin and the server's `total_slots`, which a `discovery: {props: {total_slots: N}}` block on the second server could now script — the test does not yet, so a moved session's cap is 1. The re-follow itself is unit-covered (`upstream_test.go`) |
 | Wide-rune and glyph alignment (T-20) | `tuitest` — the emulator's cell width is the authority; assert `Frame` cells, never rune counts. A layout claim needs a terminal in Unicode-core mode (see *Frame*) or the two measures cannot disagree | `TestE2EWidthTicksMultiSelectChoices`; `TestE2EWidthSurvivesAColourSchemeSwitch` | Font tofu — whether the reader's font has the glyph at all |
 | Resize and reflow (T-24, T-25) | in-process `Driver.Resize` (emulator resize + a `tea.WindowSizeMsg`, then a wait for the repaint it caused); PTY `PTYDriver.Resize` = `pty.Setsize` + a real `SIGWINCH` | `TestE2EStreamPTY` | — |
 | tty state on the way out (T-25) | PTY only — `PTYDriver.TTYState()` after `Quit()`: echo and canonical mode restored, no dangling SGR, exit code 0 | `TestE2ESmokePTY` | Whether the user's own shell prompt looks right afterwards — no shell runs inside the PTY |

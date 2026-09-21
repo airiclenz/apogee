@@ -2,6 +2,7 @@ package stubllm
 
 import (
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -86,6 +87,19 @@ type Message struct {
 	ToolCalls  []ToolCall // set on an assistant message that issued calls
 }
 
+// Probe is one discovery GET the stub received — GET /v1/models or GET /props — as the test
+// sees it afterwards. Probes are logged apart from completions so [Server.Requests] and the
+// request numbering stay about what the agent asked the model, while a test about discovery
+// can still see the probe arrive and read the headers apogee sent it under.
+type Probe struct {
+	// Path is the path probed: "/v1/models" or "/props".
+	Path string
+	// Header is every header the probe carried, as received.
+	Header http.Header
+	// At is when the probe arrived.
+	At time.Time
+}
+
 // Requests returns a copy of the request log, oldest first. It is empty when the Server was
 // built with WithRequestLog(false).
 func (s *Server) Requests() []Request {
@@ -94,6 +108,18 @@ func (s *Server) Requests() []Request {
 
 	out := make([]Request, len(s.requests))
 	copy(out, s.requests)
+	return out
+}
+
+// Probes returns a copy of the discovery log, oldest first: every GET /v1/models and GET /props
+// the stub received, whatever it answered them with. It is empty when the Server was built with
+// WithRequestLog(false).
+func (s *Server) Probes() []Probe {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := make([]Probe, len(s.probes))
+	copy(out, s.probes)
 	return out
 }
 

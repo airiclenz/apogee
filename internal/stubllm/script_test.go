@@ -21,6 +21,14 @@ func TestScriptRoundTripsThroughYAML(t *testing.T) {
 
 	want := Script{
 		Model: "stub-model",
+		Discovery: Discovery{
+			Models: []DiscoveredModel{
+				{ID: "stub-model", Name: "Stub", DisplayName: "Stub Model", ContextLength: 32768, NCtxTrain: 40960,
+					Reasoning: &ModelReasoning{SupportedEfforts: []string{"low", "high"}, DefaultEffort: "low", Mandatory: true}},
+				{ID: "other"},
+			},
+			Props: &Props{NCtx: 8192, TotalSlots: 2, ChatTemplate: "{% if enable_thinking %}"},
+		},
 		Turns: []Turn{
 			{
 				Reasoning:      "thinking about it",
@@ -135,6 +143,16 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 			name: "no turns at all",
 			yaml: "model: stub-model\n",
 			want: "a script needs at least one turn",
+		},
+		{
+			name: "a discovery hang beside a status",
+			yaml: "discovery: {status: 503, hang: true}\n",
+			want: "discovery: sets both hang and status",
+		},
+		{
+			name: "a discovery status below 100",
+			yaml: "discovery: {status: 50}\n",
+			want: "discovery: status 50 is not an HTTP status",
 		},
 		{
 			name: "an unknown key",
@@ -255,6 +273,37 @@ func TestParseRejectsAnUnplayableScript(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error = %v, want it to mention %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// TestDiscoveryOnlyScriptIsLegal pins the one case that lifts the one-turn rule: a Script whose
+// discovery block scripts something may carry no Turns, because a fixture about what apogee
+// makes of a server's self-description never reaches a completion. The refusal for a Script
+// that scripts NOTHING is TestParseRejectsAnUnplayableScript's "no turns at all" row.
+func TestDiscoveryOnlyScriptIsLegal(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		yaml string
+	}{
+		{name: "models", yaml: "discovery:\n  models:\n    - id: stub-model\n"},
+		{name: "props", yaml: "discovery:\n  props: {n_ctx: 4096, total_slots: 2}\n"},
+		{name: "a refused probe", yaml: "discovery: {status: 503, body: loading}\n"},
+		{name: "a held probe", yaml: "discovery: {hang: true}\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			script, err := Parse([]byte(tc.yaml))
+
+			if err != nil {
+				t.Fatalf("parse refused %q: %v", tc.yaml, err)
+			}
+			if len(script.Turns) != 0 || script.Discovery.isZero() {
+				t.Errorf("script = %+v, want no turns and a non-zero discovery block", script)
 			}
 		})
 	}

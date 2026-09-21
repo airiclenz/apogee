@@ -30,6 +30,17 @@ var awaitLimit = 10 * time.Second
 // field exists so the payload is shaped like a real one.
 const completionID = "chatcmpl-stubllm"
 
+// The two discovery paths apogee probes before its first completion, served here and proxied
+// by the recorder. modelsPath is probed on both wires; propsPath is llama.cpp's, off /v1/.
+const (
+	modelsPath = "/v1/models"
+	propsPath  = "/props"
+)
+
+// anthropicVersionHeader is the header every Messages-wire request carries and no
+// chat-completions request does — the tell by which GET /v1/models chooses its list shape.
+const anthropicVersionHeader = "anthropic-version"
+
 // Option configures a Server.
 type Option func(*settings)
 
@@ -70,12 +81,14 @@ type Server struct {
 	// Model is the id this upstream advertises, copied from the Script.
 	Model string
 
-	set settings
+	set       settings
+	discovery Discovery
 
 	mu       sync.Mutex
 	count    int
 	matcher  *matcher
 	requests []Request
+	probes   []Probe
 	// gates holds one channel per `await:` label, closed by [Server.Release]. Labels are
 	// created on first use from either side, so a Release that runs before the request it
 	// frees — the ordinary case, since the test is watching apogee and not the wire — opens a
@@ -187,7 +200,13 @@ func newServer(s Script, opts ...Option) (*Server, error) {
 		return nil, err
 	}
 
-	server := &Server{Model: s.Model, set: settings{requestLog: true}, matcher: m, gates: map[string]chan struct{}{}}
+	server := &Server{
+		Model:     s.Model,
+		set:       settings{requestLog: true},
+		discovery: s.Discovery,
+		matcher:   m,
+		gates:     map[string]chan struct{}{},
+	}
 	for _, opt := range opts {
 		opt(&server.set)
 	}
@@ -224,17 +243,20 @@ func (s *Server) gate(label string) chan struct{} {
 	return made
 }
 
-// Handler is the routing surface: discovery, the chat-completions route the openai wire posts
-// to and the Messages route the anthropic wire posts to, behind the optional api-key gate. Both
-// completion routes play the SAME Script — each decodes its own request shape into the neutral
-// [Request] and renders the Turn it took in its own reply shape, so a fixture is written once
-// whichever wire the test drives. Everything else 404s, which is what a real server does for
-// the llama.cpp-only paths (/props) the client probes and tolerates. [New] and [Serve] put it
-// behind a listener; [InProcess] hands it out bare, for a test that reaches it through
-// [Server.Transport] or mounts it under a mux of its own.
+// Handler is the routing surface: the two discovery probes, the chat-completions route the
+// openai wire posts to and the Messages route the anthropic wire posts to, behind the optional
+// api-key gate. Both completion routes play the SAME Script — each decodes its own request
+// shape into the neutral [Request] and renders the Turn it took in its own reply shape, so a
+// fixture is written once whichever wire the test drives. The probes answer from the Script's
+// [Discovery] block: GET /v1/models in the list shape of the wire that asked, GET /props with
+// the scripted launch facts or a 404 when none are scripted — what a real server that is not
+// llama.cpp does for the path the client probes and tolerates. Everything else 404s. [New] and
+// [Serve] put it behind a listener; [InProcess] hands it out bare, for a test that reaches it
+// through [Server.Transport] or mounts it under a mux of its own.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /v1/models", s.handleModels)
+	mux.HandleFunc("GET "+modelsPath, s.handleModels)
+	mux.HandleFunc("GET "+propsPath, s.handleProps)
 	mux.HandleFunc("POST /v1/chat/completions", s.handleChat)
 	mux.HandleFunc("POST /v1/messages", s.handleMessages)
 	return s.authorized(mux)
@@ -256,13 +278,52 @@ func (s *Server) carriesKey(r *http.Request) bool {
 	return r.Header.Get("Authorization") == "Bearer "+s.set.apiKey || r.Header.Get("x-api-key") == s.set.apiKey
 }
 
-// handleModels answers the discovery probe with the one model the Script names.
-func (s *Server) handleModels(w http.ResponseWriter, _ *http.Request) {
+// handleModels answers the models probe from the Discovery block: a scripted failure (a
+// status, or a hang that ends with the request), else the advertised list in the shape of the
+// wire that asked — the Messages list when the request carries the anthropic-version header
+// every Messages client sends, the OpenAI list otherwise. The probe is logged first, before a
+// hang blocks, so a test can see it arrive.
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	s.probe(r)
+	if s.discovery.Hang {
+		<-r.Context().Done()
+		return
+	}
+	if s.discovery.Status != 0 {
+		w.WriteHeader(s.discovery.Status)
+		_, _ = io.WriteString(w, s.discovery.Body)
+		return
+	}
+
+	models := s.discovery.models(s.Model)
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(modelsReply{
-		Object: "list",
-		Data:   []modelEntry{{ID: s.Model, Object: "model"}},
-	})
+	if r.Header.Get(anthropicVersionHeader) != "" {
+		_ = json.NewEncoder(w).Encode(anthropicModels(models))
+		return
+	}
+	_ = json.NewEncoder(w).Encode(openAIModels(models))
+}
+
+// handleProps answers llama.cpp's props probe with the scripted launch facts, or 404s when the
+// Script scripts none — the answer every server that is not llama.cpp gives.
+func (s *Server) handleProps(w http.ResponseWriter, r *http.Request) {
+	s.probe(r)
+	if s.discovery.Props == nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(s.discovery.Props.reply())
+}
+
+// probe logs a discovery GET, unless the log is off.
+func (s *Server) probe(r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.set.requestLog {
+		s.probes = append(s.probes, Probe{Path: r.URL.Path, Header: r.Header.Clone(), At: time.Now()})
+	}
 }
 
 // handleChat decodes a chat-completions request and serves it.

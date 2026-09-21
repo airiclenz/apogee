@@ -6,6 +6,13 @@
 # Fixtures that a test actually drives are RECORDED (`stubllm record`) and named
 # <server>-<what>.yaml; this one is written by hand because it documents the format.
 model: stub-model
+discovery:
+    models:
+        - id: stub-model
+          context_length: 32768
+    props:
+        n_ctx: 8192
+        total_slots: 2
 turns:
     - reasoning: The user wants the file list.
       tool_calls:

@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"strings"
 	"testing"
@@ -279,6 +280,92 @@ func TestRecorderReportsAnEmptyRecording(t *testing.T) {
 	if _, err := os.Stat(path); err == nil {
 		t.Errorf("%s was written for an empty recording", path)
 	}
+}
+
+// TestRecorderCapturesDiscovery pins that a fixture carries what the recorded server advertised:
+// the probes apogee makes before its first completion are forwarded — /props included, the one
+// path off /v1/ the proxy lets through — and their answers land in the Script's discovery block,
+// so a replay describes itself as the recorded server did. The refusal case is recorded as the
+// refusal it was, and a server without /props leaves the block's props unset.
+func TestRecorderCapturesDiscovery(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a list and props", func(t *testing.T) {
+		t.Parallel()
+
+		want := Discovery{
+			Models: []DiscoveredModel{
+				{ID: "rec-model", Name: "Recorded", ContextLength: 32768, NCtxTrain: 40960,
+					Reasoning: &ModelReasoning{SupportedEfforts: []string{"low"}, DefaultEffort: "low", Mandatory: true}},
+				{ID: "other"},
+			},
+			Props: &Props{NCtx: 8192, TotalSlots: 2, ChatTemplate: "{% if enable_thinking %}"},
+		}
+		origin := New(t, Script{Model: "rec-model", Discovery: want, Turns: []Turn{{Text: "ok"}}})
+		path := filepath.Join(t.TempDir(), "fixture.yaml")
+		proxy := recorderProxy(t, origin.URL, path)
+
+		for _, probe := range []string{modelsPath, propsPath} {
+			if status := getStatusAt(t, proxy.URL+probe); status != http.StatusOK {
+				t.Fatalf("GET %s through the proxy = %d, want 200", probe, status)
+			}
+		}
+		postTo(t, http.DefaultClient, proxy.URL, origin.Model, "hi", false)
+		if err := proxy.recorder.Close(); err != nil {
+			t.Fatalf("close recorder: %v", err)
+		}
+
+		script, err := Load(path)
+		if err != nil {
+			t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+		}
+		if !reflect.DeepEqual(script.Discovery, want) {
+			t.Errorf("recorded discovery = %+v, want %+v\n%s", script.Discovery, want, read(t, path))
+		}
+	})
+
+	t.Run("a refused probe and no props", func(t *testing.T) {
+		t.Parallel()
+
+		origin := New(t, Script{Model: "rec-model", Discovery: Discovery{Status: http.StatusServiceUnavailable, Body: "loading"}, Turns: []Turn{{Text: "ok"}}})
+		path := filepath.Join(t.TempDir(), "fixture.yaml")
+		proxy := recorderProxy(t, origin.URL, path)
+
+		if status := getStatusAt(t, proxy.URL+modelsPath); status != http.StatusServiceUnavailable {
+			t.Fatalf("GET /v1/models through the proxy = %d, want the upstream's 503", status)
+		}
+		if status := getStatusAt(t, proxy.URL+propsPath); status != http.StatusNotFound {
+			t.Fatalf("GET /props through the proxy = %d, want the upstream's 404", status)
+		}
+		postTo(t, http.DefaultClient, proxy.URL, origin.Model, "hi", false)
+		if err := proxy.recorder.Close(); err != nil {
+			t.Fatalf("close recorder: %v", err)
+		}
+
+		script, err := Load(path)
+		if err != nil {
+			t.Fatalf("the recorded fixture does not load: %v\n%s", err, read(t, path))
+		}
+		want := Discovery{Status: http.StatusServiceUnavailable, Body: "loading"}
+		if !reflect.DeepEqual(script.Discovery, want) {
+			t.Errorf("recorded discovery = %+v, want %+v", script.Discovery, want)
+		}
+	})
+}
+
+// getStatusAt GETs a URL and returns only the status, draining the body so the proxy files it.
+func getStatusAt(t *testing.T, url string) int {
+	t.Helper()
+
+	resp, err := http.Get(url)
+	if err != nil {
+		t.Fatalf("get %s: %v", url, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if _, err := readAll(resp); err != nil {
+		t.Fatalf("read %s: %v", url, err)
+	}
+	return resp.StatusCode
 }
 
 // recording is a Recorder mounted on a loopback listener: the address a client is pointed at,

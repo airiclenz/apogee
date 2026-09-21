@@ -482,25 +482,229 @@ func TestServerAPIKeyGateRefusesAnUnauthenticatedRequest(t *testing.T) {
 	}
 }
 
-// TestServerAdvertisesTheScriptedModel pins the discovery endpoint apogee probes at startup.
+// TestServerAdvertisesTheScriptedModel pins the discovery endpoint apogee probes at startup, in
+// both of its forms: a Script without a discovery block advertises its one model in the minimal
+// entry a plain OpenAI server sends, and a scripted list renders exactly the members
+// internal/provider reads — asserted as raw JSON, because this package imports nothing of
+// apogee's and the client's reading of it is the provider's test to make.
 func TestServerAdvertisesTheScriptedModel(t *testing.T) {
 	t.Parallel()
 
-	server := New(t, Script{Model: "stub-model", Turns: []Turn{{Text: "ok"}}})
+	t.Run("the script's model by default", func(t *testing.T) {
+		t.Parallel()
 
-	resp, err := http.Get(server.URL + "/v1/models")
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Text: "ok"}}})
+
+		got := getJSON(t, server, modelsPath, nil)
+
+		want := `{"object":"list","data":[{"id":"stub-model","object":"model"}]}`
+		if got != want {
+			t.Errorf("GET /v1/models = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("a scripted list", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Model: "stub-model", Discovery: Discovery{Models: []DiscoveredModel{
+			{ID: "stub-model", Name: "Stub", ContextLength: 32768, NCtxTrain: 40960,
+				Reasoning: &ModelReasoning{SupportedEfforts: []string{"low", "high"}, DefaultEffort: "low", Mandatory: true}},
+			{ID: "plain", Reasoning: &ModelReasoning{}},
+			{ID: "other"},
+		}}})
+
+		got := getJSON(t, server, modelsPath, nil)
+
+		want := `{"object":"list","data":[` +
+			`{"id":"stub-model","object":"model","name":"Stub","context_length":32768,"meta":{"n_ctx_train":40960},` +
+			`"reasoning":{"supported_efforts":["low","high"],"default_effort":"low","mandatory":true}},` +
+			`{"id":"plain","object":"model","reasoning":{}},` +
+			`{"id":"other","object":"model"}]}`
+		if got != want {
+			t.Errorf("GET /v1/models = %s, want %s", got, want)
+		}
+	})
+}
+
+// TestServerServesTheScriptedProps pins the llama.cpp probe: a Script with a props block answers
+// GET /props with the three launch facts the client reads, all three written even when zero, and
+// one without it 404s the way every server that is not llama.cpp does.
+func TestServerServesTheScriptedProps(t *testing.T) {
+	t.Parallel()
+
+	t.Run("scripted", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Discovery: Discovery{Props: &Props{NCtx: 8192, TotalSlots: 4, ChatTemplate: "{% if enable_thinking %}"}}})
+
+		got := getJSON(t, server, propsPath, nil)
+
+		want := `{"default_generation_settings":{"n_ctx":8192},"total_slots":4,"chat_template":"{% if enable_thinking %}"}`
+		if got != want {
+			t.Errorf("GET /props = %s, want %s", got, want)
+		}
+	})
+
+	t.Run("unscripted", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Model: "stub-model", Turns: []Turn{{Text: "ok"}}})
+
+		if got := getStatus(t, server, propsPath); got != http.StatusNotFound {
+			t.Errorf("GET /props status = %d, want 404", got)
+		}
+	})
+}
+
+// TestServerModelsStatusAndHang pins the two ways a Script fails the models probe: a status
+// answers with that code and body in place of the list, and a hang holds the probe until the
+// client gives up — after logging it, so a test can watch the probe arrive while it is held.
+func TestServerModelsStatusAndHang(t *testing.T) {
+	t.Parallel()
+
+	t.Run("status", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Discovery: Discovery{Status: http.StatusServiceUnavailable, Body: "loading"}})
+
+		resp, err := http.Get(server.URL + modelsPath)
+		if err != nil {
+			t.Fatalf("get models: %v", err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		body, _ := io.ReadAll(resp.Body)
+
+		if resp.StatusCode != http.StatusServiceUnavailable || string(body) != "loading" {
+			t.Errorf("GET /v1/models = %d %q, want 503 \"loading\"", resp.StatusCode, body)
+		}
+	})
+
+	t.Run("hang", func(t *testing.T) {
+		t.Parallel()
+
+		server := New(t, Script{Discovery: Discovery{Hang: true}})
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		request, err := http.NewRequestWithContext(ctx, http.MethodGet, server.URL+modelsPath, nil)
+		if err != nil {
+			t.Fatalf("build request: %v", err)
+		}
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := http.DefaultClient.Do(request)
+			done <- err
+		}()
+		deadline := time.Now().Add(5 * time.Second)
+		for len(server.Probes()) == 0 {
+			if time.Now().After(deadline) {
+				t.Fatal("the held probe never reached the log")
+			}
+			time.Sleep(time.Millisecond)
+		}
+		select {
+		case err := <-done:
+			t.Fatalf("the probe returned %v while it should still be held", err)
+		default:
+		}
+
+		cancel()
+		if err := <-done; err == nil {
+			t.Error("the held probe answered, want the cancelled context to end it")
+		}
+	})
+}
+
+// TestServerRendersTheAnthropicModelList pins the wire tell: a probe carrying the header every
+// Messages client sends gets the Messages API's list shape — typed entries with display_name,
+// has_more — and the same Script answers the bare probe in the OpenAI shape.
+func TestServerRendersTheAnthropicModelList(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Discovery: Discovery{Models: []DiscoveredModel{
+		{ID: "claude-stub", DisplayName: "Claude Stub", ContextLength: 200000},
+		{ID: "plain"},
+	}}})
+
+	got := getJSON(t, server, modelsPath, http.Header{anthropicVersionHeader: {"2023-06-01"}})
+
+	want := `{"data":[{"type":"model","id":"claude-stub","display_name":"Claude Stub"},{"type":"model","id":"plain"}],"has_more":false}`
+	if got != want {
+		t.Errorf("GET /v1/models under anthropic-version = %s, want %s", got, want)
+	}
+	if bare := getJSON(t, server, modelsPath, nil); !strings.HasPrefix(bare, `{"object":"list"`) {
+		t.Errorf("GET /v1/models without the header = %s, want the OpenAI shape", bare)
+	}
+}
+
+// TestServerLogsDiscoveryRequests pins that the probes land in their own log, with the headers
+// they carried, and never in the completion log — a test counting the requests a run made must
+// not see discovery among them, and one about discovery must see what apogee sent it under.
+func TestServerLogsDiscoveryRequests(t *testing.T) {
+	t.Parallel()
+
+	server := New(t, Script{Model: "stub-model", Discovery: Discovery{Props: &Props{NCtx: 4096}}, Turns: []Turn{{Text: "ok"}}})
+
+	getJSON(t, server, modelsPath, http.Header{"Authorization": {"Bearer k"}})
+	getJSON(t, server, propsPath, nil)
+	post(t, server, `{"model":"stub-model","messages":[{"role":"user","content":"hi"}]}`)
+
+	probes := server.Probes()
+	if len(probes) != 2 || probes[0].Path != modelsPath || probes[1].Path != propsPath {
+		t.Fatalf("probes = %+v, want the models probe then the props probe", probes)
+	}
+	if got := probes[0].Header.Get("Authorization"); got != "Bearer k" {
+		t.Errorf("models probe Authorization = %q, want the header it was sent under", got)
+	}
+	if probes[0].At.IsZero() || probes[1].At.Before(probes[0].At) {
+		t.Errorf("probe times = %s, %s, want stamped in arrival order", probes[0].At, probes[1].At)
+	}
+	if requests := server.Requests(); len(requests) != 1 || requests[0].N != 1 {
+		t.Errorf("requests = %+v, want the one completion, numbered 1 — discovery is not a request", requests)
+	}
+}
+
+// getJSON GETs one of server's routes with the given headers and returns the body with its
+// trailing newline trimmed, so a test can compare the literal JSON the client will decode.
+func getJSON(t *testing.T, server *Server, path string, header http.Header) string {
+	t.Helper()
+
+	request, err := http.NewRequestWithContext(t.Context(), http.MethodGet, server.URL+path, nil)
 	if err != nil {
-		t.Fatalf("get models: %v", err)
+		t.Fatalf("build request: %v", err)
+	}
+	for name, values := range header {
+		request.Header[name] = values
+	}
+	resp, err := http.DefaultClient.Do(request)
+	if err != nil {
+		t.Fatalf("get %s: %v", path, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	var models modelsReply
-	if err := json.NewDecoder(resp.Body).Decode(&models); err != nil {
-		t.Fatalf("decode models: %v", err)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET %s status = %d, want 200", path, resp.StatusCode)
 	}
-	if len(models.Data) != 1 || models.Data[0].ID != "stub-model" {
-		t.Errorf("models = %+v, want the one scripted model", models.Data)
+	if got := resp.Header.Get("Content-Type"); got != "application/json" {
+		t.Errorf("GET %s Content-Type = %q, want application/json", path, got)
 	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	return strings.TrimSuffix(string(body), "\n")
+}
+
+// getStatus GETs one of server's routes and returns only the status.
+func getStatus(t *testing.T, server *Server, path string) int {
+	t.Helper()
+
+	resp, err := http.Get(server.URL + path)
+	if err != nil {
+		t.Fatalf("get %s: %v", path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	return resp.StatusCode
 }
 
 // TestMatcherReportsUnservedTurns pins what AssertConsumed reports on: a script whose later

@@ -47,11 +47,80 @@ var placeholderPattern = regexp.MustCompile(`\{\{([^{}]*)\}\}`)
 //	    chunk_runes: 2
 //	    token_delay: 1ms
 type Script struct {
-	// Model is the id advertised on GET /v1/models and echoed on every reply. A test that
-	// seeds apogee's config from a Server uses it as the model name.
+	// Model is the id advertised on GET /v1/models — when Discovery names no models of its
+	// own — and echoed on every reply. A test that seeds apogee's config from a Server uses
+	// it as the model name.
 	Model string `yaml:"model,omitempty"`
-	// Turns are the replies, in order. See [Server] for which Turn answers which request.
-	Turns []Turn `yaml:"turns"`
+	// Discovery is what the server advertises to the two probes apogee makes before its first
+	// completion. The zero value is today's server: one model, Model, and no /props.
+	Discovery Discovery `yaml:"discovery,omitempty"`
+	// Turns are the replies, in order. See [Server] for which Turn answers which request. A
+	// Script with a non-zero Discovery block may carry none: a discovery-only fixture drives a
+	// probe, never a completion.
+	Turns []Turn `yaml:"turns,omitempty"`
+}
+
+// Discovery is what a [Server] answers the discovery probes with: the model list GET /v1/models
+// advertises and the launch facts llama.cpp's GET /props reports. It is the stub's half of a
+// test about what apogee makes of a server's self-description — a window, a slot count, a
+// thinking-effort tell, a refused or stalled probe — so those tests script the upstream
+// instead of a handler of their own (ADR 0062).
+//
+// Status, Body and Hang script a FAILED models probe. Status answers GET /v1/models with that
+// code and Body instead of the list; Hang holds the probe until the client gives up, and is
+// refused beside Status because the two cannot both happen. Both leave GET /props alone.
+type Discovery struct {
+	// Models is the list GET /v1/models advertises. Empty means the one entry `{id: Model}`
+	// the Script's Model names, which is what every fixture written before this block
+	// existed advertised.
+	Models []DiscoveredModel `yaml:"models,omitempty"`
+	// Props is what GET /props reports; nil means the path 404s, as on a server that is not
+	// llama.cpp.
+	Props *Props `yaml:"props,omitempty"`
+	// Status, when non-zero, is the HTTP status GET /v1/models answers with in place of the
+	// list. It is an HTTP status, so it is at least 100.
+	Status int `yaml:"status,omitempty"`
+	// Body is the body a Status reply carries.
+	Body string `yaml:"body,omitempty"`
+	// Hang holds GET /v1/models until the request's context ends, writing nothing — the
+	// server that accepted the connection and never answered. The probe is logged before it
+	// blocks, so a test can see it arrive.
+	Hang bool `yaml:"hang,omitempty"`
+}
+
+// DiscoveredModel is one entry of the advertised model list. The members are exactly what
+// internal/provider reads off a real entry: the id, the two spellings of a display name (the
+// OpenAI-shaped `name`, the Messages API's `display_name`), the two spellings of a context
+// window (OpenRouter's `context_length`, llama.cpp's `meta.n_ctx_train`) and the per-model
+// `reasoning` object whose presence is the thinking-effort tell.
+type DiscoveredModel struct {
+	ID            string          `yaml:"id"`
+	Name          string          `yaml:"name,omitempty"`
+	DisplayName   string          `yaml:"display_name,omitempty"`
+	ContextLength int             `yaml:"context_length,omitempty"`
+	NCtxTrain     int             `yaml:"n_ctx_train,omitempty"`
+	Reasoning     *ModelReasoning `yaml:"reasoning,omitempty"`
+}
+
+// ModelReasoning is the per-model `reasoning` object an OpenRouter-shaped entry carries. Its
+// presence alone says the model has a thinking-effort dial, so an empty `reasoning: {}` is a
+// meaningful thing to script; the members name the dial's vocabulary, its default and whether
+// the model cannot be asked to skip it.
+type ModelReasoning struct {
+	SupportedEfforts []string `yaml:"supported_efforts,omitempty"`
+	DefaultEffort    string   `yaml:"default_effort,omitempty"`
+	Mandatory        bool     `yaml:"mandatory,omitempty"`
+}
+
+// Props is what llama.cpp's GET /props reports about how the server was launched: the per-slot
+// context window (`default_generation_settings.n_ctx`), the number of generation slots
+// (`total_slots`) and the Jinja chat template it loaded (`chat_template`, read for the
+// thinking-effort tell). Every member is served whether or not it is set — a real /props
+// carries all three — so a zero here is a server that reports zero.
+type Props struct {
+	NCtx         int    `yaml:"n_ctx,omitempty"`
+	TotalSlots   int    `yaml:"total_slots,omitempty"`
+	ChatTemplate string `yaml:"chat_template,omitempty"`
 }
 
 // Turn is one scripted reply. A Turn is exactly ONE kind — a completion, an HTTP reply or a
@@ -290,7 +359,10 @@ func Marshal(s Script) ([]byte, error) {
 // Parse, [New] and [Serve] — so an unplayable script fails where it was written rather than
 // halfway through a driver test.
 func (s Script) Validate() error {
-	if len(s.Turns) == 0 {
+	if err := s.Discovery.validate(); err != nil {
+		return fmt.Errorf("stubllm: discovery: %w", err)
+	}
+	if len(s.Turns) == 0 && s.Discovery.isZero() {
 		return errors.New("stubllm: a script needs at least one turn")
 	}
 	for i := range s.Turns {
@@ -299,6 +371,37 @@ func (s Script) Validate() error {
 		}
 	}
 	return nil
+}
+
+// minHTTPStatus is the smallest code an HTTP status line can carry; a `status:` below it is a
+// typo, not a reply any server sends.
+const minHTTPStatus = 100
+
+// validate reports the first thing wrong with a Discovery block.
+func (d Discovery) validate() error {
+	if d.Hang && d.Status != 0 {
+		return errors.New("sets both hang and status — a probe is either held or answered")
+	}
+	if d.Status != 0 && d.Status < minHTTPStatus {
+		return fmt.Errorf("status %d is not an HTTP status", d.Status)
+	}
+	return nil
+}
+
+// isZero reports whether the block scripts nothing, so the Script advertises what one without
+// the block would. It is the same test yaml's omitempty applies, and the one that decides
+// whether a Script may go without Turns.
+func (d Discovery) isZero() bool {
+	return len(d.Models) == 0 && d.Props == nil && d.Status == 0 && d.Body == "" && !d.Hang
+}
+
+// models is the list GET /v1/models advertises: the scripted entries, or the one entry the
+// Script's Model names when none are scripted.
+func (d Discovery) models(fallback string) []DiscoveredModel {
+	if len(d.Models) > 0 {
+		return d.Models
+	}
+	return []DiscoveredModel{{ID: fallback}}
 }
 
 // validate reports the first thing wrong with a Turn.
