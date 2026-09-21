@@ -1318,10 +1318,10 @@ func messagesCarry(messages []any, want string) bool {
 //
 // It is [headlessAgainst]'s twin rather than a call to it: that one returns stderr ALONE, pins the
 // naming journey's own prompt, and wraps the run's Event sink to drive a gate (e2e_naming_test.go)
-// — three things this file needs otherwise. Nothing else differs, the runner least of all: it BINDS
-// `runOnce` to the production [run.Once] and restores it after, because what a Reaction observes is
-// exactly the engine's own event stream and a stubbed runner produces none of it — a claim that has
-// to rest on this helper's own code rather than on whatever ran before it.
+// — three things this file needs otherwise. Nothing else differs, the runner least of all: it
+// INJECTS the production [run.Once] (headlessDeps), stated rather than defaulted, because what a
+// Reaction observes is exactly the engine's own event stream and a stubbed runner produces none of
+// it — a claim that has to rest on this helper's own code rather than on a fallback read elsewhere.
 func headlessHooksAgainst(t *testing.T, stub *stubllm.Server, prompt, extraConfig string) (stdout, stderr, workspace string) {
 	t.Helper()
 	return headlessHooksArgs(t, stub, prompt, extraConfig)
@@ -1345,10 +1345,6 @@ func headlessHooksIn(t *testing.T, stub *stubllm.Server, home, prompt, extraConf
 	extra ...string) (stdout, stderr, workspace string) {
 	t.Helper()
 
-	prev := runOnce
-	runOnce = run.Once
-	t.Cleanup(func() { runOnce = prev })
-
 	// The environment must not move the home or the mode out from under the run.
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
@@ -1361,7 +1357,7 @@ func headlessHooksIn(t *testing.T, stub *stubllm.Server, home, prompt, extraConf
 		"server: stub\n")
 
 	workspace = e2eWorkspace(t)
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)

@@ -109,10 +109,8 @@ type daemonWiring struct {
 // runDaemonWith or newDaemonWiring rather than swapping a seam under the whole package.
 //
 // A nil field is the production value, resolved where it is used and never at construction: a nil
-// runner leaves daemonWiring.runner nil and raise reads the runOnce var when a Firing is raised; a
-// nil confiner reads the newConfiner var when newDaemonWiring builds the backend. The vars, rather
-// than run.Once and platform.NewConfiner, for as long as `/schedule` and the e2e stragglers still
-// swap them — a daemon test that shares a helper with them must see the same value.
+// runner leaves daemonWiring.runner nil and raise runs the Firing through run.Once; a nil confiner
+// builds the backend through platform.NewConfiner when newDaemonWiring gets there.
 type daemonDeps struct {
 	// runner is what a Firing runs through once its gates have passed (firingInputs.runner).
 	runner func(context.Context, run.Spec) (run.Result, error)
@@ -159,10 +157,10 @@ func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*dae
 	gcSnapshotDirs(roots.snapshots, store, time.Now())
 
 	// The backend is built through the constructor the host handed this daemon (daemonDeps); a nil
-	// one is the production route, read from the newConfiner seam here and not earlier.
+	// one is the production route, platform.NewConfiner, resolved here and not earlier.
 	buildConfiner := deps.confiner
 	if buildConfiner == nil {
-		buildConfiner = newConfiner
+		buildConfiner = platform.NewConfiner
 	}
 
 	return &daemonWiring{

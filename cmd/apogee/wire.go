@@ -75,34 +75,23 @@ import (
 var _ tui.Engine = (*apogee.Agent)(nil)
 
 // ----------------------------------------------------------------------------
-// The process-wide seams
+// The boot's dependencies
 // ----------------------------------------------------------------------------
-
-// newConfiner is the seam onto the host's confinement backend, for the same reason runOnce is one:
-// what a backend can enforce is a property of the MACHINE the test happens to run on — a kernel
-// with landlock or without it — and every posture decision read off it is a decision about exactly
-// that. A test dictates the capability matrix here and asserts the verdict; production never
-// reassigns it.
-//
-// It lives in the composition root rather than beside any one Driver because all three Drivers
-// build their backend from it — runRoot (wire_boot.go), `apogee headless` (headless.go) and the
-// daemon (daemonfire.go) — and the three confinement sentences a host says for itself
-// (probe.DegradedNotice, probe.ResidualNotice, the unattended Auto refusal) are therefore all
-// drivable from one place, on every host, in both directions. None of the three reads it directly
-// any more: each takes its backend's constructor as a dependency (headlessDeps, daemonDeps,
-// rootDeps), and only a nil one falls back to this var.
-var newConfiner = platform.NewConfiner
 
 // rootDeps is what the TUI's boot takes from its host rather than deciding for itself: the runner
 // a Firing raised inside the session is handed to, and the constructor of the confinement backend
 // the session is fenced by — the same two facts, for the same reason, as headlessDeps (headless.go)
 // and daemonDeps (daemonfire.go): both are properties of the MACHINE and the PROCESS the session
-// happens to run in, so a driven run injects them through newRootCommandWith rather than swapping a
-// seam under the whole package.
+// happens to run in — a kernel with landlock or without it, and every posture decision read off
+// the backend is a decision about exactly that — so a driven run injects them through
+// newRootCommandWith rather than swapping a seam under the whole package. A test dictates the
+// capability matrix through the constructor and asserts the verdict, which is how the three
+// confinement sentences a host says for itself (probe.DegradedNotice, probe.ResidualNotice, the
+// unattended Auto refusal) are drivable on every host, in both directions.
 //
 // A nil field is the production value, resolved where it is used and never at construction: a nil
-// runner leaves rootWiring.runner nil and raise reads the runOnce var when a Firing is raised; a
-// nil confiner reads the newConfiner var when newRootWiring builds the backend.
+// runner leaves rootWiring.runner nil and raise runs the Firing through run.Once; a nil confiner
+// builds the backend through platform.NewConfiner when newRootWiring gets there.
 type rootDeps struct {
 	// runner is what a Firing raised inside this session runs through (firingInputs.runner).
 	runner func(context.Context, run.Spec) (run.Result, error)

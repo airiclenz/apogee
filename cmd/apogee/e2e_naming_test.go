@@ -198,18 +198,17 @@ func withoutTheChildGate(s stubllm.Script) stubllm.Script {
 func headlessAgainst(t *testing.T, stub *stubllm.Server, extraConfig string) string {
 	t.Helper()
 
-	prev := runOnce
 	// The real runner, with ONE observer added: the Spec's own Events sink is wrapped so the case
 	// can open the child's gate at the moment the generated name has been folded into the run —
 	// which is the record the sub-agent line is printed from. run.Once wraps this sink in its own
 	// eventTap and forwards to it AFTER folding, so by the time the release fires the reading the
 	// line will be built from already carries the name. Nothing else about the composition moves:
 	// the namer is still the firing Config's own, which is the injection this case exists to prove.
-	runOnce = func(ctx context.Context, spec run.Spec) (run.Result, error) {
+	// It is handed to the command as its runner (headlessDeps) rather than swapped in anywhere.
+	runner := func(ctx context.Context, spec run.Spec) (run.Result, error) {
 		spec.Config.Events = releasingOnName(spec.Config.Events, stub)
 		return run.Once(ctx, spec)
 	}
-	t.Cleanup(func() { runOnce = prev })
 	// The environment must not move the home or the mode out from under the run.
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
@@ -223,7 +222,7 @@ func headlessAgainst(t *testing.T, stub *stubllm.Server, extraConfig string) str
 		"    model: "+stub.Model+"\n"+
 		"server: stub\n")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: runner})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)

@@ -123,11 +123,11 @@ func newRootWiringWith(opts config.Options, mode apogee.Mode, roots stateRoots, 
 	// It is built through the constructor the host handed this boot (rootDeps), for the reason
 	// that dependency exists: what a backend can enforce is a property of the MACHINE, so a fixture
 	// whose question is about GATING rather than fencing dictates the capability matrix and asks
-	// its question on every host. A nil constructor is the production route, read from the
-	// [newConfiner] seam here and not earlier.
+	// its question on every host. A nil constructor is the production route, platform.NewConfiner,
+	// resolved here and not earlier.
 	buildConfiner := deps.confiner
 	if buildConfiner == nil {
-		buildConfiner = newConfiner
+		buildConfiner = platform.NewConfiner
 	}
 	w.confiner = buildConfiner()
 

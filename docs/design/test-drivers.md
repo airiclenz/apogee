@@ -976,10 +976,14 @@ A new end-to-end test is `cmd/apogee/e2e_<topic>_test.go`, and it follows this c
 9. **Stay inside the budget below, and stay parallel.** Every wait bounded, and `t.Parallel()`
    the first statement of every e2e test — a driven launch writes nothing the process shares.
    The exceptions are the tests that reach `t.Setenv` or swap a package-var seam
-   (`newConfiner`, `liveLauncherOps`, `tuiScheduleClock`, `openerLookPath`, `runOnce`, …),
-   directly or through a helper (`guardHome`, `presentRemote`, `installFenceableConfiner`,
-   `useFakeScheduleClock`, …): those stay serial, every swapped var restored via `t.Cleanup`,
-   and a new helper that swaps one makes every test reaching it serial too.
+   (`liveLauncherOps`, `tuiScheduleClock`, `openerLookPath`, …), directly or through a helper
+   (`guardHome`, `presentRemote`, `useFakeScheduleClock`, …): those stay serial, every swapped
+   var restored via `t.Cleanup`, and a new helper that swaps one makes every test reaching it
+   serial too. The runner and the Confiner constructor are not seams to swap: every Driver takes
+   them as injected dependencies (`headlessDeps`, `daemonDeps`, `rootDeps`, and
+   `scheduleWiring.runner` for a session-raised Firing), stated on the command or the wiring a
+   test builds — `newHeadlessCommandWith`, `runDaemonWith`, `launchTUIInWith` — so a test that
+   only injects them swaps nothing and stays parallel.
 
 ## Gates and budgets
 
@@ -1027,8 +1031,8 @@ shares — `tuitest.CheckLeaks` attributes goroutines to the test that started t
 the config watcher's fast cadence is set once in `TestMain` rather than swapped per launch. What
 stays serial is exactly the set that reaches `t.Setenv` (the testing package panics on the pair)
 or swaps a package-var seam — fourteen of the seventy-one, through `guardHome`, `presentDesktop`,
-`presentRemote`, `installFenceableConfiner`, `installFakeLauncher`, `useFakeScheduleClock` or a
-`t.Setenv` of their own — and the testing package runs those to completion before it releases the
+`presentRemote`, `installFakeLauncher`, `useFakeScheduleClock` or a `t.Setenv` of their own — and
+the testing package runs those to completion before it releases the
 parallel ones, so a swapped seam is never read across tests; every swap is still restored through
 `t.Cleanup`. The rule is transitive: a helper that starts to `t.Setenv` or swap a seam makes every
 test reaching it serial, and `t.Parallel()` after such a helper is a panic, not a slow test. The

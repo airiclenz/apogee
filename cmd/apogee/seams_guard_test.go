@@ -13,13 +13,18 @@ import (
 )
 
 // TestNoParallelTestSwapsAPackageSeam pins the shape apogee-ku1 was: a test that called
-// t.Parallel() and swapped runOnce while a Scheduler firing in a sibling test read it (fixed at
-// 52e0d677 by dropping that test's t.Parallel). The seam set is derived, never listed — every
-// identifier a top-level `var` in this package's non-test files declares (runOnce, hardExit,
-// interruptSignals, newConfiner, liveLauncherOps, …) — so a seam added tomorrow is guarded the
-// day it lands. A test function or t.Run literal that runs under t.Parallel (its own call or an
-// enclosing scope's — a serial subtest of a parallel test still races every other parallel test)
-// and assigns to one of them fails here with its file:line.
+// t.Parallel() and swapped the then package-level runner while a Scheduler firing in a sibling
+// test read it (fixed at 52e0d677 by dropping that test's t.Parallel). That runner and the
+// Confiner constructor are dependencies now (headlessDeps, daemonDeps, rootDeps,
+// scheduleWiring.runner) and no longer vars, but nine function and clock globals remain in this
+// package (hardExit, interruptSignals, prewarmLabelWalk, daemonExecutable, daemonUserHome,
+// acquireDaemonLock, daemonClock, watchSchedules, tuiScheduleClock), so the guard stays. The seam
+// set is derived, never listed — every identifier a top-level `var` in this package's non-test
+// files declares — so a seam added tomorrow is guarded the day it lands; only hardExit is
+// hard-required, as the one the fixture below is written against. A test function or t.Run
+// literal that runs under t.Parallel (its own call or an enclosing scope's — a serial subtest of a
+// parallel test still races every other parallel test) and assigns to one of them fails here with
+// its file:line.
 func TestNoParallelTestSwapsAPackageSeam(t *testing.T) {
 	t.Parallel()
 
@@ -28,10 +33,8 @@ func TestNoParallelTestSwapsAPackageSeam(t *testing.T) {
 	if len(seams) == 0 {
 		t.Fatal("no package-level vars found — the seam set is derived from the non-test files, so an empty set means the scan read nothing")
 	}
-	for _, name := range []string{"runOnce", "hardExit", "newConfiner"} {
-		if !seams[name] {
-			t.Errorf("seam set lacks %q — the scan of the non-test files missed a known seam", name)
-		}
+	if !seams["hardExit"] {
+		t.Error(`seam set lacks "hardExit" — the scan of the non-test files missed a known seam`)
 	}
 
 	var findings []string
@@ -48,7 +51,7 @@ func TestNoParallelTestSwapsAPackageSeam(t *testing.T) {
 	}
 }
 
-// ...and the detector proven on a fixture rather than assumed: a parallel test assigning runOnce
+// ...and the detector proven on a fixture rather than assumed: a parallel test assigning hardExit
 // is reported at its line, a serial one and a `_ =` write are not, and a subtest inherits its
 // parent's parallelism.
 func TestNoParallelTestSwapsAPackageSeamBites(t *testing.T) {
@@ -62,41 +65,41 @@ var _ = 0
 
 func TestParallelSwap(t *testing.T) {
 	t.Parallel()
-	prev := runOnce
-	runOnce = nil
-	t.Cleanup(func() { runOnce = prev })
+	prev := hardExit
+	hardExit = nil
+	t.Cleanup(func() { hardExit = prev })
 }
 
 func TestSerialSwap(t *testing.T) {
-	prev := runOnce
-	runOnce = nil
-	t.Cleanup(func() { runOnce = prev })
+	prev := hardExit
+	hardExit = nil
+	t.Cleanup(func() { hardExit = prev })
 }
 
 func TestParallelBlankWrite(t *testing.T) {
 	t.Parallel()
-	_ = runOnce
+	_ = hardExit
 }
 
 func TestParallelParentSerialSubtest(t *testing.T) {
 	t.Parallel()
 	t.Run("sub", func(t *testing.T) {
-		runOnce = nil
+		hardExit = nil
 	})
 }
 
 func TestSerialParentParallelSubtest(t *testing.T) {
 	t.Run("sub", func(st *testing.T) {
 		st.Parallel()
-		hardExit = nil
+		interruptSignals = nil
 	})
 }
 
 func TestParallelShadow(t *testing.T) {
 	t.Parallel()
-	runOnce := 1
-	runOnce = 2
-	_ = runOnce
+	hardExit := 1
+	hardExit = 2
+	_ = hardExit
 }
 `
 	fset := token.NewFileSet()
@@ -104,15 +107,15 @@ func TestParallelShadow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse fixture: %v", err)
 	}
-	seams := map[string]bool{"runOnce": true, "hardExit": true}
+	seams := map[string]bool{"hardExit": true, "interruptSignals": true}
 
 	got := parallelSeamWrites(fset, file, seams)
 
 	want := []string{
-		"fixture_test.go:10: TestParallelSwap swaps the package seam runOnce under t.Parallel — a sibling test may be reading it (apogee-ku1)",
-		"fixture_test.go:11: TestParallelSwap swaps the package seam runOnce under t.Parallel — a sibling test may be reading it (apogee-ku1)",
-		"fixture_test.go:28: TestParallelParentSerialSubtest/sub swaps the package seam runOnce under t.Parallel — a sibling test may be reading it (apogee-ku1)",
-		"fixture_test.go:35: TestSerialParentParallelSubtest/sub swaps the package seam hardExit under t.Parallel — a sibling test may be reading it (apogee-ku1)",
+		"fixture_test.go:10: TestParallelSwap swaps the package seam hardExit under t.Parallel — a sibling test may be reading it (apogee-ku1)",
+		"fixture_test.go:11: TestParallelSwap swaps the package seam hardExit under t.Parallel — a sibling test may be reading it (apogee-ku1)",
+		"fixture_test.go:28: TestParallelParentSerialSubtest/sub swaps the package seam hardExit under t.Parallel — a sibling test may be reading it (apogee-ku1)",
+		"fixture_test.go:35: TestSerialParentParallelSubtest/sub swaps the package seam interruptSignals under t.Parallel — a sibling test may be reading it (apogee-ku1)",
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("detector findings differ\n got:\n  %s\nwant:\n  %s",
@@ -175,7 +178,7 @@ func packageGoFiles(t *testing.T, tests bool) []string {
 // parallelSeamWrites reports every assignment to a name in seams made by a test scope — a
 // `func TestXxx(t *testing.T)` or a t.Run func literal — that runs under t.Parallel, whether
 // the scope calls it itself or inherits it from an enclosing scope. A name the test function
-// declares locally (`runOnce := …`, `var runOnce …`, a parameter or range variable) shadows the
+// declares locally (`hardExit := …`, `var hardExit …`, a parameter or range variable) shadows the
 // seam and is not counted. Findings are `file:line: <scope> swaps …`, in source order.
 func parallelSeamWrites(fset *token.FileSet, file *ast.File, seams map[string]bool) []string {
 	var findings []string

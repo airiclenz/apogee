@@ -124,10 +124,6 @@ func childToolMessages(t *testing.T, stub *stubllm.Server) []string {
 func headlessStepNotice(t *testing.T, stub *stubllm.Server, extraConfig string, extra ...string) (stdout string) {
 	t.Helper()
 
-	prev := runOnce
-	runOnce = run.Once
-	t.Cleanup(func() { runOnce = prev })
-
 	// The environment must not move the home or the mode out from under the run.
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
@@ -140,7 +136,7 @@ func headlessStepNotice(t *testing.T, stub *stubllm.Server, extraConfig string, 
 		"    model: "+stub.Model+"\n"+
 		"server: stub\n")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)

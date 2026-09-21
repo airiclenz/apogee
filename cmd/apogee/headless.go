@@ -98,26 +98,19 @@ func exitCodeFor(err error) int {
 // The headless command
 // ----------------------------------------------------------------------------
 
-// runOnce is the seam onto the shared runner. `apogee headless` is a thin CLI over internal/run —
-// argument parsing and exit codes, not a second runner (ADR 0033, decision 6) — and this variable
-// is the point `/schedule`'s tests and the e2e stragglers still replace, so prompt resolution,
-// composition, output routing and exit codes are all provable without a live model. No Driver
-// reads it directly any more: each takes its runner as a dependency (headlessDeps, daemonDeps,
-// rootDeps), and only a nil one falls back to this var. Production never reassigns it.
-var runOnce = run.Once
-
 // headlessDeps is what `apogee headless` takes from its host rather than deciding for itself: the
 // runner the composed Firing is handed to, and the constructor of the confinement backend the run
-// is fenced by. Both are properties of the MACHINE and the PROCESS the command happens to run in —
-// what a backend can enforce depends on the kernel, and the runner is the one thing a test of the
-// CLI's own decisions must be able to observe from outside — so they are dependencies a test
-// injects through newHeadlessCommandWith, not seams it swaps under the whole package.
+// is fenced by. `apogee headless` is a thin CLI over internal/run — argument parsing and exit
+// codes, not a second runner (ADR 0033, decision 6) — and the runner is the point a test of the
+// CLI's own decisions observes from outside, so prompt resolution, composition, output routing and
+// exit codes are all provable without a live model. Both are properties of the MACHINE and the
+// PROCESS the command happens to run in — what a backend can enforce depends on the kernel — so
+// they are dependencies a test injects through newHeadlessCommandWith, never seams it swaps under
+// the whole package.
 //
 // A nil field is the production value, resolved where it is used and never at construction: a nil
-// runner leaves firingInputs.runner nil and raise reads the runOnce var when the Firing is raised;
-// a nil confiner reads the newConfiner var when the run builds its backend. Reading the vars there,
-// rather than run.Once and platform.NewConfiner, is deliberate for as long as the other Drivers'
-// tests still swap them — the headless tests that share a helper with them must see the same value.
+// runner leaves firingInputs.runner nil and raise runs the Firing through run.Once; a nil confiner
+// builds the backend through platform.NewConfiner when the run gets there.
 type headlessDeps struct {
 	// runner is what the Firing runs through once its gates have passed (firingInputs.runner).
 	runner func(context.Context, run.Spec) (run.Result, error)
@@ -136,7 +129,7 @@ var hardExit = os.Exit
 // own, because the context can only be cancelled once and the second press has to be visible as
 // an event rather than as a state.
 //
-// It is a variable for the reason runOnce is: a test cannot raise a real SIGTERM at this process
+// It is a variable for the reason hardExit is: a test cannot raise a real SIGTERM at this process
 // without ending the suite it runs in, so the whole watch — count to two, print, exit hard —
 // would otherwise be unassertable. Replacing it hands the test the very channel the watch reads.
 // Production never reassigns it.
@@ -179,8 +172,8 @@ func watchSecondInterrupt(sigs <-chan os.Signal, done <-chan struct{}, errOut io
 	}
 }
 
-// prewarmLabelWalk is the seam onto the Windows label-walk pre-warm, for the same reason runOnce
-// and newConfiner are seams: platform.PrewarmLabelWalk is an empty function off Windows
+// prewarmLabelWalk is the seam onto the Windows label-walk pre-warm, for the same reason hardExit
+// is one: platform.PrewarmLabelWalk is an empty function off Windows
 // (internal/platform/prewarm_other.go), so a test that only asserted "the run made no noise" would
 // pass identically against a tree that never calls it at all. Replacing this variable is how the
 // suite proves the confined-Auto headless path reaches the pre-warm on the one host where it does
@@ -795,10 +788,10 @@ func runHeadlessBody(
 	// labels are not lost — a later session reverts them (winlabel.TeardownNotice's own remedy).
 	//
 	// The backend is built through the dependency the host handed this command (headlessDeps); a
-	// nil one is the production route, read from the newConfiner seam here and not earlier.
+	// nil one is the production route, platform.NewConfiner, resolved here and not earlier.
 	buildConfiner := deps.confiner
 	if buildConfiner == nil {
-		buildConfiner = newConfiner
+		buildConfiner = platform.NewConfiner
 	}
 	confiner := buildConfiner()
 	if closer, ok := confiner.(interface{ Close() error }); ok {

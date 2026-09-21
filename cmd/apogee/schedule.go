@@ -85,6 +85,14 @@ type scheduleWiring struct {
 	// at the surface that offered the mode (scheduleAutoBlocked, ADR 0033 decision 3).
 	confiner apogee.Confiner
 
+	// runner is what a Firing raised here runs through once its gates have passed — the boot's own
+	// (rootWiring.runner, handed down from rootDeps), so a session-raised Firing runs where the host
+	// said it should: run.Once in production, a recording stub in a composition test that captures
+	// the run.Spec and runs nothing (ADR 0033 decision 6 names the runner an injected seam). It is a
+	// dependency of this wiring rather than a package var so a test states it on the literal it
+	// builds and never swaps anything process-wide; nil is the production runner (raise).
+	runner func(context.Context, run.Spec) (run.Result, error)
+
 	// store is the session store a Firing's record lands in — the interactive session's own, so a
 	// Firing shows up in /sessions beside the conversations it ran beneath (items 2 and 7).
 	store *session.Store
@@ -149,6 +157,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		keys:     w.keys,
 		roots:    w.roots,
 		confiner: w.confiner,
+		runner:   w.runner,
 		mode:     f.Mode,
 		skills:   w.skills,
 		// The interactive Scheduler's own clock, so the id this Firing is filed under is minted off

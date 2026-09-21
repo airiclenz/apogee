@@ -93,7 +93,7 @@ const firingStepPrompt = "Build a full parser pipeline.\n" +
 // marked with.
 //
 // The run really reaches the stubbed upstream, which is the dialling half; the record's model is the
-// other. It does not call t.Parallel: sibling tests here replace the package-level runner seam.
+// other. It runs the production runner against the stubbed upstream and injects nothing.
 func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
 	up := firingUpstream(t, "the build is green")
 
@@ -201,20 +201,17 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 // seam would take the composer's own one-shot probe — a round trip, on the Scheduler's goroutine, for
 // a number this session is already holding.
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as every headless test that reads a
-// composed Spec does.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as every headless test that reads a composed Spec does; nothing process-wide is swapped.
 func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -238,8 +235,8 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 // depend on which Driver fired it. The token figure is the WHOLE run's — the top-level agent's
 // spend plus every delegation's — and the delegations themselves cross as a bare count.
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as the width test above does.
 func TestScheduleFiringReportsWhatTheRunCost(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
@@ -252,11 +249,9 @@ func TestScheduleFiringReportsWhatTheRunCost(t *testing.T) {
 			{Task: "read the tests", Usage: run.Usage{TotalTokens: 3984}},
 		},
 	}}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -284,11 +279,9 @@ func TestScheduleFiringReportsNoSpendWhenThereWasNone(t *testing.T) {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -315,8 +308,8 @@ func TestScheduleFiringReportsNoSpendWhenThereWasNone(t *testing.T) {
 // the reason both other Drivers read them off the composer: the point of one composer is that the
 // Drivers cannot drift.
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as the width test above does.
 func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 	// One of each kind the composer distinguishes: a file that loaded, a file present but
 	// unreadable, and standing content past its Budget share.
@@ -336,11 +329,9 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 			t.Fatalf("resolveRoots: %v", err)
 		}
 		stub := &stubRunner{res: res}
-		prevRunner := runOnce
-		runOnce = stub.once
-		t.Cleanup(func() { runOnce = prevRunner })
 
 		w := scheduleWiring{
+			runner:  stub.once,
 			roots:   roots,
 			live:    newLiveSettings(config.Options{}),
 			binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -391,17 +382,14 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 // (TestRaiseMintsOneIDForRecordAndScratch, wire_firing_test.go); what this Driver owes is that a
 // Firing never runs in the session's.
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as the width test above does.
 func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	// The session's own boot-time dir, exactly as the composition root seeds it onto the session's
 	// Config — the value this Firing must NOT run in, because firingConfig builds its own Config
@@ -412,6 +400,7 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 	}
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -447,8 +436,8 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 // resolver always has something to say, so that branch is the engine's own nil contract and is pinned
 // where it lives (internal/agent/rebind_test.go).
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as the width test above does.
 func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 	// The launch entry's own ceiling — the number seeded onto the session's Config, and the one that
 	// must not survive the move below: firingConfig reads the cap off the entry it binds to.
@@ -476,9 +465,6 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 				t.Fatalf("resolveRoots: %v", err)
 			}
 			stub := &stubRunner{}
-			prevRunner := runOnce
-			runOnce = stub.once
-			t.Cleanup(func() { runOnce = prevRunner })
 
 			// The session as it LAUNCHED: bound to an entry pinning launchCap, which is what the
 			// settings holder's own latch was seeded with.
@@ -492,8 +478,9 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 			live.followEntry(tt.moved)
 
 			w := scheduleWiring{
-				roots: roots,
-				live:  live,
+				runner: stub.once,
+				roots:  roots,
+				live:   live,
 				binding: func() upstreamBinding {
 					return upstreamBinding{Endpoint: "http://moved.invalid", Model: "bound-model"}
 				},
@@ -529,8 +516,8 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 // share", which hands the split back to the engine's own built-in fifth rather than to the number the
 // launch entry happened to state.
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as the tests above it do.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as the tests above it do.
 func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testing.T) {
 	// The launch entry's own share — the number seeded onto the session's Config, and the one that
 	// must not survive the move below: firingConfig reads the share off the entry it binds to.
@@ -558,9 +545,6 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 				t.Fatalf("resolveRoots: %v", err)
 			}
 			stub := &stubRunner{}
-			prevRunner := runOnce
-			runOnce = stub.once
-			t.Cleanup(func() { runOnce = prevRunner })
 
 			// The session as it LAUNCHED: bound to an entry stating launchShare, which is what the
 			// settings holder's own latch was seeded with. The top-level key states nothing, so the
@@ -574,8 +558,9 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 			live.followEntry(tt.moved)
 
 			w := scheduleWiring{
-				roots: roots,
-				live:  live,
+				runner: stub.once,
+				roots:  roots,
+				live:   live,
 				binding: func() upstreamBinding {
 					return upstreamBinding{Endpoint: "http://moved.invalid", Model: "bound-model"}
 				},
@@ -612,17 +597,14 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 //
 // Driven through the real settings dispatcher rather than by writing the holder's fields, because
 // the claim is about the APPLY landing on the projection — a test that set the fields directly would
-// pass over a key whose apply forgot to record itself. Composed against the package's runner seam,
-// which is why it does not call t.Parallel.
+// pass over a key whose apply forgot to record itself. Composed against a runner injected on the
+// wiring (scheduleWiring.runner).
 func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	// The session as it LAUNCHED, with each of the three keys set to something its edit moves OFF: a
 	// value that came back unchanged would be the boot snapshot showing through rather than the edit
@@ -662,6 +644,7 @@ func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
 	}
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    live,
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -705,16 +688,13 @@ func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
 // (tui.Engine.SetConfineToWorkspace — see confinement_e2e_test.go) rather than left out: a test that
 // toggled nothing would pass just as well against a composer that DID mirror the key.
 //
-// Composed against the package's runner seam, which is why this test does not call t.Parallel.
+// Composed against a runner injected on the wiring (scheduleWiring.runner).
 func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	// The session as it LAUNCHED: fenced, which is the value the assertion below wants back.
 	live := newLiveSettings(config.Options{ConfineToWorkspace: true})
@@ -729,6 +709,7 @@ func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
 	}
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    live,
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -759,19 +740,17 @@ func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
 // the assertion evidence: a composer that fell back to its own nil default would build one from
 // roots.config and answer different dirs.
 //
-// Composed against the package's runner seam, which is why this test does not call t.Parallel.
+// Composed against a runner injected on the wiring (scheduleWiring.runner).
 func TestScheduleFiringSharesTheSessionsSkillsProvider(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	provider := skills.NewProvider(skills.Sources{Home: t.TempDir(), Workspace: t.TempDir()})
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    newLiveSettings(config.Options{}),
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -1231,21 +1210,19 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 // half is proven by the binding itself: the Firing is bound to `http://bound.invalid`, where a real
 // beat (observeServer) would find nothing and refuse the run, so a Firing that ran took none.
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as the width test above does.
 func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	live := newLiveSettings(config.Options{})
 	live.observe(32768, provider.EffortDialectOpenAI)
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    live,
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -1274,8 +1251,8 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 // how the transcript renders it is the scheduler's, not this seam's. A latch nothing has reported
 // to, and the back-online report, both let the Firing run: no observation is no refusal.
 //
-// Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
+// Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
+// exactly as the width test above does.
 func TestScheduleFiringRefusesWhenOffline(t *testing.T) {
 	const endpoint = "http://bound.invalid"
 	tests := []struct {
@@ -1312,13 +1289,11 @@ func TestScheduleFiringRefusesWhenOffline(t *testing.T) {
 				t.Fatalf("resolveRoots: %v", err)
 			}
 			stub := &stubRunner{res: run.Result{Turns: 1, FinalText: "the answer"}}
-			prevRunner := runOnce
-			runOnce = stub.once
-			t.Cleanup(func() { runOnce = prevRunner })
 
 			latch := newUpstreamLatch()
 			tc.report(latch)
 			w := scheduleWiring{
+				runner:   stub.once,
 				roots:    roots,
 				live:     newLiveSettings(config.Options{}),
 				binding:  func() upstreamBinding { return upstreamBinding{Endpoint: endpoint, Model: "bound-model"} },
@@ -1377,14 +1352,12 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 	stub := &stubRunner{emit: func(sink domain.EventSink) {
 		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
 	}}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	live := newLiveSettings(config.Options{Reactions: []domain.Reaction{recorder("boot", bootMarker)}})
 	live.setReactionLanes([]domain.Reaction{recorder("reloaded", reloadedMarker)}, nil)
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    live,
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },
@@ -1440,14 +1413,12 @@ func TestScheduleFiringCarriesTheSessionsSyncLane(t *testing.T) {
 	}
 
 	stub := &stubRunner{}
-	prevRunner := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prevRunner })
 
 	live := newLiveSettings(config.Options{})
 	live.setReactionLanes([]domain.Reaction{observe}, []domain.Reaction{gate})
 
 	w := scheduleWiring{
+		runner:  stub.once,
 		roots:   roots,
 		live:    live,
 		binding: func() upstreamBinding { return upstreamBinding{Endpoint: "http://bound.invalid", Model: "bound-model"} },

@@ -115,10 +115,10 @@ type firingInputs struct {
 	// runner is what the composed Firing is handed to once both gates have passed — run.Once in
 	// production, a recording stub in a composition test that captures the run.Spec and runs
 	// nothing (ADR 0033 decision 6 names the runner an injected seam, and ~40 tests observe the
-	// composition through it). A Driver that holds its runner as a dependency (headless, the
-	// daemon, the boot) passes it through here; nil falls back to the package's runOnce var, read at
-	// the moment the Firing is raised and never captured earlier, so `/schedule` keeps the seam it
-	// still swaps until it takes its runner as a dependency too.
+	// composition through it). Every Driver holds its runner as a dependency (headlessDeps,
+	// daemonDeps, rootDeps — and scheduleWiring.runner for a Firing a session raises) and passes it
+	// through here; nil is the production runner, run.Once, resolved at the moment the Firing is
+	// raised and never captured earlier.
 	runner func(context.Context, run.Spec) (run.Result, error)
 }
 
@@ -729,7 +729,7 @@ func clockNow(c schedule.Clock) func() time.Time {
 // into its lanes (ADR 0076 A8), builds this Firing's own Reaction Runner and drains it when the
 // Firing ends (ADR 0073), mints the record id, composes the Config (firingConfig), refuses a server
 // that answered nothing (notice.ServerOffline), lets the Driver decorate the Event sink, and runs
-// the Firing once through its runner (in.runner, or the package's runOnce seam when nil). It exists
+// the Firing once through its runner (in.runner, or the production run.Once when nil). It exists
 // because those steps were three copies that had already drifted: the id that named a record and
 // the id that named its scratch dir were two mints in two Drivers rather than one by construction,
 // and the liveness gate was a sentence each Driver re-derived from the routing.
@@ -833,11 +833,11 @@ func raise(
 	if ref != nil {
 		spec.ScheduleID, spec.ScheduleName = ref.ID, ref.Name
 	}
-	// Resolved HERE and not at construction, so a caller that left it nil gets whatever the seam
-	// holds when the Firing is raised — the production runner, or the double a test installed.
+	// Resolved HERE and not at construction: a caller that left it nil gets the production runner
+	// at the moment the Firing is raised, and a caller that stated one gets exactly that.
 	runner := in.runner
 	if runner == nil {
-		runner = runOnce
+		runner = run.Once
 	}
 	res, err := runner(ctx, spec)
 	return res, notices, err

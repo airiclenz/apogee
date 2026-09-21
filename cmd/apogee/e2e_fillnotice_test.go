@@ -196,15 +196,12 @@ func seedFillFixtures(t *testing.T, workspace string) {
 // the answer stream carried. It is [headlessHooksIn]'s twin rather than a call to it, for one
 // reason: that helper makes the workspace and runs in a single call, and this journey has to seed
 // the workspace — three files sized to the compaction line — BETWEEN the two. Nothing else differs:
-// the runner is bound to the production [run.Once] and restored after, because the notice is the
-// engine's own Reaction and a stubbed runner produces no post-tool-result Moment for it to fire
-// at; the home is written the same way, and the ambient environment is neutralised the same way.
+// the runner injected is the production [run.Once], stated rather than defaulted, because the
+// notice is the engine's own Reaction and a stubbed runner produces no post-tool-result Moment for
+// it to fire at; the home is written the same way, and the ambient environment is neutralised the
+// same way.
 func headlessFillNotice(t *testing.T, stub *stubllm.Server, extraConfig string, extra ...string) (stdout string) {
 	t.Helper()
-
-	prev := runOnce
-	runOnce = run.Once
-	t.Cleanup(func() { runOnce = prev })
 
 	// The environment must not move the home or the mode out from under the run.
 	assertNoAmbientApogeeConfig(t)
@@ -220,7 +217,7 @@ func headlessFillNotice(t *testing.T, stub *stubllm.Server, extraConfig string, 
 
 	workspace := e2eWorkspace(t)
 	seedFillFixtures(t, workspace)
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)

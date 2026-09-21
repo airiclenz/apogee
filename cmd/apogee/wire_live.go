@@ -398,7 +398,12 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		keys:     w.keys,
 		skills:   w.skillProvider,
 		confiner: w.confiner,
-		store:    w.store,
+		// The runner the host handed this boot (rootDeps), so a Firing this session raises runs
+		// through the same one every other Driver's does — stated here rather than left to the
+		// production fallback, which would otherwise mask a runner the boot was given but never
+		// passed on.
+		runner: w.runner,
+		store:  w.store,
 		// Where a Reaction raised by one of this session's Firings reports its trouble (ADR 0073 §8):
 		// the same Bridge seam the session's own Runner reports through, so a failing Reaction reads
 		// identically whichever of the two fired it.

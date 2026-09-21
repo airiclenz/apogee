@@ -97,15 +97,12 @@ func TestE2EUpstreamEOFBudgetZeroNeverReStreams(t *testing.T) {
 
 // headlessUpstream runs one real `apogee headless` against stub in a home of its own and returns
 // what reached stdout and stderr with the command's error. extraConfig is appended to the home's
-// config.yaml verbatim — a `re-stream-budget:` line, or "" for the defaults. The runner is the
-// real one, restored after: a canned runner would prove nothing about the stream the engine
-// consumes.
+// config.yaml verbatim — a `re-stream-budget:` line, or "" for the defaults. The runner injected
+// is the real one, stated rather than defaulted: a canned runner would prove nothing about the
+// stream the engine consumes.
 func headlessUpstream(t *testing.T, stub *stubllm.Server, extraConfig string) (stdout, stderr string, err error) {
 	t.Helper()
 
-	prev := runOnce
-	runOnce = run.Once
-	t.Cleanup(func() { runOnce = prev })
 	// The environment must not move the home or the mode out from under the run.
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
@@ -119,7 +116,7 @@ func headlessUpstream(t *testing.T, stub *stubllm.Server, extraConfig string) (s
 			"    endpoint: "+stub.URL+"\n"+
 			"    model: "+stub.Model+"\n"+
 			"server: stub\n")
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)

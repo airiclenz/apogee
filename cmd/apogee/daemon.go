@@ -73,7 +73,7 @@ const (
 var defaultSchedulesYAML []byte
 
 // acquireDaemonLock is the seam onto the single-instance lock (ADR 0034 decision 7). It exists for
-// the reason runOnce does: a test must be able to drive the refusal — and, more often, to keep a
+// the reason hardExit does: a test must be able to drive the refusal — and, more often, to keep a
 // test daemon off whatever lock the machine's real daemon may be holding — without a second
 // process. Production never reassigns it.
 var acquireDaemonLock = platform.AcquireLock

@@ -7,10 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/mcp"
+	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/schedule"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/snapshot"
 )
@@ -36,6 +40,14 @@ var deniedMCPServer = mcp.ServerConfig{
 // wireSession NOT yet run, so a caller can drive that step itself and read what it answered.
 func urlGuardWiring(t *testing.T, opts config.Options) *rootWiring {
 	t.Helper()
+	return urlGuardWiringWith(t, opts, rootDeps{})
+}
+
+// urlGuardWiringWith is [urlGuardWiring] with the boot's dependencies stated by the caller
+// (rootDeps) — the door a test that wants to observe the runner a session-raised Firing reaches
+// comes through. Zero deps are the production runner and backend.
+func urlGuardWiringWith(t *testing.T, opts config.Options, deps rootDeps) *rootWiring {
+	t.Helper()
 	opts.Endpoint = "http://127.0.0.1:1111"
 	opts.Model = "fake"
 	// The entry as ApplyConfig holds it: what the bind step takes, and the flag-bound pair above
@@ -50,12 +62,50 @@ func urlGuardWiring(t *testing.T, opts config.Options) *rootWiring {
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
-	w := newRootWiring(opts, apogee.ModeAskBefore, roots)
+	w := newRootWiringWith(opts, apogee.ModeAskBefore, roots, deps)
 	t.Cleanup(w.close)
 	if err := w.resolveConfig(); err != nil {
 		t.Fatalf("resolveConfig: %v", err)
 	}
 	return w
+}
+
+// A Firing the session raises runs through the runner the boot was handed: rootDeps → rootWiring
+// → the scheduleWiring wireSession builds → firingInputs. The runner is a dependency at every one
+// of those hops and nil at each is the production run.Once, so a hop that forgot to pass it on
+// would still fire — against the real runner — and nothing but this test would notice. The
+// Scheduler is driven off a hand clock (useFakeScheduleClock), which is why it is not parallel:
+// tuiScheduleClock is a package var.
+func TestASessionRaisedFiringRunsThroughTheBootsRunner(t *testing.T) {
+	clock := useFakeScheduleClock(t)
+	ran := make(chan run.Spec, 1)
+	runner := func(_ context.Context, spec run.Spec) (run.Result, error) {
+		ran <- spec
+		return run.Result{}, nil
+	}
+	w := urlGuardWiringWith(t, config.Options{}, rootDeps{runner: runner})
+	if err := w.wireSession(context.Background()); err != nil {
+		t.Fatalf("wireSession: %v", err)
+	}
+
+	if _, err := w.schedules.Add(schedule.Spec{
+		Name:   "Nightly build",
+		Cycle:  time.Hour,
+		Prompt: "check the build",
+		Mode:   domain.ModePlan,
+	}); err != nil {
+		t.Fatalf("Add: %v", err)
+	}
+	clock.tick()
+
+	select {
+	case spec := <-ran:
+		if spec.ScheduleName != "Nightly build" {
+			t.Errorf("the injected runner ran Spec.ScheduleName = %q; want the Schedule that fired", spec.ScheduleName)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the Firing never reached the runner the boot was handed; it ran through the production fallback instead")
+	}
 }
 
 // A startup connect is judged by the operator's own host lists: the endpoint is refused before
