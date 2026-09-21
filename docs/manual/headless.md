@@ -43,7 +43,9 @@ server does not list, the same fact rides the not-advertised notice as a clause)
 with both inactive.
 The run is saved to
 `~/.apogee/sessions` and shows up in `/sessions` like any other; `--no-save` runs it and
-records nothing. Either way the startup sweep still applies whatever bound the `sessions:`
+records nothing — no session record, and no undo snapshot store either, since a store filed
+under a record nothing keeps is one `apogee undo` could never reach. Either way the startup
+sweep still applies whatever bound the `sessions:`
 block names — `--no-save` drops this run's own record, not the retention policy, so a host
 driven only headlessly still keeps its store within `max-age` / `max-count`.
 
@@ -258,7 +260,9 @@ code the prose path would have given it; a run cancelled by Ctrl-C writes it too
 Two members are worth reading together with `apogee undo` above: `session` is present exactly
 when the run minted an id — which `--no-save` does as well — and `saved` says whether a record was
 actually written. Feed `apogee undo` the id of a run whose `saved` is `false` and there is nothing
-behind it.
+behind it: such a run opened no snapshot store, and its `undo_note` says so as `no record kept`.
+`undo_note` is otherwise the reason the run's undo was the narrower in-memory one
+(`undo-snapshots is off`, `git not found`, …) and empty when the session's snapshots were taken.
 
 `final_text` duplicates the last top-level `message` on purpose. A consumer reading `message` lines
 needs no accumulator; but the simplest consumer of all reads `token`s, and that one would otherwise

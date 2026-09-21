@@ -33,6 +33,15 @@ const (
 	reasonNoWorkDir = "no workspace"
 )
 
+// ReasonNoRecord is the note a run that keeps no record carries: a Firing whose Spec named no Store
+// (`apogee headless --no-save`, the bench) never opens a snapshot store, because the store would be
+// filed under a record id nothing persists — no `apogee undo <session-id>` could ever reach it, and
+// the sweep would only take it down again. It is exported rather than one of OpenJournal's own
+// reasons above because OpenJournal is never called in that case: run.Once decides it from the
+// Spec before it would name a store, and words it with this so the Driver's note reads in the same
+// voice as the rest.
+const ReasonNoRecord = "no record kept"
+
 // ErrNoIndex is [OpenStored]'s answer to a session that left no index behind — an id that names no
 // session, or a run that recorded nothing. It is a sentinel rather than a nil journal because the
 // caller's answer to it is a sentence ("nothing to undo"), not a fallback, and errors.Is is how a

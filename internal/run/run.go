@@ -45,7 +45,9 @@ type Spec struct {
 	ScheduleName string
 
 	// Store persists the Firing's record at completion. nil ⇒ the run is not persisted at
-	// all (the bench case) and Result.SessionID stays empty.
+	// all (the bench case, `--no-save`), Result.SessionID stays empty, and no snapshot store is
+	// opened either — a store filed under a record nothing keeps is one nothing can reach, so
+	// the run takes the in-memory funnel journal and reports snapshot.ReasonNoRecord.
 	Store *session.Store
 
 	// RecordID is the id the saved record is filed under, minted by the CALLER before the
@@ -178,8 +180,9 @@ type Result struct {
 	Wrote []string
 	// UndoNote is WHY this Firing's undo journal is the in-memory funnel one of ADR 0051 rather
 	// than the snapshot-backed store of ADR 0074: snapshot.OpenJournal's own reason
-	// ("undo-snapshots is off", "git not found", "workspace mismatch"), or the text of the error
-	// a store that would not open reported. It is EMPTY when snapshots ARE in force, and that is
+	// ("undo-snapshots is off", "git not found", "workspace mismatch"), snapshot.ReasonNoRecord
+	// ("no record kept") for a Spec that carried no Store, or the text of the error a store that
+	// would not open reported. It is EMPTY when snapshots ARE in force, and that is
 	// the one state in which anything can be reverted after the process has gone: only a
 	// persisted journal outlives the run that wrote it.
 	//
@@ -257,6 +260,21 @@ type SubAgentUsage struct {
 	// surface that renders any agent's spend the same way. Zero throughout when the child's
 	// Upstream reported no usage.
 	Usage
+}
+
+// openRecordJournal opens the undo store a SAVED run images its workspace into, under the id its
+// record will be filed under (ADR 0074). It is Once's one call into the snapshot package, split
+// out so the no-Store case above reads as the decision it is rather than a branch around an
+// argument list. The error OpenJournal reports for a store that would not open is folded into the
+// same answer every other "no snapshots here" case gets: the in-memory funnel journal, with the
+// error's own text as the reason.
+func openRecordJournal(ctx context.Context, spec Spec, cfg domain.Config) (*undo.Journal, string) {
+	journal, reason, err := snapshot.OpenJournal(
+		ctx, cfg.ConfigDir, spec.RecordID, cfg.WorkspaceDir, cfg.UndoSnapshots)
+	if err != nil {
+		return undo.New(), err.Error()
+	}
+	return journal, reason
 }
 
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
@@ -343,10 +361,15 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// home, and a Spec that named no RecordID and so has no store to name — already comes back as
 	// ADR 0051's in-memory funnel journal with a reason, and the one case OpenJournal reports as an
 	// error gets exactly the same answer with the error's own text as that reason.
-	journal, reason, err := snapshot.OpenJournal(
-		ctx, cfg.ConfigDir, spec.RecordID, cfg.WorkspaceDir, cfg.UndoSnapshots)
-	if err != nil {
-		journal, reason = undo.New(), err.Error()
+	//
+	// A Spec with no Store never gets that far. Its record is never saved, so a store filed under
+	// its RecordID is one nothing can reach — `apogee undo` needs the record, and the sweep takes
+	// the nameless store down after a day — and imaging the workspace into it per Exchange would
+	// be work spent on a revert that cannot be offered. The RecordID is still minted by the caller
+	// (its scratch dir needs it); it simply names no store here.
+	journal, reason := undo.New(), snapshot.ReasonNoRecord
+	if spec.Store != nil {
+		journal, reason = openRecordJournal(ctx, spec, cfg)
 	}
 	a.SetJournal(journal, reason)
 

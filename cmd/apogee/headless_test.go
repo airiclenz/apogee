@@ -34,6 +34,7 @@ import (
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
+	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
@@ -1067,6 +1068,52 @@ func TestHeadlessNoSaveDropsTheStore(t *testing.T) {
 		}
 		if stub.spec.Store != nil {
 			t.Error("Spec.Store is set under --no-save; the run would be recorded")
+		}
+	})
+
+	// The nil Store reaches the real runner as "keep no record" all the way down: with snapshots
+	// otherwise in force (a home, git, the key on by default) the run still opens no
+	// `snapshots/<id>` store under the home — the id IS minted, for the scratch dir, but a store
+	// filed under a record nothing saves is one `apogee undo` could never name, and the sweep would
+	// only take it down a day later. The closing frame says so in the snapshot package's own words,
+	// and it is the JSON frame alone that carries the note: the text report prints no line for it.
+	t.Run("--no-save opens no snapshot store", func(t *testing.T) {
+		requireSnapshotStore(t)
+		stub := stubllm.New(t, loadScript(t, "eventlines"))
+		prev := runOnce
+		runOnce = run.Once
+		t.Cleanup(func() { runOnce = prev })
+		assertNoAmbientApogeeConfig(t)
+		t.Setenv(config.EnvMode, "")
+
+		home := eventLinesHome(t, stub.URL, stub.Model)
+		cmd := newHeadlessCommand()
+		var outBuf, errBuf bytes.Buffer
+		cmd.SetOut(&outBuf)
+		cmd.SetErr(&errBuf)
+		cmd.SetIn(strings.NewReader(""))
+		cmd.SetArgs([]string{"--config", home, "--workspace", e2eWorkspace(t), "--format", "json", "--no-save", eventLinesPrompt})
+		if err := cmd.ExecuteContext(context.Background()); err != nil {
+			t.Fatalf("headless: %v (stderr: %q)", err, errBuf.String())
+		}
+		stub.AssertConsumed(t)
+
+		envelope, data := finishedFrame(t, jsonEventLines(t, outBuf.String()))
+		id, _ := envelope["session"].(string)
+		if id == "" {
+			t.Fatalf("run_finished's session = %v; want the id the run minted even though it saved nothing", envelope["session"])
+		}
+		if data["saved"] != false {
+			t.Errorf("run_finished.saved = %v; want false under --no-save", data["saved"])
+		}
+		if data["undo_note"] != snapshot.ReasonNoRecord {
+			t.Errorf("run_finished.undo_note = %v; want %q", data["undo_note"], snapshot.ReasonNoRecord)
+		}
+		if _, err := os.Stat(snapshot.Dir(home, id)); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat %s: err = %v; want no store under the id of a run that kept no record", snapshot.Dir(home, id), err)
+		}
+		if _, err := os.Stat(filepath.Join(home, "snapshots")); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("stat <home>/snapshots: err = %v; want the root never created by a --no-save run", err)
 		}
 	})
 }

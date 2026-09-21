@@ -2200,6 +2200,7 @@ func TestOnceImagesTheWorkspaceIntoTheRecordsSnapshotStore(t *testing.T) {
 	spec.Config.WorkspaceDir = t.TempDir()
 	spec.Config.ConfigDir = home
 	spec.Config.UndoSnapshots = true
+	spec.Store = session.NewStore(t.TempDir())
 	spec.RecordID = "firing-1"
 
 	if _, err := Once(context.Background(), spec); err != nil {
@@ -2215,10 +2216,52 @@ func TestOnceImagesTheWorkspaceIntoTheRecordsSnapshotStore(t *testing.T) {
 	}
 }
 
-// TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal pins the fallback an embedder and the bench both
-// run in: a Config that injects no apogee home names no store, so the run keeps ADR 0051's
-// in-memory journal, REPORTS why in the note a Driver renders, and writes nothing at all outside
-// the workspace. A missing home is a supported configuration, never a failed Firing.
+// TestOnceWithNoStoreKeepsTheInMemoryJournal pins what a run that keeps no record does about undo:
+// nothing on disk. `apogee headless --no-save` and the bench hand Once a Spec with a RecordID (the
+// scratch dir is keyed on it) and no Store, and with snapshots fully in force — a home, git, the
+// key on — the run still opens no store under that id, because no `apogee undo <session-id>` could
+// ever name a record that was never saved. The proof is the snapshot root: no directory appears
+// under it, and the note says why in the snapshot package's own words.
+func TestOnceWithNoStoreKeepsTheInMemoryJournal(t *testing.T) {
+	t.Parallel()
+	requireSnapshots(t)
+
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{
+		{ToolCalls: []stubllm.ToolCall{{ID: "call_1", Name: "write_file", Arguments: `{"path":"note.txt","content":"written"}`}}},
+		{Text: "the file is written"},
+	}})
+
+	home := t.TempDir()
+	spec := planSpec(up.URL, "write the note")
+	spec.Config.Mode = domain.ModeAuto
+	spec.Config.Confiner = stubConfiner{}
+	spec.Config.WorkspaceDir = t.TempDir()
+	spec.Config.ConfigDir = home
+	spec.Config.UndoSnapshots = true
+	spec.RecordID = "firing-3"
+
+	res, err := Once(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	if res.UndoNote != snapshot.ReasonNoRecord {
+		t.Errorf("UndoNote = %q, want %q: a run with no Store keeps no record for undo to name", res.UndoNote, snapshot.ReasonNoRecord)
+	}
+	if _, err := os.Stat(filepath.Join(home, "snapshots")); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stat <home>/snapshots: err = %v; want the root never to have been created — a run that keeps no record opens no store", err)
+	}
+	if added := addedNames([]string{}, dirNames(t, home)); len(added) > 0 {
+		t.Errorf("the run created %v under the home, want nothing at all", added)
+	}
+}
+
+// TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal pins the fallback an embedder runs in: a Config
+// that injects no apogee home names no store, so a SAVED run keeps ADR 0051's in-memory journal,
+// REPORTS why in the note a Driver renders, and writes nothing at all outside the workspace and its
+// own record store. A missing home is a supported configuration, never a failed Firing. The Spec
+// carries a Store on purpose — a Spec without one never asks the snapshot package anything (see
+// TestOnceWithNoStoreKeepsTheInMemoryJournal), and this test is about the home-less reason.
 func TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal(t *testing.T) {
 	t.Parallel()
 
@@ -2255,6 +2298,7 @@ func TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal(t *testing.T) {
 	spec := planSpec(up.URL, "look around")
 	spec.Config.WorkspaceDir = workspace
 	spec.Config.UndoSnapshots = true
+	spec.Store = session.NewStore(t.TempDir())
 	spec.RecordID = "firing-2"
 
 	res, err := Once(context.Background(), spec)

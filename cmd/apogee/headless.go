@@ -1262,7 +1262,7 @@ func undoVerbLine(res run.Result) string {
 // (firingOutcome, wire_firing.go) — so a surface never names a command the report would not.
 //
 // Three conditions, all of them necessary. There is a change to revert (the run wrote something),
-// a record to name (an unsaved run's store is nameless and was swept), and run.Result.UndoNote is
+// a record to name (an unsaved run opens no store), and run.Result.UndoNote is
 // EMPTY — the note is why the journal was the in-memory funnel one, whose records this process
 // alone ever held, so offering a verb against it would send a human to a command that answers
 // "nothing to undo". Any one of the three missing composes nothing at all.
