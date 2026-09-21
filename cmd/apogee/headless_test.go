@@ -93,7 +93,7 @@ func headlessRun(t *testing.T, stub *stubRunner, args ...string) (out, errOut st
 // — ADR 0012 — so an unconfined run is expressed by writing that file, never by a flag).
 //
 // srv is the stubllm upstream the home's `servers:` entry names, and it is REAL: the one beat the
-// composition takes dials it (discoverBeat), so a test with an opinion about what the server
+// composition takes dials it (observeServer), so a test with an opinion about what the server
 // advertises — the slot count, the effort dialect, a refused or held probe — states it in the
 // Script and reads what the composer made of it. A nil srv starts headlessBeatServer's default, and
 // an empty configDir writes the default home against srv (testConfigHomeOn); a caller that writes
@@ -677,6 +677,37 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 					"it does not buy the run out of observing its server")
 			}
 		})
+	}
+}
+
+// The Firing's beat IS the Monitor a session's heartbeat drives — the same provider.Discover under
+// the same two probes — rather than a second discovery grown for the unattended Drivers (ADR 0031's
+// Driver parity, as a tested fact). Read off the upstream: `apogee headless` leaves exactly the
+// Monitor's probe pair in the stub's discovery log, the model list and then llama.cpp's /props, and
+// the `total_slots` scripted on that /props is the width the run is composed at. The composition
+// has no beat seam of its own any more — a nil firingInputs.beat dials the server (observeServer) —
+// so there is nothing here to bite; the pin is what a second discovery would have to get past.
+func TestHeadlessBeatIsTheRealMonitor(t *testing.T) {
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+		Props:  &stubllm.Props{TotalSlots: 6},
+	}})
+
+	stub := &stubRunner{}
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, "", "a prompt"); err != nil {
+		t.Fatalf("headless: %v", err)
+	}
+
+	var probed []string
+	for _, probe := range srv.Probes() {
+		probed = append(probed, probe.Path)
+	}
+	if want := []string{"/v1/models", "/props"}; !slices.Equal(probed, want) {
+		t.Errorf("the Firing probed %v; want the Monitor's own pair %v, once — one beat, no retry, and no "+
+			"discovery of the Driver's own", probed, want)
+	}
+	if got := stub.spec.Config.ParallelAgents; got != 6 {
+		t.Errorf("Config.ParallelAgents = %d; want the 6 the server's /props reported through the Monitor's beat", got)
 	}
 }
 

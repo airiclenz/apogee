@@ -19,57 +19,70 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// daemonFireHarness is one daemon's wiring with every seam onto the host replaced: the runner, so
-// nothing is sent; the slot probe, so no Firing dials a server to ask how wide it may fan out; and
-// the confinement backend, so the composition is the same on a kernel that can fence and one that
-// cannot. Every test in this file goes through it, which is why none of them calls t.Parallel —
-// they replace package-level vars, exactly as the headless and schedule composition tests do.
+// daemonFireHarness is one daemon's wiring with the two seams onto the host replaced — the runner,
+// so nothing is sent, and the confinement backend, so the composition is the same on a kernel that
+// can fence and one that cannot — and its server REAL: a scripted upstream every `servers:` entry
+// the harness was built with points at, so the one beat a Firing takes (observeServer) dials a box
+// that answers. Every test in this file goes through it, which is why none of them calls t.Parallel
+// — they replace package-level vars, exactly as the headless and schedule composition tests do.
 type daemonFireHarness struct {
 	wiring *daemonWiring
 	runner *stubRunner
-	// probed records the endpoint the Firing's one beat was taken against.
-	probed string
-	// beat is what that beat observes. It ANSWERS by default, because the daemon refuses a Firing
-	// whose server answered nothing at all (daemonfire.go): a fixture that observed nothing would
-	// refuse every test in this file rather than compose the run each one is about. A test about the
-	// refusal dictates its own before firing.
-	beat heartbeat.Beat
+	// upstream is the scripted server every entry's Endpoint was repointed at. It ANSWERS by
+	// default — one advertised model, no /props — because the daemon refuses a Firing whose server
+	// answered nothing at all (daemonfire.go): a fixture that observed nothing would refuse every
+	// test in this file rather than compose the run each one is about. A test about what the server
+	// advertises, or about the refusal, scripts its own through newDaemonFireHarnessOn.
+	upstream *stubllm.Server
 	// logged is the daemon log the wiring narrates through — the one stream this Driver speaks on
 	// (daemon.go), captured so a test can read what a Firing said as it composed and as it landed.
 	logged *bytes.Buffer
 }
 
-// newDaemonFireHarness builds the harness for one host configuration. The apogee home is temporary
-// so no real ~/.apogee can reach the resolution — a caller that needs to prepare that home before
-// the wiring is built (planting a stale scratch dir, say) sets ConfigDir itself and keeps it.
+// newDaemonFireHarness builds the harness for one host configuration against the default upstream
+// (headlessBeatServer). The apogee home is temporary so no real ~/.apogee can reach the resolution
+// — a caller that needs to prepare that home before the wiring is built (planting a stale scratch
+// dir, say) sets ConfigDir itself and keeps it.
 func newDaemonFireHarness(t *testing.T, opts config.Options) *daemonFireHarness {
+	t.Helper()
+	return newDaemonFireHarnessOn(t, opts, headlessBeatServer(t))
+}
+
+// newDaemonFireHarnessOn is newDaemonFireHarness against upstream: the scripted server the
+// composition's beat reaches. Every endpoint the options carry — the flattened startup selection,
+// the StartupEntry a server-less schedule binds to, and each `servers:` entry — is repointed at it,
+// so the fixtures keep naming their boxes by the `.invalid` addresses that tell them apart while the
+// one dial the composition makes lands on a listener; a pin on where a Firing dials reads
+// upstream.URL, and the named-vs-startup distinction rests on the key and model beside it.
+func newDaemonFireHarnessOn(t *testing.T, opts config.Options, upstream *stubllm.Server) *daemonFireHarness {
 	t.Helper()
 
 	if opts.ConfigDir == "" {
 		opts.ConfigDir = t.TempDir()
 	}
+	opts.Endpoint = upstream.URL
+	opts.StartupEntry.Endpoint = upstream.URL
+	for i := range opts.Servers {
+		opts.Servers[i].Endpoint = upstream.URL
+	}
 	harness := &daemonFireHarness{
-		runner: &stubRunner{},
-		beat:   heartbeat.Beat{Reachable: true, Answered: true},
-		logged: &bytes.Buffer{},
+		runner:   &stubRunner{},
+		upstream: upstream,
+		logged:   &bytes.Buffer{},
 	}
 
-	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
+	prevRunner, prevConfiner := runOnce, newConfiner
 	runOnce = harness.runner.once
-	discoverBeat = func(_ context.Context, endpoint, _, _ string, _ provider.Wire) heartbeat.Beat {
-		harness.probed = endpoint
-		return harness.beat
-	}
 	newConfiner = func() apogee.Confiner { return fenceableHost }
-	t.Cleanup(func() { runOnce, discoverBeat, newConfiner = prevRunner, prevBeat, prevConfiner })
+	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
 
 	wiring, err := newDaemonWiring(opts, &daemonLog{out: harness.logged, now: time.Now})
 	if err != nil {
@@ -141,8 +154,8 @@ func TestDaemonFireBindsTheServerTheEntryNames(t *testing.T) {
 
 	spec := harness.fire(t, entryFor(t, "audit", daemon.Action{Server: "nightly"}))
 
-	if got := spec.Config.Endpoint; got != "http://nightly.invalid" {
-		t.Errorf("the firing dials %q, want the named entry's http://nightly.invalid", got)
+	if got := spec.Config.Endpoint; got != harness.upstream.URL {
+		t.Errorf("the firing dials %q, want the named entry's %s", got, harness.upstream.URL)
 	}
 	if got := spec.Config.APIKey; got != "nightly-key" {
 		t.Errorf("the firing sends %q, want the named entry's key nightly-key", got)
@@ -172,8 +185,8 @@ func TestDaemonFireFallsBackToTheStartupServer(t *testing.T) {
 
 	spec := harness.fire(t, entryFor(t, "audit", daemon.Action{}))
 
-	if got := spec.Config.Endpoint; got != "http://startup.invalid" {
-		t.Errorf("the firing dials %q, want the startup default http://startup.invalid", got)
+	if got := spec.Config.Endpoint; got != harness.upstream.URL {
+		t.Errorf("the firing dials %q, want the startup default %s", got, harness.upstream.URL)
 	}
 	if got := spec.Config.Model; got != "startup-model" {
 		t.Errorf("the firing runs %q, want the startup default's model startup-model", got)
@@ -243,7 +256,7 @@ func TestDaemonFireSendsToALauncherFrontedServerAsItStands(t *testing.T) {
 
 	spec := harness.fire(t, entryFor(t, "audit", daemon.Action{Server: "local"}))
 
-	if got := spec.Config.Endpoint; got != "http://local.invalid" {
+	if got := spec.Config.Endpoint; got != harness.upstream.URL {
 		t.Errorf("the firing dials %q, want the launcher-fronted entry's endpoint as it stands", got)
 	}
 	// Whatever that server is serving — the entry names no `model:` and validation refuses one here,
@@ -533,58 +546,64 @@ func TestDaemonFireRefusesAnUnadoptedSchedule(t *testing.T) {
 // sentence is the one all three Drivers compose through notice.ServerOffline, so a Firing words the
 // refusal exactly as a session does; this pin spells that wording out, which is what a change to it
 // has to get past.
+//
+// The nightly server is a scripted upstream per row, beaten for real, so each row dictates what
+// that server answers its model-list probe with — or closes it, so the dial is refused. The refused
+// dial's sentence is pinned as its stem (the endpoint) plus the dial's own last words, since the
+// address in between is the kernel's; the zero Beat — nothing observed and nothing to say — is a
+// verdict no listener can produce and is pinned where the gate is, on raise's own beat seam
+// (TestRaiseRefusesWhenOffline, wire_firing_test.go).
 func TestDaemonFireRefusesOnlyAServerThatAnsweredNothing(t *testing.T) {
 	for _, tc := range []struct {
 		name string
-		beat heartbeat.Beat
-		// want is the refusal sentence, and "" when this beat must let the Firing run.
-		want string
+		// discovery is what the nightly server advertises to the beat.
+		discovery stubllm.Discovery
+		// offline closes the server before the Firing, so its beat is a refused dial.
+		offline bool
+		// refuses says the Firing must be refused; false says this server must let it run.
+		refuses bool
 	}{
 		{
-			name: "a refused dial says why",
-			beat: heartbeat.Beat{Failure: "dial tcp 127.0.0.1:9: connect: connection refused"},
-			want: "cannot send — server offline (http://nightly.invalid): " +
-				"dial tcp 127.0.0.1:9: connect: connection refused",
-		},
-		{
-			// The zero Beat: nothing observed and nothing to say about it. The sentence still names
-			// the endpoint, which is the one fact a human reading the log acts on.
-			name: "nothing observed names the endpoint alone",
-			beat: heartbeat.Beat{},
-			want: "cannot send — server offline (http://nightly.invalid)",
+			name:      "a refused dial says why",
+			discovery: stubllm.Discovery{Models: []stubllm.DiscoveredModel{{ID: "nightly-model"}}},
+			offline:   true,
+			refuses:   true,
 		},
 		{
 			// A throttled model list ANSWERED: the box is there and merely would not answer this
 			// question now (internal/heartbeat). Refusing over it would turn a rate limit into a
 			// silent gap in the schedule's record.
-			name: "a throttled model list runs",
-			beat: heartbeat.Beat{Answered: true, Throttled: true, Failure: "the model list answered HTTP 429"},
+			name:      "a throttled model list runs",
+			discovery: stubllm.Discovery{Status: 429, Body: "slow down"},
 		},
 		{
 			// A completions-only endpoint serves no model list at all and answers the completion
 			// anyway — the beat is unreachable, not absent.
-			name: "a server with no model list runs",
-			beat: heartbeat.Beat{Answered: true, Failure: "the model list answered HTTP 404"},
+			name:      "a server with no model list runs",
+			discovery: stubllm.Discovery{Status: 404, Body: "no such route"},
 		},
 		{
-			name: "a healthy server runs",
-			beat: heartbeat.Beat{Answered: true, Reachable: true, ActiveModel: "nightly-model"},
+			name:      "a healthy server runs",
+			discovery: stubllm.Discovery{Models: []stubllm.DiscoveredModel{{ID: "nightly-model"}}},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			harness := newDaemonFireHarness(t, config.Options{
+			upstream := stubllm.New(t, stubllm.Script{Discovery: tc.discovery})
+			harness := newDaemonFireHarnessOn(t, config.Options{
 				HostAlias: "startup",
 				Endpoint:  "http://startup.invalid",
 				Servers: []config.ServerEntry{
 					{Name: "startup", Endpoint: "http://startup.invalid"},
 					{Name: "nightly", Endpoint: "http://nightly.invalid", Model: "nightly-model"},
 				},
-			})
-			harness.beat = tc.beat
+			}, upstream)
+			if tc.offline {
+				upstream.Close()
+			}
 
 			out, err := harness.raise(entryFor(t, "audit", daemon.Action{Server: "nightly"}))
 
-			if tc.want == "" {
+			if !tc.refuses {
 				if err != nil {
 					t.Fatalf("fire: %v; a server that ANSWERED must run the firing as before", err)
 				}
@@ -596,8 +615,9 @@ func TestDaemonFireRefusesOnlyAServerThatAnsweredNothing(t *testing.T) {
 			if err == nil {
 				t.Fatal("fire returned nil for a server that answered nothing; want the refusal")
 			}
-			if got := err.Error(); got != tc.want {
-				t.Errorf("the refusal reads %q; want the TUI's own sentence %q", got, tc.want)
+			stem := notice.ServerOffline(upstream.URL, "") + ": "
+			if got := err.Error(); !strings.HasPrefix(got, stem) || !strings.HasSuffix(got, "connection refused") {
+				t.Errorf("the refusal reads %q; want the TUI's own sentence — %q, then the refused dial's words", got, stem)
 			}
 			// Nothing was sent, so nothing was spent and no record was written — the whole point of
 			// gating before the run rather than reporting after it.
@@ -675,14 +695,16 @@ func TestDaemonStartupSweepsStaleSnapshotDirs(t *testing.T) {
 // hintNotice itself rather than a hand-typed copy, for the reason the headless twin reads it off
 // notice.ContextFileNotices: the point of one composer is that the Drivers cannot drift.
 func TestDaemonFireLogsTheCompositionsNotices(t *testing.T) {
-	harness := newDaemonFireHarness(t, config.Options{
+	// A server that advertises one model and reports a launch window, bound under ANOTHER model's
+	// name: discovery trusts the configured id as it stands (provider.HintTrusted), which is the
+	// grade the hint is composed from.
+	upstream := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "served-model"}},
+		Props:  &stubllm.Props{NCtx: 131072},
+	}})
+	harness := newDaemonFireHarnessOn(t, config.Options{
 		Servers: []config.ServerEntry{{Name: "box", Endpoint: "http://box.invalid", APIKey: "k", Model: "my-alias"}},
-	})
-	harness.beat = heartbeat.Beat{
-		Reachable: true, Answered: true,
-		ActiveModel: "my-alias", ContextWindow: 131072,
-		Resolution: provider.HintTrusted,
-	}
+	}, upstream)
 
 	harness.fire(t, entryFor(t, "nightly", daemon.Action{Server: "box"}))
 

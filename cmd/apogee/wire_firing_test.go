@@ -387,23 +387,21 @@ func TestFiringConfigMountsNoEscapingSkillRoot(t *testing.T) {
 
 // The three optional seams, each nil, each taking the documented default: a fresh key resolver asks
 // the entry's own source, a fresh catalog is built from the roots, and the width and the effort
-// dialect both come off the one-shot beat discoverBeat takes. Those defaults are what headless and
-// the daemon rely on — they have no longer-lived facility to share — so a change of default is a
-// change to two Drivers at once.
+// dialect both come off the one-shot beat observeServer takes of the REAL server — so the upstream
+// is a scripted one that advertises both, and what it advertises is what the Config must carry. The
+// dialect it advertises is the one discovery can observe: a per-model `reasoning` object is the
+// OpenRouter tell (provider.EffortDialectReasoning); `openai` has no tell and is forced-only. Those
+// defaults are what headless and the daemon rely on — they have no longer-lived facility to share —
+// so a change of default is a change to two Drivers at once.
 func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	roots := firingRoots(t)
 
-	beats := &stubBeat{beat: heartbeat.Beat{
-		Reachable:     true,
-		Answered:      true,
-		TotalSlots:    4,
-		EffortSupport: apiprovider.EffortSupport{Dialect: apiprovider.EffortDialectOpenAI},
-	}}
-	prev := discoverBeat
-	discoverBeat = beats.discover
-	t.Cleanup(func() { discoverBeat = prev })
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: "entry-model", Reasoning: &stubllm.ModelReasoning{}}},
+		Props:  &stubllm.Props{TotalSlots: 4},
+	}})
 
-	entry := config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", APIKey: "sk-from-the-entry", Model: "entry-model"}
+	entry := config.ServerEntry{Name: "box", Endpoint: srv.URL, APIKey: "sk-from-the-entry", Model: "entry-model"}
 	cfg, _, _, err := firingConfig(context.Background(), firingInputs{
 		opts:     config.Options{Bypass: true},
 		entry:    entry,
@@ -431,16 +429,16 @@ func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	if want := filepath.Join(roots.config, "skills"); !slices.Contains(cfg.ExtraReadRoots(), want) {
 		t.Errorf("Config.ExtraReadRoots() = %v; want the home library %q among them", cfg.ExtraReadRoots(), want)
 	}
-	if !beats.called {
-		t.Error("the discovery beat never ran; a nil beat seam must take discoverBeat, and an unpinned " +
+	if len(srv.Probes()) == 0 {
+		t.Error("the discovery beat never ran; a nil beat seam must take observeServer, and an unpinned " +
 			"entry has no other way to learn how wide it may fan out or which wire its server reads")
 	}
 	if cfg.ParallelAgents != 4 {
-		t.Errorf("Config.ParallelAgents = %d; want the 4 the beat reported", cfg.ParallelAgents)
+		t.Errorf("Config.ParallelAgents = %d; want the 4 the server's /props reported", cfg.ParallelAgents)
 	}
-	if cfg.EffortDialect != domain.EffortDialectOpenAI {
+	if cfg.EffortDialect != domain.EffortDialectReasoning {
 		t.Errorf("Config.EffortDialect = %q; want the %q the beat observed — an unattended run must reach the wire a session reaches",
-			cfg.EffortDialect, domain.EffortDialectOpenAI)
+			cfg.EffortDialect, domain.EffortDialectReasoning)
 	}
 }
 
@@ -562,17 +560,19 @@ func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
 		Model: "session-model",
 		Turns: []stubllm.Turn{{Text: "nothing to delegate"}},
 	})
+	// The Sub-agent server is REAL too: the composer beats it through observeServer to resolve the
+	// far seat, so it is a scripted upstream that advertises the grunt model and a two-slot width.
+	gruntServer := stubllm.New(t, stubllm.Script{
+		Model:     "grunt-model",
+		Discovery: stubllm.Discovery{Props: &stubllm.Props{TotalSlots: 2}},
+	})
 	grunt := config.ServerEntry{
 		Name:        "grunt",
-		Endpoint:    "http://grunt.example/v1",
+		Endpoint:    gruntServer.URL,
 		Description: "the cheap box",
 		Model:       "grunt-model",
 		APIKey:      "sk-grunt",
 	}
-	beats := &stubBeat{beat: heartbeat.Beat{Reachable: true, TotalSlots: 2}}
-	prev := discoverDelegationBeat
-	discoverDelegationBeat = beats.discover
-	t.Cleanup(func() { discoverDelegationBeat = prev })
 
 	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
 		opts: config.Options{
@@ -631,21 +631,27 @@ func TestFiringOrientationNamesBothSeatsUnderSeatChoice(t *testing.T) {
 	}
 }
 
-// The entry's wire reaches both beat seams (ADR 0078): the Firing's own server is observed
-// under the wire its entry names, and the `sub-agents-server:` entry under ITS wire — a mixed
-// pair, so an anthropic entry cannot be observed as an openai one by either seam, and the
-// fold of an unnamed wire onto openai is asserted rather than assumed. And the same two values
-// ride past the beats onto what the engine dials with: the Config carries the bound entry's wire
-// as written, the routed target the grunt entry's own — so the run's session client and its
-// routed children each open the connection a session on that entry would.
+// The entry's wire reaches both beats (ADR 0078): the Firing's own server is observed under the
+// wire its entry names, and the `sub-agents-server:` entry under ITS wire — a mixed pair, so an
+// anthropic entry cannot be observed as an openai one by either beat, and the fold of an unnamed
+// wire onto openai is asserted rather than assumed. Both servers are scripted upstreams and the
+// wire is read off the model-list probe each one logged: a Messages-wire probe carries the
+// `anthropic-version` header every Messages client sends and a chat-completions probe never does
+// (internal/stubllm renders the list by that same tell). And the same two values ride past the
+// beats onto what the engine dials with: the Config carries the bound entry's wire as written, the
+// routed target the grunt entry's own — so the run's session client and its routed children each
+// open the connection a session on that entry would.
 func TestFiringConfigBeatsCarryEachEntrysWire(t *testing.T) {
-	primary := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}
-	delegation := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 2}}
-	prevPrimary, prevDelegation := discoverBeat, discoverDelegationBeat
-	discoverBeat, discoverDelegationBeat = primary.discover, delegation.discover
-	t.Cleanup(func() { discoverBeat, discoverDelegationBeat = prevPrimary, prevDelegation })
+	primary := stubllm.New(t, stubllm.Script{
+		Model:     "claude",
+		Discovery: stubllm.Discovery{Props: &stubllm.Props{TotalSlots: 1}},
+	})
+	delegation := stubllm.New(t, stubllm.Script{
+		Model:     "grunt-model",
+		Discovery: stubllm.Discovery{Props: &stubllm.Props{TotalSlots: 2}},
+	})
 
-	grunt := config.ServerEntry{Name: "grunt", Endpoint: "http://grunt.example/v1", Model: "grunt-model", APIKey: "sk-grunt"}
+	grunt := config.ServerEntry{Name: "grunt", Endpoint: delegation.URL, Model: "grunt-model", APIKey: "sk-grunt"}
 	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
 		opts: config.Options{
 			Bypass:          true,
@@ -653,7 +659,7 @@ func TestFiringConfigBeatsCarryEachEntrysWire(t *testing.T) {
 			SubAgentsServer: "grunt",
 		},
 		entry: config.ServerEntry{
-			Name: "box", Endpoint: "http://box.example/v1", Model: "claude", APIKey: "sk-test", Wire: "anthropic",
+			Name: "box", Endpoint: primary.URL, Model: "claude", APIKey: "sk-test", Wire: "anthropic",
 		},
 		roots:    firingRoots(t),
 		confiner: fenceableHost,
@@ -673,13 +679,28 @@ func TestFiringConfigBeatsCarryEachEntrysWire(t *testing.T) {
 	if routing.target.Wire != "" {
 		t.Errorf("routed target Wire = %q; want the grunt entry's own unnamed wire carried as written, never the session entry's", routing.target.Wire)
 	}
-	if want := []apiprovider.Wire{apiprovider.WireAnthropic}; !slices.Equal(primary.wires, want) {
-		t.Errorf("discoverBeat was dialled with %v; want the entry's own %v", primary.wires, want)
+	if probe := modelsProbe(t, primary); probe.Header.Get("anthropic-version") == "" {
+		t.Errorf("the run's own server was beaten under %v; want the entry's own anthropic wire, whose probe carries anthropic-version",
+			probe.Header)
 	}
-	if want := []apiprovider.Wire{apiprovider.WireOpenAI}; !slices.Equal(delegation.wires, want) {
-		t.Errorf("discoverDelegationBeat was dialled with %v; want the grunt entry's unnamed wire folded to %v",
-			delegation.wires, want)
+	if probe := modelsProbe(t, delegation); probe.Header.Get("anthropic-version") != "" {
+		t.Errorf("the Sub-agent server was beaten under %v; want the grunt entry's unnamed wire folded to openai, whose probe carries no anthropic-version",
+			probe.Header)
 	}
+}
+
+// modelsProbe is the first GET /v1/models the scripted upstream logged — the beat's own probe, and
+// the one whose headers say which wire the beat was dialled under. A server that never saw one was
+// never beaten, which fails the test where the claim was made.
+func modelsProbe(t *testing.T, srv *stubllm.Server) stubllm.Probe {
+	t.Helper()
+	for _, probe := range srv.Probes() {
+		if probe.Path == "/v1/models" {
+			return probe
+		}
+	}
+	t.Fatalf("the upstream at %s was never asked for its model list; the beat did not reach it", srv.URL)
+	return stubllm.Probe{}
 }
 
 // A host with no scratch root names no scratch dir at all. The Config carries "" rather than a
@@ -713,27 +734,23 @@ func TestFiringConfigNamesNoScratchDirWithoutARoot(t *testing.T) {
 }
 
 // stubBeat is an observation a test dictates, plus the record of whether it was taken at all. It
-// serves both of the composer's beat seams — the Firing's own server (discoverBeat) and the
-// Sub-agent server (discoverDelegationBeat) — because they have one signature and one contract; a
-// test says which by the seam it swaps. The `called` half carries the two opposite claims: the
-// primary beat is taken on EVERY Firing, whatever the entry pins, while a run that names no
-// `sub-agents-server:` must ask nothing, since a round trip for a question nobody posed is exactly
-// what that gate exists to avoid.
+// is handed to the composer as firingInputs.beat — the Driver's hand-over of the run's OWN
+// observation, the one seam the composition still has — where a row needs a Beat no scripted server
+// can produce (the zero Beat, a dictated failure sentence) or has nothing to say about the server at
+// all. The Sub-agent server has no such seam: the composer beats it for real (observeServer), so a
+// test with an opinion about that box scripts it (internal/stubllm). The `called` half carries the
+// claim that the primary beat is taken on EVERY Firing, whatever the entry pins.
 type stubBeat struct {
 	called    bool
 	calls     int
 	endpoints []string
-	// wires records the wire each call was asked to dial with, beside its endpoint: the entry's
-	// protocol must reach the beat, or an anthropic entry would be observed as an openai one.
-	wires []apiprovider.Wire
-	beat  heartbeat.Beat
+	beat      heartbeat.Beat
 }
 
-func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string, wire apiprovider.Wire) heartbeat.Beat {
+func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string, _ apiprovider.Wire) heartbeat.Beat {
 	s.called = true
 	s.calls++
 	s.endpoints = append(s.endpoints, endpoint)
-	s.wires = append(s.wires, wire)
 	return s.beat
 }
 
@@ -741,65 +758,70 @@ func (s *stubBeat) discover(_ context.Context, endpoint, _, _ string, wire apipr
 // `sub-agents-server:` key a session resolves. Every failure is a NOTICE with the target left nil —
 // a Firing runs while nobody is watching, so refusing to start over a grunt box that is merely down
 // would turn a scheduled run into a silent gap in the record (ADR 0042's visible degrade).
+//
+// The Sub-agent server is a scripted upstream per row — the composer beats it for real — so what
+// each row dictates is what that server advertises, or that nothing listens at its address.
 func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
-	grunt := config.ServerEntry{
-		Name:        "grunt",
-		Endpoint:    "http://grunt.example/v1",
-		Description: "the cheap box",
-		Model:       "grunt-model",
-		APIKey:      "sk-grunt",
-	}
-
 	for _, tc := range []struct {
-		name       string
-		named      string
-		entry      config.ServerEntry
-		beat       heartbeat.Beat
+		name  string
+		named string
+		// props is what the grunt server's /props reports; nil is a server without the probe.
+		props *stubllm.Props
+		// offline closes the grunt server before the composition, so its beat is a refused dial.
+		offline    bool
 		wantBeat   bool
 		wantTarget bool
 		wantSeat   bool
+		wantSlots  int
 		wantNotice string
 	}{
 		{
-			name:  "no key names no seat and asks nothing",
-			entry: grunt,
+			name: "no key names no seat and asks nothing",
 		},
 		{
 			name:       "a name the list does not carry degrades and says which",
 			named:      "typo",
-			entry:      grunt,
 			wantNotice: `sub-agents: no servers entry named "typo" — delegations run on the session server (configured: grunt)`,
 		},
 		{
 			name:       "a reachable entry is routed to",
 			named:      "grunt",
-			entry:      grunt,
-			beat:       heartbeat.Beat{Reachable: true, TotalSlots: 5, ContextWindow: 4096},
+			props:      &stubllm.Props{TotalSlots: 5, NCtx: 4096},
 			wantBeat:   true,
 			wantTarget: true,
 			wantSeat:   true,
+			wantSlots:  5,
 			wantNotice: "sub-agents: routing to grunt (grunt-model)",
 		},
 		{
 			name:       "an unreachable entry keeps its seat and routes nothing",
 			named:      "grunt",
-			entry:      grunt,
-			beat:       heartbeat.Beat{Failure: "dial tcp: refused"},
+			offline:    true,
 			wantBeat:   true,
 			wantSeat:   true,
 			wantNotice: "sub-agents: grunt unavailable — delegations run on the session server",
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			beats := &stubBeat{beat: tc.beat}
-			prev := discoverDelegationBeat
-			discoverDelegationBeat = beats.discover
-			t.Cleanup(func() { discoverDelegationBeat = prev })
+			gruntServer := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+				Models: []stubllm.DiscoveredModel{{ID: "grunt-model"}},
+				Props:  tc.props,
+			}})
+			if tc.offline {
+				gruntServer.Close()
+			}
+			grunt := config.ServerEntry{
+				Name:        "grunt",
+				Endpoint:    gruntServer.URL,
+				Description: "the cheap box",
+				Model:       "grunt-model",
+				APIKey:      "sk-grunt",
+			}
 
 			_, routing, notices, err := firingConfig(context.Background(), firingInputs{
 				opts: config.Options{
 					Bypass:          true,
-					Servers:         []config.ServerEntry{tc.entry},
+					Servers:         []config.ServerEntry{grunt},
 					SubAgentsServer: tc.named,
 				},
 				entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", ParallelAgents: 1, EffortDialect: "reasoning"},
@@ -814,8 +836,10 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 				t.Fatalf("firingConfig: %v; routing must degrade with a notice, never refuse the run", err)
 			}
 
-			if beats.called != tc.wantBeat {
-				t.Errorf("the Sub-agent beat fired = %v, want %v", beats.called, tc.wantBeat)
+			// A closed server logs nothing, so the refused dial's beat is proven by the notice the
+			// row wants rather than by a probe the server could not record.
+			if got := len(gruntServer.Probes()) > 0; !tc.offline && got != tc.wantBeat {
+				t.Errorf("the Sub-agent beat fired = %v, want %v", got, tc.wantBeat)
 			}
 			if got := routing.target != nil; got != tc.wantTarget {
 				t.Fatalf("routing.target non-nil = %v, want %v", got, tc.wantTarget)
@@ -853,9 +877,9 @@ func TestFiringConfigResolvesItsSubAgentSeat(t *testing.T) {
 				t.Errorf("routing.target carries %q; want the NAMED entry's own key source, not the run's",
 					routing.target.APIKey)
 			}
-			if want := tc.beat.TotalSlots; routing.target.ParallelAgents != want {
-				t.Errorf("routing.target.ParallelAgents = %d; want the %d the beat reported",
-					routing.target.ParallelAgents, want)
+			if routing.target.ParallelAgents != tc.wantSlots {
+				t.Errorf("routing.target.ParallelAgents = %d; want the %d the grunt server's /props reported",
+					routing.target.ParallelAgents, tc.wantSlots)
 			}
 		})
 	}
@@ -1086,25 +1110,26 @@ func TestFiringConfigSaysWhenTheModelIsNotAdvertised(t *testing.T) {
 	}
 }
 
-// The two beat seams observe two different BOXES and must never be collapsed into one. A Firing's
-// own beat asks the server it runs on; discoverDelegationBeat asks the `sub-agents-server:` entry,
-// which has its own endpoint, model and key. Sharing the primary's beat would have
-// resolveDelegationTarget resolve a target's window, width and bound model against the wrong
-// machine — routing every delegation to a grunt server nobody observed instead of degrading to the
-// run's own Upstream with a notice.
+// The two beats observe two different BOXES and must never be collapsed into one. A Firing's own
+// beat asks the server it runs on; resolveFiringRouting asks the `sub-agents-server:` entry, which
+// has its own endpoint, model and key. Sharing the primary's beat would have resolveDelegationTarget
+// resolve a target's window, width and bound model against the wrong machine — routing every
+// delegation to a grunt server nobody observed instead of degrading to the run's own Upstream with a
+// notice. The primary's observation is the Driver's hand-over here (firingInputs.beat) and the
+// Sub-agent server a scripted upstream, so the two boxes answer with different widths and the
+// assertion reads which one each half of the composition carried.
 func TestFiringConfigBeatsTheSubAgentServerOnItsOwnEndpoint(t *testing.T) {
+	delegation := stubllm.New(t, stubllm.Script{
+		Model:     "grunt-model",
+		Discovery: stubllm.Discovery{Props: &stubllm.Props{TotalSlots: 2}},
+	})
 	grunt := config.ServerEntry{
 		Name:     "grunt",
-		Endpoint: "http://grunt.example/v1",
+		Endpoint: delegation.URL,
 		Model:    "grunt-model",
 		APIKey:   "sk-grunt",
 	}
 	primary := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 1}}
-	delegation := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: 2}}
-
-	prev := discoverDelegationBeat
-	discoverDelegationBeat = delegation.discover
-	t.Cleanup(func() { discoverDelegationBeat = prev })
 
 	_, routing, _, err := firingConfig(context.Background(), firingInputs{
 		opts: config.Options{
@@ -1125,20 +1150,22 @@ func TestFiringConfigBeatsTheSubAgentServerOnItsOwnEndpoint(t *testing.T) {
 	}
 
 	if got := primary.endpoints; !slices.Equal(got, []string{"http://box.example/v1"}) {
-		t.Errorf("the primary seam saw %v; want exactly the run's own endpoint", got)
-	}
-	if got := delegation.endpoints; !slices.Equal(got, []string{grunt.Endpoint}) {
-		t.Errorf("the Sub-agent seam saw %v; want exactly the named entry's own %q — a shared beat "+
-			"would resolve the target against the wrong box", got, grunt.Endpoint)
+		t.Errorf("the primary beat saw %v; want exactly the run's own endpoint", got)
 	}
 	if routing.target == nil {
 		t.Fatal("the composer resolved no target; the fixture no longer sets up a routed run")
 	}
+	// The target was resolved against the grunt server's OWN observation: its width is the two
+	// slots that box advertises, which the primary's dictated beat never reported.
+	modelsProbe(t, delegation)
+	if routing.target.ParallelAgents != 2 {
+		t.Errorf("routing.target.ParallelAgents = %d; want the 2 the Sub-agent server's /props reported — a shared "+
+			"beat would resolve the target against the wrong box", routing.target.ParallelAgents)
+	}
 	// And the observation on the routing is the PRIMARY's, never the one the target was resolved from.
 	if routing.Beat.TotalSlots != 1 {
 		t.Errorf("routing.Beat reports %d slots; want the primary's 1 — the Sub-agent server's beat "+
-			"answered %d and must not be what a Driver gates the run on",
-			routing.Beat.TotalSlots, delegation.beat.TotalSlots)
+			"answered 2 and must not be what a Driver gates the run on", routing.Beat.TotalSlots)
 	}
 }
 

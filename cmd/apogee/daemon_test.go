@@ -18,9 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/platform"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/schedule"
 )
@@ -60,11 +58,15 @@ type daemonHarness struct {
 	stopped bool
 }
 
-// newDaemonHarness prepares an apogee home with a startup server and installs every seam.
+// newDaemonHarness prepares an apogee home with a startup server and installs every seam. The
+// startup server is a scripted upstream that is THERE: the daemon refuses a Firing whose beat
+// answered nothing at all (daemonfire.go), and the beat is a real dial (observeServer), so a home
+// bound to a port nothing listens on would refuse every Firing this file drives rather than run the
+// one each test is about.
 func newDaemonHarness(t *testing.T) *daemonHarness {
 	t.Helper()
 
-	home := testConfigHome(t, "")
+	home := testConfigHomeOn(t, headlessBeatServer(t), "")
 	h := &daemonHarness{
 		home:      home,
 		dir:       filepath.Join(home, daemonDirName),
@@ -77,15 +79,9 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		changes:   make(chan struct{}, 1),
 	}
 
-	prevRunner, prevBeat, prevConfiner := runOnce, discoverBeat, newConfiner
+	prevRunner, prevConfiner := runOnce, newConfiner
 	prevLock, prevClock, prevWatch := acquireDaemonLock, daemonClock, watchSchedules
 	runOnce = h.runner.once
-	// A server that is THERE: the daemon refuses a Firing whose beat answered nothing at all
-	// (daemonfire.go), so a fixture observing nothing would refuse every Firing this file drives
-	// rather than run the one each test is about.
-	discoverBeat = func(context.Context, string, string, string, provider.Wire) heartbeat.Beat {
-		return heartbeat.Beat{Reachable: true, Answered: true}
-	}
 	newConfiner = func() apogee.Confiner { return fenceableHost }
 	acquireDaemonLock = func(path string) (func(), error) {
 		h.locked = path
@@ -97,7 +93,7 @@ func newDaemonHarness(t *testing.T) *daemonHarness {
 		return h.changes, func() { h.stopped = true }
 	}
 	t.Cleanup(func() {
-		runOnce, discoverBeat, newConfiner = prevRunner, prevBeat, prevConfiner
+		runOnce, newConfiner = prevRunner, prevConfiner
 		acquireDaemonLock, daemonClock, watchSchedules = prevLock, prevClock, prevWatch
 	})
 	return h

@@ -65,7 +65,7 @@ type firingInputs struct {
 	// `use-project-skills` flip keeps following its Firings (design call 5); headless and the
 	// daemon pass nil, each having no longer-lived catalog to share.
 	skills *skills.Provider
-	// beat is this run's ONE observation of the server it is bound to; nil takes discoverBeat, the
+	// beat is this run's ONE observation of the server it is bound to; nil takes observeServer, the
 	// one-shot beat standing in for the heartbeat an unattended run has none of. It is one seam
 	// rather than the two probes it replaced — a width and a dialect asked separately — because
 	// both answers come off the SAME observation of the SAME endpoint, model and key: two probes
@@ -296,6 +296,37 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	return firingBinding{cfg: cfg, spec: spec, apiKey: apiKey, keys: keys, notices: notices}, nil
 }
 
+// observeServer is the ONE observation an unattended run takes of a server: the whole Beat, because
+// everything the composition needs from discovery comes off it — how many generation slots the
+// server reports it was launched with (ADR 0039 decision 2), which wire shape it reads a
+// thinking-effort intent in (ADR 0060), and whether it answered at all. It is ONE beat of the very
+// Monitor the TUI's heartbeat drives, so an unattended run and a session read the same numbers out
+// of the same probes rather than growing a second, subtly different discovery. One beat and no retry
+// is the whole contract: a headless run composes once and has no later beat to widen on, so it asks
+// once and takes what comes.
+//
+// It never reports an error, and it replaced two probes that each asked the same server the same
+// question at the same moment: a server without /props, an unreachable one, a cancelled context all
+// answer the zero Beat, whose slot count ResolveParallelAgents turns into the entry's own default
+// width — one for an unkeyed server, four for a keyed one (config.DefaultParallelAgents) — and whose
+// dialect is the historical `chat_template_kwargs` shape every unattended run spoke before it
+// existed. What the failure MEANS is on the Beat itself (Failure, Answered, Throttled) for the
+// Driver that gates on it.
+//
+// It serves two boxes and is never shared between them: firingConfig beats the run's OWN server
+// through it when no Driver hands over a beat (firingInputs.beat), and resolveFiringRouting beats
+// the Sub-agent server — its own endpoint, model and key — because a target resolved against the
+// primary's observation would route delegations to a box nobody observed. It is a plain function
+// rather than a seam: a test that wants a different answer scripts the server it dials
+// (internal/stubllm), or hands firingConfig a beat of its own.
+//
+// wire is the entry's protocol (ADR 0078), carried because the beat IS a discovery and discovery
+// differs per wire: the Monitor is dialled with it so an anthropic entry is asked under its own
+// headers and never for a /props it does not serve.
+func observeServer(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat {
+	return heartbeat.NewMonitor(endpoint, model, apiKey, provider.WithWire(wire)).Beat(ctx)
+}
+
 // firingConfig composes the construction surface EVERY unattended run is driven from: one prompt,
 // nobody watching, no delegate that assumes a human. It exists because that surface was previously
 // spelled out three times — once per Driver — and three copies of a twenty-field literal is three
@@ -339,7 +370,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// beat never overrules one — but the call happens, because the call IS the liveness gate.
 	observe := in.beat
 	if observe == nil {
-		observe = discoverBeat
+		observe = observeServer
 	}
 	beat := observe(ctx, in.entry.Endpoint, spec.Model, apiKey, provider.WireFor(in.entry.Wire))
 
@@ -486,8 +517,8 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 // re-derive without spending a second round trip: the composition takes exactly one beat of the
 // primary server, and a Driver that must refuse a Firing rather than send a prompt into a dead
 // endpoint reads it off here. It is the PRIMARY server's — never the Sub-agent server's, which
-// resolveFiringRouting observes separately through discoverDelegationBeat, because the two are
-// different boxes with different keys.
+// resolveFiringRouting observes separately (observeServer), because the two are different boxes
+// with different keys.
 //
 // Both zero is the DEFAULT and the floor: no `sub-agents-server:` key, or a key that resolved to
 // nothing, leaves the run exactly as every Firing was before it could route at all — children on the
@@ -567,8 +598,15 @@ func resolveFiringRouting(
 	}
 
 	// One beat, no retry: the composition happens once and there is no later beat to widen on, which
-	// is the contract discoverBeat already set for an unattended run's own server.
-	observed := discoverDelegationBeat(ctx, entry.Endpoint, entry.Model, apiKey, provider.WireFor(entry.Wire))
+	// is the contract observeServer already set for an unattended run's own server. It is the SAME
+	// one-liner and never the same observation: this beats the Sub-agent server's own endpoint,
+	// model and key, so the target below is resolved against the box it will actually dial. It
+	// fires ONLY when `sub-agents-server:` names an entry — a run that delegates to its own server
+	// asks nothing here, so the default composition path costs no third round trip — and an
+	// unreachable server, a cancelled context and a server with nothing bound are all "no target",
+	// which leaves the run unrouted: the fallback every Firing took before routing existed (ADR
+	// 0045 §4's floor).
+	observed := observeServer(ctx, entry.Endpoint, entry.Model, apiKey, provider.WireFor(entry.Wire))
 	// And the one resolution the session's own beat lands, reused whole rather than re-derived: the
 	// pin-else-observe ladder is ADR 0045 decision 4, and a second copy of it is how one Driver ends
 	// up routing to a window the other would not.

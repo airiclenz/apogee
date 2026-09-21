@@ -1227,20 +1227,21 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 // is already talking to that server, so it hands the composer its own observation — the width it
 // resolves and the effort wire shape its heartbeat saw — with an empty failure. That is the one
 // Driver where the shared beat is a hand-over rather than a probe, and the assertion is both halves:
-// the seam is never reached, and the values that reach the Config are the session's.
+// no beat of its own is taken, and the values that reach the Config are the session's. The first
+// half is proven by the binding itself: the Firing is bound to `http://bound.invalid`, where a real
+// beat (observeServer) would find nothing and refuse the run, so a Firing that ran took none.
 //
 // Composed against the package's runner seam rather than a live model, which is why this test does
-// not call t.Parallel: it replaces package-level vars, exactly as the width test above does.
+// not call t.Parallel: it replaces a package-level var, exactly as the width test above does.
 func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 	stub := &stubRunner{}
-	beats := &stubBeat{}
-	prevRunner, prevBeat := runOnce, discoverBeat
-	runOnce, discoverBeat = stub.once, beats.discover
-	t.Cleanup(func() { runOnce, discoverBeat = prevRunner, prevBeat })
+	prevRunner := runOnce
+	runOnce = stub.once
+	t.Cleanup(func() { runOnce = prevRunner })
 
 	live := newLiveSettings(config.Options{})
 	live.observe(32768, provider.EffortDialectOpenAI)
@@ -1252,11 +1253,9 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 	}
 
 	if _, err := w.fire(context.Background(), schedule.Firing{Prompt: "check the build", Mode: domain.ModePlan}); err != nil {
-		t.Fatalf("fire: %v", err)
-	}
-	if beats.called {
-		t.Error("the session's Firing took a beat of its own; it must hand over the observation this " +
-			"session is already holding rather than spend a round trip on the Scheduler's goroutine")
+		t.Fatalf("fire: %v; a Firing refused here took a beat of its own against a box that is not there — "+
+			"it must hand over the observation this session is already holding rather than spend a round "+
+			"trip on the Scheduler's goroutine", err)
 	}
 	if got := stub.spec.Config.ParallelAgents; got != 6 {
 		t.Errorf("the firing runs at ParallelAgents = %d, want the session's wired width 6", got)

@@ -15,6 +15,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/title"
 )
 
@@ -544,9 +545,17 @@ func TestFiringConfigCarriesTheDelegationNamer(t *testing.T) {
 // about the work — while an unrouted child's still goes to the run's own. Without the routed reader
 // every Firing spawn would put a second call on the expensive box, which is the exact cost that
 // decision exists to avoid.
+//
+// The Sub-agent server is a scripted upstream: the composer beats it for real to resolve the target,
+// and the same box then answers the routed naming call with its one Turn. It requires the grunt
+// key, so the routed call carrying the target's own key is proven by the call succeeding at all — a
+// call under the run's key would be answered 401 and fail the naming.
 func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 	session, sessionCall := titleServer(t, "session name")
-	grunt, gruntCall := titleServer(t, "grunt name")
+	grunt := stubllm.New(t, stubllm.Script{
+		Model: "grunt-model",
+		Turns: []stubllm.Turn{{Text: "grunt name"}},
+	}, stubllm.WithAPIKey("sk-grunt"))
 
 	entry := config.ServerEntry{Name: "box", Endpoint: session.URL, Model: "entry-model"}
 	gruntEntry := config.ServerEntry{
@@ -555,11 +564,6 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 		Model:    "grunt-model",
 		APIKey:   "sk-grunt",
 	}
-
-	beats := &stubBeat{beat: heartbeat.Beat{Reachable: true}}
-	prev := discoverDelegationBeat
-	discoverDelegationBeat = beats.discover
-	t.Cleanup(func() { discoverDelegationBeat = prev })
 
 	cfg, routing, _, err := firingConfig(context.Background(), firingInputs{
 		opts: config.Options{
@@ -573,8 +577,9 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 		roots:    firingRoots(t),
 		confiner: fenceableHost,
 		mode:     domain.ModePlan,
-		// The run's own beat, handed over for the reason above: this fixture's servers answer naming
-		// calls, and the Sub-agent server's separate observation is the stub below.
+		// The run's own beat, handed over: its server is a naming stub that decodes every body as a
+		// naming call and would fail the test on the beat's empty GET. The Sub-agent server is
+		// beaten for real.
 		beat: func(context.Context, string, string, string, provider.Wire) heartbeat.Beat {
 			return heartbeat.Beat{Reachable: true, Answered: true}
 		},
@@ -591,9 +596,8 @@ func TestFiringConfigNamesARoutedChildOnTheSubAgentServer(t *testing.T) {
 		domain.DelegationNaming{Task: "grep every config key", Routed: true}); err != nil {
 		t.Fatalf("NameDelegation for a routed child: %v", err)
 	}
-	if gruntCall.Model != "grunt-model" || gruntCall.Authorization != "Bearer sk-grunt" {
-		t.Errorf("the routed call reached the Sub-agent server as (%q, %q); want the target's own model and key",
-			gruntCall.Model, gruntCall.Authorization)
+	if calls := grunt.Requests(); len(calls) != 1 || calls[0].Model != "grunt-model" {
+		t.Errorf("the Sub-agent server saw %v; want exactly one naming call addressed to the target's own model", calls)
 	}
 	if sessionCall.Model != "" {
 		t.Errorf("the run's own server saw a routed child's naming call (model %q); want the grunt box to answer "+

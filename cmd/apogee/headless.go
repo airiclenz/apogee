@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,11 +22,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/format"
-	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
@@ -374,52 +371,6 @@ func firstStringArgument(arguments json.RawMessage) string {
 		return text
 	}
 	return ""
-}
-
-// discoverBeat is the seam onto the ONE observation an unattended run takes of the server it is
-// bound to: the whole Beat, because everything the composition needs from discovery comes off it —
-// how many generation slots the server reports it was launched with (ADR 0039 decision 2), which
-// wire shape it reads a thinking-effort intent in (ADR 0060), and whether it answered at all. Like
-// runOnce it exists so the composition is provable without a live server; production never
-// reassigns it.
-//
-// It is ONE beat of the very Monitor the TUI's heartbeat drives, so an unattended run and a session
-// read the same numbers out of the same probes rather than growing a second, subtly different
-// discovery. One beat and no retry is the whole contract: a headless run composes once and has no
-// later beat to widen on, so it asks once and takes what comes.
-//
-// It never reports an error, and it replaced two probes that each asked the same server the same
-// question at the same moment: a server without /props, an unreachable one, a cancelled context all
-// answer the zero Beat, whose slot count ResolveParallelAgents turns into the entry's own default
-// width — one for an unkeyed server, four for a keyed one (config.DefaultParallelAgents) — and
-// whose dialect is the historical `chat_template_kwargs` shape
-// every unattended run spoke before the seam existed. What the failure MEANS is on the Beat itself
-// (Failure, Answered, Throttled) for the Driver that gates on it.
-//
-// wire is the entry's protocol (ADR 0078), carried because the beat IS a discovery and discovery
-// differs per wire: the Monitor is dialled with it so an anthropic entry is asked under its own
-// headers and never for a /props it does not serve.
-var discoverBeat = func(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat {
-	return heartbeat.NewMonitor(endpoint, model, apiKey, provider.WithWire(wire)).Beat(ctx)
-}
-
-// discoverDelegationBeat is the seam onto the ONE observation an unattended run takes of its
-// Sub-agent server, kept separate from discoverBeat above because it beats a DIFFERENT box: the
-// Sub-agent server's own endpoint, model and key, which is why the primary's beat can never be
-// shared with it (resolveDelegationTarget would then resolve a target against the wrong server and
-// route delegations to a box nobody observed). Like the beat above it stands in for the heartbeat an
-// unattended run has none of, it is one beat with no retry, and it is a variable so the composition
-// is provable without a live server; production never reassigns it.
-//
-// It never reports an error, for discoverBeat's reason: an unreachable server, a cancelled context
-// and a server with nothing bound are all "no target", which leaves the run unrouted — the fallback
-// every Firing took before this seam existed (ADR 0045 §4's floor).
-//
-// It fires ONLY when `sub-agents-server:` names an entry. A run that delegates to its own server
-// asks nothing here, so the default composition path costs no third round trip. wire is that
-// entry's own protocol, for discoverBeat's reason.
-var discoverDelegationBeat = func(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat {
-	return heartbeat.NewMonitor(endpoint, model, apiKey, provider.WithWire(wire)).Beat(ctx)
 }
 
 // The two values `--format` accepts, and the whole of what this command offers a caller who is not
