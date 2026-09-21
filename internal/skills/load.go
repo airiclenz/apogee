@@ -25,6 +25,15 @@ const skillFileName = "SKILL.md"
 // (internal/tools' readWorkspaceFileBounded).
 const maxSkillFileBytes = 1 << 20 // 1 MiB
 
+// maxSkillCatalogBytes bounds the SKILL.md bytes ONE scan reads across every source dir, the
+// other half of the pair with maxSkillFileBytes: the per-file cap bounds a single read, the
+// count cap (maxSkills) bounds how many files load, and neither bounds their product — 1024
+// files of 1 MiB each is a 1 GiB catalog held in memory for the life of the session, twice over
+// on a reload (audit 2026-09-20). 32 MiB is far past any honest library — a skill is a page of
+// prose — and, like the count cap, it is first-come across the walk order, so it can only ever
+// cut into the lowest-priority source (sourceAnchors).
+const maxSkillCatalogBytes = 32 << 20 // 32 MiB
+
 // maxSkills caps how many skills discovery loads across all source dirs, so a repo that plants
 // thousands of skill folders cannot make the in-memory catalog unbounded. Well past any real
 // library; the merged "/" menu only ever surfaces a handful at once.
@@ -393,8 +402,9 @@ func walkSkills(cat *Catalog, src sourceTree) {
 			})
 			return fs.SkipAll
 		}
-		loadSkillFile(cat, src, p)
-		return nil
+		// The byte cap ends the walk the same way; loadSkillFile is where a file's size is first
+		// known, so it hands the SkipAll back rather than being checked here.
+		return loadSkillFile(cat, src, p)
 	})
 }
 
@@ -439,13 +449,31 @@ func walkDepth(p string) int { return strings.Count(p, "/") + 1 }
 // stamping the Dir that source announces. A read or parse failure is recorded as a SkipError on
 // the catalog rather than returned, so the walk continues past one bad file AND the human can
 // still be told that file was passed over.
-func loadSkillFile(cat *Catalog, src sourceTree, p string) {
+//
+// Every byte read is charged to the catalog's running total, and a file that would push that
+// total past maxSkillCatalogBytes is not loaded: the skip is recorded once, naming the source
+// dir it cut, and fs.SkipAll is returned so the walk stops there — the soft-skip precedent of the
+// count cap in walkSkills. The check sits after the bounded read because a file's size is not
+// known before it (a stat would cost a syscall per file and answer for the link, not the file),
+// so the one refused read is bounded by maxSkillFileBytes and released here. The counter lives on
+// the Catalog, not the walk, so it spans every source in walk order: the user's library is read
+// first and the workspace tree is what a full catalog cuts, never the other way round.
+func loadSkillFile(cat *Catalog, src sourceTree, p string) error {
 	abs := absSkillPath(src.name, p)
 	data, err := readBounded(src.fsys, p, maxSkillFileBytes)
 	if err != nil {
 		cat.addSkip(SkipError{Path: abs, Err: err})
-		return
+		return nil
 	}
+	if cat.bytes+int64(len(data)) > maxSkillCatalogBytes {
+		cat.addSkip(SkipError{
+			Path: abs,
+			Err: fmt.Errorf("catalog byte cap (%d MiB) reached; this and any later skills under %s were not loaded",
+				maxSkillCatalogBytes>>20, src.name),
+		})
+		return fs.SkipAll
+	}
+	cat.bytes += int64(len(data))
 	skillDirRel := path.Dir(p)
 	dirName := path.Base(skillDirRel)
 	if skillDirRel == "." {
@@ -456,10 +484,11 @@ func loadSkillFile(cat *Catalog, src sourceTree, p string) {
 	sk, err := parseSkill(string(data), dirName)
 	if err != nil {
 		cat.addSkip(SkipError{Path: abs, Err: err})
-		return
+		return nil
 	}
 	sk.Dir = src.dirFor(skillDirRel)
 	cat.set(sk, abs)
+	return nil
 }
 
 // absSkillPath resolves a walk-relative SKILL.md path back to a path under the source's name, so a

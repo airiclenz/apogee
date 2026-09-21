@@ -365,6 +365,113 @@ func TestLoadOversizeSkillFileRefused(t *testing.T) {
 	}
 }
 
+// TestLoadCatalogByteCapSkipsTheRest pins the aggregate byte cap (audit 2026-09-20): a tree of
+// skills that each pass the per-file cap but together exceed maxSkillCatalogBytes is cut at the
+// cap with one recorded skip, while the user's own skill still loads.
+func TestLoadCatalogByteCapSkipsTheRest(t *testing.T) {
+	home, ws := t.TempDir(), t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "ok", "---\nid: ok\nsummary: fine\n---\nbody")
+	repo := filepath.Join(ws, ".apogee", "skills")
+	writeByteCapFillingSkills(t, repo, "r", 40)
+
+	cat, _ := Load(Sources{Home: home, Workspace: ws})
+
+	if _, ok := cat.Get("ok"); !ok {
+		t.Error("the user's skill is missing: the repo's bulk crowded the library out")
+	}
+	if got := cat.Len(); got >= 41 {
+		t.Errorf("catalog holds %d skills, want the byte cap to have cut the repo's 40 short", got)
+	}
+	assertByteCappedUnder(t, cat, repo)
+}
+
+// TestLoadCatalogByteCapNeverEvictsTheHomeLibrary is the byte cap's twin of
+// TestLoadCapNeverEvictsTheHomeLibrary: the cap is first-come across the walk order, so with the
+// library walked first, a workspace that fills it can only ever cut into itself.
+func TestLoadCatalogByteCapNeverEvictsTheHomeLibrary(t *testing.T) {
+	home, ws := t.TempDir(), t.TempDir()
+	writeSkill(t, filepath.Join(home, "skills"), "home-a", "---\nid: home-a\nsummary: s\n---\nFROM HOME A")
+	writeSkill(t, filepath.Join(home, "skills"), "home-b", "---\nid: home-b\nsummary: s\n---\nFROM HOME B")
+	repo := filepath.Join(ws, ".apogee", "skills")
+	writeByteCapFillingSkills(t, repo, "r", 40)
+
+	cat, _ := Load(Sources{Home: home, Workspace: ws})
+
+	for _, id := range []string{"home-a", "home-b"} {
+		if _, ok := cat.Get(id); !ok {
+			t.Errorf("%s is missing: the repo's bulk crowded the user's library out", id)
+		}
+	}
+	assertByteCappedUnder(t, cat, repo)
+}
+
+// TestLoadCatalogByteCapSpansBothTrees pins the counter on the Catalog rather than on one walk:
+// 20 MiB under home plus 20 MiB under the workspace is one 40 MiB catalog, so the cap trips in
+// the workspace walk — every home skill loaded, exactly one skip, naming the workspace root.
+// A per-walk counter would load all 40 MiB and announce nothing.
+func TestLoadCatalogByteCapSpansBothTrees(t *testing.T) {
+	home, ws := t.TempDir(), t.TempDir()
+	library := filepath.Join(home, "skills")
+	writeByteCapFillingSkills(t, library, "h", 20)
+	repo := filepath.Join(ws, ".apogee", "skills")
+	writeByteCapFillingSkills(t, repo, "r", 20)
+
+	cat, _ := Load(Sources{Home: home, Workspace: ws})
+
+	for i := range 20 {
+		id := fmt.Sprintf("h%04d", i)
+		if _, ok := cat.Get(id); !ok {
+			t.Errorf("%s is missing: the workspace's bulk cut into the user's library", id)
+		}
+	}
+	if got := cat.Len(); got >= 40 {
+		t.Errorf("catalog holds %d skills, want the byte cap to have spanned both trees", got)
+	}
+	assertByteCappedUnder(t, cat, repo)
+	for _, e := range cat.Skipped() {
+		if !strings.Contains(e.Reason(), repo) {
+			t.Errorf("byte cap reason = %q, want it to name the workspace root %q", e.Reason(), repo)
+		}
+	}
+}
+
+// writeByteCapFillingSkills plants n skill folders under dir, each one byte under the per-file
+// cap so every one loads on its own and together they weigh n MiB. Ids are prefix+NNNN, so a
+// prefix chosen to sort after a single-word fixture id keeps that fixture first in the walk.
+// The files take the no-frontmatter path (id from the folder, title and summary from the first
+// two lines): the frontmatter regex walks every byte of a file it matches, which is seconds per
+// 32 MiB catalog on a slow box, while the anchored miss on a `#` first line returns at once.
+func writeByteCapFillingSkills(t *testing.T, dir, prefix string, n int) {
+	t.Helper()
+	for i := range n {
+		id := fmt.Sprintf("%s%04d", prefix, i)
+		head := "# " + id + "\nsummary s\n"
+		writeSkill(t, dir, id, head+strings.Repeat("A", maxSkillFileBytes-1-len(head)))
+	}
+}
+
+// assertByteCappedUnder checks the scan recorded exactly one catalog-byte-cap skip, that it is
+// the scan's only skip, and that it landed in dir — the lowest-priority source, the only one the
+// cap may ever cut into.
+func assertByteCappedUnder(t *testing.T, cat *Catalog, dir string) {
+	t.Helper()
+	var capped []SkipError
+	for _, e := range cat.Skipped() {
+		if strings.Contains(e.Reason(), "catalog byte cap") {
+			capped = append(capped, e)
+		}
+	}
+	if len(capped) != 1 {
+		t.Fatalf("Skipped() = %+v, want exactly one catalog byte cap record", cat.Skipped())
+	}
+	if !strings.HasPrefix(capped[0].Path, dir+string(filepath.Separator)) {
+		t.Errorf("byte cap fell at %q, want it inside the lower-priority dir %q", capped[0].Path, dir)
+	}
+	if got := len(cat.Skipped()); got != 1 {
+		t.Errorf("Skipped() = %d entries, want the byte cap record alone: %+v", got, cat.Skipped())
+	}
+}
+
 func TestLoadDottedDirsSkipped(t *testing.T) {
 	home := t.TempDir()
 	// A SKILL.md hidden inside a dotted dir must not be discovered.

@@ -27,6 +27,11 @@ type Catalog struct {
 	// carries the folder for consumers, and this map exists for the shadow record alone.
 	pathByID map[string]string
 	skipped  []SkipError
+	// bytes is the SKILL.md bytes discovery has read into this catalog so far, across every
+	// source dir in walk order. load.go charges each read to it and stops a walk once the next
+	// file would push it past maxSkillCatalogBytes; it sits here rather than on one walk so the
+	// cap bounds the catalog as a whole, not each source separately.
+	bytes int64
 	// idx is the suggestion matcher's BM25 index over byID, built once by finalize at the end of
 	// the scan (suggest.go). It is nil until then, which is exactly what Suggest tests before it
 	// answers — an unfinalized catalog suggests nothing rather than half a corpus.
