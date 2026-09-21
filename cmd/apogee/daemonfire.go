@@ -339,7 +339,10 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		confiner: w.confiner,
 		model:    entry.Run.Model,
 		mode:     f.Mode,
-		report:   reportReaction,
+		// The Scheduler's own clock, so the id this Firing is filed under is minted off the same
+		// sense of time that made it due; nil in production ⇒ the wall clock (clockNow).
+		now:    clockNow(daemonClock),
+		report: reportReaction,
 	}, f.Prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
 	// What the composition had to say about this binding — a model the server never advertised, a
 	// rebind that had to degrade — reaches the daemon LOG, which is this Driver's whole user

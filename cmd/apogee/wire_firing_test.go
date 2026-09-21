@@ -25,6 +25,7 @@ import (
 	// which shadows the package name inside those functions.
 	apiprovider "github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/skills"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
@@ -1412,6 +1413,60 @@ func TestRaiseMintsOneIDForRecordAndScratch(t *testing.T) {
 	if _, statErr := os.Stat(stub.spec.Config.ScratchDir); statErr != nil {
 		t.Errorf("the scratch dir was not created: %v", statErr)
 	}
+}
+
+// The id and the record's timestamps come off ONE clock: raise mints the record id from
+// firingInputs.now and hands the same func to the runner as run.Spec.Now, so a pinned clock pins the
+// id's timestamp prefix (session.NewID's layout, cut at the random suffix) and CreatedAt alike, and
+// two Firings can never file ids whose order disagrees with their CreatedAt order. nil is the
+// production path — headless, and a Driver whose Scheduler clock is nil — and still mints.
+func TestRaiseMintsTheIDFromTheFiringsClock(t *testing.T) {
+	t.Run("a fixed clock pins the id prefix and the runner's Now", func(t *testing.T) {
+		fixed := time.Date(2026, 9, 20, 14, 30, 5, 0, time.UTC)
+		stub := &stubRunner{res: run.Result{Turns: 1}}
+		in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+		in.now = func() time.Time { return fixed }
+
+		_, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("raise: %v", err)
+		}
+
+		wantPrefix, _, _ := strings.Cut(session.NewID(fixed), "-")
+		if gotPrefix, _, _ := strings.Cut(stub.spec.RecordID, "-"); gotPrefix != wantPrefix {
+			t.Errorf("RecordID prefix = %q; want %q — the id was minted off the wall clock, not the Firing's", gotPrefix, wantPrefix)
+		}
+		if stub.spec.Now == nil {
+			t.Fatal("run.Spec.Now is nil; the runner would stamp CreatedAt off the wall clock")
+		}
+		if got := stub.spec.Now(); !got.Equal(fixed) {
+			t.Errorf("run.Spec.Now() = %v; want the Firing's instant %v", got, fixed)
+		}
+	})
+
+	t.Run("a nil clock is the wall clock and still mints", func(t *testing.T) {
+		if got := clockNow(nil); got != nil {
+			t.Error("clockNow(nil) is non-nil; a nil scheduler clock must leave firingInputs.now at its time.Now default")
+		}
+		if got := clockNow(newFakeDaemonClock()); got == nil {
+			t.Error("clockNow(clock) is nil; a real clock must be handed through")
+		}
+		stub := &stubRunner{res: run.Result{Turns: 1}}
+		in := raiseInputs(t, stub, heartbeat.Beat{Reachable: true, Answered: true})
+		in.now = nil
+
+		_, _, err := raise(context.Background(), in, "a prompt", nil, nil, nil, nil)
+		if err != nil {
+			t.Fatalf("raise: %v", err)
+		}
+
+		if stub.spec.RecordID == "" {
+			t.Error("a nil clock minted no id")
+		}
+		if stub.spec.Now == nil {
+			t.Error("run.Spec.Now is nil; the runner and the id would read two clocks")
+		}
+	})
 }
 
 // onID fires before the composition and before the gate, so a Driver that stamps the id on a

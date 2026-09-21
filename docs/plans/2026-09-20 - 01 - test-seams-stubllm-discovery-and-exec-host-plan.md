@@ -83,7 +83,7 @@ NOTES (2026-09-21): `TestOnceWithNoApogeeHomeKeepsTheInMemoryJournal`'s Store li
 **Acceptance.** `go build ./... && go test ./internal/run/... ./internal/snapshot/... && go test ./cmd/apogee/ -run 'Once|NoSave|Undo'`
 **Commit:** `fix(run): a run that keeps no record opens no snapshot store`
 
-## 2. The record id is minted from the Firing's clock
+## 2. The record id is minted from the Firing's clock — ✅ DONE (2026-09-21)
 
 **What.** `fix(firing)`: `raise` mints `in.recordID = session.NewID(time.Now())` (cmd/apogee/wire_firing.go ~:726) while `run.Once` stamps `CreatedAt` from `spec.Now` — no Driver sets `run.Spec.Now`, so a test clock cannot pin the id prefix and id order can disagree with `CreatedAt` order. Add `now func() time.Time` to `firingInputs` (nil ⇒ `time.Now`); mint the id from `in.now()` and pass the same func as `run.Spec.Now`. Daemon passes its `daemonClock`-derived now, the TUI `/schedule` path `tuiScheduleClock`'s, headless nil.
 **Regression guard.** `daemonClock` (cmd/apogee/daemon.go ~:85) and `tuiScheduleClock` (cmd/apogee/schedule.go ~:42) are nil in production, and `now: daemonClock.Now` taken as a method value on a nil interface panics at evaluation — on every production daemon and `/schedule` Firing. Resolve through a nil check — `func clockNow(c schedule.Clock) func() time.Time { if c == nil { return nil }; return c.Now }` — so a nil clock leaves `firingInputs.now` nil ⇒ `time.Now`; the scheduler's own nil ⇒ `systemClock` fallback (internal/schedule/schedule.go ~:306) is unexported and cannot be reused. `fileLayout` is unexported: pin the prefix via `session.NewID(fixed)` cut at `-`.

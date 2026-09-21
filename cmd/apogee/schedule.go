@@ -151,6 +151,9 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 		confiner: w.confiner,
 		mode:     f.Mode,
 		skills:   w.skills,
+		// The interactive Scheduler's own clock, so the id this Firing is filed under is minted off
+		// the same sense of time that made it due; nil in production ⇒ the wall clock (clockNow).
+		now: clockNow(tuiScheduleClock),
 		// The session's OWN observation of the server it is bound to, handed over as the seam the
 		// composer would otherwise probe through, so no Firing raised here spends a round trip on
 		// facts this session is already holding (design call 4). The endpoint, model and key it is

@@ -81,6 +81,13 @@ type firingInputs struct {
 	// The wire is the entry's protocol (ADR 0078), passed so the one-shot beat dials the server
 	// the way a session's Monitor does; a session's own beat has nothing to dial and ignores it.
 	beat func(ctx context.Context, endpoint, model, apiKey string, wire provider.Wire) heartbeat.Beat
+	// now is the Firing's clock: the instant the record id is minted from and the clock the runner
+	// stamps CreatedAt with (run.Spec.Now), so the id's timestamp prefix and the record's own
+	// timestamps come off ONE reading and can never disagree about the order two runs happened in.
+	// nil ⇒ time.Now — headless, and every Driver whose Scheduler runs on the wall clock. A Driver
+	// with a scheduler clock passes it through clockNow, so a test that pins the daemon's or the
+	// session's sense of time pins the id it mints too.
+	now func() time.Time
 	// recordID is the id this run's record is filed under. The run's scratch dir is created under
 	// it, so a saved run and the working files its model left behind are one thing to find and one
 	// thing to sweep. A Driver that goes through raise leaves it empty — raise mints it, so the id
@@ -658,6 +665,18 @@ func partialRunSuffix(id string) string {
 	return fmt.Sprintf("(partial run saved as %s)", id)
 }
 
+// clockNow adapts a Scheduler's Clock to the func the Firing mints its id from (firingInputs.now).
+// nil in, nil out: daemonClock and tuiScheduleClock are nil in production, and taking `.Now` as a
+// method value on a nil interface panics at the point of evaluation — on every production Firing.
+// A nil result leaves firingInputs.now at its own nil ⇒ time.Now default, which is the same wall
+// clock the scheduler falls back to (internal/schedule's unexported systemClock).
+func clockNow(c schedule.Clock) func() time.Time {
+	if c == nil {
+		return nil
+	}
+	return c.Now
+}
+
 // raise is the ONE act every unattended Firing is: it takes what a Driver decided (firingInputs, the
 // prompt, the Schedule the run belongs to, the store its record lands in) and does, in this order,
 // everything the three Drivers used to spell out for themselves — divides the `reactions:` list
@@ -676,7 +695,9 @@ func partialRunSuffix(id string) string {
 //
 // The id is minted HERE and nowhere else, which is the by-construction guarantee: firingConfig
 // creates the scratch dir under in.recordID and runOnce files the record under run.Spec.RecordID, and
-// both read the one value raise wrote. onID, when non-nil, sees that id immediately — before the
+// both read the one value raise wrote. It is minted off in.now — the same clock handed to the runner
+// as run.Spec.Now — so the id's timestamp prefix and the record's CreatedAt are one instant, not a
+// wall-clock reading here and a second one inside run.Once. onID, when non-nil, sees that id immediately — before the
 // composition and before the gate — so a Driver that stamps it on a stream (headless's Event lines,
 // ADR 0075 decision 5) stamps it on a refusal's closing frame as well.
 //
@@ -723,7 +744,11 @@ func raise(
 	}()
 	in.hooks = hookRunner
 
-	in.recordID = session.NewID(time.Now())
+	now := in.now
+	if now == nil {
+		now = time.Now
+	}
+	in.recordID = session.NewID(now())
 	if onID != nil {
 		onID(in.recordID)
 	}
@@ -747,6 +772,8 @@ func raise(
 		Prompt:   prompt,
 		Store:    store,
 		RecordID: in.recordID,
+		// The clock the id above was minted from, so CreatedAt and the id prefix agree.
+		Now: now,
 		// The sync half of the `reactions:` list this Firing resolved, armed on the Agent run.Once
 		// builds before its first Step: a `gate:` answers this run's very first tool call, and its
 		// trouble reaches the same report line the Runner's does (Config.Report, firingConfig).
