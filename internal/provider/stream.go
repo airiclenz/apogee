@@ -34,8 +34,8 @@ const (
 	// token usage. Exactly one Done ends a successful stream.
 	DeltaDone DeltaKind = "done"
 	// DeltaError is a terminal fault (transport, bad status, oversized tool args, a reply
-	// past the text cap, a stream that carried nothing but undecodable chunks). No Done
-	// follows it.
+	// that opened more tool calls than maxOpenToolCalls, a reply past the text cap, a stream
+	// that carried nothing but undecodable chunks). No Done follows it.
 	DeltaError DeltaKind = "error"
 	// DeltaContextOverflow is the terminal "prompt too long" signal (a 400 the server
 	// flagged as a context-window rejection).
@@ -385,7 +385,22 @@ type openToolCalls struct {
 	// bytes is the sum of accumulated argument bytes across every open call, so a server
 	// opening many calls cannot multiply maxToolCallBytes by their number.
 	bytes int
+	// tripped names the cap the set crossed — toolCallBytesTripped or toolCallCountTripped —
+	// and is empty while neither has. It is the one message source both wires render as the
+	// terminal DeltaError, and once set every later fold reports the stream ended.
+	tripped string
 }
+
+// toolCallBytesTripped is the fault a streamed reply ends on when its accumulated tool-call
+// argument bytes cross maxToolCallBytes.
+const toolCallBytesTripped = "apogee: tool call arguments exceeded size limit"
+
+// toolCallCountTripped is the fault a streamed reply ends on when it opens more tool calls
+// than maxOpenToolCalls.
+var toolCallCountTripped = fmt.Sprintf(
+	"apogee: streamed reply opened more than %d tool calls",
+	maxOpenToolCalls,
+)
 
 // openToolCall is one call under accumulation with the wire index that addresses it;
 // wireIndex is noIndex for a call the server opened without one.
@@ -398,11 +413,17 @@ type openToolCall struct {
 // indexed call, so those calls keep their arrival order at the end of the flush.
 const noIndex = -1
 
-// fold folds one streamed fragment into the set, reporting whether the accumulated argument
-// bytes crossed maxToolCallBytes. A fragment addressing nothing — no index, no id, and no
-// call yet open — is dropped silently, as it always has been.
+// fold folds one streamed fragment into the set, reporting whether a cap tripped — the
+// accumulated argument bytes crossing maxToolCallBytes, or the fragment opening a call past
+// maxOpenToolCalls — with tripped naming which. The count check comes BEFORE the nil-drop:
+// open past the cap returns nil, and a nil target must end the stream here rather than fall
+// into the silent drop. A fragment addressing nothing — no index, no id, and no call yet
+// open — is still dropped silently, as it always has been.
 func (o *openToolCalls) fold(frag sseToolCall) bool {
 	target := o.address(frag)
+	if o.tripped != "" {
+		return true
+	}
 	if target == nil {
 		return false
 	}
@@ -417,7 +438,11 @@ func (o *openToolCalls) fold(frag sseToolCall) bool {
 	}
 	target.call.Function.Arguments += frag.Function.Arguments
 	o.bytes += len(frag.Function.Arguments)
-	return o.bytes > maxToolCallBytes
+	if o.bytes > maxToolCallBytes {
+		o.tripped = toolCallBytesTripped
+		return true
+	}
+	return false
 }
 
 // address resolves the call a fragment belongs to, opening one where the fragment may. An
@@ -463,7 +488,14 @@ func (o *openToolCalls) withID(id string) *openToolCall {
 }
 
 // open appends a fresh call at a wire index and returns it; fold fills in its id and name.
+// It is the one choke point both wires open calls through (fold -> address -> open), so the
+// count cap lives here: a call past maxOpenToolCalls is refused — tripped is set and nil
+// returned — and fold turns that into the stream's end.
 func (o *openToolCalls) open(wireIndex int) *openToolCall {
+	if len(o.entries) >= maxOpenToolCalls {
+		o.tripped = toolCallCountTripped
+		return nil
+	}
 	e := &openToolCall{call: ToolCall{Type: "function"}, wireIndex: wireIndex}
 	o.entries = append(o.entries, e)
 	return e

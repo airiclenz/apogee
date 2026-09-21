@@ -102,6 +102,60 @@ func TestAnthropicParseSSE_TextAndInterleavedToolCalls(t *testing.T) {
 	}
 }
 
+// anthropicToolUseOpeningsSSE builds a Messages stream that opens n tool_use blocks at
+// distinct block indexes — id and name on each content_block_start, no input — then stops.
+func anthropicToolUseOpeningsSSE(n int) string {
+	var b strings.Builder
+	b.WriteString(`data: {"type":"message_start","message":{"model":"claude-x","usage":{"input_tokens":1,"output_tokens":1}}}` + "\n")
+	for i := range n {
+		fmt.Fprintf(
+			&b,
+			`data: {"type":"content_block_start","index":%d,"content_block":{"type":"tool_use","id":"toolu_%d","name":"grep","input":{}}}`+"\n",
+			i,
+			i,
+		)
+		fmt.Fprintf(&b, `data: {"type":"content_block_stop","index":%d}`+"\n", i)
+	}
+	b.WriteString(`data: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":2}}` + "\n")
+	b.WriteString(`data: {"type":"message_stop"}` + "\n")
+	return b.String()
+}
+
+// TestAnthropicParseSSE_OpenToolCallCountIsCapped pins the count cap on this wire: the
+// content_block_start that opens the maxOpenToolCalls+1th tool_use block ends the stream on
+// the same count fault the openai wire renders, with no call flushed and no Done.
+func TestAnthropicParseSSE_OpenToolCallCountIsCapped(t *testing.T) {
+	t.Parallel()
+
+	got := parseAnthropicSSE(t, anthropicToolUseOpeningsSSE(maxOpenToolCalls+1))
+
+	want := []Delta{{Kind: DeltaError, Err: toolCallCountTripped}}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("deltas =\n%s\nwant\n%s", dumpDeltas(got), dumpDeltas(want))
+	}
+}
+
+// TestAnthropicParseSSE_OpenToolCallCountAtTheCapStillFlushes pins the cap's edge on this
+// wire: exactly maxOpenToolCalls tool_use blocks flush in index order before the Done.
+func TestAnthropicParseSSE_OpenToolCallCountAtTheCapStillFlushes(t *testing.T) {
+	t.Parallel()
+
+	got := parseAnthropicSSE(t, anthropicToolUseOpeningsSSE(maxOpenToolCalls))
+
+	if len(got) != maxOpenToolCalls+1 {
+		t.Fatalf("deltas = %d, want %d calls and a Done:\n%s", len(got), maxOpenToolCalls, dumpDeltas(got))
+	}
+	for i, d := range got[:maxOpenToolCalls] {
+		want := fmt.Sprintf("toolu_%d", i)
+		if d.Kind != DeltaToolCall || d.ToolCall == nil || d.ToolCall.ID != want {
+			t.Errorf("delta %d = %+v, want tool call %q (index order)", i, d, want)
+		}
+	}
+	if last := got[maxOpenToolCalls]; last.Kind != DeltaDone {
+		t.Errorf("last delta = %+v, want a Done", last)
+	}
+}
+
 // TestAnthropicParseSSE_Thinking pins the thinking channel: thinking_delta is a DeltaThinking,
 // the signature_delta that closes a thinking block is ignored, and end_turn is "stop".
 func TestAnthropicParseSSE_Thinking(t *testing.T) {

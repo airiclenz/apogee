@@ -12,7 +12,8 @@ import (
 // its JSON `type` — the `event:` framing lines repeat it and are not read, and there is no
 // `[DONE]` terminator on this wire; `message_stop` ends the reply. The Client's caps and
 // verdicts are shared with the openai parser (maxReplyTextBytes, openToolCalls and its
-// maxToolCallBytes, the malformed-chunk count, isTransientReadError, inBandErrorDelta);
+// maxToolCallBytes and maxOpenToolCalls, the malformed-chunk count, isTransientReadError,
+// inBandErrorDelta);
 // what differs is only the event vocabulary, which lives here and nowhere else.
 
 // The Messages stream event types, as each `data:` payload's `type` names them.
@@ -205,11 +206,12 @@ func (s *anthropicStream) text(d Delta, n int) (ended bool) {
 	return !s.yield(d)
 }
 
-// foldCall folds one tool-call fragment into the open set; crossing maxToolCallBytes is
-// terminal, as on the openai wire.
+// foldCall folds one tool-call fragment into the open set; crossing maxToolCallBytes or
+// opening a call past maxOpenToolCalls is terminal, as on the openai wire, and the fault text
+// is the set's own (openToolCalls.tripped) so both wires render one message.
 func (s *anthropicStream) foldCall(frag sseToolCall) (ended bool) {
 	if s.open.fold(frag) {
-		s.yield(Delta{Kind: DeltaError, Err: "apogee: tool call arguments exceeded size limit"})
+		s.yield(Delta{Kind: DeltaError, Err: s.open.tripped})
 		return true
 	}
 	return false

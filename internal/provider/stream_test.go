@@ -572,6 +572,71 @@ data: [DONE]
 	}
 }
 
+// toolCallOpeningsSSE builds an openai-wire stream that opens n tool calls at distinct wire
+// indexes, each with a name and empty arguments, then the [DONE] terminator.
+func toolCallOpeningsSSE(n int) string {
+	var b strings.Builder
+	for i := range n {
+		fmt.Fprintf(
+			&b,
+			`data: {"choices":[{"delta":{"tool_calls":[{"index":%d,"id":"tc_%d","function":{"name":"grep","arguments":""}}]}}]}`+"\n\n",
+			i,
+			i,
+		)
+	}
+	b.WriteString("data: [DONE]\n\n")
+	return b.String()
+}
+
+// TestStream_OpenToolCallCountIsCapped pins the cap on the COUNT of open calls: the byte cap
+// bounds arguments, not calls, so a reply opening maxOpenToolCalls+1 empty-argument calls
+// ends on the count fault alone — no call is flushed, no Done follows.
+func TestStream_OpenToolCallCountIsCapped(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(toolCallOpeningsSSE(maxOpenToolCalls + 1))
+	defer srv.Close()
+
+	deltas := collectStream(NewClient(srv.URL, "m"), Request{})
+
+	kinds, calls := streamKindsAndCalls(t, deltas)
+	if len(calls) != 0 {
+		t.Errorf("tool calls = %d, want none past the cap", len(calls))
+	}
+	if want := []DeltaKind{DeltaError}; !reflect.DeepEqual(kinds, want) {
+		t.Fatalf("delta kinds = %v, want %v", kinds, want)
+	}
+	if deltas[0].Err != toolCallCountTripped {
+		t.Errorf("error = %q, want %q", deltas[0].Err, toolCallCountTripped)
+	}
+	if deltas[0].Retryable {
+		t.Errorf("the count fault is retryable; want not")
+	}
+}
+
+// TestStream_OpenToolCallCountAtTheCapStillFlushes pins the cap's edge: exactly
+// maxOpenToolCalls calls is a legitimate reply, and every one is flushed in index order.
+func TestStream_OpenToolCallCountAtTheCapStillFlushes(t *testing.T) {
+	t.Parallel()
+
+	srv := sseServer(toolCallOpeningsSSE(maxOpenToolCalls))
+	defer srv.Close()
+
+	kinds, calls := streamKindsAndCalls(t, collectStream(NewClient(srv.URL, "m"), Request{}))
+
+	if len(calls) != maxOpenToolCalls {
+		t.Fatalf("tool calls = %d, want %d", len(calls), maxOpenToolCalls)
+	}
+	for i, call := range calls {
+		if want := fmt.Sprintf("tc_%d", i); call.ID != want {
+			t.Errorf("call %d id = %q, want %q (index order)", i, call.ID, want)
+		}
+	}
+	if kinds[len(kinds)-1] != DeltaDone {
+		t.Errorf("last delta = %v, want %v", kinds[len(kinds)-1], DeltaDone)
+	}
+}
+
 func TestStream_ContextOverflow(t *testing.T) {
 	t.Parallel()
 

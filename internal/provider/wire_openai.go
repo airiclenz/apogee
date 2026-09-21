@@ -322,7 +322,7 @@ func (o *openaiCodec) parseSSE(body io.Reader, carriedEffort bool, yield func(De
 		}
 		for _, frag := range choice.Delta.ToolCalls {
 			if open.fold(frag) {
-				yield(Delta{Kind: DeltaError, Err: "apogee: tool call arguments exceeded size limit"})
+				yield(Delta{Kind: DeltaError, Err: open.tripped})
 				return
 			}
 		}

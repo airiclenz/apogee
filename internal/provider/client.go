@@ -24,6 +24,12 @@ const (
 	// bound by their number.
 	maxToolCallBytes = 1 << 20 // 1 MiB
 
+	// maxOpenToolCalls caps how many tool calls one streamed reply may open. The byte cap
+	// bounds the arguments, not the calls: a server opening call after call with empty
+	// arguments would otherwise grow the open set without limit. Sixty-four is far past any
+	// honest reply's parallel-call count; the 65th ends the stream exactly as the byte cap does.
+	maxOpenToolCalls = 64
+
 	// maxErrorBodyBytes caps how much of a non-2xx body is read before it is classified. The
 	// request timeouts default to 0, so a hostile or broken upstream answering a multi-GB
 	// error body would otherwise be buffered whole and exhaust the agent's memory. 64 KiB is
