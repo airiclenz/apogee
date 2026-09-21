@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -99,9 +100,30 @@ func exitCodeFor(err error) int {
 
 // runOnce is the seam onto the shared runner. `apogee headless` is a thin CLI over internal/run —
 // argument parsing and exit codes, not a second runner (ADR 0033, decision 6) — and this variable
-// is the single point a test replaces, so prompt resolution, composition, output routing and exit
-// codes are all provable without a live model. Production never reassigns it.
+// is the point the daemon's, the boot's and `/schedule`'s tests still replace, so prompt
+// resolution, composition, output routing and exit codes are all provable without a live model.
+// `apogee headless` itself no longer reads it directly: its runner arrives as a dependency
+// (headlessDeps), and only a nil one falls back to this var. Production never reassigns it.
 var runOnce = run.Once
+
+// headlessDeps is what `apogee headless` takes from its host rather than deciding for itself: the
+// runner the composed Firing is handed to, and the constructor of the confinement backend the run
+// is fenced by. Both are properties of the MACHINE and the PROCESS the command happens to run in —
+// what a backend can enforce depends on the kernel, and the runner is the one thing a test of the
+// CLI's own decisions must be able to observe from outside — so they are dependencies a test
+// injects through newHeadlessCommandWith, not seams it swaps under the whole package.
+//
+// A nil field is the production value, resolved where it is used and never at construction: a nil
+// runner leaves firingInputs.runner nil and raise reads the runOnce var when the Firing is raised;
+// a nil confiner reads the newConfiner var when the run builds its backend. Reading the vars there,
+// rather than run.Once and platform.NewConfiner, is deliberate for as long as the other Drivers'
+// tests still swap them — the headless tests that share a helper with them must see the same value.
+type headlessDeps struct {
+	// runner is what the Firing runs through once its gates have passed (firingInputs.runner).
+	runner func(context.Context, run.Spec) (run.Result, error)
+	// confiner builds this host's confinement backend, once per run.
+	confiner func() apogee.Confiner
+}
 
 // hardExit is the seam onto os.Exit, and the only place in this binary's headless path that may
 // reach it (the exitError rule above says why). It exists so the second-interrupt watch is
@@ -397,6 +419,16 @@ var errHeadlessNoPrompt = errors.New(
 // state carried between runs. What is left for the CLI is exactly what a CLI owns: which prompt,
 // which binding, which mode, whether to save, and what the shell learns from the exit status.
 func newHeadlessCommand() *cobra.Command {
+	return newHeadlessCommandWith(headlessDeps{})
+}
+
+// newHeadlessCommandWith is newHeadlessCommand with the host's runner and Confiner constructor
+// stated by the caller (headlessDeps). It is the door a test comes through: a stubRunner that
+// records the composed run.Spec, a fakeConfiner whose capability matrix the test dictates, or the
+// real run.Once against a scripted upstream — none of which needs a package var swapped for the
+// test's duration. Production comes through newHeadlessCommand, whose zero deps resolve to the
+// production values.
+func newHeadlessCommandWith(deps headlessDeps) *cobra.Command {
 	var opts config.Options
 	var noSave bool
 	var outputFormat string
@@ -435,7 +467,7 @@ func newHeadlessCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runHeadless(cmd, args, &opts, noSave, outputFormat, seams)
+			return runHeadless(cmd, args, &opts, noSave, outputFormat, seams, deps)
 		},
 	}
 
@@ -506,13 +538,21 @@ func headlessArgs(cmd *cobra.Command, args []string) error {
 // Event lines into the seam_closed kind (eventjson.Options.Seams), and the text path has no Event
 // lines for it to reach. It is refused here rather than silently ignored, because a caller who
 // asked for seam lines and got prose would read the silence as "the run closed no seams".
-func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, outputFormat string, seams bool) error {
+func runHeadless(
+	cmd *cobra.Command,
+	args []string,
+	opts *config.Options,
+	noSave bool,
+	outputFormat string,
+	seams bool,
+	deps headlessDeps,
+) error {
 	switch outputFormat {
 	case formatText:
 		if seams {
 			return notStarted(errors.New("apogee headless: --seams needs --format json"))
 		}
-		_, err := runHeadlessBody(cmd, args, opts, noSave, nil)
+		_, err := runHeadlessBody(cmd, args, opts, noSave, nil, deps)
 		return err
 	case formatJSON:
 		// Disarmed BEFORE the first line is written, and only on this branch: from here on a
@@ -533,7 +573,7 @@ func runHeadless(cmd *cobra.Command, args []string, opts *config.Options, noSave
 			},
 			Seams: seams,
 		})
-		res, err := runHeadlessBody(cmd, args, opts, noSave, lines)
+		res, err := runHeadlessBody(cmd, args, opts, noSave, lines, deps)
 		lines.RunFinished(runFinishedFrame(res, err))
 		return err
 	default:
@@ -664,7 +704,14 @@ func subAgentFrames(runs []run.SubAgentUsage) []eventjson.SubAgentUsage {
 //
 // It returns the Result beside the error because that funnel needs both: a refusal that never
 // started a run still carries what the session had already loaded, and the frame reports it.
-func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, noSave bool, lines *eventjson.Writer) (run.Result, error) {
+func runHeadlessBody(
+	cmd *cobra.Command,
+	args []string,
+	opts *config.Options,
+	noSave bool,
+	lines *eventjson.Writer,
+	deps headlessDeps,
+) (run.Result, error) {
 	// Every line this command narrates leaves through ONE lock from here on. The Reaction Runner built
 	// below reports a Reaction's trouble on a Reaction worker's goroutine (internal/reactions), while
 	// this function is still writing its own notices and its closing summary on the goroutine it was
@@ -746,7 +793,14 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 	// leaves them there deliberately: the human asked for the process to stop, not for it to tidy
 	// up first, and a label walk is exactly the tidying that would hold the shell for seconds. The
 	// labels are not lost — a later session reverts them (winlabel.TeardownNotice's own remedy).
-	confiner := newConfiner()
+	//
+	// The backend is built through the dependency the host handed this command (headlessDeps); a
+	// nil one is the production route, read from the newConfiner seam here and not earlier.
+	buildConfiner := deps.confiner
+	if buildConfiner == nil {
+		buildConfiner = newConfiner
+	}
+	confiner := buildConfiner()
 	if closer, ok := confiner.(interface{ Close() error }); ok {
 		defer func() {
 			if notice := platform.ConfinementTeardownNotice(closer.Close()); notice != "" {
@@ -964,6 +1018,7 @@ func runHeadlessBody(cmd *cobra.Command, args []string, opts *config.Options, no
 		confiner: confiner,
 		mode:     mode,
 		report:   reportReaction,
+		runner:   deps.runner,
 	}, prompt, nil, store, onID, narrate)
 	for _, n := range notices {
 		cmd.PrintErrln(n)

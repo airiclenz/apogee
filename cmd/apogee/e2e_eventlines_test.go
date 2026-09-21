@@ -139,10 +139,10 @@ func eventLinesRedactions(workspace string) []tuitest.Redaction {
 // headlessAgainst uses (e2e_naming_test.go), with stdout captured instead of stderr, because
 // stdout is where the whole contract lives.
 //
-// The runner is explicit and always restored. Two of the cases below pass [run.Once], because a
-// golden taken against a stubbed runner would pin nothing about the engine; the third passes a
-// canned one on purpose, and stating the seam at every call site is what keeps the difference
-// visible rather than ambient — the neighbouring tests in package main swap it too.
+// The runner is explicit and injected (headlessDeps). Two of the cases below pass [run.Once],
+// because a golden taken against a stubbed runner would pin nothing about the engine; the third
+// passes a canned one on purpose, and stating the runner at every call site is what keeps the
+// difference visible rather than ambient.
 func headlessEventLines(
 	t *testing.T,
 	runner func(context.Context, run.Spec) (run.Result, error),
@@ -150,13 +150,10 @@ func headlessEventLines(
 ) (out, errOut string, err error) {
 	t.Helper()
 
-	prev := runOnce
-	runOnce = runner
-	t.Cleanup(func() { runOnce = prev })
 	// The environment must not move the home, the mode or the server out from under the run.
 	assertNoAmbientApogeeConfig(t)
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: runner})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)

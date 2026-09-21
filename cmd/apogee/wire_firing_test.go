@@ -1334,13 +1334,10 @@ func assertReadRootsCompose(t *testing.T, roots func() []string, skillRoots []st
 
 // raiseInputs is the one shape every raise test below starts from: a bound entry with a key already
 // resolved, throwaway roots, a fenceable host and a beat the test dictates — nothing that would
-// dial, read a keychain or reach the real runner. The stubRunner is installed on the package seam
-// for the test's duration; that is shared state, so none of these tests run in parallel.
+// dial, read a keychain or reach the real runner. The stubRunner rides on the inputs themselves
+// (firingInputs.runner), so no package seam is touched.
 func raiseInputs(t *testing.T, stub *stubRunner, beat heartbeat.Beat) firingInputs {
 	t.Helper()
-	prev := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prev })
 	return firingInputs{
 		opts:     config.Options{Bypass: true},
 		entry:    config.ServerEntry{Name: "box", Endpoint: "http://box.example/v1", ParallelAgents: 1},
@@ -1348,6 +1345,7 @@ func raiseInputs(t *testing.T, stub *stubRunner, beat heartbeat.Beat) firingInpu
 		roots:    firingRoots(t),
 		confiner: fenceableHost,
 		mode:     domain.ModePlan,
+		runner:   stub.once,
 		beat:     (&stubBeat{beat: beat}).discover,
 	}
 }

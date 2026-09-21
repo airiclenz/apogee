@@ -112,6 +112,14 @@ type firingInputs struct {
 	// nil DROPS the line, exactly as domain.Config.Report's own default does — every composition
 	// test, and a Driver with nowhere to put it.
 	report func(msg string)
+	// runner is what the composed Firing is handed to once both gates have passed — run.Once in
+	// production, a recording stub in a composition test that captures the run.Spec and runs
+	// nothing (ADR 0033 decision 6 names the runner an injected seam, and ~40 tests observe the
+	// composition through it). A Driver that holds its runner as a dependency (headless) passes it
+	// through here; nil falls back to the package's runOnce var, read at the moment the Firing is
+	// raised and never captured earlier, so the daemon, `/schedule` and the boot keep the seam they
+	// still swap until they take their runner as a dependency too.
+	runner func(context.Context, run.Spec) (run.Result, error)
 }
 
 // firingBinding is the server-BOUND half of an unattended run's Config — everything firingConfig
@@ -721,10 +729,10 @@ func clockNow(c schedule.Clock) func() time.Time {
 // into its lanes (ADR 0076 A8), builds this Firing's own Reaction Runner and drains it when the
 // Firing ends (ADR 0073), mints the record id, composes the Config (firingConfig), refuses a server
 // that answered nothing (notice.ServerOffline), lets the Driver decorate the Event sink, and runs
-// the Firing once through the package's runner seam (runOnce). It exists because those steps were
-// three copies that had already drifted: the id that named a record and the id that named its
-// scratch dir were two mints in two Drivers rather than one by construction, and the liveness gate
-// was a sentence each Driver re-derived from the routing.
+// the Firing once through its runner (in.runner, or the package's runOnce seam when nil). It exists
+// because those steps were three copies that had already drifted: the id that named a record and
+// the id that named its scratch dir were two mints in two Drivers rather than one by construction,
+// and the liveness gate was a sentence each Driver re-derived from the routing.
 //
 // It stays in cmd/apogee rather than moving into internal/run for ADR 0033 decision 6's reason: the
 // runner is runner-agnostic and the caller composes. What raise composes is the host's business —
@@ -732,8 +740,8 @@ func clockNow(c schedule.Clock) func() time.Time {
 // roots, the sweeps and every notice a Driver prints in its own voice all happen before it is called.
 //
 // The id is minted HERE and nowhere else, which is the by-construction guarantee: firingConfig
-// creates the scratch dir under in.recordID and runOnce files the record under run.Spec.RecordID, and
-// both read the one value raise wrote. It is minted off in.now — the same clock handed to the runner
+// creates the scratch dir under in.recordID and the runner files the record under run.Spec.RecordID,
+// and both read the one value raise wrote. It is minted off in.now — the same clock handed to the runner
 // as run.Spec.Now — so the id's timestamp prefix and the record's CreatedAt are one instant, not a
 // wall-clock reading here and a second one inside run.Once. onID, when non-nil, sees that id immediately — before the
 // composition and before the gate — so a Driver that stamps it on a stream (headless's Event lines,
@@ -752,7 +760,7 @@ func clockNow(c schedule.Clock) func() time.Time {
 // never for a server that answered something this host has no standing to judge; a 401, a 500 and a
 // 429 all ANSWER and keep the proceed-and-degrade every Firing has always had (internal/heartbeat).
 // The round trip was already taken by the composition, so the question costs nothing of its own.
-// Whatever runOnce returns passes through untouched: a run that started is the Driver's to report,
+// Whatever the runner returns passes through untouched: a run that started is the Driver's to report,
 // exit code and all.
 //
 // The Reaction drain is deferred here, so it runs BEFORE this function returns — a Firing refused
@@ -825,7 +833,13 @@ func raise(
 	if ref != nil {
 		spec.ScheduleID, spec.ScheduleName = ref.ID, ref.Name
 	}
-	res, err := runOnce(ctx, spec)
+	// Resolved HERE and not at construction, so a caller that left it nil gets whatever the seam
+	// holds when the Firing is raised — the production runner, or the double a test installed.
+	runner := in.runner
+	if runner == nil {
+		runner = runOnce
+	}
+	res, err := runner(ctx, spec)
 	return res, notices, err
 }
 

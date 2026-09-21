@@ -99,8 +99,9 @@ func headlessRun(t *testing.T, stub *stubRunner, args ...string) (out, errOut st
 // an empty configDir writes the default home against srv (testConfigHomeOn); a caller that writes
 // its own home names srv.URL in it, because a file already written is never patched here.
 //
-// It swaps the package-level runner and Confiner seams for the duration of the test. That is
-// shared mutable state, so nothing here runs in parallel.
+// The runner and the Confiner reach the command as its dependencies (headlessDeps), never through
+// a package var; the environment it pins (t.Setenv) is still process-wide, so nothing here runs in
+// parallel.
 func headlessRunOn(
 	t *testing.T,
 	stub *stubRunner,
@@ -116,14 +117,13 @@ func headlessRunOn(
 	if configDir == "" {
 		configDir = testConfigHomeOn(t, srv, "")
 	}
-	prevRunner, prevConfiner := runOnce, newConfiner
-	runOnce = stub.once
-	newConfiner = func() apogee.Confiner { return confiner }
-	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
 	// The environment must not decide what the mode assertions measure.
 	t.Setenv(config.EnvMode, "")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{
+		runner:   stub.once,
+		confiner: func() apogee.Confiner { return confiner },
+	})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
@@ -1069,14 +1069,11 @@ var headlessSummarySession = regexp.MustCompile(`session: (\S+) · turns:`)
 // vouch for.
 func TestHeadlessPlanRunWritesItsOwnScratchDir(t *testing.T) {
 	stub := stubllm.New(t, loadScript(t, "announced-scratch-write"))
-	prev := runOnce
-	runOnce = run.Once
-	t.Cleanup(func() { runOnce = prev })
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
 
 	home := eventLinesHome(t, stub.URL, stub.Model)
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
@@ -1156,14 +1153,11 @@ func TestHeadlessNoSaveDropsTheStore(t *testing.T) {
 	t.Run("--no-save opens no snapshot store", func(t *testing.T) {
 		requireSnapshotStore(t)
 		stub := stubllm.New(t, loadScript(t, "eventlines"))
-		prev := runOnce
-		runOnce = run.Once
-		t.Cleanup(func() { runOnce = prev })
 		assertNoAmbientApogeeConfig(t)
 		t.Setenv(config.EnvMode, "")
 
 		home := eventLinesHome(t, stub.URL, stub.Model)
-		cmd := newHeadlessCommand()
+		cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 		var outBuf, errBuf bytes.Buffer
 		cmd.SetOut(&outBuf)
 		cmd.SetErr(&errBuf)
@@ -2111,15 +2105,12 @@ func captureProcessStreams(t *testing.T, fn func()) (stdout, stderr string) {
 // catch that — this test would fail immediately if the print regressed to the Print family.
 func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 	stub := &stubRunner{res: run.Result{SessionID: "s-7", FinalText: "the answer", Turns: 3, Denied: 1}}
-	prev := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
 
 	configDir, workspace := testConfigHomeOn(t, headlessBeatServer(t), ""), t.TempDir()
 	var runErr error
 	stdout, stderr := captureProcessStreams(t, func() {
-		cmd := newHeadlessCommand()
+		cmd := newHeadlessCommandWith(headlessDeps{runner: stub.once})
 		// Deliberately no SetOut: the fallback under test is the one every real run takes.
 		cmd.SetIn(strings.NewReader(""))
 		cmd.SetArgs([]string{"--config", configDir, "--workspace", workspace, "a prompt"})
@@ -2151,9 +2142,6 @@ func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 // a narration line that took OutOrStdout would break every pipeline reading the answer.
 func TestHeadlessNarratesToolCallsLiveOnStderr(t *testing.T) {
 	stub := stubllm.New(t, loadScript(t, "eventlines"))
-	prev := runOnce
-	runOnce = run.Once
-	t.Cleanup(func() { runOnce = prev })
 	assertNoAmbientApogeeConfig(t)
 	t.Setenv(config.EnvMode, "")
 
@@ -2161,7 +2149,7 @@ func TestHeadlessNarratesToolCallsLiveOnStderr(t *testing.T) {
 	home := eventLinesHome(t, stub.URL, stub.Model)
 	var runErr error
 	stdout, stderr := captureProcessStreams(t, func() {
-		cmd := newHeadlessCommand()
+		cmd := newHeadlessCommandWith(headlessDeps{runner: run.Once})
 		// Deliberately no SetOut: the fallback under test is the one every real run takes.
 		cmd.SetIn(strings.NewReader(""))
 		cmd.SetArgs([]string{"--config", home, "--workspace", workspace, eventLinesPrompt})
@@ -3046,13 +3034,13 @@ func TestHeadlessFormatJSONWriteErrorStopsLinesNotTheRun(t *testing.T) {
 		}}
 
 	// The stdout writer is the point of this test, so the command is built here rather than through
-	// headlessRun — which owns both buffers — with the same seams swapped that helper swaps.
-	prevRunner, prevConfiner := runOnce, newConfiner
-	runOnce, newConfiner = stub.once, func() apogee.Confiner { return fenceableHost }
-	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
+	// headlessRun — which owns both buffers — with the same dependencies that helper injects.
 	t.Setenv(config.EnvMode, "")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{
+		runner:   stub.once,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	})
 	var errBuf bytes.Buffer
 	cmd.SetOut(failingStdout{})
 	cmd.SetErr(&errBuf)
@@ -3119,8 +3107,8 @@ func TestHeadlessFormatJSONCancelledRunWritesTheFrame(t *testing.T) {
 const secondInterruptLine = "apogee headless: second interrupt \u2014 exiting without waiting for the run"
 
 // closingConfiner is a fenceable backend that also carries the optional `Close() error` the
-// headless command tears confinement down through (ADR 0020 §2, the newConfiner block in
-// headless.go) and counts the times that teardown ran. It is what makes the hard exit's deliberate
+// headless command tears confinement down through (ADR 0020 §2, the Confiner block in
+// runHeadlessBody) and counts the times that teardown ran. It is what makes the hard exit's deliberate
 // SKIP of the teardown observable at all: fakeConfiner has no Close, so the command's optional
 // interface assertion finds nothing there and "the teardown did not run" would be asserted against
 // a path that never had one to skip.
@@ -3259,10 +3247,8 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 	var got interruptedHeadless
 	var sigs chan<- os.Signal
 
-	prevRunner, prevConfiner := runOnce, newConfiner
 	prevExit, prevSignals := hardExit, interruptSignals
 	t.Cleanup(func() {
-		runOnce, newConfiner = prevRunner, prevConfiner
 		hardExit, interruptSignals = prevExit, prevSignals
 	})
 	// The runner the real one stands in for: it says it has been entered — the beat is behind it,
@@ -3270,7 +3256,7 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 	// TestHeadlessInterruptDuringTheBeatExits2's — then notices the cancellation and holds: the
 	// state a run is in while it saves its record and drains its Reactions, and the only state in
 	// which a second press means anything.
-	runOnce = func(ctx context.Context, _ run.Spec) (run.Result, error) {
+	runner := func(ctx context.Context, _ run.Spec) (run.Result, error) {
 		close(entered)
 		<-ctx.Done()
 		close(blocked)
@@ -3282,7 +3268,6 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 	// the command only defers a Close for a Confiner that has one, so counting the teardown needs
 	// a backend that carries it.
 	confiner := &closingConfiner{fakeConfiner: fakeConfiner{caps: apogee.ConfinementCaps{FSWrite: true}}}
-	newConfiner = func() apogee.Confiner { return confiner }
 	hardExit = func(code int) {
 		got.exited, got.code, got.snapshot = true, code, outBuf.String()
 		got.closedAtExit = confiner.closes()
@@ -3296,7 +3281,10 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 	}
 	t.Setenv(config.EnvMode, "")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{
+		runner:   runner,
+		confiner: func() apogee.Confiner { return confiner },
+	})
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
@@ -3351,13 +3339,12 @@ func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
 		cancel()
 	}()
 	stub := &stubRunner{}
-	prevRunner, prevConfiner := runOnce, newConfiner
-	runOnce = stub.once
-	newConfiner = func() apogee.Confiner { return fenceableHost }
-	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
 	t.Setenv(config.EnvMode, "")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{
+		runner:   stub.once,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	})
 	var outBuf, errBuf bytes.Buffer
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
@@ -3611,12 +3598,9 @@ func TestHeadlessStartupServerAndBypassFlags(t *testing.T) {
 // The prompt reaches the runner off stdin too — the pipeline form, with no argument at all.
 func TestHeadlessReadsThePromptFromStdin(t *testing.T) {
 	stub := &stubRunner{res: run.Result{FinalText: "ok", Turns: 1}}
-	prev := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: stub.once})
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)

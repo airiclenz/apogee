@@ -384,16 +384,13 @@ func TestKeyMigratorRefusesAnEntryWithNoPlaintextKey(t *testing.T) {
 // stderr, where it cannot contaminate the answer, and the run proceeds exactly as it would have.
 func TestHeadlessNoticesPlaintextKeysAndNeverPrompts(t *testing.T) {
 	stub := &stubRunner{res: run.Result{FinalText: "ok", Turns: 1}}
-	prev := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
 	// The run beats its server for real, so the file names a stubllm upstream in place of the pinned
 	// port; the rest of the file — the commented plaintext key above all — is onePlaintextServer's.
 	srv := headlessBeatServer(t)
 	home, path := plaintextConfig(t, strings.Replace(onePlaintextServer, testServerEndpoint, srv.URL, 1))
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: stub.once})
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
@@ -437,9 +434,6 @@ func TestHeadlessNoticesPlaintextKeysAndNeverPrompts(t *testing.T) {
 // leaves the answer alone, and edits nothing.
 func TestHeadlessNoticesTheRetiredSubAgentsFlagAndNeverPrompts(t *testing.T) {
 	stub := &stubRunner{res: run.Result{FinalText: "ok", Turns: 1}}
-	prev := runOnce
-	runOnce = stub.once
-	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
 	// The run beats its server for real, so the bound entry names a stubllm upstream in place of the
 	// pinned port; the retired flag rides on the other entry exactly as subAgentsFlagYAML writes it.
@@ -448,7 +442,7 @@ func TestHeadlessNoticesTheRetiredSubAgentsFlagAndNeverPrompts(t *testing.T) {
 	home := testConfigHomeOn(t, srv, configYAML)
 	path := filepath.Join(home, "config.yaml")
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{runner: stub.once})
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)

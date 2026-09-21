@@ -236,11 +236,6 @@ func TestDocsEnvBadValuesNameTheVariableAndTheValue(t *testing.T) {
 func headlessRunUnderEnv(t *testing.T, stub *stubRunner, name, value string) (string, error) {
 	t.Helper()
 
-	prevRunner, prevConfiner := runOnce, newConfiner
-	runOnce = stub.once
-	newConfiner = func() apogee.Confiner { return fenceableHost }
-	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
-
 	for _, other := range []string{
 		config.EnvServer, config.EnvEndpoint, config.EnvModel, config.EnvMode, config.EnvBypass,
 		config.EnvAPIKey, config.EnvConfig, config.EnvWorkspace,
@@ -249,7 +244,10 @@ func headlessRunUnderEnv(t *testing.T, stub *stubRunner, name, value string) (st
 	}
 	t.Setenv(name, value)
 
-	cmd := newHeadlessCommand()
+	cmd := newHeadlessCommandWith(headlessDeps{
+		runner:   stub.once,
+		confiner: func() apogee.Confiner { return fenceableHost },
+	})
 	var out, errOut strings.Builder
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
