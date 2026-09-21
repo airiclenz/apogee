@@ -9,11 +9,18 @@ import "strings"
 // the model emits no inline channel — content passes through untouched, which is also the
 // right default when the server already split reasoning into the response's separate
 // reasoning field (`reasoning_content`, or its `reasoning` alias — provider.RawResponse.Thinking).
+// The one shape that default does not cover is a PreOpened channel on a reply the server did
+// not split: the content opens mid-think, so IsThinking holds it until the first EndToken.
 type ThinkingConfig struct {
 	// StartToken opens a thinking span; EndToken closes it. Both must be non-empty for
 	// stripping to run — an empty token degrades to the no-op pass-through.
 	StartToken string
 	EndToken   string
+	// PreOpened records that the chat template opened the channel before the model's first
+	// byte, so the content starts mid-think and carries only the closer (the minimax-m3 shape
+	// StripThinking's orphan-closer rule already absorbs). IsThinking reads it: until a closer
+	// has landed, content with no StartToken of its own is an open implicit span.
+	PreOpened bool
 }
 
 // Stripped separates a raw assistant message into the content the user sees and the
@@ -89,13 +96,20 @@ func StripThinking(raw string, cfg *ThinkingConfig) Stripped {
 // guard a consumer uses to know the model is mid-reasoning and hold display. It mirrors
 // the oracle's isThinking: the last opener has no closer after it. A nil/empty cfg is
 // never thinking.
+//
+// A PreOpened channel goes one step beyond the oracle: while raw holds neither a StartToken
+// nor an EndToken, the implicit leading span the chat template opened is still open, so the
+// answer is true — the hold that keeps a pre-opened model's reasoning off the live stream
+// until its orphan closer lands. Once a closer has landed the implicit span is closed and the
+// last-opener rule above governs the rest of the reply, exactly as for a channel the model
+// opened itself.
 func IsThinking(raw string, cfg *ThinkingConfig) bool {
 	if cfg == nil || cfg.StartToken == "" || cfg.EndToken == "" {
 		return false
 	}
 	lastStart := strings.LastIndex(raw, cfg.StartToken)
 	if lastStart == -1 {
-		return false
+		return cfg.PreOpened && !strings.Contains(raw, cfg.EndToken)
 	}
 	return indexFrom(raw, cfg.EndToken, lastStart+len(cfg.StartToken)) == -1
 }

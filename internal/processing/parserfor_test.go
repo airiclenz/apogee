@@ -150,7 +150,7 @@ func TestParserFor_StripperByStyle(t *testing.T) {
 			if reasoning != tc.wantReasoning {
 				t.Errorf("reasoning = %q, want %q", reasoning, tc.wantReasoning)
 			}
-			if got := stripper.IsMidChannel(tc.raw); got != tc.wantMid {
+			if got := stripper.IsMidChannel(tc.raw, false); got != tc.wantMid {
 				t.Errorf("IsMidChannel = %v, want %v", got, tc.wantMid)
 			}
 		})
@@ -171,7 +171,7 @@ func TestParserFor_NoneStripperIsByteIdentical(t *testing.T) {
 	if visible != raw || reasoning != "" {
 		t.Errorf("Strip = (%q, %q), want (%q, \"\")", visible, reasoning, raw)
 	}
-	if stripper.IsMidChannel(raw) {
+	if stripper.IsMidChannel(raw, false) {
 		t.Error("IsMidChannel = true, want false for the no-op stripper")
 	}
 }

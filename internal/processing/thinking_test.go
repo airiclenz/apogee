@@ -238,3 +238,36 @@ func TestIsThinking_PortedOracleVectors_MatchTypeScript(t *testing.T) {
 		})
 	}
 }
+
+// TestIsThinking_PreOpenedChannelIsMidThinkUntilTheCloser pins the pre-opened shape (minimax-m3):
+// the chat template opened the channel, so content with no opener of its own is still mid-think
+// until the first closer lands; after it, the last-opener rule governs as for any other channel,
+// and a config without the flag is unchanged.
+func TestIsThinking_PreOpenedChannelIsMidThinkUntilTheCloser(t *testing.T) {
+	t.Parallel()
+
+	preOpened := &ThinkingConfig{StartToken: "<mm:think>", EndToken: "</mm:think>", PreOpened: true}
+	plain := &ThinkingConfig{StartToken: "<mm:think>", EndToken: "</mm:think>"}
+
+	cases := []struct {
+		name string
+		cfg  *ThinkingConfig
+		raw  string
+		want bool
+	}{
+		{"pre-opened content with no closer is mid-think", preOpened, "The user said hi.", true},
+		{"the first closer closes the implicit span", preOpened, "The user said hi.</mm:think>Hello", false},
+		{"without the flag content with no opener is not thinking", plain, "Hello", false},
+		{"a re-opened channel after the closer follows the last-opener rule", preOpened, "</mm:think>Hello<mm:think>more", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := IsThinking(tc.raw, tc.cfg); got != tc.want {
+				t.Errorf("IsThinking(%q, PreOpened=%v) = %v, want %v", tc.raw, tc.cfg.PreOpened, got, tc.want)
+			}
+		})
+	}
+}

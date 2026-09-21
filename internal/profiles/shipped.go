@@ -39,12 +39,13 @@ var shippedTable = []Entry{
 		Pattern: "minimax-m3",
 		Profile: domain.ModelProfile{
 			Thinking: domain.ThinkingProfile{
-				Style: domain.ThinkingDelimited,
-				Start: "<mm:think>",
-				End:   "</mm:think>",
+				Style:     domain.ThinkingDelimited,
+				Start:     "<mm:think>",
+				End:       "</mm:think>",
+				PreOpened: true,
 			},
 		},
-		Note: "minimax-m3: delimited <mm:think> reasoning, often pre-opened by the chat template (session 2026-08-11)",
+		Note: "minimax-m3: delimited <mm:think> reasoning, pre-opened by the chat template so the reply carries only the closer (session 2026-08-11; audit 2026-09-20)",
 	},
 	{
 		Pattern: "qwen3.8",

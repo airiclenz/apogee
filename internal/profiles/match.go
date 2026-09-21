@@ -66,12 +66,12 @@ type Decision struct {
 // wiped without a word.
 //
 // The thinking axis itself resolves as two sub-axes (ADR 0058): the channel style — Style with
-// the Start/End tokens that only mean something under it — and the effort dial. Each is
-// self-describing from the domain value, so neither needs the presence flag the roster carries:
-// `style: none` is a spelled zero distinct from the unwritten "", and effort has no zero to
-// spell — "" is the absence of the dial and the wire anchor (ADR 0050), any of the four words a
-// value. Taking the whole struct on either would re-open the trap one level down: an
-// `effort:`-only entry for a gpt-oss build — the idiom the README teaches — would wipe the
+// the Start/End tokens and the PreOpened flag that only mean something under it — and the effort
+// dial. Each is self-describing from the domain value, so neither needs the presence flag the
+// roster carries: `style: none` is a spelled zero distinct from the unwritten "", and effort has
+// no zero to spell — "" is the absence of the dial and the wire anchor (ADR 0050), any of the
+// four words a value. Taking the whole struct on either would re-open the trap one level down:
+// an `effort:`-only entry for a gpt-oss build — the idiom the README teaches — would wipe the
 // table's harmony parsing exactly as a tools-only one used to.
 func Resolve(model string, user, shipped []Entry) Decision {
 	userEntry, matchedUser := best(model, user)
@@ -100,10 +100,11 @@ func Resolve(model string, user, shipped []Entry) Decision {
 		ToolCallFormat: toolCall.Profile.ToolCallFormat,
 		Pattern:        toolCall.Profile.Pattern,
 		Thinking: domain.ThinkingProfile{
-			Style:  style.Style,
-			Start:  style.Start,
-			End:    style.End,
-			Effort: supplier(Entry.spellsThinkingEffort).Profile.Thinking.Effort,
+			Style:     style.Style,
+			Start:     style.Start,
+			End:       style.End,
+			PreOpened: style.PreOpened,
+			Effort:    supplier(Entry.spellsThinkingEffort).Profile.Thinking.Effort,
 		},
 		Tools: supplier(Entry.spellsTools).Profile.Tools,
 	}

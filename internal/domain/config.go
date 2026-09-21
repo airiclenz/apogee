@@ -681,7 +681,10 @@ const (
 // the private reasoning the loop strips from visible content and preserves as reasoning in
 // history. A zero ThinkingProfile (ThinkingNone) means no inline channel — content passes
 // through untouched, the right default when the Upstream already splits reasoning into a
-// separate wire field (`reasoning_content`, or its `reasoning` alias).
+// separate wire field (`reasoning_content`, or its `reasoning` alias). A delimited profile whose
+// channel is PreOpened is the one shape that default does not cover: until the reply's first
+// closer, or the first split reasoning delta, the loop treats the content as mid-think and holds
+// it off the live stream.
 type ThinkingProfile struct {
 	// Style selects the stripping strategy: ThinkingNone (no inline channel, the default),
 	// ThinkingDelimited (a literal Start/End token pair), or ThinkingHarmony (gpt-oss channels,
@@ -692,6 +695,14 @@ type ThinkingProfile struct {
 	// "</think>"); both must be set for stripping to run. They are ignored for the other styles.
 	Start string
 	End   string
+
+	// PreOpened records that the model's chat template opens the thinking channel before the
+	// model's first byte (minimax-m3's shape): the content starts mid-think and carries only the
+	// closer, never its own Start token. Under ThinkingDelimited the loop then holds the live
+	// stream until the first End token lands, treating the text before it as reasoning; it is
+	// ignored for the other styles. A server that splits the reasoning into its own wire field
+	// consumed the pre-opened span itself, so the first split delta releases the hold.
+	PreOpened bool
 
 	// Effort is how hard this model is asked to think (CONTEXT: Thinking effort) — a dial the
 	// request forwards to the server's chat template, ORTHOGONAL to Style above: Style says how

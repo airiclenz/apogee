@@ -79,6 +79,25 @@ func TestShippedReturnsACopy(t *testing.T) {
 	}
 }
 
+// TestShippedMinimaxIsPreOpened pins the shape the audit of 2026-09-20 named: minimax-m3's chat
+// template opens the thinking channel before the model's first byte, so the shipped entry says
+// so — the flag the stripper needs to hold the pre-opened span off the live stream.
+func TestShippedMinimaxIsPreOpened(t *testing.T) {
+	t.Parallel()
+
+	decision := Resolve("minimax-m3-Q4_K_M", nil, Shipped())
+
+	if decision.Entry.Pattern != "minimax-m3" {
+		t.Fatalf("matched pattern = %q, want minimax-m3", decision.Entry.Pattern)
+	}
+	if !decision.Entry.Profile.Thinking.PreOpened {
+		t.Error("shipped minimax-m3 entry is not PreOpened; the chat template pre-opens <mm:think>")
+	}
+	if !decision.Profile.Thinking.PreOpened {
+		t.Error("resolved profile dropped PreOpened; Resolve must copy it beside Start/End")
+	}
+}
+
 // consoleFamily is the roster ADR 0059 §3 ratified for qwen3.8 — the first tools axis any shipped
 // entry carries, and the reason ADR 0057 decision 6 gained an amendment.
 var consoleFamily = []string{"console_open", "console_send", "console_read", "console_close"}

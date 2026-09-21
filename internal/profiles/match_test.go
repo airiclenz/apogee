@@ -15,6 +15,15 @@ func delimited(start, end string) domain.ModelProfile {
 	}
 }
 
+// preOpened is delimited with the channel pre-opened by the chat template — the shipped
+// minimax-m3 shape, which every row that resolves its style from that entry expects whole:
+// PreOpened travels with Style and the tokens.
+func preOpened(start, end string) domain.ModelProfile {
+	p := delimited(start, end)
+	p.Thinking.PreOpened = true
+	return p
+}
+
 // Resolution is AXIS-WISE (ADR 0057 decision 5): every case below fixes which tier supplies which
 // axis, and the Source it reports is the tier the caller narrates — the shipped one whenever the
 // table still got a word in.
@@ -35,12 +44,12 @@ func TestResolve(t *testing.T) {
 		{
 			name: "live minimax spelling matches the shipped entry", model: "minimax/minimax-m3:exacto",
 			shipped: Shipped(), wantSource: SourceShipped, wantPattern: "minimax-m3",
-			wantProfile: delimited("<mm:think>", "</mm:think>"),
+			wantProfile: preOpened("<mm:think>", "</mm:think>"),
 		},
 		{
 			name: "gguf-ish minimax spelling matches the shipped entry", model: "minimax-m3-Q4_K_M",
 			shipped: Shipped(), wantSource: SourceShipped, wantPattern: "minimax-m3",
-			wantProfile: delimited("<mm:think>", "</mm:think>"),
+			wantProfile: preOpened("<mm:think>", "</mm:think>"),
 		},
 		{
 			name: "gpt-oss-20b matches harmony", model: "gpt-oss-20b",
@@ -128,7 +137,7 @@ func TestResolve(t *testing.T) {
 			name: "a user entry that spells no axis defers all three", model: "minimax-m3-Q4_K_M",
 			user: []Entry{{Pattern: "minimax-m3"}}, shipped: Shipped(),
 			wantSource: SourceShipped, wantPattern: "minimax-m3",
-			wantProfile: delimited("<mm:think>", "</mm:think>"),
+			wantProfile: preOpened("<mm:think>", "</mm:think>"),
 		},
 		{
 			// Axes travel independently: the user's tool-call format and the table's thinking style
@@ -242,8 +251,9 @@ func TestResolve(t *testing.T) {
 			}},
 		},
 		{
-			// ... and never alone: an effort-only entry leaves Style AND both tokens at the shipped
-			// values, because tokens are meaningless without the style that reads them.
+			// ... and never alone: an effort-only entry leaves Style, both tokens AND the pre-opened
+			// flag at the shipped values, because tokens are meaningless without the style that
+			// reads them.
 			name: "an effort-only user entry keeps the shipped tokens", model: "minimax-m3-Q4_K_M",
 			user: []Entry{{
 				Pattern: "minimax-m3",
@@ -251,7 +261,8 @@ func TestResolve(t *testing.T) {
 			}},
 			shipped: Shipped(), wantSource: SourceShipped, wantPattern: "minimax-m3",
 			wantProfile: domain.ModelProfile{Thinking: domain.ThinkingProfile{
-				Style: domain.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>", Effort: domain.EffortOff,
+				Style: domain.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>", PreOpened: true,
+				Effort: domain.EffortOff,
 			}},
 		},
 		{

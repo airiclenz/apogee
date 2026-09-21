@@ -42,11 +42,12 @@ type Entry struct {
 func (e Entry) spellsToolCall() bool { return e.Profile.ToolCallFormat != "" }
 
 // spellsThinkingStyle reports whether this entry writes the channel-style half of the thinking
-// axis — Style, together with the Start/End delimiter tokens that only mean something under it.
-// The domain value answers it alone, for the same reason as the tool-call axis: `style: none` is
-// the spelled zero and "" is the unwritten one. Start/End never make the entry speak by
-// themselves — tokens without a style name no channel to read them — so they travel with Style
-// and are never resolved on their own.
+// axis — Style, together with the Start/End delimiter tokens and the PreOpened flag that only
+// mean something under it. The domain value answers it alone, for the same reason as the
+// tool-call axis: `style: none` is the spelled zero and "" is the unwritten one. Start/End and
+// PreOpened never make the entry speak by themselves — tokens or a pre-opened flag without a
+// style name no channel to read them — so they travel with Style and are never resolved on
+// their own: a user entry that spells `thinking:` replaces the whole half, flag included.
 func (e Entry) spellsThinkingStyle() bool { return e.Profile.Thinking.Style != "" }
 
 // spellsThinkingEffort reports whether this entry writes the effort half of the thinking axis.

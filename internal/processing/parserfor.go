@@ -19,7 +19,11 @@ type ContentStripper interface {
 	// IsMidChannel reports whether raw ends inside an unclosed reasoning span — the streaming
 	// guard a live-token consumer uses to hold emission while the model is mid-reasoning. It is
 	// always false for the no-op stripper, so a native stream emits every delta immediately.
-	IsMidChannel(raw string) bool
+	// splitSeen says the server has already split reasoning into its own wire field this
+	// stream: a pre-opened delimited channel then stops holding for the implicit leading span
+	// (the server consumed it), so the content streams live exactly as it does today; the
+	// other strippers ignore it.
+	IsMidChannel(raw string, splitSeen bool) bool
 }
 
 // ParserFor translates a declarative domain.ModelProfile into the loop's two parse-seam
@@ -48,14 +52,19 @@ func ParserFor(p domain.ModelProfile) (ToolCallParser, ContentStripper, error) {
 
 // stripperFor selects the ContentStripper for a thinking profile. "" and ThinkingNone both mean
 // no inline channel (the no-op stripper); ThinkingDelimited wraps StripThinking with the profile's
-// literal Start/End tokens; ThinkingHarmony wraps StripHarmony. An unknown style is an error so a
-// misconfigured profile fails construction rather than silently leaving reasoning in visible text.
+// literal Start/End tokens and its PreOpened flag; ThinkingHarmony wraps StripHarmony. An unknown
+// style is an error so a misconfigured profile fails construction rather than silently leaving
+// reasoning in visible text.
 func stripperFor(t domain.ThinkingProfile) (ContentStripper, error) {
 	switch t.Style {
 	case "", domain.ThinkingNone:
 		return noneStripper{}, nil
 	case domain.ThinkingDelimited:
-		return delimitedStripper{cfg: &ThinkingConfig{StartToken: t.Start, EndToken: t.End}}, nil
+		return delimitedStripper{cfg: &ThinkingConfig{
+			StartToken: t.Start,
+			EndToken:   t.End,
+			PreOpened:  t.PreOpened,
+		}}, nil
 	case domain.ThinkingHarmony:
 		return harmonyStripper{}, nil
 	default:
@@ -69,7 +78,7 @@ func stripperFor(t domain.ThinkingProfile) (ContentStripper, error) {
 type noneStripper struct{}
 
 func (noneStripper) Strip(raw string) (string, string) { return raw, "" }
-func (noneStripper) IsMidChannel(string) bool          { return false }
+func (noneStripper) IsMidChannel(string, bool) bool    { return false }
 
 // delimitedStripper strips a literal Start/End thinking-token pair (e.g.
 // <think>…</think>) over the frozen StripThinking / IsThinking oracle functions.
@@ -82,7 +91,17 @@ func (d delimitedStripper) Strip(raw string) (string, string) {
 	return s.Visible, s.Reasoning
 }
 
-func (d delimitedStripper) IsMidChannel(raw string) bool { return IsThinking(raw, d.cfg) }
+// IsMidChannel evaluates IsThinking over the stripper's config — against a copy with PreOpened
+// cleared once the server has split reasoning out this stream, because a split server consumed
+// the pre-opened span itself and the content that follows is the model's own, not mid-think.
+func (d delimitedStripper) IsMidChannel(raw string, splitSeen bool) bool {
+	if splitSeen && d.cfg.PreOpened {
+		cfg := *d.cfg
+		cfg.PreOpened = false
+		return IsThinking(raw, &cfg)
+	}
+	return IsThinking(raw, d.cfg)
+}
 
 // harmonyStripper strips the full gpt-oss harmony channel set over the frozen StripHarmony /
 // IsHarmonyThinking oracle functions. StripHarmony yields three streams but ContentStripper
@@ -96,7 +115,7 @@ func (harmonyStripper) Strip(raw string) (string, string) {
 	return h.Visible, joinNonEmpty(h.Reasoning, h.Commentary)
 }
 
-func (harmonyStripper) IsMidChannel(raw string) bool { return IsHarmonyThinking(raw) }
+func (harmonyStripper) IsMidChannel(raw string, _ bool) bool { return IsHarmonyThinking(raw) }
 
 // joinNonEmpty joins a and b with a blank line, dropping either when empty, so a present channel
 // is never padded with a leading or trailing blank line from an absent one.

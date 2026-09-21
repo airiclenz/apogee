@@ -263,3 +263,94 @@ func TestStream_ReasoningSurvivesSplitChannelTokens(t *testing.T) {
 		})
 	}
 }
+
+// preOpenedProfile is the shipped minimax-m3 shape: a delimited channel the chat template opens
+// before the model's first byte, so a non-splitting server's reply carries only the closer.
+func preOpenedProfile() domain.ModelProfile {
+	return domain.ModelProfile{
+		Thinking: domain.ThinkingProfile{
+			Style: domain.ThinkingDelimited, Start: "<mm:think>", End: "</mm:think>", PreOpened: true,
+		},
+	}
+}
+
+// TestStream_PreOpenedThinkingHeldOffLiveStream: a pre-opened channel's reply opens mid-think —
+// no opener, only the closer — so the reasoning before the closer is held off the live
+// TokenEvent stream (the audit's High), the visible text after it streams, and the hold is
+// SILENT: exactly one ReasoningEvent fires, at the closer, carrying the whole pre-opened text.
+func TestStream_PreOpenedThinkingHeldOffLiveStream(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Profile = preOpenedProfile()
+	chunks := []string{"The user ", "said hi.", "</mm:think>", "Hello there!"}
+
+	a := newProfileAgent(t, cfg, chunkedResponder(t, nil, chunks))
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	got := tokenTexts(sink.events)
+	assertNoLeak(t, got, []string{"</mm:think>", "The user", "said hi."})
+
+	const wantVisible = "Hello there!"
+	if joined := strings.Join(got, ""); joined != wantVisible {
+		t.Errorf("joined live tokens = %q, want %q", joined, wantVisible)
+	}
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != wantVisible {
+		t.Errorf("final MessageEvent = %q (ok=%v), want %q", me.Text, ok, wantVisible)
+	}
+	assertReasoning(t, lastAssistantMessage(t, a), "The user said hi.")
+
+	reasoning := reasoningTexts(sink.events)
+	if len(reasoning) != 1 || reasoning[0] != "The user said hi." {
+		t.Fatalf("ReasoningEvents = %q, want exactly one carrying %q, emitted at the closer", reasoning, "The user said hi.")
+	}
+	assertNoVisibleInReasoning(t, reasoning, []string{"Hello there!"})
+}
+
+// TestStream_PreOpenedSplitReasoningStreamsLive: the same pre-opened profile on a server that
+// splits reasoning into reasoning_content — the server consumed the pre-opened span itself, so
+// the first split delta releases the hold and the content streams live, before the MessageEvent,
+// exactly as it does today.
+func TestStream_PreOpenedSplitReasoningStreamsLive(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := baseConfig(sink)
+	cfg.Profile = preOpenedProfile()
+	chunks := []string{"Hello, ", "world", "!"}
+	thinking := []string{"Weighing ", "the greeting."}
+
+	a := newProfileAgent(t, cfg, chunkedResponder(t, thinking, chunks))
+	if err := a.Submit(domain.UserInput{Text: "hi"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	var beforeMessage []domain.Event
+	for _, e := range sink.events {
+		if _, ok := e.(domain.MessageEvent); ok {
+			break
+		}
+		beforeMessage = append(beforeMessage, e)
+	}
+	// One TokenEvent per content delta, all ahead of the MessageEvent: live, not held. The
+	// delimited stripper trims the visible text it reveals, so the boundaries are asserted by
+	// count and the text by its join, as every delimited-profile stream test does.
+	got := tokenTexts(beforeMessage)
+	if len(got) != len(chunks) {
+		t.Fatalf("emitted %d TokenEvents before the MessageEvent, want %d (live, not held): %q", len(got), len(chunks), got)
+	}
+	if joined := strings.Join(got, ""); joined != "Hello, world!" {
+		t.Errorf("joined live tokens = %q, want %q", joined, "Hello, world!")
+	}
+	if me, ok := firstMessageEvent(t, sink.events); !ok || me.Text != "Hello, world!" {
+		t.Errorf("final MessageEvent = %q (ok=%v), want %q", me.Text, ok, "Hello, world!")
+	}
+	if reasoning := reasoningTexts(sink.events); strings.Join(reasoning, "") != strings.Join(thinking, "") {
+		t.Errorf("joined ReasoningEvents = %q, want %q", strings.Join(reasoning, ""), strings.Join(thinking, ""))
+	}
+}

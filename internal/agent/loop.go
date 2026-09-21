@@ -817,18 +817,33 @@ func (a *Agent) dispatchableCalls(turn int, calls []domain.ToolCall) []domain.To
 // reaches history through the completion the collector returns. What the collector records —
 // the drained body, the cancel masquerade the caller resolves with ctx.Err(), the overflow and
 // retryable bits — is its doc's.
+//
+// A PRE-OPENED delimited profile (ThinkingProfile.PreOpened — minimax-m3, whose chat template
+// opens the channel before the model's first byte) starts the stream mid-think: the content
+// carries no opener, only the closer, so the stripper holds every content delta until that
+// closer lands, and the hold is SILENT — StripThinking sees no span before the closer, so no
+// ReasoningEvent fires for the pre-opened text until the closer turns it into one span, emitted
+// whole at that moment. The first DeltaThinking of the stream releases the hold (splitSeen): a
+// server that splits reasoning into `reasoning_content` consumed the pre-opened span itself,
+// so its content streams live exactly as today. The bound this leaves: on a non-splitting
+// server a reply that never emits the closer, and on a splitting server a reply that carries no
+// DeltaThinking at all (the model skipped reasoning, or thinking is off for the turn), is held
+// to its MessageEvent — nothing on the wire tells those apart from a pre-opened span before
+// the first delta, and streaming them live would re-leak the span this hold exists to catch.
 func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Request) completion {
 	var content strings.Builder // the observer's own accumulation: the visible/reasoning split is prefix-stable over it
 	emitted := 0                // bytes of stripped visible content already sent as TokenEvents this stream
 	reasoned := 0               // bytes of stripped inline reasoning already sent as ReasoningEvents this stream
+	splitSeen := false          // the server split reasoning into its own field this stream: a pre-opened hold is released
 	observe := func(delta provider.Delta) {
 		switch delta.Kind {
 		case provider.DeltaContent:
 			content.WriteString(delta.Content)
 			acc := content.String()
-			emitted = a.emitVisibleDelta(turn, acc, emitted)
+			emitted = a.emitVisibleDelta(turn, acc, emitted, splitSeen)
 			reasoned = a.emitReasoningDelta(turn, acc, reasoned)
 		case provider.DeltaThinking:
+			splitSeen = true
 			a.cfg.Events.Emit(domain.ReasoningEvent{EventBase: a.base(turn), Text: delta.Thinking})
 		case provider.DeltaDone:
 			if u := delta.Usage; u != nil {
@@ -864,14 +879,16 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 // sent. The no-op stripper of a native / no-inline-thinking profile never reports mid-channel and
 // returns acc untouched, so this emits each content delta verbatim (the provider filters empty
 // content chunks, so len(visible) always advances past emitted) — byte-identical to today.
+// splitSeen is streamResponse's record that the server already split reasoning out this stream;
+// only a pre-opened delimited stripper reads it, to stop holding for a span the server consumed.
 //
 // A channel start token split across two deltas (e.g. "<thi" then "nk>") briefly reveals the
 // partial prefix live, because IsMidChannel only turns true once the whole token has accumulated;
 // this mirrors the oracle's isThinking and is accepted parity — assembleResponse's post-stream
 // strip still removes it from the committed message and final MessageEvent, so no suffix buffering
 // is added here (item 3's recorded chunk-boundary edge).
-func (a *Agent) emitVisibleDelta(turn int, acc string, emitted int) int {
-	if a.stripper.IsMidChannel(acc) {
+func (a *Agent) emitVisibleDelta(turn int, acc string, emitted int, splitSeen bool) int {
+	if a.stripper.IsMidChannel(acc, splitSeen) {
 		return emitted
 	}
 	visible, _ := a.stripper.Strip(acc)
