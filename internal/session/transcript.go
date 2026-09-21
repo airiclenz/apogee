@@ -46,6 +46,12 @@ const TranscriptVersion = 1
 // degrades to resuming with no scrollback replay.
 var ErrTranscriptVersion = errors.New("apogee: unsupported transcript version")
 
+// ErrTranscriptTooLarge is returned by DecodeTranscript when a blob exceeds maxRecordBytes — refused
+// before json.Unmarshal sees it, since the decode allocates in proportion to the bytes it is handed.
+// A blob inside a record file can never reach this (the store refuses the file first); it guards the
+// codec when a Driver hands it a blob from anywhere else. The caller degrades to a no-replay note.
+var ErrTranscriptTooLarge = errors.New("apogee: transcript exceeds the 256 MiB limit")
+
 // The ten persisted entry kinds. The kind is serialized as a STRING enum rather than a Driver's
 // own iota, so a future reordering of that Driver's constants can never re-interpret an old file.
 // A Driver kind with no name here — the TUI's one-time start-up box, say — is simply never written,
@@ -298,8 +304,9 @@ func EncodeTranscript(entries []Entry) ([]byte, error) {
 
 // DecodeTranscript turns a stored scrollback blob back into committed entries for replay. Empty or
 // nil data is the legacy / never-recorded case and yields (nil, nil) — the caller resumes with no
-// scrollback. A version newer than this build is refused (ErrTranscriptVersion) and any other
-// malformed input returns a decode error; the caller degrades both to a no-replay note.
+// scrollback. A blob over maxRecordBytes is refused unparsed (ErrTranscriptTooLarge), a version newer
+// than this build is refused (ErrTranscriptVersion) and any other malformed input returns a decode
+// error; the caller degrades all three to a no-replay note.
 //
 // Every rendered string field passes through sanitize.StripEscapes on the way out: a session file is
 // untrusted disk input, so the terminal-escape defence a Driver applies on the way in is re-applied
@@ -311,6 +318,9 @@ func EncodeTranscript(entries []Entry) ([]byte, error) {
 func DecodeTranscript(data []byte) ([]Entry, error) {
 	if len(data) == 0 {
 		return nil, nil
+	}
+	if len(data) > maxRecordBytes {
+		return nil, ErrTranscriptTooLarge
 	}
 	var env envelope
 	if err := json.Unmarshal(data, &env); err != nil {

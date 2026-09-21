@@ -240,6 +240,54 @@ func TestLoadRejectsFutureRecordVersion(t *testing.T) {
 	}
 }
 
+// A record file over maxRecordBytes is refused with ErrRecordTooLarge at the read — the stat
+// decides, so no byte of it is buffered — and List hides it like any other file it cannot decode.
+// The file is sparse (truncated up, never written) so the case costs no disk; pre-item the store
+// read it whole and failed only inside the JSON decode.
+func TestLoadRefusesAnOversizeRecord(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	st := NewStore(dir)
+
+	path := filepath.Join(dir, "big.json")
+	if err := os.WriteFile(path, nil, filePerm); err != nil {
+		t.Fatalf("create big: %v", err)
+	}
+	if err := os.Truncate(path, maxRecordBytes+1); err != nil {
+		t.Fatalf("truncate big: %v", err)
+	}
+
+	if _, err := st.Load("big"); !errors.Is(err, ErrRecordTooLarge) {
+		t.Errorf("Load(big) err = %v, want ErrRecordTooLarge", err)
+	}
+	if _, err := st.LoadPath(path); !errors.Is(err, ErrRecordTooLarge) {
+		t.Errorf("LoadPath(big) err = %v, want ErrRecordTooLarge", err)
+	}
+	metas, err := st.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Errorf("List surfaced an oversize record: %+v", metas)
+	}
+}
+
+// A missing record still fails at the open, not at the size check: the stat error is not a
+// verdict, so --resume's "not a known session id … nor a readable session file" line and the
+// resume note's "could not load session: … no such file" wording keep the error they had.
+func TestLoadMissingRecordFailsAtTheOpen(t *testing.T) {
+	t.Parallel()
+	st := NewStore(t.TempDir())
+
+	_, err := st.Load("absent")
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("Load(absent) err = %v, want os.ErrNotExist", err)
+	}
+	if errors.Is(err, ErrRecordTooLarge) {
+		t.Errorf("Load(absent) err = %v, refused as oversize", err)
+	}
+}
+
 // Delete removes the record's file.
 func TestDelete(t *testing.T) {
 	t.Parallel()

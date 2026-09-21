@@ -361,3 +361,21 @@ func TestDecodeTranscriptRejectsAMalformedBlob(t *testing.T) {
 		t.Fatal("a truncated blob decoded without error")
 	}
 }
+
+// TestDecodeTranscriptRefusesAnOversizeBlob pins the byte cap ahead of the parse: a blob one byte
+// over maxRecordBytes comes back as ErrTranscriptTooLarge. The blob opens as JSON and is garbage
+// from its second byte, so a decode that had run would have failed with a syntax error instead —
+// the sentinel is the proof that json.Unmarshal never saw it.
+func TestDecodeTranscriptRefusesAnOversizeBlob(t *testing.T) {
+	t.Parallel()
+	blob := make([]byte, maxRecordBytes+1)
+	blob[0] = '{'
+
+	got, err := DecodeTranscript(blob)
+	if !errors.Is(err, ErrTranscriptTooLarge) {
+		t.Fatalf("DecodeTranscript(%d bytes) error = %v, want ErrTranscriptTooLarge", len(blob), err)
+	}
+	if got != nil {
+		t.Errorf("a refused blob yielded %d entries, want none", len(got))
+	}
+}

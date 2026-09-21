@@ -25,7 +25,10 @@
 // An id is a filename, so every id crossing the Store — decoded from a file, saved, loaded,
 // held or deleted — must be a single safe path component or it is refused with ErrInvalidID. A
 // record read by path declares its own id, and without that gate a planted file would aim
-// Apogee's autosaves and deletes anywhere the user can write.
+// Apogee's autosaves and deletes anywhere the user can write. The same file is untrusted in its
+// size: a record over maxRecordBytes (256 MiB) is refused with ErrRecordTooLarge at the read, and
+// a transcript blob over the same bound with ErrTranscriptTooLarge, before any unmarshal — the
+// byte cap is what bounds the decode's allocation, not any check inside it.
 //
 // A session has one live instance. Store.Hold takes the exclusive OS lock on <id>.lock beside the
 // record (internal/platform.AcquireLock — kernel-owned, so a dead holder leaves nothing stale) and

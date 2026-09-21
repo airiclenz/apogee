@@ -46,6 +46,18 @@ const RecordVersion = 1
 // RecordVersion — a record written by a newer Apogee, refused rather than misread.
 var ErrRecordVersion = errors.New("apogee: unsupported session record version")
 
+// maxRecordBytes bounds the bytes a record file (or a transcript blob) may hold before the store
+// refuses it unread. A record is untrusted disk input decoded with plain json.Unmarshal, and the
+// three unmarshals loadPath and DecodeTranscript perform allocate in proportion to the bytes they
+// are handed — so the byte cap is what bounds the decode, not any check inside it. 256 MiB is far
+// past any session apogee itself writes and far under what an unbounded read of a planted file
+// would take from the host.
+const maxRecordBytes = 256 << 20
+
+// ErrRecordTooLarge is returned when a record file exceeds maxRecordBytes — refused at the read,
+// before any byte is decoded. List soft-skips such a file like any other it cannot decode.
+var ErrRecordTooLarge = errors.New("apogee: session record exceeds the 256 MiB limit")
+
 // ErrInvalidID is returned when a session id cannot address a file inside the store: an id is
 // joined with the store directory to form a path, so anything that is not a single, safe
 // filename component would let a record's own contents choose where Apogee writes and deletes.
@@ -342,13 +354,40 @@ func (s *Store) Load(id string) (Record, error) {
 // a file rather than an id. Legacy bare envelopes are wrapped identically to Load.
 func (s *Store) LoadPath(path string) (Record, error) { return s.loadPath(path) }
 
-// loadPath reads and decodes one record file, shared by List, Load, and LoadPath.
+// loadPath reads and decodes one record file, shared by List, Load, and LoadPath. A file whose
+// stat reports more than maxRecordBytes is refused with ErrRecordTooLarge before a byte of it is
+// read; the read itself is capped one byte past the limit so a file that grows between the stat
+// and the read is refused the same way rather than handed to the decoder whole. Only a SUCCESSFUL
+// stat can refuse: a stat error falls through to the read, whose own error stands ("open …: no
+// such file" is what --resume's wording and the resume note carry).
 func (s *Store) loadPath(path string) (Record, error) {
-	data, err := os.ReadFile(path)
+	if info, err := os.Stat(path); err == nil && info.Size() > maxRecordBytes {
+		return Record{}, fmt.Errorf("apogee: read session %q: %w", path, ErrRecordTooLarge)
+	}
+	data, err := readRecordFile(path)
 	if err != nil {
 		return Record{}, fmt.Errorf("apogee: read session %q: %w", path, err)
 	}
 	return decodeRecord(data, path)
+}
+
+// readRecordFile reads path through a maxRecordBytes+1 limit: one byte past the cap is enough to
+// tell an oversize file from one that is exactly at it, without ever buffering more. The open and
+// read errors are the *os.PathError values os.ReadFile would have returned.
+func readRecordFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, maxRecordBytes+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxRecordBytes {
+		return nil, ErrRecordTooLarge
+	}
+	return data, nil
 }
 
 // Hold takes the live-instance hold on session id — the exclusive OS lock on <dir>/<id>.lock
