@@ -89,10 +89,6 @@ func stageGitPaths(ctx context.Context, root, successNote string, paths ...strin
 	return successNote
 }
 
-// literalPathspec prefixes a path with git's :(literal) pathspec magic, which turns off both
-// glob interpretation and any other magic the string might otherwise be read as.
-func literalPathspec(path string) string { return ":(literal)" + path }
-
 // stagingSkipped renders a failed stage as the note appended to an otherwise successful result.
 // It keeps the FIRST line of what git said: git's own first line names the problem, and the tail
 // is advice aimed at a human at a terminal.

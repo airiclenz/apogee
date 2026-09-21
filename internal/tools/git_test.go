@@ -1158,7 +1158,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 		{
 			// With paths the "--" appears exactly once and IMMEDIATELY before them, so a path
 			// that looks like an option can never be read as one — and each path is the
-			// workspace-relative pathspec (workspacePathspec), not an absolute real path.
+			// workspace-relative pathspec (workspacePathspec) under the :(literal) magic
+			// (literalPathspec), not an absolute real path.
 			name: "git_diff_range with paths",
 			verb: "diff",
 			exec: func(root string) (domain.ToolResult, error) {
@@ -1184,8 +1185,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 				if sep != len(argv)-2 {
 					t.Errorf("diff argv = %q, want \"--\" immediately before the one pathspec", argv)
 				}
-				if got := argv[len(argv)-1]; got != "a.txt" {
-					t.Errorf("diff argv last element = %q, want the workspace-relative pathspec a.txt", got)
+				if got := argv[len(argv)-1]; got != ":(literal)a.txt" {
+					t.Errorf("diff argv last element = %q, want the literal workspace-relative pathspec :(literal)a.txt", got)
 				}
 			},
 		},
@@ -1604,6 +1605,28 @@ func runInRepo(t *testing.T, root string, args ...string) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
+}
+
+// gitOutputInRepo runs one git command in root with the fixture identity and returns what it
+// printed, for a test that reads the repository back (a commit's file list, a diff) rather than
+// merely arranging it.
+func gitOutputInRepo(t *testing.T, root string, args ...string) string {
+	t.Helper()
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		t.Skip("no git on PATH; skipping the live git-tool run")
+	}
+	cmd := exec.Command(gitPath, args...)
+	cmd.Dir = root
+	cmd.Env = append(gitexec.SafeEnv(""),
+		"GIT_AUTHOR_NAME=Test", "GIT_AUTHOR_EMAIL=test@example.com",
+		"GIT_COMMITTER_NAME=Test", "GIT_COMMITTER_EMAIL=test@example.com",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+	return string(out)
 }
 
 // TestGitCommit_DoesNotRunRepoSuppliedHook pins the committing path against an
@@ -2407,7 +2430,8 @@ func TestGitWrite_RendersTheOutcome(t *testing.T) {
 
 // TestGitCommit_StagesWorkspaceRelativePathspecs pins the pathspec rule git_commit's `add` shares
 // with the reads: the files it stages are spelled workspace-relative after the "--" terminator
-// (workspacePathspec, trailing slash kept), not as the absolute real paths the fence resolved.
+// (workspacePathspec, trailing slash kept) under the :(literal) magic (literalPathspec), not as
+// the absolute real paths the fence resolved.
 func TestGitCommit_StagesWorkspaceRelativePathspecs(t *testing.T) {
 	posixScriptHost(t)
 
@@ -2420,7 +2444,7 @@ func TestGitCommit_StagesWorkspaceRelativePathspecs(t *testing.T) {
 			commitCall("c1", `{"message":"m","files":["a.txt","docs/"]}`))
 	})
 
-	const want = "add -- a.txt docs/"
+	const want = "add -- :(literal)a.txt :(literal)docs/"
 	if got := strings.Join(argv, " "); got != want {
 		t.Errorf("add argv = %q, want %q", got, want)
 	}
@@ -2428,9 +2452,9 @@ func TestGitCommit_StagesWorkspaceRelativePathspecs(t *testing.T) {
 
 // TestCommitPathspecsMatchTheCommitTool pins the builder git_commit's `add` and the engine's
 // commit-secrets pre-check share: the same root-taking signature, the same workspace-relative
-// spellings in the model's order (trailing slash kept), and the same refusal — the first entry
-// that escapes the root is ErrPathEscape and NO list comes back, so neither site stages a
-// partial list.
+// :(literal) spellings in the model's order (trailing slash kept), and the same refusal — the
+// first entry that escapes the root is ErrPathEscape and NO list comes back, so neither site
+// stages a partial list.
 func TestCommitPathspecsMatchTheCommitTool(t *testing.T) {
 	t.Parallel()
 
@@ -2443,7 +2467,7 @@ func TestCommitPathspecsMatchTheCommitTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CommitPathspecs err = %v", err)
 	}
-	if want := []string{"a.txt", "docs/", "b.txt"}; strings.Join(got, " ") != strings.Join(want, " ") {
+	if want := []string{":(literal)a.txt", ":(literal)docs/", ":(literal)b.txt"}; strings.Join(got, " ") != strings.Join(want, " ") {
 		t.Errorf("pathspecs = %q, want %q", got, want)
 	}
 
@@ -2457,16 +2481,17 @@ func TestCommitPathspecsMatchTheCommitTool(t *testing.T) {
 }
 
 // TestGitLog_PathNarrowsAfterTheDoubleDash: the optional path is a pathspec placed after the
-// existing "--", workspace-relative and with its trailing slash kept, so the ref position stays
-// terminated and TestGitLog_PathShapedRefIsNotAPathspecLog's guarantee is untouched.
+// existing "--", workspace-relative under the :(literal) magic and with its trailing slash
+// kept, so the ref position stays terminated and TestGitLog_PathShapedRefIsNotAPathspecLog's
+// guarantee is untouched.
 func TestGitLog_PathNarrowsAfterTheDoubleDash(t *testing.T) {
 	root := t.TempDir()
 
 	argv := recordGitArgv(t, "log", func() (domain.ToolResult, error) {
 		return NewGitLog(root).Execute(context.Background(), logCall("c1", `{"path":"internal/"}`))
 	})
-	if n := len(argv); n < 3 || argv[n-3] != "HEAD" || argv[n-2] != "--" || argv[n-1] != "internal/" {
-		t.Errorf("log argv = %q, want it to end HEAD -- internal/", argv)
+	if n := len(argv); n < 3 || argv[n-3] != "HEAD" || argv[n-2] != "--" || argv[n-1] != ":(literal)internal/" {
+		t.Errorf("log argv = %q, want it to end HEAD -- :(literal)internal/", argv)
 	}
 }
 
@@ -2491,6 +2516,87 @@ func TestGitLog_PathFiltersTheHistory(t *testing.T) {
 	}
 	if !res.IsError || !strings.Contains(res.Content, ErrPathEscape.Error()) {
 		t.Errorf("log of a path outside the root = %q (isError=%v), want the ErrPathEscape refusal", res.Content, res.IsError)
+	}
+}
+
+// TestGitCommit_BracketFilenameStagesOnlyItself pins the :(literal) magic on git_commit's
+// `files`: with both `a[1]` and `a1` in the tree, a bare `a[1]` pathspec is a character class
+// that stages a1 alongside the file the model named; under :(literal) the commit holds `a[1]`
+// alone.
+func TestGitCommit_BracketFilenameStagesOnlyItself(t *testing.T) {
+	root := gitRepo(t)
+	for _, name := range []string{"a[1]", "a1"} {
+		if err := writeFileForTest(root, name, name+"\n"); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+
+	res, err := NewGitCommit(root).Execute(context.Background(),
+		commitCall("c1", `{"message":"bracket","files":["a[1]"]}`))
+	if err != nil {
+		t.Fatalf("commit err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("commit errored: %q", res.Content)
+	}
+
+	committed := strings.Fields(gitOutputInRepo(t, root, "show", "--name-only", "--format=", "HEAD"))
+	if !slices.Equal(committed, []string{"a[1]"}) {
+		t.Errorf("HEAD names %q, want exactly [a[1]] — the bracketed file, without the glob's match a1", committed)
+	}
+}
+
+// TestGitDiffRange_BracketPathIsLiteral pins the :(literal) magic on git_diff_range's `paths`:
+// a branch adding both `a[1]` and `a1`, narrowed to `a[1]`, diffs the bracketed file alone.
+func TestGitDiffRange_BracketPathIsLiteral(t *testing.T) {
+	root := gitRepo(t)
+	runInRepo(t, root, "checkout", "-b", "feature")
+	for _, name := range []string{"a[1]", "a1"} {
+		if err := writeFileForTest(root, name, name+"\n"); err != nil {
+			t.Fatalf("seed %s: %v", name, err)
+		}
+	}
+	// `git add` globs its pathspec too, so the fixture stages the whole tree.
+	runInRepo(t, root, "add", "-A", ".")
+	runInRepo(t, root, "commit", "-m", "both")
+
+	res, err := NewGitDiffRange(root).Execute(context.Background(),
+		diffCall("c1", `{"base":"main","head":"feature","name_only":true,"paths":["a[1]"]}`))
+	if err != nil {
+		t.Fatalf("diff err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("diff errored: %q", res.Content)
+	}
+
+	if changed := strings.Fields(res.Content); !slices.Equal(changed, []string{"a[1]"}) {
+		t.Errorf("diff names %q, want exactly [a[1]] — the bracketed file, without the glob's match a1", changed)
+	}
+}
+
+// TestGitLog_BracketPathIsLiteral pins the :(literal) magic on git_log's `path`: with one commit
+// touching `a1` and another touching `a[1]`, the log narrowed to `a[1]` lists the bracketed
+// file's commit alone.
+func TestGitLog_BracketPathIsLiteral(t *testing.T) {
+	root := gitRepo(t)
+	commitFileForTest(t, root, "a1", "plain\n", "touch a1")
+	if err := writeFileForTest(root, "a[1]", "bracketed\n"); err != nil {
+		t.Fatalf("seed a[1]: %v", err)
+	}
+	// `git add` globs its pathspec too, so the fixture stages the whole tree.
+	runInRepo(t, root, "add", "-A", ".")
+	runInRepo(t, root, "commit", "-m", "touch bracket")
+
+	res, err := NewGitLog(root).Execute(context.Background(), logCall("c1", `{"path":"a[1]"}`))
+	if err != nil {
+		t.Fatalf("Execute err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("log errored: %q", res.Content)
+	}
+
+	if !strings.Contains(res.Content, "touch bracket") || strings.Contains(res.Content, "touch a1") {
+		t.Errorf("log of a[1] = %q, want only the commit that touched the bracketed file", res.Content)
 	}
 }
 

@@ -167,8 +167,9 @@ type gitReadCall struct {
 	// values. It takes "--" only when pathspecs follow.
 	object string
 	// pathspecs narrow the call; each is workspace-relative (workspacePathspec) because the
-	// process runs in the root, and they come last, after the "--" that is the one place git
-	// reads them as pathspecs and nothing else.
+	// process runs in the root and carries the :(literal) magic (literalPathspec) so a glob
+	// metacharacter in a model-supplied name is not interpreted, and they come last, after the
+	// "--" that is the one place git reads them as pathspecs and nothing else.
 	pathspecs []string
 	// failWording is what gitResultText shows for a non-zero exit that printed nothing.
 	failWording string
@@ -251,10 +252,11 @@ func gitRead(ctx context.Context, root string, c gitReadCall) (res subprocess.Su
 // confinement-unavailable demotion (the runSubprocess contract).
 //
 // The write verbs carry no diff hardening (none of them renders a diff) and take their argv
-// as the caller spelled it: git_branch's argv is buildBranchArgs' validated output, git_commit
-// terminates its pathspecs with "--" under the workspace-relative rule (workspacePathspec), and
-// the staging helper's pathspecs carry the :(literal) magic. The read-side pre-check and summary
-// git_commit makes around its commit are reads and go through gitRead.
+// as the caller spelled it: git_branch's argv is buildBranchArgs' validated output, and
+// git_commit terminates its pathspecs with "--" under the workspace-relative rule
+// (workspacePathspec) with the :(literal) magic (literalPathspec) on each, exactly as the
+// staging helper's pathspecs carry it. The read-side pre-check and summary git_commit makes
+// around its commit are reads and go through gitRead.
 func gitWrite(ctx context.Context, root, verb string, args []string, failWording string) (res subprocess.SubprocessResult, text string, ok bool, err error) {
 	gitPath, refusal, ok := gitexec.Program(ctx, root, lookGit)
 	if !ok {
@@ -555,8 +557,11 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	}
 
 	// Stage the named files first (path-safe), so a commit only ever touches paths
-	// inside the workspace: each is fenced and spelled workspace-relative (workspacePathspec),
-	// after the "--" that makes git read it as a pathspec and nothing else.
+	// inside the workspace: each is fenced, spelled workspace-relative (workspacePathspec) and
+	// carries the :(literal) magic (literalPathspec) — a name holding *, ? or [ stages the file
+	// it names and never a glob's other matches — after the "--" that makes git read it as a
+	// pathspec and nothing else. An entry git cannot match is git's own stderr, which quotes
+	// the :(literal) spelling.
 	if len(args.Files) > 0 {
 		pathspecs, err := CommitPathspecs(args.Files, t.root)
 		if err != nil {
@@ -730,15 +735,17 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 		flags = append(flags, "--name-only")
 	}
 	// Path-scope each restriction to the workspace, so the diff cannot be pointed outside the
-	// root; the pathspec git gets is the workspace-relative spelling (workspacePathspec), the
-	// same rule git_log and git_show follow.
+	// root; the pathspec git gets is the workspace-relative spelling (workspacePathspec) under
+	// the :(literal) magic (literalPathspec), so a name holding *, ? or [ narrows to that file
+	// and never to a glob's other matches — the rule git_commit and git_log follow too; git_show
+	// alone stays bare, its argument being an object name rather than a pathspec.
 	pathspecs := make([]string, 0, len(args.Paths))
 	for _, p := range args.Paths {
 		pathspec, err := workspacePathspec(p, t.root)
 		if err != nil {
 			return errorResult(call.ID, err.Error()), nil
 		}
-		pathspecs = append(pathspecs, pathspec)
+		pathspecs = append(pathspecs, literalPathspec(pathspec))
 	}
 
 	_, text, ok, err := gitRead(ctx, t.root, gitReadCall{
@@ -1116,14 +1123,16 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 	// would return a plausible, wrong history reported as success; with "--" the same call
 	// fails loudly ("fatal: bad revision"). A path the call DID ask for goes after that "--" —
 	// the one place git reads it as a pathspec and nothing else — workspace-relative, since
-	// the process runs in the root.
+	// the process runs in the root, and under the :(literal) magic (literalPathspec), so a
+	// name holding *, ? or [ is the file it names and not a glob — the same rule git_commit
+	// and git_diff_range follow.
 	var pathspecs []string
 	if strings.TrimSpace(args.Path) != "" {
 		pathspec, err := workspacePathspec(args.Path, t.root)
 		if err != nil {
 			return errorResult(call.ID, err.Error()), nil
 		}
-		pathspecs = []string{pathspec}
+		pathspecs = []string{literalPathspec(pathspec)}
 	}
 	_, text, ok, err := gitRead(ctx, t.root, gitReadCall{
 		verb:          "log",
@@ -1163,13 +1172,14 @@ func clampGitLogCount(n int) int {
 }
 
 // CommitPathspecs is the pathspec builder git_commit stages its `files` through: each entry
-// resolved through the workspace fence and spelled workspace-relative (workspacePathspec), in
-// the order the model wrote them, without the terminating "--" the caller places ahead of them.
-// The first path that escapes the root — a symlink out of it or a ".." climb — is the error, so
-// nothing is staged from a list that names anything outside the workspace. It is exported
-// because the engine's secrets pre-check (internal/agent/secretsguard.go) stages the same list
-// into a shadow index before the tool runs, and the two sites must agree on every spelling: a
-// path the tool would refuse is a path the pre-check must not judge.
+// resolved through the workspace fence, spelled workspace-relative (workspacePathspec) and
+// carrying the :(literal) magic (literalPathspec), in the order the model wrote them, without
+// the terminating "--" the caller places ahead of them. The first path that escapes the root —
+// a symlink out of it or a ".." climb — is the error, so nothing is staged from a list that
+// names anything outside the workspace. It is exported because the engine's secrets pre-check
+// (internal/agent/secretsguard.go) stages the same list into a shadow index before the tool
+// runs, and the two sites must agree on every spelling: a path the tool would refuse is a path
+// the pre-check must not judge.
 func CommitPathspecs(files []string, root string) ([]string, error) {
 	pathspecs := make([]string, 0, len(files))
 	for _, f := range files {
@@ -1177,7 +1187,7 @@ func CommitPathspecs(files []string, root string) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		pathspecs = append(pathspecs, pathspec)
+		pathspecs = append(pathspecs, literalPathspec(pathspec))
 	}
 	return pathspecs, nil
 }
@@ -1188,7 +1198,9 @@ func CommitPathspecs(files []string, root string) ([]string, error) {
 // `internal/cli`, never the absolute real path, which would name the wrong tree on a box whose
 // root is reached through a symlink. A trailing separator on the argument is kept, because
 // `internal/` and `internal` are different pathspecs to git (the first matches a directory
-// only) and the model wrote the one it meant.
+// only) and the model wrote the one it meant. The spelling comes back BARE: git_commit,
+// git_diff_range and git_log wrap it in literalPathspec before git sees it, and git_show alone
+// uses it as-is, since its `<ref>:./<rel>` is an object name rather than a pathspec.
 func workspacePathspec(input, root string) (string, error) {
 	abs, err := resolveInRoot(input, root)
 	if err != nil {
@@ -1200,6 +1212,10 @@ func workspacePathspec(input, root string) (string, error) {
 	}
 	return rel, nil
 }
+
+// literalPathspec prefixes a path with git's :(literal) pathspec magic, which turns off both
+// glob interpretation and any other magic the string might otherwise be read as.
+func literalPathspec(path string) string { return ":(literal)" + path }
 
 // ----------------------------------------------------------------------------
 // git_show — a file's content at a revision
