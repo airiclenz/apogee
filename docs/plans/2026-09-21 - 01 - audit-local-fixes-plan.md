@@ -161,7 +161,7 @@ SDK mcp/streamable.go — handleJSON, processStream, handleSSE; SDK mcp/server.g
 **Acceptance.** `go test ./internal/mcp/...`
 **Commit:** `fix(mcp): HTTP bodies are line-bounded; a result is clipped at 2 MiB and a tool list at 512 tools`
 
-## 8. `SECURITY.md` states the stdio MCP environment exception
+## 8. `SECURITY.md` states the stdio MCP environment exception — ✅ DONE (2026-09-21)
 
 **What.** `docs(security)`: closes the audit's Medium "MCP stdio servers launch with the full inherited environment" by the ratified route — the claim is narrowed, the default stays. `SECURITY.md` "Secrets" bullet (:32-34): after "every tool subprocess and reaction command", one sentence: a stdio MCP server is the exception — it inherits apogee's full environment unless its entry sets `env-allowlist:` (the wording `docs/manual/configuration.md:1568-1569` already uses; link to it). No code, no config, no test changes.
 **Files:** SECURITY.md

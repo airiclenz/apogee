@@ -31,7 +31,11 @@ documented posture says it cannot. The guarantees apogee makes, in the order the
   scope.
 - **Secrets** — API keys are stripped from the environment of every tool subprocess and
   reaction command, and the variables your `api-key-env:` and `headers-env:` entries name
-  are redacted from their output. A key that shows up where it should not is in scope.
+  are redacted from their output. A stdio MCP server is the exception — it inherits apogee's
+  full environment unless its entry sets
+  [`env-allowlist:`](docs/manual/configuration.md#external-mcp-servers--mcp-servers) (see
+  [The upstream API key](docs/manual/configuration.md#the-upstream-api-key)). A key that
+  shows up where it should not is in scope.
 - **Prompt-injection escalation** — text a model reads (a file, a tool result, a fetched page,
   a skill) that gets apogee to skip a guard it would otherwise apply. Injection that merely
   makes the model do something the current mode already allows is not a vulnerability;
