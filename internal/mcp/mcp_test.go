@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -873,6 +874,99 @@ func TestRenderContent(t *testing.T) {
 			t.Errorf("renderContent(empty) = %q, want an explicit no-content note", got)
 		}
 	})
+	t.Run("oversize text is clipped with the marker", func(t *testing.T) {
+		res := &mcpsdk.CallToolResult{Content: []mcpsdk.Content{
+			&mcpsdk.TextContent{Text: strings.Repeat("x", maxMCPResultBytes+1)},
+		}}
+		marker := fmt.Sprintf(mcpResultTruncatedMarker, maxMCPResultBytes)
+
+		got := renderContent(res)
+
+		if !strings.HasSuffix(got, marker) {
+			t.Errorf("renderContent(oversize) does not end with %q", marker)
+		}
+		if len(got) > maxMCPResultBytes+len(marker) {
+			t.Errorf("len(renderContent(oversize)) = %d, want at most %d + the marker", len(got), maxMCPResultBytes)
+		}
+	})
+}
+
+func TestListServerTools_CapsPagesAndTools(t *testing.T) {
+	t.Parallel()
+
+	const advertised = 600
+	// A schema past maxMCPToolSchemaBytes once normalised: one string property whose description
+	// alone is 65 KiB.
+	fatSchema := map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"text": map[string]any{"type": "string", "description": strings.Repeat("d", 65<<10)},
+		},
+	}
+	addTools := func(server *mcpsdk.Server) {
+		handler := func(_ context.Context, _ *mcpsdk.CallToolRequest) (*mcpsdk.CallToolResult, error) {
+			return &mcpsdk.CallToolResult{Content: []mcpsdk.Content{&mcpsdk.TextContent{Text: "ok"}}}, nil
+		}
+		// "fat" sorts before every "tool-NNN", so it is met inside the first page and its
+		// absence from the result is the skip, never the cap.
+		server.AddTool(&mcpsdk.Tool{Name: "fat", Description: "A tool whose schema is too large.", InputSchema: fatSchema}, handler)
+		for i := 0; i < advertised; i++ {
+			server.AddTool(&mcpsdk.Tool{Name: fmt.Sprintf("tool-%03d", i), Description: "One of many.", InputSchema: map[string]any{"type": "object"}}, handler)
+		}
+	}
+
+	t.Run("at most 512 tools, the oversize schema skipped", func(t *testing.T) {
+		t.Parallel()
+		tools := listFromInProcessServer(t, 10, addTools)
+
+		if len(tools) != maxMCPToolsPerServer {
+			t.Fatalf("surfaced %d tools; want the cap of %d", len(tools), maxMCPToolsPerServer)
+		}
+		for _, tool := range tools {
+			if tool.Name() == qualifyToolName("many", "fat") {
+				t.Errorf("the tool with a %d-byte schema was surfaced; want it skipped", 65<<10)
+			}
+		}
+	})
+
+	t.Run("at most 64 pages", func(t *testing.T) {
+		t.Parallel()
+		tools := listFromInProcessServer(t, 1, addTools)
+
+		// 64 pages of one tool each, the first of them the skipped "fat", so the page cap
+		// shows as one tool fewer.
+		if want := maxMCPToolListPages - 1; len(tools) != want {
+			t.Fatalf("surfaced %d tools from one-tool pages; want %d (the page cap of %d, less the skipped tool)", len(tools), want, maxMCPToolListPages)
+		}
+	})
+}
+
+// listFromInProcessServer connects to an in-memory MCP server paging pageSize tools at a time,
+// with addTools having populated it, and returns what listServerTools surfaces under the alias
+// "many".
+func listFromInProcessServer(t *testing.T, pageSize int, addTools func(*mcpsdk.Server)) []domain.Tool {
+	t.Helper()
+	ctx := context.Background()
+	server := mcpsdk.NewServer(&mcpsdk.Implementation{Name: "many", Version: "v0.0.1"}, &mcpsdk.ServerOptions{PageSize: pageSize})
+	addTools(server)
+	clientTransport, serverTransport := mcpsdk.NewInMemoryTransports()
+	serverSession, err := server.Connect(ctx, serverTransport, nil)
+	if err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = serverSession.Close() })
+	client := mcpsdk.NewClient(&mcpsdk.Implementation{Name: clientName, Version: clientVersion}, nil)
+	session, err := client.Connect(ctx, clientTransport, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	t.Cleanup(func() { _ = session.Close() })
+
+	tools, err := listServerTools(ctx, "many", session)
+	if err != nil {
+		t.Fatalf("listServerTools: %v", err)
+	}
+	return tools
 }
 
 // findTool returns the surfaced tool with the given name, failing the test if it is absent —

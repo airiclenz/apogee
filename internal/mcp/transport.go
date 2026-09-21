@@ -433,7 +433,7 @@ func newGuardedHTTPClient(control func(network, address string, c syscall.RawCon
 		Control: control,
 	}
 	return &http.Client{
-		Transport: &http.Transport{
+		Transport: &boundedBodyTransport{next: &http.Transport{
 			Proxy:                 proxyForRequest,
 			DialContext:           dialer.DialContext,
 			ForceAttemptHTTP2:     true,
@@ -441,9 +441,44 @@ func newGuardedHTTPClient(control func(network, address string, c syscall.RawCon
 			IdleConnTimeout:       30 * time.Second,
 			TLSHandshakeTimeout:   10 * time.Second,
 			ExpectContinueTimeout: 1 * time.Second,
-		},
+		}},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},
 	}
+}
+
+// boundedBodyTransport is the RoundTripper the guarded client speaks through: it hands every
+// response body to the SDK wrapped in a boundedBody, so an HTTP-transported server meets the
+// same 4 MiB line bound (bounded.go) as a stdio server's stdout. Both HTTP transports are
+// newline-framed — an SSE event is a run of lines and a streamable JSON response is one line —
+// so the bound is per line, never cumulative: a long-lived SSE stream is never cut for having
+// carried many events, only for one event that cannot fit. The HTTP-lane outcome differs from
+// stdio's dead connection: the body read errors; a plain JSON reply fails its call, and a
+// streamable SSE reply stalls the call to its ctx or the SDK's retry budget.
+type boundedBodyTransport struct {
+	next http.RoundTripper
+}
+
+// RoundTrip forwards the request and wraps a successful response's body; an error, or a
+// response with no body, passes through untouched.
+func (t *boundedBodyTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := t.next.RoundTrip(req)
+	if err != nil || resp == nil || resp.Body == nil {
+		return resp, err
+	}
+	resp.Body = &boundedBody{
+		lineBoundedReader: lineBoundedReader{r: resp.Body, max: maxMCPMessageBytes},
+		Closer:            resp.Body,
+	}
+	return resp, nil
+}
+
+// boundedBody is the io.ReadCloser a wrapped response carries: reads go through the line bound,
+// and Close closes the ORIGINAL body. The SDK closes resp.Body itself — the SSE stream in Close,
+// handleJSON after its ReadAll, processStream on drain — so a NopCloser here would never close
+// the real body and every connection would leak.
+type boundedBody struct {
+	lineBoundedReader
+	io.Closer
 }

@@ -16,7 +16,8 @@ import (
 // the cap, so the decoder errors, the SDK retires every in-flight call with that error and the
 // connection is dead — the read half of the 2026-09-20 audit's "an MCP server's response is
 // read with no size cap". It knows nothing of MCP or of transports: the stdio transport wraps
-// the server's stdout in it, and an HTTP body can be wrapped the same way.
+// the server's stdout in it, and the HTTP transports wrap every response body in it
+// (boundedBodyTransport, transport.go).
 
 // maxMCPMessageBytes is the longest newline-delimited message a server may send: 4 MiB. A
 // tool result the model is to read is far smaller than that; a line this long is a hostile or

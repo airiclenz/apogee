@@ -1,8 +1,10 @@
 package mcp
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -185,6 +187,33 @@ func TestGuardedClient_PinsTheEndpointAndRefusesEverythingElsePrivate(t *testing
 		}
 		if got := reached.Load(); got != 1 {
 			t.Errorf("the handler was reached %d time(s); want 1", got)
+		}
+	})
+
+	t.Run("closing the bounded body closes the real one", func(t *testing.T) {
+		// The SDK closes resp.Body itself; the bound wraps it, so Close must reach through or
+		// every connection leaks. The recorder sits between the bound and the real transport.
+		client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+			security.URLGuard{}.WithResolver(fixedResolver(loopback...)))
+		bounded, ok := client.Transport.(*boundedBodyTransport)
+		if !ok {
+			t.Fatalf("client.Transport = %T; want the bounded-body RoundTripper", client.Transport)
+		}
+		recorder := &closeRecordingTransport{next: bounded.next}
+		bounded.next = recorder
+
+		resp, err := client.Get(endpoint)
+		if err != nil {
+			t.Fatalf("GET the pinned endpoint: %v", err)
+		}
+		if _, ok := resp.Body.(*boundedBody); !ok {
+			t.Fatalf("resp.Body = %T; want the bounded body", resp.Body)
+		}
+		if err := resp.Body.Close(); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+		if recorder.closed.Load() != 1 {
+			t.Errorf("the underlying body was closed %d time(s); want 1", recorder.closed.Load())
 		}
 	})
 
@@ -478,6 +507,70 @@ func TestGuardedClient_DoesNotFollowRedirects(t *testing.T) {
 	if got := followed.Load(); got != 0 {
 		t.Errorf("the redirect target was fetched %d time(s); want 0", got)
 	}
+}
+
+func TestGuardedClient_AnOversizeBodyFailsTheRead(t *testing.T) {
+	t.Parallel()
+
+	// One line past the bound, no newline anywhere — the shape of a streamable JSON reply from a
+	// server that never stops writing.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(bytes.Repeat([]byte("x"), maxMCPMessageBytes+1))
+	}))
+	defer srv.Close()
+
+	endpoint := "http://" + net.JoinHostPort("localhost", serverPort(t, srv)) + "/mcp"
+	client := endpointClient(t, ServerConfig{Name: "local", Transport: TransportStreamableHTTP, Endpoint: endpoint},
+		security.URLGuard{}.WithResolver(fixedResolver(net.IPv4(127, 0, 0, 1), net.IPv6loopback)))
+
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"ping"}`))
+	if err != nil {
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("POST the endpoint: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	got, err := io.ReadAll(resp.Body)
+	if !errors.Is(err, errMCPMessageTooLarge) {
+		t.Fatalf("read the body: err = %v (%d bytes read); want %v", err, len(got), errMCPMessageTooLarge)
+	}
+	if len(got) > maxMCPMessageBytes {
+		t.Errorf("%d bytes reached the caller; want at most %d", len(got), maxMCPMessageBytes)
+	}
+}
+
+// closeRecordingTransport forwards to next and counts the closes of each response body it hands
+// back, so a test can see whether a wrapper's Close reached the real body.
+type closeRecordingTransport struct {
+	next   http.RoundTripper
+	closed atomic.Int64
+}
+
+// RoundTrip forwards the request and wraps the response body's Close with the count.
+func (c *closeRecordingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := c.next.RoundTrip(req)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body = &countingCloser{ReadCloser: resp.Body, closed: &c.closed}
+	return resp, nil
+}
+
+// countingCloser is a ReadCloser whose Close bumps a shared counter before closing.
+type countingCloser struct {
+	io.ReadCloser
+	closed *atomic.Int64
+}
+
+// Close counts the call and closes the wrapped body.
+func (c *countingCloser) Close() error {
+	c.closed.Add(1)
+	return c.ReadCloser.Close()
 }
 
 // endpointClient builds cfg's transport and returns the http.Client the SDK would speak over, so

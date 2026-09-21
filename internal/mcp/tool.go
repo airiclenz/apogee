@@ -167,11 +167,22 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	return okResult(call.ID, content), nil
 }
 
+// maxMCPResultBytes is the most of a server's flattened result the model is handed: 2 MiB. The
+// transport's line bound (bounded.go) already keeps one message under 4 MiB; this is the
+// post-decode cap on what one call may put in the model's context, the same order as the
+// native network tools' own response cap.
+const maxMCPResultBytes = 2 << 20
+
+// mcpResultTruncatedMarker is the line appended to a clipped result, in the native network
+// tools' `[response truncated at %d bytes]` form, so the model knows the text is cut.
+const mcpResultTruncatedMarker = "\n[mcp result truncated at %d bytes]"
+
 // renderContent flattens an MCP CallToolResult's content blocks into the single text string
 // Apogee's ToolResult carries. Text blocks are joined verbatim; a non-text block (image, audio,
 // embedded resource) is rendered as a typed placeholder line so the model knows the server
 // returned non-textual content without this client trying to interpret it. An empty result
-// renders as an explicit note rather than a blank string.
+// renders as an explicit note rather than a blank string. A flattened text past
+// maxMCPResultBytes is clipped there and marked.
 func renderContent(res *mcpsdk.CallToolResult) string {
 	if res == nil || len(res.Content) == 0 {
 		return "(mcp tool returned no content)"
@@ -188,7 +199,16 @@ func renderContent(res *mcpsdk.CallToolResult) string {
 			fmt.Fprintf(&b, "[mcp %T content omitted]", c)
 		}
 	}
-	return b.String()
+	return clipResult(b.String())
+}
+
+// clipResult returns text unchanged when it fits maxMCPResultBytes, else its first
+// maxMCPResultBytes bytes followed by mcpResultTruncatedMarker.
+func clipResult(text string) string {
+	if len(text) <= maxMCPResultBytes {
+		return text
+	}
+	return text[:maxMCPResultBytes] + fmt.Sprintf(mcpResultTruncatedMarker, maxMCPResultBytes)
 }
 
 // errorResult builds a tool-level failure result surfaced to the model (IsError), mirroring the

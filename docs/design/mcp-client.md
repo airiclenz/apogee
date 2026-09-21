@@ -76,7 +76,22 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   the 4 MiB limit`, the SDK retires the in-flight call with that error — the model sees an error
   result naming it, never the oversize text — and the session is dead from then on (a following
   call fails too; `Close` still runs the ladder and reaps the tree). The reader knows nothing of
-  MCP, so an HTTP body can be bounded with the same type.
+  MCP, so an HTTP body is bounded with the same type.
+- **An HTTP server's bodies are bounded the same way; a result and a tool list are capped after
+  decode** (2026-09-21). The guarded `http.Client` both HTTP transports speak over wraps its
+  `http.Transport` in `boundedBodyTransport`, a RoundTripper that replaces every `resp.Body` with a
+  `boundedBody` — the same `lineBoundedReader` over the real body, whose `Close` closes the real
+  body (the SDK closes bodies itself, so a `NopCloser` would leak every connection). SSE events and
+  streamable JSON replies are newline-framed, so the bound is per line, never cumulative — a
+  long-lived SSE stream is never cut for carrying many events. The HTTP-lane outcome is not stdio's
+  dead connection: the body read errors; a plain JSON reply fails its call, and a streamable SSE
+  reply stalls the call to its ctx or the SDK's retry budget. Above the transport, two post-decode
+  caps: `renderContent` clips a flattened result at `maxMCPResultBytes` (2 MiB) and appends
+  `[mcp result truncated at 2097152 bytes]`; `listServerTools` asks for at most
+  `maxMCPToolListPages` (64) pages and surfaces at most `maxMCPToolsPerServer` (512) tools — past
+  either it stops and returns the capped list silently, `Connect` having no report path but tools
+  and errors — and skips a tool whose normalised schema exceeds `maxMCPToolSchemaBytes` (64 KiB)
+  as it skips one with no name.
 
 Every tool **description, schema, and result** the client surfaces is untrusted input: it is passed
 to the model and rendered, **never executed or interpreted** as a command by Apogee.

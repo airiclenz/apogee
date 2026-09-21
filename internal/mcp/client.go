@@ -178,16 +178,33 @@ func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard securit
 	return nil
 }
 
+// The three bounds on one server's tool list — the post-decode half of the 2026-09-20 audit's
+// "an MCP server's response is read with no size cap" for discovery. A server that never ends
+// its cursor chain, advertises tools without end, or hands one tool a schema the size of a book
+// would otherwise grow the registry (and the model's tool menu) without bound. Past either list
+// cap discovery stops and the capped list is returned SILENTLY: Connect returns tools and errors
+// only, and there is no Client report or notice path to carry a "cut short" line.
+const (
+	// maxMCPToolListPages is the most ListTools pages one server is asked for.
+	maxMCPToolListPages = 64
+	// maxMCPToolsPerServer is the most tools surfaced from one server.
+	maxMCPToolsPerServer = 512
+	// maxMCPToolSchemaBytes is the largest normalised input schema a tool may carry; a tool past
+	// it is skipped like a tool with no name.
+	maxMCPToolSchemaBytes = 64 << 10
+)
+
 // listServerTools pages through a server's advertised tools and surfaces each as a serverTool
 // bound to the live session. It follows the SDK's cursor pagination so a server advertising more
-// than one page is fully discovered. A tool with an empty name from the server is skipped (it
-// could never be addressed) rather than failing the whole server.
+// than one page is fully discovered, up to maxMCPToolListPages pages and maxMCPToolsPerServer
+// tools. A tool with an empty name from the server is skipped (it could never be addressed)
+// rather than failing the whole server, and so is one whose schema exceeds maxMCPToolSchemaBytes.
 func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.ClientSession) ([]domain.Tool, error) {
 	var (
 		out    []domain.Tool
 		cursor string
 	)
-	for {
+	for page := 0; page < maxMCPToolListPages; page++ {
 		res, err := session.ListTools(ctx, &mcpsdk.ListToolsParams{Cursor: cursor})
 		if err != nil {
 			return nil, fmt.Errorf("mcp: list tools from server %q: %w", serverAlias, err)
@@ -196,7 +213,14 @@ func listServerTools(ctx context.Context, serverAlias string, session *mcpsdk.Cl
 			if t == nil || strings.TrimSpace(t.Name) == "" {
 				continue
 			}
-			out = append(out, newServerTool(serverAlias, t, session))
+			tool := newServerTool(serverAlias, t, session)
+			if len(tool.schema) > maxMCPToolSchemaBytes {
+				continue
+			}
+			out = append(out, tool)
+			if len(out) == maxMCPToolsPerServer {
+				return out, nil
+			}
 		}
 		if res.NextCursor == "" {
 			break
