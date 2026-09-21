@@ -336,10 +336,13 @@ func TestE2EEventLinesGolden(t *testing.T) {
 		// bind). It lands AFTER the opening frame has been written, which is the whole difference
 		// from the case above: the stream is the two frames and nothing between them.
 		workspace := e2eWorkspace(t)
-		home := eventLinesHome(t, "http://127.0.0.1:1", "eventlines-model")
 		// The offline gate stands between this run and its runner, and its verdict is a real dial.
-		// An answering beat is what lets the refusal below be the one this case is about.
-		swapAnsweringBeat(t)
+		// A stub that advertises the configured model and scripts no Turns is what lets the refusal
+		// below be the one this case is about: the beat answers, and nothing else reaches the server.
+		stub := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+			Models: []stubllm.DiscoveredModel{{ID: "eventlines-model"}},
+		}})
+		home := eventLinesHome(t, stub.URL, "eventlines-model")
 
 		canned := &stubRunner{err: errors.New(
 			"apogee: construct the firing's agent: apogee: Config.Endpoint is required")}

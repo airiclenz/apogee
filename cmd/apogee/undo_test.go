@@ -383,7 +383,8 @@ func TestDaemonFireLogsTheUndoVerb(t *testing.T) {
 func TestHeadlessReportsAnUndoTheVerbCanActuallyPerform(t *testing.T) {
 	requireSnapshotStore(t)
 
-	home := testConfigHome(t, "")
+	srv := headlessBeatServer(t)
+	home := testConfigHomeOn(t, srv, "")
 	var file string
 	undoStore(t, home, "s-undo-6", func(ws string) {
 		file = filepath.Join(ws, "written.txt")
@@ -395,7 +396,7 @@ func TestHeadlessReportsAnUndoTheVerbCanActuallyPerform(t *testing.T) {
 	stub := &stubRunner{res: run.Result{
 		SessionID: "s-undo-6", FinalText: "done", Turns: 1, Wrote: []string{file},
 	}}
-	_, errOut, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt")
+	_, errOut, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt")
 	if err != nil {
 		t.Fatalf("headless: %v", err)
 	}

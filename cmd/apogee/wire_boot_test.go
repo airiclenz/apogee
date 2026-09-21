@@ -1091,7 +1091,8 @@ func TestEveryDriverHandsTheRosterRungsToTheConfig(t *testing.T) {
 			name: "apogee headless",
 			assemble: func(t *testing.T) apogee.Config {
 				stub := &stubRunner{}
-				if _, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, rosterYAML), "explain this repo"); err != nil {
+				srv := headlessBeatServer(t)
+				if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, testConfigHomeOn(t, srv, rosterYAML), "explain this repo"); err != nil {
 					t.Fatalf("headless: %v", err)
 				}
 				if !stub.called {

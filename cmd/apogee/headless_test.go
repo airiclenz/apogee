@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +30,6 @@ import (
 	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
-	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/reactions"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/sanitize"
@@ -84,30 +84,42 @@ var fenceableHost = &fakeConfiner{caps: apogee.ConfinementCaps{FSWrite: true}}
 // empty unless a test replaces it.
 func headlessRun(t *testing.T, stub *stubRunner, args ...string) (out, errOut string, err error) {
 	t.Helper()
-	return headlessRunOn(t, stub, fenceableHost, testConfigHome(t, ""), args...)
+	return headlessRunOn(t, stub, nil, fenceableHost, "", args...)
 }
 
-// headlessRunOn is headlessRun with the two facts the Auto gate reads under the caller's control:
-// the host's confinement backend, and the apogee home whose config.yaml carries the confinement
-// posture (`confine-to-workspace:` is file-only by design — ADR 0012 — so an unconfined run is
-// expressed by writing that file, never by a flag).
+// headlessRunOn is headlessRun with the three facts the composition reads under the caller's
+// control: the upstream the run is bound to, the host's confinement backend, and the apogee home
+// whose config.yaml carries the confinement posture (`confine-to-workspace:` is file-only by design
+// — ADR 0012 — so an unconfined run is expressed by writing that file, never by a flag).
+//
+// srv is the stubllm upstream the home's `servers:` entry names, and it is REAL: the one beat the
+// composition takes dials it (discoverBeat), so a test with an opinion about what the server
+// advertises — the slot count, the effort dialect, a refused or held probe — states it in the
+// Script and reads what the composer made of it. A nil srv starts headlessBeatServer's default, and
+// an empty configDir writes the default home against srv (testConfigHomeOn); a caller that writes
+// its own home names srv.URL in it, because a file already written is never patched here.
 //
 // It swaps the package-level runner and Confiner seams for the duration of the test. That is
 // shared mutable state, so nothing here runs in parallel.
-func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, configDir string, args ...string) (out, errOut string, err error) {
+func headlessRunOn(
+	t *testing.T,
+	stub *stubRunner,
+	srv *stubllm.Server,
+	confiner apogee.Confiner,
+	configDir string,
+	args ...string,
+) (out, errOut string, err error) {
 	t.Helper()
+	if srv == nil {
+		srv = headlessBeatServer(t)
+	}
+	if configDir == "" {
+		configDir = testConfigHomeOn(t, srv, "")
+	}
 	prevRunner, prevConfiner := runOnce, newConfiner
 	runOnce = stub.once
 	newConfiner = func() apogee.Confiner { return confiner }
 	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
-	// A test that dictated no observation of its own gets one that ANSWERED. Two reasons, and both
-	// are about what these tests are for: the offline gate refuses a run whose beat answered
-	// nothing (runHeadless), so an unswapped seam would turn every assertion below into an
-	// assertion about a refusal; and the real seam would dial a real address, which would make the
-	// suite depend on whether the developer happens to have a server on that port.
-	if !beatDictated {
-		swapAnsweringBeat(t)
-	}
 	// The environment must not decide what the mode assertions measure.
 	t.Setenv(config.EnvMode, "")
 
@@ -122,38 +134,28 @@ func headlessRunOn(t *testing.T, stub *stubRunner, confiner apogee.Confiner, con
 	return outBuf.String(), errBuf.String(), err
 }
 
-// beatDictated says a test has installed its OWN observation through swapBeat, so headlessRunOn
-// must not overwrite it with the answering default above. It is package state guarded by swapBeat's
-// own cleanup rather than a parameter because headlessRunOn is called from four files and most of
-// its callers have no opinion about the beat at all.
-var beatDictated bool
+// headlessBeatModel is the one model headlessBeatServer advertises.
+const headlessBeatModel = "stub-model"
 
-// swapBeat installs one observation of the bound server for the duration of the test and restores
-// the production seam afterwards. Every test that has an opinion about the beat — the width, the
-// effort dialect, the offline gate — goes through here rather than assigning discoverBeat directly,
-// so the harness above can tell a dictated observation from an absent one.
-func swapBeat(t *testing.T, discover func(context.Context, string, string, string, provider.Wire) heartbeat.Beat) {
+// headlessBeatServer starts the upstream a test with no opinion about the server runs against: one
+// that ANSWERS its beat — a single advertised model, no /props — so the offline gate has nothing to
+// refuse and the assertion is about whatever the test was written for. It scripts no Turns: the
+// runner stays stubRunner, so only the beat's GETs ever reach it. Every test that drives the
+// headless command WITHOUT headlessRunOn — the ones that build the cobra command themselves to
+// reach a process stream or a stdin pipe — starts one too and writes its home against it, since
+// the beat would otherwise dial the pinned port nothing listens on.
+func headlessBeatServer(t *testing.T) *stubllm.Server {
 	t.Helper()
-	prev := discoverBeat
-	discoverBeat, beatDictated = discover, true
-	t.Cleanup(func() { discoverBeat, beatDictated = prev, false })
-}
-
-// swapAnsweringBeat installs the observation a test with no opinion about the server wants: one that
-// ANSWERED, so the offline gate has nothing to refuse and the assertion is about whatever the test
-// was written for. Every test that drives the headless command WITHOUT headlessRunOn — the ones that
-// build the cobra command themselves to reach a process stream or a stdin pipe — needs it too, since
-// the production seam would otherwise dial a real address.
-func swapAnsweringBeat(t *testing.T) {
-	t.Helper()
-	swapBeat(t, (&stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true}}).discover)
+	return stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+		Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+	}})
 }
 
 // unconfinedHome writes an apogee home whose config switches confinement off — the user's own
-// explicit "I am the sandbox", which is the only way that posture is ever reached.
-func unconfinedHome(t *testing.T) string {
+// explicit "I am the sandbox", which is the only way that posture is ever reached — bound to srv.
+func unconfinedHome(t *testing.T, srv *stubllm.Server) string {
 	t.Helper()
-	return testConfigHome(t, "confine-to-workspace: false\n")
+	return testConfigHomeOn(t, srv, "confine-to-workspace: false\n")
 }
 
 // subAgentStderrLines picks the per-delegation lines out of a headless run's stderr, in the order
@@ -333,12 +335,13 @@ func TestHeadlessAutoEligibilityGate(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home := testConfigHome(t, "")
+			srv := headlessBeatServer(t)
+			home := testConfigHomeOn(t, srv, "")
 			if tc.unconfined {
-				home = unconfinedHome(t)
+				home = unconfinedHome(t, srv)
 			}
 			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
-			out, errOut, err := headlessRunOn(t, stub, fakeConfiner{caps: tc.caps}, home, "--mode", "auto", "a prompt")
+			out, errOut, err := headlessRunOn(t, stub, srv, fakeConfiner{caps: tc.caps}, home, "--mode", "auto", "a prompt")
 
 			if tc.wantRun {
 				if err != nil {
@@ -424,7 +427,7 @@ func TestHeadlessAutoDegradedCellIsARefusalNotANotice(t *testing.T) {
 
 		t.Run(probe.CapabilityLine(probe.BackendName(confiner), caps), func(t *testing.T) {
 			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
-			_, errOut, err := headlessRunOn(t, stub, confiner, testConfigHome(t, ""), "--mode", "auto", "a prompt")
+			_, errOut, err := headlessRunOn(t, stub, nil, confiner, "", "--mode", "auto", "a prompt")
 
 			if degraded == "" {
 				if err != nil {
@@ -476,7 +479,7 @@ func TestHeadlessAutoDisclosesTheFenceResidual(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
 			out, errOut, err := headlessRunOn(
-				t, stub, fakeConfiner{caps: tc.caps}, testConfigHome(t, ""), "--mode", "auto", "a prompt")
+				t, stub, nil, fakeConfiner{caps: tc.caps}, "", "--mode", "auto", "a prompt")
 			if err != nil {
 				t.Fatalf("headless: %v (stderr: %q)", err, errOut)
 			}
@@ -534,7 +537,7 @@ func TestHeadlessConfinedAutoPrewarmsTheLabelWalk(t *testing.T) {
 
 		stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
 		_, errOut, err := headlessRunOn(
-			t, stub, fenceableHost, testConfigHome(t, ""), "--mode", "auto", "a prompt")
+			t, stub, nil, fenceableHost, "", "--mode", "auto", "a prompt")
 
 		if err != nil {
 			t.Fatalf("headless: %v (stderr: %q)", err, errOut)
@@ -565,7 +568,7 @@ func TestHeadlessConfinedAutoPrewarmsTheLabelWalk(t *testing.T) {
 			t.Helper()
 			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
 			_, errOut, err := headlessRunOn(
-				t, stub, fenceableHost, testConfigHome(t, ""), "--mode", "auto", "a prompt")
+				t, stub, nil, fenceableHost, "", "--mode", "auto", "a prompt")
 			if err != nil {
 				t.Fatalf("headless: %v (stderr: %q)", err, errOut)
 			}
@@ -631,33 +634,44 @@ func TestHeadlessComposesTheRunnerSpec(t *testing.T) {
 // 0039 decision 2, ADR 0031's benchable-all-the-way-up): the bound entry's pin, else what the server
 // advertises, else one delegation at a time.
 func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
-	const pinnedServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
-		"\n    parallel-agents: 3\nserver: testbox\n"
+	pinnedServer := func(endpoint string) string {
+		return "servers:\n  - name: testbox\n    endpoint: " + endpoint +
+			"\n    parallel-agents: 3\nserver: testbox\n"
+	}
 
 	tests := []struct {
-		name       string
-		configYAML string
-		slots      int
-		want       int
+		name string
+		// pinned writes the bound entry with a `parallel-agents:` pin; unpinned takes the default
+		// startup server.
+		pinned bool
+		// props is what the server's /props reports; nil is a server that serves none.
+		props *stubllm.Props
+		want  int
 	}{
-		{name: "a pin decides, and the beat is taken anyway", configYAML: pinnedServer, slots: 9, want: 3},
-		{name: "no pin takes what the server advertises", slots: 4, want: 4},
-		{name: "no pin and a silent server is serial", slots: 0, want: 1},
+		{name: "a pin decides, and the beat is taken anyway", pinned: true, props: &stubllm.Props{TotalSlots: 9}, want: 3},
+		{name: "no pin takes what the server advertises", props: &stubllm.Props{TotalSlots: 4}, want: 4},
+		{name: "no pin and a silent server is serial", want: 1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			beats := &stubBeat{beat: heartbeat.Beat{Reachable: true, Answered: true, TotalSlots: tc.slots}}
-			swapBeat(t, beats.discover)
+			srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+				Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+				Props:  tc.props,
+			}})
+			var configYAML string
+			if tc.pinned {
+				configYAML = pinnedServer(srv.URL)
+			}
 
 			stub := &stubRunner{}
-			home := testConfigHome(t, tc.configYAML)
-			if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+			home := testConfigHomeOn(t, srv, configYAML)
+			if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt"); err != nil {
 				t.Fatalf("headless: %v", err)
 			}
 			if got := stub.spec.Config.ParallelAgents; got != tc.want {
 				t.Errorf("Config.ParallelAgents = %d; want %d", got, tc.want)
 			}
-			if !beats.called {
+			if len(srv.Probes()) == 0 {
 				t.Error("the composer took no beat; the round trip is unconditional because it IS the " +
 					"liveness gate the unattended Drivers refuse a Firing on — a pin decides the VALUE, " +
 					"it does not buy the run out of observing its server")
@@ -676,25 +690,31 @@ func TestHeadlessInstallsTheParallelAgentsCap(t *testing.T) {
 // rest of the way onto the wire. Before the seed existed every Firing sent the zero whatever the
 // server read (2026-08-25 audit C-03).
 func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
-	const forcedServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
-		"\n    effort-dialect: off\nserver: testbox\n"
+	forcedServer := func(endpoint string) string {
+		return "servers:\n  - name: testbox\n    endpoint: " + endpoint +
+			"\n    effort-dialect: off\nserver: testbox\n"
+	}
 
 	tests := []struct {
-		name       string
-		configYAML string
-		observed   provider.EffortDialect
-		want       domain.EffortDialect
+		name string
+		// forced writes the bound entry with `effort-dialect: off`; unforced takes the default
+		// startup server.
+		forced bool
+		// reasoning advertises the model with a `reasoning` object — the tell discovery reads the
+		// reasoning dialect from (internal/provider); false is a server with no tell.
+		reasoning bool
+		want      domain.EffortDialect
 	}{
 		{
-			name:       "a forced effort-dialect: decides, whatever the beat saw",
-			configYAML: forcedServer,
-			observed:   provider.EffortDialectReasoning,
-			want:       domain.EffortDialectOff,
+			name:      "a forced effort-dialect: decides, whatever the beat saw",
+			forced:    true,
+			reasoning: true,
+			want:      domain.EffortDialectOff,
 		},
 		{
-			name:     "nothing forced takes the shape discovery saw",
-			observed: provider.EffortDialectReasoning,
-			want:     domain.EffortDialectReasoning,
+			name:      "nothing forced takes the shape discovery saw",
+			reasoning: true,
+			want:      domain.EffortDialectReasoning,
 		},
 		{
 			name: "nothing forced and a server with no tell keeps the historical shape",
@@ -703,22 +723,27 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			beats := &stubBeat{beat: heartbeat.Beat{
-				Reachable:     true,
-				Answered:      true,
-				EffortSupport: provider.EffortSupport{Dialect: tc.observed},
-			}}
-			swapBeat(t, beats.discover)
+			model := stubllm.DiscoveredModel{ID: headlessBeatModel}
+			if tc.reasoning {
+				model.Reasoning = &stubllm.ModelReasoning{}
+			}
+			srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{
+				Models: []stubllm.DiscoveredModel{model},
+			}})
+			var configYAML string
+			if tc.forced {
+				configYAML = forcedServer(srv.URL)
+			}
 
 			stub := &stubRunner{}
-			home := testConfigHome(t, tc.configYAML)
-			if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+			home := testConfigHomeOn(t, srv, configYAML)
+			if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt"); err != nil {
 				t.Fatalf("headless: %v", err)
 			}
 			if got := stub.spec.Config.EffortDialect; got != tc.want {
 				t.Errorf("Config.EffortDialect = %q; want %q", got, tc.want)
 			}
-			if !beats.called {
+			if len(srv.Probes()) == 0 {
 				t.Error("the composer took no beat; one observation is taken per Firing whatever the " +
 					"bound entry pins, because that round trip is the liveness gate")
 			}
@@ -737,59 +762,73 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 // pin from the other side — a 429 on the model list, and a completions-only endpoint that serves no
 // list at all, both of which answer completions perfectly well today.
 //
-// The sentence is asserted verbatim even though all three Drivers now compose it through one
-// helper (notice.ServerOffline): the composer keeps the wording identical, and this pin is what
-// says what that wording IS, so a change to it fails here rather than reaching an operator's
-// stderr unannounced.
+// The sentence is pinned by its two ends even though all three Drivers now compose it through one
+// helper (notice.ServerOffline): the composer keeps the wording identical, and this pin is what says
+// what that wording IS, so a change to it fails here rather than reaching an operator's stderr
+// unannounced. The middle is the dial's own words — a real Monitor's failure reads
+// `apogee: model discovery: Get "…": dial tcp …: connection refused` — whose OS-specific half a
+// verbatim pin would tie the suite to. The zero Beat, which no server can produce, is pinned at the
+// composer below (TestHeadlessOfflineGateSaysNothingForABeatWithNoFailure).
 func TestHeadlessRefusesAServerThatAnsweredNothing(t *testing.T) {
-	const boundServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
-		"\nserver: testbox\n"
+	// A server that was there and is gone: the stub's port is known and nothing listens on it, so
+	// the beat's dial is refused — the transport-level failure Answered is false for.
+	srv := headlessBeatServer(t)
+	srv.Close()
 
-	tests := []struct {
-		name    string
-		beat    heartbeat.Beat
-		wantSay string
-	}{
-		{
-			name:    "nothing answered, and the beat says why",
-			beat:    heartbeat.Beat{Failure: "connection refused"},
-			wantSay: "cannot send — server offline (" + testServerEndpoint + "): connection refused",
-		},
-		{
-			name:    "nothing answered and nothing to say about it",
-			beat:    heartbeat.Beat{},
-			wantSay: "cannot send — server offline (" + testServerEndpoint + ")",
-		},
+	stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
+	out, _, err := headlessRunOn(t, stub, srv, fenceableHost, testConfigHomeOn(t, srv, ""), "a prompt")
+	if err == nil {
+		t.Fatal("a run whose server answered nothing was allowed to start")
 	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			beats := &stubBeat{beat: tc.beat}
-			swapBeat(t, beats.discover)
+	// The refusal travels as the returned error: the command silences cobra's own error printing
+	// (SilenceErrors) and main writes it to stderr, so the error's message IS the stderr line and
+	// asserting on it is asserting on what the operator reads.
+	wantLead := "cannot send — server offline (" + srv.URL + "): "
+	if got := err.Error(); !strings.HasPrefix(got, wantLead) || !strings.HasSuffix(got, "connection refused") {
+		t.Errorf("the refusal reads %q; want %q…%q — the wording is the TUI's own "+
+			"(upstreamBlockNote, internal/tui/heartbeat.go) and the two must not drift",
+			got, wantLead, "connection refused")
+	}
+	if code := exitCodeFor(err); code != exitNotStarted {
+		t.Errorf("exit code = %d; want %d — a run that never began is an invocation to fix, "+
+			"not an outcome to read", code, exitNotStarted)
+	}
+	if stub.called {
+		t.Error("the refused run still reached the runner; the whole point of the gate is that " +
+			"no prompt is submitted and no record is written")
+	}
+	if out != "" {
+		t.Errorf("stdout carried %q; a refused run answers nothing", out)
+	}
+}
 
-			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
-			out, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, boundServer), "a prompt")
-			if err == nil {
-				t.Fatal("a run whose server answered nothing was allowed to start")
-			}
-			// The refusal travels as the returned error: the command silences cobra's own error
-			// printing (SilenceErrors) and main writes it to stderr, so the error's message IS the
-			// stderr line and asserting on it is asserting on what the operator reads.
-			if got := err.Error(); got != tc.wantSay {
-				t.Errorf("the refusal reads %q; want %q — the wording is the TUI's own "+
-					"(upstreamBlockNote, internal/tui/heartbeat.go) and the two must not drift", got, tc.wantSay)
-			}
-			if code := exitCodeFor(err); code != exitNotStarted {
-				t.Errorf("exit code = %d; want %d — a run that never began is an invocation to fix, "+
-					"not an outcome to read", code, exitNotStarted)
-			}
-			if stub.called {
-				t.Error("the refused run still reached the runner; the whole point of the gate is that " +
-					"no prompt is submitted and no record is written")
-			}
-			if out != "" {
-				t.Errorf("stdout carried %q; a refused run answers nothing", out)
-			}
-		})
+// A beat that answered nothing and has nothing to say about it — the zero Beat — is unanswered all
+// the same, and the gate's sentence for it is the endpoint alone with no trailing colon. No server
+// can produce that observation (a real Monitor always names its failure), so it is pinned where the
+// observation enters the composition: firingConfig hands the Beat back on the routing exactly as it
+// was observed, and the sentence is composed as raise composes it from that routing.
+func TestHeadlessOfflineGateSaysNothingForABeatWithNoFailure(t *testing.T) {
+	beats := &stubBeat{beat: heartbeat.Beat{}}
+	entry := config.ServerEntry{Name: testServerName, Endpoint: testServerEndpoint}
+
+	_, routing, _, err := firingConfig(context.Background(), firingInputs{
+		entry:    entry,
+		roots:    firingRoots(t),
+		confiner: fenceableHost,
+		mode:     domain.ModePlan,
+		beat:     beats.discover,
+		recordID: "2026-09-21T10-00-00-firing",
+	})
+	if err != nil {
+		t.Fatalf("firingConfig: %v", err)
+	}
+
+	if routing.Beat.Answered {
+		t.Fatal("the zero Beat was reported as answered; only a server that replied is")
+	}
+	want := "cannot send — server offline (" + testServerEndpoint + ")"
+	if got := notice.ServerOffline(entry.Endpoint, routing.Beat.Failure); got != want {
+		t.Errorf("the refusal reads %q; want %q — nothing observed, nothing to say, no colon", got, want)
 	}
 }
 
@@ -799,29 +838,31 @@ func TestHeadlessRefusesAServerThatAnsweredNothing(t *testing.T) {
 // completions before this gate existed and both must go on serving them.
 func TestHeadlessRunsAgainstAServerThatAnsweredAtAll(t *testing.T) {
 	tests := []struct {
-		name string
-		beat heartbeat.Beat
+		name      string
+		discovery stubllm.Discovery
 	}{
 		{
-			name: "a throttled model list still answered",
-			beat: heartbeat.Beat{Answered: true, Throttled: true, Failure: "model list: HTTP 429"},
+			name:      "a throttled model list still answered",
+			discovery: stubllm.Discovery{Status: http.StatusTooManyRequests},
 		},
 		{
-			name: "a server that serves no model list still answered",
-			beat: heartbeat.Beat{Answered: true, Failure: "model list: HTTP 404"},
+			name:      "a server that serves no model list still answered",
+			discovery: stubllm.Discovery{Status: http.StatusNotFound},
 		},
 		{
 			name: "a healthy server, for the floor",
-			beat: heartbeat.Beat{Answered: true, Reachable: true, TotalSlots: 2},
+			discovery: stubllm.Discovery{
+				Models: []stubllm.DiscoveredModel{{ID: headlessBeatModel}},
+				Props:  &stubllm.Props{TotalSlots: 2},
+			},
 		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			beats := &stubBeat{beat: tc.beat}
-			swapBeat(t, beats.discover)
+			srv := stubllm.New(t, stubllm.Script{Discovery: tc.discovery})
 
 			stub := &stubRunner{res: run.Result{FinalText: "the answer", Turns: 1}}
-			out, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, ""), "a prompt")
+			out, _, err := headlessRunOn(t, stub, srv, fenceableHost, testConfigHomeOn(t, srv, ""), "a prompt")
 			if err != nil {
 				t.Fatalf("headless refused a server that answered: %v", err)
 			}
@@ -870,11 +911,12 @@ func TestHeadlessBudgetsAgainstTheBoundEntrysPins(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			home := testConfigHome(t, "context-window: 16384\nresponse-reserve: 0.25\nservers:\n"+
-				"  - name: testbox\n    endpoint: "+testServerEndpoint+"\n"+tc.entryKeys+"server: testbox\n")
+			srv := headlessBeatServer(t)
+			home := testConfigHomeOn(t, srv, "context-window: 16384\nresponse-reserve: 0.25\nservers:\n"+
+				"  - name: testbox\n    endpoint: "+srv.URL+"\n"+tc.entryKeys+"server: testbox\n")
 
 			stub := &stubRunner{}
-			if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+			if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt"); err != nil {
 				t.Fatalf("headless: %v", err)
 			}
 			if got := stub.spec.Config.Context.MaxContextTokens; got != tc.wantWindow {
@@ -906,12 +948,13 @@ func TestHeadlessSpecStatesTheShareTheConfigDividesBy(t *testing.T) {
 		topLevelShare = 0.2
 		entryShare    = 0.35
 	)
-	home := testConfigHome(t, "response-reserve: 0.2\nservers:\n"+
-		"  - name: testbox\n    endpoint: "+testServerEndpoint+"\n    response-reserve: 0.35\n"+
+	srv := headlessBeatServer(t)
+	home := testConfigHomeOn(t, srv, "response-reserve: 0.2\nservers:\n"+
+		"  - name: testbox\n    endpoint: "+srv.URL+"\n    response-reserve: 0.35\n"+
 		"server: testbox\n")
 
 	stub := &stubRunner{}
-	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt"); err != nil {
 		t.Fatalf("headless: %v", err)
 	}
 	got := stub.spec.Config.Context.ResponseReserveFraction
@@ -932,7 +975,8 @@ func TestHeadlessSpecStatesTheShareTheConfigDividesBy(t *testing.T) {
 // sweeps the stale dirs the TUI's boot sweeps, because a host only ever driven headlessly never
 // reaches that boot and would otherwise accumulate one dir per run forever.
 func TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes(t *testing.T) {
-	home := testConfigHome(t, "")
+	srv := headlessBeatServer(t)
+	home := testConfigHomeOn(t, srv, "")
 	scratchRoot := filepath.Join(home, "scratch")
 	stale := filepath.Join(scratchRoot, "2026-01-01T00-00-00-stale")
 	if err := os.MkdirAll(stale, 0o700); err != nil {
@@ -944,7 +988,7 @@ func TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes(t *testing.T) {
 	}
 
 	stub := &stubRunner{}
-	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt"); err != nil {
 		t.Fatalf("headless: %v", err)
 	}
 
@@ -962,11 +1006,12 @@ func TestHeadlessRunGetsItsOwnScratchDirAndSweepsStaleOnes(t *testing.T) {
 // store is backdated past the age rule alone (its record never existed, so the orphan rule would
 // also fire); either is enough for the claim, which is that the sweep RUNS.
 func TestHeadlessRunSweepsStaleSnapshotDirs(t *testing.T) {
-	home := testConfigHome(t, "")
+	srv := headlessBeatServer(t)
+	home := testConfigHomeOn(t, srv, "")
 	stale := snapshotDirAt(t, filepath.Join(home, "snapshots"), "stale", time.Now().Add(-scratchMaxAge-time.Hour))
 
 	stub := &stubRunner{}
-	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt"); err != nil {
 		t.Fatalf("headless: %v", err)
 	}
 
@@ -1129,9 +1174,9 @@ func TestHeadlessNoSaveStillAppliesTheRetentionPolicy(t *testing.T) {
 	// A home whose sessions store already holds one stale and one recent record, plus whatever
 	// retention the caller configures. The store is built on the same <home>/sessions root the
 	// command derives, so the sweep under test is walking these very files.
-	seed := func(t *testing.T, retention string) (home string, store *session.Store) {
+	seed := func(t *testing.T, srv *stubllm.Server, retention string) (home string, store *session.Store) {
 		t.Helper()
-		home = testConfigHome(t, retention)
+		home = testConfigHomeOn(t, srv, retention)
 		store = session.NewStore(filepath.Join(home, "sessions"))
 		saveAt(t, store, "/ws", now.Add(-100*time.Hour), "stale")
 		saveAt(t, store, "/ws", now.Add(-time.Hour), "recent")
@@ -1152,10 +1197,11 @@ func TestHeadlessNoSaveStillAppliesTheRetentionPolicy(t *testing.T) {
 	}
 
 	t.Run("--no-save sweeps and records nothing", func(t *testing.T) {
-		home, store := seed(t, "sessions:\n  max-age: 48h\n")
+		srv := headlessBeatServer(t)
+		home, store := seed(t, srv, "sessions:\n  max-age: 48h\n")
 
 		stub := &stubRunner{}
-		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "--no-save", "a prompt"); err != nil {
+		if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "--no-save", "a prompt"); err != nil {
 			t.Fatalf("headless: %v", err)
 		}
 
@@ -1169,10 +1215,11 @@ func TestHeadlessNoSaveStillAppliesTheRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("retention unset removes nothing", func(t *testing.T) {
-		home, store := seed(t, "")
+		srv := headlessBeatServer(t)
+		home, store := seed(t, srv, "")
 
 		stub := &stubRunner{}
-		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "--no-save", "a prompt"); err != nil {
+		if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "--no-save", "a prompt"); err != nil {
 			t.Fatalf("headless: %v", err)
 		}
 
@@ -1182,10 +1229,11 @@ func TestHeadlessNoSaveStillAppliesTheRetentionPolicy(t *testing.T) {
 	})
 
 	t.Run("a saving run is unchanged", func(t *testing.T) {
-		home, store := seed(t, "sessions:\n  max-age: 48h\n")
+		srv := headlessBeatServer(t)
+		home, store := seed(t, srv, "sessions:\n  max-age: 48h\n")
 
 		stub := &stubRunner{}
-		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt"); err != nil {
+		if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt"); err != nil {
 			t.Fatalf("headless: %v", err)
 		}
 
@@ -1201,10 +1249,11 @@ func TestHeadlessNoSaveStillAppliesTheRetentionPolicy(t *testing.T) {
 	// materialise a sessions tree that was never there. --no-save promises no RECORD, and a first
 	// run that leaves an empty <home>/sessions behind would be a new fact on disk.
 	t.Run("no sessions directory is created", func(t *testing.T) {
-		home := testConfigHome(t, "sessions:\n  max-age: 48h\n")
+		srv := headlessBeatServer(t)
+		home := testConfigHomeOn(t, srv, "sessions:\n  max-age: 48h\n")
 
 		stub := &stubRunner{}
-		if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "--no-save", "a prompt"); err != nil {
+		if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "--no-save", "a prompt"); err != nil {
 			t.Fatalf("headless: %v", err)
 		}
 
@@ -1782,11 +1831,12 @@ func TestHeadlessSaysWhenTheContextWindowIsUnknown(t *testing.T) {
 	})
 
 	t.Run("a pinned window leaves nothing to say", func(t *testing.T) {
-		home := testConfigHome(t, "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\n"+
+		srv := headlessBeatServer(t)
+		home := testConfigHomeOn(t, srv, "servers:\n  - name: testbox\n    endpoint: "+srv.URL+"\n"+
 			"    context-window: 32768\nserver: testbox\n")
 		stub := &stubRunner{res: run.Result{SessionID: "s-13", FinalText: "the answer", Turns: 1}}
 
-		_, errOut, err := headlessRunOn(t, stub, fenceableHost, home, "a prompt")
+		_, errOut, err := headlessRunOn(t, stub, srv, fenceableHost, home, "a prompt")
 		if err != nil {
 			t.Fatalf("headless: %v", err)
 		}
@@ -2034,9 +2084,8 @@ func TestHeadlessAnswerLandsOnTheProcessStdout(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
-	swapAnsweringBeat(t)
 
-	configDir, workspace := testConfigHome(t, ""), t.TempDir()
+	configDir, workspace := testConfigHomeOn(t, headlessBeatServer(t), ""), t.TempDir()
 	var runErr error
 	stdout, stderr := captureProcessStreams(t, func() {
 		cmd := newHeadlessCommand()
@@ -2363,8 +2412,9 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 		// is the cheapest way into it — the per-model half of the Config is what resolves the
 		// prompt, and nothing earlier in the command reads that key at all.
 		stub := &stubRunner{}
-		home := testConfigHome(t, "system-prompt-text: \"hi {{bogus}}\"\n")
-		out, _, err := headlessRunOn(t, stub, fenceableHost, home, "--format", "json", "a prompt")
+		srv := headlessBeatServer(t)
+		home := testConfigHomeOn(t, srv, "system-prompt-text: \"hi {{bogus}}\"\n")
+		out, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "--format", "json", "a prompt")
 		if err == nil {
 			t.Fatal("a config whose system prompt would not resolve was allowed to start")
 		}
@@ -2391,14 +2441,13 @@ func TestHeadlessFormatJSONFramesEveryExit(t *testing.T) {
 
 	t.Run("the offline gate refuses with the id already minted", func(t *testing.T) {
 		// The one never-started class that happens AFTER the id exists and BEFORE any sink does:
-		// the frame therefore names the session and still reports that nothing was saved.
-		const boundServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
-			"\nserver: testbox\n"
-		beats := &stubBeat{beat: heartbeat.Beat{Failure: "connection refused"}}
-		swapBeat(t, beats.discover)
+		// the frame therefore names the session and still reports that nothing was saved. The
+		// server is a closed stub, so the beat's dial is refused.
+		srv := headlessBeatServer(t)
+		srv.Close()
 
 		stub := &stubRunner{}
-		out, _, err := headlessRunOn(t, stub, fenceableHost, testConfigHome(t, boundServer),
+		out, _, err := headlessRunOn(t, stub, srv, fenceableHost, testConfigHomeOn(t, srv, ""),
 			"--format", "json", "a prompt")
 		if err == nil {
 			t.Fatal("a run whose server answered nothing was allowed to start")
@@ -2970,7 +3019,6 @@ func TestHeadlessFormatJSONWriteErrorStopsLinesNotTheRun(t *testing.T) {
 	prevRunner, prevConfiner := runOnce, newConfiner
 	runOnce, newConfiner = stub.once, func() apogee.Confiner { return fenceableHost }
 	t.Cleanup(func() { runOnce, newConfiner = prevRunner, prevConfiner })
-	swapAnsweringBeat(t)
 	t.Setenv(config.EnvMode, "")
 
 	cmd := newHeadlessCommand()
@@ -2978,7 +3026,7 @@ func TestHeadlessFormatJSONWriteErrorStopsLinesNotTheRun(t *testing.T) {
 	cmd.SetOut(failingStdout{})
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"--config", testConfigHome(t, ""), "--workspace", t.TempDir(),
+	cmd.SetArgs([]string{"--config", testConfigHomeOn(t, headlessBeatServer(t), ""), "--workspace", t.TempDir(),
 		"--format", "json", "a prompt"})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
@@ -3170,6 +3218,7 @@ type interruptedHeadless struct {
 func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless {
 	t.Helper()
 
+	entered := make(chan struct{})
 	blocked := make(chan struct{})
 	released := make(chan struct{})
 	exited := make(chan struct{})
@@ -3185,10 +3234,13 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 		runOnce, newConfiner = prevRunner, prevConfiner
 		hardExit, interruptSignals = prevExit, prevSignals
 	})
-	// The runner the real one stands in for: it notices the cancellation, then holds — the state a
-	// run is in while it saves its record and drains its Reactions, and the only state in which a
-	// second press means anything.
+	// The runner the real one stands in for: it says it has been entered — the beat is behind it,
+	// so a press from here lands on the RUN and not on the composition, whose own interrupt is
+	// TestHeadlessInterruptDuringTheBeatExits2's — then notices the cancellation and holds: the
+	// state a run is in while it saves its record and drains its Reactions, and the only state in
+	// which a second press means anything.
 	runOnce = func(ctx context.Context, _ run.Spec) (run.Result, error) {
+		close(entered)
 		<-ctx.Done()
 		close(blocked)
 		<-released
@@ -3211,14 +3263,13 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 		close(registered)
 		return func() {}
 	}
-	swapAnsweringBeat(t)
 	t.Setenv(config.EnvMode, "")
 
 	cmd := newHeadlessCommand()
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"--config", testConfigHome(t, ""), "--workspace", t.TempDir(),
+	cmd.SetArgs([]string{"--config", testConfigHomeOn(t, headlessBeatServer(t), ""), "--workspace", t.TempDir(),
 		"--format", "json", "a prompt"})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -3226,6 +3277,7 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 	go func() { done <- cmd.ExecuteContext(ctx) }()
 
 	<-registered
+	<-entered
 	// The first press: the context ends, and the same signal reaches the watch's own channel —
 	// signal.Notify delivers to every registered channel, NotifyContext's included.
 	cancel()
@@ -3250,18 +3302,23 @@ func driveInterruptedHeadless(t *testing.T, interrupts int) interruptedHeadless 
 // it. Owned consequence of one ctx for composition and run (plan 2026-09-15 - 01 item 8): the
 // process used to die by signal here, saying nothing.
 func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
-	const boundServer = "servers:\n  - name: testbox\n    endpoint: " + testServerEndpoint +
-		"\nserver: testbox\n"
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	// The beat stands in for a Monitor whose dial was cut short: the interrupt lands while it runs,
-	// and what it reports is what the real one reports for a cancelled ctx — no answer, and the
-	// ctx's own reason as the failure.
-	swapBeat(t, func(beatCtx context.Context, _, _, _ string, _ provider.Wire) heartbeat.Beat {
+	// The server accepts the probe and never answers it, and the interrupt lands while the Monitor
+	// waits: the stub logs the GET before it holds it, so the cancel fires once the beat is known
+	// to be in flight, and what the beat reports is what a real Monitor reports for a cancelled
+	// ctx — no answer, and the ctx's own reason ending the failure.
+	srv := stubllm.New(t, stubllm.Script{Discovery: stubllm.Discovery{Hang: true}})
+	go func() {
+		for len(srv.Probes()) == 0 {
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(time.Millisecond):
+			}
+		}
 		cancel()
-		<-beatCtx.Done()
-		return heartbeat.Beat{Failure: beatCtx.Err().Error()}
-	})
+	}()
 	stub := &stubRunner{}
 	prevRunner, prevConfiner := runOnce, newConfiner
 	runOnce = stub.once
@@ -3274,7 +3331,7 @@ func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
 	cmd.SetOut(&outBuf)
 	cmd.SetErr(&errBuf)
 	cmd.SetIn(strings.NewReader(""))
-	cmd.SetArgs([]string{"--config", testConfigHome(t, boundServer), "--workspace", t.TempDir(),
+	cmd.SetArgs([]string{"--config", testConfigHomeOn(t, srv, ""), "--workspace", t.TempDir(),
 		"--format", "json", "a prompt"})
 
 	err := cmd.ExecuteContext(ctx)
@@ -3285,9 +3342,12 @@ func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
 	if stub.called {
 		t.Error("the runner ran; an interrupt during the beat refuses before a prompt is spent")
 	}
-	want := notice.ServerOffline(testServerEndpoint, context.Canceled.Error())
-	if got := err.Error(); got != want {
-		t.Errorf("the refusal reads %q; want the offline gate's own sentence %q", got, want)
+	// The middle of the sentence is the dial's own words (`apogee: model discovery: Get "…"`); the
+	// two ends are the gate's stem and the ctx's reason.
+	wantLead := notice.ServerOffline(srv.URL, "") + ": "
+	if got := err.Error(); !strings.HasPrefix(got, wantLead) || !strings.HasSuffix(got, context.Canceled.Error()) {
+		t.Errorf("the refusal reads %q; want the offline gate's own sentence %q…%q",
+			got, wantLead, context.Canceled.Error())
 	}
 	if code := exitCodeFor(err); code != exitNotStarted {
 		t.Errorf("exit code = %d; want %d — nothing was sent and nothing was saved", code, exitNotStarted)
@@ -3301,8 +3361,9 @@ func TestHeadlessInterruptDuringTheBeatExits2(t *testing.T) {
 	if envelope["session"] == nil {
 		t.Error("session is null; the id was minted before the beat was taken")
 	}
-	if text, _ := data["error"].(string); text != want {
-		t.Errorf("the frame's error = %q; want %q", text, want)
+	// The frame carries the very sentence the operator reads on stderr.
+	if text, _ := data["error"].(string); text != err.Error() {
+		t.Errorf("the frame's error = %q; want %q", text, err.Error())
 	}
 }
 
@@ -3472,21 +3533,24 @@ func TestHeadlessRefusesEveryUndeterminedStartup(t *testing.T) {
 // turns the startup refusal's remedy into the flag, pinned in
 // TestHeadlessRefusesEveryUndeterminedStartup.
 func TestHeadlessStartupServerAndBypassFlags(t *testing.T) {
-	const twoServers = "servers:\n  - name: other\n    endpoint: http://127.0.0.1:9999\n" +
-		"  - name: " + testServerName + "\n    endpoint: " + testServerEndpoint + "\nserver: other\n"
+	twoServers := func(endpoint string) string {
+		return "servers:\n  - name: other\n    endpoint: http://127.0.0.1:9999\n" +
+			"  - name: " + testServerName + "\n    endpoint: " + endpoint + "\nserver: other\n"
+	}
 
 	t.Run("--server starts on the entry it names", func(t *testing.T) {
 		t.Setenv(config.EnvServer, "")
 		t.Setenv(config.EnvEndpoint, "")
 		stub := &stubRunner{}
-		home := testConfigHome(t, twoServers)
-		_, _, err := headlessRunOn(t, stub, fenceableHost, home, "--server", testServerName, "a prompt")
+		srv := headlessBeatServer(t)
+		home := testConfigHomeOn(t, srv, twoServers(srv.URL))
+		_, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "--server", testServerName, "a prompt")
 		if err != nil {
 			t.Fatalf("headless: %v", err)
 		}
-		if got := stub.spec.Config.Endpoint; got != testServerEndpoint {
+		if got := stub.spec.Config.Endpoint; got != srv.URL {
 			t.Errorf("Config.Endpoint = %q; want %q — the flag's entry, over the file's server:",
-				got, testServerEndpoint)
+				got, srv.URL)
 		}
 	})
 
@@ -3520,14 +3584,13 @@ func TestHeadlessReadsThePromptFromStdin(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
-	swapAnsweringBeat(t)
 
 	cmd := newHeadlessCommand()
 	var out, errOut bytes.Buffer
 	cmd.SetOut(&out)
 	cmd.SetErr(&errOut)
 	cmd.SetIn(strings.NewReader("what does this repo do?\n"))
-	cmd.SetArgs([]string{"--config", testConfigHome(t, ""), "--workspace", t.TempDir(), "--no-save"})
+	cmd.SetArgs([]string{"--config", testConfigHomeOn(t, headlessBeatServer(t), ""), "--workspace", t.TempDir(), "--no-save"})
 
 	if err := cmd.ExecuteContext(context.Background()); err != nil {
 		t.Fatalf("headless: %v\n%s", err, errOut.String())
@@ -3762,9 +3825,9 @@ func requireHookShell(t *testing.T) {
 // hookHomeRecording writes an apogee home whose one Reaction subscribes to events and dumps the
 // payload it is handed onto marker, and returns that home. The script writes the document byte for
 // byte, so a test reads back exactly what the run put on the Reaction's stdin.
-func hookHomeRecording(t *testing.T, marker string, events ...string) string {
+func hookHomeRecording(t *testing.T, srv *stubllm.Server, marker string, events ...string) string {
 	t.Helper()
-	return testConfigHome(t, fmt.Sprintf(
+	return testConfigHomeOn(t, srv, fmt.Sprintf(
 		"reactions:\n  - id: record\n    on: [%s]\n    run: [\"sh\", \"-c\", \"cat > \\\"$0\\\"\", %q]\n",
 		strings.Join(events, ", "), marker))
 }
@@ -3800,8 +3863,9 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
 	}}
 
-	if _, _, err := headlessRunOn(t, stub, fenceableHost,
-		hookHomeRecording(t, marker, "exchange-finished"), "explain this repo"); err != nil {
+	srv := headlessBeatServer(t)
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost,
+		hookHomeRecording(t, srv, marker, "exchange-finished"), "explain this repo"); err != nil {
 		t.Fatalf("headless: %v", err)
 	}
 
@@ -3824,13 +3888,14 @@ func TestHeadlessFiresAHookAtTheExchangeBoundary(t *testing.T) {
 // the seam the Driver fills: a `gate:` dropped here would leave a configured gate silently answering
 // nothing at every unattended root.
 func TestHeadlessArmsTheSyncLaneOnTheFiringsSpec(t *testing.T) {
-	home := testConfigHome(t,
+	srv := headlessBeatServer(t)
+	home := testConfigHomeOn(t, srv,
 		"reactions:\n"+
 			"  - id: record\n    on: [exchange-finished]\n    run: [\"true\"]\n"+
 			"  - id: warden\n    on: [pre-tool-exec]\n    gate: [\"/bin/sh\", \"-c\", \"echo deny\"]\n")
 	stub := &stubRunner{}
 
-	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "explain this repo"); err != nil {
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "explain this repo"); err != nil {
 		t.Fatalf("headless: %v", err)
 	}
 
@@ -3879,8 +3944,9 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 		})
 	}
 
-	if _, _, err := headlessRunOn(t, stub, fenceableHost,
-		hookHomeRecording(t, marker, "file-changed"), "write a file"); err != nil {
+	srv := headlessBeatServer(t)
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost,
+		hookHomeRecording(t, srv, marker, "file-changed"), "write a file"); err != nil {
 		t.Fatalf("headless: %v", err)
 	}
 
@@ -3905,7 +3971,8 @@ func TestHeadlessDerivesTheFileChangedHookFromItsOwnRoster(t *testing.T) {
 func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
 	requireHookShell(t)
 
-	home := testConfigHome(t, "reactions:\n  - id: record\n    on: [exchange-finished]\n"+
+	srv := headlessBeatServer(t)
+	home := testConfigHomeOn(t, srv, "reactions:\n  - id: record\n    on: [exchange-finished]\n"+
 		"    run: [\"sh\", \"-c\", \"echo boom >&2; exit 1\"]\n")
 	stub := &stubRunner{
 		res: run.Result{FinalText: "the answer", Turns: 1},
@@ -3914,7 +3981,7 @@ func TestHeadlessReportsAFailingHookOnStderr(t *testing.T) {
 		},
 	}
 
-	out, errOut, err := headlessRunOn(t, stub, fenceableHost, home, "explain this repo")
+	out, errOut, err := headlessRunOn(t, stub, srv, fenceableHost, home, "explain this repo")
 	if err != nil {
 		t.Fatalf("headless: %v", err)
 	}
@@ -3937,14 +4004,15 @@ func TestHeadlessFoldsARetiredHooksBlockOnStart(t *testing.T) {
 	requireHookShell(t)
 
 	marker := filepath.Join(t.TempDir(), "folded.json")
-	home := testConfigHome(t, fmt.Sprintf(
+	srv := headlessBeatServer(t)
+	home := testConfigHomeOn(t, srv, fmt.Sprintf(
 		"hooks:\n  - name: record\n    events: [exchange-finished]\n"+
 			"    command: [\"sh\", \"-c\", \"cat > \\\"$0\\\"\", %q]\n", marker))
 	stub := &stubRunner{emit: func(sink domain.EventSink) {
 		sink.Emit(domain.TurnEvent{Status: domain.StatusExchangeComplete})
 	}}
 
-	if _, _, err := headlessRunOn(t, stub, fenceableHost, home, "explain this repo"); err != nil {
+	if _, _, err := headlessRunOn(t, stub, srv, fenceableHost, home, "explain this repo"); err != nil {
 		t.Fatalf("headless: %v", err)
 	}
 

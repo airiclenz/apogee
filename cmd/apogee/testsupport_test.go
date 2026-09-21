@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
 // noNotify drops ApplyConfig's soft startup notices — its callers assert resolved
@@ -27,14 +29,28 @@ const (
 	testServerEndpoint = "http://127.0.0.1:1111"
 )
 
+// startupServerYAMLFor is startupServerYAML with the startup server at endpoint: the block a test
+// whose run takes a REAL beat writes, naming the stubllm upstream it started, so the beat dials a
+// server that answers rather than the pinned port nothing listens on.
+func startupServerYAMLFor(endpoint string) string {
+	return "servers:\n  - name: " + testServerName + "\n    endpoint: " + endpoint + "\nserver: " +
+		testServerName + "\n"
+}
+
 // writeConfigHome writes an apogee home's config.yaml: the caller's own keys, followed by a startup
 // server when they name none, so a test states only the keys it is about. A caller that DOES write
 // a `servers:` block owns the whole upstream half of the file, `server:` included.
 func writeConfigHome(t *testing.T, dir, extra string) {
 	t.Helper()
+	writeConfigHomeFor(t, dir, testServerEndpoint, extra)
+}
+
+// writeConfigHomeFor is writeConfigHome with the startup server at endpoint.
+func writeConfigHomeFor(t *testing.T, dir, endpoint, extra string) {
+	t.Helper()
 	body := extra
 	if !namesServersBlock(extra) {
-		body += startupServerYAML
+		body += startupServerYAMLFor(endpoint)
 	}
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(body), 0o600); err != nil {
 		t.Fatalf("write config.yaml: %v", err)
@@ -57,6 +73,16 @@ func testConfigHome(t *testing.T, extra string) string {
 	t.Helper()
 	dir := t.TempDir()
 	writeConfigHome(t, dir, extra)
+	return dir
+}
+
+// testConfigHomeOn is testConfigHome with the startup server at srv's URL — the home a run whose
+// composition beats its server for real is given, so the beat reaches the scripted upstream. A
+// caller that writes its own `servers:` block names srv.URL there itself, as with writeConfigHome.
+func testConfigHomeOn(t *testing.T, srv *stubllm.Server, extra string) string {
+	t.Helper()
+	dir := t.TempDir()
+	writeConfigHomeFor(t, dir, srv.URL, extra)
 	return dir
 }
 

@@ -388,9 +388,10 @@ func TestHeadlessNoticesPlaintextKeysAndNeverPrompts(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
-	swapAnsweringBeat(t)
-
-	home, path := plaintextConfig(t, onePlaintextServer)
+	// The run beats its server for real, so the file names a stubllm upstream in place of the pinned
+	// port; the rest of the file — the commented plaintext key above all — is onePlaintextServer's.
+	srv := headlessBeatServer(t)
+	home, path := plaintextConfig(t, strings.Replace(onePlaintextServer, testServerEndpoint, srv.URL, 1))
 
 	cmd := newHeadlessCommand()
 	var out, errOut bytes.Buffer
@@ -440,9 +441,11 @@ func TestHeadlessNoticesTheRetiredSubAgentsFlagAndNeverPrompts(t *testing.T) {
 	runOnce = stub.once
 	t.Cleanup(func() { runOnce = prev })
 	t.Setenv(config.EnvMode, "")
-	swapAnsweringBeat(t)
-
-	home := testConfigHome(t, subAgentsFlagYAML)
+	// The run beats its server for real, so the bound entry names a stubllm upstream in place of the
+	// pinned port; the retired flag rides on the other entry exactly as subAgentsFlagYAML writes it.
+	srv := headlessBeatServer(t)
+	configYAML := strings.Replace(subAgentsFlagYAML, testServerEndpoint, srv.URL, 1)
+	home := testConfigHomeOn(t, srv, configYAML)
 	path := filepath.Join(home, "config.yaml")
 
 	cmd := newHeadlessCommand()
@@ -466,7 +469,7 @@ func TestHeadlessNoticesTheRetiredSubAgentsFlagAndNeverPrompts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read the config: %v", err)
 	}
-	if string(data) != subAgentsFlagYAML {
+	if string(data) != configYAML {
 		t.Errorf("an unattended run edited the config it was only meant to report on:\n%s", data)
 	}
 }
