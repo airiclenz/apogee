@@ -69,13 +69,24 @@ type Terminal struct {
 	// secretEnv names the host-configured credential variables to drop from the child's
 	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
 	secretEnv []string
+	// host is the operating system the tool launches through: the platform shell it wraps the
+	// line with and scopes the child's environment through (execHost).
+	host execHost
 }
 
 // NewTerminal returns a terminal tool whose working directory resolves within root and whose
 // child environment drops the secretEnv variables on top of apogee's own credentials (nil ⇒
-// apogee's own alone — the scrub as it was before the host could name any).
+// apogee's own alone — the scrub as it was before the host could name any). It runs on the real
+// operating system (defaultExecHost); builtinTools builds the five execution tools on one host
+// through newTerminal.
 func NewTerminal(root string, secretEnv []string) *Terminal {
-	return &Terminal{toolSpec: terminalSpec, root: root, secretEnv: secretEnv}
+	return newTerminal(root, secretEnv, defaultExecHost())
+}
+
+// newTerminal is NewTerminal with the host the tool launches through supplied — one execHost
+// shared by the execution tools in production, a host carrying fakes in a test.
+func newTerminal(root string, secretEnv []string, host execHost) *Terminal {
+	return &Terminal{toolSpec: terminalSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
 // ReadOnly reports that terminal is write-capable (false) — a shell command can write, so
@@ -117,7 +128,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// os/exec's argv joining would escape the model's quotes into cmd.exe's face). That
 	// raw command line is also what says WHICH shell is about to read the line, so the
 	// pre-flight below is derived from it rather than from a second OS switch.
-	cmdline := shellHost.CommandLine(args.Command)
+	cmdline := t.host.shell.CommandLine(args.Command)
 	if err := preflightCommandLine(args.Command, cmdline == ""); err != nil {
 		return errorResult(call.ID, "could not parse command line: "+err.Error()), nil
 	}
@@ -142,7 +153,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// to fix and the model reads a refusal rather than "not available". The Windows raw
 	// command line is unaffected — argv[0] is now the absolute cmd.exe and the verbatim line
 	// is still what cmd reads (internal/subprocess/cmdline_other.go).
-	argv, err := shellArgv(ctx, t.root, command)
+	argv, err := t.host.shellArgv(ctx, t.root, command)
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
@@ -157,7 +168,7 @@ func (t *Terminal) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 		// variables, which a model-chosen command line has no use for and could exfiltrate,
 		// and minus the PATH entries that resolve inside the workspace, which would let the
 		// model plant the programs its own command line then executes.
-		Env: subprocessEnvScopedPath(t.root, t.secretEnv),
+		Env: t.host.subprocessEnvScopedPath(t.root, t.secretEnv),
 	}
 	res, err := runTerminalSubprocess(ctx, spec)
 	if err != nil {

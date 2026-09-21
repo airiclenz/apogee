@@ -166,10 +166,10 @@ func TestTerminal_ScopesTheWorkspaceOffTheChildPATH(t *testing.T) {
 	// Not parallel: t.Setenv, plus the package-level runner swap.
 	root := t.TempDir()
 	path, inside, outside := workspacePATH(t, root)
-	// The tool RESOLVES its shell on this PATH before it builds the spec (shellArgv), so the
-	// fixture carries the host's own shell directory: the assertions below are about which
+	// The tool RESOLVES its shell on this PATH before it builds the spec (execHost.shellArgv), so
+	// the fixture carries the host's own shell directory: the assertions below are about which
 	// entries survive the scrub, not about a host with no `sh`.
-	shell, err := exec.LookPath(shellHost.Shell())
+	shell, err := exec.LookPath(defaultExecHost().shell.Shell())
 	if err != nil {
 		t.Skipf("no platform shell on this host: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestTerminal_EmptyAndUnparseableCommand(t *testing.T) {
 
 // hostShellIsPOSIX reports whether this host's shell takes a real argv (sh -c) rather than a
 // verbatim command line (cmd.exe) — the same convention Execute derives its pre-flight from.
-func hostShellIsPOSIX() bool { return shellHost.CommandLine("probe") == "" }
+func hostShellIsPOSIX() bool { return defaultExecHost().shell.CommandLine("probe") == "" }
 
 // TestTerminal_PreflightMatchesTheTargetShell is the table proof that the pre-flight is a
 // POSIX-sh gate and not a universal one: every row is a line cmd.exe reads without
@@ -295,17 +295,16 @@ func (h rawCmdlineHost) CommandLine(line string) string {
 
 // TestTerminal_CmdLinesAreNotGatedByThePOSIXSplitter drives Execute with the Windows
 // raw-command-line convention in force and asserts the two lines the POSIX splitter rejects
-// get past the gate and reach spec construction — whatever the shell then makes of them.
-//
-// It is deliberately NOT parallel: it substitutes the package-level shellHost, and Go
-// resumes parallel tests only after the sequential pass over the top-level tests is done.
+// get past the gate and reach spec construction — whatever the shell then makes of them. The
+// Windows rules ride in on the tool's own execHost, so nothing package-wide is swapped and the
+// test runs in parallel; the real shell runs the lines.
 func TestTerminal_CmdLinesAreNotGatedByThePOSIXSplitter(t *testing.T) {
-	saved := shellHost
-	shellHost = rawCmdlineHost{Host: saved}
-	t.Cleanup(func() { shellHost = saved })
+	t.Parallel()
+	h := defaultExecHost()
+	h.shell = rawCmdlineHost{Host: h.shell}
 
 	for _, command := range []string{`echo don't panic`, `dir "C:\Program Files\"`} {
-		res, err := executeTerminalLine(t, command)
+		res, err := executeTerminalLine(t, h, command)
 		if err != nil {
 			t.Fatalf("Execute(%q) err = %v, want nil", command, err)
 		}
@@ -315,10 +314,11 @@ func TestTerminal_CmdLinesAreNotGatedByThePOSIXSplitter(t *testing.T) {
 	}
 }
 
-// executeTerminalLine runs one command line through a fresh terminal tool rooted at a temp dir.
-func executeTerminalLine(t *testing.T, command string) (domain.ToolResult, error) {
+// executeTerminalLine runs one command line through a fresh terminal tool rooted at a temp dir
+// and launching through h.
+func executeTerminalLine(t *testing.T, h execHost, command string) (domain.ToolResult, error) {
 	t.Helper()
-	return NewTerminal(t.TempDir(), nil).Execute(context.Background(), terminalCall("c1", command))
+	return newTerminal(t.TempDir(), nil, h).Execute(context.Background(), terminalCall("c1", command))
 }
 
 func TestTerminal_WorkdirEscapeRejected(t *testing.T) {
@@ -637,14 +637,14 @@ func TestTerminal_PrependsFailFastPreambleToThePOSIXLine(t *testing.T) {
 // convention and asserts the line reaches spec construction verbatim: cmd.exe has no
 // `set -e` analogue, so the fail-fast preamble is POSIX-only by design.
 //
-// Not parallel: it substitutes the package-level shellHost and the runner.
+// Not parallel: the Windows rules ride in on the tool's execHost, but withCapturedTerminalRun
+// still swaps the package-level runner beside parallel readers.
 func TestTerminal_NoPreambleOnRawCmdLines(t *testing.T) {
-	saved := shellHost
-	shellHost = rawCmdlineHost{Host: saved}
-	t.Cleanup(func() { shellHost = saved })
+	h := defaultExecHost()
+	h.shell = rawCmdlineHost{Host: h.shell}
 
 	captured := withCapturedTerminalRun(t)
-	if _, err := NewTerminal(t.TempDir(), nil).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
+	if _, err := newTerminal(t.TempDir(), nil, h).Execute(context.Background(), terminalCall("c1", "echo hi")); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
 	if got := captured.Argv[len(captured.Argv)-1]; got != "echo hi" {

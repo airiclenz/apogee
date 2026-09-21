@@ -50,7 +50,7 @@ func TestTerminal_WindowsRedirectToAQuotedSpacedPath(t *testing.T) {
 	target := filepath.Join(dir, "out.txt")
 
 	term := NewTerminal(root, nil)
-	res, err := term.Execute(context.Background(), terminalCall("c1", "echo x> "+shellHost.Quote(target)))
+	res, err := term.Execute(context.Background(), terminalCall("c1", "echo x> "+defaultExecHost().shell.Quote(target)))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
@@ -135,7 +135,7 @@ func TestTerminal_WindowsCancelKillsTheProcessTree(t *testing.T) {
 	}
 
 	term := NewTerminal(root, nil)
-	call := terminalCall("c1", "powershell -NoProfile -ExecutionPolicy Bypass -File "+shellHost.Quote(scriptPath))
+	call := terminalCall("c1", "powershell -NoProfile -ExecutionPolicy Bypass -File "+defaultExecHost().shell.Quote(scriptPath))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -188,7 +188,7 @@ func TestTerminal_WindowsCleanRunReapsADetachedProcess(t *testing.T) {
 	}
 
 	term := NewTerminal(root, nil)
-	call := terminalCall("c1", "powershell -NoProfile -ExecutionPolicy Bypass -File "+shellHost.Quote(scriptPath))
+	call := terminalCall("c1", "powershell -NoProfile -ExecutionPolicy Bypass -File "+defaultExecHost().shell.Quote(scriptPath))
 	res, err := term.Execute(context.Background(), call)
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)

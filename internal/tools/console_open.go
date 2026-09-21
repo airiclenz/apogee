@@ -78,13 +78,24 @@ type ConsoleOpen struct {
 	// secretEnv names the host-configured credential variables to drop from the child's
 	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
 	secretEnv []string
+	// host is the operating system the tool launches through: the platform shell it wraps the
+	// line with and scopes the Console's environment through (execHost).
+	host execHost
 }
 
 // NewConsoleOpen returns a console_open tool whose working directory resolves within root and
 // whose child environment drops the secretEnv variables on top of apogee's own credentials (nil ⇒
-// apogee's own alone) — the same construction terminal takes, for the same reasons.
+// apogee's own alone) — the same construction terminal takes, for the same reasons. It runs on
+// the real operating system (defaultExecHost); builtinTools builds the five execution tools on
+// one host through newConsoleOpen.
 func NewConsoleOpen(root string, secretEnv []string) *ConsoleOpen {
-	return &ConsoleOpen{toolSpec: consoleOpenSpec, root: root, secretEnv: secretEnv}
+	return newConsoleOpen(root, secretEnv, defaultExecHost())
+}
+
+// newConsoleOpen is NewConsoleOpen with the host the tool launches through supplied — one
+// execHost shared by the execution tools in production, a host carrying fakes in a test.
+func newConsoleOpen(root string, secretEnv []string, host execHost) *ConsoleOpen {
+	return &ConsoleOpen{toolSpec: consoleOpenSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
 // ReadOnly reports that console_open is write-capable (false): the program it starts is a shell,
@@ -128,7 +139,7 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 	// The pre-flight is derived from the raw command line the platform would hand the shell,
 	// exactly as terminal's is: empty means a real argv (POSIX sh -c) and a POSIX splitter is
 	// the right second opinion; non-empty means cmd.exe, which has none worth giving.
-	if err := preflightCommandLine(args.Command, shellHost.CommandLine(args.Command) == ""); err != nil {
+	if err := preflightCommandLine(args.Command, t.host.shell.CommandLine(args.Command) == ""); err != nil {
 		return errorResult(call.ID, "could not parse command line: "+err.Error()), nil
 	}
 
@@ -161,7 +172,7 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 		Command:  args.Command,
 		Argv:     argv,
 		Dir:      dir,
-		Env:      subprocessEnvScopedPath(t.root, t.secretEnv, consoleTermVar),
+		Env:      t.host.subprocessEnvScopedPath(t.root, t.secretEnv, consoleTermVar),
 		Confined: confined,
 		Prepare:  prepare,
 	})
@@ -185,14 +196,14 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 // consoleArgv resolves the argv the Console actually runs: the platform shell wrapped around the
 // model's command line, with the shell resolved to an absolute program.
 //
-// The resolution and the fence are the shared ones (shellArgv, exec_common.go): the platform
+// The resolution and the fence are the shared ones (execHost.shellArgv, exec_host.go): the platform
 // hands back a BARE "sh", and the fence measures argv[0] against the writable box — a bare name
 // would be measured against apogee's own working directory, which is the workspace itself, and
 // every open would be refused. Resolving first also puts the fence where it belongs: on the
 // program PATH actually leads to, so an `sh` planted inside the workspace is refused by name
 // rather than executed.
 func (t *ConsoleOpen) consoleArgv(ctx context.Context, callID, command string) ([]string, domain.ToolResult, bool) {
-	argv, err := shellArgv(ctx, t.root, command)
+	argv, err := t.host.shellArgv(ctx, t.root, command)
 	if err != nil {
 		return nil, errorResult(callID, err.Error()), false
 	}

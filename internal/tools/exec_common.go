@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
-	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/subprocess"
 )
@@ -56,24 +55,6 @@ func subprocessEnv(secretEnv []string, extra ...string) []string {
 		env = append(env, entry)
 	}
 	return append(env, extra...)
-}
-
-// subprocessEnvScopedPath returns subprocessEnv's environment with one further scrub applied to
-// the inherited half: the child's PATH drops every entry that lies inside workspaceRoot and every
-// entry that is not an absolute location (platform.Shell.ScopeInheritedEnv).
-//
-// It is what the tools handing the MODEL a shell or an interpreter take. They inherit the
-// operator's environment because that is the developer tooling they exist to run, but a
-// workspace-resident PATH entry — an activated .venv, node_modules/.bin — would otherwise let
-// bytes the model wrote become the `git`, the `ssh` or the `curl` that the subprocess, or
-// anything it spawns, resolves for itself: the plant-then-exec chain apogee refuses at its own
-// resolution sites (security.ResolveProgram) and cannot check inside somebody else's process.
-//
-// The extras are appended AFTER the scoping — they are apogee's own additions rather than
-// inherited values, and appending keeps them last-wins in the child, which is how every exec
-// implementation resolves a duplicate.
-func subprocessEnvScopedPath(workspaceRoot string, secretEnv []string, extra ...string) []string {
-	return append(shellHost.ScopeInheritedEnv(workspaceRoot, subprocessEnv(secretEnv)), extra...)
 }
 
 // isSecretEnv reports whether a "KEY=value" entry names a credential no subprocess the model
@@ -188,7 +169,7 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 // Two of the spec's fields carry a rule of this package's own. Env: EVERY tool that runs
 // something for the MODEL sets it — none of them inherits whole. git and the Go toolchain take an
 // allowlist scoped by platform.Host.ScopeEnv; the shell and interpreter tools take
-// subprocessEnvScopedPath() — the caller's environment minus every credential variable (apogee's
+// execHost.subprocessEnvScopedPath() — the caller's environment minus every credential variable (apogee's
 // own and the host-configured ones), with the child's PATH scoped out of the workspace; and the
 // test runner takes subprocessEnv(), the same minus the credentials, because a test suite needs
 // the toolchain variables its user's shell has but no subprocess of the model's needs apogee's
@@ -307,39 +288,4 @@ func diagnosticsExcerpt(diagnostics string) string {
 		trimmed = "…" + strings.ToValidUTF8(trimmed[len(trimmed)-maxSubprocessErrorExcerptBytes:], "")
 	}
 	return ": " + trimmed
-}
-
-// shellHost is the platform shell/path facility the terminal tool wraps a command line with
-// (sh -c on POSIX, cmd /c on Windows). It is a package var so a test can substitute a fake.
-var shellHost platform.Host = platform.Current()
-
-// resolveShell resolves the platform's shell NAME to the absolute program the tools launch,
-// through the exec fence's complete form (security.ResolveProgram): PATH lookup, a refusal for a
-// relative answer, then the writable-box refusal, measured against the workspace root and the
-// confinement box riding on ctx.
-//
-// Resolving is what makes the fence meaningful here. platform hands back a bare "sh", and the
-// fence measures argv[0] against the writable box — a bare name would be measured against
-// apogee's own working directory, which is the workspace itself. Resolving first also puts the
-// fence on the program PATH actually leads to, so an `sh` planted inside the workspace is refused
-// by name rather than executed.
-func resolveShell(ctx context.Context, root string) (string, error) {
-	return security.ResolveProgram(nil, shellHost.Shell(), root, confinementBox(ctx))
-}
-
-// shellArgv returns the argv that runs command through the platform shell, with argv[0] replaced
-// by the resolved, fenced program resolveShell answered with.
-//
-// It is binding for this package: shellHost.Command's bare argv[0] is never handed to
-// runSubprocess: every consumer that wraps a model-supplied line in the platform shell builds its
-// argv here, so there is exactly one place the shell is resolved and exactly one place it is
-// fenced.
-func shellArgv(ctx context.Context, root, command string) ([]string, error) {
-	shell, err := resolveShell(ctx, root)
-	if err != nil {
-		return nil, err
-	}
-	argv := shellHost.Command(command)
-	argv[0] = shell
-	return argv, nil
 }

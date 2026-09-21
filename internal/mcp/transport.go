@@ -191,7 +191,8 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 
 // stdioHost is the platform facility a stdio server's env-allowlist is scoped through (the
 // allowlisted keys, the platform's own essentials, PATH scoped away from the workspace). It is a
-// package var so a test can substitute a fake, the idiom internal/tools' shellHost follows.
+// package var so a test can substitute a fake (internal/tools' execution tools instead carry
+// their platform.Host on an execHost value each tool is built with).
 var stdioHost platform.Host = platform.Current()
 
 // stdioTerminateDuration is how long apogee's stdio shutdown ladder (stdinLadder.Close) waits at

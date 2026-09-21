@@ -381,7 +381,7 @@ func TestDiagnostics_VetSubprocessEnvironmentIsPinned(t *testing.T) {
 
 	root := tempRoot(t)
 	abs := filepath.Join(root, "pkg", "file.go")
-	spec := goVetSpec("/usr/bin/go", root, abs)
+	spec := goVetSpec(defaultExecHost(), "/usr/bin/go", root, abs)
 
 	if got, want := spec.Argv, []string{"/usr/bin/go", "vet", filepath.Join(root, "pkg")}; !slices.Equal(got, want) {
 		t.Errorf("vet argv = %q, want %q (the PACKAGE directory, not the file)", got, want)

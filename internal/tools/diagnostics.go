@@ -83,11 +83,22 @@ type diagnosticsArgs struct {
 type Diagnostics struct {
 	toolSpec
 	root string
+	// host is the operating system the tool launches through: the platform rules the vet
+	// toolchain's allowlisted environment is scoped through (execHost).
+	host execHost
 }
 
-// NewDiagnostics returns a diagnostics tool whose target path resolves within root.
+// NewDiagnostics returns a diagnostics tool whose target path resolves within root. It runs on
+// the real operating system (defaultExecHost); builtinTools builds the five execution tools on
+// one host through newDiagnostics.
 func NewDiagnostics(root string) *Diagnostics {
-	return &Diagnostics{toolSpec: diagnosticsSpec, root: root}
+	return newDiagnostics(root, defaultExecHost())
+}
+
+// newDiagnostics is NewDiagnostics with the host the tool launches through supplied — one
+// execHost shared by the execution tools in production, a host carrying fakes in a test.
+func newDiagnostics(root string, host execHost) *Diagnostics {
+	return &Diagnostics{toolSpec: diagnosticsSpec, root: root, host: host}
 }
 
 // ReadOnly reports that diagnostics performs no writes — it only inspects — an honest
@@ -208,7 +219,7 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 		return okResult(callID, cleanGoMessage(abs)+"\n\ngo vet skipped: no 'go' toolchain found on PATH."), nil
 	}
 
-	vet, hadFindings, err := runGoVet(ctx, goPath, t.root, abs)
+	vet, hadFindings, err := runGoVet(ctx, t.host, goPath, t.root, abs)
 	if err != nil {
 		// Only ctx cancellation reaches here (runGoVet's contract); surface it as a Go
 		// error so the loop rolls the Turn back rather than reporting a partial result.
@@ -263,8 +274,8 @@ func goSyntaxDiagnostics(abs string, src []byte) string {
 // including a dependency the pinned environment cannot resolve — degrades rather than
 // failing the diagnosis). go vet writes findings to stderr and
 // exits non-zero when it finds problems; a clean package exits zero with no output.
-func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, hadFindings bool, err error) {
-	res, runErr := runSubprocess(ctx, goVetSpec(goPath, root, abs))
+func runGoVet(ctx context.Context, h execHost, goPath, root, abs string) (findings string, hadFindings bool, err error) {
+	res, runErr := runSubprocess(ctx, goVetSpec(h, goPath, root, abs))
 	if runErr != nil {
 		// ctx cancellation, or a confinement-unavailable demotion (diagnostics takes
 		// the subprocess class, so dispatch does confine it — the demote signal must
@@ -291,12 +302,12 @@ func runGoVet(ctx context.Context, goPath, root, abs string) (findings string, h
 // inside root (abs was already resolved through the fence). That widening is what
 // vettedPackageLine states on the result, so the sentence the operator approved and the
 // scope the subprocess read are the same sentence.
-func goVetSpec(goPath, root, abs string) subprocess.SubprocessSpec {
+func goVetSpec(h execHost, goPath, root, abs string) subprocess.SubprocessSpec {
 	return subprocess.SubprocessSpec{
 		Argv:    []string{goPath, "vet", filepath.Dir(abs)},
 		Dir:     root,
 		Timeout: vetTimeout,
-		Env:     goVetEnv(root),
+		Env:     goVetEnv(h, root),
 	}
 }
 
@@ -353,9 +364,9 @@ var goVetPins = []string{
 // goVetEnv returns the exact environment the vet subprocess runs with: the allowlisted
 // host keys scoped to root (PATH first among them — the toolchain must not resolve its
 // own programs out of the workspace the model writes to), then the pins that decide how
-// the toolchain behaves.
-func goVetEnv(root string) []string {
-	return append(shellHost.ScopeEnv(root, goToolchainEnvKeys, os.LookupEnv), goVetPins...)
+// the toolchain behaves. The scoping is h's shell rules' (platform.Host.ScopeEnv).
+func goVetEnv(h execHost, root string) []string {
+	return append(h.shell.ScopeEnv(root, goToolchainEnvKeys, os.LookupEnv), goVetPins...)
 }
 
 // cleanGoMessage is the success text for a Go file with no syntax errors and no

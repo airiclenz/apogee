@@ -42,7 +42,7 @@ func withFakeInterpreter(t *testing.T, found bool, path string) {
 func withFakePythonVersion(t *testing.T, major, minor int, ok bool) {
 	t.Helper()
 	orig := interpreterVersion
-	interpreterVersion = func(context.Context, string, string, []string) (int, int, bool) { return major, minor, ok }
+	interpreterVersion = func(execHost, context.Context, string, string, []string) (int, int, bool) { return major, minor, ok }
 	t.Cleanup(func() { interpreterVersion = orig })
 }
 
@@ -327,7 +327,7 @@ func TestPythonVersionSpec_DropsTheConfiguredSecretNames(t *testing.T) {
 	// Not parallel: t.Setenv.
 	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
 
-	spec := pythonVersionSpec("/usr/bin/python3", t.TempDir(), []string{"APOGEE_TEST_PROVIDER_KEY"})
+	spec := pythonVersionSpec(defaultExecHost(), "/usr/bin/python3", t.TempDir(), []string{"APOGEE_TEST_PROVIDER_KEY"})
 	if value, ok := envValue(spec.Env, "APOGEE_TEST_PROVIDER_KEY"); ok {
 		t.Errorf("APOGEE_TEST_PROVIDER_KEY = %q reached the probe environment, want the configured name dropped", value)
 	}
@@ -376,7 +376,7 @@ func TestPythonVersionSpec_ScopesTheWorkspaceOffTheProbePATH(t *testing.T) {
 	path, inside, outside := workspacePATH(t, root)
 	t.Setenv("PATH", path)
 
-	spec := pythonVersionSpec(filepath.Join(outside, "python3"), root, nil)
+	spec := pythonVersionSpec(defaultExecHost(), filepath.Join(outside, "python3"), root, nil)
 	entries := envPathEntries(t, spec.Env)
 	if slices.Contains(entries, inside) {
 		t.Errorf("probe PATH = %q still names the in-workspace entry %q", entries, inside)
@@ -439,7 +439,7 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 	}
 	// No workspace root: this probe only reports which mechanism the run below exercises, so
 	// there is no box to scope its PATH out of.
-	major, minor, known := interpreterVersion(context.Background(), interp, "", nil)
+	major, minor, known := interpreterVersion(defaultExecHost(), context.Background(), interp, "", nil)
 	if !known {
 		t.Logf("%s did not report a version; the run below exercises the -I fallback", interp)
 	} else {

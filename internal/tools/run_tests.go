@@ -191,13 +191,23 @@ type RunTests struct {
 	// secretEnv names the host-configured credential variables to drop from the runner's
 	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
 	secretEnv []string
+	// host is the operating system the tool launches through (execHost).
+	host execHost
 }
 
 // NewRunTests returns a run_tests tool that detects and runs the suite of the project at root,
 // with the secretEnv variables dropped from the runner's environment on top of apogee's own
 // credentials (nil ⇒ apogee's own alone — the scrub as it was before the host could name any).
+// It runs on the real operating system (defaultExecHost); builtinTools builds the five execution
+// tools on one host through newRunTests.
 func NewRunTests(root string, secretEnv []string) *RunTests {
-	return &RunTests{toolSpec: runTestsSpec, root: root, secretEnv: secretEnv}
+	return newRunTests(root, secretEnv, defaultExecHost())
+}
+
+// newRunTests is NewRunTests with the host the tool launches through supplied — one execHost
+// shared by the execution tools in production, a host carrying fakes in a test.
+func newRunTests(root string, secretEnv []string, host execHost) *RunTests {
+	return &RunTests{toolSpec: runTestsSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
 // ReadOnly reports that run_tests is write-capable (false): a test suite is the project's own

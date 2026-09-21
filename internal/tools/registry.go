@@ -293,6 +293,14 @@ func DefaultToolsWithHost(root string, host HostTools) []domain.Tool {
 // KnownToolNames reads its names off it, so a default-off or unbacked tool is still a name apogee
 // knows while nothing offers it.
 func builtinTools(root string, host HostTools) []domain.Tool {
+	return builtinToolsWith(root, host, defaultExecHost())
+}
+
+// builtinToolsWith is builtinTools with the execHost the five execution tools (terminal,
+// python_exec, diagnostics, run_tests, console_open) are built on supplied: ONE host, built once
+// here and handed to each, so the operating system every one of them launches through is the same
+// value — which is what lets a test hand all five a host carrying fakes.
+func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 	mounts := host.readMounts()
 	return []domain.Tool{
 		NewReadFile(root, mounts),
@@ -307,16 +315,16 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		NewCopyFile(root, mounts),
 		NewMoveFile(root),
 		NewDeleteFile(root),
-		NewTerminal(root, host.SecretEnvVars),
-		NewPythonExec(root, host.SecretEnvVars),
+		newTerminal(root, host.SecretEnvVars, h),
+		newPythonExec(root, host.SecretEnvVars, h),
 		NewGitBranch(root),
 		NewGitCommit(root),
 		NewGitDiffRange(root),
 		NewGitStatus(root),
 		NewGitLog(root),
 		NewGitShow(root),
-		NewDiagnostics(root),
-		NewRunTests(root, host.SecretEnvVars),
+		newDiagnostics(root, h),
+		newRunTests(root, host.SecretEnvVars, h),
 		NewWebFetch(host.URLGuard),
 		NewHTTPRequest(host.URLGuard),
 		NewWebSearch(host.URLGuard, host.WebSearchEndpoint),
@@ -327,7 +335,7 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 		// The Console family (ADR 0059) sits last because it is the first family registered
 		// DEFAULT-OFF: nothing here reaches a default menu, so its place in build order costs no
 		// model a slot, and a roster that lifts it appends it after the tools every model gets.
-		NewConsoleOpen(root, host.SecretEnvVars),
+		newConsoleOpen(root, host.SecretEnvVars, h),
 		NewConsoleSend(),
 		NewConsoleRead(),
 		NewConsoleClose(),

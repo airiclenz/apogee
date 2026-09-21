@@ -94,10 +94,11 @@ const (
 
 // interpreterVersion reports interp's own (major, minor) version, with ok=false when the probe
 // could not be run or its output could not be read. workspaceRoot is the box the probe's own
-// PATH is scoped out of (pythonVersionSpec). It is a package var so a test can pin either side
-// of the 3.11 boundary without depending on the Python the host happens to ship.
-var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string, secretEnv []string) (major, minor int, ok bool) {
-	res, err := runSubprocess(ctx, pythonVersionSpec(interp, workspaceRoot, secretEnv))
+// PATH is scoped out of (pythonVersionSpec), through h's shell rules. It is a package var so a
+// test can pin either side of the 3.11 boundary without depending on the Python the host
+// happens to ship.
+var interpreterVersion = func(h execHost, ctx context.Context, interp, workspaceRoot string, secretEnv []string) (major, minor int, ok bool) {
+	res, err := runSubprocess(ctx, pythonVersionSpec(h, interp, workspaceRoot, secretEnv))
 	if err != nil || res.ExitCode != 0 {
 		return 0, 0, false
 	}
@@ -112,13 +113,13 @@ var interpreterVersion = func(ctx context.Context, interp, workspaceRoot string,
 // holds bytes the model cannot have authored — and the working directory is precisely what
 // would otherwise front sys.path for the -c program. Its environment is the same one the
 // snippet itself gets (minus PYTHONSAFEPATH, which only matters for the snippet): inherited,
-// less apogee's credentials, with the workspace scoped off PATH.
-func pythonVersionSpec(interp, workspaceRoot string, secretEnv []string) subprocess.SubprocessSpec {
+// less apogee's credentials, with the workspace scoped off PATH through h's shell rules.
+func pythonVersionSpec(h execHost, interp, workspaceRoot string, secretEnv []string) subprocess.SubprocessSpec {
 	return subprocess.SubprocessSpec{
 		Argv:    []string{interp, "-c", pythonVersionProgram},
 		Dir:     filepath.Dir(interp),
 		Timeout: pythonVersionProbeTimeout,
-		Env:     subprocessEnvScopedPath(workspaceRoot, secretEnv),
+		Env:     h.subprocessEnvScopedPath(workspaceRoot, secretEnv),
 	}
 }
 
@@ -189,13 +190,24 @@ type PythonExec struct {
 	// secretEnv names the host-configured credential variables to drop from the interpreter's
 	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
 	secretEnv []string
+	// host is the operating system the tool launches through: the platform rules the
+	// interpreter's environment is scoped through (execHost).
+	host execHost
 }
 
 // NewPythonExec returns a python-exec tool whose working directory resolves within root and whose
 // interpreter environment drops the secretEnv variables on top of apogee's own credentials (nil ⇒
-// apogee's own alone — the scrub as it was before the host could name any).
+// apogee's own alone — the scrub as it was before the host could name any). It runs on the real
+// operating system (defaultExecHost); builtinTools builds the five execution tools on one host
+// through newPythonExec.
 func NewPythonExec(root string, secretEnv []string) *PythonExec {
-	return &PythonExec{toolSpec: pythonExecSpec, root: root, secretEnv: secretEnv}
+	return newPythonExec(root, secretEnv, defaultExecHost())
+}
+
+// newPythonExec is NewPythonExec with the host the tool launches through supplied — one execHost
+// shared by the execution tools in production, a host carrying fakes in a test.
+func newPythonExec(root string, secretEnv []string, host execHost) *PythonExec {
+	return &PythonExec{toolSpec: pythonExecSpec, root: root, secretEnv: secretEnv, host: host}
 }
 
 // ReadOnly reports that python-exec is write-capable (false) — a script can write, so the
@@ -259,11 +271,11 @@ func (t *PythonExec) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// Both are decided here rather than in the snippet, so nothing is injected into the `code`
 	// the operator approved.
 	spec := subprocess.SubprocessSpec{
-		Argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(ctx, interp, t.root, t.secretEnv))),
+		Argv:    pythonArgv(interp, !honoursSafePath(interpreterVersion(t.host, ctx, interp, t.root, t.secretEnv))),
 		Dir:     dir,
 		Timeout: time.Duration(args.TimeoutSeconds) * time.Second,
 		Stdin:   args.Code,
-		Env:     subprocessEnvScopedPath(t.root, t.secretEnv, pythonSafePathVar),
+		Env:     t.host.subprocessEnvScopedPath(t.root, t.secretEnv, pythonSafePathVar),
 	}
 	res, err := runPythonSubprocess(ctx, spec)
 	if err != nil {
