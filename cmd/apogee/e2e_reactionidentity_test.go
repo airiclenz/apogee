@@ -150,13 +150,19 @@ var reactionIdentityCases = []reactionIdentityCase{
 // budget fraction. That is ~41.9k characters.
 //
 // There is a ceiling ABOVE it too, and the file has to stay under that one: a result estimated
-// above the whole History allocation — 60% of the same working window, ~62.9k characters — is
-// elided on its way INTO the conversation by the structural clamp (internal/agent/dispatch.go
-// clampToolResult), and a clamped result never grows past the guard's ceiling to be capped at all.
+// above the whole History allocation is elided on its way INTO the conversation by the structural
+// clamp (internal/agent/dispatch.go clampToolResult), and a clamped result never grows past the
+// guard's ceiling to be capped at all. History is no longer a fixed share of that window: it is the
+// working room less what this session's standing content MEASURES — each measured part plus 10%
+// headroom, floored at 2% of the room — and never below half the room (internal/context/budget.go
+// Allocate), then held under the emergency fold's transcript budget (agent.HistoryCap, 28160 tokens
+// at this window, above the working room, so it does not bind here). This run renders only the
+// built-in prompt and its orientation and seeds no context file, so both reservations stay small and
+// History lands far above the ~52.4k characters its half-the-room floor alone would guarantee.
 //
 // 1000 lines of 53 characters plus their newlines is ~54k: comfortably over the first and under the
-// second, with room for the header read_file prepends and for either fraction to be re-tuned by a
-// little without silently turning this row into a run that records nothing.
+// second, with room for the header read_file prepends and for the guard's fraction or the standing
+// measurement to move by a little without silently turning this row into a run that records nothing.
 const (
 	resultCapFileLines = 1000
 	resultCapFileLine  = "filler line for the tool-result cap identity row"
