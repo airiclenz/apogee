@@ -33,8 +33,8 @@ six-platform cross-build a loop over `GOOS`/`GOARCH` rather than six build envir
 **2. Every external program is a runtime-detected optional enhancement.** An executable apogee does
 not ship is resolved on `PATH` — at construction where the answer is stable, at call time where it
 is not — and its absence produces a **named, graceful result**, never a start-up failure and never a
-prerequisite the user must satisfy first. The realisations are the pattern: the five `git` tools
-resolve `git` through `lookGit` and answer "git not available"; `python_exec` probes `python3` then
+prerequisite the user must satisfy first. The realisations are the pattern: the `git` tools
+resolve `git` through their `execHost`'s look and answer "git not available"; `python_exec` probes `python3` then
 `python` and answers "python not available"; `diagnostics`' vet half degrades to a skipped note
 without a Go toolchain; `run_tests` reports "not available" for a runner its project markers named
 but the host lacks; `autofix` resolves `goimports`/`black`/`rustfmt` once at construction and leaves

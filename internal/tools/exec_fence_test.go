@@ -26,14 +26,6 @@ func plantExecutable(t *testing.T, root, rel string) string {
 	return path
 }
 
-// prependPATH puts dir ahead of the inherited PATH for the duration of one test — the everyday
-// shape of the collision the fence judges: an activated .venv or a node_modules/.bin sitting
-// ahead of the system entries and winning the lookup.
-func prependPATH(t *testing.T, dir string) {
-	t.Helper()
-	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
-}
-
 // TestEveryExecSiteRefusesAProgramInsideTheWorkspace walks the tool exec sites one by one and
 // pins the same rule at each: a program resolved on PATH that lands inside the workspace is
 // refused, and the refusal NAMES the resolved path. The table is the item's scope statement —
@@ -43,14 +35,15 @@ func prependPATH(t *testing.T, dir string) {
 //
 // The last two rows resolve the PLATFORM SHELL rather than a named tool, through the one
 // resolver both take (shellArgv → security.ResolveProgram), which is why a planted `sh` is
-// refused where a bare "sh" handed straight to os/exec would have been run.
+// refused where a bare "sh" handed straight to os/exec would have been run. Every row plants its
+// program through the tool's execHost look (fakeLookHost), so no row touches PATH or a package
+// var and the table runs in parallel.
 //
 // Naming the path is half the requirement, not a nicety: without it the operator reads a bare
 // "not available" and goes looking for an install, when the cause is a workspace-resident entry
 // on their own PATH.
 func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
-	// No t.Parallel anywhere below: the git row still swaps a package-level look* var, and
-	// the two shell rows plant their program through t.Setenv.
+	t.Parallel()
 	tests := []struct {
 		name string
 		// run plants a program inside root, points the tool's resolver at it, and returns
@@ -64,8 +57,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 			name: "git",
 			run: func(t *testing.T, root string) (string, string, bool) {
 				planted := plantExecutable(t, root, "node_modules/.bin/git")
-				withFakeGit(t, true, planted)
-				res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+				res, err := newGitStatus(root, fakeLookHost(true, planted)).Execute(context.Background(), statusCall("c1"))
 				if err != nil {
 					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 				}
@@ -116,8 +108,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 			run: func(t *testing.T, root string) (string, string, bool) {
 				skipWithoutPOSIXShell(t)
 				planted := plantExecutable(t, root, "node_modules/.bin/sh")
-				prependPATH(t, filepath.Dir(planted))
-				res, err := NewTerminal(root, nil).Execute(context.Background(), terminalCall("c1", "echo hi"))
+				res, err := newTerminal(root, nil, fakeLookHost(true, planted)).Execute(context.Background(), terminalCall("c1", "echo hi"))
 				if err != nil {
 					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 				}
@@ -130,9 +121,8 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 			run: func(t *testing.T, root string) (string, string, bool) {
 				skipWithoutPOSIXShell(t)
 				planted := plantExecutable(t, root, "node_modules/.bin/sh")
-				prependPATH(t, filepath.Dir(planted))
 				ctx, _ := consoleTestCtx(t)
-				res, err := NewConsoleOpen(root, nil).Execute(ctx, consoleOpenCall("c1", "echo hi", 10))
+				res, err := newConsoleOpen(root, nil, fakeLookHost(true, planted)).Execute(ctx, consoleOpenCall("c1", "echo hi", 10))
 				if err != nil {
 					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 				}
@@ -144,6 +134,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			root := tempRoot(t)
 			planted, content, isError := tt.run(t, root)
 			if isError != tt.wantError {

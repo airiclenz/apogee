@@ -259,8 +259,9 @@
 //
 // The subprocess plumbing. exec_host.go is execHost, the operating system as ONE value — PATH
 // lookup, the subprocess runner, the platform shell rules and the Console opener — that
-// builtinTools builds once and hands to the five execution tools, with the shell resolution and
-// the PATH-scoped environment as its methods. exec_common.go is the single runSubprocess every
+// builtinTools builds once and hands to the five execution tools, the six git tools and the two
+// git-staging file operations, with the shell resolution and the PATH-scoped environment as its
+// methods. exec_common.go is the single runSubprocess every
 // execution tool above calls — the environment scrub and the denial labels — plus
 // RunHookSubprocess, the one exported door onto that funnel, so a HOOK that must spawn (an engine-origin Go Reaction) gets
 // the same exec fence on its argv[0], scrub, teardown, cap and clamp instead of an exec.Command

@@ -55,10 +55,20 @@ type deleteFileArgs struct {
 type DeleteFile struct {
 	toolSpec
 	root string
+	// host is the execHost whose look resolves the git the deletion is staged through
+	// (stageGitPaths) — the one host builtinTools builds, so a test hands the tool a fake look.
+	host execHost
 }
 
-// NewDeleteFile returns a delete_file tool that resolves paths within root.
-func NewDeleteFile(root string) *DeleteFile { return &DeleteFile{toolSpec: deleteFileSpec, root: root} }
+// NewDeleteFile returns a delete_file tool that resolves paths within root and stages through the
+// git the real operating system resolves (defaultExecHost); builtinTools builds it on the shared
+// host through newDeleteFile.
+func NewDeleteFile(root string) *DeleteFile { return newDeleteFile(root, defaultExecHost()) }
+
+// newDeleteFile is NewDeleteFile with the host whose look resolves git supplied.
+func newDeleteFile(root string, host execHost) *DeleteFile {
+	return &DeleteFile{toolSpec: deleteFileSpec, root: root, host: host}
+}
 
 // ReadOnly reports that delete_file is write-capable — it returns false, the signal that the loop
 // must gate it through Approval in Ask-Before (domain.ReadOnlyTool).
@@ -130,7 +140,7 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	}
 	// Staging runs only after the unlink stands, and only ever adds to what the call reports: the
 	// probe reads the INDEX, so the path it takes is the one that was just removed from disk.
-	staged := stageGitPaths(ctx, t.root, " (deletion staged in git)", args.Path)
+	staged := stageGitPaths(ctx, t.root, t.host.look, " (deletion staged in git)", args.Path)
 	return okResult(call.ID, "deleted "+args.Path+resolved+staged), nil
 }
 

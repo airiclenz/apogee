@@ -286,8 +286,9 @@ func RunTo(ctx context.Context, dir string, env []string, timeout time.Duration,
 }
 
 // Query is Run for a caller that has already resolved (and fenced) its own git — the tools
-// package, whose lookup seam is its own package var. It is Run minus the resolution: the probe,
-// the hardening and the stdout-as-data contract are identical.
+// package, whose git tools resolve through the execHost they were built with rather than
+// LookPath. It is Run minus the resolution: the probe, the hardening and the stdout-as-data
+// contract are identical.
 func Query(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
 	return query(ctx, gitPath, dir, env, timeout, nil, args...)
 }

@@ -3,6 +3,8 @@ package tools
 import (
 	"context"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/gitexec"
 )
 
 // Git-aware file operations (2026-08-22) — the shared best-effort index update
@@ -57,7 +59,10 @@ import (
 // them: gitWrite runs with the workspace root as cwd and git resolves relative and
 // absolute-inside-repo pathspecs from there, so a workspace that is a SUBDIRECTORY of the
 // repository needs no special handling.
-func stageGitPaths(ctx context.Context, root, successNote string, paths ...string) string {
+//
+// look is the PATH lookup git is resolved through — the calling tool's execHost look, so the
+// staging git is the git that tool's host answers (a fake in a test, exec.LookPath in production).
+func stageGitPaths(ctx context.Context, root string, look gitexec.LookFunc, successNote string, paths ...string) string {
 	if len(paths) == 0 {
 		return ""
 	}
@@ -66,7 +71,7 @@ func stageGitPaths(ctx context.Context, root, successNote string, paths ...strin
 	// answer) are all silent skips: staging is a courtesy on top of an operation that already
 	// stands, and none of them is something the model can act on. gitWrite folds the first two
 	// into the same ok=false as the probe's own non-zero exit.
-	_, _, ok, err := gitWrite(ctx, root, "ls-files", []string{"--error-unmatch", "--", literalPathspec(paths[0])}, "")
+	_, _, ok, err := gitWrite(ctx, root, look, "ls-files", []string{"--error-unmatch", "--", literalPathspec(paths[0])}, "")
 	if err != nil || !ok {
 		return ""
 	}
@@ -79,7 +84,7 @@ func stageGitPaths(ctx context.Context, root, successNote string, paths ...strin
 	// A Go error here is a cancelled context or a confinement-unavailable demotion (the runGit
 	// contract) rather than git's own verdict; it is still a stage that did not happen, and the
 	// model is told the same way.
-	add, _, ok, err := gitWrite(ctx, root, "add", args, "")
+	add, _, ok, err := gitWrite(ctx, root, look, "add", args, "")
 	if err != nil {
 		return stagingSkipped(err.Error())
 	}

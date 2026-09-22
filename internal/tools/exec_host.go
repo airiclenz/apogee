@@ -14,12 +14,13 @@ import (
 // that launches a program for the MODEL reaches for — resolving a program name on PATH, running
 // a one-shot subprocess, the platform shell's rules, and opening a Console. It is ONE value the
 // five execution tools (terminal, python_exec, run_tests, diagnostics, console_open) are built
-// with, so a test hands a tool a host whose facilities are fakes rather than swapping a
-// package-level var beside every other test that reads it.
+// with — and the six git tools and the two git-staging file operations (move_file, delete_file)
+// take their git lookup from it — so a test hands a tool a host whose facilities are fakes rather
+// than swapping a package-level var beside every other test that reads it.
 //
 // It is unexported by decision (2026-09-20): the composition root builds exactly one through
-// defaultExecHost and builtinTools hands it to the five; a bench-facing HostTools field is one
-// addition away should a Driver need to supply its own.
+// defaultExecHost and builtinTools hands it to every tool that takes it; a bench-facing HostTools
+// field is one addition away should a Driver need to supply its own.
 type execHost struct {
 	// look resolves a program NAME to the absolute path PATH leads to — the lookup the exec fence
 	// (security.ResolveProgram) measures against the writable box.

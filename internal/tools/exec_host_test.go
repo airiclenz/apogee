@@ -51,8 +51,10 @@ func fakeLookHost(found bool, path string) execHost {
 type markerHost struct{ platform.Host }
 
 // TestBuiltinToolsShareOneExecHost pins the reason execHost exists: builtinTools builds ONE host
-// and every execution tool launches through that same value, so a test — or later a Driver —
-// that supplies a host has supplied it to all five, not to whichever tools happened to take it.
+// and every tool that takes one — the five execution tools, the six git tools and the two
+// git-staging file operations — launches and resolves through that same value, so a test — or
+// later a Driver — that supplies a host has supplied it to all thirteen, not to whichever tools
+// happened to take it.
 func TestBuiltinToolsShareOneExecHost(t *testing.T) {
 	t.Parallel()
 	marker := &markerHost{Host: platform.Current()}
@@ -72,11 +74,27 @@ func TestBuiltinToolsShareOneExecHost(t *testing.T) {
 			shells[tool.Name()] = typed.host.shell
 		case *ConsoleOpen:
 			shells[tool.Name()] = typed.host.shell
+		case *GitBranch:
+			shells[tool.Name()] = typed.host.shell
+		case *GitCommit:
+			shells[tool.Name()] = typed.host.shell
+		case *GitDiffRange:
+			shells[tool.Name()] = typed.host.shell
+		case *GitStatus:
+			shells[tool.Name()] = typed.host.shell
+		case *GitLog:
+			shells[tool.Name()] = typed.host.shell
+		case *GitShow:
+			shells[tool.Name()] = typed.host.shell
+		case *MoveFile:
+			shells[tool.Name()] = typed.host.shell
+		case *DeleteFile:
+			shells[tool.Name()] = typed.host.shell
 		}
 	}
 
-	if len(shells) != 5 {
-		t.Fatalf("found %d execution tools in the build, want 5: %v", len(shells), shells)
+	if len(shells) != 13 {
+		t.Fatalf("found %d host-holding tools in the build, want 13: %v", len(shells), shells)
 	}
 	for name, shell := range shells {
 		if shell != platform.Host(marker) {

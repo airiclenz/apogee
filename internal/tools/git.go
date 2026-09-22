@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -57,13 +56,6 @@ const gitTimeout = 15 * time.Second
 // separate diff ceiling.
 const gitDiffTimeout = 10 * time.Second
 
-// lookGit is the PATH lookup security.ResolveProgram performs for git (a package var so a test
-// can inject a fake resolver). Every resolution this package makes — each gitexec.Program and
-// gitexec.Resolve call — hands it to gitexec, so a swap here reaches the whole git family and
-// nothing else. The environment, the diff-level hardening (gitexec.DiffHardeningArgs) and the
-// command-config pattern are gitexec's own names; this package holds no aliases for them.
-var lookGit gitexec.LookFunc = exec.LookPath
-
 // runGit runs git with gitArgs in root under the per-call timeout and the hardened, scrubbed
 // environment, honouring the confinement handle the disposition installed (if any), and returns
 // the captured outcome in the core's shape. Every git TOOL invocation goes through here; the
@@ -89,8 +81,11 @@ func runGitUnchecked(ctx context.Context, gitPath, root string, timeout time.Dur
 // workspace-scoped environment (no APOGEE_API_KEY, no inherited config redirection), the
 // repo-local command-config refusal, and the §2.4 process-tree teardown.
 //
-// It resolves through this package's own lookGit rather than gitexec.Run's lookup, so a test
-// that plants a git for the tools plants it for the engine's git too.
+// It is gitexec.Run under this package's name: the engine's git resolves through
+// gitexec.LookPath, while the git TOOLS resolve through the execHost they were built with — a
+// test that plants a git for the tools hands it to their host; one that plants it for the
+// engine swaps gitexec.LookPath. The empty-args check stays here so the sentence is this
+// funnel's own.
 //
 // Every failure is ONE error and they are deliberately not distinguished: git absent, a fenced
 // binary, a refused repository, a non-zero exit, a timeout, a wedged drain and a cancelled ctx
@@ -104,11 +99,7 @@ func RunGitQuery(ctx context.Context, root string, timeout time.Duration, args .
 	if len(args) == 0 {
 		return "", errors.New("apogee: RunGitQuery: no git subcommand")
 	}
-	gitPath, err := gitexec.Resolve(ctx, root, lookGit)
-	if err != nil {
-		return "", err
-	}
-	return gitexec.Query(ctx, gitPath, root, nil, timeout, args...)
+	return gitexec.Run(ctx, root, nil, timeout, args...)
 }
 
 // gitResultText renders a captured git outcome as text the model reads: the
@@ -209,18 +200,19 @@ func gitReadTimeout(verb string) time.Duration {
 }
 
 // gitRead is the one read call the four RO-subproc git tools spawn through: it resolves git for
-// root (gitexec.Program, with this package's lookGit), runs the call's argv through runGit under
-// the verb's timeout, and renders the outcome with gitResultText. It returns the raw capture
-// alongside the rendering because two callers read the bytes rather than the text — git_show
-// hands res.CombinedOutput to renderFile untrimmed, git_status parses its porcelain — and text
-// is the model-facing sentence for the rest: on ok=false the failure (git absent or fenced, a
-// refused repository, or a non-zero exit rendered with failWording), on ok=true the success
-// rendered with fallback. A git that could not be resolved is returned in the same shape
+// root (gitexec.Program, with look — the calling tool's execHost look), runs the call's argv
+// through runGit under the verb's timeout, and renders the outcome with gitResultText. It
+// returns the raw capture alongside the rendering because two callers read the bytes rather than
+// the text — git_show hands res.CombinedOutput to renderFile untrimmed, git_status parses its
+// porcelain — and text is the model-facing sentence for the rest: on ok=false the failure (git
+// absent or fenced, a refused repository, or a non-zero exit rendered with failWording), on
+// ok=true the success rendered with fallback. A git that could not be resolved is returned in the
+// same shape
 // gitexec.Capture gives a refused repository — a failed outcome carrying the sentence — so a
 // caller has one failure branch. The Go error is non-nil only for ctx cancellation or a
 // confinement-unavailable demotion (the runSubprocess contract).
-func gitRead(ctx context.Context, root string, c gitReadCall) (res subprocess.SubprocessResult, text string, ok bool, err error) {
-	gitPath, refusal, ok := gitexec.Program(ctx, root, lookGit)
+func gitRead(ctx context.Context, root string, look gitexec.LookFunc, c gitReadCall) (res subprocess.SubprocessResult, text string, ok bool, err error) {
+	gitPath, refusal, ok := gitexec.Program(ctx, root, look)
 	if !ok {
 		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, refusal, false, nil
 	}
@@ -240,13 +232,14 @@ func gitRead(ctx context.Context, root string, c gitReadCall) (res subprocess.Su
 
 // gitWrite is the one call every MUTATING git invocation spawns through — git_branch's four
 // actions, git_commit's `add` and `commit`, and the staging helper's trackedness probe and
-// `add -A` (internal/tools/git_stage.go). It resolves git for root (gitexec.Program, with this
-// package's lookGit), runs `verb args...` through runGit under gitTimeout, and returns the raw
-// capture beside its rendering the way gitRead does: on ok=false text is the failure (git absent
-// or fenced, a refused repository, or a non-zero exit rendered with failWording); on ok=true it
-// is git's trimmed output, which may be empty — the success wording is the caller's, since it
-// names the action ("Created and switched to branch …", "commit created") and git_branch's list
-// re-renders the raw output first. A git that could not be resolved is returned in the shape
+// `add -A` (internal/tools/git_stage.go). It resolves git for root (gitexec.Program, with look —
+// the calling tool's execHost look), runs `verb args...` through runGit under gitTimeout, and
+// returns the raw capture beside its rendering the way gitRead does: on ok=false text is the
+// failure (git absent or fenced, a refused repository, or a non-zero exit rendered with
+// failWording); on ok=true it is git's trimmed output, which may be empty — the success wording
+// is the caller's, since it names the action ("Created and switched to branch …", "commit
+// created") and git_branch's list re-renders the raw output first. A git that could not be
+// resolved is returned in the shape
 // gitexec.Capture gives a refused repository — a failed outcome carrying the sentence — so a
 // caller has one failure branch. The Go error is non-nil only for ctx cancellation or a
 // confinement-unavailable demotion (the runSubprocess contract).
@@ -257,8 +250,8 @@ func gitRead(ctx context.Context, root string, c gitReadCall) (res subprocess.Su
 // (workspacePathspec) with the :(literal) magic (literalPathspec) on each, exactly as the
 // staging helper's pathspecs carry it. The read-side pre-check and summary git_commit makes
 // around its commit are reads and go through gitRead.
-func gitWrite(ctx context.Context, root, verb string, args []string, failWording string) (res subprocess.SubprocessResult, text string, ok bool, err error) {
-	gitPath, refusal, ok := gitexec.Program(ctx, root, lookGit)
+func gitWrite(ctx context.Context, root string, look gitexec.LookFunc, verb string, args []string, failWording string) (res subprocess.SubprocessResult, text string, ok bool, err error) {
+	gitPath, refusal, ok := gitexec.Program(ctx, root, look)
 	if !ok {
 		return subprocess.SubprocessResult{CombinedOutput: refusal, ExitCode: 1}, refusal, false, nil
 	}
@@ -309,10 +302,18 @@ var protectedBranches = map[string]bool{
 type GitBranch struct {
 	toolSpec
 	root string
+	host execHost
 }
 
-// NewGitBranch returns a git-branch tool operating in root.
-func NewGitBranch(root string) *GitBranch { return &GitBranch{toolSpec: gitBranchSpec, root: root} }
+// NewGitBranch returns a git-branch tool operating in root that resolves git on the real operating
+// system (defaultExecHost); builtinTools builds the git family on one host through newGitBranch.
+func NewGitBranch(root string) *GitBranch { return newGitBranch(root, defaultExecHost()) }
+
+// newGitBranch is NewGitBranch with the host whose look resolves git supplied — one execHost shared by
+// the execution tools in production, a host carrying a fake look in a test.
+func newGitBranch(root string, host execHost) *GitBranch {
+	return &GitBranch{toolSpec: gitBranchSpec, root: root, host: host}
+}
 
 // ReadOnly reports that git_branch is write-capable (false): create/switch/delete
 // mutate the repository.
@@ -341,7 +342,7 @@ func (t *GitBranch) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		return errorResult(call.ID, errMsg), nil
 	}
 
-	res, text, ok, err := gitWrite(ctx, t.root, gitArgs[0], gitArgs[1:], "git branch failed")
+	res, text, ok, err := gitWrite(ctx, t.root, t.host.look, gitArgs[0], gitArgs[1:], "git branch failed")
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
@@ -501,10 +502,18 @@ type gitCommitArgs struct {
 type GitCommit struct {
 	toolSpec
 	root string
+	host execHost
 }
 
-// NewGitCommit returns a git-commit tool operating in root.
-func NewGitCommit(root string) *GitCommit { return &GitCommit{toolSpec: gitCommitSpec, root: root} }
+// NewGitCommit returns a git-commit tool operating in root that resolves git on the real operating
+// system (defaultExecHost); builtinTools builds the git family on one host through newGitCommit.
+func NewGitCommit(root string) *GitCommit { return newGitCommit(root, defaultExecHost()) }
+
+// newGitCommit is NewGitCommit with the host whose look resolves git supplied — one execHost shared by
+// the execution tools in production, a host carrying a fake look in a test.
+func newGitCommit(root string, host execHost) *GitCommit {
+	return &GitCommit{toolSpec: gitCommitSpec, root: root, host: host}
+}
 
 // ReadOnly reports that git_commit is write-capable (false): it mutates the
 // repository's index and history.
@@ -544,7 +553,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// it rides the flags slot. A git that cannot be resolved at all is the same ok=false and
 	// falls through to the commit itself, which reports the refusal.
 	if args.Amend {
-		remotes, _, ok, err := gitRead(ctx, t.root, gitReadCall{
+		remotes, _, ok, err := gitRead(ctx, t.root, t.host.look, gitReadCall{
 			verb:  "branch",
 			flags: []string{"-r", "--contains", "HEAD"},
 		})
@@ -567,7 +576,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		if err != nil {
 			return errorResult(call.ID, err.Error()), nil
 		}
-		_, text, ok, err := gitWrite(ctx, t.root, "add", append([]string{"--"}, pathspecs...), "git add failed")
+		_, text, ok, err := gitWrite(ctx, t.root, t.host.look, "add", append([]string{"--"}, pathspecs...), "git add failed")
 		if err != nil {
 			return domain.ToolResult{}, err
 		}
@@ -594,7 +603,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if args.AllowEmpty {
 		commitArgs = append(commitArgs, "--allow-empty")
 	}
-	res, text, ok, err := gitWrite(ctx, t.root, "commit", commitArgs, "git commit failed")
+	res, text, ok, err := gitWrite(ctx, t.root, t.host.look, "commit", commitArgs, "git commit failed")
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
@@ -605,7 +614,7 @@ func (t *GitCommit) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	// Report the new commit's one-line summary (best-effort; the commit already
 	// succeeded, so a failed summary is not surfaced as the call's error). A read, so it
 	// goes through gitRead and carries the diff hardening every log does.
-	_, summary, ok, err := gitRead(ctx, t.root, gitReadCall{
+	_, summary, ok, err := gitRead(ctx, t.root, t.host.look, gitReadCall{
 		verb:          "log",
 		diffProducing: true,
 		flags:         []string{"-1", "--oneline"},
@@ -671,11 +680,17 @@ var validRef = regexp.MustCompile(`^[a-zA-Z0-9._\-/~^@{}]+$`)
 type GitDiffRange struct {
 	toolSpec
 	root string
+	host execHost
 }
 
-// NewGitDiffRange returns a git-diff-range tool operating in root.
-func NewGitDiffRange(root string) *GitDiffRange {
-	return &GitDiffRange{toolSpec: gitDiffRangeSpec, root: root}
+// NewGitDiffRange returns a git-diff-range tool operating in root that resolves git on the real operating
+// system (defaultExecHost); builtinTools builds the git family on one host through newGitDiffRange.
+func NewGitDiffRange(root string) *GitDiffRange { return newGitDiffRange(root, defaultExecHost()) }
+
+// newGitDiffRange is NewGitDiffRange with the host whose look resolves git supplied — one execHost shared by
+// the execution tools in production, a host carrying a fake look in a test.
+func newGitDiffRange(root string, host execHost) *GitDiffRange {
+	return &GitDiffRange{toolSpec: gitDiffRangeSpec, root: root, host: host}
 }
 
 // ReadOnly reports that git_diff_range performs no writes (a diff is harmless
@@ -748,7 +763,7 @@ func (t *GitDiffRange) Execute(ctx context.Context, call domain.ToolCall) (domai
 		pathspecs = append(pathspecs, literalPathspec(pathspec))
 	}
 
-	_, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+	_, text, ok, err := gitRead(ctx, t.root, t.host.look, gitReadCall{
 		verb:          "diff",
 		diffProducing: true,
 		flags:         flags,
@@ -806,10 +821,18 @@ type gitStatusReport struct {
 type GitStatus struct {
 	toolSpec
 	root string
+	host execHost
 }
 
-// NewGitStatus returns a git-status tool operating in root.
-func NewGitStatus(root string) *GitStatus { return &GitStatus{toolSpec: gitStatusSpec, root: root} }
+// NewGitStatus returns a git-status tool operating in root that resolves git on the real operating
+// system (defaultExecHost); builtinTools builds the git family on one host through newGitStatus.
+func NewGitStatus(root string) *GitStatus { return newGitStatus(root, defaultExecHost()) }
+
+// newGitStatus is NewGitStatus with the host whose look resolves git supplied — one execHost shared by
+// the execution tools in production, a host carrying a fake look in a test.
+func newGitStatus(root string, host execHost) *GitStatus {
+	return &GitStatus{toolSpec: gitStatusSpec, root: root, host: host}
+}
 
 // ReadOnly reports that git_status performs no writes (reading the index and working tree
 // changes nothing) — an honest statement about the tool, read by self-regulation's read/write
@@ -849,7 +872,7 @@ func (t *GitStatus) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	//
 	// It is the one read that produces no diff, so it carries no gitexec.DiffHardeningArgs —
 	// `git status` would reject them.
-	res, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+	res, text, ok, err := gitRead(ctx, t.root, t.host.look, gitReadCall{
 		verb:        "status",
 		flags:       []string{"--porcelain=v2", "--branch", "--ignore-submodules=dirty", "-z"},
 		failWording: "git status failed",
@@ -1068,10 +1091,18 @@ const gitLogDateFormat = "iso-strict"
 type GitLog struct {
 	toolSpec
 	root string
+	host execHost
 }
 
-// NewGitLog returns a git-log tool operating in root.
-func NewGitLog(root string) *GitLog { return &GitLog{toolSpec: gitLogSpec, root: root} }
+// NewGitLog returns a git-log tool operating in root that resolves git on the real operating
+// system (defaultExecHost); builtinTools builds the git family on one host through newGitLog.
+func NewGitLog(root string) *GitLog { return newGitLog(root, defaultExecHost()) }
+
+// newGitLog is NewGitLog with the host whose look resolves git supplied — one execHost shared by
+// the execution tools in production, a host carrying a fake look in a test.
+func newGitLog(root string, host execHost) *GitLog {
+	return &GitLog{toolSpec: gitLogSpec, root: root, host: host}
+}
 
 // ReadOnly reports that git_log performs no writes (reading history changes nothing) — an
 // honest statement about the tool, read by self-regulation's read/write tally. As with
@@ -1134,7 +1165,7 @@ func (t *GitLog) Execute(ctx context.Context, call domain.ToolCall) (domain.Tool
 		}
 		pathspecs = []string{literalPathspec(pathspec)}
 	}
-	_, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+	_, text, ok, err := gitRead(ctx, t.root, t.host.look, gitReadCall{
 		verb:          "log",
 		diffProducing: true,
 		flags: []string{
@@ -1255,10 +1286,18 @@ type gitShowArgs struct {
 type GitShow struct {
 	toolSpec
 	root string
+	host execHost
 }
 
-// NewGitShow returns a git-show tool operating in root.
-func NewGitShow(root string) *GitShow { return &GitShow{toolSpec: gitShowSpec, root: root} }
+// NewGitShow returns a git-show tool operating in root that resolves git on the real operating
+// system (defaultExecHost); builtinTools builds the git family on one host through newGitShow.
+func NewGitShow(root string) *GitShow { return newGitShow(root, defaultExecHost()) }
+
+// newGitShow is NewGitShow with the host whose look resolves git supplied — one execHost shared by
+// the execution tools in production, a host carrying a fake look in a test.
+func newGitShow(root string, host execHost) *GitShow {
+	return &GitShow{toolSpec: gitShowSpec, root: root, host: host}
+}
 
 // ReadOnly reports that git_show performs no writes (reading an object changes nothing) — an
 // honest statement about the tool, read by self-regulation's read/write tally. As with the other
@@ -1329,7 +1368,7 @@ func (t *GitShow) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	// `./` prefix makes git resolve the path against the process's cwd (the workspace root)
 	// rather than the repository root. --no-textconv matters here — `git show <ref>:<path>`
 	// would otherwise run the repository's textconv driver on the blob.
-	res, text, ok, err := gitRead(ctx, t.root, gitReadCall{
+	res, text, ok, err := gitRead(ctx, t.root, t.host.look, gitReadCall{
 		verb:          "show",
 		diffProducing: true,
 		object:        string(guarded) + ":./" + rel,

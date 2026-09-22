@@ -51,7 +51,7 @@ func TestStageGitPaths_StagesTrackedRename(t *testing.T) {
 	root := gitRepo(t)
 	renameOnDisk(t, root, "README.md", "GUIDE.md")
 
-	note := stageGitPaths(context.Background(), root, stagedNote, "README.md", "GUIDE.md")
+	note := stageGitPaths(context.Background(), root, exec.LookPath, stagedNote, "README.md", "GUIDE.md")
 
 	if note != stagedNote {
 		t.Fatalf("note = %q, want %q", note, stagedNote)
@@ -75,7 +75,7 @@ func TestStageGitPaths_UntrackedSourceIsLeftAlone(t *testing.T) {
 	}
 	renameOnDisk(t, root, "scratch.txt", "notes.txt")
 
-	if note := stageGitPaths(context.Background(), root, stagedNote, "scratch.txt", "notes.txt"); note != "" {
+	if note := stageGitPaths(context.Background(), root, exec.LookPath, stagedNote, "scratch.txt", "notes.txt"); note != "" {
 		t.Fatalf("note = %q, want empty for an untracked source", note)
 	}
 	status := gitStatusPorcelain(t, root)
@@ -96,7 +96,7 @@ func TestStageGitPaths_OutsideARepository(t *testing.T) {
 	}
 	renameOnDisk(t, root, "a.txt", "b.txt")
 
-	if note := stageGitPaths(context.Background(), root, stagedNote, "a.txt", "b.txt"); note != "" {
+	if note := stageGitPaths(context.Background(), root, exec.LookPath, stagedNote, "a.txt", "b.txt"); note != "" {
 		t.Fatalf("note = %q, want empty outside a repository", note)
 	}
 }
@@ -104,10 +104,10 @@ func TestStageGitPaths_OutsideARepository(t *testing.T) {
 // TestStageGitPaths_GitAbsent pins the graceful-absence half of §3a: with no git on PATH the
 // helper returns nothing rather than reporting a failure the operator cannot act on.
 func TestStageGitPaths_GitAbsent(t *testing.T) {
-	withFakeGit(t, false, "")
+	t.Parallel()
 
 	root := t.TempDir()
-	if note := stageGitPaths(context.Background(), root, stagedNote, "a.txt", "b.txt"); note != "" {
+	if note := stageGitPaths(context.Background(), root, fakeLook(false, ""), stagedNote, "a.txt", "b.txt"); note != "" {
 		t.Fatalf("note = %q, want empty when git is absent", note)
 	}
 }
@@ -120,7 +120,7 @@ func TestStageGitPaths_NoPaths(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	if note := stageGitPaths(context.Background(), root, stagedNote); note != "" {
+	if note := stageGitPaths(context.Background(), root, exec.LookPath, stagedNote); note != "" {
 		t.Fatalf("note = %q, want empty with no paths", note)
 	}
 	if status := gitStatusPorcelain(t, root); !strings.Contains(status, "?? stray.txt") {
@@ -142,7 +142,7 @@ func TestStageGitPaths_GlobMetacharacterFilename(t *testing.T) {
 	runInRepo(t, root, "commit", "-m", "bracketed file")
 	renameOnDisk(t, root, "file[1].txt", "file[2].txt")
 
-	note := stageGitPaths(context.Background(), root, stagedNote, "file[1].txt", "file[2].txt")
+	note := stageGitPaths(context.Background(), root, exec.LookPath, stagedNote, "file[1].txt", "file[2].txt")
 
 	if note != stagedNote {
 		t.Fatalf("note = %q, want %q", note, stagedNote)
@@ -247,7 +247,7 @@ func TestStageGitPaths_ConfinesTheGitChild(t *testing.T) {
 	renameOnDisk(t, root, "README.md", "GUIDE.md")
 	conf := &stagingConfiner{}
 
-	note := stageGitPaths(confinedStagingCtx(conf, root), root, stagedNote, "README.md", "GUIDE.md")
+	note := stageGitPaths(confinedStagingCtx(conf, root), root, exec.LookPath, stagedNote, "README.md", "GUIDE.md")
 
 	if note != stagedNote {
 		t.Fatalf("note = %q, want %q", note, stagedNote)
@@ -274,7 +274,7 @@ func TestStageGitPaths_UnconfinableChildIsANote(t *testing.T) {
 		renameOnDisk(t, root, "README.md", "GUIDE.md")
 		conf := &stagingConfiner{failFor: "add"}
 
-		note := stageGitPaths(confinedStagingCtx(conf, root), root, stagedNote, "README.md", "GUIDE.md")
+		note := stageGitPaths(confinedStagingCtx(conf, root), root, exec.LookPath, stagedNote, "README.md", "GUIDE.md")
 
 		if !strings.HasPrefix(note, " (git staging skipped:") {
 			t.Fatalf("note = %q, want a staging-skipped note", note)
@@ -289,7 +289,7 @@ func TestStageGitPaths_UnconfinableChildIsANote(t *testing.T) {
 		renameOnDisk(t, root, "README.md", "GUIDE.md")
 		conf := &stagingConfiner{failFor: "ls-files"}
 
-		if note := stageGitPaths(confinedStagingCtx(conf, root), root, stagedNote, "README.md", "GUIDE.md"); note != "" {
+		if note := stageGitPaths(confinedStagingCtx(conf, root), root, exec.LookPath, stagedNote, "README.md", "GUIDE.md"); note != "" {
 			t.Fatalf("note = %q, want empty: an unconfinable probe is a silent skip", note)
 		}
 	})

@@ -218,13 +218,11 @@ func TestDeleteFile_DisclosesTheResolvedTarget(t *testing.T) {
 // text, because it is what the model reads to learn that the index moved too.
 const deletionStagedNote = " (deletion staged in git)"
 
-// The three git-aware tests stay sequential: they drive real git, and the package's fake-resolver
-// tests (withFakeGit) swap the process-wide lookGit while they run.
-
 // TestDeleteFile_StagesTheDeletionOfATrackedFile is the point of the git-aware half: deleting a
 // committed file leaves the index holding that deletion — what `git rm` would have produced — and
 // the result says so instead of leaving the model to discover it through git_status.
 func TestDeleteFile_StagesTheDeletionOfATrackedFile(t *testing.T) {
+	t.Parallel()
 	root := realPath(t, gitRepo(t))
 
 	result := runFileOp(t, NewDeleteFile(root), map[string]any{"path": "README.md"})
@@ -244,6 +242,7 @@ func TestDeleteFile_StagesTheDeletionOfATrackedFile(t *testing.T) {
 // never knew about must leave the index exactly as it was, and the result text unchanged from what
 // the tool has always returned.
 func TestDeleteFile_UntrackedDeletionIsNotStaged(t *testing.T) {
+	t.Parallel()
 	root := realPath(t, gitRepo(t))
 	if err := writeFileForTest(root, "scratch.txt", "draft\n"); err != nil {
 		t.Fatalf("seed file: %v", err)
@@ -266,6 +265,7 @@ func TestDeleteFile_UntrackedDeletionIsNotStaged(t *testing.T) {
 // probe fails the same way an untracked file does, so the tool behaves byte-identically to the
 // version that knew nothing about git.
 func TestDeleteFile_NonRepoWorkspaceIsUnchanged(t *testing.T) {
+	t.Parallel()
 	root := tempRoot(t)
 	writeFixture(t, filepath.Join(root, "plain.txt"), "bytes\n", 0o644)
 

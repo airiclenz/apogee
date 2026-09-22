@@ -296,10 +296,12 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 	return builtinToolsWith(root, host, defaultExecHost())
 }
 
-// builtinToolsWith is builtinTools with the execHost the five execution tools (terminal,
-// python_exec, diagnostics, run_tests, console_open) are built on supplied: ONE host, built once
-// here and handed to each, so the operating system every one of them launches through is the same
-// value — which is what lets a test hand all five a host carrying fakes.
+// builtinToolsWith is builtinTools with the execHost the execution tools are built on supplied —
+// the five that launch a program for the model (terminal, python_exec, diagnostics, run_tests,
+// console_open), the six git tools and the two file operations that stage through git
+// (move_file, delete_file): ONE host, built once here and handed to each, so the operating system
+// every one of them resolves and launches through is the same value — which is what lets a test
+// hand all of them a host carrying fakes.
 func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 	mounts := host.readMounts()
 	return []domain.Tool{
@@ -313,16 +315,16 @@ func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
 		NewEditExistingFile(root),
 		NewViewDiff(root),
 		NewCopyFile(root, mounts),
-		NewMoveFile(root),
-		NewDeleteFile(root),
+		newMoveFile(root, h),
+		newDeleteFile(root, h),
 		newTerminal(root, host.SecretEnvVars, h),
 		newPythonExec(root, host.SecretEnvVars, h),
-		NewGitBranch(root),
-		NewGitCommit(root),
-		NewGitDiffRange(root),
-		NewGitStatus(root),
-		NewGitLog(root),
-		NewGitShow(root),
+		newGitBranch(root, h),
+		newGitCommit(root, h),
+		newGitDiffRange(root, h),
+		newGitStatus(root, h),
+		newGitLog(root, h),
+		newGitShow(root, h),
 		newDiagnostics(root, h),
 		newRunTests(root, host.SecretEnvVars, h),
 		NewWebFetch(host.URLGuard),

@@ -19,20 +19,17 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-// withFakeGit swaps lookGit for the duration of a test (restored on cleanup), so the
-// graceful-degradation and confine paths are exercisable without depending on the host. It
-// fakes the LOOK alone — the fence security.ResolveProgram applies to what the look answers is
-// the real one, which is what makes the planted-git refusal a genuine assertion.
-func withFakeGit(t *testing.T, found bool, path string) {
+// swapEngineGitLook swaps gitexec.LookPath — the lookup the ENGINE's own git (RunGitQuery →
+// gitexec.Run) resolves through — for the duration of a test, restored on cleanup. The git TOOLS
+// never read it: they resolve through the execHost they were built with, so a test plants a git
+// for a tool by handing it fakeLookHost. It fakes the LOOK alone — the fence
+// security.ResolveProgram applies to what the look answers is the real one, which is what makes
+// the planted-git refusal a genuine assertion. A test calling it cannot be parallel.
+func swapEngineGitLook(t *testing.T, path string) {
 	t.Helper()
-	orig := lookGit
-	lookGit = func(string) (string, error) {
-		if !found {
-			return "", exec.ErrNotFound
-		}
-		return path, nil
-	}
-	t.Cleanup(func() { lookGit = orig })
+	orig := gitexec.LookPath
+	gitexec.LookPath = fakeLook(true, path)
+	t.Cleanup(func() { gitexec.LookPath = orig })
 }
 
 // gitRepo creates an initialized git repository in a fresh temp dir with a committed
@@ -230,32 +227,34 @@ func TestGit_Markers(t *testing.T) {
 // ----------------------------------------------------------------------------
 
 func TestGit_GracefulWhenAbsent(t *testing.T) {
-	withFakeGit(t, false, "")
+	t.Parallel()
+	absent := fakeLookHost(false, "")
 	root := t.TempDir()
 
 	cases := []struct {
 		name string
-		exec func() (domain.ToolResult, error)
+		exec func(h execHost) (domain.ToolResult, error)
 	}{
-		{"branch", func() (domain.ToolResult, error) {
-			return NewGitBranch(root).Execute(context.Background(), branchCall("c1", `{"action":"list"}`))
+		{"branch", func(h execHost) (domain.ToolResult, error) {
+			return newGitBranch(root, h).Execute(context.Background(), branchCall("c1", `{"action":"list"}`))
 		}},
-		{"commit", func() (domain.ToolResult, error) {
-			return NewGitCommit(root).Execute(context.Background(), commitCall("c1", `{"message":"x"}`))
+		{"commit", func(h execHost) (domain.ToolResult, error) {
+			return newGitCommit(root, h).Execute(context.Background(), commitCall("c1", `{"message":"x"}`))
 		}},
-		{"diff", func() (domain.ToolResult, error) {
-			return NewGitDiffRange(root).Execute(context.Background(), diffCall("c1", `{"base":"a","head":"b"}`))
+		{"diff", func(h execHost) (domain.ToolResult, error) {
+			return newGitDiffRange(root, h).Execute(context.Background(), diffCall("c1", `{"base":"a","head":"b"}`))
 		}},
-		{"status", func() (domain.ToolResult, error) {
-			return NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+		{"status", func(h execHost) (domain.ToolResult, error) {
+			return newGitStatus(root, h).Execute(context.Background(), statusCall("c1"))
 		}},
-		{"log", func() (domain.ToolResult, error) {
-			return NewGitLog(root).Execute(context.Background(), logCall("c1", `{}`))
+		{"log", func(h execHost) (domain.ToolResult, error) {
+			return newGitLog(root, h).Execute(context.Background(), logCall("c1", `{}`))
 		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := tc.exec()
+			t.Parallel()
+			res, err := tc.exec(absent)
 			if err != nil {
 				t.Fatalf("Execute err = %v, want nil (absence must degrade, not crash)", err)
 			}
@@ -293,11 +292,11 @@ func TestGitBranch_NameRequired(t *testing.T) {
 }
 
 func TestGitBranch_ProtectedDeleteBlocked(t *testing.T) {
-	// Not parallel: withFakeGit swaps the package-level lookGit var.
+	t.Parallel()
 	// No git needed: the protected-branch check rejects before the subprocess.
-	withFakeGit(t, true, "/usr/bin/git")
+	present := fakeLookHost(true, "/usr/bin/git")
 	for _, name := range []string{"main", "Master", "develop", "development"} {
-		res, err := NewGitBranch(t.TempDir()).Execute(context.Background(),
+		res, err := newGitBranch(t.TempDir(), present).Execute(context.Background(),
 			branchCall("c1", fmt.Sprintf(`{"action":"delete","name":%q}`, name)))
 		if err != nil {
 			t.Fatalf("Execute err = %v", err)
@@ -312,10 +311,10 @@ func TestGitBranch_ProtectedDeleteBlocked(t *testing.T) {
 // branch name or start-point that git would read as an option flag is refused before the
 // subprocess runs (the git tools use argv arrays, so this is the remaining injection class).
 func TestGitBranch_RejectsOptionLikeArgs(t *testing.T) {
-	// Not parallel: withFakeGit swaps the package-level lookGit var. The guard rejects before
-	// the subprocess, but a present git keeps the test honest that the guard — not a missing
-	// git — is what blocks.
-	withFakeGit(t, true, "/usr/bin/git")
+	t.Parallel()
+	// The guard rejects before the subprocess, but a present git keeps the test honest that the
+	// guard — not a missing git — is what blocks.
+	present := fakeLookHost(true, "/usr/bin/git")
 
 	cases := []struct {
 		name    string
@@ -329,7 +328,8 @@ func TestGitBranch_RejectsOptionLikeArgs(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			res, err := NewGitBranch(t.TempDir()).Execute(context.Background(), branchCall("c1", tc.args))
+			t.Parallel()
+			res, err := newGitBranch(t.TempDir(), present).Execute(context.Background(), branchCall("c1", tc.args))
 			if err != nil {
 				t.Fatalf("Execute err = %v", err)
 			}
@@ -483,9 +483,8 @@ func TestGitDiffRange_RefValidation(t *testing.T) {
 }
 
 func TestGitDiffRange_PathEscapeRejected(t *testing.T) {
-	// Not parallel: withFakeGit swaps the package-level lookGit var.
-	withFakeGit(t, true, "/usr/bin/git")
-	dr := NewGitDiffRange(t.TempDir())
+	t.Parallel()
+	dr := newGitDiffRange(t.TempDir(), fakeLookHost(true, "/usr/bin/git"))
 	res, err := dr.Execute(context.Background(),
 		diffCall("c1", `{"base":"main","head":"dev","paths":["../../etc/passwd"]}`))
 	if err != nil {
@@ -758,9 +757,8 @@ func TestGitBranch_RunsUnderConfine(t *testing.T) {
 }
 
 func TestGitCommit_ConfinementUnavailablePropagates(t *testing.T) {
-	// Not parallel: withFakeGit swaps the package-level lookGit var.
-	withFakeGit(t, true, "/usr/bin/git")
-	co := NewGitCommit(t.TempDir())
+	t.Parallel()
+	co := newGitCommit(t.TempDir(), fakeLookHost(true, "/usr/bin/git"))
 	conf := &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}, unavailable: true}
 	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
 		Confiner: conf,
@@ -1026,6 +1024,7 @@ func TestGitStatus_IgnoresSubmoduleWorkTreeDirt(t *testing.T) {
 // effect: a fake git records the argv it was launched with, so the flag cannot be lost to a
 // refactor that keeps the two-case behaviour above passing by accident.
 func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
+	t.Parallel()
 	posixScriptHost(t)
 
 	dir := t.TempDir()
@@ -1035,9 +1034,8 @@ func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
 	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
-	withFakeGit(t, true, fakeGit)
 
-	res, err := NewGitStatus(t.TempDir()).Execute(context.Background(), statusCall("c1"))
+	res, err := newGitStatus(t.TempDir(), fakeLookHost(true, fakeGit)).Execute(context.Background(), statusCall("c1"))
 	if err != nil {
 		t.Fatalf("status err = %v", err)
 	}
@@ -1084,6 +1082,7 @@ func TestGitStatus_PassesIgnoreSubmodulesDirty(t *testing.T) {
 // TestGitCommit_PassesNoGpgSign uses), so it asserts what git was LAUNCHED with rather than what
 // the rendered result happens to look like.
 func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
+	t.Parallel()
 	posixScriptHost(t)
 
 	root := t.TempDir()
@@ -1093,7 +1092,7 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 
 	for _, tc := range []struct {
 		name   string
-		exec   func(root string) (domain.ToolResult, error)
+		exec   func(root string, h execHost) (domain.ToolResult, error)
 		verb   string
 		assert func(t *testing.T, argv []string)
 	}{
@@ -1102,8 +1101,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 			// literally — the same list TestGitStatus_PassesIgnoreSubmodulesDirty asserts.
 			name: "git_status",
 			verb: "status",
-			exec: func(root string) (domain.ToolResult, error) {
-				return NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+			exec: func(root string, h execHost) (domain.ToolResult, error) {
+				return newGitStatus(root, h).Execute(context.Background(), statusCall("c1"))
 			},
 			assert: func(t *testing.T, argv []string) {
 				t.Helper()
@@ -1119,8 +1118,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 			// typo'd ref into a loud failure rather than a plausible wrong history.
 			name: "git_log",
 			verb: "log",
-			exec: func(root string) (domain.ToolResult, error) {
-				return NewGitLog(root).Execute(context.Background(), logCall("c1", `{"ref":"HEAD"}`))
+			exec: func(root string, h execHost) (domain.ToolResult, error) {
+				return newGitLog(root, h).Execute(context.Background(), logCall("c1", `{"ref":"HEAD"}`))
 			},
 			assert: func(t *testing.T, argv []string) {
 				t.Helper()
@@ -1137,8 +1136,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 			// three-dot range itself — a "--" asserted here would be asserting a bug.
 			name: "git_diff_range without paths",
 			verb: "diff",
-			exec: func(root string) (domain.ToolResult, error) {
-				return NewGitDiffRange(root).Execute(context.Background(), diffCall("c1", `{"base":"main","head":"HEAD"}`))
+			exec: func(root string, h execHost) (domain.ToolResult, error) {
+				return newGitDiffRange(root, h).Execute(context.Background(), diffCall("c1", `{"base":"main","head":"HEAD"}`))
 			},
 			assert: func(t *testing.T, argv []string) {
 				t.Helper()
@@ -1162,8 +1161,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 			// (literalPathspec), not an absolute real path.
 			name: "git_diff_range with paths",
 			verb: "diff",
-			exec: func(root string) (domain.ToolResult, error) {
-				return NewGitDiffRange(root).Execute(context.Background(), diffCall("c1", `{"base":"main","head":"HEAD","paths":["a.txt"]}`))
+			exec: func(root string, h execHost) (domain.ToolResult, error) {
+				return newGitDiffRange(root, h).Execute(context.Background(), diffCall("c1", `{"base":"main","head":"HEAD","paths":["a.txt"]}`))
 			},
 			assert: func(t *testing.T, argv []string) {
 				t.Helper()
@@ -1192,8 +1191,8 @@ func TestGitReadTrio_ArgvCarriesTheHardening(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Not parallel: withFakeGit swaps the package-level lookGit var.
-			argv := recordGitArgv(t, tc.verb, func() (domain.ToolResult, error) { return tc.exec(root) })
+			t.Parallel()
+			argv := recordGitArgv(t, tc.verb, func(h execHost) (domain.ToolResult, error) { return tc.exec(root, h) })
 			tc.assert(t, argv)
 		})
 	}
@@ -1214,8 +1213,9 @@ func hasHardeningPair(argv []string) bool {
 // recordGitArgv runs one tool call against a fake git that appends every invocation it receives
 // to a record file, and returns the argv from the first line carrying verb — the repo-local
 // command-config probe's own `config … --get-regexp` invocations are recorded first, so the
-// subcommand is what identifies the line the tool itself chose.
-func recordGitArgv(t *testing.T, verb string, run func() (domain.ToolResult, error)) []string {
+// subcommand is what identifies the line the tool itself chose. run receives the host whose
+// look resolves the fake git, so it constructs the tool under test on that host.
+func recordGitArgv(t *testing.T, verb string, run func(h execHost) (domain.ToolResult, error)) []string {
 	t.Helper()
 
 	dir := t.TempDir()
@@ -1225,9 +1225,8 @@ func recordGitArgv(t *testing.T, verb string, run func() (domain.ToolResult, err
 	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
-	withFakeGit(t, true, fakeGit)
 
-	res, err := run()
+	res, err := run(fakeLookHost(true, fakeGit))
 	if err != nil {
 		t.Fatalf("%s err = %v", verb, err)
 	}
@@ -1983,6 +1982,7 @@ func TestGit_RepoLocalAliasIsNotRefused(t *testing.T) {
 // commit.gpgsign=true would otherwise launch the configured gpg program on every commit. A fake
 // git records the argv it was launched with, so the assertion is about the real command line.
 func TestGitCommit_PassesNoGpgSign(t *testing.T) {
+	t.Parallel()
 	posixScriptHost(t)
 
 	dir := t.TempDir()
@@ -1992,9 +1992,8 @@ func TestGitCommit_PassesNoGpgSign(t *testing.T) {
 	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
-	withFakeGit(t, true, fakeGit)
 
-	res, err := NewGitCommit(t.TempDir()).Execute(context.Background(),
+	res, err := newGitCommit(t.TempDir(), fakeLookHost(true, fakeGit)).Execute(context.Background(),
 		commitCall("c1", `{"message":"a commit"}`))
 	if err != nil {
 		t.Fatalf("commit err = %v", err)
@@ -2034,7 +2033,7 @@ func TestRunGitQuery_ReturnsStdoutAloneAndAppliesHardening(t *testing.T) {
 	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
-	withFakeGit(t, true, fakeGit)
+	swapEngineGitLook(t, fakeGit)
 	t.Setenv("APOGEE_API_KEY", "shhh-secret")
 
 	out, err := RunGitQuery(context.Background(), t.TempDir(), gitTimeout, "status", "--porcelain")
@@ -2067,7 +2066,7 @@ func TestRunGitQuery_ReturnsStdoutAloneAndAppliesHardening(t *testing.T) {
 func TestRunGitQuery_RefusesAPlantedGit(t *testing.T) {
 	root := t.TempDir()
 	planted := plantExecutable(t, root, "node_modules/.bin/git")
-	withFakeGit(t, true, planted)
+	swapEngineGitLook(t, planted)
 
 	_, err := RunGitQuery(context.Background(), root, gitTimeout, "status", "--porcelain")
 
@@ -2090,7 +2089,7 @@ func TestRunGitQuery_NonZeroExitIsAnError(t *testing.T) {
 	if err := os.WriteFile(fakeGit, []byte("#!/bin/sh\necho 'fatal: not a git repository' >&2\nexit 128\n"), 0o755); err != nil {
 		t.Fatalf("write fake git: %v", err)
 	}
-	withFakeGit(t, true, fakeGit)
+	swapEngineGitLook(t, fakeGit)
 
 	_, err := RunGitQuery(context.Background(), t.TempDir(), gitTimeout, "rev-parse", "--is-inside-work-tree")
 
@@ -2247,13 +2246,14 @@ func TestGitShow_InheritsTheOpenEndedCap(t *testing.T) {
 // textconv driver) and the object spelled `<ref>:./<relative path>`, so git resolves it against
 // the process's cwd — with no "--" after it, since an object is neither a bare ref nor a pathspec.
 func TestGitShow_ArgvIsHardenedAndCwdRelative(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	argv := recordGitArgv(t, "show", func() (domain.ToolResult, error) {
-		return NewGitShow(root).Execute(context.Background(), showCall("c1", `{"ref":"v1.2","path":"docs/guide.md"}`))
+	argv := recordGitArgv(t, "show", func(h execHost) (domain.ToolResult, error) {
+		return newGitShow(root, h).Execute(context.Background(), showCall("c1", `{"ref":"v1.2","path":"docs/guide.md"}`))
 	})
 	if !hasHardeningPair(argv) {
 		t.Errorf("show argv = %q, want it to carry --no-textconv --no-ext-diff", argv)
@@ -2355,6 +2355,7 @@ func TestGuardRef(t *testing.T) {
 // when it printed nothing — the success wording is the caller's), and an absent git is the same
 // ok=false carrying the graceful sentence, in the shape a refused repository already takes.
 func TestGitWrite_RendersTheOutcome(t *testing.T) {
+	t.Parallel()
 	posixScriptHost(t)
 
 	for _, tc := range []struct {
@@ -2401,16 +2402,15 @@ func TestGitWrite_RendersTheOutcome(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			// Not parallel: withFakeGit swaps the package-level lookGit var.
+			t.Parallel()
 			fakeGit := filepath.Join(t.TempDir(), "fake-git")
 			if tc.found {
 				if err := os.WriteFile(fakeGit, []byte(tc.script), 0o755); err != nil {
 					t.Fatalf("write fake git: %v", err)
 				}
 			}
-			withFakeGit(t, tc.found, fakeGit)
 
-			res, text, ok, err := gitWrite(context.Background(), t.TempDir(), "add", []string{"-A", "--", "a.txt"}, tc.failWording)
+			res, text, ok, err := gitWrite(context.Background(), t.TempDir(), fakeLook(tc.found, fakeGit), "add", []string{"-A", "--", "a.txt"}, tc.failWording)
 
 			if err != nil {
 				t.Fatalf("gitWrite err = %v", err)
@@ -2433,14 +2433,15 @@ func TestGitWrite_RendersTheOutcome(t *testing.T) {
 // (workspacePathspec, trailing slash kept) under the :(literal) magic (literalPathspec), not as
 // the absolute real paths the fence resolved.
 func TestGitCommit_StagesWorkspaceRelativePathspecs(t *testing.T) {
+	t.Parallel()
 	posixScriptHost(t)
 
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
 		t.Fatalf("mkdir docs: %v", err)
 	}
-	argv := recordGitArgv(t, "add", func() (domain.ToolResult, error) {
-		return NewGitCommit(root).Execute(context.Background(),
+	argv := recordGitArgv(t, "add", func(h execHost) (domain.ToolResult, error) {
+		return newGitCommit(root, h).Execute(context.Background(),
 			commitCall("c1", `{"message":"m","files":["a.txt","docs/"]}`))
 	})
 
@@ -2485,10 +2486,11 @@ func TestCommitPathspecsMatchTheCommitTool(t *testing.T) {
 // kept, so the ref position stays terminated and TestGitLog_PathShapedRefIsNotAPathspecLog's
 // guarantee is untouched.
 func TestGitLog_PathNarrowsAfterTheDoubleDash(t *testing.T) {
+	t.Parallel()
 	root := t.TempDir()
 
-	argv := recordGitArgv(t, "log", func() (domain.ToolResult, error) {
-		return NewGitLog(root).Execute(context.Background(), logCall("c1", `{"path":"internal/"}`))
+	argv := recordGitArgv(t, "log", func(h execHost) (domain.ToolResult, error) {
+		return newGitLog(root, h).Execute(context.Background(), logCall("c1", `{"path":"internal/"}`))
 	})
 	if n := len(argv); n < 3 || argv[n-3] != "HEAD" || argv[n-2] != "--" || argv[n-1] != ":(literal)internal/" {
 		t.Errorf("log argv = %q, want it to end HEAD -- :(literal)internal/", argv)
