@@ -153,7 +153,10 @@ func TestApprovalSeam_TwinCoalescesWhileItWaits(t *testing.T) {
 		d, err := seam.Approve(context.Background(), req)
 		twin <- answer{d, err}
 	}()
-	time.Sleep(20 * time.Millisecond) // long enough for the twin to be genuinely queued behind it
+	// Both callers run on context.Background(), so both take the seam's own private slot. The twin
+	// read the memory before queueing and found nothing, so it is genuinely inside Acquire — which
+	// is the state the re-check on the far side of the wait exists for.
+	waitForQueuedCallers(t, seam.(*queuedApprover).slot, 1, "the twin")
 
 	close(inner.release) // the human allows it for the session; the twin gets the slot next
 

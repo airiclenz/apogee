@@ -76,7 +76,7 @@ func TestPromptSlot_CancelledTurnReleasesEitherKindOfWaiter(t *testing.T) {
 			queued <- err
 		}()
 
-		time.Sleep(20 * time.Millisecond) // long enough for the question to be genuinely waiting
+		waitForQueuedCallers(t, slot, 1, "the question queued behind the visible approval")
 		cancel()
 
 		select {
@@ -121,7 +121,7 @@ func TestPromptSlot_CancelledTurnReleasesEitherKindOfWaiter(t *testing.T) {
 			got <- answer{d, err}
 		}()
 
-		time.Sleep(20 * time.Millisecond) // long enough for the approval to be genuinely waiting
+		waitForQueuedCallers(t, slot, 1, "the approval queued behind the visible question")
 		cancel()
 
 		select {
@@ -191,5 +191,44 @@ func TestStep_DesignatesOnePromptSlotForTheWholeTree(t *testing.T) {
 	}
 	if seen[1] != seen[0] {
 		t.Error("a sub-agent's Step replaced the tree's prompt slot; siblings would stop queueing against each other")
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Observing a queued caller (plan 2026-09-22 - 01, item 9)
+// ----------------------------------------------------------------------------
+
+// queuedCallerCeiling bounds a poll for a caller to appear inside domain.PromptSlot.Acquire. It is
+// deliberately generous: the poll returns the instant the count matches, so the headroom costs a
+// healthy run nothing and is only ever spent on a box loaded enough to leave a goroutine
+// unscheduled for seconds — which is exactly what the 20ms sleeps it replaced could not survive.
+//
+// It is NOT the assertion. Each caller of waitForQueuedCallers only reaches its real deadline —
+// the 3 * time.Second the test then gives the cancelled caller to answer — once the queue state is
+// established, so that deadline keeps its full bite however generous this ceiling is: widening the
+// wait for "the caller is queued" never widens the window in which the ctx-aware wait must react.
+const queuedCallerCeiling = 10 * time.Second
+
+// waitForQueuedCallers blocks until slot reports want callers inside Acquire, failing the test with
+// what — a phrase naming the thing that never queued — if that has not happened within
+// queuedCallerCeiling.
+//
+// Waiting() counts callers INSIDE Acquire, not callers that are stuck, so it must only ever be read
+// while a first caller demonstrably holds the slot: every call site here follows a <-entered
+// handshake with a blocking delegate, which is what makes a reading of want mean "queued behind the
+// visible prompt" rather than merely "somebody called Acquire".
+func waitForQueuedCallers(t *testing.T, slot *domain.PromptSlot, want int, what string) {
+	t.Helper()
+
+	deadline := time.Now().Add(queuedCallerCeiling)
+	for {
+		got := slot.Waiting()
+		if got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: Waiting() was %d after %s, want %d", what, got, queuedCallerCeiling, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

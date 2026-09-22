@@ -68,7 +68,10 @@ func TestQueuedAsker_QueuedQuestionAnswersItsOwnCancellation(t *testing.T) {
 		queued <- reply{ans, err}
 	}()
 
-	time.Sleep(20 * time.Millisecond) // long enough for the second question to be genuinely waiting
+	// Both callers run on context.Background(), so neither designates a slot and both take the
+	// seam's own private one — which is why the count is read off q rather than off a slot the
+	// test built.
+	waitForQueuedAskers(t, q.(*queuedAsker).slot, 1, "the second question")
 	cancel()
 
 	select {
@@ -188,4 +191,43 @@ type askerFunc func(context.Context, domain.AskRequest) (domain.AskAnswer, error
 
 func (f askerFunc) Ask(ctx context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
 	return f(ctx, req)
+}
+
+// ----------------------------------------------------------------------------
+// Observing a queued caller (plan 2026-09-22 - 01, item 9)
+// ----------------------------------------------------------------------------
+
+// queuedAskerCeiling bounds a poll for a caller to appear inside domain.PromptSlot.Acquire. It is
+// deliberately generous: the poll returns the instant the count matches, so the headroom costs a
+// healthy run nothing and is only ever spent on a box loaded enough to leave a goroutine
+// unscheduled for seconds — which is exactly what the 20ms sleep it replaced could not survive.
+//
+// It is NOT the assertion. The test only reaches its real deadline — the 3 * time.Second it then
+// gives the cancelled question to answer — once the queue state is established, so that deadline
+// keeps its full bite however generous this ceiling is: widening the wait for "the question is
+// queued" never widens the window in which the ctx-aware wait must react.
+const queuedAskerCeiling = 10 * time.Second
+
+// waitForQueuedAskers blocks until slot reports want callers inside Acquire, failing the test with
+// what — a phrase naming the thing that never queued — if that has not happened within
+// queuedAskerCeiling.
+//
+// Waiting() counts callers INSIDE Acquire, not callers that are stuck, so it must only ever be read
+// while a first caller demonstrably holds the slot: the call site here follows a <-inner.entered
+// handshake with a blocking Asker, which is what makes a reading of want mean "queued behind the
+// visible question" rather than merely "somebody called Acquire".
+func waitForQueuedAskers(t *testing.T, slot *domain.PromptSlot, want int, what string) {
+	t.Helper()
+
+	deadline := time.Now().Add(queuedAskerCeiling)
+	for {
+		got := slot.Waiting()
+		if got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("%s: Waiting() was %d after %s, want %d", what, got, queuedAskerCeiling, want)
+		}
+		time.Sleep(time.Millisecond)
+	}
 }

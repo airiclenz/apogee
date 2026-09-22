@@ -221,7 +221,10 @@ func TestQueuedApprover_QueuedRequestAnswersItsOwnCancellation(t *testing.T) {
 		queued <- answer{d, err}
 	}()
 
-	time.Sleep(20 * time.Millisecond) // long enough for the second request to be genuinely waiting
+	// Both callers run on context.Background(), so neither designates a slot and both take the
+	// seam's own private one — which is why the count is read off q rather than off a slot the
+	// test built.
+	waitForQueuedCallers(t, q.(*queuedApprover).slot, 1, "the second request")
 	cancel()
 
 	select {

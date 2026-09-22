@@ -458,7 +458,12 @@ go test -race ./internal/domain/... -run 'PromptSlot'
 
 **Commit:** `test(domain): PromptSlot reports a waiting caller instead of a test timing one`
 
-## 9. The queued-caller tests block on the waiter count, not on a sleep
+## 9. The queued-caller tests block on the waiter count, not on a sleep — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the item's Acceptance `-race` run cannot execute on this host — ThreadSanitizer refuses the kernel's 47-bit VMA ("Found 47 - Supported 48") for every package, touched or not; the same tests pass with `go test -count=2 ./internal/agent/... ./internal/tools/... -run 'PromptSlot|Approval|Queued|AskUser'`.
+NOTES (2026-09-23): the Acceptance grep is non-empty by design — it returns only `internal/tools/terminal_test.go:446`, the `pidAlive` poll interval the item's regression guard explicitly permits to remain.
+NOTES (2026-09-23): the poll ceiling is a per-package const (`queuedCallerCeiling` in internal/agent, `queuedAskerCeiling` in internal/tools) rather than one shared constant — the two packages cannot share a test helper, and neither may export one for the other.
+NOTES (2026-09-23): verified the converted twin row still bites — with the seam's post-wait cache re-check disabled, `TestApprovalSeam_TwinCoalescesWhileItWaits` fails on "the human was asked 2 times ... want 1"; `internal/agent/construct.go` was restored unchanged afterwards.
 
 **What.** The test half of `apogee-7fmu`'s sleep family. Depends on item 8.
 **Goal:** none of the queued-caller tests asserts another goroutine has reached a blocking point by
