@@ -287,7 +287,11 @@ go test ./cmd/apogee/... -run 'ConfinementJourney|AutoDegrad|Degraded'
 
 **Commit:** `fix(probe): the degraded-confinement notice names why the backend cannot fence`
 
-## 5. run_tests takes a timeout the model can raise
+## 5. run_tests takes a timeout the model can raise — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): `condenseTestOutput` gained a `budget time.Duration` parameter so the timeout line renders `min(budget, subprocess.MaxSubprocessTimeout)`; its four existing test call sites pass `runTestsTimeout`.
+
+NOTES (2026-09-23): `docs/design/archived/technical-design.md` still says run_tests has "a 300s ceiling" — left as written, it is the archived historical record.
 
 **What.** The `run_tests` half of `apogee-v0e8`. Depends on item 6, the raised ceiling, which lands
 first.

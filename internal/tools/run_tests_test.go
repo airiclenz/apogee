@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/subprocess"
@@ -406,6 +408,125 @@ func TestRunTestsDropsTheConfiguredSecretNamesFromTheRunnerEnvironment(t *testin
 	}
 }
 
+// TestRunTestsSchemaAdvertisesTheTimeoutItApplies pins that the model is told about
+// timeout_seconds AND told the real numbers: the default is rendered from runTestsTimeout and the
+// ceiling from subprocess.MaxSubprocessTimeout, so a resized budget cannot leave a stale figure in
+// the schema a model plans against.
+func TestRunTestsSchemaAdvertisesTheTimeoutItApplies(t *testing.T) {
+	t.Parallel()
+
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(NewRunTests(t.TempDir(), nil).Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	prop, ok := schema.Properties["timeout_seconds"]
+	if !ok {
+		t.Fatal("schema is missing the timeout_seconds property: a slow suite has no way to ask for more time")
+	}
+	if prop["type"] != "integer" {
+		t.Errorf("timeout_seconds type = %v, want integer (terminal's shape)", prop["type"])
+	}
+	description, _ := prop["description"].(string)
+	for _, want := range []string{
+		fmt.Sprintf("default %d", int(runTestsTimeout.Seconds())),
+		fmt.Sprintf("max %d", int(subprocess.MaxSubprocessTimeout.Seconds())),
+	} {
+		if !strings.Contains(description, want) {
+			t.Errorf("the timeout_seconds description must state %q (rendered, not restated by hand): %q", want, description)
+		}
+	}
+}
+
+// TestRunTestsRequestedTimeoutReachesTheRunner pins the point of the parameter: a model that asks
+// for more time gets it on the spec the runner is launched with, handed through untouched — the
+// ceiling is internal/subprocess's to apply, not this tool's to duplicate.
+func TestRunTestsRequestedTimeoutReachesTheRunner(t *testing.T) {
+	t.Parallel()
+
+	program := filepath.Join(t.TempDir(), "go")
+	h, captured := capturedRunHost(t)
+	h.look = fakeLook(true, program)
+
+	root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
+	runTestsCallOn(t, root, h, map[string]any{"timeout_seconds": 2400})
+
+	if want := 2400 * time.Second; captured.Timeout != want {
+		t.Errorf("spec.Timeout = %s, want %s — the requested budget must reach the run", captured.Timeout, want)
+	}
+}
+
+// TestRunTestsAbsentTimeoutFallsBackToTheToolDefault pins the fallback half: a call naming no
+// budget — or naming zero — runs under runTestsTimeout, this tool's own default. Handing the zero
+// straight through would select subprocess.DefaultSubprocessTimeout instead, which is a sixth of
+// it: a suite that passes today would start timing out.
+func TestRunTestsAbsentTimeoutFallsBackToTheToolDefault(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args map[string]any
+	}{
+		{name: "absent", args: nil},
+		{name: "zero", args: map[string]any{"timeout_seconds": 0}},
+		{name: "negative", args: map[string]any{"timeout_seconds": -5}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			program := filepath.Join(t.TempDir(), "go")
+			h, captured := capturedRunHost(t)
+			h.look = fakeLook(true, program)
+
+			root := writeProject(t, map[string]string{"go.mod": "module example.test/x\n\ngo 1.21\n"})
+			runTestsCallOn(t, root, h, tc.args)
+
+			if captured.Timeout != runTestsTimeout {
+				t.Errorf("spec.Timeout = %s, want the run_tests default %s", captured.Timeout, runTestsTimeout)
+			}
+			if captured.Timeout == subprocess.DefaultSubprocessTimeout {
+				t.Errorf("spec.Timeout fell back to the subprocess default %s rather than the tool's own", subprocess.DefaultSubprocessTimeout)
+			}
+		})
+	}
+}
+
+// TestRunTestsTimeoutLineQuotesTheAppliedBudget pins the sentence the model actually reads when a
+// run expires: it names the budget the run was GIVEN, so a raised timeout is not reported as the
+// package default — and a request above the ceiling is reported as the ceiling, which is what the
+// run really had, rather than as the number the model asked for.
+func TestRunTestsTimeoutLineQuotesTheAppliedBudget(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		budget time.Duration
+		want   string
+	}{
+		{name: "the default when none was asked for", budget: runTestsTimeout, want: "timed out after " + runTestsTimeout.String()},
+		{name: "the raised budget the model asked for", budget: 1800 * time.Second, want: "timed out after 30m0s"},
+		{
+			name:   "a request over the ceiling names the ceiling",
+			budget: 2 * subprocess.MaxSubprocessTimeout,
+			want:   "timed out after " + subprocess.MaxSubprocessTimeout.String(),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{
+				CombinedOutput: "ok  \texample.test/x\n", TimedOut: true,
+			}, tc.budget)
+			if !strings.Contains(firstLineOf(got), tc.want) {
+				t.Errorf("the timeout line = %q, want it to state %q", firstLineOf(got), tc.want)
+			}
+		})
+	}
+}
+
 // TestRunTestsCondensesRunnerReportedCounts pins the two runners that print their OWN tally: their
 // sentence is quoted rather than re-derived, and their failure blocks are recognised — asserted on
 // captured output, so neither pytest nor npm has to be installed for the mapping to be pinned.
@@ -435,7 +556,7 @@ func TestRunTestsCondensesRunnerReportedCounts(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := condenseTestOutput(tc.runner, "cmd", subprocess.SubprocessResult{CombinedOutput: tc.output, ExitCode: 1})
+			got := condenseTestOutput(tc.runner, "cmd", subprocess.SubprocessResult{CombinedOutput: tc.output, ExitCode: 1}, runTestsTimeout)
 			if !strings.HasPrefix(got, "FAIL ("+tc.runner.name+")") {
 				t.Errorf("the verdict must lead: %q", firstLineOf(got))
 			}
@@ -456,7 +577,7 @@ func TestRunTestsCondensesAFailureWithNoRecognisableTest(t *testing.T) {
 	t.Parallel()
 
 	output := "# example.test/x [example.test/x.test]\n./x_test.go:6:2: undefined: helper\nFAIL\texample.test/x [build failed]\n"
-	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: output, ExitCode: 2})
+	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: output, ExitCode: 2}, runTestsTimeout)
 
 	if !strings.Contains(got, "undefined: helper") {
 		t.Errorf("a build failure's own message must survive the condensing:\n%s", got)
@@ -478,7 +599,7 @@ func TestRunTestsCapKeepsTheClosingNote(t *testing.T) {
 		fmt.Fprintf(&out, "--- FAIL: TestHuge%03d (0.00s)\n", i)
 		out.WriteString("    " + strings.Repeat("d", 400) + "\n")
 	}
-	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: out.String(), ExitCode: 1})
+	got := condenseTestOutput(goTestRunner, "go test ./...", subprocess.SubprocessResult{CombinedOutput: out.String(), ExitCode: 1}, runTestsTimeout)
 
 	assertUnderCap(t, got)
 	if !strings.HasSuffix(strings.TrimRight(got, "\n"), "full log]") {
@@ -497,7 +618,7 @@ func TestRunTestsCapHoldsAgainstAnOversizedFilter(t *testing.T) {
 
 	filter := strings.Repeat("T", 20000)
 	display := displayCommand(goTestRunner, goTestRunner.args("", filter))
-	got := condenseTestOutput(goTestRunner, display, subprocess.SubprocessResult{CombinedOutput: "ok\n", ExitCode: 0})
+	got := condenseTestOutput(goTestRunner, display, subprocess.SubprocessResult{CombinedOutput: "ok\n", ExitCode: 0}, runTestsTimeout)
 
 	assertUnderCap(t, got)
 	if !strings.HasSuffix(strings.TrimRight(got, "\n"), "full log]") {

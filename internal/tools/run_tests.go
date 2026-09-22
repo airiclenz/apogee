@@ -39,11 +39,15 @@ import (
 // (ADR 0008) — a fresh runner process per call.
 
 const (
-	// runTestsTimeout bounds one test run. A suite is the longest-running thing an execution
-	// tool starts, so the ceiling sits well above the 120s subprocess default — but it is
-	// still a ceiling: a wedged suite ends as a timed-out result the model can read rather
-	// than a Turn nobody can end.
-	runTestsTimeout = 300 * time.Second
+	// runTestsTimeout bounds one test run when the model names no budget of its own. A suite is
+	// the longest-running thing an execution tool starts, so the default sits well above the 120s
+	// subprocess default — and it is sized for the slowest hardware apogee is built for rather
+	// than for a developer laptop: a full suite with a cold build cache on a throttled
+	// single-board box runs well past five minutes, and cutting it off there reports a healthy
+	// suite as a timeout. It is still a default, not the ceiling: a run that needs longer asks
+	// for it through timeout_seconds, and a wedged suite still ends as a timed-out result the
+	// model can read rather than a Turn nobody can end.
+	runTestsTimeout = 900 * time.Second
 	// maxRunTestsResultBytes hard-caps the WHOLE condensed result, closing note included.
 	// Flooding a small context is the failure this tool is built to prevent, so the cap binds
 	// the text that leaves the tool, not merely the part of it the condenser chose to quote.
@@ -71,18 +75,38 @@ var runTestsSpec = toolSpec{
 	// the log — with the escape hatch named, so needing the full output leads to terminal
 	// rather than to a second run_tests call that returns the same summary.
 	description: "Run the project's test suite and get a CONDENSED summary — never the full log. The runner is detected from project markers: go.mod ⇒ 'go test', pytest.ini or a pyproject.toml pytest section ⇒ 'pytest', package.json with a test script ⇒ 'npm test'. The result gives PASS/FAIL, the counts the runner reports, and the first failing tests with their first error lines, capped at 8 KB. Use terminal when you need the complete output.",
-	schema: json.RawMessage(`{
+	// The timeout_seconds description is RENDERED from this tool's own default and
+	// internal/subprocess's ceiling, never restated by hand: the numbers the model is told are
+	// the numbers the run actually applies, so a resized budget cannot leave the advertised one
+	// behind (terminal's shape).
+	schema: json.RawMessage(fmt.Sprintf(`{
   "type": "object",
   "properties": {
     "path": {"type": "string", "description": "Optional subtree to test, relative to the workspace root (default: the whole project). It is handed to the detected runner in that runner's own native form"},
-    "filter": {"type": "string", "description": "Optional test-name pattern, mapped to the detected runner's own filter flag (go: -run, pytest: -k, npm: -t)"}
+    "filter": {"type": "string", "description": "Optional test-name pattern, mapped to the detected runner's own filter flag (go: -run, pytest: -k, npm: -t)"},
+    "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds for the whole run (default %d, max %d). Raise it when the suite is slow rather than re-running a timed-out one"}
   }
-}`),
+}`,
+		int(runTestsTimeout.Seconds()),
+		int(subprocess.MaxSubprocessTimeout.Seconds()),
+	)),
 }
 
 type runTestsArgs struct {
-	Path   string `json:"path"`
-	Filter string `json:"filter"`
+	Path           string `json:"path"`
+	Filter         string `json:"filter"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+}
+
+// runTestsBudget resolves the budget one run is governed by from the optional timeout_seconds: an
+// absent or zero value falls back to runTestsTimeout — this tool's OWN default, never the 120s
+// subprocess one a zero Timeout would otherwise select — and a positive value is handed through
+// untouched, because internal/subprocess.run is the single place the ceiling is applied.
+func runTestsBudget(requested int) time.Duration {
+	if requested <= 0 {
+		return runTestsTimeout
+	}
+	return time.Duration(requested) * time.Second
 }
 
 // testRunner describes one supported test runner: how it is detected, how its argv is built
@@ -217,11 +241,11 @@ func (t *RunTests) ReadOnly() bool { return false }
 // marker the disposition keys on to confine it in Auto rather than gating it.
 func (t *RunTests) Subprocess() bool { return true }
 
-// Execute detects the runner, runs it under the run-tests timeout, and returns the condensed
-// result: a success result when the suite passed, an error result when it failed (so the model
-// sees the failure the way it sees a non-zero terminal exit). No marker, a missing runner
-// program, a path escape, and an option-shaped argument are all surfaced as results; only ctx
-// cancellation or a confinement-unavailable demotion is a Go error.
+// Execute detects the runner, runs it under the requested budget or the run-tests default, and
+// returns the condensed result: a success result when the suite passed, an error result when it
+// failed (so the model sees the failure the way it sees a non-zero terminal exit). No marker, a
+// missing runner program, a path escape, and an option-shaped argument are all surfaced as
+// results; only ctx cancellation or a confinement-unavailable demotion is a Go error.
 func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {
 	if err := ctx.Err(); err != nil {
 		return domain.ToolResult{}, err
@@ -270,17 +294,18 @@ func (t *RunTests) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// runs that work in the user's shell — but the runner it starts is repo-authored code, which
 	// under this threat model is untrusted bytes with no business reading the key apogee talks to
 	// its inference server with.
+	budget := runTestsBudget(args.TimeoutSeconds)
 	res, err := t.host.run(ctx, subprocess.SubprocessSpec{
 		Argv:    append([]string{program}, runnerArgs...),
 		Dir:     t.root,
-		Timeout: runTestsTimeout,
+		Timeout: budget,
 		Env:     subprocessEnv(t.secretEnv),
 	})
 	if err != nil {
 		return domain.ToolResult{}, err
 	}
 
-	condensed := condenseTestOutput(runner, displayCommand(runner, runnerArgs), res)
+	condensed := condenseTestOutput(runner, displayCommand(runner, runnerArgs), res, budget)
 	if res.ExitCode != 0 || res.TimedOut {
 		return errorResult(call.ID, condensed), nil
 	}
@@ -406,7 +431,7 @@ func displayCommand(runner testRunner, args []string) string {
 // A failing run with no recognisable failing test — a compile error, a pytest collection error —
 // falls back to the HEAD of the log, because that is where all three runners report the failure
 // that stopped them before any test ran.
-func condenseTestOutput(runner testRunner, display string, res subprocess.SubprocessResult) string {
+func condenseTestOutput(runner testRunner, display string, res subprocess.SubprocessResult, budget time.Duration) string {
 	// The command echo is model-supplied text (a filter is copied into it verbatim), so it is
 	// clipped like any other quoted line BEFORE the footer reserves room for it. Unclipped, a
 	// filter longer than the cap would push the footer alone past the byte limit this tool
@@ -424,7 +449,10 @@ func condenseTestOutput(runner testRunner, display string, res subprocess.Subpro
 	fmt.Fprintf(&b, "%s (%s)", verdict, runner.name)
 	switch {
 	case res.TimedOut:
-		fmt.Fprintf(&b, " — timed out after %s", runTestsTimeout)
+		// The budget the RUN was given, not the package default — and never the requested value:
+		// a model asking for more than the subprocess ceiling is silently cut back to it, so the
+		// line would otherwise name a budget no run ever had.
+		fmt.Fprintf(&b, " — timed out after %s", min(budget, subprocess.MaxSubprocessTimeout))
 	case failed:
 		fmt.Fprintf(&b, " — exit code %d", res.ExitCode)
 	}
