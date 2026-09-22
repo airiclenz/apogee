@@ -102,10 +102,12 @@ func TestRunFeedsStdinAndAppendsTheEnvironmentLast(t *testing.T) {
 
 // TestRunReportsTheDeadlineRatherThanWaitingOnASleep is the bound that keeps one wedged command
 // from holding its caller. A command that IS the sleep dies with the deadline and nothing else is
-// owed. A wrapper-shaped one — a shell that spawned the sleep — leaves a grandchild holding the
-// stderr pipe it inherited, and the copy behind that pipe would block forever; WaitGrace is what
-// bounds it, so that case must finish soon after the grace and never later. Both the caller's own
-// context deadline and Options.Timeout are the deadline.
+// owed. A wrapper-shaped one — a shell that spawned the sleep — dies with its process group, the
+// sleep included (TestRunKillsAWrappersGrandchildOnTimeout pins that half); what the bound here
+// still guards is the drain, since a descendant that detached with setsid can hold the stderr pipe
+// past the kill and WaitGrace is what ends the copy behind it, so that case must finish soon after
+// the grace and never later. Both the caller's own context deadline and Options.Timeout are the
+// deadline.
 func TestRunReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	requireShell(t)
 	t.Parallel()

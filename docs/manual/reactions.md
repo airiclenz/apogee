@@ -250,8 +250,11 @@ The rest of the posture, which is the one an `api-key-cmd:` already runs under:
   failure notice.
 - **A non-zero exit is a failure** and is reported to you. So is a program that cannot be found or
   is refused by the fence.
-- **`timeout:` (default `30s`) ends the run.** The process is killed, and a wrapper that left a
-  grandchild holding the stderr pipe gets a further two seconds before apogee stops waiting on it.
+- **`timeout:` (default `30s`) ends the run.** The command's whole process group is killed, so a
+  wrapper's grandchild dies with it rather than surviving the deadline — and a process the command
+  leaves behind dies when the command does, on a clean exit too; `setsid` detaches it from the
+  group and is the one way to leave something running. A detached process still holding the stderr
+  pipe gets a further two seconds before apogee stops waiting on it.
 
 ## Sending a webhook
 

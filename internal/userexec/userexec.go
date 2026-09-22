@@ -1,7 +1,8 @@
 // Package userexec runs the USER's own argv — a Reaction's `run:` list, a server entry's
 // `api-key-cmd:` — under the one exec posture both of those share. It is a leaf: it imports
-// internal/security for the program fence and nothing else of apogee's, so any package that holds a
-// user-configured command line can call it without pulling a subsystem in.
+// internal/security for the program fence and internal/platform for the process-tree teardown, and
+// nothing else of apogee's, so any package that holds a user-configured command line can call it
+// without pulling a subsystem in.
 //
 // The posture, and why each half is a refusal of an easier shape:
 //
@@ -14,12 +15,20 @@
 // could have written, which is what security.ResolveProgram refuses (ADR 0073 §6). The box is nil:
 // these commands run on apogee's own behalf, before or beside any confinement box, so the workspace
 // root the caller holds is the whole fence — and an empty root fences nothing, for the Drivers that
-// have no workspace to name.
+// have no workspace to name. What the command does get is the process-tree teardown every apogee
+// subprocess runs under (platform.NewProcessTeardown, RunWithTeardown): the child leads its own
+// process group, the deadline kills that group rather than the leader alone, and the group is
+// reaped when the leader exits on its own too — a process the command leaves behind dies when the
+// command does, and only a descendant that detached with setsid survives. That is a safety net,
+// never the fence (ADR 0020): supervision of what the user's command spawned, not a limit on what
+// it may do.
 //
 // No terminal. The child gets only the stdin the caller hands it and neither of apogee's standard
-// streams: it is running under a TUI that owns the terminal, so a tool that tried to prompt there
-// would draw over the frame and read the keystrokes meant for apogee. A backend that has to ask the
-// human to unlock must prompt through a GUI agent (pinentry-mac, the Keychain dialog).
+// streams: it is running under a TUI that owns the terminal, and since the child leads a process
+// group of its own it is outside the terminal's foreground group, so a tool that opens /dev/tty to
+// prompt there is stopped by SIGTTIN until the deadline kills it, rather than ever reading the
+// keystrokes meant for apogee. A backend that has to ask the human to unlock must prompt through a
+// GUI agent (pinentry-mac, the Keychain dialog).
 //
 // Bounded, always. The run ends at the caller's deadline; stderr is capped at MaxStderr and folded
 // to a StderrTailRunes-long tail, because it is held only to quote back in a failure line read on
@@ -47,14 +56,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
 const (
-	// WaitGrace bounds the wait AFTER the deadline fired. Killing the process ends the process,
-	// but a wrapper-shaped command — a shell script re-execing the real tool — can leave a
-	// grandchild holding the stderr pipe it inherited, and cmd.Run would then block on the copy
-	// forever (internal/keystore's run.go carries the same guard for the same reason).
+	// WaitGrace bounds the wait AFTER the deadline fired. Killing the process group ends the
+	// command and everything it spawned, but a descendant that detached with setsid is outside
+	// the group's reach and can still hold the stderr pipe it inherited, and Wait would then block
+	// on the copy forever; this is the drain bound that ends it (internal/keystore's run.go
+	// carries the same guard for the same reason). It replaces platform.ProcessWaitDelay for
+	// these runs because a failure line here is read by a person waiting on the deadline.
 	WaitGrace = 2 * time.Second
 
 	// MaxStderr bounds what one command may make apogee hold in memory. Stderr is kept only to
@@ -131,6 +143,11 @@ func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 	}
 
 	cmd := exec.CommandContext(ctx, program, argv[1:]...)
+	// The teardown is wired before anything else touches cmd: it owns SysProcAttr's process
+	// group and cmd.Cancel, and its resource (a Job Object on Windows) exists from here on, so
+	// its release is deferred here rather than left to RunWithTeardown.
+	td := platform.NewProcessTeardown(cmd)
+	defer td.Release()
 	cmd.Stdin = opts.Stdin
 	stdout := &cappedWriter{limit: opts.StdoutCap}
 	if opts.WantStdout {
@@ -141,9 +158,10 @@ func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 	stderr := &cappedWriter{limit: MaxStderr}
 	cmd.Stderr = stderr
 	cmd.Env = append(os.Environ(), opts.Env...)
+	// After NewProcessTeardown, which set platform.ProcessWaitDelay: this package's bound wins.
 	cmd.WaitDelay = WaitGrace
 
-	runErr := cmd.Run()
+	runErr := platform.RunWithTeardown(cmd, td)
 	result := Result{
 		TimedOut:        errors.Is(ctx.Err(), context.DeadlineExceeded),
 		StderrTail:      stderrTail(stderr.String()),
@@ -158,9 +176,9 @@ func Run(ctx context.Context, argv []string, opts Options) (Result, error) {
 		result.ExitCode = exitErr.ExitCode()
 		return result, nil
 	case result.TimedOut:
-		// The deadline killed the child and the wait ended on WaitGrace instead of a status —
-		// a wrapper's grandchild held the pipe. That is a run that timed out, not one that
-		// never ran.
+		// The deadline killed the process group and the wait ended on WaitGrace instead of a
+		// status — a setsid escapee, outside the group, held the pipe. That is a run that timed
+		// out, not one that never ran.
 		result.ExitCode = -1
 		return result, nil
 	}

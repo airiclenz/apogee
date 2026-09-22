@@ -112,10 +112,12 @@ func TestCommandExecutorReportsTheExitStatusAndWhatTheCommandSaid(t *testing.T) 
 // wedged script from holding a Reaction's worker — and, at shutdown, the whole grace period.
 //
 // The two cases are the two shapes a hung Reaction takes. A command that IS the sleep dies with the
-// deadline and nothing else is owed. A wrapper-shaped one — a shell that spawned the sleep — leaves
-// a grandchild holding the stderr pipe it inherited, and the copy behind that pipe would block
-// forever; userexec.WaitGrace is what bounds it, so this case must finish soon after the grace and
-// never later (internal/userexec's table pins the bound itself; this is the Reaction's wording of it).
+// deadline and nothing else is owed. A wrapper-shaped one — a shell that spawned the sleep — dies
+// with its process group, the sleep included; what the bound still guards is the drain, since a
+// descendant that detached with setsid can hold the stderr pipe past the kill, and
+// userexec.WaitGrace is what ends the copy behind it, so this case must finish soon after the grace
+// and never later (internal/userexec's table pins the bound itself; this is the Reaction's wording
+// of it).
 func TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	requireShell(t)
 
