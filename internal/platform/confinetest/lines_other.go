@@ -60,6 +60,19 @@ func truncateLine(sh Shell, target string) (string, bool) {
 	return "truncate -s 0 " + sh.Quote(target), true
 }
 
+// udpSendLine returns the bash line that sends one datagram to host:port, and whether this
+// host has a bash to run it in. It is the row-#13 probe: bash's /dev/udp redirection opens a
+// SOCK_DGRAM and `printf` writes one datagram into it, which is the smallest thing that can
+// honestly be called UDP egress. The bash constraint is runConnectProbe's exactly — /dev/udp
+// is a bash built-in with no POSIX-sh counterpart — so the row skips where bash is absent
+// rather than quietly probing something else.
+func udpSendLine(host, port string) (string, bool) {
+	if _, err := exec.LookPath("bash"); err != nil {
+		return "", false // no bash, no /dev/udp; the row skips rather than lying.
+	}
+	return "exec 3<>/dev/udp/" + host + "/" + port + "; printf x >&3", true
+}
+
 // setRawCommandLine is a no-op off Windows: execve takes a real argv, so os/exec's joining
 // is faithful and syscall.SysProcAttr has no CmdLine field to set.
 func setRawCommandLine(_ *exec.Cmd, _ string) {}

@@ -47,6 +47,12 @@ func chainedClobberLine(Shell, string) (string, bool) { return "", false }
 // per-access mask, so it has no truncate residual to disclose in the first place.
 func truncateLine(Shell, string) (string, bool) { return "", false }
 
+// udpSendLine declines on Windows: row #13 drives bash's /dev/udp redirection, which cmd.exe
+// has no counterpart for — and ProbeNetwork never reaches the row there in any case, because
+// the Windows token backend reports NetworkEgress == false (ADR 0020 §4), so there is no
+// network-deny box for a datagram to escape.
+func udpSendLine(string, string) (string, bool) { return "", false }
+
 // setRawCommandLine hands raw to CreateProcess verbatim, bypassing os/exec's EscapeArg
 // joining, which mangles the redirect's quotes (internal/subprocess/cmdline_other.go carries
 // the full reasoning; this is the same fix for the harness). It only sets the command line:

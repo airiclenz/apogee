@@ -229,7 +229,13 @@ func Probe(t *testing.T, c domain.Confiner, sh Shell, failFastPreamble string, n
 	})
 }
 
-// ProbeNetwork runs the network arm (confinement-execution-contract §6.2 rows #7–#8). It
+// udpProbeWait bounds row #13's listener read. A datagram that escapes at all is already on
+// the loopback by the time the confined child has returned, so the wait only has to cover
+// kernel scheduling — and it is also the exact cost of the negative case, where it always
+// expires in full.
+const udpProbeWait = 2 * time.Second
+
+// ProbeNetwork runs the network arm (confinement-execution-contract §6.2 rows #7–#8 and #13). It
 // is split from Probe so the fs battery runs on every fs-capable host while the net arm
 // runs only where the backend can enforce network egress (NetworkEgress==true) — which
 // excludes Windows by construction (ADR 0020 §4), so the positive control #8 goes unproven
@@ -268,6 +274,59 @@ func ProbeNetwork(t *testing.T, c domain.Confiner, sh Shell) {
 			t.Fatalf("connect to %s failed under network-open box, want success: %v", addr, err)
 		}
 	})
+
+	t.Run("udp_egress_under_network_deny", func(t *testing.T) {
+		// Row #13: the network-class counterpart of row #12. A network-deny box fences TCP
+		// connect and bind; whether it also fences DATAGRAM egress is backend-specific, so the
+		// assertion is keyed on the backend's OWN disclosure exactly as #12's is —
+		// Residuals naming connect(2) UDP means the gap is admitted and the datagram must be
+		// DELIVERED; Residuals silent on it means the fence is claimed complete and the
+		// datagram must NOT reach the listener. Asserting behaviour and disclosure together is
+		// what stops either drifting silently.
+		//
+		// The observable is the LISTENER, never the confined child's exit status. connect(2)
+		// and write(2) on a SOCK_DGRAM are local operations: under bwrap's unshared net
+		// namespace the child exits 0 while nothing ever leaves the namespace, so an
+		// exit-keyed assertion would read "egress happened" off a box that fenced it
+		// completely. The parent's own socket is the only honest witness.
+		pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatalf("listen udp: %v", err)
+		}
+		defer func() { _ = pc.Close() }()
+		udpHost, udpPort, err := net.SplitHostPort(pc.LocalAddr().String())
+		if err != nil {
+			t.Fatalf("split host/port %q: %v", pc.LocalAddr(), err)
+		}
+		line, ok := udpSendLine(udpHost, udpPort)
+		if !ok {
+			t.Skip("confinetest: no bash on PATH for the /dev/udp redirection (cmd.exe); UDP egress row is skipped")
+		}
+		box := domain.ConfinementBox{WorkspaceRoot: ws, NetworkAllow: []string{"example.invalid:443"}}
+		sendErr := runDatagramProbe(t, c, box, line)
+
+		if err := pc.SetReadDeadline(time.Now().Add(udpProbeWait)); err != nil {
+			t.Fatalf("set read deadline: %v", err)
+		}
+		n, _, readErr := pc.ReadFrom(make([]byte, 64))
+		delivered := readErr == nil && n > 0
+		if discloses(c.Capabilities().Residuals, domain.ResidualUDPEgress) {
+			if !delivered {
+				t.Fatalf("no datagram reached %s under a network-deny box (read: %v, confined send: %v) although "+
+					"the backend discloses %q as unfenced; the disclosure and the behaviour disagree",
+					pc.LocalAddr(), readErr, sendErr, domain.ResidualUDPEgress)
+			}
+			return
+		}
+		if delivered {
+			t.Fatalf("a datagram reached %s under a network-deny box although the backend discloses no %q "+
+				"residual; unfenced datagram egress must be disclosed in Capabilities().Residuals",
+				pc.LocalAddr(), domain.ResidualUDPEgress)
+		}
+		if !errors.Is(readErr, os.ErrDeadlineExceeded) {
+			t.Fatalf("reading %s: %v; want the read deadline to expire with no datagram", pc.LocalAddr(), readErr)
+		}
+	})
 }
 
 // runWriteProbe builds the platform's "write one byte to target" shell line, confines it to
@@ -297,6 +356,22 @@ func runConnectProbe(t *testing.T, c domain.Confiner, sh Shell, box domain.Confi
 	}
 	// bash/sh /dev/tcp opens a TCP connection; landlock denies connect with EPERM.
 	line := "exec 3<>/dev/tcp/" + host + "/" + port
+	ctx := context.Background()
+	cmd := exec.CommandContext(ctx, "bash", "-c", line)
+	if err := c.Confine(ctx, box, cmd); err != nil {
+		t.Fatalf("Confine(bash -c %q): %v", line, err)
+	}
+	return cmd.Run()
+}
+
+// runDatagramProbe drives one UDP datagram out of the box through bash's /dev/udp
+// redirection, hard-coding bash for the reason runConnectProbe does — the redirection is a
+// bash built-in — and taking no Shell because udpSendLine has already declined wherever bash
+// is absent. The run error is returned for diagnostics only: row #13 never asserts on it,
+// because connect+write on a SOCK_DGRAM succeed locally even inside a box whose fence lets
+// nothing out.
+func runDatagramProbe(t *testing.T, c domain.Confiner, box domain.ConfinementBox, line string) error {
+	t.Helper()
 	ctx := context.Background()
 	cmd := exec.CommandContext(ctx, "bash", "-c", line)
 	if err := c.Confine(ctx, box, cmd); err != nil {

@@ -254,8 +254,10 @@ func TestNamespaceProbe(t *testing.T) {
 	confinetest.Probe(t, NewNamespaceConfiner(), Current(), FailFastPreamble(), newProbeDenialKiller)
 }
 
-// TestNamespaceProbeNetwork drives the network arm (rows #7–#8): `--unshare-net` on a
-// network-deny box, an open network on the default box.
+// TestNamespaceProbeNetwork drives the network arm (rows #7–#8 and #13): `--unshare-net` on a
+// network-deny box, an open network on the default box, and one real datagram sent out of the
+// deny box — which the listener must never receive here, because this backend discloses
+// connect(2) AF_UNIX alone and `--unshare-net` cuts datagram egress with the rest.
 func TestNamespaceProbeNetwork(t *testing.T) {
 	confinetest.ProbeNetwork(t, NewNamespaceConfiner(), Current())
 }

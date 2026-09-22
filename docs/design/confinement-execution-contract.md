@@ -828,7 +828,9 @@ never optimistic:
 
 - **Linux:** call `landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)` to read the
   supported ABI. ABI ≥ 1 (kernel ≥ 5.13) ⇒ `FSWrite = true`. ABI ≥ 4 (kernel ≥ 6.7) ⇒ `NetworkEgress =
-  true`. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
+  true` **with `Residuals` naming `connect(2) UDP` and `connect(2) AF_UNIX`** — the ABI's network
+  rights cover TCP `connect`/`bind` alone, so a deny box says which two egress classes it still
+  lets through *(amended 2026-09-22, item 6 of plan `2026-09-22 - 00`)*. A kernel without landlock ⇒ `{false, false}`. **ABI 1–2 ⇒ `FSWrite = true` with
   `Residuals = [truncate(2)]`** (the ruleset cannot handle `LANDLOCK_ACCESS_FS_TRUNCATE` before
   ABI 3): the fence is real but a confined command can still *empty* an existing file outside the
   box, and a kernel ≥ 6.2 closes it. A kernel without landlock says why in `Unavailable`
@@ -839,9 +841,12 @@ never optimistic:
   — the platform shell's no-op under the exact flag line `Confine` would generate for a box rooted at
   the temp dir, bounded by a timeout — because "bwrap is installed" is not "bwrap can fence here"
   (`apparmor_restrict_unprivileged_userns`, a seccomp filter and `user.max_user_namespaces=0` all
-  refuse at launch, not at lookup). Exit 0 ⇒ **`{FSWrite: true, NetworkEgress: true, Residuals: nil}`**
-  — one launch fences the filesystem and, when the box asks, the network, and nothing is residual
-  (`--unshare-net` is deny-all, the same coarse tightening landlock ABI 4 enforces). Any failure ⇒
+  refuse at launch, not at lookup). Exit 0 ⇒ **`{FSWrite: true, NetworkEgress: true, Residuals: [connect(2) AF_UNIX]}`**
+  — one launch fences the filesystem and, when the box asks, the network (`--unshare-net` is
+  deny-all, the same coarse tightening landlock ABI 4 enforces, and it cuts datagram egress with
+  it), but a pathname AF_UNIX socket is reached through the path fence rather than the net one, so
+  that one class stays open and is disclosed *(amended 2026-09-22, item 7 of plan
+  `2026-09-22 - 00`; ADR 0081 §4's "nothing is residual" is superseded)*. Any failure ⇒
   `{false, false}` with `Unavailable` = `bwrap not on PATH`, `bwrap refused: <bwrap's last stderr
   line>` or `bwrap timed out`; when landlock could not fence either, the string carries **both**
   reasons, landlock's first. The probe has no disk side effect, so `NewReportConfiner()` is
@@ -863,14 +868,28 @@ sentence naming what this backend could not do on this host, rendered by `probe.
 `/confine` say what would have to change rather than a bare `false`. It never gates anything —
 `AutoEligible()` reads `FSWrite` alone.
 
-`Residuals` is the disclosure half of capability honesty (added 2026-08-26): the write-class
-accesses a backend **knowingly cannot fence on this host while `FSWrite` is true**, each named by
+`Residuals` is the disclosure half of capability honesty (added 2026-08-26): the accesses a backend
+**knowingly cannot fence on this host while the matching enforcement bit is true**, each named by
 its syscall, empty when the fence is complete. A backend that leaves an access open *says so*
 rather than reporting a fence it does not have. It is disclosure only — `AutoEligible()` reads
 `FSWrite` alone, so a residual never gates Auto and is never a refusal; `probe.CapabilityLine`
 appends `· unfenced: <a, b>` and `probe.ResidualNotice` states the consequence once at startup,
 beside (never instead of) `DegradedNotice`, which stays the `FSWrite = false` story headless runs
 and Firings are refused on.
+
+**Two classes ride in that one list** *(widened 2026-09-22, items 6–9 of plan `2026-09-22 - 00`)*.
+**Write-class** residuals are open while `FSWrite` is true — today only landlock's `truncate(2)`
+below ABI 3. **Network-egress-class** residuals are open inside a network-**deny** box while
+`NetworkEgress` is true: `connect(2) UDP` and `connect(2) AF_UNIX` (`domain.ResidualUDPEgress`,
+`domain.ResidualUnixEgress` — spelled once in `internal/domain` so the backends that disclose them
+and the probe surfaces that word them cannot drift apart). They are a standing fact about the
+backend, not a per-box answer, so they are disclosed wherever `NetworkEgress` is true — a deny box
+is only what makes them matter, and the caps are read before any box exists. The split has one
+visible consequence: `probe.CapabilityLine` words **every** token, while `probe.ResidualNotice` is
+write-class only and filters the network ones out, so no host gains a startup banner about egress
+a box it never asked to tighten leaves open. Row **#13** of the battery below is what keeps the
+network class from being a claim on paper: it drives a real datagram out of a deny box and asserts
+the outcome against the backend's own disclosure, the way row #12 does for `truncate(2)`.
 
 P3.4 changes `AutoEligible()` from `FSWrite && NetworkEgress` to **`FSWrite` only** (ADR 0012: the
 network is open by default, so network-egress confinement is an *optional tightening*, not an Auto
@@ -937,6 +956,7 @@ harness asserts on exit status / error.
 | 10 | `Confine` a box with a non-empty `NetworkAllow` | **`ErrConfinementUnavailable`** — a requested tightening is never a silent no-op | **Windows** |
 | 11 | multi-command script: a denied `mkdir … && cd … && cat > …` heredoc chain, then an unguarded **relative** write — fail-fast preamble and kill-on-denial watch wired exactly as the terminal tool composes them | **stopped** — the watch matched the streamed denial; non-zero exit; the workspace file absent | POSIX (skips under `cmd.exe`) |
 | 12 | the parent seeds `<sibling-temp>/truncate.txt`, then the confined child runs `truncate -s 0 <path>` | keyed on the backend's own disclosure: `Residuals` empty ⇒ **denied** and the bytes intact; `Residuals` names `truncate(2)` ⇒ **succeeds** and the file is empty | POSIX with coreutils `truncate` (skips on macOS / `cmd.exe`) |
+| 13 | (net) the parent opens a loopback `net.ListenPacket`, then the confined child sends one datagram to it from a network-**deny** box (`exec 3<>/dev/udp/<host>/<port>; printf x >&3`) | keyed on the backend's own disclosure: `Residuals` silent on `connect(2) UDP` ⇒ **the datagram does not reach the listener** (the parent's read hits its deadline); `Residuals` names it ⇒ **the datagram is delivered** | net-capable POSIX with `bash` (skips under `cmd.exe`) |
 
 #3/#4 are the core "escape is OS-blocked" proof; #5 is the "no per-thread landlock, parent untouched"
 proof; #6 is the "after fork, before execve, inherited across exec" proof specific to the re-exec
@@ -986,11 +1006,29 @@ wrapper; #7/#8 encode ADR 0012's network-open default with deny as a tightening.
 > Linux driver (`TestNamespaceProbe` / `TestNamespaceProbeNetwork`): rows #1–#6, #11 and #12 plus
 > #7/#8. "Linux" in the Backend column means either Linux backend. Row #3's denial is **EROFS** under
 > it (the read-only root, not a permission errno), which is why row #11 needed ADR 0056 D2's third
-> spelling; row #12 must **deny** with the bytes intact, because the backend reports `Residuals: nil`
-> — its fence is complete or absent, never partial. The harness skips itself where the construction
+> spelling; row #12 must **deny** with the bytes intact, because the backend discloses no
+> `truncate(2)` residual — its write fence is complete or absent, never partial. The harness skips itself where the construction
 > probe reported `FSWrite == false` (no `bwrap`, or a kernel that refuses unprivileged user
 > namespaces), so a CI container without userns skips cleanly; wherever `bwrap` and userns work —
 > landlock or not — every row runs for real.
+
+> **Amended 2026-09-22 (`apogee-qi3`, plan `2026-09-22 - 00` item 9).** Row **#13**
+> (`udp_egress_under_network_deny`) does for the **network** fence what row #12 does for the write
+> fence: it drives real egress out of a deny box and keys the assertion on the backend's own
+> `Residuals`, so behaviour and disclosure are asserted together. It is what widens the battery's
+> notion of a residual past the write class — §5's two classes — and it exists because a deny box
+> that fences TCP alone was, until now, indistinguishable from one that fences everything.
+>
+> The observable is the **parent's listener**, never the confined child's exit status. `connect(2)`
+> and `write(2)` on a `SOCK_DGRAM` are local operations that report no delivery failure: under the
+> namespace backend's `--unshare-net` the child exits **0** while the datagram never leaves the new
+> netns (verified 2026-09-22), so an exit-keyed row would read "egress happened" off the one backend
+> that fences it completely. So: disclosure absent ⇒ the parent's read hits its deadline with no
+> datagram; disclosure present ⇒ the datagram is delivered. The line is `bash`'s `/dev/udp`
+> redirection — the same `bash` constraint rows #7/#8 already carry — and the row skips where `bash`
+> is absent. Against the **namespace** backend the negative arm runs for real (it discloses
+> `connect(2) AF_UNIX` only); against **landlock** ABI 4+ the positive arm asserts the delivery its
+> `connect(2) UDP` disclosure promises, and rows #7/#8/#13 all skip on Windows with `NetworkEgress`.
 
 ### 6.3 Per-backend acceptance checklists (now mechanical)
 
@@ -1001,8 +1039,8 @@ confined child (#5); cross-build green (file `linux`-tagged; other OSes keep `de
 promoted to a direct dep with `go mod tidy` clean.
 
 **Linux namespace (2026-09-17, ADR 0081)** is done when: on a host with `bwrap` and working unprivileged
-user namespaces `confinetest.Probe` passes #1–#6, #11 and #12 (#12 denying, `Residuals: nil`) and
-`confinetest.ProbeNetwork` passes #7/#8; the argv line is unit-tested as a pure function of the box with
+user namespaces `confinetest.Probe` passes #1–#6, #11 and #12 (#12 denying — no `truncate(2)`
+residual is disclosed) and `confinetest.ProbeNetwork` passes #7/#8 and #13; the argv line is unit-tested as a pure function of the box with
 no process (hermetic — `--unshare-net` iff `NetworkAllow` is non-empty, missing roots skipped, never
 `--new-session` or `--unshare-pid`); `bwrap` absent **or** userns refused ⇒ `Capabilities() ==
 {false, false}` with a non-empty `Unavailable` naming the cause (`bwrap not on PATH` / `bwrap refused:

@@ -515,7 +515,15 @@ neutral clause. (a), (b) and (d) must fail against the pre-item tree. CHANGELOG 
 **Acceptance.** `go build ./... && go test ./internal/probe/... && go test ./internal/tui/... -run 'Confine'`
 **Commit:** `fix(probe): the residual notice words each residual it names`
 
-## 9. A confinetest row drives UDP egress under a net-deny box
+## 9. A confinetest row drives UDP egress under a net-deny box — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the row runs for real against the namespace/bwrap backend on this box (negative arm — it discloses `connect(2) AF_UNIX` only, so the listener must stay silent, and it does); the landlock arm is compile-checked only, since `TestLandlockProbeNetwork` skips here, so the positive "datagram is delivered" branch is unexercised on this host.
+
+NOTES (2026-09-22): the probe mechanism was positive-controlled outside the box before the row was trusted — the same `/dev/udp` line run unconfined delivers one byte to the listener, so a silent listener under the deny box is the fence, not a broken probe.
+
+NOTES (2026-09-22): consequential edit — internal/platform/namespace_linux_test.go: made necessary by the new row; `TestNamespaceProbeNetwork`'s doc comment enumerated the rows it drives as "#7–#8" and was falsified by #13 joining them.
+
+NOTES (2026-09-22): consequential edit — docs/design/confinement-execution-contract.md §5 bwrap bullet and §6.3 namespace checklist: made necessary by this item's §5 rewrite of what a residual is; both still read `Residuals: nil` for the namespace backend, which item 7 falsified (it discloses `connect(2) AF_UNIX`), and §5 was the one place this item was chartered to make that meaning right.
 
 **What.** `test(confinetest)`: the battery row the audit asks for, plus the contract document's
 record of it. Depends on items 6 and 7.
