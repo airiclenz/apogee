@@ -95,3 +95,31 @@ func dropControl(r rune) rune {
 	}
 	return r
 }
+
+// ClampRunes cuts s to at most n runes, on a rune boundary so the result is always valid UTF-8.
+// It returns s itself when it already fits, trims nothing and appends no ellipsis: a caller that
+// wants the cut marked (the "…" a ledger row or a delegation label carries) decides that on the
+// result, by comparing it with what went in. It is the one clamp for text that must fit a fixed
+// budget — a gate's reason, a skill's summary, a delegation's cause — where the budget is a rune
+// count and nothing else.
+func ClampRunes(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
+}
+
+// FirstLine reduces s to the one form every single-line display can paint: the text before the
+// first newline, trimmed of surrounding whitespace. A string that holds nothing else comes back
+// empty, which is the ABSENT signal a label's callers read — nothing here decides what to do about
+// that, only what the line is.
+//
+// It takes s as it stands. Where a render seam demands untrusted model text be escape-stripped
+// first, the CALLER strips it and hands the result in ([StripEscapesToLine] at the headless seam,
+// the view's own strip in the TUI): the strip belongs to the seam that paints, the first-line rule
+// belongs here, and keeping them apart is what lets one rule serve seams with different strips.
+func FirstLine(s string) string {
+	line, _, _ := strings.Cut(s, "\n")
+	return strings.TrimSpace(line)
+}

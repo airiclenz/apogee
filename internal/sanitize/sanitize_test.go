@@ -203,3 +203,67 @@ func TestBidiControlIsExactlyTheElevenCodePoints(t *testing.T) {
 		}
 	}
 }
+
+// TestClampRunes pins the one clamp for a fixed rune budget: text that fits comes back as it went
+// in (the string itself, not a copy), text over the budget is cut on a rune boundary so a multibyte
+// character is never split, and the clamp neither trims nor marks the cut — a caller that wants
+// an ellipsis compares the result with the input and adds its own.
+func TestClampRunes(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		in   string
+		n    int
+		want string
+	}{
+		{"fits", "short", 10, "short"},
+		{"exactly n", "12345", 5, "12345"},
+		{"over n is cut", "1234567", 5, "12345"},
+		{"cut on a rune boundary", "héllo wörld", 4, "héll"},
+		{"multibyte counts one rune per character", "日本語テキスト", 3, "日本語"},
+		{"not trimmed", "  padded  ", 20, "  padded  "},
+		{"no ellipsis", "abcdef", 3, "abc"},
+		{"empty stays empty", "", 5, ""},
+		{"zero budget cuts everything", "abc", 0, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := ClampRunes(tc.in, tc.n); got != tc.want {
+				t.Errorf("ClampRunes(%q, %d) = %q, want %q", tc.in, tc.n, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestFirstLine pins the one form every single-line display paints a delegation in: the text ahead
+// of the first newline, trimmed. The \r\n case is the one worth spelling out — the cut is made on
+// the \n, so the \r is left behind for the trim rather than surviving into a rendered row.
+func TestFirstLine(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   string
+		want string
+	}{
+		{"a single line is its own first line", "repo-scout", "repo-scout"},
+		{"padding is trimmed", "   repo-scout\t ", "repo-scout"},
+		{"multi-line keeps the first", "repo-scout\nand then some prose", "repo-scout"},
+		{"a padded multi-line first is trimmed", "  repo-scout  \n more prose\n", "repo-scout"},
+		{"\\r\\n leaves no \\r behind", "repo-scout\r\nprose", "repo-scout"},
+		{"a leading blank line is absent", "\nrepo-scout", ""},
+		{"whitespace only is absent", "   \n  ", ""},
+		{"empty is empty", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := FirstLine(tc.in); got != tc.want {
+				t.Errorf("FirstLine(%q) = %q, want %q", tc.in, got, tc.want)
+			}
+		})
+	}
+}

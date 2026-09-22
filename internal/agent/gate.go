@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // The GATE stage of the Approver (ADR 0076 D2): the user's own answer to "may this call run",
@@ -138,7 +139,7 @@ func (a *Agent) askGate(ctx context.Context, turn int, r domain.Reaction, call d
 	a.reportReaction(turn, r.ID, domain.MomentPreToolExec, err)
 	return domain.GateDecision{
 		Verdict: domain.GateAsk,
-		Reason:  clampRunes("did not answer ("+err.Error()+")", gateReasonRunes),
+		Reason:  sanitize.ClampRunes("did not answer ("+err.Error()+")", gateReasonRunes),
 	}
 }
 
@@ -255,16 +256,7 @@ func gateReasonText(lines []string) string {
 			kept = append(kept, trimmed)
 		}
 	}
-	return clampRunes(strings.Join(kept, " "), gateReasonRunes)
-}
-
-// clampRunes cuts s to at most n runes, on a rune boundary so the result is always valid UTF-8.
-func clampRunes(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
-	return string(runes[:n])
+	return sanitize.ClampRunes(strings.Join(kept, " "), gateReasonRunes)
 }
 
 // gateRefusal is the verdict a denied call carries: a Refuse whose model-facing reason names the

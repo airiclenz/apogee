@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/tools"
 )
 
@@ -361,7 +362,7 @@ func outputPresence(target string) string {
 // so a row quotes what the parent already read at the top of that result and no more.
 func delegationCause(content string) string {
 	head := strings.TrimSpace(headLines(content, 1))
-	if clamped := clampRunes(head, delegationCauseMaxRunes); clamped != head {
+	if clamped := sanitize.ClampRunes(head, delegationCauseMaxRunes); clamped != head {
 		return clamped + "…"
 	}
 	return head

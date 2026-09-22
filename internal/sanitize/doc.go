@@ -30,6 +30,16 @@
 // two callers need the predicate rather than the rewrite: internal/title folds it into a wider
 // "strippable" test, and internal/session REFUSES an id that carries one rather than stripping it.
 //
+// Two more rules over untrusted text live here because they are pure functions over runes that
+// several packages spelled for themselves, and the strip is what they sit beside at a seam:
+//
+//   - [ClampRunes] cuts text to a rune budget on a rune boundary, with no trim and no ellipsis —
+//     the one clamp for a gate's reason, a skill's summary and a delegation's cause, which used to
+//     be three private copies (internal/agent twice, internal/skills once).
+//   - [FirstLine] reduces text to its first line, trimmed — the form every single-line display
+//     paints a delegation's name or task in, spelled once for the recursion point, the ledger, the
+//     headless Driver and internal/title's DelegateLabel.
+//
 // The seam rule is unchanged by this package existing: untrusted text is stripped at the SEAM it
 // enters a display through, never at each producer (internal/tui/doc.go states it for the frame).
 // This package owns the spelling of the strip, not the decision of where it runs.

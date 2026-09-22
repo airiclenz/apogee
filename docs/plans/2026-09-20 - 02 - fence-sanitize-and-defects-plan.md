@@ -184,7 +184,7 @@ NOTES (2026-09-22): a root that is no repository yields no file from `rev-parse`
 **Acceptance.** `go test ./internal/gitexec/... ./internal/tools/... -run 'Capture|CommandConfig|Git'`; `! grep -n 'accepted staleness' internal/gitexec/gitexec.go`
 **Commit:** `fix(gitexec): the command-config probe is re-run when the repository's config files change, not once per process`
 
-## 8. One rune clamp and one first-line rule in `sanitize`
+## 8. One rune clamp and one first-line rule in `sanitize` — ✅ DONE (2026-09-22)
 
 **What.** `sanitize.ClampRunes(s string, n int) string` — at most n runes on a rune boundary, no trim, no ellipsis, returns s when it fits (`agent/gate.go`'s body verbatim); `sanitize.FirstLine(s string) string` — `strings.Cut(s, "\n")` then `TrimSpace` (`title.FirstLine`'s body verbatim). Delete `agent/gate.go clampRunes`, `skills/parse.go clampRunes`, `title.FirstLine`. Callers: gate.go, children.go → `sanitize.ClampRunes`; subagent.go → `sanitize.ClampRunes(sanitize.FirstLine(args.Task), title.MaxDelegateRunes)`; parse.go trims `summary` once before `validate` at both sites, then `sanitize.ClampRunes` (output identical — the private clamp trimmed first); `title.DelegateLabel` and `run/run.go` → `sanitize.FirstLine`. `capRunes`, `truncate`, `Clip`, `clipSubAgentTask`, tui `clipRunes` untouched (ratified).
 **Regression guard.** The caller list also holds `subagent.go delegationName` (internal/agent/subagent.go:744), a second `title.FirstLine` call → `sanitize.FirstLine`; and the doc comments spelling `title.FirstLine` at internal/run/run.go:826,838 (and subagent.go's) are rewritten with the move, or the `! grep -rn 'title\.FirstLine'` acceptance fails on prose.

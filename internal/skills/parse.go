@@ -7,6 +7,8 @@ import (
 	"unicode"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // maxSummaryLen caps a skill summary, mirroring the apogee-code oracle (summary.slice(0,200)):
@@ -195,12 +197,12 @@ func parseWithFrontmatter(fmText, body, dirName string) (Skill, error) {
 		return Skill{}, err
 	}
 	id := firstNonEmpty(fm.ID, fm.Name, dirName)
-	summary := firstNonEmpty(fm.Summary, fm.Description)
+	summary := strings.TrimSpace(firstNonEmpty(fm.Summary, fm.Description))
 	return validate(Skill{
 		ID:          strings.TrimSpace(id),
 		DisplayName: strings.TrimSpace(firstNonEmpty(fm.DisplayName, titleCase(id))),
-		Summary:     clampRunes(summary, maxSummaryLen),
-		Description: clampRunes(summary, maxDescriptionLen),
+		Summary:     sanitize.ClampRunes(summary, maxSummaryLen),
+		Description: sanitize.ClampRunes(summary, maxDescriptionLen),
 		Body:        strings.TrimSpace(body),
 		Triggers:    normalizeTriggers(fm.Triggers),
 	})
@@ -366,11 +368,12 @@ func parseFallback(content, dirName string) (Skill, error) {
 	if summary == "" {
 		summary = displayName // a heading-only skill summarises itself by its title
 	}
+	summary = strings.TrimSpace(summary)
 	return validate(Skill{
 		ID:          strings.TrimSpace(dirName),
 		DisplayName: strings.TrimSpace(displayName),
-		Summary:     clampRunes(summary, maxSummaryLen),
-		Description: clampRunes(summary, maxDescriptionLen),
+		Summary:     sanitize.ClampRunes(summary, maxSummaryLen),
+		Description: sanitize.ClampRunes(summary, maxDescriptionLen),
 		Body:        strings.TrimSpace(content),
 	})
 }
@@ -439,15 +442,4 @@ func titleCase(s string) string {
 		parts[i] = string(r)
 	}
 	return strings.Join(parts, " ")
-}
-
-// clampRunes trims s and caps it at max runes (rune-safe so a multibyte cut never splits a
-// character). One clamp serves both limits the same description text meets: maxSummaryLen for the
-// Summary the "/" menu paints, maxDescriptionLen for the Description the matcher indexes.
-func clampRunes(s string, max int) string {
-	s = strings.TrimSpace(s)
-	if r := []rune(s); len(r) > max {
-		return string(r[:max])
-	}
-	return s
 }

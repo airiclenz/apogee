@@ -18,6 +18,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/title"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -792,7 +793,7 @@ func isSubAgentCall(call domain.ToolCall) bool {
 // the recursion point rather than at each display, so a model that pads or newlines its name
 // cannot break a status line or a prompt body downstream.
 func delegationName(raw string) string {
-	return title.FirstLine(raw)
+	return sanitize.FirstLine(raw)
 }
 
 // delegationSeat is the Delegation seat ONE spawn is built for (ADR 0069) — the two places a
@@ -1176,7 +1177,7 @@ func delegationLabel(name string, call domain.ToolCall) string {
 	}
 	var args tools.SubAgentArgs
 	if json.Unmarshal(call.Arguments, &args) == nil {
-		if task := clampRunes(title.FirstLine(args.Task), title.MaxDelegateRunes); task != "" {
+		if task := sanitize.ClampRunes(sanitize.FirstLine(args.Task), title.MaxDelegateRunes); task != "" {
 			return task
 		}
 	}

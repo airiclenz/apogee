@@ -11,6 +11,7 @@ import (
 	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/refs"
+	"github.com/airiclenz/apogee/internal/sanitize"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/title"
@@ -846,7 +847,7 @@ func runWindow(child, firing int) int {
 
 // firstTaskLine reads the sub_agent call's task argument and returns its first line, "" when
 // the arguments are malformed or name no task. It is the gist the TUI puts on a delegation's
-// branch row; the JSON decode is this package's, the first-line rule is title.FirstLine's.
+// branch row; the JSON decode is this package's, the first-line rule is sanitize.FirstLine's.
 func firstTaskLine(args json.RawMessage) string {
 	var decoded struct {
 		Task string `json:"task"`
@@ -854,11 +855,11 @@ func firstTaskLine(args json.RawMessage) string {
 	if err := json.Unmarshal(args, &decoded); err != nil {
 		return ""
 	}
-	return title.FirstLine(decoded.Task)
+	return sanitize.FirstLine(decoded.Task)
 }
 
 // delegationName reads the sub_agent call's OPTIONAL name argument and normalises it the way the
-// recursion point does (title.FirstLine, the one rule both apply): "" when the arguments are
+// recursion point does (sanitize.FirstLine, the one rule both apply): "" when the arguments are
 // malformed or name none, which is the delegation-is-unnamed signal every surface reads as "fall
 // back to the task". It sits beside firstTaskLine and shares its shape — the JSON decode here, the
 // first-line rule below.
@@ -869,7 +870,7 @@ func delegationName(args json.RawMessage) string {
 	if err := json.Unmarshal(args, &decoded); err != nil {
 		return ""
 	}
-	return title.FirstLine(decoded.Name)
+	return sanitize.FirstLine(decoded.Name)
 }
 
 // subAgentRuns reports the runs that finished with a reading, in finish order; nil when the
