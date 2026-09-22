@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -191,8 +192,9 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 // as its output — so every caller's existing "git ... failed" branch surfaces it verbatim, with
 // no signature for a future git tool to forget to handle.
 //
-// The probe behind that refusal is memoised per repository (commandConfigProbes), so it costs
-// its two subprocesses once rather than on every git call.
+// The probe behind that refusal is memoised per repository (commandConfigProbes) and re-run
+// only when a file that decided its answer changes, so it costs its three subprocesses once per
+// config rather than on every git call.
 func Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
 	drivers, err := probeCommandConfig(ctx, gitPath, root, nil)
 	if err != nil {
@@ -204,10 +206,11 @@ func Capture(ctx context.Context, gitPath, root string, timeout time.Duration, a
 	return CaptureUnchecked(ctx, gitPath, root, nil, timeout, args...)
 }
 
-// CaptureUnchecked is Capture without the command-config probe. Only two callers may use it:
-// this package's own probe — which must reach git to ASK about the config, and whose own
-// invocation (`git config --get-regexp`) executes no configured program — and a test asserting
-// what the probe itself would see. Everything a MODEL causes goes through Capture.
+// CaptureUnchecked is Capture without the command-config probe. Only one caller may use it: a
+// test asserting what the probe itself would see (internal/tools' runGitUnchecked). The probe's
+// own invocations — which must reach git to ASK about the config, and execute no configured
+// program — go through probeGit instead, which keeps git's diagnostics out of the listing it
+// parses. Everything a MODEL causes goes through Capture.
 func CaptureUnchecked(ctx context.Context, gitPath, root string, env []string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
 	return subprocess.RunSubprocess(ctx, runSpec(gitPath, root, env, timeout, false, args...))
 }
@@ -340,10 +343,10 @@ func query(ctx context.Context, gitPath, dir string, env []string, timeout time.
 // subcommand, and every subcommand these callers invoke is a builtin, so a repo-local alias
 // never changes what apogee's own argv runs.
 //
-// The source string must stay POSIX-ERE-compatible — plain ( ) groups, no (?: — because it is
-// handed to git verbatim and git's --get-regexp compiles it with regcomp; the same string is
-// kept here to re-check what came back, since git's combined output can carry a warning line the
-// listing never intended as a name. That source is [security.GitCommandConfigNameSource]: the
+// The source string must stay POSIX-ERE-compatible — plain ( ) groups, no (?: — because the
+// tools tests hand it to git verbatim (`git config --get-regexp`, internal/tools/git_test.go's
+// global-scope guards), where git compiles it with regcomp; the probe itself lists every key and
+// re-checks each against this compiled form. That source is [security.GitCommandConfigNameSource]: the
 // shell write view builds its own [security.GitCommandConfigName] from it — the same names PLUS
 // core.hookspath, because a `git config` line that sets the key is a write into .git/config
 // whatever the hardening options do to it afterwards — and this package imports security, never
@@ -352,7 +355,9 @@ var CommandConfigName = regexp.MustCompile(`^(` + security.GitCommandConfigNameS
 
 // FilterConfigScopes are the config scopes a command-valued key is refused from — the
 // REPOSITORY's own files, which is what the workspace bytes can carry. --local is .git/config
-// (with whatever it include.path-s, since git resolves the includes for us); --worktree is the
+// with whatever it include.path-s — followed only because the probe passes --includes, which a
+// scoped read leaves off by default, so the refusal reaches a key an included file carries and
+// the include's own path joins the fingerprinted set; --worktree is the
 // per-worktree file, read only where the worktreeConfig extension is on and otherwise either a
 // duplicate of --local or an outright error. The operator's --global and --system scopes are
 // deliberately absent: that config is theirs, on the same trust boundary the hardeningEnv
@@ -363,30 +368,91 @@ var FilterConfigScopes = []string{"--local", "--worktree"}
 // a thousand of them cannot turn the refusal sentence into the whole result.
 const maxNamedCommandKeys = 5
 
-// commandConfigProbes memoises the repo-local command-config probe for the process lifetime,
-// keyed by the git binary, the repository root AND the caller's extra environment together — the
-// same root probed with a different git is a different question, a Driver may hold several roots
-// at once, and a run redirected by GIT_DIR asks about a DIFFERENT repository than the plain run
-// in the same directory does. Each value is the probed name slice, which every reader treats as
-// read-only.
+// commandConfigProbes memoises the repo-local command-config probe, keyed by the git binary, the
+// repository root AND the caller's extra environment together — the same root probed with a
+// different git is a different question, a Driver may hold several roots at once, and a run
+// redirected by GIT_DIR asks about a DIFFERENT repository than the plain run in the same
+// directory does. Each value is a commandConfigProbe, which every reader treats as read-only.
 //
 // Why memoise at all: Capture is the choke point EVERY git tool call passes through, and the
-// probe costs two subprocesses of its own — so probing per call tripled the process cost of every
-// git tool (one git_commit ran its four real git commands behind twelve git processes).
+// probe costs three subprocesses of its own — so probing per call would multiply the process
+// cost of every git tool (a git_commit runs four real git commands).
 //
-// The accepted staleness, deliberate: a repository's config is probed once and never re-read. A
-// command-valued key added to that config after the first probe is not refused until apogee
-// restarts, and one removed keeps refusing just as long. The threat this refusal answers is an
-// attacker-AUTHORED checkout — hostile in its config before apogee ever opens it — not a config
-// edited underneath a running session, so a per-session answer is the right granularity.
+// Why the memo is keyed on the config's identity rather than on the process: the writer that
+// matters never goes through this package. A confined terminal running an opaque program can
+// write a filter.<x>.clean into .git/config after the first probe — a write the shell write view
+// cannot see — and a memo held for the process lifetime would serve the stale clean answer to the
+// next git TOOL, unconfined and on the host, whose add or diff then executes it. So each answer
+// carries the fingerprints (fileprint) of the files that DECIDED it — the scope files, HEAD and
+// every include they name, present or absent — and probeCommandConfig re-stats them on every
+// call, serving the cache only while every print still matches. Invalidating after the
+// write-capable calls that pass through this package instead would miss exactly that writer.
 //
 // Two goroutines probing the same not-yet-probed key both run the probe and store the same
 // answer; the duplicated work is wasted, never the outcome.
 var commandConfigProbes sync.Map
 
+// commandConfigProbe is one memoised answer: the command-valued names the repository's own
+// config carries, and the prints of the files that decided them.
+type commandConfigProbe struct {
+	names  []string
+	prints []fileprint
+}
+
+// holds reports whether every file the answer depends on still prints as it did when the probe
+// ran. No prints at all — git named no file, as a fake git in a test does — holds trivially.
+func (p commandConfigProbe) holds() bool {
+	for _, print := range p.prints {
+		if !print.holds() {
+			return false
+		}
+	}
+	return true
+}
+
+// fileprint is the identity of one file the probe's answer depends on, as os.Stat reports it:
+// size, modification time, mode and the inode/device pair os.SameFile compares — so an edit in
+// place, a rename over the file and a truncation each read as a change whatever the clock's
+// granularity. An absent file is a print of its own: git skips a missing include silently, so
+// the file the model creates later must be watched from the start. A stat that failed for any
+// other reason keeps no info and never matches, which re-probes.
+type fileprint struct {
+	path   string
+	absent bool
+	info   os.FileInfo
+}
+
+// takeFileprint stats path into its print.
+func takeFileprint(path string) fileprint {
+	info, err := os.Stat(path)
+	switch {
+	case err == nil:
+		return fileprint{path: path, info: info}
+	case errors.Is(err, os.ErrNotExist):
+		return fileprint{path: path, absent: true}
+	default:
+		return fileprint{path: path}
+	}
+}
+
+// holds re-stats the file and reports whether it still prints as it did.
+func (p fileprint) holds() bool {
+	now := takeFileprint(p.path)
+	if p.absent || now.absent {
+		return p.absent && now.absent
+	}
+	if p.info == nil || now.info == nil {
+		return false
+	}
+	return os.SameFile(p.info, now.info) &&
+		p.info.Size() == now.info.Size() &&
+		p.info.ModTime().Equal(now.info.ModTime()) &&
+		p.info.Mode() == now.info.Mode()
+}
+
 // probeCommandConfig returns repoLocalCommandConfig's answer for the repository the run at root
-// under env would actually reach, going to git only the first time it is asked about a given
-// (gitPath, root, env) triple.
+// under env would actually reach, going to git only when the (gitPath, root, env) triple has no
+// memoised answer or a file that decided the memoised one has changed since.
 //
 // A FAILED probe is never cached. Its error is the subprocess contract's — ctx cancellation or a
 // confinement-unavailable demotion — which says nothing about the repository, so caching it
@@ -394,53 +460,189 @@ var commandConfigProbes sync.Map
 func probeCommandConfig(ctx context.Context, gitPath, root string, env []string) ([]string, error) {
 	key := gitPath + "\x00" + root + "\x00" + strings.Join(env, "\x00")
 	if cached, ok := commandConfigProbes.Load(key); ok {
-		return cached.([]string), nil
+		if probe := cached.(commandConfigProbe); probe.holds() {
+			return probe.names, nil
+		}
 	}
-	names, err := repoLocalCommandConfig(ctx, gitPath, root, env)
+	probe, err := repoLocalCommandConfig(ctx, gitPath, root, env)
 	if err != nil {
 		return nil, err
 	}
-	commandConfigProbes.Store(key, names)
-	return names, nil
+	commandConfigProbes.Store(key, probe)
+	return probe.names, nil
+}
+
+// probeGit runs one of the probe's own git invocations with stdout split from the diagnostics,
+// so a warning git prints can never pose as a record of the listing.
+func probeGit(ctx context.Context, gitPath, root string, env []string, args ...string) (subprocess.SubprocessResult, error) {
+	return subprocess.RunSubprocess(ctx, runSpec(gitPath, root, env, probeTimeout, true, args...))
 }
 
 // repoLocalCommandConfig lists the repo-local config names whose VALUE is a program git would
-// execute (CommandConfigName) for the repository the run at root under env reaches, by asking
-// git itself rather than parsing .git/config — git is the only thing that agrees with git about
-// includes, casing and quoting. Listing config executes none of them: a filter fires on
-// add/checkout/diff and a credential helper on a network call, never on `git config`, and
-// --name-only keeps an attacker-chosen VALUE out of the output entirely.
+// execute (CommandConfigName) for the repository the run at root under env reaches, together
+// with the prints of the files that decided the answer, by asking git itself rather than
+// parsing .git/config — git is the only thing that agrees with git about includes, casing and
+// quoting. Listing config executes none of them: a filter fires on add/checkout/diff and a
+// credential helper on a network call, never on `git config`. One listing per scope yields the
+// names, the include paths and the origins in one subprocess; its -z framing keeps an
+// attacker-chosen VALUE from posing as a key (parseConfigListing).
 //
-// A non-zero exit is the pass case, not an error: git exits 1 when nothing matched and 128 when
-// the scope does not apply at all (root is no repository; --worktree on a git that refuses the
-// option). The error return is the subprocess contract's — ctx cancellation or a
-// confinement-unavailable demotion — and it stops the caller, so a probe that could not run
-// never lets the real command run un-probed.
-func repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []string) ([]string, error) {
-	var names []string
-	seen := make(map[string]struct{})
+// The scope files are printed BEFORE the listings, so a write racing a listing shows up as a
+// mismatch on the next call rather than as a stale hit; the includes are only known afterwards.
+//
+// A non-zero exit is the pass case, not an error: git exits 128 when the scope does not apply
+// at all (root is no repository; --worktree on a git that refuses the option). The error return
+// is the subprocess contract's — ctx cancellation or a confinement-unavailable demotion — and it
+// stops the caller, so a probe that could not run never lets the real command run un-probed.
+func repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []string) (commandConfigProbe, error) {
+	files, top, err := configFiles(ctx, gitPath, root, env)
+	if err != nil {
+		return commandConfigProbe{}, err
+	}
+	var probe commandConfigProbe
+	for _, file := range files {
+		probe.prints = append(probe.prints, takeFileprint(file))
+	}
+
+	var names, includes orderedSet
 	for _, scope := range FilterConfigScopes {
-		res, err := CaptureUnchecked(ctx, gitPath, root, env, probeTimeout,
-			"config", scope, "--name-only", "--get-regexp", CommandConfigName.String())
+		res, err := probeGit(ctx, gitPath, root, env,
+			"config", scope, "--includes", "--show-origin", "--list", "-z")
 		if err != nil {
-			return nil, err
+			return commandConfigProbe{}, err
 		}
 		if res.ExitCode != 0 {
 			continue
 		}
-		for _, line := range strings.Split(res.CombinedOutput, "\n") {
-			name := strings.TrimSpace(line)
-			if !CommandConfigName.MatchString(name) {
-				continue
+		for _, entry := range parseConfigListing(res.Stdout) {
+			switch {
+			case CommandConfigName.MatchString(entry.key):
+				names.add(entry.key)
+			case isIncludeKey(entry.key) && entry.value != "":
+				includes.add(resolveInclude(top, entry.origin, entry.value))
 			}
-			if _, dup := seen[name]; dup {
-				continue
-			}
-			seen[name] = struct{}{}
-			names = append(names, name)
 		}
 	}
-	return names, nil
+
+	probe.names = names.list
+	for _, path := range includes.list {
+		probe.prints = append(probe.prints, takeFileprint(path))
+	}
+	return probe, nil
+}
+
+// configFiles asks git which files carry the repository's own config for the run at root under
+// env — the --local and --worktree files, and HEAD, which decides whether an
+// includeIf.onbranch:<b>.path include is followed — plus the work-tree top the listing's relative
+// origins are spelled from. No .git/ path is assumed: a run redirected by GIT_DIR names that
+// store's files and is fingerprinted by its own config. --show-toplevel comes LAST because it
+// dies without a work tree (a bare store) after the paths have been printed, so the exit code is
+// not consulted and the paths are read from whatever stdout holds: a relative path is relative to
+// root, a missing top (that bare store, whose origins are absolute anyway) falls back to root,
+// and a git that printed nothing names no file — and so no print, never root itself.
+func configFiles(ctx context.Context, gitPath, root string, env []string) (files []string, top string, err error) {
+	res, err := probeGit(ctx, gitPath, root, env, "rev-parse",
+		"--git-path", "config", "--git-path", "config.worktree", "--git-path", "HEAD", "--show-toplevel")
+	if err != nil {
+		return nil, "", err
+	}
+	var lines []string
+	for _, line := range strings.Split(res.Stdout, "\n") {
+		if line = strings.TrimRight(line, "\r"); line != "" {
+			lines = append(lines, line)
+		}
+	}
+	top = root
+	if len(lines) > configFileCount {
+		top = lines[configFileCount]
+		lines = lines[:configFileCount]
+	}
+	for _, line := range lines {
+		if !filepath.IsAbs(line) {
+			line = filepath.Join(root, line)
+		}
+		files = append(files, filepath.Clean(line))
+	}
+	return files, top, nil
+}
+
+// configFileCount is how many --git-path answers configFiles asks rev-parse for ahead of the
+// work-tree top.
+const configFileCount = 3
+
+// configEntry is one record of a `git config --show-origin --list -z` listing: the file it came
+// from as git spells it — relative to the work-tree top, or absolute under GIT_DIR — the key as
+// git canonicalises it, and the value.
+type configEntry struct {
+	origin, key, value string
+}
+
+// parseConfigListing cuts a -z listing into its records: <origin>\0<key>\n<value>\0, or
+// <origin>\0<key>\0 for a valueless key. Each record is cut at its FIRST newline — a value may
+// hold newlines of its own — and the NUL framing is what keeps an attacker-chosen value from
+// posing as a key. The bytes after the final NUL are never a record: nothing for a complete
+// listing, a partial record plus the capped path's "[output truncated" marker for one that
+// overran subprocess.MaxSubprocessOutputBytes, and a fake git's free-form echo in a test — all
+// dropped, as is an origin that is no file (a `command line:` override).
+func parseConfigListing(listing string) []configEntry {
+	tokens := strings.Split(listing, "\x00")
+	tokens = tokens[:len(tokens)-1]
+	entries := make([]configEntry, 0, len(tokens)/2)
+	for i := 0; i+1 < len(tokens); i += 2 {
+		origin, ok := strings.CutPrefix(tokens[i], "file:")
+		if !ok {
+			continue
+		}
+		key, value, _ := strings.Cut(tokens[i+1], "\n")
+		entries = append(entries, configEntry{origin: origin, key: key, value: value})
+	}
+	return entries
+}
+
+// isIncludeKey reports whether key is an include.path or includeIf.<condition>.path key — the
+// two forms git follows into another file — as the listing lowercases them.
+func isIncludeKey(key string) bool {
+	return key == "include.path" ||
+		(strings.HasPrefix(key, "includeif.") && strings.HasSuffix(key, ".path"))
+}
+
+// resolveInclude turns an include value into the path git opens for it: a leading ~/ is the
+// home directory, a relative path is relative to the config file that carries it, and a
+// relative origin is itself spelled from top. A nested include is listed with the included file
+// as its origin, so it resolves the same way.
+func resolveInclude(top, origin, value string) string {
+	if rest, ok := strings.CutPrefix(value, "~/"); ok {
+		if home, err := os.UserHomeDir(); err == nil {
+			return filepath.Join(home, rest)
+		}
+	}
+	if filepath.IsAbs(value) {
+		return filepath.Clean(value)
+	}
+	carrier := origin
+	if !filepath.IsAbs(carrier) {
+		carrier = filepath.Join(top, carrier)
+	}
+	return filepath.Join(filepath.Dir(carrier), value)
+}
+
+// orderedSet collects strings once each, in first-seen order — the probe's names and include
+// paths, which a repository may repeat across scopes.
+type orderedSet struct {
+	seen map[string]struct{}
+	list []string
+}
+
+// add records value unless it was seen before.
+func (s *orderedSet) add(value string) {
+	if s.seen == nil {
+		s.seen = make(map[string]struct{})
+	}
+	if _, dup := s.seen[value]; dup {
+		return
+	}
+	s.seen[value] = struct{}{}
+	s.list = append(s.list, value)
 }
 
 // CommandConfigRefusal is the model-facing sentence for a repository whose own config names a

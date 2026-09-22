@@ -18,7 +18,9 @@
 //     filter driver, an sshCommand — gets no git call at all ([CommandConfigName],
 //     [CommandConfigRefusal]); the operator's global config is on the other side of that trust
 //     boundary and still applies. The probe behind the refusal is memoised per
-//     (git binary, root, environment). The pattern's source string is internal/security's
+//     (git binary, root, environment) and re-probed when the config's files change — the scope
+//     files, HEAD and every include they name are fingerprinted and re-stat-ed on each call. The
+//     pattern's source string is internal/security's
 //     ([security.GitCommandConfigNameSource]), which the shell write view widens with
 //     core.hooksPath to name .git/config for a `git config` line that sets such a key.
 //

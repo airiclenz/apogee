@@ -474,8 +474,8 @@ func operandTargets(words []string) []string {
 // other verb's operands (the global options before it included) are write targets. A `config`
 // write of a command-valued key into the repository's own config additionally names
 // `.git/config`, the file it lands in — its operands alone (`filter.x.clean cmd`) never spell
-// the control-plane path the write-git-control-plane rule matches, and the memoised probe on
-// the git tools' side would not catch up until apogee restarts.
+// the control-plane path the write-git-control-plane rule matches, so the approval would not
+// show what the line really touches (the git tools' probe re-reads a changed config on its own).
 func gitTargets(operands []string) []string {
 	rest := operands
 	for len(rest) > 0 && strings.HasPrefix(rest[0], "-") {

@@ -748,8 +748,8 @@ func TestGitBranch_RunsUnderConfine(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute err = %v", err)
 	}
-	if conf.confineCount() != 3 {
-		t.Errorf("Confine called %d times, want 3 (the two filter-driver config probes and the branch list — every git subprocess the tool builds is confined)", conf.confineCount())
+	if conf.confineCount() != 4 {
+		t.Errorf("Confine called %d times, want 4 (the command-config probe's three processes and the branch list — every git subprocess the tool builds is confined)", conf.confineCount())
 	}
 	if res.IsError {
 		t.Errorf("confined list errored: %q", res.Content)
@@ -1212,7 +1212,8 @@ func hasHardeningPair(argv []string) bool {
 
 // recordGitArgv runs one tool call against a fake git that appends every invocation it receives
 // to a record file, and returns the argv from the first line carrying verb — the repo-local
-// command-config probe's own `config … --get-regexp` invocations are recorded first, so the
+// command-config probe's own invocations (`rev-parse --git-path …`, then one
+// `config … --includes --show-origin --list -z` per scope) are recorded first, so the
 // subcommand is what identifies the line the tool itself chose. run receives the host whose
 // look resolves the fake git, so it constructs the tool under test on that host.
 func recordGitArgv(t *testing.T, verb string, run func(h execHost) (domain.ToolResult, error)) []string {
@@ -2620,7 +2621,7 @@ func TestGitLog_BracketPathIsLiteral(t *testing.T) {
 }
 
 // TestGitBranch_ListMarksRemoteRefs: with a remote-tracking branch present, list still runs ONE
-// branch process (the confine count stays at the two config probes plus one) and tags the
+// branch process (the confine count stays at the probe's three processes plus one) and tags the
 // remote ref " (remote)" while the local names read as before.
 func TestGitBranch_ListMarksRemoteRefs(t *testing.T) {
 	root, _ := gitRepoWithBareRemote(t, "origin")
@@ -2643,8 +2644,8 @@ func TestGitBranch_ListMarksRemoteRefs(t *testing.T) {
 	if !strings.Contains(res.Content, "main *") || strings.Contains(res.Content, "refs/heads/") {
 		t.Errorf("list = %q, want the current local branch as \"main *\" with the refs/heads/ prefix stripped", res.Content)
 	}
-	if conf.confineCount() != 3 {
-		t.Errorf("Confine called %d times, want 3 (two config probes + the one branch process — remotes are marked from that same listing)", conf.confineCount())
+	if conf.confineCount() != 4 {
+		t.Errorf("Confine called %d times, want 4 (the probe's three processes + the one branch process — remotes are marked from that same listing)", conf.confineCount())
 	}
 }
 

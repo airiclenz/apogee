@@ -109,11 +109,12 @@ func TestCapture_AppliesHardeningToEveryInvocation(t *testing.T) {
 	}
 }
 
-// TestCapture_MemoisesTheCommandConfigProbePerRoot pins the probe's cost model: the repo-local
-// command-config probe runs once per repository — not once per git call — and one root's cached
-// answer never stands in for another's. A fake git logs every invocation it receives, so what is
-// counted is the real subprocess count rather than a proxy for it.
-func TestCapture_MemoisesTheCommandConfigProbePerRoot(t *testing.T) {
+// TestCapture_ServesTheCacheWhileTheConfigHolds pins the probe's cost model: the repo-local
+// command-config probe runs once per repository while the files that decided it hold — not once
+// per git call — and one root's cached answer never stands in for another's. A fake git logs
+// every invocation it receives, so what is counted is the real subprocess count rather than a
+// proxy for it; it prints nothing, so the probe names no file and the memo holds on no prints.
+func TestCapture_ServesTheCacheWhileTheConfigHolds(t *testing.T) {
 	posixScriptHost(t)
 
 	dir := t.TempDir()
@@ -136,22 +137,129 @@ func TestCapture_MemoisesTheCommandConfigProbePerRoot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read invocation log: %v", err)
 	}
-	probes, calls := 0, 0
+	listings, paths, calls := 0, 0, 0
 	for _, line := range strings.Split(strings.TrimSpace(string(logged)), "\n") {
 		switch {
-		case strings.Contains(line, "--get-regexp"):
-			probes++
+		case strings.Contains(line, "--show-origin"):
+			listings++
+		case strings.Contains(line, "rev-parse"):
+			paths++
 		case strings.Contains(line, "status"):
 			calls++
 		}
 	}
 
-	wantProbes := len(gitexec.FilterConfigScopes) * 2
-	if probes != wantProbes {
-		t.Errorf("probe invocations = %d, want %d (one per config scope per root; the repeat call on the first root must reuse the memoised answer)", probes, wantProbes)
+	wantListings := len(gitexec.FilterConfigScopes) * 2
+	if listings != wantListings {
+		t.Errorf("config listings = %d, want %d (one per config scope per root; the repeat call on the first root must reuse the memoised answer)", listings, wantListings)
+	}
+	if paths != 2 {
+		t.Errorf("rev-parse invocations = %d, want 2 (one per root)", paths)
 	}
 	if calls != 3 {
 		t.Errorf("git calls = %d, want 3 (memoising the probe must not swallow a real invocation)", calls)
+	}
+}
+
+// appendToConfig appends text to the repository's .git/config without a git call — the write a
+// confined terminal's opaque program would make, which no argv of ours sees.
+func appendToConfig(t *testing.T, root, text string) {
+	t.Helper()
+	path := filepath.Join(root, ".git", "config")
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read .git/config: %v", err)
+	}
+	if err := os.WriteFile(path, append(current, text...), 0o644); err != nil {
+		t.Fatalf("write .git/config: %v", err)
+	}
+}
+
+// captureStatus runs one status through Capture on root and returns the captured outcome.
+func captureStatus(t *testing.T, gitPath, root string) subprocess.SubprocessResult {
+	t.Helper()
+	res, err := gitexec.Capture(context.Background(), gitPath, root, testTimeout, "status", "--porcelain")
+	if err != nil {
+		t.Fatalf("Capture err = %v", err)
+	}
+	return res
+}
+
+// TestCapture_ReprobesWhenTheConfigChanges pins that the memo is keyed on the config's identity,
+// not the process: a command-valued key written into .git/config AFTER the first probe — with no
+// git call, as an opaque program under a confined terminal would write it — refuses the next call,
+// and removing it lets the call through again.
+func TestCapture_ReprobesWhenTheConfigChanges(t *testing.T) {
+	gitPath := realGit(t)
+	root := t.TempDir()
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	if res := captureStatus(t, gitPath, root); res.ExitCode != 0 {
+		t.Fatalf("Capture refused a clean repository: %q", res.CombinedOutput)
+	}
+
+	const hostile = "[filter \"x\"]\n\tclean = true\n"
+	appendToConfig(t, root, hostile)
+	refused := captureStatus(t, gitPath, root)
+
+	if refused.ExitCode == 0 || !strings.Contains(refused.CombinedOutput, "filter.x.clean") {
+		t.Fatalf("Capture after the config write = %q, want the refusal naming filter.x.clean", refused.CombinedOutput)
+	}
+	path := filepath.Join(root, ".git", "config")
+	current, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read .git/config: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(strings.TrimSuffix(string(current), hostile)), 0o644); err != nil {
+		t.Fatalf("restore .git/config: %v", err)
+	}
+	if res := captureStatus(t, gitPath, root); res.ExitCode != 0 {
+		t.Errorf("Capture after the key was removed = %q, want the call to run again", res.CombinedOutput)
+	}
+}
+
+// TestCapture_ReprobesWhenAnAbsentIncludeAppears pins two things at once: the probe follows
+// includes at all (a scoped `git config` read follows none unless asked), and a missing include
+// — which git skips silently — is watched from the start, so the file the model creates later
+// refuses the next call.
+func TestCapture_ReprobesWhenAnAbsentIncludeAppears(t *testing.T) {
+	gitPath := realGit(t)
+	root := t.TempDir()
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	appendToConfig(t, root, "[include]\n\tpath = ../extra\n")
+	if res := captureStatus(t, gitPath, root); res.ExitCode != 0 {
+		t.Fatalf("Capture refused a repository whose include is absent: %q", res.CombinedOutput)
+	}
+
+	if err := os.WriteFile(filepath.Join(root, "extra"), []byte("[filter \"x\"]\n\tclean = true\n"), 0o644); err != nil {
+		t.Fatalf("write the include: %v", err)
+	}
+	res := captureStatus(t, gitPath, root)
+
+	if res.ExitCode == 0 || !strings.Contains(res.CombinedOutput, "filter.x.clean") {
+		t.Errorf("Capture after the include appeared = %q, want the refusal naming filter.x.clean", res.CombinedOutput)
+	}
+}
+
+// TestCapture_ReprobesWhenTheBranchChanges pins HEAD's place in the fingerprinted set: an
+// includeIf.onbranch include is listed only while HEAD matches, so a branch switch that touches
+// no config file at all still changes the answer.
+func TestCapture_ReprobesWhenTheBranchChanges(t *testing.T) {
+	gitPath := realGit(t)
+	root := t.TempDir()
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	if err := os.WriteFile(filepath.Join(root, "extra"), []byte("[filter \"x\"]\n\tclean = true\n"), 0o644); err != nil {
+		t.Fatalf("write the include: %v", err)
+	}
+	appendToConfig(t, root, "[includeIf \"onbranch:feat\"]\n\tpath = ../extra\n")
+	if res := captureStatus(t, gitPath, root); res.ExitCode != 0 {
+		t.Fatalf("Capture refused on a branch the include does not apply to: %q", res.CombinedOutput)
+	}
+
+	runRealGit(t, gitPath, root, "checkout", "-b", "feat")
+	res := captureStatus(t, gitPath, root)
+
+	if res.ExitCode == 0 || !strings.Contains(res.CombinedOutput, "filter.x.clean") {
+		t.Errorf("Capture on the matching branch = %q, want the refusal naming filter.x.clean", res.CombinedOutput)
 	}
 }
 
@@ -267,7 +375,7 @@ func TestRunTo_StreamsPayloadUntruncated(t *testing.T) {
 	const chunk = 64
 	const repeats = 8192 // 512 KiB — twice the capped path's ceiling
 	fakeGit := writeFakeGit(t, t.TempDir(), "#!/bin/sh\n"+
-		"case \"$*\" in *--get-regexp*) exit 1 ;; esac\n"+
+		"case \"$*\" in *config*|*rev-parse*) exit 1 ;; esac\n"+
 		"line=0123456789012345678901234567890123456789012345678901234567890123\n"+
 		"n=0\nwhile [ $n -lt 8192 ]; do printf '%s' \"$line\"; n=$((n+1)); done\n")
 	withFakeGit(t, fakeGit)
