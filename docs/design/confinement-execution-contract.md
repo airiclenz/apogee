@@ -868,6 +868,18 @@ sentence naming what this backend could not do on this host, rendered by `probe.
 `/confine` say what would have to change rather than a bare `false`. It never gates anything —
 `AutoEligible()` reads `FSWrite` alone.
 
+`Cause` is that same *why* in a form a caller can branch on (added 2026-09-22): a small closed enum
+(`backend-absent` / `probe-timed-out` / `launch-refused`) set at **every** site returning caps with
+`FSWrite = false` — including the two whose sentence is empty, `denyConfiner` and a Windows token
+backend the session has already closed — and empty exactly where `FSWrite` is true. An empty
+`Unavailable` therefore no longer means "the backend has nothing to say"; it means the incapacity has
+no host fact worth a sentence, and the cause names it regardless. Nothing renders it —
+`probe.CapabilityLine` and the startup notice word the sentence, and `AutoEligible()` still reads
+`FSWrite` alone. It exists so a reader can tell a probe that ran out of time (the namespace rung's
+60 s launch budget, spent only on a host that is failing to answer) from a backend that was never
+installed, without matching on prose. Where both Linux rungs say no the sentence joins them and the
+cause is the returned rung's own — the namespace backend's, never landlock's and never a zero.
+
 `Residuals` is the disclosure half of capability honesty (added 2026-08-26): the accesses a backend
 **knowingly cannot fence on this host while the matching enforcement bit is true**, each named by
 its syscall, empty when the fence is complete. A backend that leaves an access open *says so*

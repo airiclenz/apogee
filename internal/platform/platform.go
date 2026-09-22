@@ -125,9 +125,13 @@ type Host interface {
 type denyConfiner struct{}
 
 // Capabilities reports a backend that can enforce nothing — both fs-write and
-// network-egress are false, so this backend never satisfies the Auto gate.
+// network-egress are false, so this backend never satisfies the Auto gate. It offers no
+// Unavailable sentence: there is no facility here to explain itself, and a host reading
+// "no confinement backend on this OS" learns nothing the backend's own name did not already
+// say. The typed CauseBackendAbsent carries that exact fact instead, so a caller branching
+// on the cause is never handed a zero it has to guess at.
 func (denyConfiner) Capabilities() domain.ConfinementCaps {
-	return domain.ConfinementCaps{FSWrite: false, NetworkEgress: false}
+	return domain.ConfinementCaps{FSWrite: false, NetworkEgress: false, Cause: domain.CauseBackendAbsent}
 }
 
 // Confine cannot prepare a confined command — this backend enforces nothing — so it

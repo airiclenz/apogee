@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/platform/confinetest"
@@ -89,7 +90,7 @@ func TestNamespaceArgv(t *testing.T) {
 func TestNamespaceConfineRewritesCmd(t *testing.T) {
 	t.Parallel()
 
-	c := newNamespaceConfiner("/usr/bin/bwrap", "")
+	c := newNamespaceConfiner("/usr/bin/bwrap", "", "")
 	box := domain.ConfinementBox{WorkspaceRoot: "/"}
 	cmd := exec.Command("/bin/echo", "hello", "world")
 
@@ -124,7 +125,7 @@ func TestNamespaceConfineForwardsResolvedPath(t *testing.T) {
 	// The confined argv must carry the RESOLVED program path (cmd.Path), not the bare
 	// cmd.Args[0]: bwrap execs the command with no PATH lookup of its own, so a bare "echo"
 	// would ENOENT inside the namespace.
-	c := newNamespaceConfiner("/usr/bin/bwrap", "")
+	c := newNamespaceConfiner("/usr/bin/bwrap", "", "")
 	cmd := exec.Command("echo", "hi") // bare name; Go resolves cmd.Path via LookPath
 	resolved := cmd.Path
 	if resolved == "" || !strings.HasPrefix(resolved, "/") {
@@ -150,7 +151,7 @@ func TestNamespaceConfineRejectsEmptyArgv(t *testing.T) {
 	// Confine must refuse a cmd with no argv rather than produce a malformed launch line —
 	// the deterministic guard runs before the availability check, so an unavailable backend
 	// still reports "no argv" rather than ErrConfinementUnavailable.
-	c := newNamespaceConfiner("", "bwrap not on PATH")
+	c := newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
 	cmd := &exec.Cmd{} // no Args
 
 	err := c.Confine(context.Background(), domain.ConfinementBox{}, cmd)
@@ -172,7 +173,7 @@ func TestNamespaceConfineUnavailableIsErrConfinementUnavailable(t *testing.T) {
 	// bwrap absent => Confine returns ErrConfinementUnavailable (the "confine if you can,
 	// gate if you can't" safety net) carrying the reason, so dispatch falls back to Approval
 	// and the user reads why.
-	c := newNamespaceConfiner("", "bwrap not on PATH")
+	c := newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
 	cmd := exec.Command("/bin/echo", "hi")
 
 	err := c.Confine(context.Background(), domain.ConfinementBox{WorkspaceRoot: "/ws"}, cmd)
@@ -198,25 +199,32 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 		name            string
 		bwrapPath       string
 		unavailable     string
+		cause           domain.ConfinementCause
 		wantFSWrite     bool
 		wantNetwork     bool
 		wantUnavailable string
+		wantCause       domain.ConfinementCause
 		wantResiduals   []string
 	}{
 		// bwrap present => one launch fences both fs-write and network egress, so Unavailable
 		// stays empty on the fenceable cell — but `--unshare-net` cannot reach a PATHNAME
 		// AF_UNIX socket, which the read-only root carries into the box, so that one access is
 		// disclosed by syscall and nothing else is.
-		{"bwrap_present", "/usr/bin/bwrap", "", true, true, "", []string{domain.ResidualUnixEgress}},
+		{"bwrap_present", "/usr/bin/bwrap", "", "", true, true, "", "", []string{domain.ResidualUnixEgress}},
 		// bwrap absent => deny-all caps => the disposition gates the subprocess surface (Auto
-		// not refused, ADR 0012) and the reason is disclosed (contract §5). Nothing is fenced,
-		// so nothing is residual either: a residual is an admitted gap in a fence that exists.
-		{"bwrap_absent", "", "bwrap not on PATH", false, false, "bwrap not on PATH", nil},
+		// not refused, ADR 0012) and the reason is disclosed (contract §5) in both forms.
+		// Nothing is fenced, so nothing is residual either: a residual is an admitted gap in a
+		// fence that exists.
+		{"bwrap_absent", "", "bwrap not on PATH", domain.CauseBackendAbsent, false, false, "bwrap not on PATH", domain.CauseBackendAbsent, nil},
+		// A probe that outlived its budget reaches the caps as its OWN cause: the sentence and
+		// the token both say the probe never answered, which is not the same host fact as a
+		// bwrap that is not installed.
+		{"probe_timed_out", "", "bwrap timed out", domain.CauseProbeTimedOut, false, false, "bwrap timed out", domain.CauseProbeTimedOut, nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := newNamespaceConfiner(tt.bwrapPath, tt.unavailable)
+			c := newNamespaceConfiner(tt.bwrapPath, tt.unavailable, tt.cause)
 
 			caps := c.Capabilities()
 
@@ -228,6 +236,10 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 			}
 			if caps.Unavailable != tt.wantUnavailable {
 				t.Errorf("Unavailable = %q, want %q", caps.Unavailable, tt.wantUnavailable)
+			}
+			if caps.Cause != tt.wantCause {
+				t.Errorf("Cause = %q, want %q: the typed cause is what a caller branches on, "+
+					"and a fenceable backend carries none", caps.Cause, tt.wantCause)
 			}
 			if !slices.Equal(caps.Residuals, tt.wantResiduals) {
 				t.Errorf("Residuals = %v, want %v: a fenceable box still passes pathname AF_UNIX egress, "+
@@ -284,7 +296,7 @@ func TestNamespaceProbeReasonNamesTheCause(t *testing.T) {
 		const diagnostic = "bwrap: setting up uid map: Permission denied"
 		launcher := stubLauncher(t, "echo '"+diagnostic+"' >&2\nexit 1\n")
 
-		reason := probeNamespace(launcher)
+		reason, cause := probeNamespace(launcher)
 
 		if !strings.Contains(reason, diagnostic) {
 			t.Errorf("reason = %q, want it to contain %q", reason, diagnostic)
@@ -292,13 +304,21 @@ func TestNamespaceProbeReasonNamesTheCause(t *testing.T) {
 		if !strings.HasPrefix(reason, "bwrap refused: ") {
 			t.Errorf("reason = %q, want the %q prefix", reason, "bwrap refused: ")
 		}
+		if cause != domain.CauseLaunchRefused {
+			t.Errorf("cause = %q, want %q: the launcher ran and said no", cause, domain.CauseLaunchRefused)
+		}
 	})
 
 	t.Run("successful_launch_is_fenceable", func(t *testing.T) {
 		launcher := stubLauncher(t, "exit 0\n")
 
-		if reason := probeNamespace(launcher); reason != "" {
+		reason, cause := probeNamespace(launcher)
+
+		if reason != "" {
 			t.Errorf("reason = %q, want \"\" for a launcher that exits 0", reason)
+		}
+		if cause != "" {
+			t.Errorf("cause = %q, want \"\" for a launcher that exits 0", cause)
 		}
 	})
 
@@ -306,10 +326,36 @@ func TestNamespaceProbeReasonNamesTheCause(t *testing.T) {
 		// A launcher that fails without a word still yields a reason that says something.
 		launcher := stubLauncher(t, "exit 3\n")
 
-		reason := probeNamespace(launcher)
+		reason, cause := probeNamespace(launcher)
 
 		if want := "bwrap refused: exit status 3"; reason != want {
 			t.Errorf("reason = %q, want %q", reason, want)
+		}
+		if cause != domain.CauseLaunchRefused {
+			t.Errorf("cause = %q, want %q: a wordless non-zero exit is still a refusal", cause, domain.CauseLaunchRefused)
+		}
+	})
+
+	t.Run("a_launcher_that_outlives_the_budget_times_out", func(t *testing.T) {
+		// The cold, loaded box the production budget was raised for, driven at a budget a test
+		// can afford: a launcher that never returns must classify as a probe that did not
+		// ANSWER, never as one that refused — the whole point of the typed cause is that a
+		// caller can tell "this host cannot fence" from "this host did not say in time".
+		// `exec` so the sleep REPLACES the shell rather than being its child: the probe
+		// captures stderr through a pipe, and a surviving grandchild holding the write end
+		// would make Wait pay the whole ProcessWaitDelay drain (5 s) on every suite run.
+		launcher := stubLauncher(t, "exec sleep 30\n")
+		restore := namespaceProbeTimeout
+		namespaceProbeTimeout = 50 * time.Millisecond
+		t.Cleanup(func() { namespaceProbeTimeout = restore })
+
+		reason, cause := probeNamespace(launcher)
+
+		if want := "bwrap timed out"; reason != want {
+			t.Errorf("reason = %q, want %q", reason, want)
+		}
+		if cause != domain.CauseProbeTimedOut {
+			t.Errorf("cause = %q, want %q: a launcher that never answered did not refuse", cause, domain.CauseProbeTimedOut)
 		}
 	})
 
@@ -324,6 +370,10 @@ func TestNamespaceProbeReasonNamesTheCause(t *testing.T) {
 		}
 		if caps.Unavailable != "bwrap not on PATH" {
 			t.Errorf("Unavailable = %q, want %q", caps.Unavailable, "bwrap not on PATH")
+		}
+		if caps.Cause != domain.CauseBackendAbsent {
+			t.Errorf("Cause = %q, want %q: nothing ran, so nothing refused or timed out",
+				caps.Cause, domain.CauseBackendAbsent)
 		}
 	})
 }

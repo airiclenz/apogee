@@ -82,13 +82,19 @@ import (
 type namespaceConfiner struct {
 	bwrapPath   string // absolute path of bwrap; "" when the backend cannot fence
 	unavailable string // why the backend cannot fence; "" when bwrapPath is set
+	// cause is the typed counterpart of unavailable, so a caller can tell a probe that ran out
+	// of time from a bwrap that is not installed without reading the sentence; "" when
+	// bwrapPath is set.
+	cause domain.ConfinementCause
 }
 
 // newNamespaceConfiner builds the backend from an explicit probe result. It is the shared
 // constructor both the probing NewNamespaceConfiner and the hermetic tests use, so the
-// caps/argv/rewrite logic is exercised without a real bwrap (contract §5).
-func newNamespaceConfiner(bwrapPath, unavailable string) *namespaceConfiner {
-	return &namespaceConfiner{bwrapPath: bwrapPath, unavailable: unavailable}
+// caps/argv/rewrite logic is exercised without a real bwrap (contract §5). unavailable and
+// cause travel together: a backend that cannot fence carries both, and one that can carries
+// neither.
+func newNamespaceConfiner(bwrapPath, unavailable string, cause domain.ConfinementCause) *namespaceConfiner {
+	return &namespaceConfiner{bwrapPath: bwrapPath, unavailable: unavailable, cause: cause}
 }
 
 // NewNamespaceConfiner probes this host once and returns the namespace backend: bwrap is
@@ -98,31 +104,46 @@ func newNamespaceConfiner(bwrapPath, unavailable string) *namespaceConfiner {
 // unprivileged process — `kernel.apparmor_restrict_unprivileged_userns`, a seccomp filter,
 // `user.max_user_namespaces=0` — refuse it at run time, not at PATH-lookup time, so only a
 // real launch can answer. Either failure yields a backend that fences nothing and says why
-// through Capabilities().Unavailable; the probe has no disk side effect, so the report
-// confiner may construct it too.
+// through Capabilities().Unavailable and, in the typed form a caller can branch on, through
+// Capabilities().Cause: an absent bwrap is domain.CauseBackendAbsent, while a launch that
+// refused or outlived the probe budget carries the cause probeNamespace returned. The probe
+// has no disk side effect, so the report confiner may construct it too.
 func NewNamespaceConfiner() *namespaceConfiner {
 	bwrapPath, err := exec.LookPath("bwrap")
 	if err != nil {
-		return newNamespaceConfiner("", "bwrap not on PATH")
+		return newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
 	}
-	if reason := probeNamespace(bwrapPath); reason != "" {
-		return newNamespaceConfiner("", reason)
+	if reason, cause := probeNamespace(bwrapPath); reason != "" {
+		return newNamespaceConfiner("", reason, cause)
 	}
-	return newNamespaceConfiner(bwrapPath, "")
+	return newNamespaceConfiner(bwrapPath, "", "")
 }
 
-// namespaceProbeTimeout bounds the construction probe's one real launch: a bwrap that
-// hangs setting up its namespaces must not stall apogee's startup.
-const namespaceProbeTimeout = 10 * time.Second
+// namespaceProbeTimeout bounds the construction probe's one real launch: a bwrap that hangs
+// setting up its namespaces must not stall apogee's startup. A minute, not ten seconds,
+// because this budget is only ever SPENT on a host that is failing to answer — a bwrap that
+// can fence returns in milliseconds and the probe returns with it — so a generous ceiling
+// costs a healthy host nothing, while a cold, loaded box (a Pi paging its first bwrap in off
+// an SD card, a container under a saturated CPU) stops being told it cannot fence when it can.
+// That is internal/tuitest's poll-and-return reasoning applied to production. The consequence
+// to state: a host whose bwrap truly wedges now stalls startup for a minute rather than ten
+// seconds, which is the price of not downgrading a slow host's whole session.
+//
+// It is a var rather than a const only so the timeout case can lower it; production never
+// assigns it.
+var namespaceProbeTimeout = 60 * time.Second
 
 // probeNamespace launches the platform shell running a no-op under bwrapPath with the exact
-// flag line Confine would generate for a box rooted at the temp dir, and returns "" when
-// the launch exits 0 — the host can fence — or the reason it cannot: `bwrap refused: <last
-// non-empty stderr line>` (bwrap prints one diagnostic line, e.g. `bwrap: setting up uid
-// map: Permission denied`; the exit error stands in when it printed nothing) or `bwrap
-// timed out`. Stdin and stdout are /dev/null; only stderr is captured. WaitDelay bounds the
-// drain after a timeout kill so a child left holding the stderr pipe cannot wedge Wait.
-func probeNamespace(bwrapPath string) string {
+// flag line Confine would generate for a box rooted at the temp dir, and returns ("", "")
+// when the launch exits 0 — the host can fence — or the reason it cannot, in both forms: the
+// sentence `bwrap refused: <last non-empty stderr line>` (bwrap prints one diagnostic line,
+// e.g. `bwrap: setting up uid map: Permission denied`; the exit error stands in when it
+// printed nothing) with domain.CauseLaunchRefused, or `bwrap timed out` with
+// domain.CauseProbeTimedOut. The two are never collapsed: a refusal is this host's answer,
+// while a timeout is no answer at all. Stdin and stdout are /dev/null; only stderr is
+// captured. WaitDelay bounds the drain after a timeout kill so a child left holding the
+// stderr pipe cannot wedge Wait.
+func probeNamespace(bwrapPath string) (string, domain.ConfinementCause) {
 	ctx, cancel := context.WithTimeout(context.Background(), namespaceProbeTimeout)
 	defer cancel()
 
@@ -135,16 +156,16 @@ func probeNamespace(bwrapPath string) string {
 
 	err := cmd.Run()
 	if err == nil {
-		return ""
+		return "", ""
 	}
 	if ctx.Err() != nil {
-		return "bwrap timed out"
+		return "bwrap timed out", domain.CauseProbeTimedOut
 	}
 	reason := lastNonEmptyLine(stderr.String())
 	if reason == "" {
 		reason = err.Error()
 	}
-	return "bwrap refused: " + reason
+	return "bwrap refused: " + reason, domain.CauseLaunchRefused
 }
 
 // lastNonEmptyLine returns the last line of s that is not blank, trimmed, or "" when every
@@ -162,8 +183,9 @@ func lastNonEmptyLine(s string) string {
 // Capabilities reports what the namespace backend can enforce on this host, probed once at
 // construction (confinement-execution-contract §5). One bwrap launch fences both the
 // filesystem (read-only root, writable binds) and — when the box asks — the network, so
-// with bwrap present both caps are true; without it both are false and Unavailable says
-// why, so the disposition gates rather than confines and Auto is not refused (ADR 0012).
+// with bwrap present both caps are true; without it both are false, Unavailable says why in
+// prose and Cause says the same thing in the typed form a caller branches on, so the
+// disposition gates rather than confines and Auto is not refused (ADR 0012).
 //
 // The network fence is not total, and the gap is DISCLOSED rather than hidden (amends
 // ADR 0081 §4, dated note in place). `--unshare-net` gives the box an empty network
@@ -179,7 +201,7 @@ func lastNonEmptyLine(s string) string {
 // fences nothing and discloses no residual — that path is wholly Unavailable.
 func (c *namespaceConfiner) Capabilities() domain.ConfinementCaps {
 	if c.bwrapPath == "" {
-		return domain.ConfinementCaps{Unavailable: c.unavailable}
+		return domain.ConfinementCaps{Unavailable: c.unavailable, Cause: c.cause}
 	}
 	return domain.ConfinementCaps{
 		FSWrite:       true,

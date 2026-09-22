@@ -179,6 +179,10 @@ func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 		rules:     rules,
 		protected: windowsProtectedRoots(os.LookupEnv, userProfileRoot()),
 		journal:   winlabel.Open(home),
+		// The incapable caps this backend starts from and keeps if the mint below fails: no
+		// sentence (a mint refusal has no host fact the user could change) but the typed cause
+		// every unfenceable caps value carries, so the zero value is never what a caller reads.
+		caps: domain.ConfinementCaps{Cause: domain.CauseBackendAbsent},
 	}
 
 	token, err := mintRestrictedLowToken()
@@ -278,7 +282,9 @@ func (c *tokenConfiner) Close() error {
 		_ = c.token.Close()
 		c.token = 0
 	}
-	c.caps = domain.ConfinementCaps{}
+	// The token is gone, so the facility is: the latched caps answer the same incapacity a
+	// mint failure reports, sentence-less and typed.
+	c.caps = domain.ConfinementCaps{Cause: domain.CauseBackendAbsent}
 	return err
 }
 

@@ -17,7 +17,11 @@ import "github.com/airiclenz/apogee/internal/domain"
 // When neither fences, the namespace backend is returned anyway, carrying BOTH reasons in
 // Capabilities().Unavailable ("landlock unavailable (...); bwrap not on PATH"), so every
 // wording surface — the startup notice, `apogee probe host`, /confine — names the namespace
-// backend and says what would have to change on this host. The dispatch disposition then
+// backend and says what would have to change on this host. Only the PROSE joins the two rungs:
+// Capabilities().Cause is whatever the returned backend's own rung set, which is the namespace
+// rung's (bwrap absent, its probe timed out, its launch was refused) and never landlock's and
+// never a zero — a caller branching on the cause is asking about the backend it was handed,
+// and the rung it was handed is the one that speaks for the host's remaining hope of fencing. The dispatch disposition then
 // gates the subprocess surface rather than confining it (Auto is not refused — ADR 0012).
 // The selector is build-tagged per OS because both constructors are linux-only.
 
@@ -49,6 +53,8 @@ func selectLinuxConfiner(ll *landlockConfiner, newNS func() *namespaceConfiner) 
 	if ns.Capabilities().FSWrite {
 		return ns
 	}
+	// Only the sentence is joined; ns.cause is left exactly as the namespace rung set it, so
+	// the caps value carries the cause of the rung it was returned from (see the file header).
 	ns.unavailable = ll.unavailableReason() + "; " + ns.unavailable
 	return ns
 }

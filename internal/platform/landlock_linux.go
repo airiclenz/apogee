@@ -194,6 +194,20 @@ func (c *landlockConfiner) unavailableReason() string {
 	return fmt.Sprintf("landlock unavailable (landlock_create_ruleset: %v)", c.probeErrno)
 }
 
+// unavailableCause is the typed counterpart of unavailableReason: CauseBackendAbsent whenever
+// landlock cannot fence writes on this kernel, "" when it can. There is one cause and not a
+// token per errno because every way landlock says no is the same fact to a caller — the
+// facility is not there — whether the syscall answers ENOSYS or the LSM was left out of the
+// boot line; which of the two it was stays in the sentence. Nothing here can time out: the
+// construction probe is a syscall that returns or fails at once, so CauseProbeTimedOut belongs
+// to the namespace rung alone.
+func (c *landlockConfiner) unavailableCause() domain.ConfinementCause {
+	if c.abi >= landlockABIFSWrite {
+		return ""
+	}
+	return domain.CauseBackendAbsent
+}
+
 // Capabilities reports what landlock can enforce on this kernel, probed once at
 // construction (confinement-execution-contract §5). FSWrite is true at ABI >= 1
 // (kernel >= 5.13); NetworkEgress is true only at ABI >= 4 (kernel >= 6.7). A kernel
@@ -223,6 +237,7 @@ func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 		FSWrite:       c.abi >= landlockABIFSWrite,
 		NetworkEgress: c.abi >= landlockABINetwork,
 		Unavailable:   c.unavailableReason(),
+		Cause:         c.unavailableCause(),
 	}
 	if c.abi >= landlockABIFSWrite && c.abi < landlockABITruncate {
 		caps.Residuals = append(caps.Residuals, "truncate(2)")

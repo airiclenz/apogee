@@ -183,7 +183,19 @@ go test ./internal/agent/... -run 'CommitSecrets|Guardrails_CommitSecrets'
 
 **Commit:** `fix(agent): a staged-secret scan that cannot finish forces the approval look`
 
-## 3. The namespace probe is sized for a cold start and a timeout is a typed cause
+## 3. The namespace probe is sized for a cold start and a timeout is a typed cause — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): consequential edit — internal/platform/seatbelt.go: made necessary by the cause rule, which the item keys on the caps rather than on a backend list ("every site returning caps with FSWrite false sets a cause", found with the item's own `grep -rn "ConfinementCaps{"`). An absent sandbox-exec is the last such production site outside the item's Files and now carries CauseBackendAbsent; the backend probes presence only, so it has no refusal and no timeout to report.
+
+NOTES (2026-09-22): consequential edit — docs/design/confinement-execution-contract.md: made necessary by the new field. §5 documents each caps field in turn (`Unavailable`, `Residuals`); the `Cause` paragraph now sits between them, records that an empty `Unavailable` no longer implies an absent reason, and states the two-rung join rule. Nothing already written there became false — no live document quoted the ten-second probe budget.
+
+NOTES (2026-09-22): `namespaceProbeTimeout` is a package var rather than a const, as the item's Tests section directs, so the timeout case can lower it; production never assigns it and the two tests that reach `probeNamespace` are both non-parallel.
+
+NOTES (2026-09-22): the timeout classification is falsifiable, not incidental — with `domain.CauseProbeTimedOut` swapped for `CauseLaunchRefused` in `probeNamespace`, `TestNamespaceProbeReasonNamesTheCause/a_launcher_that_outlives_the_budget_times_out` fails with `cause = "launch-refused", want "probe-timed-out"` (checked, then restored).
+
+NOTES (2026-09-22): the timeout case's stub launcher runs `exec sleep 30`, not `sleep 30`. A surviving grandchild holds the captured stderr pipe, so `Wait` would pay the whole `ProcessWaitDelay` drain: the subtest cost 5.07 s before the `exec` and 0.05 s after it.
+
+NOTES (2026-09-22): `-race` cannot run on this host — the kernel's VMA range (47 bits) is outside ThreadSanitizer's supported 48, so every `-race` invocation aborts before the first test. The item's own Acceptance does not use it; the unraced run is what was verified here.
 
 **What.** The platform half of `apogee-3mh`.
 **Goal:** a bwrap probe on a cold, loaded box completes rather than downgrading the session's

@@ -74,10 +74,18 @@ func newSeatbeltConfiner(present bool) *seatbeltConfiner {
 // both caps are true; when it is absent both are false, so the disposition gates the
 // subprocess surface rather than confining it ("confine if you can, gate if you can't",
 // ADR 0012) and Auto is not refused.
+//
+// An absent sandbox-exec carries the typed CauseBackendAbsent, like every other site that
+// returns caps it cannot fence with. Presence is the whole of what this backend probes — it
+// launches nothing at construction — so it has no refusal and no timeout to report, and one
+// cause covers it.
 func (c *seatbeltConfiner) Capabilities() domain.ConfinementCaps {
+	if !c.present {
+		return domain.ConfinementCaps{Cause: domain.CauseBackendAbsent}
+	}
 	return domain.ConfinementCaps{
-		FSWrite:       c.present,
-		NetworkEgress: c.present,
+		FSWrite:       true,
+		NetworkEgress: true,
 	}
 }
 

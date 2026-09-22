@@ -19,8 +19,10 @@ const neitherHostReason = "landlock unavailable (landlock_create_ruleset: functi
 func TestSelectLinuxConfiner(t *testing.T) {
 	t.Parallel()
 
-	fenceableNamespace := func() *namespaceConfiner { return newNamespaceConfiner("/usr/bin/bwrap", "") }
-	absentNamespace := func() *namespaceConfiner { return newNamespaceConfiner("", "bwrap not on PATH") }
+	fenceableNamespace := func() *namespaceConfiner { return newNamespaceConfiner("/usr/bin/bwrap", "", "") }
+	absentNamespace := func() *namespaceConfiner {
+		return newNamespaceConfiner("", "bwrap not on PATH", domain.CauseBackendAbsent)
+	}
 
 	tests := []struct {
 		name        string
@@ -73,8 +75,11 @@ func TestSelectLinuxConfiner(t *testing.T) {
 			newNS:       absentNamespace,
 			wantBackend: "namespace",
 			wantNSCalls: 1,
-			wantCaps:    domain.ConfinementCaps{Unavailable: neitherHostReason},
-			wantLine:    "namespace (fs-write: unavailable · network: unavailable · why: " + neitherHostReason + ")",
+			// The sentence joins both rungs; the CAUSE is the namespace rung's own, because
+			// that is the backend the selector returned. A zero here would leave a caller
+			// unable to tell an unfenceable host from a fenceable one.
+			wantCaps: domain.ConfinementCaps{Unavailable: neitherHostReason, Cause: domain.CauseBackendAbsent},
+			wantLine: "namespace (fs-write: unavailable · network: unavailable · why: " + neitherHostReason + ")",
 		},
 	}
 	for _, tt := range tests {
@@ -119,8 +124,12 @@ func TestNewConfinerOnThisHost(t *testing.T) {
 	case namespace.Capabilities().FSWrite:
 		want = namespace.Capabilities()
 	default:
+		// Both rungs said no: the prose joins them, and the typed cause is the namespace
+		// rung's own — whatever this host's bwrap did (absent, refused, or too slow to
+		// answer) — never landlock's and never the zero value.
 		want = domain.ConfinementCaps{
 			Unavailable: landlock.unavailableReason() + "; " + namespace.unavailable,
+			Cause:       namespace.cause,
 		}
 	}
 

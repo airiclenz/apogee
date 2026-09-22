@@ -363,3 +363,44 @@ func TestConfinementNetworkResidualTokensAreNamedBySyscall(t *testing.T) {
 		t.Error("the two network residual tokens are identical; they name two different egress classes")
 	}
 }
+
+// Cause is the typed half of a confiner's incapacity, and two properties make it readable at
+// all. A caps value that FENCES carries none, so a caller branching on it is never handed a
+// stale token on a host where the fence is real; and no enumerated cause is itself the empty
+// token, which is how "fences" says it has nothing to name. The second is what the first rests
+// on — collapse them and every backend's disclosure becomes ambiguous at once — and neither is
+// visible from any single backend, so both are pinned here rather than in internal/platform.
+func TestFenceableCapsCarryNoCause(t *testing.T) {
+	t.Parallel()
+
+	fenceable := []struct {
+		name string
+		caps ConfinementCaps
+	}{
+		{"fs only", ConfinementCaps{FSWrite: true}},
+		{"fs and network", ConfinementCaps{FSWrite: true, NetworkEgress: true}},
+		{"fencing with a disclosed residual", ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)"}}},
+	}
+	for _, tt := range fenceable {
+		if tt.caps.Cause != "" {
+			t.Errorf("%s: Cause = %q, want \"\" — a backend that fences has no incapacity to name",
+				tt.name, tt.caps.Cause)
+		}
+		if !tt.caps.AutoEligible() {
+			t.Errorf("%s: AutoEligible() = false, want true — the case is meant to be a fencing host", tt.name)
+		}
+	}
+
+	causes := []ConfinementCause{CauseBackendAbsent, CauseProbeTimedOut, CauseLaunchRefused}
+	for i, cause := range causes {
+		if cause == "" {
+			t.Errorf("cause %d is the empty token, which is how a fencing host says it has none", i)
+		}
+		for _, other := range causes[i+1:] {
+			if cause == other {
+				t.Errorf("causes %q and %q are the same value; a caller cannot tell a timed-out "+
+					"probe from an absent backend then", cause, other)
+			}
+		}
+	}
+}
