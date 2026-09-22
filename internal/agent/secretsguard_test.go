@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -275,6 +277,95 @@ func TestCommitSecretsGitFailureSkips(t *testing.T) {
 			t.Error("the shadow staging created the real index file")
 		}
 	})
+}
+
+// writeSleepingGit installs an executable POSIX git at dir/git that answers nothing and sleeps
+// well past any budget a test sets, so every shadow run the pre-check makes is one the check's
+// own context has to cut short. It returns dir.
+func writeSleepingGit(t *testing.T, dir string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("the sleeping-git fixture is a POSIX shell script; the budget it pins is platform-independent")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "git"), []byte("#!/bin/sh\nsleep 30\n"), 0o755); err != nil {
+		t.Fatalf("write sleeping git: %v", err)
+	}
+	return dir
+}
+
+// lowerCommitSecretsTimeout shrinks the pre-check's budget for one test and restores it after,
+// so a case can spend the whole ceiling in milliseconds. Tests using it must not run in parallel.
+func lowerCommitSecretsTimeout(t *testing.T, d time.Duration) {
+	t.Helper()
+	orig := commitSecretsTimeout
+	commitSecretsTimeout = d
+	t.Cleanup(func() { commitSecretsTimeout = orig })
+}
+
+// TestCommitSecretsIncompleteScanForcesApproval proves the degraded check fails loud: a scan
+// that resolved a repository and then could not finish — the budget spent on a git that never
+// answers, or a git run that failed mid-scan — forces exactly one approval look in Auto, worded
+// as an unchecked commit rather than as a finding, and a denied look answers the model with the
+// same words. This is the outcome ADR 0080 decision 6's silent skip used to hide.
+func TestCommitSecretsIncompleteScanForcesApproval(t *testing.T) {
+	// No t.Parallel in either case: PATH, the shadow funnel and the budget are process-wide.
+	t.Run("the budget cuts the scan short", func(t *testing.T) {
+		root := newSecretsRepo(t)
+		stageSecrets(t, root)
+		slow := writeSleepingGit(t, t.TempDir())
+		t.Setenv("PATH", slow+string(os.PathListSeparator)+os.Getenv("PATH"))
+		lowerCommitSecretsTimeout(t, 250*time.Millisecond)
+		sink := &recordingSink{}
+		approver := &gateApprover{decision: domain.ApprovalDeny}
+
+		driveToolCall(t, secretsConfig(sink, root, approver), sink, "c1", "git_commit", `{"message":"add keys"}`)
+
+		requireIncompleteScanLook(t, approver, sink)
+	})
+
+	t.Run("a git failure after the repository resolved", func(t *testing.T) {
+		root := newSecretsRepo(t)
+		stageSecrets(t, root)
+		orig := shadowGitQuery
+		// rev-parse resolves the repository; the diff that would read the staged bytes dies.
+		shadowGitQuery = func(ctx context.Context, gitPath, dir string, env []string, timeout time.Duration, args ...string) (string, error) {
+			if len(args) > 0 && args[0] == "diff" {
+				return "", errors.New("git diff: exit 128: fatal: unable to read the index")
+			}
+			return orig(ctx, gitPath, dir, env, timeout, args...)
+		}
+		t.Cleanup(func() { shadowGitQuery = orig })
+		sink := &recordingSink{}
+		approver := &gateApprover{decision: domain.ApprovalDeny}
+
+		driveToolCall(t, secretsConfig(sink, root, approver), sink, "c1", "git_commit", `{"message":"add keys"}`)
+
+		requireIncompleteScanLook(t, approver, sink)
+	})
+}
+
+// requireIncompleteScanLook asserts the one forced look an incomplete scan warrants: the Tier-2
+// reason on the prompt, the incomplete-scan wording as its Fix row, and the denial answering the
+// model with that same wording.
+func requireIncompleteScanLook(t *testing.T, approver *gateApprover, sink *recordingSink) {
+	t.Helper()
+	if len(approver.requests) != 1 {
+		t.Fatalf("approver consulted %d times, want the one look a scan that could not finish forces", len(approver.requests))
+	}
+	req := approver.requests[0]
+	if req.Reason != forceApprovalReason {
+		t.Errorf("Reason = %q, want %q", req.Reason, forceApprovalReason)
+	}
+	if req.Remedy != incompleteScanHint {
+		t.Errorf("Remedy = %q, want the incomplete-scan wording %q", req.Remedy, incompleteScanHint)
+	}
+	res, ok := lastToolResult(sink.events)
+	if !ok || !res.IsError {
+		t.Fatalf("tool result = %+v (ok=%v), want the denial", res, ok)
+	}
+	if want := "tool call denied by approver — " + incompleteScanHint; res.Content != want {
+		t.Errorf("denial = %q, want %q", res.Content, want)
+	}
 }
 
 // TestCommitSecretsSkipsInPlanMode proves Plan mode spawns no git child for the pre-check:

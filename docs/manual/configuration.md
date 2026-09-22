@@ -2095,6 +2095,11 @@ and JWTs, and the staged names for key and env files (`*.pem`, `*.key`, `*.p12`,
 templates and any `.pub` public key excepted); a hit forces the look in every mode, the
 `Fix:` row names the file and what was found, and approving is the only way through — there
 is no allow-list ([ADR 0080](../adr/0080-git-commit-forces-a-look-at-staged-secret-material.md)).
+A scan that *cannot finish* forces the same look: if git stops answering within the check's own
+budget, or fails part-way through a repository it had already resolved, the `Fix:` row says the
+staged content is unchecked instead of naming a finding — a check that did not run never passes
+for a clean one. A workspace that is no git repository at all has nothing to scan and is not
+asked about.
 A forced prompt is a speed-bump, not a block — you can say yes to it. But it carries no
 cache key, so **it offers no "Always allow this session" row** — the pane closes on
 `a forced look is asked every time` in its place: the yes authorises that one call, and

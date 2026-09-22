@@ -136,7 +136,11 @@ grep -n "DiscoveryTimeout" internal/heartbeat/heartbeat.go
 
 **Commit:** `fix(provider): the discovery probe is sized for a slow local server and the beat interval derives from it`
 
-## 2. A secrets pre-check that cannot finish forces the approval look
+## 2. A secrets pre-check that cannot finish forces the approval look — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): consequential edit — docs/manual/configuration.md: made necessary by the third outcome (the manual's commit-secrets paragraph stated the look is forced by a hit alone, which is now incomplete; the added sentences quote no budget number so they cannot drift).
+
+NOTES (2026-09-22): the timeout classification is falsifiable, not incidental — with the `errors.Is(err, errScanTimedOut)` branch removed from `newShadowIndex`, `TestCommitSecretsIncompleteScanForcesApproval/the_budget_cuts_the_scan_short` fails with "approver consulted 0 times" (checked, then restored).
 
 **What.** Closes `apogee-c8l`, the silent degradation of a security control.
 **Goal:** a `git_commit` whose staged-secret pre-check could not complete never proceeds
