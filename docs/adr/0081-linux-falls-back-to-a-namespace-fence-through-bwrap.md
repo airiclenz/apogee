@@ -106,11 +106,24 @@ here": kernels and profiles that refuse `CLONE_NEWUSER` to an unprivileged proce
 (`kernel.apparmor_restrict_unprivileged_userns`, a seccomp filter, `user.max_user_namespaces=0`)
 refuse it at run time, not at `PATH`-lookup time. So construction runs the platform shell's no-op
 under `bwrap` with the exact flag line `Confine` would generate for a box rooted at the temp dir,
-bounded by a timeout. Exit 0 ⇒ `{FSWrite:true, NetworkEgress:true, Residuals:nil}` — one launch
-fences both the filesystem and, when the box asks, the network, and nothing is residual. Any failure
-⇒ `{false, false}` with `Unavailable` set to `bwrap refused: <bwrap's last stderr line>` (e.g.
-`bwrap: setting up uid map: Permission denied`) or `bwrap timed out`. The probe has no disk side
-effect.
+bounded by a timeout. Exit 0 ⇒ `{FSWrite:true, NetworkEgress:true}` — one launch fences both the
+filesystem and, when the box asks, the network. Any failure ⇒ `{false, false}` with `Unavailable`
+set to `bwrap refused: <bwrap's last stderr line>` (e.g. `bwrap: setting up uid map: Permission
+denied`) or `bwrap timed out`. The probe has no disk side effect.
+
+> **Amended 2026-09-22 — the fenceable answer carries one residual.** This section originally read
+> `{FSWrite:true, NetworkEgress:true, Residuals:nil}`, "and nothing is residual". That overstated the
+> network half. `--unshare-net` gives the box an empty network namespace, which does cut UDP and
+> abstract AF_UNIX sockets along with TCP — but a **pathname** AF_UNIX socket is a filesystem object,
+> not a network-namespace one, so the `--ro-bind / /` root of decision 3 carries `/var/run/docker.sock`
+> and `/run/user/<uid>/bus` into the box and a confined command can still `connect(2)` to them. A
+> network-deny box therefore is not a total egress fence, and capability honesty
+> (confinement-execution-contract §5) makes the gap disclosed rather than hidden: exit 0 now yields
+> `Residuals: ["connect(2) AF_UNIX"]` (`domain.ResidualUnixEgress`, the token landlock discloses for
+> its own TCP-only rights), wherever `NetworkEgress` is true. A host without bwrap is unchanged — it
+> fences nothing, so it admits no gap either and stays wholly `Unavailable`. The token is not
+> write-class, so `probe.CapabilityLine` words it and `probe.ResidualNotice` filters it out: no host
+> gains a startup banner for it.
 
 **5. Any run-time failure is `ErrConfinementUnavailable`, never an unfenced run.** `Confine` on a
 backend whose probe failed returns `ErrConfinementUnavailable` carrying the reason, so the contract

@@ -201,13 +201,17 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 		wantFSWrite     bool
 		wantNetwork     bool
 		wantUnavailable string
+		wantResiduals   []string
 	}{
-		// bwrap present => one launch fences both fs-write and network egress; nothing to
-		// disclose, so Unavailable stays empty on the fenceable cell.
-		{"bwrap_present", "/usr/bin/bwrap", "", true, true, ""},
+		// bwrap present => one launch fences both fs-write and network egress, so Unavailable
+		// stays empty on the fenceable cell — but `--unshare-net` cannot reach a PATHNAME
+		// AF_UNIX socket, which the read-only root carries into the box, so that one access is
+		// disclosed by syscall and nothing else is.
+		{"bwrap_present", "/usr/bin/bwrap", "", true, true, "", []string{domain.ResidualUnixEgress}},
 		// bwrap absent => deny-all caps => the disposition gates the subprocess surface (Auto
-		// not refused, ADR 0012) and the reason is disclosed (contract §5).
-		{"bwrap_absent", "", "bwrap not on PATH", false, false, "bwrap not on PATH"},
+		// not refused, ADR 0012) and the reason is disclosed (contract §5). Nothing is fenced,
+		// so nothing is residual either: a residual is an admitted gap in a fence that exists.
+		{"bwrap_absent", "", "bwrap not on PATH", false, false, "bwrap not on PATH", nil},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -225,8 +229,9 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 			if caps.Unavailable != tt.wantUnavailable {
 				t.Errorf("Unavailable = %q, want %q", caps.Unavailable, tt.wantUnavailable)
 			}
-			if caps.Residuals != nil {
-				t.Errorf("Residuals = %v, want nil: the namespace fence is complete or absent, never partial", caps.Residuals)
+			if !slices.Equal(caps.Residuals, tt.wantResiduals) {
+				t.Errorf("Residuals = %v, want %v: a fenceable box still passes pathname AF_UNIX egress, "+
+					"and an absent backend admits no gap at all", caps.Residuals, tt.wantResiduals)
 			}
 			if got := caps.AutoEligible(); got != tt.wantFSWrite {
 				t.Errorf("AutoEligible = %v, want %v (Auto needs fs only, ADR 0012)", got, tt.wantFSWrite)
@@ -240,9 +245,10 @@ func TestNamespaceCapabilitiesHonest(t *testing.T) {
 // harness skips itself when the construction probe reported FSWrite==false (no bwrap, or a
 // kernel that refuses unprivileged user namespaces), so a CI container without userns
 // skips cleanly; wherever bwrap and userns work — landlock or not — every row runs for
-// real. Row #12 must DENY with the bytes intact (Residuals nil: the fence is complete or
-// absent, never partial); row #11 passes only because the kill-on-denial signature matches
-// the EROFS the read-only root answers — the journey test for the announced fence.
+// real. Row #12 must DENY with the bytes intact: the read-only root fences truncate(2), and
+// the only access this backend discloses as residual is network-class, not write-class. Row
+// #11 passes only because the kill-on-denial signature matches the EROFS the read-only root
+// answers — the journey test for the announced fence.
 func TestNamespaceProbe(t *testing.T) {
 	// Not parallel: the confined children are real subprocesses.
 	confinetest.Probe(t, NewNamespaceConfiner(), Current(), FailFastPreamble(), newProbeDenialKiller)

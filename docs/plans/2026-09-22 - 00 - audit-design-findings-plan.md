@@ -384,7 +384,13 @@ and (e) must fail against the pre-item tree. CHANGELOG sidecar, `[Unreleased]/Fi
 **Acceptance.** `go build ./... && go test ./internal/platform/... -run 'Landlock|SelectLinuxConfiner' && go test ./internal/domain/... -run 'Confinement|Caps' && go test ./internal/probe/...`
 **Commit:** `fix(platform): a landlock net-deny box discloses the UDP and UNIX-socket egress it leaves open`
 
-## 7. A bwrap net-deny box discloses its pathname-UNIX-socket egress
+## 7. A bwrap net-deny box discloses its pathname-UNIX-socket egress — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the header comment's network paragraph (`internal/platform/namespace_linux.go`) also gained the AF_UNIX fact — the item's prose guard requires no line in the package to claim this backend fences completely, and that paragraph described `--unshare-net` as "the same coarse tightening landlock ABI 4 enforces".
+
+NOTES (2026-09-22): `TestNamespaceCapabilitiesHonest` compares residuals with `slices.Equal` (already imported) rather than adding a `reflect` import for one assertion.
+
+NOTES (2026-09-22): no `.github/workflows/ci.yml` edit — item 6 landed the `unfenced:.*truncate(2)` narrowing first, as the item's text anticipated.
 
 **What.** `fix(platform)`: the namespace half of `apogee-qi3`. `--unshare-net` cuts UDP and abstract
 sockets, but a pathname UNIX socket is filesystem-scoped, so `/var/run/docker.sock` and

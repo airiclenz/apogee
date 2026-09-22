@@ -49,15 +49,21 @@ func TestSelectLinuxConfiner(t *testing.T) {
 			},
 			wantLine: "landlock (fs-write: available · network: available · unfenced: connect(2) UDP, connect(2) AF_UNIX)",
 		},
-		// No landlock, bwrap works: the second rung is the backend, its caps untouched.
+		// No landlock, bwrap works: the second rung is the backend, its caps untouched — and
+		// those caps carry the one egress class `--unshare-net` cannot reach, a pathname
+		// AF_UNIX socket the read-only root binds into the box, so the line names it too.
 		{
 			name:        "namespace_when_landlock_cannot_fence",
 			landlock:    &landlockConfiner{abi: -1, probeErrno: unix.ENOSYS},
 			newNS:       fenceableNamespace,
 			wantBackend: "namespace",
 			wantNSCalls: 1,
-			wantCaps:    domain.ConfinementCaps{FSWrite: true, NetworkEgress: true},
-			wantLine:    "namespace (fs-write: available · network: available)",
+			wantCaps: domain.ConfinementCaps{
+				FSWrite:       true,
+				NetworkEgress: true,
+				Residuals:     []string{domain.ResidualUnixEgress},
+			},
+			wantLine: "namespace (fs-write: available · network: available · unfenced: connect(2) AF_UNIX)",
 		},
 		// Neither: the namespace backend is returned {false, false} carrying BOTH reasons,
 		// so the probe / /confine line says what would have to change on this host.

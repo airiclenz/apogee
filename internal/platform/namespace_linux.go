@@ -70,6 +70,11 @@ import (
 // Network follows landlock's semantics (ADR 0012): open by default, and a non-empty
 // NetworkAllow opts the box into deny-all via `--unshare-net` — an empty network
 // namespace with only a loopback, the same coarse tightening landlock ABI 4 enforces.
+// Tighter than landlock's in one direction (an empty namespace also cuts UDP and abstract
+// AF_UNIX sockets, which landlock's TCP-only rights do not) and no tighter in another: a
+// pathname AF_UNIX socket is reached through the filesystem, which the read-only root
+// carries in, so a deny box is not a total egress fence and Capabilities discloses the
+// residual rather than claiming one.
 
 // namespaceConfiner is the bwrap-launched Linux Confiner backend. bwrapPath is the launcher
 // Confine execs, resolved once at construction; "" means the backend cannot fence on this
@@ -157,14 +162,30 @@ func lastNonEmptyLine(s string) string {
 // Capabilities reports what the namespace backend can enforce on this host, probed once at
 // construction (confinement-execution-contract §5). One bwrap launch fences both the
 // filesystem (read-only root, writable binds) and — when the box asks — the network, so
-// with bwrap present both caps are true and nothing is residual; without it both are false
-// and Unavailable says why, so the disposition gates rather than confines and Auto is not
-// refused (ADR 0012).
+// with bwrap present both caps are true; without it both are false and Unavailable says
+// why, so the disposition gates rather than confines and Auto is not refused (ADR 0012).
+//
+// The network fence is not total, and the gap is DISCLOSED rather than hidden (amends
+// ADR 0081 §4, dated note in place). `--unshare-net` gives the box an empty network
+// namespace, which cuts UDP and abstract AF_UNIX sockets along with TCP — but a PATHNAME
+// AF_UNIX socket is a filesystem object, not a network-namespace one, so the `--ro-bind / /`
+// root carries /var/run/docker.sock and /run/user/<uid>/bus into the box and a confined
+// command can still connect(2) to them. That is a standing fact about the backend, not a
+// per-box answer — a deny box is what makes it matter, and the caps are read before any box
+// exists — so the token rides in Residuals wherever NetworkEgress is true, spelled once in
+// internal/domain and shared with landlock, which leaks the same access for its own reason.
+// Only probe.CapabilityLine words it: it is not write-class, so probe.ResidualNotice
+// filters it out and no host gains a startup banner for it. Without bwrap the backend
+// fences nothing and discloses no residual — that path is wholly Unavailable.
 func (c *namespaceConfiner) Capabilities() domain.ConfinementCaps {
 	if c.bwrapPath == "" {
 		return domain.ConfinementCaps{Unavailable: c.unavailable}
 	}
-	return domain.ConfinementCaps{FSWrite: true, NetworkEgress: true}
+	return domain.ConfinementCaps{
+		FSWrite:       true,
+		NetworkEgress: true,
+		Residuals:     []string{domain.ResidualUnixEgress},
+	}
 }
 
 // Confine prepares cmd to execute confined to box, then returns — it does not run cmd
