@@ -10,6 +10,10 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- `domain.Presenter` now answers `IsExecutionCapable()` — whether the opener rung the host has wired can execute a program of the user's own choosing (a non-empty `present.command` on a local session) — and `present_document` forwards that answer to the engine without executing anything. Out-of-tree implementers of `apogee.Presenter` must add the method.
+
+- The confinement escape battery gains row #13: a confined child sends a real UDP datagram out of a network-deny box and the parent's loopback listener decides the verdict — no datagram may reach it unless the backend discloses `connect(2) UDP` as unfenced, and one must when it does. The row is keyed on the listener, never on the child's exit status (a datagram write inside an unshared net namespace exits 0 while nothing leaves), and skips where `bash` is absent. The confinement execution contract's §5 now records the two residual classes — write-class and network-egress-class — and §6.2 carries the row.
+
 - `context.Allocate` now takes what the caller MEASURED the two standing parts to be (`context.Measured{SystemPrompt, FileContext}`, in tokens): a measured part reserves its measurement plus 10% headroom, floored at 2% of the working room, and History takes the remainder — floored at 50% of the working room, below which the two reservations are scaled down together so the parts still sum to the window exactly. A negative field (`Measured{-1, -1}`) means "unmeasured" and keeps the part's old fixed fraction (15% system prompt, 25% file context), which is what every caller passes today, so the allocation is unchanged until the Agent measures. `Allocation` gains `StandingAdvisory`, the fixed 15%-of-working-room ceiling the oversize notice measures standing content against — deliberately not the reserved room, which now grows with the content it measures.
 
 - The context Budget now reserves what a session's standing content actually MEASURES. `(*Agent).budget()` renders the standing table once per call and hands `context.Allocate` the token size of each part — the `context files` row is the file-context part, every other row together is the system-prompt part, both estimated through the Agent's own calibrated ratio — so a session with no workspace context files stops holding a quarter of the working room for content that does not exist and leaves that room to History. History is capped where it is produced, at the emergency fold's own transcript budget (`agent.HistoryCap(window)`, applied only when a window is ADVERTISED), so ADR 0018 §8's survivability ordering — the structural floor at or under what a fold can still render — now holds at every window instead of only above ~8.9k tokens, and the fill notice, Prune, `HistoryExceedsAllocation`, the fold trigger and `structuralFloor` all read that one number. `domain.Budget` gains `StandingAdvisory`, the fixed 15%-of-working-room advisory ceiling, and `ContextFilesReport.SystemShare` reads it instead of the reservation — a measured reservation grows with the content it measures, so reading it as the ceiling would mean the oversize notice could never fire. At an 8192-token window History goes from 3,933 to 3,584 tokens; on a large window with no context files it grows substantially.
@@ -236,6 +240,104 @@ point is a **minor** bump, not a breaking change.
 - Tests: `TestProbeContextLiveArmsTheSyncLaneOnTheFirstAgentOnly` reads the Generation off the two Agents `probe context --live` builds — the as-configured one carries the user's advise Reaction on its sync lane with Bypass off, the second an empty lane with Bypass on — through a new package-level construction seam `newProbeAgent`, guarded by the serial-seam test automatically (closes `apogee-n5k`).
 
 ### Fixed
+
+- **`/undo` and `/redo` no longer hold the journal's lock across their filesystem work.**
+  `Journal.Revert` and `Journal.Redo` now capture the exchange's ordinal, pop the group,
+  set the boundary and bump the generation under one short hold, then walk the step — every
+  restore, every removal, every image read — with the lock RELEASED, and re-take it only to
+  move the group and save `journal.json`. A delegated sub-agent's `Record`, and a Driver's
+  `Generation()`, are answered while the restores are still running instead of queueing
+  behind a whole tree's worth of writes. The pop is what makes it safe: the group being
+  walked is unreachable from the journal, so a record arriving mid-step opens an exchange of
+  its own rather than merging into an entry the step is reading. ADR 0074 decision 6 is
+  preserved on the re-take — a reverted group joins the redo stack only if nothing wrote
+  while it walked, and a re-applied group goes back UNDER any exchange opened during the
+  walk, so `/undo` still walks the stack newest-first. Reports keep today's exchange
+  numbering. Closes `apogee-m6k`.
+
+- **A `present.command` override's program is now resolved and fenced exactly as rung 1's is.** `Opener.argv` routed the override straight out of `overrideArgv` with a bare `argv[0]`, so the program the user named was looked up against apogee's inherited PATH at the moment of launch — by the one rung that runs with no approval and no confinement box in every mode, `present_document` being read-only. A `zed` planted in a workspace bin directory a confined call may write was therefore a program the MODEL chose. The override's `argv[0]` now goes through the same `security.ResolveProgram` step rung 1 takes (`Opener.resolveProgram`) and gets rung 1's three outcomes, told apart the same way: a program resolving inside the workspace fence is refused loudly in the sentence rung 1 already emits (`present: refusing to launch …`), a relative or `.`-resolved program is refused the same way, and a program that is simply absent degrades to the baseline transcript rung (`ErrNoOpener`) with the document still presented. The fence judges `argv[0]` and nothing else — the template's own flags and the substituted `{path}` ride through untouched — so rung 3 stays neither extension-bounded nor name-bounded, and an override naming an absolute program outside the fence runs exactly as before.
+
+- **A configured `present.command` no longer runs on a document the model named unless you
+  say so.** `present.command` is a command LINE and `{path}` is a path the model chose, so a
+  `command: "sh {path}"` would have executed a file the model had just written. A new file-only
+  key, `present.command-on-model-documents`, gates it: off (the default, and the reading of an
+  absent key) the presentation ladder skips the command rung and degrades straight to the
+  transcript line, and the tool result tells the model to tell you which key would change that.
+  It is the one `present:` key the `/settings` pane will not write — ⏎ on its row opens the
+  config file, beside the prose that says what turning it on means. Nothing changes where no
+  `present.command` is configured: the built-in OS opener is untouched, in every mode, and
+  `present_document` stays a read-only tool that asks no approval and prompts no human.
+
+- ADR 0019 §5 now carries a dated addendum (2026-09-22) recording that a `present_document` call
+  reaches an execution-capable rung 3 only when the file-only `present.command-on-model-documents`
+  key is set, superseding §5's "nothing here runs a model-chosen command" on the argument side;
+  CONTEXT.md's presentation-ladder entry, the `present_document` package docs and the Opener's own
+  doc comments say the same. The manual's Linux-fence prose no longer calls the truncate gap the
+  one incomplete Linux fence — the network residuals a net-deny box discloses are named beside it.
+
+- A landlock backend that can deny the network now says what a deny box still lets through.
+  Landlock's network rights are TCP bind and TCP connect and nothing else, so a box opted into
+  network-deny never fenced UDP datagrams or a connection to a pathname `AF_UNIX` socket — and
+  `Capabilities()` reported the fence without the gap. On every kernel at landlock ABI ≥ 4 the two
+  classes are now disclosed as residuals (`connect(2) UDP`, `connect(2) AF_UNIX`), so
+  `apogee probe` and `/confine` word them on the backend line: `landlock (fs-write: available ·
+  network: available · unfenced: connect(2) UDP, connect(2) AF_UNIX)`. The tokens are spelled once
+  in `internal/domain` (`ResidualUDPEgress`, `ResidualUnixEgress`) so the backend that discloses
+  them and the surfaces that word them cannot drift apart. The auto-mode residual banner stays
+  write-class — it filters the network tokens out and says nothing for a network-only set, so no
+  Linux host gains a startup notice — and the Auto gate is untouched: a residual is disclosure,
+  never a refusal. The rights half of the gap is not codeable: no UDP or `AF_UNIX` landlock right
+  exists in the kernel ABI, so the honest disclosure is the fix.
+
+- The Linux namespace (bwrap) confinement backend now discloses `connect(2) AF_UNIX` as an unfenced access whenever it can fence: `--unshare-net` cuts UDP and abstract sockets, but a pathname UNIX socket is reached through the filesystem, so `/var/run/docker.sock` and `/run/user/<uid>/bus` stay reachable through the box's read-only root. A host without bwrap fences nothing and still discloses no residual.
+
+- The auto-mode residual notice now words **each** residual it names instead of interpolating the
+  whole list into one sentence whose consequence belongs to `truncate(2)` alone. A set of two once
+  read "cannot fence truncate(2), refer(2) — a confined command can still empty an existing file",
+  stating of the second token something that does not follow from it; each token now carries its own
+  clause — `truncate(2)` keeps its consequence and the kernel that closes it, and a token this
+  project has no wording for gets the neutral clause true of every residual (the backend discloses
+  the access rather than fencing it) rather than a borrowed one. Silence stays impossible: a new
+  unfenced write-class access still reaches the operator. `CapabilityLine` is unchanged and remains
+  the honesty surface for the network-egress tokens, which the write-class notice filters out.
+
+- **Windows: a confinement root spared for a live sibling is handed off, never deleted.** Two
+  sessions confining one workspace whose teardowns overlapped each spared the shared root to the
+  other — the sibling's process was still alive — and each then removed its own label journal, so
+  apogee's Low integrity label stayed on the tree with no journal anywhere naming it: `Recover`
+  and the residue report both skip a journal whose owner is alive, so nothing could clear it and
+  nothing could report it (audit 2026-09-20, High). The spared root is now handed back as an
+  undischarged entry and the journal is rewritten to carry it rather than removed, exactly as a
+  prior handed off under a sibling-claimed root already was, so the last session to close is the
+  one that finds no live claim and clears the tree; until then `apogee probe host` names the root.
+  The handed-off root deliberately loses any persisted clearable verdict, so a later run reads the
+  tree's label again before stripping it.
+
+- Windows confinement: a mandatory-label journal can no longer talk the teardown into
+  NULL-SACLing a volume root or writing a label onto an arbitrary path. A persisted root
+  verdict (`root_judged`) now skips only the label re-read — the volume-root refusal is applied
+  whatever the journal claims — and a prior label is written back only after this run's own
+  pre-clear pass has found apogee's own label on the path. A journalled prior whose path now
+  carries someone else's label is neither restored nor destroyed: it is carried in the journal
+  to a later run, for a bounded number of reverts, and put back once apogee's own mark is on
+  the path again.
+
+- **A restored session snapshot is checked for its shape before it is applied.** `decodeState` — the one decode seam `--resume`, the session browser's `RestoreSession` and the `CutSession` fork primitive all share — now refuses a payload whose conversation carries a message with a role outside the four `domain.Role` constants, more than 4,096 messages, or a single message (content plus tool-call arguments) over 10 MiB, with the `ErrSnapshotRefused` sentinel. The refusal lands before anything is swapped in, so the live session's conversation, task list, consoles and usage tally are left exactly as they were. The crafted case this closes is a `[user, assistant, system, …]` history: `dropLeadingSystem` strips only a *leading* run of system messages, so a system message further in survived the restore and the Anthropic wire seam hoisted it into the system prompt — that one is now refused rather than stripped, while a leading run is still normalized away as before. The size ceiling is deliberately the same 10 MiB every read tool already enforces on the file bodies it commits, so no session apogee itself could write becomes unresumable or unforkable.
+
+- A restored session snapshot can no longer forge the engine's own structure: a message body, task
+  row, deferred correction or pending input whose line opens with a workspace context-file header
+  or footer, the delegate report block's opening sentence, an advice fence or an engine-note fence
+  refuses the whole payload with the snapshot sentinel, leaving the live session untouched on
+  `--resume`, on a `/sessions` restore and on a fork alike. A restored pending input is bounded by
+  the same per-message ceiling as the message it becomes. The two fences an ordinary session
+  commits verbatim — the task list block's opening and the host orientation header — are excluded
+  by design, so a transcript carrying a `task_list` result still restores and still forks. The
+  engine-note fence also joined the workspace context-file fence, so a repo file can no longer
+  spell one either.
+
+- `SECURITY.md` and `AGENTS.md` now state what activating a checkout's git hooks trusts: `bd init` / `bd hooks install` point git's `core.hooksPath` at a checkout-controlled directory, after which every `git commit`, `checkout` and `push` runs that repository's shell with your full privileges. apogee vets, pins and sandboxes none of it — hydrate only a checkout you trust, and read `.beads/hooks/` first in a clone of a fork. apogee's own git tool calls remain unaffected (git runs with `core.hooksPath=` blanked).
+
+- Fixed: a Windows label journal that survives a close (a prior handed off, or a root spared for a live sibling) no longer loses its owning PID. A second close rewrote the file claiming PID 0, which another session read as a dead owner — it could then clear the live session's root out from under it — and which `apogee probe host` reported as foreign confinement residue.
 
 - **The test kit no longer fails a healthy run on a slow box.** `internal/tuitest`'s waits are
   condition polls that return the instant the condition holds, so a tight deadline on one buys
