@@ -1100,9 +1100,10 @@ const uncalibratedRoomMargin = 2
 // ContextLimit: a `working-window:` bound is a soft line the reducers keep the session under, and
 // folding at it would fire this guard on every request a bounded session deliberately lets run
 // past its working room while still fitting the server's window. The History allocation — the
-// working room less the measured standing reservations, never below half of it and never above the
-// fold's transcript budget — stays the boundary trigger's business
-// (Budget.HistoryExceedsAllocation), not this one's — and that one DOES follow the working ceiling, which is how the bound actually bites.
+// working room less the measured standing reservations, floored at half that room and then capped
+// at the fold's transcript budget, which at a small window binds below that floor — stays the
+// boundary trigger's business (Budget.HistoryExceedsAllocation), not this one's — and that one
+// DOES follow the working ceiling, which is how the bound actually bites.
 //
 // With an UNKNOWN window (no discovery, no config: Allocate returns the zero Allocation, leaving
 // no working room) BOTH sides of the compare change. The room becomes

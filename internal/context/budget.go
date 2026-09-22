@@ -65,7 +65,7 @@ const historyFloorFraction = 0.50
 // them: the system-prompt part and the file-context part. A NEGATIVE field means the caller took
 // no measurement of that part (spelled Measured{-1, -1}), and the part falls back to its fixed
 // fraction. The zero value is MEASURED-ZERO — a caller that rendered nothing — not unmeasured, so
-// a measured part that renders nothing still floors at standingFloorFraction.
+// a measured part that renders nothing still floors at standingFloorPercent.
 //
 // Measurement arrives in TOKENS: Allocate converts nothing, so the one chars→token implementation
 // (domain.Budget.EstimateTokens, which TokenEstimator delegates to) stays the only place the ratio

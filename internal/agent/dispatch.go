@@ -1749,8 +1749,9 @@ func (a *Agent) appendToolResult(
 //
 // The threshold sits deliberately far above the tool-result-cap Floor guard's: the whole History
 // allocation — the working room less what this session's standing content MEASURES (plus headroom,
-// each part floored at 2% of the room), never below half the working room — chosen because it sits
-// at or below the emergency fold's own transcript budget, which is the property that keeps the fold
+// each part floored at 2% of the room), floored at half that room and then capped — the cap binds
+// below the floor at a small window — chosen because it puts History at or below the emergency
+// fold's own transcript budget, which is the property that keeps the fold
 // survivable, while the guard's tighter 40%-of-working-room cap shapes the ordinary case. That
 // ordering used to be arithmetic that only held above ~8.9k tokens; it is now construction: the
 // Budget caps History at the fold's transcript budget itself (HistoryCap, applied where History is
