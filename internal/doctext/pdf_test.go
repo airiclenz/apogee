@@ -735,7 +735,10 @@ func TestExtractPDF_RefusesAnInflateBomb(t *testing.T) {
 	)
 
 	data := onePagePDF(t, flateStreamObject(deflatedZeros(t, inflated)))
-	if len(data) > 256<<10 {
+	// Loose for the same reason the other fixture guard is: the compressed size is the Go
+	// toolchain's deflate output and drifts between releases. A mebibyte against eighty
+	// inflated still says everything this guard exists to say.
+	if len(data) > 1<<20 {
 		t.Fatalf("fixture is %d bytes, want a bomb far smaller than what it inflates to", len(data))
 	}
 
@@ -910,8 +913,13 @@ func TestExtractPDF_LeavesUndecodedStreamsUncharged(t *testing.T) {
 					" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
 				contentStream("Beside a large stream"),
 				flateStreamObject(deflatedZeros(t, 200<<20), testCase.entries...))
-			if len(data) > 256<<10 || len(data) < 128<<10 {
-				t.Fatalf("fixture is %d bytes, want about two hundred kibibytes", len(data))
+			// The window is deliberately loose. The only claim it makes is that the fixture
+			// stays a cheap one — a few hundred kibibytes on disk against two hundred
+			// mebibytes inflated — and its exact size is the Go toolchain's deflate output,
+			// which drifts between releases (1.26 wrote ~206 KiB here, 1.27 ~412 KiB). A
+			// window centred on one toolchain's number is a test that breaks on the next.
+			if len(data) > 1<<20 {
+				t.Fatalf("fixture is %d bytes, want a stream far smaller than what it inflates to", len(data))
 			}
 
 			text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
