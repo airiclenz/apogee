@@ -88,7 +88,9 @@
 // between-Steps boundary. children.go is that same door one level down: the registry a parent
 // publishes its RUNNING sub-agents in, the mailbox each child drains at its own between-Steps
 // boundaries, and InterjectChild, which addresses a child by its spawn call-ID (ADR 0063). rebind.go swaps every per-model binding together when the Upstream's
-// loaded model changes, and moves the session to another server (ADR 0024). setprofile.go is
+// loaded model changes, and moves the session to another server (ADR 0024); serverbinding.go is
+// the one presence-typed value a model change, a server switch or a routed target states its
+// bindings as, with the one pure projection onto a Config. setprofile.go is
 // the separate, explicit door for changing the model PROFILE, which Rebind deliberately leaves
 // alone (ADR 0037). swaptools.go is the single door for handing the engine a freshly built
 // tool registry, so no second registry-mutation path has to exist. delegationtarget.go is the
