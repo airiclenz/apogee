@@ -453,11 +453,12 @@ func (l *turnLifecycle) autoFoldArmed(exceedsAllocation func() bool) bool {
 	return !l.compactSat
 }
 
-// resetFoldLatches clears both fold latches together (Rebind, SwitchUpstream): each recorded a
-// verdict on a fold against the server and model just departed — that it faulted, or that it
-// could not bring the history under THAT window's allocation — which says nothing about the pair
-// now bound. The Exchange-scoped clear (openExchange) would reach the stand-down at the next
-// Exchange anyway — a rebind is a quiescent boundary — so this keeps the two latches moving together.
+// resetFoldLatches clears both fold latches together — Agent.recalibrate, the one reset Rebind
+// and SwitchUpstream make, calls it beside the token estimator's: each latch recorded a verdict on
+// a fold against the server and model just departed — that it faulted, or that it could not bring
+// the history under THAT window's allocation — which says nothing about the pair now bound. The
+// Exchange-scoped clear (openExchange) would reach the stand-down at the next Exchange anyway — a
+// rebind is a quiescent boundary — so this keeps the two latches moving together.
 func (l *turnLifecycle) resetFoldLatches() {
 	l.compactSat = false
 	l.compactFailed = false

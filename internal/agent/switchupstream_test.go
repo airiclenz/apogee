@@ -210,9 +210,9 @@ func TestSwitchUpstreamRefusesAnEmptyEndpoint(t *testing.T) {
 // 0046) — because both describe the SLOT rather than the conversation, and the retired server's
 // numbers describe a machine this session no longer talks to.
 //
-// The three moves are the three states an entry can be in: both pinned, neither pinned, and a window
-// with no cap — where the engine derives the cap from the reply room that very window reserves,
-// which is the whole reason the window has to move first.
+// A thin driver of the binding: which Config cells a switch states, the zeroes included, is
+// TestServerBindingApplyTo's row, so this pins only what the table cannot see — that a switch
+// projects through it and the Budget and the reply cap read the arrived-at numbers.
 func TestSwitchUpstreamCarriesTheNewServersTokenBounds(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 8192
@@ -223,55 +223,29 @@ func TestSwitchUpstreamCarriesTheNewServersTokenBounds(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	// Onto an entry that pins both: the Budget measures against the new window and the wire states
-	// the new ceiling, neither of them the number the session launched with.
 	if err := a.SwitchUpstream(UpstreamSpec{
 		Endpoint: "http://big.invalid:9999", MaxContextTokens: 131072, MaxOutputTokens: 16384,
 	}); err != nil {
 		t.Fatalf("SwitchUpstream onto the pinned entry: %v", err)
 	}
+
 	if got := a.budget().ContextLimit; got != 131072 {
 		t.Errorf("budget window = %d after the switch, want the new entry's pinned 131072", got)
 	}
 	if got := a.maxOutputTokens(); got != 16384 {
 		t.Errorf("reply cap = %d after the switch, want the new entry's pinned 16384", got)
 	}
-
-	// Onto an entry that pins neither: the previous server's numbers do NOT follow. The window falls
-	// to unknown until that server's first beat binds one — the state a session before its first beat
-	// is in — and the cap falls to the clamp floor, which is what an unknown window's zero reserve
-	// derives (never "unbounded", internal/context.Allocation).
-	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://bare.invalid:9999"}); err != nil {
-		t.Fatalf("SwitchUpstream onto the unpinned entry: %v", err)
-	}
-	if got := a.budget().ContextLimit; got != 0 {
-		t.Errorf("budget window = %d after the unpinned switch, want 0 — the retired pin must not follow", got)
-	}
-	if got := a.maxOutputTokens(); got != minOutputTokenCap {
-		t.Errorf("reply cap = %d after the unpinned switch, want the derived floor %d", got, minOutputTokenCap)
-	}
-
-	// And onto an entry that pins only the window: the cap is DERIVED from that window's own reply
-	// reserve (65,536 × 0.20 = 13,107, which sits between the two clamp ends), so the request and the
-	// Budget cannot disagree about the room the reply has.
-	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: "http://windowed.invalid:9999", MaxContextTokens: 65536}); err != nil {
-		t.Fatalf("SwitchUpstream onto the window-only entry: %v", err)
-	}
-	reserve := a.budget().ResponseReserve
-	if reserve <= minOutputTokenCap || reserve >= maxOutputTokenCap {
-		t.Fatalf("the window-only reserve = %d; the case needs one strictly inside [%d, %d]",
-			reserve, minOutputTokenCap, maxOutputTokenCap)
-	}
-	if got := a.maxOutputTokens(); got != reserve {
-		t.Errorf("reply cap = %d after the window-only switch, want the new window's own reserve %d", got, reserve)
-	}
 }
 
 // TestSwitchUpstreamCarriesTheNewServersResponseReserveShare: the third statement a move makes about
 // the server it lands on — how that server's window is SPLIT for the reply, the share the caller
 // resolved from the new entry's `response-reserve:` over the top-level key. It follows the two bounds
-// above for their reason, and a spec stating none puts the split back to the engine's own built-in
-// share rather than dividing the new server's window the retired server's way.
+// above for their reason, and — the table's row — a spec stating none puts the split back to the
+// engine's own built-in share rather than dividing the new server's window the retired server's way.
+//
+// A thin driver of the binding, like the bounds': it pins only that a switch projects through it,
+// asserted through the Budget because the share is only interesting insofar as it moves the tokens
+// actually held back.
 func TestSwitchUpstreamCarriesTheNewServersResponseReserveShare(t *testing.T) {
 	cfg := baseConfig(&recordingSink{})
 	cfg.Context.MaxContextTokens = 8192
@@ -281,27 +255,14 @@ func TestSwitchUpstreamCarriesTheNewServersResponseReserveShare(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	// Onto an entry stating half its window: the Budget holds exactly that back, whatever the run's
-	// own top-level share says.
 	if err := a.SwitchUpstream(UpstreamSpec{
 		Endpoint: "http://halved.invalid:9999", MaxContextTokens: 100000, ResponseReserveFraction: 0.5,
 	}); err != nil {
 		t.Fatalf("SwitchUpstream onto the entry stating a share: %v", err)
 	}
+
 	if got := a.budget().ResponseReserve; got != 50000 {
 		t.Errorf("reply reserve = %d after the switch, want the new entry's half of 100,000", got)
-	}
-
-	// Onto an entry stating none: the retired server's half does NOT follow — the engine's own
-	// built-in fifth divides the window again, which is what "nobody said" means here.
-	if err := a.SwitchUpstream(UpstreamSpec{
-		Endpoint: "http://bare.invalid:9999", MaxContextTokens: 100000,
-	}); err != nil {
-		t.Fatalf("SwitchUpstream onto the entry stating none: %v", err)
-	}
-	if got := a.budget().ResponseReserve; got != 20000 {
-		t.Errorf("reply reserve = %d after the unstated switch, want the built-in fifth of 100,000 — "+
-			"the retired entry's share must not follow", got)
 	}
 }
 

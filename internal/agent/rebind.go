@@ -73,12 +73,11 @@ type RebindSpec struct {
 	// spec because the pin has no engine setter of its own, so the only door a live edit of it can
 	// reach the engine through is the re-resolution the caller is already driving.
 	//
-	// A POINTER, and that is the whole contract: nil ⇒ this spec says NOTHING about the reply
-	// ceiling and whatever is in force stands. It is SamplingParams's rule one layer in ("a nil
-	// field leaves the loop's value untouched", domain/hooks.go) and it is what keeps a caller that
-	// re-resolved only the per-model bindings from silently un-bounding a reply an entry pinned —
-	// the failure a plain int would make the DEFAULT, since a spec that simply did not mention the
-	// cap would clear it. A non-nil value is applied as written, the ZERO included: 0 is the
+	// A POINTER, and that is the whole contract — it is serverBinding's presence rule
+	// (serverbinding.go) surfacing on the public spec: nil ⇒ this spec says NOTHING about the reply
+	// ceiling and whatever is in force stands, which is what keeps a caller that re-resolved only
+	// the per-model bindings from silently un-bounding a reply an entry pinned — the failure a plain
+	// int would make the DEFAULT. A non-nil value is applied as written, the ZERO included: 0 is the
 	// operator dropping the pin, and the engine derives the cap from the reply room the Budget
 	// reserves again (maxOutputTokens, loop.go), never "no cap at all".
 	MaxOutputTokens *int
@@ -89,11 +88,12 @@ type RebindSpec struct {
 	// share has no engine setter of its own, so the re-resolution the caller is already driving is the
 	// only door a live edit of it can reach the engine through.
 	//
-	// A POINTER on the ceiling's contract: nil ⇒ this spec says NOTHING about the split and whatever
-	// share is in force stands — which is what keeps a caller that re-resolved only the per-model
-	// bindings from silently re-dividing a window an entry pinned. A non-nil value is applied as
-	// written, the ZERO included: 0 is "neither scope states a share", and internal/context.Allocate
-	// hands the split back to its own built-in default rather than to the departed entry's number.
+	// A POINTER on the ceiling's contract, serverBinding's presence rule again: nil ⇒ this spec says
+	// NOTHING about the split and whatever share is in force stands — which is what keeps a caller
+	// that re-resolved only the per-model bindings from silently re-dividing a window an entry
+	// pinned. A non-nil value is applied as written, the ZERO included: 0 is "neither scope states
+	// a share", and internal/context.Allocate hands the split back to its own built-in default
+	// rather than to the departed entry's number.
 	ResponseReserveFraction *float64
 	// Profile is the model profile re-resolved for the new model (ADR 0044): how it speaks the
 	// wire, on the axes of tool-call format and inline thinking channel — and, since ADR 0057,
@@ -118,12 +118,13 @@ type RebindSpec struct {
 	// reach the engine through.
 	//
 	// A plain value rather than a pointer, and that is deliberate: the caller resolving a binding
-	// always knows what the server said about the dial, so there is nothing to be silent about, and
-	// the zero (provider.EffortDialectNone) is itself the meaningful answer — "this server
-	// advertises no dial", which keeps the historical `chat_template_kwargs` shape and so
-	// reproduces the request bytes that predate the dialect seam (ADR 0031). It is the ONLY effort
-	// fact that crosses into the engine: the level vocabulary a server reports, and the level it
-	// defaults to, stay host-side.
+	// always knows what the server said about the dial, so there is nothing to be silent about —
+	// the binding states it ALWAYS present (serverbinding.go) — and the zero
+	// (provider.EffortDialectNone) is itself the meaningful answer — "this server advertises no
+	// dial", which keeps the historical `chat_template_kwargs` shape and so reproduces the request
+	// bytes that predate the dialect seam (ADR 0031). It is the ONLY effort fact that crosses into
+	// the engine: the level vocabulary a server reports, and the level it defaults to, stay
+	// host-side.
 	EffortDialect provider.EffortDialect
 }
 
@@ -176,35 +177,17 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 		return err
 	}
 
-	// Build against a COPY of the config: nothing below can mutate the live Agent until the
-	// commit, so a spec that fails a gate leaves the Agent on the model that just went away.
-	next := a.cfg
-	next.Model = spec.Model
-	next.SystemPrompt = spec.SystemPrompt
-	next.Context.MaxContextTokens = spec.MaxContextTokens
-	// The reply ceiling only when the spec speaks about it (see the field's contract): a nil leaves
-	// the bound this session already holds exactly where it was, so a rebind driven for a model
-	// change — or by any caller that resolves the per-model bindings alone — can never un-bound a
-	// reply the bound entry's `max-output-tokens:` pinned. Written onto the copy with the rest, so a
-	// spec that fails a gate below moves this no more than it moves the others.
-	if spec.MaxOutputTokens != nil {
-		next.Context.MaxOutputTokens = *spec.MaxOutputTokens
-	}
-	// The reserve share on the same contract and for the same reason (see the field): a nil leaves the
-	// split this session already holds, so only a caller that actually re-resolved `response-reserve:`
-	// moves it, and a stated 0 hands the split back to Allocate's own default. Written onto the copy
-	// with the rest, so a spec that fails a gate below moves this no more than it moves the others.
-	if spec.ResponseReserveFraction != nil {
-		next.Context.ResponseReserveFraction = *spec.ResponseReserveFraction
-	}
-	// applyProfile below writes the live a.cfg.Profile; carrying the profile on the copy too is
-	// what keeps `a.cfg = next` from putting the departed model's profile straight back.
-	next.Profile = spec.Profile
-	// The newly bound server's effort dialect, mirrored onto the Config the way every binding above
-	// is. The live answer is the a.effortDialect field written inside the commit below — the Config
-	// only ever SEEDS it (agent.go) — but leaving the seed on the departed server's shape here would
-	// leave a stale value behind for any future reader of the Config to pick up.
-	next.EffortDialect = toDomainDialect(spec.EffortDialect)
+	// Project the spec onto a COPY of the config through the one server binding (serverbinding.go):
+	// which cells a model change states, and which it leaves standing — the two optional bounds
+	// when nil, the dial facts always — is the constructor's contract, and applyTo is pure, so
+	// nothing below can mutate the live Agent until the commit and a spec that fails a gate leaves
+	// the Agent on the model that just went away. The copy carries the profile too, which is what
+	// keeps `a.cfg = next` from putting the departed model's profile straight back over the one
+	// applyProfile writes; and it carries the newly bound server's effort dialect mirrored onto the
+	// Config — the live answer is the a.effortDialect field written inside the commit below, the
+	// Config only ever SEEDS it (agent.go), but leaving the seed on the departed server's shape
+	// would leave a stale value behind for any future reader of the Config to pick up.
+	next := spec.binding().applyTo(a.cfg)
 
 	// The last step that can fail: translating the new model's profile into its parse-seam
 	// collaborators — and, once that has committed, composing the new model's tool roster off the
@@ -233,11 +216,19 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 	// moves the bindings beside it; it needs no lock for the reason the a.cfg assignment above
 	// needs none (see this method's doc).
 	a.effortDialect = spec.EffortDialect
-	a.tokens = apogeectx.NewTokenEstimator()
-	// Both fold latches go with the estimator: what they judged, they judged against the server and
-	// model just departed (turnLifecycle.resetFoldLatches).
-	a.turns.resetFoldLatches()
+	a.recalibrate()
 	return nil
+}
+
+// recalibrate is the ONE reset a move makes, whether of the model (Rebind) or of the server
+// (SwitchUpstream): the token estimator goes, since its chars→token calibration described the
+// model just departed, and both fold latches go with it, since what they judged — that a fold
+// faulted, or that it could not bring the history under the window's allocation — they judged
+// against the server and model just departed (turnLifecycle.resetFoldLatches). It runs inside
+// the commit, after nothing can fail, so a spec a gate refused moves neither.
+func (a *Agent) recalibrate() {
+	a.tokens = apogeectx.NewTokenEstimator()
+	a.turns.resetFoldLatches()
 }
 
 // UpstreamSpec carries the new Upstream target Agent.SwitchUpstream moves the session to: where the
@@ -252,6 +243,12 @@ func (a *Agent) Rebind(spec RebindSpec) error {
 // It still names no model — a switch UNBINDS the model rather than guessing what the new server
 // serves (ADR 0024's one-code-path rule: the new Upstream's first observed model binds through
 // Rebind like every other binding does).
+//
+// Every field here is a plain value, and every one is applied as written, the zero included: a
+// switch states ALL of them present on the one server binding (serverbinding.go — absent keeps,
+// present replaces), because an absent pin is a fact about the new server rather than a licence to
+// keep the retired one's number. The per-field docs below say what each zero means; the rule that
+// makes the zero land is the binding's.
 type UpstreamSpec struct {
 	// Endpoint is the new Upstream's base URL. Required — errMissingEndpoint stands.
 	Endpoint string
@@ -286,24 +283,24 @@ type UpstreamSpec struct {
 	// entry's `working-window:` resolved over the top-level key by the caller
 	// (config.ResolveWorkingWindow), like the window beside it and for its reason: how much room is
 	// affordable is a statement about the slot. 0 ⇒ neither scope bounds anything, which leaves the
-	// advertised window as the whole working room. The zero is applied rather than skipped for the
-	// reply cap's reason below — keeping the RETIRED server's bound would work in a room describing
-	// a machine this session no longer talks to.
+	// advertised window as the whole working room — applied, not skipped (the binding rule above):
+	// keeping the RETIRED server's bound would work in a room describing a machine this session no
+	// longer talks to.
 	WorkingWindow int
 	// MaxOutputTokens is the ceiling on ONE reply from the new server — the new entry's
 	// `max-output-tokens:` pin, carried as written (ADR 0046). 0 ⇒ that entry pins no cap, and the
-	// engine derives one from the reply room the Budget reserves out of the window above. The zero is
-	// applied rather than skipped for the reason the DelegationTarget's is (delegationtarget.go): a
-	// cap of nothing is not a broken session, it is a session deriving its own, while keeping the old
+	// engine derives one from the reply room the Budget reserves out of the window above — applied,
+	// not skipped (the binding rule above), as the DelegationTarget's is (delegationtarget.go): a cap
+	// of nothing is not a broken session, it is a session deriving its own, while keeping the old
 	// pin would bound a reply from this server at a number describing another one.
 	MaxOutputTokens int
 	// ResponseReserveFraction is the share of the window above held back for one reply on the new
 	// server — the new entry's `response-reserve:` resolved over the top-level key by the caller
 	// (config.ResolveResponseReserve), like the window beside it and for its reason: how a window is
 	// split is a statement about the slot the reply has to fit in. 0 ⇒ neither scope states a share,
-	// which hands the split back to the engine's own built-in one (internal/context.Allocate) — the
-	// zero is applied rather than skipped for the reply cap's reason above, since keeping the RETIRED
-	// server's share would divide this server's window by a number describing another one.
+	// which hands the split back to the engine's own built-in one (internal/context.Allocate) —
+	// applied, not skipped (the binding rule above), since keeping the RETIRED server's share would
+	// divide this server's window by a number describing another one.
 	ResponseReserveFraction float64
 }
 
@@ -355,11 +352,13 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	// client it was built with: without this a `/server` switch would silently disarm a session
 	// that started with `ui.inspector` on. The tap binds to THIS Agent, which is the one that will
 	// speak over the new connection.
-	// The replacement is dialled under the NEW server's wire (ADR 0078) — read off the Config as it
-	// will stand after the mirror below, since dialOptions composes from the Config of the Agent
-	// that speaks over the connection, and that Agent is about to be on spec's server.
-	arrived := a.cfg
-	arrived.Wire = spec.Wire
+	// The Config as it will stand on the new server, projected through the one server binding
+	// (serverbinding.go): the dial facts, the seat's human words and all four token bounds move as
+	// the spec states them, the zeroes included, and the model unbinds — which cells a switch states
+	// is the constructor's contract. It is composed BEFORE the dial because the replacement is
+	// dialled under the NEW server's wire (ADR 0078): dialOptions composes from the Config of the
+	// Agent that speaks over the connection, and that Agent is about to be on spec's server.
+	arrived := spec.binding().applyTo(a.cfg)
 	opts, tap := dialOptions(arrived)
 	tap.bind(a)
 	// The retired client goes down with the server it dialled: a switch is the one moment where a
@@ -371,23 +370,11 @@ func (a *Agent) SwitchUpstream(spec UpstreamSpec) error {
 	_ = a.closeOwnedUpstream(a.upstream)
 	a.upstream = a.dial(spec.Endpoint, "", spec.APIKey, opts...)
 	a.ownsUpstream = true
-	a.cfg.Endpoint = spec.Endpoint
-	a.cfg.APIKey = spec.APIKey
-	a.cfg.Wire = spec.Wire
-	// The human's words for the box just dialled, moving WITH it (ADR 0069): the orientation
-	// block's Delegations line describes the session seat from these, and an empty spec field
-	// clears rather than keeps — the retired server's name describes a machine this session no
-	// longer talks to, exactly like the window and the reply cap below.
-	a.cfg.ServerName = spec.ServerName
-	a.cfg.ServerDescription = spec.ServerDescription
-	a.cfg.Model = ""
-	a.cfg.Context.MaxContextTokens = spec.MaxContextTokens
-	a.cfg.Context.WorkingWindow = spec.WorkingWindow
-	a.cfg.Context.MaxOutputTokens = spec.MaxOutputTokens
-	a.cfg.Context.ResponseReserveFraction = spec.ResponseReserveFraction
-	a.tokens = apogeectx.NewTokenEstimator()
-	// Both fold latches clear, for the reason Rebind clears them: a fold that faulted or saturated
-	// against the retired server judges nothing about the one just dialled.
-	a.turns.resetFoldLatches()
+	// The projected Config lands whole — the human's words for the box just dialled move WITH it
+	// (ADR 0069: the orientation block's Delegations line describes the session seat from these,
+	// and an empty spec field clears rather than keeps, since the retired server's name describes
+	// a machine this session no longer talks to, exactly like the window and the reply cap).
+	a.cfg = arrived
+	a.recalibrate()
 	return nil
 }

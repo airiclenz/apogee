@@ -188,7 +188,11 @@ NOTES (2026-09-22): a second test `TestServerBindingApplyToIsPure` sits beside t
 **Acceptance.** `go build ./... && go test ./internal/agent/ -run 'ServerBinding|DocMap'`
 **Commit:** `refactor(agent): serverBinding is one presence-typed value with one pure projection`
 
-## 10. Rebind and SwitchUpstream call the projection; the reset lives once
+## 10. Rebind and SwitchUpstream call the projection; the reset lives once — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): serverbinding.go is untouched — its constructor and applyTo docs already describe the Rebind/SwitchUpstream callers and nothing in it became false; the Files list named it as a snapshot.
+
+NOTES (2026-09-22): the four driver tests keep one stated move each with its wire/Budget assertion; their silent and dropped-zero ladders are TestServerBindingApplyTo's rows and were folded out, per the item's "thin drivers" text.
 
 **What.** Depends on item 9. `Rebind` = validate → `next := spec.binding().applyTo(a.cfg)` → `applyProfile` → commit (`a.cfg = next`, `SetModel`, `a.effortDialect = spec.EffortDialect`) → `a.recalibrate()`; `SwitchUpstream` = `arrived := spec.binding().applyTo(a.cfg)` → `dialOptions(arrived)` → teardown/dial → `a.cfg = arrived` → `a.recalibrate()`. New `(a *Agent) recalibrate()` (token estimator + `resetFoldLatches`) is the ONE reset; the two inline pairs in rebind.go are deleted. Ordering preserved (`dialOptions` reads the arrived Config before the dial). The two struct docs' per-field zero prose points at the binding rule. Wire-visible behaviour byte-identical — pinned by the tests named below.
 **Files:** internal/agent/rebind.go, internal/agent/serverbinding.go, internal/agent/rebind_test.go, internal/agent/switchupstream_test.go, internal/agent/turn.go
