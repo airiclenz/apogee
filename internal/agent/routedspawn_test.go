@@ -207,6 +207,11 @@ func TestSpawnStampsItsOwnWindowOnItsReadings(t *testing.T) {
 // window stands instead, and the STAMP says so too: a Driver reading it paints the routed fill
 // against a real limit rather than falling back to the session's window for a child in a different
 // one. A target that does name a window still overrides, which is the routed case proper.
+//
+// The stamp is all this asks now: which Config cell the window lands in — and that a windowless
+// target still states the dial facts and the model, so it is a routed delegation and not a
+// fallback — is the projection's own contract, pinned cell by cell in TestServerBindingApplyTo
+// (serverbinding_test.go). What only a built child can show is what the stamp downstream reads.
 func TestRoutedSpawnWithoutATargetWindowKeepsTheParents(t *testing.T) {
 	t.Parallel()
 
@@ -232,18 +237,9 @@ func TestRoutedSpawnWithoutATargetWindowKeepsTheParents(t *testing.T) {
 
 			child := spawn(t, parent)
 
-			if got := child.cfg.Context.MaxContextTokens; got != tc.want {
-				t.Errorf("routed child window = %d, want %d", got, tc.want)
-			}
 			if got := reading(child).ContextWindow; got != tc.want {
 				t.Errorf("routed child reading names window %d, want the effective %d — a 0 stamp sends a Driver to the session's window",
 					got, tc.want)
-			}
-			// The window guard is about the window alone: the rest of the routing still comes from
-			// the target, so a windowless entry is a routed delegation and not a fallback.
-			if child.cfg.Model != target.Model || child.cfg.Endpoint != target.Endpoint {
-				t.Errorf("routed child = %q on %q, want the target's %q on %q",
-					child.cfg.Model, child.cfg.Endpoint, target.Model, target.Endpoint)
 			}
 		})
 	}
@@ -258,6 +254,10 @@ func TestRoutedSpawnWithoutATargetWindowKeepsTheParents(t *testing.T) {
 // hand every unstated routed child the engine's built-in fifth in place of the share the operator
 // actually configured, and a fraction — unlike a token count — stays meaningful against any window,
 // so there is nothing in the inherited number describing the wrong server.
+//
+// Which Config cell each of those two cases lands in is the projection's contract, pinned in
+// TestServerBindingApplyTo (serverbinding_test.go); what is asked here is what a BUILT child does
+// with the resolved share — the arithmetic downstream of it, and the parent left undivided.
 func TestRoutedSpawnResponseReserveShare(t *testing.T) {
 	t.Parallel()
 
@@ -287,10 +287,7 @@ func TestRoutedSpawnResponseReserveShare(t *testing.T) {
 
 			child := spawn(t, parent)
 
-			if got := child.cfg.Context.ResponseReserveFraction; got != tc.want {
-				t.Errorf("routed child reserve share = %v, want %v", got, tc.want)
-			}
-			// And what that share MEANS for the child: the reserve is held back out of the target's
+			// What that share MEANS for the child: the reserve is held back out of the target's
 			// window, not out of the session's, so the two halves of a routed budget agree.
 			wantReserve := int(tc.want * float64(target.ContextWindow))
 			if got := child.budget().ResponseReserve; got != wantReserve {
@@ -479,6 +476,15 @@ func TestRoutedSpawnSpeaksTheTargetsEffortDialect(t *testing.T) {
 	if parent.effortDialect != provider.EffortDialectReasoning {
 		t.Errorf("parent dialect = %q after a routed spawn, want its own %q untouched",
 			parent.effortDialect, provider.EffortDialectReasoning)
+	}
+	// And the child's CONFIG mirrors it, which the hand-written routed block never wrote: the one
+	// projection states the dialect like every other cell the target names (serverbinding.go). It is
+	// non-wire — the live field above is what an effort intent is expressed through, seeded from the
+	// delegation rather than from this copy — so the mirror changes nothing the child speaks; it only
+	// stops the child's Config from describing the orchestrator's server while the child is on another.
+	if child.cfg.EffortDialect != domain.EffortDialectKwargs {
+		t.Errorf("routed child Config dialect = %q, want the target's %q mirrored",
+			child.cfg.EffortDialect, domain.EffortDialectKwargs)
 	}
 }
 

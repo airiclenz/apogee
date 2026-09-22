@@ -1579,49 +1579,19 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	// was built.
 	seatFallback := seat == seatSubAgentsServer && target == nil
 	if target != nil {
-		childCfg.Endpoint = target.Endpoint
-		childCfg.APIKey = target.APIKey
-		// The target's own wire, unconditionally — never the parent's: the child is on another
-		// server, and "" is that server's own answer (folded to openai at the dial, ADR 0078).
-		childCfg.Wire = target.Wire
-		childCfg.Model = target.Model
-		// The window is the one target field that may name NOTHING: a flagged entry with no
-		// `context-window:` pin, on a server whose beat observed no per-slot window either, resolves
-		// to 0 (the host leaves it there rather than inventing a number). Assigning that 0 would
-		// build the child WINDOWLESS — its Budget and automatic Compaction inactive, and its readings
-		// stamped 0, which sends both Drivers to their "the reading names none" fallback and paints a
-		// routed fill against the SESSION's window, the one window that child is not in. So an
-		// unnamed window is not a replacement at all: it leaves the parent's standing, seeded above.
-		// The parent's number is the better wrong answer than none — a routed child is never
-		// constructed windowless — and it is what an UNROUTED child gets anyway. Negative is folded
-		// in with 0 because a target cannot mean it (config refuses a negative pin; a beat cannot
-		// observe one), so both spellings mean the same thing here: the target named no window.
-		if target.ContextWindow > 0 {
-			childCfg.Context.MaxContextTokens = target.ContextWindow
-		}
-		// The room INSIDE that window the child works in — the target's `working-window:`, carried
-		// unconditionally like the reply ceiling below and for the same reason: a bound in tokens is
-		// a number sized for ONE server's window, so an unbounded target must not leave the parent's
-		// standing over the window just settled above. 0 is the honest absent value, and it puts the
-		// child back in the whole of the routed server's window.
-		childCfg.Context.WorkingWindow = target.WorkingWindow
-		// The reply ceiling, unconditionally — the one routed field whose zero IS the answer (ADR
-		// 0046). An unpinned target leaves the child deriving its cap from the window just settled
-		// above, which is the routed server's; keeping the parent's pin would bound a reply from
-		// this server by a number that describes the one the parent happens to be on.
-		childCfg.Context.MaxOutputTokens = target.MaxOutputTokens
-		// And how the window just settled above is SPLIT — the target's `response-reserve:` override,
-		// applied only when it states one (see the field's contract). An entry that states none leaves
-		// the parent's resolved share standing, which is the run's top-level key: a fraction stays
-		// meaningful against any window, so there is nothing here to describe the wrong server.
-		if target.ResponseReserveFraction > 0 {
-			childCfg.Context.ResponseReserveFraction = target.ResponseReserveFraction
-		}
-		childCfg.Profile = target.Profile
+		// Every Config cell a routed delegation moves lands through the ONE projection
+		// (serverbinding.go): WHICH cells the target states, and what each absence means — the window
+		// it may name none of, the two inner bounds whose zeroes ARE the answer, the share that stays
+		// silent when it is unstated — is the target's OWN contract, written once on
+		// DelegationTarget's field docs where its binding() constructor reads it rather than spelled a
+		// second time here.
+		childCfg = target.binding().applyTo(childCfg)
+		// That projection ALSO mirrors the target's effort dialect onto the child's Config — the one
+		// deliberate divergence from what this block used to write, and a non-wire one: nothing reads a
+		// delegate's dialect off its Config (construct.go seeds the live field from the delegation
+		// composed below), so the mirror only makes the child's Config describe the server it is on.
+		// The field the child actually SPEAKS with is settled after this block, from routedDialect.
 		routedDialect = target.EffortDialect
-		if target.Bypass != nil {
-			childCfg.Bypass = *target.Bypass
-		}
 		var opts []provider.Option
 		opts, tap = dialOptions(childCfg)
 		upstream = a.dial(target.Endpoint, target.Model, target.APIKey, opts...)

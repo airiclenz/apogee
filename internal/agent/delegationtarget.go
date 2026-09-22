@@ -14,9 +14,11 @@ package agent
 // per-model bindings and SwapTools for the tool set, which is also what keeps routing benchable
 // all the way up: a bench Driver drives this setter directly, with no config file in sight.
 //
-// This file is the LATCH alone — the holder, its setter and its read seam. What a routed spawn
-// then BUILDS from the target (upstream, window, profile, posture) lives with the spawn, in
-// subagent.go.
+// This file is the LATCH alone — the holder, its setter and its read seam — plus the target's own
+// per-field contract, which is where the rule for each cell is written down. What a routed spawn
+// then BUILDS from the target lives elsewhere: the Config cells the target states are projected by
+// its binding() constructor (serverbinding.go), and the client it dials — with the latch read and
+// the seat decided — by the spawn itself, in subagent.go.
 
 import (
 	"sync"
@@ -56,8 +58,13 @@ type DelegationTarget struct {
 	// else the observed per-slot window. 0 means the target names NO window (neither pinned nor
 	// observed), and it is the one field an unusable value does not make the whole target unusable:
 	// the spawn keeps the PARENT's window instead of inheriting the zero, so a routed child is never
-	// built windowless — with a dead Budget, no automatic Compaction and readings stamped 0 — over a
-	// number nobody supplied (subagent.go).
+	// built windowless — with a dead Budget, no automatic Compaction and readings stamped 0, which
+	// sends both Drivers to their "the reading names none" fallback and paints a routed fill against
+	// the SESSION's window, the one window that child is not in — over a number nobody supplied. The
+	// parent's number is the better wrong answer than none, and it is what an UNROUTED child gets
+	// anyway. A NEGATIVE value folds in with 0 rather than meaning something of its own: config
+	// refuses a negative pin and a beat cannot observe one, so both spellings say the same thing
+	// here. That present-only-when-positive rule is stated once, in binding() (serverbinding.go).
 	ContextWindow int
 	// WorkingWindow is the room INSIDE ContextWindow a routed child actually works in, in tokens —
 	// the flagged entry's `working-window:` pin. There is no observed half to fall back to: a server
