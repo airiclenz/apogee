@@ -50,6 +50,17 @@
 // record, or at a Close whose diff is non-empty — because a redo across a newer write
 // would re-apply an old tree over work just asked for (ADR 0074 decision 6).
 //
+// Stepping and the lock. A revert and a redo POP the group they are about to walk under
+// the mutex and then release it for the walk itself, so the restores, the removals and the
+// image reads all happen with nothing held: a sub-agent recording a write, or a Driver
+// asking for the generation, is answered while the step is still running instead of queueing
+// behind a tree's worth of filesystem work. The pop is what makes that safe — the group being
+// walked is unreachable from the journal, so a record arriving mid-step opens a group of its
+// own rather than merging into an entry the step is reading. Where the group lands is decided
+// on the re-take: a reverted one joins the redo stack only if nothing wrote meanwhile, since
+// a write clears that stack, and a redone one goes back UNDER any group opened during the
+// walk, so `/undo` still walks the stack newest-first (ADR 0074 decision 6).
+//
 // Persistence. Given an index path beside those images ([WithIndexPath]) the journal writes
 // journal.json after every Close, Revert and Redo, and [Load] reads it back, so `/undo` still
 // reaches the exchanges of the process before this one (ADR 0074 decision 5). The file is an

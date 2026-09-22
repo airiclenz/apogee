@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -584,4 +585,233 @@ func TestRevertThroughTheRecordedFence(t *testing.T) {
 	}
 	assertContent(t, outside, "before")
 	assertContent(t, inside, "before")
+}
+
+// ----------------------------------------------------------------------------
+// The lock scope of a step (apogee-m6k)
+//
+// A revert and a redo pop the group they are about to walk and then release the lock for
+// the walk itself, so the journal keeps answering while the restores run. These cases bite
+// on the LOCK, not on the race detector: each parks a step inside the image source and
+// asserts that a call which would have queued behind a walk-long hold arrives anyway.
+// ----------------------------------------------------------------------------
+
+// lockWaitGrace is how long a call that must NOT be queued behind a walking step is given to
+// arrive. It is generous because it is not a timing measurement: a queued call never arrives
+// at all until the parked step is released, so anything short of the gate's own release is
+// the same answer.
+const lockWaitGrace = 10 * time.Second
+
+// waitOn fails the test unless c delivers within the grace period, naming what was waited on.
+func waitOn[T any](t *testing.T, c <-chan T, what string) T {
+	t.Helper()
+
+	select {
+	case v := <-c:
+		return v
+	case <-time.After(lockWaitGrace):
+		t.Fatalf("timed out waiting for %s", what)
+		return *new(T)
+	}
+}
+
+// parkableExchange records one exchange the walk of which must read an image: a diff-only
+// path the revert restores from the pre-image tree (the Content call the gate parks on) and
+// a funnel-recorded file beside it. It returns the two paths.
+func parkableExchange(t *testing.T, journal *Journal, root string) (tracked, funnelled string) {
+	t.Helper()
+
+	tracked = seedFile(t, root, "tracked.txt", "human")
+	exchange(t, journal, func() {
+		subprocessWrite(t, root, "tracked.txt", "agent")
+		funnelled = funnelWrite(t, journal, root, "doc.txt", "agent doc")
+	})
+	return tracked, funnelled
+}
+
+// recordInBackground writes name through the workspace fence and journals it, the way a
+// delegated sub-agent's funnel does, and closes the returned channel when the Record returns.
+// It touches no *testing.T, because it runs on a goroutine of its own.
+func recordInBackground(journal *Journal, root, name, content string) (<-chan struct{}, string) {
+	path := filepath.Join(root, name)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		fence := security.WorkspaceFence(root)
+		_ = fence.WriteFile(path, []byte(content), 0o644)
+		journal.Record(Mutation{
+			Fence:      fence,
+			Path:       path,
+			Post:       []byte(content),
+			PostExists: true,
+		})
+	}()
+	return done, path
+}
+
+func TestRevert_WhileItWalks_AnswersRecordAndGeneration(t *testing.T) {
+	journal, gate, root := gatedJournal(t)
+	tracked, funnelled := parkableExchange(t, journal, root)
+
+	entered := gate.arm()
+	reverted := make(chan Report, 1)
+	go func() {
+		report, _ := journal.Revert()
+		reverted <- report
+	}()
+	waitOn(t, entered, "the revert to park inside the image source")
+
+	stamped := make(chan uint64, 1)
+	go func() { stamped <- journal.Generation() }()
+	generation := waitOn(t, stamped, "Generation() to answer while the revert walked")
+
+	recorded, fresh := recordInBackground(journal, root, "fresh.txt", "fresh")
+	waitOn(t, recorded, "Record to land while the revert walked")
+
+	gate.unblock()
+	report := waitOn(t, reverted, "the revert to finish")
+
+	assertContent(t, tracked, "human")
+	assertAbsent(t, funnelled)
+	if len(report.Restored) != 1 || len(report.Deleted) != 1 {
+		t.Errorf("revert reported %+v, want one restore and one removal", report)
+	}
+
+	// The mid-walk record belongs to an exchange of its own: the group the revert walked was
+	// popped before the walk, so nothing could merge into it.
+	step, ok := journal.Preview()
+	if !ok {
+		t.Fatal("the mid-walk record left nothing to undo, want its own group")
+	}
+	if step.Ordinal != 1 {
+		t.Errorf("the journal holds %d groups after the revert, want the mid-walk one alone", step.Ordinal)
+	}
+	if got := onlyChange(t, step, ok); got.Path != fresh {
+		t.Errorf("the top group holds %s, want the mid-walk record %s", got.Path, fresh)
+	}
+	if step.Generation <= generation {
+		t.Errorf("generation %d did not advance past the %d read mid-walk", step.Generation, generation)
+	}
+
+	// A write during the walk clears the redo stack (ADR 0074 decision 6), so the reverted
+	// group is dropped rather than offered back over work the human has just asked for.
+	if _, ok := journal.RedoPreview(); ok {
+		t.Error("a redo is offered after an exchange wrote during the revert, want none")
+	}
+}
+
+func TestRevert_RecordArrivingMidWalk_DoesNotDisturbTheRestore(t *testing.T) {
+	journal, gate, root := gatedJournal(t)
+	tracked, funnelled := parkableExchange(t, journal, root)
+
+	entered := gate.arm()
+	reverted := make(chan Report, 1)
+	go func() {
+		report, _ := journal.Revert()
+		reverted <- report
+	}()
+	waitOn(t, entered, "the revert to park inside the image source")
+
+	// The racing write lands on a path the parked step has not reached yet. Merged into the
+	// group being walked it would move that entry's post-state onto the new bytes, and the
+	// step would then "restore" over a write the human has just asked for.
+	recorded, _ := recordInBackground(journal, root, "doc.txt", "the human's own line")
+	waitOn(t, recorded, "Record to land while the revert walked")
+
+	gate.unblock()
+	report := waitOn(t, reverted, "the revert to finish")
+
+	assertContent(t, tracked, "human")
+	assertContent(t, funnelled, "the human's own line")
+	if len(report.Skipped) != 1 || report.Skipped[0].Path != funnelled {
+		t.Fatalf("revert skipped %+v, want %s left alone", report.Skipped, funnelled)
+	}
+	if report.Skipped[0].Reason != changedReason(undoward) {
+		t.Errorf("the skip reads %q, want %q", report.Skipped[0].Reason, changedReason(undoward))
+	}
+}
+
+func TestRedo_WhileItWalks_ReappliesUnderAGroupOpenedMidWalk(t *testing.T) {
+	journal, gate, root := gatedJournal(t)
+	tracked, funnelled := parkableExchange(t, journal, root)
+
+	if _, err := journal.Revert(); err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	assertContent(t, tracked, "human")
+	assertAbsent(t, funnelled)
+
+	step, ok := journal.RedoPreview()
+	if !ok {
+		t.Fatal("nothing to redo after a revert that raced nothing")
+	}
+
+	entered := gate.arm()
+	redone := make(chan Report, 1)
+	go func() {
+		report, _ := journal.Redo(step.Generation)
+		redone <- report
+	}()
+	waitOn(t, entered, "the redo to park inside the image source")
+
+	stamped := make(chan uint64, 1)
+	go func() { stamped <- journal.Generation() }()
+	waitOn(t, stamped, "Generation() to answer while the redo walked")
+
+	recorded, fresh := recordInBackground(journal, root, "fresh.txt", "fresh")
+	waitOn(t, recorded, "Record to land while the redo walked")
+
+	gate.unblock()
+	waitOn(t, redone, "the redo to finish")
+
+	assertContent(t, tracked, "agent")
+	assertContent(t, funnelled, "agent doc")
+
+	// The exchange that wrote during the walk is the NEWEST one, so the re-applied group goes
+	// back underneath it and `/undo` still walks the stack newest-first.
+	top, ok := journal.Preview()
+	if !ok {
+		t.Fatal("nothing to undo after the redo, want two groups")
+	}
+	if top.Ordinal != 2 {
+		t.Fatalf("the journal holds %d groups after the redo, want 2", top.Ordinal)
+	}
+	if got := onlyChange(t, top, ok); got.Path != fresh {
+		t.Errorf("the top group holds %s, want the mid-walk record %s", got.Path, fresh)
+	}
+}
+
+func TestReportLines_OrdinalOfARevertAndARedo_CountsFromTheOldestGroup(t *testing.T) {
+	root := t.TempDir()
+	journal := New()
+	for _, name := range []string{"one.txt", "two.txt", "three.txt"} {
+		journal.BeginGroup()
+		funnelWrite(t, journal, root, name, "agent")
+	}
+
+	report, err := journal.Revert()
+	if err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	if report.Ordinal != 3 {
+		t.Errorf("the revert reports exchange %d, want 3", report.Ordinal)
+	}
+	if line := ReportLines(report)[0]; !strings.HasPrefix(line, "exchange 3:") {
+		t.Errorf("the revert's first line is %q, want it to head exchange 3", line)
+	}
+
+	step, ok := journal.RedoPreview()
+	if !ok {
+		t.Fatal("nothing to redo after a revert")
+	}
+	redone, err := journal.Redo(step.Generation)
+	if err != nil {
+		t.Fatalf("Redo: %v", err)
+	}
+	if redone.Ordinal != 1 {
+		t.Errorf("the redo reports exchange %d, want 1", redone.Ordinal)
+	}
+	if line := ReportLines(redone)[0]; !strings.HasPrefix(line, "exchange 1:") {
+		t.Errorf("the redo's first line is %q, want it to head exchange 1", line)
+	}
 }

@@ -203,7 +203,13 @@ func (g *group) snapshotted() bool { return g.pre != "" && g.post != "" }
 //
 // It is safe for concurrent use — delegated sub-agents record into their parent's
 // journal from their own goroutines (ADR 0039) — and every method takes the same lock,
-// so a preview or a revert never observes a half-written group.
+// so nothing ever observes a half-written group. A revert and a redo hold that lock only
+// long enough to POP the group they are about to walk: the walk itself — every restore,
+// every removal, every image read — runs with the lock RELEASED, so a sub-agent recording
+// a write is never made to wait on a filesystem step it has nothing to do with. What makes
+// that safe is the pop: the group being walked is unreachable from the journal, so a
+// [Journal.Record] arriving during the step opens a group of its own instead of mutating
+// an entry the step is reading.
 //
 // Without a [Snapshotter] the stack holds this process's own funnel records, in memory and
 // nowhere else, exactly as ADR 0051 built it. With one ([WithSnapshotter] and [WithWorkspace]
@@ -364,27 +370,63 @@ func (j *Journal) previewOf(g *group, ordinal int, d direction) Step {
 	return Step{Ordinal: ordinal, Generation: j.generation, Changes: changes}
 }
 
-// runStep carries one group's step out over every path it reaches and reports what it did.
-// An undo runs in the REVERSE of the order the writes happened, so a path created after
+// walk is one popped group's step, frozen for a run with the lock released: the group
+// itself, everything [runStep] reads of the journal, and the two stamps the re-take needs
+// to decide where the group lands once the step is over.
+//
+// ordinal is the group's 1-based position read BEFORE the pop, so a report numbers the
+// exchange the way the preview that announced it did. taken is the generation the step
+// stamped on its way out, which a re-take compares against to learn whether anything wrote
+// while it walked. depth is how deep the undo stack was when the step began, which is where
+// a redone group is put back — under, not over, any group opened during the walk.
+type walk struct {
+	group   *group
+	src     resolver
+	paths   []reversible
+	ordinal int
+	taken   uint64
+	depth   int
+}
+
+// takeWalk freezes what a lock-free step needs — the group's resolver and the paths it acts
+// on, both read while the lock is still held — and stamps the journal as moved, so a
+// [Journal.Record] arriving during the walk opens a group of its own rather than joining the
+// one being walked. Callers hold the lock and have already popped g off its stack.
+func (j *Journal) takeWalk(g *group, ordinal int) walk {
+	j.pending = true
+	j.generation++
+	return walk{
+		group:   g,
+		src:     j.source(g),
+		paths:   j.reach(g),
+		ordinal: ordinal,
+		taken:   j.generation,
+		depth:   len(j.groups),
+	}
+}
+
+// runStep carries one popped group's step out over every path it reaches and reports what it
+// did. An undo runs in the REVERSE of the order the writes happened, so a path created after
 // another is removed before it; a redo runs forward, the order the writes themselves took.
 // The report is in write order either way, so it reads like the preview that announced it.
-// Callers hold the lock.
-func (j *Journal) runStep(g *group, ordinal int, d direction) Report {
-	src := j.source(g)
-	paths := j.reach(g)
-
-	outcomes := make([]Change, len(paths))
+//
+// It is a function rather than a method, and takes a [walk] rather than a [Journal], because
+// it runs with the journal's lock RELEASED: everything it touches was frozen under the lock
+// by [Journal.takeWalk], and the group it walks was popped there, so nothing it reads is
+// reachable from the journal while it writes.
+func runStep(w walk, d direction) Report {
+	outcomes := make([]Change, len(w.paths))
 	if d == undoward {
-		for i := len(paths) - 1; i >= 0; i-- {
-			outcomes[i] = paths[i].apply(src, d)
+		for i := len(w.paths) - 1; i >= 0; i-- {
+			outcomes[i] = w.paths[i].apply(w.src, d)
 		}
 	} else {
-		for i := range paths {
-			outcomes[i] = paths[i].apply(src, d)
+		for i := range w.paths {
+			outcomes[i] = w.paths[i].apply(w.src, d)
 		}
 	}
 
-	report := Report{Ordinal: ordinal}
+	report := Report{Ordinal: w.ordinal}
 	for _, outcome := range outcomes {
 		switch outcome.Action {
 		case ActionRestore:
@@ -414,23 +456,52 @@ func (j *Journal) runStep(g *group, ordinal int, d direction) Report {
 // The popped group moves to the redo stack, where [Journal.Redo] can put it back until
 // the next exchange that writes clears it.
 //
+// The group is popped BEFORE the walk and the walk runs with the journal's lock released,
+// so a delegated sub-agent's [Journal.Record] — or a Driver asking [Journal.Generation] —
+// is answered while the restores are still going on instead of queueing behind them. A
+// record that arrives mid-walk lands in a group of its own, never in the one being reverted.
+//
 // It returns [ErrNothingToUndo], and does nothing, when no group remains.
 func (j *Journal) Revert() (Report, error) {
+	step, err := j.takeTop()
+	if err != nil {
+		return Report{}, err
+	}
+
+	report := runStep(step, undoward)
+
+	return report, j.landReverted(step)
+}
+
+// takeTop pops the top un-undone group and freezes its step, or reports that there is none
+// to take. It is [Journal.Revert]'s whole first hold.
+func (j *Journal) takeTop() (walk, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	if len(j.groups) == 0 {
-		return Report{}, ErrNothingToUndo
+		return walk{}, ErrNothingToUndo
 	}
-	top := j.groups[len(j.groups)-1]
+	ordinal := len(j.groups)
+	top := j.groups[ordinal-1]
+	j.groups = j.groups[:ordinal-1]
 
-	report := j.runStep(top, len(j.groups), undoward)
+	return j.takeWalk(top, ordinal), nil
+}
 
-	j.groups = j.groups[:len(j.groups)-1]
-	j.redo = append(j.redo, top)
-	j.pending = true
-	j.generation++
-	return report, j.persist()
+// landReverted moves the walked group onto the redo stack and saves the journal — unless
+// something WROTE while the step walked, which the generation says. A write clears the redo
+// stack (ADR 0074 decision 6), so re-offering the group after one would let `/redo` re-apply
+// an old tree over the very work the human has just asked for; the group is dropped instead,
+// exactly as [Journal.Record] would have dropped it had it arrived a moment earlier.
+func (j *Journal) landReverted(step walk) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	if j.generation == step.taken {
+		j.redo = append(j.redo, step.group)
+	}
+	return j.persist()
 }
 
 // Wrote lists every path this journal has a record for, across ALL groups and in the order

@@ -3,6 +3,7 @@ package undo
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // ErrNothingToRedo is returned by [Journal.Redo] when the redo stack is empty — nothing has
@@ -49,24 +50,50 @@ func (j *Journal) RedoPreview() (Step, bool) {
 // one it could not fully carry out. It returns [ErrNothingToRedo], and does nothing, when
 // the stack is empty, and — on a journal with an index path — reports a save that failed
 // alongside the report it could not record, exactly as [Journal.Revert] does.
+//
+// It pops before it walks and walks with the lock released, exactly as [Journal.Revert]
+// does, so a concurrent [Journal.Record] is answered rather than queued behind the
+// re-application. The generation check stays in the first hold: a stale redo must refuse
+// having touched nothing at all.
 func (j *Journal) Redo(generation uint64) (Report, error) {
+	step, err := j.takeRedoTop(generation)
+	if err != nil {
+		return Report{}, err
+	}
+
+	report := runStep(step, redoward)
+
+	return report, j.landRedone(step)
+}
+
+// takeRedoTop refuses a stale or empty redo and otherwise pops the group `/redo` re-applies,
+// freezing its step. It is [Journal.Redo]'s whole first hold.
+func (j *Journal) takeRedoTop(generation uint64) (walk, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
 	if len(j.redo) == 0 {
-		return Report{}, ErrNothingToRedo
+		return walk{}, ErrNothingToRedo
 	}
 	if j.generation != generation {
-		return Report{}, fmt.Errorf("%w: previewed at generation %d, journal is at %d",
+		return walk{}, fmt.Errorf("%w: previewed at generation %d, journal is at %d",
 			ErrStaleGeneration, generation, j.generation)
 	}
-	top := j.redo[len(j.redo)-1]
+	ordinal := len(j.redo)
+	top := j.redo[ordinal-1]
+	j.redo = j.redo[:ordinal-1]
 
-	report := j.runStep(top, len(j.redo), redoward)
+	return j.takeWalk(top, ordinal), nil
+}
 
-	j.redo = j.redo[:len(j.redo)-1]
-	j.groups = append(j.groups, top)
-	j.pending = true
-	j.generation++
-	return report, j.persist()
+// landRedone puts the re-applied group back on the undo stack at the depth it was taken
+// from, so a group opened by a [Journal.Record] that arrived while the step walked stays
+// ABOVE it: `/undo` walks the stack newest-first, and the newest exchange is that record's,
+// not the one just re-applied (ADR 0074 decision 6).
+func (j *Journal) landRedone(step walk) error {
+	j.mu.Lock()
+	defer j.mu.Unlock()
+
+	j.groups = slices.Insert(j.groups, min(step.depth, len(j.groups)), step.group)
+	return j.persist()
 }

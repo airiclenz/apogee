@@ -131,6 +131,67 @@ func (f *fakeSnapshotter) Content(tree, path string) ([]byte, bool, error) {
 	return data, ok, nil
 }
 
+// ----------------------------------------------------------------------------
+// The gated Snapshotter — the stand-in that parks a step mid-walk.
+// ----------------------------------------------------------------------------
+
+// gatedSnapshotter holds a step open inside the journal's image source. Content is the call
+// a walk cannot avoid — it is how a restore gets the bytes it writes — so an ARMED gate
+// announces the first one on entered and blocks it on release, which lets a test park a
+// revert or a redo in the middle of its filesystem work and ask the journal questions while
+// it is there. The gate disarms as it fires, so the rest of the walk runs straight through,
+// and [gatedSnapshotter.arm] puts it back for the next step.
+type gatedSnapshotter struct {
+	*fakeSnapshotter
+
+	gateMu  sync.Mutex
+	armed   bool
+	entered chan struct{}
+	release chan struct{}
+}
+
+func newGatedSnapshotter(root string) *gatedSnapshotter {
+	return &gatedSnapshotter{fakeSnapshotter: newFakeSnapshotter(root)}
+}
+
+// arm makes the next Content call park, and returns the channel that announces it.
+func (g *gatedSnapshotter) arm() <-chan struct{} {
+	g.gateMu.Lock()
+	defer g.gateMu.Unlock()
+
+	g.armed = true
+	g.entered = make(chan struct{})
+	g.release = make(chan struct{})
+	return g.entered
+}
+
+// unblock lets a parked call go on. It is idempotent and safe on an unarmed gate, so a test
+// can release the step it parked and still hand the same method to t.Cleanup — which is what
+// unwinds the goroutines of a test that failed while a step was parked.
+func (g *gatedSnapshotter) unblock() {
+	g.gateMu.Lock()
+	release := g.release
+	g.armed, g.release = false, nil
+	g.gateMu.Unlock()
+
+	if release != nil {
+		close(release)
+	}
+}
+
+func (g *gatedSnapshotter) Content(tree, path string) ([]byte, bool, error) {
+	g.gateMu.Lock()
+	armed, entered, release := g.armed, g.entered, g.release
+	g.armed = false
+	g.gateMu.Unlock()
+
+	if armed {
+		close(entered)
+		<-release
+	}
+	return g.fakeSnapshotter.Content(tree, path)
+}
+
 // fakeTreeID content-addresses an image, so two captures of an unchanged workspace answer
 // the same id — the property item 11's "a pre==post group is not a step" rule reads.
 func fakeTreeID(image map[string][]byte) string {
@@ -158,6 +219,18 @@ func snapshotJournal(t *testing.T) (*Journal, *fakeSnapshotter, string) {
 	root := t.TempDir()
 	snap := newFakeSnapshotter(root)
 	return New(WithSnapshotter(snap), WithWorkspace(root)), snap, root
+}
+
+// gatedJournal returns a snapshot-backed journal whose image source can park a step
+// mid-walk, so a test can hold a revert or a redo open and ask the journal questions while
+// its filesystem work is still going on.
+func gatedJournal(t *testing.T) (*Journal, *gatedSnapshotter, string) {
+	t.Helper()
+
+	root := t.TempDir()
+	gate := newGatedSnapshotter(root)
+	t.Cleanup(gate.unblock)
+	return New(WithSnapshotter(gate), WithWorkspace(root)), gate, root
 }
 
 // subprocessWrite changes a file the way a terminal command or an MCP server does: through

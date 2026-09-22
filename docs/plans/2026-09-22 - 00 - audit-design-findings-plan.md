@@ -59,7 +59,15 @@ repo-policy call (`apogee-242`). No plan chain gate — A/B/C/D are archived.
 
 ---
 
-## 1. A revert pops its group under the lock and walks it lock-free
+## 1. A revert pops its group under the lock and walks it lock-free — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): `j.persist()` stays inside the second hold, as the item's Approach states ("re-take for the redo-stack move and `j.persist()`") — it encodes the journal's own two stacks and cannot read them lock-free. The item's Goal sentence reads "no filesystem write … while `Journal.mu` is held"; the walk, which is what the audit's Critical names, is lock-free, and the one small atomic index write is not.
+
+NOTES (2026-09-22): the step is parked on the Snapshotter (the item allows "a fence or Snapshotter call the walk makes"): `security.Fence` is a concrete struct with no seam, and a diff-only path's restore reads its bytes through `Snapshotter.Content`. The `gatedSnapshotter` stand-in therefore sits in `snapshot_test.go` beside `fakeSnapshotter` (both files are in the item's Files list); the four cases themselves are in `journal_test.go` on `funnelWrite`/`seedFile`/`assertContent`.
+
+NOTES (2026-09-22): test (c) is a redo after a revert that raced NOTHING — a revert that raced a `Record` drops its redo group by the item's own ratified generation rule, so "Redo after (a)" cannot be taken literally. It parks the redo's own walk as well, and additionally pins that a group opened mid-walk stays on top of the re-applied one; test (a) gained the matching assertion that a revert which raced a write offers no redo at all (ADR 0074 decision 6). Both rules are mechanisms this item introduces, so neither ships untested.
+
+NOTES (2026-09-22): `go test -race ./internal/undo/...` cannot run on this box — `FATAL: ThreadSanitizer: unsupported VMA range (Found 47 - Supported 48)`, the limitation `docs/manual/building.md:124-128` records. It is a CI check, as the item states. The three lock-biting cases were verified red against the pre-item tree by restoring `journal.go`/`redo.go` from HEAD: all three time out (deadlock), and the ordinal guard passes there as intended.
 
 **What.** `fix(undo)`: closes `apogee-m6k`, the audit's Critical "the undo journal holds its mutex
 across filesystem writes".
