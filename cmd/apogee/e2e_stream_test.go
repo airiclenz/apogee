@@ -55,19 +55,30 @@ const streamPrompt = "Write a 400-line numbered list, one short sentence per lin
 // TestE2ESmokeInProcess, where the session is idle and nothing is in flight.
 const midStreamWidth = 60
 
+// streamRuneAllowance is the extra wait [streamReplyWait] grants per rune of the fixture's reply,
+// on top of [tuitest.DefaultTimeout]. The stub plays three runes per delta and sleeps a
+// millisecond between deltas, but that millisecond is a floor rather than a pace: a 1 ms timer
+// fires on the box's next timer tick — ~3 ms on the 9-core dev VM (500 × time.NewTimer(1ms)
+// measured 1.48 s, 2026-09-14), and longer where there is less CPU to go round — so a delta costs
+// about three milliseconds of playback, which is one millisecond per rune of it. The fixture's
+// 3 runes / 1 ms are pinned by TestE2EStreamFixtureIsTheListItClaims, so this holds for as long as
+// the pin does.
+const streamRuneAllowance = time.Millisecond
+
 // streamReplyWait bounds every wait for the LAST line of the fixture's reply. The in-process test,
 // its pty twin and the judge's frames all wait for that line and all wait this long, so the budget
 // has one name and one reason and the twins cannot drift apart.
 //
-// The default 5 s is too short by arithmetic before any load is added: 5,784 runes three at a time
-// is 1,928 deltas, and the millisecond between them is a floor rather than a pace — a 1 ms timer
-// fires on the box's next timer tick, ~3 ms on the 9-core dev VM (500 × time.NewTimer(1ms) measured
-// 1.48 s, 2026-09-14), so the stub alone takes ≈ 5.8 s to play the reply there, and the in-process
-// wait, which starts after line 20 and two resizes, timed out once at 5 s beside the parallel suite
-// under -race with 369 of 400 lines painted. The bound is that tick-rounded floor with room for
-// the parallel suite on top. The fixture's 3 runes / 1 ms are pinned by
-// TestE2EStreamFixtureIsTheListItClaims, so the arithmetic here holds for as long as the pin does.
-const streamReplyWait = 15 * time.Second
+// It is [tuitest.DefaultTimeout] plus [streamRuneAllowance] per streamed rune — the shape [submit]
+// and [awaitReply] use, and for the same reason: the default is what a wait on this suite gets for
+// the machinery under it, and what THIS wait adds is the time the reply has to be played for
+// before its last line can exist at all. Deriving it that way is the point: the previous 15 s was
+// arithmetic from a stopwatch on one nine-core box (≈ 5.8 s of playback, with room for the
+// parallel suite on top), and a box with fewer cores than that one spends the whole of it on
+// playback and has nothing left for the paint — which is how a healthy-but-slow run got called a
+// hang. A passing run pays none of it: the wait returns the instant the line paints.
+var streamReplyWait = tuitest.DefaultTimeout +
+	time.Duration(streamRunes(streamLines))*streamRuneAllowance
 
 // streamLine is line n of the fixture's reply.
 func streamLine(n int) string { return fmt.Sprintf("%d. Item %d.", n, n) }

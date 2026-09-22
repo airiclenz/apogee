@@ -34,10 +34,26 @@ const (
 	// The container the newcomer works in: a plain Debian userland with nothing Go-shaped in it,
 	// so a step that silently needs a toolchain fails here instead of passing on a dev box.
 	newcomerImage = "debian:stable-slim"
-	// The whole exercise, end to end. A local judge model driving twenty shell steps is slow.
-	newcomerBudget = 15 * time.Minute
-	// One shell command inside the container.
-	newcomerStepBudget = 60 * time.Second
+	// The whole exercise, end to end — derived from the step budget rather than chosen beside
+	// it. This ctx is what every judge call and every `docker exec` hangs off, and its expiry is
+	// a t.Fatalf rather than the reader's report, so it has to be able to hold what it bounds:
+	// every one of the newcomerMaxSteps steps may spend its whole newcomerStepBudget AND its
+	// whole newcomerJudgeAllowance, and the slack left by the steps that do not is what covers
+	// the image pull, the container start and the closing report. The previous 15 m could not
+	// fit even its own 20 × 60 s of steps. Generous costs a healthy run nothing (the principle
+	// internal/tuitest's DefaultTimeout states): the exercise ends when the reader finishes or hits
+	// the step ceiling, never on this clock.
+	newcomerBudget = newcomerMaxSteps * (newcomerStepBudget + newcomerJudgeAllowance)
+	// One shell command inside the container. It admits the hardware a reader plausibly has
+	// rather than the one this was written on: a step is an `apt-get install`, a release archive
+	// pulled over a domestic link or a build from source, and on a four-core ARM box on a slow
+	// connection any of those is minutes, not seconds. A budget only a workstation can meet
+	// would fail the exercise on plumbing and have the judge report it as a doc gap.
+	newcomerStepBudget = 3 * time.Minute
+	// What newcomerBudget adds per step for the judge's own round trip — the model reading the
+	// last output and deciding what to type next. That is a local endpoint, possibly inferring
+	// on CPU, over a transcript that grows with every step it has already taken.
+	newcomerJudgeAllowance = 2 * time.Minute
 	// The tool-use loop's ceiling. A reader who has not installed apogee in twenty steps has
 	// found the finding this test exists for.
 	newcomerMaxSteps = 20

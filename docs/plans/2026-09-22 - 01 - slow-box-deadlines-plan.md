@@ -618,7 +618,29 @@ go test -race -count=2 ./internal/userexec/... ./internal/reactions/... ./intern
 
 **Commit:** `test: the real-process and settle-window margins fit a loaded box`
 
-## 12. The e2e budgets outside the cured kit follow the kit's principle
+## 12. The e2e budgets outside the cured kit follow the kit's principle — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the stub's playback allowance is stated PER RUNE (`streamRuneAllowance = 1ms`)
+rather than per delta. Three runes per delta at the tick-rounded ~3 ms floor is one millisecond per
+rune, so the two are the same number and the per-rune form avoids a second constant equal to the
+fixture's pinned chunk size; the total is `tuitest.DefaultTimeout` + 5,784 ms ≈ 65.8 s.
+NOTES (2026-09-23): `streamReplyWait` changed from `const` to `var`, since it now calls
+`streamRunes(streamLines)`. Package-level initialisation order resolves the forward reference, so
+the declaration keeps its place in the file; all four call sites are unchanged
+(`tuitest.Within(streamReplyWait)`).
+NOTES (2026-09-23): `newcomerBudget` keeps its position at the head of the const block and forward-
+references `newcomerStepBudget`, `newcomerJudgeAllowance` and `newcomerMaxSteps`, which Go resolves
+— chosen over reordering the block, which the item does not ask for. The resulting ceiling is
+20 × (3 m + 2 m) = 100 minutes for a test that is gated on docker plus a judge endpoint and never
+runs unattended.
+NOTES (2026-09-23): `docs/design/test-drivers.md`:1073 still describes `streamReplyWait` as
+"(15 s: the tick-rounded floor with room for the parallel suite on top)". Left as written: item 14
+owns every doc sentence quoting a budget the code no longer holds, names this file in its **Files**
+and declares its dependency on this item; item 14 is not yet done.
+NOTES (2026-09-23): the Acceptance commands were run without `-race` — this host's kernel gives a
+47-bit VMA and ThreadSanitizer refuses to start on it, so every `-race` run fails before a test
+executes. `go test ./cmd/apogee/... -run 'TestE2EStream'` passes (14.8 s), `go vet ./cmd/apogee/...`
+and `gofmt -l cmd/apogee/` are clean.
 
 **What.** The `cmd/apogee` constants of `apogee-7fmu` that commit `31f44f75` did not reach.
 **Goal:** no e2e budget is centred on one machine's measurement.
