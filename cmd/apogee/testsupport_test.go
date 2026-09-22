@@ -17,21 +17,18 @@ import (
 // values, not the wording (resolveConfineToWorkspace's own table covers the notices).
 func noNotify(string) {}
 
-// startupServerYAML is the smallest upstream a config can describe since ADR 0036 retired the
-// top-level `endpoint:` key: one `servers:` entry and the `server:` pointer that starts on it.
-// Startup refuses a config that names no server at all, so every test whose subject is some OTHER
-// key carries this block to get past selection — the way a real config always will.
-const startupServerYAML = "servers:\n  - name: testbox\n    endpoint: http://127.0.0.1:1111\nserver: testbox\n"
-
-// The facts startupServerYAML resolves to, for the tests that assert what selection produced.
+// The facts the startup server block resolves to, for the tests that assert what selection produced.
 const (
 	testServerName     = "testbox"
 	testServerEndpoint = "http://127.0.0.1:1111"
 )
 
-// startupServerYAMLFor is startupServerYAML with the startup server at endpoint: the block a test
-// whose run takes a REAL beat writes, naming the stubllm upstream it started, so the beat dials a
-// server that answers rather than the pinned port nothing listens on.
+// startupServerYAMLFor is the smallest upstream a config can describe since ADR 0036 retired the
+// top-level `endpoint:` key: one `servers:` entry at endpoint and the `server:` pointer that starts
+// on it. Startup refuses a config that names no server at all, so every test whose subject is some
+// OTHER key carries this block to get past selection — the way a real config always will. A test
+// whose run takes a REAL beat names the stubllm upstream it started, so the beat dials a server
+// that answers rather than the pinned testServerEndpoint port nothing listens on.
 func startupServerYAMLFor(endpoint string) string {
 	return "servers:\n  - name: " + testServerName + "\n    endpoint: " + endpoint + "\nserver: " +
 		testServerName + "\n"
