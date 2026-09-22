@@ -732,7 +732,11 @@ which seed a *leading* `RoleSystem` message and must keep restoring. CHANGELOG s
 **Acceptance.** `go build ./... && go test ./internal/agent/... -run 'Restore|Snapshot|CutSession' && go test ./internal/session/...`
 **Commit:** `fix(agent): a restored snapshot's roles, counts and sizes are checked before it is applied`
 
-## 13. A restored snapshot cannot forge the engine's own structure
+## 13. A restored snapshot cannot forge the engine's own structure — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the deferred-correction queue has no read-only accessor, so checkRestoredDeferred drains it with TakeDeferred and re-queues it in FIFO order on the way out — decodeState's own temporary, so nothing else observes the round trip; no internal/domain change was needed.
+
+NOTES (2026-09-22): the item says to reuse forgesStandingStructure; the restore list is a strict subset of standingFences (the committed rows are excluded), so a second derived list (restoredFences) and a content-level detector (forgesRestoredStructure) were added beside it in standingblocks.go rather than widening the per-line one — contextfiles.go is untouched.
 
 **What.** `fix(agent)`: the content half of `apogee-mre`. Depends on item 12.
 

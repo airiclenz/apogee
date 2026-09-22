@@ -5,9 +5,10 @@ package agent
 // that is true of the whole — the wire order, which blocks seed a message and which only ride
 // along, and which lines a workspace context file may not spell — used to live in four files'
 // prose and two hand-written lists. It lives here instead, in standingBlocks: one ordered row per
-// block, read by standingSystem for the composition and by forgesStandingStructure (contextfiles.go)
-// for the fence, so the order and the fence have exactly one author and a block added to the
-// message is a row added here.
+// block, read by standingSystem for the composition, by forgesStandingStructure (contextfiles.go)
+// for the workspace fence and by forgesRestoredStructure for the snapshot-ingestion one (state.go),
+// so the order and both fences have exactly one author and a block added to the message is a row
+// added here.
 //
 // Two rules the table encodes rather than each block restating:
 //
@@ -30,6 +31,7 @@ package agent
 // message when none exists) and is stamped by buildRequest through req.AppendToSystem.
 
 import (
+	"strings"
 	"sync"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -39,11 +41,19 @@ import (
 // ("" contributes nothing), the line openings a workspace context file may not spell — a block
 // with no furniture of its own, the prompt, has none; the context files own their header AND
 // their footer — and whether the block rides along (engine-owned) or seeds (configured source).
+//
+// committed marks a row whose fence ordinary, default-on apogee behaviour writes VERBATIM into
+// COMMITTED history — the task list block's opening, which every task_list tool result renders
+// (internal/tools/task_list.go), and the orientation header, which is line 1 of a shipped prompt
+// template any read of that file commits. Both stay on standingFences (a workspace file must not
+// forge either), and both are off the restore list (restoredFences): a snapshot refusal keyed on
+// a line an ordinary session carries would make that session unresumable and unforkable at once.
 type standingBlock struct {
 	name       string
 	render     func(*Agent) string
 	fences     []string
 	ridesAlong bool
+	committed  bool
 }
 
 // standingContextFilesRow names the table's workspace-context-files row. It is a constant because
@@ -64,9 +74,9 @@ const standingContextFilesRow = "context files"
 func standingBlocks() []standingBlock {
 	return []standingBlock{
 		{name: "prompt", render: (*Agent).systemPrompt},
-		{name: "orientation", render: (*Agent).orientationBlock, fences: []string{orientationHeader()}, ridesAlong: true},
+		{name: "orientation", render: (*Agent).orientationBlock, fences: []string{orientationHeader()}, ridesAlong: true, committed: true},
 		{name: "delegate report", render: (*Agent).delegateReportBlock, fences: []string{delegateReportFence}, ridesAlong: true},
-		{name: "task list", render: (*Agent).taskListBlock, fences: []string{TaskListFence}, ridesAlong: true},
+		{name: "task list", render: (*Agent).taskListBlock, fences: []string{TaskListFence}, ridesAlong: true, committed: true},
 		{name: standingContextFilesRow, render: (*Agent).contextBlocks, fences: []string{contextFileHeader, contextFileFooter}},
 	}
 }
@@ -109,26 +119,89 @@ func (a *Agent) standingRenders() []standingRender {
 
 // standingFences returns the CLOSED list forgesStandingStructure checks a content line against:
 // the table's fence column in row order, then the two lines of the advice fence an advise
-// Reaction's text is delivered in (domain.RenderAdvice). The advice fence is here for the same
-// reason from the other side: its header is derived from provenance so no handler can print one,
-// and this is what keeps a repo file from printing one either. Derived from the table, so a row's
-// fence cannot be left off the list; derived once, because the fence tests every line of every
-// context file against it.
+// Reaction's text is delivered in (domain.RenderAdvice), then the two lines of the engine-note
+// fence the engine's own asides ride in (domain.RenderEngineNote). Both pairs are here for the
+// same reason from the other side: their headers are derived from provenance so no handler can
+// print one, and this is what keeps a repo file from printing one either. Derived from the table,
+// so a row's fence cannot be left off the list; derived once, because the fence tests every line
+// of every context file against it.
 func standingFences() []string {
 	standingFencesOnce.Do(func() {
 		rows := standingBlocks()
-		fences := make([]string, 0, len(rows)+2)
+		fences := make([]string, 0, len(rows)+len(unforgeableFences))
 		for _, row := range rows {
 			fences = append(fences, row.fences...)
 		}
-		standingFenceList = append(fences, domain.AdviceFencePrefix, domain.AdviceFenceClosePrefix)
+		standingFenceList = append(fences, unforgeableFences...)
 	})
 	return standingFenceList
 }
 
-// standingFenceList is standingFences' result, built on first use (standingFencesOnce). No
-// initializer — that is what keeps it out of the cycle standingBlocks documents.
+// restoredFences returns the CLOSED list forgesRestoredStructure checks a RESTORED payload's
+// content against: standingFences minus the rows an ordinary session commits verbatim (the
+// committed column — see standingBlock), so what remains is exactly the furniture apogee never
+// writes into history. A restored message, task row, deferred correction or pending input that
+// spells one of these was written by something other than apogee, and it is spelling the engine's
+// own structure at the one seam where outside bytes become committed history (state.go).
+//
+// Derived from the same table as standingFences for the same reason — a block added to the message
+// joins both lists at once — and cached for the same one: the check runs over every line of every
+// restored message.
+func restoredFences() []string {
+	restoredFencesOnce.Do(func() {
+		rows := standingBlocks()
+		fences := make([]string, 0, len(rows)+len(unforgeableFences))
+		for _, row := range rows {
+			if row.committed {
+				continue
+			}
+			fences = append(fences, row.fences...)
+		}
+		restoredFenceList = append(fences, unforgeableFences...)
+	})
+	return restoredFenceList
+}
+
+// unforgeableFences are the two fence pairs that belong to no standingBlocks row: the advice fence
+// an advise Reaction's text is delivered in and the engine-note fence the engine's own asides ride
+// in. Neither is ever committed — Message.recordContent cuts a message at its first fence, so no
+// session record carries one (domain/advice.go) — so both are on BOTH lists.
+var unforgeableFences = []string{
+	domain.AdviceFencePrefix, domain.AdviceFenceClosePrefix,
+	domain.EngineNoteFencePrefix, domain.EngineNoteFenceClosePrefix,
+}
+
+// forgesRestoredStructure reports the first restoredFences entry any line of content spells, and
+// whether it found one. It takes whole content rather than one line because that is the unit the
+// restore seam holds — a message body, a task row, a deferred correction, a pending input — and it
+// walks the lines without splitting them into a slice, because the content it walks is bounded by
+// maxRestoredMessageBytes (state.go) rather than by anything smaller.
+//
+// Leading whitespace is trimmed before the test, exactly as forgesStandingStructure trims it: an
+// indented forgery reads as furniture to a model just as well as a flush one.
+func forgesRestoredStructure(content string) (string, bool) {
+	fences := restoredFences()
+	for rest := content; rest != ""; {
+		line, tail, _ := strings.Cut(rest, "\n")
+		rest = tail
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" {
+			continue
+		}
+		for _, fence := range fences {
+			if strings.HasPrefix(trimmed, fence) {
+				return fence, true
+			}
+		}
+	}
+	return "", false
+}
+
+// standingFenceList and restoredFenceList are the two lists' results, built on first use. No
+// initializer — that is what keeps them out of the cycle standingBlocks documents.
 var (
 	standingFencesOnce sync.Once
 	standingFenceList  []string
+	restoredFencesOnce sync.Once
+	restoredFenceList  []string
 )

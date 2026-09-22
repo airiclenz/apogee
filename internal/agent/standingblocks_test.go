@@ -7,6 +7,7 @@ package agent
 // does not know fails here, not in a repo's AGENTS.md.
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -131,17 +132,21 @@ func TestStandingBlocks_ConfiguredRowsSeedAndRideAlongRowsDoNot(t *testing.T) {
 	}
 }
 
-// TestStandingBlocks_FencesAreTheTableColumnPlusTheAdviceFence pins what forgesStandingStructure
-// checks against: every fence of every row, then the advice fence's two line openings, and
-// nothing else — none of them empty, since an empty prefix would fence every line of every file.
-func TestStandingBlocks_FencesAreTheTableColumnPlusTheAdviceFence(t *testing.T) {
+// TestStandingBlocks_FencesAreTheTableColumnPlusTheAdviceAndEngineNoteFences pins what
+// forgesStandingStructure checks against: every fence of every row, then the advice fence's two
+// line openings and the engine note fence's two, and nothing else — none of them empty, since an
+// empty prefix would fence every line of every file.
+func TestStandingBlocks_FencesAreTheTableColumnPlusTheAdviceAndEngineNoteFences(t *testing.T) {
 	t.Parallel()
 
-	want := make([]string, 0, 8)
+	want := make([]string, 0, 10)
 	for _, row := range standingBlocks() {
 		want = append(want, row.fences...)
 	}
-	want = append(want, domain.AdviceFencePrefix, domain.AdviceFenceClosePrefix)
+	want = append(want,
+		domain.AdviceFencePrefix, domain.AdviceFenceClosePrefix,
+		domain.EngineNoteFencePrefix, domain.EngineNoteFenceClosePrefix,
+	)
 
 	got := standingFences()
 
@@ -158,5 +163,41 @@ func TestStandingBlocks_FencesAreTheTableColumnPlusTheAdviceFence(t *testing.T) 
 	}
 	if forgesStandingStructure("Run make check before committing.") {
 		t.Error("an ordinary line reads as furniture")
+	}
+}
+
+// TestStandingBlocks_RestoredFencesDropTheCommittedRows pins the restore list against the fence
+// list: it is standingFences minus the two rows an ordinary session commits verbatim — the task
+// list block's opening and the orientation header — and nothing else. A snapshot refusal keyed on
+// either of those would make every session that ever called task_list unresumable and unforkable.
+func TestStandingBlocks_RestoredFencesDropTheCommittedRows(t *testing.T) {
+	t.Parallel()
+
+	excluded := []string{TaskListFence, orientationHeader()}
+	want := make([]string, 0, 8)
+	for _, fence := range standingFences() {
+		if slices.Contains(excluded, fence) {
+			continue
+		}
+		want = append(want, fence)
+	}
+
+	got := restoredFences()
+
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("restoredFences() = %q, want %q", got, want)
+	}
+	for _, fence := range got {
+		if _, forged := forgesRestoredStructure("  " + fence + " forged"); !forged {
+			t.Errorf("forgesRestoredStructure does not refuse %q", fence)
+		}
+	}
+	for _, fence := range excluded {
+		if _, forged := forgesRestoredStructure(fence + " the real thing"); forged {
+			t.Errorf("forgesRestoredStructure refuses %q, which an ordinary session commits", fence)
+		}
+	}
+	if _, forged := forgesRestoredStructure("a line about the engine and its advice\nand another"); forged {
+		t.Error("ordinary prose mentioning the words reads as furniture")
 	}
 }

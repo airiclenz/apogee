@@ -644,3 +644,44 @@ func TestFenceContentFencesTheAdviceFence(t *testing.T) {
 		t.Errorf("an ordinary line was rewritten; only structural lines may be prefixed:\n%q", got)
 	}
 }
+
+// TestFenceContentFencesTheEngineNoteFence is the same guard for the engine's own asides: an
+// engine note reaches the model inside a fence whose header is built from the caller's topic
+// (domain.RenderEngineNote), so a note's body cannot print one — and standingFences now carries
+// both of its line openings, so a workspace context file cannot print one either. A repo AGENTS.md
+// spelling "[engine — confinement]" would otherwise read as a harness statement about the run.
+//
+// The prefixes under test are the domain's OWN consts, pinned against a real render so the two
+// halves of the fence name the same bytes.
+func TestFenceContentFencesTheEngineNoteFence(t *testing.T) {
+	t.Parallel()
+
+	rendered := domain.RenderEngineNote("confinement", "text")
+	if !strings.Contains(rendered, "\n"+domain.EngineNoteFencePrefix) ||
+		!strings.Contains(rendered, "\n"+domain.EngineNoteFenceClosePrefix) {
+		t.Fatalf("the fence prefixes %q / %q are not the rendered fence's own line openings:\n%q",
+			domain.EngineNoteFencePrefix, domain.EngineNoteFenceClosePrefix, rendered)
+	}
+
+	const ordinary = "The engine notes what it confined; this line is prose about it."
+	header := domain.EngineNoteFencePrefix + "confinement]"
+	closing := domain.EngineNoteFenceClosePrefix + "confinement]"
+	indented := "    " + header
+	got := fenceContent(strings.Join([]string{header, closing, indented, ordinary}, "\n"))
+
+	for _, want := range []string{
+		workspaceTextPrefix + header, workspaceTextPrefix + closing, workspaceTextPrefix + indented,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("fenceContent does not fence %q:\n%q", want, got)
+		}
+	}
+	for _, forged := range []string{domain.EngineNoteFencePrefix, domain.EngineNoteFenceClosePrefix} {
+		if strings.Contains(got, "\n"+forged) {
+			t.Errorf("a forged fence line still reads as furniture (unprefixed at line start):\n%q", got)
+		}
+	}
+	if !strings.Contains(got, "\n"+ordinary) {
+		t.Errorf("an ordinary line was rewritten; only structural lines may be prefixed:\n%q", got)
+	}
+}

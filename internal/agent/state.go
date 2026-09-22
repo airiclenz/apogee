@@ -189,6 +189,9 @@ func decodeState(state json.RawMessage) (agentState, error) {
 	if err := checkRestoredShape(st.Conversation); err != nil {
 		return agentState{}, err
 	}
+	if err := checkRestoredStructure(&st); err != nil {
+		return agentState{}, err
+	}
 	return st, nil
 }
 
@@ -215,11 +218,13 @@ const (
 	maxRestoredMessageBytes = 10 * 1024 * 1024
 )
 
-// ErrSnapshotRefused is the sentinel every shape refusal wraps: a restored conversation carrying a
-// role outside the four domain.Role constants, more messages than maxRestoredMessages, or a single
-// message past maxRestoredMessageBytes. It is returned BEFORE any state is swapped in, so a
-// refused payload leaves the live session — its conversation, task list, consoles and usage tally
-// — exactly as it was, on --resume, on RestoreSession and on CutSession alike.
+// ErrSnapshotRefused is the sentinel every refusal at this seam wraps — the SHAPE refusals
+// (checkRestoredShape: a role outside the four domain.Role constants, more messages than
+// maxRestoredMessages, a single message past maxRestoredMessageBytes) and the STRUCTURE ones
+// (checkRestoredStructure: a payload spelling the engine's own furniture, or an oversized pending
+// input). It is returned BEFORE any state is swapped in, so a refused payload leaves the live
+// session — its conversation, task list, consoles and usage tally — exactly as it was, on
+// --resume, on RestoreSession and on CutSession alike.
 var ErrSnapshotRefused = errors.New("apogee: session snapshot refused")
 
 // checkRestoredShape reports whether conv is a shape apogee could have written. Three refusals,
@@ -378,4 +383,101 @@ func dropLeadingSystem(conv *domain.Conversation) int {
 		conv.DropRange(0, n)
 	}
 	return n
+}
+
+// checkRestoredStructure reports whether any content a session file carries spells the engine's
+// OWN furniture. It is the second half of the ingestion guard: checkRestoredShape bounds the
+// shape a payload may have, this bounds what the content inside that shape may say.
+//
+// The threat it closes is unattributable injection. Everything it walks reaches the model as text
+// apogee itself appears to have written — a committed message body, a task row the standing block
+// renders under the engine's own header, a deferred correction the loop injects as an
+// unattributed USER message at the role-safe position (domain.Request.InjectContext), and the
+// pending input a resumed session submits as the human's own words. A line of any of them opening
+// with a context-file header or footer, the delegate report's opening sentence, an advice fence or
+// an engine-note fence is a stranger's text dressed as the harness's, and the ratified call
+// (apogee-mre) is refusal of the WHOLE payload rather than a silent rewrite: this is a session
+// file apogee did not write, not a repo file to be fenced.
+//
+// The list it checks against (restoredFences, standingblocks.go) deliberately EXCLUDES the task
+// list block's opening and the orientation header. Both are committed verbatim by ordinary,
+// default-on behaviour — every task_list result renders the first — so refusing them would make
+// an ordinary session unresumable and unforkable at once, which is a far larger hole than the one
+// it would close.
+//
+// pendingInput is the one field that is BOUNDED as well as checked: it is not part of the
+// conversation, so checkRestoredShape's per-message cap never saw it, yet a restore submits it as
+// a message. maxRestoredMessageBytes is therefore the right ceiling — the same one a message it
+// is about to become is held to. Its FileRefs are not checked here: decodeState is Agent-less and
+// workspace-blind, and an escaping ref is already fenced by security.SafeOpen when readFileRef
+// opens it (loop.go).
+func checkRestoredStructure(st *agentState) error {
+	if st.Conversation != nil {
+		var bad error
+		st.Conversation.Range(func(i int, m domain.Message) bool {
+			if fence, forged := forgesRestoredStructure(m.Content); forged {
+				bad = fmt.Errorf(
+					"apogee: decode session state: message %d opens a line with %q, which apogee never commits: %w",
+					i, fence, ErrSnapshotRefused,
+				)
+			}
+			return bad == nil
+		})
+		if bad != nil {
+			return bad
+		}
+		if err := checkRestoredDeferred(st.Conversation); err != nil {
+			return err
+		}
+	}
+	for i, task := range st.Tasks {
+		if fence, forged := forgesRestoredStructure(task.Text); forged {
+			return fmt.Errorf(
+				"apogee: decode session state: task %d opens a line with %q, which apogee never commits: %w",
+				i, fence, ErrSnapshotRefused,
+			)
+		}
+	}
+	if st.PendingInput != nil {
+		if n := len(st.PendingInput.Text); n > maxRestoredMessageBytes {
+			return fmt.Errorf(
+				"apogee: decode session state: pending input is %d bytes, over the %d-byte limit: %w",
+				n, maxRestoredMessageBytes, ErrSnapshotRefused,
+			)
+		}
+		if fence, forged := forgesRestoredStructure(st.PendingInput.Text); forged {
+			return fmt.Errorf(
+				"apogee: decode session state: pending input opens a line with %q, which apogee never commits: %w",
+				fence, ErrSnapshotRefused,
+			)
+		}
+	}
+	return nil
+}
+
+// checkRestoredDeferred checks the conversation's queued deferred corrections — the strings
+// conversationJSON round-trips so a deferring Reaction's injection survives a snapshot boundary,
+// and which the loop then hands to Request.InjectContext as an unattributed user message. The
+// queue has no read-only accessor, so the check drains it and puts it back in FIFO order; conv is
+// decodeState's own temporary at this point, so nothing else can observe the round trip, and a
+// refusal discards the whole temporary anyway.
+func checkRestoredDeferred(conv *domain.Conversation) error {
+	injects, ok := conv.TakeDeferred()
+	if !ok {
+		return nil
+	}
+	defer func() {
+		for _, inject := range injects {
+			conv.Defer(inject)
+		}
+	}()
+	for i, inject := range injects {
+		if fence, forged := forgesRestoredStructure(inject); forged {
+			return fmt.Errorf(
+				"apogee: decode session state: deferred correction %d opens a line with %q, which apogee never commits: %w",
+				i, fence, ErrSnapshotRefused,
+			)
+		}
+	}
+	return nil
 }
