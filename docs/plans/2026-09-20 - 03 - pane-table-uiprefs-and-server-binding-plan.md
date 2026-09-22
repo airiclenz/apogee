@@ -57,7 +57,9 @@ become constructors onto one pure projection. Gated on plan B (`2026-09-20 - 02`
 - The stale "seven overlays" note at `frameBlocks` and the `frameBlocks` capacity — a comment, fixed in item 3 only if touched.
 - Everything in plans A and B.
 
-## 1. Verify plan B is archived
+## 1. Verify plan B is archived — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): gate passed at HEAD 1e112316 — `docs/plans/archived/2026-09-20 - 02 - fence-sanitize-and-defects-plan.md` present (archived at 92e363a1), no `2026-09-20 - 02` file remains under `docs/plans/`; working tree clean.
 
 **What.** Refuse to proceed unless `docs/plans/2026-09-20 - 02 - fence-sanitize-and-defects-plan.md` is absent from `docs/plans/` and present under `docs/plans/archived/` — plan B rewrites `internal/agent/subagent.go` and the tui residue tests this plan touches.
 **Files:** none
