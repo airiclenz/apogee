@@ -414,10 +414,10 @@ type frameKey struct {
 	// and nothing else about a theme changes mid-session.
 	scheme  string
 	measure widthAuthority
-	// width and hideScrollbar are the column budget: the window's columns less the gutter the bar
+	// width and showScrollbar are the column budget: the window's columns less the gutter the bar
 	// reserves (layout()), which is the width renderView wraps to and the widget measures at.
 	width         int
-	hideScrollbar bool
+	showScrollbar bool
 	// blink is the live star's phase, and only while a block still holds an open call: a settled
 	// transcript paints identically at either phase, so folding the bare phase in would repaint the
 	// scrollback on every flip of an idle session's clock (foldSpinnerTick's decision, spinner.go).
@@ -431,10 +431,10 @@ type frameKey struct {
 func (m Model) frameKey() frameKey {
 	return frameKey{
 		generation:    m.transcript.generation,
-		scheme:        m.opts.ColorSchemeName,
+		scheme:        m.opts.UI.ColorScheme,
 		measure:       m.th.measure,
 		width:         m.width,
-		hideScrollbar: m.opts.HideScrollbar,
+		showScrollbar: m.opts.UI.ShowScrollbar,
 		blink:         m.spin.blink() && m.transcript.hasOpenToolCall(),
 		backHint:      m.backHint(),
 	}

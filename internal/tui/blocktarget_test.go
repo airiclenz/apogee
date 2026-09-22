@@ -952,7 +952,7 @@ func taskListHeaders(m Model) []string {
 }
 
 // TestTaskListCardsShareOneFold pins the shared fold (item 4 of plan "2026-09-14 - 00"): every
-// task-list card in the transcript is one preference, seeded from Options.TaskListFolded and
+// task-list card in the transcript is one preference, seeded from Options.UI.TaskListOpen and
 // flipped on EVERY card by a gesture on any one of them — a click on the second folds both, ⏎ at
 // the block cursor on the first opens both — and the flip lands on the very next frame through the
 // cached paint path, because the fact lives on each entry's expanded flag and the paint keys on it.
@@ -996,8 +996,8 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 		if got, want := taskListHeaders(m), []string{"✦ Task List (1/3) " + glyphCollapsed, "✦ Task List (1/3) " + glyphCollapsed}; !reflect.DeepEqual(got, want) {
 			t.Errorf("the next frame paints headers %q, want both folded %q — the cached paint did not move", got, want)
 		}
-		if !m.opts.TaskListFolded {
-			t.Error("opts.TaskListFolded is still false after the fold")
+		if m.opts.UI.TaskListOpen {
+			t.Error("opts.UI.TaskListOpen is still true after the fold")
 		}
 		if want := []settingEdit{{path: "ui.task-list-open", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
 			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
@@ -1050,7 +1050,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 
 		cards := taskListEntries(m)
 		if len(cards) != 2 || m.transcript.entries[cards[1]].expanded {
-			t.Fatalf("a card added under the folded preference starts open (cards %v); it is seeded from TaskListFolded", cards)
+			t.Fatalf("a card added under the folded preference starts open (cards %v); it is seeded from UI.TaskListOpen", cards)
 		}
 		m = clickCell(t, m, 2, screenRow(t, m, headerLineOf(t, m, cards[1]))) // opens both
 		addTaskListCard(&m, "3")
@@ -1065,7 +1065,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 		t.Parallel()
 
 		opts := testOpts
-		opts.TaskListFolded = true
+		opts.UI.TaskListOpen = false
 		m := modelWithTaskListBlock(t, opts)
 		cards := taskListEntries(m)
 		if len(cards) != 1 || m.transcript.entries[cards[0]].expanded {
@@ -1102,7 +1102,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 
 		m = clickCell(t, m, 2, screenRow(t, m, header))
 
-		if blockExpanded(t, m, header) || !m.opts.TaskListFolded {
+		if blockExpanded(t, m, header) || m.opts.UI.TaskListOpen {
 			t.Error("the fold did not flip under a nil seam; the Driver degrade is flip-and-forget")
 		}
 		if got := len(m.transcript.entries); got != entries {
@@ -1124,7 +1124,7 @@ func TestTaskListCardsShareOneFold(t *testing.T) {
 
 		m = clickCell(t, m, 2, screenRow(t, m, header))
 
-		if blockExpanded(t, m, header) || !m.opts.TaskListFolded {
+		if blockExpanded(t, m, header) || m.opts.UI.TaskListOpen {
 			t.Error("the refused write unwound the fold; the session keeps the flipped state")
 		}
 		var warnings []string

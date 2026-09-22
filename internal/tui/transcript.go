@@ -54,7 +54,7 @@ type transcript struct {
 	ws workspaceRoot
 	// taskListOpen is the state a NEW task-list card is seeded with — the one fold preference every
 	// header-folding card shares (toolView.collapsesToHeader), whose record is the Model's
-	// Options.TaskListFolded and whose FACT is each entry's own expanded flag. It lives here for ws's
+	// Options.UI.TaskListOpen and whose FACT is each entry's own expanded flag. It lives here for ws's
 	// reason: addToolCall is reached through apply, which folds an Event with no Model in sight, and
 	// replay decodes a record whose cards carry no fold at all. The Model seeds it at construction
 	// and moves it through [transcript.setTaskListOpen], the one sweep a toggle and a settings apply

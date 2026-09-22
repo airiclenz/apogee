@@ -857,7 +857,7 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 	if len(records) == 0 {
 		row := inspectorEmptyRow
 		switch {
-		case !m.opts.Inspector:
+		case !m.opts.UI.Inspector:
 			row = inspectorDisarmedRow
 		case m.inRunView():
 			row = inspectorScopedEmptyRow

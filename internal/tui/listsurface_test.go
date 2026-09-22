@@ -416,7 +416,7 @@ func TestListCursorWheelClampsWhereTheKeysWrap(t *testing.T) {
 func breathingListModel(t *testing.T, height int, bar bool) Model {
 	t.Helper()
 	opts := testOpts
-	opts.HideScrollbar = !bar
+	opts.UI.ShowScrollbar = bar
 	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
 }

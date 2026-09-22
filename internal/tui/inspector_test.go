@@ -42,7 +42,7 @@ func wireEventOfCall(direction, payload string, turn, depth int, callID string) 
 func inspectorModel(t *testing.T, events ...domain.Event) Model {
 	t.Helper()
 	m := newTestModel(t)
-	m.opts.Inspector = true
+	m.opts.UI.Inspector = true
 	for _, e := range events {
 		m = m.foldEvent(e)
 	}
@@ -372,7 +372,7 @@ func TestInspectorDisarmedNamesTheKey(t *testing.T) {
 		t.Errorf("the disarmed pane does not name the key that arms it:\n%s", pane)
 	}
 
-	m.opts.Inspector = true
+	m.opts.UI.Inspector = true
 	if armed := strip(m.renderReport(inspectReport)); strings.Contains(armed, "ui.inspector") {
 		t.Errorf("an armed but empty pane tells the human to set a key that is already set:\n%s", armed)
 	}
@@ -386,7 +386,7 @@ func TestInspectorDisarmedNamesTheKey(t *testing.T) {
 func TestInspectVerbOpensThePaneAndEscCloses(t *testing.T) {
 	t.Parallel()
 	m := newTestModel(t)
-	m.opts.Inspector = true
+	m.opts.UI.Inspector = true
 	m = m.foldEvent(wireEvent(domain.WireDirectionRequest, `{"a":1}`, 1, 0))
 	m.input.SetValue("/inspect")
 	m, cmd := stepCmd(t, m, keyEnter())
@@ -989,7 +989,7 @@ func TestReadableCountsItsOwnHiddenLines(t *testing.T) {
 func scopedInspectorModel(t *testing.T, events ...domain.Event) Model {
 	t.Helper()
 	m := modelWithRun(t)
-	m.opts.Inspector = true
+	m.opts.UI.Inspector = true
 	for _, e := range events {
 		m = m.foldEvent(e)
 	}
@@ -1087,7 +1087,7 @@ func TestInspectorScopedEmptyNamesEveryCause(t *testing.T) {
 		t.Errorf("the armed scoped-empty pane = %q, want the one row %q", rows, wantScopedEmpty)
 	}
 
-	m.opts.Inspector = false
+	m.opts.UI.Inspector = false
 
 	rows, _ = m.inspectorRows()
 	if len(rows) != 1 || rows[0][0] != wantDisarmed {

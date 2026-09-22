@@ -110,10 +110,10 @@ func (m Model) availableSchemes() []string {
 // currentSchemeName is the scheme this session is drawn in, as it is spelled in the config. Empty ⇒
 // unwired, and the answer is the built-in default — which is what an unset key resolves to anyway.
 func (m Model) currentSchemeName() string {
-	if m.opts.ColorSchemeName == "" {
+	if m.opts.UI.ColorScheme == "" {
 		return scheme.DefaultName
 	}
-	return m.opts.ColorSchemeName
+	return m.opts.UI.ColorScheme
 }
 
 // ----------------------------------------------------------------------------

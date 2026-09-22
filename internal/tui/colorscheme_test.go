@@ -54,7 +54,7 @@ func (h fakeSchemeHost) Export(name string) (string, error) {
 func colorSchemeOpts(log *settingsWriteLog, list []string,
 	resolve func(string) (scheme.Scheme, []string), export func(string) (string, error)) Options {
 	opts := testOpts
-	opts.ColorSchemeName = "dark"
+	opts.UI.ColorScheme = "dark"
 	opts.Schemes = fakeSchemeHost{list: func() []string { return list }, resolve: resolve, export: export}
 	if log != nil {
 		opts.Settings = fakeSettingsHost{write: log.write}
@@ -96,7 +96,7 @@ func TestColorSchemeCommandListsWhatCanBeSwitchedTo(t *testing.T) {
 	t.Parallel()
 
 	opts := colorSchemeOpts(nil, []string{"dark", "light", "mine"}, nil, nil)
-	opts.ColorSchemeName = "light"
+	opts.UI.ColorScheme = "light"
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme")
 
 	note := colorSchemeNote(t, m)
@@ -117,7 +117,7 @@ func TestColorSchemeCommandNamesAConfiguredSchemeThatIsNotOnOffer(t *testing.T) 
 	t.Parallel()
 
 	opts := colorSchemeOpts(nil, []string{"dark", "light"}, nil, nil)
-	opts.ColorSchemeName = "solarized"
+	opts.UI.ColorScheme = "solarized"
 	m, _ := runColorSchemeLine(t, newTestModelEng(t, &fakeEngine{}, opts), "/color-scheme")
 
 	if note := colorSchemeNote(t, m); !strings.Contains(note, `the config names "solarized"`) {
@@ -163,8 +163,8 @@ func TestColorSchemeCommandSwitchesAndPersists(t *testing.T) {
 	if got := hexOf(m.th.errorFg); got != "#123456" {
 		t.Errorf("the model's error tone = %s, want the switched scheme's #123456 — the theme did not move", got)
 	}
-	if m.opts.ColorSchemeName != "light" {
-		t.Errorf("ColorSchemeName = %q, want %q", m.opts.ColorSchemeName, "light")
+	if m.opts.UI.ColorScheme != "light" {
+		t.Errorf("UI.ColorScheme = %q, want %q", m.opts.UI.ColorScheme, "light")
 	}
 	if got, want := cmdMsg(cmd), tea.ClearScreen(); !reflect.DeepEqual(got, want) {
 		t.Errorf("the switch produced %#v, want tea.ClearScreen's Msg %#v", got, want)

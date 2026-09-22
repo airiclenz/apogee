@@ -34,6 +34,14 @@ import (
 // submit returns is never executed (these tests drive the state machine directly with the
 // five seam Msgs), so the fakeEngine's drive methods are never called.
 
+// testUIPrefs is the `ui:` block a hand-built test Options runs under: the scroll bar shown and
+// the task-list cards open — the two keys whose config default is true — and every other field at
+// its zero value, which is the still, uncoloured classic spinner, no quiet threshold, no band and
+// no large umbrella that the status-line and layout goldens are written against. It is seeded
+// deliberately because the renderer never special-cases a zero UIPrefs (domain.UIPrefs): a builder
+// that takes an Options seeds it where the caller left UI zero, and a literal Options names it.
+var testUIPrefs = domain.UIPrefs{ShowScrollbar: true, TaskListOpen: true}
+
 // testOpts are the display values the status line and footer render.
 var testOpts = Options{
 	Model:         "test-model",
@@ -41,6 +49,17 @@ var testOpts = Options{
 	Mode:          domain.ModeAskBefore,
 	HostAlias:     "test-host",
 	ContextWindow: 32768,
+	UI:            testUIPrefs,
+}
+
+// withTestUI seeds testUIPrefs onto an Options whose UI block the caller left zero, so a builder's
+// caller that names no block runs under the harness's default rather than a hidden bar and folded
+// cards; a caller that set any field keeps its block whole.
+func withTestUI(opts Options) Options {
+	if opts.UI == (domain.UIPrefs{}) {
+		opts.UI = testUIPrefs
+	}
+	return opts
 }
 
 // newTestModel builds a ready, idle model sized to a standard window.
@@ -148,6 +167,7 @@ func TestNewModelSeedsStartupBox(t *testing.T) {
 		ContextWindow: 32768,                   // format.Tokens → "32k"
 		Version:       "v1.2.3+45.gdeadbeef01", // the full string /version shows — the box must NOT use it
 		BaseVersion:   "v1.2.3",                // the clean release version the box displays
+		UI:            testUIPrefs,
 	}
 	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 
@@ -193,6 +213,7 @@ func TestNewStartupViewMatchesSeed(t *testing.T) {
 		ContextWindow: 32768,
 		Version:       "v1.2.3+45.gdeadbeef01", // the full string /version shows — the box must NOT use it
 		BaseVersion:   "v1.2.3",                // the clean release version the box displays
+		UI:            testUIPrefs,
 	}
 	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 
@@ -3519,7 +3540,7 @@ func TestModelAskLongQuestionCapsBody(t *testing.T) {
 // newSessionModel builds a ready, idle model wired to a persistence host.
 func newSessionModel(t *testing.T, eng Engine, host SessionHost) Model {
 	t.Helper()
-	m := newModel(context.Background(), eng, Options{Sessions: host}, nil)
+	m := newModel(context.Background(), eng, Options{Sessions: host, UI: testUIPrefs}, nil)
 	return step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 }
 
@@ -3637,6 +3658,7 @@ func TestNewModelReplaysResumedScrollback(t *testing.T) {
 
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		Resumed: &ResumedSession{Transcript: blob, Title: "first question", CtxUsed: 4096},
+		UI:      testUIPrefs,
 	}, nil)
 
 	if m.ctxUsed != 4096 {
@@ -3696,6 +3718,7 @@ func TestNewModelReplaysARunnerWrittenScrollback(t *testing.T) {
 
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		Resumed: &ResumedSession{Transcript: blob, Title: "check the build"},
+		UI:      testUIPrefs,
 	}, nil)
 
 	if !hasEntry(m, entryUser, "check the build") {
@@ -3720,6 +3743,7 @@ func TestNewModelResumeCorruptBlobDegrades(t *testing.T) {
 	t.Parallel()
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		Resumed: &ResumedSession{Transcript: []byte("{ not json"), Title: "broken"},
+		UI:      testUIPrefs,
 	}, nil)
 
 	if hasEntry(m, entryUser, "") {
@@ -4699,7 +4723,7 @@ func TestModelStatusLineActivity(t *testing.T) {
 func guardedRunningModel(t *testing.T, after time.Duration) Model {
 	t.Helper()
 	m := newTestModel(t)
-	m.opts.StallAfter = after
+	m.opts.UI.StallAfter = after
 	m.input.SetValue("hello")
 	return step(t, m, keyEnter())
 }
@@ -5193,7 +5217,7 @@ func TestTranscriptBodyLeavesRightGutter(t *testing.T) {
 }
 
 // TestHiddenScrollbarYieldsTheColumn is the inverse of the two pinning tests above: with
-// `ui.show-scrollbar` off (Options.HideScrollbar, the inverted form the composition root passes)
+// `ui.show-scrollbar` off (Options.UI.ShowScrollbar false, the value as the config spells it)
 // the bar's column goes back to the body rather than sitting reserved and blank. The transcript
 // overflows its viewport, so the shown state would certainly paint a track and a thumb here — and
 // hiding the bar hides the BAR, not the scrolling, which the wheel at the end proves.
@@ -5201,7 +5225,7 @@ func TestHiddenScrollbarYieldsTheColumn(t *testing.T) {
 	t.Parallel()
 	const width = 80
 	opts := testOpts
-	opts.HideScrollbar = true
+	opts.UI.ShowScrollbar = false
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	// Single-character words wrap flush to the limit, and this many of them overflow the viewport
 	// several times over.
@@ -5732,7 +5756,7 @@ func paneOverTailModel(t *testing.T) Model {
 func TestScrollbarThumbSeatsAtTheBottomWithAPaneOpen(t *testing.T) {
 	t.Parallel()
 	m := paneOverTailModel(t)
-	if m.opts.HideScrollbar {
+	if !m.opts.UI.ShowScrollbar {
 		t.Fatal("setup: the scroll bar is switched off, so there is no thumb to place")
 	}
 
@@ -5878,7 +5902,7 @@ func TestPaneHeightChangeReachesLayout(t *testing.T) {
 		arrange: func(t *testing.T) Model {
 			t.Helper()
 			opts := testOpts
-			opts.Inspector = true
+			opts.UI.Inspector = true
 			m := modelWithOverlayRoomAt(t, 80, 24, opts)
 			m.inspector = inspectorPane{open: true}
 			m.layout()
@@ -7402,6 +7426,7 @@ func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 	m := newModel(context.Background(), &fakeEngine{}, Options{
 		ColorSchemeWarnings: []string{schemeWarning},
 		StartupNotices:      []string{first, second},
+		UI:                  testUIPrefs,
 	}, nil)
 
 	var notes []string
@@ -7431,7 +7456,7 @@ func TestStartupNoticesPostAsEphemeralNotes(t *testing.T) {
 		}
 	}
 
-	clean := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	clean := newModel(context.Background(), &fakeEngine{}, Options{UI: testUIPrefs}, nil)
 	for _, notice := range []string{first, second} {
 		if hasEntry(clean, entryNote, notice) {
 			t.Errorf("a run with no startup notices still noted %q", notice)

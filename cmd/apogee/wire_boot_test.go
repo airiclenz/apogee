@@ -260,49 +260,45 @@ func TestRunRootThreadsContextFiles(t *testing.T) {
 	})
 }
 
-// The resolved `ui:` block reaches the renderer: runRoot hands opts.ui's two values to
-// tui.Options as Spinner and SpinnerColor. They are threaded INDEPENDENTLY — the colour flag is
-// not derived from the style and the style not from the flag — so the table walks the combination
-// that would pass if either were folded into the other (a non-default style with the loop off) as
-// well as the plain default.
-func TestRunRootThreadsSpinnerOptions(t *testing.T) {
+// The resolved `ui:` block reaches the renderer WHOLE: runRoot hands config's resolved
+// domain.UIPrefs to tui.Options.UI as the one value it is, with nothing flattened, dropped or
+// flipped on the way — the polarity the config spells (show-scrollbar, task-list-open) is the
+// polarity the renderer reads. The literal sits off every default on every field, so a wiring
+// that rebuilt the block field by field and lost or inverted one fails on that field.
+func TestRunRootCarriesTheUIPrefsWhole(t *testing.T) {
 	t.Parallel()
-	tests := []struct {
-		name string
-		ui   config.UISettings
-	}{
-		{name: "the resolved default: snake with the colour loop on", ui: config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}},
-		{name: "a named style with the loop off travels as both", ui: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark"}},
-		{name: "classic with the loop on — the old glyphs, the new colours", ui: config.UISettings{Spinner: tui.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"}},
+	ui := domain.UIPrefs{
+		Spinner:          tui.SpinnerGlitter,
+		SpinnerColor:     false,
+		ShowScrollbar:    false,
+		ColorScheme:      "light",
+		StallAfter:       90 * time.Second,
+		Inspector:        true,
+		SkillSuggestions: false,
+		TaskListOpen:     false,
+		ToolsOpen:        true,
+		ToolsFoldOver:    7,
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			rec := &recordingLauncher{}
-			opts := config.Options{
-				Endpoint:     "http://127.0.0.1:1111",
-				Model:        "fake",
-				StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
-				Mode:         "ask-before",
-				Workspace:    t.TempDir(),
-				UI:           tt.ui,
-			}
-			if err := runRoot(context.Background(), opts, rec.launch); err != nil {
-				t.Fatalf("runRoot: %v", err)
-			}
-			if rec.opts.Spinner != tt.ui.Spinner {
-				t.Errorf("tui.Options.Spinner = %q; want the resolved %q", rec.opts.Spinner, tt.ui.Spinner)
-			}
-			if rec.opts.SpinnerColor != tt.ui.SpinnerColor {
-				t.Errorf("tui.Options.SpinnerColor = %v; want the resolved %v", rec.opts.SpinnerColor, tt.ui.SpinnerColor)
-			}
-		})
+	rec := &recordingLauncher{}
+	opts := config.Options{
+		Endpoint:     "http://127.0.0.1:1111",
+		Model:        "fake",
+		StartupEntry: config.ServerEntry{Endpoint: "http://127.0.0.1:1111", Model: "fake"},
+		Mode:         "ask-before",
+		Workspace:    t.TempDir(),
+		UI:           ui,
+	}
+	if err := runRoot(context.Background(), opts, rec.launch); err != nil {
+		t.Fatalf("runRoot: %v", err)
+	}
+	if rec.opts.UI != ui {
+		t.Errorf("tui.Options.UI = %+v; want the resolved block carried whole, %+v", rec.opts.UI, ui)
 	}
 }
 
 // The `ui.color-scheme:` key reaches the renderer RESOLVED: runRoot reads the schemes folder under
-// the apogee home this run uses and hands tui.Options the palette itself, plus the name it loaded
-// under and whatever the load cost. Reading files is the composition root's job — the renderer is
+// the apogee home this run uses and hands tui.Options the palette itself, plus whatever the load
+// cost — the name it loaded under rides in the block (tui.Options.UI.ColorScheme). Reading files is the composition root's job — the renderer is
 // handed colours, never a path.
 //
 // The two cases are the two halves of the forgiving contract (ADR 0040 design call 8): a user file
@@ -343,8 +339,8 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 		if got := rec.opts.ColorScheme.Surface; got != scheme.Default().Surface {
 			t.Errorf("tui.Options.ColorScheme.Surface = %q; want the default %q", got, scheme.Default().Surface)
 		}
-		if rec.opts.ColorSchemeName != "dark" {
-			t.Errorf("tui.Options.ColorSchemeName = %q; want %q", rec.opts.ColorSchemeName, "dark")
+		if rec.opts.UI.ColorScheme != "dark" {
+			t.Errorf("tui.Options.UI.ColorScheme = %q; want %q", rec.opts.UI.ColorScheme, "dark")
 		}
 		if len(rec.opts.ColorSchemeWarnings) != 0 {
 			t.Errorf("a well-formed scheme warned: %v", rec.opts.ColorSchemeWarnings)

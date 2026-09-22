@@ -541,6 +541,7 @@ func resumedUsageModel(t *testing.T, stored session.Usage) Model {
 	t.Helper()
 	return newModel(context.Background(), &fakeEngine{}, Options{
 		Resumed: &ResumedSession{Title: "france question", Usage: stored},
+		UI:      testUIPrefs,
 	}, nil)
 }
 

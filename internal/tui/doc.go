@@ -538,7 +538,7 @@
 // choice rather than a deprecated fallback — while the ten-second Oklch colour loop is a FLAG
 // beside the style, never a property of one, so all six style × colour combinations render and
 // [spinnerAnim.view] is the single place the two compose. cmd/apogee's file-only `ui:` block
-// selects both ([Options.Spinner], [Options.SpinnerColor]); theme.go keeps the field the glyph is
+// selects both ([Options.UI]: Spinner, SpinnerColor); theme.go keeps the field the glyph is
 // painted on (spinnerBase) and the loop's colour stops ([theme.spinnerStops], so a scheme switch
 // moves the loop with it), never the frames.
 //

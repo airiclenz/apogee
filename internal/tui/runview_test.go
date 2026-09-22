@@ -38,7 +38,7 @@ func modelWithRun(t *testing.T) Model {
 // umbrella at 2.
 func modelWithRunUmbrella(t *testing.T, opts Options) Model {
 	t.Helper()
-	opts.ToolsFoldOver = 1
+	opts.UI.ToolsFoldOver = 1
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m.transcript.reset()
 	m.transcript.addUser("survey the repo", nil)

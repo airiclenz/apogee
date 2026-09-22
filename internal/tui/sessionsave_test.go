@@ -451,6 +451,7 @@ func TestResumedRecordKeepsItsServedModelsAcrossTheFirstSave(t *testing.T) {
 			Sessions:  host,
 			Workspace: "/ws/a",
 			Resumed:   &ResumedSession{Title: "france question", ServedModels: []string{"stored-a"}},
+			UI:        testUIPrefs,
 		}, nil)
 		m = step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 		seedConversation(&m)

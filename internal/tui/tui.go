@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
@@ -1031,95 +1030,31 @@ type Options struct {
 	// Empty falls back to the endpoint URL's host at render time.
 	HostAlias string
 
-	// Spinner is the status-line animation the `ui.spinner` config key selected. It is a SELECTION,
-	// already validated by the binary (internal/config's UISettings.Validate calls ParseSpinnerStyle), so
-	// the renderer never parses a name. The zero value is not one of the styles: it resolves to
-	// classic, the animation with no registry entry falls back to (spinnerAnim.spec). cmd/apogee
-	// always sets a real style, so the zero value only reaches hand-built test Options — where the
-	// one-column classic cell is what the existing status-line geometry tests expect.
-	Spinner SpinnerStyle
-
-	// SpinnerColor runs the spinner's slow colour loop. It is INDEPENDENT of Spinner — the loop
-	// applies to whichever style is selected, and no style carries a colour of its own — so all
-	// three styles × colour on/off are valid. The zero value, false, is no colour loop: the glyph
-	// keeps the terminal's own text colour, which is also the pre-styles look under classic.
-	SpinnerColor bool
-
-	// HideScrollbar takes the scroll bar away from the transcript and from every popup pane — and
-	// with it the column the bar hangs in, which the body then takes, because a hidden bar that
-	// still ate a column would read as a bug. It is what the `ui.show-scrollbar` config key
-	// selected, INVERTED at the composition root (cmd/apogee's wire.go is the one place the
-	// polarity flips): the config key is positive and defaults to true, while this field must have
-	// the zero value mean today's behaviour — the bar shown — so the hand-built Options of the
-	// layout tests keep the width they pin. A `/settings` edit of the key moves it mid-session
-	// (ADR 0037) and re-lays out, so the wrap width it decides changes exactly when the human
-	// changes it and never on its own.
-	HideScrollbar bool
-
-	// TaskListFolded starts every task-list card in the transcript FOLDED to its counted header
-	// rather than open on its rows — what the `ui.task-list-open` config key selected, INVERTED at
-	// the composition root exactly as HideScrollbar is (cmd/apogee's wire_options.go is the one
-	// place the polarity flips): the config key is positive and defaults to true, while this field
-	// must have the zero value mean today's behaviour — the cards open — so a hand-built Options
-	// paints the card a human sees by default. It is one preference for EVERY task-list card, not a
-	// per-card memory: the fold FACT stays on each entry's own expanded state, which the paint keys
-	// on, and this is the value a new card is seeded from and a toggle on any card moves them all
-	// to ([Model.toggleTaskListFold]). That toggle writes the key back through [SettingsHost]
-	// silently (ADR 0035 addendum), so the choice outlives the session; a `/settings` edit or a
-	// hand-edited file moves it mid-session the same way (settingsApplyLocal).
-	TaskListFolded bool
-
-	// ToolsOpen starts every LARGE Tools umbrella in the transcript — one with more type rows than
-	// ToolsFoldOver ([transcript.umbrellaIsLarge]) — OPEN on its type rows rather than
-	// folded to its counted header: what the `ui.tools-open` config key selected, threaded through
-	// with the SAME polarity, unlike TaskListFolded, because the key defaults to false and so its
-	// zero value already means the auto-fold the umbrella ships with. It is one preference for
-	// every large umbrella and nothing else: a large umbrella keeps no fold of its own, so the paint
-	// reads the shared value each frame, and a click or ⏎ on any large header flips it for all of
-	// them ([Model.toggleToolsFold]) and writes the key back through [SettingsHost] silently (ADR
-	// 0035 addendum); a `/settings` edit or a hand-edited file moves it mid-session the same way
-	// (settingsApplyLocal). A SMALL umbrella never reads it: it folds on its head entry's own
-	// session-only flag instead ([transcript.umbrellaFolded]).
-	ToolsOpen bool
-
-	// ToolsFoldOver is how many type rows a Tools umbrella may show before it is LARGE and obeys
-	// ToolsOpen — the `ui.tools-fold-over` config key's value, already validated by the binary
-	// (internal/config's UISettings), so the renderer takes a count and never a spelling of one. The
-	// zero value is the documented "never": no umbrella has fewer than zero rows, so none is ever
-	// large under it, and a hand-built Options leaves every umbrella small — foldable from its header
-	// on its own session-only flag, never on ToolsOpen. A `/settings` edit moves it mid-session
-	// (settingsApplyLocal).
-	ToolsFoldOver int
-
-	// StallAfter is how long the ENGINE may go silent, mid-turn, before the status line reports the
-	// quiet — what the `ui.stall-after` config key selected, already parsed by the binary
-	// (internal/config's UISettings), so the renderer takes a duration and never a spelling of one.
-	// Past it a running turn's phrase gains a `· quiet <elapsed>` suffix, which is a REPORT and not a
-	// verdict: a slow turn and a dead one are indistinguishable from here, so the honest thing to say
-	// is how long nothing has arrived.
+	// UI is the resolved `ui:` block, carried WHOLE: the status-line spinner and its colour loop,
+	// the scroll bar, the palette's name, the quiet threshold, the Inspector's arming, the
+	// skill-suggestion band and the two transcript folds ([domain.UIPrefs]). It arrives from the
+	// composition root as the value config resolved (cmd/apogee's wire_options.go hands it through
+	// untouched) and spells config's own POSITIVE polarity — `UI.ShowScrollbar`, `UI.TaskListOpen` —
+	// so no field flips on the way in: a renderer that wants "hide" or "folded" negates at the point
+	// of use (layout, popupScrollbarOn). Every value is already validated or parsed by the binary
+	// (UIPrefs.Validate, ParseStallAfter, ParseToolsFoldOver), so the renderer selects and never
+	// parses; and the zero value is NOT the block's default — nothing downstream special-cases it,
+	// so a hand-built Options seeds it deliberately (the tests' testUIPrefs) rather than leaning on
+	// zero meaning "shown" and "open".
 	//
-	// The zero value is the guard OFF, which is both the config key's own spelling of "off" and what
-	// the hand-built Options of the layout tests want: a suffix appearing under a status line whose
-	// width they pin would be a change they never asked for.
-	StallAfter time.Duration
-
-	// Inspector is what the `ui.inspector` config key selected: whether this session's engine was
-	// built with the wire capture armed (domain.Config.Inspector). The renderer does not act on it —
-	// the records arrive as events either way (inspector.go) — it WORDS one row with it: an empty
-	// /inspect pane says "nothing captured yet" where the key is on and names the key where it is
-	// off, and those are different answers to the same silence. The zero value is disarmed, which is
-	// both the key's own default and what the hand-built Options of the layout tests want.
-	Inspector bool
-
-	// SkillSuggestions paints the skill-suggestion band above the input box — what the
-	// `ui.skill-suggestions` config key selected (ADR 0061). With it on, the draft is ranked against
-	// [Options.Skills] as it is typed and the closest skills are named in the band; with it off the
-	// band never paints and the Tab that opens the menu on it stays inert. It gates a hint on THIS
-	// screen and nothing else: no part of the catalog reaches the model either way — a skill is sent
-	// only when the human invokes it with a `/token`. A `/settings` edit moves it mid-session
-	// (ADR 0037, settingsApplyLocal). The zero value is off, which is what the hand-built Options of
-	// the layout tests want: it is the screen apogee rendered before the band existed.
-	SkillSuggestions bool
+	// Which fields the renderer reads, and where: Spinner and SpinnerColor select the animation at
+	// construction (spinnerAnim.spec — the zero style resolves to classic, the animation with no
+	// registry entry); ShowScrollbar reserves the bar's gutter column or gives it to the body
+	// (layout) and is in the frame key for it (paintcache.go); ColorScheme is the NAME the palette
+	// below was loaded under, so a report can say which scheme is in force; StallAfter is the quiet
+	// threshold the status line reports past (0 ⇒ off); Inspector WORDS /inspect's empty pane — the
+	// engine acts on the same key, the renderer only names it when nothing was captured;
+	// SkillSuggestions gates the band above the input box (ADR 0061), a hint for the human that
+	// reaches no model; TaskListOpen seeds every task-list card's fold and ToolsOpen/ToolsFoldOver
+	// every large Tools umbrella's ([Model.toggleTaskListFold], [Model.toggleToolsFold]), each written
+	// back through [SettingsHost] silently when a card is toggled (ADR 0035 addendum). A `/settings`
+	// edit or a hand-edited file moves any of them mid-session (ADR 0037, settingsApplyLocal).
+	UI domain.UIPrefs
 
 	// CursorShape is the shape the prompt's caret is drawn with — what the `cursor-shape` config
 	// key selected. apogee draws the REAL terminal cursor (the textarea's simulated one is retired
@@ -1139,12 +1074,6 @@ type Options struct {
 	// parses. The zero value is the empty Scheme, which is not a palette at all — hand-built test
 	// Options leave it so, and colorScheme() answers it with the built-in default.
 	ColorScheme scheme.Scheme
-
-	// ColorSchemeName is the name that palette was loaded under, so a report can SAY which scheme is
-	// in force (`/color-scheme` lists it as the current one) without the renderer having to
-	// recognize a palette it was handed. Empty ⇒ unwired, and the reports fall back to the default
-	// scheme's name.
-	ColorSchemeName string
 
 	// ColorSchemeWarnings is what resolving that scheme cost, already rendered to lines: an unknown
 	// name, an unreadable file, a defective key. Each becomes one ephemeral transcript note at

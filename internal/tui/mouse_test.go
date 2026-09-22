@@ -3461,7 +3461,7 @@ func TestSuperGroupClickTogglesEachLevel(t *testing.T) {
 // and 6, the prompts 0 and 5.
 func modelWithLargeUmbrellas(t *testing.T, opts Options) Model {
 	t.Helper()
-	opts.ToolsFoldOver = 1
+	opts.UI.ToolsFoldOver = 1
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m.transcript.reset()
 	for _, batch := range []string{"first", "second"} {
@@ -3538,8 +3538,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		for _, head := range []int{firstHead, secondHead} {
 			typeRowLine(t, m, head) // both umbrellas list their type rows again
 		}
-		if !m.opts.ToolsOpen || !m.transcript.toolsOpen {
-			t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v after the open; want both true", m.opts.ToolsOpen, m.transcript.toolsOpen)
+		if !m.opts.UI.ToolsOpen || !m.transcript.toolsOpen {
+			t.Errorf("opts.UI.ToolsOpen = %v, transcript.toolsOpen = %v after the open; want both true", m.opts.UI.ToolsOpen, m.transcript.toolsOpen)
 		}
 		if want := []settingEdit{{path: "ui.tools-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
 			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
@@ -3561,8 +3561,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, folded) {
 			t.Errorf("after ⏎ on the first header the next frame paints %q, want both folded %q", got, folded)
 		}
-		if m.opts.ToolsOpen {
-			t.Error("opts.ToolsOpen is still true after the fold")
+		if m.opts.UI.ToolsOpen {
+			t.Error("opts.UI.ToolsOpen is still true after the fold")
 		}
 		if want := []settingEdit{{path: "ui.tools-open", value: "true"}, {path: "ui.tools-open", value: "false"}}; !reflect.DeepEqual(log.writes, want) {
 			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
@@ -3607,8 +3607,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 
 		m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, firstHead)))
 
-		if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, open) || !m.opts.ToolsOpen {
-			t.Errorf("headers = %q, opts.ToolsOpen = %v; the fold did not flip under a nil seam", got, m.opts.ToolsOpen)
+		if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, open) || !m.opts.UI.ToolsOpen {
+			t.Errorf("headers = %q, opts.UI.ToolsOpen = %v; the fold did not flip under a nil seam", got, m.opts.UI.ToolsOpen)
 		}
 		if got := len(m.transcript.entries); got != entries {
 			t.Errorf("the transcript grew from %d to %d entries under a nil seam; want no note", entries, got)
@@ -3627,7 +3627,7 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 		log := &settingsWriteLog{}
 		opts := testOpts
 		opts.Settings = fakeSettingsHost{write: log.write}
-		opts.ToolsFoldOver = 1
+		opts.UI.ToolsFoldOver = 1
 		m := newTestModelEng(t, &fakeEngine{}, opts)
 		m.input.SetValue("read the files, then check the build")
 		m = step(t, m, keyEnter()) // submit: the Turn is running from here on
@@ -3655,8 +3655,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 			t.Errorf("after the click the header is %q, want it open, ending in %q", got, glyphExpanded)
 		}
 		typeRowLine(t, m, head) // the type rows are listed again
-		if !m.opts.ToolsOpen || !m.transcript.toolsOpen {
-			t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v; the live umbrella did not flip the shared fold", m.opts.ToolsOpen, m.transcript.toolsOpen)
+		if !m.opts.UI.ToolsOpen || !m.transcript.toolsOpen {
+			t.Errorf("opts.UI.ToolsOpen = %v, transcript.toolsOpen = %v; the live umbrella did not flip the shared fold", m.opts.UI.ToolsOpen, m.transcript.toolsOpen)
 		}
 		if want := []settingEdit{{path: "ui.tools-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
 			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
@@ -3690,8 +3690,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 			t.Errorf("after the click the view paints %q, want the open %q", got, want)
 		}
 		typeRowLine(t, m, head)
-		if !m.opts.ToolsOpen {
-			t.Error("opts.ToolsOpen is still false after the click inside the view")
+		if !m.opts.UI.ToolsOpen {
+			t.Error("opts.UI.ToolsOpen is still false after the click inside the view")
 		}
 		if want := []settingEdit{{path: "ui.tools-open", value: "true"}}; !reflect.DeepEqual(log.writes, want) {
 			t.Errorf("writes = %+v, want exactly %+v", log.writes, want)
@@ -3728,8 +3728,8 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 
 		m = clickCell(t, m, 4, screenRow(t, m, umbrellaHeaderLineOf(t, m, firstHead)))
 
-		if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, open) || !m.opts.ToolsOpen {
-			t.Errorf("headers = %q, opts.ToolsOpen = %v; the refused write unwound the flip", got, m.opts.ToolsOpen)
+		if got := umbrellaHeaders(t, m); !reflect.DeepEqual(got, open) || !m.opts.UI.ToolsOpen {
+			t.Errorf("headers = %q, opts.UI.ToolsOpen = %v; the refused write unwound the flip", got, m.opts.UI.ToolsOpen)
 		}
 		var warnings []string
 		for _, e := range m.transcript.entries {
@@ -3753,7 +3753,7 @@ func TestLargeUmbrellasShareOneFold(t *testing.T) {
 // are entries 0, 3 and 6.
 func modelWithMixedUmbrellas(t *testing.T, opts Options) Model {
 	t.Helper()
-	opts.ToolsFoldOver = 1
+	opts.UI.ToolsFoldOver = 1
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 	m.transcript.reset()
 	m.transcript.addUser("read the files", nil)
@@ -3809,7 +3809,7 @@ func TestSmallUmbrellaHeaderFoldsItselfOnly(t *testing.T) {
 		t.Errorf("folded: reads=%v runs=%v large=%v; want only the clicked small umbrella to move (the large one stays under the shut preference)",
 			m.transcript.umbrellaFolded(readsHead), m.transcript.umbrellaFolded(runsHead), m.transcript.umbrellaFolded(largeHead))
 	}
-	if m.opts.ToolsOpen || m.transcript.toolsOpen {
+	if m.opts.UI.ToolsOpen || m.transcript.toolsOpen {
 		t.Error("a small umbrella's header moved the shared fold; only a large one's does")
 	}
 	if len(log.writes) != 0 || len(m.settingEdits) != 0 {
@@ -4032,7 +4032,7 @@ func TestUsageWheelScrollsTheReport(t *testing.T) {
 func inspectorPaneModel(t *testing.T, records int) Model {
 	t.Helper()
 	m := newTestModel(t)
-	m.opts.Inspector = true
+	m.opts.UI.Inspector = true
 	for i := range records {
 		m = m.foldEvent(wireEvent(domain.WireDirectionRequest, fmt.Sprintf(`{"n":%d}`, i), i, 0))
 	}
@@ -4334,7 +4334,7 @@ func bothPanesModel(t *testing.T, records int) Model {
 	for i := range 20 {
 		m.transcript.addUser(fmt.Sprintf("prompt %d", i), nil)
 	}
-	m.opts.Inspector = true
+	m.opts.UI.Inspector = true
 	for i := range records {
 		m = m.foldEvent(wireEvent(domain.WireDirectionRequest, fmt.Sprintf(`{"n":%d}`, i), i, 0))
 	}

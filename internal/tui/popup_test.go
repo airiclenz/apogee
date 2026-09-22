@@ -2438,7 +2438,7 @@ func TestPopupPlacementRowAtCountsTheLeadingPad(t *testing.T) {
 // The bar is a property of the POPUP surface rather than of one pane that grew one, so the test
 // drives real panes rather than a hand-built spec: an overflowing /usage report carries the thumb,
 // a picker whose whole offering is seated carries no bar at all, and `ui.show-scrollbar: false`
-// (Options.HideScrollbar, the inverted form the composition root passes) takes the bar off the
+// (Options.UI.ShowScrollbar false, the value as the config spells it) takes the bar off the
 // overflowing pane exactly as it takes the transcript's away.
 func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
 	t.Parallel()
@@ -2485,7 +2485,7 @@ func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
 		for i := range maxUsageRows {
 			m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("delegate %d", i), childTotals, 4096)
 		}
-		m.opts.HideScrollbar = true
+		m.opts.UI.ShowScrollbar = false
 		if spec, _ := m.reportSpec(usageReport, usageContent(m.usageRows(), m.servedModels)); spec.scrollbar {
 			t.Errorf("the spec still asks for a bar with the switch off")
 		}

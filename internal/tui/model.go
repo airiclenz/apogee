@@ -404,7 +404,7 @@ type Model struct {
 	// including a ReasoningEvent, since a reasoning stream is life and the stall the guard was built
 	// for (2026-08-14) had NO events at all — plus a move to an activity kind the guard watches, the
 	// launch of a worker whose request is away but unanswered (moveActivity, isQuietWatched). It is the quiet clock the stall guard reads: once the gap to now
-	// crosses [Options.StallAfter] the status line qualifies the running phrase with a bare `quiet`
+	// crosses [Options.UI].StallAfter the status line qualifies the running phrase with a bare `quiet`
 	// in front of the activity's own clock — "thinking · quiet · 2m 59s" (runningPhrase,
 	// activity.quiet) — and the silence's own length is shown nowhere. Nothing on a timer touches
 	// it: a heartbeat or a spinner frame proves the TUI is alive, not the engine. A plain time.Time,
@@ -679,7 +679,7 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 		notify:       notify,
 		promptEditor: newPromptEditor(opts.CursorShape, th.surface),
 		viewport:     vp,
-		spin:         newSpinnerAnim(opts.Spinner, opts.SpinnerColor),
+		spin:         newSpinnerAnim(opts.UI.Spinner, opts.UI.SpinnerColor),
 		th:           th,
 		state:        stateIdle,
 	}
@@ -699,15 +699,14 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 
 	// Seed the shared task-list fold from the same Options, for the same reason and with the same
 	// preservation: the card is added by a fold that reaches no Model, and /clear keeps the human's
-	// preference. The polarity turns back here — the transcript's zero value is the ordinary
-	// collapsed block, the Option's zero value the open card the config key defaults to.
-	m.transcript.taskListOpen = !opts.TaskListFolded
+	// preference. The option and the transcript field both spell the key's own "open", so the value
+	// crosses as it is — the zero value is the folded card, never a default the seed leans on.
+	m.transcript.taskListOpen = opts.UI.TaskListOpen
 
 	// And the shared Tools umbrella fold with its threshold, the same way and for the same reasons:
-	// the paint reads both off the transcript, and /clear keeps the human's preference. No polarity
-	// turns here — the option and the transcript field both spell the key's own "open".
-	m.transcript.toolsOpen = opts.ToolsOpen
-	m.transcript.toolsFoldOver = opts.ToolsFoldOver
+	// the paint reads both off the transcript, and /clear keeps the human's preference.
+	m.transcript.toolsOpen = opts.UI.ToolsOpen
+	m.transcript.toolsFoldOver = opts.UI.ToolsFoldOver
 
 	// Give the transcript its block-paint cache (paintcache.go). It is built ONCE, here, and lives
 	// behind a pointer for the same reason ws is set before the first fold: every by-value copy of
@@ -2270,12 +2269,12 @@ const (
 // never paid for.
 func (m *Model) layout() {
 	// The scroll-bar gutter column is reserved only while the bar is shown (ui.show-scrollbar,
-	// inverted into Options.HideScrollbar): a hidden bar gives the column back to the body rather
-	// than eating it invisibly. A `/settings` edit of the key moves it mid-session (ADR 0037) and
+	// Options.UI.ShowScrollbar as the config spells it): a hidden bar gives the column back to the
+	// body rather than eating it invisibly. A `/settings` edit of the key moves it mid-session (ADR 0037) and
 	// lays out again from here, so the transcript re-wraps exactly once per deliberate change —
 	// see bodyRightGutter (theme.go).
 	width := m.width
-	if !m.opts.HideScrollbar {
+	if m.opts.UI.ShowScrollbar {
 		width -= scrollbarWidth
 	}
 	m.viewport.SetWidth(max(1, width))
@@ -2833,7 +2832,7 @@ func (m Model) View() tea.View {
 		body := m.applyStickyHeader(vp.View())
 		body = m.highlightTranscript(body)  // overlay any transcript drag-selection on the composed rows
 		body = m.highlightBlockCursor(body) // and the keyboard cursor's bar (blockcursor.go — they never coexist)
-		if m.opts.HideScrollbar {
+		if !m.opts.UI.ShowScrollbar {
 			rows = append(rows, body)
 		} else {
 			rows = append(rows, m.joinScrollbar(body, m.renderScrollbar(vp)))
@@ -3677,7 +3676,7 @@ func (m Model) shownSlot(view runRef) (runRef, runActivity, string) {
 // running, a busy sibling is no evidence that the delegate on the row is alive.
 func (m Model) isStalled(view runRef, now time.Time) bool {
 	run, slot, _ := m.shownSlot(view)
-	return slot.act.quiet(m.quietClock(run, slot), now, m.opts.StallAfter)
+	return slot.act.quiet(m.quietClock(run, slot), now, m.opts.UI.StallAfter)
 }
 
 // quietClock is WHEN the run behind a shown slot was last heard from — the origin the stall guard
@@ -4183,8 +4182,8 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 }
 
 // popupScrollbarOn is the answer every popup spec carries in popupSpec.scrollbar: the human's
-// `ui.show-scrollbar` (Options.HideScrollbar, the inverted form the composition root passes),
-// read HERE rather than inside the popup module, which is not given a Model to read it from.
+// `ui.show-scrollbar` (Options.UI.ShowScrollbar, the value as the config spells it), read HERE
+// rather than inside the popup module, which is not given a Model to read it from.
 //
 // One switch covers both bars because it is one preference. The key is about whether apogee draws
 // an indicator down a right-hand column at all — a reader who took the transcript's away did not
@@ -4195,4 +4194,4 @@ func (m Model) popupBudget(p framePane, rows, rowCap, chrome int, floor popupFlo
 // column (popupRowLines). What this decides is only whether the bar is available to the pane, and
 // stamping it at every construction site is what makes "every overflowing popup" true by
 // construction rather than by a list of panes someone has to remember to extend.
-func (m Model) popupScrollbarOn() bool { return !m.opts.HideScrollbar }
+func (m Model) popupScrollbarOn() bool { return m.opts.UI.ShowScrollbar }

@@ -60,7 +60,7 @@ const (
 // ([Model.spentSkills]) — a skill shown when a message went out is not offered again.
 func (m Model) recomputeSkillHints(value string) Model {
 	m.skillHints = nil
-	if !m.opts.SkillSuggestions || m.opts.Skills == nil || m.autocomplete.active {
+	if !m.opts.UI.SkillSuggestions || m.opts.Skills == nil || m.autocomplete.active {
 		return m
 	}
 	invoked := map[string]bool{}
@@ -156,7 +156,7 @@ func (m *Model) spendSkillHints() {
 // the same gate the tab case in handleKey answers with) — so the row stands down for the whole time
 // the prompt is not the human's own, and comes back on the next frame once it is.
 func (m Model) hasSkillHints() bool {
-	return m.opts.SkillSuggestions && m.state.live() && !m.autocomplete.active && len(m.skillHints) > 0
+	return m.opts.UI.SkillSuggestions && m.state.live() && !m.autocomplete.active && len(m.skillHints) > 0
 }
 
 // renderSkillHints draws the band's one row, or "" when there is nothing to draw — no hints, or a

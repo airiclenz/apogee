@@ -53,7 +53,7 @@ func (s *titleSeam) asked() [][]string {
 // titlingOpts are the Options a naming test runs under: a persistence host to name a record in, a
 // workspace, and the toggle plus seam under test. A nil seam models an unwired generator.
 func titlingOpts(host SessionHost, seam *titleSeam, autoTitle bool) Options {
-	opts := Options{Sessions: host, Workspace: "/ws", AutoTitle: autoTitle}
+	opts := Options{Sessions: host, Workspace: "/ws", AutoTitle: autoTitle, UI: testUIPrefs}
 	if seam != nil {
 		opts.GenerateTitle = seam.generate
 	}

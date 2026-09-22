@@ -194,6 +194,7 @@ func e2eOptions(endpoint, workspace string) Options {
 		Endpoint:  endpoint,
 		Mode:      domain.ModeAskBefore,
 		Workspace: workspace,
+		UI:        testUIPrefs,
 	}
 }
 

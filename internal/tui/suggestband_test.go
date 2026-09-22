@@ -42,7 +42,7 @@ type suggestCall struct {
 // bandOpts is testOpts with the knob on and a catalog whose Suggest is the caller's hook.
 func bandOpts(hook func(draft string, exclude func(string) bool, limit int) []skills.Suggestion) Options {
 	o := testOpts
-	o.SkillSuggestions = true
+	o.UI.SkillSuggestions = true
 	o.Skills = fakeSkillCatalog{
 		skills: []skills.Skill{
 			{ID: "security-audit", DisplayName: "Security Audit"},
@@ -164,7 +164,7 @@ func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
 
 		var rec suggestCall
 		opts := bandOpts(gatedSuggest(&rec))
-		opts.SkillSuggestions = false
+		opts.UI.SkillSuggestions = false
 		m := typeDraft(t, modelWithOverlayRoom(t, 24, opts), "audit the parser")
 
 		if rec.calls != 0 {
@@ -557,7 +557,7 @@ func TestSuggestBandPrecision(t *testing.T) {
 		t.Fatalf("fixture catalog holds %d skills, want at least 20 — is internal/skills/testdata/library intact?", catalog.Len())
 	}
 	opts := testOpts
-	opts.SkillSuggestions = true
+	opts.UI.SkillSuggestions = true
 	opts.Skills = catalog
 
 	cases := []struct {

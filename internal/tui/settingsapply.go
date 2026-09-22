@@ -257,11 +257,10 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 			m.opts.OnAutoTitle(m.opts.AutoTitle)
 		}
 	case settingKeyShowScrollbar:
-		// The config key is positive and the option is inverted (the polarity flips in cmd/apogee).
 		// The bar's gutter column is transcript width, which is why the option is in the frame key
 		// (paintcache.go): the repaint tail lays out again from it rather than leaving the column to
 		// the next resize.
-		m.opts.HideScrollbar = value != settingTrue
+		m.opts.UI.ShowScrollbar = value == settingTrue
 	case settingKeySpinner:
 		style, err := ParseSpinnerStyle(value)
 		if err != nil {
@@ -270,28 +269,26 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		// Both halves: the option is the record of what is selected, m.spin is what paints. The
 		// frame counter is left where it is — every style's glyph indexes it modulo its own frame
 		// count — so a style swapped mid-run continues the animation instead of restarting it.
-		m.opts.Spinner, m.spin.style = style, style
+		m.opts.UI.Spinner, m.spin.style = style, style
 	case settingKeySpinnerColor:
 		on := value == settingTrue
-		m.opts.SpinnerColor, m.spin.color = on, on
+		m.opts.UI.SpinnerColor, m.spin.color = on, on
 	case settingKeySkillSuggestions:
 		// Nothing is laid out again and nothing is recomputed here: the band is derived from the
 		// draft where the frame is built, so the very next render already answers the new value —
 		// and an edit made from the /settings pane happens with no draft on screen anyway.
-		m.opts.SkillSuggestions = value == settingTrue
+		m.opts.UI.SkillSuggestions = value == settingTrue
 	case settingKeyTaskListOpen:
-		// The config key is positive and the option is inverted (the polarity flips in cmd/apogee),
-		// and the value lands on every task-list card at once: this is the same sweep a click on a
+		// The value lands on every task-list card at once: this is the same sweep a click on a
 		// card takes (toggleTaskListFold), which is what makes a `/settings` edit and a hand-edited
 		// file apply live — and a resumed session, whose cards were seeded from the file, paint
 		// per the file. The sweep bumps the transcript's generation, so the repaint tail lays out
 		// again for the cards' moved height.
-		m.setTaskListFolded(value != settingTrue)
+		m.setTaskListOpen(value == settingTrue)
 	case settingKeyToolsOpen:
-		// Same polarity as the key (unlike the task list: this key defaults to false), and the same
-		// shape of apply — the value lands on every large Tools umbrella at once through the one
-		// setter a header toggle takes (toggleToolsFold), so a `/settings` edit and a hand-edited
-		// file fold or open them live. The setter touches the transcript, so the repaint tail draws
+		// The same shape of apply as the task list — the value lands on every large Tools umbrella
+		// at once through the one setter a header toggle takes (toggleToolsFold), so a `/settings`
+		// edit and a hand-edited file fold or open them live. The setter touches the transcript, so the repaint tail draws
 		// each umbrella afresh for its moved height.
 		m.setToolsOpen(value == settingTrue)
 	case settingKeyToolsFoldOver:
@@ -309,7 +306,7 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		}
 		// Nothing is scheduled and nothing is laid out again: the threshold is read where the status
 		// line is painted, and the spinner already repaints it every frame while a turn runs.
-		m.opts.StallAfter = after
+		m.opts.UI.StallAfter = after
 	case settingKeyColorScheme:
 		note, cmd, err := m.applyColorScheme(value)
 		return m, note, cmd, true, err
@@ -400,7 +397,7 @@ func (m *Model) applyColorScheme(name string) (string, tea.Cmd, error) {
 	m.th.measure = measure
 	fillInput(&m.input, m.th.surface)
 	m.transcript.paints.clear()
-	m.opts.ColorScheme, m.opts.ColorSchemeName = s, name
+	m.opts.ColorScheme, m.opts.UI.ColorScheme = s, name
 	for _, w := range warnings {
 		m.transcript.addEphemeralNote(w)
 	}
@@ -455,16 +452,16 @@ const taskListOpenSource = "task-list-open"
 // "2026-09-14 - 00", item 4 — a landed write says nothing, because the card itself is the report).
 const taskListNotSavedNote = "not saved: "
 
-// setTaskListFolded moves the shared task-list fold on BOTH halves the Model keeps: the Option that
-// records the preference (Options.TaskListFolded) and the transcript's seed-and-sweep
+// setTaskListOpen moves the shared task-list fold on BOTH halves the Model keeps: the Option that
+// records the preference (Options.UI.TaskListOpen) and the transcript's seed-and-sweep
 // ([transcript.setTaskListOpen]), which puts every task-list card on screen into the new state and
 // seeds every card added after it. It is the one writer of either, so the two cannot drift: a
 // toggle on a card and an apply of `ui.task-list-open` both come through here, and neither touches
 // a card by hand. It is a pointer method because both its callers hold the Model they are already
 // returning.
-func (m *Model) setTaskListFolded(folded bool) {
-	m.opts.TaskListFolded = folded
-	m.transcript.setTaskListOpen(!folded)
+func (m *Model) setTaskListOpen(open bool) {
+	m.opts.UI.TaskListOpen = open
+	m.transcript.setTaskListOpen(open)
 }
 
 // toggleTaskListFold is what a click on a task-list card, or ⏎ at the block cursor on one, means
@@ -485,13 +482,13 @@ func (m *Model) setTaskListFolded(folded bool) {
 // the Model alone, because nothing here schedules anything: the caller repaints, anchored, as it
 // does for every other flip.
 func (m Model) toggleTaskListFold() Model {
-	m.setTaskListFolded(!m.opts.TaskListFolded)
+	m.setTaskListOpen(!m.opts.UI.TaskListOpen)
 	if m.opts.Settings == nil {
 		return m
 	}
-	value := settingTrue
-	if m.opts.TaskListFolded {
-		value = settingFalse
+	value := settingFalse
+	if m.opts.UI.TaskListOpen {
+		value = settingTrue
 	}
 	if err := m.opts.Settings.Write(settingKeyTaskListOpen, value); err != nil {
 		m.transcript.addError(taskListOpenSource, taskListNotSavedNote+err.Error(), runRef{})
@@ -505,12 +502,12 @@ func (m Model) toggleTaskListFold() Model {
 const toolsOpenSource = "tools-open"
 
 // setToolsOpen moves the shared Tools umbrella fold on BOTH halves the Model keeps: the Option that
-// records the preference (Options.ToolsOpen) and the transcript field the paint reads
+// records the preference (Options.UI.ToolsOpen) and the transcript field the paint reads
 // ([transcript.setToolsOpen]), which every large umbrella on screen answers to on the next frame.
 // It is the one writer of either, so the two cannot drift — a toggle on a header and an apply of
-// `ui.tools-open` both come through here — and a pointer method for setTaskListFolded's reason.
+// `ui.tools-open` both come through here — and a pointer method for setTaskListOpen's reason.
 func (m *Model) setToolsOpen(open bool) {
-	m.opts.ToolsOpen = open
+	m.opts.UI.ToolsOpen = open
 	m.transcript.setToolsOpen(open)
 }
 
@@ -519,7 +516,7 @@ func (m *Model) setToolsOpen(open bool) {
 // ([transcript.setToolsFoldOver]). Only `ui.tools-fold-over`'s apply comes through here — no
 // gesture moves the threshold — but the same one-writer rule keeps the row and the paint agreeing.
 func (m *Model) setToolsFoldOver(n int) {
-	m.opts.ToolsFoldOver = n
+	m.opts.UI.ToolsFoldOver = n
 	m.transcript.setToolsFoldOver(n)
 }
 
@@ -531,12 +528,12 @@ func (m *Model) setToolsFoldOver(n int) {
 // way. A nil seam flips and writes nothing — the Driver degrade (ADR 0031) — and the write is
 // synchronous on the keypress, returning the Model alone for the caller to repaint, anchored.
 func (m Model) toggleToolsFold() Model {
-	m.setToolsOpen(!m.opts.ToolsOpen)
+	m.setToolsOpen(!m.opts.UI.ToolsOpen)
 	if m.opts.Settings == nil {
 		return m
 	}
 	value := settingFalse
-	if m.opts.ToolsOpen {
+	if m.opts.UI.ToolsOpen {
 		value = settingTrue
 	}
 	if err := m.opts.Settings.Write(settingKeyToolsOpen, value); err != nil {

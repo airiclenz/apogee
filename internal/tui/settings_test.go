@@ -1655,8 +1655,8 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 			},
 			check: func(t *testing.T, m Model) {
 				t.Helper()
-				if !m.opts.HideScrollbar {
-					t.Error("opts.HideScrollbar is still false; the bar was not taken away")
+				if m.opts.UI.ShowScrollbar {
+					t.Error("opts.UI.ShowScrollbar is still true; the bar was not taken away")
 				}
 				// The bar's gutter is transcript width: the flip must lay the frame out again, or the
 				// body would keep wrapping to a column it no longer pays for.
@@ -1685,13 +1685,13 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 				Default: "true", Editable: true, Desc: "Show the skills that fit what you are typing.",
 			},
 			seed: func(m Model) Model {
-				m.opts.SkillSuggestions = true // the knob's own default, which testOpts does not carry
+				m.opts.UI.SkillSuggestions = true // the knob's own default, which testOpts does not carry
 				return m
 			},
 			check: func(t *testing.T, m Model) {
 				t.Helper()
-				if m.opts.SkillSuggestions {
-					t.Error("opts.SkillSuggestions is still on; the band would go on being painted")
+				if m.opts.UI.SkillSuggestions {
+					t.Error("opts.UI.SkillSuggestions is still on; the band would go on being painted")
 				}
 			},
 		},
@@ -1700,9 +1700,8 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 			row:  settingsTaskListOpenRow(),
 			check: func(t *testing.T, m Model) {
 				t.Helper()
-				// The config key is positive and the option inverted, as the scroll bar's is.
-				if !m.opts.TaskListFolded {
-					t.Error("opts.TaskListFolded is still false; the cards would go on opening")
+				if m.opts.UI.TaskListOpen {
+					t.Error("opts.UI.TaskListOpen is still true; the cards would go on opening")
 				}
 			},
 		},
@@ -1716,9 +1715,9 @@ func TestSettingsPaneRendererOwnedKeysApplyWithoutTheSeam(t *testing.T) {
 			check: func(t *testing.T, m Model) {
 				t.Helper()
 				// Same polarity as the key, unlike the task list's: false is the fold.
-				if m.opts.ToolsOpen || m.transcript.toolsOpen {
-					t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v; want both false — the umbrellas would go on painting open",
-						m.opts.ToolsOpen, m.transcript.toolsOpen)
+				if m.opts.UI.ToolsOpen || m.transcript.toolsOpen {
+					t.Errorf("opts.UI.ToolsOpen = %v, transcript.toolsOpen = %v; want both false — the umbrellas would go on painting open",
+						m.opts.UI.ToolsOpen, m.transcript.toolsOpen)
 				}
 			},
 		},
@@ -1799,8 +1798,8 @@ func TestSettingsToolsKeysApplyLocally(t *testing.T) {
 		if len(log.applies) != 0 {
 			t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
 		}
-		if !m.opts.ToolsOpen || !m.transcript.toolsOpen {
-			t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v after `true`; want both true", m.opts.ToolsOpen, m.transcript.toolsOpen)
+		if !m.opts.UI.ToolsOpen || !m.transcript.toolsOpen {
+			t.Errorf("opts.UI.ToolsOpen = %v, transcript.toolsOpen = %v after `true`; want both true", m.opts.UI.ToolsOpen, m.transcript.toolsOpen)
 		}
 		if got, want := m.settingsValueCell(rows[0]), "true"+settingsEditMarker; got != want {
 			t.Errorf("value cell = %q, want %q", got, want)
@@ -1808,8 +1807,8 @@ func TestSettingsToolsKeysApplyLocally(t *testing.T) {
 
 		m = step(t, m, keyEnter()) // and back
 
-		if m.opts.ToolsOpen || m.transcript.toolsOpen {
-			t.Errorf("opts.ToolsOpen = %v, transcript.toolsOpen = %v after `false`; want both false", m.opts.ToolsOpen, m.transcript.toolsOpen)
+		if m.opts.UI.ToolsOpen || m.transcript.toolsOpen {
+			t.Errorf("opts.UI.ToolsOpen = %v, transcript.toolsOpen = %v after `false`; want both false", m.opts.UI.ToolsOpen, m.transcript.toolsOpen)
 		}
 	})
 
@@ -1832,12 +1831,12 @@ func TestSettingsToolsKeysApplyLocally(t *testing.T) {
 		if len(log.applies) != 0 {
 			t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
 		}
-		if m.opts.ToolsFoldOver != 8 || m.transcript.toolsFoldOver != 8 {
-			t.Errorf("opts.ToolsFoldOver = %d, transcript.toolsFoldOver = %d; want both 8", m.opts.ToolsFoldOver, m.transcript.toolsFoldOver)
+		if m.opts.UI.ToolsFoldOver != 8 || m.transcript.toolsFoldOver != 8 {
+			t.Errorf("opts.UI.ToolsFoldOver = %d, transcript.toolsFoldOver = %d; want both 8", m.opts.UI.ToolsFoldOver, m.transcript.toolsFoldOver)
 		}
-		if got := edit(t, &settingsWriteLog{}, "0"); got.opts.ToolsFoldOver != 0 || got.transcript.toolsFoldOver != 0 {
-			t.Errorf("opts.ToolsFoldOver = %d, transcript.toolsFoldOver = %d after `0`; want both 0, the key's own \"never\"",
-				got.opts.ToolsFoldOver, got.transcript.toolsFoldOver)
+		if got := edit(t, &settingsWriteLog{}, "0"); got.opts.UI.ToolsFoldOver != 0 || got.transcript.toolsFoldOver != 0 {
+			t.Errorf("opts.UI.ToolsFoldOver = %d, transcript.toolsFoldOver = %d after `0`; want both 0, the key's own \"never\"",
+				got.opts.UI.ToolsFoldOver, got.transcript.toolsFoldOver)
 		}
 	})
 
@@ -1852,9 +1851,9 @@ func TestSettingsToolsKeysApplyLocally(t *testing.T) {
 			if got := m.settingsNote(row); !strings.Contains(got, "saved — live apply failed") {
 				t.Errorf("%q: marker = %q, want the apply's own refusal", text, got)
 			}
-			if m.opts.ToolsFoldOver != 5 || m.transcript.toolsFoldOver != 5 {
-				t.Errorf("%q: opts.ToolsFoldOver = %d, transcript.toolsFoldOver = %d; want both still 5 — a refused apply must not move the threshold",
-					text, m.opts.ToolsFoldOver, m.transcript.toolsFoldOver)
+			if m.opts.UI.ToolsFoldOver != 5 || m.transcript.toolsFoldOver != 5 {
+				t.Errorf("%q: opts.UI.ToolsFoldOver = %d, transcript.toolsFoldOver = %d; want both still 5 — a refused apply must not move the threshold",
+					text, m.opts.UI.ToolsFoldOver, m.transcript.toolsFoldOver)
 			}
 		}
 	})
@@ -1888,8 +1887,8 @@ func TestSettingsTaskListOpenAppliesToEveryCard(t *testing.T) {
 	if len(log.applies) != 0 {
 		t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
 	}
-	if !m.opts.TaskListFolded {
-		t.Error("opts.TaskListFolded is still false after the edit")
+	if m.opts.UI.TaskListOpen {
+		t.Error("opts.UI.TaskListOpen is still true after the edit")
 	}
 	for _, at := range cards {
 		if m.transcript.entries[at].expanded {
@@ -1906,8 +1905,8 @@ func TestSettingsTaskListOpenAppliesToEveryCard(t *testing.T) {
 
 	m = step(t, m, keyEnter()) // and back to true
 
-	if m.opts.TaskListFolded {
-		t.Error("opts.TaskListFolded is still true after the edit back")
+	if !m.opts.UI.TaskListOpen {
+		t.Error("opts.UI.TaskListOpen is still false after the edit back")
 	}
 	for _, at := range cards {
 		if !m.transcript.entries[at].expanded {
@@ -1976,7 +1975,7 @@ func TestSettingsPaneStallAfterAppliesAndRefusesWhatIsNotADuration(t *testing.T)
 	edit := func(t *testing.T, log *settingsWriteLog, text string) Model {
 		t.Helper()
 		m, _ := settingsEditModel(t, []SettingRow{row}, log)
-		m.opts.StallAfter = 90 * time.Second // the shipped threshold, so "off" is a visible change
+		m.opts.UI.StallAfter = 90 * time.Second // the shipped threshold, so "off" is a visible change
 		return step(t, typeSetting(t, step(t, m, keyEnter()), text), keyEnter())
 	}
 
@@ -1989,20 +1988,20 @@ func TestSettingsPaneStallAfterAppliesAndRefusesWhatIsNotADuration(t *testing.T)
 	if len(log.applies) != 0 {
 		t.Errorf("applies = %+v, want none: the renderer owns this key", log.applies)
 	}
-	if got, want := m.opts.StallAfter, 2*time.Minute; got != want {
-		t.Errorf("opts.StallAfter = %s, want %s — the new threshold did not reach the status line", got, want)
+	if got, want := m.opts.UI.StallAfter, 2*time.Minute; got != want {
+		t.Errorf("opts.UI.StallAfter = %s, want %s — the new threshold did not reach the status line", got, want)
 	}
 
-	if got := edit(t, &settingsWriteLog{}, "0").opts.StallAfter; got != 0 {
-		t.Errorf("opts.StallAfter = %s, want 0 — `0` did not turn the guard off", got)
+	if got := edit(t, &settingsWriteLog{}, "0").opts.UI.StallAfter; got != 0 {
+		t.Errorf("opts.UI.StallAfter = %s, want 0 — `0` did not turn the guard off", got)
 	}
 
 	m = edit(t, &settingsWriteLog{}, "soonish")
 	if got := m.settingsNote(row); !strings.Contains(got, "saved — live apply failed") {
 		t.Errorf("marker = %q, want the apply's own refusal", got)
 	}
-	if got, want := m.opts.StallAfter, 90*time.Second; got != want {
-		t.Errorf("opts.StallAfter = %s, want %s — a refused apply must not move the threshold", got, want)
+	if got, want := m.opts.UI.StallAfter, 90*time.Second; got != want {
+		t.Errorf("opts.UI.StallAfter = %s, want %s — a refused apply must not move the threshold", got, want)
 	}
 }
 
@@ -3907,8 +3906,8 @@ func TestSettingsPaneAppliesAColorSchemeLive(t *testing.T) {
 		t.Errorf("applies = %+v, want none — the scheme is applied inside the pane", log.applies)
 	}
 	// And the Options carry the scheme now in force, so a report can name it.
-	if switched.opts.ColorSchemeName != "light" {
-		t.Errorf("ColorSchemeName = %q, want %q", switched.opts.ColorSchemeName, "light")
+	if switched.opts.UI.ColorScheme != "light" {
+		t.Errorf("UI.ColorScheme = %q, want %q", switched.opts.UI.ColorScheme, "light")
 	}
 }
 

@@ -203,12 +203,12 @@ func TestNewModelTakesItsThemeFromTheWiredScheme(t *testing.T) {
 
 	wired := scheme.Default()
 	wired.Error = "#010203"
-	m := newModel(context.Background(), &fakeEngine{}, Options{ColorScheme: wired}, nil)
+	m := newModel(context.Background(), &fakeEngine{}, Options{ColorScheme: wired, UI: testUIPrefs}, nil)
 	if got := hexOf(m.th.errorFg); got != "#010203" {
 		t.Errorf("the model's error tone = %s; want the wired scheme's #010203", got)
 	}
 
-	bare := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	bare := newModel(context.Background(), &fakeEngine{}, Options{UI: testUIPrefs}, nil)
 	if got, want := hexOf(bare.th.errorFg), hexOf(newTheme(scheme.Default()).errorFg); got != want {
 		t.Errorf("unwired Options gave the error tone %s; want the default scheme's %s", got, want)
 	}
@@ -226,7 +226,7 @@ func TestNewModelNotesTheColorSchemeWarnings(t *testing.T) {
 
 	const warning = `color-scheme "mine.yaml": key "error": bad hex "#zz0000" — using default`
 	m := newModel(context.Background(), &fakeEngine{},
-		Options{ColorSchemeWarnings: []string{warning}}, nil)
+		Options{ColorSchemeWarnings: []string{warning}, UI: testUIPrefs}, nil)
 
 	if !hasEntry(m, entryNote, warning) {
 		t.Errorf("no note carries the colour-scheme warning; entries = %+v", m.transcript.entries)
@@ -237,7 +237,7 @@ func TestNewModelNotesTheColorSchemeWarnings(t *testing.T) {
 		}
 	}
 
-	clean := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	clean := newModel(context.Background(), &fakeEngine{}, Options{UI: testUIPrefs}, nil)
 	if hasEntry(clean, entryNote, warning) {
 		t.Error("a run with no warnings still noted one")
 	}

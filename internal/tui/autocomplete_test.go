@@ -26,7 +26,7 @@ import (
 // spans the 98-column chat area) over the given options.
 func newDropdownModel(t *testing.T, opts Options) Model {
 	t.Helper()
-	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m := newModel(context.Background(), &fakeEngine{}, withTestUI(opts), nil)
 	return step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 }
 

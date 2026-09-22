@@ -109,36 +109,21 @@ func (w *rootWiring) options() tui.Options {
 		// recording is a config splice. It is always present in this binary: what a Driver leaves nil
 		// (ADR 0031), a full apogee session simply has.
 		Delegation: delegationHost{w: w},
-		// The resolved `ui:` block: which animation paints the status-line spinner, whether its
-		// colour loop runs, whether the transcript's scroll bar is painted at all, and how long the
-		// engine may go silent before the status line reports the quiet. Independent values, resolved
-		// and validated by ApplyConfig, so the renderer selects rather than parses — the threshold
-		// arrives as the duration it means, not as the text it was written as.
-		// The scroll bar and the task-list fold are the two keys whose polarity flips here — the
-		// config says show / open, the renderer's option says hide / folded, so each zero value is
-		// the default the key carries (see tui.Options). The Tools umbrella fold does NOT flip: its
-		// key defaults to false, so the option's zero value already means the fold the key carries.
-		Spinner:        w.opts.UI.Spinner,
-		SpinnerColor:   w.opts.UI.SpinnerColor,
-		HideScrollbar:  !w.opts.UI.ShowScrollbar,
-		TaskListFolded: !w.opts.UI.TaskListOpen,
-		ToolsOpen:      w.opts.UI.ToolsOpen,
-		ToolsFoldOver:  w.opts.UI.ToolsFoldOver,
-		StallAfter:     w.opts.UI.StallAfter,
-		// And `ui.inspector`, which the ENGINE acts on (domain.Config.Inspector arms the capture) and
-		// the renderer only words its empty pane with: /inspect names the key when nothing was
-		// captured and it is off.
-		Inspector: w.opts.UI.Inspector,
-		// And `ui.skill-suggestions`, which is the renderer's alone: whether the band above the input
-		// box names the skills that fit the draft (ADR 0061). It reaches no engine seam in either
-		// state — a suggestion is a hint for the human, and the catalog stays invisible to the model
-		// until a `/token` invokes one.
-		SkillSuggestions: w.opts.UI.SkillSuggestions,
-		// The `ui.color-scheme:` key, already resolved to the palette itself (wire_live.go): the name
-		// so the renderer can say which scheme is in force, and the warnings the resolve produced so
-		// it can tell the human why the screen is not the one they asked for.
+		// The resolved `ui:` block, handed through WHOLE: which animation paints the status-line
+		// spinner and whether its colour loop runs, whether the transcript's scroll bar is painted at
+		// all, the palette's name, how long the engine may go silent before the status line reports
+		// the quiet, whether the Inspector's capture is armed (the ENGINE acts on that one —
+		// domain.Config.Inspector — and the renderer only words its empty pane with it), whether the
+		// band above the input box names the skills that fit the draft (ADR 0061 — the renderer's
+		// alone, reaching no engine seam), and the two transcript folds with their threshold. One
+		// value with one parser (domain.UIPrefs, ADR 0043): resolved and validated by ApplyConfig, so
+		// the renderer selects rather than parses, and spelled in config's own positive polarity all
+		// the way down, so nothing flips here — the renderer negates where it wants "hide".
+		UI: w.opts.UI,
+		// The `ui.color-scheme:` key, already resolved to the palette itself (wire_live.go), and the
+		// warnings the resolve produced so the renderer can tell the human why the screen is not the
+		// one they asked for; the NAME rides in the block above.
 		ColorScheme:         w.colorScheme,
-		ColorSchemeName:     w.opts.UI.ColorScheme,
 		ColorSchemeWarnings: w.colorSchemeWarnings,
 		// The confinement posture announceConfinement already said on stderr, repeated so the
 		// alternate screen opening over that line does not lose it (apogee-2sj).

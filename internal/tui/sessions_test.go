@@ -29,7 +29,7 @@ import (
 // the /sessions overlay's workspace filtering is exercisable.
 func newBrowserModel(t *testing.T, eng Engine, host *fakeSessionHost, workspace string) Model {
 	t.Helper()
-	m := newModel(context.Background(), eng, Options{Sessions: host, Workspace: workspace}, nil)
+	m := newModel(context.Background(), eng, Options{Sessions: host, Workspace: workspace, UI: testUIPrefs}, nil)
 	return step(t, m, tea.WindowSizeMsg{Width: 100, Height: 30})
 }
 
@@ -796,7 +796,7 @@ func TestSessionNameFollowsResume(t *testing.T) {
 	t.Run("the --resume start", func(t *testing.T) {
 		t.Parallel()
 		host := &fakeSessionHost{}
-		opts := Options{Sessions: host, Workspace: "/ws/a", Resumed: &ResumedSession{Title: "an older task"}}
+		opts := Options{Sessions: host, Workspace: "/ws/a", Resumed: &ResumedSession{Title: "an older task"}, UI: testUIPrefs}
 		m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 
 		if m.sessionName != "an older task" {
@@ -1770,7 +1770,7 @@ func modelWithOverlayRoom(t *testing.T, height int, opts Options) Model {
 // something already occupying them.
 func modelWithOverlayRoomAt(t *testing.T, width, height int, opts Options) Model {
 	t.Helper()
-	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
+	m := newModel(context.Background(), &fakeEngine{}, withTestUI(opts), nil)
 	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: height})
 	for i := range 40 {
 		m.transcript.commitAssistant(fmt.Sprintf("reply line %02d", i), runRef{})
@@ -2361,6 +2361,7 @@ func TestSessionUsageTotalsSurviveTheRecord(t *testing.T) {
 		t.Parallel()
 		m := newModel(context.Background(), &fakeEngine{}, Options{
 			Resumed: &ResumedSession{Title: "france question", CtxUsed: 4096, Usage: want},
+			UI:      testUIPrefs,
 		}, nil)
 
 		if got := m.usage; got != domain.Usage(want) {

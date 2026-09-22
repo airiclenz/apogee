@@ -869,7 +869,7 @@ func TestParseSpinnerStyle(t *testing.T) {
 }
 
 // TestNewModelSelectsTheConfiguredSpinner pins the construction seam the `ui:` config block feeds:
-// newModel carries Options.Spinner and Options.SpinnerColor onto the Model's animation, both of
+// newModel carries Options.UI.Spinner and Options.UI.SpinnerColor onto the Model's animation, both of
 // them, independently — the table walks all six combinations, so folding the colour flag into the
 // style (or reading one off the other) fails here rather than in a live run. The zero Options are
 // covered too: cmd/apogee always resolves a real style, so the zero value reaches only hand-built
@@ -881,7 +881,7 @@ func TestNewModelSelectsTheConfiguredSpinner(t *testing.T) {
 	for _, style := range domain.SpinnerStyleNames() {
 		for _, colour := range []bool{false, true} {
 			opts := testOpts
-			opts.Spinner, opts.SpinnerColor = style, colour
+			opts.UI.Spinner, opts.UI.SpinnerColor = style, colour
 			m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 			if m.spin.style != style {
 				t.Errorf("newModel with Spinner %q built the animation for %q", style, m.spin.style)
@@ -896,13 +896,14 @@ func TestNewModelSelectsTheConfiguredSpinner(t *testing.T) {
 		}
 	}
 
-	// Zero Options: no style named, no colour asked for — the still, uncoloured spinner the
-	// hand-built test Options in this package rely on (classic, one column, no foreground).
-	m := newModel(context.Background(), &fakeEngine{}, Options{}, nil)
+	// The harness's block (testUIPrefs): no style named, no colour asked for — the still,
+	// uncoloured spinner the hand-built test Options in this package rely on (classic, one column,
+	// no foreground).
+	m := newModel(context.Background(), &fakeEngine{}, Options{UI: testUIPrefs}, nil)
 	if m.spin.color {
-		t.Error("zero Options built a coloured spinner; the colour loop must be opt-in")
+		t.Error("a zero spinner key built a coloured spinner; the colour loop must be opt-in")
 	}
 	if got, want := m.spin.view(m.th), m.th.spinnerBase.Render(legacyClassicFrames[0]); got != want {
-		t.Errorf("zero Options render %q at frame 0; want the bare classic cell %q", got, want)
+		t.Errorf("a zero spinner key renders %q at frame 0; want the bare classic cell %q", got, want)
 	}
 }
