@@ -281,7 +281,32 @@ the untouched-cells check. (a) and (c) must fail against the pre-item tree. Must
 **Acceptance.** `go build ./... && go vet ./... && go test ./internal/config/... -run 'Present|Registry|Option' && go test ./internal/tui/... -run 'Present' && go test ./internal/tools/... -run 'Classify|Present' && go test ./internal/agent/... -run 'Resolve|Ladder|Present' && go test ./cmd/apogee/... -run 'E2EPresent'`
 **Commit:** `fix(present): an execution-capable present.command runs only behind a file-only opt-in`
 
-## 5. ADR 0019 and CONTEXT record the opt-in rung-3 opener
+## 5. ADR 0019 and CONTEXT record the opt-in rung-3 opener — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the ADR's §5 addendum is a dated bolded paragraph inside §5 (the ADR's inline
+"clarified 2026-07-21" idiom) rather than a new `## Amendment` section, per the item's "amend in
+place"; §1, the 2026-07-26/2026-08-12/2026-08-26 amendments and the 2026-09-15 note are untouched.
+
+NOTES (2026-09-22): Acceptance check 1 returns two lines, not one — 0019:149 sits under the dated
+addendum as required, and 0019:254 is the 2026-07-26 amendment's (d), a still-true sentence the
+item's regression guard directs be left as written. Everything else in that grep is gone.
+
+NOTES (2026-09-22): the prose sweep reached two files the item's **Files:** list does not name —
+internal/tools/doc.go (the package map's present_document paragraph enumerated the ladder without
+rung 3's opt-in) and internal/tui/doc.go:231 ("the ladder gates the opener on LOCALITY only", which
+item 4 made false) — both re-pointed under the item's "named files are not the closed list" rule.
+
+NOTES (2026-09-22): the approach's in-code line anchors internal/present/opener.go:64-67/:204-206
+were the rung-1 argv[0] prose at the header base; items 2-4 have since rewritten that region, so the
+re-pointed claims there are the CommandOverride field doc and the "the bound stops at rung 3"
+paragraph instead. `docs/design/confinement-execution-contract.md` was read and left as written: its
+":550-553" text sits inside a *dated 2026-08-12 amendment* and is accurate as history.
+
+NOTES (2026-09-22): `go test ./cmd/apogee/` fails on `TestE2ELiveStateFollowsTheRunningSession`
+both with and without this item's changes — a REGRESSION from item 4, not from here (it passes at
+463e0ca0 and fails at 64ab7d12): adding the `present.command-on-model-documents` row widened the
+/settings pane's key column and the e2e frame assertion was never re-baselined. Reported on this
+item's FOLLOW-UP line. `internal/tools` and the docs/settings tests pass.
 
 **What.** Recast at the regression check (2026-09-22). `docs(adr)`: the prose half of `apogee-2we`.
 Depends on item 4.

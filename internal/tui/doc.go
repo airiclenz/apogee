@@ -229,10 +229,15 @@
 // the worker goroutine, through the same late-bound programRef — minus the rendezvous: it picks a
 // rung from the [Presentation] the composition root installed ([Bridge.SetPresentation]), attempts
 // it, sends a [presentedMsg] and returns, so a presentation can never park a Turn on the UI. The
-// ladder gates the opener on LOCALITY only and lets internal/present answer whether this machine
+// ladder gates rung 1 on LOCALITY only and lets internal/present answer whether this machine
 // has anything to open into, so the desktop test lives in exactly one place and a configured
-// present.command — which deliberately stands in for that test — is not second-guessed here. The
-// Update loop folds the message into a transcript entry of its own (entryPresented,
+// present.command — which deliberately stands in for that test — is not second-guessed here.
+// Rung 3 carries the one further gate: an execution-capable opener (a present.command on a local
+// session) is WITHHELD from a document the model named unless present.command-on-model-documents
+// is set (ADR 0019 §5's 2026-09-22 addendum), and the withholding rides out on the outcome so the
+// tool result can name the key.
+//
+// The Update loop folds the message into a transcript entry of its own (entryPresented,
 // renderPresentedBlock): the ▤ block that is deliberately not shaped like a tool card, whose path
 // and URL are emitted as raw plain text because terminal linkification is the whole mechanism.
 //

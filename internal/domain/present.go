@@ -10,7 +10,9 @@ import "context"
 // deliverable to: the model names a document it has just written and the HOST decides how
 // the user sees it (the presentation ladder — the transcript baseline always, the OS opener
 // when the session is local and a desktop exists, a doc-server URL when it is remote, a
-// user-configured command when one is set). The model supplies a path, never a mechanism.
+// user-configured command when one is set AND `present.command-on-model-documents` opts that
+// rung in on a document the model named — ADR 0019 §5's 2026-09-22 addendum). The model
+// supplies a path, never a mechanism.
 //
 // It is the sibling of Asker (P3.11): the same host-decides delegate shape, for showing a
 // document rather than asking a question. Like Asker it is NOT a safety gate — a Presenter

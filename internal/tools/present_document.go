@@ -36,7 +36,11 @@ type presentDocumentArgs struct {
 // named affordance that replaces platform guessing: the model names a file, the HOST picks
 // the mechanism through the presentation ladder (the transcript baseline always, the OS
 // opener on a local desktop, a doc-server URL when remote, the user's own present.command
-// when configured). The model never reasons about platforms and never supplies a command.
+// when one is configured AND the file-only present.command-on-model-documents key opts that
+// rung in — ADR 0019 §5's 2026-09-22 addendum; without it the rung is skipped for the baseline
+// and the result below says so). The model never reasons about platforms and never supplies a
+// command — but it does supply the ARGUMENT, which is why an execution-capable rung 3 needs
+// the opt-in.
 //
 // It routes through the host-supplied Presenter delegate, the sibling of Asker (P3.11): it is
 // mode-INDEPENDENT (always the delegate, never the Approval/disposition gate), it is NOT a

@@ -180,7 +180,8 @@
 // present_document (ADR 0019) is the Asker pattern applied to showing a finished document:
 // the model names a deliverable it has written and the HOST picks the mechanism (the
 // presentation ladder — the transcript baseline always, the OS opener on a local desktop, a
-// doc-server URL when remote), so no platform reasoning reaches the model. It is ReadOnly and
+// doc-server URL when remote, a configured present.command when the user has opted that rung in
+// for model-named documents), so no platform reasoning reaches the model. It is ReadOnly and
 // mode-independent through the host's Presenter delegate, registered only when one is
 // supplied, and its result names the rung actually reached so the model can relay it
 // truthfully; a failed mechanism degrades to the baseline rather than failing the call.

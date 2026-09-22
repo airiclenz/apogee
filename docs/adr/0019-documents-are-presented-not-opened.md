@@ -79,7 +79,10 @@ listener.
   open into is the **opener's own** answer (its `ErrNoOpener`), and a configured command **stands
   in for that desktop test** — an OS with no built-in opener is precisely the case the override
   exists for. So the desktop check lives in exactly one place, and a set `present.command` opens on
-  a local box with no *detected* desktop but never on a remote one.
+  a local box with no *detected* desktop but never on a remote one. On a document the **model**
+  named — which is every `present_document` call — this rung carries one further condition
+  (amended 2026-09-22, §5's addendum below): it runs only when the file-only
+  `present.command-on-model-documents` key is set, and otherwise is skipped for rung 0.
 
 **3. The doc server is a capability-token allowlist, not a file server.** It serves **only**
 explicitly presented files, each under a random token at `/d/<32-hex>/<basename>`: no directory
@@ -118,6 +121,38 @@ the path is resolved inside the workspace root and must be an existing regular f
 rung runs, the model never supplies a command, and `present.command` is the **user's own**
 configuration — global config, the same standing as their shell. ADR 0012's invariant is
 untouched: nothing here runs a *model-chosen* command, unsupervised or otherwise.
+
+**Addendum (2026-09-22) — an execution-capable rung 3 runs only behind a file-only opt-in.**
+§5's closing sentence — "nothing here runs a *model-chosen* command, unsupervised or otherwise" —
+is **superseded**, together with the "the model never supplies a command" premise it rests on.
+Both are true of the **command** and false of the **argument**: `{path}` is the path the model has
+just written, so a `present.command` of `sh {path}` or `python {path}` does not *show* the model's
+file, it *runs* it — on a rung that fires with no approval and no confinement box, in every mode
+including Plan. The blast-radius bound §5 claims ("bounded by what can be presented") holds only
+while the configured application renders rather than executes, and nothing checked that.
+
+So: a `present_document` call reaches an **execution-capable** rung 3 — a non-empty
+`present.command` on a local session — **only when the file-only
+`present.command-on-model-documents` key is true**. Absent or false (the default), the ladder
+**skips** rung 3 and degrades straight to rung 0 rather than to rung 1, because `present.command`
+deliberately stands in for rung 1's mechanism (§2's rung 3) and quietly opening the document in
+an application the user did not choose would be the wrong repair. The tool result then names the
+key and the file that sets it, so the one person who can act on the degradation is told how. The
+key is **file-only** — `/settings` will not write it — because a capability of this shape is
+granted in the user's own config file, deliberately, and never from inside a session the model is
+talking in. Rung 3's own argv[0] is fenced as well (2026-09-22): the template names a *program*,
+so a bare `zed` is a PATH lookup at launch time, and a PATH entry the model may write is a program
+the model chose — it is resolved absolutely and refused inside the workspace exactly as rung 1's
+is. A user who never sets `present.command` sees no change at all: rung 1 is untouched by the key.
+
+**Nothing else moves.** §1 stands unchanged — `present_document` is still `ReadOnly`, still
+mode-**independent** and outside the Approval gate, still not an `ExternalEffectTool` — and the
+opt-in adds no tool class and no row to `docs/design/confinement-execution-contract.md` §4: it is
+a config fact the host reads, not a disposition. The **Presenter's fire-and-forget contract**
+(`domain.Presenter`) stands: the withheld rung asks no Approver and no Asker, acquires no prompt
+slot and blocks on no human. No ladder cell moves, and the amendments and note below are
+untouched. The rest of §5 stands too — the opener still runs host-side, outside tool confinement,
+and that is still deliberate.
 
 ## Considered options
 

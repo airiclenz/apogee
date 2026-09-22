@@ -2047,7 +2047,12 @@ executing). **Rung 2 (remote + browser-renderable)** — the
 plain text; every served document is answered under a restrictive `Content-Security-Policy`
 (`default-src 'none'`, bare `sandbox`) plus `nosniff`, which is what makes rung 2 the rung that
 may still show active content. **Rung 3** — the
-`present.command` config template replaces rung 1's opener. It **fails visible**: any rung above
+`present.command` config template replaces rung 1's opener, and is **execution-capable** by
+construction ({path} is a path the *model* chose, so `sh {path}` runs the document rather than
+showing it): on a document the model named it runs only when the file-only
+`present.command-on-model-documents` key is set, and with the key off (the default) the ladder
+**skips** rung 3 for rung 0 and the tool result names the key. Its argv[0] is resolved absolutely
+and refused inside the workspace exactly as rung 1's is. It **fails visible**: any rung above
 0 that fails degrades to rung 0 and the entry says what happened.
 _Avoid_: "fallback chain" (rung 0 is not a fallback — it always runs), "auto-open" for the whole
 thing (that is rung 1 only).

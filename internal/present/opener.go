@@ -81,6 +81,9 @@ type Opener struct {
 	// REPLACES the OS opener on every OS (ADR 0019 rung 3), including the ones that have no
 	// built-in opener: it is the user's own statement of how a document is shown on their
 	// machine, so it also stands in for the desktop check this type would otherwise make.
+	// WHETHER this rung may run on a document the MODEL named is not this type's call: the
+	// ladder withholds it unless present.command-on-model-documents is set (ADR 0019 §5's
+	// 2026-09-22 addendum), and a withheld rung never reaches the Opener at all.
 	CommandOverride string
 	// WorkspaceRoot is the workspace the model writes in — the fence neither rung's own program
 	// may resolve inside (resolveProgram). It is the same root the file tools are scoped to, wired
@@ -136,11 +139,15 @@ func (o Opener) Open(path string) error {
 // reads as ErrNoOpener, so the ladder degrades to the baseline rung exactly as it does for a
 // headless session (ADR 0019 §4, amended 2026-07-26).
 //
-// The bound stops at rung 3 on purpose: a present.command template names ONE application, so the
-// extension selects nothing there, and narrowing the user's own configured opener to a curated
-// list would refuse the source files and odd formats they configured it for. ADR 0019 §5's
-// reasoning holds on that rung — present.command is the user's own configuration, with the same
-// standing as their shell.
+// The EXTENSION bound stops at rung 3 on purpose: a present.command template names ONE
+// application, so the extension selects nothing there, and narrowing the user's own configured
+// opener to a curated list would refuse the source files and odd formats they configured it for.
+// What used to be said next — that ADR 0019 §5's reasoning holds unchanged on that rung, because
+// present.command is the user's own configuration with the same standing as their shell — is
+// superseded by §5's 2026-09-22 addendum: the configuration is the user's, but the ARGUMENT is
+// the model's, so an execution-capable rung 3 is withheld from a model-named document unless
+// present.command-on-model-documents opts it in. That gate lives in the ladder (internal/tui's
+// Presenter), not here; what this file bounds on rung 3 is argv[0], below.
 //
 // The OS table is the one every desktop documents: `open <path>` on macOS, `cmd /c start ""
 // <path>` on Windows (start's first quoted argument is the window TITLE, and omitting it makes

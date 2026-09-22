@@ -1977,13 +1977,23 @@ swept with the scratch directory. Nothing is set on an unconfined run: the comma
 environment exactly as your shell has it. The orientation block tells the model as much on
 its `Scratch dir:` line.
 
-One Linux fence is real but incomplete: on a kernel older than **6.2** (landlock ABI 1–2 —
+**Every Linux fence names the accesses it cannot cover**, and truncation is one of them: on a
+kernel older than **6.2** (landlock ABI 1–2 —
 Ubuntu 22.04, Debian 12, RHEL 9) the kernel has no way to restrict *truncation*, so a confined
 command still cannot create or write a file outside the workspace but can empty one that is
 already there. Auto is still fenced and still eligible; Apogee names the gap rather than
 implying a fence it does not have — `apogee probe` and `/confine` show it as
 `unfenced: truncate(2)` on the backend line, and Auto says it once at startup. A kernel 6.2 or
-newer closes it; until then, treat Auto's fence as create-and-write only.
+newer closes that one; until then, treat Auto's fence as create-and-write only.
+
+Network **deny** carries gaps of its own, which the same `unfenced:` field lists. Where landlock
+can claim network deny at all it still lets UDP datagrams out and still lets a command reach a
+UNIX socket named by path, so it discloses `connect(2) UDP` and `connect(2) AF_UNIX`; the
+namespace (bwrap) backend discloses `connect(2) AF_UNIX` for the same reason — its network
+namespace closes IP, not a socket the command opens through the filesystem. No kernel closes
+either one, so unlike truncation they are not waiting on a newer box. They are **not**
+write-class, so they stay off the startup notice and live on the backend line, where the full
+list is comma-separated.
 
 **On Windows the fence is a token, and the box is a mark on your disk.** No Windows
 facility takes "these paths are writable" as an argument, so the command runs under a
