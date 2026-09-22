@@ -683,7 +683,9 @@ and item 10's new ones. CHANGELOG sidecar, `[Unreleased]/Fixed`.
 **Acceptance.** `go build ./... && go test ./internal/platform/winlabel/... && GOOS=windows go vet ./internal/platform/winlabel/... && GOOS=windows go test -c -o /dev/null ./internal/platform/winlabel/`
 **Commit:** `fix(winlabel): a persisted verdict skips the label read, never the volume-root guardrail`
 
-## 12. A restored snapshot's roles, counts and sizes are checked before it is applied
+## 12. A restored snapshot's roles, counts and sizes are checked before it is applied — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the per-message size is measured as the message's content plus the arguments of any tool calls it carries — the two fields a forged payload can make arbitrarily large — rather than content alone.
 
 **What.** `fix(agent)`: the shape half of `apogee-mre`, the audit's Medium "session-snapshot
 ingestion restores untrusted history as committed conversation".

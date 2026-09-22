@@ -2,6 +2,7 @@ package agent
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -185,7 +186,107 @@ func decodeState(state json.RawMessage) (agentState, error) {
 	} else if err := json.Unmarshal(state, &st); err != nil {
 		return agentState{}, fmt.Errorf("apogee: decode session state: %w", err)
 	}
+	if err := checkRestoredShape(st.Conversation); err != nil {
+		return agentState{}, err
+	}
 	return st, nil
+}
+
+// The shape bounds a restored conversation must sit inside. A session file is untrusted input —
+// it is bytes on disk that any process with the user's privileges may have rewritten, and what
+// decodeState turns it into is COMMITTED history: messages the request projection sends to the
+// provider under roles apogee itself never wrote. So the decode seam checks the shape before the
+// swap, exactly as internal/session's store checks maxRecordBytes before it reads a record.
+//
+// Both numbers sit deliberately ABOVE what apogee's own tools can commit, because decodeState is
+// also the fork primitive behind CutSession: a threshold a legitimate session could cross would
+// make that session unresumable AND unforkable at once, permanently. maxRestoredMessageBytes is
+// therefore maxFileReadBytes (internal/tools/tools.go), the ceiling every read tool already
+// enforces on the file bodies it commits — a read_file with an explicit end_line over a one-line
+// file is byte-uncapped and survives the tool-result clamp whole, so a 10 MiB message is a shape
+// apogee itself produces and must keep restoring.
+const (
+	// maxRestoredMessages bounds the message count of a restored conversation.
+	maxRestoredMessages = 4096
+	// maxRestoredMessageBytes bounds a single restored message — its content plus the arguments
+	// of any tool calls it carries. It is internal/tools' maxFileReadBytes (10 MiB); the two
+	// constants live in different packages and are kept equal by the comment above, not by the
+	// compiler.
+	maxRestoredMessageBytes = 10 * 1024 * 1024
+)
+
+// ErrSnapshotRefused is the sentinel every shape refusal wraps: a restored conversation carrying a
+// role outside the four domain.Role constants, more messages than maxRestoredMessages, or a single
+// message past maxRestoredMessageBytes. It is returned BEFORE any state is swapped in, so a
+// refused payload leaves the live session — its conversation, task list, consoles and usage tally
+// — exactly as it was, on --resume, on RestoreSession and on CutSession alike.
+var ErrSnapshotRefused = errors.New("apogee: session snapshot refused")
+
+// checkRestoredShape reports whether conv is a shape apogee could have written. Three refusals,
+// all of them wrapping ErrSnapshotRefused:
+//
+//   - a role outside the four domain.Role constants. domain.Message.UnmarshalJSON assigns Role
+//     from the wire with no enum check, so a hand-edited payload can name any string at all —
+//     and the wire projections pass the roles they are given.
+//   - more than maxRestoredMessages messages, or a single message past maxRestoredMessageBytes.
+//   - a RoleSystem message past the conversation's LEADING run of them. Per ADR 0023 no committed
+//     message may be RoleSystem; the leading run is tolerated and dropped by dropLeadingSystem,
+//     because a legacy snapshot carries one there and normalizing it is lossless. A system message
+//     further in is neither: the Anthropic wire seam hoists it into the system prompt, so a crafted
+//     [user, system, assistant, ...] history would put attacker text where the engine's own
+//     standing instructions live. That one is REFUSED rather than stripped — silently editing a
+//     session's history is not a repair the human asked for.
+func checkRestoredShape(conv *domain.Conversation) error {
+	if conv == nil {
+		return nil
+	}
+	if n := conv.Len(); n > maxRestoredMessages {
+		return fmt.Errorf(
+			"apogee: decode session state: %d messages exceeds the %d-message limit: %w",
+			n, maxRestoredMessages, ErrSnapshotRefused,
+		)
+	}
+	var bad error
+	leading := true
+	conv.Range(func(i int, m domain.Message) bool {
+		switch m.Role {
+		case domain.RoleSystem:
+			if !leading {
+				bad = fmt.Errorf(
+					"apogee: decode session state: message %d is a system message past the leading run: %w",
+					i, ErrSnapshotRefused,
+				)
+			}
+		case domain.RoleUser, domain.RoleAssistant, domain.RoleTool:
+			leading = false
+		default:
+			bad = fmt.Errorf(
+				"apogee: decode session state: message %d has role %q, not one of the four roles: %w",
+				i, string(m.Role), ErrSnapshotRefused,
+			)
+		}
+		if bad == nil {
+			if n := messageBytes(m); n > maxRestoredMessageBytes {
+				bad = fmt.Errorf(
+					"apogee: decode session state: message %d is %d bytes, over the %d-byte limit: %w",
+					i, n, maxRestoredMessageBytes, ErrSnapshotRefused,
+				)
+			}
+		}
+		return bad == nil
+	})
+	return bad
+}
+
+// messageBytes is the size checkRestoredShape bounds: the message's content plus the arguments of
+// any tool calls it carries, the two fields a payload can make arbitrarily large. The rest of a
+// Message is ids, roles and flags.
+func messageBytes(m domain.Message) int {
+	n := len(m.Content)
+	for _, tc := range m.ToolCalls {
+		n += len(tc.Arguments)
+	}
+	return n
 }
 
 // CutSession returns a copy of snap with its last dropExchanges Exchanges removed and the loop
@@ -261,9 +362,13 @@ func exchangeOpenings(conv *domain.Conversation) []int {
 
 // dropLeadingSystem removes conv's leading RoleSystem messages and reports how many it dropped —
 // the restore-seam enforcement of ADR 0023's "no system message in committed history" invariant.
-// Only the LEADING run is dropped: that is the position buildRequest's seeded message and the wire
-// seam's tool-block fold collide with, and it leaves a hook-authored mid-history system message
-// (which Conversation.PrefixEnd deliberately still tolerates in a request) alone.
+// Only the LEADING run is dropped because only the leading run ever reaches here: a RoleSystem
+// message further in is REFUSED by checkRestoredShape before the payload is applied at all. This
+// once left such a message alone deliberately, on the ground that Conversation.PrefixEnd tolerates
+// one in a request; what that reasoning missed is that the payload is untrusted input, and the
+// wire seam hoists a mid-history system message into the system prompt. Normalizing the leading
+// run is lossless — it is the position buildRequest's seeded message and the wire seam's
+// tool-block fold collide with — so it stays a drop, and the rest is a refusal.
 func dropLeadingSystem(conv *domain.Conversation) int {
 	n := 0
 	for n < conv.Len() && conv.At(n).Role == domain.RoleSystem {
