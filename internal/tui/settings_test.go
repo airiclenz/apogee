@@ -1778,9 +1778,9 @@ func settingsToolsFoldOverRow() SettingRow {
 // "2026-09-17 - 01"): both Tools keys are the renderer's own and never reach the seam. `ui.tools-open`
 // lands on the Option and the transcript field the paint reads on the same keypress; `ui.tools-fold-over`
 // goes through the value buffer an int row opens — a count lands on both halves, and text a count
-// cannot be made of, or a negative one, is refused on the row and moves nothing (parseStallAfter's
-// posture: the binary validates before it writes, but the pane is not the only thing that can put a
-// value in that file).
+// cannot be made of, or a negative one, is refused on the row and moves nothing (the stall-after
+// row's posture: the binary validates before it writes, but the pane is not the only thing that can
+// put a value in that file).
 func TestSettingsToolsKeysApplyLocally(t *testing.T) {
 	t.Parallel()
 
@@ -1816,7 +1816,9 @@ func TestSettingsToolsKeysApplyLocally(t *testing.T) {
 	edit := func(t *testing.T, log *settingsWriteLog, text string) Model {
 		t.Helper()
 		m, _ := settingsEditModel(t, []SettingRow{row}, log)
-		m.setToolsFoldOver(5) // the shipped threshold, which testOpts' zero value does not carry
+		// The shipped threshold on both halves, which testOpts' zero value does not carry.
+		m.opts.UI.ToolsFoldOver = 5
+		m.transcript.setToolsFoldOver(5)
 		return step(t, typeSetting(t, step(t, m, keyEnter()), text), keyEnter())
 	}
 

@@ -2,10 +2,7 @@ package tui
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
-	"strings"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -237,10 +234,14 @@ func (m Model) autoBlastRadiusNote(pending settingEdit) string {
 // anything to do with it: routing them out to the binary and back would only give the pane a longer
 // way to reach its own state.
 //
-// A value the renderer's own vocabulary does not know is returned as an apply error rather than
-// silently ignored. The binary validates before it writes, so this cannot happen through the pane —
+// Every `ui.*` arm is the same two moves: the value lands on the Options' block through
+// [domain.UIPrefs.Set] — the one parser the config file, the registry rows and this pane share
+// (ADR 0043), so a spelling the file accepts is the spelling the pane accepts, and a refusal is
+// domain's own sentence — and then the widget that paints from it is told. The parse is domain's,
+// which is why a value the block does not know comes back as an apply error rather than being
+// silently ignored: the binary validates before it writes, so this cannot happen through the pane,
 // but the pane is not the only thing that can put a value in the file, and a spinner style this
-// build has no animation for is worth a sentence on the row.
+// build has no animation for is worth a sentence on the row. A refused Set has touched nothing.
 //
 // Two of these keys have more to say than "done": the note is the row's own sentence about the apply
 // (empty for a key that simply took effect), and the Cmd is what the apply needs the program to do
@@ -256,60 +257,78 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		if m.opts.OnAutoTitle != nil {
 			m.opts.OnAutoTitle(m.opts.AutoTitle)
 		}
-	case settingKeyShowScrollbar:
+	case domain.UIKeyShowScrollbar:
 		// The bar's gutter column is transcript width, which is why the option is in the frame key
 		// (paintcache.go): the repaint tail lays out again from it rather than leaving the column to
 		// the next resize.
-		m.opts.UI.ShowScrollbar = value == settingTrue
-	case settingKeySpinner:
-		style, err := ParseSpinnerStyle(value)
-		if err != nil {
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+	case domain.UIKeySpinner:
+		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
 		// Both halves: the option is the record of what is selected, m.spin is what paints. The
 		// frame counter is left where it is — every style's glyph indexes it modulo its own frame
 		// count — so a style swapped mid-run continues the animation instead of restarting it.
-		m.opts.UI.Spinner, m.spin.style = style, style
-	case settingKeySpinnerColor:
-		on := value == settingTrue
-		m.opts.UI.SpinnerColor, m.spin.color = on, on
-	case settingKeySkillSuggestions:
+		m.spin.style = m.opts.UI.Spinner
+	case domain.UIKeySpinnerColor:
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+		m.spin.color = m.opts.UI.SpinnerColor
+	case domain.UIKeySkillSuggestions:
 		// Nothing is laid out again and nothing is recomputed here: the band is derived from the
 		// draft where the frame is built, so the very next render already answers the new value —
 		// and an edit made from the /settings pane happens with no draft on screen anyway.
-		m.opts.UI.SkillSuggestions = value == settingTrue
-	case settingKeyTaskListOpen:
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+	case domain.UIKeyTaskListOpen:
 		// The value lands on every task-list card at once: this is the same sweep a click on a
 		// card takes (toggleTaskListFold), which is what makes a `/settings` edit and a hand-edited
 		// file apply live — and a resumed session, whose cards were seeded from the file, paint
 		// per the file. The sweep bumps the transcript's generation, so the repaint tail lays out
 		// again for the cards' moved height.
-		m.setTaskListOpen(value == settingTrue)
-	case settingKeyToolsOpen:
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+		m.transcript.setTaskListOpen(m.opts.UI.TaskListOpen)
+	case domain.UIKeyToolsOpen:
 		// The same shape of apply as the task list — the value lands on every large Tools umbrella
 		// at once through the one setter a header toggle takes (toggleToolsFold), so a `/settings`
-		// edit and a hand-edited file fold or open them live. The setter touches the transcript, so the repaint tail draws
-		// each umbrella afresh for its moved height.
-		m.setToolsOpen(value == settingTrue)
-	case settingKeyToolsFoldOver:
-		n, err := parseToolsFoldOver(value)
-		if err != nil {
+		// edit and a hand-edited file fold or open them live. The setter touches the transcript, so
+		// the repaint tail draws each umbrella afresh for its moved height.
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+		m.transcript.setToolsOpen(m.opts.UI.ToolsOpen)
+	case domain.UIKeyToolsFoldOver:
+		if err := m.opts.UI.Set(path, value); err != nil {
 			return m, "", nil, true, err
 		}
 		// Which umbrellas are large is a paint fact, so the setter touches the transcript: an
 		// umbrella the new threshold moves across the line gains or loses its glyph on the next frame.
-		m.setToolsFoldOver(n)
-	case settingKeyStallAfter:
-		after, err := parseStallAfter(value)
-		if err != nil {
-			return m, "", nil, true, err
-		}
+		m.transcript.setToolsFoldOver(m.opts.UI.ToolsFoldOver)
+	case domain.UIKeyStallAfter:
 		// Nothing is scheduled and nothing is laid out again: the threshold is read where the status
 		// line is painted, and the spinner already repaints it every frame while a turn runs.
-		m.opts.UI.StallAfter = after
-	case settingKeyColorScheme:
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, "", nil, true, err
+		}
+	case domain.UIKeyColorScheme:
+		// The screen first, the block second: applyColorScheme is what resolves the name and draws
+		// in it, and a Set BEFORE it would leave UI.ColorScheme naming a palette the screen is not
+		// drawn in when the resolve fails — the ADR 0031 Driver degrade with no resolver wired —
+		// which is what currentSchemeName (colorscheme.go) would then report as in force.
 		note, cmd, err := m.applyColorScheme(value)
-		return m, note, cmd, true, err
+		if err != nil {
+			return m, note, cmd, true, err
+		}
+		if err := m.opts.UI.Set(path, value); err != nil {
+			return m, note, cmd, true, err
+		}
+		return m, note, cmd, true, nil
 	case settingKeyCursorShape:
 		shape, err := ParseCursorShape(value)
 		if err != nil {
@@ -323,37 +342,6 @@ func (m Model) settingsApplyLocal(path, value string) (Model, string, tea.Cmd, b
 		return m, "", nil, false, nil
 	}
 	return m, "", nil, true, nil
-}
-
-// parseStallAfter reads the `ui.stall-after` row's value as the quiet threshold the status line
-// waits out, and refuses what a threshold cannot be. It restates the parse internal/config makes at
-// startup rather than calling it: neither package imports the other (ADR 0043, the 2026-08-21
-// amendment), and the whole of the contract is two lines of time.ParseDuration.
-//
-// The refusal is worded for the row it is rendered on: the key, what the key takes, and the text
-// that was offered, with no path in front of it.
-func parseStallAfter(value string) (time.Duration, error) {
-	after, err := time.ParseDuration(strings.TrimSpace(value))
-	if err != nil || after < 0 {
-		return 0, fmt.Errorf("ui.stall-after takes a length of time of 0 or more, like 90s or 2m "+
-			"(0 turns the quiet qualifier off), not %q", value)
-	}
-	return after, nil
-}
-
-// parseToolsFoldOver reads the `ui.tools-fold-over` row's value as the type-row count an
-// umbrella must exceed to be large, and refuses what a count cannot be — parseStallAfter's posture,
-// and for its reason: the parse restates internal/config's rather than calling it (ADR 0043), and
-// the whole contract is one strconv.Atoi and a floor of 0, the key's own spelling of "never".
-//
-// The refusal is worded for the row it is rendered on: the key, what it takes, and the text offered.
-func parseToolsFoldOver(value string) (int, error) {
-	n, err := strconv.Atoi(strings.TrimSpace(value))
-	if err != nil || n < 0 {
-		return 0, fmt.Errorf("ui.tools-fold-over takes a number of type rows of 0 or more "+
-			"(0 never folds a Tools umbrella), not %q", value)
-	}
-	return n, nil
 }
 
 // applyColorScheme puts a named colour scheme into effect on THIS screen — the live half of ADR
@@ -424,23 +412,16 @@ func colorSchemeWarningNote(n int) string {
 	}
 }
 
-// The registry paths this package names. settingKeyMode is the one key the pane MIRRORS after the
-// seam applied it (the footer's own copy); the rest are the renderer-owned keys settingsApplyLocal
-// puts into effect itself. Every other key is a path this package never spells — the binary's
-// dispatcher routes them by name, which is exactly the coupling ADR 0037 decision 2 keeps out here.
+// The registry paths this package spells on its own. settingKeyMode is the one key the pane MIRRORS
+// after the seam applied it (the footer's own copy); auto-title and cursor-shape are the two
+// renderer-owned keys that live outside the `ui:` block — the block's own keys are spelled once, in
+// domain ([domain.UIKeySpinner] and its siblings), which is the spelling [domain.UIPrefs.Set] takes.
+// Every other key is a path this package never spells — the binary's dispatcher routes them by
+// name, which is exactly the coupling ADR 0037 decision 2 keeps out here.
 const (
-	settingKeyMode             = "mode"
-	settingKeyAutoTitle        = "auto-title"
-	settingKeyShowScrollbar    = "ui.show-scrollbar"
-	settingKeySpinner          = "ui.spinner"
-	settingKeySpinnerColor     = "ui.spinner-color"
-	settingKeyColorScheme      = "ui.color-scheme"
-	settingKeyStallAfter       = "ui.stall-after"
-	settingKeySkillSuggestions = "ui.skill-suggestions"
-	settingKeyTaskListOpen     = "ui.task-list-open"
-	settingKeyToolsOpen        = "ui.tools-open"
-	settingKeyToolsFoldOver    = "ui.tools-fold-over"
-	settingKeyCursorShape      = "cursor-shape"
+	settingKeyMode        = "mode"
+	settingKeyAutoTitle   = "auto-title"
+	settingKeyCursorShape = "cursor-shape"
 )
 
 // taskListOpenSource is the label the fold gesture's one failure notice carries — the key's own
@@ -455,10 +436,10 @@ const taskListNotSavedNote = "not saved: "
 // setTaskListOpen moves the shared task-list fold on BOTH halves the Model keeps: the Option that
 // records the preference (Options.UI.TaskListOpen) and the transcript's seed-and-sweep
 // ([transcript.setTaskListOpen]), which puts every task-list card on screen into the new state and
-// seeds every card added after it. It is the one writer of either, so the two cannot drift: a
-// toggle on a card and an apply of `ui.task-list-open` both come through here, and neither touches
-// a card by hand. It is a pointer method because both its callers hold the Model they are already
-// returning.
+// seeds every card added after it. It is the gesture's writer of both: a toggle on a card comes
+// through here, and an apply of `ui.task-list-open` lands the Option through [domain.UIPrefs.Set]
+// and then makes the same transcript sweep (settingsApplyLocal) — neither touches a card by hand.
+// It is a pointer method because its caller holds the Model it is already returning.
 func (m *Model) setTaskListOpen(open bool) {
 	m.opts.UI.TaskListOpen = open
 	m.transcript.setTaskListOpen(open)
@@ -490,11 +471,11 @@ func (m Model) toggleTaskListFold() Model {
 	if m.opts.UI.TaskListOpen {
 		value = settingTrue
 	}
-	if err := m.opts.Settings.Write(settingKeyTaskListOpen, value); err != nil {
+	if err := m.opts.Settings.Write(domain.UIKeyTaskListOpen, value); err != nil {
 		m.transcript.addError(taskListOpenSource, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}
-	return m.recordSettingEdit(settingEdit{path: settingKeyTaskListOpen, value: value})
+	return m.recordSettingEdit(settingEdit{path: domain.UIKeyTaskListOpen, value: value})
 }
 
 // toolsOpenSource is the label the umbrella fold gesture's one failure notice carries — the key's
@@ -504,20 +485,12 @@ const toolsOpenSource = "tools-open"
 // setToolsOpen moves the shared Tools umbrella fold on BOTH halves the Model keeps: the Option that
 // records the preference (Options.UI.ToolsOpen) and the transcript field the paint reads
 // ([transcript.setToolsOpen]), which every large umbrella on screen answers to on the next frame.
-// It is the one writer of either, so the two cannot drift — a toggle on a header and an apply of
-// `ui.tools-open` both come through here — and a pointer method for setTaskListOpen's reason.
+// It is the gesture's writer of both — a toggle on a header comes through here, while an apply of
+// `ui.tools-open` lands the Option through [domain.UIPrefs.Set] and then moves the same transcript
+// field (settingsApplyLocal) — and a pointer method for setTaskListOpen's reason.
 func (m *Model) setToolsOpen(open bool) {
 	m.opts.UI.ToolsOpen = open
 	m.transcript.setToolsOpen(open)
-}
-
-// setToolsFoldOver moves the type-row threshold an umbrella is large above on both halves,
-// setToolsOpen's rule: the Option records the value, the transcript paints by it
-// ([transcript.setToolsFoldOver]). Only `ui.tools-fold-over`'s apply comes through here — no
-// gesture moves the threshold — but the same one-writer rule keeps the row and the paint agreeing.
-func (m *Model) setToolsFoldOver(n int) {
-	m.opts.UI.ToolsFoldOver = n
-	m.transcript.setToolsFoldOver(n)
 }
 
 // toggleToolsFold is what a click on a LARGE Tools umbrella's header, or ⏎ at the block cursor on
@@ -536,11 +509,11 @@ func (m Model) toggleToolsFold() Model {
 	if m.opts.UI.ToolsOpen {
 		value = settingTrue
 	}
-	if err := m.opts.Settings.Write(settingKeyToolsOpen, value); err != nil {
+	if err := m.opts.Settings.Write(domain.UIKeyToolsOpen, value); err != nil {
 		m.transcript.addError(toolsOpenSource, taskListNotSavedNote+err.Error(), runRef{})
 		return m
 	}
-	return m.recordSettingEdit(settingEdit{path: settingKeyToolsOpen, value: value})
+	return m.recordSettingEdit(settingEdit{path: domain.UIKeyToolsOpen, value: value})
 }
 
 // settingsApplyFailedNote opens the row's failure when the WRITE landed and the apply did not: the

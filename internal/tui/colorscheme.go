@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
 )
 
@@ -57,13 +58,13 @@ func (m Model) switchColorScheme(name string) (tea.Model, tea.Cmd) {
 		m.transcript.addError(colorSchemeSource, noSettingsWriterNote, runRef{})
 		return m, nil
 	}
-	if err := m.opts.Settings.Write(settingKeyColorScheme, name); err != nil {
+	if err := m.opts.Settings.Write(domain.UIKeyColorScheme, name); err != nil {
 		m.transcript.addError(colorSchemeSource, err.Error(), runRef{})
 		return m, nil
 	}
 	// The same journal entry the pane records, so a key changed from the transcript wears the pane's
 	// "changed this session" marker when the human next opens it (recordSettingEdit).
-	m = m.recordSettingEdit(settingEdit{path: settingKeyColorScheme, value: name})
+	m = m.recordSettingEdit(settingEdit{path: domain.UIKeyColorScheme, value: name})
 	warnings, cmd, err := m.applyColorScheme(name)
 	if err != nil {
 		m.transcript.addNote(settingsApplyFailedNote + err.Error())

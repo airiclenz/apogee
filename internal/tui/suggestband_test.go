@@ -9,6 +9,7 @@ import (
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/skills"
 )
 
@@ -185,9 +186,9 @@ func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
 			t.Fatal("no band to switch off")
 		}
 
-		m, _, _, handled, err := m.settingsApplyLocal(settingKeySkillSuggestions, "false")
+		m, _, _, handled, err := m.settingsApplyLocal(domain.UIKeySkillSuggestions, "false")
 		if err != nil || !handled {
-			t.Fatalf("settingsApplyLocal(%q, false) = handled %v, err %v", settingKeySkillSuggestions, handled, err)
+			t.Fatalf("settingsApplyLocal(%q, false) = handled %v, err %v", domain.UIKeySkillSuggestions, handled, err)
 		}
 
 		if m.renderSkillHints() != "" {

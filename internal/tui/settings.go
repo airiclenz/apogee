@@ -1003,7 +1003,7 @@ func settingsPickable(row SettingRow) bool {
 // changed under an open question is one list wherever it is read, and the accept can only ever take a
 // value the frame the human answered was showing.
 func (m Model) settingsVocabulary(row SettingRow) []string {
-	if row.Path == settingKeyColorScheme {
+	if row.Path == domain.UIKeyColorScheme {
 		if m.opts.Schemes == nil {
 			return nil // unwired: the row opens nothing rather than offering an empty list
 		}
