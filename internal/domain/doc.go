@@ -15,7 +15,7 @@
 //
 // # The files, one line each
 //
-// Twenty-five files, grouped by which part of the language each one carries.
+// Twenty-eight files, grouped by which part of the language each one carries.
 //
 // The construction surface and the session envelope. config.go is Config, the whole
 // construction surface (ADR 0001), plus the mode ladder it opens on — Mode, ParseMode,
@@ -24,7 +24,10 @@
 // channel, and the ToolRosterDelta a profile equips a model with (ADR 0057). uivocab.go is the presentation vocabulary a Driver is CONFIGURED
 // with — the spinner styles with their parse, the cursor-shape NAMES with their validator, and
 // the PreboundStart a session begins unbound with — homed here for ParseMode's reason, so the
-// config layer validates a spelling without importing a renderer (ADR 0043). session.go is the
+// config layer validates a spelling without importing a renderer (ADR 0043). uiprefs.go is the
+// `ui:` block as ONE value — UIPrefs with its defaults, its ten keys in template order, the
+// stall-after and tools-fold-over parsers, Validate, and the one Set every layer that carries the
+// block lands a key through. session.go is the
 // Session envelope, its SessionVersion and DecodeSession; the opaque State payload inside it
 // belongs to the engine. errors.go is the sentinel errors the root facade re-exports as vars,
 // each carrying the condition that raises it.

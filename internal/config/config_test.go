@@ -27,7 +27,7 @@ func intptr(n int) *int       { return &n }
 // default spinner style with its colour loop on, the transcript's scroll bar shown, the stall
 // guard waiting 120 seconds of engine silence out, the skill-suggestion band painting, the task-list cards open, and a Tools umbrella
 // folding past five type rows with large umbrellas starting folded. It is spelled out rather than taken from
-// defaultUISettings, so a change to any shipped default shows up here as a failure instead of
+// domain.DefaultUIPrefs, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
 var wantUIDefault = UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
 	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5}
@@ -4769,7 +4769,7 @@ func TestApplyConfigUIInspectorIsIndependentOfTheOtherUIKeys(t *testing.T) {
 		os.ReadFile, noNotify); err != nil {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
-	want := defaultUISettings()
+	want := domain.DefaultUIPrefs()
 	want.Inspector = true
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)

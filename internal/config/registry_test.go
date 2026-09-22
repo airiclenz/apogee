@@ -293,7 +293,7 @@ func TestSkillSuggestionsRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 	if got := row.Read(off); got != "false" {
 		t.Errorf("read of a session with the band off = %q, want \"false\"", got)
 	}
-	if got := row.Read(Options{UI: defaultUISettings()}); got != "true" {
+	if got := row.Read(Options{UI: domain.DefaultUIPrefs()}); got != "true" {
 		t.Errorf("read of an unconfigured session = %q, want \"true\"", got)
 	}
 }
@@ -325,7 +325,7 @@ func TestTaskListOpenRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 	if got := row.Read(folded); got != "false" {
 		t.Errorf("read of a session with the cards folded = %q, want \"false\"", got)
 	}
-	if got := row.Read(Options{UI: defaultUISettings()}); got != "true" {
+	if got := row.Read(Options{UI: domain.DefaultUIPrefs()}); got != "true" {
 		t.Errorf("read of an unconfigured session = %q, want \"true\"", got)
 	}
 }
@@ -356,7 +356,7 @@ func TestToolsOpenRowIsAnEditableBoolDefaultingOff(t *testing.T) {
 	if got := row.Read(open); got != "true" {
 		t.Errorf("read of a session with the umbrellas open = %q, want \"true\"", got)
 	}
-	if got := row.Read(Options{UI: defaultUISettings()}); got != "false" {
+	if got := row.Read(Options{UI: domain.DefaultUIPrefs()}); got != "false" {
 		t.Errorf("read of an unconfigured session = %q, want \"false\"", got)
 	}
 }
@@ -389,7 +389,7 @@ func TestToolsFoldOverRowIsAnEditableIntDefaultingFive(t *testing.T) {
 	if got := row.Read(never); got != "0" {
 		t.Errorf("read of a session that never folds = %q, want \"0\"", got)
 	}
-	if got := row.Read(Options{UI: defaultUISettings()}); got != "5" {
+	if got := row.Read(Options{UI: domain.DefaultUIPrefs()}); got != "5" {
 		t.Errorf("read of an unconfigured session = %q, want \"5\"", got)
 	}
 }
@@ -947,6 +947,56 @@ func TestRegistrySetIsTheInverseOfRead(t *testing.T) {
 			}
 			if !slices.Equal(moved, []string{field}) {
 				t.Errorf("Set moved the Options fields %v, want exactly [%s] — the field the row reads", moved, field)
+			}
+		})
+	}
+}
+
+// TestUIRowsLandThroughUIPrefsSet pins the `ui.*` rows to the block's own parser: for every one of
+// domain.UIKeys() there is a row, and landing a documented value through the row (row.Set — the
+// admission, then landUI) leaves the Options exactly where domain.UIPrefs.Set(key, value) on the
+// same block leaves it. That is the one-parser claim (ADR 0043) made testable: a row whose landing
+// wandered off the block's Set — or named its neighbour's key — is caught here.
+func TestUIRowsLandThroughUIPrefsSet(t *testing.T) {
+	t.Parallel()
+
+	// The defaults an empty file resolves to are the base, and every documented value below is
+	// off its default, so a landing that moved nothing is named too.
+	var resolved Options
+	mustApplyFile(t, &resolved, fileConfig{})
+	documented := map[string]string{
+		"ui.spinner": "classic", "ui.spinner-color": "false", "ui.show-scrollbar": "false",
+		"ui.color-scheme": "light", "ui.stall-after": "1m30s", "ui.inspector": "true",
+		"ui.skill-suggestions": "false", "ui.task-list-open": "false", "ui.tools-open": "true",
+		"ui.tools-fold-over": "12",
+	}
+
+	for _, key := range domain.UIKeys() {
+		t.Run(key, func(t *testing.T) {
+			t.Parallel()
+			row, ok := LookupKey(key)
+			if !ok || row.Set == nil {
+				t.Fatalf("no landing row for %s", key)
+			}
+			value, ok := documented[key]
+			if !ok {
+				t.Fatalf("no documented value for %s", key)
+			}
+
+			throughRow := resolved
+			if err := row.Set(value, &throughRow); err != nil {
+				t.Fatalf("row.Set(%q): %v", value, err)
+			}
+			throughBlock := resolved
+			if err := throughBlock.UI.Set(key, value); err != nil {
+				t.Fatalf("UI.Set(%s, %q): %v", key, value, err)
+			}
+
+			if throughRow.UI != throughBlock.UI {
+				t.Errorf("row.Set(%q) landed %+v; UIPrefs.Set landed %+v", value, throughRow.UI, throughBlock.UI)
+			}
+			if throughRow.UI == resolved.UI {
+				t.Errorf("row.Set(%q) moved nothing on the default block %+v", value, resolved.UI)
 			}
 		})
 	}

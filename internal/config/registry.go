@@ -676,21 +676,21 @@ var KeyRegistry = bindSetters([]Key{
 		Validate: validateSpinnerName,
 		Desc:     "The status-line spinner animation shown while a turn runs.",
 		Read:     func(o Options) string { return string(o.UI.Spinner) },
-		Set:      landIn(uiOf, UISettings.Validate, domain.ParseSpinnerStyle, func(u *UISettings) *domain.SpinnerStyle { return &u.Spinner }),
+		Set:      landUI(domain.UIKeySpinner),
 	},
 	{
 		Path: "ui.spinner-color", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Run the ten-second colour loop over the spinner glyph.",
 		Read:     func(o Options) string { return boolValue(o.UI.SpinnerColor) },
-		Set:      landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.SpinnerColor }),
+		Set:      landUI(domain.UIKeySpinnerColor),
 	},
 	{
 		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Paint the scroll bar on the transcript and on any overflowing popup, and reserve its column.",
 		Read:     func(o Options) string { return boolValue(o.UI.ShowScrollbar) },
-		Set:      landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.ShowScrollbar }),
+		Set:      landUI(domain.UIKeyShowScrollbar),
 	},
 	{
 		// A dynamic vocabulary (KindScheme), so EnumValues is empty and the surface asks the session
@@ -701,7 +701,7 @@ var KeyRegistry = bindSetters([]Key{
 		Validate: validateColorSchemeName,
 		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
 		Read:     func(o Options) string { return o.UI.ColorScheme },
-		Set:      landIn(uiOf, UISettings.Validate, asIs, func(u *UISettings) *string { return &u.ColorScheme }),
+		Set:      landUI(domain.UIKeyColorScheme),
 	},
 	{
 		// A length of time, which this table has no kind for — and one key is not a vocabulary, so it
@@ -714,7 +714,7 @@ var KeyRegistry = bindSetters([]Key{
 		// The threshold as a DURATION prints itself (`1m30s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
 		Read: func(o Options) string { return o.UI.StallAfter.String() },
-		Set:  landIn(uiOf, UISettings.Validate, parseStallAfter, func(u *UISettings) *time.Duration { return &u.StallAfter }),
+		Set:  landUI(domain.UIKeyStallAfter),
 	},
 	{
 		// No validate hook and none possible: a bool's kind IS its whole contract. Editable, and the
@@ -728,7 +728,7 @@ var KeyRegistry = bindSetters([]Key{
 		// started: a row edited mid-session goes on reporting the armed state until the next start,
 		// the same fact the description states.
 		Read: func(o Options) string { return boolValue(o.UI.Inspector) },
-		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.Inspector }),
+		Set:  landUI(domain.UIKeyInspector),
 	},
 	{
 		// A bool like ui.spinner-color beside it, and applied the same way: its whole effect is on
@@ -739,7 +739,7 @@ var KeyRegistry = bindSetters([]Key{
 		Desc: "Show the skills that fit the message you are typing in a band above the input box; " +
 			"Tab opens the / menu on them.",
 		Read: func(o Options) string { return boolValue(o.UI.SkillSuggestions) },
-		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.SkillSuggestions }),
+		Set:  landUI(domain.UIKeySkillSuggestions),
 	},
 	{
 		// A bool like ui.skill-suggestions beside it, applied the same way (the renderer's own
@@ -751,7 +751,7 @@ var KeyRegistry = bindSetters([]Key{
 		Desc: "Start with the task-list cards in the transcript open; a click on one folds them all " +
 			"and records the choice here.",
 		Read: func(o Options) string { return boolValue(o.UI.TaskListOpen) },
-		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.TaskListOpen }),
+		Set:  landUI(domain.UIKeyTaskListOpen),
 	},
 	{
 		// ui.task-list-open's twin for the Tools umbrella: a bool the renderer applies to itself and
@@ -763,7 +763,7 @@ var KeyRegistry = bindSetters([]Key{
 		Desc: "Large Tools umbrellas (more type rows than `ui.tools-fold-over`) start open; " +
 			"a click on one folds them all and records the choice here.",
 		Read: func(o Options) string { return boolValue(o.UI.ToolsOpen) },
-		Set:  landIn(uiOf, UISettings.Validate, strconv.ParseBool, func(u *UISettings) *bool { return &u.ToolsOpen }),
+		Set:  landUI(domain.UIKeyToolsOpen),
 	},
 	{
 		// A count, and the range is the whole contract — sessions.max-count's shape with a floor and
@@ -775,7 +775,7 @@ var KeyRegistry = bindSetters([]Key{
 		Validate: validateToolsFoldOver,
 		Desc:     "Type rows a Tools umbrella may show before it is large and obeys `ui.tools-open`; 0 makes none large.",
 		Read:     func(o Options) string { return strconv.Itoa(o.UI.ToolsFoldOver) },
-		Set:      landIn(uiOf, UISettings.Validate, strconv.Atoi, func(u *UISettings) *int { return &u.ToolsFoldOver }),
+		Set:      landUI(domain.UIKeyToolsFoldOver),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
@@ -863,7 +863,7 @@ var KeyRegistry = bindSetters([]Key{
 //
 // One function per key whose kind is not the whole of its contract (Key.Validate). Each is
 // the check the STARTUP path already makes for that key, called with the value as the file would
-// spell it: UISettings.Validate for the spinner name, ParseCursorShape for the caret, domain.ParseMode for
+// spell it: domain.UIPrefs.Validate for the spinner name, ParseCursorShape for the caret, domain.ParseMode for
 // the ladder, PresentSettings.Validate for the port.
 // Reusing them is the point — a value refused when it is typed at a surface and the same value
 // refused at launch are refused by one implementation, so the surface can never persist a config
@@ -1204,26 +1204,26 @@ func validatePresentPort(value string) error {
 }
 
 // validateSpinnerName refuses a spinner style this build has no animation for, through the startup
-// check itself — UISettings.Validate, which asks internal/domain (the package that owns the
-// vocabulary) and names the key the value was read from.
+// check itself — domain.UIPrefs.Validate, which asks the package that owns the vocabulary and
+// names the key the value was read from.
 func validateSpinnerName(value string) error {
-	return UISettings{Spinner: domain.SpinnerStyle(value)}.Validate()
+	return domain.UIPrefs{Spinner: domain.SpinnerStyle(value)}.Validate()
 }
 
 // validateStallAfter refuses a `ui.stall-after:` that is not a length of time to wait, through the
-// startup path itself: the yaml seam that reads the text (toUISettings) and the check that judges
-// what it made of it (UISettings.Validate). Going through the seam rather than calling
-// time.ParseDuration a second time is what keeps the two answers one answer — the empty value that
-// means "the default" and the `0` that means "off" are the seam's calls, not this hook's.
+// one parser every surface reads the key with (domain.ParseStallAfter): the file pass, this hook
+// and the landing (UIPrefs.Set) give one answer, so the empty value that means "the default" and
+// the `0` that means "off" are the parser's calls, not this hook's.
 func validateStallAfter(value string) error {
-	return uiConfig{StallAfter: &value}.toUISettings().Validate()
+	_, err := domain.ParseStallAfter(value)
+	return err
 }
 
 // validateSessionsMaxAge refuses a `sessions.max-age:` that is not a length of time to keep a
 // record for, through the startup path itself: the yaml seam that reads the text
-// (toSessionSettings) and the check that judges what it made of it (SessionSettings.Validate). It is
-// validateStallAfter's shape for validateStallAfter's reason — going through the seam is what keeps
-// the two answers one answer, so the empty value that means "the default" and the `0` that means
+// (toSessionSettings) and the check that judges what it made of it (SessionSettings.Validate).
+// Going through the seam rather than calling time.ParseDuration a second time is what keeps the
+// two answers one answer, so the empty value that means "the default" and the `0` that means
 // "for ever" are the seam's calls rather than this hook's.
 func validateSessionsMaxAge(value string) error {
 	return sessionsConfig{MaxAge: &value}.toSessionSettings().Validate()
@@ -1242,15 +1242,12 @@ func validateSessionsMaxCount(value string) error {
 }
 
 // validateToolsFoldOver refuses a `ui.tools-fold-over:` that is not a number of type rows, through
-// the same check startup makes on the parsed block (UISettings.Validate) rather than a second
-// range literal — validateSessionsMaxCount's shape.
+// the one parser every surface reads the key with (domain.ParseToolsFoldOver), which refuses a
+// count below zero in the sentence startup's block check (UIPrefs.Validate) refuses it in —
+// validateStallAfter's shape.
 func validateToolsFoldOver(value string) error {
-	n, err := strconv.Atoi(value)
-	if err != nil {
-		return fmt.Errorf("apogee: invalid ui.tools-fold-over %q: want a number of type rows "+
-			"(0 never folds)", value)
-	}
-	return UISettings{ToolsFoldOver: n}.Validate()
+	_, err := domain.ParseToolsFoldOver(value)
+	return err
 }
 
 // validateColorSchemeName refuses a name that could not be a scheme's file name — empty, or one
@@ -1425,8 +1422,18 @@ func land[T any](parse func(string) (T, error), at func(*Options) *T) func(strin
 	}
 }
 
+// landUI is the landing of a `ui.*` row: the canonical text through the block's own parser,
+// domain.UIPrefs.Set, which trims, parses per key, judges the edited copy and writes it back only
+// on success — landIn's contract, kept by the value itself rather than restated here, so the pane,
+// the file pass and the live apply read one parser (ADR 0043). The row names its key a second time
+// because it cannot name itself inside its own literal; TestUIRowsLandThroughUIPrefsSet holds the
+// two spellings together.
+func landUI(key string) func(string, *Options) error {
+	return func(canonical string, o *Options) error { return o.UI.Set(key, canonical) }
+}
+
 // landIn is the landing of a row that shares a carrier with its neighbours — one field of a block
-// the Options holds whole (`ui.*`, `present.*`, `sessions.*`). The edit runs on a COPY of the block,
+// the Options holds whole (`present.*`, `sessions.*`). The edit runs on a COPY of the block,
 // the block's own validator judges the copy — the same check startup makes on the parsed block, so
 // a field that is fine alone but wrong beside its siblings is refused here too — and only a copy
 // it accepts is written back: a Set that fails has touched nothing.
@@ -1451,8 +1458,7 @@ func landIn[B, T any](
 	}
 }
 
-// The three blocks a landIn row edits, named once so the rows read alike.
-func uiOf(o *Options) *UISettings            { return &o.UI }
+// The two blocks a landIn row edits, named once so the rows read alike.
 func presentOf(o *Options) *PresentSettings  { return &o.Present }
 func sessionsOf(o *Options) *SessionSettings { return &o.Sessions }
 
@@ -1473,20 +1479,10 @@ func parseList(canonical string) ([]string, error) {
 	return names, nil
 }
 
-// parseStallAfter reads a `ui.stall-after:` value through the yaml seam that reads it at startup
-// (toUISettings) — so the empty value that means "the default" and the `0` that means "off" are
-// the seam's calls here as they are there — refusing, in the block validator's own sentence, the
-// text the seam could make nothing of.
-func parseStallAfter(value string) (time.Duration, error) {
-	settings := uiConfig{StallAfter: &value}.toUISettings()
-	if err := settings.Validate(); err != nil {
-		return 0, err
-	}
-	return settings.StallAfter, nil
-}
-
 // parseSessionsMaxAge reads a `sessions.max-age:` value through its startup seam
-// (toSessionSettings), parseStallAfter's shape for parseStallAfter's reason.
+// (toSessionSettings) — so the empty value that means "the default" and the `0` that means "for
+// ever" are the seam's calls here as they are there — refusing, in the block validator's own
+// sentence, the text the seam could make nothing of.
 func parseSessionsMaxAge(value string) (time.Duration, error) {
 	settings := sessionsConfig{MaxAge: &value}.toSessionSettings()
 	if err := settings.Validate(); err != nil {

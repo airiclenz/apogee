@@ -8,12 +8,16 @@ import (
 	"sync"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // DefaultName is the built-in scheme every fallback lands on: the palette apogee has
 // always drawn with, apart from three roles retuned for legibility while the scheme
-// system was being built (`code`, `tool-header` and `tool-marker`).
-const DefaultName = "dark"
+// system was being built (`code`, `tool-header` and `tool-marker`). The name is
+// internal/domain's ([domain.DefaultColorSchemeName], the default a `ui:` block resolves
+// to), restated here so the loader's fallback and the config's default cannot drift.
+const DefaultName = domain.DefaultColorSchemeName
 
 // builtinFS carries the shipped schemes. They live in the binary, never on disk —
 // nothing installs them at boot and nothing fetches them from a network (ADR 0040).

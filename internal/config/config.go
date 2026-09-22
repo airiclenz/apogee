@@ -20,7 +20,6 @@ import (
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/prompt"
-	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tools"
 	"gopkg.in/yaml.v3"
 )
@@ -258,147 +257,17 @@ func (cf contextFilesSettings) resolved() []string {
 	return cf.names
 }
 
-// UISettings is the resolved `ui:` block, in the form the composition root hands the renderer
-// (wire.go's tui.Options). It is one struct rather than loose fields on [Options] for the same
-// reason PresentSettings is: the keys describe ONE subsystem and travel together, from the on-disk
-// block through resolution to the wire.
-//
-// The two spinner keys are deliberately INDEPENDENT. The colour loop is not a property of a style
-// and is not folded into the style name: it applies to whichever style spinner names, so all three
-// styles × colour on/off are valid combinations. Nothing here or downstream may key one off the
-// other.
-type UISettings struct {
-	// spinner names the status-line animation. It is carried as read (a name this build may not
-	// know) until validate parses it, so an unknown style is a startup error naming the key rather
-	// than a silent fall back to the default.
-	Spinner domain.SpinnerStyle
-	// spinnerColor runs the slow colour loop over whichever style spinner names. Default true;
-	// false leaves the glyph in the terminal's own text colour, which is the escape hatch for a
-	// terminal whose colour depth turns the gradient into steps.
-	SpinnerColor bool
-	// showScrollbar paints the transcript's scroll bar and reserves the column it hangs in. Default
-	// true; false takes both away together — a hidden bar that still ate a column would read as a
-	// bug — and the transcript body takes that width instead. It is process-constant, so the wrap
-	// width it decides never changes mid-run.
-	ShowScrollbar bool
-	// colorScheme names the palette every coloured thing on the screen takes its colour from: a
-	// built-in (dark, light) or a `<apogee-home>/schemes/<name>.yaml` the user wrote, which shadows
-	// a built-in of the same name. It is carried as a NAME rather than a resolved palette because
-	// resolution reads a file, which the composition root does at wiring time (wire.go) — and,
-	// unlike spinner, an unknown name is deliberately NOT a startup error: a scheme is cosmetic, so
-	// a typo costs a warning and the default palette rather than the session (ADR 0040 design
-	// call 8).
-	ColorScheme string
-	// stallAfter is how long the ENGINE may go silent mid-turn before the status line says so: past
-	// it the running phrase gains a bare `quiet` qualifier in front of its clock, which is the honest
-	// fact rather than a verdict — a slow turn and a dead one look identical from out here, and only
-	// the human can tell them apart. Default 120s, which clears the ingestion of a large prompt
-	// (legitimately silent for a minute or two on a local model); 0 turns it off. It is resolved to a
-	// DURATION here, unlike spinner beside it, because the renderer takes a duration and nothing
-	// downstream would gain from a second parse of the same text.
-	StallAfter time.Duration
-	// inspector arms the Inspector's wire capture: with it on, the engine reports the raw request
-	// and response bytes of every model call as domain.WireEvents, which `/inspect` shows. Default
-	// FALSE, and the off-state is a true zero — nothing is captured, accumulated or emitted — so the
-	// key costs a session that leaves it alone exactly nothing. It is read at STARTUP only (the
-	// observer is installed while the engine is constructed), so a mid-session edit takes effect at
-	// the next start; the template's key doc says so.
-	Inspector bool
-	// skillSuggestions paints the suggestion band above the input box: while the user types, the
-	// catalog's skills are ranked against the draft and the closest are named there (ADR 0061).
-	// Default TRUE, and the whole of what it gates is on the screen — nothing about the catalog
-	// reaches the model either way, so this key changes what the human is offered and never what the
-	// session sends. false leaves the band unpainted and the Tab that opens it inert.
-	SkillSuggestions bool
-	// taskListOpen is whether the transcript's task-list cards start open (every row painted) or
-	// folded to their counted header. Default TRUE, the shape the card had before it folded again.
-	// ONE shared state for every task-list card in the transcript: the renderer applies it to
-	// itself (settingsApplyLocal), and the fold gesture on any card writes the flip back here
-	// silently through the settings seam, so the choice outlives the session (ADR 0035 addendum).
-	// Screen-only, like skillSuggestions: nothing about it reaches the model.
-	TaskListOpen bool
-	// toolsOpen is whether a LARGE Tools umbrella in the transcript — one with more type rows than
-	// toolsFoldOver, by size alone, whatever the Turn is doing — starts open (every type row
-	// painted) or folded to its counted `✦ Tools (N calls)` header. Default FALSE: a large umbrella
-	// is a burst of calls, and folding it out of the box is the point. ONE shared state for every
-	// large umbrella, and taskListOpen's whole posture otherwise: the renderer applies it to itself,
-	// the fold gesture on any large umbrella writes the flip back here silently (ADR 0035 addendum),
-	// and nothing about it reaches the model. A small umbrella never reads it: it folds on its own
-	// session-only flag, which is written nowhere (ADR 0035, 2026-09-18 addendum).
-	ToolsOpen bool
-	// toolsFoldOver is how many type rows a Tools umbrella may show before it counts as large and
-	// obeys toolsOpen. Default 5. 0 is the documented "never": no umbrella has fewer than zero rows,
-	// so none is ever large and every one folds on its own session-only flag alone. Negative is
-	// meaningless and Validate refuses it.
-	ToolsFoldOver int
-	// unparsedStallAfter is a `stall-after:` value time.ParseDuration could make nothing of, kept as
-	// it was written so Validate can name the text the human typed rather than the value it failed
-	// to become. Empty on every config that resolves — including one that never named the key —
-	// because the yaml seam applies no judgement of its own (toUISettings) and Validate is the one
-	// place a ui block is refused.
-	unparsedStallAfter string
-}
+// UISettings is the resolved `ui:` block — [domain.UIPrefs], the one value the block is from the
+// file through resolution to the wire and the live apply, whose own parser (UIPrefs.Set) the
+// `ui.*` registry rows land through. The alias keeps this package's older spelling readable while
+// the callers move over.
+type UISettings = domain.UIPrefs
 
 // defaultStallAfterText is how long the engine may stay silent before the status line reports the
 // quiet, as the config file spells it — the value the starter template ships, so a config that
-// omits the key and one seeded on first run agree; defaultStallAfter is the same threshold
-// resolved. Long enough that ingesting a large prompt never trips it, short enough that a turn
-// which really has died is named while the human is still at the screen.
+// omits the key and one seeded on first run agree; domain.DefaultStallAfter is the same threshold
+// resolved, which TestRegistryDefaultsReadBackFromAnEmptyFile holds the two to.
 const defaultStallAfterText = "120s"
-
-var defaultStallAfter = mustParseDuration(defaultStallAfterText)
-
-// defaultUISettings is the resolved `ui:` block with nothing configured: the renderer's own default
-// style, with the colour loop on, the scroll bar shown, the default colour scheme, the shipped
-// quiet threshold the stall guard waits out, the Inspector disarmed (a false left at the zero
-// value: an off-state that captures nothing is the absence of the feature), the skill-suggestion
-// band on, the task-list cards open, and the Tools umbrella folding past five type rows with
-// large umbrellas starting folded (a false left at the zero value). The style is
-// ASKED of internal/domain (ParseSpinnerStyle's documented "" ⇒ the default) rather than restated here,
-// so the vocabulary and its default stay in the one package that owns them — the same reason
-// validate does not list the valid names, and the same reason the scheme name comes from
-// internal/scheme.
-func defaultUISettings() UISettings {
-	// ParseSpinnerStyle errors only on a style it does not know; "" is the request for the default,
-	// so this cannot fail.
-	style, _ := domain.ParseSpinnerStyle("")
-	return UISettings{
-		Spinner:          style,
-		SpinnerColor:     true,
-		ShowScrollbar:    true,
-		ColorScheme:      scheme.DefaultName,
-		StallAfter:       defaultStallAfter,
-		SkillSuggestions: true,
-		TaskListOpen:     true,
-		ToolsFoldOver:    5,
-	}
-}
-
-// validate rejects a ui block naming a spinner style this build has no animation for, a
-// `stall-after:` that is not a length of time to wait, or a `tools-fold-over:` below zero. Catching
-// them here makes a typo a startup error that names the key; left to the renderer they would
-// silently resolve to some other style and to the shipped threshold, and the user would be left
-// wondering why their setting did nothing.
-// The spinner's valid set comes from internal/domain, which owns the vocabulary — this only adds the
-// key the bad value was read from, which that package cannot know.
-func (u UISettings) Validate() error {
-	if _, err := domain.ParseSpinnerStyle(string(u.Spinner)); err != nil {
-		return fmt.Errorf("apogee: invalid ui.spinner: %w", err)
-	}
-	if u.unparsedStallAfter != "" {
-		return fmt.Errorf("apogee: invalid ui.stall-after %q: want a length of time like 90s or 2m, "+
-			"or 0 to turn the quiet qualifier off", u.unparsedStallAfter)
-	}
-	if u.StallAfter < 0 {
-		return fmt.Errorf("apogee: invalid ui.stall-after %s: want 0 or more, where 0 turns the "+
-			"quiet qualifier off", u.StallAfter)
-	}
-	if u.ToolsFoldOver < 0 {
-		return fmt.Errorf("apogee: invalid ui.tools-fold-over %d: want 0 or more, where 0 never "+
-			"folds a Tools umbrella", u.ToolsFoldOver)
-	}
-	return nil
-}
 
 // SessionSettings is the resolved `sessions:` block — the retention policy the session store is
 // swept against. It is one struct rather than loose fields on [Options] for UISettings' reason: the
@@ -496,7 +365,7 @@ func (s SessionSettings) Validate() error {
 //     no path for those sources to reach the key.
 //
 // Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
-// context-files keys, the four present keys, the seven ui keys — each write the whole block their key
+// context-files keys, the four present keys, the ten ui keys — each write the whole block their key
 // sits in, because the Options field IS that block and the block's own mapper (toUISettings and its
 // siblings) applies the defaults for whatever the file left out. The rows of one block therefore
 // write the same value, which is why they share one named projection. And confine-to-workspace's
@@ -967,7 +836,7 @@ var keyAccessors = []keyAccessor{
 		fromFile: filePresent,
 	},
 	{
-		// The seven `ui:` keys are one carrier, the `present:` block's shape — and independent axes
+		// The ten `ui:` keys are one carrier, the `present:` block's shape — and independent axes
 		// within it: naming a style does not turn the colour loop off (toUISettings).
 		row:      mustKey("ui.spinner"),
 		fromFile: fileUI,
@@ -1082,7 +951,7 @@ func setThroughRow(path string) func(o *Options, text string) error {
 }
 
 // The file projections shared by the key groups that resolve into ONE carrier: four system-prompt
-// keys, two context-files keys, four present keys and seven ui keys. Every key of a block writes the
+// keys, two context-files keys, four present keys and ten ui keys. Every key of a block writes the
 // whole block — the Options field IS the block, and the block's mapper defaults whatever the file
 // left out — so the rows of one block differ in nothing but the key they are described by, and a
 // named function is the honest way to say that. context-files is the one that is not a plain copy:
@@ -1104,7 +973,11 @@ func filePresent(o *Options, fc fileConfig) error {
 }
 
 func fileUI(o *Options, fc fileConfig) error {
-	o.UI = fc.ui()
+	ui, err := fc.ui()
+	if err != nil {
+		return err
+	}
+	o.UI = ui
 	return nil
 }
 
@@ -1125,7 +998,7 @@ func (fc fileConfig) present() PresentSettings {
 	return p.toPresentSettings()
 }
 
-func (fc fileConfig) ui() UISettings {
+func (fc fileConfig) ui() (UISettings, error) {
 	var u uiConfig
 	if fc.UI != nil {
 		u = *fc.UI
@@ -2495,12 +2368,12 @@ func (c contextFilesConfig) toContextFilesSettings() contextFilesSettings {
 	return s
 }
 
-// uiConfig is the on-disk schema for the `ui:` block. It mirrors UISettings with yaml tags;
+// uiConfig is the on-disk schema for the `ui:` block. It mirrors domain.UIPrefs with yaml tags;
 // toUISettings maps it across so the on-disk shape and the resolved value stay independently
 // evolvable (as presentConfig does for PresentSettings).
 type uiConfig struct {
 	// Spinner names the status-line animation — snake | glitter | classic. Empty ⇒ the default.
-	// It stays a raw string here: UISettings.Validate parses it once, so an unknown name reaches
+	// It stays a raw string here: UIPrefs.Validate parses it once, so an unknown name reaches
 	// startup as an error rather than being quietly dropped at the yaml seam.
 	Spinner string `yaml:"spinner"`
 	// SpinnerColor gates the colour loop over whichever style Spinner names — an INDEPENDENT key,
@@ -2520,8 +2393,9 @@ type uiConfig struct {
 	// length of time as `time.ParseDuration` spells it (`90s`, `2m`), or `0` to turn the qualifier off.
 	// A pointer for ShowScrollbar's reason turned inside out: here it is the explicit `0` — the
 	// documented spelling of "off" — that must be distinguishable from an absent key, which keeps
-	// the 120s default. It stays a raw string at this seam because the parse can FAIL, and a ui block
-	// is refused in one place (UISettings.Validate), never at the yaml boundary.
+	// the 120s default. It stays a raw string at this seam because the parse can FAIL, and the text
+	// is read by the one parser every surface reads the key with (domain.ParseStallAfter), whose
+	// refusal quotes it as written.
 	StallAfter *string `yaml:"stall-after"`
 	// Inspector arms the raw-protocol capture `/inspect` shows. A pointer for ShowScrollbar's
 	// reason — an explicit `inspector: false` is a fact about this config, not an absent key — even
@@ -2546,7 +2420,7 @@ type uiConfig struct {
 	// because the explicit `0` — the documented spelling of "never folds" — must be distinguishable
 	// from an absent key, which keeps the default of 5. An int rather than a raw string, unlike
 	// stall-after: yaml's own parse is the only one there is, and the one judgement (below zero) is
-	// UISettings.Validate's.
+	// UIPrefs.Validate's.
 	ToolsFoldOver *int `yaml:"tools-fold-over"`
 }
 
@@ -2554,11 +2428,14 @@ type uiConfig struct {
 // the block leaves out. A block that sets one key therefore leaves the others at their defaults,
 // which is what keeps the axes independent from the on-disk shape onward: naming a style does not
 // turn the colour loop off, turning the loop off does not change the style, and neither says
-// anything about the scroll bar.
-func (u uiConfig) toUISettings() UISettings {
-	s := defaultUISettings()
+// anything about the scroll bar. The one key the file carries as text a parse can FAIL on,
+// `stall-after:`, is read through domain.ParseStallAfter — the parser every surface reads the key
+// with — so the refusal is that parser's sentence, quoting the text as written, and it is made at
+// the file pass rather than at ResolveOptions (as `delegate-timeout` is).
+func (u uiConfig) toUISettings() (UISettings, error) {
+	s := domain.DefaultUIPrefs()
 	if u.Spinner != "" {
-		s.Spinner = domain.SpinnerStyle(u.Spinner) // validated by UISettings.Validate, not here
+		s.Spinner = domain.SpinnerStyle(u.Spinner) // validated by UIPrefs.Validate, not here
 	}
 	if u.SpinnerColor != nil {
 		s.SpinnerColor = *u.SpinnerColor
@@ -2570,17 +2447,14 @@ func (u uiConfig) toUISettings() UISettings {
 		s.ColorScheme = u.ColorScheme // resolved against the schemes folder by wire.go, not here
 	}
 	if u.StallAfter != nil {
-		// An empty value reads as an absent key, the posture the two string keys above take: what the
-		// pointer buys is telling an explicit `0` — the documented spelling of "off" — from a block
-		// that never named the key. Text no duration can be made of is carried AS WRITTEN for
-		// UISettings.Validate to refuse and to quote; this seam judges nothing.
-		if text := strings.TrimSpace(*u.StallAfter); text != "" {
-			if after, err := time.ParseDuration(text); err == nil {
-				s.StallAfter = after
-			} else {
-				s.unparsedStallAfter = text
-			}
+		// An empty value reads as an absent key, the posture the two string keys above take — the
+		// parser's own "" ⇒ the default: what the pointer buys is telling an explicit `0` — the
+		// documented spelling of "off" — from a block that never named the key.
+		after, err := domain.ParseStallAfter(*u.StallAfter)
+		if err != nil {
+			return UISettings{}, err
 		}
+		s.StallAfter = after
 	}
 	if u.Inspector != nil {
 		s.Inspector = *u.Inspector
@@ -2595,14 +2469,14 @@ func (u uiConfig) toUISettings() UISettings {
 		s.ToolsOpen = *u.ToolsOpen
 	}
 	if u.ToolsFoldOver != nil {
-		s.ToolsFoldOver = *u.ToolsFoldOver // refused below zero by UISettings.Validate, not here
+		s.ToolsFoldOver = *u.ToolsFoldOver // refused below zero by UIPrefs.Validate, not here
 	}
-	return s
+	return s, nil
 }
 
 // sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with
 // yaml tags; toSessionSettings maps it across so the on-disk shape and the resolved value stay
-// independently evolvable (as uiConfig does for UISettings).
+// independently evolvable (as uiConfig does for domain.UIPrefs).
 type sessionsConfig struct {
 	// MaxAge is how long a session record is worth keeping — a length of time as
 	// `time.ParseDuration` spells it (`720h`, `30m`), or `0` to turn the age rule off. A pointer for

@@ -365,11 +365,12 @@ type Options struct {
 	// reads at every session boundary.
 	ContextFiles []string
 
-	// ui is the resolved `ui:` block — the status-line spinner's animation and its colour loop.
-	// Loaded from the config file only, like present above. ApplyConfig sets it from the resolved
-	// settings (already validated against the styles this build knows); runRoot hands both values
-	// straight to the renderer as tui.Options.
-	UI UISettings
+	// ui is the resolved `ui:` block — one domain.UIPrefs, the value the block is from the file to
+	// the wire, whose own parser (UIPrefs.Set) the `ui.*` registry rows land through. Loaded from
+	// the config file only, like present above. ApplyConfig sets it from the resolved settings
+	// (already validated against the styles this build knows); runRoot hands it whole to the
+	// renderer as tui.Options.
+	UI domain.UIPrefs
 
 	// sessions is the resolved `sessions:` block — how old a saved session may get and how many may
 	// stand before a startup sweep discards the rest. Loaded from the config file only, like ui
