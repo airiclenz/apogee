@@ -175,9 +175,9 @@ func fillNoticeFirings(t *testing.T, lines []map[string]any) []string {
 func seedFillFixtures(t *testing.T, workspace string) {
 	t.Helper()
 
-	history := apogeectx.Allocate(fillNoticeWindow, 0, 0).History
+	history := apogeectx.Allocate(fillNoticeWindow, 0, 0, apogeectx.Measured{SystemPrompt: -1, FileContext: -1}).History
 	if history <= 0 {
-		t.Fatalf("Allocate(%d, 0, 0) allocated no History; the notice would have no line to measure against",
+		t.Fatalf("Allocate(%d, 0, 0, unmeasured) allocated no History; the notice would have no line to measure against",
 			fillNoticeWindow)
 	}
 	size := int(float64(history) * apogeectx.DefaultCharsPerToken * fillFixtureShare)

@@ -7,8 +7,9 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// TestAllocate_ReserveHonouredAndPartsSum pins the allocation arithmetic: the response reserve is
-// held back, and the four parts sum to the window exactly (no rounding drift, so ≤-window holds).
+// TestAllocate_ReserveHonouredAndPartsSum pins the allocation arithmetic on the UNMEASURED path:
+// the response reserve is held back, each standing part keeps the fixed fraction it reserved before
+// the Budget could measure, and the four parts sum to the window exactly (no rounding drift, so ≤-window holds).
 func TestAllocate_ReserveHonouredAndPartsSum(t *testing.T) {
 	cases := []struct {
 		name     string
@@ -28,7 +29,7 @@ func TestAllocate_ReserveHonouredAndPartsSum(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			a := Allocate(tc.window, tc.reserve, tc.fraction)
+			a := Allocate(tc.window, tc.reserve, tc.fraction, Measured{-1, -1})
 
 			if a.Window != tc.window {
 				t.Errorf("Window = %d, want %d", a.Window, tc.window)
@@ -58,11 +59,14 @@ func TestAllocate_ReserveHonouredAndPartsSum(t *testing.T) {
 }
 
 // TestAllocate_UnknownWindowIsZero pins the unbounded signal: a non-positive window has no basis to
-// allocate, so every field is zero and a consumer treats it as unbounded.
+// allocate, so every field is zero — a measurement of the standing parts cannot conjure room out
+// of a window nobody named — and a consumer treats it as unbounded.
 func TestAllocate_UnknownWindowIsZero(t *testing.T) {
 	for _, window := range []int{0, -1} {
-		if got := Allocate(window, 1024, 0.3); got != (Allocation{}) {
-			t.Errorf("Allocate(%d, …) = %+v, want the zero Allocation", window, got)
+		for _, measured := range []Measured{{-1, -1}, {0, 0}, {1000, 2000}} {
+			if got := Allocate(window, 1024, 0.3, measured); got != (Allocation{}) {
+				t.Errorf("Allocate(%d, …, %+v) = %+v, want the zero Allocation", window, measured, got)
+			}
 		}
 	}
 }
@@ -70,7 +74,7 @@ func TestAllocate_UnknownWindowIsZero(t *testing.T) {
 // TestAllocate_OversizeReserveClamped proves a reserve at/over the window is clamped so at least one
 // working token remains rather than leaving a zero (or negative) prompt budget.
 func TestAllocate_OversizeReserveClamped(t *testing.T) {
-	a := Allocate(1000, 5000, 0)
+	a := Allocate(1000, 5000, 0, Measured{-1, -1})
 	if a.ResponseReserve != 999 {
 		t.Errorf("ResponseReserve = %d, want it clamped to window-1 (999)", a.ResponseReserve)
 	}
@@ -108,11 +112,116 @@ func TestAllocate_ReservePrecedence(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Allocate(window, tc.reserve, tc.fraction).ResponseReserve; got != tc.wantReserve {
+			if got := Allocate(window, tc.reserve, tc.fraction, Measured{-1, -1}).ResponseReserve; got != tc.wantReserve {
 				t.Errorf("Allocate(%d, %d, %v).ResponseReserve = %d, want %d",
 					window, tc.reserve, tc.fraction, got, tc.wantReserve)
 			}
 		})
+	}
+}
+
+// TestAllocate_MeasuredPartsReserveWhatTheyMeasure pins the measured path: a part the caller
+// measured reserves that measurement plus the headroom, rounded up, and History takes what is
+// left — so standing content the session does not carry is never held back from the transcript. A
+// negative field still falls back to its fixed fraction, and the two paths mix freely.
+func TestAllocate_MeasuredPartsReserveWhatTheyMeasure(t *testing.T) {
+	// window 100000, default reserve 20% ⇒ reserve 20000, working room 80000.
+	const window = 100000
+	const working = 80000
+
+	cases := []struct {
+		name       string
+		measured   Measured
+		wantSystem int
+		wantFile   int
+	}{
+		{"both measured", Measured{SystemPrompt: 5000, FileContext: 12000}, 5500, 13200},
+		{"the headroom rounds up", Measured{SystemPrompt: 2001, FileContext: 2001}, 2202, 2202},
+		{"system unmeasured keeps its fraction", Measured{SystemPrompt: -1, FileContext: 12000}, 12000, 13200},
+		{"file unmeasured keeps its fraction", Measured{SystemPrompt: 5000, FileContext: -1}, 5500, 20000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := Allocate(window, 0, 0, tc.measured)
+
+			if a.SystemPrompt != tc.wantSystem || a.FileContext != tc.wantFile {
+				t.Errorf("reservations = {sys %d file %d}, want {sys %d file %d}",
+					a.SystemPrompt, a.FileContext, tc.wantSystem, tc.wantFile)
+			}
+			if want := working - tc.wantSystem - tc.wantFile; a.History != want {
+				t.Errorf("History = %d, want the remainder %d", a.History, want)
+			}
+			if a.SystemPrompt < 0 || a.FileContext < 0 || a.History < 0 || a.ResponseReserve < 0 {
+				t.Errorf("a part is negative: %+v", a)
+			}
+			if sum := a.ResponseReserve + a.SystemPrompt + a.FileContext + a.History; sum != window {
+				t.Errorf("parts sum = %d, want the window %d exactly: %+v", sum, window, a)
+			}
+		})
+	}
+}
+
+// TestAllocate_MeasuredPartFloorsAtTwoPercent proves a part that measures nothing — or next to
+// nothing — still reserves the 2% floor rather than zero, so a session that seeds its first context
+// file mid-run has room already held for it.
+func TestAllocate_MeasuredPartFloorsAtTwoPercent(t *testing.T) {
+	const window = 100000
+	const floor = 1600 // 2% of the 80000-token working room
+
+	for _, measured := range []Measured{{SystemPrompt: 0, FileContext: 0}, {SystemPrompt: 100, FileContext: 100}} {
+		a := Allocate(window, 0, 0, measured)
+
+		if a.SystemPrompt != floor || a.FileContext != floor {
+			t.Errorf("Allocate(…, %+v) reserved {sys %d file %d}, want both floored at %d",
+				measured, a.SystemPrompt, a.FileContext, floor)
+		}
+		if sum := a.ResponseReserve + a.SystemPrompt + a.FileContext + a.History; sum != window {
+			t.Errorf("parts sum = %d, want the window %d exactly: %+v", sum, window, a)
+		}
+	}
+}
+
+// TestAllocate_HistoryFloorScalesTheStandingParts proves the History floor holds against standing
+// content larger than the working room: History lands on exactly half the working room, the two
+// reservations are scaled down TOGETHER in proportion to what each asked for, and the parts still
+// sum to the window. Standing content that big is the oversize notice's job to report, never a
+// reason to starve the transcript.
+func TestAllocate_HistoryFloorScalesTheStandingParts(t *testing.T) {
+	const window = 100000
+	const working = 80000
+
+	// Reservations of 33000 and 66000 — one part twice the other — against the 40000 of working
+	// room above the floor: each is scaled by 40000/99000, so the 1:2 proportion survives.
+	a := Allocate(window, 0, 0, Measured{SystemPrompt: 30000, FileContext: 60000})
+
+	if want := working / 2; a.History != want {
+		t.Errorf("History = %d, want exactly %d (half the working room)", a.History, want)
+	}
+	if a.SystemPrompt != 13333 || a.FileContext != 26667 {
+		t.Errorf("scaled reservations = {sys %d file %d}, want {sys 13333 file 26667} — scaled together, 1:2 kept",
+			a.SystemPrompt, a.FileContext)
+	}
+	if sum := a.ResponseReserve + a.SystemPrompt + a.FileContext + a.History; sum != window {
+		t.Errorf("parts sum = %d, want the window %d exactly: %+v", sum, window, a)
+	}
+}
+
+// TestAllocate_StandingAdvisoryIsTheFixedShare pins the advisory ceiling the oversize notice reads
+// (ADR 0026): 15% of the working room whatever the standing parts measured — a ceiling that moved
+// with the measurement is one the notice could never cross.
+func TestAllocate_StandingAdvisoryIsTheFixedShare(t *testing.T) {
+	const window = 100000
+	const want = 12000 // 15% of the 80000-token working room
+
+	for _, measured := range []Measured{
+		{SystemPrompt: -1, FileContext: -1},
+		{SystemPrompt: 0, FileContext: 0},
+		{SystemPrompt: 5000, FileContext: 12000},
+		{SystemPrompt: 30000, FileContext: 60000},
+	} {
+		if got := Allocate(window, 0, 0, measured).StandingAdvisory; got != want {
+			t.Errorf("Allocate(…, %+v).StandingAdvisory = %d, want the fixed %d", measured, got, want)
+		}
 	}
 }
 

@@ -63,7 +63,14 @@ minus what the standing content actually measures, the band is 70%/50%, and six 
 - Sub-agent context-file injection (`apogee-vi5`).
 - A live-LLM check; everything here is driven in `go test`.
 
-## 1. `Allocate` measures the standing parts and floors History
+## 1. `Allocate` measures the standing parts and floors History — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the headroom and the 2% floor are applied as integer percentages (`standingHeadroomPercent = 110`, `standingFloorPercent = 2`, `ceilPercent`) rather than float factors — `12000 × 1.10` in float64 lands a hair above 13200, and rounding that up reserved a phantom token. The result is exactly the item's "measured × 1.10, rounded up".
+NOTES (2026-09-22): the cross-package call sites spell the unmeasured value `apogeectx.Measured{SystemPrompt: -1, FileContext: -1}` rather than the item's positional `Measured{-1, -1}`, because `go vet` (in this item's acceptance) refuses an unkeyed composite literal of an imported struct type. The in-package `internal/context/budget_test.go` cases keep the positional `Measured{-1, -1}` spelling the item names.
+NOTES (2026-09-22): consequential edit — internal/agent/budget_test.go: made necessary by Allocate's new parameter (two call sites pass the unmeasured value; assertions unchanged)
+NOTES (2026-09-22): consequential edit — internal/agent/turn_test.go: made necessary by Allocate's new parameter (one call site passes the unmeasured value)
+NOTES (2026-09-22): consequential edit — internal/agent/contextfiles_test.go: made necessary by Allocate's new parameter (one call site passes the unmeasured value)
+NOTES (2026-09-22): consequential edit — cmd/apogee/e2e_fillnotice_test.go: made necessary by Allocate's new parameter (`seedFillFixtures` passes the unmeasured value; its t.Fatalf text follows the new signature)
 
 **What.** In `internal/context/budget.go`, `Allocate` gains a measured input: the token size of the
 system-prompt part and of the file-context part (a small value type, e.g. `Measured{SystemPrompt,

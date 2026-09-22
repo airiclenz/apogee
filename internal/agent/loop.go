@@ -1434,7 +1434,10 @@ func (a *Agent) budget() domain.Budget {
 	if working := a.cfg.Context.WorkingWindow; working > 0 && (window <= 0 || working < window) {
 		limit = working
 	}
-	alloc := apogeectx.Allocate(limit, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction)
+	// The standing parts are unmeasured here, so each falls back to its fixed fraction of the
+	// working room (internal/context.Measured).
+	alloc := apogeectx.Allocate(limit, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction,
+		apogeectx.Measured{SystemPrompt: -1, FileContext: -1})
 	return domain.Budget{
 		Window:          window,
 		ContextLimit:    limit,
