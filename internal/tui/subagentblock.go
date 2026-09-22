@@ -628,6 +628,13 @@ func renderSubAgentMemberRows(th theme, tv toolView, marker string, width, room 
 // typed `done` where the report became a body — is not lost by the swap: subAgentSummary's last
 // cell is exactly that text, now behind the count of the work and the delegate's fill.
 //
+// The head's typed stat is REPLACED rather than carried: the slot a collapsed run falls back to is
+// the same composed line with the ENGINE's verdict (delegationStat) where the gist stood, so the
+// count and the fill survive a width the promote-guard refuses the gist at. The swap is the whole
+// of that demotion — [toolView.runVerdict] is what tells demoted() so, and nothing lands in a body,
+// a run's row having none to grow (ADR 0063). A head whose report became a body carries a blank
+// stat, wears no fallback and stays unpromotable, exactly as it did before.
+//
 // The BODY is dropped because the summary already carries the report's first line and no block says
 // the same thing twice in two adjacent rows — the defect this closed was exactly that, the report
 // laid out here in full above the formatted copy the span's last assistant row already held
@@ -643,6 +650,12 @@ func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
 	view := head.tool
 	view.Summary = subAgentSummary(head, span)
 	view.Details = toolBody{} // the zero body: no lines, and so nothing to lay out beneath
+	view.stat = statValue{}
+	if !head.tool.stat.blank() {
+		verdict := head.tool.stat.spell()
+		view.runVerdict = verdict
+		view.stat = plainStat(subAgentSummaryLine(head, span, verdict))
+	}
 	return view
 }
 
@@ -655,7 +668,10 @@ func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
 // The fill is the exact opposite: it is the head's OWN frozen reading (subAgentFill) and never a
 // nested run's, because each agent fills a window of its own. It sits between the count and the gist
 // so that the two readings a row always carries hold the left, and the gist — the one part with no
-// bound on its length — takes the clip a narrow terminal makes.
+// bound on its length — is the one cell a narrow row gives up: where the promote-guard refuses the
+// composed line, the row reads the SAME line with the engine's verdict in the gist's place
+// (subAgentSummaryLine, collapsedSubAgentView, toolView.demoted), so the count and the fill survive
+// the width and nothing lands in a body.
 //
 // A run with nothing to say beyond the count — no reading yet, nothing to add while it works, or a
 // report that carried no line at all — keeps the count alone rather than trailing an empty
@@ -681,26 +697,7 @@ func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
 // in the painter because this line is composed for every spanned member, reported or not, so the
 // gate on having reported has to stand where the cells are joined.
 func subAgentSummary(head paintInput, span []paintInput) branchSummary {
-	calls := 0
-	for i := range span {
-		if span[i].kind == entryToolCall {
-			calls++
-		}
-	}
-	text := plural(calls, "tool call")
-	if fill := subAgentFill(head); fill != "" {
-		text += " · " + fill
-	}
-	if gist := subAgentGist(head, span); gist != "" {
-		text += " · " + gist
-	}
-	if model := subAgentModel(head); model != "" {
-		text += " · " + model
-	}
-	if bound := subAgentStepCap(head); bound != "" && !subAgentReported(head) {
-		text += " · " + bound
-	}
-	summary := quotedSummary(detailLine{Text: text})
+	summary := quotedSummary(detailLine{Text: subAgentSummaryLine(head, span, subAgentGist(head, span))})
 	// The verdict is the HEAD's OWN (branchSummary.failed), carried onto the composed reading rather
 	// than re-derived from anybody's wording. This line opens with a count of the work, so its own
 	// words say nothing about how the run ended and a painter reading them would find no failure to
@@ -718,6 +715,39 @@ func subAgentSummary(head paintInput, span []paintInput) branchSummary {
 	// green in both readings of it.
 	summary.succeeded = head.tool.Summary.succeeded
 	return summary
+}
+
+// subAgentSummaryLine joins the cells of a collapsed run's one line — count, fill, gist, model, and
+// the step cap while the run is still working — in that order, skipping the gist cell when it is
+// empty. The gist is a PARAMETER rather than read from the head here because the line is composed
+// twice for the same run: once with the child's own gist (subAgentSummary), and once with the
+// engine's verdict in its place, which is the row a collapsed run falls back to when the
+// promote-guard refuses the first (collapsedSubAgentView, toolView.demoted). One joining serves
+// both so the fallback cannot drift into a second wording of the same row.
+//
+// Every other cell's rule is described where it is spelled: subAgentFill, subAgentModel and
+// subAgentStepCap. The order itself is subAgentSummary's — read the reasoning there.
+func subAgentSummaryLine(head paintInput, span []paintInput, gist string) string {
+	calls := 0
+	for i := range span {
+		if span[i].kind == entryToolCall {
+			calls++
+		}
+	}
+	text := plural(calls, "tool call")
+	if fill := subAgentFill(head); fill != "" {
+		text += " · " + fill
+	}
+	if gist != "" {
+		text += " · " + gist
+	}
+	if model := subAgentModel(head); model != "" {
+		text += " · " + model
+	}
+	if bound := subAgentStepCap(head); bound != "" && !subAgentReported(head) {
+		text += " · " + bound
+	}
+	return text
 }
 
 // subAgentModel spells the run head's model cell, or nothing at all. The entry holds a model only

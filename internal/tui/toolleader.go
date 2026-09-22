@@ -35,14 +35,17 @@ const promoteMinTargetCells = 15
 // guardPromotions settles the promote-guard for a whole block, before one row of it is painted: a
 // view whose promoted one-line output would leave the row less than promoteMinTargetCells of target
 // is replaced by its demoted reading, the line back in the body and the typed stat in the slot
-// (toolView.demoted).
+// (toolView.demoted) — except for a COLLAPSED RUN, where the demoted reading is the same composed
+// line with the engine's verdict where the report's gist stood (`1 tool call · done`) and nothing
+// lands in a body at all (toolView.runVerdict, subagentblock.go's collapsedSubAgentView).
 //
 // It runs HERE, at the block's entrance, rather than inside leaderRow, because demotion changes what
-// the block IS and not merely how one row prints: a demoted call has a body, so it now hides
+// the block IS and not merely how one row prints: a demoted CALL has a body, so it now hides
 // something when collapsed, and that is the very question the header's indicator, the click surface
 // and the slot's remainder count are all answered from (blockHidesWhenCollapsed). A guard applied at
 // the row would leave those three saying the call had nothing to reveal while the paint had just
-// hidden a line.
+// hidden a line. A demoted RUN grows no body and so moves none of those three: what it hides is its
+// whole span either way, and its report is a level down in the run's own view (ADR 0063).
 //
 // The answer depends on the WIDTH alone and never on the block's state, which is the leader row's
 // standing promise read one level up: a row that promoted its line collapsed and demoted it open

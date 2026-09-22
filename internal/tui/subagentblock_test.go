@@ -2209,3 +2209,125 @@ func TestSubAgentSkippedRowReadsItsResult(t *testing.T) {
 		}
 	})
 }
+
+// ----------------------------------------------------------------------------
+
+// The promote-guard drops a collapsed run's GIST and nothing else. A finished delegation whose
+// one-line report the presenter promoted into its slot used to paint a bare `done` at any width
+// the composed line could not be read at — the count and the fill gone, and the report pushed into
+// a body the row could not open (`+1 more line`), a run's row having no body under ADR 0063. It now
+// falls back to the SAME line with the engine's verdict where the gist stood, and nothing lands in
+// a body: the report is a level down, in the run's own view.
+func TestCollapsedRunKeepsItsCountWhenTheGistIsDemoted(t *testing.T) {
+	t.Parallel()
+
+	// A real one-line report, long enough that its composed line cannot be read at 80 cells but
+	// comfortable at 200 — which is the whole of what the guard is deciding between.
+	const sentence = "All scope files read once, caller checks done. Writing `OUT` now, then returning the receipt."
+	const fallback = "1 tool call · done"
+
+	t.Run("a width that holds the gist still reads it", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", sentence)
+
+		if got := renderPlain(tr, 200); !strings.Contains(got, "1 tool call · "+sentence) {
+			t.Errorf("wide row does not carry the promoted gist:\n%s", got)
+		}
+	})
+
+	t.Run("a narrow width keeps the count and grows no body", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", sentence)
+
+		got := renderPlain(tr, 80)
+		if !strings.Contains(got, fallback) {
+			t.Errorf("narrow row does not carry %q:\n%s", fallback, got)
+		}
+		if strings.Contains(got, "more line") {
+			t.Errorf("the demoted run grew a body it cannot open:\n%s", got)
+		}
+	})
+
+	// The fallback is the ENGINE's verdict, so the row keeps the green a finished run is painted in
+	// — live, and again after the record has been through the wire (fromWireToolView), which is the
+	// reading a resumed session opens on.
+	t.Run("the fallback wears the success tone, live and replayed", func(t *testing.T) {
+		t.Parallel()
+
+		th := newTheme(scheme.Default())
+		if !colorActive(th) {
+			t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+		}
+
+		painted := func(t *testing.T, tr *transcript) {
+			t.Helper()
+			row := ""
+			for _, ln := range tr.renderLines(th, 80) {
+				if strings.Contains(strip(ln), fallback) {
+					row = ln
+					break
+				}
+			}
+			if row == "" {
+				t.Fatalf("no painted row carries %q", fallback)
+			}
+			if !strings.Contains(row, th.successMark.Render(fallback)) {
+				t.Errorf("slot %q is not painted in the success role: %q", fallback, row)
+			}
+			if strings.Contains(row, th.toolMarker.Render(fallback)) {
+				t.Errorf("slot %q still wears the ordinary marker tone: %q", fallback, row)
+			}
+		}
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", sentence)
+		painted(t, tr)
+
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		painted(t, &transcript{entries: got})
+	})
+
+	// A grouped member falls back exactly as the lone run does. The claim is made on the FIRST
+	// member's row BY INDEX: the second member's report became a body, so its row already reads the
+	// fallback text at every width and a search for that text would find it instead.
+	t.Run("a grouped member falls back on its own row", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", sentence)
+		loneDelegation(tr, "s2", "build", "b.go", "Found 4 gaps\nin the suite")
+
+		// Line 0 is the block header, then one row per member in order.
+		row := strings.Split(renderPlain(tr, 80), "\n")[1]
+		if !strings.Contains(row, fallback) {
+			t.Errorf("first member's row = %q; want it to carry %q", row, fallback)
+		}
+	})
+
+	// The verdict the fallback spells is whatever the engine spelled, never a hard-coded `done`. The
+	// live presenter never promotes a capped report — its envelope marker is a second line — so the
+	// capped head is built the way a resumed record decodes to one.
+	t.Run("the fallback spells the verdict the engine gave", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", sentence)
+		tr.entries[0].tool.stat = plainStat(delegationBoundLead + "step cap")
+
+		const capped = "1 tool call · stopped at its step cap"
+		if got := renderPlain(tr, 80); !strings.Contains(got, capped) {
+			t.Errorf("narrow row does not carry %q:\n%s", capped, got)
+		}
+	})
+}

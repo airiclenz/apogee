@@ -1081,7 +1081,11 @@ depth — so one number says how much work happened in there, at every nesting l
 rule. The middle cell is the other half of that summary: **how full the delegate's own context
 got** (`12k/32k`), spelled in the unit-capped form the status line's gauge spells its window in so
 the two readings on screen are read in one language, and placed between the count and the gist so
-the gist — the one part with no bound on its length — is what a narrow terminal clips. It appears
+the gist — the one part with no bound on its length — is the one cell a narrow row gives up. Where
+the width leaves the row too little of its target to be worth reading, the promote-guard swaps that
+gist for the **engine's verdict** and the row reads the same line without it — `1 tool call · done`,
+`2 tool calls · 12k/32k · stopped at its step cap` — so the count and the fill survive every width
+and nothing lands in a body, the report staying one click away in the run's own view (ADR 0063). It appears
 **only once a reading exists**: a run whose child has not reported usage yet keeps the count alone
 rather than trailing an empty separator, which is the gauge's own rule about a number with no scale
 beside it. It **ticks as each of the child's Turns lands** and **freezes on the final reading**, so
