@@ -321,7 +321,7 @@ func (w *rootWiring) announceConfinement() {
 
 	// The unknown-window honesty line used to print here, before the alt-screen. It has moved into
 	// the TUI's rebind fold (ADR 0024): at this point in startup NOTHING has asked the server yet,
-	// so a launch-time notice would fire on every cold start and be wrong ten seconds later. The
+	// so a launch-time notice would fire on every cold start and be wrong one beat later. The
 	// first beat that binds a window without one is where the sentence is actually true.
 
 	// Eager pre-warm of the confinement label walk (ADR 0020 §2, the plan's approach A). On the

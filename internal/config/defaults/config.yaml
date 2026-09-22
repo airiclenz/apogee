@@ -53,7 +53,7 @@
 #   api-key    the bearer token that server wants, if it wants one — llama.cpp started with
 #              --api-key, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. It is
 #              sent as `Authorization: Bearer <key>` (`x-api-key: <key>` on the anthropic wire,
-#              below) on EVERY request to that server: your conversation, the ten-second
+#              below) on EVERY request to that server: your conversation, the periodic
 #              heartbeat, and both halves of `apogee probe`.
 #              Optional — leave it out for a keyless local server and no Authorization header is
 #              sent at all. APOGEE_API_KEY overrides it for the server this session starts on
@@ -98,7 +98,7 @@
 #   model      that server's model hint: which of the models it serves you mean. Optional —
 #              leave it out and the first heartbeat binds whatever is loaded, which is all a
 #              single-model server (e.g. llama.cpp's llama-server) needs; apogee then follows
-#              that server, rebinding within ten seconds whenever the loaded model changes
+#              that server, rebinding within a beat or so whenever the loaded model changes
 #              under a running session and saying so in the transcript. Set it and this id is
 #              what goes on the wire, advertised or not — the server's model list only supplies
 #              the context window, from the matching entry or, for a variant slug like
@@ -746,14 +746,14 @@ auto-title: true
 # on an ordinary multi-model server, and into its launch-profile: key (below) on a server fronted by
 # llama-launcher — so the next start binds the same model, and a launcher-fronted server has the
 # profile loaded again for you when nothing is serving there yet. Only a pick YOU made is recorded:
-# a model swapped under a running session (which apogee follows within ten seconds either way) is
+# a model swapped under a running session (which apogee follows within a beat either way) is
 # not, and neither are the one-shot --model / APOGEE_MODEL overrides. llama-launcher's own config is
 # never written — the pointer lives here, in apogee's file. /unload-model and /stop-server leave it
 # alone: they free the GPU, they do not forget what you were on. Config-file only (no flag or env).
 remember-model: true
 
 # =============================================================================
-# The model's context window in tokens. This one IS a pin: the ten-second heartbeat never overrides
+# The model's context window in tokens. This one IS a pin: the heartbeat never overrides
 # it, so a model switch still rebinds but the window stays exactly what you set here. Leave it unset
 # to discover the window from the server, live — including when the server switches models. Set it
 # only when your server does not advertise a window, or when its number is wrong for how you run it.

@@ -489,8 +489,8 @@ func (c *parallelAgentsCap) follow(entry config.ServerEntry) int {
 // could not say — so it is dropped rather than written, exactly as liveSettings.observe treats an
 // unnamed window.
 //
-// The install is unconditional rather than change-detecting: it is one mutex and one int on a
-// ten-second cadence, and a cap that is re-stated to the value it already had is indistinguishable
+// The install is unconditional rather than change-detecting: it is one mutex and one int on the
+// beat cadence, and a cap that is re-stated to the value it already had is indistinguishable
 // from one nobody touched.
 func (c *parallelAgentsCap) observe(slots int) int {
 	c.mu.Lock()

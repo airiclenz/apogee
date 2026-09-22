@@ -124,14 +124,17 @@ type rebindIntent struct {
 // offlineFailureThreshold is how many consecutive idle beat failures flip the footer offline once
 // a beat has ever landed. One failure is not evidence of an absent server: discovery's own timeout
 // can elapse on a server that is merely saturated, and a footer that flickers offline mid-session
-// would be worse than useless. Two (~15–25 s after the server actually went away) is the owner's
-// debounce. Before any beat has landed there is nothing to weigh against, so a cold start says so
+// would be worse than useless. Two is the owner's debounce, and the window it buys is read off the
+// constants rather than fixed: at best heartbeat.Interval + provider.DiscoveryTimeout after the
+// server actually went away, at worst twice that interval plus that timeout (~90–150 s at today's
+// values). The window widened with the probe budget, which is the price of not calling a saturated
+// local server dead — this supersedes ADR 0024's "~15–25 s" debounce line. Before any beat has landed there is nothing to weigh against, so a cold start says so
 // on the first failure — see foldBeatFailure.
 const offlineFailureThreshold = 2
 
 // onlineNote and offlineNote word the two transitions, each recorded exactly once per crossing
 // (the saveFailing fail-once posture): a heartbeat that noted every failed beat would fill the
-// transcript with one line every ten seconds while a server is down.
+// transcript with one line every heartbeat.Interval while a server is down.
 const onlineNote = "server back online"
 
 // offlineNote words the offline crossing, naming why the server could not be read when the monitor
@@ -228,7 +231,7 @@ func (m Model) foldBeatMsg(msg beatMsg) (tea.Model, tea.Cmd) {
 	if noted {
 		// Only a beat that MOVED something — the offline state, a binding, or the rows of an open
 		// picker — lays out: a beat that changed nothing has nothing to draw, so re-rendering the
-		// whole transcript every ten seconds would be work for its own sake. (It no longer costs a
+		// whole transcript on every beat would be work for its own sake. (It no longer costs a
 		// live drag-selection: a repaint that appends a note leaves the spanned lines alone, and
 		// refreshViewport's keep-if-unchanged rule keeps the selection through it. Economy, not
 		// correctness.)
@@ -374,7 +377,7 @@ func (m Model) observeBinding(beat heartbeat.Beat, firstContact bool) (Model, bo
 // until the next usage event or a compaction re-measures it).
 //
 // A failure leaves every binding exactly where it was and says so ONCE per distinct target: the
-// monitor beats every ten seconds, and a transcript repeating the same refusal at that rate would
+// monitor beats every heartbeat.Interval, and a transcript repeating the same refusal at that rate would
 // bury the conversation it is meant to annotate (the saveFailing fail-once posture).
 func (m Model) applyRebind(intent rebindIntent) (Model, bool) {
 	if !m.appliesRebinds() {
@@ -597,7 +600,7 @@ func windowWord(n int) string {
 // first beat binds through the ordinary rebind path — one code path with the cold start. ctxUsed
 // survives, exactly as it survives a model rebind. The returned Cmd is that first beat, fired NOW
 // rather than one Interval from now: the human just acted and should not watch "connecting…" for
-// ten seconds.
+// a whole beat interval.
 func (m Model) foldServerSwitch(from string, result ServerSwitchResult, record choiceRecord) (tea.Model, tea.Cmd) {
 	m.opts.Endpoint = result.Endpoint
 	m.opts.HostAlias = result.HostAlias

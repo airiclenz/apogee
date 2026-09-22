@@ -101,9 +101,8 @@ func newRootCommandWith(launch launcher, deps rootDeps, subs ...*cobra.Command) 
 				}
 				opts.Prebound = undetermined.Start
 			}
-			// Nothing asks the server anything here. Startup used to stall for up to five seconds
-			// on a discovery probe — and hard-fail when no model was configured and the server was
-			// down — which made a coding tool unusable exactly when the server needed attention.
+			// Nothing asks the server anything here. Startup used to stall for a whole discovery
+			// probe budget — and hard-fail when no model was configured and the server was down — which made a coding tool unusable exactly when the server needed attention.
 			// The TUI now paints immediately and the heartbeat fires its first beat from Init, so
 			// discovery is late and continuous rather than early and once (ADR 0024, decision 8):
 			// the same beat that late-seeds a cold start refreshes a running one.

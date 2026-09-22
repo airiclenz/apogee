@@ -19,16 +19,20 @@ import (
 	"context"
 	"errors"
 	"net/http"
-	"time"
 
 	"github.com/airiclenz/apogee/internal/provider"
 )
 
-// Interval is the monitor's cadence. It is a named constant, not a config key — the owner
-// fixed ten seconds. provider.Discover's own five-second timeout keeps a beat strictly
-// shorter than the interval, and the caller re-arms only from a landed beat, so beats can
-// never overlap.
-const Interval = 10 * time.Second
+// Interval is the monitor's cadence. It is a named constant, not a config key — and it is
+// DERIVED rather than stated: twice provider.DiscoveryTimeout, the bound on the probe each beat
+// makes. That is what keeps a beat strictly shorter than the interval BY CONSTRUCTION — no pair of
+// independently written constants can drift into overlapping beats — and the caller re-arms only
+// from a landed beat, so beats can never overlap either way.
+//
+// This supersedes ADR 0024's recorded ten-second cadence: that cadence was weighed against a
+// five-second probe budget, and the budget is now sized for a saturated local server, so the
+// cadence follows it rather than being restated beside it.
+const Interval = 2 * provider.DiscoveryTimeout
 
 // ModelSummary is one model the Upstream advertises through GET /v1/models. The list travels
 // on every Beat so a caller can hold the current offering in state — the data layer the TUI's

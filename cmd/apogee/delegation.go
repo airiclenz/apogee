@@ -193,7 +193,7 @@ type delegationWiring struct {
 	// keys resolves the named entry's key source. It is asked on every beat rather than once at
 	// wiring time, and that is the whole reason a resolver caches: the command runs on the first
 	// beat and the ten thousand after it read the answer — while a beat whose resolution FAILED
-	// asks again ten seconds later, which is what lets a keychain the human unlocks mid-session
+	// asks again one interval later, which is what lets a keychain the human unlocks mid-session
 	// bring the Sub-agent server back without a relaunch.
 	keys *config.KeyResolver
 	// engine is where a resolved target is latched.
@@ -365,9 +365,10 @@ func subAgentBeat(entry config.ServerEntry) func(context.Context, string) heartb
 // observe starts one beat on the Sub-agent server and hands back the join for it. With no Sub-agent
 // server there is nothing to observe and the join is a no-op — no goroutine, no push, no latch.
 //
-// It is split into start-and-join because the session's beat runs in the same window: two five-second
-// discoveries in SERIES would be exactly heartbeat.Interval, and that package's no-overlap property
-// rests on a beat staying strictly shorter than the interval. Run side by side they cost the longer
+// It is split into start-and-join because the session's beat runs in the same window: heartbeat.Interval
+// is twice provider.DiscoveryTimeout by construction, so two full-budget discoveries in SERIES would be
+// exactly that interval, and that package's no-overlap property rests on a beat staying strictly
+// shorter than it. Run side by side they cost the longer
 // of the two, so the second server is observed on the same cadence without slowing the first.
 //
 // What it resolves against is a SNAPSHOT taken before the goroutine starts: the entry and its beat
@@ -849,7 +850,7 @@ func resolveDelegationTarget(
 	}
 	// The shape the grunt model speaks the wire in, matched on the model that just resolved (ADR
 	// 0044). The notice half of the match is deliberately dropped: it explains a built-in match of
-	// the model the HUMAN is looking at, and this resolution re-runs every ten seconds on a model
+	// the model the HUMAN is looking at, and this resolution re-runs on every beat on a model
 	// they are not — a beat is no place to repeat a sentence.
 	profile, _ := resolveModelProfile(model, userProfiles)
 	// The wire shape this server reads a thinking-effort intent in, pin-else-observe like every

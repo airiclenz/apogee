@@ -62,7 +62,35 @@ the **Goal** restated so the item's own Acceptance checks it; supersedes this bl
 - Any version identifier, release heading or `CHANGELOG.md` edit (item sidecars carry those).
 - `internal/tuitest`'s already-cured constants (commit `31f44f75`) and the fan-out test it fixed.
 
-## 1. The discovery probe is sized for a saturated local server, and the beat interval derives from it
+## 1. The discovery probe is sized for a saturated local server, and the beat interval derives from it — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): consequential edit — internal/provider/client.go: made necessary by exporting discoveryTimeout as provider.DiscoveryTimeout (the discoveryDeadline field comment and WithDiscoveryTimeout's "default 5s" doc both named the old symbol/value).
+
+NOTES (2026-09-22): consequential edit — internal/config/config.go: made necessary by the derived cadence (two comments stated the heartbeat asks "every ten seconds").
+
+NOTES (2026-09-22): consequential edit — internal/config/defaults/config.yaml: made necessary by the derived cadence (four user-facing template comments stated the ten-second heartbeat).
+
+NOTES (2026-09-22): consequential edit — cmd/apogee/root.go: made necessary by the raised probe budget (the comment quoted a five-second startup stall).
+
+NOTES (2026-09-22): consequential edit — cmd/apogee/wire_verbs.go: made necessary by the raised probe budget ("two five-second discoveries").
+
+NOTES (2026-09-22): consequential edit — cmd/apogee/delegation.go: made necessary by the derived cadence (three comments quoting ten seconds / two five-second discoveries; the "two discoveries in series would be exactly heartbeat.Interval" claim is now restated from the 2× relation, which still holds exactly).
+
+NOTES (2026-09-22): consequential edit — cmd/apogee/wire_boot.go: made necessary by the derived cadence ("wrong ten seconds later").
+
+NOTES (2026-09-22): consequential edit — cmd/apogee/upstream.go: made necessary by the derived cadence ("a ten-second cadence").
+
+NOTES (2026-09-22): consequential edit — internal/tui/heartbeat_test.go: made necessary by the derived cadence (six comments and one failure message quoting ten seconds).
+
+NOTES (2026-09-22): consequential edit — docs/manual/configuration.md: made necessary by the derived cadence (three user-facing sentences quoting the ten-second heartbeat).
+
+NOTES (2026-09-22): consequential edit — CONTEXT.md: made necessary by the derived cadence (the Heartbeat entry stated "every ten seconds"; it now states the derivation and "about a minute").
+
+NOTES (2026-09-22): docs/adr/0024 and docs/adr/0028 are left as written — they are the historical record, and the item's guard asks only that the supersession be NAMED where the constants are restated, which internal/heartbeat/heartbeat.go and internal/tui/heartbeat.go now do.
+
+NOTES (2026-09-22): the guard grep's remaining hits are unrelated to this item's constants (the spinner colour lap, the shutdown grace, reaction kill grace, and several test-local budgets) and were left alone.
+
+NOTES (2026-09-22): the longer cadence has a real suite cost: `TestE2ESeatDelegationsLineSurvivesATargetDownBeat` waits for two real failed beats and now takes ~122 s (it passes). Its wait was re-anchored to `2*heartbeat.Interval + tuitest.DefaultTimeout` as the item directs, so the allowance is added to the pair rather than multiplied by the interval.
 
 **What.**
 **Goal:** a discovery probe against a local server that answers slowly does not fail, and the

@@ -926,7 +926,7 @@ a result naming it, so the model learns the spelling instead of silently losing 
 and an empty list is the same as no list at all.
 
 The context **window** these budgets are measured against is discovered from the
-server — live, not once: apogee asks every ten seconds, so switching the loaded model
+server — live, not once: apogee asks about once a minute, so switching the loaded model
 under a running session re-binds the window with it. Set `context-window:` (a file-only
 key, in tokens) only when your server does not advertise a window, or when its number is
 wrong for how you run it; that key is a **pin** the heartbeat never overrides. It takes a
@@ -1525,7 +1525,7 @@ See [ADR 0069](../adr/0069-the-top-level-model-picks-the-delegation-seat.md).
 A local server usually wants no credentials, but some do: llama.cpp started with
 `--api-key`, LM Studio, a remote vLLM, any keyed OpenAI-compatible proxy. Give
 apogee that token and it rides **every** wire to the endpoint as
-`Authorization: Bearer <key>` — your conversation, the ten-second heartbeat, and
+`Authorization: Bearer <key>` — your conversation, the periodic heartbeat, and
 both halves of `apogee probe` — so a keyed server never leaves the footer stuck
 on a `401` while the session works. It belongs to the server that wants it, so it
 lives in that server's entry:
@@ -1632,7 +1632,7 @@ Apogee imports it as a library, so three commands act on this machine's servers:
 All three are ordinary menu rows. The last two name what they act on, which is what makes
 them safe to offer: neither can touch anything but the server this session is talking to.
 
-Apogee never becomes a process manager. The launcher **actuates**, the ten-second
+Apogee never becomes a process manager. The launcher **actuates**, the periodic
 heartbeat **observes**, and it is the next beat that binds whatever it finds — the same
 path a model changed from the server side already travels. A profile that resolves to
 another server moves the session there, conversation and all, exactly like `/server`; a

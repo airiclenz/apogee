@@ -25,7 +25,7 @@ import (
 // The tick chain is proven the way the spinner's is (TestSpinnerTickChainGeneration): synthetic
 // Msgs into Update, asserting the state, the transcript, and whether a Cmd was scheduled. Only the
 // two Init tests actually RUN a Cmd; every fold test feeds the beat directly, so nothing waits on
-// a real ten-second interval.
+// a real beat interval.
 
 // fakeHeartbeat is a scripted beat source. Each call yields the next beat in the script and the
 // last one repeats forever, so "down, down, then up" can be beaten as many times as a test likes.
@@ -181,8 +181,8 @@ func firstBeat(t *testing.T, cmd tea.Cmd) beatMsg {
 // ----------------------------------------------------------------------------
 
 // The first beat fires from Init, not one interval later: startup discovery IS that beat now, so
-// the footer must stop saying "connecting…" as soon as the server answers rather than ten seconds
-// after the TUI paints.
+// the footer must stop saying "connecting…" as soon as the server answers rather than one beat
+// interval after the TUI paints.
 func TestInitFiresImmediateBeat(t *testing.T) {
 	t.Parallel()
 
@@ -334,7 +334,7 @@ func TestOfflineDebouncesAtIdle(t *testing.T) {
 
 	m = foldBeatMsg(t, m, downBeat("timeout"))
 	if n := countNotes(m, "server offline"); n != 1 {
-		t.Errorf("a further failed beat noted the crossing again (%d notes); the transcript would fill at one line per ten seconds", n)
+		t.Errorf("a further failed beat noted the crossing again (%d notes); the transcript would fill at one line per beat", n)
 	}
 }
 
@@ -1063,7 +1063,7 @@ func TestWindowOnlyChangeRebinds(t *testing.T) {
 
 // A beat that cannot name a window reports 0, which is the ABSENCE of an observation rather than an
 // observation of absence: it must never be mistaken for the window having changed, or a server with
-// no /props would rebind every ten seconds forever.
+// no /props would rebind on every beat forever.
 func TestZeroWindowBeatIsNotAChange(t *testing.T) {
 	t.Parallel()
 
@@ -1159,7 +1159,7 @@ func TestPinnedWindowResultSticks(t *testing.T) {
 }
 
 // A rebind that cannot be resolved leaves every binding where it was and says so — once per target.
-// The monitor beats every ten seconds; repeating one refusal at that rate would bury the
+// The monitor beats every heartbeat.Interval; repeating one refusal at that rate would bury the
 // conversation it annotates.
 func TestRebindFailureNotedOnce(t *testing.T) {
 	t.Parallel()
@@ -1229,7 +1229,7 @@ func TestRebindNilIsDisplayFrozen(t *testing.T) {
 
 // The whole narration, read end to end: a cold start against a stopped server, the server coming up
 // with model A, an identical beat, then a switch to B. Four beats, three lines — the transcript is
-// the feature's user-visible contract, and its enemy is duplication at one line every ten seconds.
+// the feature's user-visible contract, and its enemy is duplication at one line every beat.
 func TestBeatScriptNarratesEachChangeOnce(t *testing.T) {
 	t.Parallel()
 

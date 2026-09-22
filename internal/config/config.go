@@ -1496,8 +1496,8 @@ type fileConfig struct {
 	// `--model`/`APOGEE_MODEL` overrides, never do.
 	RememberModel *bool `yaml:"remember-model"`
 	// ContextWindow PINS the model context window in tokens (item 3 / S3). File-only (no flag/env),
-	// like auto-compact. Absent or ≤ 0 ⇒ unpinned, so the window follows what the ten-second
-	// heartbeat observes, live, across a model switch; a positive value is never overridden by a
+	// like auto-compact. Absent or ≤ 0 ⇒ unpinned, so the window follows what the heartbeat
+	// observes on its own cadence, live, across a model switch; a positive value is never overridden by a
 	// beat (ADR 0024) — the escape hatch for a server that does not advertise a window, or
 	// advertises one that is wrong for how it is run. It feeds ContextConfig.MaxContextTokens,
 	// which the Budget and automatic Compaction bind against.
@@ -3677,8 +3677,8 @@ func FilePath(configDir string) string {
 
 // Upstream discovery is deliberately absent from this file. It used to live here as the
 // lowest-priority resolution layer (flag > env > file > discover), probing the server before the
-// first paint; it now belongs to the heartbeat, which asks the same question every ten seconds from
-// inside the running session (ADR 0024). A `servers:` entry's `model` hint and `context-window:`
+// first paint; it now belongs to the heartbeat, which asks the same question once every
+// heartbeat.Interval from inside the running session (ADR 0024). A `servers:` entry's `model` hint and `context-window:`
 // are what they always were — a pinned model id and a pinned window — but neither is filled in
 // from the wire any more: an unset
 // model stays empty until the first beat binds one, and an unset window stays 0, which is why

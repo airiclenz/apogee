@@ -169,7 +169,7 @@ type Client struct {
 	retryBaseDelay    time.Duration
 	requestTimeout    time.Duration    // per-attempt bound for Respond; 0 ⇒ caller's ctx governs
 	streamIdleTimeout time.Duration    // silence bound for Stream (see WithStreamIdleTimeout); 0 ⇒ off
-	discoveryDeadline time.Duration    // bound for one Discover call; 0 ⇒ the discoveryTimeout default
+	discoveryDeadline time.Duration    // bound for one Discover call; 0 ⇒ the DiscoveryTimeout default
 	wireObserver      func(WireRecord) // nil ⇒ no wire capture at all (see WithWireObserver)
 
 	// wire names the protocol WithWire selected and codec speaks it. Both are settled once by
@@ -263,7 +263,7 @@ func WithStreamIdleTimeout(d time.Duration) Option {
 }
 
 // WithDiscoveryTimeout bounds one Discover call — both probes together — so a hung server cannot
-// stall construction (default 5s; zero or negative keeps the default). A test that stacks many
+// stall construction (default DiscoveryTimeout; zero or negative keeps the default). A test that stacks many
 // loopback servers under a race-instrumented shard passes a generous bound so the row it is
 // asserting cannot be failed by the deadline rather than by the reply.
 func WithDiscoveryTimeout(d time.Duration) Option { return func(c *Client) { c.discoveryDeadline = d } }

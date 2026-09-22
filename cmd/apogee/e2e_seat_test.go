@@ -221,7 +221,7 @@ func TestE2ESeatDelegationsLineDescribesBothSeatsOnTheFirstRequest(t *testing.T)
 //
 // The beat is the point of the run. The routing LATCH follows availability — that is what makes an
 // unusable ask fall back — and the temptation is to let the prompt follow it too, which would churn
-// the standing system message every ten seconds and cost the prefix cache exactly what ADR 0023 §6
+// the standing system message on every beat and cost the prefix cache exactly what ADR 0023 §6
 // promises. So this closes the far server for real, waits for apogee to notice, and asks whether
 // the line moved.
 func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
@@ -236,12 +236,14 @@ func TestE2ESeatDelegationsLineSurvivesATargetDownBeat(t *testing.T) {
 	before := seatLastDelegationsLine(t, run.session)
 
 	// The far box goes away, and the notice waits for TWO consecutive failed beats
-	// (delegationFailureThreshold) before it says so. Beats land on a fixed ten-second cadence
-	// (internal/heartbeat.Interval), which is longer than the kit's default wait, so this one is
-	// given room for the pair plus the interval the first of them may already be into.
+	// (delegationFailureThreshold) before it says so. Beats land on heartbeat.Interval, which is
+	// longer than the kit's default wait, so this one is given room for the pair — the second beat
+	// lands at most two intervals after the close — plus the kit's own default for the paint that
+	// follows. The allowance is ADDED to the pair rather than multiplied by the interval, so a
+	// cadence derived from the probe budget cannot compound into a wait nothing else bounds.
 	run.target.Close()
 	awaitNotice(t, run.drv, "sub-agents: "+seatTargetServer+" unavailable",
-		tuitest.Within(3*heartbeat.Interval))
+		tuitest.Within(2*heartbeat.Interval+tuitest.DefaultTimeout))
 
 	sent := len(run.session.Requests())
 	submit(run.drv, seatPlainPrompt)

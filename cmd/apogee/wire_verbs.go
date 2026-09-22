@@ -103,7 +103,7 @@ func (w *rootWiring) beat(ctx context.Context) heartbeat.Beat {
 	// The Sub-agent server's own observation rides the SAME cadence (ADR 0045): one beat every
 	// Interval, on the goroutine the renderer already opened for this one, so routing needs no clock
 	// of its own. It is started before the session's and joined after it — side by side rather than
-	// in series, which is what keeps two five-second discoveries from adding up to the interval
+	// in series, which is what keeps two full-budget discoveries from adding up to the interval
 	// itself (delegation.go). With no Sub-agent server configured the join is a no-op and no second
 	// beat happens at all.
 	joinDelegation := w.delegation.observe(ctx)

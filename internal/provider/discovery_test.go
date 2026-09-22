@@ -935,7 +935,7 @@ func TestDiscoverTransportFailureIsLabelled(t *testing.T) {
 
 	// The bound is generous on purpose: this test runs alongside every other package's tests
 	// under the race-instrumented shard script, and a loopback reply that arrives late must be
-	// judged on what it said, never failed by the 5s default expiring first (apogee-3h4).
+	// judged on what it said, never failed by the DiscoveryTimeout default expiring first (apogee-3h4).
 	const generous = 60 * time.Second
 
 	_, err := NewClient(endpoint, "", WithDiscoveryTimeout(generous)).Discover(context.Background())
@@ -1003,8 +1003,8 @@ func TestDiscoverTransportFailureIsLabelled(t *testing.T) {
 // TestDiscoverDeadlineIsATransportError pins the timeout surface: a server that never answers
 // within the configured WithDiscoveryTimeout bound is a failure the server never saw, so it is a
 // *TransportError with context.DeadlineExceeded still reachable through the chain — the finding the
-// heartbeat and the unattended Drivers act on. The bound is the option's, not the 5s default, which
-// is what lets a test pin it in milliseconds.
+// heartbeat and the unattended Drivers act on. The bound is the option's, not the DiscoveryTimeout
+// default, which is what lets a test pin it in milliseconds.
 func TestDiscoverDeadlineIsATransportError(t *testing.T) {
 	t.Parallel()
 

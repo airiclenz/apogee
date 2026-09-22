@@ -408,3 +408,18 @@ func TestBeatAnsweredSeparatesADeadBoxFromAnUnusableReply(t *testing.T) {
 		}
 	})
 }
+
+// TestIntervalOutlastsOneDiscoveryProbe pins the invariant the cadence is DERIVED to hold rather
+// than the numbers it happens to derive to today: one beat's probe must be strictly shorter than
+// the gap between beats, so a server slow enough to spend its whole discovery budget can never have
+// two beats in flight at once. Either constant may move; the relation may not.
+func TestIntervalOutlastsOneDiscoveryProbe(t *testing.T) {
+	t.Parallel()
+
+	if Interval <= provider.DiscoveryTimeout {
+		t.Fatalf(
+			"Interval = %v, provider.DiscoveryTimeout = %v; the cadence must outlast one probe or beats overlap",
+			Interval, provider.DiscoveryTimeout,
+		)
+	}
+}

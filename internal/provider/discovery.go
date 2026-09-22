@@ -10,9 +10,17 @@ import (
 	"time"
 )
 
-// discoveryTimeout is the default bound on a discovery probe, so a hung server cannot stall
-// construction (matches the TS oracle's DISCOVERY_TIMEOUT_MS); WithDiscoveryTimeout overrides it.
-const discoveryTimeout = 5 * time.Second
+// DiscoveryTimeout is the default bound on a discovery probe, so a hung server cannot stall
+// construction; WithDiscoveryTimeout overrides it. It is sized for the hardware apogee is built
+// for: a local server that is merely SATURATED — one generation slot already busy serving this
+// very session — answers /v1/models late rather than not at all, and a budget tight enough to
+// expire on it calls a healthy server dead. A server that answers returns immediately, so this
+// budget is spent only on a failure, which is what makes a generous one free. The consequence,
+// accepted deliberately: a server that is genuinely ABSENT is now reported offline later.
+//
+// It is exported because heartbeat.Interval DERIVES from it (twice this value), so that "a beat is
+// strictly shorter than the interval" holds by construction rather than by two constants agreeing.
+const DiscoveryTimeout = 30 * time.Second
 
 // DiscoveredModel is one model the Upstream advertises. ContextWindow is 0 when the
 // server does not report it.
@@ -152,7 +160,7 @@ type EffortSupport struct {
 func (c *Client) Discover(ctx context.Context) (ModelInfo, error) {
 	deadline := c.discoveryDeadline
 	if deadline <= 0 {
-		deadline = discoveryTimeout
+		deadline = DiscoveryTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()

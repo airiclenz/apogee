@@ -2107,7 +2107,9 @@ monitoring is the [Heartbeat](#probing-and-model-identity)'s job), "auto-configu
 written into config).
 
 **Heartbeat** (and its **Beat**):
-The continuous **monitor** of the [Upstream](#identity-and-shape): every **ten seconds** apogee asks
+The continuous **monitor** of the [Upstream](#identity-and-shape): on a cadence **derived from the
+discovery probe's own budget** — `heartbeat.Interval` is twice `provider.DiscoveryTimeout`, about a
+minute at today's values, which is what keeps a beat strictly shorter than the interval — apogee asks
 the server which model it is serving, in which context window, and what else it advertises, and
 reports the answer as one **Beat**. Deliberately the opposite pole of [Probe](#probing-and-model-identity)
 on every axis — a probe diagnoses **once, on demand**, and prints a report a *human* reads; the
