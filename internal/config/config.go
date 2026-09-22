@@ -257,12 +257,6 @@ func (cf contextFilesSettings) resolved() []string {
 	return cf.names
 }
 
-// UISettings is the resolved `ui:` block — [domain.UIPrefs], the one value the block is from the
-// file through resolution to the wire and the live apply, whose own parser (UIPrefs.Set) the
-// `ui.*` registry rows land through. The alias keeps this package's older spelling readable while
-// the callers move over.
-type UISettings = domain.UIPrefs
-
 // defaultStallAfterText is how long the engine may stay silent before the status line reports the
 // quiet, as the config file spells it — the value the starter template ships, so a config that
 // omits the key and one seeded on first run agree; domain.DefaultStallAfter is the same threshold
@@ -270,7 +264,7 @@ type UISettings = domain.UIPrefs
 const defaultStallAfterText = "120s"
 
 // SessionSettings is the resolved `sessions:` block — the retention policy the session store is
-// swept against. It is one struct rather than loose fields on [Options] for UISettings' reason: the
+// swept against. It is one struct rather than loose fields on [Options] for [domain.UIPrefs]' reason: the
 // two keys describe ONE subsystem and travel together, from the on-disk block through resolution to
 // whichever Driver runs the sweep.
 //
@@ -366,7 +360,7 @@ func (s SessionSettings) Validate() error {
 //
 // Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
 // context-files keys, the four present keys, the ten ui keys — each write the whole block their key
-// sits in, because the Options field IS that block and the block's own mapper (toUISettings and its
+// sits in, because the Options field IS that block and the block's own mapper (toUIPrefs and its
 // siblings) applies the defaults for whatever the file left out. The rows of one block therefore
 // write the same value, which is why they share one named projection. And confine-to-workspace's
 // accessor carries the file's own value only: the EFFECTIVE one also depends on whether a Host
@@ -837,7 +831,7 @@ var keyAccessors = []keyAccessor{
 	},
 	{
 		// The ten `ui:` keys are one carrier, the `present:` block's shape — and independent axes
-		// within it: naming a style does not turn the colour loop off (toUISettings).
+		// within it: naming a style does not turn the colour loop off (toUIPrefs).
 		row:      mustKey("ui.spinner"),
 		fromFile: fileUI,
 	},
@@ -998,12 +992,12 @@ func (fc fileConfig) present() PresentSettings {
 	return p.toPresentSettings()
 }
 
-func (fc fileConfig) ui() (UISettings, error) {
+func (fc fileConfig) ui() (domain.UIPrefs, error) {
 	var u uiConfig
 	if fc.UI != nil {
 		u = *fc.UI
 	}
-	return u.toUISettings()
+	return u.toUIPrefs()
 }
 
 func (fc fileConfig) sessions() SessionSettings {
@@ -2369,7 +2363,7 @@ func (c contextFilesConfig) toContextFilesSettings() contextFilesSettings {
 }
 
 // uiConfig is the on-disk schema for the `ui:` block. It mirrors domain.UIPrefs with yaml tags;
-// toUISettings maps it across so the on-disk shape and the resolved value stay independently
+// toUIPrefs maps it across so the on-disk shape and the resolved value stay independently
 // evolvable (as presentConfig does for PresentSettings).
 type uiConfig struct {
 	// Spinner names the status-line animation — snake | glitter | classic. Empty ⇒ the default.
@@ -2424,7 +2418,7 @@ type uiConfig struct {
 	ToolsFoldOver *int `yaml:"tools-fold-over"`
 }
 
-// toUISettings maps the on-disk ui block onto the resolved value, applying the defaults for the keys
+// toUIPrefs maps the on-disk ui block onto the resolved value, applying the defaults for the keys
 // the block leaves out. A block that sets one key therefore leaves the others at their defaults,
 // which is what keeps the axes independent from the on-disk shape onward: naming a style does not
 // turn the colour loop off, turning the loop off does not change the style, and neither says
@@ -2432,7 +2426,7 @@ type uiConfig struct {
 // `stall-after:`, is read through domain.ParseStallAfter — the parser every surface reads the key
 // with — so the refusal is that parser's sentence, quoting the text as written, and it is made at
 // the file pass rather than at ResolveOptions (as `delegate-timeout` is).
-func (u uiConfig) toUISettings() (UISettings, error) {
+func (u uiConfig) toUIPrefs() (domain.UIPrefs, error) {
 	s := domain.DefaultUIPrefs()
 	if u.Spinner != "" {
 		s.Spinner = domain.SpinnerStyle(u.Spinner) // validated by UIPrefs.Validate, not here
@@ -2452,7 +2446,7 @@ func (u uiConfig) toUISettings() (UISettings, error) {
 		// documented spelling of "off" — from a block that never named the key.
 		after, err := domain.ParseStallAfter(*u.StallAfter)
 		if err != nil {
-			return UISettings{}, err
+			return domain.UIPrefs{}, err
 		}
 		s.StallAfter = after
 	}

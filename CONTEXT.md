@@ -1238,7 +1238,12 @@ by relaunch. The one deferral wording left is a **boundary note** for a key that
 boundary the session crosses anyway ("· applies at next clear", the `context-files:` pair, whose
 KV-prefix stability is deliberate); a pane edit **outranks an env/flag override** for the running
 session (the row notes that the override wins again at the next start, startup precedence
-unchanged), and a persist whose apply then failed says so ("saved — live apply failed: …").
+unchanged), and a persist whose apply then failed says so ("saved — live apply failed: …"). The
+ten renderer-owned `ui.*` keys travel as one value, **`domain.UIPrefs`** — the `ui:` block's
+schema, homed in `internal/domain` because config and the renderer both name it and import neither
+the other (ADR 0043, 2026-09-20 amendment): resolved by config, carried whole on the renderer's
+Options in the file's own positive polarity, and edited live through its one parser, `UIPrefs.Set`,
+which the registry rows themselves call.
 Editing is **hybrid**: simple keys are edited in the pane — a bool toggles, a 3-plus-option key
 opens a selection popup, a string or an int opens a real single-line field on its row (cursor keys
 and mouse), the inline system prompt a multi-line field (⏎ inserts a newline, ctrl+s commits) —

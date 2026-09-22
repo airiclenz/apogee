@@ -180,8 +180,8 @@ options, migrate and watch move behind the bridge), 10 (`config.go` and `configw
 11 (drop the bridge, qualify the call sites). Item 9 reported BLOCKED — the bridge it was asked to
 write could not be written without item 10's files. The key registry is not a layer beneath the
 config core; the two name each other. `registry.go`'s validator column calls straight into the
-files item 10 was to move (`ParseSettingList`, `PresentSettings.Validate`, `UISettings.Validate`,
-and now `domain.ParseMode`), because a row's startup check is the real check rather than a second
+files item 10 was to move (`ParseSettingList`, `PresentSettings.Validate`, the `ui:` block's
+validator (since 2026-09-20 `domain.UIPrefs.Validate`), and now `domain.ParseMode`), because a row's startup check is the real check rather than a second
 spelling of it, while `config.go`'s multi-source table is typed on the registry's `Key`. Aliasing
 half of that back into `package main` while the other half stayed there is circular by
 construction. The owner's call on 2026-08-10 was to merge items 9 and 10 and move all six
@@ -290,3 +290,40 @@ environment cannot smuggle in, and the refusal is the row's sentence behind the 
 (`apogee: invalid APOGEE_BYPASS "maybe": bypass is true or false, not "maybe"`). One consequence
 is named: `APOGEE_MODE=fast` is now refused at the env pass, with the variable named, where it
 used to be carried raw and refused by the Driver's `ParseMode` at wiring.
+
+## Amendment (2026-09-20) — `internal/domain` owns the `ui:` preference schema
+
+The 2026-08-21 amendment moved the UI **vocabulary** — the spinner-style and cursor-shape names and
+their parsers — into `internal/domain`, and left the `ui:` block's shape with `internal/config`:
+the config package's own `ui:` struct was the resolved block, its parse and its validate, and the
+renderer received the same ten facts as ten flattened `Options` fields, two of them with their
+polarity flipped at the composition root. That gave the block three spellings — the config struct,
+the renderer's fields, and the live-apply arms that parsed a `/settings` edit a third time on their
+way to those fields.
+
+**The `ui:` PREFERENCE SCHEMA — keys, defaults, parse, validate — now lives in `internal/domain`,
+as one value, `domain.UIPrefs`.** It is the value the block is from the file through resolution to
+the wire and the live apply: `config.Options.UI` and `tui.Options.UI` are both that type, carried
+whole, in the positive polarity the file spells (`ShowScrollbar`, `TaskListOpen`; the renderer
+negates where it wants "hide" or "folded"); `UIPrefs.Set(key, text)` is its one parser, which the
+`ui.*` registry rows call from their `Set` column and the renderer's local apply calls for the
+same keys — a `Set` the rows did not use would be a third parser, which is the line this record
+draws. The config package's own name for the block, kept as an alias of `domain.UIPrefs` while
+the callers moved, is retired.
+
+**Why `internal/domain` and not `internal/config`.** `internal/config` and `internal/tui` do not
+import each other — the 2026-08-21 amendment's testable line runs the one way, and the renderer
+importing the config package would reopen the coupling from the other side. A value both must name
+therefore belongs in the package both already import, which is the same reasoning that homed the
+vocabulary there: the preference schema describes the configuration surface, not any one renderer,
+and not the file format either (`uiConfig`, the yaml-tagged on-disk shape, stays in
+`internal/config` and maps onto the value). `uivocab.go`'s "this package does not know the config
+schema" sentence — true for the parsers that take a bare value — now names `UIPrefs` as the one
+exception: it knows the `ui.*` keys because it IS their schema.
+
+What does not change: the registry row is still the one table the pane and resolution read
+(2026-08-21 amendment), and `Key.Set` is still the row's inverse (2026-09-16 amendment) — the rows
+for the ten `ui.*` keys simply implement that column by calling the value's own parser.
+`cursor-shape` stays a top-level key outside `UIPrefs`, and `ui.inspector` stays inside it: the
+engine acts on that one (`domain.Config.Inspector`), so the value carries it and the renderer only
+words its empty pane with it.

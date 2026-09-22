@@ -289,7 +289,7 @@ func TestSkillSuggestionsRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
 	}
 
-	off := Options{UI: UISettings{SkillSuggestions: false}}
+	off := Options{UI: domain.UIPrefs{SkillSuggestions: false}}
 	if got := row.Read(off); got != "false" {
 		t.Errorf("read of a session with the band off = %q, want \"false\"", got)
 	}
@@ -321,7 +321,7 @@ func TestTaskListOpenRowIsAnEditableBoolDefaultingOn(t *testing.T) {
 		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
 	}
 
-	folded := Options{UI: UISettings{TaskListOpen: false}}
+	folded := Options{UI: domain.UIPrefs{TaskListOpen: false}}
 	if got := row.Read(folded); got != "false" {
 		t.Errorf("read of a session with the cards folded = %q, want \"false\"", got)
 	}
@@ -352,7 +352,7 @@ func TestToolsOpenRowIsAnEditableBoolDefaultingOff(t *testing.T) {
 		t.Error("the row is not editable; the knob is live from /settings (ADR 0037)")
 	}
 
-	open := Options{UI: UISettings{ToolsOpen: true}}
+	open := Options{UI: domain.UIPrefs{ToolsOpen: true}}
 	if got := row.Read(open); got != "true" {
 		t.Errorf("read of a session with the umbrellas open = %q, want \"true\"", got)
 	}
@@ -385,7 +385,7 @@ func TestToolsFoldOverRowIsAnEditableIntDefaultingFive(t *testing.T) {
 		t.Error("the row has no validate hook; a negative threshold would reach the file before startup refused it")
 	}
 
-	never := Options{UI: UISettings{ToolsFoldOver: 0}}
+	never := Options{UI: domain.UIPrefs{ToolsFoldOver: 0}}
 	if got := row.Read(never); got != "0" {
 		t.Errorf("read of a session that never folds = %q, want \"0\"", got)
 	}
@@ -422,12 +422,12 @@ func TestToolsFoldOverRejectsNegative(t *testing.T) {
 		t.Run(tt.text, func(t *testing.T) {
 			t.Parallel()
 			hookErr := row.Validate(tt.text)
-			blockErr := UISettings{ToolsFoldOver: tt.n}.Validate()
+			blockErr := domain.UIPrefs{ToolsFoldOver: tt.n}.Validate()
 			if (hookErr != nil) != tt.refused {
 				t.Errorf("hook Validate(%q) = %v; want refused=%v", tt.text, hookErr, tt.refused)
 			}
 			if (blockErr != nil) != tt.refused {
-				t.Errorf("UISettings{ToolsFoldOver: %d}.Validate() = %v; want refused=%v", tt.n, blockErr, tt.refused)
+				t.Errorf("domain.UIPrefs{ToolsFoldOver: %d}.Validate() = %v; want refused=%v", tt.n, blockErr, tt.refused)
 			}
 			if tt.refused {
 				if !strings.Contains(hookErr.Error(), "ui.tools-fold-over") {

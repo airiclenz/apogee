@@ -29,7 +29,7 @@ func intptr(n int) *int       { return &n }
 // folding past five type rows with large umbrellas starting folded. It is spelled out rather than taken from
 // domain.DefaultUIPrefs, so a change to any shipped default shows up here as a failure instead of
 // silently agreeing with itself.
-var wantUIDefault = UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
+var wantUIDefault = domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true,
 	ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5}
 
 // testHostID is the machine identity injected into resolution so the Host acknowledgement
@@ -264,7 +264,7 @@ func TestResolvePrecedence(t *testing.T) {
 			name: "the ui block is file-only (three of its keys stated)",
 			file: fileConfig{UI: &uiConfig{Spinner: "glitter", SpinnerColor: boolptr(false), ShowScrollbar: boolptr(false)}},
 			want: func(o *Options) {
-				o.UI = UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
+				o.UI = domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false,
 					ColorScheme: "dark", StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5}
 			},
 		},
@@ -4718,7 +4718,7 @@ func TestApplyConfigUI(t *testing.T) {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := UISettings{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
+	want := domain.UIPrefs{Spinner: domain.SpinnerGlitter, SpinnerColor: false, ShowScrollbar: false, ColorScheme: "light",
 		StallAfter: 2 * time.Minute, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5}
 	if opts.UI != want {
 		t.Errorf("opts.ui = %+v; want %+v", opts.UI, want)
@@ -4984,24 +4984,24 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 	tests := []struct {
 		name string
 		yaml string
-		want UISettings
+		want domain.UIPrefs
 	}{
 		{
 			name: "only spinner: → the colour loop stays on and the bar stays shown",
 			yaml: "ui:\n  spinner: classic\n",
-			want: UISettings{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: domain.UIPrefs{Spinner: domain.SpinnerClassic, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
 		},
 		{
 			name: "only spinner-color: false → the style stays the default and the bar stays shown",
 			yaml: "ui:\n  spinner-color: false\n",
-			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
+			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: false, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
 		},
 		{
 			name: "only show-scrollbar: false → the bar goes, the spinner keys stay put",
 			yaml: "ui:\n  show-scrollbar: false\n",
-			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
+			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: false, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
 		},
 		{
@@ -5009,13 +5009,13 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			// present-and-true branch is exercised, not just its nil one.
 			name: "only show-scrollbar: true → the shipped default, said out loud",
 			yaml: "ui:\n  show-scrollbar: true\n",
-			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
 		},
 		{
 			name: "only color-scheme: → the spinner keys and the bar stay put",
 			yaml: "ui:\n  color-scheme: light\n",
-			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
+			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "light",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
 		},
 		{
@@ -5023,7 +5023,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			// leaves every other key of the block where it was.
 			name: "only skill-suggestions: false → the band goes and the look is untouched",
 			yaml: "ui:\n  skill-suggestions: false\n",
-			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: false, TaskListOpen: true, ToolsFoldOver: 5},
 		},
 		{
@@ -5031,7 +5031,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			// folded and leaves the band and the look exactly where they were.
 			name: "only task-list-open: false → the cards start folded and nothing else moves",
 			yaml: "ui:\n  task-list-open: false\n",
-			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 120 * time.Second, SkillSuggestions: true, TaskListOpen: false, ToolsFoldOver: 5},
 		},
 		{
@@ -5039,7 +5039,7 @@ func TestApplyConfigUIPartialKeepsTheOtherDefault(t *testing.T) {
 			// nothing about the look, and none of the four keys above moves it.
 			name: "only stall-after: 0 → the look is untouched and only the guard goes",
 			yaml: "ui:\n  stall-after: 0\n",
-			want: UISettings{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
+			want: domain.UIPrefs{Spinner: domain.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark",
 				StallAfter: 0, SkillSuggestions: true, TaskListOpen: true, ToolsFoldOver: 5},
 		},
 	}

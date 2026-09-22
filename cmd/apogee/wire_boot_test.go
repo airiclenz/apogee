@@ -326,7 +326,7 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 			Mode:         "ask-before",
 			ConfigDir:    home,
 			Workspace:    t.TempDir(),
-			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			UI:           domain.UIPrefs{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -357,7 +357,7 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 			Mode:         "ask-before",
 			ConfigDir:    t.TempDir(),
 			Workspace:    t.TempDir(),
-			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "no-such-scheme"},
+			UI:           domain.UIPrefs{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "no-such-scheme"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot refused an unknown colour scheme: %v", err)
@@ -388,7 +388,7 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 			Mode:         "ask-before",
 			ConfigDir:    home,
 			Workspace:    t.TempDir(),
-			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			UI:           domain.UIPrefs{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)
@@ -441,7 +441,7 @@ func TestRunRootResolvesTheColorScheme(t *testing.T) {
 			Mode:         "ask-before",
 			ConfigDir:    home,
 			Workspace:    t.TempDir(),
-			UI:           config.UISettings{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
+			UI:           domain.UIPrefs{Spinner: tui.SpinnerSnake, SpinnerColor: true, ShowScrollbar: true, ColorScheme: "dark"},
 		}
 		if err := runRoot(context.Background(), opts, rec.launch); err != nil {
 			t.Fatalf("runRoot: %v", err)

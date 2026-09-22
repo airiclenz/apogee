@@ -9,6 +9,7 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/config"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/profiles"
 	"github.com/airiclenz/apogee/internal/tui"
 )
@@ -67,7 +68,7 @@ func fabricatedSettings() config.Options {
 		WorkingWindow:         16384,
 		ResponseReserve:       0.35,
 		Present:               config.PresentSettings{AutoOpen: true, Command: "zed {path}", Port: 8080},
-		UI: config.UISettings{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
+		UI: domain.UIPrefs{Spinner: tui.SpinnerGlitter, SpinnerColor: true, ShowScrollbar: false,
 			ColorScheme: "dark", StallAfter: 2 * time.Minute, Inspector: true, SkillSuggestions: false,
 			TaskListOpen: false, ToolsOpen: true, ToolsFoldOver: 3},
 		Bypass: true,

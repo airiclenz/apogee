@@ -28,7 +28,7 @@ func projectionOptions(t *testing.T) config.Options {
 		ToolsEnabled:         []string{"web_search"},
 		URLAllowHosts:        []string{"allowed.example"},
 		URLDenyHosts:         []string{"denied.example"},
-		UI:                   config.UISettings{Inspector: true},
+		UI:                   domain.UIPrefs{Inspector: true},
 		UndoSnapshots:        true,
 		ContextFiles:         []string{"AGENTS.md"},
 		AutoCompact:          true,

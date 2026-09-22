@@ -43,7 +43,10 @@ func SpinnerStyleNames() []SpinnerStyle { return slices.Clone(spinnerStyleNames)
 
 // ParseSpinnerStyle maps a config value onto a style. "" ⇒ the default; an unknown value is an
 // error naming the styles this build knows. The caller names the key it read the value from —
-// this package does not know the config schema.
+// this package does not know the config schema. The one exception is [UIPrefs]: it IS the `ui:`
+// block's schema (keys, defaults, parse, validate — ADR 0043, 2026-09-20 amendment), homed here
+// because config and the renderer both name the value and do not import each other; its Set names
+// the key itself and calls this parser for the bare value.
 func ParseSpinnerStyle(s string) (SpinnerStyle, error) {
 	if s == "" {
 		return DefaultSpinnerStyle, nil
