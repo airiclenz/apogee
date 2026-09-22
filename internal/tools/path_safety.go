@@ -10,9 +10,11 @@ import (
 
 // Path-safety is consolidated into the shared internal/security guard (P3.6 / D6):
 // one symlink-aware, traversal-rejecting boundary every guarded tool inherits, in
-// every mode. These package-local aliases keep the built-in tools (and their tests)
-// calling the same names while the implementation lives in one place. Behaviour is
-// unchanged — security.ResolveInRoot is the verbatim move of the former local code.
+// every mode. The built-in tools call it by its own names — security.ResolveInRoot for
+// the containment judgement, security.SafeReadFile and security.SafeOpen for the
+// TOCTOU-safe reads — so the rule lives in one place and is named as one thing. What
+// stays here is only what this package adds on top: the sentinel every tool matches, the
+// confinement read the exec sites need, and the one-descriptor stat.
 
 // ErrPathEscape is returned when a tool argument resolves to a path outside the
 // sandbox root. It is the security guard's sentinel, re-exported here so existing
@@ -21,12 +23,6 @@ import (
 // says nothing about the argument — is matched by its own qualified name at the few
 // sites that distinguish the two, always ahead of this one.
 var ErrPathEscape = security.ErrPathEscape
-
-// resolveInRoot resolves input within root via the shared path-safety guard, returning
-// ErrPathEscape for a path that escapes the workspace (symlinks followed).
-func resolveInRoot(input, root string) (string, error) {
-	return security.ResolveInRoot(input, root)
-}
 
 // confinementBox returns the box a confined call runs inside, or nil when no Confinement
 // handle rides on ctx — the gated/unconfined case, where the workspace root is the whole
@@ -41,31 +37,15 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 	return nil
 }
 
-// safeReadFile reads input within root through the shared TOCTOU-safe guard, with the
-// workspace fence enforced at READ time so an escaping symlink component is refused
-// rather than followed (security review H1). It replaces the former resolveInRoot+
-// os.ReadFile pair for the write tools' read-modify-write step.
-func safeReadFile(input, root string) ([]byte, error) {
-	return security.SafeReadFile(root, input)
-}
-
-// safeOpen opens input for reading within root through the shared TOCTOU-safe guard, with
-// the workspace fence enforced at OPEN time (os.Root-pinned). The returned handle pins the
-// file's identity: what is statted and read through it is the file that was opened,
-// regardless of any rename after. The caller owns Close and any size policy.
-func safeOpen(input, root string) (*os.File, error) {
-	return security.SafeOpen(root, input)
-}
-
 // statInRoot stats path within root through ONE pinned descriptor: the file is opened
 // through the workspace fence (os.Root-pinned) and the FileInfo is an fstat of THAT
-// descriptor, so what is described is what was opened. It replaces the resolveInRoot +
+// descriptor, so what is described is what was opened. It replaces the former resolveInRoot +
 // os.Stat pair, whose second half re-walked the path string and would follow a component
 // swapped to point outside the workspace after the check passed (the H1 check-then-use gap).
 // A directory opens successfully and is reported by its FileInfo, so each caller keeps its
 // own "not a file" / "not a directory" wording.
 func statInRoot(path, root string) (os.FileInfo, error) {
-	f, err := safeOpen(path, root)
+	f, err := security.SafeOpen(root, path)
 	if err != nil {
 		return nil, err
 	}

@@ -110,7 +110,7 @@
 // git_show (2026-09-15) is the family's sixth member and the read the working tree cannot
 // answer: one file as it was at a revision (`git show <ref>:./<path>` — the committed version,
 // an older one, or a file a later commit deleted). Its ref takes git_log's two-part guard, its
-// path the workspace fence (resolveInRoot) before it is handed to git workspace-relative, and
+// path the workspace fence (security.ResolveInRoot) before it is handed to git workspace-relative, and
 // what it renders is read_file's own shape through renderFile — the header, the range
 // arguments, locate, and the open-ended 400-line cap — so a model that knows read_file knows
 // git_show. It declares ReadOnly() and carries the readOnlySubprocess marker like the other
@@ -124,9 +124,10 @@
 // still cannot tell an intended clobber from an accident), move_file refuses a directory at either
 // end (a directory rename would run unjournalled) while copy_file (2026-09-15) copies a directory
 // SOURCE recursively — the tree enumerated through its own fence, every destination journalled as
-// one undo step, each file copied by the single-file primitive — and both go through internal/security's os.Root-pinned
-// primitives — SafeCopyFileFrom for the copy, SafeRename plus SafeCopyFile and SafeRemove for the
-// move — so the fence is decided at OPERATION time at BOTH ends, never on a re-walked path string.
+// one undo step, each file copied by the single-file primitive — and both go through the
+// security.Fence's os.Root-pinned verbs — Fence.CopyFileFrom for the copy, Fence.Rename plus
+// Fence.CopyFile and Fence.Remove for the move — so the fence is decided at OPERATION time at
+// BOTH ends, never on a re-walked path string.
 // The two ends need not share a root: copy_file (2026-08-12) resolves its SOURCE over the READ
 // scope, so an ABSOLUTE path the workspace refuses may still match a configured read-only root (the
 // skills library) and be read through an os.Root pinned at THAT root, while its DESTINATION stays
@@ -151,7 +152,7 @@
 // destination and nothing else.
 //
 // delete_file (2026-08-10) closes that family with its remove-bytes half: one path, files only (a
-// directory is a different blast radius), removed through SafeRemove's pinned os.Root so the fence
+// directory is a different blast radius), removed through Fence.Remove's pinned os.Root so the fence
 // is decided at REMOVE time. It names a single file, so its marker resolves `path` like every other
 // single-file writer. Its dangerous-action classification is the one ADR 0012's ruleset already
 // assigns and needs no new rule: that ruleset is precision-over-recall — almost-never-legitimate AND
@@ -160,7 +161,7 @@
 // there: `path` is not a payloadKey, so the credential/persistence rules inspect a delete_file
 // target and hard-refuse it in every mode, ahead of the ladder. It journals the bytes it is about
 // to unlink, with the mode the file carried, because that copy is the only one left the moment
-// SafeRemove returns — the model-facing description still says there is no undo, and from the
+// Fence.Remove returns — the model-facing description still says there is no undo, and from the
 // MODEL's side that stays true: `/undo` is a human command and no tool exposes it (ADR 0051).
 //
 // run_tests (2026-08-10) asks diagnostics' question of the whole project instead of one file:
@@ -308,11 +309,15 @@
 // the two assemblers, NewDefaultRegistry and NewDefaultRegistryWithHost, that turn the built-ins
 // into a domain.ToolRegistry, and the roster ladder they apply on the way — EffectiveRoster
 // over the build's default-off declarations, the global lists and the profile axis (ADR 0057).
-// path_safety.go is the thin alias layer onto internal/security's
-// one symlink-aware boundary (ResolveInRoot, ErrPathEscape), so every tool and test here keeps
-// calling the same names while the rule lives in one place — plus the approved escape's
-// tools-side read (ADR 0049), which hands the security core the one permitted out-of-workspace
-// target and pins the write family's own read-back and pre-flight stat to it. The undo write
+// path_safety.go (2026-09-22) is what this package adds on top of internal/security's one
+// symlink-aware boundary, which every tool and test here calls by its own names —
+// security.ResolveInRoot for containment, security.SafeReadFile and security.SafeOpen for the
+// TOCTOU-safe reads — rather than through aliases: the ErrPathEscape sentinel they all match,
+// confinementBox, the read the exec sites hand security.ResolveProgram, and statInRoot, the
+// one-descriptor stat. It also carries the account of the approved escape (ADR 0049): dispatch
+// stamps the typed domain.WriteEscapePermit on the context, writeScopeOf reads it into the
+// security.Fence the write scope holds, and the write family's own read-back and pre-flight stat
+// pin to whatever that Fence Governs. The undo write
 // funnels are NOT here: they are the write-side value's own methods (write_target.go), where the
 // capture is a method of the value every writer holds (ADR 0051 §3). path_read.go is
 // the READ half carved out beside it: the one-handle bounded read every read tool goes through,
@@ -341,8 +346,9 @@
 // workspace_scoped.go is the
 // unexported workspaceScopedWriter marker and the write-target resolvers that say WHICH
 // argument a given writer lands on. write_target.go is the WRITE side's scope value, readScope's
-// twin: writeScope, what one execution may write and through which fence (the root, the
-// approved-escape permit and the undo journal, read off the context once), and the writeTarget
+// twin: writeScope, what one execution may write and through which fence (the security.Fence —
+// the root paired with the typed approved-escape permit — and the undo journal, read off the
+// context once), and the writeTarget
 // methods a write verb goes through once it has asked its scope for the call's argument — read,
 // stat, perm, refuseVirtual, notFound, note, write, journaled and mutation — so a verb's every
 // reach for its path is the one resolution dispatch classified. It also holds BOTH undo write

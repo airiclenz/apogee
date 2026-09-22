@@ -212,7 +212,7 @@ func (t *CopyFile) copyDirectory(
 	if refusal != "" {
 		return errorResult(call.ID, refusal), nil
 	}
-	if _, err := resolveInRoot(args.Destination, t.root); errors.Is(err, ErrPathEscape) {
+	if _, err := security.ResolveInRoot(args.Destination, t.root); errors.Is(err, ErrPathEscape) {
 		return errorResult(call.ID, "cannot copy a directory outside the workspace: "+args.Destination+
 			" (an approved write lands on one path, and a directory copy writes many — copy the files one at a time)"), nil
 	}
@@ -273,7 +273,7 @@ func (t *CopyFile) copyDirectory(
 
 // directoryFiles enumerates the regular files under dir — spelled as the copy will name it under
 // root — as slash-free relative paths in a stable (sorted) order, EVERY directory opened through
-// root's fence (safeOpen) so a subtree that leaves the root is refused rather than walked. It
+// root's fence (security.SafeOpen) so a subtree that leaves the root is refused rather than walked. It
 // never descends through a symlink and lists only real regular files: a linked directory could
 // loop, and a link, a device or a socket is not something a copy reproduces — which is the same
 // reading find_files gives a tree, whose walk names real files alone.
@@ -281,7 +281,7 @@ func directoryFiles(dir, root string) ([]string, error) {
 	var files []string
 	var walk func(rel string) error
 	walk = func(rel string) error {
-		d, err := safeOpen(filepath.Join(dir, rel), root)
+		d, err := security.SafeOpen(root, filepath.Join(dir, rel))
 		if err != nil {
 			return err
 		}

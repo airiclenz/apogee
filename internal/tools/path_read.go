@@ -37,7 +37,7 @@ func workspaceRelative(path, root string) string {
 // for the size it reports). On failure the second return is the model-facing message,
 // rendered exactly as the read tools rendered it before; on success it is empty.
 func readWorkspaceFileBounded(path, root string) ([]byte, string) {
-	f, err := safeOpen(path, root)
+	f, err := security.SafeOpen(root, path)
 	if err != nil {
 		return nil, readFileErrorMessage(err, path)
 	}
@@ -47,13 +47,13 @@ func readWorkspaceFileBounded(path, root string) ([]byte, string) {
 
 // readWorkspaceFileBoundedOrAbsent is readWorkspaceFileBounded for the one caller that treats an
 // ABSENT path as a legitimate empty side rather than a refusal — view_diff previewing the file it
-// is about to create. Absence is read off the safeOpen error alone (errors.Is fs.ErrNotExist): a
+// is about to create. Absence is read off the security.SafeOpen error alone (errors.Is fs.ErrNotExist): a
 // path whose chain escapes the root, a root that will not open, a directory and an over-cap file
 // are all still refused in readWorkspaceFileBounded's own words, so a fence refusal is never
 // disguised as an empty file. absent is true, with no bytes and no message, exactly when the
 // open said the path is not there.
 func readWorkspaceFileBoundedOrAbsent(path, root string) (data []byte, absent bool, failMessage string) {
-	f, err := safeOpen(path, root)
+	f, err := security.SafeOpen(root, path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil, true, ""
 	}
@@ -129,7 +129,7 @@ func readAllBounded(r io.Reader, max int64) (data []byte, within bool, err error
 	return data, int64(len(data)) <= max, nil
 }
 
-// readFileErrorMessage renders a safeReadFile failure for the model: a path that escapes
+// readFileErrorMessage renders a security.SafeReadFile failure for the model: a path that escapes
 // the workspace surfaces the uniform escape message (not "file not found", which would
 // hide the refusal), while any other read error (a genuinely missing file) keeps the
 // "file not found" phrasing the write tools used before the H1 fix.
@@ -274,7 +274,7 @@ func (s readScope) extraRoots(input string) []string {
 // ErrPathEscape, so the model reads the one uniform "outside the workspace" refusal whatever
 // the extra roots happen to be.
 func (s readScope) resolve(input string) (root, resolved string, err error) {
-	resolved, err = resolveInRoot(input, s.root)
+	resolved, err = security.ResolveInRoot(input, s.root)
 	if err == nil {
 		return s.root, resolved, nil
 	}
@@ -291,7 +291,7 @@ func (s readScope) resolve(input string) (root, resolved string, err error) {
 // The two spellings differ because the fence's two containment judgements do. Under the
 // WORKSPACE root the input is handed on AS GIVEN, so the read is byte-for-byte what it was
 // before extra roots existed — a symlinked workspace root (macOS /tmp) included. Under an EXTRA
-// root it is the REAL path matchRoot already resolved, because resolveInRoot judged containment
+// root it is the REAL path matchRoot already resolved, because security.ResolveInRoot judged containment
 // on REAL paths while the bounded read's security.rootRelative relativises LEXICALLY: a symlink
 // SPELLING of a file under a real mounted root passes the first check and then fails the second,
 // which is how a dotfiles-symlinked ~/.apogee/skills came to be refused by read_file while
@@ -320,7 +320,7 @@ func (s readScope) locate(input string) (root, target string, err error) {
 // the workspace could not answer the question at all, so an extra root that happened to accept
 // the path would silently substitute a different file for the one the caller asked about.
 func (s readScope) open(input string) (*os.File, string, error) {
-	f, err := safeOpen(input, s.root)
+	f, err := security.SafeOpen(s.root, input)
 	if err == nil {
 		return f, s.root, nil
 	}
@@ -334,7 +334,7 @@ func (s readScope) open(input string) (*os.File, string, error) {
 	if !ok {
 		return nil, "", err
 	}
-	f, extraErr := safeOpen(input, extraRoot)
+	f, extraErr := security.SafeOpen(extraRoot, input)
 	if extraErr != nil {
 		return nil, "", extraErr
 	}
@@ -440,7 +440,7 @@ func (s readScope) searchTarget(input, given string) (searchTarget, string) {
 	}
 
 	// The name is measured from the MATCHED root, symlink-resolved by the shared guard:
-	// resolveInRoot hands back real paths, so on a host where a root is reached through a link
+	// security.ResolveInRoot hands back real paths, so on a host where a root is reached through a link
 	// (macOS's /tmp, a symlinked /home) the raw root is a prefix of nothing.
 	targetRel := filepath.ToSlash(workspaceRelative(resolved, root))
 	// prefix lifts a walk-relative name to a root-relative one ("" when the search root IS the
@@ -512,7 +512,7 @@ func virtualSearchTarget(v virtualTarget, given string) (searchTarget, string) {
 // (audit 2026-08-25 F-13): the host's contract (domain.Config.ExtraReadRoots) is that every root
 // it mounts is already symlink-resolved, so a root that is not was never vouched for by anybody.
 //
-// That rule is also what lets the fence's two containment judgements agree. resolveInRoot judges
+// That rule is also what lets the fence's two containment judgements agree. security.ResolveInRoot judges
 // containment on REAL paths while the bounded read's rootRelative relativises LEXICALLY, so the
 // pair answers one question only when the root AND the path are both real. Which is why this
 // returns the resolved path beside the root it matched, and why readScope.locate hands a read
@@ -531,7 +531,7 @@ func matchRoot(input string, roots []string) (root, resolved string, ok bool) {
 		if !rootUsable(candidate) {
 			continue
 		}
-		candidateResolved, err := resolveInRoot(input, candidate)
+		candidateResolved, err := security.ResolveInRoot(input, candidate)
 		if err != nil {
 			continue
 		}

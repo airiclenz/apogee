@@ -142,7 +142,7 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 	if t.caller == nil {
 		// A surfaced tool with no live session can never run — surface it as an error result
 		// rather than panicking (defensive: the Client always wires a caller).
-		return errorResult(call.ID, "mcp: tool is not connected to a server"), nil
+		return domain.ErrorResult(call.ID, "mcp: tool is not connected to a server"), nil
 	}
 
 	params := &mcpsdk.CallToolParams{Name: t.remoteName}
@@ -157,14 +157,14 @@ func (t serverTool) Execute(ctx context.Context, call domain.ToolCall) (domain.T
 		}
 		// A transport / protocol error (tool missing, server gone) is surfaced to the model as
 		// an error result so the Turn survives and the model can route around it (ADR 0007).
-		return errorResult(call.ID, "mcp: call failed: "+err.Error()), nil
+		return domain.ErrorResult(call.ID, "mcp: call failed: "+err.Error()), nil
 	}
 
 	content := renderContent(res)
 	if res.IsError {
-		return errorResult(call.ID, content), nil
+		return domain.ErrorResult(call.ID, content), nil
 	}
-	return okResult(call.ID, content), nil
+	return domain.OKResult(call.ID, content), nil
 }
 
 // maxMCPResultBytes is the most of a server's flattened result the model is handed: 2 MiB. The
@@ -209,17 +209,6 @@ func clipResult(text string) string {
 		return text
 	}
 	return text[:maxMCPResultBytes] + fmt.Sprintf(mcpResultTruncatedMarker, maxMCPResultBytes)
-}
-
-// errorResult builds a tool-level failure result surfaced to the model (IsError), mirroring the
-// internal/tools helper of the same intent — the loop reserves a Go error for ctx cancellation.
-func errorResult(callID, message string) domain.ToolResult {
-	return domain.ToolResult{CallID: callID, Content: message, IsError: true}
-}
-
-// okResult builds a successful tool result.
-func okResult(callID, content string) domain.ToolResult {
-	return domain.ToolResult{CallID: callID, Content: content}
 }
 
 // Compile-time proof serverTool satisfies the external-effect tool surface the dispatch

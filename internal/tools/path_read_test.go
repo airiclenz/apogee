@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // TestReadAllBounded pins the bound step of the one-handle read in isolation: at most max
@@ -131,7 +133,7 @@ func TestReadScopeResolve(t *testing.T) {
 					t.Fatalf("resolve(%q) error = %v, want ErrPathEscape", tc.input, err)
 				}
 				// The refusal must read exactly as it does without any extra roots.
-				_, wantErr := resolveInRoot(tc.input, workspace)
+				_, wantErr := security.ResolveInRoot(tc.input, workspace)
 				if err.Error() != wantErr.Error() {
 					t.Errorf("error = %q, want the workspace's own %q", err, wantErr)
 				}
@@ -194,7 +196,7 @@ func TestReadScopeWorkspaceOnlyUnchanged(t *testing.T) {
 
 			outside := filepath.Join(extra, "skill.md")
 			_, _, err = scope.resolve(outside)
-			_, wantErr := resolveInRoot(outside, workspace)
+			_, wantErr := security.ResolveInRoot(outside, workspace)
 			if err == nil || err.Error() != wantErr.Error() {
 				t.Errorf("resolve(%q) error = %v, want %v", outside, err, wantErr)
 			}
@@ -361,7 +363,7 @@ func TestReadScopeSkipsUnusableExtraRoot(t *testing.T) {
 	underMissing := filepath.Join(missing, "skill.md")
 	onlyMissing := readScope{root: workspace, extra: func() []string { return []string{missing} }}
 	_, _, err = onlyMissing.resolve(underMissing)
-	_, wantErr := resolveInRoot(underMissing, workspace)
+	_, wantErr := security.ResolveInRoot(underMissing, workspace)
 	if err == nil || err.Error() != wantErr.Error() {
 		t.Errorf("resolve(%q) error = %v, want %v", underMissing, err, wantErr)
 	}

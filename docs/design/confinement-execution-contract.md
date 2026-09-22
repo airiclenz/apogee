@@ -389,7 +389,7 @@ type workspaceScopedWriter interface {
 	// workspaceWriteTarget resolves the absolute path this call would write, so
 	// dispatch can classify in- vs out-of-workspace before Execute (§4). ok is false
 	// when the call writes nothing inspectable (then dispatch treats it as in-bounds).
-	// It performs no write — pure path resolution, reusing resolveInRoot's logic
+	// It performs no write — pure path resolution, reusing security.ResolveInRoot's logic
 	// without enforcing containment. It yields the path in BOTH spellings: the
 	// absolute path the argument NAMES, and that path symlink-resolved. Only the
 	// resolver sees the two, and they differ exactly when the argument travels
@@ -433,7 +433,7 @@ func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
 ```
 
 Each built-in write tool gains the two unexported methods (one-liners delegating to its existing
-arg-decode + `resolveInRoot`-style logic). `internal/agent/dispatch.go` calls `tools.IsWorkspaceScopedWriter`
+arg-decode + `security.ResolveInRoot`-style logic). `internal/agent/dispatch.go` calls `tools.IsWorkspaceScopedWriter`
 / `tools.WorkspaceWriteTarget` — a detection-only import, and **`internal/agent` already imports
 `internal/tools`** (`loop.go` defaults the registry via `tools.NewDefaultRegistry`), so this adds no new
 package edge and no cycle (`tools` imports only `domain`).

@@ -118,7 +118,7 @@ func (t writeTarget) read() ([]byte, error) {
 	if absent {
 		return nil, os.ErrNotExist
 	}
-	return safeReadFile(pinInput, pinRoot)
+	return security.SafeReadFile(pinRoot, pinInput)
 }
 
 // stat stats the file this call is about to create, replace or remove, through the same fence

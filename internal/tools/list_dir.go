@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 var listDirSpec = toolSpec{
@@ -88,7 +89,7 @@ func (t *ListDir) Execute(ctx context.Context, call domain.ToolCall) (domain.Too
 	// absolute path is only ever used to derive the root-relative name it starts from.
 	rel := workspaceRelative(dir, root)
 
-	handle, err := safeOpen(rel, root)
+	handle, err := security.SafeOpen(root, rel)
 	if err != nil {
 		return errorResult(call.ID, directoryNotFoundMessage(err, root, rel, args.Path)), nil
 	}
@@ -196,7 +197,7 @@ func (t *ListDir) collectEntries(ctx context.Context, dir *os.File, root, rel st
 // unreadable one: list_dir has always reported what it can read, so an entry it cannot read
 // is silently absent rather than an error.
 func (t *ListDir) collectSubdir(ctx context.Context, root, rel string, recursive bool, maxDepth, depth int) ([]string, error) {
-	sub, err := safeOpen(rel, root)
+	sub, err := security.SafeOpen(root, rel)
 	if err != nil {
 		return nil, nil
 	}

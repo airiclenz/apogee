@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // maxPathSuggestions caps how many sibling entries a not-found refusal offers. Five is a
@@ -44,7 +46,7 @@ func suggestSiblings(root, rel, given string) []string {
 		return nil // no name was missing — nothing to be a near-miss of
 	}
 
-	parent, err := safeOpen(filepath.Dir(rel), root)
+	parent, err := security.SafeOpen(root, filepath.Dir(rel))
 	if err != nil {
 		return nil
 	}

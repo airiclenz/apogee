@@ -45,9 +45,10 @@ func (s toolSpec) Description() string { return s.description }
 // Schema returns the JSON schema of the tool's arguments.
 func (s toolSpec) Schema() json.RawMessage { return s.schema }
 
-// okResult builds a success ToolResult for callID.
+// okResult builds a success ToolResult for callID — domain.OKResult under the package's
+// own short name, which every tool here spells.
 func okResult(callID, content string) domain.ToolResult {
-	return domain.ToolResult{CallID: callID, Content: content}
+	return domain.OKResult(callID, content)
 }
 
 // okSummary builds a success ToolResult carrying both halves of the outcome: the prose
@@ -60,9 +61,10 @@ func okSummary(callID, content string, summary domain.ToolSummary) domain.ToolRe
 }
 
 // errorResult builds a tool-level failure ToolResult — surfaced to the model rather
-// than returned as a Go error, which is reserved for ctx cancellation (ADR 0007).
+// than returned as a Go error, which is reserved for ctx cancellation (ADR 0007). It is
+// domain.ErrorResult under the package's own short name.
 func errorResult(callID, message string) domain.ToolResult {
-	return domain.ToolResult{CallID: callID, Content: message, IsError: true}
+	return domain.ErrorResult(callID, message)
 }
 
 // rowBreakEscaper spells the two line-break characters as backslash-letter pairs. It is a

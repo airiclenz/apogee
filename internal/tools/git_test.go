@@ -70,7 +70,7 @@ func gitRepo(t *testing.T) string {
 }
 
 func writeFileForTest(root, name, content string) error {
-	abs, err := resolveInRoot(name, root)
+	abs, err := security.ResolveInRoot(name, root)
 	if err != nil {
 		return err
 	}

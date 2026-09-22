@@ -154,7 +154,7 @@ func resolveWorkdirInRoot(workdir, root string) (string, error) {
 	if workdir == "" {
 		return root, nil
 	}
-	return resolveInRoot(workdir, root)
+	return security.ResolveInRoot(workdir, root)
 }
 
 // runSubprocess runs spec as a one-shot subprocess through internal/subprocess, the shared core

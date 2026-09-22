@@ -1223,7 +1223,7 @@ func CommitPathspecs(files []string, root string) ([]string, error) {
 	return pathspecs, nil
 }
 
-// workspacePathspec resolves a model-supplied path through the workspace fence (resolveInRoot,
+// workspacePathspec resolves a model-supplied path through the workspace fence (security.ResolveInRoot,
 // so a symlink out of the root or a ".." climb is ErrPathEscape) and hands back the
 // WORKSPACE-RELATIVE spelling git reads as a pathspec from a process running in the root —
 // `internal/cli`, never the absolute real path, which would name the wrong tree on a box whose
@@ -1233,7 +1233,7 @@ func CommitPathspecs(files []string, root string) ([]string, error) {
 // git_diff_range and git_log wrap it in literalPathspec before git sees it, and git_show alone
 // uses it as-is, since its `<ref>:./<rel>` is an object name rather than a pathspec.
 func workspacePathspec(input, root string) (string, error) {
-	abs, err := resolveInRoot(input, root)
+	abs, err := security.ResolveInRoot(input, root)
 	if err != nil {
 		return "", err
 	}
@@ -1322,7 +1322,7 @@ func (t *GitShow) readOnlySubprocess() {}
 // same bytes: the `[File: <path> @ <ref>, N lines total, showing lines a-b]` header, the range
 // arguments honoured as written, an open-ended read capped at defaultReadLines /
 // defaultReadBytes with the tail that says how to get the rest, and a locate report when a
-// term was asked for. The path is fenced to the workspace (resolveInRoot — an escape is refused
+// term was asked for. The path is fenced to the workspace (security.ResolveInRoot — an escape is refused
 // with the uniform ErrPathEscape message) and handed to git in its `./`-prefixed
 // workspace-relative form, which git resolves against the process's cwd rather than the
 // repository root, so a workspace that is a subdirectory of its repository reads the right

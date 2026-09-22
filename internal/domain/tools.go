@@ -565,6 +565,20 @@ type ToolResult struct {
 	Summary ToolSummary
 }
 
+// OKResult builds the success ToolResult for callID: the prose the model reads and nothing
+// structured — a tool with a summary to attach sets Summary itself.
+func OKResult(callID, content string) ToolResult {
+	return ToolResult{CallID: callID, Content: content}
+}
+
+// ErrorResult builds the tool-level failure ToolResult for callID: surfaced to the model as
+// IsError rather than returned as a Go error, which the loop reserves for ctx cancellation
+// (ADR 0007). Every tool surface — the built-ins, an MCP server's tools, an embedder's —
+// reports a failure in this one shape, so the loop and the hosts read one thing.
+func ErrorResult(callID, message string) ToolResult {
+	return ToolResult{CallID: callID, Content: message, IsError: true}
+}
+
 // ToolRegistry is the injectable set of available tools (ADR 0001 — injectable, no
 // globals). A sub-agent receives a subset of the parent's registry, never a
 // superset (ADR 0005). Registration order is preserved so the tool menu the model

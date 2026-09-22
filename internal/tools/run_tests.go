@@ -300,7 +300,7 @@ func (t *RunTests) subtree(input string) (rel, errMsg string) {
 	if looksLikeOption(input) {
 		return "", `path must not begin with "-": it would be read as an option flag by the test runner`
 	}
-	abs, err := resolveInRoot(input, t.root)
+	abs, err := security.ResolveInRoot(input, t.root)
 	if err != nil {
 		return "", err.Error()
 	}

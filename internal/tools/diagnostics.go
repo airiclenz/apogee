@@ -132,7 +132,7 @@ func (t *Diagnostics) ApprovalScope(call domain.ToolCall) string {
 	if !ok || strings.TrimSpace(args.Path) == "" || !args.runVet() {
 		return ""
 	}
-	abs, err := resolveInRoot(args.Path, t.root)
+	abs, err := security.ResolveInRoot(args.Path, t.root)
 	if err != nil || detectLanguage(abs) != langGo {
 		return ""
 	}
@@ -156,7 +156,7 @@ func (t *Diagnostics) Execute(ctx context.Context, call domain.ToolCall) (domain
 		return errorResult(call.ID, "path is required"), nil
 	}
 
-	abs, err := resolveInRoot(args.Path, t.root)
+	abs, err := security.ResolveInRoot(args.Path, t.root)
 	if err != nil {
 		return errorResult(call.ID, err.Error()), nil
 	}
@@ -184,11 +184,11 @@ func (a diagnosticsArgs) runVet() bool { return a.Vet == nil || *a.Vet }
 func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, runVet bool) (domain.ToolResult, error) {
 	// The source is read ONCE, through the workspace fence (os.Root-pinned), and the BYTES
 	// are handed to the parser below: parsing by path would re-walk that path, following a
-	// component swapped to point outside the workspace after resolveInRoot checked it. A
+	// component swapped to point outside the workspace after security.ResolveInRoot checked it. A
 	// refusal is reported as a refusal, never as an absent file. No size bound is added —
 	// the parser read the whole file before this fence too, and a cap would stop a large but
 	// legitimate source file from being diagnosable at all.
-	src, err := safeReadFile(workspaceRelative(abs, t.root), t.root)
+	src, err := security.SafeReadFile(t.root, workspaceRelative(abs, t.root))
 	if err != nil {
 		return errorResult(callID, notFoundOrRefusal(err, "file not found: ", t.root, workspaceRelative(abs, t.root), name)), nil
 	}
