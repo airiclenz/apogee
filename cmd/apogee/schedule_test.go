@@ -95,6 +95,8 @@ const firingStepPrompt = "Build a full parser pipeline.\n" +
 // The run really reaches the stubbed upstream, which is the dialling half; the record's model is the
 // other. It runs the production runner against the stubbed upstream and injects nothing.
 func TestScheduleFiringRunsAgainstTheCurrentBinding(t *testing.T) {
+	t.Parallel()
+
 	up := firingUpstream(t, "the build is green")
 
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
@@ -204,6 +206,8 @@ func TestScheduleFiringReportsAPerModelResolutionFailure(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as every headless test that reads a composed Spec does; nothing process-wide is swapped.
 func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -238,6 +242,8 @@ func TestScheduleFiringCarriesTheParallelAgentsWidth(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as the width test above does.
 func TestScheduleFiringReportsWhatTheRunCost(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -274,6 +280,8 @@ func TestScheduleFiringReportsWhatTheRunCost(t *testing.T) {
 // A Firing that delegated nothing and whose Upstream reported no usage leaves both readings at
 // zero, which is what lets every surface omit them and read exactly as it did before they existed.
 func TestScheduleFiringReportsNoSpendWhenThereWasNone(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -311,6 +319,8 @@ func TestScheduleFiringReportsNoSpendWhenThereWasNone(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as the width test above does.
 func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
+	t.Parallel()
+
 	// One of each kind the composer distinguishes: a file that loaded, a file present but
 	// unreadable, and standing content past its Budget share.
 	report := domain.ContextFilesReport{
@@ -345,6 +355,8 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 	}
 
 	t.Run("the anomalies cross and the loaded line does not", func(t *testing.T) {
+		t.Parallel()
+
 		var want []string
 		for _, n := range notice.ContextFileNotices(report) {
 			if n.Anomaly {
@@ -365,6 +377,8 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 	})
 
 	t.Run("a clean report carries none", func(t *testing.T) {
+		t.Parallel()
+
 		out := firingWith(t, run.Result{SessionID: "s-2", Turns: 1})
 
 		if len(out.ContextAnomalies) != 0 {
@@ -385,6 +399,8 @@ func TestScheduleFiringReportsTheContextFilesItCouldNotRead(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as the width test above does.
 func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -439,6 +455,8 @@ func TestScheduleFiringGetsItsOwnScratchDir(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as the width test above does.
 func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
+	t.Parallel()
+
 	// The launch entry's own ceiling — the number seeded onto the session's Config, and the one that
 	// must not survive the move below: firingConfig reads the cap off the entry it binds to.
 	const launchCap = 2048
@@ -460,6 +478,8 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			roots, err := resolveRoots(t.TempDir(), t.TempDir())
 			if err != nil {
 				t.Fatalf("resolveRoots: %v", err)
@@ -519,6 +539,8 @@ func TestScheduleFiringIsBoundedByTheEntryTheSessionMovedOnto(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as the tests above it do.
 func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testing.T) {
+	t.Parallel()
+
 	// The launch entry's own share — the number seeded onto the session's Config, and the one that
 	// must not survive the move below: firingConfig reads the share off the entry it binds to.
 	const launchShare = 0.5
@@ -540,6 +562,8 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			roots, err := resolveRoots(t.TempDir(), t.TempDir())
 			if err != nil {
 				t.Fatalf("resolveRoots: %v", err)
@@ -600,6 +624,8 @@ func TestScheduleFiringSplitsTheWindowTheEntryTheSessionMovedOntoStates(t *testi
 // pass over a key whose apply forgot to record itself. Composed against a runner injected on the
 // wiring (scheduleWiring.runner).
 func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -690,6 +716,8 @@ func TestScheduleFiringFollowsLiveSettingsEdits(t *testing.T) {
 //
 // Composed against a runner injected on the wiring (scheduleWiring.runner).
 func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -742,6 +770,8 @@ func TestScheduleFiringKeepsTheBootFenceAfterConfineOff(t *testing.T) {
 //
 // Composed against a runner injected on the wiring (scheduleWiring.runner).
 func TestScheduleFiringSharesTheSessionsSkillsProvider(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -1137,6 +1167,8 @@ func (s loopSender) Send(msg tea.Msg) { s.msgs <- msg }
 // The Update loop is simulated rather than run because the claim is about ONE goroutine: whatever
 // creates a Schedule must be free to go on draining messages afterwards.
 func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
+	t.Parallel()
+
 	bridge := tui.NewBridge()
 	sender := loopSender{msgs: make(chan tea.Msg)}
 	bridge.Bind(sender)
@@ -1213,6 +1245,8 @@ func TestCreatingAScheduleFromTheUpdateLoopDoesNotHangTheProgram(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as the width test above does.
 func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)
@@ -1254,6 +1288,8 @@ func TestScheduleFiringTakesNoBeatOfItsOwn(t *testing.T) {
 // Composed against a runner injected on the wiring (scheduleWiring.runner) rather than a live model,
 // exactly as the width test above does.
 func TestScheduleFiringRefusesWhenOffline(t *testing.T) {
+	t.Parallel()
+
 	const endpoint = "http://bound.invalid"
 	tests := []struct {
 		name    string
@@ -1284,6 +1320,8 @@ func TestScheduleFiringRefusesWhenOffline(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			roots, err := resolveRoots(t.TempDir(), t.TempDir())
 			if err != nil {
 				t.Fatalf("resolveRoots: %v", err)
@@ -1330,6 +1368,8 @@ func TestScheduleFiringRefusesWhenOffline(t *testing.T) {
 // launched with (ADR 0037: a Firing sees what the session sees). The two entries write different
 // markers, so a Runner built from the boot list fails on both halves at once.
 func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
+	t.Parallel()
+
 	requireHookShell(t)
 
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
@@ -1391,6 +1431,8 @@ func TestScheduleFiringFiresTheReloadedHookList(t *testing.T) {
 // Firing builds its Agent inside run.Once), so this asserts the seam the Driver actually fills —
 // the observe lane must not leak into it, and the sync lane must not be dropped on the floor.
 func TestScheduleFiringCarriesTheSessionsSyncLane(t *testing.T) {
+	t.Parallel()
+
 	roots, err := resolveRoots(t.TempDir(), t.TempDir())
 	if err != nil {
 		t.Fatalf("resolveRoots: %v", err)

@@ -120,11 +120,12 @@ func assertToolResultAnswered(t *testing.T, requests []stubllm.Request) {
 // input count rather than inside it, and the line has to carry the fixture's numbers under the
 // names ADR 0075 D10 fixed, whichever wire answered.
 //
-// Not parallel: the headless half goes through [headlessEventLines], whose runner is injected
-// (headlessDeps) and which swaps nothing process-wide any more; the test stays serial as it was
-// measured (test-drivers.md, Gates and budgets) rather than because a sibling could read a seam
-// mid-swap. The default-wire case below stays parallel.
+// Parallel like every driven launch (test-drivers.md, rule 9): the headless half goes through
+// [headlessEventLines], whose runner is injected (headlessDeps) and which reaches no t.Setenv,
+// so neither half swaps anything a sibling could read mid-swap.
 func TestE2EAnthropicWireCompletesAToolLoop(t *testing.T) {
+	t.Parallel()
+
 	stub := driveWireLoop(t, "anthropic")
 
 	requests := stub.Requests()

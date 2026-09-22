@@ -27,7 +27,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/eventjson"
 	"github.com/airiclenz/apogee/internal/format"
-	"github.com/airiclenz/apogee/internal/heartbeat"
 	"github.com/airiclenz/apogee/internal/notice"
 	"github.com/airiclenz/apogee/internal/probe"
 	"github.com/airiclenz/apogee/internal/reactions"
@@ -798,8 +797,9 @@ func TestHeadlessSendsTheServersEffortDialect(t *testing.T) {
 // what that wording IS, so a change to it fails here rather than reaching an operator's stderr
 // unannounced. The middle is the dial's own words — a real Monitor's failure reads
 // `apogee: model discovery: Get "…": dial tcp …: connection refused` — whose OS-specific half a
-// verbatim pin would tie the suite to. The zero Beat, which no server can produce, is pinned at the
-// composer below (TestHeadlessOfflineGateSaysNothingForABeatWithNoFailure).
+// verbatim pin would tie the suite to. The zero Beat, which no server can produce, is pinned where a
+// Beat can be dictated (TestRaiseRefusesWhenOffline, wire_firing_test.go); what the command EMITS on
+// each output format is TestHeadlessOfflineRefusalIsOneSentenceOnEveryFormat below.
 func TestHeadlessRefusesAServerThatAnsweredNothing(t *testing.T) {
 	// A server that was there and is gone: the stub's port is known and nothing listens on it, so
 	// the beat's dial is refused — the transport-level failure Answered is false for.
@@ -833,33 +833,73 @@ func TestHeadlessRefusesAServerThatAnsweredNothing(t *testing.T) {
 	}
 }
 
-// A beat that answered nothing and has nothing to say about it — the zero Beat — is unanswered all
-// the same, and the gate's sentence for it is the endpoint alone with no trailing colon. No server
-// can produce that observation (a real Monitor always names its failure), so it is pinned where the
-// observation enters the composition: firingConfig hands the Beat back on the routing exactly as it
-// was observed, and the sentence is composed as raise composes it from that routing.
-func TestHeadlessOfflineGateSaysNothingForABeatWithNoFailure(t *testing.T) {
-	beats := &stubBeat{beat: heartbeat.Beat{}}
-	entry := config.ServerEntry{Name: testServerName, Endpoint: testServerEndpoint}
+// The refusal as the command EMITS it, on both output formats, against a server that is really
+// gone: in text mode the returned error is the line main prints to stderr, in json mode the closing
+// frame carries it as `error`, and the two are one sentence — one composer (notice.ServerOffline),
+// one wording, so an operator reading stderr and a script reading the stream read the same refusal.
+// It is asserted on what the command wrote, not on what the composer was fed: a pin on the routing's
+// Beat.Failure handed to notice.ServerOffline says nothing about the line an operator sees.
+//
+// The zero Beat — Answered false with no Failure, the colon-less sentence — is not reachable from
+// here: a real Monitor always carries the discovery error's text in Failure (internal/heartbeat), so
+// no stubllm Script produces it. It is pinned where a Beat can be dictated, at the act that composes
+// the refusal (TestRaiseRefusesWhenOffline, wire_firing_test.go).
+func TestHeadlessOfflineRefusalIsOneSentenceOnEveryFormat(t *testing.T) {
+	// The server was there and is gone: its port is known and nothing listens on it, so the beat's
+	// dial is refused — the transport-level failure Answered is false for, reached without waiting
+	// out the discovery timeout a held probe would cost (stubllm's Hang).
+	srv := headlessBeatServer(t)
+	srv.Close()
+	wantLead := notice.ServerOffline(srv.URL, "") + ": "
+	const wantTail = "connection refused"
 
-	_, routing, _, err := firingConfig(context.Background(), firingInputs{
-		entry:    entry,
-		roots:    firingRoots(t),
-		confiner: fenceableHost,
-		mode:     domain.ModePlan,
-		beat:     beats.discover,
-		recordID: "2026-09-21T10-00-00-firing",
-	})
-	if err != nil {
-		t.Fatalf("firingConfig: %v", err)
-	}
+	textStub := &stubRunner{}
+	textOut, textErrOut, textErr := headlessRunOn(t, textStub, srv, fenceableHost,
+		testConfigHomeOn(t, srv, ""), "a prompt")
+	jsonStub := &stubRunner{}
+	jsonOut, jsonErrOut, jsonErr := headlessRunOn(t, jsonStub, srv, fenceableHost,
+		testConfigHomeOn(t, srv, ""), "--format", "json", "a prompt")
 
-	if routing.Beat.Answered {
-		t.Fatal("the zero Beat was reported as answered; only a server that replied is")
+	if textErr == nil || jsonErr == nil {
+		t.Fatalf("a run whose server answered nothing was allowed to start (text err %v, json err %v)",
+			textErr, jsonErr)
 	}
-	want := "cannot send — server offline (" + testServerEndpoint + ")"
-	if got := notice.ServerOffline(entry.Endpoint, routing.Beat.Failure); got != want {
-		t.Errorf("the refusal reads %q; want %q — nothing observed, nothing to say, no colon", got, want)
+	if textStub.called || jsonStub.called {
+		t.Error("the refused run still reached the runner; the gate exists so no prompt is submitted")
+	}
+	// Text mode: the command returns the sentence and prints nothing of its own (SilenceErrors), so
+	// the error IS the stderr line main writes. Its two ends are the gate's stem and the dial's
+	// words; the middle is the OS's own wording of a refused dial, which no verbatim pin may tie
+	// the suite to.
+	if got := textErr.Error(); !strings.HasPrefix(got, wantLead) || !strings.HasSuffix(got, wantTail) {
+		t.Errorf("text mode refuses with %q; want %q…%q", got, wantLead, wantTail)
+	}
+	if textOut != "" {
+		t.Errorf("text mode wrote %q to stdout; a refused run answers nothing", textOut)
+	}
+	// JSON mode: the stream is the closing frame alone, and its `error` is the very sentence the
+	// text path returns — not a paraphrase, not a wrapped one.
+	lines := jsonEventLines(t, jsonOut)
+	if len(lines) != 1 {
+		t.Fatalf("json mode wrote %d lines; a refusal ahead of the opening frame is the closing "+
+			"frame alone: %q", len(lines), jsonOut)
+	}
+	_, data := finishedFrame(t, lines)
+	wantExitCode(t, data, exitNotStarted)
+	frameErr, _ := data["error"].(string)
+	if frameErr != textErr.Error() {
+		t.Errorf("the closing frame's error is %q; want the text path's own %q — one composer, one sentence",
+			frameErr, textErr.Error())
+	}
+	if !strings.HasPrefix(frameErr, wantLead) || !strings.HasSuffix(frameErr, wantTail) {
+		t.Errorf("the closing frame's error is %q; want %q…%q", frameErr, wantLead, wantTail)
+	}
+	// Neither stderr carries the sentence: main prints it in text mode and the frame carries it in
+	// json mode, so a line from the command itself would make the operator read the refusal twice.
+	for name, errOut := range map[string]string{"text": textErrOut, "json": jsonErrOut} {
+		if strings.Contains(errOut, "server offline") {
+			t.Errorf("%s mode's stderr carried the refusal itself: %q", name, errOut)
+		}
 	}
 }
 
