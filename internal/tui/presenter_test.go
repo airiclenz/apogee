@@ -305,6 +305,66 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 	}
 }
 
+// TestPresenterIsExecutionCapable pins the per-call fact the engine reads off the wired ladder:
+// only a LOCAL session whose Opener carries a non-empty present.command can run a program of the
+// user's own choosing. Locality is asked here for the same reason climb asks it — an override
+// fired from a remote box reaches no application the user is sitting in front of — so a configured
+// command on a remote session is no more execution-capable than no command at all.
+func TestPresenterIsExecutionCapable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		rungs Presentation
+		want  bool
+	}{
+		{
+			name:  "local session with a present.command",
+			rungs: Presentation{Local: true, Opener: &present.Opener{CommandOverride: "myviewer {path}"}},
+			want:  true,
+		},
+		{
+			name:  "local session whose override is empty",
+			rungs: Presentation{Local: true, Opener: &present.Opener{}},
+			want:  false,
+		},
+		{
+			name:  "local session whose override is whitespace only",
+			rungs: Presentation{Local: true, Opener: &present.Opener{CommandOverride: "   \t "}},
+			want:  false,
+		},
+		{
+			name:  "local session with no opener wired at all",
+			rungs: Presentation{Local: true},
+			want:  false,
+		},
+		{
+			name:  "remote session, override set",
+			rungs: Presentation{Local: false, Opener: &present.Opener{CommandOverride: "myviewer {path}"}},
+			want:  false,
+		},
+		{
+			name:  "remote session serving through the doc server",
+			rungs: Presentation{Local: false, Docs: docServer(t, t.TempDir())},
+			want:  false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			presenter := &uiPresenter{prog: &programRef{}, rungs: tc.rungs}
+
+			got := presenter.IsExecutionCapable()
+
+			if got != tc.want {
+				t.Errorf("IsExecutionCapable() = %v; want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestPresenterOpensTheResolvedPath proves the opener is handed the ABSOLUTE path the tool
 // resolved, never the display path — the display half is for the transcript alone.
 func TestPresenterOpensTheResolvedPath(t *testing.T) {

@@ -35,6 +35,10 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 	return domain.PresentOutcome{}, nil
 }
 
+// IsExecutionCapable: this stub wires no opener at all, so it can execute nothing of the
+// user's choosing.
+func (stubPresenter) IsExecutionCapable() bool { return false }
+
 // planMenuTools is the registry the agreement table runs over: every shipped built-in (both
 // host delegates supplied, so ask_user and present_document are in it too) plus fakes for the
 // classes no built-in occupies — a third-party network tool, an MCP tool, a third-party

@@ -31,8 +31,29 @@ import "context"
 // already put the path in front of the user. An implementation reports the rung it actually
 // reached (PresentShown) instead; an error is reserved for a presentation that reached the
 // user in no form at all.
+//
+// GROWING THE INTERFACE IS A BREAKING CHANGE, and IsExecutionCapable was added knowing it
+// (2026-09-22). PresentRequest and PresentOutcome are structs precisely so post-v1 growth stays
+// additive for an out-of-tree implementer (see PresentRequest below); a new METHOD has no such
+// escape — every Presenter, including one written against the re-exported apogee.Presenter, must
+// answer it. It was taken deliberately: the engine cannot tell the user why a presentation
+// degraded without asking the host what its ladder can actually do, and only the host knows.
 type Presenter interface {
 	Present(ctx context.Context, req PresentRequest) (PresentOutcome, error)
+
+	// IsExecutionCapable reports whether the opener rung THIS host has wired can execute a
+	// program of the user's own choosing — true exactly when a non-empty present.command is
+	// configured for a session running on the user's machine, false for every rung-0/1/2-only
+	// wiring, a nil opener and a remote session alike.
+	//
+	// It is a FACT the engine reads, not a permission it spends: answering it executes nothing,
+	// resolves nothing and changes no mode, classification or ladder behaviour. It exists so a
+	// tool result can word a degraded presentation in terms of the mechanism the host actually
+	// holds, without a live host handle crossing the quiescent boundary (ADR 0008).
+	//
+	// It is answered per call rather than captured once: the rungs are rebuilt in place when a
+	// `present.*` key is committed live (ADR 0037), so a cached answer would outlive its truth.
+	IsExecutionCapable() bool
 }
 
 // PresentRequest is the document put in front of the user. It is a STRUCT (not a bare path)

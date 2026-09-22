@@ -175,6 +175,10 @@ func (stubPresenter) Present(context.Context, domain.PresentRequest) (domain.Pre
 	return domain.PresentOutcome{}, nil
 }
 
+// IsExecutionCapable: this stub wires no opener at all, so it can execute nothing of the
+// user's choosing.
+func (stubPresenter) IsExecutionCapable() bool { return false }
+
 // ---------------------------------------------------------------------------
 
 // denyingGate is one user-origin `gate:` entry over argv, as a `reactions:` file resolves it,

@@ -83,6 +83,22 @@ func NewPresentDocument(root string, mounts ReadMounts, presenter domain.Present
 // nothing), so the disposition runs it freely in every mode — including Plan.
 func (t *PresentDocument) ReadOnly() bool { return true }
 
+// IsExecutionCapable forwards the host Presenter's own answer: whether the opener rung the host
+// wired can execute a program of the user's choosing (a configured present.command on a local
+// session). It asks the delegate the tool already holds rather than a live handle, so the seam
+// stays stateless across Turns (ADR 0008), and a nil delegate — a hand-built registry that
+// registered the tool without a Presenter — answers false, the same graceful reading Execute
+// gives it.
+//
+// It executes nothing and decides nothing: present_document remains ReadOnly and runs in every
+// mode. The answer only lets the result wording name the mechanism the host actually holds.
+func (t *PresentDocument) IsExecutionCapable() bool {
+	if t.presenter == nil {
+		return false
+	}
+	return t.presenter.IsExecutionCapable()
+}
+
 // Execute resolves the named document inside the workspace or a read mount, confirms it is an
 // existing regular file, and hands it to the Presenter, returning result text that names the rung
 // the host actually reached so the model can relay it truthfully.

@@ -19,6 +19,9 @@ type scriptedPresenter struct {
 	err     error
 	seen    domain.PresentRequest
 	calls   int
+	// executionCapable is the host fact the tool forwards: whether this stand-in's ladder could
+	// run a program of the user's choosing.
+	executionCapable bool
 }
 
 func (p *scriptedPresenter) Present(_ context.Context, req domain.PresentRequest) (domain.PresentOutcome, error) {
@@ -29,6 +32,8 @@ func (p *scriptedPresenter) Present(_ context.Context, req domain.PresentRequest
 	}
 	return p.outcome, nil
 }
+
+func (p *scriptedPresenter) IsExecutionCapable() bool { return p.executionCapable }
 
 func presentCall(t *testing.T, args map[string]string) domain.ToolCall {
 	t.Helper()
@@ -228,6 +233,49 @@ func TestPresentDocument_IsReadOnly(t *testing.T) {
 	t.Parallel()
 	if !domain.IsReadOnly(NewPresentDocument(t.TempDir(), ReadMounts{}, &scriptedPresenter{})) {
 		t.Error("present_document must be read-only (runs in Plan, never gates)")
+	}
+}
+
+// TestPresentDocument_IsExecutionCapableForwardsTheDelegate pins the seam item 4's degrade path
+// reads: the tool states the HOST's fact rather than deciding one of its own, and a registry that
+// registered the tool without a Presenter answers false instead of panicking.
+func TestPresentDocument_IsExecutionCapableForwardsTheDelegate(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		presenter domain.Presenter
+		want      bool
+	}{
+		{
+			name:      "a delegate whose ladder can run the user's command",
+			presenter: &scriptedPresenter{executionCapable: true},
+			want:      true,
+		},
+		{
+			name:      "a delegate whose ladder cannot",
+			presenter: &scriptedPresenter{},
+			want:      false,
+		},
+		{
+			name:      "no delegate at all",
+			presenter: nil,
+			want:      false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tool := NewPresentDocument(t.TempDir(), ReadMounts{}, tc.presenter)
+
+			got := tool.IsExecutionCapable()
+
+			if got != tc.want {
+				t.Errorf("IsExecutionCapable() = %v; want %v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -557,6 +605,8 @@ func (p *cancellingPresenter) Present(ctx context.Context, _ domain.PresentReque
 	<-ctx.Done()
 	return domain.PresentOutcome{}, ctx.Err()
 }
+
+func (*cancellingPresenter) IsExecutionCapable() bool { return false }
 
 func TestPresentDocument_SpecIsModelFacing(t *testing.T) {
 	t.Parallel()

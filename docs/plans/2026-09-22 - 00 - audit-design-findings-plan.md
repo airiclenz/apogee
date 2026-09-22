@@ -160,7 +160,15 @@ keep passing: every other `TestOpener*`, `TestLaunchDetachedReportsWhatHappened`
 **Acceptance.** `go build ./... && go test ./internal/present/... && go test ./cmd/apogee/... -run 'E2EPresent|presentationRungs'`
 **Commit:** `fix(present): a present.command override's argv[0] is resolved and fenced as rung 1's is`
 
-## 3. The Presenter states whether the wired opener is execution-capable
+## 3. The Presenter states whether the wired opener is execution-capable — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the predicate is named `IsExecutionCapable() bool` — the plan names the fact ("execution-capable") but not the symbol; the `is` prefix follows the coding standards' boolean rule. `uiPresenter` answers it from the ladder snapshot exactly as the item's regression guard specifies (`rungs.Local && rungs.Opener != nil && strings.TrimSpace(rungs.Opener.CommandOverride) != ""`), and `PresentDocument` forwards its delegate's answer, false for a nil delegate.
+
+NOTES (2026-09-22): `cmd/apogee/wire_present.go` is in the item's **Files:** but needed no edit — `presentationRungs` already carries `p.Command` onto `present.Opener.CommandOverride` (wire_present.go:62), which is the field the predicate reads, so there is nothing to wire. Left untouched rather than edited for the sake of the list.
+
+NOTES (2026-09-22): the deliberate departure from `internal/domain/present.go`'s additive-growth record is documented in place, in a paragraph above the `Presenter` interface: a new METHOD breaks every out-of-tree implementer of the re-exported `apogee.Presenter`, unlike an added struct field, and that is taken knowingly.
+
+NOTES (2026-09-22): "must fail against the pre-item tree" holds in its strongest form for both new tests — `TestPresenterIsExecutionCapable` and `TestPresentDocument_IsExecutionCapableForwardsTheDelegate` call a method that does not exist at base, so the packages do not compile there. `go vet ./...` (in this item's Acceptance) is what proves the five further implementers compile, since `go build ./...` skips test packages.
 
 **What.** `feat(present)`: the per-call fact item 4's degrade reads. Depends on item 2.
 

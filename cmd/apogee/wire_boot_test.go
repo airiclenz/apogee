@@ -1129,6 +1129,9 @@ func (stubPresenter) Present(context.Context, apogee.PresentRequest) (apogee.Pre
 	return apogee.PresentOutcome{}, nil
 }
 
+// IsExecutionCapable: the wiring under test never asks what this stub's ladder can run.
+func (stubPresenter) IsExecutionCapable() bool { return false }
+
 func TestParseMode(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

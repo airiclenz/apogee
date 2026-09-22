@@ -93,6 +93,20 @@ func (p *uiPresenter) ladder() Presentation {
 // uiPresenter is the engine's Presenter.
 var _ domain.Presenter = (*uiPresenter)(nil)
 
+// IsExecutionCapable reports whether the ladder this host has wired can run a program of the
+// user's own choosing: a LOCAL session (rung 1/3's own gate — see Presentation.Local) whose
+// Opener carries a non-empty present.command. A nil Opener, a blank override and a remote
+// session all answer false, because none of them can reach an application the user named.
+//
+// It reads the same one-snapshot-per-question ladder Present does and answers from configuration
+// alone — nothing is resolved, launched or classified here.
+func (p *uiPresenter) IsExecutionCapable() bool {
+	rungs := p.ladder()
+	return rungs.Local &&
+		rungs.Opener != nil &&
+		strings.TrimSpace(rungs.Opener.CommandOverride) != ""
+}
+
 // Present walks the ladder for one document and records the result in the transcript. It returns
 // an error ONLY when ctx is already cancelled — a stopping Turn gets no presentation at all, which
 // is the fail-safe direction (ADR 0007: the loop rolls the Turn back). Every other outcome,

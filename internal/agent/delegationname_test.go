@@ -128,6 +128,10 @@ func (p *recordingPresenter) Present(_ context.Context, req domain.PresentReques
 	return domain.PresentOutcome{Method: domain.PresentShown, Location: req.DisplayPath}, nil
 }
 
+// IsExecutionCapable: this double records requests; it wires no opener, so it can execute
+// nothing of the user's choosing.
+func (*recordingPresenter) IsExecutionCapable() bool { return false }
+
 // TestPresentIdentity_TopLevelRunPresentsAtDepthZero pins the presenter half of the identity seam
 // at the one depth it is still reached from: the tool called by the top-level agent reports depth 0
 // and no spawning call — honest values for the outermost run, so a Driver never has to tell
