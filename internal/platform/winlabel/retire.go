@@ -71,9 +71,62 @@ func clearTreeOutcome(root string, failures int, first error) error {
 		failures, root, first)
 }
 
+// priorVerdict is priorRestorable's answer over one journalled prior. The zero value is the
+// unknown read, the answer that acts on nothing.
+type priorVerdict int
+
+const (
+	// priorUnknown is a read that failed for a reason other than "gone": the path's label is
+	// not knowable, and both other answers destroy something, so the revert aborts and a
+	// later run judges the entry again.
+	priorUnknown priorVerdict = iota
+	// priorRestore writes the journalled prior back: apogee's own Low label is still on the
+	// path, so the prior recorded beneath it is apogee's to put back.
+	priorRestore
+	// priorDrop discards the instruction for good: the path is gone, so it carries no label
+	// to put back and there is nothing left to revert.
+	priorDrop
+	// priorCarry neither writes nor discards: the path carries a label that is not apogee's,
+	// so the prior travels on in the journal to a run that reads the path again — for at most
+	// maxPriorCarries reverts (carryPrior).
+	priorCarry
+)
+
+// String names the verdict, so a table failure reads as a decision rather than an integer.
+func (v priorVerdict) String() string {
+	switch v {
+	case priorRestore:
+		return "restore"
+	case priorDrop:
+		return "drop"
+	case priorCarry:
+		return "carry"
+	default:
+		return "unknown"
+	}
+}
+
+// maxPriorCarries bounds the life of a carried prior: the number of reverts that may look at
+// one and find no mark of apogee's on its path before the instruction is dropped. It exists
+// because a carry keeps its journal on the disk — retire rewrites the file for whatever
+// remains — so an unbounded one would leave a journal, and the residue notice over it, on the
+// machine forever. Eight reverts is deliberately generous: the realistic case is a foreign
+// label restored by hand or by a policy refresh within a session or two, and every revert of
+// every session and recovery pass counts toward it.
+const maxPriorCarries = 8
+
+// carryPrior folds one carry verdict into an entry's carry count, returning the new count and
+// whether the carry is exhausted — the point at which the prior is dropped instead.
+//
+// It is pure so the bound is table-testable on any OS — the retire seam pattern.
+func carryPrior(carried int) (next int, exhausted bool) {
+	next = carried + 1
+	return next, next >= maxPriorCarries
+}
+
 // priorRestorable is the READ-side check on one journalled prior: from the path's current
-// mandatory label and the error that read may have failed with, it reports whether the prior
-// may be written back and whether the instruction to write it back must be dropped.
+// mandatory label and the error that read may have failed with, it reports what the revert may
+// do with the instruction to write that prior back.
 //
 // Only the record side was ever vouched for — recordEntry refuses to journal a Low prior, so
 // an honest journal never asks for apogee's own label to be put back. Nothing vouched for the
@@ -86,27 +139,104 @@ func clearTreeOutcome(root string, failures int, first error) error {
 //
 //   - A Low label, read cleanly, is restorable: apogee's mark is on the path, so the prior
 //     recorded beneath it is apogee's to put back.
-//   - Any other label, read cleanly, DROPS the instruction. Either the path was never
-//     apogee's or someone has changed it since; nothing of apogee's is on it, so there is
-//     nothing left to revert, and keeping the entry would re-attempt the write forever.
-//   - A path that is GONE drops too — the verdict the restore loop already reaches for a
-//     vanished path: an object that no longer exists carries no label to put back.
-//   - Any OTHER read failure is neither. The verdict is unknown and both answers destroy
-//     something: restoring writes a label onto a path that may not be apogee's, dropping
-//     destroys the only record of a foreign one. The caller keeps the entry unjudged and
-//     leaves it to a later run.
+//   - Any OTHER label, read cleanly — a foreign one, or none at all — CARRIES the entry
+//     rather than dropping it. Nothing of apogee's is on the path, so the prior must not be
+//     written back on this run; but a drop destroys the only record of the label the path
+//     carried before the run, and the state that produced this read is routinely temporary —
+//     a policy refresh, another tool's label, a path this very revert is about to clear. So
+//     the entry travels on and a later revert reads the path again, restoring the prior the
+//     moment apogee's own mark is back on it. The carry is bounded (carryPrior): a journal
+//     that carried forever would never retire.
+//   - A path that is GONE drops — the verdict the restore loop already reaches for a
+//     vanished path: an object that no longer exists carries no label to put back, and no
+//     later run can bring it back either.
+//   - Any OTHER read failure is unknown, and unlike the carry it cannot be deferred safely:
+//     the caller cannot tell a transient denial from a path it must not touch, so the revert
+//     ABORTS with the entry unjudged, nothing cleared, and the journal kept whole.
 //
 // It is pure so the decision is table-testable on any OS — the retire seam pattern — which
 // matters most here: ReadSDDL errors off Windows, and this is the one decision a planted
 // journal attacks.
-func priorRestorable(current string, readErr error) (restore, drop bool) {
+func priorRestorable(current string, readErr error) priorVerdict {
 	if readErr != nil {
-		return false, os.IsNotExist(readErr)
+		if os.IsNotExist(readErr) {
+			return priorDrop
+		}
+		return priorUnknown
 	}
 	if IsLowLabel(current) {
-		return true, false
+		return priorRestore
 	}
-	return false, true
+	return priorCarry
+}
+
+// judgeEntries takes every pre-clear verdict one journal's entries need — the root's
+// clearability (rootClearable) and the prior's disposition (priorRestorable) — off ONE label
+// read per path, and records them on the entries IN PLACE. It reports whether anything moved
+// (changed, so the journal is worth rewriting) and whether a PRIOR was settled destructively
+// (settled: a restore vouched for, or an instruction discarded), which is what makes
+// persisting the result a precondition rather than an optimisation.
+//
+// The two flags exist because the verdicts have different stakes. A root verdict lost to an
+// unwritable apogee home costs nothing this run — the clear happens anyway, and a later run
+// reads the root again — while a prior verdict is taken BEFORE the clear precisely because
+// the clear destroys the evidence it rests on: a restorable prior re-judged after the clear
+// would read an unlabelled path, and a discarded one re-judged would be discarded again over
+// a path that has moved on. A plain carry sits with the root verdicts: nothing is written and
+// nothing is thrown away, so a lost count merely lengthens the carry; an EXHAUSTED carry
+// discards the prior and therefore settles it.
+//
+// A path whose entry needs neither verdict is never read, which is what keeps an already-judged
+// root from re-reading the NULL SACL its own clear wrote (Entry.RootJudged) and an
+// already-judged prior from re-reading a path the clear has unlabelled (Entry.Judged).
+//
+// An unknown read aborts, and aborts BEFORE the clear: the entry stays unjudged, retire keeps
+// the journal whole, and the next run judges it against a path that still carries every label
+// this one would have removed. Clearing first and retrying later would hand that retry an
+// unlabelled path and the verdict "not apogee's". Verdicts already recorded on earlier entries
+// stay recorded — they were taken off clean reads of their own paths.
+//
+// readLabel is injected (ReadSDDL in production, which is Windows-tagged) so every decision
+// the pre-clear pass makes is table-testable on any OS — the retire seam pattern.
+func judgeEntries(entries []Entry, readLabel func(string) (string, error)) (changed, settled bool, err error) {
+	for i := range entries {
+		entry := &entries[i]
+		// A root that already carried a foreign label is ONE entry wearing both instructions
+		// (LabelTree), and both verdicts are taken off the same read of the same path.
+		judgeRoot := entry.Root && !entry.RootJudged
+		judgePrior := entry.PriorSDDL != "" && !entry.Judged
+		if !judgeRoot && !judgePrior {
+			continue
+		}
+		current, readErr := readLabel(entry.Path)
+		if judgeRoot && rootClearable(entry.Path, current, readErr) {
+			entry.RootJudged = true
+			changed = true
+		}
+		if !judgePrior {
+			continue
+		}
+		switch priorRestorable(current, readErr) {
+		case priorRestore:
+			entry.Judged = true
+			changed, settled = true, true
+		case priorDrop:
+			entry.PriorSDDL = ""
+			changed, settled = true, true
+		case priorCarry:
+			next, exhausted := carryPrior(entry.Carried)
+			entry.Carried = next
+			if exhausted {
+				entry.PriorSDDL = ""
+				settled = true
+			}
+			changed = true
+		default:
+			return changed, settled, fmt.Errorf("apogee: confine: cannot read the mandatory label of %q to judge the prior the journal records for it: %v",
+				entry.Path, readErr)
+		}
+	}
+	return changed, settled, nil
 }
 
 // rootClearable is the CLEAR-side check on one journalled root: from the root's path, its
@@ -222,7 +352,15 @@ func isDriveLetter(b byte) bool {
 // descendant keeps the journal (clearTreeOutcome), and a verdict re-taken on the retry would
 // read the NULL SACL the clear itself wrote, refuse the root, and let the journal retire over
 // descendants still labelled Low. Only an UNJUDGED root is read, which is the pre-clear pass's
-// own case (judgePriors).
+// own case (judgeEntries).
+//
+// What the persisted verdict skips is the LABEL READ, never the GUARDRAIL. A volume root is
+// refused here whatever the entry claims, because rootClearable's volume refusal is a
+// statement about the SHAPE of the path — nothing above a box may be labelled, so nothing
+// above a box may be cleared — and a journal that could switch it off by writing
+// "root_judged": true into a planted entry would hand a stranger the whole of C:\ (F-08's
+// clear prong, reopened through the flag that closed it). The flag vouches only that apogee
+// once read apogee's own label on that path; it cannot vouch that the path is a tree.
 //
 // Roots are compared case-folded (foldPath): C:\Work and c:\work name one location.
 // alive is injected (ProcessAlive in production, which is Windows-tagged) and readLabel with
@@ -245,6 +383,12 @@ func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabe
 		}
 		if claimed[foldPath(entry.Path)] {
 			spared = append(spared, entry.Path)
+			continue
+		}
+		// The guardrail is outside the persisted-verdict skip on purpose: the flag stands in
+		// for a LABEL READ apogee itself took, and nothing else. A volume root is refused on
+		// the shape of its path, which no read and no journal can change.
+		if isVolumeRoot(entry.Path) {
 			continue
 		}
 		if !entry.RootJudged {
@@ -301,8 +445,20 @@ func handoffSparedRoots(handoff []Entry, spared []string) []Entry {
 }
 
 // restorablePriors splits r's prior-label restores into what may be restored NOW and what
-// must be HANDED OFF to a later run: a prior sitting at or under a root any sibling journal
-// still names as a Root entry is deferred, everything else is restored by this revert.
+// must be HANDED OFF to a later run: a prior an in-memory verdict has not vouched for
+// (Entry.Judged), and a prior sitting at or under a root any sibling journal still names as a
+// Root entry, are both deferred; everything else is restored by this revert.
+//
+// The Judged gate is the restore prong of F-08 held shut at the last seam. What this function
+// hands to revertJournal is written to the disk with SetSDDL, so an entry that reaches the
+// restore map is a label write onto the path it names — and the ONLY thing standing between a
+// journal a stranger planted under the apogee home and that write is the pre-clear judgement
+// (judgeEntries, priorRestorable), which sets Judged exactly when apogee's own Low label was
+// found on the path. An unjudged prior is therefore never restorable here, whatever it looks
+// like: it is either a carry waiting for a later read (priorCarry) or an instruction nothing
+// has vouched for, and both belong in the hand-off, which writes nothing and merely keeps the
+// record alive. Every prior a correct revert restores passes the pre-clear pass first, so the
+// gate costs an honest journal nothing.
 //
 // The deferral is what keeps a foreign prior on a shared root from being lost to sibling
 // teardown ordering. Restoring it while the sibling journal's clear obligation is
@@ -328,9 +484,6 @@ func restorablePriors(r Record, siblings []Record) (restore map[string]string, h
 			claimed = append(claimed, foldPath(root))
 		}
 	}
-	if len(claimed) == 0 {
-		return r.PriorLabels(), nil
-	}
 	underClaim := func(path string) bool {
 		folded := foldPath(path)
 		for _, root := range claimed {
@@ -345,7 +498,7 @@ func restorablePriors(r Record, siblings []Record) (restore map[string]string, h
 		if entry.PriorSDDL == "" {
 			continue
 		}
-		if underClaim(entry.Path) {
+		if !entry.Judged || underClaim(entry.Path) {
 			handoff = append(handoff, entry)
 			continue
 		}

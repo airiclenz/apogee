@@ -161,9 +161,12 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 		foreignMedium = "S:AI(ML;OICI;NW;;;ME)"
 		foreignHigh   = "S:(ML;;NW;;;HI)"
 	)
+	// Judged is set on both priors because the pre-clear pass (judgeEntries) always runs
+	// first in production and an UNJUDGED prior is handed off rather than restored whatever
+	// the siblings say — the restore prong of F-08, tabled separately below.
 	journal := Record{PID: 100, Entries: []Entry{
-		{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
-		{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
+		{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium, Judged: true},
+		{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh, Judged: true},
 		{Path: `C:\scratch`, Root: true},
 	}}
 
@@ -187,8 +190,8 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 			},
 			wantRestore: map[string]string{},
 			wantHandoff: []Entry{
-				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
-				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
+				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium, Judged: true},
+				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh, Judged: true},
 			},
 		},
 		{
@@ -198,8 +201,8 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 			},
 			wantRestore: map[string]string{},
 			wantHandoff: []Entry{
-				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium},
-				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh},
+				{Path: `C:\work`, Root: true, PriorSDDL: foreignMedium, Judged: true},
+				{Path: `C:\work\vendor\lib.dll`, PriorSDDL: foreignHigh, Judged: true},
 			},
 		},
 		{
@@ -256,6 +259,109 @@ func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRestorablePriorsNeverRestoresAnUnjudgedPrior(t *testing.T) {
+	t.Parallel()
+
+	// F-08's restore prong held shut at the last seam. What this function puts in the restore
+	// map is handed to revertJournal and written to the disk with SetSDDL, so the ONLY thing
+	// between a journal a stranger planted under the apogee home and that write is the
+	// pre-clear verdict (judgeEntries), which sets Judged exactly when apogee's own Low label
+	// was found on the path. An unjudged prior — a planted one, or one carried because the
+	// path wore someone else's label — goes to the hand-off, which writes nothing and merely
+	// keeps the record alive for a run that reads the path again.
+	const planted = "S:(ML;OICI;NW;;;HI)"
+	journal := Record{PID: 100, Entries: []Entry{
+		{Path: `C:\Windows\System32\drivers\etc\hosts`, PriorSDDL: planted},
+		{Path: `C:\work\carried.dll`, PriorSDDL: planted, Carried: 2},
+		{Path: `C:\work\vouched.dll`, PriorSDDL: planted, Judged: true},
+	}}
+
+	restore, handoff := restorablePriors(journal, nil)
+
+	if len(restore) != 1 || restore[`C:\work\vouched.dll`] != planted {
+		t.Fatalf("restore = %v, want only the judged prior — an unjudged entry must never reach SetSDDL", restore)
+	}
+	want := []Entry{journal.Entries[0], journal.Entries[1]}
+	if len(handoff) != len(want) {
+		t.Fatalf("handoff = %+v, want %+v", handoff, want)
+	}
+	for i := range want {
+		if handoff[i] != want[i] {
+			t.Errorf("handoff[%d] = %+v, want %+v verbatim — the carry count travels with the entry", i, handoff[i], want[i])
+		}
+	}
+}
+
+func TestRetireCarriesAForeignPriorUntilThePathIsApogeesAgain(t *testing.T) {
+	t.Parallel()
+
+	// The carry end to end, over a real journal file: run one finds someone else's label on
+	// the path, so the prior is neither written back nor thrown away and the journal survives
+	// rewritten to carry it; run two finds apogee's own mark back on the path, restores the
+	// prior it would previously have destroyed, and retires the journal. Before the carry
+	// existed the first run dropped the prior for good and the foreign label was unrecoverable.
+	const (
+		foreignPrior = "S:AI(ML;OICI;NW;;;ME)"
+		someoneElses = "S:(ML;OICI;NW;;;HI)"
+	)
+	const labelled = `C:\work\vendor.dll`
+	path := JournalPath(t.TempDir(), 4242)
+	journal := Record{PID: 4242, Entries: []Entry{{Path: labelled, PriorSDDL: foreignPrior}}}
+	if err := WriteJournal(path, journal); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+
+	var restored map[string]string
+	carried, err := retire(path, journal, judgingRevert(staticLabel(someoneElses), &restored))
+	if err != nil {
+		t.Fatalf("retire (first run) = %v, want nil — a carry is not a failed revert", err)
+	}
+	if len(restored) != 0 {
+		t.Errorf("the first run restored %v; nothing of apogee's was on the path", restored)
+	}
+	if len(carried) != 1 || carried[0].PriorSDDL != foreignPrior || carried[0].Carried != 1 {
+		t.Fatalf("remaining = %+v, want the prior carried forward once", carried)
+	}
+	kept, err := ReadJournal(path)
+	if err != nil {
+		t.Fatalf("the journal did not survive the carry: %v", err)
+	}
+	if len(kept.Entries) != 1 || kept.Entries[0] != carried[0] {
+		t.Fatalf("rewritten journal = %+v, want the carried entry — the record of the foreign label must survive the run", kept.Entries)
+	}
+
+	second, err := retire(path, kept, judgingRevert(readsApogeesOwnLabel, &restored))
+	if err != nil {
+		t.Fatalf("retire (second run) = %v, want nil", err)
+	}
+	if restored[labelled] != foreignPrior {
+		t.Errorf("restored = %v, want the carried prior put back once apogee's own mark was on the path again", restored)
+	}
+	if len(second) != 0 {
+		t.Errorf("remaining = %+v, want nothing left to carry", second)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("the journal survived a revert that discharged everything; a stale journal reports residue that is not there")
+	}
+}
+
+// judgingRevert mirrors revertSparingLiveSiblings' pre-clear pass and restore split
+// (walk_windows.go) over the pure deciders it composes, so a prior's whole life — judged
+// before the clear, carried while the path is not apogee's, restored once it is again — is
+// drivable on any OS. The label read is scripted rather than a real SACL and the restore is
+// recorded rather than written: what these cases assert is which priors reach SetSDDL and what
+// the journal keeps, not the write itself.
+func judgingRevert(read func(string) (string, error), restored *map[string]string) func(Record) ([]Entry, error) {
+	return func(r Record) ([]Entry, error) {
+		if _, _, err := judgeEntries(r.Entries, read); err != nil {
+			return nil, err
+		}
+		restore, handoff := restorablePriors(r, nil)
+		*restored = restore
+		return handoff, nil
 	}
 }
 
@@ -394,39 +500,148 @@ func TestPriorRestorableTable(t *testing.T) {
 	)
 	denied := errors.New("access is denied")
 
+	// A label that is not apogee's CARRIES rather than drops: the prior is not apogee's to
+	// write back on this run, but the journalled descriptor is the only record of what the
+	// path wore before the run, and dropping it destroys that record for good over a state —
+	// a policy refresh, another tool's label — that a later revert may well find gone.
 	tests := []struct {
-		name        string
-		current     string
-		readErr     error
-		wantRestore bool
-		wantDrop    bool
+		name    string
+		current string
+		readErr error
+		want    priorVerdict
 	}{
-		{name: "apogees_own_low_label_is_restorable", current: ownLabel, wantRestore: true},
-		{name: "the_canonical_low_sid_is_the_same_mark", current: canonicalLow, wantRestore: true},
-		{name: "a_foreign_medium_label_drops_the_instruction", current: foreignMedium, wantDrop: true},
-		{name: "a_foreign_high_label_drops_the_instruction", current: foreignHigh, wantDrop: true},
-		{name: "an_unlabelled_path_drops_the_instruction", current: "", wantDrop: true},
-		{name: "a_vanished_path_drops_the_instruction", readErr: os.ErrNotExist, wantDrop: true},
+		{name: "apogees_own_low_label_is_restorable", current: ownLabel, want: priorRestore},
+		{name: "the_canonical_low_sid_is_the_same_mark", current: canonicalLow, want: priorRestore},
+		{name: "a_foreign_medium_label_carries_the_instruction", current: foreignMedium, want: priorCarry},
+		{name: "a_foreign_high_label_carries_the_instruction", current: foreignHigh, want: priorCarry},
+		{name: "an_unlabelled_path_carries_the_instruction", current: "", want: priorCarry},
+		{name: "a_vanished_path_drops_the_instruction", readErr: os.ErrNotExist, want: priorDrop},
 		{
-			name:     "a_vanished_path_reported_as_a_path_error_drops_too",
-			readErr:  &fs.PathError{Op: "read", Path: `C:\work\gone.txt`, Err: fs.ErrNotExist},
-			wantDrop: true,
+			name:    "a_vanished_path_reported_as_a_path_error_drops_too",
+			readErr: &fs.PathError{Op: "read", Path: `C:\work\gone.txt`, Err: fs.ErrNotExist},
+			want:    priorDrop,
 		},
-		{name: "an_unreadable_path_is_neither_restored_nor_dropped", readErr: denied},
+		{name: "an_unreadable_path_is_neither_restored_carried_nor_dropped", readErr: denied, want: priorUnknown},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			restore, drop := priorRestorable(tt.current, tt.readErr)
-
-			if restore != tt.wantRestore || drop != tt.wantDrop {
-				t.Errorf("priorRestorable(%q, %v) = restore %v, drop %v; want restore %v, drop %v",
-					tt.current, tt.readErr, restore, drop, tt.wantRestore, tt.wantDrop)
+			if got := priorRestorable(tt.current, tt.readErr); got != tt.want {
+				t.Errorf("priorRestorable(%q, %v) = %v; want %v", tt.current, tt.readErr, got, tt.want)
 			}
 		})
 	}
+}
+
+func TestCarryPriorBoundsTheCarrysLife(t *testing.T) {
+	t.Parallel()
+
+	// A carry keeps its journal on the disk — retire rewrites the file for whatever remains —
+	// so an unbounded one would leave a journal, and the residue notice over it, on the
+	// machine forever. The count is what makes the journal always retire in the end.
+	for carried := 0; carried < maxPriorCarries-1; carried++ {
+		next, exhausted := carryPrior(carried)
+		if next != carried+1 || exhausted {
+			t.Errorf("carryPrior(%d) = %d, %v; want %d, false — the carry still has runs left",
+				carried, next, exhausted, carried+1)
+		}
+	}
+	if next, exhausted := carryPrior(maxPriorCarries - 1); next != maxPriorCarries || !exhausted {
+		t.Errorf("carryPrior(%d) = %d, %v; want %d, true — the bound must end the carry",
+			maxPriorCarries-1, next, exhausted, maxPriorCarries)
+	}
+}
+
+func TestJudgeEntriesCarriesAForeignPriorAndDropsItAtTheBound(t *testing.T) {
+	t.Parallel()
+
+	// The pre-clear pass's own handling of the carry, tabled off the injected label read so it
+	// runs on every OS. A carried entry keeps its descriptor and stays UNJUDGED — which is
+	// what keeps restorablePriors from ever writing it back — and settles nothing, so a
+	// journal rewrite that fails costs only the count. The revert that exhausts the bound
+	// discards the descriptor instead, and that IS a settled verdict: it destroys a record.
+	const (
+		foreignPrior  = "S:AI(ML;OICI;NW;;;ME)"
+		someoneElses  = "S:(ML;OICI;NW;;;HI)"
+		labelledByUs  = apogeesOwnLowLabel
+		carriedToLast = maxPriorCarries - 1
+	)
+
+	tests := []struct {
+		name        string
+		entry       Entry
+		current     string
+		wantPrior   string
+		wantCarried int
+		wantJudged  bool
+		wantChanged bool
+		wantSettled bool
+	}{
+		{
+			name:        "a_foreign_label_carries_the_prior_forward_unjudged",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior},
+			current:     someoneElses,
+			wantPrior:   foreignPrior,
+			wantCarried: 1,
+			wantChanged: true,
+		},
+		{
+			name:        "an_unlabelled_path_carries_too_rather_than_losing_the_record",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior},
+			current:     "",
+			wantPrior:   foreignPrior,
+			wantCarried: 1,
+			wantChanged: true,
+		},
+		{
+			name:        "the_carry_past_its_bound_drops_the_prior_and_settles_it",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Carried: carriedToLast},
+			current:     someoneElses,
+			wantPrior:   "",
+			wantCarried: maxPriorCarries,
+			wantChanged: true,
+			wantSettled: true,
+		},
+		{
+			name:        "apogees_own_label_judges_the_carried_prior_restorable",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Carried: 3},
+			current:     labelledByUs,
+			wantPrior:   foreignPrior,
+			wantCarried: 3,
+			wantJudged:  true,
+			wantChanged: true,
+			wantSettled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			entries := []Entry{tt.entry}
+			changed, settled, err := judgeEntries(entries, staticLabel(tt.current))
+			if err != nil {
+				t.Fatalf("judgeEntries = %v, want nil", err)
+			}
+			got := entries[0]
+			if got.PriorSDDL != tt.wantPrior || got.Carried != tt.wantCarried || got.Judged != tt.wantJudged {
+				t.Errorf("entry = %+v; want prior %q, carried %d, judged %v",
+					got, tt.wantPrior, tt.wantCarried, tt.wantJudged)
+			}
+			if changed != tt.wantChanged || settled != tt.wantSettled {
+				t.Errorf("judgeEntries = changed %v, settled %v; want changed %v, settled %v",
+					changed, settled, tt.wantChanged, tt.wantSettled)
+			}
+		})
+	}
+}
+
+// staticLabel is the label-read seam answering one descriptor for every path — the disk state
+// a whole table row is written against.
+func staticLabel(current string) func(string) (string, error) {
+	return func(string) (string, error) { return current, nil }
 }
 
 // apogeesOwnLowLabel is the inherited spelling a labelled root propagates — the mark
@@ -555,6 +770,21 @@ func TestRevertibleRootsClearsOnlyRootsApogeesOwnLabelVouchesFor(t *testing.T) {
 			journal: Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true, RootJudged: true}}},
 			read:    func(string) (string, error) { return clearSDDL, nil },
 			want:    []string{`C:\work`},
+		},
+		{
+			// The verdict skips the label READ, never the GUARDRAIL. A planted entry can set
+			// "root_judged": true as easily as it can name a path, so a flag that switched the
+			// volume refusal off would hand a stranger the NULL-SACLing of the whole of C:\ —
+			// F-08's clear prong reopened through the very field that closed it. The volume
+			// refusal is a statement about the SHAPE of the path, which no read ever decided.
+			name: "a_persisted_verdict_does_not_buy_a_planted_volume_root",
+			journal: Record{PID: 100, Entries: []Entry{
+				{Path: `C:\`, Root: true, RootJudged: true},
+				{Path: `\\server\share`, Root: true, RootJudged: true},
+				{Path: `C:\work`, Root: true, RootJudged: true},
+			}},
+			read: func(string) (string, error) { return clearSDDL, nil },
+			want: []string{`C:\work`},
 		},
 		{
 			name:    "a_live_siblings_claim_still_spares_a_vouched_root",

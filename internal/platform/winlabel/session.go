@@ -182,8 +182,10 @@ func (j *Journal) ForgetLabelled() {
 // minus any root a LIVE sibling session's journal still names (revertibleRoots), which stays
 // fenced for that session — then the paths that carried an explicit label before the run get
 // theirs back verbatim — minus any prior under a root a sibling journal still claims, which is
-// handed off rather than restored into the sibling's live box and lost to its later clear
-// (restorablePriors) — and the journal file is removed, but ONLY if nothing failed and nothing
+// handed off rather than restored into the sibling's live box and lost to its later clear, and
+// minus any prior the pre-clear pass did not vouch for, which is CARRIED to a run that finds
+// apogee's own label back on the path (restorablePriors, priorRestorable) — and the journal
+// file is removed, but ONLY if nothing failed and nothing
 // was handed off (the package-level retire). A failed revert keeps both the file and the
 // in-memory record, so the labels it describes are still recoverable: the next NewConfiner
 // retries them and Residue reports them meanwhile. A handoff is not a failure — the caller's

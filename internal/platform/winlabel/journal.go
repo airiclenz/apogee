@@ -75,6 +75,20 @@ type Entry struct {
 	// in the way, and a verdict carried into a later run would let it strip whatever the tree
 	// carries by then without reading it.
 	RootJudged bool `json:"root_judged,omitempty"`
+	// Carried counts the reverts that have found this prior's path wearing a label that is
+	// neither apogee's own Low mark nor nothing at all — a FOREIGN label put there since the
+	// run that journalled the prior. That verdict is neither a restore (nothing of apogee's is
+	// on the path, so the prior is not apogee's to write back) nor a drop (dropping destroys
+	// the only record of the label the path carried before the run), so the entry is CARRIED
+	// to a later revert, which reads the path again (priorRestorable, priorCarry).
+	//
+	// The count is what gives that carry a BOUNDED life. A prior carried forever would keep
+	// its journal on the disk forever — retire rewrites the file rather than removing it while
+	// anything remains — and ConfinementResidue would alarm over it for the life of the
+	// machine, so the prior is dropped once maxPriorCarries reverts have looked at the path
+	// and none has found apogee's mark on it. An older journal has no such field and decodes
+	// 0, which is the honest answer: no revert has carried it yet.
+	Carried int `json:"carried,omitempty"`
 }
 
 // Roots returns the journalled box roots, the trees teardown walks.

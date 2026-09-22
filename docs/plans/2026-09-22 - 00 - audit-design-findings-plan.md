@@ -624,7 +624,15 @@ against the pre-item tree. Must keep passing: every case in `retire_test.go`, `j
 **Acceptance.** `go build ./... && go test ./internal/platform/winlabel/... && GOOS=windows go vet ./internal/platform/winlabel/...`
 **Commit:** `fix(winlabel): a root spared for a live sibling is handed off, never deleted`
 
-## 11. A persisted verdict skips the label read, never the guardrail
+## 11. A persisted verdict skips the label read, never the guardrail — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): consequential edit — internal/platform/winlabel/session.go: made necessary by the new carry outcome, whose Retire doc comment listed only the sibling-claim exclusion from the restore set.
+
+NOTES (2026-09-22): the pre-clear decision loop moved out of the Windows-tagged `judgePriors` into a pure `judgeEntries` in retire.go (injected label read), so the carry bound and the abort rule are provable on Linux as the item requires; `judgePriors` keeps only the real `ReadSDDL` and the journal rewrite.
+
+NOTES (2026-09-22): `priorRestorable` now returns a named `priorVerdict` (restore/drop/carry/unknown) rather than two bools — the item's "third, explicitly-named carry outcome" — and `Entry` gains the additive `carried` JSON field bounded by `maxPriorCarries = 8` (value is an author call; the item named none).
+
+NOTES (2026-09-22): `restorablePriors` lost its no-siblings fast path, which returned `Record.PriorLabels()` wholesale and would have bypassed the new `!entry.Judged` hand-off gate; the existing sibling table's fixtures gain `Judged: true` because production always judges before this split.
 
 **What.** `fix(winlabel)`: the Linux-provable half of `apogee-73s`, the audit's High "a forgeable
 confinement journal drives the victim's next Recover/Retire to NULL-SACL or label-write arbitrary

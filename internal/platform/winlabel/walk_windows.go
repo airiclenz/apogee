@@ -291,6 +291,10 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 // whatever it carries — and it REFUSES rather than aborting: a root that fails the test is
 // skipped by revertibleRoots and the rest of the journal reverts.
 //
+// Every decision it takes lives in judgeEntries, which reads through an injected seam and is
+// therefore provable on any OS; what is Windows-tagged HERE is the real label read it is given
+// and the journal rewrite that persists what it decided.
+//
 // The ORDER is the whole point. ClearTree is what turns a path apogee labelled into an
 // unlabelled one, so a verdict taken after it cannot tell apogee's own work from a stranger's
 // entry — every prior would read foreign and be dropped, and the foreign labels the journal
@@ -299,7 +303,7 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 // which of the two an entry lands in is decided after this, and a handed-off entry is exactly
 // the one a later pass reads once some other session's clear has unlabelled its path.
 //
-// The verdict is recorded on the entry (Entry.Judged, Entry.RootJudged) and PERSISTED before
+// The verdict is recorded on the entry (Entry.Judged, Entry.RootJudged, Entry.Carried) and PERSISTED before
 // the clear, because the paths that re-visit a path later — a hand-off waiting for a live
 // sibling to retire, and a retry after a revert that failed (session.go's kept journal, ADR
 // 0020 §2) — all read it after the clear, when the NULL SACL the clear itself wrote is all
@@ -314,7 +318,10 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 // home for runs that clear cleanly today. A root verdict is therefore taken in memory — the
 // in-place r.Entries write below, which is the session's own slice — and a rewrite that fails
 // with no prior judged falls through to the clear it has always performed; the verdict is
-// simply not carried across processes on that run.
+// simply not carried across processes on that run. A plain CARRY sits on that side of the
+// line too (judgeEntries): it writes nothing and discards nothing, so a lost count only
+// lengthens the carry, while the exhausted carry that finally discards a prior settles it and
+// takes the abort with every other discard.
 //
 // A read failure other than "gone" aborts the revert too, and equally before the clear: the
 // entry stays unjudged, the journal is kept whole by retire, and the next run judges it against
@@ -329,34 +336,9 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 // instruction to do nothing — while an entry that still names a ROOT keeps its clear
 // obligation and only loses its prior.
 func judgePriors(r Record, own string) error {
-	judged, priorJudged := false, false
-	for i := range r.Entries {
-		entry := &r.Entries[i]
-		// A root that already carried a foreign label is ONE entry wearing both instructions
-		// (LabelTree), and both verdicts are taken off the same read of the same path.
-		judgeRoot := entry.Root && !entry.RootJudged
-		judgePrior := entry.PriorSDDL != "" && !entry.Judged
-		if !judgeRoot && !judgePrior {
-			continue
-		}
-		current, readErr := ReadSDDL(entry.Path)
-		if judgeRoot && rootClearable(entry.Path, current, readErr) {
-			entry.RootJudged = true
-			judged = true
-		}
-		if !judgePrior {
-			continue
-		}
-		switch restore, drop := priorRestorable(current, readErr); {
-		case restore:
-			entry.Judged = true
-		case drop:
-			entry.PriorSDDL = ""
-		default:
-			return fmt.Errorf("apogee: confine: cannot read the mandatory label of %q to judge the prior the journal records for it: %v",
-				entry.Path, readErr)
-		}
-		judged, priorJudged = true, true
+	judged, priorJudged, err := judgeEntries(r.Entries, ReadSDDL)
+	if err != nil {
+		return err
 	}
 	if !judged || own == "" {
 		return nil
