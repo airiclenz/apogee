@@ -83,7 +83,10 @@ NOTES (2026-09-22): gate PASSED — `docs/plans/archived/2026-09-20 - 01 - test-
 **Acceptance.** `test -f "docs/plans/archived/2026-09-20 - 01 - test-seams-stubllm-discovery-and-exec-host-plan.md" && ! test -f "docs/plans/2026-09-20 - 01 - test-seams-stubllm-discovery-and-exec-host-plan.md"`
 **Commit:** none — a gate, nothing to commit
 
-## 2. `security.Fence` carries root + typed permit and the ADR 0049 rule once
+## 2. `security.Fence` carries root + typed permit and the ADR 0049 rule once — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): `Fence.Governs` returns false before resolving when the permit is empty — the same answer the plan's formula gives (`Names` refuses an empty `Real`), kept as an early return so the no-permit path never walks the filesystem, exactly as `openMutationRoot`'s old `permitted != ""` guard did.
+NOTES (2026-09-22): the long `Safe*` doc comments moved onto the `Fence` methods with the bodies; each wrapper carries a short doc naming its method. ADR 0049's `namesPermittedTarget` sentence and the contract's `openMutationRoot` mention are item 4's dated amendments and are left untouched.
 
 **What.** Depends on item 1. New `internal/security/fence.go` (named in `doc.go`'s map): `type Fence struct { Root string; Permit domain.WriteEscapePermit }`; `WorkspaceFence(root) Fence`; `(Fence) Governs(input string) bool` = `f.Permit.Names(EvalRealPath(permittedName(f.Root, input)))` — replaces `namesPermittedTarget`; `openMutationRoot`/`openPermittedRoot` take a `Fence`. Verbs: `WriteFile(input, data, perm)`, `Remove(input)`, `CopyFile(src, dst)`, `CopyFileFrom(srcRoot, src, dst)` (the source root is the read side's, ungoverned), `Rename(old, new)` (never permitted — the ratified rule and rationale on the method). `domain.WriteEscapePermit` gains `Names(resolved string) bool` (`p.Real != "" && filepath.Clean(resolved) == filepath.Clean(p.Real)`). The free `Safe*` mutating functions become one-line wrappers over `Fence` THIS item so callers stay untouched; item 4 deletes them.
 **Files:** internal/security/fence.go, internal/security/fence_test.go, internal/security/writepermit.go, internal/security/safeio.go, internal/security/doc.go, internal/security/writepermit_test.go, internal/domain/confinement.go

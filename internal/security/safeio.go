@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // ----------------------------------------------------------------------------
@@ -79,88 +81,13 @@ import (
 // at use time). This layer is a guard, not a boundary (see doc.go); the boundary is the
 // Confiner, which is what bounds who can plant the link in the first place.
 
-// SafeWriteFile writes data to input (relative to root, or absolute-inside-root),
-// creating parent directories as needed, with the workspace fence enforced at WRITE time
-// through an os.Root pinned at root. A path that escapes the root — by traversal, by an
-// absolute target outside root, or by a symlinked component pointing outside (including
-// one swapped in concurrently) — returns an error wrapping ErrPathEscape, and nothing is
-// written.
-//
-// The write is ATOMIC at the target name: data goes to a staging file in the target's own
-// parent directory (same directory, hence same filesystem — what rename atomicity
-// requires) and is then renamed over the target through the pinned root. A crash or a
-// failing write mid-call therefore never leaves a truncated target: readers see either the
-// old file or the new one, never a half-written one. The staging file is removed on any
-// failure after it is created. There is no fsync — the guarantee is "no torn file visible
-// at the target name", not power-loss durability.
-//
-// Mode: an existing target keeps its own mode across the rename; a newly-created target
-// takes perm (subject to the process umask, as an ordinary create is).
-//
-// Because the last step is a rename, the contract at the target NAME is REPLACE-THE-NAME:
-// when the name is a symlink pointing inside the root, the rename replaces the symlink
-// itself with a regular file rather than writing through to its target. A name (or
-// component) symlinked OUTSIDE the root is still refused with ErrPathEscape, and nothing —
-// not even a staging file — is created outside the fence.
-//
-// The PARENT CHAIN is the opposite: every directory component leading to the target must be
-// a real directory. A parent that is a symlink — even one pointing inside the root, which the
-// workspace fence has no reason to refuse — returns an error wrapping ErrSymlinkedParent
-// before anything is created, staged or mkdir'd, because following it would land the write
-// somewhere the argument never named (the SYMLINK POLICY note in the package header). So the
-// guarantee is: the write touches EXACTLY the name the caller passed, resolved through real
-// directories, or it touches nothing.
-//
-// permitted is the one out-of-workspace path an approval authorised — the resolved target the
-// approval pane disclosed (ADR 0049) — or empty for the ordinary call, which is every call that
-// never met a Gate. A permit changes nothing for a target inside root; for an input that
-// re-resolves to exactly that path it pins the write to the target's own deepest existing
-// ancestor instead of refusing it. The rule is stated once, in writepermit.go.
+// SafeWriteFile is Fence.WriteFile with the root and the permit passed apart: permitted is the
+// approved escape target's resolved path (ADR 0049), or empty for the ordinary call. Every
+// guarantee — the atomic staged write, the replace-the-name contract, the real-directory parent
+// chain, the one-path-wide permit — is the method's; this is a wrapper so callers written against
+// the free function keep working until they take a Fence.
 func SafeWriteFile(root, input string, data []byte, perm os.FileMode, permitted string) error {
-	r, rel, err := openMutationRoot(root, input, permitted)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = r.Close() }()
-
-	// Before ANY mutation: a symlinked parent would redirect the MkdirAll below as readily
-	// as it would redirect the write itself.
-	if err := refuseSymlinkedParents(r, rel); err != nil {
-		return err
-	}
-
-	dir := filepath.Dir(rel)
-	if dir != "." {
-		// Create parent directories within the fence. An ESCAPE error here (a parent
-		// component symlinked outside the root) is fatal — refuse before writing. A
-		// non-escape error (e.g. "file exists" when a parent component already exists,
-		// including as a symlink) is NOT fatal here: the authoritative gates are the
-		// targetMode stat and the staging open below, which os.Root refuses with "path
-		// escapes from parent" if resolution would traverse out of the root. Deferring to
-		// them keeps the fence decided at use time and avoids a false failure on a
-		// pre-existing parent.
-		if err := r.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
-			return mapRootEscape(err)
-		}
-	}
-
-	mode, existed, err := targetMode(r, rel, perm)
-	if err != nil {
-		return err
-	}
-	staged, f, err := createStagingFile(r, dir, mode)
-	if err != nil {
-		return mapRootEscape(err)
-	}
-	if err := stageAndClose(f, data, mode, existed); err != nil {
-		_ = r.Remove(staged)
-		return err
-	}
-	if err := r.Rename(staged, rel); err != nil {
-		_ = r.Remove(staged)
-		return mapRootEscape(err)
-	}
-	return nil
+	return Fence{Root: root, Permit: domain.WriteEscapePermit{Real: permitted}}.WriteFile(input, data, perm)
 }
 
 // ErrSymlinkedParent is returned when a write's path reaches its target THROUGH a symlinked
@@ -412,85 +339,21 @@ func SafeOpen(root, input string) (*os.File, error) {
 	return f, nil
 }
 
-// SafeCopyFileFrom copies the regular file at srcInput — relative to srcRoot, or
-// absolute-inside-srcRoot — to dstInput under dstRoot, with EACH END fenced at COPY time by its
-// OWN os.Root: the source is read through a root pinned at srcRoot, the destination written
-// through a root pinned at dstRoot. A path that escapes ITS OWN root (by traversal, by an
-// absolute target outside it, or by a symlinked component pointing outside, including one
-// swapped in concurrently) returns an error wrapping ErrPathEscape, and nothing is written. The
-// two fences are independent: a source escaping srcRoot is refused even when it happens to lie
-// inside dstRoot, and vice versa.
-//
-// Two roots exist for the one case where a read boundary and a write boundary legitimately
-// differ — a copy's source is a READ, so it may come from a configured read-only root (the
-// skills library) while the destination stays workspace-fenced. The write half is not widened
-// by any of this: dstRoot bounds the only thing this call creates, exactly as the one-root form
-// does.
-//
-// The destination is written with SafeWriteFile's guarantees: parent directories are created
-// inside the fence, the bytes are staged in the destination's own parent and renamed over it,
-// and the staging file is removed on any failure after it is created. So the destination name
-// is never seen half-copied, and — the rename being the last step — an in-root symlink AT that
-// name is replaced by a regular file rather than written through. The destination's PARENT chain
-// gets SafeWriteFile's refusal too: a parent that is a symlink, even one staying inside dstRoot,
-// returns an error wrapping ErrSymlinkedParent before the source is opened and before anything is
-// staged or mkdir'd. The SOURCE chain is exempt by design — a copy's source is a read, and reads
-// follow in-root links.
-//
-// Mode: the destination lands with the SOURCE's mode, whether or not it already existed. That
-// is what distinguishes a copy from a write: the point of copying a 0755 script is to end up
-// with a 0755 script. A source that is not a regular file (a directory, a device) is refused:
-// this primitive copies ONE file, and a caller copying a tree (copy_file's directory branch)
-// enumerates it through its own fence and calls this once per file — the caller's own "not a
-// file" wording is the model-facing one, this is the backstop.
-//
-// The content is streamed, so a copy costs no more memory than its buffer however large the
-// file is; there is no fsync, for the same reason SafeWriteFile has none.
-//
-// permitted is SafeWriteFile's approved escape target (ADR 0049), and it bounds the DESTINATION
-// alone: the source half is a read, and a read is never widened by an approval to write. Empty
-// means no permit, which is every call that never met a Gate.
+// SafeCopyFileFrom is Fence.CopyFileFrom with the destination root and the permit passed apart:
+// the source is read through its own root, the destination written through one pinned at dstRoot,
+// and permitted (ADR 0049, empty for none) bounds the destination alone. The guarantees are the
+// method's; this is a wrapper so callers written against the free function keep working until
+// they take a Fence.
 func SafeCopyFileFrom(srcRoot, srcInput, dstRoot, dstInput, permitted string) error {
-	srcRel, err := rootRelative(srcInput, srcRoot)
-	if err != nil {
-		return err
-	}
-	dr, dstRel, err := openMutationRoot(dstRoot, dstInput, permitted)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = dr.Close() }()
-	sr, err := os.OpenRoot(srcRoot)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRootInaccessible, err)
-	}
-	defer func() { _ = sr.Close() }()
-
-	// Before ANY mutation, and before the source is even opened: a symlinked parent on the
-	// DESTINATION chain would land the copy somewhere the argument never named, exactly as it
-	// would redirect a SafeWriteFile. The SOURCE chain is deliberately not checked — a copy's
-	// source is a read, and reads follow (the SYMLINK POLICY note in the package header).
-	if err := refuseSymlinkedParents(dr, dstRel); err != nil {
-		return err
-	}
-
-	src, mode, err := openCopySource(sr, srcRel, srcInput)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = src.Close() }()
-
-	return stageCopy(dr, dstRel, src, mode)
+	return Fence{Root: dstRoot, Permit: domain.WriteEscapePermit{Real: permitted}}.CopyFileFrom(srcRoot, srcInput, dstInput)
 }
 
-// SafeCopyFile copies the regular file at srcInput to dstInput — both relative to root, or
-// absolute-inside-root — with the workspace fence enforced at COPY time. It is
-// SafeCopyFileFrom's EQUAL-ROOTS special case: the one root pins both ends, which is what every
-// caller whose source and destination are both workspace paths wants. Every guarantee documented
-// on SafeCopyFileFrom — staged-and-renamed destination, the source's mode, a non-regular source
-// refused, ErrPathEscape at either end with nothing written — holds here unchanged.
+// SafeCopyFile is Fence.CopyFile with the root and the permit passed apart — the equal-roots
+// copy, permitted (ADR 0049, empty for none) bounding the destination alone. The guarantees are
+// the method's; this is a wrapper so callers written against the free function keep working
+// until they take a Fence.
 func SafeCopyFile(root, srcInput, dstInput, permitted string) error {
-	return SafeCopyFileFrom(root, srcInput, root, dstInput, permitted)
+	return Fence{Root: root, Permit: domain.WriteEscapePermit{Real: permitted}}.CopyFile(srcInput, dstInput)
 }
 
 // openCopySource opens the copy's source through the root pinned at the SOURCE's end and reports
@@ -559,100 +422,20 @@ func copyAndClose(dst *os.File, src io.Reader, mode os.FileMode) error {
 	return dst.Close()
 }
 
-// SafeRename renames oldInput to newInput — both relative to root, or absolute-inside-root —
-// through a single os.Root pinned at root, so BOTH ends of the rename are fenced: a path that
-// escapes the root at either end returns an error wrapping ErrPathEscape and nothing moves.
-// Parent directories of the destination are created inside the fence, as SafeWriteFile creates
-// them for its target.
-//
-// The rename is the filesystem's own: atomic, and it replaces an existing destination NAME
-// (including a symlink at that name) without following it. Deciding whether replacing that name
-// is allowed is the caller's policy, not this primitive's.
-//
-// BOTH parent chains must be real directories. A rename mutates both ends — the old name is
-// unlinked, the new one created — so a symlinked parent on either chain would move a file the
-// operator never named, and returns an error wrapping ErrSymlinkedParent with nothing created and
-// nothing moved. The check runs before the destination's parents are created, which also means a
-// caller that retries a FAILED rename as copy-then-remove (move_file does) knows any error other
-// than this one came from two chains that already passed the gate.
-//
-// It takes NO approved-escape permit (ADR 0049), and that is not an omission. A rename is one
-// syscall through one pinned root, so it cannot span the workspace fence and an approved target
-// outside it — the kernel would refuse the cross-device move even if a root could express it.
-// An approved escape MOVE is therefore the copy-then-remove pair: SafeCopyFileFrom carries the
-// permit to the destination, SafeRemove unlinks the in-workspace source under the fence.
+// SafeRename is Fence.Rename with the root passed apart. It takes NO approved-escape permit
+// because the method consults none: a rename is one syscall through one pinned root and cannot
+// span the fence (the rationale is on Fence.Rename). This is a wrapper so callers written against
+// the free function keep working until they take a Fence.
 func SafeRename(root, oldInput, newInput string) error {
-	oldRel, err := rootRelative(oldInput, root)
-	if err != nil {
-		return err
-	}
-	newRel, err := rootRelative(newInput, root)
-	if err != nil {
-		return err
-	}
-	r, err := os.OpenRoot(root)
-	if err != nil {
-		return fmt.Errorf("%w: %v", ErrRootInaccessible, err)
-	}
-	defer func() { _ = r.Close() }()
-
-	// Before ANY mutation: BOTH ends of a rename are mutated — the old name is unlinked, the new
-	// one created — so a symlinked parent on either chain would move a file the operator never
-	// named. Both chains are validated before the MkdirAll below, so a refused rename creates
-	// nothing, and a caller that falls back to copy-then-remove on some OTHER failure knows both
-	// ends already passed this gate.
-	if err := refuseSymlinkedParents(r, oldRel); err != nil {
-		return err
-	}
-	if err := refuseSymlinkedParents(r, newRel); err != nil {
-		return err
-	}
-
-	if dir := filepath.Dir(newRel); dir != "." {
-		if err := r.MkdirAll(dir, 0o755); err != nil && isRootEscapeError(err) {
-			return mapRootEscape(err)
-		}
-	}
-	if err := r.Rename(oldRel, newRel); err != nil {
-		return mapRootEscape(err)
-	}
-	return nil
+	return WorkspaceFence(root).Rename(oldInput, newInput)
 }
 
-// SafeRemove removes the name input (relative to root, or absolute-inside-root) through an
-// os.Root pinned at root, so a path escaping the root is refused rather than followed. It
-// removes THE NAME: a symlink is unlinked, never the file it points at.
-//
-// The name's PARENT chain must be real directories, as it must for a write: an unlink lands
-// wherever the chain leads, so a symlinked parent — even one staying inside the root — returns an
-// error wrapping ErrSymlinkedParent and nothing is removed.
-//
-// It is os.Remove's contract otherwise — a non-empty directory is refused by the filesystem —
-// and a missing name returns an error satisfying errors.Is(err, os.ErrNotExist).
-//
-// permitted is SafeWriteFile's approved escape target (ADR 0049), empty for the ordinary call.
-// A deletion is the most destructive member of the approved family and is deliberately included:
-// its Gate disclosed the same resolved path a write's would, so the same permit — and only the
-// exact path it names — reaches the same primitive.
+// SafeRemove is Fence.Remove with the root and the permit passed apart: permitted is the
+// approved escape target's resolved path (ADR 0049), or empty for the ordinary call. The
+// unlink-the-name contract and the real-directory parent chain are the method's; this is a
+// wrapper so callers written against the free function keep working until they take a Fence.
 func SafeRemove(root, input, permitted string) error {
-	r, rel, err := openMutationRoot(root, input, permitted)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = r.Close() }()
-
-	// Before ANY mutation: the unlink lands wherever the parent chain leads, so a symlinked
-	// parent would remove a file under a name the operator never approved — `docs/config` erasing
-	// `.git/config` through a `docs → .git` link. The target's OWN name is not examined: removing
-	// a symlink unlinks the link, which is this primitive's contract.
-	if err := refuseSymlinkedParents(r, rel); err != nil {
-		return err
-	}
-
-	if err := r.Remove(rel); err != nil {
-		return mapRootEscape(err)
-	}
-	return nil
+	return Fence{Root: root, Permit: domain.WriteEscapePermit{Real: permitted}}.Remove(input)
 }
 
 // rootRelative validates that input stays within root (the same containment property

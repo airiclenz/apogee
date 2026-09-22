@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"os/exec"
+	"path/filepath"
 )
 
 // ----------------------------------------------------------------------------
@@ -234,6 +235,16 @@ type WriteEscapePermit struct {
 	// Real is the resolved absolute path this permit authorises — the one the human was shown.
 	// Empty means the permit authorises nothing: WriteEscapePermitFrom reports it absent.
 	Real string
+}
+
+// Names reports whether resolved — an already-resolved absolute path, the output of the same
+// resolution dispatch classified the write with — is exactly the path this permit authorises. It
+// is the whole of what a permit decides: one path, compared clean-for-clean, and an empty permit
+// names nothing, so a bare or revoked permit can never answer yes. The fence asks it after
+// re-resolving the argument (security.Fence.Governs); the permit itself never resolves, because
+// what it was minted from is already the real path the approval pane showed.
+func (p WriteEscapePermit) Names(resolved string) bool {
+	return p.Real != "" && filepath.Clean(resolved) == filepath.Clean(p.Real)
 }
 
 // writeEscapePermitCtxKey is the unexported context key under which a WriteEscapePermit rides.

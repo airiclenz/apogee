@@ -23,8 +23,8 @@ import (
 // A PERMITTED TARGET is how that yes reaches the filesystem without widening the fence for
 // anything else. The permit is one resolved absolute path — the very writeTarget.Real the
 // approval pane disclosed, carried on the execution context as domain.WriteEscapePermit and
-// handed to the primitives in safeio.go as a string (empty = no permit). The rule it buys is
-// exactly one path wide:
+// handed to the verbs in fence.go as the Permit of a security.Fence (a zero permit = none). The
+// rule it buys is exactly one path wide:
 //
 //   - No permit, or a target inside the workspace root: today's fence, byte-for-byte. Every
 //     existing call keeps the behaviour it had — the never-worse floor.
@@ -48,15 +48,15 @@ import (
 // outside the workspace can swap it afterwards. The boundary is the Confiner. What this layer
 // guarantees is that an approved escape lands on the path the human read, or lands nowhere.
 
-// openMutationRoot pins the os.Root a mutation of input lands through and returns input's path
-// relative to that root. It is the ONE place the fence decides which root bounds a write, so
-// every primitive in safeio.go inherits the same rule by construction rather than by repetition:
-// the workspace root for an in-workspace target (permit or no permit), the permitted target's
-// own ancestor for an approved escape, and a refusal for everything else.
+// openMutationRoot pins the os.Root a mutation of input under f lands through and returns
+// input's path relative to that root. It is the ONE place the fence decides which root bounds a
+// write, so every verb in fence.go inherits the same rule by construction rather than by
+// repetition: the workspace root for an in-workspace target (permit or no permit), the permitted
+// target's own ancestor for an approved escape, and a refusal for everything else.
 //
-// Which branch a call takes is decided by its RESOLVED path, and that question is asked FIRST: an
-// argument that re-resolves to exactly the permitted target takes the permitted branch even when
-// its spelling sits inside the workspace. That case is the workspace-internal symlink whose target
+// Which branch a call takes is decided by its RESOLVED path (Fence.Governs), and that question is
+// asked FIRST: an argument that re-resolves to exactly the permitted target takes the permitted
+// branch even when its spelling sits inside the workspace. That case is the workspace-internal symlink whose target
 // lies outside — the path dispatch resolved in order to classify the write and the approval pane
 // disclosed in full, so the yes the operator gave names the outside target and the mutation has to
 // reach it. Sending it down the lexical branch instead would refuse the one call the human read,
@@ -68,28 +68,28 @@ import (
 // internal/agent/dispatch.go), so an ordinary in-workspace write can never meet the match above.
 //
 // The caller owns the returned root and must Close it. On any error nothing is left open.
-func openMutationRoot(root, input, permitted string) (*os.Root, string, error) {
-	if permitted != "" && namesPermittedTarget(root, input, permitted) {
-		return openPermittedRoot(root, input, permitted)
+func openMutationRoot(f Fence, input string) (*os.Root, string, error) {
+	if f.Governs(input) {
+		return openPermittedRoot(f, input)
 	}
 
-	rel, err := rootRelative(input, root)
+	rel, err := rootRelative(input, f.Root)
 	if err == nil {
-		r, openErr := os.OpenRoot(root)
+		r, openErr := os.OpenRoot(f.Root)
 		if openErr != nil {
 			return nil, "", fmt.Errorf("%w: %v", ErrRootInaccessible, openErr)
 		}
 		return r, rel, nil
 	}
-	if permitted == "" {
+	if f.Permit.Real == "" {
 		return nil, "", err
 	}
-	return openPermittedRoot(root, input, permitted)
+	return openPermittedRoot(f, input)
 }
 
 // openPermittedRoot pins the root for a mutation that leaves the workspace WITH an approval
-// behind it: input must re-resolve to exactly permitted, and the root is then pinned at the
-// deepest existing directory above that target, as close to it as the filesystem allows.
+// behind it: input must re-resolve to exactly f's permitted target, and the root is then pinned
+// at the deepest existing directory above that target, as close to it as the filesystem allows.
 //
 // Pinning the ancestor rather than the whole host is what keeps the permit one path wide: the
 // only names reachable through that root are the target's own missing parents and the target
@@ -99,11 +99,10 @@ func openMutationRoot(root, input, permitted string) (*os.Root, string, error) {
 // the same reason the escape and symlinked-parent messages are: an operator who approved a write
 // and got an error needs to know which of the two truths applies, that the argument no longer
 // means what the pane showed, or that the target itself has become a link.
-func openPermittedRoot(root, input, permitted string) (*os.Root, string, error) {
-	named := permittedName(root, input)
-	target := filepath.Clean(permitted)
+func openPermittedRoot(f Fence, input string) (*os.Root, string, error) {
+	target := filepath.Clean(f.Permit.Real)
 
-	if resolved := EvalRealPath(named); resolved != target {
+	if resolved := EvalRealPath(permittedName(f.Root, input)); !f.Permit.Names(resolved) {
 		return nil, "", fmt.Errorf(
 			"%w: %q resolves to %q, not the approved target %q (an approved write lands on the path the approval disclosed, and nowhere else)",
 			ErrPathEscape, input, resolved, target)
@@ -128,20 +127,10 @@ func openPermittedRoot(root, input, permitted string) (*os.Root, string, error) 
 	return r, rel, nil
 }
 
-// namesPermittedTarget reports whether input means exactly the permitted target — the single
-// question that decides whether a mutation runs through the permitted root instead of the fence.
-//
-// It is asked twice on purpose. openMutationRoot asks it to ROUTE, ahead of the lexical branch;
-// openPermittedRoot asks it again to REFUSE, with the specific message an operator whose approval
-// stopped executing needs. Both ask it of the same string through the same resolution, so a path
-// can never route one way and be judged another.
-func namesPermittedTarget(root, input, permitted string) bool {
-	return EvalRealPath(permittedName(root, input)) == filepath.Clean(permitted)
-}
-
-// permittedName renders input as the absolute path the permit is judged against: a relative
-// argument joins the workspace root exactly as every other mutation resolves it, an absolute one
-// stands as given. Cleaning is left to EvalRealPath, which does it on the way to the real path.
+// permittedName renders input as the absolute path the permit is judged against (Fence.Governs):
+// a relative argument joins the workspace root exactly as every other mutation resolves it, an
+// absolute one stands as given. Cleaning is left to EvalRealPath, which does it on the way to the
+// real path.
 func permittedName(root, input string) string {
 	if filepath.IsAbs(input) {
 		return input

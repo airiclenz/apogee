@@ -29,7 +29,8 @@
 //     The fence makes exactly ONE exception, and only when the operator made it: a write
 //     the ladder GATED and the human approved carries a permitted target — the resolved path
 //     the approval pane disclosed — and lands there, one path wide, re-resolved at write time
-//     (writepermit.go, ADR 0049). Without a permit nothing about the fence changes.
+//     (the Permit of a security.Fence — fence.go, writepermit.go, ADR 0049). Without a permit
+//     nothing about the fence changes.
 //   - URL-safety (URLGuard): scheme/host allow-deny for the network tools
 //     (web-fetch / http-request, P3.11), deny-first precedence.
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
@@ -109,30 +110,38 @@
 // ErrRootInaccessible (the root itself deleted, renamed or not a directory — deliberately not an
 // escape, so the caller blames the root and not the argument), and the EvalRealPath /
 // WorkspaceRelative helpers every surface that prints a path goes through.
-// safeio.go is the USE — SafeReadFile, SafeWriteFile, SafeOpen, SafeCopyFile, SafeCopyFileFrom,
-// SafeRename and SafeRemove, each performed through an os.Root pinned at the root it is fenced
-// by so the validated path IS the path touched (H1), with the same-directory staging file and
-// rename that makes a write atomic at the target name. It also carries the in-root symlink
-// policy the fence does not decide: ErrSymlinkedParent and refuseSymlinkedParents, the
-// write-side refusal of a parent chain that crosses a link, applied to every chain a primitive
-// here MUTATES (SafeWriteFile's target, SafeRename's two ends, SafeRemove's target and
-// SafeCopyFileFrom's destination) and to no chain it merely reads. All but one pin every end at the SAME
-// (workspace) root; SafeCopyFileFrom is the exception that pins a root at each end, because a
-// copy's source is a read and may come from a read-only root the destination fence knows nothing
-// about — its write half is bounded by the destination root exactly as the others are. SafeOpen
+// fence.go is the USE on the write side — security.Fence, the workspace Root and the typed
+// approved-escape Permit (domain.WriteEscapePermit) as one value, with the mutating verbs
+// WriteFile, Remove, CopyFile, CopyFileFrom and Rename as its methods, each performed through an
+// os.Root pinned at the root it is fenced by so the validated path IS the path touched (H1), with
+// the same-directory staging file and rename that makes a write atomic at the target name.
+// Fence.Governs is the ADR 0049 question asked once — does this argument re-resolve to exactly
+// the permitted target? — and every verb routes through it; Rename alone consults no permit,
+// because one rename through one root cannot span the fence. All but one verb pin every end at
+// the SAME (workspace) root; CopyFileFrom is the exception that pins a root at each end, because
+// a copy's source is a read and may come from a read-only root the destination fence knows
+// nothing about — its write half is bounded by the destination root exactly as the others are.
+// safeio.go is the USE on the read side and the shared machinery — SafeReadFile and SafeOpen,
+// plus the free SafeWriteFile, SafeCopyFile, SafeCopyFileFrom, SafeRename and SafeRemove that
+// are one-line wrappers over the Fence verbs for callers that still pass root and permit apart.
+// It also carries the in-root symlink policy the fence does not decide: ErrSymlinkedParent and
+// refuseSymlinkedParents, the write-side refusal of a parent chain that crosses a link, applied
+// to every chain a verb MUTATES (WriteFile's target, Rename's two ends, Remove's target and
+// CopyFileFrom's destination) and to no chain it merely reads. SafeOpen
 // returns only a regular file or a directory (ErrNotRegular for a pipe, socket or device) and
 // opens non-blocking so a planted FIFO cannot wedge it: safeio_open_unix.go is that flag,
 // syscall.O_NONBLOCK, for every non-Windows target; safeio_open_windows.go is its zero on
 // Windows, which has no such flag and no pipe inside a workspace tree.
 // writepermit.go is the fence's one exception and the whole of it: the approved escape target
-// (ADR 0049). openMutationRoot — the single place every mutating primitive above decides which
-// root bounds it — plus the re-resolution that reproduces dispatch's classification rather than
-// trusting it, the deepest-existing-ancestor anchor the approved write is pinned to, and the
-// symlinked-target refusal. The permit question is asked FIRST and on the RESOLVED path, so an
-// argument that re-resolves to exactly the permitted target answers with that target's own
-// ancestor even when it is spelled inside the workspace — the disclosed workspace-internal symlink
-// pointing out. Every OTHER call takes the lexical branch unchanged: today's workspace root,
-// byte-for-byte, for a path spelled inside it, and a refusal for one that is not.
+// (ADR 0049). openMutationRoot — the single place every Fence verb decides which root bounds
+// it — plus the re-resolution that reproduces dispatch's classification rather than trusting
+// it, the deepest-existing-ancestor anchor the approved write is pinned to, and the
+// symlinked-target refusal. The permit question (Fence.Governs) is asked FIRST and on the
+// RESOLVED path, so an argument that re-resolves to exactly the permitted target answers with
+// that target's own ancestor even when it is spelled inside the workspace — the disclosed
+// workspace-internal symlink pointing out. Every OTHER call takes the lexical branch unchanged:
+// today's workspace root, byte-for-byte, for a path spelled inside it, and a refusal for one
+// that is not.
 // execsafety.go measures that same boundary in the other direction: RefuseExecFromWritablePath
 // keeps an argv[0] that resolves inside the writable box from ever being executed, so bytes a
 // confined call was allowed to WRITE cannot become the program a later unconfined call RUNS.

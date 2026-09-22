@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // permitFor renders the permit an approval would carry for target: the RESOLVED absolute path,
@@ -12,18 +14,18 @@ import (
 // tests pin the same string the approval pane discloses rather than a hand-built one. On macOS the
 // difference is real — a t.TempDir() lives under a symlinked /var — and a test that skipped this
 // would pass for the wrong reason.
-func permitFor(t *testing.T, target string) string {
+func permitFor(t *testing.T, target string) domain.WriteEscapePermit {
 	t.Helper()
 
-	return EvalRealPath(target)
+	return domain.WriteEscapePermit{Real: EvalRealPath(target)}
 }
 
-// TestSafeWriteFile_PermittedTargetWritesOutsideTheWorkspace is ADR 0049's whole promise at the
+// TestFenceWriteFile_PermittedTargetWritesOutsideTheWorkspace is ADR 0049's whole promise at the
 // fence: the approved out-of-workspace write actually writes, to exactly the path the approval
 // disclosed and to nothing else. The table walks the four answers the permit can give — the
 // target as it stands, the target whose parents do not exist yet, a target the permit does not
 // name, and the same write with no permit at all, which must refuse exactly as it always did.
-func TestSafeWriteFile_PermittedTargetWritesOutsideTheWorkspace(t *testing.T) {
+func TestFenceWriteFile_PermittedTargetWritesOutsideTheWorkspace(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -45,16 +47,16 @@ func TestSafeWriteFile_PermittedTargetWritesOutsideTheWorkspace(t *testing.T) {
 			root := t.TempDir()
 			outside := t.TempDir()
 			target := filepath.Join(outside, tc.target)
-			permit := ""
+			fence := WorkspaceFence(root)
 			if tc.permit != "" {
-				permit = permitFor(t, filepath.Join(outside, tc.permit))
+				fence.Permit = permitFor(t, filepath.Join(outside, tc.permit))
 			}
 
-			err := SafeWriteFile(root, target, []byte("approved"), 0o644, permit)
+			err := fence.WriteFile(target, []byte("approved"), 0o644)
 
 			if !tc.wantWrite {
 				if !errors.Is(err, ErrPathEscape) {
-					t.Fatalf("SafeWriteFile err = %v, want ErrPathEscape", err)
+					t.Fatalf("WriteFile err = %v, want ErrPathEscape", err)
 				}
 				if _, statErr := os.Stat(target); !errors.Is(statErr, os.ErrNotExist) {
 					t.Fatalf("refused write still landed at %s (stat err = %v)", target, statErr)
@@ -62,7 +64,7 @@ func TestSafeWriteFile_PermittedTargetWritesOutsideTheWorkspace(t *testing.T) {
 				return
 			}
 			if err != nil {
-				t.Fatalf("SafeWriteFile on the approved target: %v", err)
+				t.Fatalf("WriteFile on the approved target: %v", err)
 			}
 			data, readErr := os.ReadFile(target)
 			if readErr != nil {
@@ -75,13 +77,13 @@ func TestSafeWriteFile_PermittedTargetWritesOutsideTheWorkspace(t *testing.T) {
 	}
 }
 
-// TestSafeWriteFile_PermitRefusesADivergedTarget covers the two ways the disclosed path and the
+// TestFenceWriteFile_PermitRefusesADivergedTarget covers the two ways the disclosed path and the
 // filesystem can part company after the human said yes. A DANGLING symlink at the target name is
 // the case resolution cannot see through — the permit and the argument agree, and the write must
 // still be refused, because the bytes would land on a name the pane never showed. A resolving
 // symlink is refused one step earlier, as a mismatch, and the file it points at must be untouched:
 // that is the redirect an attacker would want.
-func TestSafeWriteFile_PermitRefusesADivergedTarget(t *testing.T) {
+func TestFenceWriteFile_PermitRefusesADivergedTarget(t *testing.T) {
 	t.Parallel()
 
 	t.Run("a dangling symlink at the approved name is refused", func(t *testing.T) {
@@ -94,10 +96,10 @@ func TestSafeWriteFile_PermitRefusesADivergedTarget(t *testing.T) {
 			t.Skipf("symlinks unsupported: %v", err)
 		}
 
-		err := SafeWriteFile(root, link, []byte("approved"), 0o644, permitFor(t, link))
+		err := Fence{Root: root, Permit: permitFor(t, link)}.WriteFile(link, []byte("approved"), 0o644)
 
 		if !errors.Is(err, ErrPathEscape) {
-			t.Fatalf("SafeWriteFile onto a symlinked target err = %v, want ErrPathEscape", err)
+			t.Fatalf("WriteFile onto a symlinked target err = %v, want ErrPathEscape", err)
 		}
 		info, statErr := os.Lstat(link)
 		if statErr != nil || info.Mode()&os.ModeSymlink == 0 {
@@ -120,10 +122,11 @@ func TestSafeWriteFile_PermitRefusesADivergedTarget(t *testing.T) {
 		}
 
 		// The permit names the link the operator approved; resolution follows it to elsewhere.md.
-		err := SafeWriteFile(root, link, []byte("approved"), 0o644, filepath.Clean(link))
+		fence := Fence{Root: root, Permit: domain.WriteEscapePermit{Real: filepath.Clean(link)}}
+		err := fence.WriteFile(link, []byte("approved"), 0o644)
 
 		if !errors.Is(err, ErrPathEscape) {
-			t.Fatalf("SafeWriteFile through a redirecting symlink err = %v, want ErrPathEscape", err)
+			t.Fatalf("WriteFile through a redirecting symlink err = %v, want ErrPathEscape", err)
 		}
 		data, readErr := os.ReadFile(elsewhere)
 		if readErr != nil || string(data) != "untouched" {
@@ -142,21 +145,21 @@ func TestSafeWriteFile_PermitRefusesADivergedTarget(t *testing.T) {
 		}
 		target := filepath.Join(blocker, "child.md")
 
-		err := SafeWriteFile(root, target, []byte("approved"), 0o644, permitFor(t, target))
+		err := Fence{Root: root, Permit: permitFor(t, target)}.WriteFile(target, []byte("approved"), 0o644)
 
 		if !errors.Is(err, ErrPathEscape) {
-			t.Fatalf("SafeWriteFile under a regular file err = %v, want ErrPathEscape", err)
+			t.Fatalf("WriteFile under a regular file err = %v, want ErrPathEscape", err)
 		}
 	})
 }
 
-// TestSafeWriteFile_PermittedTargetThroughAWorkspaceLink covers the shape the Gate can disclose but
+// TestFenceWriteFile_PermittedTargetThroughAWorkspaceLink covers the shape the Gate can disclose but
 // the fence could not execute: the argument is spelled INSIDE the workspace and leaves it through a
 // symlink. Dispatch resolves that link to classify the write, so the pane showed — and the permit
 // names — the outside path; the bytes must therefore land THERE, through the permitted ancestor
 // root, with the link left as the link it was. Without the matching permit the same call is refused
 // exactly as it always was, which is the floor this branch may not lower.
-func TestSafeWriteFile_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
+func TestFenceWriteFile_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -183,21 +186,21 @@ func TestSafeWriteFile_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
 			if err := os.Symlink(target, link); err != nil {
 				t.Skipf("symlinks unsupported: %v", err)
 			}
-			permit := ""
+			fence := WorkspaceFence(root)
 			if tc.permit != "" {
-				permit = permitFor(t, filepath.Join(outside, tc.permit))
+				fence.Permit = permitFor(t, filepath.Join(outside, tc.permit))
 			}
 
-			err := SafeWriteFile(root, "link.md", []byte("approved"), 0o644, permit)
+			err := fence.WriteFile("link.md", []byte("approved"), 0o644)
 
 			want := "original"
 			if tc.wantWrite {
 				want = "approved"
 				if err != nil {
-					t.Fatalf("SafeWriteFile through the approved link: %v", err)
+					t.Fatalf("WriteFile through the approved link: %v", err)
 				}
 			} else if !errors.Is(err, ErrPathEscape) {
-				t.Fatalf("SafeWriteFile err = %v, want ErrPathEscape", err)
+				t.Fatalf("WriteFile err = %v, want ErrPathEscape", err)
 			}
 			data, readErr := os.ReadFile(target)
 			if readErr != nil || string(data) != want {
@@ -211,11 +214,11 @@ func TestSafeWriteFile_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
 	}
 }
 
-// TestSafeRemove_PermittedTargetThroughAWorkspaceLink states the delete half of the same shape,
+// TestFenceRemove_PermittedTargetThroughAWorkspaceLink states the delete half of the same shape,
 // which is the one with a surprise in it: the approval disclosed the RESOLVED path, so that is what
 // the delete removes — the outside file, leaving the workspace link behind and dangling. Unlinking
 // the link instead would leave the file the operator agreed to destroy exactly where it was.
-func TestSafeRemove_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
+func TestFenceRemove_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -229,8 +232,8 @@ func TestSafeRemove_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 
-	if err := SafeRemove(root, "doomed.md", permitFor(t, target)); err != nil {
-		t.Fatalf("SafeRemove through the approved link: %v", err)
+	if err := (Fence{Root: root, Permit: permitFor(t, target)}).Remove("doomed.md"); err != nil {
+		t.Fatalf("Remove through the approved link: %v", err)
 	}
 
 	if _, err := os.Stat(target); !errors.Is(err, os.ErrNotExist) {
@@ -242,24 +245,24 @@ func TestSafeRemove_PermittedTargetThroughAWorkspaceLink(t *testing.T) {
 	}
 }
 
-// TestSafeWriteFile_PermitLeavesWorkspaceWritesUnchanged pins the never-worse floor from the other
+// TestFenceWriteFile_PermitLeavesWorkspaceWritesUnchanged pins the never-worse floor from the other
 // side: a permit is an EXCEPTION for one path, never a mode. An in-workspace write lands where it
 // always did while an unrelated permit rides along — indistinguishable from the same write with no
 // permit at all — and a workspace path that leaves the fence through a symlink to somewhere the
 // permit does NOT name is still refused, because what a permit authorises is one resolved path,
 // never the act of escaping.
-func TestSafeWriteFile_PermitLeavesWorkspaceWritesUnchanged(t *testing.T) {
+func TestFenceWriteFile_PermitLeavesWorkspaceWritesUnchanged(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	outside := t.TempDir()
 	approved := filepath.Join(outside, "approved.md")
-	permit := permitFor(t, approved)
+	permitted := Fence{Root: root, Permit: permitFor(t, approved)}
 
-	if err := SafeWriteFile(root, "notes.md", []byte("in workspace"), 0o644, permit); err != nil {
+	if err := permitted.WriteFile("notes.md", []byte("in workspace"), 0o644); err != nil {
 		t.Fatalf("in-workspace write with a permit present: %v", err)
 	}
-	if err := SafeWriteFile(root, "plain.md", []byte("in workspace"), 0o644, ""); err != nil {
+	if err := WorkspaceFence(root).WriteFile("plain.md", []byte("in workspace"), 0o644); err != nil {
 		t.Fatalf("the same write with no permit: %v", err)
 	}
 	for _, name := range []string{"notes.md", "plain.md"} {
@@ -278,7 +281,7 @@ func TestSafeWriteFile_PermitLeavesWorkspaceWritesUnchanged(t *testing.T) {
 		t.Skipf("symlinks unsupported: %v", err)
 	}
 	smuggled := filepath.Join(outside, "smuggled.md")
-	err := SafeWriteFile(root, filepath.Join("hop", "smuggled.md"), []byte("smuggled"), 0o644, permit)
+	err := permitted.WriteFile(filepath.Join("hop", "smuggled.md"), []byte("smuggled"), 0o644)
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("write through a workspace symlink err = %v, want ErrPathEscape", err)
 	}
@@ -300,10 +303,9 @@ func TestPermittedTarget_NeverWidensARead(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	target := filepath.Join(outside, "approved.md")
-	permit := permitFor(t, target)
 
-	if err := SafeWriteFile(root, target, []byte("approved"), 0o644, permit); err != nil {
-		t.Fatalf("SafeWriteFile on the approved target: %v", err)
+	if err := (Fence{Root: root, Permit: permitFor(t, target)}).WriteFile(target, []byte("approved"), 0o644); err != nil {
+		t.Fatalf("WriteFile on the approved target: %v", err)
 	}
 
 	if _, err := SafeReadFile(root, target); !errors.Is(err, ErrPathEscape) {
@@ -314,11 +316,11 @@ func TestPermittedTarget_NeverWidensARead(t *testing.T) {
 	}
 }
 
-// TestSafeRemove_PermittedTarget covers the most destructive member of the approved family. A
+// TestFenceRemove_PermittedTarget covers the most destructive member of the approved family. A
 // delete is included on purpose (ADR 0049 §5): its Gate discloses the same resolved path a write's
 // does, so it honours the same permit — and refuses just as narrowly, leaving a neighbour the
 // permit does not name exactly where it was.
-func TestSafeRemove_PermittedTarget(t *testing.T) {
+func TestFenceRemove_PermittedTarget(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -330,28 +332,28 @@ func TestSafeRemove_PermittedTarget(t *testing.T) {
 			t.Fatalf("setup: %v", err)
 		}
 	}
-	permit := permitFor(t, doomed)
+	fence := Fence{Root: root, Permit: permitFor(t, doomed)}
 
-	if err := SafeRemove(root, kept, permit); !errors.Is(err, ErrPathEscape) {
-		t.Fatalf("SafeRemove of an unapproved neighbour err = %v, want ErrPathEscape", err)
+	if err := fence.Remove(kept); !errors.Is(err, ErrPathEscape) {
+		t.Fatalf("Remove of an unapproved neighbour err = %v, want ErrPathEscape", err)
 	}
 	if _, err := os.Stat(kept); err != nil {
 		t.Fatalf("the unapproved neighbour was removed: %v", err)
 	}
 
-	if err := SafeRemove(root, doomed, permit); err != nil {
-		t.Fatalf("SafeRemove of the approved target: %v", err)
+	if err := fence.Remove(doomed); err != nil {
+		t.Fatalf("Remove of the approved target: %v", err)
 	}
 	if _, err := os.Stat(doomed); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the approved target survived its delete (stat err = %v)", err)
 	}
 }
 
-// TestSafeCopyFile_PermittedDestination pins the copy half of the family: the permit bounds the
+// TestFenceCopyFile_PermittedDestination pins the copy half of the family: the permit bounds the
 // DESTINATION, which is the write, and leaves the source where it was — a read the workspace fence
 // still owns. The last case is the one an approval must never buy: an approved out-of-workspace
 // destination does not make an out-of-workspace SOURCE readable.
-func TestSafeCopyFile_PermittedDestination(t *testing.T) {
+func TestFenceCopyFile_PermittedDestination(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
@@ -360,13 +362,13 @@ func TestSafeCopyFile_PermittedDestination(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	approved := filepath.Join(outside, "copied", "src.txt")
-	permit := permitFor(t, approved)
+	fence := Fence{Root: root, Permit: permitFor(t, approved)}
 
-	if err := SafeCopyFile(root, "src.txt", filepath.Join(outside, "other.txt"), permit); !errors.Is(err, ErrPathEscape) {
+	if err := fence.CopyFile("src.txt", filepath.Join(outside, "other.txt")); !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("copy to an unapproved destination err = %v, want ErrPathEscape", err)
 	}
 
-	if err := SafeCopyFile(root, "src.txt", approved, permit); err != nil {
+	if err := fence.CopyFile("src.txt", approved); err != nil {
 		t.Fatalf("copy to the approved destination: %v", err)
 	}
 	data, err := os.ReadFile(approved)
@@ -378,7 +380,7 @@ func TestSafeCopyFile_PermittedDestination(t *testing.T) {
 	if err := os.WriteFile(outsideSource, []byte("PRIVATE"), 0o600); err != nil {
 		t.Fatalf("setup: %v", err)
 	}
-	err = SafeCopyFile(root, outsideSource, "stolen.txt", permitFor(t, outsideSource))
+	err = Fence{Root: root, Permit: permitFor(t, outsideSource)}.CopyFile(outsideSource, "stolen.txt")
 	if !errors.Is(err, ErrPathEscape) {
 		t.Fatalf("copy FROM a permitted path err = %v, want ErrPathEscape", err)
 	}
