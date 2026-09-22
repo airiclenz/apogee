@@ -592,6 +592,24 @@ type toolView struct {
 	// bool, and a replayed record re-derives the mark from the entry it decoded.
 	finished bool
 
+	// runVerdict is the ENGINE's verdict word for a COLLAPSED RUN whose row a painter composed —
+	// `done`, `stopped at its step cap` (head.tool.stat.spell(), delegationStat) — and "" on every
+	// view that is not a collapsed run's reading. There is no bool beside it: this member is the whole
+	// gate. Where it is set, the promote-guard's refusal swaps the GIST out of the composed line for
+	// the engine's verdict and nothing lands in a body (demoted), which is what keeps a run's row
+	// openable only into its run view (ADR 0063).
+	//
+	// It is a PAINT-TIME reading like finished above it, and never a presented fact: only the painter
+	// composing a collapsed run's line sets it (collapsedSubAgentView), and a view the painter did not
+	// compose that way — an unframed delegation's (unframedSubAgentView), a hand-built one — carries
+	// "" and takes the ordinary demotion with its body line.
+	//
+	// It is deliberately not on the wire: toWireToolView/fromWireToolView do not name it and
+	// session.ToolView stays untouched, a replayed record composing the line afresh from the span it
+	// decoded. It is not display text either — the word is one the ENGINE spelled, never text a user
+	// or a model wrote — so the escape seam need not reach it (sanitizeExemptToolViewMembers).
+	runVerdict string
+
 	// solo marks a call that must never be folded into a grouped block, however well it matches its
 	// neighbours (groupable, render.go). Grouping's own rule is about the SHAPE of a call — a target
 	// to lead a member's leader row — and says nothing about what the block MEANS; solo is where a
@@ -1005,8 +1023,29 @@ func (tv toolView) promotable() bool {
 // of, and writing through the slice it shares would put the line in the entry's own body as well —
 // once per repaint. Demoting is idempotent for the same reason it is safe: the stat leaves with the
 // promotion, so a view already demoted is no longer promotable.
+//
+// A COLLAPSED RUN reads it differently, and [toolView.runVerdict] is the whole gate on that reading:
+// there the stat IS the fallback line the painter composed for this moment — the same count, fill
+// and model with the ENGINE's verdict where the report's gist stood — so the swap is the whole of
+// the demotion and the body stays at zero. Nothing is lost by it either, for a better reason than
+// the ordinary swap has: the report is one click away in the RUN's own view, and a run's row may
+// grow no body in place (ADR 0063).
+//
+// The verdicts are carried over the swap rather than re-derived, because the composed line is no
+// longer the bare verdict word typedSummary would recognise: the failure the head's own summary
+// worded stands, and the success green a finished run is painted in is read from the verdict word
+// itself (succeededSummary) — `done` is the ENGINE's reading of a run it drove to its boundary and
+// the one verdict apogee paints green (ratified call 3 of docs/plans/"2026-08-31 - 05").
 func (tv toolView) demoted() toolView {
 	if !tv.promotable() {
+		return tv
+	}
+	if tv.runVerdict != "" {
+		summary := typedSummary(tv.stat)
+		summary.failed = tv.Summary.failed
+		summary.succeeded = tv.Summary.succeeded || succeededSummary(tv.runVerdict)
+		tv.Summary = summary
+		tv.stat = statValue{}
 		return tv
 	}
 	lines := make([]detailLine, 0, tv.Details.len()+1)

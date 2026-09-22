@@ -980,6 +980,90 @@ func TestPromotionCarriesBothReadingsOfTheOutcome(t *testing.T) {
 	}
 }
 
+// TestCollapsedRunDemotionKeepsTheLineAndNoBody pins the demotion a COLLAPSED SUB-AGENT RUN takes
+// when the promote-guard refuses its composed line: the stat the painter put beside it IS that line
+// with the engine's verdict where the report's gist stood, so the swap alone is the whole demotion
+// and nothing lands in the body — a run's row opens its run view, never a body in place (ADR 0063).
+//
+// The verdicts have to survive the swap, which is what the first two cases are about: the composed
+// line is not the bare word succeededSummary reads, so the green a finished run is painted in comes
+// from [toolView.runVerdict] itself — and only from the delegation vocabulary, so a run stopped at
+// its step cap keeps the ordinary marker tone.
+//
+// The third case is the gate: the same view with no verdict word on it is an ordinary promotion and
+// takes the ordinary demotion, line into the body and all.
+func TestCollapsedRunDemotionKeepsTheLineAndNoBody(t *testing.T) {
+	t.Parallel()
+
+	const (
+		doneLine   = "1 tool call · 36k/1.3M · done"
+		cappedLine = "1 tool call · 36k/1.3M · stopped at its step cap"
+		quotedGist = "1 tool call · 36k/1.3M · <sentence>"
+		cappedWord = "stopped at its step cap"
+	)
+
+	for _, tc := range []struct {
+		name       string
+		runVerdict string
+		stat       string
+
+		wantSummary   string
+		wantSucceeded bool
+		wantBody      []string
+	}{{
+		name:       "a finished run keeps its composed line and the green it was shown in",
+		runVerdict: delegationDoneVerdict, stat: doneLine,
+		wantSummary: doneLine, wantSucceeded: true,
+	}, {
+		name:       "a capped run keeps its line and earns no verdict",
+		runVerdict: cappedWord, stat: cappedLine,
+		wantSummary: cappedLine,
+	}, {
+		name:        "without the verdict word it is an ordinary promotion",
+		stat:        cappedLine,
+		wantSummary: cappedLine, wantBody: []string{quotedGist},
+	}} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			// The quoted line is the promoted report as subAgentSummary leaves it: the tool's own
+			// words, carrying neither verdict.
+			view := toolView{
+				name:       subAgentToolName,
+				runVerdict: tc.runVerdict,
+				stat:       plainStat(tc.stat),
+				Summary:    quotedSummary(detailLine{Text: quotedGist}),
+			}
+
+			got := view.demoted()
+
+			if got.Summary.Text != tc.wantSummary {
+				t.Errorf("demoted summary = %q, want %q", got.Summary.Text, tc.wantSummary)
+			}
+			if got.Summary.quoted {
+				t.Error("the composed line took the slot as quoted text; it is the block's own wording")
+			}
+			if got.Summary.succeeded != tc.wantSucceeded {
+				t.Errorf("demoted succeeded = %v, want %v (runVerdict %q)",
+					got.Summary.succeeded, tc.wantSucceeded, tc.runVerdict)
+			}
+			if got.Summary.failed {
+				t.Error("the demotion worded a failure the head never carried")
+			}
+			body := make([]string, 0, got.Details.len())
+			for _, d := range got.Details.all() {
+				body = append(body, d.Text)
+			}
+			if !slices.Equal(body, tc.wantBody) {
+				t.Errorf("demoted body = %q, want %q", body, tc.wantBody)
+			}
+			if got.promotable() {
+				t.Error("the demoted view is still promotable; the swap must be a one-way move")
+			}
+		})
+	}
+}
+
 // A call still in flight carries neither half of an outcome, and the zero summary is plain, so
 // it groups with its finished neighbours rather than breaking their block.
 func TestPresentToolCallInFlightHasNoOutcome(t *testing.T) {
@@ -3048,9 +3132,10 @@ func TestSanitizeLeavesTheResultsOwnRegionsAlone(t *testing.T) {
 // carries display text is either stripped or listed here, so the next one added cannot slip past
 // the seam by nobody noticing.
 var sanitizeExemptToolViewMembers = map[string]string{
-	"name":    "the registry lookup key, never rendered — Label carries the displayed copy of it, and Label is stripped",
-	"argStat": "a value the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
-	"args":    "the parsed request, display state's raw material and never painted: every line built from it is a body line, and the seam strips those",
+	"name":       "the registry lookup key, never rendered — Label carries the displayed copy of it, and Label is stripped",
+	"argStat":    "a value the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
+	"args":       "the parsed request, display state's raw material and never painted: every line built from it is a body line, and the seam strips those",
+	"runVerdict": "a paint-time word the ENGINE spelled for a collapsed run (done, stopped at its step cap), never wire or producer text; it decides a demotion and never reaches the screen itself",
 }
 
 // TestToolViewSanitizeReachesEveryStringMember is the structural guard on the tool card's escape
