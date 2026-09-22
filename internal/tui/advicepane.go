@@ -213,33 +213,3 @@ func (m Model) runAdviceCommand() (tea.Model, tea.Cmd) {
 	m.layout()
 	return m, nil
 }
-
-// The report module's functions under this pane's name (reportpane.go). Each one is the shared body
-// with adviceReport filled in: naming them here is what lets the frame, the keyboard and the pointer
-// go on addressing the /advice pane as itself while there is only one report left to maintain.
-
-// renderAdvice paints the pane, or "" when it is closed or the frame cannot seat it.
-func (m Model) renderAdvice() string { return m.renderReport(adviceReport) }
-
-// adviceSpec composes the pane's [popupSpec] for THIS frame — its rows, the budget the frame
-// granted and the window the scroll landed on ([Model.reportSpec]).
-func (m Model) adviceSpec() (popupSpec, bool) {
-	return m.reportSpec(adviceReport, m.adviceContent())
-}
-
-// adviceKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time and
-// pgup/pgdown a drawn window at a time (reportKey). There is no sixth key — one rendering.
-func (m Model) adviceKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
-	return m.reportKey(adviceReport, msg)
-}
-
-// dismissAdvice takes the pane off the frame and gives its rows back to the transcript. The scroll
-// goes with it: the next open lands on the newest firing again.
-func (m Model) dismissAdvice() Model { return m.dismissReport(adviceReport) }
-
-// advicePaneRect is where the open pane is drawn: the screen row its top border lands on and how
-// many rows it takes.
-func (m Model) advicePaneRect() (y0, h int, ok bool) { return m.reportPaneRect(adviceReport) }
-
-// adviceWindow is the row window the pane is showing as the frame DREW it.
-func (m Model) adviceWindow() (reportWindow, bool) { return m.reportWindow(adviceReport) }

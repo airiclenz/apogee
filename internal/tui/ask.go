@@ -48,7 +48,7 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 // deleting back to empty restores the highlight. Non-wrapping, clamped to the choice range.
 //
 // It reports whether it CLAIMED the key, the way the frame's other non-modal panes do
-// ([Model.usageKey], [Model.inspectorKey]): the prompt is soft-modal, so every key it does not act
+// ([Model.reportKey]): the prompt is soft-modal, so every key it does not act
 // on goes where it always went. ⏎ is not its key — the enter switch in handleKey sends the answer
 // through [Model.submitAnswer] — and esc is the frame's own cancel.
 //

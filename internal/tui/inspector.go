@@ -777,37 +777,6 @@ func cutReadable(lead, segment string, column int) (row, rest string) {
 	return lead + string(runes[:budget]), string(runes[budget:])
 }
 
-// The report module's functions under this pane's name (reportpane.go). Each one is the shared body
-// with inspectReport filled in: naming them here is what lets the frame, the keyboard and the pointer
-// go on addressing the /inspect pane as itself while there is only one report left to maintain.
-
-// renderInspector paints the pane, or "" when it is closed or the frame cannot seat it.
-func (m Model) renderInspector() string { return m.renderReport(inspectReport) }
-
-// inspectorSpec composes the pane's [popupSpec] for THIS frame — its rows, the budget the frame
-// granted and the window the scroll landed on ([Model.reportSpec]).
-func (m Model) inspectorSpec() (popupSpec, bool) {
-	return m.reportSpec(inspectReport, m.inspectContent())
-}
-
-// inspectorKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time,
-// pgup/pgdown a drawn window at a time, and ctrl+r flips the rendering (reportKey).
-func (m Model) inspectorKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
-	return m.reportKey(inspectReport, msg)
-}
-
-// dismissInspector takes the pane off the frame and gives its rows back to the transcript. The scroll
-// goes with it: the next /inspect opens on the newest record again, which is where the question is
-// asked from.
-func (m Model) dismissInspector() Model { return m.dismissReport(inspectReport) }
-
-// inspectorPaneRect is where the open pane is drawn: the screen row its top border lands on and how
-// many rows it takes.
-func (m Model) inspectorPaneRect() (y0, h int, ok bool) { return m.reportPaneRect(inspectReport) }
-
-// inspectorWindow is the row window the pane is showing as the frame DREW it.
-func (m Model) inspectorWindow() (reportWindow, bool) { return m.reportWindow(inspectReport) }
-
 // inspectContent is what the pane tells the shared module about itself for one frame: its name, the
 // keys it spells, how tall it likes to be, and the record rows with the kinds composed beside them.
 // It words no empty state of its own — an empty ring is a ROW here, and which one depends on whether
@@ -815,8 +784,8 @@ func (m Model) inspectorWindow() (reportWindow, bool) { return m.reportWindow(in
 //
 // It is a METHOD because the rendering ctrl+r selected is Model state, and the rows and the hint are
 // two halves of ONE answer about it: composed apart, a pane could spell one rendering's keys over the
-// other's rows. Both callers — this file's inspectorSpec and the shared module's reportContent —
-// route through it for that reason. The TITLE joins them for the same reason once the pane scopes:
+// other's rows. The shared module reaches it through the kind's row alone ([reportRows]), so
+// there is no second composition to drift from it. The TITLE joins them for the same reason once the pane scopes:
 // a box called "raw wire traffic" over one delegation's records would misname what is under it, so
 // the run's name is composed HERE, beside the rows it belongs to, and the unscoped title stays the
 // bare constant it has always been.

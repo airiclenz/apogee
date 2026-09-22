@@ -106,7 +106,7 @@ func TestWirePayloadReachesThePaneStrippedAndPretty(t *testing.T) {
 	if len(rec.lines) < 3 {
 		t.Errorf("payload lines = %q, want the body expanded onto its own lines", rec.lines)
 	}
-	readable := strip(m.renderInspector())
+	readable := strip(m.renderReport(inspectReport))
 	if strings.Contains(readable, `"model"`) {
 		t.Errorf("the pane opens on the body rather than on the readable summary:\n%s", readable)
 	}
@@ -114,7 +114,7 @@ func TestWirePayloadReachesThePaneStrippedAndPretty(t *testing.T) {
 		t.Errorf("the readable pane does not summarise the request envelope:\n%s", readable)
 	}
 	m.inspector.raw = true
-	if pane := strip(m.renderInspector()); !strings.Contains(pane, `"model"`) {
+	if pane := strip(m.renderReport(inspectReport)); !strings.Contains(pane, `"model"`) {
 		t.Errorf("the raw pane does not show the request body:\n%s", pane)
 	}
 }
@@ -194,7 +194,7 @@ func TestInspectorRowsHeadEveryRecord(t *testing.T) {
 		}
 	}
 
-	pane := strip(m.renderInspector())
+	pane := strip(m.renderReport(inspectReport))
 	for _, head := range want {
 		if !strings.Contains(pane, head) {
 			t.Errorf("the pane does not draw the header %q:\n%s", head, pane)
@@ -237,7 +237,7 @@ func TestInspectorNamesAnUnrecordedReply(t *testing.T) {
 		t.Errorf("the note sits at row %d, want it inside the first record (headings at %v)", notes[0], headings)
 	}
 
-	if pane := strip(m.renderInspector()); !strings.Contains(pane, "no response recorded") {
+	if pane := strip(m.renderReport(inspectReport)); !strings.Contains(pane, "no response recorded") {
 		t.Errorf("the pane does not say the reply was never recorded:\n%s", pane)
 	}
 }
@@ -367,13 +367,13 @@ func TestInspectorDisarmedNamesTheKey(t *testing.T) {
 	m := newTestModel(t)
 	m.inspector = inspectorPane{open: true}
 
-	pane := strip(m.renderInspector())
+	pane := strip(m.renderReport(inspectReport))
 	if !strings.Contains(pane, "ui.inspector") {
 		t.Errorf("the disarmed pane does not name the key that arms it:\n%s", pane)
 	}
 
 	m.opts.Inspector = true
-	if armed := strip(m.renderInspector()); strings.Contains(armed, "ui.inspector") {
+	if armed := strip(m.renderReport(inspectReport)); strings.Contains(armed, "ui.inspector") {
 		t.Errorf("an armed but empty pane tells the human to set a key that is already set:\n%s", armed)
 	}
 }
@@ -434,7 +434,7 @@ func TestInspectOpensOnTheNewestRecord(t *testing.T) {
 	next, _ := m.runInspectCommand()
 	m = next.(Model)
 
-	spec, seated := m.inspectorSpec()
+	spec, seated := m.reportSpec(inspectReport, m.inspectContent())
 	if !seated {
 		t.Fatal("the frame seated no pane for a full ring")
 	}
@@ -476,7 +476,7 @@ func TestInspectorLeavesEveryOtherKeyAlone(t *testing.T) {
 	}
 
 	closed := newTestModel(t)
-	if handled, _, _ := closed.inspectorKey(ctrlR()); handled {
+	if handled, _, _ := closed.reportKey(inspectReport, ctrlR()); handled {
 		t.Error("a closed pane claimed ctrl+r; the chord is the open pane's alone")
 	}
 }
@@ -491,7 +491,7 @@ func TestCtrlRFlipsTheRenderingAndTheHint(t *testing.T) {
 	m := inspectorModel(t, wireEvent(domain.WireDirectionResponse,
 		`{"choices":[{"delta":{"reasoning_content":"weighing it"}}]}`, 1, 0))
 
-	readable := strip(m.renderInspector())
+	readable := strip(m.renderReport(inspectReport))
 	if !strings.Contains(readable, readableThinkingPrefix+"weighing it") {
 		t.Fatalf("the pane does not open on the readable rendering:\n%s", readable)
 	}
@@ -503,7 +503,7 @@ func TestCtrlRFlipsTheRenderingAndTheHint(t *testing.T) {
 	if !m.inspector.raw {
 		t.Fatal("ctrl+r did not put the pane in raw mode")
 	}
-	raw := strip(m.renderInspector())
+	raw := strip(m.renderReport(inspectReport))
 	if !strings.Contains(raw, `"reasoning_content"`) {
 		t.Errorf("the raw pane does not show the protocol member:\n%s", raw)
 	}
@@ -518,7 +518,7 @@ func TestCtrlRFlipsTheRenderingAndTheHint(t *testing.T) {
 	if m.inspector.raw {
 		t.Fatal("a second ctrl+r did not put the pane back on the readable rendering")
 	}
-	if back := strip(m.renderInspector()); back != readable {
+	if back := strip(m.renderReport(inspectReport)); back != readable {
 		t.Errorf("the pane came back as\n%s\nwant the frame it opened on\n%s", back, readable)
 	}
 }
@@ -1155,7 +1155,7 @@ func TestInspectScopedOpensOnTheViewedRunsNewestRecord(t *testing.T) {
 		t.Errorf("top = %d, want it past the %d SCOPED rows (the ring draws %d)", m.inspector.top, len(scoped), len(wholeRows))
 	}
 
-	spec, seated := m.inspectorSpec()
+	spec, seated := m.reportSpec(inspectReport, m.inspectContent())
 	if !seated {
 		t.Fatal("the frame seated no pane for a full run")
 	}
@@ -1185,7 +1185,7 @@ func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
 	next, _ := m.runInspectCommand()
 	m = next.(Model)
 
-	spec, seated := m.inspectorSpec()
+	spec, seated := m.reportSpec(inspectReport, m.inspectContent())
 	if !seated {
 		t.Fatal("the frame seated no pane for the ring")
 	}
@@ -1196,7 +1196,7 @@ func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
 
 	m = growInspectorRecords(t, m, 6)
 
-	grown, seated := m.inspectorSpec()
+	grown, seated := m.reportSpec(inspectReport, m.inspectContent())
 	if !seated {
 		t.Fatal("the frame seated no pane for the grown ring")
 	}
@@ -1205,7 +1205,7 @@ func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
 			grown.rowTop, grown.rowTop+seats, len(grown.rows))
 	}
 	newest := "request · turn " + strconv.Itoa(m.wire[len(m.wire)-1].turn)
-	if painted := strip(m.renderInspector()); !strings.Contains(painted, newest) {
+	if painted := strip(m.renderReport(inspectReport)); !strings.Contains(painted, newest) {
 		t.Errorf("the pane does not draw the newest record %q:\n%s", newest, painted)
 	}
 

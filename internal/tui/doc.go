@@ -923,7 +923,7 @@
 // reportpane.go the pane those two, /thinking and /advice ARE — the reportPane value ({open, top,
 // follow, raw}, the follow pinning /inspect, /thinking and /advice to the tail as the transcript
 // is), the key contract, the dismiss, the budget→render path and the whole mouse family (rect,
-// window, click, wheel), written once and named four times, with every rectangle in the transcript-side slot a
+// window, click, wheel), written once and named once — each kind one row of [reportRows] — with every rectangle in the transcript-side slot a
 // lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix
 // sum of its own; popup.go the one bordered pane every overlay — those five, the autocomplete
 // dropdown, the ask and approval prompts — is painted through, and the [popupPlacement] it hands

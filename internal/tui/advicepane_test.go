@@ -167,7 +167,7 @@ func TestAdvicePaneFollowsTheNewestFiring(t *testing.T) {
 	if after.end != after.total {
 		t.Errorf("after a firing the pane shows rows [%d, %d) of %d, want the tail still", after.start, after.end, after.total)
 	}
-	spec, seated := m.adviceSpec()
+	spec, seated := m.reportSpec(adviceReport, m.adviceContent())
 	if !seated {
 		t.Fatal("the frame seated no /advice pane")
 	}
@@ -178,15 +178,15 @@ func TestAdvicePaneFollowsTheNewestFiring(t *testing.T) {
 
 // TestDismissingTheAdvicePaneDropsTheScroll pins the other half of where the verb lands: closing the
 // pane takes the scroll with it, so the next /advice opens on the newest firing again rather than on
-// the window the last reading was left at. Both ways of closing spend dismissAdvice's one body
-// (dismissReport), so proving it here proves it for esc and for a click outside alike.
+// the window the last reading was left at. Both ways of closing spend the one body (dismissReport),
+// so proving it here proves it for esc and for a click outside alike.
 func TestDismissingTheAdvicePaneDropsTheScroll(t *testing.T) {
 	t.Parallel()
 
 	m := advicePaneModel(t, 40)
 	m.advicePane.top = 7
 
-	closed := m.dismissAdvice()
+	closed := m.dismissReport(adviceReport)
 
 	if closed.advicePane.open {
 		t.Error("the dismissed pane is still on the frame")
@@ -295,7 +295,7 @@ func TestAdviceOpensOnTheNewestFiring(t *testing.T) {
 	if window.start == 0 {
 		t.Fatalf("the whole board fits in %d rows — the test premise needs more firings than the pane seats", window.total)
 	}
-	spec, seated := m.adviceSpec()
+	spec, seated := m.reportSpec(adviceReport, m.adviceContent())
 	if !seated {
 		t.Fatal("the frame seated no /advice pane")
 	}

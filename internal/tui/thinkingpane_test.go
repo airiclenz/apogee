@@ -400,7 +400,7 @@ func TestThinkingOpensOnTheNewestRecord(t *testing.T) {
 	next, _ := m.runThinkingCommand()
 	m = next.(Model)
 
-	spec, seated := m.thinkingSpec()
+	spec, seated := m.reportSpec(thinkingReport, m.thinkingContent())
 	if !seated {
 		t.Fatal("the frame seated no pane for a full board")
 	}
@@ -416,15 +416,15 @@ func TestThinkingOpensOnTheNewestRecord(t *testing.T) {
 
 // TestDismissingTheThinkingPaneDropsTheScroll pins the other half of where the verb lands: closing
 // the pane takes the scroll with it, so the next /thinking opens on the newest record again rather
-// than on the window the last reading was left at. Both ways of closing spend dismissThinking's one
-// body (dismissReport), so proving it here proves it for esc and for a click outside alike.
+// than on the window the last reading was left at. Both ways of closing spend the one body
+// (dismissReport), so proving it here proves it for esc and for a click outside alike.
 func TestDismissingTheThinkingPaneDropsTheScroll(t *testing.T) {
 	t.Parallel()
 
 	m := thinkingPaneModel(t, 40)
 	m.thinkingPane.top = 7
 
-	closed := m.dismissThinking()
+	closed := m.dismissReport(thinkingReport)
 
 	if closed.thinkingPane.open {
 		t.Error("the dismissed pane is still on the frame")
@@ -448,7 +448,7 @@ func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
 	next, _ := m.runThinkingCommand()
 	m = next.(Model)
 
-	spec, seated := m.thinkingSpec()
+	spec, seated := m.reportSpec(thinkingReport, m.thinkingContent())
 	if !seated {
 		t.Fatal("the frame seated no pane for a full board")
 	}
@@ -459,7 +459,7 @@ func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
 
 	m = growThinkingRecords(t, m, 6)
 
-	grown, seated := m.thinkingSpec()
+	grown, seated := m.reportSpec(thinkingReport, m.thinkingContent())
 	if !seated {
 		t.Fatal("the frame seated no pane for the grown board")
 	}
@@ -468,7 +468,7 @@ func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
 			grown.rowTop, grown.rowTop+seats, len(grown.rows))
 	}
 	newest := grown.rows[len(grown.rows)-1][0]
-	if painted := strip(m.renderThinking()); !strings.Contains(painted, newest) {
+	if painted := strip(m.renderReport(thinkingReport)); !strings.Contains(painted, newest) {
 		t.Errorf("the pane does not draw its newest row %q:\n%s", newest, painted)
 	}
 }

@@ -3940,7 +3940,7 @@ func usageReportModel(t *testing.T, delegates int) Model {
 func TestUsageReportUnderTheClick(t *testing.T) {
 	t.Parallel()
 	m := usageReportModel(t, 20)
-	paneTop, h, ok := m.usagePaneRect()
+	paneTop, h, ok := m.reportPaneRect(usageReport)
 	if !ok {
 		t.Fatal("the report is not on the frame")
 	}
@@ -3971,11 +3971,11 @@ func TestUsageReportUnderTheClick(t *testing.T) {
 func TestUsageWheelScrollsTheReport(t *testing.T) {
 	t.Parallel()
 	m := usageReportModel(t, 20)
-	paneTop, h, ok := m.usagePaneRect()
+	paneTop, h, ok := m.reportPaneRect(usageReport)
 	if !ok {
 		t.Fatal("the report is not on the frame")
 	}
-	win, ok := m.usageWindow()
+	win, ok := m.reportWindow(usageReport)
 	if !ok {
 		t.Fatal("the report reports no window")
 	}
@@ -4001,7 +4001,7 @@ func TestUsageWheelScrollsTheReport(t *testing.T) {
 	for range win.total + 5 {
 		end = wheel(end, tea.MouseWheelDown, y)
 	}
-	last, ok := end.usageWindow()
+	last, ok := end.reportWindow(usageReport)
 	if !ok {
 		t.Fatal("the scrolled report reports no window")
 	}
@@ -4048,7 +4048,7 @@ func inspectorPaneModel(t *testing.T, records int) Model {
 func TestInspectorPaneUnderTheClick(t *testing.T) {
 	t.Parallel()
 	m := inspectorPaneModel(t, 12)
-	paneTop, h, ok := m.inspectorPaneRect()
+	paneTop, h, ok := m.reportPaneRect(inspectReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
@@ -4079,11 +4079,11 @@ func TestInspectorPaneUnderTheClick(t *testing.T) {
 func TestInspectorWheelScrollsTheRecords(t *testing.T) {
 	t.Parallel()
 	m := inspectorPaneModel(t, 12)
-	paneTop, h, ok := m.inspectorPaneRect()
+	paneTop, h, ok := m.reportPaneRect(inspectReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
-	win, ok := m.inspectorWindow()
+	win, ok := m.reportWindow(inspectReport)
 	if !ok {
 		t.Fatal("the pane reports no window")
 	}
@@ -4109,7 +4109,7 @@ func TestInspectorWheelScrollsTheRecords(t *testing.T) {
 	for range win.total + 5 {
 		end = wheel(end, tea.MouseWheelDown, y)
 	}
-	last, ok := end.inspectorWindow()
+	last, ok := end.reportWindow(inspectReport)
 	if !ok {
 		t.Fatal("the scrolled pane reports no window")
 	}
@@ -4142,7 +4142,7 @@ func TestInspectorWheelScrollsTheRecords(t *testing.T) {
 func TestThinkingPaneUnderTheClick(t *testing.T) {
 	t.Parallel()
 	m := thinkingPaneModel(t, 12)
-	paneTop, h, ok := m.thinkingPaneRect()
+	paneTop, h, ok := m.reportPaneRect(thinkingReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
@@ -4174,11 +4174,11 @@ func TestThinkingPaneUnderTheClick(t *testing.T) {
 func TestThinkingWheelScrollsTheRows(t *testing.T) {
 	t.Parallel()
 	m := thinkingPaneModel(t, 40)
-	paneTop, h, ok := m.thinkingPaneRect()
+	paneTop, h, ok := m.reportPaneRect(thinkingReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
-	win, ok := m.thinkingWindow()
+	win, ok := m.reportWindow(thinkingReport)
 	if !ok {
 		t.Fatal("the pane reports no window")
 	}
@@ -4204,7 +4204,7 @@ func TestThinkingWheelScrollsTheRows(t *testing.T) {
 	for range win.total + 5 {
 		end = wheel(end, tea.MouseWheelDown, y)
 	}
-	last, ok := end.thinkingWindow()
+	last, ok := end.reportWindow(thinkingReport)
 	if !ok {
 		t.Fatal("the scrolled pane reports no window")
 	}
@@ -4237,7 +4237,7 @@ func TestThinkingWheelScrollsTheRows(t *testing.T) {
 func TestAdvicePaneUnderTheClick(t *testing.T) {
 	t.Parallel()
 	m := advicePaneModel(t, 12)
-	paneTop, h, ok := m.advicePaneRect()
+	paneTop, h, ok := m.reportPaneRect(adviceReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
@@ -4269,11 +4269,11 @@ func TestAdvicePaneUnderTheClick(t *testing.T) {
 func TestAdviceWheelScrollsTheRows(t *testing.T) {
 	t.Parallel()
 	m := advicePaneModel(t, 40)
-	paneTop, h, ok := m.advicePaneRect()
+	paneTop, h, ok := m.reportPaneRect(adviceReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
-	win, ok := m.adviceWindow()
+	win, ok := m.reportWindow(adviceReport)
 	if !ok {
 		t.Fatal("the pane reports no window")
 	}
@@ -4299,7 +4299,7 @@ func TestAdviceWheelScrollsTheRows(t *testing.T) {
 	for range win.total + 5 {
 		end = wheel(end, tea.MouseWheelDown, y)
 	}
-	last, ok := end.adviceWindow()
+	last, ok := end.reportWindow(adviceReport)
 	if !ok {
 		t.Fatal("the scrolled pane reports no window")
 	}
@@ -4352,15 +4352,15 @@ func bothPanesModel(t *testing.T, records int) Model {
 func TestClickInTheBandTheInspectorGrowsIntoFallsThrough(t *testing.T) {
 	t.Parallel()
 	m := bothPanesModel(t, 30)
-	usageTop, _, ok := m.usagePaneRect()
+	usageTop, _, ok := m.reportPaneRect(usageReport)
 	if !ok {
 		t.Fatal("the report is not on the frame")
 	}
-	preTop, _, ok := m.inspectorPaneRect()
+	preTop, _, ok := m.reportPaneRect(inspectReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
-	postTop, _, ok := m.dismissUsage().inspectorPaneRect()
+	postTop, _, ok := m.dismissReport(usageReport).reportPaneRect(inspectReport)
 	if !ok {
 		t.Fatal("the pane leaves the frame when the report above it is dismissed")
 	}
@@ -4393,7 +4393,7 @@ func TestClickInTheBandTheInspectorGrowsIntoFallsThrough(t *testing.T) {
 func TestClickInsideTheInspectorSurvivesTheReportDismissal(t *testing.T) {
 	t.Parallel()
 	m := bothPanesModel(t, 30)
-	paneTop, h, ok := m.inspectorPaneRect()
+	paneTop, h, ok := m.reportPaneRect(inspectReport)
 	if !ok {
 		t.Fatal("the pane is not on the frame")
 	}
@@ -4420,7 +4420,7 @@ func TestClickInsideTheInspectorSurvivesTheReportDismissal(t *testing.T) {
 func TestClickOnAVacatedRowSelectsNoTranscriptLine(t *testing.T) {
 	t.Parallel()
 	m := bothPanesModel(t, 1)
-	usageTop, _, ok := m.usagePaneRect()
+	usageTop, _, ok := m.reportPaneRect(usageReport)
 	if !ok {
 		t.Fatal("the report is not on the frame")
 	}
@@ -4428,7 +4428,7 @@ func TestClickOnAVacatedRowSelectsNoTranscriptLine(t *testing.T) {
 	if _, _, ok := m.pointTranscriptRow(10, y); ok {
 		t.Fatalf("precondition: the pre-click frame already names a transcript row at y=%d", y)
 	}
-	if _, _, ok := m.dismissUsage().dismissInspector().pointTranscriptRow(10, y); !ok {
+	if _, _, ok := m.dismissReport(usageReport).dismissReport(inspectReport).pointTranscriptRow(10, y); !ok {
 		t.Fatalf("precondition: y=%d is no transcript row once both panes are dismissed either", y)
 	}
 
@@ -4473,7 +4473,7 @@ func TestPublishedFrameSpansMatchAFreshComposition(t *testing.T) {
 func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 	t.Parallel()
 	m := bothPanesModel(t, 30)
-	usageTop, _, ok := m.usagePaneRect()
+	usageTop, _, ok := m.reportPaneRect(usageReport)
 	if !ok {
 		t.Fatal("the report is not on the frame")
 	}

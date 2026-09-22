@@ -118,36 +118,6 @@ func (m Model) runUsageCommand() (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// The report module's functions under this pane's name (reportpane.go). Each one is the shared body
-// with usageReport filled in: naming them here is what lets the frame, the keyboard and the pointer
-// go on addressing the /usage report as themselves while there is only one report left to maintain.
-
-// renderUsage paints the pane, or "" when it is closed or the frame cannot seat it.
-func (m Model) renderUsage() string { return m.renderReport(usageReport) }
-
-// usageSpec composes the report's [popupSpec] for THIS frame out of rows its caller has already
-// composed — the pane's own entry into [Model.reportSpec], which the window and the paint reach
-// through [Model.reportContent] instead.
-func (m Model) usageSpec(rows []popupRow) (popupSpec, bool) {
-	return m.reportSpec(usageReport, usageContent(rows, m.servedModels))
-}
-
-// usageKey is the pane's whole key contract: esc closes the report, ↑/↓ scroll it a row at a time and
-// pgup/pgdown a drawn window at a time (reportKey).
-func (m Model) usageKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
-	return m.reportKey(usageReport, msg)
-}
-
-// dismissUsage takes the report off the frame and gives its rows back to the transcript.
-func (m Model) dismissUsage() Model { return m.dismissReport(usageReport) }
-
-// usagePaneRect is where the open report is drawn: the screen row its top border lands on and how
-// many rows it takes.
-func (m Model) usagePaneRect() (y0, h int, ok bool) { return m.reportPaneRect(usageReport) }
-
-// usageWindow is the row window the report is showing as the frame DREW it.
-func (m Model) usageWindow() (reportWindow, bool) { return m.reportWindow(usageReport) }
-
 // usageContent is what the report tells the shared module about itself for one frame: its name, the
 // keys it spells, how tall it likes to be, the rows it was composed with, and — where there are none
 // — the one sentence it shows instead of them. served is the set of model ids the session was

@@ -1368,6 +1368,12 @@ func paneClaim(key func(Model, tea.KeyPressMsg) (bool, tea.Model, tea.Cmd)) func
 	}
 }
 
+// reportClaim is the named report's key contract in the shape [paneClaim] adapts — [Model.reportKey]
+// with the kind filled in, so a report rung of [keyClaimOrder] names its kind and no forwarder.
+func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
+	return func(m Model, msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) { return m.reportKey(r, msg) }
+}
+
 // keyClaimOrder is the overlay precedence [Model.handleKey] walks, top rung first: the modal
 // overlays that own the keyboard while they are up, then the report panes that claim only their
 // own keys, then the transcript's block cursor — and only then the frame's own verbs, the state-gated
@@ -1434,7 +1440,7 @@ var keyClaimOrder = []keyClaimant{
 		// keys in every state: the pane is what the human is reading, and a page key that scrolled the
 		// conversation hidden BEHIND the report would move the one list they cannot see.
 		name:  "usage report",
-		claim: paneClaim(Model.usageKey),
+		claim: paneClaim(reportClaim(usageReport)),
 	},
 	{
 		// The /inspect pane claims the same five keys, plus a ctrl+r of its own that flips its rendering,
@@ -1444,7 +1450,7 @@ var keyClaimOrder = []keyClaimant{
 		// is shaped after — the two are never open together in practice and their claims are disjoint
 		// while one of them is closed, so the order between THEM decides nothing.
 		name:  "inspector pane",
-		claim: paneClaim(Model.inspectorKey),
+		claim: paneClaim(reportClaim(inspectReport)),
 	},
 	{
 		// The /thinking pane claims the report's five keys and no sixth — it has ONE rendering, so
@@ -1456,7 +1462,7 @@ var keyClaimOrder = []keyClaimant{
 		// pane shows that run's thinking, so the esc that closes it is the esc the human means for it,
 		// and the NEXT esc goes on up the view exactly as it would have with no pane open.
 		name:  "thinking pane",
-		claim: paneClaim(Model.thinkingKey),
+		claim: paneClaim(reportClaim(thinkingReport)),
 	},
 	{
 		// The /advice pane claims the report's five keys and no sixth — one rendering, no ctrl+r
@@ -1464,7 +1470,7 @@ var keyClaimOrder = []keyClaimant{
 		// them for the same reason: a pane that owns the keyboard answers its own esc first, and the
 		// esc that closes a report opened inside a run view is the esc the human means for it.
 		name:  "advice pane",
-		claim: paneClaim(Model.adviceKey),
+		claim: paneClaim(reportClaim(adviceReport)),
 	},
 	{
 		// An open run view claims exactly one key — esc, which goes one level up (runview.go, ADR
@@ -2638,10 +2644,10 @@ func (m Model) frameOverlays() frameOverlays {
 	o.browser = m.renderSessionBrowser()
 	o.picker = m.renderPicker()
 	o.settings = m.renderSettings()
-	o.usage = m.renderUsage()
-	o.inspector = m.renderInspector()
-	o.thinking = m.renderThinking()
-	o.advice = m.renderAdvice()
+	o.usage = m.renderReport(usageReport)
+	o.inspector = m.renderReport(inspectReport)
+	o.thinking = m.renderReport(thinkingReport)
+	o.advice = m.renderReport(adviceReport)
 	o.dropdown = m.renderAutocomplete()
 	o.queued = m.renderPendingInterjections()
 	o.hint = m.renderSkillHints()

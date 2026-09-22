@@ -2450,14 +2450,14 @@ func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
 			m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("delegate %d", i), childTotals, 4096)
 		}
 		rows := m.usageRows()
-		spec, seated := m.usageSpec(rows)
+		spec, seated := m.reportSpec(usageReport, usageContent(rows, m.servedModels))
 		if seats := reportSeats(spec); !seated || seats >= len(rows) {
 			t.Fatalf("the report did not overflow: %d of %d rows seated (seated=%v)", seats, len(rows), seated)
 		}
-		column := popupBarColumn(m.renderUsage())
+		column := popupBarColumn(m.renderReport(usageReport))
 		if at, size := popupThumbSpan(column); at < 0 || size == 0 {
 			t.Errorf("the overflowing report painted no thumb; its bar column is %q:\n%s",
-				column, strip(m.renderUsage()))
+				column, strip(m.renderReport(usageReport)))
 		}
 	})
 
@@ -2486,11 +2486,11 @@ func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
 			m = delegate(t, m, fmt.Sprintf("s%d", i), fmt.Sprintf("delegate %d", i), childTotals, 4096)
 		}
 		m.opts.HideScrollbar = true
-		if spec, _ := m.usageSpec(m.usageRows()); spec.scrollbar {
+		if spec, _ := m.reportSpec(usageReport, usageContent(m.usageRows(), m.servedModels)); spec.scrollbar {
 			t.Errorf("the spec still asks for a bar with the switch off")
 		}
-		if column := popupBarColumn(m.renderUsage()); len(column) != 0 {
-			t.Errorf("the switch off still painted %d bar cells:\n%s", len(column), strip(m.renderUsage()))
+		if column := popupBarColumn(m.renderReport(usageReport)); len(column) != 0 {
+			t.Errorf("the switch off still painted %d bar cells:\n%s", len(column), strip(m.renderReport(usageReport)))
 		}
 	})
 }

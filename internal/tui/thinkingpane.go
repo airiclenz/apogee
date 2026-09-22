@@ -203,36 +203,3 @@ func (m Model) runThinkingCommand() (tea.Model, tea.Cmd) {
 	m.layout()
 	return m, nil
 }
-
-// The report module's functions under this pane's name (reportpane.go). Each one is the shared body
-// with thinkingReport filled in: naming them here is what lets the frame, the keyboard and the
-// pointer go on addressing the /thinking pane as itself while there is only one report left to
-// maintain.
-
-// renderThinking paints the pane, or "" when it is closed or the frame cannot seat it.
-func (m Model) renderThinking() string { return m.renderReport(thinkingReport) }
-
-// thinkingSpec composes the pane's [popupSpec] for THIS frame — its rows, the budget the frame
-// granted and the window the scroll landed on ([Model.reportSpec]).
-func (m Model) thinkingSpec() (popupSpec, bool) {
-	return m.reportSpec(thinkingReport, m.thinkingContent())
-}
-
-// thinkingKey is the pane's whole key contract: esc closes it, ↑/↓ scroll a row at a time and
-// pgup/pgdown a drawn window at a time (reportKey). There is no sixth key — the pane has ONE
-// rendering, so the ctrl+r /inspect answers belongs to the live box behind this one.
-func (m Model) thinkingKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
-	return m.reportKey(thinkingReport, msg)
-}
-
-// dismissThinking takes the pane off the frame and gives its rows back to the transcript. The scroll
-// goes with it: the next /thinking opens on the newest record again, which is where the question is
-// asked from.
-func (m Model) dismissThinking() Model { return m.dismissReport(thinkingReport) }
-
-// thinkingPaneRect is where the open pane is drawn: the screen row its top border lands on and how
-// many rows it takes.
-func (m Model) thinkingPaneRect() (y0, h int, ok bool) { return m.reportPaneRect(thinkingReport) }
-
-// thinkingWindow is the row window the pane is showing as the frame DREW it.
-func (m Model) thinkingWindow() (reportWindow, bool) { return m.reportWindow(thinkingReport) }

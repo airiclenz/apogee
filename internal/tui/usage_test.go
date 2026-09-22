@@ -63,12 +63,12 @@ func TestReportPaneBreathes(t *testing.T) {
 	t.Run("a reading longer than its window is set off at both ends", func(t *testing.T) {
 		wide := step(t, m, tea.WindowSizeMsg{Width: 80, Height: 24})
 
-		spec, seated := wide.usageSpec(wide.usageRows())
+		spec, seated := wide.reportSpec(usageReport, usageContent(wide.usageRows(), wide.servedModels))
 		if !seated || len(spec.rows) <= spec.maxRows {
 			t.Fatalf("precondition: %d rows into a %d-line window (seated=%v) — the reading must overflow the pane",
 				len(spec.rows), spec.maxRows, seated)
 		}
-		view := wide.renderUsage()
+		view := wide.renderReport(usageReport)
 		lines := popupLines(view)
 
 		if got := popupInterior(lines[2]); got != "" {
@@ -98,16 +98,16 @@ func TestReportPaneBreathes(t *testing.T) {
 		for _, height := range []int{smallestOverlayWindow, 17, 18} {
 			short := step(t, m, tea.WindowSizeMsg{Width: 80, Height: height})
 
-			spec, seated := short.usageSpec(short.usageRows())
+			spec, seated := short.reportSpec(usageReport, usageContent(short.usageRows(), short.servedModels))
 			if !seated {
 				t.Fatalf("the frame seated no pane at %d rows", height)
 			}
-			lines := popupLines(short.renderUsage())
+			lines := popupLines(short.renderReport(usageReport))
 
 			for i, line := range lines[1 : len(lines)-1] {
 				if popupInterior(line) == "" {
 					t.Errorf("at %d rows the pane paints a blank content line at %d, want its breathing room handed back to the reading:\n%s",
-						height, i+1, strip(short.renderUsage()))
+						height, i+1, strip(short.renderReport(usageReport)))
 				}
 			}
 			// The two borders, the title and the hint: what is left is the reading itself.
@@ -223,7 +223,7 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 
 	m := usageModel(t, mainTotals, 8192)
 	m = delegate(t, m, "s1", "survey the tests", childTotals, 16384)
-	pane := strip(m.renderUsage())
+	pane := strip(m.renderReport(usageReport))
 
 	for _, want := range []string{usageTitle, usageHint, usageMainLabel, usageSessionLabel,
 		"survey the tests", usageHeaderCells(false)[1], format.Tokens(21500)} {
@@ -232,7 +232,7 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 		}
 	}
 
-	empty := strip(usageModel(t, domain.Usage{}, 0).renderUsage())
+	empty := strip(usageModel(t, domain.Usage{}, 0).renderReport(usageReport))
 	if !strings.Contains(empty, usageEmptyBody) {
 		t.Errorf("the empty pane does not say why it is empty:\n%s", empty)
 	}
@@ -240,7 +240,7 @@ func TestUsagePanePaintsItsRowsAndSaysWhenThereAreNone(t *testing.T) {
 		t.Errorf("the empty pane drew an agent row that reported nothing:\n%s", empty)
 	}
 
-	if closed := m.closedUsage().renderUsage(); closed != "" {
+	if closed := m.closedUsage().renderReport(usageReport); closed != "" {
 		t.Errorf("the closed pane rendered %q, want nothing", closed)
 	}
 }
@@ -254,7 +254,7 @@ func TestUsagePaneNamesTheModelsThatAnswered(t *testing.T) {
 	m := usageModel(t, mainTotals, 8192)
 	m.servedModels = []string{"gpt-oss-20b-mxfp4", "grunt-8b"}
 
-	pane := strip(m.renderUsage())
+	pane := strip(m.renderReport(usageReport))
 	if want := usageServedLabel + "gpt-oss-20b-mxfp4" + usageServedSeparator + "grunt-8b"; !strings.Contains(pane, want) {
 		t.Errorf("the pane does not name the models that answered %q:\n%s", want, pane)
 	}
@@ -262,7 +262,7 @@ func TestUsagePaneNamesTheModelsThatAnswered(t *testing.T) {
 		t.Errorf("the served line displaced the rows:\n%s", pane)
 	}
 
-	unnamed := strip(usageModel(t, mainTotals, 8192).renderUsage())
+	unnamed := strip(usageModel(t, mainTotals, 8192).renderReport(usageReport))
 	if strings.Contains(unnamed, usageServedLabel) {
 		t.Errorf("the pane drew a served line with no model named:\n%s", unnamed)
 	}
@@ -331,7 +331,7 @@ func TestUsageKeysScrollTheReport(t *testing.T) {
 	t.Parallel()
 
 	m := usageScrollModel(t)
-	win, ok := m.usageWindow()
+	win, ok := m.reportWindow(usageReport)
 	if !ok {
 		t.Fatal("the report reports no window")
 	}
@@ -340,7 +340,7 @@ func TestUsageKeysScrollTheReport(t *testing.T) {
 		t.Fatalf("precondition: window [%d,%d) of %d rows — the report must open at the top with more than a page below it",
 			win.start, win.end, win.total)
 	}
-	if pane := strip(m.renderUsage()); !strings.Contains(pane, "↑/↓ scroll · esc close") {
+	if pane := strip(m.renderReport(usageReport)); !strings.Contains(pane, "↑/↓ scroll · esc close") {
 		t.Errorf("the pane does not spell the keys it now owns:\n%s", pane)
 	}
 
@@ -367,7 +367,7 @@ func TestUsageKeysScrollTheReport(t *testing.T) {
 		for range win.total {
 			end = step(t, end, keyPgDown())
 		}
-		last, ok := end.usageWindow()
+		last, ok := end.reportWindow(usageReport)
 		if !ok {
 			t.Fatal("the scrolled report reports no window")
 		}
@@ -396,7 +396,7 @@ func TestUsageKeysLeaveTheRestOfTheFrameAlone(t *testing.T) {
 
 	m := usageScrollModel(t)
 
-	if control := step(t, m.dismissUsage(), keyPgUp()); !control.detached {
+	if control := step(t, m.dismissReport(usageReport), keyPgUp()); !control.detached {
 		t.Fatalf("precondition: with the report closed pgup did not scroll the transcript (offset %d)",
 			control.viewport.YOffset())
 	}
