@@ -421,7 +421,9 @@ go run ./cmd/apogee probe model --help
 
 **Commit:** `fix(probe): apogee probe model takes a timeout sized for CPU inference`
 
-## 8. PromptSlot can tell a test that a caller is waiting
+## 8. PromptSlot can tell a test that a caller is waiting — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the item's Acceptance `-race` run cannot execute on this host — ThreadSanitizer refuses the kernel's 47-bit VMA ("Found 47 - Supported 48") for every package, touched or not; the same tests pass with `-count=2` without `-race`.
 
 **What.** The production half of `apogee-7fmu`'s sleep family.
 **Goal:** a test can learn that a second caller is blocked acquiring the prompt slot, without timing

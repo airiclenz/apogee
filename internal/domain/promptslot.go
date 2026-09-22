@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"sync/atomic"
+)
 
 // ----------------------------------------------------------------------------
 // The prompt slot (ADR 0039 decision 12) — ONE prompt in front of the human, of ANY kind
@@ -35,7 +38,8 @@ import "context"
 // A PromptSlot is safe for concurrent use by construction — the channel IS the synchronisation —
 // and the zero value is NOT usable: build one with NewPromptSlot.
 type PromptSlot struct {
-	slot chan struct{} // capacity 1: the prompt currently in front of the human
+	slot    chan struct{} // capacity 1: the prompt currently in front of the human
+	waiting atomic.Int64  // callers currently inside Acquire — see Waiting
 }
 
 // NewPromptSlot returns an empty prompt slot — nobody is in front of the human yet.
@@ -48,6 +52,9 @@ func NewPromptSlot() *PromptSlot {
 // Driver. Every nil return must be paired with exactly one Release (the callers `defer` it); a
 // non-nil return acquired nothing and must not be released.
 func (p *PromptSlot) Acquire(ctx context.Context) error {
+	p.waiting.Add(1)
+	defer p.waiting.Add(-1)
+
 	select {
 	case p.slot <- struct{}{}:
 		return nil
@@ -61,6 +68,22 @@ func (p *PromptSlot) Acquire(ctx context.Context) error {
 // which is why the pairing is a `defer` at every call site rather than a rule to remember.
 func (p *PromptSlot) Release() {
 	<-p.slot
+}
+
+// Waiting reports how many callers are currently inside Acquire. It exists so a test can learn that
+// a second caller is genuinely queued behind the visible prompt by POLLING this count rather than by
+// sleeping long enough to assume it — a sleep that is a guess on a fast box and a flake on a loaded
+// one. Poll it against a generous ceiling: the poll returns the instant the count matches, so a
+// healthy run pays nothing for the headroom.
+//
+// The count rises BEFORE the wait begins, so it also counts a caller that will acquire the free slot
+// without ever blocking; it is "callers inside Acquire", not "callers that are stuck". A reading of 1
+// therefore means a caller has entered Acquire, and only a reading taken while another caller
+// demonstrably holds the slot means that caller is queued. It falls again on either exit —
+// admission or a cancelled ctx — never on Release, which belongs to the caller already in front of
+// the human.
+func (p *PromptSlot) Waiting() int {
+	return int(p.waiting.Load())
 }
 
 // promptSlotCtxKey keys the designated prompt surface in a running Agent's context.

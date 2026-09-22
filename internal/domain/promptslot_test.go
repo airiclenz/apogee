@@ -56,7 +56,7 @@ func TestPromptSlot_QueuedCallerAnswersItsOwnCancellation(t *testing.T) {
 	queued := make(chan error, 1)
 	go func() { queued <- slot.Acquire(ctx) }()
 
-	time.Sleep(20 * time.Millisecond) // long enough for the second caller to be genuinely waiting
+	waitForPromptSlotWaiters(t, slot, 1) // the second caller is genuinely waiting, not assumed to be
 	cancel()
 
 	select {
@@ -66,6 +66,75 @@ func TestPromptSlot_QueuedCallerAnswersItsOwnCancellation(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("a queued caller never answered its own cancellation — the wait is not ctx-aware")
+	}
+}
+
+// TestPromptSlot_WaitingCountsACallerUntilItIsAdmitted pins the seam that lets a test observe a
+// queued caller instead of timing one: while the slot is held, a second caller shows up in
+// Waiting(), and the count falls back to zero once it is admitted.
+func TestPromptSlot_WaitingCountsACallerUntilItIsAdmitted(t *testing.T) {
+	slot := NewPromptSlot()
+	if err := slot.Acquire(context.Background()); err != nil {
+		t.Fatalf("the first Acquire returned %v, want the empty slot", err)
+	}
+	if got := slot.Waiting(); got != 0 {
+		t.Fatalf("a caller that acquired the free slot still counts as %d waiting, want 0", got)
+	}
+
+	admitted := make(chan error, 1)
+	go func() { admitted <- slot.Acquire(context.Background()) }()
+	waitForPromptSlotWaiters(t, slot, 1)
+
+	slot.Release()
+	if err := <-admitted; err != nil {
+		t.Fatalf("the waiting caller returned %v, want admission once the slot was free", err)
+	}
+	waitForPromptSlotWaiters(t, slot, 0)
+	slot.Release()
+}
+
+// TestPromptSlot_WaitingDropsWhenAQueuedCallerIsCancelled pins the other exit from the wait: a
+// caller that gives up on its cancelled Turn stops being counted, so the count tracks who is in the
+// queue NOW rather than who ever joined it.
+func TestPromptSlot_WaitingDropsWhenAQueuedCallerIsCancelled(t *testing.T) {
+	slot := NewPromptSlot()
+	if err := slot.Acquire(context.Background()); err != nil {
+		t.Fatalf("Acquire: %v", err)
+	}
+	defer slot.Release()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	queued := make(chan error, 1)
+	go func() { queued <- slot.Acquire(ctx) }()
+	waitForPromptSlotWaiters(t, slot, 1)
+
+	cancel()
+	if err := <-queued; !errors.Is(err, context.Canceled) {
+		t.Fatalf("a cancelled queued caller returned %v, want context.Canceled", err)
+	}
+	waitForPromptSlotWaiters(t, slot, 0)
+}
+
+// promptSlotWaiterCeiling bounds a poll for the waiter count. It is deliberately generous: the poll
+// returns the instant the count matches, so the headroom costs a healthy run nothing and is only
+// ever spent on a box loaded enough to leave a goroutine unscheduled for seconds.
+const promptSlotWaiterCeiling = 10 * time.Second
+
+// waitForPromptSlotWaiters blocks until slot reports exactly want callers inside Acquire, failing
+// the test if that has not happened within promptSlotWaiterCeiling.
+func waitForPromptSlotWaiters(t *testing.T, slot *PromptSlot, want int) {
+	t.Helper()
+
+	deadline := time.Now().Add(promptSlotWaiterCeiling)
+	for {
+		got := slot.Waiting()
+		if got == want {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("Waiting() was %d after %s, want %d", got, promptSlotWaiterCeiling, want)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }
 
