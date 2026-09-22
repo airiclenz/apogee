@@ -350,7 +350,11 @@ re-sized to the new band and window and keep their assertions.
 **Acceptance.** `go build ./... && go test ./internal/context -run 'TestPrune' -count=1 && go test ./internal/agent -run 'TestAutoPrune|TestStepNotice|TestTokenNotice' -count=1`
 **Commit:** `feat(context): prune at 70%/50% of History and protect six Turns`
 
-## 5. Docs: CONTEXT.md, ADR, config template, manual
+## 5. Docs: CONTEXT.md, ADR, config template, manual — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the new ADR is numbered **0084** (0083 was the highest in the tree) and its front matter names what it amends: ADR 0018 §7/§8, ADR 0026 §8 and ADR 0077.
+NOTES (2026-09-22): the two addenda are a dated `##` section each rather than a literal single line — each file's existing addenda/amendments are sectioned that way, and the content the item mandates (which figures are retired, what History is now, the cap's new home in `budget()`, and that ADR 0077 §3's "never disagree" rule stands) does not fit one line. Neither ADR body is rewritten, and neither addendum calls the retired split "the floor case".
+NOTES (2026-09-22): the item's sweep grep (`60%|40%|four most recent|15%|25%|48%` across CONTEXT.md, docs/adr, docs/manual, internal/config/defaults) was run after the edits; every surviving hit is either a named non-target (ADR 0018 §9's and ADR 0071's tool-result-cap 40%, ADR 0026 §8's 15%, ADR 0022's "25% of runs"), a line the new addenda cover by quotation (ADR 0018 105/132/305-306, ADR 0077 24/25/81), or the new correct text in CONTEXT.md. `docs/manual/` has no remaining hit.
 
 **What.** Depends on items 1–4. (a) `CONTEXT.md` **Budget** entry states the measured allocation:
 the reply reserve (20% default), the two measured reservations (+10% headroom, 2% floor), the 50%

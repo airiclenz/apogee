@@ -139,3 +139,17 @@ rungs, its switch and the `context-fill-notice` Reaction stand untouched — and
 stays 20M: the per-call lever for a child whose single requests run large is `working-window:`.
 The token renderer shared with the fill notice gains an M tier, so a fill notice over a window of
 a million tokens or more now reads `1.3M` where it read `1300k`. Plan `2026-09-19 - 01` item 3.
+
+## Addendum (2026-09-22): the "60% / ~48%" figures were the fixed-share split, now retired
+
+The Context's "gives History 60% of what remains, so the automatic Compaction line sits at roughly
+**48% of the working ceiling**" — and the Rejected "the model would be folded at ~48%" that rests
+on it — describe the FIXED-SHARE split retired by
+[ADR 0084](0084-the-budget-reserves-what-the-standing-content-measures.md): History is now the
+working room less what the standing parts measure, never below 50% of the working room and never
+above the fold's transcript budget, so the line the ladder is scaled to moves with the session's
+own standing content rather than sitting at one fraction of the window. The decision is unchanged
+— scaling the rungs to the History allocation rather than to the window is exactly what makes that
+survivable — and decision 3's "the notice and the fold never disagree" holds as written, because
+the cap lives where History is produced (`(*Agent).budget()`) and every reader, the notice and the
+fold included, reads that one number.

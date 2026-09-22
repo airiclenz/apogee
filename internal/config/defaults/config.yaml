@@ -551,10 +551,10 @@ auto-compact: true
 # =============================================================================
 # Prune stale tool results. Long sessions fill up with the OUTPUT of tool calls the model has
 # already read and moved past — whole files, long searches, build logs — and that output crowds out
-# the conversation itself. When the history outgrows 60% of its share of the context window, apogee
+# the conversation itself. When the history outgrows 70% of its share of the context window, apogee
 # replaces the oldest and largest of those results with a one-line stub,
 # `[pruned: N lines from <tool> <argument> — re-run the call if you need it]`, until the history is
-# back under 40%; the model can always re-run a call whose output it still needs. The four most
+# back under 50%; the model can always re-run a call whose output it still needs. The six most
 # recent tool-calling turns are never touched, so the work in progress is left alone, and nothing
 # but tool output is ever pruned. Each pass prints one line in the transcript saying how many
 # results went and roughly how many tokens that freed. Like auto-compact it is STRUCTURAL — it

@@ -1669,6 +1669,22 @@ used interchangeably.
 The allocation of the model's context window across the parts of a request — system
 prompt, conversation history, file context, and response reserve. The single authority
 on how much room each part gets; other reducers consume it. Lives in `context/`.
+The split is **measured**, not a set of fixed shares: the **reply reserve** comes off the top
+(20% of the window by default, `response-reserve:`), and out of the **working room** that
+remains each standing part — the system-prompt part (the rendered [System prompt](#context-and-history)
+and every engine-owned standing block) and the [Context files](#context-and-history) part —
+reserves what it actually measures plus **10% headroom**, never less than **2%** of the working
+room. **History is the remainder**, floored at **50%** of the working room (a standing content
+larger than that is the oversize notice's business, never a reason to switch the reducers off)
+and capped at the emergency fold's own transcript budget, so the structural floor stays below it
+at every window ([ADR 0018](docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md) §8).
+The former fixed **15%** (system prompt) and **25%** (file context) fractions survive only as the
+**fallback for an unmeasured part** — test-only in the shipped engine, since `(*Agent).budget()`
+always measures. Beside the reservations the Budget carries one **advisory ceiling**
+(`StandingAdvisory`, still 15% of the working room): the [Context files](#context-and-history)
+oversize notice measures against that, never against the reserved share. The shares, the headroom,
+the floors and the prune band are **code constants**, not configuration. See
+[ADR 0084](docs/adr/0084-the-budget-reserves-what-the-standing-content-measures.md).
 It reads TWO ceilings: the **advertised window** (`Budget.Window`, the wall the server
 enforces — read by overflow detection alone, since whether a request *will not fit* is the
 server's question) and the **working ceiling** (`Budget.ContextLimit`, the room the session
@@ -1740,7 +1756,10 @@ fixed for a session (the server's prefix cache survives) and an edit lands on th
 skipped silently, a present-but-unreadable one **loudly** (a note, never a startup failure — it was
 discovered, not named); a malformed *name* is a startup error. Oversize is **advisory only**: the
 host names each loaded file and warns when the standing content exceeds the
-[Budget](#context-and-history)'s system-prompt share — nothing is ever capped or truncated. See
+[Budget](#context-and-history)'s **advisory ceiling** (`StandingAdvisory`, a fixed 15% of the
+working room) — which, since the Budget began reserving what the standing parts *measure*, is no
+longer the room actually reserved for them: the ceiling is a warning line, not an allocation, and
+nothing is ever capped or truncated. See
 [ADR 0026](docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md).
 _Avoid_: "project prompt", "workspace prompt" (the System prompt is the user's, these are the
 project's — the terms must stay separable), "AGENTS.md support" (that is the default name, not the
@@ -1872,10 +1891,10 @@ _Avoid_: "compression", "compaction" (capping is per-result and non-generative),
 The **structural** conversation-level reducer that collapses *stale tool results* — and nothing
 else — to one-line stubs when history outgrows its share of the Budget. Like Compaction and unlike
 Tool-result capping it is **not a Mechanism**: it stays on under Bypass and is gated only by the
-file-only `prune-tool-results:` key (default on). It runs at a quiescent **Turn boundary**,
-rewriting committed history: above **60%** of the History allocation it stubs the oldest results
-first, largest first within a Turn, until the fill is back under **40%**, and it protects the four
-most recent tool-calling Turns entirely. Each stub reads
+file-only `prune-tool-results:` key (default on). It runs at **every Turn boundary,
+mid-Exchange included**, rewriting committed history: above **70%** of the History allocation it
+stubs the oldest results first, largest first within a Turn, until the fill is back under **50%**,
+and it protects the **six** most recent tool-calling Turns entirely. Each stub reads
 `[pruned: N lines from <tool> <argument> — re-run the call if you need it]` — the recovery is the
 model's own re-run — and a pass reports itself to every Driver as one **`PruneEvent`** carrying the
 results stubbed and the tokens freed. It skips whenever the context window is unknown, since a
