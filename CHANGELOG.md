@@ -229,6 +229,22 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The driven `esc×2` stop gesture no longer depends on how busy the box is.** `internal/tui`
+  measures the gesture's window (`escStopWindow`, one second) when each press is FOLDED rather than
+  when it is sent, so two presses the kit put 70 ms apart on the wire (`tuitest`'s `escapeGap`) are
+  folded more than a second apart whenever the fold queue is backed up — mid-reply, with the rest of
+  the parallel suite on the same cores — and the second press RE-ARMS the gesture instead of
+  confirming it. The run carried on and the test waited for an idle screen that was never coming:
+  that is how `TestE2EStreamCancelKeepsWhatArrived` timed out against the 400-line fixture with line
+  342 of 400 painted and the prompt box still reading `esc×2 stop` (1 run in 5 of
+  `go test ./internal/agent/... ./cmd/apogee/... ./internal/tui/...` on a Raspberry Pi 4). The eight
+  driven stop sites now go through one `stopRun` step that does what the human it stands for does:
+  press, wait for the armed hint the status line puts up, press again — and press again if the run is
+  still in flight. It reads the prompt box's placeholder HEAD to tell idle from running, because the
+  box truncates its legend to the room it has and at 60 columns the idle one ends at `⌃c` with the
+  word `quit` cut off. Test-only; the product's gesture is unchanged (the unversioned disarm tick
+  behind it is filed as `apogee-ukw`).
+
 - **`TestDispatchMintsTheWriteEscapePermit` no longer reads red under a temp dir inside `~/.apogee`.**
   Its "no gate" cells (confine off, a declared writable path, a remembered allow-for-session) hold
   only where the target is governed by the workspace fence alone, and a write under the control

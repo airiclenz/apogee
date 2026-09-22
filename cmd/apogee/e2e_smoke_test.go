@@ -486,6 +486,72 @@ func submit(drv driven, text string) {
 	drv.Press(tuitest.Enter)
 }
 
+// escStopArmedHint is the opening of every wording of the armed-esc hint (internal/tui's
+// escStopHintPlain and the fan-out forms that add what a stop would discard), so waiting for it
+// recognises an armed gesture whatever room the status line had to say it in.
+const escStopArmedHint = "press esc again to stop"
+
+// idlePromptHead opens the prompt box's placeholder while nothing is in flight, and
+// runningPromptHead the one it wears while a worker does (internal/tui's idlePlaceholder and
+// runningPlaceholder). Only the HEAD of each is named: the box truncates its legend to the room it
+// has — at 60 columns the idle one ends at "⌃c", with the word "quit" cut off — so the tail is not
+// a thing a test may wait on, while the first words survive every width.
+const (
+	idlePromptHead    = "Send a message"
+	runningPromptHead = "queue a message"
+)
+
+// stopRunAttempts bounds how many times [stopRun] re-presses before it calls the run stuck. Three
+// presses is a retry rather than a loop: by the second attempt the screen has already shown the
+// hint once, so a run still going after that is a defect and not a slow box.
+const stopRunAttempts = 3
+
+// stopRun performs the esc×2 stop gesture and does not return until the worker has folded.
+//
+// The gesture is a pair, and internal/tui measures the pair's window (escStopWindow, one second)
+// when each press is FOLDED, not when it is sent: two presses the kit puts 70 ms apart on the wire
+// (tuitest's escapeGap) can be folded a second or more apart whenever the fold queue is backed up
+// — mid-reply, with the rest of the parallel suite on the same cores — and the second press then
+// RE-ARMS the gesture instead of confirming it. The run carries on, and the test waits for an idle
+// screen that is never coming: that is how TestE2EStreamCancelKeepsWhatArrived timed out against
+// the 400-line fixture with line 342 of 400 painted and the prompt box still reading "esc×2 stop".
+//
+// So the step does what the human it stands for does: press, WATCH FOR THE HINT the arming puts on
+// the status line, press again — and if the run is still going, press again. Waiting on the hint is
+// what makes the second press open its window from a fold that has already happened; the retry is
+// what carries the step over the fold latency that is left.
+func stopRun(t *testing.T, drv driven) {
+	t.Helper()
+	for attempt := 1; attempt <= stopRunAttempts; attempt++ {
+		drv.Press(tuitest.Esc)
+		drv.WaitText(escStopArmedHint)
+		drv.Press(tuitest.Esc)
+		if awaitIdlePrompt(drv, tuitest.DefaultTimeout) {
+			return
+		}
+	}
+	t.Fatalf("the run was still in flight after %d esc×2 stop gestures; the last frame is:\n%s",
+		stopRunAttempts, drv.Frame())
+}
+
+// awaitIdlePrompt reports whether the prompt box went back to its idle placeholder inside budget.
+// It polls rather than calling a tuitest wait because a wait that has not landed is not a failure
+// here — [stopRun] has another press to try — and only the last attempt may fail the test. It reads
+// INSIDE the prompt box for [submit]'s reason: the transcript above it can hold anything.
+func awaitIdlePrompt(drv driven, budget time.Duration) bool {
+	deadline := time.Now().Add(budget)
+	for time.Now().Before(deadline) {
+		if rows, ok := drv.Frame().PromptBox(); ok {
+			box := strings.Join(rows, "\n")
+			if strings.Contains(box, idlePromptHead) && !strings.Contains(box, runningPromptHead) {
+				return true
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
 // toolTurnAllowance is the extra wait [awaitReply] grants per tool turn in the chain ahead of a
 // wrap-up line, on top of [tuitest.DefaultTimeout]. Every tool turn is a model round-trip, the
 // tool itself and the bookkeeping git around it (two tree reads, the pre and post images) — a

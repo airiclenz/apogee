@@ -159,8 +159,7 @@ func TestE2EConsolesDieWithTheirOwner(t *testing.T) {
 	// Step 11 — quitting closes every open Console. The pid is read before the quit, because after it
 	// there is no process to ask about.
 	pid := drv.Pid()
-	drv.Press(tuitest.Esc) // stop the hanging Turn so the quit is a quit and not a cancel-then-quit
-	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
+	stopRun(t, drv) // the hanging Turn goes first, so the quit is a quit and not a cancel-then-quit
 	drv.WaitQuiet(settled)
 	drv.Quit()
 	awaitGone(t, drv, pid, parentSleep, "every Console to be reaped when apogee quits")

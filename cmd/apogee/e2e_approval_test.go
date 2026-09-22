@@ -148,8 +148,7 @@ func TestE2EApprovalForcedLookSurvivesAutoMode(t *testing.T) {
 	// Cancel rather than allow: under auto the allow executes inside the workspace fence, so
 	// whether the command then succeeds is confinement's business and not this item's. Esc×2 —
 	// the stop gesture arms on the first press and confirms on the second.
-	drv.Press(tuitest.Esc)
-	drv.Press(tuitest.Esc)
+	stopRun(t, drv)
 	drv.WaitGone(forcedMarker)
 
 	if err := sess.Quit(); err != nil {
@@ -204,8 +203,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	// the driver's escapeGap sits well inside escStopWindow.
 	submit(drv, controlPrompt)
 	drv.WaitText(approvalMarker)
-	drv.Press(tuitest.Esc)
-	drv.Press(tuitest.Esc)
+	stopRun(t, drv)
 	drv.WaitGone(approvalMarker)
 	waitIdle(drv)
 

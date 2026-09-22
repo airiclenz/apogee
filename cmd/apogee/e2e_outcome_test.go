@@ -158,8 +158,7 @@ func TestE2EOutcomeCancelledDelegationCarriesTheFailureTone(t *testing.T) {
 
 	// Step 3 — Esc×2 stops it (one press only arms the gesture). The note is the whole of what the
 	// live session says about it.
-	drv.Press(tuitest.Esc)
-	drv.Press(tuitest.Esc) // esc×2: the first press arms the stop, the second confirms it
+	stopRun(t, drv)
 	drv.WaitText("cancelled")
 	drv.WaitQuiet(settled)
 	live := drv.Frame()
