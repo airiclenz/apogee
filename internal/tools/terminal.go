@@ -17,15 +17,21 @@ import (
 var terminalSpec = toolSpec{
 	name:        "terminal",
 	description: "Run a shell command line and capture its output and exit code. One-shot (a fresh process per call); supports pipes, redirection, and globbing through the platform shell. On POSIX the line runs fail-fast (`set -e`, and `pipefail` where the shell supports it): the first command that exits non-zero stops the rest of the line, so guard expected non-zero exits (`grep … || true`). The shell is POSIX sh (dash on Debian-family hosts — no bash arrays, [[ ]] or process substitution); use python_exec for anything bash-only.",
-	schema: json.RawMessage(`{
+	// The timeout_seconds description is RENDERED from internal/subprocess's own constants, never
+	// restated by hand: the numbers the model is told are the numbers the funnel actually applies,
+	// so a resized ceiling cannot leave the advertised one behind.
+	schema: json.RawMessage(fmt.Sprintf(`{
   "type": "object",
   "required": ["command"],
   "properties": {
     "command": {"type": "string", "description": "The shell command line to run (POSIX sh on Unix, cmd on Windows). Supports pipes, redirection, and globs."},
     "workdir": {"type": "string", "description": "Optional working directory (relative to the workspace root or absolute)"},
-    "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default 120, max 600)"}
+    "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default %d, max %d)"}
   }
-}`),
+}`,
+		int(subprocess.DefaultSubprocessTimeout.Seconds()),
+		int(subprocess.MaxSubprocessTimeout.Seconds()),
+	)),
 }
 
 type terminalArgs struct {

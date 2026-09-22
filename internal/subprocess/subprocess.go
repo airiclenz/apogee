@@ -24,8 +24,13 @@ const (
 	// DefaultSubprocessTimeout bounds a subprocess call when the caller names no timeout;
 	// the §2.4 teardown reaps the process group when it fires.
 	DefaultSubprocessTimeout = 120 * time.Second
-	// MaxSubprocessTimeout is the hard ceiling on a caller-named timeout.
-	MaxSubprocessTimeout = 600 * time.Second
+	// MaxSubprocessTimeout is the hard ceiling on a caller-named timeout. It is sized for the
+	// slowest hardware apogee is built for rather than for a developer laptop: a cold toolchain
+	// build on a throttled single-board box — an empty module and build cache, one or two usable
+	// cores — runs well past ten minutes, and a caller that asks for that much is honoured rather
+	// than cut short at a budget no such machine can meet. A run that answers quickly pays
+	// nothing for the headroom, since the ceiling is only ever spent by a run that hangs.
+	MaxSubprocessTimeout = 3600 * time.Second
 )
 
 // SubprocessSpec is the platform-agnostic description of one subprocess execution: the argv
@@ -191,6 +196,21 @@ func RunSubprocessTo(ctx context.Context, spec SubprocessSpec, stdout io.Writer)
 	return run(ctx, spec, stdout)
 }
 
+// effectiveTimeout resolves the budget one run is governed by: a caller naming none takes
+// DefaultSubprocessTimeout, and one naming more than the ceiling is cut back to
+// MaxSubprocessTimeout. The clamp is silent — the caller reads the budget it was actually given
+// off the timeout message when the run expires — which is the idiom the rest of the codebase
+// already uses for a caller-named bound (http_request clamps the same way).
+func effectiveTimeout(requested time.Duration) time.Duration {
+	if requested <= 0 {
+		return DefaultSubprocessTimeout
+	}
+	if requested > MaxSubprocessTimeout {
+		return MaxSubprocessTimeout
+	}
+	return requested
+}
+
 // run is the body both entry points share. streamStdout non-nil is the streaming variant: the
 // child's stdout goes there uncapped and never into a capped buffer.
 func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (SubprocessResult, error) {
@@ -201,13 +221,7 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 		return SubprocessResult{}, fmt.Errorf("apogee: RunSubprocess: empty argv")
 	}
 
-	timeout := spec.Timeout
-	if timeout <= 0 {
-		timeout = DefaultSubprocessTimeout
-	}
-	if timeout > MaxSubprocessTimeout {
-		timeout = MaxSubprocessTimeout
-	}
+	timeout := effectiveTimeout(spec.Timeout)
 
 	// The run is governed by its own context (a child of the caller's, so a model-side
 	// cancel still propagates) carrying the per-call timeout. The §2.4 teardown reaps the

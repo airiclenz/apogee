@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -17,15 +18,21 @@ import (
 var pythonExecSpec = toolSpec{
 	name:        "python_exec",
 	description: "Run a Python script through the system interpreter and capture its output and exit code. One-shot (a fresh interpreter per call); the script is fed on standard input. The workspace is deliberately NOT on sys.path, so the standard library always wins: importing a project module needs an explicit line in the code, e.g. `import sys; sys.path.append('.')`. Reports clearly when no Python interpreter is available.",
-	schema: json.RawMessage(`{
+	// The timeout_seconds description is RENDERED from internal/subprocess's own constants, never
+	// restated by hand: the numbers the model is told are the numbers the funnel actually applies,
+	// so a resized ceiling cannot leave the advertised one behind.
+	schema: json.RawMessage(fmt.Sprintf(`{
   "type": "object",
   "required": ["code"],
   "properties": {
     "code": {"type": "string", "description": "The Python source to run. It is fed to the interpreter on standard input (a fresh interpreter per call). The workspace is not on sys.path: to import a project module, add it in the code (import sys; sys.path.append('.'))."},
     "workdir": {"type": "string", "description": "Optional working directory (relative to the workspace root or absolute)"},
-    "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default 120, max 600)"}
+    "timeout_seconds": {"type": "integer", "description": "Optional timeout in seconds (default %d, max %d)"}
   }
-}`),
+}`,
+		int(subprocess.DefaultSubprocessTimeout.Seconds()),
+		int(subprocess.MaxSubprocessTimeout.Seconds()),
+	)),
 }
 
 type pythonExecArgs struct {

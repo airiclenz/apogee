@@ -329,7 +329,13 @@ go test ./internal/tools/... -run 'RunTests|Registry|Roster'
 
 **Commit:** `fix(tools): run_tests takes a timeout the model can raise`
 
-## 6. The subprocess ceiling is reachable on slow hardware
+## 6. The subprocess ceiling is reachable on slow hardware — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the new `TestEffectiveTimeoutAdmitsASlowBoxSubprocessBudget` carries a third row beyond the item's two — a caller naming no budget takes `DefaultSubprocessTimeout` — because the item's own extraction of the clamp out of `run` could otherwise break that path silently. Its name contains "Subprocess" so the item's Acceptance pattern (`-run 'Subprocess|Terminal|Python'`) actually reaches it.
+
+NOTES (2026-09-23): the honoured-unclamped case is falsifiable, not incidental — it asks for 30 minutes, which the old 600 s ceiling would have cut to 10 minutes, so the case fails against the pre-item constant.
+
+NOTES (2026-09-23): the guard grep's remaining live hits are not this ceiling — `docs/design/hook-talkback-findings.md`:156 quotes Claude Code's and Codex's 600 s hook timeouts in a rivals' comparison table, and `internal/tools/`'s other `600`s are file modes (`0o600`) and unrelated test budgets. `docs/plans/archived/phase-3-detail-plan.md`:1082 is the historical record and is left as written.
 
 **What.** The ceiling half of `apogee-v0e8`.
 **Goal:** a caller-named subprocess timeout long enough for a cold toolchain build on throttled

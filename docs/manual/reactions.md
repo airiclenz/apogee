@@ -401,7 +401,7 @@ command is spawned through the same door every execution tool uses, so it gets t
 credential scrub — apogee's own key, every `api-key-env:` variable and every webhook
 `headers-env:` variable are **absent** from its environment — along with the process-tree teardown
 and that door's ceilings: combined stdout and stderr are capped at 256 KiB before the 8 KiB advice
-cap is applied, and a `timeout:` above 600 s is clamped to 600 s. A `timeout: 0s` on an entry that
+cap is applied, and a `timeout:` above 3600 s is clamped to 3600 s. A `timeout: 0s` on an entry that
 spells only `advise:` or `gate:` falls back to the class default, where the same value on a `run:`
 entry is a startup refusal. A `run:` command alone inherits the environment whole. None of this
 reaches a **webhook** under either key: nothing is spawned, so there is no permit, no box and no

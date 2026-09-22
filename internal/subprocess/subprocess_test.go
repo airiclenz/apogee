@@ -538,3 +538,46 @@ func TestRunSubprocessRefusesAnEmptyArgv(t *testing.T) {
 		t.Fatal("RunSubprocess err = nil for an empty argv, want a refusal")
 	}
 }
+
+// TestEffectiveTimeoutAdmitsASlowBoxSubprocessBudget pins the reach of the funnel's ceiling. The budget a
+// caller names is what a cold toolchain build on throttled hardware needs, so a request past the
+// ten-minute maximum this ceiling used to hold is honoured unclamped; only a request past the
+// constant itself is cut back, and to the constant rather than to a literal a future resize would
+// leave behind.
+func TestEffectiveTimeoutAdmitsASlowBoxSubprocessBudget(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		requested time.Duration
+		want      time.Duration
+	}{
+		{
+			name:      "a cold-build budget past the old ten-minute ceiling is honoured",
+			requested: 30 * time.Minute,
+			want:      30 * time.Minute,
+		},
+		{
+			name:      "a budget past the ceiling is clamped to the ceiling",
+			requested: MaxSubprocessTimeout + time.Minute,
+			want:      MaxSubprocessTimeout,
+		},
+		{
+			name:      "a caller naming no budget takes the default",
+			requested: 0,
+			want:      DefaultSubprocessTimeout,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := effectiveTimeout(tc.requested)
+
+			if got != tc.want {
+				t.Fatalf("effectiveTimeout(%s) = %s, want %s", tc.requested, got, tc.want)
+			}
+		})
+	}
+}
