@@ -459,7 +459,15 @@ fail against the pre-item tree. CHANGELOG sidecar, `[Unreleased]/Fixed`.
 **Acceptance.** `go build ./... && go test ./internal/platform/... -run 'Namespace|SelectLinuxConfiner'`
 **Commit:** `fix(platform): a bwrap net-deny box discloses its pathname-UNIX-socket egress`
 
-## 8. The residual notice words each residual it names
+## 8. The residual notice words each residual it names — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): test (d) landed as its own function, `TestResidualNoticeWordsEachTokenOnItsOwnTerms`, rather than a `residualSets` row — `TestResidualNotice`'s matrix asserts the truncate story in every fired cell (`empty an existing file`, `6.2`), which an unknown token must NOT carry, so the two cannot share one loop. It also pins the two-token case (one clause each, truncate's consequence said exactly once and only on its own line), which is the shape the old single sentence could not produce.
+
+NOTES (2026-09-22): "(a), (b) and (d) must fail against the pre-item tree" holds against the plan's header base (`a803bb46`), where `domain.ResidualUDPEgress` does not exist and the test package does not compile. Against the tree as it stands — items 6 and 7 landed — only (d) is red, verified by restoring `internal/probe/confinement.go` from HEAD: both its subtests fail (the notice lends truncate's consequence to `refer(2)` and words one sentence for two tokens). (a) and (b) pass there because item 6 introduced the filter and the tokens, exactly as this item's regression guard says it should.
+
+NOTES (2026-09-22): the truncate token is matched against a probe-local `const residualTruncate`, not a shared `domain.Residual*` constant. Deliberate and documented in place: a drift between that spelling and `internal/platform`'s is harmless here — an unrecognised token falls to the neutral clause, which is true of every residual — whereas hoisting it into `internal/domain` would add a third token to the shared block for no honesty gained and touch files outside this item.
+
+NOTES (2026-09-22): no edit to `internal/platform/landlock_linux.go:209-210`, which the item's regression guard names as superseded. Item 6 already re-pointed that comment (the new paragraph at :212-220 states the network tokens are CapabilityLine's alone), and the sentence at :209-210 is about the `truncate(2)` residual — which `ResidualNotice` still words, more precisely than before — so it is not falsified. `internal/platform` is not in this item's Files.
 
 **What.** Recast at the regression check (2026-09-22). `fix(probe)`: the user-facing half of
 `apogee-qi3`. Depends on items 6 and 7.

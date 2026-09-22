@@ -94,6 +94,11 @@ func TestCapabilityLine(t *testing.T) {
 		// A reason beside a working fence is stale by definition and is never rendered.
 		{"fs with a stale reason", "landlock", domain.ConfinementCaps{FSWrite: true, Unavailable: "stale"},
 			"landlock (fs-write: available · network: unavailable)"},
+		// The network-egress residuals a deny box leaves open ride the SAME list: CapabilityLine is
+		// the honesty surface for them, since the write-class startup banner filters them out.
+		{"the network residuals", "landlock", domain.ConfinementCaps{FSWrite: true, NetworkEgress: true,
+			Residuals: []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress}},
+			"landlock (fs-write: available · network: available · unfenced: connect(2) UDP, connect(2) AF_UNIX)"},
 		// Both disclosures at once: the residual is named first, the reason last.
 		{"residual and a reason", "landlock", domain.ConfinementCaps{Residuals: []string{"truncate(2)"}, Unavailable: "ENOSYS"},
 			"landlock (fs-write: unavailable · network: unavailable · unfenced: truncate(2) · why: ENOSYS)"},
@@ -116,15 +121,23 @@ func (stubConfiner) Capabilities() domain.ConfinementCaps { return domain.Confin
 
 func (stubConfiner) Confine(context.Context, domain.ConfinementBox, *exec.Cmd) error { return nil }
 
-// The residual notice fires in EXACTLY one cell of the {mode} × {FSWrite} × {confine} ×
-// {residual} matrix: Auto, asking for confinement, on a backend that CAN fence but discloses a
-// write-class access it cannot cover (landlock ABI 1–2 and truncate(2)). It is the sibling of the
-// degradation notice, never its overlap — that one needs FSWrite false, this one needs it true —
-// so the last assertion here is that no input makes both speak.
+// The residual notice fires in EXACTLY the cells of the {mode} × {FSWrite} × {confine} ×
+// {residual} matrix where Auto asks for confinement on a backend that CAN fence and discloses a
+// WRITE-CLASS access it cannot cover (landlock ABI 1–2 and truncate(2)). A set holding only
+// network-egress tokens is not one of them — those are CapabilityLine's to word — so the matrix
+// carries a network-only set and a mixed set beside the two originals, and the mixed one fires the
+// truncate story carrying no network token. It is the sibling of the degradation notice, never its
+// overlap — that one needs FSWrite false, this one needs it true — so the last assertion here is
+// that no input makes both speak.
 func TestResidualNotice(t *testing.T) {
 	t.Parallel()
 	modes := []domain.Mode{domain.ModePlan, domain.ModeAskBefore, domain.ModeAllowEdits, domain.ModeAuto}
-	residualSets := [][]string{nil, {"truncate(2)"}}
+	residualSets := [][]string{
+		nil,
+		{"truncate(2)"},
+		{domain.ResidualUDPEgress},
+		{"truncate(2)", domain.ResidualUDPEgress},
+	}
 	fired := 0
 	for _, mode := range modes {
 		for _, fsWrite := range []bool{true, false} {
@@ -132,7 +145,7 @@ func TestResidualNotice(t *testing.T) {
 				for _, residuals := range residualSets {
 					caps := domain.ConfinementCaps{FSWrite: fsWrite, Residuals: residuals}
 					got := probe.ResidualNotice("landlock", caps, mode, confine)
-					want := mode == domain.ModeAuto && confine && fsWrite && len(residuals) > 0
+					want := mode == domain.ModeAuto && confine && fsWrite && holdsWriteClassToken(residuals)
 					if (got != "") != want {
 						t.Errorf("ResidualNotice(landlock, FSWrite=%v, residuals=%v, %q, confine=%v) = %q; wantNotice = %v",
 							fsWrite, residuals, mode, confine, got, want)
@@ -156,6 +169,9 @@ func TestResidualNotice(t *testing.T) {
 							t.Errorf("residual notice %q does not mention %q", got, want)
 						}
 					}
+					if strings.Contains(got, domain.ResidualUDPEgress) {
+						t.Errorf("residual notice words a network token the auto banner filters out:\n%s", got)
+					}
 					if strings.Contains(got, "/confine off") {
 						t.Errorf("residual notice offers /confine off; a disclosure must not read as a remedy to loosen:\n%s", got)
 					}
@@ -163,9 +179,21 @@ func TestResidualNotice(t *testing.T) {
 			}
 		}
 	}
-	if fired != 1 {
-		t.Errorf("notice fired in %d cells of the matrix; want exactly 1 (auto + confine + FSWrite + a residual)", fired)
+	if fired != 2 {
+		t.Errorf("notice fired in %d cells of the matrix; want exactly 2 (auto + confine + FSWrite, for the two sets holding a write-class token)", fired)
 	}
+}
+
+// holdsWriteClassToken is the matrix's own answer to "should this set say anything" — a set speaks
+// iff it holds a token that is not one of the two network-egress ones. Spelled out here rather than
+// reusing the production filter, so the test states the rule instead of quoting the code it checks.
+func holdsWriteClassToken(residuals []string) bool {
+	for _, residual := range residuals {
+		if residual != domain.ResidualUDPEgress && residual != domain.ResidualUnixEgress {
+			return true
+		}
+	}
+	return false
 }
 
 // The network-egress residuals are disclosure for the capability line, never a startup banner: a
@@ -212,6 +240,71 @@ func TestResidualNoticeIsSilentForNetworkOnlyResiduals(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Every token the notice names is worded on its own terms. truncate(2) is the only one this
+// project has a consequence for; a write-class token it has never seen must still reach the
+// operator, and must reach them with the NEUTRAL clause — what is true of any residual by
+// definition — rather than borrowing truncate(2)'s "can still empty an existing file", which would
+// state of the new access something that does not follow from it. The mixed row is the one that
+// would have caught the old single-sentence shape: two tokens, two clauses, one consequence each.
+func TestResidualNoticeWordsEachTokenOnItsOwnTerms(t *testing.T) {
+	t.Parallel()
+
+	const unknown = "refer(2)"
+
+	t.Run("an unknown write-class token gets the neutral clause", func(t *testing.T) {
+		t.Parallel()
+		caps := domain.ConfinementCaps{FSWrite: true, Residuals: []string{unknown}}
+
+		got := probe.ResidualNotice("landlock", caps, domain.ModeAuto, true)
+
+		if got == "" {
+			t.Fatalf("ResidualNotice(residuals=%v) said nothing; an unfenced write-class access must reach the operator", caps.Residuals)
+		}
+		if !strings.Contains(got, unknown) {
+			t.Errorf("notice does not name the token it exists to disclose:\n%s", got)
+		}
+		if !strings.Contains(got, "can still perform it outside the workspace") {
+			t.Errorf("notice does not word the token neutrally:\n%s", got)
+		}
+		for _, borrowed := range []string{"empty an existing file", "6.2", "create-and-write"} {
+			if strings.Contains(got, borrowed) {
+				t.Errorf("notice lends truncate(2)'s consequence %q to %s:\n%s", borrowed, unknown, got)
+			}
+		}
+	})
+
+	t.Run("two tokens get one clause each", func(t *testing.T) {
+		t.Parallel()
+		caps := domain.ConfinementCaps{FSWrite: true, Residuals: []string{"truncate(2)", unknown}}
+
+		got := probe.ResidualNotice("landlock", caps, domain.ModeAuto, true)
+
+		if !strings.Contains(got, "truncate(2) — ") || !strings.Contains(got, unknown+" — ") {
+			t.Fatalf("notice does not word both tokens:\n%s", got)
+		}
+		// The specific consequence stays with the token it belongs to: it is said once, on
+		// truncate(2)'s line, and the unknown token's line is a different sentence.
+		if strings.Count(got, "empty an existing file") != 1 {
+			t.Errorf("truncate(2)'s consequence is not said exactly once:\n%s", got)
+		}
+		truncateLine, unknownLine := "", ""
+		for _, line := range strings.Split(got, "\n") {
+			if strings.Contains(line, "truncate(2) — ") {
+				truncateLine = line
+			}
+			if strings.Contains(line, unknown+" — ") {
+				unknownLine = line
+			}
+		}
+		if !strings.Contains(truncateLine, "empty an existing file") {
+			t.Errorf("truncate(2)'s clause does not carry its own consequence:\n%s", got)
+		}
+		if strings.Contains(unknownLine, "empty an existing file") {
+			t.Errorf("the unknown token's clause carries truncate(2)'s consequence:\n%s", got)
+		}
+	})
 }
 
 // The auto ladder an UNATTENDED run is held to is the one a LAUNCH is held to (ADR 0033, decision

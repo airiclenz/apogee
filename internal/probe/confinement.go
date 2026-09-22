@@ -96,15 +96,20 @@ func DegradedNotice(backendName string, caps domain.ConfinementCaps, mode domain
 		backendName)
 }
 
-// ResidualNotice returns the one-line-plus-consequence notice for Auto entered with confinement
-// asked for, on a backend that CAN fence the filesystem but discloses a write-class access it
-// cannot cover (caps.Residuals — landlock ABI 1–2, where truncate(2) has no bit; contract §5).
+// ResidualNotice returns the notice for Auto entered with confinement asked for, on a backend
+// that CAN fence the filesystem but discloses a write-class access it cannot cover (caps.Residuals
+// — landlock ABI 1–2, where truncate(2) has no bit; contract §5).
 // It is write-class ONLY: the network-egress-class tokens are filtered out (writeClassResiduals),
 // so a backend that discloses nothing but the egress a deny box leaves open says nothing here and
 // no host gains a startup banner for a fence it never asked for. CapabilityLine still names them.
 // The fence is doing its job and Auto is not degraded, so nothing is refused and nothing is
-// loosened: the operator is simply told the one thing the fence does not stop, and which kernel
-// closes it.
+// loosened: the operator is simply told what the fence does not stop.
+//
+// Every token it names is WORDED — one clause each, from residualConsequence — rather than
+// interpolated into a single sentence whose consequence belongs to truncate(2) alone. A set of two
+// once read as "cannot fence truncate(2), refer(2) — a confined command can still empty an existing
+// file", which states of refer(2) something that does not follow from it; a reader cannot tell a
+// disclosure they must act on from one the sentence merely swept up.
 //
 // It is the SIBLING of DegradedNotice, never its overlap: DegradedNotice speaks where FSWrite is
 // false — the cell headless and the daemon refuse Auto on — and this one speaks only where
@@ -119,11 +124,37 @@ func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain
 	if len(writeClass) == 0 {
 		return ""
 	}
+	clauses := make([]string, 0, len(writeClass))
+	for _, residual := range writeClass {
+		clauses = append(clauses, "  "+residual+" — "+residualConsequence(residual))
+	}
 	return fmt.Sprintf(
-		"apogee: auto mode confines terminal commands, but the %s backend on this kernel cannot fence %s —\n"+
-			"  a confined command can still empty an existing file outside the workspace (landlock ABI 1–2, kernel < 6.2).\n"+
-			"  A kernel ≥ 6.2 closes it; until then treat auto's fence as create-and-write only.",
-		backendName, strings.Join(writeClass, ", "))
+		"apogee: auto mode confines terminal commands, but the %s backend on this kernel cannot fence:\n%s",
+		backendName, strings.Join(clauses, "\n"))
+}
+
+// residualTruncate is the one residual token this package has consequence wording for. It is the
+// spelling internal/platform's landlock backend emits; the two are not a shared constant because a
+// drift here is HARMLESS by construction — an unrecognised token falls to the neutral clause below,
+// which is true of every residual, where sharing a constant with the backend that discovers the gap
+// would invert the dependency for no honesty gained.
+const residualTruncate = "truncate(2)"
+
+// residualConsequence words ONE residual token: what a confined command can still do with the
+// access this backend leaves open, in the operator's terms. A token it knows gets the specific
+// consequence and the kernel that closes it; a token it does not gets the NEUTRAL clause — the one
+// thing true of every residual by definition (contract §5: an access the backend knowingly cannot
+// fence) — never truncate(2)'s consequence borrowed for it. Silence is not an option either: a
+// backend that grows a new unfenced write-class access must still reach the operator, so the
+// default arm says what it can rather than dropping the token.
+func residualConsequence(residual string) string {
+	if residual == residualTruncate {
+		return "a confined command can still empty an existing file outside the workspace\n" +
+			"    (landlock ABI 1–2, kernel < 6.2). A kernel ≥ 6.2 closes it; until then treat auto's\n" +
+			"    fence as create-and-write only."
+	}
+	return "the backend discloses this access rather than fencing it, so a\n" +
+		"    confined command can still perform it outside the workspace."
 }
 
 // writeClassResiduals drops the network-egress-class tokens from a residual set, leaving the
