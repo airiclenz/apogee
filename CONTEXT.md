@@ -1932,7 +1932,9 @@ A summary is **never sent to the model** — it is display data a host consumes,
 summary *value* has no wire form; what the transcript codec may mirror into the session record are
 the **facts** a variant carries, which is what the neutral codec in `internal/session` does for the
 **Edit regions** below
-([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5).
+([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5);
+the rendered view the codec stores keeps its presenter verdicts on the wire, a standing denial
+([ADR 0083](docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md) §1).
 A Mechanism that rewrites `Content` on the `PostToolResult` seam does not invalidate it: a
 summary records what the tool *did*, not what the text *says*.
 _Avoid_: "tool metadata", "tool result type" (the result already has a type; this is its
@@ -1946,7 +1948,9 @@ re-derives positions from arguments. It rides the **Tool summary** contract unch
 data, never sent to the model, and no wire form for the summary value — and the region facts are
 the one part of a summary the neutral codec in `internal/session` mirrors onto a wire type of
 its own, so a resumed session renders the same split diffs
-([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5).
+([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5;
+a facts-only fold that drops the verdicts beside them is a standing denial,
+[ADR 0083](docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md) §1).
 A result carrying none renders the argument-derived list exactly as before, which is what keeps
 tools an open extension point ([ADR 0002](docs/adr/0002-tools-are-an-open-extension-point-mechanisms-are-curated.md)).
 The [Split diff](#deliverables-and-presentation) is its consumer. See
