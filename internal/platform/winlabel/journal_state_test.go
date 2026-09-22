@@ -198,3 +198,50 @@ func TestJournalRetireWithoutARevertSeamDoesNothing(t *testing.T) {
 		t.Errorf("stat the journal file after Retire: %v; a revert that did not happen must not remove it", err)
 	}
 }
+
+// A Retire that leaves a handoff must keep the journal's OWNING PID, because the Close that
+// follows rewrites the file from the in-memory record. Dropping it there would make the second
+// write claim PID 0 — a PID no live process holds — and everything that reads a journal reads
+// that claim: a sibling's revertibleRoots would take the owner for dead and clear this live
+// session's root out from under it, and ResidueIn would report the file as a stranger's
+// leftovers. A repeated Close is routine once a handoff keeps the journal alive, so the second
+// write is the one that matters.
+func TestJournalRetireKeepsTheOwningPIDAcrossARepeatedClose(t *testing.T) {
+	t.Parallel()
+
+	home := t.TempDir()
+	j := Open(home)
+	j.mu.Lock()
+	if _, err := j.record(Entry{Path: `C:\work`, Root: true}); err != nil {
+		j.mu.Unlock()
+		t.Fatalf("record the root: %v", err)
+	}
+	j.mu.Unlock()
+
+	// A handoff is what keeps the file on the disk for a second Close to rewrite.
+	handoff := []Entry{{Path: `C:\work\vendor`, PriorSDDL: "S:AI(ML;;NW;;;ME)"}}
+	j.revert = func(string, string) func(Record) ([]Entry, error) {
+		return func(Record) ([]Entry, error) { return handoff, nil }
+	}
+	for pass := 1; pass <= 2; pass++ {
+		if err := j.Retire(); err != nil {
+			t.Fatalf("Retire pass %d: %v", pass, err)
+		}
+	}
+
+	rec, err := ReadJournal(JournalPath(home, os.Getpid()))
+	if err != nil {
+		t.Fatalf("read the journal a handoff kept: %v", err)
+	}
+	if rec.PID != os.Getpid() {
+		t.Errorf("the rewritten journal names PID %d, want this process (%d); a sibling reads any other owner as dead and may clear a live session's root",
+			rec.PID, os.Getpid())
+	}
+
+	j.mu.Lock()
+	inMemory := j.rec.PID
+	j.mu.Unlock()
+	if inMemory != os.Getpid() {
+		t.Errorf("the in-memory record names PID %d after Retire, want this process (%d); the next rewrite reads it", inMemory, os.Getpid())
+	}
+}

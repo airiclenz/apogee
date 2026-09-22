@@ -229,7 +229,13 @@ func (j *Journal) Retire() error {
 		return fmt.Errorf("apogee: confine: could not revert every mandatory label; the journal %q is kept so the next run retries: %w",
 			j.path, err)
 	}
-	j.rec = Record{Entries: remaining}
+	// Only the ENTRIES move: the record's other fields — its owning PID above all — describe
+	// the journal, not the revert, and the file retire just rewrote still names this process
+	// (retire writes Record{PID: r.PID, …}). Replacing the whole record here would zero the PID
+	// in memory, and the next Close — routine now that a handoff survives one — would rewrite
+	// the file claiming PID 0: a sibling reads that as a DEAD owner and may clear this live
+	// session's root out from under it, and ResidueIn reports the journal as foreign residue.
+	j.rec.Entries = remaining
 	j.forgetLabelled()
 	return nil
 }
