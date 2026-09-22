@@ -23,22 +23,6 @@ func diagnosticsCallNoVet(id, path string) domain.ToolCall {
 	return domain.ToolCall{ID: id, Tool: "diagnostics", Arguments: args}
 }
 
-// withFakeGo swaps lookGo for the duration of a test (restored on cleanup), so the
-// toolchain-absent path is exercisable without depending on the host's PATH. It fakes the LOOK
-// alone — the fence security.ResolveProgram applies to what the look answers is the real one,
-// which is what makes the planted-toolchain refusal a genuine assertion.
-func withFakeGo(t *testing.T, found bool, path string) {
-	t.Helper()
-	orig := lookGo
-	lookGo = func(string) (string, error) {
-		if !found {
-			return "", exec.ErrNotFound
-		}
-		return path, nil
-	}
-	t.Cleanup(func() { lookGo = orig })
-}
-
 // realGo skips the test when no Go toolchain is on PATH, so the live go-vet runs
 // stay green on a host without `go` (the tool's graceful contract).
 func realGo(t *testing.T) {
@@ -194,12 +178,12 @@ func TestDiagnostics_UnsupportedLanguageDegradesGracefully(t *testing.T) {
 }
 
 func TestDiagnostics_GoSyntaxErrorReportedInProcess(t *testing.T) {
-	// Not parallel: withFakeGo swaps the package-level lookGo var. Proves the syntax
-	// half needs NO toolchain — a syntax error is reported even with go absent.
-	withFakeGo(t, false, "")
+	t.Parallel()
+	// A host whose look finds no go proves the syntax half needs NO toolchain — a syntax
+	// error is reported even with go absent.
 	dir := tempRoot(t)
 	writeGoFile(t, dir, "broken.go", "package main\n\nfunc main() {\n\tx :=\n}\n")
-	d := NewDiagnostics(dir)
+	d := newDiagnostics(dir, fakeLookHost(false, ""))
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "broken.go"))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
@@ -218,8 +202,7 @@ func TestDiagnostics_GoSyntaxErrorReportedInProcess(t *testing.T) {
 // clause — exactly as it was when the tool parsed for itself. Check's "nothing to break" rule
 // is the trailer's, not this tool's.
 func TestDiagnostics_BlankGoFileStaysASyntaxError(t *testing.T) {
-	// Not parallel: withFakeGo swaps the package-level lookGo var.
-	withFakeGo(t, false, "")
+	t.Parallel()
 	cases := []struct {
 		name    string
 		content string
@@ -231,7 +214,7 @@ func TestDiagnostics_BlankGoFileStaysASyntaxError(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			dir := tempRoot(t)
 			writeGoFile(t, dir, "blank.go", tc.content)
-			d := NewDiagnostics(dir)
+			d := newDiagnostics(dir, fakeLookHost(false, ""))
 			res, err := d.Execute(context.Background(), diagnosticsCall("c1", "blank.go"))
 			if err != nil {
 				t.Fatalf("Execute err = %v, want nil", err)
@@ -270,12 +253,12 @@ func TestDiagnostics_SyntaxDoorSpellsTheFirstErrorAndCountsTheRest(t *testing.T)
 }
 
 func TestDiagnostics_CleanGoFileWithVetSkipNote(t *testing.T) {
-	// Not parallel: withFakeGo swaps lookGo (force the toolchain-absent branch so the
-	// result is deterministic regardless of the host).
-	withFakeGo(t, false, "")
+	t.Parallel()
+	// A host whose look finds no go forces the toolchain-absent branch, so the result is
+	// deterministic regardless of the test machine.
 	dir := tempRoot(t)
 	writeGoFile(t, dir, "clean.go", "package main\n\nfunc main() {}\n")
-	d := NewDiagnostics(dir)
+	d := newDiagnostics(dir, fakeLookHost(false, ""))
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
@@ -476,16 +459,16 @@ func TestDiagnostics_VetResultNamesThePackageDirectory(t *testing.T) {
 }
 
 func TestDiagnostics_RunsWithoutAConfinementHandle(t *testing.T) {
+	t.Parallel()
 	// diagnostics takes the SUBPROCESS class (§4 amended 2026-07-26), so Auto installs a
 	// confinement handle — but every other rung runs it without one (an approved gate,
 	// "I am the sandbox", the library seam). The tool must therefore never REQUIRE the
-	// handle: the diagnosis still reports with no Confiner in play. Force the
-	// toolchain-absent branch so this stays deterministic and toolchain-free; the syntax
-	// half proves the read path runs.
-	withFakeGo(t, false, "")
+	// handle: the diagnosis still reports with no Confiner in play. A host whose look finds
+	// no go forces the toolchain-absent branch so this stays deterministic and
+	// toolchain-free; the syntax half proves the read path runs.
 	dir := tempRoot(t)
 	writeGoFile(t, dir, "clean.go", "package main\n\nfunc main() {}\n")
-	d := NewDiagnostics(dir)
+	d := newDiagnostics(dir, fakeLookHost(false, ""))
 	res, err := d.Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)

@@ -232,7 +232,9 @@ NOTES (2026-09-22): `go test -race` cannot run on this host (ThreadSanitizer: un
 **Acceptance.** `go test ./internal/tools/... -run 'Terminal|PythonExec|RunTests|ExecFence|EveryExecSite' && go test -race -count=2 ./internal/tools/`; `! grep -nE '^var (runTerminalSubprocess|runPythonSubprocess|runTestsSubprocess|lookInterpreter|lookTestProgram|interpreterVersion)\b' internal/tools/*.go`
 **Commit:** `refactor(tools): the one-shot execution tools look up and run through execHost`
 
-## 13. Diagnostics' go lookup and the Console opener ride the host
+## 13. Diagnostics' go lookup and the Console opener ride the host — ✅ DONE (2026-09-22)
+NOTES (2026-09-22): `TestConsoleOpen_ScrubsCredentialsAndAsksForADumbTerminal` stays serial — it uses `t.Setenv`, which panics under `t.Parallel()`; its "Not parallel" comment now names only that reason. The other two freed console tests and the four freed diagnostics tests gain `t.Parallel()`.
+NOTES (2026-09-22): the fence's `console_open` row is untouched — it plants its shell through `prependPATH`/`t.Setenv`, and moving the fence rows' shell planting onto `h.look` is item 14's text; the table's "No t.Parallel" comment now cites the git row alone.
 
 **What.** Depends on items 11 and 12. Delete `lookGo` and `openConsole`; `Diagnostics.Execute` uses `t.host.look`, `ConsoleOpen.Execute` uses `t.host.openConsole`. `withFakeGo` → `fakeLookHost`; the three `openConsole =` sites become `h.openConsole = …` on `newConsoleOpen(root, secretEnv, h)`. Freed tests gain `t.Parallel()`.
 **Regression guard.** Depends on items 11 and 12 (`fakeLookHost` is introduced by 12).

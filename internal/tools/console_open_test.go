@@ -109,20 +109,19 @@ func TestConsoleOpen_ExitedProgramIsReportedNotHidden(t *testing.T) {
 // is told it is talking to a dumb terminal so it spends none of the model's context on escape
 // sequences the Console strips anyway.
 func TestConsoleOpen_ScrubsCredentialsAndAsksForADumbTerminal(t *testing.T) {
-	// Not parallel: t.Setenv plus the package-level opener swap.
+	// Not parallel: t.Setenv.
 	t.Setenv("APOGEE_API_KEY", "sk-secret-value")
 	t.Setenv("APOGEE_TEST_PROVIDER_KEY", "sk-configured-value")
 
 	var captured console.OpenSpec
-	restore := openConsole
-	openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
+	h := defaultExecHost()
+	h.openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
 		captured = spec
 		return registry.Open(spec)
 	}
-	t.Cleanup(func() { openConsole = restore })
 
 	ctx, _ := consoleTestCtx(t)
-	tool := NewConsoleOpen(t.TempDir(), []string{"APOGEE_TEST_PROVIDER_KEY"})
+	tool := newConsoleOpen(t.TempDir(), []string{"APOGEE_TEST_PROVIDER_KEY"}, h)
 
 	if _, err := tool.Execute(ctx, consoleOpenCall("c1", "sh", 10)); err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
@@ -149,7 +148,7 @@ func TestConsoleOpen_ScrubsCredentialsAndAsksForADumbTerminal(t *testing.T) {
 // beside it is display identity the model chose, and two siblings of one Turn can carry the same
 // one — so a context carrying only that owns nothing.
 func TestConsoleOpen_StampsTheEngineMintedOwnerKey(t *testing.T) {
-	// Not parallel: the package-level opener swap.
+	t.Parallel()
 	cases := []struct {
 		name  string
 		stamp func(context.Context) context.Context
@@ -169,16 +168,16 @@ func TestConsoleOpen_StampsTheEngineMintedOwnerKey(t *testing.T) {
 
 	for _, testCase := range cases {
 		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
 			var captured console.OpenSpec
-			restore := openConsole
-			openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
+			h := defaultExecHost()
+			h.openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
 				captured = spec
 				return registry.Open(spec)
 			}
-			t.Cleanup(func() { openConsole = restore })
 			ctx, _ := consoleTestCtx(t)
 
-			_, err := NewConsoleOpen(t.TempDir(), nil).Execute(testCase.stamp(ctx), consoleOpenCall("c1", "sh", 10))
+			_, err := newConsoleOpen(t.TempDir(), nil, h).Execute(testCase.stamp(ctx), consoleOpenCall("c1", "sh", 10))
 
 			if err != nil {
 				t.Fatalf("Execute err = %v, want nil", err)
@@ -291,14 +290,13 @@ func TestConsoleOpen_ConfinesThroughTheHandleOnContext(t *testing.T) {
 // pseudo-terminal starts with.
 func TestConsoleOpen_ConfinedConsoleCarriesTheSeededScratchEnv(t *testing.T) {
 	skipWithoutPOSIXShell(t)
-	// Not parallel: the package-level opener swap.
+	t.Parallel()
 	var captured console.OpenSpec
-	restore := openConsole
-	openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
+	h := defaultExecHost()
+	h.openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
 		captured = spec
 		return registry.Open(spec)
 	}
-	t.Cleanup(func() { openConsole = restore })
 	scratch := filepath.Join(t.TempDir(), "scratch")
 	if err := os.MkdirAll(scratch, 0o700); err != nil {
 		t.Fatal(err)
@@ -309,7 +307,7 @@ func TestConsoleOpen_ConfinedConsoleCarriesTheSeededScratchEnv(t *testing.T) {
 		Box:      domain.ConfinementBox{WorkspaceRoot: t.TempDir(), ScratchDir: scratch},
 	})
 
-	res, err := NewConsoleOpen(t.TempDir(), nil).Execute(ctx, consoleOpenCall("c1", "sh", 100))
+	res, err := newConsoleOpen(t.TempDir(), nil, h).Execute(ctx, consoleOpenCall("c1", "sh", 100))
 
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)

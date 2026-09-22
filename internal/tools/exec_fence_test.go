@@ -49,8 +49,8 @@ func prependPATH(t *testing.T, dir string) {
 // "not available" and goes looking for an install, when the cause is a workspace-resident entry
 // on their own PATH.
 func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
-	// No t.Parallel anywhere below: the git and diagnostics rows still swap a package-level
-	// look* var, and the two shell rows plant their program through t.Setenv.
+	// No t.Parallel anywhere below: the git row still swaps a package-level look* var, and
+	// the two shell rows plant their program through t.Setenv.
 	tests := []struct {
 		name string
 		// run plants a program inside root, points the tool's resolver at it, and returns
@@ -103,8 +103,7 @@ func TestEveryExecSiteRefusesAProgramInsideTheWorkspace(t *testing.T) {
 				writeGoModule(t, root)
 				writeGoFile(t, root, "clean.go", "package diagtest\n\nfunc F() int { return 1 }\n")
 				planted := plantExecutable(t, root, "tools/go")
-				withFakeGo(t, true, planted)
-				res, err := NewDiagnostics(root).Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
+				res, err := newDiagnostics(root, fakeLookHost(true, planted)).Execute(context.Background(), diagnosticsCall("c1", "clean.go"))
 				if err != nil {
 					t.Fatalf("Execute returned a Go error (reserved for cancellation): %v", err)
 				}

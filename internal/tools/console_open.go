@@ -42,13 +42,6 @@ type consoleOpenArgs struct {
 // first place spends none of the model's context on cursor motion it cannot see.
 const consoleTermVar = "TERM=dumb"
 
-// openConsole starts the Console a call assembled (a package var so a test can capture the exact
-// argv, environment and confinement this tool builds — the door execHost.run already is for
-// the one-shot tools).
-var openConsole = func(registry *console.Registry, spec console.OpenSpec) (*console.Console, error) {
-	return registry.Open(spec)
-}
-
 // ConsoleOpen starts a persistent interactive program under a pseudo-terminal and hands the model
 // an id to drive it by (ADR 0059). Where terminal is one process per call — ADR 0008's stateless
 // floor — a Console is LIVE HOST STATE held on the engine: it outlives the Turn that opened it,
@@ -79,7 +72,8 @@ type ConsoleOpen struct {
 	// environment beside apogee's own (HostTools.SecretEnvVars); nil drops apogee's own alone.
 	secretEnv []string
 	// host is the operating system the tool launches through: the platform shell it wraps the
-	// line with and scopes the Console's environment through (execHost).
+	// line with and scopes the Console's environment through, and the opener that starts the
+	// Console under the registry (execHost).
 	host execHost
 }
 
@@ -163,7 +157,10 @@ func (t *ConsoleOpen) Execute(ctx context.Context, call domain.ToolCall) (domain
 		return domain.ToolResult{}, err
 	}
 
-	opened, err := openConsole(registry, console.OpenSpec{
+	// The opener is the host's own (t.host.openConsole — the Console registry's Open in
+	// production, a capturing fake in a test that reads the exact argv, environment and
+	// confinement this tool builds — the door execHost.run already is for the one-shot tools).
+	opened, err := t.host.openConsole(registry, console.OpenSpec{
 		// A delegation owns what it opened: when the sub-agent ends, its Consoles are closed
 		// and the parent's are not (ADR 0059 §6). The key is the engine's, minted per delegation
 		// and never the model-supplied call id — two siblings can collide on that. Empty at the

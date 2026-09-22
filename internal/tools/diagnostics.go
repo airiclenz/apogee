@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -83,8 +82,9 @@ type diagnosticsArgs struct {
 type Diagnostics struct {
 	toolSpec
 	root string
-	// host is the operating system the tool launches through: the platform rules the vet
-	// toolchain's allowlisted environment is scoped through (execHost).
+	// host is the operating system the tool launches through: the PATH lookup the go toolchain
+	// resolves by and the platform rules the vet toolchain's allowlisted environment is scoped
+	// through (execHost).
 	host execHost
 }
 
@@ -205,7 +205,11 @@ func (t *Diagnostics) diagnoseGo(ctx context.Context, callID, name, abs string, 
 		return okResult(callID, cleanGoMessage(abs)), nil
 	}
 
-	goPath, err := security.ResolveProgram(lookGo, "go", t.root, confinementBox(ctx))
+	// The look is the host's own (t.host.look — never the fence's real fallback, so a host
+	// carrying a fake look drives the toolchain lookup too); its shape is the resolver's — the
+	// absolute path and a nil error, or exec.LookPath's error when go is absent, which the
+	// graceful "skipped" note below absorbs (§3a).
+	goPath, err := security.ResolveProgram(t.host.look, "go", t.root, confinementBox(ctx))
 	if err != nil {
 		if errors.Is(err, security.ErrExecFromWritablePath) {
 			// A toolchain the model can write is refused rather than run. vet is the optional
@@ -434,12 +438,6 @@ func detectLanguage(abs string) language {
 		return langUnknown
 	}
 }
-
-// lookGo is the PATH lookup security.ResolveProgram performs for the system Go toolchain (a
-// package var so a test can inject a fake resolver). It carries the resolver's own look
-// shape — the absolute path and a nil error, or exec.LookPath's error when go is absent, which
-// diagnoseGo maps to the graceful "skipped" note (§3a).
-var lookGo = exec.LookPath
 
 var (
 	_ domain.Tool           = (*Diagnostics)(nil)
