@@ -22,9 +22,12 @@ import (
 )
 
 // settled is how long the screen must go without a byte before a frame is read as final. It is the
-// same rule both drivers use, and it is short enough that thirteen steps of it stay inside the
-// package's wall-clock budget.
-const settled = 150 * time.Millisecond
+// same rule both drivers use, and it is the one budget in the kit that a healthy run really does
+// spend — every WaitQuiet pays it in full — so it is set by what a loaded box costs, not by what a
+// quiet one needs. Too short and a repaint that stalls mid-stream on a throttled runner reads as
+// "finished" and pins half a frame; at a quarter second the whole suite pays a handful of seconds
+// for a margin wide enough to survive a scheduling hiccup.
+const settled = 250 * time.Millisecond
 
 // TestE2ESmokeInProcess walks checklist T-25 steps 1–13 through the real composition: the root
 // command, the config resolution, the Agent, the tool layer, the approval gate, the session store
@@ -506,6 +509,11 @@ const (
 // hint once, so a run still going after that is a defect and not a slow box.
 const stopRunAttempts = 3
 
+// stopRunRetryBudget is how long a non-final [stopRun] attempt waits for the fold before it presses
+// again. It is short because running it out is not a failure — there is another press to try — and
+// the last attempt is the one that carries the generous backstop.
+const stopRunRetryBudget = 5 * time.Second
+
 // stopRun performs the esc×2 stop gesture and does not return until the worker has folded.
 //
 // The gesture is a pair, and internal/tui measures the pair's window (escStopWindow, one second)
@@ -526,7 +534,16 @@ func stopRun(t *testing.T, drv driven) {
 		drv.Press(tuitest.Esc)
 		drv.WaitText(escStopArmedHint)
 		drv.Press(tuitest.Esc)
-		if awaitIdlePrompt(drv, tuitest.DefaultTimeout) {
+		// Only the LAST attempt gets the full backstop. A press that re-armed instead of
+		// confirming is the case the retry exists for, and sitting out a generous deadline
+		// before trying again would spend a minute on the very path the retry is meant to be
+		// quick about; the retry itself is cheap, so the earlier attempts wait a short while
+		// and press on.
+		budget := stopRunRetryBudget
+		if attempt == stopRunAttempts {
+			budget = tuitest.DefaultTimeout
+		}
+		if awaitIdlePrompt(drv, budget) {
 			return
 		}
 	}

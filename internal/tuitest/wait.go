@@ -15,8 +15,19 @@ import (
 // whole suite its budget.
 
 const (
-	// DefaultTimeout is how long [WaitFor] waits before it gives up.
-	DefaultTimeout = 5 * time.Second
+	// DefaultTimeout is how long [WaitFor] waits before it gives up. It is deliberately
+	// generous, and that costs a healthy run nothing: a wait polls its condition and returns
+	// the instant it holds, so this budget is only ever spent on a failure. What a tight one
+	// buys instead is a suite that passes on fast hardware and fails on a loaded CI runner or a
+	// throttled laptop — which is not a passing suite, it is one that has not been run on the
+	// hardware that matters. The price paid here is that a genuine hang takes a minute to
+	// report rather than five seconds; go test's own package timeout is the outer backstop.
+	DefaultTimeout = 60 * time.Second
+	// teardownTimeout bounds the waits that are ALLOWED to run out without failing anything — a
+	// pump whose bytes arrived long ago, a read loop nobody will ever join. Running out is the
+	// right answer on those paths, so their clock stays short enough that a tolerated run-out
+	// does not cost the suite a minute.
+	teardownTimeout = 5 * time.Second
 	// pollInterval is how often the condition is re-asked. Fast enough that a wait costs about
 	// what it needs to, slow enough that a busy condition is not a spin loop.
 	pollInterval = 20 * time.Millisecond

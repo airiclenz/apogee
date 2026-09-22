@@ -309,9 +309,11 @@ func (d *Driver) Close() {
 		attached := d.attached
 		d.mu.Unlock()
 		if attached {
+			// A teardown clock, not an assertion one: Close fails nothing when it runs out,
+			// and a run that will not return is [CheckLeaks]'s finding to report.
 			select {
 			case <-d.done:
-			case <-time.After(DefaultTimeout):
+			case <-time.After(teardownTimeout):
 			}
 		}
 		_ = d.input.Close()
@@ -339,7 +341,7 @@ func (d *Driver) joinReadLoop() {
 	select {
 	case <-d.input.released:
 	case <-d.ended:
-	case <-time.After(DefaultTimeout):
+	case <-time.After(teardownTimeout):
 	}
 }
 
@@ -400,7 +402,13 @@ func (in *driverInput) touched() bool {
 // timeout — ultraviolet's is 50 ms (DefaultEscTimeout). Type a "/" 5 ms after an Esc and the program
 // is handed one alt+/ instead of the two keys that were pressed. This is the terminal's rule, not a
 // race: it is the one place a driver has to wait on a clock rather than on the screen.
-const escapeGap = 70 * time.Millisecond
+//
+// The margin over that 50 ms is wide on purpose. The reader's timer fires when the reader is
+// scheduled to notice it, so on a loaded box the gap the program actually observes is shorter than
+// the gap the driver slept, and a 20 ms margin is one scheduling hiccup away from merging two
+// keystrokes. The suite presses Esc a couple of dozen times, so the extra costs it a second or two
+// in total — the only fixed sleep in the kit, and the cheapest place to be generous.
+const escapeGap = 200 * time.Millisecond
 
 // send writes into the program's input under the same lock the answer pump holds, so a terminal
 // answer can never be spliced into the middle of a keystroke's byte sequence.

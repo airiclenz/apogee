@@ -329,11 +329,11 @@ func (d *PTYDriver) awaitExit(what string) int {
 // The wait is bounded rather than open-ended, because a slave held open by something the child left
 // behind (a grandchild that kept its stdio) never yields that EOF — and in that case the bytes were
 // pumped long before, so running out the clock is the right answer, not a failure. The clock is ONE
-// clock, [DefaultTimeout] from the moment of the reap, however many callers ask: a Kill on a child
+// clock, [teardownTimeout] from the moment of the reap, however many callers ask: a Kill on a child
 // that Quit already drained returns at once, and a Close after a drain that ran out does not run it
 // out again. Close still ends such a pump the only way it can be ended, by closing the master.
 func (d *PTYDriver) awaitDrain() {
-	remaining := DefaultTimeout - time.Since(d.reapedAt)
+	remaining := teardownTimeout - time.Since(d.reapedAt)
 	if remaining <= 0 {
 		return
 	}
