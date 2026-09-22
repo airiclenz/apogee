@@ -61,10 +61,11 @@ type Runner func(name string, args ...string) error
 // the null device (see launchDetached), because an opener that printed a warning would scribble
 // straight across the Bubble Tea screen and corrupt the frame.
 //
-// Rung 1's own program is resolved absolutely before it is launched and refused when it resolves
-// somewhere the model may write (WorkspaceRoot, security.RefuseExecFromWritablePath): this rung
-// runs with no approval and no confinement box in every mode, so "which bytes are `xdg-open`" must
-// not be a question apogee's inherited PATH answers at launch time.
+// Either rung's own program is resolved absolutely before it is launched and refused when it
+// resolves somewhere the model may write (WorkspaceRoot, security.RefuseExecFromWritablePath):
+// these rungs run with no approval and no confinement box in every mode, so "which bytes are
+// `xdg-open`" — and equally "which bytes are the `zed` a present.command names" — must not be a
+// question apogee's inherited PATH answers at launch time.
 //
 // Every input is injected. The zero value is safe and opens nothing: an empty GOOS matches no
 // branch, so Open reports ErrNoOpener.
@@ -81,15 +82,16 @@ type Opener struct {
 	// built-in opener: it is the user's own statement of how a document is shown on their
 	// machine, so it also stands in for the desktop check this type would otherwise make.
 	CommandOverride string
-	// WorkspaceRoot is the workspace the model writes in — the fence rung 1's own program may not
-	// resolve inside (resolveProgram). It is the same root the file tools are scoped to, wired
+	// WorkspaceRoot is the workspace the model writes in — the fence neither rung's own program
+	// may resolve inside (resolveProgram). It is the same root the file tools are scoped to, wired
 	// from the composition root. An empty root fences nothing: a caller that cannot name a
 	// workspace has no policy to apply, and inventing one would refuse every program on the host
 	// (security.RefuseExecFromWritablePath states the same rule).
 	WorkspaceRoot string
-	// LookPath resolves one of rung 1's program names to the absolute path of the file PATH says
-	// it is — exec.LookPath in production, a table's own answer in tests, which is what lets the
-	// resolution be pinned on a machine that has no desktop opener at all. Nil means exec.LookPath.
+	// LookPath resolves a program name — one of rung 1's three, or the one a present.command
+	// names — to the absolute path of the file PATH says it is: exec.LookPath in production, a
+	// table's own answer in tests, which is what lets the resolution be pinned on a machine that
+	// has no desktop opener at all. Nil means exec.LookPath.
 	LookPath func(name string) (string, error)
 	// Run launches the command Open built. Nil means launchDetached, the production runner.
 	Run Runner
@@ -151,14 +153,34 @@ func (o Opener) Open(path string) error {
 // (ADR 0019, second amendment 2026-07-26). macOS and Linux need no name bound, because `open`
 // and `xdg-open` receive the path as one execve argument with no shell in between.
 //
-// A fourth bound applies to the OS table alone, on the PROGRAM: each of the three names is
-// resolved to an absolute path here and refused when it resolves inside the workspace
-// (resolveProgram). Rung 3 is deliberately outside it — present.command is the user's own
-// configuration, with the same standing as their shell (ADR 0019 §5), and this package does not
-// second-guess a command line its operator wrote.
+// A fourth bound applies to BOTH rungs, on the PROGRAM: argv[0] — each of the OS table's three
+// names, and equally the first word of a present.command template — is resolved to an absolute
+// path here and refused when it resolves inside the workspace (resolveProgram).
+//
+// Rung 3 sat outside that bound until 2026-09-22, on the reasoning that present.command is the
+// user's own configuration with the same standing as their shell (ADR 0019 §5). What the
+// reasoning misses is WHERE the program comes from: the template names a program, not a file, so
+// a bare `zed` is looked up against the PATH this session inherited, at the moment of launch, by
+// a rung that runs with no approval and no confinement box in every mode. A `zed` planted in a
+// workspace bin directory a confined call may write is a program the MODEL chose, however the
+// operator meant the key — the same PATH-entry shape rung 1 already refuses (resolveProgram).
+//
+// The bound judges argv[0] and nothing else. The template's own flags, and the {path} substituted
+// into them, ride through exactly as the operator wrote them, so rung 3 stays neither
+// extension-bounded nor name-bounded: what is fenced is which program runs, never which document
+// it is handed.
 func (o Opener) argv(path string) ([]string, error) {
 	if template := strings.TrimSpace(o.CommandOverride); template != "" {
-		return overrideArgv(template, path)
+		argv, err := overrideArgv(template, path)
+		if err != nil {
+			return nil, err
+		}
+		resolved, err := o.resolveProgram(argv[0])
+		if err != nil {
+			return nil, err
+		}
+		argv[0] = resolved
+		return argv, nil
 	}
 	if !OpenerRenderable(path) {
 		return nil, ErrNoOpener
@@ -196,12 +218,14 @@ func (o Opener) osArgv(program string, args ...string) ([]string, error) {
 	return append([]string{resolved}, args...), nil
 }
 
-// resolveProgram answers WHICH FILE one of rung 1's three program names is, before anything is
-// launched, and refuses one the model could have written.
+// resolveProgram answers WHICH FILE the program in argv[0] is — one of rung 1's three names, or
+// the first word of a present.command template — before anything is launched, and refuses one the
+// model could have written.
 //
-// Resolving at all is the point. `open`, `xdg-open` and `cmd` were bare names handed to
-// exec.Command, which looks them up against apogee's own inherited PATH at launch — the only
-// bare-name exec left in non-test code. present_document is read-only, so it auto-runs in every
+// Resolving at all is the point. `open`, `xdg-open`, `cmd` and the override's own program were
+// bare names handed to exec.Command, which looks them up against apogee's own inherited PATH at
+// launch — the last bare-name execs left in non-test code. present_document is read-only, so it
+// auto-runs in every
 // mode including Plan, which makes this the one process apogee starts with no approval and no
 // confinement box behind it: a PATH entry the model can write is a program the model chooses.
 // Resolving here also means the argv apogee builds is the argv the OS runs, with no second lookup
@@ -426,10 +450,10 @@ func overrideArgv(template, path string) ([]string, error) {
 // for as long as they keep reading. Either way the child is reaped by the watching goroutine, so
 // nothing is left behind.
 //
-// name is the program to run and never a lookup: on rung 1 it is the absolute path argv already
-// resolved and fenced (resolveProgram), so exec.Command below performs no PATH search of its own.
-// On rung 3 it is the first word of the user's own present.command, resolved the way their shell
-// would resolve it — their configuration, their PATH, stated in argv's doc comment.
+// name is the program to run and never a lookup: on BOTH rungs it is the absolute path argv
+// already resolved and fenced (resolveProgram), so exec.Command below performs no PATH search of
+// its own — there is no second lookup left for a PATH change to land in between the argv apogee
+// built and the program the OS starts.
 func launchDetached(name string, args ...string) error {
 	cmd := exec.Command(name, args...)
 

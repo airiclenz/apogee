@@ -378,13 +378,13 @@ func TestOpenerCommandOverrideIsNotExtensionBounded(t *testing.T) {
 	t.Parallel()
 
 	runner := &recordingRunner{}
-	opener := Opener{GOOS: "darwin", CommandOverride: "zed {path}", Run: runner.run}
+	opener := Opener{GOOS: "darwin", CommandOverride: "zed {path}", LookPath: lookInBin, Run: runner.run}
 	path := docNamed("main.go")
 
 	if err := opener.Open(path); err != nil {
 		t.Fatalf("Open(%q) = %v, want the user's own opener to run", path, err)
 	}
-	if got := runner.only(t); !equalArgv(got, []string{"zed", path}) {
+	if got := runner.only(t); !equalArgv(got, resolvedArgv([]string{"zed", path})) {
 		t.Errorf("Open(%q) ran %q, want the configured application", path, got)
 	}
 }
@@ -397,13 +397,13 @@ func TestOpenerCommandOverrideIsNotNameBounded(t *testing.T) {
 	t.Parallel()
 
 	runner := &recordingRunner{}
-	opener := Opener{GOOS: "windows", CommandOverride: "zed {path}", Run: runner.run}
+	opener := Opener{GOOS: "windows", CommandOverride: "zed {path}", LookPath: lookInBin, Run: runner.run}
 	path := docNamed("report&calc&.html")
 
 	if err := opener.Open(path); err != nil {
 		t.Fatalf("Open(%q) = %v, want the user's own opener to run", path, err)
 	}
-	if got := runner.only(t); !equalArgv(got, []string{"zed", path}) {
+	if got := runner.only(t); !equalArgv(got, resolvedArgv([]string{"zed", path})) {
 		t.Errorf("Open(%q) ran %q, want the configured application", path, got)
 	}
 }
@@ -459,6 +459,11 @@ func TestOpenerReportsNoOpenerWithoutADesktop(t *testing.T) {
 // The configured command replaces the OS opener everywhere, and the path is substituted AFTER
 // the template is split — so the user's quoting fixes the argument boundaries and a path with a
 // space in it can never become two arguments.
+//
+// The rows name the program the operator configured; the assertion expects the ABSOLUTE path PATH
+// resolves it to (resolvedArgv), because rung 3's argv[0] is resolved and fenced exactly as rung
+// 1's is (TestOpenerFencesTheOverridesProgram). What the override still decides on its own is
+// everything after argv[0]: the flags, their order, and where {path} lands among them.
 func TestOpenerCommandOverride(t *testing.T) {
 	t.Parallel()
 
@@ -541,14 +546,15 @@ func TestOpenerCommandOverride(t *testing.T) {
 				GOOS:            tt.goos,
 				Env:             envFrom(tt.vars),
 				CommandOverride: tt.override,
+				LookPath:        lookInBin,
 				Run:             runner.run,
 			}
 
 			if err := opener.Open(testDocPath); err != nil {
 				t.Fatalf("Open() = %v, want no error", err)
 			}
-			if got := runner.only(t); !equalArgv(got, tt.want) {
-				t.Errorf("Open() ran %q, want %q", got, tt.want)
+			if got := runner.only(t); !equalArgv(got, resolvedArgv(tt.want)) {
+				t.Errorf("Open() ran %q, want %q", got, resolvedArgv(tt.want))
 			}
 		})
 	}
@@ -692,6 +698,115 @@ func TestOpenerRefusesAProgramInsideTheWorkspace(t *testing.T) {
 			// send them after a missing install instead of after their own PATH.
 			if tt.wantResolved != "" && !strings.Contains(err.Error(), tt.wantResolved) {
 				t.Errorf("Open() = %v, want the message to name the resolved program %q", err, tt.wantResolved)
+			}
+			if len(runner.calls) != 0 {
+				t.Errorf("Open() launched %v, want nothing run", runner.calls)
+			}
+		})
+	}
+}
+
+// Rung 3's program is model-chosen in exactly the way rung 1's is. A present.command template
+// names a PROGRAM, not a file, so a bare `zed` is resolved against the PATH this session
+// inherited — at the moment of launch, by a rung that runs with no approval and no confinement
+// box in every mode. A confined call is ALLOWED to write `.venv/bin`, so a planted `zed` there is
+// a program the MODEL chose, whatever the operator meant when they set the key. The override's
+// argv[0] therefore gets rung 1's three outcomes, told apart the same way: absent degrades,
+// refused is loud.
+//
+// What the fence does NOT touch is everything after argv[0] — the operator's own flags and the
+// substituted {path} ride through unchanged, which is why rung 3 stays neither extension-bounded
+// nor name-bounded (TestOpenerCommandOverrideIsNotExtensionBounded,
+// TestOpenerCommandOverrideIsNotNameBounded).
+func TestOpenerFencesTheOverridesProgram(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	bin := filepath.Join(root, ".venv", "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatalf("mkdir %s: %v", bin, err)
+	}
+	planted := filepath.Join(bin, "zed")
+	if err := os.WriteFile(planted, []byte("#!/bin/sh\nexec /bin/sh\n"), 0o755); err != nil {
+		t.Fatalf("write %s: %v", planted, err)
+	}
+
+	tests := []struct {
+		name     string
+		override string
+		look     func(string) (string, error)
+		// wantErr is the sentinel Open must report; nil means the launch must go through.
+		wantErr error
+		// wantMessage is a substring the refusal must carry, empty where nothing beyond the
+		// sentinel is pinned.
+		wantMessage string
+		// wantArgv is the command line the runner must have been handed; nil means nothing may run.
+		wantArgv []string
+	}{
+		{
+			name:     "a program resolving inside the workspace is refused as rung 1's is",
+			override: "zed {path}",
+			look:     func(name string) (string, error) { return filepath.Join(bin, name), nil },
+			wantErr:  security.ErrExecFromWritablePath,
+			// The same sentence rung 1 emits, so an operator reads one refusal and not two
+			// (Opener.resolveProgram).
+			wantMessage: "present: refusing to launch ",
+		},
+		{
+			name:     "a program that is simply absent degrades to the baseline rung",
+			override: "zed {path}",
+			look:     func(string) (string, error) { return "", exec.ErrNotFound },
+			wantErr:  ErrNoOpener,
+		},
+		{
+			name:     "a relative program is refused: the child would re-resolve it in the workspace",
+			override: "./thing {path}",
+			look:     func(name string) (string, error) { return name, nil },
+			wantErr:  security.ErrExecFromWritablePath,
+		},
+		{
+			name:     "an absolute program outside the fence still runs, arguments untouched",
+			override: "zed --goto {path}:1",
+			look:     lookInBin,
+			wantArgv: resolvedArgv([]string{"zed", "--goto", testDocPath + ":1"}),
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			runner := &recordingRunner{}
+			opener := Opener{
+				GOOS:            "linux",
+				Env:             envFrom(map[string]string{"DISPLAY": ":0"}),
+				CommandOverride: tt.override,
+				WorkspaceRoot:   root,
+				LookPath:        tt.look,
+				Run:             runner.run,
+			}
+
+			err := opener.Open(testDocPath)
+			if tt.wantErr == nil {
+				if err != nil {
+					t.Fatalf("Open() = %v, want the configured opener to run", err)
+				}
+				if got := runner.only(t); !equalArgv(got, tt.wantArgv) {
+					t.Errorf("Open() ran %q, want %q", got, tt.wantArgv)
+				}
+				return
+			}
+
+			if !errors.Is(err, tt.wantErr) {
+				t.Fatalf("Open() = %v, want %v", err, tt.wantErr)
+			}
+			// A refusal must never wear the degrade's clothes: ErrNoOpener says "this desktop has
+			// no opener", and swallowing a fenced program in it hides the one case worth saying.
+			if tt.wantErr != ErrNoOpener && errors.Is(err, ErrNoOpener) {
+				t.Error("Open() reported ErrNoOpener for a refused program, degrading silently")
+			}
+			if tt.wantMessage != "" && !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Errorf("Open() = %v, want the message to carry %q", err, tt.wantMessage)
 			}
 			if len(runner.calls) != 0 {
 				t.Errorf("Open() launched %v, want nothing run", runner.calls)

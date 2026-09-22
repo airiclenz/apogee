@@ -112,7 +112,11 @@ against the pre-item tree. Must keep passing:
 **Acceptance.** `go build ./... && go test -count=2 ./internal/undo/... && go test ./internal/agent/... -run 'Undo|Revert|Redo'` — the raced run `go test -race ./internal/undo/...` is a CI/other-box check, not this box's.
 **Commit:** `fix(undo): a revert pops its group under the lock and walks it lock-free`
 
-## 2. A present.command override's argv[0] is resolved and fenced as rung 1's is
+## 2. A present.command override's argv[0] is resolved and fenced as rung 1's is — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the doc comments inside `internal/present/opener.go` that asserted the program bound applies to "the OS table alone" were corrected in place — the `Opener` type doc, `argv`'s fourth-bound paragraph, the `WorkspaceRoot`/`LookPath` field docs, `resolveProgram`'s opening and `launchDetached`'s "on rung 3 … resolved the way their shell would" sentence. All sit in the item's own Files. ADR 0019's two "the bound stops at rung 3" passages (:210-213, :252-256) are scoped to the EXTENSION and NAME bounds, which this item preserves, so neither is falsified and neither was touched; ADR 0019 §5's addendum is item 5's.
+
+NOTES (2026-09-22): `docs/design/confinement-execution-contract.md:571-576` (the dated 2026-08-30 amendment) enumerates `security.ResolveProgram`'s call sites and names "rung 1's OS opener"; that enumeration is now one site short. Left as written — it is a dated historical record, true of its date — and flagged here because item 5's prose-guard grep (`present_document|present\.command|presentation ladder`) does not match that phrasing.
 
 **What.** `fix(present)`: closes the argv[0] half of `apogee-2we`, the audit's High "the rung-3
 opener runs a model-chosen program unapproved and unconfined in every mode".
