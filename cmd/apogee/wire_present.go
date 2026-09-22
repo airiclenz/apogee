@@ -16,11 +16,12 @@ import (
 	"github.com/airiclenz/apogee/internal/tui"
 )
 
-// openerLookPath is how rung 1 resolves the program it launches — nil in production, which is
-// present.Opener's own default of exec.LookPath (internal/present/opener.go). It exists because the
-// Opener is built HERE, inside presentationRungs, and installed into the tool layer through
-// livePresentation.install, so the launcher closure a driver enters through never sees it: there is
-// no argument a test could pass and no field it could reach afterwards.
+// openerLookPath is how the Opener resolves the program it launches — rung 1's OS opener and a
+// rung-3 present.command alike — nil in production, which is present.Opener's own default of
+// exec.LookPath (internal/present/opener.go). It exists because the Opener is built HERE, inside
+// presentationRungs, and installed into the tool layer through livePresentation.install, so the
+// launcher closure a driver enters through never sees it: there is no argument a test could pass
+// and no field it could reach afterwards.
 //
 // A driven test swaps it for a resolver that answers with a script of its own — the ratified proxy
 // for "the document opened on the desktop" (design call 9): what an OS opener does with a file is
