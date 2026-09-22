@@ -1482,7 +1482,7 @@ func TestHeadlessOutputRouting(t *testing.T) {
 		want := []string{
 			"sub-agent: 12k/32k · audit the issues · qwen3-4b",
 			"sub-agent: 4k/32k · summarise the findings",
-			"sub-agent: 4k/32k · scout · sneaky[2Kmodel",
+			"sub-agent: 4k/32k · scout · sneakymodel",
 		}
 		if !slices.Equal(lines, want) {
 			t.Errorf("sub-agent lines = %q; want %q", lines, want)
@@ -2019,9 +2019,10 @@ func TestHeadlessSubAgentLineUsesTheGeneratedName(t *testing.T) {
 
 // The sanitizer's whole job as THIS Driver spends it, pinned character by character. The set and
 // its reasons belong to internal/sanitize, which tests them exhaustively; what this table guards is
-// that the two CLI-visible forms keep coming from that one helper — a C0 control character is an
-// instruction to the terminal rather than a character in the text, and a bidi one reorders the
-// glyphs of a line printed beside a reading without touching a byte. Both forms drop the class;
+// that the two CLI-visible forms keep coming from that one helper — an escape sequence goes whole,
+// a C0 control character is an instruction to the terminal rather than a character in the text,
+// and a bidi one reorders the glyphs of a line printed beside a reading without touching a byte.
+// Both forms drop the class;
 // they differ only over the two controls prose is written with, which the answer keeps and a
 // one-line label folds to a space.
 func TestHeadlessStripEscapesDropsControlCharacters(t *testing.T) {
@@ -2032,15 +2033,15 @@ func TestHeadlessStripEscapesDropsControlCharacters(t *testing.T) {
 		wantLine string // what a sub-agent's task label prints
 	}{
 		{"plain text passes through untouched", "just an answer", "just an answer", "just an answer"},
-		{"ESC opens an ANSI sequence", "safe\x1b[31mred", "safe[31mred", "safe[31mred"},
+		{"a CSI colour goes whole", "safe\x1b[31mred", "safered", "safered"},
 		{"BEL rings the bell", "safe\x07text", "safetext", "safetext"},
 		{"CR rewinds the line", "shown\rhidden", "shownhidden", "shownhidden"},
 		{"CRLF leaves the newline behind", "first\r\nsecond", "first\nsecond", "first second"},
 		{
-			"an OSC 52 clipboard write is left inert",
+			"an OSC 52 clipboard write goes whole",
 			"safe \x1b]52;c;cGF5bG9hZA==\x07 text",
-			"safe ]52;c;cGF5bG9hZA== text",
-			"safe ]52;c;cGF5bG9hZA== text",
+			"safe  text",
+			"safe  text",
 		},
 		{"NUL, backspace and the rest of C0 go too", "a\x00b\x08c\x1fd", "abcd", "abcd"},
 		{"DEL goes with them", "a\x7fb", "ab", "ab"},
@@ -3752,7 +3753,7 @@ func TestNarrationSinkSummarisesTheFirstStringArgument(t *testing.T) {
 		{"no arguments", ``, "→ read_file"},
 		{"empty object", `{}`, "→ read_file"},
 		{"over the width", `{"path":"` + long + `"}`, "→ read_file " + strings.Repeat("x", headlessTaskMax-1) + "…"},
-		{"escape sequence", `{"path":"a\u001b[31m.txt\nb"}`, "→ read_file a[31m.txt b"},
+		{"escape sequence", `{"path":"a\u001b[31m.txt\nb"}`, "→ read_file a.txt b"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -3810,7 +3811,7 @@ func TestNarrationSinkWordsTheResult(t *testing.T) {
 	want := "→ shell ls\n" +
 		"← shell ok\n" +
 		"→ shell ls\n" +
-		"← shell error: ls: no such[0m file\n" +
+		"← shell error: ls: no such file\n" +
 		"← call_9\n" +
 		"← read_file ok\n" +
 		"→ terminal ls missing\n" +
@@ -3843,7 +3844,7 @@ func TestNarrationSinkNamesTheSubAgent(t *testing.T) {
 	}})
 	sink.Emit(domain.SubAgentPhaseEvent{EventBase: child, Phase: domain.SubAgentStarted})
 	sink.Emit(domain.SubAgentPhaseEvent{EventBase: unnamed, Phase: domain.SubAgentStarted})
-	sink.Emit(domain.SubAgentNamedEvent{EventBase: child, Name: "read\x1bthe keys"})
+	sink.Emit(domain.SubAgentNamedEvent{EventBase: child, Name: "read\x1b[2Kthe keys"})
 	sink.Emit(domain.SubAgentPhaseEvent{
 		EventBase: domain.EventBase{Depth: 2, CallID: "grandchild"}, Phase: domain.SubAgentStarted,
 	})

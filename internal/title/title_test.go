@@ -685,6 +685,30 @@ func TestSanitize(t *testing.T) {
 			ok:   true,
 		},
 		{
+			name: "a lone mid-line CR vanishes rather than folding to a space",
+			raw:  "a\rb",
+			want: "ab",
+			ok:   true,
+		},
+		{
+			name: "a lone VT vanishes",
+			raw:  "a\vb",
+			want: "ab",
+			ok:   true,
+		},
+		{
+			name: "a lone FF vanishes",
+			raw:  "a\fb",
+			want: "ab",
+			ok:   true,
+		},
+		{
+			name: "a lone NEL vanishes",
+			raw:  "a\u0085b",
+			want: "ab",
+			ok:   true,
+		},
+		{
 			name: "surrounding double quotes stripped",
 			raw:  `"Add retry to the uploader"`,
 			want: "Add retry to the uploader",
@@ -799,11 +823,12 @@ func TestSanitize(t *testing.T) {
 
 // A title is the one piece of model-authored text that is SAVED and comes back out onto a browsable
 // list, so a bidirectional formatting character in the reply would reorder a session-browser row —
-// and the stored title, read later by something else, would not say what the row said. IsControl is
-// Cc only, so these survived the strip until this seam named them. The set stays narrow on purpose:
-// the ZWJ and soft-hyphen cases below are what a blanket unicode.Cf drop would break, and a title is
-// prose a person may legitimately have written.
-func TestStripEscapesDropsBidiControls(t *testing.T) {
+// and the stored title, read later by something else, would not say what the row said. The strip
+// itself is internal/sanitize's and is pinned there; this is the whole cleanup pipeline, since that
+// is how a reply really reaches a saved record. The set stays narrow on purpose: the ZWJ and
+// soft-hyphen cases below are what a blanket unicode.Cf drop would break, and a title is prose a
+// person may legitimately have written.
+func TestSanitizeDropsBidiControls(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -822,13 +847,12 @@ func TestStripEscapesDropsBidiControls(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if got := StripEscapes(tc.raw); got != tc.want {
-				t.Errorf("StripEscapes(%q) = %q, want %q", tc.raw, got, tc.want)
-			}
-			// Through the whole cleanup too, since that is how a reply really reaches a saved record.
 			got, ok := Sanitize(tc.raw)
 			if !ok {
 				t.Fatalf("Sanitize(%q) reported failure", tc.raw)
+			}
+			if got != tc.want {
+				t.Errorf("Sanitize(%q) = %q, want %q", tc.raw, got, tc.want)
 			}
 			if strings.ContainsFunc(got, sanitize.BidiControl) {
 				t.Errorf("Sanitize(%q) = %q, which still carries a bidi control", tc.raw, got)

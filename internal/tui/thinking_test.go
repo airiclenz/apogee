@@ -52,14 +52,14 @@ func TestThinkingBoardAppendsStrippedChunksInOrder(t *testing.T) {
 			want:   "the user asked for a plan",
 		},
 		{
-			name:   "an OSC 8 opener and its C0 terminator are stripped",
+			name:   "an OSC 8 opener goes whole, its payload and C0 terminator with it",
 			chunks: []string{"\x1b]8;;http://evil\x07link"},
-			want:   "]8;;http://evillink",
+			want:   "link",
 		},
 		{
-			name:   "an escape split across two chunks is stripped in both halves",
+			name:   "an escape split across two chunks: the opener is swallowed to its chunk's end, the tail arrives inert",
 			chunks: []string{"before\x1b[", "31mafter"},
-			want:   "before[31mafter",
+			want:   "before31mafter",
 		},
 		{
 			name:   "the line breaks and tabs reasoning is written with survive",

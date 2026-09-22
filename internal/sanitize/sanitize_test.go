@@ -11,14 +11,15 @@ const (
 	escCSI   = "\x1b[2J\x1b[H"          // a CSI screen clear and cursor home
 )
 
-// The sanitizer's whole job, pinned character by character. A control character in untrusted text
-// is an instruction to the terminal rather than a character in the text — ESC opens an ANSI
-// sequence, BEL rings the bell and closes an OSC 52 clipboard payload, CR rewinds the line so what
-// follows overwrites what the reader already saw, and NUL or DEL takes string length while
-// occupying no display cell — and stripping ESC alone left every one of the others to arrive
-// intact. The two that a wrapped body is railed BY, the newline and the tab, are the class's only
-// survivors.
-func TestStripEscapesDropsControlCharacters(t *testing.T) {
+// The sanitizer's whole job, pinned sequence by sequence and character by character. A control
+// character in untrusted text is an instruction to the terminal rather than a character in the
+// text — ESC opens an ANSI sequence, BEL rings the bell and closes an OSC 52 clipboard payload, CR
+// rewinds the line so what follows overwrites what the reader already saw, and NUL or DEL takes
+// string length while occupying no display cell. A sequence goes WHOLE: its ESC, its parameters and
+// its final byte together, so what the reader sees is the text and not the sequence's tail. The two
+// that a wrapped body is railed BY, the newline and the tab, are the class's only survivors — an
+// ESC ahead of one of them goes alone, and a sequence nothing terminates stops at the newline.
+func TestStripEscapes(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -27,15 +28,29 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 		want string
 	}{
 		{"plain text passes through untouched", "just a note", "just a note"},
-		{"ESC opens an ANSI sequence", "safe\x1b[31mred", "safe[31mred"},
+		{"a CSI colour goes whole", "safe\x1b[31mred\x1b[0m", "safered"},
+		{"a CSI screen game goes whole", "safe" + escCSI + "text", "safetext"},
+		{"an OSC 52 clipboard write goes whole, BEL-terminated", "safe " + escOSC52 + " text", "safe  text"},
+		{"an OSC goes whole, ST-terminated", "safe \x1b]8;;http://evil\x1b\\link text", "safe link text"},
+		{"a bare ESC takes its follower with it", "a\x1bcb", "ab"},
+		{"an ESC ahead of a kept newline goes alone", "a\x1b\nb", "a\nb"},
+		{"an ESC ahead of a kept tab goes alone", "a\x1b\tb", "a\tb"},
+		{"an ESC ahead of another ESC goes alone: the second opens its own sequence", "a\x1b\x1b[31mb", "ab"},
+		{"an unterminated CSI is swallowed to the end of its line and the next line survives", "a\x1b[31\nb", "a\nb"},
+		{"an unterminated OSC is swallowed to the end of its line too", "a\x1b]52;c;xyz\nb", "a\nb"},
+		{"an unterminated sequence at the end of the text takes the rest", "a\x1b[31", "a"},
+		{"a C1 CSI (U+009B) is dropped as a character", "a\u009b31mb", "a31mb"},
+		{"the rest of C1 goes with it", "a\u0080b\u009fc", "abc"},
 		{"BEL rings the bell", "safe\x07text", "safetext"},
-		{"CR rewinds the line", "shown\rhidden", "shownhidden"},
+		{"a lone CR rewinds the line", "shown\rhidden", "shownhidden"},
+		{"a lone VT goes", "a\vb", "ab"},
+		{"a lone FF goes", "a\fb", "ab"},
+		{"a lone NEL goes", "a\u0085b", "ab"},
 		{"CRLF leaves the newline behind", "first\r\nsecond", "first\nsecond"},
-		{"an OSC 52 clipboard write is left inert", "safe " + escOSC52 + " text", "safe ]52;c;cGFyaQ== text"},
-		{"a CSI screen game goes with it", "safe" + escCSI + "text", "safe[2J[Htext"},
 		{"NUL, backspace and the rest of C0 go too", "a\x00b\x08c\x1fd", "abcd"},
 		{"DEL goes with them", "a\x7fb", "ab"},
 		{"the newline and the tab are the body's own", "para\n\nnext\tcolumn", "para\n\nnext\tcolumn"},
+		{"ZWJ and the soft hyphen survive: they are the user's own prose", "\U0001f469\u200d\U0001f4bb in\u00adcremental", "\U0001f469\u200d\U0001f4bb in\u00adcremental"},
 		{"non-ASCII text is not control text", "héllo — 世界 ✓", "héllo — 世界 ✓"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,7 +62,7 @@ func TestStripEscapesDropsControlCharacters(t *testing.T) {
 				t.Errorf("StripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
 			}
 			for _, r := range got {
-				if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f {
+				if (r < 0x20 && r != '\n' && r != '\t') || (r >= 0x7f && r <= 0x9f) {
 					t.Errorf("StripEscapes(%q) left %#U behind: %q", tc.in, r, got)
 				}
 			}
@@ -101,7 +116,7 @@ func TestStripEscapesDropsBidiControls(t *testing.T) {
 	}
 }
 
-// The allocation the seam is cheap because of: strings.Map returns its input unchanged when it
+// The allocation the seam is cheap because of: the strip returns its input unchanged when it
 // rewrites nothing, which is the overwhelmingly common case — ordinary text carrying no control
 // character at all — and is what lets a producer that also strips cost nothing. A regression here
 // would be silent, since the output stays correct either way.
@@ -130,7 +145,9 @@ func TestStripEscapesToLineFoldsBreaks(t *testing.T) {
 		{"a newline and a tab fold to one space each", "a\nb\tc", "a b c"},
 		{"CRLF folds to one space: the CR is dropped, the newline folded", "first\r\nsecond", "first second"},
 		{"the bidi set goes, exactly as it does in a body", "run \u202esafe.sh", "run safe.sh"},
-		{"ESC and BEL go with them", "safe\x1b[31m\x07red", "safe[31mred"},
+		{"a CSI and a BEL go with them", "safe\x1b[31m\x07red", "safered"},
+		{"an ESC ahead of a folded newline goes alone", "a\x1b\nb", "a b"},
+		{"an unterminated CSI stops at the newline, which folds", "a\x1b[31\nb", "a b"},
 		{"ordinary text is untouched", "just a label", "just a label"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -142,7 +159,7 @@ func TestStripEscapesToLineFoldsBreaks(t *testing.T) {
 				t.Errorf("StripEscapesToLine(%q) = %q; want %q", tc.in, got, tc.want)
 			}
 			for _, r := range got {
-				if r < 0x20 || r == 0x7f || BidiControl(r) {
+				if r < 0x20 || (r >= 0x7f && r <= 0x9f) || BidiControl(r) {
 					t.Errorf("StripEscapesToLine(%q) left %#U behind: %q", tc.in, r, got)
 				}
 			}
@@ -162,7 +179,7 @@ func TestStripEscapesAllStripsEveryElement(t *testing.T) {
 	in := []string{"safe\x1b[31m", "run \u202esafe.sh", "plain"}
 	got := StripEscapesAll(in)
 
-	want := []string{"safe[31m", "run safe.sh", "plain"}
+	want := []string{"safe", "run safe.sh", "plain"}
 	if len(got) != len(want) {
 		t.Fatalf("StripEscapesAll returned %d entries; want %d", len(got), len(want))
 	}

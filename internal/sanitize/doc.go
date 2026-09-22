@@ -14,8 +14,13 @@
 // does for the numbers they both spell. Everything here is a pure function over runes: nothing in
 // it knows a Model, a session, a terminal or a config.
 //
-// Three forms of one strip, differing only in what they do with the two controls prose is written
-// with:
+// The strip is sequence-aware: an ANSI escape sequence goes WHOLE — a CSI through its final byte,
+// an OSC through its BEL or ST terminator, any other ESC with its follower, an unterminated
+// sequence to the end of its line — beside the control class it drops rune by rune (C0, DEL, C1,
+// the bidi set). That supersedes the ESC-only drop the archived
+// `docs/plans/archived/2026-08-26 - 02 - untrusted-text-approval-integrity-plan.md` NOTES settled
+// on, which left a sequence's tail painted beside the label it had coloured. Three forms of that
+// one strip, differing only in what they do with the two controls prose is written with:
 //
 //   - [StripEscapes] keeps the newline and the tab, because its callers are wrapped BODIES — a
 //     streamed answer, a canonical message, a tool result — where they are the structure rather
@@ -27,8 +32,8 @@
 //     sanitized in one call.
 //
 // [BidiControl] is the set the three of them drop beside the control characters, exported because
-// two callers need the predicate rather than the rewrite: internal/title folds it into a wider
-// "strippable" test, and internal/session REFUSES an id that carries one rather than stripping it.
+// a caller may need the predicate rather than the rewrite: internal/session REFUSES an id that
+// carries one rather than stripping it, and the undo verb refuses a session id the same way.
 //
 // Two more rules over untrusted text live here because they are pure functions over runes that
 // several packages spelled for themselves, and the strip is what they sit beside at a seam:

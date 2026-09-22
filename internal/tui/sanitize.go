@@ -23,9 +23,9 @@ import "github.com/airiclenz/apogee/internal/sanitize"
 // under one name in the package it guards is worth three lines. Nothing here knows a transcript, an
 // entry or a Model — it is pure string work over runes, and that is the whole of its contract.
 
-// stripEscapes is [sanitize.StripEscapes] — the C0 control characters, DEL and the bidi formatting
-// set dropped from untrusted text, the newline and the tab kept because this package's biggest
-// callers are wrapped bodies railed by them.
+// stripEscapes is [sanitize.StripEscapes] — every ANSI escape sequence dropped whole, the C0 and C1
+// control characters, DEL and the bidi formatting set dropped from untrusted text, the newline and
+// the tab kept because this package's biggest callers are wrapped bodies railed by them.
 func stripEscapes(s string) string { return sanitize.StripEscapes(s) }
 
 // bidiControl is [sanitize.BidiControl] — the reordering characters stripEscapes drops beside the

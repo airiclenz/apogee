@@ -32,11 +32,11 @@ import (
 )
 
 // The model label the TUI is launched with in the wide test: the checklist's own
-// `--model "$(printf 'gpt\033[31m-oss-20b')"`, and what the footer must make of it — the ESC
-// dropped, the rest of the sequence left standing as ordinary text on the footer's own colours.
+// `--model "$(printf 'gpt\033[31m-oss-20b')"`, and what the footer must make of it — the whole
+// sequence dropped, the label left standing as ordinary text on the footer's own colours.
 const (
 	hostileModelFlag  = "gpt\x1b[31m-oss-20b"
-	hostileModelShown = "gpt[31m-oss-20b"
+	hostileModelShown = "gpt-oss-20b"
 )
 
 // narrowHostileSize is the terminal T-12's steps 6 and 10 are read at. Sixty columns is where the
@@ -59,7 +59,7 @@ func TestE2EHostileProbeKeepsItsOwnRows(t *testing.T) {
 		t.Errorf("the probe report carries %d raw ESC bytes:\n%q", n, report)
 	}
 	line := reportLine(t, report, "workspace:")
-	if !strings.Contains(line, "wsRED") && !strings.Contains(line, "ws[31mRED") {
+	if !strings.Contains(line, "wsRED") {
 		t.Errorf("the workspace line does not name the hostile root: %q", line)
 	}
 	// One line for the root: the name holds no newline, so nothing under it may have moved down.
@@ -82,15 +82,15 @@ func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
 	sess := launchTUIOn(t, drv, stub, hostileHome(t, stub), ws, "--model", hostileModelFlag)
 	red := ansiRed(t)
 
-	// Step 2 — the footer shows the label as ordinary text: the ESC dropped, the rest inert, and
-	// every cell of the row painted in the footer's own colours rather than in the red the sequence
-	// asked for.
+	// Step 2 — the footer shows the label as ordinary text: the sequence dropped whole, and every
+	// cell of the row painted in the footer's own colours rather than in the red the sequence asked
+	// for.
 	drv.WaitText("Send a message")
 	drv.WaitQuiet(settled)
 	first := drv.Frame()
 	footer := footerRow(t, first)
 	if !strings.Contains(footer, hostileModelShown) {
-		t.Errorf("the footer does not show the model label inert: %q", footer)
+		t.Errorf("the footer does not show the model label clean: %q", footer)
 	}
 	assertModelSegmentIsNotRed(t, first, red)
 	// The rest of the row is intact: the server it is on, the separators, and the mode marker the
@@ -117,7 +117,7 @@ func TestE2EHostileSurfacesKeepTheirOwnRows(t *testing.T) {
 	assertSkillSectionRows(t, skills, "1 skill shadowed by another of the same id:", 2)
 	// The hostile directory name is on ONE row, its newline flattened to a space, and no row in the
 	// block reads like a loaded skill's entry — which is the impersonation the note exists to disclose.
-	if _, _, ok := skills.Find("ev[31mil row —"); !ok {
+	if _, _, ok := skills.Find("evil row —"); !ok {
 		t.Errorf("the failed skill's name is not on one row of the note:\n%s", skills)
 	}
 	if got := strings.Count(skills.String(), " · workspace "); got != 1 {
@@ -291,10 +291,12 @@ func TestJudgeHostileRowsReadAsOneRow(t *testing.T) {
 
 	judge.Require(t, t.Context(), judge.Rubric{
 		Item: "T-12",
-		Claim: "hostile file and skill names render as inert text on the number of rows apogee " +
-			"authored, and a wrapped popup body keeps its continuation lines under its own indent",
-		PassWhen: "every surface renders the hostile bytes as inert escaped text on the number of " +
-			"rows it authored, the terminal's colours and cursor are unaffected throughout, and " +
+		Claim: "hostile file and skill names render as plain text, their escape sequences stripped " +
+			"whole, on the number of rows apogee authored, and a wrapped popup body keeps its " +
+			"continuation lines under its own indent",
+		PassWhen: "every surface renders the hostile names as plain text with no escape sequence " +
+			"left in them, on the number of rows it authored, the terminal's colours and cursor " +
+			"are unaffected throughout, and " +
 			"wrapped popup bodies keep their continuation lines under their own indent.",
 		FailsIf: "a row count exceeds the heading's count; a filename appears to add a header, a " +
 			"match or a note of its own; text after a hostile name reads reversed; or a wrapped " +
@@ -517,7 +519,7 @@ func hostileHome(t *testing.T, stub *stubllm.Server) string {
 }
 
 // hostileRedactions are the substitutions the hundred-column golden needs on top of the session's
-// own. What the golden KEEPS is the hostile name itself — `wsRED`, `ev[31mil row`, the escaped
+// own. What the golden KEEPS is the hostile name itself — `wsRED`, `evil row`, the escaped
 // reason — which is the whole reason to record this frame; what goes is everything that is a fact
 // about the machine.
 //

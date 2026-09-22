@@ -137,7 +137,7 @@ func TestSessionRuleLayout(t *testing.T) {
 		},
 		{
 			// Untrusted twice over: an OSC payload, a bare BEL, a bare ESC and a CSI colour all leave
-			// the name entirely (title.StripEscapes), and what is left is one row of text.
+			// the name entirely (sanitize.StripEscapesToLine), and what is left is one row of text.
 			what:      "escape sequences and control characters do not survive",
 			in:        "the\x1b]2;pwned\x07 wave\x1b[31m\x07\x1b",
 			w:         30,

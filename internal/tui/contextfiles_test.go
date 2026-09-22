@@ -134,8 +134,8 @@ func TestContextFilesNoticeStripsEscapes(t *testing.T) {
 	m := newTestModelEng(t, eng, testOpts)
 
 	want := []string{
-		"context: A[31mGENTS.md (512 B)",
-		"context: BRO[31mKEN.md unreadable — permission denied",
+		"context: AGENTS.md (512 B)",
+		"context: BROKEN.md unreadable — permission denied",
 	}
 	if got := contextNotes(m); !slices.Equal(got, want) {
 		t.Errorf("context notes = %v, want %v", got, want)

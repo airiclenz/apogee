@@ -50,7 +50,6 @@ import (
 	"fmt"
 	"strings"
 	"time"
-	"unicode"
 	"unicode/utf8"
 
 	"github.com/airiclenz/apogee/internal/provider"
@@ -410,8 +409,9 @@ func capRunes(s string, limit int) string {
 //
 // The pipeline, in order: strip a leading <think>…</think> block; take the first non-empty
 // line, skipping code-fence marker lines as noise (small models fence their output even when
-// told not to); strip ANSI and control escapes (the reply is untrusted model text that lands in
-// a rendered browser row); strip the wrapping models add — surrounding quotes or backticks, a
+// told not to); strip escape sequences and control characters whole (sanitize.StripEscapesToLine —
+// the reply is untrusted model text that lands in a rendered browser row, so a lone CR, VT, FF or
+// NEL vanishes rather than folding to a space); strip the wrapping models add — surrounding quotes or backticks, a
 // leading comment or heading marker, a leading "Title:" label — until the string stops
 // changing; collapse inner whitespace; drop a trailing period; and word-boundary truncate to
 // MaxRunes with an ellipsis.
@@ -433,7 +433,7 @@ func Sanitize(raw string) (string, bool) {
 // proportionally as early as a title does rather than inheriting a floor sized for a wider one.
 func SanitizeTo(raw string, maxRunes int) (string, bool) {
 	s := firstContentLine(stripThinking(raw))
-	s = stripAffixes(StripEscapes(s))
+	s = stripAffixes(sanitize.StripEscapesToLine(s))
 	s = collapseWhitespace(s)
 	s = strings.TrimSpace(strings.TrimSuffix(s, "."))
 	if s == "" {
@@ -497,87 +497,6 @@ func fenceMarker(line string) bool {
 	}
 	tag := strings.TrimLeft(line, marker)
 	return tag == "" || !strings.ContainsAny(tag, " \t")
-}
-
-// StripEscapes removes ANSI escape sequences and every remaining control character. The reply is
-// untrusted model text that ends up in a rendered session-browser row, so a title can never be
-// allowed to carry cursor movement, colour, or an OSC sequence (the same posture as the
-// transcript's escape strip). Callers pass a single line, so no newline survives to be lost.
-//
-// It is exported because it is the one definition of "a title carries no escape sequence and no
-// control character", and a title is read outside this package too — the TUI renders the live
-// session's name onto the frame, where a control character is a LAYOUT bug as much as a trust one:
-// it breaks the measure of a row that is squared to the window. A second, weaker strip written at
-// such a seam is exactly how two definitions of the same guarantee drift apart, so every seam calls
-// this one. Whitespace controls stay exempt for every consumer alike (strippableControl); each
-// collapses them a step later, and all do.
-func StripEscapes(s string) string {
-	if !strings.ContainsFunc(s, strippableControl) {
-		return s // the overwhelmingly common case: nothing to strip, nothing to allocate
-	}
-	runes := []rune(s)
-	var b strings.Builder
-	b.Grow(len(s))
-	for i := 0; i < len(runes); i++ {
-		switch {
-		case runes[i] == 0x1b:
-			i += escapeRunes(runes[i:]) - 1
-		case strippableControl(runes[i]):
-			// dropped
-		default:
-			b.WriteRune(runes[i])
-		}
-	}
-	return b.String()
-}
-
-// strippableControl reports whether r is a control character that must not survive into a title.
-// Whitespace controls (a tab, most obviously) are exempt: they carry no escape and collapse into
-// a single space one step later, so dropping them here would weld two words together.
-//
-// The bidi formatting characters count as strippable too (sanitize.BidiControl). unicode.IsControl
-// is Cc only, so without them a reply could name the session with a right-to-left override and have
-// the history browser render a row in an order the stored title does not have — the title is the one
-// piece of model-authored text that survives into a saved session and comes back out onto a
-// browsable list, which is the whole reason this strip is the strong one.
-//
-// The set itself is not spelled here: internal/sanitize owns it for the whole module — why it is
-// the bidi characters and deliberately not the whole of unicode.Cf included — and a copy of it in
-// this package is what that package replaced.
-func strippableControl(r rune) bool {
-	return (unicode.IsControl(r) && !unicode.IsSpace(r)) || sanitize.BidiControl(r)
-}
-
-// escapeRunes reports how many runes the escape sequence beginning at runes[0] (an ESC) spans:
-// a CSI runs to its final byte in @-~, an OSC to a BEL or a string terminator, and anything else
-// is a two-character escape. An unterminated sequence swallows the rest of the line, which is
-// the safe direction — a half-escape rendered literally is exactly what the strip exists to
-// prevent.
-func escapeRunes(runes []rune) int {
-	if len(runes) < 2 {
-		return 1
-	}
-	switch runes[1] {
-	case '[':
-		for i := 2; i < len(runes); i++ {
-			if runes[i] >= '@' && runes[i] <= '~' {
-				return i + 1
-			}
-		}
-		return len(runes)
-	case ']':
-		for i := 2; i < len(runes); i++ {
-			if runes[i] == 0x07 {
-				return i + 1
-			}
-			if runes[i] == 0x1b && i+1 < len(runes) && runes[i+1] == '\\' {
-				return i + 2
-			}
-		}
-		return len(runes)
-	default:
-		return 2
-	}
 }
 
 // stripAffixes peels the wrapping models put around a one-line answer. Each pass takes off a

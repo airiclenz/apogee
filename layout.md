@@ -1682,8 +1682,9 @@ runs. A zero-width frame — reachable before the first size message lands — p
 
 **The strip.** The name is untrusted twice over: it is a model's reply to the naming call, and it is a
 stored record's title read back off disk, which nothing sanitizes on the way in. It goes through the
-same strong strip the naming pipeline uses (whole escape sequences AND every non-whitespace control
-character) and then has its whitespace runs collapsed, so a pasted multi-line name occupies one row
+module's one strip in its one-line form, the same one the naming pipeline uses (whole escape
+sequences AND every control character, the newline and the tab folded to a space) and then has its
+whitespace runs collapsed, so a pasted multi-line name occupies one row
 rather than smuggling a newline into the frame. Here a control character is a LAYOUT bug as much as a
 security one: it breaks the row's measure, and every row of this frame is squared to the window.
 

@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/airiclenz/apogee/internal/title"
+	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
 // ----------------------------------------------------------------------------
@@ -24,10 +24,10 @@ import (
 //
 // The trust posture, unchanged from that seam and for the same reason: the name is untrusted TWICE
 // over — a model's reply to the naming call, and a stored record's Meta.Title read back off disk,
-// which nothing sanitizes on the way in. It goes through internal/title's strong strip
-// (title.StripEscapes: whole escape sequences AND every non-whitespace control character) and then
-// through strings.Fields/Join, so a pasted multi-line name occupies one row rather than smuggling a
-// newline into the frame. Here a control character is a LAYOUT bug as much as a security one: it
+// which nothing sanitizes on the way in. It goes through the module's one strip in its one-line
+// form (sanitize.StripEscapesToLine: whole escape sequences AND every control character, the
+// newline and the tab folded to a space) and then through strings.Fields/Join, so a pasted
+// multi-line name occupies one row rather than smuggling a newline into the frame. Here a control character is a LAYOUT bug as much as a security one: it
 // breaks the row's measure, and every row of this frame is squared to the window.
 //
 // Owner-ratified decisions (2026-08-03), which the constants below spell out: there is NO fixed cap
@@ -97,7 +97,7 @@ func sessionRuleLayout(measure widthAuthority, name string, w int) (lead, label,
 		// Reachable before the first WindowSizeMsg, and strings.Repeat panics on a negative count.
 		return "", "", ""
 	}
-	clean := strings.Join(strings.Fields(title.StripEscapes(name)), " ")
+	clean := strings.Join(strings.Fields(sanitize.StripEscapesToLine(name)), " ")
 	room := w - 2*(sessionRuleMinSegment+1)
 	if clean == "" || room < sessionRuleMinName {
 		return strings.Repeat(sessionRuleRune, w), "", ""

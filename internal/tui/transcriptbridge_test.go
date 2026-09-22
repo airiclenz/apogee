@@ -1028,10 +1028,10 @@ func TestTranscriptCodecStripsEscapesOnDecode(t *testing.T) {
 		assertNoESC(t, e.presented.Reason)
 		assertNoESC(t, e.ctxModel)
 	}
-	// The strip drops the C0 control characters and DEL (keeping \n and \t) and passes every
-	// printable rune through — here that is the ESC alone, with the text around it intact.
-	if got[0].text != "hithere" {
-		t.Errorf("stripped user text = %q; want %q", got[0].text, "hithere")
+	// The strip drops an escape sequence whole — here a bare ESC and the one character after it —
+	// and passes every printable rune around it through intact.
+	if got[0].text != "hihere" {
+		t.Errorf("stripped user text = %q; want %q", got[0].text, "hihere")
 	}
 }
 

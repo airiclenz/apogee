@@ -10,13 +10,13 @@
   the steps, implement this feature, wh…                                                           │
                                                                                                    │
   1 skill found but not loaded:                                                                    ┃
-    ev[31mil row — skill is missing a required field (id="ev\x1b[31mil\nrow"                       ┃
+    evil row — skill is missing a required field (id="ev\x1b[31mil\nrow"                           ┃
   displayName="ev\x1b[31mil\nrow" summary="ev\x1b[31mil\nrow" body-empty=true)                     ┃
-      <root>/ws[31mRED/.apogee/skills/ev[31mil row/SKILL.md ┃
+      <root>/wsRED/.apogee/skills/evil row/SKILL.md ┃
                                                                                                    ┃
   1 skill shadowed by another of the same id:                                                      ┃
-    dupe — <root>/ws[31mRED/.apogee/skills/dupe/SKILL.md ┃
-      the live copy is <root>/ws[31mRED/skills/dupe/SKILL.md ┃
+    dupe — <root>/wsRED/.apogee/skills/dupe/SKILL.md ┃
+      the live copy is <root>/wsRED/skills/dupe/SKILL.md ┃
                                                                                                    ┃
   edit a skill apogee ships: /skills export <id>                                                   ┃
     copies it into <home>/skills/<id>, where your copy wins                      ┃
@@ -26,5 +26,5 @@
 ╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit                                        │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────╯
-  probe-target ✦ gpt[31m-oss-20b <footer tail>
+  probe-target ✦ gpt-oss-20b <footer tail>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

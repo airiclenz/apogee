@@ -709,8 +709,8 @@ func TestTranscriptStripsTerminalEscapes(t *testing.T) {
 	})
 }
 
-// escapedArgs marshals one key/value pair the way a model emits it: the ESC byte travels as the
-// JSON escape a model literally writes as backslash-u-001b, decoding back to the raw byte — which
+// escapedArgs marshals one key/value pair the way a model emits it: the ESC travels as the JSON
+// escape a model literally writes as backslash-u-001b, decoding back to the raw byte — which
 // is exactly the shape that reaches a target extractor.
 func escapedArgs(t *testing.T, key, value string) json.RawMessage {
 	t.Helper()
@@ -719,89 +719,6 @@ func escapedArgs(t *testing.T, key, value string) json.RawMessage {
 		t.Fatalf("marshal tool arguments: %v", err)
 	}
 	return raw
-}
-
-// The seam's sanitizer, pinned character by character. A control character in untrusted text is an
-// instruction to the terminal rather than a character in the text — ESC opens an ANSI sequence, BEL
-// rings the bell and closes an OSC 52 clipboard payload, CR rewinds the line so what follows
-// overwrites what the reader already saw, and NUL or DEL takes string length while occupying no
-// display cell — and stripping ESC alone left every one of the others to arrive intact. The two the
-// renderer wraps and rails a body BY, the newline and the tab, are the class's only survivors.
-func TestStripEscapesDropsControlCharacters(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"plain text passes through untouched", "just a note", "just a note"},
-		{"ESC opens an ANSI sequence", "safe\x1b[31mred", "safe[31mred"},
-		{"BEL rings the bell", "safe\x07text", "safetext"},
-		{"CR rewinds the line", "shown\rhidden", "shownhidden"},
-		{"CRLF leaves the newline behind", "first\r\nsecond", "first\nsecond"},
-		{"an OSC 52 clipboard write is left inert", "safe " + escOSC52 + " text", "safe ]52;c;cGFyaQ== text"},
-		{"a CSI screen game goes with it", "safe" + escCSI + "text", "safe[2J[Htext"},
-		{"NUL, backspace and the rest of C0 go too", "a\x00b\x08c\x1fd", "abcd"},
-		{"DEL goes with them", "a\x7fb", "ab"},
-		{"the newline and the tab are the body's own", "para\n\nnext\tcolumn", "para\n\nnext\tcolumn"},
-		{"non-ASCII text is not control text", "héllo — 世界 ✓", "héllo — 世界 ✓"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := stripEscapes(tc.in)
-			if got != tc.want {
-				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
-			}
-			for _, r := range got {
-				if (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f {
-					t.Errorf("stripEscapes(%q) left %#U behind: %q", tc.in, r, got)
-				}
-			}
-			if again := stripEscapes(got); again != got {
-				t.Errorf("stripEscapes is not idempotent: %q became %q", got, again) // every seam may strip twice
-			}
-		})
-	}
-}
-
-// The bidi half of the same sanitizer, pinned rune by rune. A bidirectional formatting character
-// reorders the glyphs around it without touching a byte the executor reads, so on the DECISION
-// surface it is the same hazard as the CR above: the row says one thing and the tool runs another,
-// and flattening a field does nothing to it. The set is deliberately narrow — the bidi controls, not
-// all of unicode.Cf — so the two survivors below are the point of the test as much as the casualties
-// are: U+200D ZWJ holds an emoji sequence together and U+00AD is a soft hyphen, and a later
-// "consistency" change to blanket-drop Cf must break a test rather than a person's prose.
-func TestStripEscapesDropsBidiControls(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name string
-		in   string
-		want string
-	}{
-		{"RLO reorders the row it sits in", "run \u202esafe.sh", "run safe.sh"},
-		{"LRO goes with it", "run \u202dsafe.sh", "run safe.sh"},
-		{"the embeddings and their pop go too", "a\u202ab\u202bc\u202cd", "abcd"},
-		{"the isolates go", "a\u2066b\u2067c\u2068d\u2069e", "abcde"},
-		{"the marks go", "a\u200eb\u200fc", "abc"},
-		{"a whole reversed tail is dropped, not reordered", "echo hello\u202edlrow", "echo hellodlrow"},
-		{"ZWJ survives: it holds an emoji sequence together", "\U0001f469\u200d\U0001f4bb ok", "\U0001f469\u200d\U0001f4bb ok"},
-		{"a soft hyphen survives: it is the user's own prose", "in\u00adcremental", "in\u00adcremental"},
-		{"a zero-width space survives", "a\u200bb", "a\u200bb"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			got := stripEscapes(tc.in)
-			if got != tc.want {
-				t.Errorf("stripEscapes(%q) = %q; want %q", tc.in, got, tc.want)
-			}
-			if strings.ContainsFunc(got, bidiControl) {
-				t.Errorf("stripEscapes(%q) left a bidi control behind: %q", tc.in, got)
-			}
-			if again := stripEscapes(got); again != got {
-				t.Errorf("stripEscapes is not idempotent: %q became %q", got, again)
-			}
-		})
-	}
 }
 
 // The other half of the same seam, pinned character by character: what stripEscapes KEEPS because a
@@ -2470,10 +2387,10 @@ func TestApplyUsageStripsTheDelegateModel(t *testing.T) {
 
 	subAgentUsageOn(tr, 1, 12000, window, "child"+escOSC52, "gpt-oss-20b")
 
-	// The strip drops the ESC introducer and the BEL terminator and leaves the payload behind as
-	// inert text, exactly as it does everywhere else (TestStripEscapesDropsControlCharacters): what
-	// reaches the frame is no longer a sequence the terminal will act on.
-	if got, want := tr.entries[0].ctxModel, "child]52;c;cGFyaQ=="; got != want {
+	// The strip drops the OSC whole — introducer, payload and BEL terminator — exactly as it does
+	// everywhere else (internal/sanitize's TestStripEscapes): what reaches the frame is the id the
+	// server hid the sequence in, and nothing the terminal will act on.
+	if got, want := tr.entries[0].ctxModel, "child"; got != want {
 		t.Errorf("head model = %q, want %q — the fold strips the server's own text", got, want)
 	}
 }
@@ -3814,8 +3731,8 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 	})
 
 	// The name is model-supplied text and takes the same control strip every other display field on
-	// this card takes (sanitize) — the ESC byte itself, not the ANSI sequence around it, which the
-	// host's own sanitiser removes before the name is ever emitted. This is the view's backstop
+	// this card takes (sanitize) — a stray ESC and the BEL after it, which the host's own sanitiser
+	// already removed before the name was ever emitted. This is the view's backstop
 	// rather than a second opinion, and a backstop that let a control through would put it on the
 	// one row a collapsed delegation always paints.
 	t.Run("a control character in the name is stripped", func(t *testing.T) {

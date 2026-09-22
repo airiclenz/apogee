@@ -1128,9 +1128,9 @@ func TestSessionRowCellsScheduleTagStripsEscapes(t *testing.T) {
 	}
 
 	rows := sessionRows(b, "/ws/a", now)
-	want := []popupRow{{"a firing · ⟳ reset c me", "· 5m ago", "· 1 msg"}}
+	want := []popupRow{{"a firing · ⟳ reset  me", "· 5m ago", "· 1 msg"}}
 	if !reflect.DeepEqual(rows, want) {
-		t.Errorf("rows = %v, want the ESC bytes gone from the tag (%v)", rows, want)
+		t.Errorf("rows = %v, want the escape gone whole from the tag (%v)", rows, want)
 	}
 	for i, ln := range layoutPopupRows(newTheme(scheme.Default()), rows) {
 		if strings.ContainsRune(ln, 0x1b) {
@@ -1167,10 +1167,10 @@ func TestSessionRowsTagForkedSessions(t *testing.T) {
 		{"fix the parser · ⑂ fix the parser", "· 1m ago", "· 2 msgs"},
 		{"orphaned fork · ⑂ gone-9", "· 2m ago", "· 1 msg"},
 		{"over there · ⑂ elsewhere", "· 3m ago", "· 1 msg"},
-		{"escaped · ⑂ reset c me", "· 4m ago", "· 1 msg"},
+		{"escaped · ⑂ reset  me", "· 4m ago", "· 1 msg"},
 		{"sweep — 03:00 · ⟳ sweep · ⑂ fix the parser", "· 5m ago", "· 1 msg"},
 		{"fix the parser", "· 1h ago", "· 4 msgs"},
-		{"reset c me", "· 1h ago", "· 1 msg"},
+		{"reset  me", "· 1h ago", "· 1 msg"},
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Errorf("rows = %v, want the fork tags resolved through the full list (%v)", rows, want)
@@ -1260,9 +1260,9 @@ func TestSessionRowCellsStripEscapes(t *testing.T) {
 	}
 
 	rows := sessionRows(b, "/ws/a", now)
-	want := []popupRow{{"reset c me · cother", "· 5m ago", "· 3 msgs"}}
+	want := []popupRow{{"reset  me · other", "· 5m ago", "· 3 msgs"}}
 	if !reflect.DeepEqual(rows, want) {
-		t.Errorf("rows = %v, want the ESC bytes gone from the title cell (%v)", rows, want)
+		t.Errorf("rows = %v, want the escape gone whole from the title cell (%v)", rows, want)
 	}
 	// The laid-out line is what the pane paints, before any styling of its own: no ESC survives into
 	// it from any cell.
@@ -1284,7 +1284,7 @@ func TestSessionBrowserRenameSeedStripsEscapes(t *testing.T) {
 	m = openBrowser(t, m)
 
 	m = step(t, m, keyCtrl('r'))
-	if got, want := m.sessionBrowser.renameBuf.value(), "reset c me"; got != want {
+	if got, want := m.sessionBrowser.renameBuf.value(), "reset  me"; got != want {
 		t.Errorf("rename buffer = %q, want the seed escape-stripped (%q)", got, want)
 	}
 	for i, ln := range layoutPopupRows(m.th, sessionRows(m.sessionBrowser, m.opts.Workspace, time.Now())) {

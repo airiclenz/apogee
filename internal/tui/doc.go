@@ -1117,10 +1117,10 @@
 // TUI, internal/title, internal/session and the headless CLI all call: the set was written out four
 // times and the fourth copy had drifted, so it is now spelled once and a copy of it anywhere,
 // this package included, is a bug. That package is where a seam that needs one goes to read the
-// rule — which characters go, which two stay, and why. stripEscapes is idempotent and
-// allocation-free on text
-// with nothing to rewrite — no control character, no DEL, no bidi formatting character, no invalid
-// UTF-8 byte — so a producer that also strips costs nothing. TestTranscriptStripsTerminalEscapes and its siblings pin every
+// rule — an escape sequence goes whole, which characters go, which two stay, and why.
+// stripEscapes is idempotent and allocation-free on text with nothing to rewrite — no escape
+// sequence, no control character, no DEL, no bidi formatting character — so a producer that also
+// strips costs nothing. TestTranscriptStripsTerminalEscapes and its siblings pin every
 // one of those paths.
 //
 // The COMPOSER is that invariant's second door, and the "@" dropdown is what walks through it: an

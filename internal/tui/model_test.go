@@ -1556,22 +1556,25 @@ func TestModelApprovalReasonWrapsInFull(t *testing.T) {
 }
 
 // Every model-authored string (tool name, reason, args) is escape-stripped before rendering, so a
-// model-authored ESC byte never reaches the terminal (D8, hardening). As in the ask case, the ESC
-// is removed and the color code survives as INERT literal text — its presence in the stripped View
-// is exactly the proof the strip happened at the call site (had the ESC survived, plain() would
-// have swallowed the whole SGR sequence and the literal would be gone).
+// model-authored escape sequence never reaches the terminal (D8, hardening). As in the ask case,
+// the fixtures are OSC 8 hyperlinks rather than SGR colours because plain() strips CSI sequences
+// only: an OSC that survived the seam would still be in the stripped View, so the label reading
+// clean with no ESC anywhere in it is the proof the strip happened at the call site.
 func TestModelApprovalEscapeStrips(t *testing.T) {
 	t.Parallel()
 	m, _ := newApprovalModel(t, domain.ApprovalRequest{
-		Tool:      "write\x1b[31mfile",
-		Reason:    "be\x1b[32mcareful",
-		Arguments: json.RawMessage("{\"path\":\"x\x1b[33my\"}"), // a real ESC byte inside the args string
+		Tool:      "write\x1b]8;;x\x07file",
+		Reason:    "be\x1b]8;;x\x07careful",
+		Arguments: json.RawMessage("{\"path\":\"x\x1b]8;;x\x07y\"}"), // a real ESC byte inside the args string
 	})
 	view := plain(m.View())
-	for _, want := range []string{"write[31mfile", "be[32mcareful", "x[33my"} {
+	for _, want := range []string{"writefile", "becareful", "xy"} {
 		if !strings.Contains(view, want) {
-			t.Errorf("ESC not stripped at the source, expected inert literal %q:\n%s", want, view)
+			t.Errorf("sequence not stripped whole at the source, expected clean label %q:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "\x1b") {
+		t.Errorf("an ESC reached the view:\n%q", view)
 	}
 }
 
@@ -3467,23 +3470,25 @@ func TestModelAskSingleSelectRenderIsUnchanged(t *testing.T) {
 }
 
 // The question and choices are escape-stripped before rendering, so a model-authored ESC byte
-// never reaches the terminal (D8, hardening). stripEscapes drops the control characters and keeps
-// every printable rune, so the ESC goes and the rest of the sequence stays behind as INERT literal
-// text ("[31mred"); had the ESC survived, plain() would have consumed the whole "\x1b[31m" as a
-// real SGR sequence and the literal would be gone — so its presence in the stripped View is
-// exactly the proof the strip happened at the call site.
+// never reaches the terminal (D8, hardening). stripEscapes drops a sequence whole, so the fixtures
+// are OSC 8 hyperlinks rather than SGR colours: plain() strips CSI sequences only, so an OSC that
+// survived the seam would still be in the stripped View — the label reading clean with no ESC
+// anywhere in it is exactly the proof the strip happened at the call site.
 func TestModelAskEscapeStrips(t *testing.T) {
 	t.Parallel()
 	m, _ := newAskModel(t, domain.AskRequest{
-		Question: "pick\x1b[31mred",
-		Choices:  []string{"al\x1b[32mpha"},
+		Question: "pick\x1b]8;;x\x07red",
+		Choices:  []string{"al\x1b]8;;x\x07pha"},
 	})
 	view := plain(m.View())
-	if !strings.Contains(view, "pick[31mred") {
-		t.Errorf("question ESC not stripped at the source:\n%s", view)
+	if !strings.Contains(view, "pickred") {
+		t.Errorf("question sequence not stripped at the source:\n%s", view)
 	}
-	if !strings.Contains(view, "[32mpha") {
-		t.Errorf("choice ESC not stripped at the source:\n%s", view)
+	if !strings.Contains(view, "alpha") {
+		t.Errorf("choice sequence not stripped at the source:\n%s", view)
+	}
+	if strings.Contains(view, "\x1b") {
+		t.Errorf("an ESC reached the view:\n%q", view)
 	}
 }
 
@@ -6761,7 +6766,7 @@ func TestFooterContentStripsEscapes(t *testing.T) {
 	t.Parallel()
 	opts := testOpts
 	opts.Model = "\x1b]8;;mailto:evil\x07qwen"
-	opts.HostAlias = "host\x1b[31m"
+	opts.HostAlias = "host\x1b]8;;x\x07"
 
 	m := step(t, newModel(context.Background(), &fakeEngine{}, opts, nil), tea.WindowSizeMsg{Width: 80, Height: 24})
 	m.hb.effort = provider.EffortSupport{Supported: true, Default: "\x1b]8;;x\x07medium"}
@@ -6775,11 +6780,12 @@ func TestFooterContentStripsEscapes(t *testing.T) {
 	if !strings.Contains(roomy, "qwen") || !strings.Contains(roomy, "medium") {
 		t.Errorf("footer = %q, want the model id and the effort word still readable", roomy)
 	}
-	// The host's escape is CSI, so ansiPattern would eat an UNSTRIPPED one along with the styling
-	// and the check above could not tell the two apart. A stripped one survives as inert text —
-	// which is what makes this the assertion that the host went through the seam too.
-	if want := "host[31m"; !strings.Contains(roomy, want) {
-		t.Errorf("footer = %q, want the host segment left inert as %q", roomy, want)
+	// The host's escape is an OSC for the same reason: a CSI fixture would be eaten by ansiPattern
+	// along with the styling whether or not the seam stripped it, and the check above could not
+	// tell the two apart. The host alias reading clean beside the no-ESC assertion is what makes
+	// this the proof that the host went through the seam too.
+	if want := "host"; !strings.Contains(roomy, want) {
+		t.Errorf("footer = %q, want the host segment shown clean as %q", roomy, want)
 	}
 }
 
@@ -6919,19 +6925,25 @@ func TestFooterWorkdirIsEscapeStripped(t *testing.T) {
 	opts.Workspace = "/ws/proj\x1b[31mRED"
 	m := newTestModelEng(t, &fakeEngine{}, opts)
 
-	const want = "proj[31mRED"
+	// The field is read directly, so the CSI fixture stands: the sequence goes whole and the name
+	// around it is what is left.
+	const want = "projRED"
 	if strings.ContainsRune(m.workdir, 0x1b) {
 		t.Errorf("m.workdir keeps the ESC: %q", m.workdir)
 	}
 	if !strings.HasSuffix(m.workdir, want) {
-		t.Errorf("m.workdir = %q, want it to end %q — the sequence inert, its text kept", m.workdir, want)
+		t.Errorf("m.workdir = %q, want it to end %q — the sequence gone, its text kept", m.workdir, want)
 	}
+	// The painted row is read through ansiPattern, which would eat an unstripped CSI along with the
+	// styling, so its half of the claim is an OSC form of the same name.
+	opts.Workspace = "/ws/proj\x1b]8;;x\x07RED"
+	m = newTestModelEng(t, &fakeEngine{}, opts)
 	footer := m.footerContent(120)
 	if strings.Contains(ansiPattern.ReplaceAllString(footer, ""), "\x1b") {
 		t.Errorf("the painted footer carries an ESC the theme did not author: %q", footer)
 	}
 	if flat := ansiPattern.ReplaceAllString(footer, ""); !strings.Contains(flat, want) {
-		t.Errorf("footer = %q, want the workdir shown inert as %q", flat, want)
+		t.Errorf("footer = %q, want the workdir shown clean as %q", flat, want)
 	}
 }
 

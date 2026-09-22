@@ -1487,7 +1487,8 @@ func TestModelPickerAlignsTheProfileColumns(t *testing.T) {
 // other cell. net.SplitHostPort validates an address's SHAPE, not its bytes — it rejects "[" and "]"
 // but passes an ESC byte straight through — and the popup module truncates ANSI-preserving without
 // stripping anything, so an unstripped "\x1bc" (RIS, a full terminal reset) hidden in a profile's
-// address would be painted for real. Stripped, the rest of it stays as inert literal text.
+// address would be painted for real. Stripped, the sequence goes whole and the digits around it
+// stay.
 func TestModelPickerEscapeStripsTheProfilePort(t *testing.T) {
 	t.Parallel()
 	fake := newLauncher()
@@ -1507,7 +1508,7 @@ func TestModelPickerEscapeStripsTheProfilePort(t *testing.T) {
 			t.Errorf("cell %d = %q carries a raw ESC into the pane", i, cell)
 		}
 	}
-	if got, want := rows[0][3], "(:c9999)"; got != want {
+	if got, want := rows[0][3], "(:9999)"; got != want {
 		t.Errorf("port cell = %q, want %q", got, want)
 	}
 }

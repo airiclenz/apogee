@@ -56,7 +56,7 @@ func TestAdviceBoardFoldsAdviseFiringsInOrder(t *testing.T) {
 	m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, 2)})
 
 	want := []adviceRecord{
-		{run: runRef{}, turn: 1, reaction: "style-check", origin: domain.OriginUser, moment: domain.MomentPostToolResult, detail: "prefer[31m tabs"},
+		{run: runRef{}, turn: 1, reaction: "style-check", origin: domain.OriginUser, moment: domain.MomentPostToolResult, detail: "prefer tabs"},
 		{run: child, turn: 2, reaction: "context-fill-notice", origin: domain.OriginEngine, moment: domain.MomentPostToolResult, detail: "rung 1 (50%)"},
 	}
 	if !reflect.DeepEqual(m.advice, want) {
