@@ -254,10 +254,12 @@ func TestResolvePrecedence(t *testing.T) {
 			},
 		},
 		{
-			name: "the present block is file-only (all four keys)",
-			file: fileConfig{Present: &presentConfig{AutoOpen: boolptr(false), Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}},
+			name: "the present block is file-only (all five keys)",
+			file: fileConfig{Present: &presentConfig{AutoOpen: boolptr(false), Command: "zed {path}",
+				CommandOnModelDocuments: true, Port: 8934, Host: "10.0.0.2"}},
 			want: func(o *Options) {
-				o.Present = PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "10.0.0.2"}
+				o.Present = PresentSettings{AutoOpen: false, Command: "zed {path}",
+					CommandOnModelDocuments: true, Port: 8934, Host: "10.0.0.2"}
 			},
 		},
 		{
@@ -700,8 +702,8 @@ func everyKeyFileConfig() fileConfig {
 		Tools:         &toolsConfig{Disabled: []string{"web_search"}, Enabled: []string{"web_fetch"}},
 		URLSafety:     &urlSafetyConfig{AllowHosts: []string{"example.com"}, DenyHosts: []string{"evil.example"}},
 		ModelProfiles: map[string]modelProfileConfig{"qwen": {ToolCallFormat: "xml"}},
-		Present: &presentConfig{AutoOpen: boolptr(false), Command: "open {path}", Port: 8080,
-			Host: "box.local"},
+		Present: &presentConfig{AutoOpen: boolptr(false), Command: "open {path}",
+			CommandOnModelDocuments: true, Port: 8080, Host: "box.local"},
 		SystemPromptText: "be brief", SystemPromptFile: "prompt.md",
 		SystemPromptModels: map[string]systemPromptEntryConfig{"qwen": {Text: "be terse"}},
 		SystemPromptLayers: []systemPromptLayerConfig{{Text: "prefer tables"}},
@@ -4044,7 +4046,7 @@ func TestMechanismsKeyIsStrippedAndHasNoRegistryRow(t *testing.T) {
 	}
 }
 
-// The present config block parses into opts.present (ADR 0019): all four keys, file-only like
+// The present config block parses into opts.present (ADR 0019): all five keys, file-only like
 // the blocks around it, so the composition root can build the ladder's mechanisms from them.
 func TestApplyConfigPresent(t *testing.T) {
 	t.Parallel()
@@ -4052,6 +4054,7 @@ func TestApplyConfigPresent(t *testing.T) {
 	const configYAML = `present:
   auto-open: false
   command: "zed {path}"
+  command-on-model-documents: true
   port: 8934
   host: 192.168.64.2
 `
@@ -4061,9 +4064,45 @@ func TestApplyConfigPresent(t *testing.T) {
 		t.Fatalf("ApplyConfig: %v", err)
 	}
 
-	want := PresentSettings{AutoOpen: false, Command: "zed {path}", Port: 8934, Host: "192.168.64.2"}
+	want := PresentSettings{
+		AutoOpen: false, Command: "zed {path}", CommandOnModelDocuments: true,
+		Port: 8934, Host: "192.168.64.2",
+	}
 	if opts.Present != want {
 		t.Errorf("opts.present = %+v; want %+v", opts.Present, want)
+	}
+}
+
+// present.command-on-model-documents defaults OFF, which is the whole of the gate it opens: a
+// block that configures a command but never writes the key must not read as consent to run that
+// command on a document the model named. Both silences are pinned — the key absent from a present
+// block, and the block absent altogether — because the key's default is the opposite of
+// auto-open's and a resolution that leaned on the block's presence would pass one and fail the
+// other.
+func TestApplyConfigPresentCommandOnModelDocumentsDefaultsOff(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		yaml string
+	}{
+		{name: "a present block that never writes the key", yaml: "present:\n  command: \"sh {path}\"\n"},
+		{name: "no present block at all", yaml: ""},
+		{name: "the key written false", yaml: "present:\n  command-on-model-documents: false\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			writeConfigHome(t, home, tc.yaml)
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.Present.CommandOnModelDocuments {
+				t.Error("present.command-on-model-documents resolved true; want off unless the file says otherwise")
+			}
+		})
 	}
 }
 

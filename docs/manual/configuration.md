@@ -1885,7 +1885,7 @@ transcript says so and falls back to the path.
 
 The built-in server hands out one random-token URL per presented document — no directory
 listing, no other file reachable — re-reads the file per request, starts only when a
-document is actually served, and stops when apogee exits. Four **file-only** keys tune
+document is actually served, and stops when apogee exits. Five **file-only** keys tune
 all of this:
 
 ```yaml
@@ -1893,9 +1893,19 @@ all of this:
 present:
   auto-open: true        # open documents on a LOCAL desktop run; false = only print the path
   command: "zed {path}"  # open with THIS application instead of the OS default
+  command-on-model-documents: false  # let `command` run on a document the MODEL named
   port: 0                # the built-in server's port; 0 (default) picks a free one per session
   host: ""               # address the printed URL advertises; empty = detected
 ```
+
+`command-on-model-documents` is off unless you set it, and it is the only one of the five
+the `/settings` pane will not write — ⏎ on its row opens this file instead. It exists
+because `present.command` is a command line and `{path}` is a path the **model** chose: a
+`command: "zed {path}"` shows you a document, but a `command: "sh {path}"` would run one
+the model had just written. With the key off, a `present_document` call on a machine that
+has a `command` configured degrades to the transcript rung — the path is shown, the command
+is not run, and the model is told to tell you which key would change that. Nothing changes
+when no `command` is set: the built-in OS opener of rung 1 is not affected by this key.
 
 `host` is a fallback, not an override: over SSH the address you connected to this box on
 is used, because it is known-routable. If a printed URL is unreachable on **macOS

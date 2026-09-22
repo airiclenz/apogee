@@ -102,6 +102,18 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 			want:    "Presented report.html: shown in the transcript with a link.",
 		},
 		{
+			// The one degradation the user can act on: the host holds an application the user
+			// named and did not run it on a document the model named, because the opt-in is off.
+			// The sentence is read from the constant that EMITS it — a copy retyped here would go
+			// on passing while the model was told something else.
+			name: "a withheld present.command is stated beside the baseline rung",
+			outcome: domain.PresentOutcome{
+				Method: domain.PresentShown, Location: "report.html", CommandWithheld: true,
+			},
+			want: "Presented report.html: the path is shown in the transcript for the user to open. " +
+				presentedCommandWithheldNote,
+		},
+		{
 			// A document rung 1 refuses to hand the OS handler (present.OpenerRenderable, the
 			// launch bound added 2026-07-26) is a DEGRADE, not a refusal: the host answers
 			// "shown", the tool reports the baseline rung, and the call is not an error — the
@@ -141,6 +153,21 @@ func TestPresentDocument_OutcomeWordingPerRung(t *testing.T) {
 				t.Errorf("presenter consulted %d times, want exactly 1 — rung 0 always runs", presenter.calls)
 			}
 		})
+	}
+}
+
+// TestPresentDocumentWithheldNoteNamesTheKey pins what the withheld sentence must CONTAIN, as
+// against the wording table above, which pins the sentence it is: the user reading the model's
+// report is the only person who can act on the degradation, so the note has to name the key and
+// the value that turns it on. A rewording that dropped either would leave a truthful sentence
+// nobody could act on.
+func TestPresentDocumentWithheldNoteNamesTheKey(t *testing.T) {
+	t.Parallel()
+
+	for _, want := range []string{"present.command-on-model-documents", "true", "present.command"} {
+		if !strings.Contains(presentedCommandWithheldNote, want) {
+			t.Errorf("the withheld note %q does not name %q", presentedCommandWithheldNote, want)
+		}
 	}
 }
 

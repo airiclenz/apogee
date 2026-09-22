@@ -182,7 +182,9 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 			rungs: func(*testing.T) Presentation {
 				o := openerRunning("linux", new([]string)) // no DISPLAY: HasDesktop is false
 				o.CommandOverride = "zed {path}"
-				return Presentation{Local: true, Opener: o}
+				// Opted in: since 2026-09-22 an execution-capable rung 3 runs only behind
+				// present.command-on-model-documents, and this row is about the desktop gate.
+				return Presentation{Local: true, Opener: o, CommandOnModelDocuments: true}
 			},
 			path:       markdown,
 			wantMethod: domain.PresentOpened,
@@ -300,6 +302,101 @@ func TestPresenterLadderPicksRung(t *testing.T) {
 			}
 			if msg.Location != "" {
 				t.Errorf("location = %q; want empty on a rung that served nothing", msg.Location)
+			}
+		})
+	}
+}
+
+// TestPresenterWithholdsAnExecutionCapableRungWithoutTheOptIn pins the rung-3 gate: a ladder that
+// can run a program of the user's own choosing runs it on a document the MODEL named only when
+// present.command-on-model-documents is set. Absent and false are the same answer — the key
+// defaults off — and the degrade goes to the BASELINE, never to the OS opener, because
+// present.command replaces that opener wherever it is set.
+//
+// The inert half matters as much as the gated half: with no present.command configured the key
+// decides nothing, so rung 1 opens exactly as it did before the gate existed, whichever way the
+// key is set.
+func TestPresenterWithholdsAnExecutionCapableRungWithoutTheOptIn(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	markdown := writeDoc(t, root, "review.md")
+
+	tests := []struct {
+		name       string
+		override   string
+		optIn      bool
+		wantMethod domain.PresentMethod
+		wantLaunch bool
+	}{
+		{
+			name:       "an override runs when the key is set",
+			override:   "zed {path}",
+			optIn:      true,
+			wantMethod: domain.PresentOpened,
+			wantLaunch: true,
+		},
+		{
+			name:       "an override is withheld when the key is false",
+			override:   "zed {path}",
+			wantMethod: domain.PresentShown,
+		},
+		{
+			// The absent key, which toPresentSettings resolves to false: the same row as above,
+			// stated separately because "absent ⇒ off" is the decision this gate rests on.
+			name:       "an override is withheld when the key was never written",
+			override:   "zed {path}",
+			wantMethod: domain.PresentShown,
+		},
+		{
+			name:       "no override: rung 1 opens with the key off",
+			wantMethod: domain.PresentOpened,
+			wantLaunch: true,
+		},
+		{
+			name:       "no override: rung 1 opens with the key on",
+			optIn:      true,
+			wantMethod: domain.PresentOpened,
+			wantLaunch: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			var argv []string
+			// darwin so rung 1 has a desktop to open into with no override configured; the
+			// override rows reach the runner through the override itself.
+			opener := openerRunning("darwin", &argv)
+			opener.CommandOverride = tc.override
+			rungs := Presentation{Local: true, Opener: opener, CommandOnModelDocuments: tc.optIn}
+
+			req := domain.PresentRequest{Path: markdown, DisplayPath: "docs/review.md"}
+			out, msg := presentOnce(t, rungs, req)
+
+			if out.Method != tc.wantMethod {
+				t.Errorf("method = %q; want %q", out.Method, tc.wantMethod)
+			}
+			if launched := len(argv) > 0; launched != tc.wantLaunch {
+				t.Errorf("launched = %v (argv %v); want %v — a withheld rung resolves and runs nothing",
+					launched, argv, tc.wantLaunch)
+			}
+			// The withheld branch is the only one that sets the flag, and the entry and the
+			// outcome must tell the user and the model the same story.
+			wantWithheld := tc.override != "" && !tc.optIn
+			if out.CommandWithheld != wantWithheld {
+				t.Errorf("outcome.CommandWithheld = %v; want %v", out.CommandWithheld, wantWithheld)
+			}
+			wantReason := ""
+			if wantWithheld {
+				wantReason = commandWithheldReason
+			}
+			if msg.Reason != wantReason {
+				t.Errorf("entry reason = %q; want %q", msg.Reason, wantReason)
+			}
+			if wantWithheld && !strings.Contains(msg.Reason, "present.command-on-model-documents") {
+				t.Errorf("entry reason = %q; want it to name the key the user would set", msg.Reason)
 			}
 		})
 	}

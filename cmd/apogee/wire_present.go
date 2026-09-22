@@ -53,8 +53,18 @@ var openerLookPath func(name string) (string, error)
 //
 // Rung 0 — the transcript line carrying the path — is deliberately absent: it needs no mechanism,
 // it is never skipped, and nothing in the config can turn it off.
+//
+// One fact rides along beside the mechanisms: `present.command-on-model-documents`, the file-only
+// opt-in the ladder gates an execution-capable rung 3 on. It wires no rung of its own — it says
+// whether the Opener above may run on a document the MODEL named — so it is carried whatever the
+// session's locality is, and the ladder asks it only where it bears (tui.Presentation).
 func presentationRungs(p config.PresentSettings, workspace, goos string, env func(string) string) tui.Presentation {
-	rungs := tui.Presentation{Local: present.Locality(env) == present.Local}
+	rungs := tui.Presentation{
+		Local: present.Locality(env) == present.Local,
+		// The rung-3 opt-in travels with the ladder rather than with the Opener: it says whether a
+		// rung RUNS, which is the ladder's question (tui.Presentation.CommandOnModelDocuments).
+		CommandOnModelDocuments: p.CommandOnModelDocuments,
+	}
 	if rungs.Local && p.AutoOpen {
 		rungs.Opener = &present.Opener{
 			GOOS:            goos,
@@ -75,10 +85,12 @@ func presentationRungs(p config.PresentSettings, workspace, goos string, env fun
 }
 
 // livePresentation owns the `present:` block as it stands right now and the ladder built from it —
-// the presentation half of ADR 0037 decision 1. The four keys are editable in the `/settings` pane,
-// and a committed one lands here: the block is updated, the rungs are rebuilt exactly as startup
-// built them, and they are re-installed on the presenter (tui.Bridge.SetPresentation, which swaps
-// the rungs of the presenter the engine captured rather than making a second one).
+// the presentation half of ADR 0037 decision 1. Four of the five keys are editable in the
+// `/settings` pane — `present.command-on-model-documents` is the one that is not, and it reaches a
+// session by being in the file at startup — and a committed one lands here: the block is updated,
+// the rungs are rebuilt exactly as startup built them, and they are re-installed on the presenter
+// (tui.Bridge.SetPresentation, which swaps the rungs of the presenter the engine captured rather
+// than making a second one).
 //
 // It also owns the doc server's LIFETIME, because a rebuild is the only thing that can end one
 // mid-session: the app's own teardown closes whatever is current, and an address change closes the

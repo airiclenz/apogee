@@ -39,6 +39,31 @@ type Presentation struct {
 	// opens into a display nobody is watching (ADR 0019, "auto-opening on the remote box" —
 	// rejected), so locality is asked here and never delegated.
 	Local bool
+	// CommandOnModelDocuments is `present.command-on-model-documents`, the file-only opt-in that
+	// lets an EXECUTION-CAPABLE rung 3 — an Opener carrying a present.command — run on a document
+	// the model named. False (the default, and an absent key) means the ladder skips rung 3 and
+	// degrades straight to the baseline rather than to rung 1: present.command REPLACES the OS
+	// opener wherever it is set (present.Opener.CommandOverride), so there is no lower opener rung
+	// left to fall to, and inventing one would open a document in an application the user did not
+	// choose.
+	//
+	// It lives HERE, with the ladder, rather than on the Opener, for the reason the Opener's own
+	// doc gives: the Opener decides WHAT to run, and whether a rung runs at all is the ladder's
+	// call. The Opener is handed a document the model named on every rung, so it could not tell
+	// this case apart in any event.
+	CommandOnModelDocuments bool
+}
+
+// executionCapable is the ladder's own answer to "can this wiring run a program of the user's
+// choosing": a LOCAL session (rung 1/3's gate — see Local) whose Opener carries a non-empty
+// present.command. A nil Opener, a blank override and a remote session all answer false, because
+// none of them can reach an application the user named.
+//
+// It is a method on the SNAPSHOT rather than on the presenter so the question and the climb that
+// acts on it read the same rungs: one Present call sees one ladder (see ladder), and a predicate
+// that took its own snapshot could answer about a ladder the climb never walked.
+func (p Presentation) executionCapable() bool {
+	return p.Local && p.Opener != nil && strings.TrimSpace(p.Opener.CommandOverride) != ""
 }
 
 // uiPresenter is the host's Presenter: the delegate present_document routes a finished
@@ -101,10 +126,7 @@ var _ domain.Presenter = (*uiPresenter)(nil)
 // It reads the same one-snapshot-per-question ladder Present does and answers from configuration
 // alone — nothing is resolved, launched or classified here.
 func (p *uiPresenter) IsExecutionCapable() bool {
-	rungs := p.ladder()
-	return rungs.Local &&
-		rungs.Opener != nil &&
-		strings.TrimSpace(rungs.Opener.CommandOverride) != ""
+	return p.ladder().executionCapable()
 }
 
 // Present walks the ladder for one document and records the result in the transcript. It returns
@@ -117,7 +139,7 @@ func (p *uiPresenter) Present(ctx context.Context, req domain.PresentRequest) (d
 		return domain.PresentOutcome{}, err
 	}
 
-	method, location, reason := p.climb(ctx, req)
+	walk := p.climb(ctx, req)
 
 	// Rung 0, unconditionally and last: the entry describes whatever the rungs above it managed.
 	// send is asynchronous (bridge.go), so the worker never waits on the Update loop.
@@ -128,9 +150,9 @@ func (p *uiPresenter) Present(ctx context.Context, req domain.PresentRequest) (d
 	p.prog.send(presentedMsg{
 		Title:       req.Title,
 		Path:        req.DisplayPath,
-		Location:    location,
-		Method:      method,
-		Reason:      reason,
+		Location:    walk.location,
+		Method:      walk.method,
+		Reason:      walk.reason,
 		Depth:       req.Depth,
 		SpawnCallID: req.SpawnCallID,
 	})
@@ -139,7 +161,27 @@ func (p *uiPresenter) Present(ctx context.Context, req domain.PresentRequest) (d
 	// served one: the served URL carries the doc server's capability token (ADR 0019 §3), and the
 	// outcome is model context — relayed in the tool result, POSTed upstream on the next Turn and
 	// persisted with the session. The URL's whole reach is the entry sent just above.
-	return domain.PresentOutcome{Method: method, Location: req.DisplayPath}, nil
+	return domain.PresentOutcome{
+		Method:   walk.method,
+		Location: req.DisplayPath,
+		// The one degradation the user can act on travels back as data, so the tool result can name
+		// the key that would have changed it (domain.PresentOutcome.CommandWithheld).
+		CommandWithheld: walk.commandWithheld,
+	}, nil
+}
+
+// climbResult is what one walk of the ladder produced: the rung reached, the served URL (empty
+// unless rung 2 carried it), the short reason the transcript entry shows when a rung was tried or
+// withheld, and whether an execution-capable rung 3 was the thing withheld. It is a struct rather
+// than a fourth return value because the last two are one story told twice — once to the user in
+// the transcript, once to the model in the tool result — and they must never disagree.
+type climbResult struct {
+	method   domain.PresentMethod
+	location string
+	reason   string
+	// commandWithheld is set on exactly one branch: an execution-capable ladder with
+	// present.command-on-model-documents off. It rides out on domain.PresentOutcome.
+	commandWithheld bool
 }
 
 // climb attempts the highest rung that applies to this session and reports what happened: the
@@ -152,34 +194,60 @@ func (p *uiPresenter) Present(ctx context.Context, req domain.PresentRequest) (d
 // a machine that is not this one, and on a local box with no desktop there is no browser to open it
 // (ADR 0019 rung 2 is remote by definition). ctx is re-checked before each mechanism so a user stop
 // lands promptly instead of after a launch grace or a bind.
-func (p *uiPresenter) climb(ctx context.Context, req domain.PresentRequest) (domain.PresentMethod, string, string) {
+//
+// One rung is WITHHELD rather than attempted: an execution-capable ladder (a present.command the
+// user configured) opens a document the MODEL named only with
+// present.command-on-model-documents set. Without it the walk stops here — before the Opener is
+// consulted at all, so nothing is resolved and nothing is launched — and the document reaches the
+// user on the baseline rung with a reason that names the key.
+func (p *uiPresenter) climb(ctx context.Context, req domain.PresentRequest) climbResult {
 	rungs := p.ladder()
 	if rungs.Local {
 		if rungs.Opener == nil || ctx.Err() != nil {
-			return domain.PresentShown, "", ""
+			return climbResult{method: domain.PresentShown}
+		}
+		if rungs.executionCapable() && !rungs.CommandOnModelDocuments {
+			return climbResult{
+				method:          domain.PresentShown,
+				reason:          commandWithheldReason,
+				commandWithheld: true,
+			}
 		}
 		err := rungs.Opener.Open(req.Path)
 		switch {
 		case err == nil:
-			return domain.PresentOpened, "", ""
+			return climbResult{method: domain.PresentOpened}
 		case errors.Is(err, present.ErrNoOpener):
 			// Not a failure: this machine has nothing to open into (a headless Linux session, an
 			// OS with no opener and no present.command). The baseline rung is the right answer.
-			return domain.PresentShown, "", "no opener on this machine"
+			return climbResult{method: domain.PresentShown, reason: "no opener on this machine"}
 		default:
-			return domain.PresentShown, "", "could not open: " + clipDetail(firstLine(err.Error()))
+			return climbResult{
+				method: domain.PresentShown,
+				reason: "could not open: " + clipDetail(firstLine(err.Error())),
+			}
 		}
 	}
 
 	if rungs.Docs == nil || !browserRenderable(req.Path) || ctx.Err() != nil {
-		return domain.PresentShown, "", ""
+		return climbResult{method: domain.PresentShown}
 	}
 	url, err := rungs.Docs.Serve(req.Path)
 	if err != nil {
-		return domain.PresentShown, "", "could not serve: " + clipDetail(firstLine(err.Error()))
+		return climbResult{
+			method: domain.PresentShown,
+			reason: "could not serve: " + clipDetail(firstLine(err.Error())),
+		}
 	}
-	return domain.PresentServed, url, ""
+	return climbResult{method: domain.PresentServed, location: url}
 }
+
+// commandWithheldReason is the transcript entry's short reason for the one withheld rung — the
+// user's own words for their own setting, in the register the other reasons use ("no opener on
+// this machine"). The model is told the same thing in the tool result, in its own longer wording
+// (tools.presentedCommandWithheldNote); this is the half the user reads.
+const commandWithheldReason = "present.command not run on a model-named document " +
+	"(present.command-on-model-documents is off)"
 
 // browserRenderableExts is the set rung 2 serves: the documents a browser renders itself rather
 // than downloads (ADR 0019 §2). The doc server is deliberately extension-AGNOSTIC — it will serve

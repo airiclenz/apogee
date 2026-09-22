@@ -111,6 +111,19 @@ type PresentOutcome struct {
 	// URL carries a capability token (ADR 0019 §3). Where the user finds a served document is the
 	// transcript entry's to say.
 	Location string
+
+	// CommandWithheld says the ONE degradation the user can act on: this host has an
+	// execution-capable rung 3 wired (a present.command on a local session) and did not run it,
+	// because `present.command-on-model-documents` is not set. Every other degradation is a fact
+	// about the machine — no opener, a server that could not bind — and reads the same whatever
+	// the user does next; this one is a setting of theirs, so the tool result names it.
+	//
+	// It is a FIELD rather than a live handle for the reason PresentOutcome is a struct at all
+	// (freeze-safety, and ADR 0008's quiescent boundary): the reason crosses back as data the tool
+	// renders, not as a host the tool may ask again later.
+	//
+	// False on every other outcome, including an opened one — a rung that ran withheld nothing.
+	CommandWithheld bool
 }
 
 // PresentMethod names the presentation-ladder rung that carried a document to the user. The

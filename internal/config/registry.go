@@ -656,6 +656,19 @@ var KeyRegistry = bindSetters([]Key{
 		Set:      landIn(presentOf, PresentSettings.Validate, asIs, func(p *PresentSettings) *string { return &p.Command }),
 	},
 	{
+		Path: "present.command-on-model-documents", Kind: KindBool, Default: "false",
+		// NOT editable here, and it is the one `present.` key that is not: this is the opt-in that
+		// lets present.command run on a path the MODEL chose, so it is turned on in the config file
+		// beside the prose that says what that means, never by one keypress next to the command it
+		// arms. The pane still shows it and ⏎ still opens the file on it (editPointer), which is the
+		// whole of "file-only" here.
+		Editable: false,
+		Desc:     "Let present.command run on a document the model named; off = the path is shown instead.",
+		Read:     func(o Options) string { return boolValue(o.Present.CommandOnModelDocuments) },
+		Set: landIn(presentOf, PresentSettings.Validate, strconv.ParseBool,
+			func(p *PresentSettings) *bool { return &p.CommandOnModelDocuments }),
+	},
+	{
 		Path: "present.port", Kind: KindInt, Default: "0",
 		Editable: true,
 		Validate: validatePresentPort,

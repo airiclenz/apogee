@@ -344,7 +344,8 @@ type Options struct {
 	ModelProfiles []profiles.Entry
 
 	// present is the resolved `present:` block (ADR 0019) — the presentation ladder's config:
-	// auto-open, the command override, and the doc server's port and advertised host. Loaded from
+	// auto-open, the command override, the opt-in that lets that command run on a model-named
+	// document, and the doc server's port and advertised host. Loaded from
 	// the config file only, like the blocks above. ApplyConfig sets it from the resolved settings;
 	// runRoot turns it into this host's actual mechanisms (presentationRungs) and installs them on
 	// the TUI bridge, which is what supplies Config.Presenter and registers present_document.

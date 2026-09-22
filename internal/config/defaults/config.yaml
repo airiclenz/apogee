@@ -856,8 +856,17 @@ remember-model: true
 # present:
 #   auto-open: true      # open documents on a LOCAL desktop run; false = only print the path
 #   command: "zed {path}"  # open with THIS application instead of the OS default ({path} = the file)
+#   command-on-model-documents: false  # let `command` run on a document the MODEL named
 #   port: 0              # the built-in server's port; 0 (default) picks a free one per session
 #   host: ""             # address the printed URL advertises; empty = detected (see below)
+#
+# `command-on-model-documents` is OFF unless you set it here, and it is the one `present:` key
+# the /settings pane will not write — ⏎ on its row opens this file instead. `command` is a
+# command LINE and `{path}` is a path the MODEL chose: `zed {path}` shows you a document, but
+# `sh {path}` would RUN one the model had just written. While it is off, a document the model
+# presents on a machine with a `command` set stays at the transcript line — the path is shown,
+# your command is not run, and the model is told which key would change that. It has no effect
+# when no `command` is set: the built-in opener of the local-desktop rung is untouched by it.
 #
 # `host` is a FALLBACK, not an override: over SSH the address you connected to this box on
 # (from $SSH_CONNECTION) is used, because it is known-routable. Set `host` for topologies SSH

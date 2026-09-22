@@ -425,18 +425,21 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"response-reserve":        "0.35", // the shortest spelling that reads back as the same share
 		"present.auto-open":       "true",
 		"present.command":         "zed {path}",
-		"present.port":            "8080",
-		"present.host":            "",
-		"ui.spinner":              "glitter",
-		"ui.spinner-color":        "true",
-		"ui.show-scrollbar":       "false",
-		"ui.color-scheme":         "dark",
-		"ui.stall-after":          "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
-		"ui.inspector":            "true",  // armed for THIS run, which is the only thing a startup-only key can report
-		"ui.skill-suggestions":    "false", // turned off in the fixture: a bool row reports the value, never the default
-		"ui.task-list-open":       "false", // folded in the fixture, for the same reason: the row reports the value
-		"ui.tools-open":           "true",  // opened in the fixture, against its false default: the row reports the value
-		"ui.tools-fold-over":      "3",     // a count prints itself, and the fixture's 3 is not the default 5
+		// Unset in the fixture: the opt-in that lets that command run on a model-named document
+		// is off unless the file says otherwise, and a bool row reports the value, never a hope.
+		"present.command-on-model-documents": "false",
+		"present.port":                       "8080",
+		"present.host":                       "",
+		"ui.spinner":                         "glitter",
+		"ui.spinner-color":                   "true",
+		"ui.show-scrollbar":                  "false",
+		"ui.color-scheme":                    "dark",
+		"ui.stall-after":                     "2m0s",  // a duration prints itself, and the printing is a spelling the key takes back
+		"ui.inspector":                       "true",  // armed for THIS run, which is the only thing a startup-only key can report
+		"ui.skill-suggestions":               "false", // turned off in the fixture: a bool row reports the value, never the default
+		"ui.task-list-open":                  "false", // folded in the fixture, for the same reason: the row reports the value
+		"ui.tools-open":                      "true",  // opened in the fixture, against its false default: the row reports the value
+		"ui.tools-fold-over":                 "3",     // a count prints itself, and the fixture's 3 is not the default 5
 		// Unset in the fixture, and both off-states print themselves: a duration's zero is "0s" and a
 		// count's is "0", each a spelling the key takes back.
 		"sessions.max-age":   "0s",

@@ -53,6 +53,13 @@ type PresentSettings struct {
 	// command is the present.command template (e.g. `zed {path}`), which replaces the built-in OS
 	// opener on every OS. Empty ⇒ the per-OS default (open / start / xdg-open).
 	Command string
+	// commandOnModelDocuments is the opt-in that lets a configured command run on a document the
+	// MODEL named — the only path on which present.command becomes execution of a model-chosen
+	// argument (`sh {path}` over a file the model just wrote). Default FALSE, unlike auto-open:
+	// absent means the ladder degrades to the transcript rung rather than launching the command,
+	// and says so. It changes nothing when no command is configured — rung 1's OS opener hands a
+	// document to its associated application either way.
+	CommandOnModelDocuments bool
 	// port is the TCP port the doc server (rung 2) binds. Default 0 ⇒ an ephemeral port, which
 	// costs nothing: the URL is printed fresh per presentation, so a stable port buys the user
 	// nothing to remember.
@@ -812,13 +819,17 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// The four `present:` keys are one carrier, the system-prompt trio's shape: the block the file
+		// The five `present:` keys are one carrier, the system-prompt trio's shape: the block the file
 		// carries, with toPresentSettings defaulting the keys it leaves out (auto-open on).
 		row:      mustKey("present.auto-open"),
 		fromFile: filePresent,
 	},
 	{
 		row:      mustKey("present.command"),
+		fromFile: filePresent,
+	},
+	{
+		row:      mustKey("present.command-on-model-documents"),
 		fromFile: filePresent,
 	},
 	{
@@ -1555,8 +1566,9 @@ type fileConfig struct {
 	ModelProfiles map[string]modelProfileConfig `yaml:"model-profiles"`
 	// Present configures how a finished document is shown to the user (ADR 0019): the
 	// presentation ladder's auto-open switch, the application that stands in for the OS opener,
-	// and the doc server's port and advertised host. File-only (no flag/env), like the blocks
-	// above. Absent ⇒ auto-open on, no command override, an ephemeral port and a detected host. A
+	// whether that application may run on a document the MODEL named, and the doc server's port
+	// and advertised host. File-only (no flag/env), like the blocks above. Absent ⇒ auto-open on,
+	// no command override, no command on model documents, an ephemeral port and a detected host. A
 	// pointer so an absent block falls through to those defaults rather than being an explicit
 	// zero setting — which would read as `auto-open: false` and silently disable the rung the
 	// whole feature exists for.
@@ -2277,6 +2289,10 @@ type presentConfig struct {
 	AutoOpen *bool `yaml:"auto-open"`
 	// Command is the opener template with {path} where the document goes; empty ⇒ the OS default.
 	Command string `yaml:"command"`
+	// CommandOnModelDocuments opts the command above in to documents the model named. A plain bool
+	// rather than AutoOpen's pointer: its default is FALSE, so the absent key and the zero value
+	// are the same answer and there is nothing to tell apart.
+	CommandOnModelDocuments bool `yaml:"command-on-model-documents"`
 	// Port is the doc server's TCP port; 0 (the default) takes an ephemeral one.
 	Port int `yaml:"port"`
 	// Host is the address served URLs advertise; empty ⇒ detected (see PresentSettings.host).
@@ -2285,9 +2301,16 @@ type presentConfig struct {
 
 // toPresentSettings maps the on-disk present block onto the resolved value, applying the
 // auto-open default (true) when the key is absent. A block that sets one key therefore leaves the
-// other three at their defaults, which is what makes it usable a line at a time.
+// other four at their defaults, which is what makes it usable a line at a time —
+// command-on-model-documents among them, whose default is off.
 func (p presentConfig) toPresentSettings() PresentSettings {
-	s := PresentSettings{AutoOpen: true, Command: p.Command, Port: p.Port, Host: p.Host}
+	s := PresentSettings{
+		AutoOpen:                true,
+		Command:                 p.Command,
+		CommandOnModelDocuments: p.CommandOnModelDocuments,
+		Port:                    p.Port,
+		Host:                    p.Host,
+	}
 	if p.AutoOpen != nil {
 		s.AutoOpen = *p.AutoOpen
 	}

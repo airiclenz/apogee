@@ -198,6 +198,12 @@ func (t *PresentDocument) Execute(ctx context.Context, call domain.ToolCall) (do
 // one degradation that carries: the doc server serves the workspace alone, so on a remote session
 // such a document reaches the user as its path and nothing more. It is stated on every rung — the
 // tool cannot see which kind of session it runs in, and the model relays what it is told.
+//
+// outcome.CommandWithheld appends the OTHER degradation the result can word: the host holds an
+// application the user named and did not run it on a document the model named, because the opt-in
+// is off. It is the only degradation the user can act on, so the sentence names the key and how to
+// set it — a model that reports "the path is shown" and nothing else leaves the user with no way
+// to find out why their present.command did not fire.
 func renderPresented(display string, outcome domain.PresentOutcome, mounted bool) string {
 	var rung string
 	switch outcome.Method {
@@ -207,6 +213,9 @@ func renderPresented(display string, outcome domain.PresentOutcome, mounted bool
 		rung = "shown in the transcript with a link."
 	default:
 		rung = "the path is shown in the transcript for the user to open."
+	}
+	if outcome.CommandWithheld {
+		rung += " " + presentedCommandWithheldNote
 	}
 	if mounted {
 		rung += " " + presentedMountNote
@@ -218,6 +227,14 @@ func renderPresented(display string, outcome domain.PresentOutcome, mounted bool
 // rung-2 degradation stated once, in the model's own result text, rather than left for a remote
 // user to discover.
 const presentedMountNote = "Outside the workspace it is served locally; a remote session shows the path only."
+
+// presentedCommandWithheldNote is the sentence a withheld rung 3 carries in its result: the user's
+// present.command was not run on this document because the opt-in that allows it on a document the
+// MODEL named is off. It names the key and the value that turns it on, in the config file that is
+// the only place it is set — the user reading the model's report is the one person who can act on
+// it, and a degradation nobody can locate is no better than a silent one.
+const presentedCommandWithheldNote = "The user's present.command was not run on it: " +
+	"set `present.command-on-model-documents: true` in the present: block of ~/.apogee/config.yaml to allow that."
 
 var (
 	_ domain.Tool         = (*PresentDocument)(nil)

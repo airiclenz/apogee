@@ -209,7 +209,27 @@ still pass unchanged. Must keep passing: `internal/tui/presenter_test.go` in ful
 **Acceptance.** `go build ./... && go vet ./... && go test ./internal/domain/... ./internal/present/... ./internal/tools/... -run 'Present' && go test ./internal/tui/... -run 'Present|Bridge'`
 **Commit:** `feat(present): the Presenter states whether the wired opener is execution-capable`
 
-## 4. An execution-capable rung 3 runs only behind a file-only opt-in
+## 4. An execution-capable rung 3 runs only behind a file-only opt-in — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): deviation — `presentConfig` gains a plain `bool`, not the `*bool` the item's approach names: the key's default is FALSE, so an absent key and the zero value are the same answer and a pointer would have nothing to tell apart (unlike `auto-open`'s true default, which is why that one is a pointer).
+
+NOTES (2026-09-22): deviation — the opt-in lands on `tui.Presentation` rather than on `present.Opener`: the Opener decides WHAT to run and the ladder decides WHETHER a rung runs at all (internal/present/opener.go:55-58), the Opener is handed a model-named document on every rung so it could not tell this case apart, and `internal/present` is not among the item's Files.
+
+NOTES (2026-09-22): deviation — the registry row is `Editable: false`, the one `present.` key the `/settings` pane will not write; `editPointer` gives it the existing "⏎ opens $EDITOR" affordance, which is what makes "file-only" real here, and it is why no `livePresentation.apply` case or `wire_settings.go` dispatcher entry was added.
+
+NOTES (2026-09-22): deviation — test (b)'s "all four modes" is pinned as the ladder's inert half (no override ⇒ rung 1 opens with the key both ways): `uiPresenter.climb` never sees a mode and the presenter is mode-independent by construction, so mode coverage stays where it already is — `TestPresentDocument_IsReadOnly`, `TestPresentDocument_IsNotExternalEffect` and the untouched `-run 'Classify|Present'` cells.
+
+NOTES (2026-09-22): the existing `presenter_test.go` row "local with a present.command opens on a machine with no desktop" now sets `CommandOnModelDocuments: true` — it is about the DESKTOP gate, and the opt-in is what keeps it reaching the runner.
+
+NOTES (2026-09-22): consequential edit — internal/config/defaults/config.yaml: made necessary by the new registry key (the shipped template documents every `present:` key, ADR 0019).
+
+NOTES (2026-09-22): consequential edit — internal/config/registry_test.go: made necessary by the new registry key (`TestRegistrySetIsTheInverseOfRead`'s `owns` table names the Options field of every row that has a Set).
+
+NOTES (2026-09-22): consequential edit — internal/config/config_test.go: made necessary by the new registry key (`everyKeyFileConfig` must state every key at a non-default value, and the file-only present row enumerates the block's keys).
+
+NOTES (2026-09-22): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by the new registry key (`TestSettingsRowsFormatEffectiveValues` pins one value per registry key and counts them).
+
+NOTES (2026-09-22): `domain.Presenter.IsExecutionCapable` and `tools.PresentDocument.IsExecutionCapable` (item 3) still have no production consumer: the climb gates on the same predicate, factored as `Presentation.executionCapable` so the question and the walk read ONE ladder snapshot (a second `IsExecutionCapable()` call inside climb would re-take the lock and could answer about a ladder the walk never used). The tool words the degrade from `PresentOutcome.CommandWithheld`, as the item's approach directs.
 
 **What.** Recast at the regression check (2026-09-22). `fix(agent)`: closes the gating half of
 `apogee-2we`. Depends on item 3.
