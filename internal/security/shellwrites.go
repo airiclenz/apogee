@@ -2,6 +2,7 @@ package security
 
 import (
 	"path"
+	"regexp"
 	"strings"
 	"unicode"
 )
@@ -395,6 +396,37 @@ var gitReadSubcommands = map[string]bool{
 	"check-attr": true, "help": true, "version": true, "--version": true, "--help": true,
 }
 
+// GitCommandConfigNameSource is the one source string behind every "config name whose VALUE is
+// a program git executes" pattern: an sshCommand, an editor, a pager, an askpass, a filter or
+// merge or diff driver, a credential helper, a gpg.program, a proxy command. internal/gitexec
+// anchors it as its CommandConfigName — the repo-local probe that costs a repository its git
+// tools — and hands that string to git's --get-regexp verbatim, so it must stay POSIX-ERE
+// compatible: plain ( ) groups, no (?: and no (?i). It lives here because gitexec imports
+// security, never the reverse; a name it matches is spelled lowercase, so a caller lowers what
+// it matches first.
+const GitCommandConfigNameSource = `core\.(sshcommand|editor|pager|askpass|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external|diff\..*\.(command|textconv)|merge\..*\.driver|mergetool\..*\.cmd|difftool\..*\.cmd|filter\..*\.(clean|smudge|process)|credential\.helper|credential\..*\.helper|gpg\.program|gpg\..*\.program|uploadpack\.packobjectshook|remote\..*\.proxy|pager\..*`
+
+// GitCommandConfigName is the shell write view's superset of gitexec's CommandConfigName: the
+// same names plus core.hookspath. The probe leaves core.hooksPath out on purpose — gitexec's
+// hardening options empty it on every call, so refusing it there would cost a repository its
+// git tools for a key that reaches no program — but a `git config` line that SETS it is a write
+// into the repository's control plane all the same, and that is what this pattern judges.
+var GitCommandConfigName = regexp.MustCompile(`^(` + GitCommandConfigNameSource + `|core\.hookspath)$`)
+
+// gitConfigReadForms are the `git config` options under which the invocation only reads a
+// value and writes no config file.
+var gitConfigReadForms = map[string]bool{
+	"--get": true, "--get-all": true, "--get-regexp": true, "--get-urlmatch": true,
+	"--get-color": true, "--get-colorbool": true, "-l": true, "--list": true,
+}
+
+// gitConfigOtherFileOptions are the `git config` options that direct the write at a file OTHER
+// than the repository's own: the operator's scopes, or a file the line names outright (which
+// then feeds the view as an operand of its own).
+var gitConfigOtherFileOptions = map[string]bool{
+	"--global": true, "--system": true, "-f": true, "--file": true,
+}
+
 // findWritingPredicates are the `find` operands that make it delete, run a program or write
 // a listing; with any of them present the whole command is judged as writing.
 var findWritingPredicates = map[string]bool{
@@ -439,7 +471,11 @@ func operandTargets(words []string) []string {
 }
 
 // gitTargets judges a git command by its subcommand: a read verb contributes nothing, any
-// other verb's operands (the global options before it included) are write targets.
+// other verb's operands (the global options before it included) are write targets. A `config`
+// write of a command-valued key into the repository's own config additionally names
+// `.git/config`, the file it lands in — its operands alone (`filter.x.clean cmd`) never spell
+// the control-plane path the write-git-control-plane rule matches, and the memoised probe on
+// the git tools' side would not catch up until apogee restarts.
 func gitTargets(operands []string) []string {
 	rest := operands
 	for len(rest) > 0 && strings.HasPrefix(rest[0], "-") {
@@ -462,7 +498,29 @@ func gitTargets(operands []string) []string {
 			targets = append(targets, w)
 		}
 	}
-	return valueOperands(targets)
+	targets = valueOperands(targets)
+	if rest[0] == "config" && gitConfigWritesCommandKey(rest[1:]) {
+		targets = append(targets, ".git/config")
+	}
+	return targets
+}
+
+// gitConfigWritesCommandKey reports whether the operands of a `git config` invocation write a
+// command-valued key (GitCommandConfigName, matched on the lowered operand — git canonicalises
+// the name's case) into the repository's own config: no operand directs the write at another
+// file (gitConfigOtherFileOptions), none makes it a read (gitConfigReadForms).
+func gitConfigWritesCommandKey(operands []string) bool {
+	matched := false
+	for _, w := range operands {
+		option, _, _ := strings.Cut(w, "=")
+		if gitConfigOtherFileOptions[option] || gitConfigReadForms[option] {
+			return false
+		}
+		if GitCommandConfigName.MatchString(strings.ToLower(w)) {
+			matched = true
+		}
+	}
+	return matched
 }
 
 // ddTargets keeps only what dd writes: the values of its `of=` operands.

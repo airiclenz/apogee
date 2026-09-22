@@ -65,6 +65,11 @@ func TestWriteTargetsOf(t *testing.T) {
 		{"git --git-dir then a write verb", "git --git-dir=.git/modules/x config a b", ".git/modules/x a b"},
 		{"git remote fails closed", "git remote add origin x", "add origin x"},
 		{"git branch fails closed", "git branch -D x", "x"},
+		{"git config writing a command-valued key names .git/config", "git config --local filter.x.clean cmd", "filter.x.clean cmd .git/config"},
+		{"git config setting core.hooksPath names .git/config (lowered before matching)", "git config core.hooksPath /tmp/h", "core.hooksPath /tmp/h .git/config"},
+		{"git config --global writes the operator's file, not .git/config", "git config --global filter.x.clean cmd", "filter.x.clean cmd"},
+		{"git config of a plain key names no file", "git config user.name x", "user.name x"},
+		{"git config --get is a read of the key", "git config --get filter.x.clean", "filter.x.clean"},
 
 		// --- dd ----------------------------------------------------------------------------
 		{"dd writes only its of=", "dd if=.git/config of=/tmp/x bs=1", "/tmp/x"},

@@ -343,8 +343,12 @@ func query(ctx context.Context, gitPath, dir string, env []string, timeout time.
 // The source string must stay POSIX-ERE-compatible — plain ( ) groups, no (?: — because it is
 // handed to git verbatim and git's --get-regexp compiles it with regcomp; the same string is
 // kept here to re-check what came back, since git's combined output can carry a warning line the
-// listing never intended as a name.
-var CommandConfigName = regexp.MustCompile(`^(core\.(sshcommand|editor|pager|askpass|gitproxy|alternaterefscommand)|sequence\.editor|diff\.external|diff\..*\.(command|textconv)|merge\..*\.driver|mergetool\..*\.cmd|difftool\..*\.cmd|filter\..*\.(clean|smudge|process)|credential\.helper|credential\..*\.helper|gpg\.program|gpg\..*\.program|uploadpack\.packobjectshook|remote\..*\.proxy|pager\..*)$`)
+// listing never intended as a name. That source is [security.GitCommandConfigNameSource]: the
+// shell write view builds its own [security.GitCommandConfigName] from it — the same names PLUS
+// core.hookspath, because a `git config` line that sets the key is a write into .git/config
+// whatever the hardening options do to it afterwards — and this package imports security, never
+// the reverse, so the one string lives there.
+var CommandConfigName = regexp.MustCompile(`^(` + security.GitCommandConfigNameSource + `)$`)
 
 // FilterConfigScopes are the config scopes a command-valued key is refused from — the
 // REPOSITORY's own files, which is what the workspace bytes can carry. --local is .git/config

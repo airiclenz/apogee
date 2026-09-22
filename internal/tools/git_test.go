@@ -1962,6 +1962,23 @@ func TestGit_RepoLocalFsmonitorTrueIsNotRefused(t *testing.T) {
 	}
 }
 
+// TestGit_RepoLocalHooksPathIsNotRefused pins that core.hooksPath stays absent from the probe's
+// pattern (gitexec.CommandConfigName): the hardening options empty it on every call, so a repo
+// that sets it keeps its git tools — only the shell write view, which judges a `git config` line
+// SETTING the key, widens its own pattern with it (security.GitCommandConfigName).
+func TestGit_RepoLocalHooksPathIsNotRefused(t *testing.T) {
+	root := gitRepo(t)
+	runInRepo(t, root, "config", "--local", "core.hooksPath", t.TempDir())
+
+	res, err := NewGitStatus(root).Execute(context.Background(), statusCall("c1"))
+	if err != nil {
+		t.Fatalf("status err = %v", err)
+	}
+	if res.IsError {
+		t.Fatalf("git_status refused a repo that only set core.hooksPath: %q", res.Content)
+	}
+}
+
 // TestGit_RepoLocalAliasIsNotRefused pins the other deliberate absence: an alias cannot shadow a
 // builtin subcommand, and every subcommand these tools invoke is a builtin, so a repo-local alias
 // changes nothing about what apogee's own argv runs and must not cost the repository its tools.
