@@ -561,7 +561,22 @@ go test -race ./internal/provider/... -run 'RetryAfter|Respond'
 
 **Commit:** `test: three wall-clock proxies assert the thing they stand for`
 
-## 11. The real-process and settle-window margins fit a loaded box
+## 11. The real-process and settle-window margins fit a loaded box — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): both deadline tables' scripts were lengthened from `sleep 5` to `sleep 30`, the
+route the item's Regression guard names for widening the `within` bounds past `WaitGrace + 2s`; the
+bounds are now `margin` (5 s) and `WaitGrace + margin` (7 s), both far below the script's own sleep,
+so what the cases assert — Run gives up on the deadline instead of running the script out — is
+unchanged.
+NOTES (2026-09-23): `testDeadline` and `testQuiet` are now derived from `testSettle`
+(`10 * testSettle` = 5 s, `2 * testSettle` = 1 s) rather than re-stated, so the guard's
+`testQuiet >= testSettle` relation survives any future widening; the unix stall's fixed 50 ms margin
+became `testSettle/2` for the same reason. Every `testSettle` reader in `internal/filewatch` was
+re-checked and the whole package re-run, not only the unix file.
+NOTES (2026-09-23): the Acceptance command was run without `-race` — this host's kernel gives a
+47-bit VMA and ThreadSanitizer refuses to start on it ("unsupported VMA range, Found 47 - Supported
+48"), so every `-race` run of any package fails before a test executes. `go test -count=2` over the
+three packages passes; `go vet` and `gofmt` clean.
 
 **What.** The remaining `apogee-7fmu` rows, where a real process or a real settle window is the
 thing being timed and a budget is the honest instrument.

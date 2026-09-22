@@ -15,11 +15,20 @@ import (
 // The cadence the tests run the watcher at. The Settle window is generously wider than the Interval
 // so that a burst of writes coalesces even on a loaded machine under -race, and the deadline is wide
 // enough that a missed report is a failure of the watcher rather than of the box it runs on.
+//
+// The three windows are margins sized for a loaded box, and the last two derive from the Settle so
+// the relation each one asserts survives any future widening. testSettle is the window a FRACTION of
+// which still has to be measurable: filewatch_unix_test.go sleeps testSettle/3 to land a second
+// write inside a real SIGSTOP-stalled Settle, and at 150ms that fraction was a 50ms sleep a
+// descheduled goroutine could overrun. testDeadline is the whole window awaitChange gives one
+// report, so that a report merely late on a slow box is not a failure. testQuiet is the window in
+// which a SECOND report must not arrive, which only says anything about the Settle when it is at
+// least as long as one.
 const (
 	testInterval = 10 * time.Millisecond
-	testSettle   = 150 * time.Millisecond
-	testDeadline = 3 * time.Second
-	testQuiet    = 400 * time.Millisecond
+	testSettle   = 500 * time.Millisecond
+	testDeadline = 10 * testSettle
+	testQuiet    = 2 * testSettle
 )
 
 // startWatcher starts a watcher over path at the test cadence and stops it with the test.

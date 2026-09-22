@@ -113,6 +113,13 @@ func TestRunReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	t.Parallel()
 
 	const deadline = 200 * time.Millisecond
+	// margin is what a loaded box under -race is allowed on top of the thing being claimed: the
+	// shell's cold start and the kill's delivery in the first case, and the stderr copy's teardown
+	// behind WaitGrace in the second. It is the instrument, never the claim — what each case asserts
+	// is that Run gives up on the deadline rather than running the script out, so the only bound the
+	// margin owes is to stay well under the script's own sleep. The scripts sleep 30 for exactly
+	// that headroom.
+	const margin = 5 * time.Second
 	for _, tc := range []struct {
 		name   string
 		script string
@@ -121,20 +128,20 @@ func TestRunReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	}{
 		{
 			name:   "the command itself, under the context's deadline",
-			script: "exec sleep 5",
+			script: "exec sleep 30",
 			bound: func(ctx context.Context) (context.Context, context.CancelFunc, Options) {
 				ctx, cancel := context.WithTimeout(ctx, deadline)
 				return ctx, cancel, Options{}
 			},
-			within: time.Second,
+			within: margin,
 		},
 		{
 			name:   "a wrapper's grandchild, under Options.Timeout",
-			script: "sleep 5",
+			script: "sleep 30",
 			bound: func(ctx context.Context) (context.Context, context.CancelFunc, Options) {
 				return ctx, func() {}, Options{Timeout: deadline}
 			},
-			within: WaitGrace + time.Second,
+			within: WaitGrace + margin,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

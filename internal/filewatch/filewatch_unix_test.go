@@ -30,7 +30,11 @@ func TestWatchSettlesOnTheClockNotTheTick(t *testing.T) {
 
 	// The child waits until this process is stopped, writes, holds it stopped past the Settle, and
 	// continues it. `ps -o stat=` reports a stopped process with a leading T on Linux and macOS.
-	stall := testSettle + 50*time.Millisecond
+	// The stall holds this process stopped for a whole Settle plus a margin, so the pending tick is
+	// unambiguously older than the Settle by the time the SIGCONT lands. The margin covers the
+	// scheduling slack on a loaded box between the child's `ps` seeing the T state and its own sleep
+	// actually running, and it derives from the Settle so it stays proportional to it.
+	stall := testSettle + testSettle/2
 	script := fmt.Sprintf(
 		"while ! ps -o stat= -p %[1]d | grep -q '^T'; do sleep 0.01; done; "+
 			"printf 'auto-title: true\\n' > %[2]q; sleep %[3]s; kill -CONT %[1]d",

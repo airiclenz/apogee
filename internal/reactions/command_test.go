@@ -121,13 +121,21 @@ func TestCommandExecutorReportsTheExitStatusAndWhatTheCommandSaid(t *testing.T) 
 func TestCommandExecutorReportsTheDeadlineRatherThanWaitingOnASleep(t *testing.T) {
 	requireShell(t)
 
+	// margin is what a loaded box under -race is allowed on top of the thing being claimed: the
+	// shell's cold start and the kill's delivery in the first case, and the stderr copy's teardown
+	// behind userexec.WaitGrace in the second. It is the instrument, never the claim — what each
+	// case asserts is that Run gives up on the deadline rather than running the script out, so the
+	// only bound the margin owes is to stay well under the script's own sleep. The scripts sleep 30
+	// for exactly that headroom. internal/userexec's table carries the same margin for the same
+	// reason.
+	const margin = 5 * time.Second
 	for _, tc := range []struct {
 		name   string
 		script string
 		within time.Duration
 	}{
-		{name: "the command itself", script: "exec sleep 5", within: time.Second},
-		{name: "a wrapper's grandchild", script: "sleep 5", within: userexec.WaitGrace + time.Second},
+		{name: "the command itself", script: "exec sleep 30", within: margin},
+		{name: "a wrapper's grandchild", script: "sleep 30", within: userexec.WaitGrace + margin},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			hook := shellHook("notify", tc.script)
