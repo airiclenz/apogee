@@ -675,7 +675,39 @@ go vet ./cmd/apogee/...
 
 **Commit:** `test(e2e): the budgets outside the cured kit follow the kit's principle`
 
-## 13. holdKey and the transcript walk scale with the work they drive
+## 13. holdKey and the transcript walk scale with the work they drive — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): re-derived from the ratified "raise `holdKeyMax` so the hold survives a loaded
+box, keeping the gap" — raising the count alone does not survive this hardware, it breaks the test.
+Measured on the reference ARM box: `holdKeyMax = 24` failed 2 of 5 runs, 48 failed 3 of 5, 600 failed
+3 of 3, all with "the pane was answered by keys that arrived before it painted". The cause is byte
+backlog, not the count: at a fixed 5 ms gap the pump types faster than the Update loop drains the
+pty, so the presses still unread when the pane paints are delivered past `approvalArmDelay`'s 100 ms
+wall-clock latch. The count is therefore kept as the bound and raised (12 → 40) exactly as the
+regression guard asks, and the pump is paced — each press waits up to `settled` for the screen to
+move before the next — so at most one press is ever in flight and the hold can last as long as the
+pane takes. `holdKeyMax` is now a ceiling only: 40 presses × `settled` ≈ 10 s, inside the `WaitText`
+that follows the hold, so that wait is what reports a pane that never paints.
+NOTES (2026-09-23): the item's premise verified by measurement before the change — at
+`holdKeyMax = 12` the pump exhausted all twelve presses on every one of three runs (logged) and the
+pane appeared afterwards, so the hold never overlapped the pane and the assertion was vacuous on
+this box. After the change it stops at the marker after 5–8 presses, i.e. the hold is live when the
+pane paints, which is what the test claims to exercise.
+NOTES (2026-09-23): `waitForFrameChange` (`cmd/apogee/e2e_hostile_test.go`) and `waitForScroll`
+(`cmd/apogee/e2e_stream_test.go`) were left unedited as the item states — their docs already cite
+`repaintBudget`, and the new constant's doc names them as the other full-budget spenders.
+NOTES (2026-09-23): the Acceptance command was run without `-race` — this host's kernel gives a
+47-bit VMA and ThreadSanitizer refuses to start on it (`FATAL: ThreadSanitizer: unsupported VMA
+range`), so every `-race` run fails before a test executes. `go test -count=3 -timeout 20m
+./cmd/apogee/ -run 'TestE2EApprovalKeysAreArmedAfterPaint|TestE2EOutcomeSlotsCarryTheToolsVerdict'`
+passes (85 s); the whole `./cmd/apogee/` package passes (187 s) with the raised `repaintBudget`;
+`go vet ./cmd/apogee/` and `gofmt -l cmd/apogee/` are clean.
+NOTES (2026-09-23): observed while sizing the hold — `approvalArmDelay` is a wall-clock latch, so a
+key already queued in the pty when the pane opens answers it as soon as the 100 ms elapses, however
+long ago the human pressed it. On a box slow enough that the input backlog outlives the latch, a
+held key answers an approval the human never saw a frame for. Fixing that is a product change in
+`internal/tui/approval.go` (arm on the drained input position, not on the clock) and is outside this
+item; it is on the run's DEFER line.
 
 **What.** Recast at the regression check (2026-09-22). Closes the code half of `apogee-61g`: the two
 `cmd/apogee` budgets that are still flat literals after commit `31f44f75`.

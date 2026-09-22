@@ -179,7 +179,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	submit(drv, controlPrompt)
 	release := holdKey(drv, "a", approvalMarker)
 	drv.WaitText(approvalMarker)
-	release()
+	held := release()
 	drv.WaitQuiet(settled)
 	if _, _, ok := drv.Frame().Find(approvalMarker); !ok {
 		t.Fatalf("the pane was answered by keys that arrived before it painted:\n%s", drv.Frame())
@@ -188,7 +188,7 @@ func TestE2EApprovalKeysAreArmedAfterPaint(t *testing.T) {
 	// Step 4 — and the deliberate press costs nothing. The frame has been settled for longer than
 	// the latch, so the very next `a` rules.
 	pressAndSettle(t, drv, "a")
-	clearPrompt(drv)
+	clearPrompt(drv, held)
 	waitIdle(drv)
 
 	// Step 5 — `d` denies, just as promptly.
@@ -355,17 +355,32 @@ func raisePane(drv driven) {
 	drv.WaitQuiet(settled)
 }
 
-// holdKey writes key into the terminal every few milliseconds until marker is on screen, and the
-// returned function stops it. It is the driver's reading of the checklist's "hold the `a` key down
-// through the moment the approval pane appears": every byte it sends is delivered before the pane
-// could have armed, so the pane must survive all of them.
+// holdKey writes key into the terminal until marker is on screen, and the returned function stops
+// it and reports how many presses it sent. It is the driver's reading of the checklist's "hold the
+// `a` key down through the moment the approval pane appears": every byte it sends is delivered
+// before the pane could have armed, so the pane must survive all of them.
 //
-// It is bounded twice over — by the marker and by a key count — so a pane that never appears ends
-// the pump rather than filling the prompt box for as long as the test runs.
-func holdKey(drv driven, key, marker string) func() {
+// The pump paces itself to the PROGRAM rather than to the clock: a press goes out, the screen is
+// given [settled] to move under it, and only then does the next one follow. A press every few
+// milliseconds out-runs a loaded box — keys queue in the pty faster than the Update loop drains
+// them, and the ones still unread when the pane finally paints are delivered AFTER its arming
+// latch, so a hold that never overlapped the pane is what answers it. Pacing keeps at most one
+// press in flight, which is what lets the hold last as long as the pane takes to appear — on a
+// throttled box that is well past the ≤60 ms a fixed gap bought — without any of it spilling past
+// the latch.
+//
+// It is bounded twice over — by the marker and by [holdKeyMax] — so a pane that never appears ends
+// the pump rather than filling the prompt box for as long as the test runs. The count it returns is
+// what [clearPrompt] empties afterwards, so that ceiling can be as generous as a loaded box needs
+// without a healthy run paying for it.
+func holdKey(drv driven, key, marker string) func() int {
+	// The floor between two presses on a box that keeps up, and how long one press waits to be
+	// taken up on a box that does not.
 	const gap = 5 * time.Millisecond
+	const pace = settled
 
 	done, stopped := make(chan struct{}), make(chan struct{})
+	sent := 0
 	go func() {
 		defer close(stopped)
 		for range holdKeyMax {
@@ -377,27 +392,44 @@ func holdKey(drv driven, key, marker string) func() {
 			if _, _, ok := drv.Frame().Find(marker); ok {
 				return
 			}
+			painted := drv.Screen().BytesWritten()
 			drv.Type(key)
+			sent++
 			time.Sleep(gap)
+			for deadline := time.Now().Add(pace); drv.Screen().BytesWritten() == painted && time.Now().Before(deadline); {
+				time.Sleep(gap)
+			}
 		}
 	}()
-	return func() {
+	// The receive on stopped is what makes sent safe to read here: the pump has returned before the
+	// count is taken, so the two never touch it at once.
+	return func() int {
 		close(done)
 		<-stopped
+		return sent
 	}
 }
 
-// holdKeyMax bounds how many keys [holdKey] sends, and therefore how many backspaces empty the box
-// afterwards. One number rather than two: they are the same number.
-const holdKeyMax = 12
+// holdKeyMax is the ceiling on how many keys [holdKey] sends, and a hold reaches it only when the
+// marker never arrives: a pump paced on the screen stops at the pane, which on this suite's slowest
+// box is under ten presses in. Forty of them, each waiting up to [settled] to be taken up, bound a
+// pane that never paints at around ten seconds — inside the WaitText that follows the hold, so that
+// wait is what reports the failure and the pump is long quiet by the time it does.
+//
+// Raising it from the dozen a fixed-gap pump could afford costs a healthy run nothing, because
+// [clearPrompt] presses one backspace per key actually sent rather than one per key allowed.
+const holdKeyMax = 40
 
 // clearPrompt empties the input box. A decision key that arrives before its pane exists is typed at
 // the PROMPT — which is the correct place for a keystroke nothing else has claimed — and the next
 // line submitted would otherwise carry it as a prefix and match no scripted turn. It presses one
-// backspace per key the hold could have left behind; the extra ones land on an empty box and do
+// backspace per key the hold left behind, plus one; the extra lands on an empty box and does
 // nothing, which is cheaper than reading the box back between each.
-func clearPrompt(drv driven) {
-	for range holdKeyMax + 1 {
+//
+// held is the count [holdKey]'s stop function returned, not [holdKeyMax]: a hold that stopped at
+// the marker after five presses costs five backspaces, whatever the ceiling would have allowed.
+func clearPrompt(drv driven, held int) {
+	for range held + 1 {
 		drv.Press(tuitest.Backspace)
 	}
 }
@@ -408,9 +440,12 @@ func clearPrompt(drv driven) {
 func pressAndSettle(t *testing.T, drv driven, key string) {
 	t.Helper()
 
-	// What "no perceptible wait" is worth as a number. Generous against a loaded CI box and still
-	// an order below the wait a re-armed latch would cost.
-	const promptly = 2 * time.Second
+	// What "no perceptible wait" is worth as a number. It is a LIVENESS bound, not a measurement of
+	// how fast the pane answers: a round trip that takes a second on a throttled box is a healthy
+	// round trip, and only a pane that is not being answered at all — a latch that re-armed, a key
+	// that reached nothing — takes longer than this. Twenty times [settled], which is still far
+	// below the wait a re-armed latch would cost.
+	const promptly = 20 * settled
 
 	start := time.Now()
 	drv.Type(key)

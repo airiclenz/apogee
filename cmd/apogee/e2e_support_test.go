@@ -635,8 +635,13 @@ var _ = func(d *tuitest.Driver) []tea.ProgramOption { return d.ProgramOptions() 
 // does not fit at all — the pages of it walked in order.
 
 // repaintBudget bounds [awaitRepaint]. See its doc for why it is set by what a loaded box costs
-// rather than by what a quiet one needs.
-const repaintBudget = 3 * time.Second
+// rather than by what a quiet one needs. Forty times [settled] — the kit's own unit of "the screen
+// has stopped moving" — which keeps it well under [tuitest.DefaultTimeout] and still long enough
+// that a page taking seconds to paint on a throttled box lands inside it. Three callers spend it in
+// full to answer "nothing moved": [scrollTranscript] once per walk, and e2e_hostile_test.go's
+// waitForFrameChange and e2e_stream_test.go's waitForScroll once per call. The seconds that adds to
+// a healthy run are the deliberate price of never reading a half-walked surface as the whole one.
+const repaintBudget = 40 * settled
 
 // expandLastBlock opens the last toggleable block in the transcript — the keyboard route to the
 // click the checklist describes. ⌥↑ enters the block cursor on the LAST stop and ⏎ toggles what it
@@ -727,9 +732,12 @@ func scrollTranscript(drv *tuitest.Driver) string {
 		drv.Press(tuitest.PgDown)
 		// The byte counter, not the quiet check, is what says the press LANDED. A quiet check taken
 		// straight after a keystroke passes on a screen that has simply not been painted yet, and a
-		// walk built on one reads its first page twice and calls that the end.
+		// walk built on one reads its first page twice and calls that the end. The quiet that follows
+		// is [settled], the same "the screen has stopped moving" the rest of the kit reads frames by:
+		// a page still painting 60 ms in — which is an ordinary loaded box — would otherwise be read
+		// half-drawn into the transcript this returns.
 		awaitRepaint(drv, painted)
-		drv.WaitQuiet(60 * time.Millisecond)
+		drv.WaitQuiet(settled)
 	}
 	return b.String()
 }
