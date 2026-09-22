@@ -98,7 +98,7 @@ budget=$((ncpu - 1))
 # fanned its tests out GOMAXPROCS-wide would put shards × GOMAXPROCS driven e2e tests on the
 # box at once (four cmd/apogee shards × 9 = 36 on the 9-core box this is tuned for, beside the
 # tui shards and the rest), which is what turned the sharded suite red after the cmd/apogee
-# sweep — 5 s waits timing out, leak checks finding goroutines still unwinding, PTY frames
+# sweep — the kit's waits timing out, leak checks finding goroutines still unwinding, PTY frames
 # arriving late: load, not logic. So the budget is divided among the processes it launches,
 # and each shard runs that many tests at once — 1 whenever the plan already fills the budget
 # with processes, more only when APOGEE_TEST_SHARDS leaves slots over.
@@ -107,7 +107,7 @@ budget=$((ncpu - 1))
 # packages run at once (GOMAXPROCS), but each of them fanned its own tests out GOMAXPROCS-wide
 # on top of that — on the 4-vCPU runner up to sixteen tests beside four shards, which is the
 # load that stretched a 2 s CPU-bound walk in internal/doctext to 14 s and timed out the
-# shards' 5 s waits. The floor is there because those packages' tests mostly sleep rather than
+# shards' waits. The floor is there because those packages' tests mostly sleep rather than
 # compute: one at a time put the rest on the critical path (99 s against 69 s shards on the
 # 9-core box), two at a time cost nothing measurable, and either is a fraction of the old
 # fan-out. Its package-level concurrency (-p) is left alone: the process is dominated by
@@ -116,7 +116,7 @@ budget=$((ncpu - 1))
 # The slow-box floor. APOGEE_TEST_SLOW=1 is an explicit knob rather than a bound sized off
 # nproc because core count cannot tell the boxes apart: a Raspberry Pi 4 and CI's 4-vCPU runner
 # both report 4 cores and differ 3–5x per core, and CI keeps the plan above. On the Pi the
-# default plan's ≈11 concurrent driven tests turn `submit`'s 5 s echo wait and the 2 s leak
+# default plan's ≈11 concurrent driven tests turn `submit`'s echo wait and the leak
 # grace red — load, not logic — where 4 at once (1 shard per heavy package, every process
 # -parallel 1, the rest -p 2) is the mix measured green. The rest's floor of 2 is overridden too.
 is_slow_box() { [ "${APOGEE_TEST_SLOW:-}" = 1 ]; }

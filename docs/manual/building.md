@@ -69,6 +69,14 @@ act; CI creates the tag and nothing more.
 
 ## Testing
 
+`make test` is the supported way to run the suite, and the shape to reach for when verifying
+work: it shards the two heavy packages and bounds how many tests each process runs at once. A
+raw multi-package `go test` — `./...`, or several packages named on one line — does neither.
+`go test` runs packages concurrently and gives each of them the whole box for its own
+`t.Parallel` fan-out, so the driven tests in `cmd/apogee` and `internal/tui` end up competing
+with their neighbours and report that load as a failure. To debug one test, narrow to its
+package instead: `go test -race -count=1 -run TestE2ESmokeInProcess ./cmd/apogee/`.
+
 `make test` does not run `go test ./...` in one process. Almost all of the suite's wall time
 is in two packages — `cmd/apogee` and `internal/tui` — and both are `t.Parallel` inside.
 In `cmd/apogee` the e2e tests are parallel by default: `tuitest.CheckLeaks` attributes
@@ -91,7 +99,7 @@ cache) and around 55s warm.
 The one flag is `-parallel`. `go test` runs a package's `t.Parallel` tests GOMAXPROCS at a
 time by default, as if it had the box to itself; a shard does not, and a shard that also fanned
 its tests out that wide would put shards × GOMAXPROCS driven e2e tests on the box at once —
-which is load, not logic, and is what makes 5 s waits time out and leak checks catch goroutines
+which is load, not logic, and is what makes the kit's waits time out and leak checks catch goroutines
 still unwinding. So the script divides its process budget among the processes it launches and
 passes each heavy shard that share as `-parallel`: 1 whenever the plan already fills the budget
 with processes (the default sizing, and CI's cap below), more only when `APOGEE_TEST_SHARDS`
@@ -111,8 +119,11 @@ The seed goes stale as the suite's shape moves; refresh it with `make test-timin
 after a `make test` on a dev box (it copies `.test-timings` into the seed) and commit the
 result.
 
-`go test -race -count=1 ./...` remains the equivalent single-process run, and is the one to
-reach for when bisecting or debugging a single test. CI runs `make test` under
+`go test -race -count=1 ./...` remains the equivalent single-process run — every test, nothing
+skipped — but it is not the supported shape, for the reason above: it hands every package the
+box at once, which is the load the shard plan exists to avoid. When bisecting or debugging,
+name the package and the test (`go test -race -count=1 -run TestX ./cmd/apogee/`) rather than
+the whole tree. CI runs `make test` under
 `APOGEE_TEST_SHARDS=2` — the same sharded form, capped because a hosted runner is a 4 vCPU
 box where each race-enabled shard carries its own memory cost.
 

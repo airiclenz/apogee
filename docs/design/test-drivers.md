@@ -461,7 +461,9 @@ than as a pass).
 
 ### Waiting
 
-A driver test never sleeps. `WaitFor(t, cond, opts...)` polls at 20 ms against a 5 s deadline and,
+A driver test never sleeps. `WaitFor(t, cond, opts...)` polls at 20 ms against `DefaultTimeout` —
+60 s, generous on purpose, since a wait returns the instant its condition holds and only a failure
+ever spends it — and,
 when it gives up, prints the last frame *plain and styled*, so a colour bug is visible in the
 failure output rather than only in a rerun. `WaitText`, `WaitGone` and `WaitQuiet` are the
 shorthands almost every test uses. Options: `On(screen)` (which screen to print — pass it),
@@ -470,7 +472,8 @@ writes `<dir>/<test name>.{txt,ansi}`, for a CI run nobody is watching live.
 
 `CheckLeaks(t)` is the other guard: called FIRST in a driver test, it fails the test if a goroutine
 from `internal/tui`, bubbletea, `internal/tuitest`, `internal/filewatch`, `internal/heartbeat` or
-`internal/reactions` is still running 2 s after it ends. Only goroutines the test itself started:
+`internal/reactions` is still running when `leakGrace` (the same 60 s as `DefaultTimeout`, and
+generous for the same reason) runs out after it ends. Only goroutines the test itself started:
 the call labels the test goroutine with a per-call pprof label (`tuitest.leakcheck`), every
 goroutine started from it — the program's included — inherits the label, and the cleanup reads the
 goroutine profile and reports the stacks still carrying it, so a parallel neighbour's straggler is
@@ -690,8 +693,8 @@ pty — the black-box twin of `e2eSession.Relaunch()`, and the reopen half of ev
 killed run leave behind?" claim. The new run gets a trace file of its own: appending two runs'
 paint into one stream would leave `TraceBytes()` answering about neither.
 
-**The settle rule is the same** — no bytes for 150 ms means the frame is final — because it is a
-property of the picture, not of how the bytes arrived. The two drivers' **byte counters are not**:
+**The settle rule is the same** — no bytes for `settled` (250 ms) means the frame is final —
+because it is a property of the picture, not of how the bytes arrived. The two drivers' **byte counters are not**:
 a real pty in raw mode does no newline translation and the in-process driver's output does, so a
 flicker ceiling is pinned per driver.
 
@@ -1045,8 +1048,12 @@ already spend the box, so `scripts/test-shards.sh` passes each heavy shard a `-p
 its share of the process budget, 1 at the default sizing — and a shard runs its parallel tests
 that many at a time: the alternative, `go test`'s GOMAXPROCS-wide default in every shard at once,
 put up to thirty-six driven tests on the 9-core box and turned the sharded suite red on load
-alone (5 s waits, leak checks, PTY frames). The kit's waits stay sized for a shard that has its
-share of the box, not for one competing with seven others' fan-out.
+alone (waits timing out, leak checks, PTY frames). The kit's waits stay sized for a shard that has
+its share of the box, not for one competing with seven others' fan-out. Which is also why
+`make test` is the supported way to run this package: a raw multi-package `go test` (`./...`, or
+`./cmd/apogee/... ./internal/tui/...` on one line) has no shard plan bounding it at all, and the
+driven tests report that load as a failure. One package at a time, narrowed with `-run`, is the
+debugging shape.
 
 The per-test figures that follow are test time under `-race` on an idle box, not wall clock, and
 they still add up to roughly the **≈ 122 s** the serial measurement above recorded, on top of the
@@ -1068,16 +1075,17 @@ fixture that streams the checklist's 400-line answer three runes at a time with 
 between deltas spends ~2 s of scripted delay before the composition and the renderer are paid for
 at all, and ~5 s of wall clock under `-race`. The millisecond is a floor, not a pace: a 1 ms Go
 timer fires on the box's next timer tick, ~3 ms on the 9-core dev VM (500 × `time.NewTimer(1ms)`
-measured 1.48 s, 2026-09-14), so the stub alone plays the 1,928 deltas in ≈ 5.8 s there — past
-the kit's 5 s default before any load is added, which is why every wait for the reply's last line
-(in process, through the pty, under the judge) shares the one named bound `streamReplyWait`
-(15 s: the tick-rounded floor with room for the parallel suite on top) instead of a per-test
-literal. The T-24 set (`cmd/apogee/e2e_stream_test.go`) runs
-three near-complete passes over that answer — in process, through the pty, and once more for the
-repaint ceiling — and measures **≈ 20 s** under `-race`, ≈ 16 s without it. Two knobs trade
-fidelity for time if that becomes the package's problem: the fixture's `chunk_runes` (3 is what cuts
-most lines mid-word, which is the point of the fixture) and how far into the answer the ceiling
-test's last mark sits.
+measured 1.48 s, 2026-09-14), so the stub alone plays the 1,928 deltas in ≈ 5.8 s there — playback
+a flat budget has to cover before any load is added, and more of it on a box with fewer cores.
+Which is why every wait for the reply's last line (in process, through the pty, under the judge)
+shares the one named bound `streamReplyWait`: `DefaultTimeout` plus an allowance per streamed
+rune, so the playback the wait must outlast is priced rather than guessed — the stopwatch
+arithmetic behind its previous flat 15 s held only for the nine-core box it was taken on. The T-24
+set (`cmd/apogee/e2e_stream_test.go`) runs three near-complete passes over that answer — in
+process, through the pty, and once more for the repaint ceiling — and measures **≈ 20 s** under
+`-race`, ≈ 16 s without it. Two knobs trade fidelity for time if that becomes the package's
+problem: the fixture's `chunk_runes` (3 is what cuts most lines mid-word, which is the point of
+the fixture) and how far into the answer the ceiling test's last mark sits.
 
 `TestE2EEgressLongStreamIsNotDeadlined` is the one test in the package that is deliberately allowed
 past that norm: it measures **≈ 26 s**, and the twenty-five of them are the claim. The provider
@@ -1128,9 +1136,10 @@ walks the key list DOWNWARDS (`settingsGoDown`): the rows it wants sit near the 
 verdict a CANCELLED delegation's outcome slot carries is written by the replay that closes it, so the
 claim costs a relaunch and a `/sessions` restore.
 
-Two rules keep it there. Every wait is a bounded `WaitFor` (5 s default) on a condition, never a
-sleep; and a settle is 150 ms of no bytes, taken only when a frame is about to be READ. The second
-rule has a corollary worth stating, because it is the quiet way a driver test lies: **`WaitQuiet` is
-not a wait for a keypress to land**. The screen has been quiet since before the key was sent, so the
-check passes at once, on a frame the program has not answered yet. Wait for the paint the key caused
-(`awaitRepaint`, or a `WaitText` on what the key was supposed to produce) and settle after that.
+Two rules keep it there. Every wait is a bounded `WaitFor` (`DefaultTimeout`, 60 s) on a
+condition, never a sleep; and a settle is `settled` — 250 ms — of no bytes, taken only when a
+frame is about to be READ. The second rule has a corollary worth stating, because it is the quiet
+way a driver test lies: **`WaitQuiet` is not a wait for a keypress to land**. The screen has been
+quiet since before the key was sent, so the check passes at once, on a frame the program has not
+answered yet. Wait for the paint the key caused (`awaitRepaint`, or a `WaitText` on what the key
+was supposed to produce) and settle after that.

@@ -760,7 +760,11 @@ go test -race -count=3 -timeout 20m ./cmd/apogee/ -run 'TestE2EApprovalKeysAreAr
 
 **Commit:** `test(e2e): holdKey and the transcript walk scale with the work they drive`
 
-## 14. The docs state the supported way to run the suite, and stop quoting the old budgets
+## 14. The docs state the supported way to run the suite, and stop quoting the old budgets — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the item's second Acceptance command, `sh -n scripts/test-shards.sh`, fails identically on the unmodified tree — the script is `#!/usr/bin/env bash` and `/bin/sh` here is dash, which rejects line 45 — so the syntax check was run as `bash -n scripts/test-shards.sh` (passes). Not a change this item made.
+NOTES (2026-09-23): the regression-guard sweep found two stale numbers beyond the ones the item names — `docs/design/test-drivers.md`'s PTY settle rule ("no bytes for 150 ms") and its `streamReplyWait` parenthesis ("15 s: the tick-rounded floor") — and both are restated from the code, as the guard's "every sentence, not only the ones listed here" rule requires. The two paragraphs holding them were re-wrapped to the file's line width after the edit.
+NOTES (2026-09-23): historical narrations of past red runs (`scripts/test-shards.sh`'s three comments, the `-parallel` paragraphs in `docs/manual/building.md` and `docs/design/test-drivers.md`) had their stale figures dropped rather than replaced: the events they describe happened when the default WAS 5 s, so quoting today's 60 s there would make the account false. `docs/adr/`, `docs/plans/archived/`, `docs/reviews/` and `CHANGELOG.md` were left as written, and `~15 s`/ADR 0062 at `docs/design/test-drivers.md`'s "the kit's first slice budgeted for itself" stands — the item yields to it.
 
 **What.** The documentation half of `apogee-61g`, and the one owning item for every stale budget
 number this cluster's predecessor left behind. Depends on items 12 and 13 — both change numbers this
