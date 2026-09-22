@@ -22,7 +22,7 @@
 // reducer that rewrites old tool results into a one-line stub naming the call that produced
 // them, so a long Exchange is relieved of dumps the model has finished with without spending
 // an upstream call. It is pure policy — trigger and per-result sizes both measured through the
-// Budget (Budget.HistoryExceedsFraction), a 60%-of-History start and a 40% stop, the most
+// Budget (Budget.HistoryExceedsFraction), a 70%-of-History start and a 50% stop, the most
 // recent PruneKeepTurns tool-calling Turns never touched, oldest Turn and largest result
 // first. Its wide band is deliberate: the rewrite is committed to history, which costs the
 // upstream server's prefix cache once per prune (ADR 0023 §6), so rare and larger beats

@@ -18,7 +18,7 @@ import (
 //
 // Prefix-cache note (ADR 0023 §6). A prune rewrites COMMITTED history, so the upstream server's
 // prefix cache is invalidated once per prune — the whole reason internal/context prunes on a wide
-// 60%/40% band instead of a single threshold: rare and larger beats frequent and small, and the
+// 70%/50% band instead of a single threshold: rare and larger beats frequent and small, and the
 // band is what makes the trade affordable rather than something the engine has to schedule around.
 //
 // What this is NOT: the generative mid-Exchange reducer the issue register still tracks. That

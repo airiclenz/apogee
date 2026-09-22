@@ -2,6 +2,7 @@ package context
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -53,6 +54,48 @@ func readCall(id string, size int) []callSpec {
 	return []callSpec{{id: id, tool: "read", content: strings.Repeat("x", size)}}
 }
 
+// fillerTurns is n tool-calling Turns of one sized result each, ids prefixed with name. Every
+// fixture count that depends on the protected window is built from it, so PruneKeepTurns stays
+// the only place the window's size is written down.
+func fillerTurns(name string, n, size int) [][]callSpec {
+	turns := make([][]callSpec, 0, n)
+	for i := 0; i < n; i++ {
+		turns = append(turns, readCall(fmt.Sprintf("%s%d", name, i), size))
+	}
+	return turns
+}
+
+// pruneConvPadded is pruneConv with PruneKeepTurns tiny filler Turns ("keep0"…) appended: they
+// fill the protected recent window, so every Turn the caller passes sits outside it and is a
+// candidate. The padding is deliberately small, so it moves the fill hardly at all and the
+// caller's own sizes decide when the band trips.
+func pruneConvPadded(turns ...[]callSpec) *domain.Conversation {
+	return pruneConv(append(turns, fillerTurns("keep", PruneKeepTurns, fillerChars)...)...)
+}
+
+// fillerChars is one filler result's size and pruneStubAllowance a generous upper bound on the
+// length of one stub — what bandHistory must assume a rewrite puts back in place of the result
+// it reclaimed.
+const (
+	fillerChars        = 10
+	pruneStubAllowance = 120
+)
+
+// bandHistory is a History allocation that sits conv in the middle of the prune band: over
+// pruneHighFraction as the conversation stands, and under pruneLowFraction once one result of
+// reclaim characters has been rewritten into a stub. Both ends are derived from the band
+// constants, so a retuned band re-derives the fixture instead of needing it re-tuned by hand.
+func bandHistory(t *testing.T, conv *domain.Conversation, reclaim int) int {
+	t.Helper()
+	full := float64(domain.PromptChars(conv.Messages(), nil))
+	after := full - float64(reclaim) + pruneStubAllowance
+	low, high := after/pruneLowFraction, full/pruneHighFraction
+	if low >= high {
+		t.Fatalf("no History satisfies the band for %.0f chars with %d reclaimed", full, reclaim)
+	}
+	return int((low + high) / 2)
+}
+
 // contentByID is the content of the tool result answering call id.
 func contentByID(t *testing.T, conv *domain.Conversation, id string) string {
 	t.Helper()
@@ -77,24 +120,26 @@ func TestPruneDoesNothing(t *testing.T) {
 	}{
 		{
 			name:   "unknown window never prunes",
-			conv:   pruneConv(readCall("a", 500), readCall("b", 500), readCall("c", 500), readCall("d", 500), readCall("e", 500)),
+			conv:   pruneConvPadded(readCall("a", 500), readCall("b", 500)),
 			budget: domain.Budget{CharsPerToken: 1, History: 0},
 		},
 		{
+			// Padded past the protected window, so the fraction is the only thing declining.
 			name:   "under the high fraction never prunes",
-			conv:   pruneConv(readCall("a", 500), readCall("b", 500), readCall("c", 500), readCall("d", 500), readCall("e", 500)),
+			conv:   pruneConvPadded(readCall("a", 500), readCall("b", 500)),
 			budget: domain.Budget{CharsPerToken: 1, History: 100000},
 		},
 		{
 			name:   "fewer tool-calling Turns than the protected window",
-			conv:   pruneConv(readCall("a", 500), readCall("b", 500), readCall("c", 500)),
+			conv:   pruneConv(fillerTurns("a", PruneKeepTurns-1, 500)...),
 			budget: domain.Budget{CharsPerToken: 1, History: 100},
 		},
 		{
+			// PruneKeepTurns Turns follow the stubbed one, so the protected-index gate passes
+			// and the stub check is what declines.
 			name: "already-stubbed results are not re-pruned",
-			conv: pruneConv(
+			conv: pruneConvPadded(
 				[]callSpec{{id: "a", tool: "read", content: pruneStubPrefix + " 40 lines from read — re-run the call if you need it]"}},
-				readCall("b", 10), readCall("c", 10), readCall("d", 10), readCall("e", 10),
 			),
 			budget: domain.Budget{CharsPerToken: 1, History: 100},
 		},
@@ -119,26 +164,23 @@ func TestPruneDoesNothing(t *testing.T) {
 }
 
 // TestPruneProtectsTheRecentToolCallingTurns proves the most recent PruneKeepTurns tool-calling
-// Turns survive a pass that prunes everything it is allowed to.
+// Turns survive a pass that prunes everything it is allowed to: PruneKeepTurns + 1 Turns go in,
+// and only the oldest one comes back stubbed.
 func TestPruneProtectsTheRecentToolCallingTurns(t *testing.T) {
 	t.Parallel()
-	conv := pruneConv(
-		readCall("a", 200), readCall("b", 200),
-		readCall("c", 200), readCall("d", 200), readCall("e", 200), readCall("f", 200),
-	)
+	conv := pruneConvPadded(readCall("a", 200))
 
 	got := Prune(conv, domain.Budget{CharsPerToken: 1, History: 100}, PruneKeepTurns)
 
-	if got.Pruned != 2 {
-		t.Errorf("Pruned = %d, want 2 (only the two Turns outside the protected window)", got.Pruned)
+	if got.Pruned != 1 {
+		t.Errorf("Pruned = %d, want 1 (only the Turn outside the protected window)", got.Pruned)
 	}
-	for _, id := range []string{"a", "b"} {
-		if !strings.HasPrefix(contentByID(t, conv, id), pruneStubPrefix) {
-			t.Errorf("result %q was not pruned", id)
-		}
+	if !strings.HasPrefix(contentByID(t, conv, "a"), pruneStubPrefix) {
+		t.Error(`result "a" was not pruned`)
 	}
-	for _, id := range []string{"c", "d", "e", "f"} {
-		if got := contentByID(t, conv, id); got != strings.Repeat("x", 200) {
+	for i := 0; i < PruneKeepTurns; i++ {
+		id := fmt.Sprintf("keep%d", i)
+		if got := contentByID(t, conv, id); got != strings.Repeat("x", fillerChars) {
 			t.Errorf("protected result %q was rewritten: %q", id, got)
 		}
 	}
@@ -147,16 +189,46 @@ func TestPruneProtectsTheRecentToolCallingTurns(t *testing.T) {
 	}
 }
 
+// TestPruneBandIsSeventyToFifty pins the band itself. A history at 65% of its History allocation
+// is left whole; one at 75% is pruned — but only until the fill is back under the low bound, so
+// the pass reclaims what the band asks for and stops with eligible results still intact.
+func TestPruneBandIsSeventyToFifty(t *testing.T) {
+	t.Parallel()
+	// The ratified band and protected window are constants, not configuration.
+	if pruneHighFraction != 0.7 || pruneLowFraction != 0.5 || PruneKeepTurns != 6 {
+		t.Fatalf("band = %v/%v over %d protected Turns, want 0.7/0.5 over 6", pruneHighFraction, pruneLowFraction, PruneKeepTurns)
+	}
+	const eligible = 4
+	full := domain.PromptChars(pruneConvPadded(fillerTurns("old", eligible, 1000)...).Messages(), nil)
+
+	quiet := pruneConvPadded(fillerTurns("old", eligible, 1000)...)
+	if got := Prune(quiet, domain.Budget{CharsPerToken: 1, History: int(float64(full) / 0.65)}, PruneKeepTurns); got != (PruneResult{}) {
+		t.Errorf("Prune at 65%% of History = %+v, want the zero PruneResult", got)
+	}
+
+	conv := pruneConvPadded(fillerTurns("old", eligible, 1000)...)
+	b := domain.Budget{CharsPerToken: 1, History: int(float64(full) / 0.75)}
+
+	got := Prune(conv, b, PruneKeepTurns)
+
+	if got.Pruned == 0 {
+		t.Fatal("Prune at 75% of History did nothing, want a pass")
+	}
+	if got.Pruned == eligible {
+		t.Errorf("Pruned = %d, want fewer than the %d eligible results — the pass stops at the low bound", got.Pruned, eligible)
+	}
+	if b.HistoryExceedsFraction(conv.Messages(), pruneLowFraction) {
+		t.Error("the pass stopped with the history still over the low bound")
+	}
+}
+
 // TestPruneOrdersOldestTurnFirst prunes into a Budget that is satisfied by one rewrite: the
 // result that goes is the older Turn's, though both Turns hold an equally large one.
 func TestPruneOrdersOldestTurnFirst(t *testing.T) {
 	t.Parallel()
-	conv := pruneConv(
-		readCall("old", 1000), readCall("new", 1000),
-		readCall("c", 10), readCall("d", 10), readCall("e", 10), readCall("f", 10),
-	)
+	conv := pruneConvPadded(readCall("old", 1000), readCall("new", 1000))
 
-	got := Prune(conv, domain.Budget{CharsPerToken: 1, History: 3000}, PruneKeepTurns)
+	got := Prune(conv, domain.Budget{CharsPerToken: 1, History: bandHistory(t, conv, 1000)}, PruneKeepTurns)
 
 	if got.Pruned != 1 {
 		t.Fatalf("Pruned = %d, want 1 (the pass stops once history is back under the low fraction)", got.Pruned)
@@ -173,16 +245,15 @@ func TestPruneOrdersOldestTurnFirst(t *testing.T) {
 // so only size — not position — can explain which is rewritten first.
 func TestPruneOrdersLargestWithinATurn(t *testing.T) {
 	t.Parallel()
-	conv := pruneConv(
+	conv := pruneConvPadded(
 		[]callSpec{
 			{id: "small", tool: "read", content: strings.Repeat("x", 200)},
 			{id: "large", tool: "read", content: strings.Repeat("x", 1000)},
 		},
 		readCall("later", 200),
-		readCall("c", 10), readCall("d", 10), readCall("e", 10), readCall("f", 10),
 	)
 
-	got := Prune(conv, domain.Budget{CharsPerToken: 1, History: 2000}, PruneKeepTurns)
+	got := Prune(conv, domain.Budget{CharsPerToken: 1, History: bandHistory(t, conv, 1000)}, PruneKeepTurns)
 
 	if got.Pruned != 1 {
 		t.Fatalf("Pruned = %d, want 1", got.Pruned)
@@ -230,10 +301,9 @@ func TestPruneStubNamesTheCall(t *testing.T) {
 			t.Parallel()
 			// The oldest Turn holds the result under test; a bulky second Turn keeps the
 			// history over the high fraction so the pass reaches it.
-			conv := pruneConv(
+			conv := pruneConvPadded(
 				[]callSpec{tc.call},
 				readCall("bulk", 2000),
-				readCall("c", 10), readCall("d", 10), readCall("e", 10), readCall("f", 10),
 			)
 
 			if got := Prune(conv, domain.Budget{CharsPerToken: 1, History: 100}, PruneKeepTurns); got.Pruned == 0 {

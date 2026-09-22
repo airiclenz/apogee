@@ -27,17 +27,20 @@ import (
 
 const (
 	// pruneHighFraction is the fill at which pruning starts and pruneLowFraction the fill it
-	// stops at, both as a fraction of the Budget's History allocation. The band is wide on
-	// purpose: a prune rewrites committed history, which invalidates the upstream server's
-	// prefix cache (ADR 0023 §6), so the policy trades a rare, larger reclaim for the frequent
-	// small ones a single threshold would produce.
-	pruneHighFraction = 0.6
-	pruneLowFraction  = 0.4
+	// stops at, both as a fraction of the Budget's History allocation. The band still spans 20
+	// points on purpose: a prune rewrites committed history, which invalidates the upstream
+	// server's prefix cache (ADR 0023 §6), so the policy trades a rare, larger reclaim for the
+	// frequent small ones a single threshold would produce. It starts at 70% rather than 60%
+	// because a model that reads a file in chunks fills History with results it is still using:
+	// firing earlier stubbed work in progress and bought re-reads, not room.
+	pruneHighFraction = 0.7
+	pruneLowFraction  = 0.5
 
 	// PruneKeepTurns is how many of the most recent tool-calling Turns are never pruned. The
 	// freshest results are what the model is actively reasoning over; stubbing those would
-	// break the Exchange in progress rather than relieve it.
-	PruneKeepTurns = 4
+	// break the Exchange in progress rather than relieve it. Six is what a chunked read of a
+	// single file spans, so the passes a working model makes over one file survive as a unit.
+	PruneKeepTurns = 6
 
 	// pruneArgMaxChars bounds the argument echoed in a stub, so one pathological call (a long
 	// pattern, a here-doc command) cannot spend more context than the result it replaced.

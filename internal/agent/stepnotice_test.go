@@ -352,7 +352,7 @@ func TestStepNoticeIsToldAgainAfterAPruneStubbedIt(t *testing.T) {
 		a.turns.exchangeTurns = 2
 		noted := adviseOneCall(t, a, "one") // the noted result: index 1, the oldest tool result
 		assertStepNoted(t, noted, "one", stepNoticeLineThreeOfFour)
-		seedToolTurns(a, apogeectx.PruneKeepTurns, 4000) // ~16k chars, past the ~9.4k-char trigger; the noted Turn is the one outside the window
+		seedToolTurns(a, apogeectx.PruneKeepTurns, 4000) // ~24k chars, past the ~10k-char trigger; the noted Turn is the one outside the window
 		if !a.stepNoticeLive {
 			t.Fatal("the notice did not latch on the noted result")
 		}

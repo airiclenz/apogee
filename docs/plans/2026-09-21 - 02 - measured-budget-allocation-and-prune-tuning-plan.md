@@ -297,7 +297,13 @@ change and their existing tests keep passing.
 **Acceptance.** `go build ./... && go test ./internal/agent -run 'TestContextFiles' -count=1 && go test ./internal/notice ./internal/domain -count=1`
 **Commit:** `fix(agent): the oversize notice keeps its fixed advisory ceiling`
 
-## 4. Prune band 70% / 50% and six protected Turns
+## 4. Prune band 70% / 50% and six protected Turns — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the fixtures in `internal/context/prune_test.go` are re-derived rather than re-tuned: two new helpers do it — `fillerTurns(name, n, size)` builds n filler Turns and `pruneConvPadded` appends `PruneKeepTurns` of them, so the protected window's size is written down only in the constant; `bandHistory(t, conv, reclaim)` returns a History allocation between `after/pruneLowFraction` and `full/pruneHighFraction` (measured with `domain.PromptChars`), replacing the hand-picked `History: 3000` / `2000` in the two ordering tests.
+NOTES (2026-09-22): `TestPruneDoesNothing`'s first two cases ("unknown window", "under the high fraction") were also padded through `pruneConvPadded` — at keep=6 their five hand-written Turns would have made the protected-index gate, not the fraction, the reason the pass declines.
+NOTES (2026-09-22): `TestPruneBandIsSeventyToFifty` (new, per the item's Tests) also pins the ratified constants directly (`pruneHighFraction != 0.7 || pruneLowFraction != 0.5 || PruneKeepTurns != 6`), since nothing else in the tree pinned the six.
+NOTES (2026-09-22): the item's comment sweep is a floor, so `TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow`'s doc line ("a history of six tool-calling Turns") was folded in — it named the fixture by the old window; it now says "two tool-calling Turns more than the protected window". The re-derived figures: `pruneConfig` 70% trigger ≈ 10k chars (3,584 × 0.7 × 4), `prune_test.go` ~32k chars seeded (PruneKeepTurns+2 Turns), `stepnotice_test.go` ~24k chars seeded (PruneKeepTurns Turns).
+NOTES (2026-09-22): `cmd/apogee/e2e_reactionidentity_test.go` (~line 153) still describes the History allocation as "60% of the same working window, ~62.9k characters" — item 2's prose rule was scoped to `internal/agent`, so this copy outside it kept the retired fixed-share figure. Left alone (not this item's band comment); reported on FOLLOW-UP. The test itself still passes: the measured History at that window is larger than the figure the comment quotes, so the fixture stays under the clamp.
 
 **What.** `internal/context/prune.go`: `pruneHighFraction = 0.7`, `pruneLowFraction = 0.5`,
 `PruneKeepTurns = 6`; the doc comments state the new numbers and the reason the band still spans

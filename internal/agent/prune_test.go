@@ -24,7 +24,7 @@ import (
 func pruneConfig(sink domain.EventSink) domain.Config {
 	cfg := baseConfig(sink)
 	// History allocation = 3,584 tokens (a.budget().History: the working room less the measured
-	// standing reservations, capped at the fold's transcript budget), so the 60% trigger ≈ 8.6k
+	// standing reservations, capped at the fold's transcript budget), so the 70% trigger ≈ 10k
 	// chars at the uncalibrated ratio.
 	cfg.Context.MaxContextTokens = 8192
 	cfg.Context.CompactionEnabled = false
@@ -79,8 +79,8 @@ func pruneEvents(events []domain.Event) []domain.PruneEvent {
 }
 
 // TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow is the trigger's success path: an over-budget
-// history of six tool-calling Turns is pruned at the Turn boundary, and only the Turns outside the
-// protected recent window lose their results. The pass emits exactly one PruneEvent whose Tokens is
+// history of two tool-calling Turns more than the protected window is pruned at the Turn boundary,
+// and only the Turns outside that window lose their results. The pass emits exactly one PruneEvent whose Tokens is
 // the Budget's estimate of the characters actually reclaimed, and the request built straight after
 // carries the stubs rather than the dumps.
 func TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow(t *testing.T) {
@@ -90,7 +90,7 @@ func TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	seedToolTurns(a, apogeectx.PruneKeepTurns+2, 4000) // ~24k chars, far past the ~9.4k-char trigger
+	seedToolTurns(a, apogeectx.PruneKeepTurns+2, 4000) // ~32k chars, far past the ~10k-char trigger
 	before := toolResultContents(a)
 
 	if err := a.Submit(domain.UserInput{Text: "the fresh question"}); err != nil {
