@@ -1321,7 +1321,7 @@ assigns one to each named role).
 
 **Safety guardrails**:
 Apogee's production safety set: Agent modes, Approval, path-safety (TOCTOU-safe at use time via a
-Go 1.26 `os.Root` pinned at the workspace root — `security.SafeWriteFile`/`SafeReadFile`, so an
+Go 1.26 `os.Root` pinned at the workspace root — `security.Fence.WriteFile`/`SafeReadFile`, so an
 escaping symlink component swapped after the check is refused at write/read time), **url-safety**
 (the network tools' `URLGuard` — scheme/host allow-deny plus a **default-on SSRF floor** that denies
 loopback / private / IMDS / link-local **plus** RFC-6598 CGNAT `100.64/10`, the whole `0.0.0.0/8`,

@@ -10,9 +10,9 @@
 //   - Path-safety (ResolveInRoot / EvalRealPath, ErrPathEscape): the consolidated,
 //     symlink-aware, traversal-rejecting workspace boundary the file tools call —
 //     one guard instead of a copy per tool. The actual read/write the write tools then
-//     perform goes through the TOCTOU-safe SafeReadFile / SafeWriteFile (safeio.go),
-//     which operate via an os.Root pinned at the workspace root so the validated path IS
-//     the path written — an escaping-symlink component (incl. one swapped in concurrently
+//     perform goes through the TOCTOU-safe SafeReadFile (safeio.go) / Fence.WriteFile
+//     (fence.go), which operate via an os.Root pinned at the workspace root so the validated
+//     path IS the path written — an escaping-symlink component (incl. one swapped in concurrently
 //     by a confined subprocess) is refused, not followed (closes the H1 symlink-swap race).
 //     A bounded read goes through SafeOpen, which returns the pinned handle itself: the
 //     caller fstats and limit-reads the very descriptor it opened, so the size bound
@@ -30,7 +30,10 @@
 //     the ladder GATED and the human approved carries a permitted target — the resolved path
 //     the approval pane disclosed — and lands there, one path wide, re-resolved at write time
 //     (the Permit of a security.Fence — fence.go, writepermit.go, ADR 0049). Without a permit
-//     nothing about the fence changes.
+//     nothing about the fence changes. Since 2026-09-22 the Fence is the ONLY spelling of that
+//     pair: the free wrappers that took root and permit apart as strings are gone, and an undo
+//     record (undo.Mutation) carries the Fence its write ran under, so a revert can claim no
+//     wider bound than the write had.
 //   - URL-safety (URLGuard): scheme/host allow-deny for the network tools
 //     (web-fetch / http-request, P3.11), deny-first precedence.
 //   - The dangerous-action guard (DangerousActionGuard): the default-on footgun
@@ -122,9 +125,9 @@
 // a copy's source is a read and may come from a read-only root the destination fence knows
 // nothing about — its write half is bounded by the destination root exactly as the others are.
 // safeio.go is the USE on the read side and the shared machinery — SafeReadFile and SafeOpen,
-// plus the free SafeWriteFile, SafeCopyFile, SafeCopyFileFrom, SafeRename and SafeRemove that
-// are one-line wrappers over the Fence verbs for callers that still pass root and permit apart.
-// It also carries the in-root symlink policy the fence does not decide: ErrSymlinkedParent and
+// the read primitives, which take no permit and are not Fence verbs (ADR 0049 D2); the staging
+// and copy helpers the verbs are built from live here too. It also carries the in-root symlink
+// policy the fence does not decide: ErrSymlinkedParent and
 // refuseSymlinkedParents, the write-side refusal of a parent chain that crosses a link, applied
 // to every chain a verb MUTATES (WriteFile's target, Rename's two ends, Remove's target and
 // CopyFileFrom's destination) and to no chain it merely reads. SafeOpen

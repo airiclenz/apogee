@@ -276,8 +276,9 @@ func (t tracked) plan(src resolver, d direction) Change {
 	return Change{Path: t.path, Action: ActionRestore}
 }
 
-// apply plans this path's step and carries it out through the same fenced primitives every
-// other restore goes through, so a diff-scoped revert can reach no further than a funnel one.
+// apply plans this path's step and carries it out through the workspace Fence — the bound a
+// write the funnel never saw can only have run under — so a diff-scoped revert can reach no
+// further than a funnel one.
 func (t tracked) apply(src resolver, d direction) Change {
 	planned := t.plan(src, d)
 
@@ -291,10 +292,10 @@ func (t tracked) apply(src resolver, d direction) Change {
 		case err == nil && !exists:
 			err = fmt.Errorf("the image no longer holds %s", t.rel)
 		case err == nil:
-			err = security.SafeWriteFile(t.root, t.path, data, defaultRestorePerm, "")
+			err = security.WorkspaceFence(t.root).WriteFile(t.path, data, defaultRestorePerm)
 		}
 	case ActionDelete:
-		err = security.SafeRemove(t.root, t.path, "")
+		err = security.WorkspaceFence(t.root).Remove(t.path)
 	default:
 		return planned
 	}

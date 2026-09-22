@@ -814,6 +814,8 @@ it without re-deciding.
 > The marker's `workspaceWriteTarget` seam (§3.2) is what made the permit an additive change rather
 > than a rework.
 
+> **Amendment (2026-09-22):** the permit no longer travels as a bare `Real` string — `writeScope` holds a typed `security.Fence` (root + `domain.WriteEscapePermit`), `openMutationRoot` takes that Fence, and the question is asked through `Fence.Governs` (item 4 of plan `2026-09-20 - 02`). The routing described above is unchanged.
+
 `AutoEligible()` becomes `FSWrite`-only (§5), so `ErrAutoUnavailable` is now **conditional** — a host
 with no fs-confinement does not refuse Auto; it lands in the "subproc, caps insufficient → gate" row.
 

@@ -70,10 +70,10 @@
 // headless Driver (ADR 0031, ADR 0033), and the object store behind a Snapshotter reaches
 // it through an interface rather than the other way round.
 //
-// Restores and removals go through internal/security's fenced primitives —
-// SafeWriteFile and SafeRemove, the very ones the funnel wrote through — so an undo
-// inherits the same symlink and traversal refusals the original write had. It can
-// never reach further than the write it is reversing.
+// Restores and removals go through the security.Fence each record carries — its WriteFile
+// and Remove, the very verbs the funnel wrote through — so an undo inherits the same
+// symlink and traversal refusals the original write had. It can never reach further than
+// the write it is reversing.
 //
 // Files:
 //   - doc.go — this map and the package's rationale.

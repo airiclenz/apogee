@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -40,7 +41,7 @@ func journalledAgent(t *testing.T, pre, post string) (*Agent, string) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	a.journal.Record(undo.Mutation{
-		Root:       root,
+		Fence:      security.WorkspaceFence(root),
 		Path:       target,
 		Perm:       0o644,
 		Pre:        []byte(pre),
@@ -100,7 +101,7 @@ func TestUndoRevertRefusesAStaleGeneration(t *testing.T) {
 
 	// What a write landing between the preview and the confirm does to the journal.
 	a.journal.Record(undo.Mutation{
-		Root:       a.cfg.WorkspaceDir,
+		Fence:      security.WorkspaceFence(a.cfg.WorkspaceDir),
 		Path:       filepath.Join(filepath.Dir(target), "other.txt"),
 		Post:       []byte("later"),
 		PostExists: true,

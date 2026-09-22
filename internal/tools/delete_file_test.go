@@ -179,7 +179,7 @@ func TestDeleteFile_IsRegistered(t *testing.T) {
 	}
 }
 
-// TestDeleteFile_DisclosesTheResolvedTarget covers the removal half. SafeRemove unlinks THE NAME,
+// TestDeleteFile_DisclosesTheResolvedTarget covers the removal half. Fence.Remove unlinks THE NAME,
 // so the note here discloses more than the call touched — the file the link pointed at survives —
 // which is the direction a security surface errs in: the operator asked to delete `docs/notes.md`
 // and is told what that name stood for.

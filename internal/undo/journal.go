@@ -120,9 +120,11 @@ type Report struct {
 
 // Mutation is one completed filesystem mutation, as the write funnel saw it.
 //
-// Root is the workspace root the mutation was fenced against and Permitted is the one
-// approved out-of-workspace target it carried (ADR 0049), or empty — together they let
-// a revert reach exactly as far as the original write reached and no further. Path is
+// Fence is the bound the mutation ran under — the workspace root it was fenced against and
+// the one approved out-of-workspace target it carried (ADR 0049), or none — so a revert
+// reaches exactly as far as the original write reached and no further. It is in-process
+// state and is never serialised: a group read back from journal.json ([GroupRecord]) has no
+// funnel entries, only the tree-tracked paths it re-fences at the workspace root. Path is
 // the identity of the record — the thing a preview discloses and the key a group merges
 // on. For an ordinary write it is the path the argument NAMED, root-joined and cleaned
 // with nothing followed; only an approved escape records the permit's RESOLVED target,
@@ -137,9 +139,8 @@ type Report struct {
 // A Mutation is recorded only after the mutation SUCCEEDED: a failed write leaves the
 // file as it was, so a record of it would claim a change that never happened.
 type Mutation struct {
-	Root       string
+	Fence      security.Fence
 	Path       string
-	Permitted  string
 	Perm       os.FileMode
 	Pre        []byte
 	PreExisted bool
@@ -148,7 +149,7 @@ type Mutation struct {
 }
 
 // entry is one path's record inside a group: the first pre-image seen for that path and
-// the latest post-state, plus the fencing context a revert needs to write it back.
+// the latest post-state, plus the Fence a revert has to go back through to write it back.
 //
 // rel is the same path as the tree that images this group spells it — workspace-relative
 // and slash-separated — or empty for a path outside the workspace, which no tree holds.
@@ -157,9 +158,8 @@ type Mutation struct {
 // (ADR 0074 decision 9), so those keep their bytes here and every other entry keeps the
 // hash alone, exactly as before. postKept says which of the two this entry is.
 type entry struct {
-	root       string
+	fence      security.Fence
 	readRoot   string
-	permitted  string
 	path       string
 	rel        string
 	perm       os.FileMode
@@ -290,11 +290,10 @@ func (j *Journal) Record(m Mutation) {
 	}
 
 	recorded := &entry{
-		root:       m.Root,
-		readRoot:   readBackRoot(m.Root, path),
-		permitted:  m.Permitted,
+		fence:      m.Fence,
+		readRoot:   readBackRoot(m.Fence.Root, path),
 		path:       path,
-		rel:        treePath(m.Root, path),
+		rel:        treePath(m.Fence.Root, path),
 		perm:       restorePerm(m.Perm),
 		pre:        append([]byte(nil), m.Pre...),
 		preExisted: m.PreExisted,
@@ -488,10 +487,10 @@ func (e *entry) plan(src resolver, d direction) Change {
 	return Change{Path: e.path, Action: ActionRestore}
 }
 
-// apply plans this entry's step and carries the result out, through the same fenced
-// primitives the original write went through. A primitive that refuses — an escaping
-// symlink swapped in since, a directory gone read-only — turns the change into a skip
-// carrying the refusal, because that is what the caller has to tell the human.
+// apply plans this entry's step and carries the result out, through the very Fence the
+// original write went through. A verb that refuses — an escaping symlink swapped in since,
+// a directory gone read-only — turns the change into a skip carrying the refusal, because
+// that is what the caller has to tell the human.
 func (e *entry) apply(src resolver, d direction) Change {
 	planned := e.plan(src, d)
 
@@ -501,10 +500,10 @@ func (e *entry) apply(src resolver, d direction) Change {
 		var data []byte
 		data, err = e.image(src, d)
 		if err == nil {
-			err = security.SafeWriteFile(e.root, e.path, data, e.perm, e.permitted)
+			err = e.fence.WriteFile(e.path, data, e.perm)
 		}
 	case ActionDelete:
-		err = security.SafeRemove(e.root, e.path, e.permitted)
+		err = e.fence.Remove(e.path)
 	default:
 		return planned
 	}

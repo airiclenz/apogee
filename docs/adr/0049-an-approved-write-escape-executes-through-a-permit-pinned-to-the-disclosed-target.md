@@ -130,6 +130,8 @@ symlink-component half at use time. The permitted branch pins its root at the de
 directory above the disclosed target rather than at a nominal parent, so a target whose parents do
 not exist yet is ordinary rather than a refusal.
 
+**Amendment (2026-09-22):** `namesPermittedTarget` is now `Fence.Governs` (`internal/security/fence.go`) — the root and the permit travel together as one typed `security.Fence` value, `openMutationRoot` takes that Fence, the free `Safe*` mutators that passed root and permit apart are deleted, and an undo record (`undo.Mutation.Fence`) carries the Fence its write ran under. The rule is unchanged; only its spelling moved.
+
 **Asking first is what makes the workspace-internal symlink case executable.** An argument spelled
 *inside* the workspace can still resolve *outside* it — a disclosed link in the workspace pointing
 out. That path is what dispatch resolved in order to classify the write and what the approval pane

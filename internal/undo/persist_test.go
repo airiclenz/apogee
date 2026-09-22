@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 )
 
 // ----------------------------------------------------------------------------
@@ -135,7 +138,7 @@ func TestSave_ExchangeWhoseTreesAreEqual_IsAbsentAndTakesNoOrdinal(t *testing.T)
 			t.Fatalf("escape write: %v", err)
 		}
 		journal.Record(Mutation{
-			Root: root, Path: outside, Permitted: outside,
+			Fence: security.Fence{Root: root, Permit: domain.WriteEscapePermit{Real: outside}}, Path: outside,
 			Pre: []byte("before"), PreExisted: true,
 			Post: []byte("after"), PostExists: true,
 		})

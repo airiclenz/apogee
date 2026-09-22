@@ -420,9 +420,8 @@ func (p *preImage) commit(post []byte, exists bool) {
 		return
 	}
 	p.target.scope.journal.Record(undo.Mutation{
-		Root:       p.fence.Root,
+		Fence:      p.fence,
 		Path:       p.path,
-		Permitted:  p.fence.Permit.Real,
 		Perm:       p.perm,
 		Pre:        p.data,
 		PreExisted: p.existed,

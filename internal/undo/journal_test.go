@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -24,12 +25,12 @@ func funnelWrite(t *testing.T, journal *Journal, root, name, content string) str
 	path := filepath.Join(root, name)
 	pre, existed := preImage(t, path)
 
-	if err := security.SafeWriteFile(root, path, []byte(content), 0o644, ""); err != nil {
+	if err := security.WorkspaceFence(root).WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatalf("write %s: %v", name, err)
 	}
 
 	journal.Record(Mutation{
-		Root:       root,
+		Fence:      security.WorkspaceFence(root),
 		Path:       path,
 		Pre:        pre,
 		PreExisted: existed,
@@ -46,12 +47,12 @@ func funnelDelete(t *testing.T, journal *Journal, root, name string) string {
 	path := filepath.Join(root, name)
 	pre, existed := preImage(t, path)
 
-	if err := security.SafeRemove(root, path, ""); err != nil {
+	if err := security.WorkspaceFence(root).Remove(path); err != nil {
 		t.Fatalf("remove %s: %v", name, err)
 	}
 
 	journal.Record(Mutation{
-		Root:       root,
+		Fence:      security.WorkspaceFence(root),
 		Path:       path,
 		Pre:        pre,
 		PreExisted: existed,
@@ -70,19 +71,19 @@ func funnelMove(t *testing.T, journal *Journal, root, from, to string) (string, 
 	sourcePre, sourceExisted := preImage(t, source)
 	destinationPre, destinationExisted := preImage(t, destination)
 
-	if err := security.SafeRename(root, source, destination); err != nil {
+	if err := security.WorkspaceFence(root).Rename(source, destination); err != nil {
 		t.Fatalf("move %s to %s: %v", from, to, err)
 	}
 
 	journal.Record(Mutation{
-		Root:       root,
+		Fence:      security.WorkspaceFence(root),
 		Path:       source,
 		Pre:        sourcePre,
 		PreExisted: sourceExisted,
 		PostExists: false,
 	})
 	journal.Record(Mutation{
-		Root:       root,
+		Fence:      security.WorkspaceFence(root),
 		Path:       destination,
 		Pre:        destinationPre,
 		PreExisted: destinationExisted,
@@ -485,7 +486,7 @@ func TestRecord_ConcurrentWritersAndReaders_IsRaceClean(t *testing.T) {
 		go func(path string) {
 			defer writes.Done()
 			journal.Record(Mutation{
-				Root:       root,
+				Fence:      security.WorkspaceFence(root),
 				Path:       path,
 				Pre:        []byte("seed"),
 				PreExisted: true,
@@ -519,7 +520,7 @@ func TestRevert_PathThatEscapedTheFence_IsSkippedWithTheRefusal(t *testing.T) {
 	outside := filepath.Join(t.TempDir(), "outside.txt")
 	journal := New()
 	journal.Record(Mutation{
-		Root:       root,
+		Fence:      security.WorkspaceFence(root),
 		Path:       outside,
 		Pre:        []byte("before"),
 		PreExisted: true,
@@ -538,4 +539,49 @@ func TestRevert_PathThatEscapedTheFence_IsSkippedWithTheRefusal(t *testing.T) {
 		t.Errorf("reason = %q, want it to name the failed restore", report.Skipped[0].Reason)
 	}
 	assertAbsent(t, outside)
+}
+
+// TestRevertThroughTheRecordedFence: a revert goes back through the very Fence the record
+// carries. A permitted record (ADR 0049) reaches its out-of-workspace target through
+// Fence{Root, Permit}; an ordinary record runs under the workspace fence alone, so the same
+// path with no permit is refused — the record, not the path, decides how far a revert reaches.
+func TestRevertThroughTheRecordedFence(t *testing.T) {
+	root := t.TempDir()
+	// The permit names the RESOLVED target (see Mutation), so the path is spelled by its real
+	// name — on macOS t.TempDir() is reached through the /var → /private/var link.
+	outside := filepath.Join(security.EvalRealPath(t.TempDir()), "outside.txt")
+	inside := filepath.Join(root, "inside.txt")
+	for _, path := range []string{outside, inside} {
+		if err := os.WriteFile(path, []byte("after"), 0o644); err != nil {
+			t.Fatalf("seed %s: %v", path, err)
+		}
+	}
+	journal := New()
+	journal.Record(Mutation{
+		Fence:      security.Fence{Root: root, Permit: domain.WriteEscapePermit{Real: outside}},
+		Path:       outside,
+		Pre:        []byte("before"),
+		PreExisted: true,
+		Post:       []byte("after"),
+		PostExists: true,
+	})
+	journal.Record(Mutation{
+		Fence:      security.WorkspaceFence(root),
+		Path:       inside,
+		Pre:        []byte("before"),
+		PreExisted: true,
+		Post:       []byte("after"),
+		PostExists: true,
+	})
+
+	report, err := journal.Revert()
+
+	if err != nil {
+		t.Fatalf("Revert: %v", err)
+	}
+	if len(report.Restored) != 2 || len(report.Skipped) != 0 {
+		t.Fatalf("report = %+v, want both records restored through their own fence", report)
+	}
+	assertContent(t, outside, "before")
+	assertContent(t, inside, "before")
 }

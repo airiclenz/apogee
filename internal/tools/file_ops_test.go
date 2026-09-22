@@ -278,7 +278,7 @@ func TestCopyFile_RefusesAShippedDirectory(t *testing.T) {
 }
 
 // TestMoveFile_RefusesADirectorySource: move_file stays a FILE operation. A directory move would
-// run SafeRename unjournalled, so the shared check's "not a file" arm refuses it — the arm
+// run Fence.Rename unjournalled, so the shared check's "not a file" arm refuses it — the arm
 // copy_file no longer reaches, which is why this row exists.
 func TestMoveFile_RefusesADirectorySource(t *testing.T) {
 	t.Parallel()

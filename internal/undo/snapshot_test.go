@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -506,7 +507,7 @@ func TestEscape_RevertsAndRedoes_WithAndWithoutASnapshotter(t *testing.T) {
 					t.Fatalf("escape write: %v", err)
 				}
 				journal.Record(Mutation{
-					Root: root, Path: outside, Permitted: outside,
+					Fence: security.Fence{Root: root, Permit: domain.WriteEscapePermit{Real: outside}}, Path: outside,
 					Pre: []byte("before"), PreExisted: true,
 					Post: []byte("after"), PostExists: true,
 				})
@@ -587,7 +588,7 @@ func TestSnapshotSurface_ConcurrentCaptureRecordAndPreview_IsRaceClean(t *testin
 			defer work.Done()
 			_ = journal.MarkPre(context.Background())
 			journal.Record(Mutation{
-				Root: root, Path: filepath.Join(root, fmt.Sprintf("f%d.txt", n)),
+				Fence: security.WorkspaceFence(root), Path: filepath.Join(root, fmt.Sprintf("f%d.txt", n)),
 				Post: []byte("x"), PostExists: true,
 			})
 			_ = journal.Close(context.Background())
