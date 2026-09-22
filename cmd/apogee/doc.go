@@ -130,9 +130,10 @@
 // the offline estimate of what apogee itself puts in front of the model (ADR 0079), or with
 // `--live` the server's own Turn-1 count for one fixed one-word request, twice (as configured,
 // then Bypass) when advise/shape Reactions are armed;
-// undo.go `apogee undo <session-id> [confirm]`, the revert an unattended
-// Firing has nobody to offer — it opens one saved session's snapshot store from a fresh
-// process and shows `/undo`'s own listing (ADR 0074).
+// undo.go `apogee undo <session-id> [confirm <generation>]`, the revert an unattended
+// Firing has nobody to offer — it holds the session, opens its snapshot store from a fresh
+// process and shows `/undo`'s own listing; the confirm quotes the generation the preview
+// printed, as `/undo confirm` does (ADR 0074).
 //
 // The platform helper: confined_exec_linux.go intercepts the __confined-exec sentinel
 // before Cobra, so the landlock backend can confine a subprocess by re-invoking this

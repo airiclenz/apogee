@@ -128,13 +128,22 @@ list and no offer, because nothing outlived the process to revert from.
 **`apogee undo <session-id>` is that revert, from any directory and long after the run.** It is
 the same two steps as `/undo` inside a session: `apogee undo <session-id>` previews, listing
 every recorded path with what the revert would do to it — *restore*, *delete*, or *skip* with
-the reason — and `apogee undo <session-id> confirm` applies exactly that step and reports what
-it did. Run it again to walk further back; each `confirm` takes one more exchange. A file that
-no longer holds what the agent left is skipped rather than overwritten, so your own edits since
-the run are safe. There is no `--workspace` flag and it is refused as unknown: the tree the
-revert belongs to is recorded in the session's own snapshot index, and a workspace given on the
-command line could only disagree with it. A session recorded without snapshots has nothing to
-revert here and says so. The full account of what undo covers is on the
+the reason — and closes with the exact line that applies it,
+`apogee undo <session-id> confirm <generation>`, where the generation is the journal's stamp at
+the moment of the preview. Run that line and it applies exactly that step and reports what it
+did. The stamp is required — a bare `confirm` answers `preview first: apogee undo <id>, then
+run the line it prints` — and it is what ties the confirm to the listing you read: a journal
+that has moved since (another exchange recorded, an earlier confirm applied) refuses the stale
+stamp, touches nothing and prints the fresh preview with the line that now applies. Run it
+again to walk further back; each `confirm` takes one more exchange. A file that no longer holds
+what the agent left is skipped rather than overwritten, so your own edits since the run are
+safe. The verb holds the session for its run, so a session that is open in a live apogee is
+refused with `session <id> is open in another apogee — fork it to work alongside` rather than
+rewritten under it (an unattended headless or daemon run takes no such hold of its own). There
+is no `--workspace` flag and it is refused as unknown: the tree the revert belongs to is
+recorded in the session's own snapshot index, and a workspace given on the command line could
+only disagree with it. A session recorded without snapshots has nothing to revert here and says
+so. The full account of what undo covers is on the
 [commands page](commands.md#undoing-the-agents-file-writes--undo-and-redo).
 
 A run whose final turn was **abandoned** says so on that same summary line — the stats

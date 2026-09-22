@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,11 +12,13 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/run"
+	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
+	"github.com/airiclenz/apogee/internal/undo"
 )
 
 // ---------------------------------------------------------------------------
-// `apogee undo <session-id> [confirm]` (ADR 0074, bead apogee-kk0.7)
+// `apogee undo <session-id> [confirm <generation>]` (ADR 0074, bead apogee-kk0.7)
 // ---------------------------------------------------------------------------
 
 // undoStore seeds one saved session's snapshot store the way a Firing would have left it: an image
@@ -62,6 +65,26 @@ func runUndoCmd(t *testing.T, home string, args ...string) (string, error) {
 	return out.String(), err
 }
 
+// undoGenerationFromPreview lifts the generation stamp out of the `apogee undo <id> confirm <n>
+// applies this` line a preview closes with, failing the test when the line is absent or shaped
+// differently. The tests confirm with what the preview PRINTED rather than a number they compose,
+// because the claim under test is that the line a human reads is the line a human can run.
+func undoGenerationFromPreview(t *testing.T, preview, id string) string {
+	t.Helper()
+
+	lead := "  apogee undo " + id + " confirm "
+	at := strings.Index(preview, lead)
+	if at < 0 {
+		t.Fatalf("the preview does not close with the confirm line: %q", preview)
+	}
+	rest := preview[at+len(lead):]
+	end := strings.Index(rest, " applies this")
+	if end < 0 {
+		t.Fatalf("the confirm line is not shaped `confirm <generation> applies this`: %q", preview)
+	}
+	return rest[:end]
+}
+
 // TestUndoVerbPreviewsThenReverts is the verb's headline: the same two steps `/undo` offers, from a
 // fresh process that was never in the session. The preview discloses the path and touches nothing;
 // the confirm puts the file back exactly as the exchange found it.
@@ -87,14 +110,14 @@ func TestUndoVerbPreviewsThenReverts(t *testing.T) {
 	if !strings.Contains(preview, file) {
 		t.Errorf("the preview does not disclose the recorded path %q: %q", file, preview)
 	}
-	if !strings.Contains(preview, "apogee undo s-undo-1 confirm applies this") {
+	if !strings.Contains(preview, "apogee undo s-undo-1 confirm 1 applies this") {
 		t.Errorf("the preview does not close with the line that executes it: %q", preview)
 	}
 	if _, err := os.Stat(file); err != nil {
 		t.Errorf("the preview touched the workspace: %v", err)
 	}
 
-	report, err := runUndoCmd(t, home, "s-undo-1", "confirm")
+	report, err := runUndoCmd(t, home, "s-undo-1", "confirm", undoGenerationFromPreview(t, preview, "s-undo-1"))
 	if err != nil {
 		t.Fatalf("the confirm failed: %v", err)
 	}
@@ -106,8 +129,9 @@ func TestUndoVerbPreviewsThenReverts(t *testing.T) {
 	}
 
 	// The step is spent: a second confirm has nothing left, and says so rather than walking into
-	// an exchange the human never previewed.
-	if _, err := runUndoCmd(t, home, "s-undo-1", "confirm"); err == nil ||
+	// an exchange the human never previewed — and says so BEFORE the stamp is compared, so the
+	// spent stamp earns the empty-journal answer, not a stale one.
+	if _, err := runUndoCmd(t, home, "s-undo-1", "confirm", "1"); err == nil ||
 		!strings.Contains(err.Error(), "nothing to undo for session s-undo-1") {
 		t.Errorf("a second confirm answered %v, want the empty-journal refusal", err)
 	}
@@ -143,7 +167,11 @@ func TestUndoVerbRestoresAFileTheExchangeChanged(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	if _, err := runUndoCmd(t, home, "s-undo-2", "confirm"); err != nil {
+	preview, err := runUndoCmd(t, home, "s-undo-2")
+	if err != nil {
+		t.Fatalf("the preview failed: %v", err)
+	}
+	if _, err := runUndoCmd(t, home, "s-undo-2", "confirm", undoGenerationFromPreview(t, preview, "s-undo-2")); err != nil {
 		t.Fatalf("the confirm failed: %v", err)
 	}
 
@@ -274,6 +302,141 @@ func TestUndoVerbRefusesASecondArgumentThatIsNotConfirm(t *testing.T) {
 	}
 }
 
+// TestUndoVerbRefusesABareConfirm: the generation is a REQUIRED third positional, so a `confirm`
+// with no stamp names no step and is sent back to the preview with the exact sentence — before the
+// home is resolved or any store is touched.
+func TestUndoVerbRefusesABareConfirm(t *testing.T) {
+	home := t.TempDir()
+
+	_, err := runUndoCmd(t, home, "s-undo-7", "confirm")
+
+	if err == nil || !strings.Contains(err.Error(), "preview first: apogee undo s-undo-7, then run the line it prints") {
+		t.Fatalf("the verb answered %v, want the preview-first refusal", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "sessions")); !os.IsNotExist(err) {
+		t.Errorf("a bare confirm still reached the session store (err %v)", err)
+	}
+}
+
+// TestUndoVerbRefusesAStaleGeneration is the staleness protocol on this surface (ADR 0051 D7):
+// a confirm quotes the stamp the preview printed, and a journal that recorded another exchange in
+// between refuses it, touches nothing and prints the fresh preview — the step a confirm would now
+// apply — rather than reverting one the human never read.
+func TestUndoVerbRefusesAStaleGeneration(t *testing.T) {
+	requireSnapshotStore(t)
+
+	home := t.TempDir()
+	var first string
+	undoStore(t, home, "s-undo-9", func(ws string) {
+		first = filepath.Join(ws, "first.txt")
+		if err := os.WriteFile(first, []byte("the first exchange"), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	})
+
+	preview, err := runUndoCmd(t, home, "s-undo-9")
+	if err != nil {
+		t.Fatalf("the preview failed: %v", err)
+	}
+	stale := undoGenerationFromPreview(t, preview, "s-undo-9")
+
+	// The journal moves under the stamp: another exchange, recorded the way the fixture records
+	// its first — through the same opener the verb uses.
+	second := filepath.Join(filepath.Dir(first), "second.txt")
+	journal, reason, err := snapshot.OpenJournal(context.Background(), home, "s-undo-9",
+		filepath.Dir(first), true)
+	if err != nil || reason != "" {
+		t.Fatalf("reopen the store: %v (%s)", err, reason)
+	}
+	if err := journal.MarkPre(context.Background()); err != nil {
+		t.Fatalf("MarkPre: %v", err)
+	}
+	if err := os.WriteFile(second, []byte("the second exchange"), 0o600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := journal.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	out, err := runUndoCmd(t, home, "s-undo-9", "confirm", stale)
+
+	if !errors.Is(err, undo.ErrStaleGeneration) {
+		t.Fatalf("a stale confirm answered %v, want undo.ErrStaleGeneration", err)
+	}
+	if !strings.Contains(out, "the journal moved since that preview — nothing was undone") {
+		t.Errorf("the refusal does not say the journal moved: %q", out)
+	}
+	if !strings.Contains(out, "apogee undo s-undo-9 — exchange 2:") || !strings.Contains(out, second) {
+		t.Errorf("the refusal does not reprint the fresh preview: %q", out)
+	}
+	fresh := undoGenerationFromPreview(t, out, "s-undo-9")
+	if fresh == stale {
+		t.Errorf("the fresh preview quotes the stale stamp %s", stale)
+	}
+	for _, file := range []string{first, second} {
+		if _, err := os.Stat(file); err != nil {
+			t.Errorf("a stale confirm touched %s: %v", file, err)
+		}
+	}
+
+	// And the stamp the fresh preview printed is the one that works.
+	if _, err := runUndoCmd(t, home, "s-undo-9", "confirm", fresh); err != nil {
+		t.Fatalf("the confirm with the fresh stamp failed: %v", err)
+	}
+	if _, err := os.Stat(second); !os.IsNotExist(err) {
+		t.Errorf("the second exchange's file survived the revert (err %v)", err)
+	}
+}
+
+// TestUndoVerbRefusesAHeldSession: the verb holds the session for its run, so one that is open in a
+// live apogee — whose next persist would overwrite whatever this verb wrote — is refused with the
+// hold's own sentence and the store is left byte-identical.
+func TestUndoVerbRefusesAHeldSession(t *testing.T) {
+	requireSnapshotStore(t)
+
+	home := t.TempDir()
+	undoStore(t, home, "s-undo-10", func(ws string) {
+		if err := os.WriteFile(filepath.Join(ws, "note.txt"), []byte("written"), 0o600); err != nil {
+			t.Fatalf("WriteFile: %v", err)
+		}
+	})
+	preview, err := runUndoCmd(t, home, "s-undo-10")
+	if err != nil {
+		t.Fatalf("the preview failed: %v", err)
+	}
+	generation := undoGenerationFromPreview(t, preview, "s-undo-10")
+
+	index := filepath.Join(snapshot.Dir(home, "s-undo-10"), "journal.json")
+	before, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatalf("read the index the fixture wrote: %v", err)
+	}
+
+	// The live apogee: the same hold a --resume start takes, kept for the confirm's duration.
+	release, err := session.NewStore(filepath.Join(home, "sessions")).Hold("s-undo-10")
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	defer func() { _ = release() }()
+
+	_, err = runUndoCmd(t, home, "s-undo-10", "confirm", generation)
+
+	var held *session.HeldError
+	if !errors.As(err, &held) {
+		t.Fatalf("a confirm on a held session answered %v, want a *session.HeldError", err)
+	}
+	if !strings.Contains(err.Error(), "session s-undo-10 is open in another apogee") {
+		t.Errorf("the refusal reads %q, want the hold's own sentence", err)
+	}
+	after, err := os.ReadFile(index)
+	if err != nil {
+		t.Fatalf("read the index after the refusal: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("a refused confirm rewrote journal.json:\n%s\nwant:\n%s", after, before)
+	}
+}
+
 // TestUndoVerbIsRegistered fails when the binary ships without the verb the unattended Drivers point
 // their readers at — a report naming a command that does not exist is worse than no report.
 func TestUndoVerbIsRegistered(t *testing.T) {
@@ -401,9 +564,14 @@ func TestHeadlessReportsAnUndoTheVerbCanActuallyPerform(t *testing.T) {
 		t.Fatalf("headless: %v", err)
 	}
 
+	// The report names the preview; the preview prints the confirm — the two steps, typed as read.
 	id := undoIDFromReport(t, errOut)
-	if _, err := runUndoCmd(t, home, id, "confirm"); err != nil {
+	preview, err := runUndoCmd(t, home, id)
+	if err != nil {
 		t.Fatalf("the command the report named failed: %v", err)
+	}
+	if _, err := runUndoCmd(t, home, id, "confirm", undoGenerationFromPreview(t, preview, id)); err != nil {
+		t.Fatalf("the line the preview printed failed: %v", err)
 	}
 
 	if _, err := os.Stat(file); !os.IsNotExist(err) {

@@ -99,6 +99,13 @@ already print ends with the exact command for that run's own session, so the ans
 Firing wrote the wrong thing" is a line the operator can copy rather than a manual `git checkout`
 they must compose. This is what closes bead `apogee-kk0.7`.
 
+*Amendment (2026-09-22):* the grammar is `apogee undo <session-id> [confirm <generation>]` — the
+generation is a required third positional, printed on the preview's closing line and quoted back
+by the confirm, so the verb carries decision 7's stamp exactly as `/undo confirm` does; a bare
+`confirm` is sent back to the preview, and a stale stamp is refused with the fresh preview
+reprinted. The verb also holds the session (`session.Store.Hold`) for its whole run, so a session
+open in a live apogee is refused rather than having its journal rewritten under it.
+
 **9 — An approved out-of-workspace write stays funnel-journaled and per-process.** A snapshot's
 work-tree is the workspace, so a write executed under an
 [ADR 0049](0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)
