@@ -73,9 +73,13 @@ type Process struct {
 	cmd    *exec.Cmd
 	master *os.File
 	ring   *ring
-	// cancel stops the process by cancelling the command's own context, whose cmd.Cancel
-	// signals the whole process group.
+	// cancel stops the process by cancelling the command's own context, whose cmd.Cancel —
+	// wired by td — signals the whole process group.
 	cancel context.CancelFunc
+	// td is platform's §2.4 process teardown: it owns cmd.Cancel and the clean-exit group kill
+	// reap performs, so a Console tears its tree down through the same tested contract as the
+	// one-shot subprocess path.
+	td platform.ProcessTeardown
 	// denial is the kill-on-denial watch, non-nil only for a confined Console.
 	denial *platform.DenialKillWriter
 	// readerDone closes when the reader goroutine has drained the terminal for the last time,
@@ -94,15 +98,15 @@ type Process struct {
 // Start runs spec's command under a pseudo-terminal and returns the live Process.
 //
 // The command gets a context of its own — never a per-call one — because a Console outlives the
-// tool call that opened it: cancelling that context is what Kill does, and cmd.Cancel turns it
-// into a SIGKILL of the whole process group so nothing the command spawned is left behind
-// (confinement execution contract §2.4).
+// tool call that opened it: cancelling that context is what Kill does, and the cmd.Cancel that
+// platform.NewProcessTeardown wires turns it into a SIGKILL of the whole process group so nothing
+// the command spawned is left behind (confinement execution contract §2.4).
 //
 // The process is started as a SESSION leader with the terminal as its controlling tty, which is
 // what makes job control, line editing and Ctrl-C work inside it. A session leader cannot also be
-// placed in a caller-chosen process group, so whatever Setpgid the Prepare hook asked for is
-// dropped here — at no cost to teardown, because after setsid the process's group id equals its
-// pid and a kill aimed at the negative pid still reaches the whole group.
+// placed in a caller-chosen process group, so whatever Setpgid the teardown or the Prepare hook
+// asked for is dropped here — at no cost to teardown, because after setsid the process's group
+// id equals its pid and a kill aimed at the negative pid still reaches the whole group.
 func Start(spec Spec) (*Process, error) {
 	if len(spec.Argv) == 0 {
 		return nil, errors.New("console: no command to run")
@@ -110,12 +114,9 @@ func Start(spec Spec) (*Process, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(ctx, spec.Argv[0], spec.Argv[1:]...)
+	td := platform.NewProcessTeardown(cmd)
 	cmd.Dir = spec.Dir
 	cmd.Env = spec.Env
-	cmd.Cancel = func() error {
-		killProcessGroup(cmd)
-		return nil
-	}
 	cmd.WaitDelay = waitDelay
 
 	if spec.Prepare != nil {
@@ -129,6 +130,7 @@ func Start(spec Spec) (*Process, error) {
 		cmd:        cmd,
 		ring:       newRing(ringCapacity),
 		cancel:     cancel,
+		td:         td,
 		readerDone: make(chan struct{}),
 		reaped:     make(chan struct{}),
 		exitCode:   -1,
@@ -145,6 +147,10 @@ func Start(spec Spec) (*Process, error) {
 		collect = process.denial
 	}
 
+	// pty.StartWithAttrs assigns this copy to cmd.SysProcAttr before Start, so clearing Setpgid
+	// here discards the one the teardown set and the child never runs setsid-then-setpgid. The
+	// teardown's kill is unaffected: a session leader's PGID == its PID, which is exactly the
+	// group the negative-PID kill is aimed at.
 	attrs := syscall.SysProcAttr{}
 	if cmd.SysProcAttr != nil {
 		attrs = *cmd.SysProcAttr
@@ -248,9 +254,12 @@ func (p *Process) collectOutput(collect io.Writer) {
 //
 // The second kill is the §2.4 teardown-on-every-exit amendment: a command that exits on its own
 // after backgrounding a child leaves that child holding the terminal, so the clean-exit path
-// needs the same group kill the cancel path gets. Aiming it at the reaped leader's negative pid
-// is safe precisely because the group still has a member — the kernel cannot recycle a process
-// group id while one remains.
+// needs the same group kill the cancel path gets — the teardown's Reap, aimed at the reaped
+// leader's negative pid, which is safe precisely because the group still has a member (the
+// kernel cannot recycle a process group id while one remains). A descendant that left the group
+// with a setsid or setpgid of its own is outside that reach — the same accepted residual the
+// one-shot subprocess path documents at platform.NewProcessTeardown. Release then drops whatever
+// the containment held, a no-op on POSIX.
 func (p *Process) reap() {
 	defer close(p.reaped)
 	_ = p.cmd.Wait()
@@ -262,19 +271,6 @@ func (p *Process) reap() {
 	p.exited = true
 	p.exitCode = code
 	p.mu.Unlock()
-	killProcessGroup(p.cmd)
-}
-
-// killProcessGroup SIGKILLs the process's whole group. The process is a session leader, so its
-// group id equals its pid and the negative-pid kill reaches every descendant that has not
-// deliberately left the group with a setsid or setpgid of its own — the same accepted residual
-// the one-shot subprocess path documents. An already-gone process or empty group is the ordinary
-// case and answers with an error worth ignoring.
-func killProcessGroup(cmd *exec.Cmd) {
-	if cmd.Process == nil {
-		return
-	}
-	if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil {
-		_ = cmd.Process.Kill()
-	}
+	p.td.Reap(p.cmd)
+	p.td.Release()
 }

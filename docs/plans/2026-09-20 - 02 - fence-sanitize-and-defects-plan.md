@@ -225,7 +225,9 @@ NOTES (2026-09-22): the table case names "a wrapper's grandchild" in userexec_te
 **Acceptance.** `go build ./... && go test -race ./internal/userexec/... ./internal/reactions/... ./internal/config/...`; `! grep -n 'cmd.Run()' internal/userexec/userexec.go`; `test $(grep -c '"github.com/airiclenz/apogee/internal/platform"' internal/userexec/userexec.go) -eq 1`
 **Commit:** `fix(userexec): a timed-out user command takes its process tree with it`
 
-## 11. The Console's group kill goes through platform's teardown
+## 11. The Console's group kill goes through platform's teardown — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): `go test -race` cannot run on this host (ThreadSanitizer "unsupported VMA range", 47-bit — a Raspberry Pi); the acceptance suite was run without `-race` and passes; the verifier should run the `-race` form on a box that supports it.
 
 **What.** `fix(console)`: `internal/console/process.go`'s `killProcessGroup` is a raw `syscall.Kill` twin of `platform.killProcessGroup` outside the tested `ProcessTeardown` contract. In `Start`, call `td := platform.NewProcessTeardown(cmd)` right after `exec.CommandContext` and drop the hand-written `cmd.Cancel`; keep `cmd.WaitDelay = waitDelay` after it; keep `Setpgid=false; Setsid=true` (a session leader's PGID == PID, so the negative-PID kill still covers the group — say so in the comment); store `td` on `Process`; `reap()` → `p.td.Reap(p.cmd); p.td.Release()`. Delete `killProcessGroup`. Behaviour identical.
 **Regression guard.** The `syscall.Kill` acceptance grep is scoped to the production file — `! grep -n 'syscall.Kill' internal/console/process.go` — because the pre-existing liveness probe `processExists` (internal/console/process_test.go:252, `syscall.Kill(pid, 0)`) is untouched by this item.

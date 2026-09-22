@@ -38,9 +38,10 @@
 // command and hands it in through [Spec.Prepare], and all this package does with that fact is
 // put the kill-on-denial watch on the output path when [Spec.Confined] says the command was
 // confined (ADR 0056 §2). It knows nothing about tools, models or the engine's exchange — it
-// imports internal/platform and the pseudo-terminal dependency and nothing else, which is what
-// keeps the file boundary at the process; an owner is an opaque string it matches and never reads
-// meaning into. Windows has no backend here yet: the build-tag pair keeps the whole exported
+// imports internal/platform (the denial watch and the §2.4 process teardown, whose group kill
+// is the one a Console tears its tree down with on cancel and on clean exit alike) and the
+// pseudo-terminal dependency and nothing else, which is what keeps the file boundary at the
+// process; an owner is an opaque string it matches and never reads meaning into. Windows has no backend here yet: the build-tag pair keeps the whole exported
 // surface and [Start] returns [ErrUnsupported], because the tools above it are registered on
 // every platform.
 //
