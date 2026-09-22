@@ -634,6 +634,10 @@ var _ = func(d *tuitest.Driver) []tea.ProgramOption { return d.ProgramOptions() 
 // assertion: one row of it, its whole text with the wrap taken back out, and — for a surface that
 // does not fit at all — the pages of it walked in order.
 
+// repaintBudget bounds [awaitRepaint]. See its doc for why it is set by what a loaded box costs
+// rather than by what a quiet one needs.
+const repaintBudget = 3 * time.Second
+
 // expandLastBlock opens the last toggleable block in the transcript — the keyboard route to the
 // click the checklist describes. ⌥↑ enters the block cursor on the LAST stop and ⏎ toggles what it
 // is standing on (blockcursor.go).
@@ -648,7 +652,14 @@ func expandLastBlock(drv *tuitest.Driver) {
 		tuitest.Awaiting("the block cursor to highlight a block"))
 	drv.Press(tuitest.Enter)
 	drv.WaitQuiet(settled)
+	// The esc is anchored on its own repaint, exactly as the ⌥↑ above is, and for the reason the
+	// walk in [scrollTranscript] states: a quiet check taken straight after a keystroke passes on
+	// a screen that has not been painted YET — the screen was already quiet before the press — and
+	// the paint then lands during whatever the caller does next, where it is read as that step's
+	// repaint instead of this one's.
+	dropped := drv.Screen().BytesWritten()
 	drv.Press(tuitest.Esc)
+	awaitRepaint(drv, dropped)
 	drv.WaitQuiet(settled)
 }
 
@@ -726,8 +737,13 @@ func scrollTranscript(drv *tuitest.Driver) string {
 // awaitRepaint blocks until the screen has been painted since it held `painted` bytes, and gives up
 // after a bounded wait. It reports nothing: a press that paints nothing is the end of a list, and
 // the caller finds that out from the page it reads next.
+//
+// The budget is generous because both of its outcomes are cheap. A press that paints returns the
+// moment it does, so a healthy walk never spends it; a press at the end of a list spends it once
+// per walk. A tight budget, on the other hand, ends a walk early on a loaded box — the caller reads
+// the page it already read, calls that the transcript's end, and asserts against half a block.
 func awaitRepaint(drv *tuitest.Driver, painted int64) {
-	deadline := time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(repaintBudget)
 	for time.Now().Before(deadline) {
 		if drv.Screen().BytesWritten() > painted {
 			return

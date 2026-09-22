@@ -408,9 +408,14 @@ func rowsContain(rows []string, want string) bool {
 //
 // Like [waitForScroll] it watches the screen's byte counter before it pays for a snapshot, because a
 // poll loop that lays out every cell every few milliseconds costs more than the scroll it measures.
+//
+// The budget is [repaintBudget], and it is generous for the reason that one is: because "no movement"
+// is an ANSWER here, a tight budget does not fail on a loaded box — it lies, reporting a repaint that
+// was merely slow as a viewport that is already at its top, and the walk above it then asserts against
+// half the rows it meant to read.
 func waitForFrameChange(drv *tuitest.Driver, was string) bool {
 	painted := drv.Screen().BytesWritten()
-	deadline := time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(repaintBudget)
 	for time.Now().Before(deadline) {
 		if now := drv.Screen().BytesWritten(); now > painted {
 			painted = now

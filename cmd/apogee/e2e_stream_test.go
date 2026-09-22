@@ -768,9 +768,13 @@ func windowLow(f tuitest.Frame) int {
 // It waits on the screen's byte counter before it rebuilds a frame, for the reason the settings
 // walk does (e2e_smoke_test.go): a poll loop that lays out every cell every few milliseconds costs
 // more than the scroll it is measuring.
+//
+// The budget is [repaintBudget], generous for the reason that one is: "no movement" is an ANSWER
+// here, so a tight budget does not fail on a loaded box — it reports a slow repaint as a window that
+// would not move, and the walk above it stops short of the rows it meant to read.
 func waitForScroll(drv *tuitest.Driver, was int) bool {
 	painted := drv.Screen().BytesWritten()
-	deadline := time.Now().Add(500 * time.Millisecond)
+	deadline := time.Now().Add(repaintBudget)
 	for time.Now().Before(deadline) {
 		if now := drv.Screen().BytesWritten(); now > painted {
 			painted = now
