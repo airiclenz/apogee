@@ -20,6 +20,25 @@ minus what the standing content actually measures, the band is 70%/50%, and six 
 - 4: guard folded — the three six-Turn fixtures and the already-stubbed case are padded from `PruneKeepTurns`; the tool-result cap's 40% and the History-share ~60% sites are not this item's.
 - 5: guard folded — the addenda name the retired fixed-share split, never "the floor case" (owner decision); the grep rule is scoped to Budget-share, History-allocation and prune-band lines.
 - Round 2 (2026-09-21, b7fbf8c7): 2: recast — the History cap moves to where History is PRODUCED (`(*Agent).budget()`, History ≤ the fold's transcript budget); `deriveGrowthBounds` stays uncapped and its 16k `turn_test` case is struck; every reader reads ONE number, so ADR 0077 §3's "never disagree" rule holds unchanged (yields to ADR 0077 §3 / `HistoryFill`); `fillnotice_test.go`, `toolresultfloor_test.go`, `filerefs_test.go` are sized from `a.budget().History` and named in Tests; guard (c) reworded — nothing renders, `Measured{0, 0}` is exact (owner decisions). 5: guard folded — the ADR 0018 §8 addendum names the cap's new home (`budget()`); the ADR 0077 addendum is the fixed-share-retired line only, no addendum on `HistoryFill`'s comment (owner decision).
+- Round 3 (2026-09-22, 64e1c68c): 1: guard folded — `internal/agent/loop.go` (`(*Agent).budget`, the
+  ONE production `Allocate` caller) joins Files and the caller list, and "unmeasured" is spelled
+  `Measured{-1, -1}` because the struct zero value is measured-zero, so no call site compiles
+  unchanged. 2: guard folded — the cap is gated on and computed from the ADVERTISED window
+  (`a.cfg.Context.MaxContextTokens`), never `ContextLimit` (a `working-window:`-only session would
+  collapse History to 256); `seedFillFixtures` sizes from the CAPPED History through an exported
+  helper, since `cmd/apogee` is package main and the fill regexp pins the fifties; the item
+  supersedes `internal/domain/hooks.go`'s allocation-block sum sentence and strikes the matching sum
+  assertion; the prose rule widens to `3\.9k` with `autocompact_guard_test.go` and `prune_test.go`
+  joining Files (owner decision). 3: guard folded — the grep reaches `allocated to it\|window
+  share\|own share of the window`, `internal/notice/contextfiles.go` joins Files (doc comments
+  only), the exact-wording case moves to `internal/notice/contextfiles_test.go` because
+  `internal/agent` imports `internal/notice` nowhere, and ADR 0026's "the Budget already allocates a
+  system-prompt share" rejection line takes the addendum too. 4: guard folded — both owned comments'
+  figures are re-derived from `a.budget().History` (3584 at 8192, ~10k-char trigger) and
+  `PruneKeepTurns`; `fillnotice_test.go`'s ladder rungs and `autocompact_guard_test.go`'s compaction
+  fixture join the named non-targets. 5: guard folded — the acceptance greps are repointed to
+  patterns that bite (`protects the four`, `under **40%**`, `four most`, `40%`), and ADR 0026 §8's
+  "15% of working room" line joins the named non-targets as item 3's (owner decision).
 
 ## Authoritative sources
 
@@ -65,13 +84,19 @@ Binding: the split stays pure (no I/O, no Agent state) — ADR 0010; one impleme
 chars→token ratio (`Budget.EstimateTokens`) — measurement arrives in tokens, `Allocate` converts
 nothing.
 **Regression guard.** The 15%/25% fallback for an unmeasured part is TEST-ONLY after item 2
-(`budget()` always measures) — stated in the What above.
-**Files:** internal/context/budget.go, internal/context/budget_test.go
-**Read first:** internal/context/budget.go — Allocate, Allocation, systemPromptFraction, fileContextFraction, defaultReserveFraction; internal/context/budget_test.go — TestAllocate_ReserveHonouredAndPartsSum, TestAllocate_UnknownWindowIsZero, TestAllocate_OversizeReserveClamped; internal/agent/loop.go — budget;
-internal/agent/budget_test.go — TestBudgetIsHonestBeforeCalibration, TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom; internal/agent/contextfiles_test.go — TestContextFilesReportMeasuresStandingContent; cmd/apogee/e2e_fillnotice_test.go — seedFillFixtures; internal/agent/turn_test.go — TestGrowthBounds_WorkingWindowKeepsReaderNumbers
+(`budget()` always measures) — stated in the What above. (round 3) "Unmeasured" is spelled with a
+NEGATIVE field (`Measured{-1, -1}`): the struct zero value `Measured{}` is MEASURED-zero, which
+item 2 guard (c) rests on, so no call site "compiles unchanged" — every site
+`grep -rn 'Allocate(' --include='*.go'` finds is edited to pass it explicitly, the ONE production
+caller included: `(*Agent).budget` in `internal/agent/loop.go`, which joins this item's Files and
+its caller list and passes the unmeasured value here (item 2 replaces it).
+**Files:** internal/context/budget.go, internal/context/budget_test.go, internal/agent/loop.go
+**Read first:** internal/context/budget.go — Allocate, Allocation, systemPromptFraction, fileContextFraction, defaultReserveFraction; internal/context/budget_test.go — TestAllocate_ReserveHonouredAndPartsSum, TestAllocate_UnknownWindowIsZero (`got != (Allocation{})`, so StandingAdvisory must stay comparable), TestAllocate_OversizeReserveClamped;
+internal/agent/loop.go — budget; internal/agent/budget_test.go — TestBudgetIsHonestBeforeCalibration, TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom; internal/agent/turn_test.go — TestGrowthBounds_WorkingWindowKeepsReaderNumbers;
+internal/agent/contextfiles_test.go — TestContextFilesReportMeasuresStandingContent; cmd/apogee/e2e_fillnotice_test.go — seedFillFixtures
 **Tests.** `budget_test.go`: (a) measured parts reserve `measured × 1.10` and History takes the
 rest, every field non-negative, parts sum to the window; (b) a zero measurement floors at 2% of
-working; (c) an unmeasured part reserves its fraction exactly as before (existing
+working; (c) an unmeasured part (spelled `Measured{-1, -1}`) reserves its fraction exactly as before (existing
 `TestAllocate_ReserveHonouredAndPartsSum` keeps passing); (d) a standing content larger than the
 working room leaves History at exactly 50% of working and the two reservations scaled
 proportionally, sum intact; (e) `StandingAdvisory` equals the 15% share regardless of measurement;
@@ -136,7 +161,34 @@ room less the measured standing reservations, floored at 50%); `internal/agent/d
 joins item 2's Files; its bodies are sized from `a.budget().History` (or its header line restates
 the new History at 8192) and `TestContextFillNotice` joins the acceptance `-run`; (h) (round 2)
 `toolresultfloor_test.go` and `filerefs_test.go` are re-derived from `a.budget().History` where
-they hand-pin the 3.9k line and are named in Tests, not listed as "keep passing". Documented
+they hand-pin the 3.9k line and are named in Tests, not listed as "keep passing".
+(i) (round 3) the cap is gated on and computed from the ADVERTISED window
+(`a.cfg.Context.MaxContextTokens > 0`, mirroring `deriveGrowthBounds`'s `if b.Window > 0`), NEVER
+from `limit`/`ContextLimit`: a session with `working-window: 200000` and no `context-window:` has
+`Window == 0` and `ContextLimit == 200000`, where `max(0 − 4608, 256)` would collapse History from
+~155k to 256 for every reader; with no advertised window History stays `alloc.History` uncapped,
+exactly as today. (j) (round 3, supersedes (c)'s SIZING, not its `Measured{0, 0}` claim)
+`seedFillFixtures` sizes from the CAPPED History, because the binary's `budget()` History at 8192 is
+`max(8192 − 4096 − 512, 256) = 3584` while the uncapped 6292 lands the fill at ~95% and fails
+`fillNoticeLine`'s "percent in the fifties" regexp; `cmd/apogee` is package main and cannot name the
+unexported `compactMaxTokens` / `compactPromptOverheadTokens` / `compactMinTranscriptTokens`, so
+export the cap as a helper (e.g. `agent.HistoryCap(window)`) for the e2e test to call — never a
+re-pinned literal without the arithmetic stated in a comment. (k) (round 3) the cap reverses the
+allocation-block sum sentence in `internal/domain/hooks.go` ("the rest is split across SystemPrompt,
+FileContext, and History (they sum to ContextLimit - ResponseReserve)"): this item supersedes that
+sentence and names it for rewording (History is the allocation capped at the fold's transcript
+budget, so the three no longer sum), and strikes the matching sum assertion in
+`TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom`. (l) (round 3, owner decision) item 2's
+prose rule is widened to reach the two comments its `60%\|48%\|working room` grep misses —
+`internal/agent/autocompact_guard_test.go` and `internal/agent/prune_test.go`, each pinning the
+8192 window's "~3.9k-token History allocation". The rule becomes: every comment under
+`internal/agent` stating the History allocation as a fixed fraction OR as a pinned token figure for
+a named window — grep `60%\|48%\|working room\|3\.9k` — is re-derived from the measured allocation;
+at the 8192 window the cap makes History 3584 (a DECREASE from today's 3933), so both comments
+state that number or cite `a.budget().History`. `internal/agent/autocompact_guard_test.go` and
+`internal/agent/prune_test.go` join item 2's Files; item 4 keeps `internal/agent/prune_test.go` in
+its own Files for the band re-sizing, and the deliberate overlap makes items 2 and 4 run serial.
+Documented
 decisions: this item yields to ADR 0018 §8
 (`docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md`, the
 §8 crossover arithmetic; restated in code by `internal/agent/dispatch.go` `structuralFloor`) — the
@@ -146,22 +198,27 @@ the cap's new home (`budget()`) in item 5. It also yields to ADR 0077 §3
 `internal/domain/budget.go` `HistoryFill` and `internal/agent/fillnotice.go`) — with the cap in
 `budget()` the notice and the fold read one History, so the "never disagree" rule stands and gets
 no addendum.
-**Files:** internal/agent/loop.go, internal/domain/hooks.go, internal/agent/compact.go, internal/agent/dispatch.go, internal/agent/contextfiles.go, internal/agent/budget_test.go, internal/agent/turn_test.go, internal/agent/contextfiles_test.go, internal/agent/fillnotice_test.go, internal/agent/toolresultfloor_test.go, internal/agent/filerefs_test.go, cmd/apogee/e2e_fillnotice_test.go
-**Read first:** internal/agent/loop.go — budget, standingSystem, requestExceedsWindow; internal/agent/standingblocks.go — standingBlocks, standingRenders; internal/agent/compact.go — deriveGrowthBounds, historyExceedsAllocation; internal/agent/dispatch.go — structuralFloor, clampToolResult;
-internal/domain/budget.go — HistoryFill, HistoryExceedsAllocation; internal/agent/toolresultfloor_test.go — floorAgent, TestToolResultCapKeepsTheTighterCapAboveTheFloor; internal/agent/filerefs_test.go — refAgentWithWindow, TestResolveFileRefs_SplitsTheFloorAcrossReferences;
-internal/agent/fillnotice_test.go — fillConfig, sizedTool, TestContextFillNoticeFirstPostFoldResultFiresItsOwnRung
+**Files:** internal/agent/loop.go, internal/domain/hooks.go, internal/agent/compact.go, internal/agent/dispatch.go, internal/agent/contextfiles.go, internal/agent/budget_test.go, internal/agent/turn_test.go, internal/agent/contextfiles_test.go, internal/agent/fillnotice_test.go, internal/agent/toolresultfloor_test.go, internal/agent/filerefs_test.go, internal/agent/autocompact_guard_test.go, internal/agent/prune_test.go, cmd/apogee/e2e_fillnotice_test.go
+**Read first:** internal/agent/loop.go — budget, standingSystem, requestExceedsWindow; internal/agent/standingblocks.go — standingBlocks, standingRenders (the "context files" row is the file part; the ride-along rule returns nil when nothing seeds); internal/agent/compact.go — deriveGrowthBounds, compactMaxTokens, compactPromptOverheadTokens, compactMinTranscriptTokens;
+internal/domain/hooks.go — Budget (Window vs ContextLimit, the allocation-block sum sentence); internal/agent/dispatch.go — structuralFloor, clampToolResult, clampToBound; internal/agent/contextfiles.go — ContextFilesReport, contextBlocks (no recursion: no standing render reads budget());
+internal/agent/budget_test.go — TestBudgetIsHonestBeforeCalibration, TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom; cmd/apogee/e2e_fillnotice_test.go — seedFillFixtures, fillFixtureShare, fillNoticeLine
 **Tests.** `internal/agent/budget_test.go`: `TestBudgetIsHonestBeforeCalibration` and
 `TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom` now compare against `Allocate` fed the same
 measurement the Agent takes (a helper on the test side renders the standing blocks and estimates
 them), repinned to `min(alloc.History, max(Window − (compactMaxTokens + compactPromptOverheadTokens), compactMinTranscriptTokens))`,
+with the allocation-sum assertion struck (the three parts no longer sum to
+`ContextLimit − ResponseReserve`) and the `window: 0, working: 200000` row proving History stays
+UNCAPPED when no window is advertised;
 and a new test shows a session with a large `AGENTS.md` gets a larger `FileContext` and a
 smaller History than the same session without it, with History never below 50% of working.
 `turn_test.go` `TestGrowthBounds_WorkingWindowKeepsReaderNumbers` sizes its fixtures from the
 Agent's own `budget()` (or the measured `Allocate`), never the unmeasured split; `deriveGrowthBounds`
 stays uncapped, so no 16k `structuralFloor() <= transcriptBudget` case. `e2e_fillnotice_test.go`
-`seedFillFixtures` sizes from `Allocate(fillNoticeWindow, 0, 0, Measured{0, 0})` and
+`seedFillFixtures` sizes from the CAPPED History at `fillNoticeWindow` — the exported helper of
+guard (j), never the uncapped `Allocate(fillNoticeWindow, 0, 0, Measured{0, 0}).History` — and
 `fillNoticeConfig` pins `use-default-prompt: false` (comment: with no context file nothing renders
-under the ride-along rule, both parts measure 0 and floor at 2%, so `Measured{0, 0}` is exact).
+under the ride-along rule, both parts measure 0 and floor at 2%, so `Measured{0, 0}` is exact);
+`fillNoticeLine`'s "percent in the fifties" regexp still matches.
 `contextfiles_test.go` `TestContextFilesReportMeasuresStandingContent` is repinned to
 `a.budget().StandingAdvisory`. `internal/agent/fillnotice_test.go`: the bodies of every
 `TestContextFillNotice*` case are sized from `a.budget().History` (or the file's header line
@@ -190,13 +247,29 @@ entry) is item 5's, not this item's.
 over `internal/ docs/adr/0026*` — it reaches `internal/agent/contextfiles.go` ("against the Budget's
 system share") and `internal/notice/window.go` ("gates it on a system share"), which joins Files;
 `CONTEXT.md`'s "Budget's system-prompt share" line is outside this item's scope and item 5 owns it.
-**Files:** internal/agent/contextfiles.go, internal/agent/contextfiles_test.go, internal/domain/contextfile.go, internal/notice/window.go, docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md
-**Read first:** internal/agent/contextfiles.go — ContextFilesReport; internal/domain/contextfile.go — ContextFilesReport, Oversize; internal/notice/contextfiles.go — ContextFileNotices; internal/agent/contextfiles_test.go — TestContextFilesReportMeasuresStandingContent, TestContextFilesReportWithoutWindowOrFiles;
-internal/notice/contextfiles_test.go; internal/eventjson/writer.go — ContextFiles; internal/notice/window.go — WindowUnknown
+(round 3) The grep is widened again to
+`SystemShare\|system[- ]share\|system-prompt share\|Budget\.SystemPrompt\|allocated to it\|window share\|own share of the window`
+over `internal/` — it reaches the two comments that call the ceiling an ALLOCATION,
+`internal/notice/contextfiles.go` ("outgrown the window share allocated to it", which joins Files:
+DOC COMMENTS only, the rendered wording stays) and `internal/domain/contextfile.go` ("the Budget's
+own share of the window" / "a zero share, so nothing was allocated"). The new exact-wording case
+goes in `internal/notice/contextfiles_test.go`, NOT `internal/agent/contextfiles_test.go`:
+`internal/agent` imports `internal/notice` nowhere today (only `internal/tui` and `cmd/apogee` do),
+and the case as drafted would silently open an engine→notice edge; `internal/agent`'s test keeps
+`SystemShare == a.budget().StandingAdvisory` plus `Oversize()`. The ADR 0026 addendum also covers
+the Considered-options line that rejects a configurable size limit "because the Budget already
+allocates a system-prompt share" — after item 1 it no longer does, so the §8 addendum alone would
+leave that reasoning stating a retired fact.
+**Files:** internal/agent/contextfiles.go, internal/agent/contextfiles_test.go, internal/domain/contextfile.go, internal/notice/contextfiles.go, internal/notice/contextfiles_test.go, internal/notice/window.go, docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md
+**Read first:** internal/domain/contextfile.go — ContextFilesReport, Oversize, SystemShare; internal/notice/contextfiles.go — ContextFileNotices, ContextNotice; internal/agent/contextfiles.go — ContextFilesReport, readContextFile;
+internal/agent/contextfiles_test.go — TestContextFilesReportMeasuresStandingContent, TestContextFilesReportWithoutWindowOrFiles; internal/notice/contextfiles_test.go; internal/notice/window.go — WindowUnknown;
+docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md — §8, Considered options; internal/eventjson/writer.go — ContextFiles
 **Tests.** `contextfiles_test.go` `TestContextFilesReportMeasuresStandingContent` asserts
-`SystemShare == a.budget().StandingAdvisory` (repinned in item 2, kept here); a new case shows a standing content that fits its
-measured reservation but exceeds 15% of working STILL renders the notice with the exact wording
-above (drive `ContextFileNotices`, compare the emitted string); the surfaces `tui/model.go`
+`SystemShare == a.budget().StandingAdvisory` (repinned in item 2, kept here) plus `Oversize()`; the
+new exact-wording case lives in `internal/notice/contextfiles_test.go` — a report whose standing
+content fits its measured reservation but exceeds 15% of working STILL renders the notice with the
+exact wording above (drive `ContextFileNotices`, compare the emitted string), so no engine→notice
+import is opened; the surfaces `tui/model.go`
 `noteContextFiles`, `headless.go` `contextFilesFrame`, `schedule.go` `contextAnomalies` need no
 change and their existing tests keep passing.
 **Acceptance.** `go build ./... && go test ./internal/agent -run 'TestContextFiles' -count=1 && go test ./internal/notice ./internal/domain -count=1`
@@ -222,11 +295,20 @@ fixture with `PruneKeepTurns` filler Turns (count derived from the constant, nev
 c,d,e,f) and re-derive History from the band; seed `TestPruneDoesNothing`'s "already-stubbed results
 are not re-pruned" case with `PruneKeepTurns` Turns after the stubbed one so the protected-index gate
 passes and the stub check is what declines. The tool-result cap's 40% and the History-share ~60%
-sites are not this item's (owners named in the What).
+sites are not this item's (owners named in the What). (round 3) Rewording only the band leaves the
+two owned comments' FIGURES wrong: every figure in `internal/agent/prune_test.go` `pruneConfig`
+("History allocation ≈ 3.9k tokens; the 60% trigger ≈ 9.4k chars") and in
+`internal/agent/stepnotice_test.go` ("~16k chars, past the ~9.4k-char trigger") is re-derived from
+`a.budget().History` at the 8192 window — item 2's cap makes it 3584, so the 70% trigger is
+~10k chars — and from `PruneKeepTurns` (`seedToolTurns(a, PruneKeepTurns, 4000)` now seeds ~24k
+chars, not ~16k); none of 3.9k / 9.4k / 16k is carried over. The named non-targets also gain
+`internal/agent/fillnotice_test.go`'s fill-ladder rungs ("from 40% to 80%", "= 40%" — item 2
+repins those) and `internal/agent/autocompact_guard_test.go`'s compaction fixture ("The four
+Turns"), neither of which is the prune band.
 **Files:** internal/context/prune.go, internal/context/doc.go, internal/context/prune_test.go, internal/agent/prune.go, internal/agent/prune_test.go, internal/agent/stepnotice_test.go
-**Read first:** internal/context/prune.go — pruneHighFraction, pruneLowFraction, PruneKeepTurns, Prune, pruneProtectedIndex; internal/context/prune_test.go — pruneConv, readCall, TestPruneDoesNothing, TestPruneProtectsTheRecentToolCallingTurns, TestPruneOrdersOldestTurnFirst, TestPruneOrdersLargestWithinATurn, TestPruneStubNamesTheCall;
-internal/domain/budget.go — HistoryExceedsFraction, PromptChars; internal/agent/prune.go — autoPrune; internal/agent/prune_test.go — pruneConfig, seedToolTurns, TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow;
-internal/agent/stepnotice_test.go — TestStepNoticeIsToldAgainAfterAPruneStubbedIt, TestTokenNoticeIsToldAgainAfterAPruneStubbedIt; internal/context/doc.go — package comment (Pruning paragraph)
+**Read first:** internal/context/prune.go — pruneHighFraction, pruneLowFraction, PruneKeepTurns, Prune, pruneProtectedIndex; internal/context/prune_test.go — pruneConv, readCall, TestPruneProtectsTheRecentToolCallingTurns, TestPruneOrdersOldestTurnFirst, TestPruneDoesNothing;
+internal/agent/prune_test.go — pruneConfig, seedToolTurns, TestAutoPruneStubsOldTurnsAndKeepsTheRecentWindow; internal/agent/stepnotice_test.go — TestStepNoticeIsToldAgainAfterAPruneStubbedIt, TestTokenNoticeIsToldAgainAfterAPruneStubbedIt; internal/domain/budget.go — HistoryExceedsFraction, PromptChars;
+internal/agent/compact.go — compactMaxTokens, compactPromptOverheadTokens, compactMinTranscriptTokens; internal/agent/prune.go — autoPrune; internal/context/doc.go — package comment (Pruning paragraph)
 **Tests.** `prune_test.go`: `TestPruneProtectsTheRecentToolCallingTurns` drives seven tool-calling
 Turns and asserts the six most recent are untouched and the first is stubbed;
 `TestPruneOrdersOldestTurnFirst`, `TestPruneOrdersLargestWithinATurn` and `TestPruneStubNamesTheCall`
@@ -275,10 +357,21 @@ a) — do NOT call it "the floor case"; (round 2) the ADR 0018 §8 addendum name
 fixed-share-retired line only — the "never disagree" rule stands, no addendum on `HistoryFill`'s
 comment (`internal/domain/budget.go`). The prose rule is scoped to lines stating a Budget share, the History
 allocation or the prune band; the tool-result cap's 40% (ADR 0071 D-table, ADR 0018 §9) and
-ADR 0022's "25% of runs" are named non-targets.
+ADR 0022's "25% of runs" are named non-targets. (round 3, owner decision) item 5's named
+non-target list gains ADR 0026 §8's "15% of working room" line (the `15%` grep hits
+docs/adr/0026-*.md around lines 128 and 171) — item 3 owns that line through
+`Budget.SystemPrompt`, so item 5 leaves it alone. (round 3) The acceptance greps are repointed to
+patterns that actually bite the tree: `four most recent` matches CONTEXT.md nowhere (it wraps —
+"it protects the four" / "most recent tool-calling Turns") and `four turns` matches neither
+`config.yaml` nor `configuration.md` ("The four most" / "# recent tool-calling turns"), so all
+three files could keep "four" with the check green; and NO pattern reached the band's LOW bound
+("under **40%**" in CONTEXT.md and configuration.md, "back under 40%" in config.yaml), so the
+40% → 50% edit could be skipped anywhere. Use `protects the four` and `under \*\*40%\*\*` for
+CONTEXT.md and `four most` and `40%` for config.yaml / configuration.md — all match today.
 **Files:** CONTEXT.md, docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md, docs/adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md, docs/adr/<next>-the-budget-reserves-what-the-standing-content-measures.md, internal/config/defaults/config.yaml, docs/manual/configuration.md
-**Read first:** CONTEXT.md — **Budget**, **Pruning**, **Context files** entries (section #context-and-history); docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md — Amendment sections, the "~60% of the working room" paragraph; docs/adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md — "Two facts fixed the design" paragraph, Addendum (2026-09-19) heading form;
-internal/config/defaults/config.yaml — `prune-tool-results:` comment block; docs/manual/configuration.md — the **Pruning** paragraph after Compaction; internal/context/budget.go — systemPromptFraction, fileContextFraction, Allocate; internal/agent/prune.go — autoPrune
+**Read first:** CONTEXT.md — **Budget** entry, **Pruning** entry ("quiescent **Turn boundary**", "above **60%**", "under **40%**", "protects the four"), **Context files** entry ("Budget's system-prompt share"); docs/adr/0018-context-overflow-recovers-structurally-the-emergency-fold-and-one-retry.md — §8 structural floor, "History is ~60% of the working room (~48% of the window)", Amendment (2026-08-26);
+docs/adr/0077-the-context-fill-notice-is-the-first-engine-advise-reaction.md — "Two facts fixed the design", Addendum (2026-09-19) heading form, Rejected "~48%" line; internal/config/defaults/config.yaml — `prune-tool-results:` comment block; docs/manual/configuration.md — the **Pruning** paragraph after Compaction;
+internal/agent/prune.go — autoPrune ("runs at EVERY Turn boundary, mid-Exchange included" — the source that makes the CONTEXT.md correction true); internal/context/budget.go — systemPromptFraction, fileContextFraction, defaultReserveFraction, Allocate; docs/adr/0026-workspace-context-files-are-session-scoped-prompt-data.md — §8 (item 3's site, not this one's)
 **Tests.** None (docs only); `go test ./internal/config -count=1` proves the embedded template still parses.
-**Acceptance.** `go build ./... && go test ./internal/config -count=1 && ! grep -n 'four most recent\|above \*\*60%\*\*\|quiescent \*\*Turn boundary\*\*' CONTEXT.md && ! grep -n '60%\|four turns' internal/config/defaults/config.yaml docs/manual/configuration.md`
+**Acceptance.** `go build ./... && go test ./internal/config -count=1 && ! grep -n 'protects the four\|above \*\*60%\*\*\|under \*\*40%\*\*\|quiescent \*\*Turn boundary\*\*' CONTEXT.md && ! grep -n '60%\|40%\|four most' internal/config/defaults/config.yaml docs/manual/configuration.md`
 **Commit:** `docs(context): the Budget measures its standing parts; prune band and window documented`
