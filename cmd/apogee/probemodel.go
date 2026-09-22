@@ -15,11 +15,15 @@ import (
 	"github.com/airiclenz/apogee/internal/sanitize"
 )
 
-// batteryRequestTimeout bounds ONE battery call. The battery is four short exchanges against a
-// local server, so a call still running after a minute is a hung server rather than a slow
-// model — and a probe that wedges is worse than a probe that reports a failure, because the
-// failure is itself a finding the report can state.
-const batteryRequestTimeout = 60 * time.Second
+// batteryRequestTimeout is the DEFAULT bound on one battery ATTEMPT, overridable with --timeout.
+// Two things it is not: it is not a bound on the command, and it is not a bound on one battery
+// call — a timed-out attempt is retryable, so the client's retries can multiply this figure by the
+// attempt budget before the call itself gives up. Five minutes because the servers this probe
+// exists for are the slow ones: a 30B-class model quantised onto a CPU ordinarily spends minutes
+// on a single short exchange, and cutting that off would report a healthy server as a broken one.
+// A probe that wedges is still worse than a probe that reports a failure — the failure is itself a
+// finding the report can state — which is why the bound exists at all rather than being dropped.
+const batteryRequestTimeout = 300 * time.Second
 
 // errProbeModelNeedsEndpoint is the refusal when resolution left this command with nothing to
 // call. Selection itself refuses first since ADR 0036 — a config that names no startup server
@@ -53,6 +57,9 @@ var errProbeModelNeedsLabel = errors.New(
 func probeModelCommand() *cobra.Command {
 	var opts config.Options
 	var noSave bool
+	// A local, like noSave: no other probe command bounds a call this way, so the figure has no
+	// business in config.Options — the flag IS the whole surface.
+	var batteryTimeout time.Duration
 
 	cmd := &cobra.Command{
 		Use:   "model",
@@ -144,7 +151,7 @@ func probeModelCommand() *cobra.Command {
 			// Both of this command's clients are keyed, so a keyed
 			// Upstream cannot refuse the probe while a session against it works.
 			client := provider.NewClient(opts.Endpoint, label,
-				provider.WithRequestTimeout(batteryRequestTimeout), provider.WithAPIKey(apiKey),
+				provider.WithRequestTimeout(batteryTimeout), provider.WithAPIKey(apiKey),
 				provider.WithWire(wire))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
 				Endpoint: opts.Endpoint,
@@ -182,6 +189,8 @@ func probeModelCommand() *cobra.Command {
 		"apogee home directory for config/library/sessions (default: ~/.apogee)")
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the full battery and print the report, but record no fingerprint (ADR 0021's off-switch)")
+	flags.DurationVar(&batteryTimeout, "timeout", batteryRequestTimeout,
+		"bound on ONE attempt at a battery call; retries can multiply it (e.g. 10m for a CPU-hosted model)")
 
 	return cmd
 }

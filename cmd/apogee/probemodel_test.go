@@ -794,3 +794,108 @@ func TestProbeModelPlaceholderToolCallsAreNotEvidence(t *testing.T) {
 			rec.CapabilityTier, probe.TierBasic)
 	}
 }
+
+// stalledModelUpstream is a battery server that never answers its FIRST chat request: it holds
+// that one attempt open until the test is over, and answers every later request at once. It is
+// the shape of the slow local server `--timeout` exists for, and a command that RETURNS while the
+// first attempt is still held is the observable proof that the flag's value reached the battery
+// client — Client.requestTimeout is unexported, with no accessor, and the client is built inside
+// the command's own RunE. The held attempt is retryable, so the client's next attempt gets the
+// immediate answer and the battery runs on.
+func stalledModelUpstream(t *testing.T) (*httptest.Server, func() int) {
+	t.Helper()
+	hold := make(chan struct{})
+	var mu sync.Mutex
+	held := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_, _ = w.Write([]byte(`{"data":[{"id":"battery-model","context_length":4096}]}`))
+			return
+		case "/props":
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		mu.Lock()
+		first := held == 0
+		if first {
+			held++
+		}
+		mu.Unlock()
+		if first {
+			<-hold // released only at cleanup: this attempt ends only if the caller cuts it
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"{\"ok\":true}"},"finish_reason":"stop"}]}`))
+	}))
+	// Registered after the Close cleanup so it runs BEFORE it (cleanups are LIFO): a held handler
+	// would otherwise block httptest's Close for the whole of its shutdown wait.
+	t.Cleanup(srv.Close)
+	t.Cleanup(func() { close(hold) })
+	return srv, func() int {
+		mu.Lock()
+		defer mu.Unlock()
+		return held
+	}
+}
+
+// --timeout bounds one battery ATTEMPT: the figure the user types is what the battery client is
+// built with, so an attempt against a server that stops answering is cut there instead of at the
+// default sized for CPU inference.
+func TestProbeModelTimeoutFlagBoundsTheBatteryAttempt(t *testing.T) {
+	t.Parallel()
+	srv, heldAttempts := stalledModelUpstream(t)
+	home := upstreamHome(t, srv.URL)
+
+	cmd := newProbeCommand()
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	cmd.SetErr(&out)
+	// The flag spelled exactly as registered, on the command line a user would type. The model is
+	// pinned so the whole run goes through the battery client the flag builds.
+	cmd.SetArgs([]string{"model", "--config", home, "--model", "battery-model", "--no-save",
+		"--timeout", "200ms"})
+
+	// Driven off the test goroutine so an unbounded attempt FAILS this case rather than hanging it
+	// until the package deadline; every assertion stays on the test goroutine, which is why the
+	// command is executed here rather than through runProbeModel and its t.Fatalf.
+	errCh := make(chan error, 1)
+	go func() { errCh <- cmd.ExecuteContext(context.Background()) }()
+
+	// Generous on purpose: it only has to sit far below the 5m default and far above a healthy
+	// run, which cuts the held attempt in 200ms and finishes against the answering upstream.
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("probe model: %v\n%s", err, out.String())
+		}
+	case <-time.After(60 * time.Second):
+		t.Fatalf("probe model never returned: --timeout 200ms did not reach the battery client, "+
+			"which is still waiting out the %s default", batteryRequestTimeout)
+	}
+	if heldAttempts() == 0 {
+		t.Errorf("the upstream never held a battery attempt, so the run proves nothing about --timeout")
+	}
+}
+
+// And with no --timeout the battery is bounded by a figure a CPU-hosted model can meet. The
+// registered flag's own default is what the assertion reads, since the client carrying it is
+// built inside RunE and keeps the value unexported.
+func TestProbeModelTimeoutDefaultsToTheCPUInferenceBudget(t *testing.T) {
+	t.Parallel()
+	var registered string
+	for _, sub := range newProbeCommand().Commands() {
+		if sub.Name() != "model" {
+			continue
+		}
+		if flag := sub.Flags().Lookup("timeout"); flag != nil {
+			registered = flag.DefValue
+		}
+	}
+	// The literal is deliberate: comparing against batteryRequestTimeout would pass at any value,
+	// including the 60 s that cut a CPU-hosted model off mid-battery. An empty string means the
+	// flag is not registered at all.
+	if registered != "5m0s" {
+		t.Errorf("probe model --timeout default = %q; want \"5m0s\"", registered)
+	}
+}

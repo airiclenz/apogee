@@ -55,10 +55,14 @@ comparison is all the record buys — nothing reads it at startup and it switche
 `--no-save` runs the whole battery and records nothing; when the battery completed, the
 record's path is printed either way, so deleting that file undoes it. A battery that did not
 complete derives no identity, records nothing and prints no path — its `record` block reads
-`written: no — an incomplete battery derives no identity to record`. It takes `--endpoint`, `--model` and
-`--config` as well, so you can point the battery at a server and a model this host has
+`written: no — an incomplete battery derives no identity to record`. It takes `--endpoint`, `--model`,
+`--timeout` and `--config` as well, so you can point the battery at a server and a model this host has
 never been configured for — with no `--model` the server is asked which one it is
-serving. Both `apogee probe` and `apogee probe model` resolve the entry's API key before
+serving. `--timeout` bounds ONE attempt at a battery call — not the command, and not the call,
+since a timed-out attempt is retried and the wait before the call itself gives up is that figure
+times the attempt budget. It defaults to five minutes, which one short exchange ordinarily costs a
+30B-class model quantised onto a CPU; raise it on a slower box (`--timeout 10m`).
+Both `apogee probe` and `apogee probe model` resolve the entry's API key before
 they look at the server, and a source that refuses — an `api-key-cmd:` that fails, an
 `api-key-env:` naming a variable that is not set — fails the command with that source's own
 message rather than probing unauthenticated: *unreachable* would be the wrong finding.

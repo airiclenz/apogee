@@ -378,7 +378,9 @@ go build ./... && go test ./internal/subprocess/... ./internal/tools/... -run 'S
 
 **Commit:** `fix(subprocess): the timeout ceiling is reachable on slow hardware`
 
-## 7. apogee probe model takes a timeout, and its comment stops calling a slow model hung
+## 7. apogee probe model takes a timeout, and its comment stops calling a slow model hung — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the `--timeout` guard observes the flag's value through the COMMAND's completion, not through a cancelled server handler — an httptest handler does not see the client hang up (measured), so the fixture holds the first battery attempt open forever and the case asserts the command returns anyway; verified discriminating by unwiring the flag (the case fails).
 
 **What.** Closes `apogee-5y94`.
 **Goal:** a battery against a CPU-quantised local model completes, and the documented meaning of the
