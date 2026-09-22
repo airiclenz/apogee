@@ -4498,12 +4498,13 @@ func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 // The one pointer table both gestures walk (mouse.go, pointerPanes)
 // ----------------------------------------------------------------------------
 
-// TestPointerPanesWalkInTheClickChainOrder pins the table's order literally: it is the CLICK-CHAIN
+// TestPointerPanesWalkInTheClickChainOrder pins the list's order literally: it is the CLICK-CHAIN
 // order — settings, then the four reports in the order the slot draws them, then the two modals, the
 // prompt slot and the dropdown — and NOT the slot's stacking order (the framePane order), which puts
 // the prompt first. The reports are asked before the modal half and the prompt after it because a
 // click on a lower report dismisses the one above it before it reaches it, and no pane is entered
-// twice: a pane asked twice would be dismissed by its own first answer.
+// twice: a pane asked twice would be dismissed by its own first answer. What each pane answers WITH
+// is its row of the pane table, which TestEveryFramePaneHasASpec pins as filled.
 func TestPointerPanesWalkInTheClickChainOrder(t *testing.T) {
 	t.Parallel()
 	want := []framePane{paneSettings, paneUsage, paneInspector, paneThinking, paneAdvice, paneBrowser, panePicker, panePrompt, paneDropdown}
@@ -4513,23 +4514,20 @@ func TestPointerPanesWalkInTheClickChainOrder(t *testing.T) {
 	}
 	seen := make(map[framePane]bool, len(want))
 	for i, p := range pointerPanes {
-		if p.pane != want[i] {
-			t.Errorf("pointerPanes[%d] is pane %d, want pane %d", i, p.pane, want[i])
+		if p != want[i] {
+			t.Errorf("pointerPanes[%d] is pane %d, want pane %d", i, p, want[i])
 		}
-		if seen[p.pane] {
-			t.Errorf("pane %d is entered twice", p.pane)
+		if seen[p] {
+			t.Errorf("pane %d is entered twice", p)
 		}
-		seen[p.pane] = true
-		if p.click == nil || p.wheel == nil {
-			t.Errorf("pane %d is missing an answer: click %v, wheel %v", p.pane, p.click != nil, p.wheel != nil)
-		}
+		seen[p] = true
 	}
 }
 
-// The /settings entry drops the pane's own highlight on a click it does NOT claim — the one thing the
-// chain does on the pane's behalf, because a settings span left armed would keep answering every
-// motion and every release taken elsewhere on the frame. Asked of the entry itself, so the drop is
-// pinned where it lives rather than inferred from what the transcript did next
+// The /settings row's click drops the pane's own highlight on a click it does NOT claim — the one
+// thing the chain does on the pane's behalf, because a settings span left armed would keep answering
+// every motion and every release taken elsewhere on the frame. Asked of the row's click itself, so
+// the drop is pinned where it lives rather than inferred from what the transcript did next
 // (TestTranscriptDragOutlivesASettingsHighlight covers that end).
 func TestSettingsEntryDropsTheHighlightOnAClickItDoesNotClaim(t *testing.T) {
 	t.Parallel()
@@ -4545,12 +4543,7 @@ func TestSettingsEntryDropsTheHighlightOnAClickItDoesNotClaim(t *testing.T) {
 	if _, _, ok := m.pointTranscriptRow(0, row); !ok {
 		t.Fatalf("row %d is not a transcript row on this frame", row)
 	}
-	entry := pointerPanes[0]
-	if entry.pane != paneSettings {
-		t.Fatalf("the first entry is pane %d, want paneSettings", entry.pane)
-	}
-
-	next, _, claimed := entry.click(m, m.withFrameSpans(), leftClick(2, row))
+	next, _, claimed := paneSpecs[paneSettings].click(m, m.withFrameSpans(), leftClick(2, row))
 
 	if claimed {
 		t.Fatal("a click on the transcript was claimed by the /settings pane")

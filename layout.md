@@ -146,7 +146,10 @@ and whether the click is spent on closing it:
 
 The last row is why the two decision panes are *soft*-modal to the pointer as they already are to
 the wheel: the prompt stays live under an ask question, and a pane that swallowed every outside
-click would take the caret seat and the transcript drag away for as long as its box was up.
+click would take the caret seat and the transcript drag away for as long as its box was up. Each row
+of this table is one pane's own answer, stated once on that pane's row of the pane table
+(`internal/tui/panes.go`) beside its key claim and its wheel; the order the frame asks the panes in
+is a separate list, and never the table's.
 
 **And a pane in that slot sits flush on the bottom chrome.** The frame spends exactly one blank gap
 row, and it sits ABOVE the slot — between the session area and whatever comes next — so the approval

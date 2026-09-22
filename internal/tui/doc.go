@@ -271,7 +271,10 @@
 // picker, the ask prompt, the approval prompt and the "/" | "@" dropdown — and they are one
 // rectangle written once as well: [popupPaneHit] maps a screen row through the painter's OWN
 // placement (popup.go) for every boxed pane, so the row a click names is the row the painter drew
-// and no handler re-derives geometry the painter already spent. On all five the pointer only ever
+// and no handler re-derives geometry the painter already spent. What each pane DOES with a click or
+// a notch is its row of the pane table (panes.go: the click and wheel funcs of [paneSpec]), and the
+// order the two gestures ask the panes in is [pointerPanes] alone — a list of panes, not of funcs —
+// so the click chain and the wheel chain are two walks over the same rows. On all five the pointer only ever
 // does what the keyboard does: a click highlights the row it landed on, and a SECOND click on that
 // same row is the ⏎ the highlight was offering — always two, because the row an activating click may
 // take is the row the POINTER armed ([clickArm], model.go) and a pane's own default highlight is
@@ -926,9 +929,11 @@
 // window, click, wheel), written once and named once — each kind one row of [reportRows] — with every rectangle in the transcript-side slot a
 // lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix
 // sum of its own; panes.go the pane table — one [paneSpec] row per framePane ({name, slot, modal,
-// open, render}, filled in init() and read at call time), which is what [Model.openPanes], the
-// overlay builder and the transcript-side slot walk each iterate, so a pane is one row and the
-// framePane order is the one order the frame both gives way and stacks in; popup.go the one bordered pane every overlay — those five, the autocomplete
+// open, render, key, keyOpen, click, wheel}, filled in init() and read at call time), which is what
+// [Model.openPanes], the overlay builder and the transcript-side slot walk each iterate, and what
+// the key precedence ([keyClaimOrder], through [paneClaimant]) and the pointer chain ([pointerPanes])
+// read each pane's answers off, so a pane is one row and the framePane order is the one order the
+// frame both gives way and stacks in; popup.go the one bordered pane every overlay — those five, the autocomplete
 // dropdown, the ask and approval prompts — is painted through, and the [popupPlacement] it hands
 // back with each paint is where the pointer READS that pane: which line the row block starts on and
 // how many lines each row took, walked by [popupPlacement.rowAt], so the package holds one mapping

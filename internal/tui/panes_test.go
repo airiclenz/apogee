@@ -8,13 +8,17 @@ import (
 )
 
 // TestEveryFramePaneHasASpec pins the pane table against the framePane constants: every pane below
-// paneKinds has a row with a distinct name, a valid slot and both funcs filled — a pane declared
+// paneKinds has a row with a distinct name, a valid slot and its funcs filled — a pane declared
 // without a row would index a zero row, a nil func rather than a build error, and the walks over
-// the table would panic on the first frame. The input slot holds exactly one pane, the dropdown,
+// the table would panic on the first frame or the first click. The key claim is the one func a row
+// may leave nil, and only the prompt's: its keys are handleKey's state switches, not a rung of
+// keyClaimOrder. modal is true for exactly the three panes that own the keyboard through such a rung
+// plus the prompt, which owns it by state. The input slot holds exactly one pane, the dropdown,
 // which is what lets stackInputSlot name it rather than filter for it.
 func TestEveryFramePaneHasASpec(t *testing.T) {
 	t.Parallel()
 
+	modal := map[framePane]bool{panePrompt: true, paneBrowser: true, paneSettings: true, panePicker: true}
 	names := map[string]framePane{}
 	var inputPanes []framePane
 	for p := framePane(0); p < paneKinds; p++ {
@@ -30,6 +34,18 @@ func TestEveryFramePaneHasASpec(t *testing.T) {
 		}
 		if row.render == nil {
 			t.Errorf("pane %d (%s) has no renderer", p, row.name)
+		}
+		if row.click == nil {
+			t.Errorf("pane %d (%s) has no click: the click chain would panic on it", p, row.name)
+		}
+		if row.wheel == nil {
+			t.Errorf("pane %d (%s) has no wheel: the wheel chain would panic on it", p, row.name)
+		}
+		if (row.key == nil) != (p == panePrompt) {
+			t.Errorf("pane %d (%s) key claim nil = %v; only the prompt's keys live outside keyClaimOrder", p, row.name, row.key == nil)
+		}
+		if row.modal != modal[p] {
+			t.Errorf("pane %d (%s) modal = %v, want %v", p, row.name, row.modal, modal[p])
 		}
 		switch row.slot {
 		case slotTranscript:

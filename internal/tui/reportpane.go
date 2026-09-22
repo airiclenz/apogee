@@ -97,11 +97,11 @@ type reportRow struct {
 // kind precisely so that no function value ever sits on the Model (ADR 0011).
 //
 // It is filled in by its DECLARATION and must stay so — not by an init function the way
-// pickerOfferings is (picker.go). The content funcs compose rows and never reach the painter, so
-// there is no reference loop for the compiler to refuse; and a package var elsewhere copies a row's
-// pane at ITS declaration (pointerPanes, mouse.go, through [reportKind.pane]) — every init function
-// runs after every variable initializer, so a table init filled would hand that copy the zero pane
-// for all four reports. The table is written once, here, and never again.
+// pickerOfferings and paneSpecs are (picker.go, panes.go). The content funcs compose rows and never
+// reach the painter, so there is no reference loop for the compiler to refuse; and a table a
+// declaration can fill is one no package var can read too early — every init function runs after
+// every variable initializer, so a table init filled would hand any declaration-time reader of a
+// row's pane the zero pane for all four reports. The table is written once, here, and never again.
 var reportRows = [reportKinds]reportRow{
 	usageReport: {
 		pane:    paneUsage,

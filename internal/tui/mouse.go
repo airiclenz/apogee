@@ -397,26 +397,14 @@ func (a clickArm) holds(pane framePane, row int) bool {
 	return a.ok && a.pane == pane && a.row == row
 }
 
-// pointerPane is one boxed pane's two pointer answers, keyed by the framePane it is drawn as: click
-// is what [Model.handleMouseClick] asks of it, in that chain's three-part currency — the Model, a
-// tea.Cmd and whether the pane CLAIMED the click — and wheel is what [Model.foldMouseWheel] asks, in
-// the wheel's two-part one (no Cmd exists on that side: a notch moves a highlight and hands back no
-// work). Every click func takes the live m, which is what mutates, and the pre-click frame pre, which
-// every geometry question is put to (handleMouseClick's rule); the walk composes pre once and hands
-// the same value to every entry. The key verdicts stay per pane (ADR 0053 D3): an entry says what a
-// pane does with a click or a notch, never which keys it claims.
-type pointerPane struct {
-	pane  framePane
-	click func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool)
-	wheel func(m Model, msg tea.MouseWheelMsg) (Model, bool)
-}
-
 // pointerPanes is the click chain and the wheel chain in ONE order, the order the two gestures have
 // always been asked in — the CLICK-CHAIN order, which is NOT the slot's stacking order (the
 // framePane order, model.go) — so a row a notch would walk is a row a click can highlight, and a
-// pane added later is asked by both gestures the day it is entered here. The table is a package
-// value rather than a field: the Model is copied on every Update (ADR 0011), and a table of funcs is
-// nothing a frame needs to carry.
+// pane added later is asked by both gestures the day it is entered here. What each pane DOES with a
+// click or a notch is its row of the pane table (paneSpecs, panes.go: the click and wheel funcs, in
+// the currencies [paneSpec] states); this list holds only WHEN it is asked, which is why it is a list
+// of panes and not of funcs. The key verdicts stay per pane as well (ADR 0053 D3): the row says what
+// a pane does with a click or a notch, never which keys it claims.
 //
 // The order: the /settings pane is asked FIRST because it is the frame's one full-height pane, drawn
 // over the transcript for exactly its own rows. The four reports — /usage, /inspect, /thinking,
@@ -433,19 +421,20 @@ type pointerPane struct {
 // Wherever two of these panes can never share a frame the order between them is arbitrary, because
 // only one rectangle can hold the pointer at a time; what is never arbitrary is that every pane is
 // asked before the footer, the prompt and the transcript below.
-var pointerPanes = []pointerPane{
-	{pane: paneSettings, click: settingsPointerClick, wheel: Model.settingsWheel},
-	reportPointer(usageReport),
-	reportPointer(inspectReport),
-	reportPointer(thinkingReport),
-	reportPointer(adviceReport),
-	{pane: paneBrowser, click: Model.handleBrowserClick, wheel: Model.browserWheel},
-	{pane: panePicker, click: Model.handlePickerClick, wheel: Model.pickerWheel},
-	{pane: panePrompt, click: promptPointerClick, wheel: Model.promptWheel},
-	{pane: paneDropdown, click: Model.handleDropdownClick, wheel: Model.dropdownWheel},
+var pointerPanes = []framePane{
+	paneSettings,
+	paneUsage,
+	paneInspector,
+	paneThinking,
+	paneAdvice,
+	paneBrowser,
+	panePicker,
+	panePrompt,
+	paneDropdown,
 }
 
-// settingsPointerClick is the /settings pane's entry: [Model.handleSettingsClick], plus the one thing
+// settingsPointerClick is the /settings pane's click, the one its row of the pane table names
+// (panes.go): [Model.handleSettingsClick], plus the one thing
 // the chain does on its behalf when it does NOT claim the click — its highlight goes, as the other two
 // selections would. The converse is the pane's own (a claimed click drops the prompt's and the
 // transcript's spans); this half is the one a live selection makes silent, because a settings span
@@ -458,23 +447,8 @@ func settingsPointerClick(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, 
 	return next, cmd, claimed
 }
 
-// reportPointer is the entry for one of the read-only reports, resolved THROUGH its kind (reportpane.go):
-// the click is [Model.handleReportClick] — inside the box it is claimed and nothing happens, outside it
-// the report is dismissed and the click goes on — and the wheel is [Model.reportWheel], one row per notch
-// while the pointer is over it.
-func reportPointer(r reportKind) pointerPane {
-	return pointerPane{
-		pane: r.pane(),
-		click: func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-			return m.handleReportClick(r, pre, msg)
-		},
-		wheel: func(m Model, msg tea.MouseWheelMsg) (Model, bool) {
-			return m.reportWheel(r, msg)
-		},
-	}
-}
-
-// promptPointerClick is the prompt slot's entry: the ask pane ([Model.handleAskClick]) and the approval
+// promptPointerClick is the prompt slot's click, the one panePrompt's row of the pane table names
+// (panes.go): the ask pane ([Model.handleAskClick]) and the approval
 // pane ([Model.handleApprovalClick]) share panePrompt's rectangle ("the approval or the ask prompt",
 // model.go) and answer a click the same way, for the same reasons. Which of the two is up is a question
 // of STATE rather than of geometry, so the two are asked one after the other rather than arbitrated
@@ -553,11 +527,12 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 	// here, and every rect below is a READ of it rather than a fresh render of every overlay
 	// ([Model.withFrameSpans], model.go).
 	pre := m.withFrameSpans()
-	// The panes, in the one order both gestures ask them in (pointerPanes). A pane that does not claim
-	// the click hands the model on — dismissed where its currency says so — and the next pane's rect is
-	// still read off pre, never off the model a dismissal has moved.
+	// The panes, in the one order both gestures ask them in (pointerPanes), each answering with its
+	// row's click (paneSpecs). A pane that does not claim the click hands the model on — dismissed
+	// where its currency says so — and the next pane's rect is still read off pre, never off the model
+	// a dismissal has moved.
 	for _, p := range pointerPanes {
-		next, cmd, claimed := p.click(m, pre, msg)
+		next, cmd, claimed := paneSpecs[p].click(m, pre, msg)
 		if claimed {
 			return next, cmd
 		}
@@ -1862,10 +1837,11 @@ func (m Model) foldMouseWheel(msg tea.MouseWheelMsg) (tea.Model, tea.Cmd) {
 	// here rather than in each pane's wheel handler, the pair of the drop handleKey makes (model.go)
 	// — the two ways a highlight moves without a click, cleared in the two places they arrive.
 	m.clickArmed = clickArm{}
-	// The panes, in the one order both gestures ask them in (pointerPanes): each takes the notch only
-	// when the pointer is inside its own rectangle, and the first to take it answers.
+	// The panes, in the one order both gestures ask them in (pointerPanes), each answering with its
+	// row's wheel (paneSpecs): each takes the notch only when the pointer is inside its own rectangle,
+	// and the first to take it answers.
 	for _, p := range pointerPanes {
-		if next, handled := p.wheel(m, msg); handled {
+		if next, handled := paneSpecs[p].wheel(m, msg); handled {
 			return next, nil
 		}
 	}

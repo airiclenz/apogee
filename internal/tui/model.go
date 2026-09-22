@@ -1369,7 +1369,8 @@ func paneClaim(key func(Model, tea.KeyPressMsg) (bool, tea.Model, tea.Cmd)) func
 }
 
 // reportClaim is the named report's key contract in the shape [paneClaim] adapts — [Model.reportKey]
-// with the kind filled in, so a report rung of [keyClaimOrder] names its kind and no forwarder.
+// with the kind filled in, so a report's row of the pane table ([reportPaneRow]) names its kind and
+// no forwarder.
 func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
 	return func(m Model, msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) { return m.reportKey(r, msg) }
 }
@@ -1381,97 +1382,66 @@ func reportClaim(r reportKind) func(Model, tea.KeyPressMsg) (bool, tea.Model, te
 //
 // The order is load-bearing, which is why it is data: every entry states what its surface claims and
 // why it can neither rise nor fall in the list, and TestKeyClaimOrderMatchesTheDocumentedPrecedence
-// fails if the sequence changes. Adding a surface is one entry here plus its key contract in its own
-// file — never another `if` in handleKey.
+// fails if the sequence changes. The eight pane rungs read their gate and their claim off the pane's
+// row of the pane table ([paneClaimant], panes.go), so what a pane DOES with a key is stated once, on
+// its row, and this list holds only WHEN it is asked; the two rungs that are not panes — the run view
+// and the block cursor — carry their claims here. Adding a pane's keys is its row plus one rung here;
+// adding any other surface is one entry here plus its key contract in its own file — never another
+// `if` in handleKey.
 //
 // The entry buys more than routing: the walk freshens the transcript's scroll clamp after any claim
 // that moved a pane's height ([Model.claimKey]), so a surface added here has its height settled
 // before the key's own Update ends, and its author lays nothing out.
 var keyClaimOrder = []keyClaimant{
-	{
-		// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
-		// selection, resume, delete-confirm, rename edit, and esc to close (sessions.go) — before the
-		// normal input routing below, exactly as the autocomplete overlay claims its keys first.
-		name:  "sessions browser",
-		open:  func(m Model) bool { return m.state == stateIdle && m.sessionBrowser.open },
-		claim: modalClaim(Model.sessionBrowserKey),
-	},
-	{
-		// The /settings pane is modal in the same way and for a stronger reason: it is the frame's one
-		// FULL-HEIGHT pane (frameRowPlan), so the input box behind it is a box the human cannot read —
-		// a keystroke falling through to it would edit an invisible draft. Idle-only, like its verb
-		// (commandSpecs), and it swallows every key it does not act on (settings.go).
-		name:  "settings pane",
-		open:  Model.settingsOwnsInput,
-		claim: modalClaim(Model.settingsKey),
-	},
-	{
-		// The picker is the browser's simpler sibling and claims keys the same way: while it is open the
-		// selection, the accept and esc are all its own (picker.go). It claims them in BOTH live states,
-		// because /schedule opens its cycle and mode popups mid-Exchange as well, and
-		// /sub-agents-server the one it retargets delegations from — those verbs are
-		// whileRunning (commandSpecs), and an overlay that renders without taking keys would be a modal
-		// the human cannot answer. The older kinds are unaffected: their verbs are idle-only, and a
-		// picker cannot be open when a worker STARTS, since it owns ⏎ for as long as it is up.
-		name:  "picker",
-		open:  func(m Model) bool { return m.state.live() && m.picker.open },
-		claim: modalClaim(Model.pickerKey),
-	},
-	{
-		// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
-		// including enter and tab — before the normal routing below. Any other key returns
-		// handled=false and falls through to edit the input (which re-derives it). Every region opens
-		// in BOTH states (computeAutocomplete), so an interjection reaches a file, a skill and a
-		// reporting command as easily as a submitted message does; the per-command while-running policy
-		// is applied at accept (commandRunnable), not by hiding the menu.
-		name:  "autocomplete overlay",
-		open:  func(m Model) bool { return m.state.live() && m.autocomplete.active },
-		claim: paneClaim(Model.autocompleteKey),
-	},
-	{
-		// The /usage report claims esc and the four keys that scroll it, and nothing else (usage.go). It
-		// is not modal — it says something rather than asking, so the box behind it stays live and every
-		// other key goes where it always went — and the claim sits below the overlays above precisely
-		// because they ARE modal: a pane that owns the keyboard answers its own esc first. Below the
-		// dropdown for the same reason one rung down: a menu a keystroke opened is dismissed by the esc
-		// the human means for it.
-		//
-		// It must stay ABOVE the transcript's PgUp/PgDn interception in handleKey, which claims those two
-		// keys in every state: the pane is what the human is reading, and a page key that scrolled the
-		// conversation hidden BEHIND the report would move the one list they cannot see.
-		name:  "usage report",
-		claim: paneClaim(reportClaim(usageReport)),
-	},
-	{
-		// The /inspect pane claims the same five keys, plus a ctrl+r of its own that flips its rendering,
-		// on the same terms (inspector.go): not modal, so
-		// every key it does not act on goes where it always went, and below the modal overlays above
-		// because a pane that owns the keyboard answers its own esc first. It sits beside the report it
-		// is shaped after — the two are never open together in practice and their claims are disjoint
-		// while one of them is closed, so the order between THEM decides nothing.
-		name:  "inspector pane",
-		claim: paneClaim(reportClaim(inspectReport)),
-	},
-	{
-		// The /thinking pane claims the report's five keys and no sixth — it has ONE rendering, so
-		// there is no ctrl+r here (thinkingpane.go) — on the same non-modal terms as the two panes
-		// above it: every key it does not act on goes where it always went, and it sits below the
-		// modal overlays because a pane that owns the keyboard answers its own esc first.
-		//
-		// It sits beside its two siblings, and ABOVE the run view on purpose: opened inside a view the
-		// pane shows that run's thinking, so the esc that closes it is the esc the human means for it,
-		// and the NEXT esc goes on up the view exactly as it would have with no pane open.
-		name:  "thinking pane",
-		claim: paneClaim(reportClaim(thinkingReport)),
-	},
-	{
-		// The /advice pane claims the report's five keys and no sixth — one rendering, no ctrl+r
-		// (advicepane.go) — on the same non-modal terms as the three panes above it, and sits beside
-		// them for the same reason: a pane that owns the keyboard answers its own esc first, and the
-		// esc that closes a report opened inside a run view is the esc the human means for it.
-		name:  "advice pane",
-		claim: paneClaim(reportClaim(adviceReport)),
-	},
+	// The /sessions browser is a modal overlay (idle only): while open it claims every keypress —
+	// selection, resume, delete-confirm, rename edit, and esc to close (sessions.go) — before the
+	// normal input routing below, exactly as the autocomplete overlay claims its keys first.
+	paneClaimant(paneBrowser, "sessions browser"),
+	// The /settings pane is modal in the same way and for a stronger reason: it is the frame's one
+	// FULL-HEIGHT pane (frameRowPlan), so the input box behind it is a box the human cannot read —
+	// a keystroke falling through to it would edit an invisible draft. Idle-only, like its verb
+	// (commandSpecs), and it swallows every key it does not act on (settings.go).
+	paneClaimant(paneSettings, "settings pane"),
+	// The picker is the browser's simpler sibling and claims keys the same way: while it is open the
+	// selection, the accept and esc are all its own (picker.go) — in BOTH live states, for the reason
+	// its row states.
+	paneClaimant(panePicker, "picker"),
+	// While the autocomplete overlay is open, it claims the navigation, accept, and dismiss keys —
+	// including enter and tab — before the normal routing below. Any other key returns
+	// handled=false and falls through to edit the input (which re-derives it).
+	paneClaimant(paneDropdown, "autocomplete overlay"),
+	// The /usage report claims esc and the four keys that scroll it, and nothing else (usage.go). It
+	// is not modal — it says something rather than asking, so the box behind it stays live and every
+	// other key goes where it always went — and the claim sits below the overlays above precisely
+	// because they ARE modal: a pane that owns the keyboard answers its own esc first. Below the
+	// dropdown for the same reason one rung down: a menu a keystroke opened is dismissed by the esc
+	// the human means for it.
+	//
+	// It must stay ABOVE the transcript's PgUp/PgDn interception in handleKey, which claims those two
+	// keys in every state: the pane is what the human is reading, and a page key that scrolled the
+	// conversation hidden BEHIND the report would move the one list they cannot see.
+	paneClaimant(paneUsage, "usage report"),
+	// The /inspect pane claims the same five keys, plus a ctrl+r of its own that flips its rendering,
+	// on the same terms (inspector.go): not modal, so
+	// every key it does not act on goes where it always went, and below the modal overlays above
+	// because a pane that owns the keyboard answers its own esc first. It sits beside the report it
+	// is shaped after — the two are never open together in practice and their claims are disjoint
+	// while one of them is closed, so the order between THEM decides nothing.
+	paneClaimant(paneInspector, "inspector pane"),
+	// The /thinking pane claims the report's five keys and no sixth — it has ONE rendering, so
+	// there is no ctrl+r here (thinkingpane.go) — on the same non-modal terms as the two panes
+	// above it: every key it does not act on goes where it always went, and it sits below the
+	// modal overlays because a pane that owns the keyboard answers its own esc first.
+	//
+	// It sits beside its two siblings, and ABOVE the run view on purpose: opened inside a view the
+	// pane shows that run's thinking, so the esc that closes it is the esc the human means for it,
+	// and the NEXT esc goes on up the view exactly as it would have with no pane open.
+	paneClaimant(paneThinking, "thinking pane"),
+	// The /advice pane claims the report's five keys and no sixth — one rendering, no ctrl+r
+	// (advicepane.go) — on the same non-modal terms as the three panes above it, and sits beside
+	// them for the same reason: a pane that owns the keyboard answers its own esc first, and the
+	// esc that closes a report opened inside a run view is the esc the human means for it.
+	paneClaimant(paneAdvice, "advice pane"),
 	{
 		// An open run view claims exactly one key — esc, which goes one level up (runview.go, ADR
 		// 0063) — and lets every other key fall through, so typing, scrolling and the block cursor's
