@@ -272,7 +272,10 @@
 // command line — lives in internal/subprocess, which internal/gitexec spawns through too. The
 // execution tools build the core's subprocess.SubprocessSpec and read its SubprocessResult
 // directly (2026-09-15; the package's mirror of those two shapes is gone); what stays here is
-// runSubprocess itself, the one seam the tests' package-var fakes stand in for.
+// runSubprocess itself, which execHost.run is in production. A test fakes a field of the host it
+// hands the tool (capturedRunHost, fakeLookHost), never a package var: the package has no
+// function- or platform.Host-typed top-level var, and exec_host_test.go's
+// TestNoPackageLevelExecSeam holds it to none through go/types.
 //
 // Network. network.go is the funnel itself — networkTool.do, the single path from a tool to
 // the network — carrying the URLGuard pre-flight and dial-time checks, the one per-call
