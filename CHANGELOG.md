@@ -237,11 +237,48 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **The test kit no longer fails a healthy run on a slow box.** `internal/tuitest`'s waits are
+  condition polls that return the instant the condition holds, so a tight deadline on one buys
+  nothing on a green run and costs a loaded CI runner a spurious failure — which is how
+  `TestE2EFanOutCeilingRefusesTheOverflow` timed out on GitHub CI with the fan-out visibly behaving
+  correctly, five sub-agents done and the ninth and tenth carrying exactly the ceiling refusal the
+  test asserts. `DefaultTimeout` is now sixty seconds, and the three waits that are ALLOWED to run
+  out without failing anything — `PTYDriver.awaitDrain`, `Driver.joinReadLoop` and `Driver.Close`'s
+  wait for the run to return — moved to a `teardownTimeout` of their own so a tolerated run-out
+  still costs the suite five seconds, not a minute. `leakGrace` follows `DefaultTimeout` for the same
+  reason. `stopRun`'s non-final attempts keep a short budget, since re-pressing is the point of the
+  retry; only the last attempt carries the generous backstop.
+
+- **A driven transcript walk could quietly read half a block.** `awaitRepaint`, `waitForFrameChange`
+  and `waitForScroll` each polled the screen's byte counter for 500 ms and then reported "nothing
+  moved" as a meaningful answer — it is how a viewport says it is at its top — so on a loaded box a
+  repaint that was merely slow read as the end of the transcript and the assertion above it ran
+  against the rows that had been painted so far. All three now share `repaintBudget`, generous
+  because both of its outcomes are cheap. `expandLastBlock`'s closing `esc` is anchored on its own
+  repaint as well: the screen was already quiet when the key was sent, so the quiet check returned
+  at once and the paint landed inside the next step, where it was read as that step's movement.
+  `settled` and `escapeGap` are widened for the same reason — the one budget a healthy run really
+  does spend is set by what a loaded box costs, not by what a quiet one needs.
+
+- **`TestExtractPDF_LeavesUndecodedStreamsUncharged` no longer depends on the Go toolchain's deflate
+  output.** Its fixture is 200 MiB of zeros through `compress/zlib`, so its compressed size is
+  whatever the compiler's deflate writes that year — about 206 KiB under Go 1.26 and about 412 KiB
+  under 1.27, and the window it was checked against (128–256 KiB) failed the latter. Both fixture
+  guards in `internal/doctext` now assert only the thing they exist for, that the fixture stays a
+  cheap one, with a ceiling no toolchain bump moves.
+
+- **`TestDelegationLedgerReportsOutputPresenceAtRenderTime` no longer reads red on macOS.** The
+  delegation ledger records the RESOLVED workspace target, which is what the test's own doc comment
+  says it must; the expectation was joined against `t.TempDir()` as spelled, and on macOS that is an
+  unresolved `/var/folders/…` path against a resolved `/private/var/folders/…` one. `outputPathAgent`
+  now resolves the workspace root it builds on, so every assertion joined against it compares one
+  spelling.
+
 - A collapsed sub-agent row whose promoted one-line report failed the promote-guard painted a bare `done` (a lone run: an unopenable `+1 more line`); it now keeps its count and fill, with the engine's verdict in the gist's place.
 
 - **The driven `esc×2` stop gesture no longer depends on how busy the box is.** `internal/tui`
   measures the gesture's window (`escStopWindow`, one second) when each press is FOLDED rather than
-  when it is sent, so two presses the kit put 70 ms apart on the wire (`tuitest`'s `escapeGap`) are
+  when it is sent, so two presses the kit puts a fraction of a second apart on the wire (`tuitest`'s `escapeGap`) are
   folded more than a second apart whenever the fold queue is backed up — mid-reply, with the rest of
   the parallel suite on the same cores — and the second press RE-ARMS the gesture instead of
   confirming it. The run carried on and the test waited for an idle screen that was never coming:
