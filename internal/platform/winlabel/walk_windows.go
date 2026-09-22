@@ -253,11 +253,17 @@ func osRevert() revertFunc { return revertSparingLiveSiblings }
 // revertJournal over the journal's roots MINUS every root a sibling journal with a live owning
 // process still names and every root apogee's own label no longer vouches for
 // (revertibleRoots, rootClearable), restoring only the priors no sibling journal still
-// claims the tree of — the rest are handed back as the journal's remains (restorablePriors,
-// retire). Teardown and recovery both revert through this closure, so neither ever clears a
-// root out from under a concurrently running session, and neither restores a foreign prior a
-// sibling's pending clear would destroy — the sibling read and both exclusions happen at
-// revert time, when liveness and the claim set are current, not at construction.
+// claims the tree of — the rest are handed back as the journal's remains, together with every
+// root a live sibling spared (restorablePriors, handoffSparedRoots, retire). Teardown and
+// recovery both revert through this closure, so neither ever clears a root out from under a
+// concurrently running session, and neither restores a foreign prior a sibling's pending clear
+// would destroy — the sibling read and both exclusions happen at revert time, when liveness
+// and the claim set are current, not at construction.
+//
+// A spared root leaves this journal alive rather than discharged, which is what keeps two
+// sessions closing at once from each sparing the shared root to the other and then deleting
+// both records of it: the join of the two hand-off sets is the whole of what this revert did
+// NOT do, and retire keeps the file for all of it.
 func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 	return func(r Record) ([]Entry, error) {
 		if err := judgePriors(r, own); err != nil {
@@ -265,10 +271,11 @@ func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
 		}
 		siblings := siblingJournals(home, own)
 		restore, handoff := restorablePriors(r, siblings)
-		if err := revertJournal(revertibleRoots(r, siblings, ProcessAlive, ReadSDDL), restore); err != nil {
+		clear, spared := revertibleRoots(r, siblings, ProcessAlive, ReadSDDL)
+		if err := revertJournal(clear, restore); err != nil {
 			return nil, err
 		}
-		return handoff, nil
+		return handoffSparedRoots(handoff, spared), nil
 	}
 }
 
@@ -369,9 +376,10 @@ func judgePriors(r Record, own string) error {
 // revertJournal undoes one journal's disk mutation: clear the label from every object under
 // each of roots, then restore the prior descriptors. roots is the journal's root set minus
 // what a live sibling session still claims and minus every root apogee's own Low label no
-// longer vouches for (revertibleRoots, rootClearable) — a spared root is not a failure,
-// because the sibling's own journal carries the Root entry and with it the clear obligation,
-// so this journal may still retire. priors is likewise the journal's restorable subset
+// longer vouches for (revertibleRoots, rootClearable) — a spared root is not a failure, but it
+// is handed back rather than discharged, so this journal is rewritten to carry it and the last
+// session to close is the one that clears the tree (handoffSparedRoots, retire).
+// priors is likewise the journal's restorable subset
 // (restorablePriors): a prior under a sibling-claimed root is handed off rather than restored
 // here, because the sibling's pending clear would wipe it. Clearing first and restoring second
 // is the order that matters — a prior label inside a root would otherwise be wiped by the walk
@@ -411,7 +419,9 @@ func revertJournal(roots []string, priors map[string]string) error {
 // dead journal's root that a live journal also names stays labelled
 // (revertSparingLiveSiblings), because the live session is using that very tree — its own
 // journal keeps the clear obligation, and recovery gets the root once that session too is
-// gone.
+// gone. The dead journal is not retired over that root either: the spared root is handed back
+// and the file rewritten to carry it (handoffSparedRoots, retire), so the obligation survives
+// in BOTH records and whichever outlives the other clears the tree.
 //
 // A journal whose revert fails survives this pass (retire): recovery is best-effort — there is
 // no user to tell at construction time — but it must never destroy the record of labels it did
@@ -429,8 +439,9 @@ func revertJournal(roots []string, priors map[string]string) error {
 // only trace of whatever it described. It is not silent, though — Residue reports it, which is
 // the only way that state ever reaches a human.
 //
-// The pass repeats until no journal retires: a journal whose prior restore was handed off
-// because a sibling journal still claimed the root (restorablePriors) becomes completable the
+// The pass repeats until no journal retires: a journal whose prior restore or whose own root
+// was handed off because a sibling journal still claimed the root (restorablePriors,
+// handoffSparedRoots) becomes completable the
 // moment that sibling retires later in the same sweep, and which order the two are visited in
 // is an accident of their PIDs' spellings — one more sweep finishes the restore now rather
 // than deferring it to the next session. Each continuing sweep removes at least one file, so

@@ -295,9 +295,10 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 	// must not strip the label out from under the survivor — its memoised label pass would
 	// never re-label, and every later confined write in that session would be denied. The
 	// exclusion is decided here, purely: this journal's roots minus every root a LIVE sibling
-	// journal also names. A spared root is not a failed revert — the sibling's own Root entry
-	// carries the clear obligation, so this journal may still retire — and a DEAD sibling
-	// spares nothing, because its roots are an interrupted run recovery clears anyway.
+	// journal also names. A spared root is not a failed revert, but it is handed BACK to this
+	// journal (handoffSparedRoots) rather than dropped, so the file survives carrying it and
+	// whichever of the two sessions closes last is the one that clears the tree — and a DEAD
+	// sibling spares nothing, because its roots are an interrupted run recovery clears anyway.
 	//
 	// The label read is stubbed to apogee's own mark throughout, so this table sees the sibling
 	// rule alone; the clearability rule it composes with has its own table below.
@@ -363,7 +364,7 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 			t.Parallel()
 
 			alive := func(pid int) bool { return tt.live[pid] }
-			got := revertibleRoots(journal, tt.siblings, alive, readsApogeesOwnLabel)
+			got, _ := revertibleRoots(journal, tt.siblings, alive, readsApogeesOwnLabel)
 			if len(got) != len(tt.want) {
 				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
 			}
@@ -576,7 +577,7 @@ func TestRevertibleRootsClearsOnlyRootsApogeesOwnLabelVouchesFor(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got := revertibleRoots(tt.journal, tt.siblings, alwaysAlive, tt.read)
+			got, _ := revertibleRoots(tt.journal, tt.siblings, alwaysAlive, tt.read)
 			if len(got) != len(tt.want) {
 				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
 			}
@@ -584,6 +585,338 @@ func TestRevertibleRootsClearsOnlyRootsApogeesOwnLabelVouchesFor(t *testing.T) {
 				if got[i] != tt.want[i] {
 					t.Errorf("revertibleRoots[%d] = %q, want %q", i, got[i], tt.want[i])
 				}
+			}
+		})
+	}
+}
+
+// sparingRevert mirrors revertSparingLiveSiblings' join (walk_windows.go) over the pure
+// deciders it composes, so the sparing case is drivable on any OS: the production closure is
+// //go:build windows because the clear and the restore it drives ARE the label APIs, and the
+// pre-clear judgement it opens with (judgePriors) reads one. The clear is recorded rather than
+// performed — what these cases assert is which roots reach it and what the revert hands back,
+// not the walk itself. Siblings are read off the disk exactly as production reads them
+// (siblingJournals), because the interleave under test is two journal FILES seeing each other.
+func sparingRevert(home, own string, live map[int]bool, cleared *[]string) func(Record) ([]Entry, error) {
+	return func(r Record) ([]Entry, error) {
+		siblings := siblingJournals(home, own)
+		// The restore half is revertJournal's other argument and has its own table
+		// (TestRestorablePriorsHandsOffSiblingClaimedTrees); only the clear side decides what
+		// these cases assert.
+		_, handoff := restorablePriors(r, siblings)
+		clear, spared := revertibleRoots(r, siblings, func(pid int) bool { return live[pid] }, readsApogeesOwnLabel)
+		*cleared = append(*cleared, clear...)
+		return handoffSparedRoots(handoff, spared), nil
+	}
+}
+
+func TestRevertibleRootsHandsBackTheRootsALiveSiblingSpared(t *testing.T) {
+	t.Parallel()
+
+	// The spared roots are RETURNED, not merely skipped: sparing one is not discharging it,
+	// and the caller needs it back to keep this journal alive over it (handoffSparedRoots).
+	// A root the clearability rule refuses is NOT handed back — nothing of apogee's is on it,
+	// so there is no obligation to carry — which is why the two exclusions are told apart here
+	// rather than counted together.
+	const foreignMedium = "S:AI(ML;;NW;;;ME)"
+
+	tests := []struct {
+		name       string
+		journal    Record
+		siblings   []Record
+		live       map[int]bool
+		read       func(string) (string, error)
+		wantClear  []string
+		wantSpared []string
+	}{
+		{
+			name:       "a_live_siblings_claim_hands_the_root_back",
+			journal:    Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true}, {Path: `C:\scratch`, Root: true}}},
+			siblings:   []Record{{PID: 200, Entries: []Entry{{Path: `c:\WORK`, Root: true}}}},
+			live:       map[int]bool{200: true},
+			read:       readsApogeesOwnLabel,
+			wantClear:  []string{`C:\scratch`},
+			wantSpared: []string{`C:\work`},
+		},
+		{
+			name:      "a_dead_siblings_claim_hands_nothing_back",
+			journal:   Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true}}},
+			siblings:  []Record{{PID: 200, Entries: []Entry{{Path: `C:\work`, Root: true}}}},
+			read:      readsApogeesOwnLabel,
+			wantClear: []string{`C:\work`},
+		},
+		{
+			name:      "a_root_apogees_label_no_longer_vouches_for_is_dropped_not_handed_back",
+			journal:   Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true}}},
+			read:      func(string) (string, error) { return foreignMedium, nil },
+			wantClear: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			alive := func(pid int) bool { return tt.live[pid] }
+			clear, spared := revertibleRoots(tt.journal, tt.siblings, alive, tt.read)
+			if !sameRoots(clear, tt.wantClear) {
+				t.Errorf("clear = %v, want %v", clear, tt.wantClear)
+			}
+			if !sameRoots(spared, tt.wantSpared) {
+				t.Errorf("spared = %v, want %v", spared, tt.wantSpared)
+			}
+		})
+	}
+}
+
+// sameRoots compares two root lists element for element, treating nil and empty as one answer.
+func sameRoots(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func TestHandoffSparedRootsFoldsTheSparedRootsIntoThePriorHandoff(t *testing.T) {
+	t.Parallel()
+
+	// The fold retire's remains are built from. A spared root joins the priors already handed
+	// off, and it joins them UNJUDGED: nothing was cleared on it, so no NULL SACL of this
+	// revert's own making is in the way, and a verdict carried forward would let a later run
+	// strip the tree without reading it (F-08's clear prong). A root that already appears —
+	// one entry wearing both instructions — keeps its single entry, because a journal is one
+	// entry per path and two would walk the tree twice.
+	const foreignMedium = "S:AI(ML;;NW;;;ME)"
+
+	tests := []struct {
+		name    string
+		handoff []Entry
+		spared  []string
+		want    []Entry
+	}{
+		{
+			name:    "no_spared_root_leaves_the_handoff_untouched",
+			handoff: []Entry{{Path: `C:\work\vendor.dll`, PriorSDDL: foreignMedium, Judged: true}},
+			want:    []Entry{{Path: `C:\work\vendor.dll`, PriorSDDL: foreignMedium, Judged: true}},
+		},
+		{
+			name:   "a_spared_root_alone_becomes_the_whole_handoff",
+			spared: []string{`C:\work`},
+			want:   []Entry{{Path: `C:\work`, Root: true}},
+		},
+		{
+			name:    "a_spared_root_joins_the_priors_already_handed_off",
+			handoff: []Entry{{Path: `C:\work\vendor.dll`, PriorSDDL: foreignMedium, Judged: true}},
+			spared:  []string{`C:\work`},
+			want: []Entry{
+				{Path: `C:\work\vendor.dll`, PriorSDDL: foreignMedium, Judged: true},
+				{Path: `C:\work`, Root: true},
+			},
+		},
+		{
+			name:    "a_spared_root_already_handed_off_for_its_prior_keeps_one_entry_and_loses_the_verdict",
+			handoff: []Entry{{Path: `c:\WORK`, Root: true, RootJudged: true, PriorSDDL: foreignMedium, Judged: true}},
+			spared:  []string{`C:\work`},
+			want:    []Entry{{Path: `c:\WORK`, Root: true, PriorSDDL: foreignMedium, Judged: true}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := handoffSparedRoots(tt.handoff, tt.spared)
+			if len(got) != len(tt.want) {
+				t.Fatalf("handoffSparedRoots = %+v, want %+v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("handoffSparedRoots[%d] = %+v, want %+v", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestRetireKeepsTheJournalOfARootSparedForALiveSibling(t *testing.T) {
+	t.Parallel()
+
+	// The fourth fate, and the one the audit's overlapping-close finding turns on: the revert
+	// succeeded but spared the shared root to a LIVE sibling, so the Low label is still on that
+	// tree and this journal is the only record of it that this process owns. It must survive
+	// rewritten to the root, exactly as a handed-off prior keeps it. A DEAD sibling spares
+	// nothing, and the journal retires as it always has.
+	tests := []struct {
+		name      string
+		live      map[int]bool
+		wantClear []string
+		wantKept  bool
+	}{
+		{
+			name:     "a_live_sibling_spares_the_root_and_the_journal_survives_carrying_it",
+			live:     map[int]bool{200: true},
+			wantKept: true,
+		},
+		{
+			name:      "a_dead_sibling_spares_nothing_and_the_journal_retires",
+			wantClear: []string{`C:\work`},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			own := JournalPath(home, 100)
+			mine := Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true, RootJudged: true}}}
+			if err := WriteJournal(own, mine); err != nil {
+				t.Fatalf("seed this session's journal: %v", err)
+			}
+			sibling := Record{PID: 200, Entries: []Entry{{Path: `C:\work`, Root: true}}}
+			if err := WriteJournal(JournalPath(home, 200), sibling); err != nil {
+				t.Fatalf("seed the sibling journal: %v", err)
+			}
+
+			var cleared []string
+			remaining, err := retire(own, mine, sparingRevert(home, own, tt.live, &cleared))
+			if err != nil {
+				t.Fatalf("retire = %v, want nil — a spared root is not a failed revert", err)
+			}
+			if !sameRoots(cleared, tt.wantClear) {
+				t.Errorf("cleared roots = %v, want %v", cleared, tt.wantClear)
+			}
+
+			kept, statErr := ReadJournal(own)
+			if !tt.wantKept {
+				if statErr == nil {
+					t.Fatalf("the journal survived a revert that discharged everything: %+v", kept)
+				}
+				if len(remaining) != 0 {
+					t.Errorf("remaining = %+v, want nothing handed back", remaining)
+				}
+				return
+			}
+			if statErr != nil {
+				t.Fatalf("the journal did not survive the spared root: %v — the Low label on that tree is now unrecoverable", statErr)
+			}
+			want := Entry{Path: `C:\work`, Root: true}
+			if len(kept.Entries) != 1 || kept.Entries[0] != want {
+				t.Errorf("rewritten journal entries = %+v, want exactly the spared root, unjudged", kept.Entries)
+			}
+			if kept.PID != mine.PID {
+				t.Errorf("rewritten journal PID = %d, want the original owner %d", kept.PID, mine.PID)
+			}
+			if len(remaining) != 1 || remaining[0] != want {
+				t.Errorf("remaining = %+v, want the spared root back, so a repeated Close converges", remaining)
+			}
+		})
+	}
+}
+
+func TestRetireOverASparedRootLeavesAJournalResidueReports(t *testing.T) {
+	t.Parallel()
+
+	// End to end over the surface a human actually sees: after the sparing retire, the journal
+	// is still on the disk AND Residue names the root it carries. Before this rule the file was
+	// removed, so the stranded Low label was not merely unrecoverable — no report could even
+	// mention it.
+	home := t.TempDir()
+	own := JournalPath(home, 4242)
+	mine := Record{PID: 4242, Entries: []Entry{{Path: `C:\work`, Root: true}}}
+	if err := WriteJournal(own, mine); err != nil {
+		t.Fatalf("seed this session's journal: %v", err)
+	}
+	if err := WriteJournal(JournalPath(home, 4343), Record{PID: 4343, Entries: []Entry{{Path: `C:\work`, Root: true}}}); err != nil {
+		t.Fatalf("seed the sibling journal: %v", err)
+	}
+
+	var cleared []string
+	if _, err := retire(own, mine, sparingRevert(home, own, map[int]bool{4343: true}, &cleared)); err != nil {
+		t.Fatalf("retire = %v, want nil", err)
+	}
+	if len(cleared) != 0 {
+		t.Fatalf("cleared = %v, want nothing — the live sibling is still fenced by that label", cleared)
+	}
+	if _, err := os.Stat(own); err != nil {
+		t.Fatalf("the journal file did not survive: %v", err)
+	}
+	if notice := ResidueIn(home); !strings.Contains(notice, `C:\work`) {
+		t.Errorf("ResidueIn = %q, want the spared root named — a label nothing reports is a label nothing clears", notice)
+	}
+}
+
+func TestOverlappingClosesNeverStrandTheSharedRootsLabel(t *testing.T) {
+	t.Parallel()
+
+	// The audit's High finding, driven in both orders: two sessions confine one workspace and
+	// their teardowns overlap, so each sees the other alive and spares the shared root. The
+	// invariant is that the pair can never end with the label on the disk and no journal naming
+	// it — a journal survives until a revert actually clears the tree, and only then is the
+	// last file removed.
+	orders := []struct {
+		name  string
+		first int
+		last  int
+	}{
+		{name: "the_first_session_closes_first", first: 100, last: 200},
+		{name: "the_second_session_closes_first", first: 200, last: 100},
+	}
+
+	for _, order := range orders {
+		t.Run(order.name, func(t *testing.T) {
+			t.Parallel()
+
+			home := t.TempDir()
+			for _, pid := range []int{100, 200} {
+				r := Record{PID: pid, Entries: []Entry{{Path: `C:\work`, Root: true, RootJudged: true}}}
+				if err := WriteJournal(JournalPath(home, pid), r); err != nil {
+					t.Fatalf("seed the journal of %d: %v", pid, err)
+				}
+			}
+
+			// Both closes run while the other process is still alive — the interleave that
+			// used to delete both files over a label neither had cleared.
+			var cleared []string
+			for _, closing := range []struct{ own, other int }{{order.first, order.last}, {order.last, order.first}} {
+				path := JournalPath(home, closing.own)
+				r, err := ReadJournal(path)
+				if err != nil {
+					t.Fatalf("read the journal of %d: %v", closing.own, err)
+				}
+				live := map[int]bool{closing.other: true}
+				if _, err := retire(path, r, sparingRevert(home, path, live, &cleared)); err != nil {
+					t.Fatalf("retire the journal of %d: %v", closing.own, err)
+				}
+			}
+			if len(cleared) != 0 {
+				t.Fatalf("cleared = %v, want nothing while a sibling is still alive", cleared)
+			}
+			if survivors := ListJournals(home); len(survivors) == 0 {
+				t.Fatal("both journals were removed over a label neither close cleared; the Low label on C:\\work is now unrecoverable and unreportable")
+			}
+
+			// Both processes are gone. The next run — a session's constructor or recovery —
+			// finds no live claim, clears the tree and only then removes the file.
+			for _, path := range ListJournals(home) {
+				r, err := ReadJournal(path)
+				if err != nil {
+					t.Fatalf("read the surviving journal %q: %v", path, err)
+				}
+				if _, err := retire(path, r, sparingRevert(home, path, nil, &cleared)); err != nil {
+					t.Fatalf("retire the surviving journal %q: %v", path, err)
+				}
+			}
+			if len(cleared) == 0 {
+				t.Error("no run ever cleared the shared root once both owners were gone")
+			}
+			if survivors := ListJournals(home); len(survivors) != 0 {
+				t.Errorf("journals survived a revert that cleared everything: %v — a stale journal reports residue that is not there", survivors)
 			}
 		})
 	}

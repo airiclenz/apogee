@@ -14,13 +14,21 @@ import (
 // ConfinementResidue reports it (ADR 0020 §2).
 //
 // A revert may also succeed while HANDING OFF entries it deliberately did not act on — a
-// foreign prior under a root a sibling journal still claims (restorablePriors). Those are not
+// foreign prior under a root a sibling journal still claims (restorablePriors), and the ROOT
+// a LIVE sibling spared from the clear (revertibleRoots, handoffSparedRoots). Those are not
 // failures, but they are still undischarged instructions, so the journal is REWRITTEN to carry
-// exactly them (under its original owner) rather than removed: the record of the foreign label
-// survives sibling teardown ordering, and the first construction after the claiming journals
-// are gone completes the restore. The remaining entries are returned so a session backend can
-// keep its in-memory journal in step; nil means the journal is fully retired. On a revert
-// error the return is nil and the file keeps everything it had.
+// exactly them (under its original owner) rather than removed: the record of the foreign
+// label, and of the label still sitting on the spared tree, survives sibling teardown
+// ordering, and the first construction after the claiming journals are gone completes the
+// revert. A remaining ROOT entry keeps the file for exactly the reason a remaining prior does,
+// and that is what closes the overlapping-close hole: two sessions confining one workspace
+// each spared the shared root to the other and each then removed its own journal, leaving the
+// Low label on the disk with nothing anywhere left to describe it — unrecoverably, since
+// Recover and ResidueIn both skip a journal whose owner is alive (audit 2026-09-20).
+//
+// The remaining entries are returned so a session backend can keep its in-memory journal in
+// step; nil means the journal is fully retired. On a revert error the return is nil and the
+// file keeps everything it had.
 //
 // revert is injected — revertSparingLiveSiblings' closure over revertJournal in
 // production, which is Windows-tagged — so the
@@ -126,8 +134,11 @@ func priorRestorable(current string, readErr error) (restore, drop bool) {
 //     so nothing above a box may be cleared either, and a journal naming one describes a
 //     mutation apogee would never have made.
 //
-// A refused root is SKIPPED, not an abort — exactly the disposition a root a live sibling
-// still claims gets (revertibleRoots): the rest of the journal reverts as it would have.
+// A refused root is SKIPPED, not an abort: the rest of the journal reverts as it would have.
+// It is NOT handed back the way a root a live sibling still claims is (handoffSparedRoots).
+// The two dispositions look alike and are not: the spared root demonstrably still carries
+// apogee's label, so an obligation over it has to survive somewhere, while a refused root
+// carries nothing of apogee's to remove and leaves this journal owing nothing over that tree.
 //
 // It is pure so the decision is table-testable on any OS — the retire seam pattern — which
 // matters most here: ReadSDDL errors off Windows, and this is the one decision a planted
@@ -181,19 +192,29 @@ func isDriveLetter(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
-// revertibleRoots returns the journalled roots a revert may clear: r's roots minus every
-// root also named (Root == true) by a sibling journal whose owning process is still ALIVE,
-// and minus every root apogee's own label no longer vouches for (rootClearable).
+// revertibleRoots splits r's journalled roots in two. clear is what this revert may strip:
+// r's roots minus every root also named (Root == true) by a sibling journal whose owning
+// process is still ALIVE, and minus every root apogee's own label no longer vouches for
+// (rootClearable). spared is the roots the LIVE-sibling rule held back, which the caller hands
+// off (handoffSparedRoots) so this journal survives carrying them.
 // Two sessions confining one workspace journal the same root, and the first to tear down
 // must not strip the label out from under the survivor — its memoised label pass would never
 // re-label, and every later confined write in that session would be denied.
 //
-// A spared root is NOT a failed revert and must not keep this journal: the live sibling's
-// own journal names the root as a Root entry, so the clear obligation lives on in THAT
-// journal — its teardown or, after a crash, recovery clears the root once no live session
-// claims it — and this journal may still retire. A DEAD sibling spares nothing: its journal
-// is an interrupted run whose roots recovery will clear anyway, and clearing them here first
-// is the same idempotent operation.
+// A spared root is not a failed revert, but it DOES keep this journal, and that supersedes
+// the rule this function used to state. The clear obligation does live on in the live
+// sibling's own journal — its teardown or, after a crash, recovery clears the root once no
+// live session claims it — but only for as long as that journal exists, and two sessions
+// closing at once each spare the root to the other: both files would then be removed with the
+// label still on the disk, with nothing left to describe it and no surface that would report
+// it (Recover and ResidueIn both skip a journal whose owner is alive). Handing the root back
+// instead makes the LAST journal to go the one that finds no live claim and clears the tree.
+// A DEAD sibling spares nothing: its journal is an interrupted run whose roots recovery will
+// clear anyway, and clearing them here first is the same idempotent operation.
+//
+// The clearability half hands nothing back. A root apogee's own label no longer vouches for
+// carries nothing of apogee's to remove, so there is no obligation for the journal to keep —
+// the opposite of the sparing case, where the label is demonstrably still on the tree.
 //
 // The clearability half is F-08's second prong. An entry already carrying the PERSISTED
 // verdict (Entry.RootJudged) is taken as clearable without a fresh read, and that precedence
@@ -207,7 +228,7 @@ func isDriveLetter(b byte) bool {
 // alive is injected (ProcessAlive in production, which is Windows-tagged) and readLabel with
 // it (ReadSDDL, likewise), so the decision is table-testable on any OS — the retire seam
 // pattern.
-func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabel func(string) (string, error)) []string {
+func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabel func(string) (string, error)) (clear, spared []string) {
 	claimed := make(map[string]bool)
 	for _, sibling := range siblings {
 		if !alive(sibling.PID) {
@@ -217,9 +238,13 @@ func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabe
 			claimed[foldPath(root)] = true
 		}
 	}
-	out := make([]string, 0, len(r.Entries))
+	clear = make([]string, 0, len(r.Entries))
 	for _, entry := range r.Entries {
-		if !entry.Root || claimed[foldPath(entry.Path)] {
+		if !entry.Root {
+			continue
+		}
+		if claimed[foldPath(entry.Path)] {
+			spared = append(spared, entry.Path)
 			continue
 		}
 		if !entry.RootJudged {
@@ -228,7 +253,49 @@ func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabe
 				continue
 			}
 		}
-		out = append(out, entry.Path)
+		clear = append(clear, entry.Path)
+	}
+	return clear, spared
+}
+
+// handoffSparedRoots folds the roots a live sibling spared (revertibleRoots) into the hand-off
+// restorablePriors built, producing the entries retire rewrites the journal to. A spared root
+// that already appears there — one entry wearing both instructions, a root that also carried a
+// foreign prior (LabelTree) — keeps its single entry and simply regains the Root flag rather
+// than being listed twice, because a journal is one entry per path (recordEntry) and two would
+// make the later revert walk the tree twice.
+//
+// The spared root is handed off UNJUDGED: RootJudged is cleared here, never carried over from
+// the pre-clear pass (judgePriors). That verdict exists for one case only — a revert that
+// cleared the root and then failed a descendant keeps the journal (clearTreeOutcome), and the
+// retry must not re-read the NULL SACL its own clear wrote and refuse the root. NOTHING was
+// cleared on a spared root, so there is no NULL SACL to beat, and a verdict carried forward
+// would instead let a later Recover skip the read (revertibleRoots) and strip the label off
+// whatever that tree carries by then — F-08's clear prong, reopened. The later pass reads the
+// path again, which is exactly what should decide it.
+//
+// It is pure so the fold is table-testable on any OS — the retire seam pattern — and it is
+// spelled here rather than in the Windows-tagged caller that joins the two sets for that
+// reason.
+func handoffSparedRoots(handoff []Entry, spared []string) []Entry {
+	if len(spared) == 0 {
+		return handoff
+	}
+	out := append([]Entry(nil), handoff...)
+	for _, root := range spared {
+		folded := foldPath(root)
+		merged := false
+		for i := range out {
+			if foldPath(out[i].Path) != folded {
+				continue
+			}
+			out[i].Root, out[i].RootJudged = true, false
+			merged = true
+			break
+		}
+		if !merged {
+			out = append(out, Entry{Path: root, Root: true})
+		}
 	}
 	return out
 }

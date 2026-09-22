@@ -190,6 +190,14 @@ func (j *Journal) ForgetLabelled() {
 // Close returns nil — but the surviving entries stay in memory too, so a repeated Close
 // converges instead of deleting the handoff record.
 //
+// A root spared for a live sibling is part of that handoff (handoffSparedRoots), so this
+// session's journal survives rewritten to it rather than being removed. The sparing alone was
+// never enough: when two sessions over one workspace close at once, each spares the shared
+// root to the other, and two removals would leave the Low label on the disk with no journal
+// anywhere naming it — Recover and Residue both skip a live owner's file, so nothing would
+// ever clear it or report it (audit 2026-09-20). Kept, the obligation passes to whichever
+// session closes last, which finds no live claim and clears the tree.
+//
 // The revert itself is reached through j.revert, the seam Open fixed from the build's
 // osRevert: the production revert IS the label walk, which is Windows-tagged, and routing it
 // through one seam is what lets this method be declared ONCE for every OS rather than as two

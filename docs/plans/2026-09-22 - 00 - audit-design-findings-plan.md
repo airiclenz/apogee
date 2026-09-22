@@ -566,7 +566,19 @@ Windows dialect file. CHANGELOG sidecar, `[Unreleased]/Added`.
 **Acceptance.** `go build ./... && go test ./internal/platform/... -run 'ProbeNetwork' && GOOS=windows go vet ./internal/platform/...`
 **Commit:** `test(confinetest): a battery row drives UDP egress under a net-deny box`
 
-## 10. A root spared for a live sibling is handed off, never deleted
+## 10. A root spared for a live sibling is handed off, never deleted — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the fold is a new pure helper, `handoffSparedRoots` (retire.go), rather than a spared entry built inside `revertibleRoots` — the join of the two hand-off sets has to stay out of the `//go:build windows` caller to be table-testable, and it is where the one-entry-per-path rule is kept.
+
+NOTES (2026-09-22): the fold also CLEARS `RootJudged` on a spared root already handed off for its own foreign prior (`restorablePriors` hands that entry off verbatim, judged) — the item's unjudged rule applied to the one entry wearing both instructions, since nothing cleared that tree either.
+
+NOTES (2026-09-22): `internal/platform/winlabel/journal.go` is edited for documentation only — `Entry.RootJudged`'s doc now states that a spared root is handed back with the field cleared.
+
+NOTES (2026-09-22): consequential edit — internal/platform/confiner_windows_test.go: made necessary by the hand-off. `TestWindowsTeardownSparesALiveSiblingsRoot` asserted the superseded rule (one journal left after the first `Close`, the live sibling's alone); it is re-baselined to expect TWO — the sibling's plus the first session's, rewritten to carry the spared root undischarged and unjudged — and its comment now states the hand-off rule. The test's tail is unchanged and still holds: once the sibling is killed, recovery retires both journals and leaves the tree clear.
+
+NOTES (2026-09-22): consequential edit — internal/platform/winlabel/retire.go: made necessary by the hand-off. `rootClearable`'s doc equated a refused root's disposition with a sibling-claimed one; the two now differ, so it states that a refused root is skipped and hands nothing back, unlike a spared one.
+
+NOTES (2026-09-22): consequential edit — internal/platform/winlabel/retire_test.go: made necessary by the hand-off. `TestRevertibleRootsSparesOnlyALiveSiblingsRoots`'s preamble still stated the superseded rule ("this journal may still retire"); it now states the hand-off. The surviving mentions in `CHANGELOG.md` and `docs/plans/archived/` are historical and stay.
 
 **What.** `fix(winlabel)`: closes `apogee-ea3`, the audit's High "two confining sessions each spare
 the shared root, then strand the Low label on disk unrecoverably".

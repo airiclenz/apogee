@@ -70,6 +70,10 @@ type Entry struct {
 	// would read the NULL SACL the clear itself wrote, refuse the root, and retire the journal
 	// over descendants still labelled Low. An older journal has no such field and decodes
 	// false, which is the honest answer: nothing has judged it yet, so its first pass does.
+	// A root a LIVE sibling spared is likewise handed back with the field cleared
+	// (handoffSparedRoots): that revert cleared nothing on it, so no NULL SACL of its own is
+	// in the way, and a verdict carried into a later run would let it strip whatever the tree
+	// carries by then without reading it.
 	RootJudged bool `json:"root_judged,omitempty"`
 }
 

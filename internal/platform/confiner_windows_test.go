@@ -1242,8 +1242,10 @@ func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 		t.Fatalf("plant the sibling journal: %v", err)
 	}
 
-	// A spared root is not a failed revert: the sibling's own Root entry carries the clear
-	// obligation, so the first session's journal must still retire cleanly.
+	// A spared root is not a failed revert — but it is not discharged either. The shared tree
+	// still carries apogee's Low label, so the first session hands the root back as an
+	// undischarged entry and rewrites its journal rather than removing it: whichever session
+	// closes last is the one that finds no live claim and clears the tree.
 	if err := first.Close(); err != nil {
 		t.Fatalf("Close = %v, want nil; a root spared for a live sibling must not fail the revert", err)
 	}
@@ -1252,9 +1254,26 @@ func TestWindowsTeardownSparesALiveSiblingsRoot(t *testing.T) {
 	if label, _ := winlabel.ReadSDDL(ws); !strings.Contains(label, ";LW)") {
 		t.Errorf("shared root label = %q after the first session's Close; the live sibling's box was un-fenced", label)
 	}
+	ownPath := winlabel.JournalPath(home, os.Getpid())
 	left := winlabel.ListJournals(home)
-	if len(left) != 1 || !strings.EqualFold(left[0], siblingPath) {
-		t.Errorf("journals = %v after Close, want only the live sibling's %q — the first session's own journal still retires", left, siblingPath)
+	named := 0
+	for _, path := range left {
+		if strings.EqualFold(path, siblingPath) || strings.EqualFold(path, ownPath) {
+			named++
+		}
+	}
+	if len(left) != 2 || named != 2 {
+		t.Errorf("journals = %v after Close, want both the live sibling's %q and the first session's own %q — a journal carrying a spared root is rewritten, never removed", left, siblingPath, ownPath)
+	}
+	handed, err := winlabel.ReadJournal(ownPath)
+	if err != nil {
+		t.Fatalf("the first session's journal did not survive the spared root: %v", err)
+	}
+	if len(handed.Entries) != 1 || !strings.EqualFold(handed.Entries[0].Path, ws) || !handed.Entries[0].Root {
+		t.Errorf("the first session's journal = %+v after Close, want exactly the spared root %q handed back as an undischarged Root entry", handed.Entries, ws)
+	}
+	if handed.Entries[0].RootJudged {
+		t.Error("the handed-back root is marked judged; nothing read its label, so a later Recover must read the tree again before it strips anything")
 	}
 
 	// Once the sibling dies its journal is an interrupted run, and recovery owns the root
