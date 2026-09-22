@@ -72,7 +72,9 @@ kill), and record the review's standing denials as an ADR. Gated on plan A
 - Everything in plans A and C.
 - `internal/console/ansi.go`'s unexported sequence-aware strip stays — two of three definitions fold; the console's keeps its incomplete-CSI pin (`console/ansi_test.go`).
 
-## 1. Verify plan A is archived
+## 1. Verify plan A is archived — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): gate PASSED — `docs/plans/archived/2026-09-20 - 01 - test-seams-stubllm-discovery-and-exec-host-plan.md` present (archived at 1180fc1d) and absent from `docs/plans/`; the plan's acceptance command exits 0.
 
 **What.** Refuse to proceed unless `docs/plans/2026-09-20 - 01 - test-seams-stubllm-discovery-and-exec-host-plan.md` is absent from `docs/plans/` and present under `docs/plans/archived/` — plan A reshapes `internal/tools`' exec files this plan's item 5 edits.
 **Files:** none
