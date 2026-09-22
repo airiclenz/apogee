@@ -24,7 +24,8 @@ import (
 // and that is what closes the overlapping-close hole: two sessions confining one workspace
 // each spared the shared root to the other and each then removed its own journal, leaving the
 // Low label on the disk with nothing anywhere left to describe it — unrecoverably, since
-// Recover and ResidueIn both skip a journal whose owner is alive (audit 2026-09-20).
+// Recover clears, and ResidueIn reports, only what a journal still on the disk names (audit
+// 2026-09-20).
 //
 // The remaining entries are returned so a session backend can keep its in-memory journal in
 // step; nil means the journal is fully retired. On a revert error the return is nil and the
@@ -337,8 +338,9 @@ func isDriveLetter(b byte) bool {
 // live session claims it — but only for as long as that journal exists, and two sessions
 // closing at once each spare the root to the other: both files would then be removed with the
 // label still on the disk, with nothing left to describe it and no surface that would report
-// it (Recover and ResidueIn both skip a journal whose owner is alive). Handing the root back
-// instead makes the LAST journal to go the one that finds no live claim and clears the tree.
+// it (Recover clears, and ResidueIn reports, only what a journal still on the disk names).
+// Handing the root back instead makes the LAST journal to go the one that finds no live
+// claim and clears the tree.
 // A DEAD sibling spares nothing: its journal is an interrupted run whose roots recovery will
 // clear anyway, and clearing them here first is the same idempotent operation.
 //

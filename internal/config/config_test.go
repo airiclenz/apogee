@@ -4106,7 +4106,7 @@ func TestApplyConfigPresentCommandOnModelDocumentsDefaultsOff(t *testing.T) {
 	}
 }
 
-// A present block that sets ONE key leaves the other three at their defaults — the reason
+// A present block that sets ONE key leaves the other four at their defaults — the reason
 // auto-open is a pointer on the on-disk schema. Setting `port:` alone must not read as
 // `auto-open: false` and silently disable the rung the feature exists for.
 func TestApplyConfigPresentPartialKeepsDefaults(t *testing.T) {

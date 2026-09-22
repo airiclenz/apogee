@@ -196,9 +196,10 @@ func (j *Journal) ForgetLabelled() {
 // session's journal survives rewritten to it rather than being removed. The sparing alone was
 // never enough: when two sessions over one workspace close at once, each spares the shared
 // root to the other, and two removals would leave the Low label on the disk with no journal
-// anywhere naming it — Recover and Residue both skip a live owner's file, so nothing would
-// ever clear it or report it (audit 2026-09-20). Kept, the obligation passes to whichever
-// session closes last, which finds no live claim and clears the tree.
+// anywhere naming it — Recover clears, and Residue reports, only what a journal still on the
+// disk names, so nothing would ever clear it or report it (audit 2026-09-20). Kept, the
+// obligation passes to whichever session closes last, which finds no live claim and clears
+// the tree.
 //
 // The revert itself is reached through j.revert, the seam Open fixed from the build's
 // osRevert: the production revert IS the label walk, which is Windows-tagged, and routing it
