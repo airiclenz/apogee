@@ -79,6 +79,16 @@ func availability(ok bool) string {
 // blast radius plainly and names the sanctioned route to the user's OWN decision — it never
 // loosens anything by itself.
 //
+// It names the backend AND why that backend cannot fence: caps.Unavailable — the same prose
+// CapabilityLine renders as "why: …" for /confine status and `apogee probe` — goes on a line of
+// its own beneath the fallback sentence, so a user whose session lost confinement reads the host
+// fact off the startup notice instead of having to ask a second surface for it. The wording sits
+// HERE, with this package's other two, for the reason the file header gives: three surfaces, one
+// story. An empty sentence is not a missing reason (domain.ConfinementCaps.Unavailable) but it is
+// nothing to print — the no-backend stub every OS without a real facility gets, and a Windows
+// token the session has closed, both reach this cell with nothing to say — so an empty reason
+// emits no line rather than a dangling "why:", leaving the notice exactly as it read before.
+//
 // It returns "" (no notice) in every other cell: the three lower modes make no confinement
 // promise, an already-unconfined Auto has its own louder warning at the call site, and a
 // backend that CAN fence needs no explanation. Pure so the wording is table-testable without
@@ -87,13 +97,18 @@ func DegradedNotice(backendName string, caps domain.ConfinementCaps, mode domain
 	if mode != domain.ModeAuto || !confineToWorkspace || caps.FSWrite {
 		return ""
 	}
+	why := ""
+	if caps.Unavailable != "" {
+		why = "  why: " + caps.Unavailable + "\n"
+	}
 	return fmt.Sprintf(
 		"apogee: auto mode is gating terminal commands — the %s backend on this host reports no\n"+
 			"  filesystem confinement, so commands cannot be fenced and fall back to approval.\n"+
+			"%s"+
 			"  To run unconfined instead (safe ONLY on a disposable machine):\n"+
 			"    /confine off          — this session\n"+
 			"    /confine off --save   — and remember this host in ~/.apogee/config.yaml",
-		backendName)
+		backendName, why)
 }
 
 // ResidualNotice returns the notice for Auto entered with confinement asked for, on a backend

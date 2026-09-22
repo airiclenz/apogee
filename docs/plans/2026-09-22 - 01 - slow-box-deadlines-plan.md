@@ -243,7 +243,13 @@ go build ./... && go test ./internal/domain/... ./internal/platform/...
 
 **Commit:** `fix(platform): the namespace probe is sized for a cold start and a timeout is a typed cause`
 
-## 4. The degraded-confinement notice names why the backend cannot fence
+## 4. The degraded-confinement notice names why the backend cannot fence — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the reason goes on its own `  why: <sentence>` line rather than inside the existing sentence — the fallback line is already 81 columns and a reason spliced into it would wrap unpredictably on a narrow terminal; `why:` is the label `probe.CapabilityLine` already uses for the same field, so the surfaces stay one vocabulary.
+
+NOTES (2026-09-23): no live document had to change. `docs/design/confinement-execution-contract.md`:867 and `docs/adr/0081`:143 already state that "the startup notice, `apogee probe host` and `/confine`" all speak the `Unavailable` sentence — written as if this item had landed; the startup notice was the one of the three that did not, and now does, so both sentences become true rather than false. The only other copies of the notice text are in `docs/plans/archived/`, which is the historical record and left as written.
+
+NOTES (2026-09-23): the new case is falsifiable, not incidental — with the `caps.Unavailable != ""` branch in `DegradedNotice` disabled, `TestDegradedNoticeNamesTheReason` fails on both reason subtests (checked, then restored).
 
 **What.** The disclosure half of `apogee-3mh`. It reads only `caps.Unavailable`, which exists unchanged
 at the base, so it and item 3 may land in either order.
