@@ -323,7 +323,13 @@ the amended wording, and `go build ./...` still passing after the comment edits.
 **Acceptance.** `rg -n 'outside the Approval gate|never routes through the Approval gate|runs a model-chosen command' docs/adr/0019-*.md CONTEXT.md internal/` returns only lines sitting under the dated addendum; `rg -n 'incomplete|truncate' docs/manual/probe.md docs/manual/configuration.md` shows no line calling the truncate gap the one incomplete Linux fence; then `go build ./...`.
 **Commit:** `docs(adr): ADR 0019 records that an execution-capable rung-3 opener needs an opt-in`
 
-## 6. A landlock net-deny box discloses the egress it cannot fence
+## 6. A landlock net-deny box discloses the egress it cannot fence — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the `ci.yml` residual step's grep is narrowed to `unfenced:.*truncate(2)` and its step name/comment reworded — ubuntu-latest is landlock ABI ≥ 4, so a bare `unfenced:` grep would fail every run of a correct tree.
+
+NOTES (2026-09-22): a second domain case (`TestConfinementNetworkResidualTokensAreNamedBySyscall`) pins the two tokens' literal spelling — the probe filter is a deny-list keyed on them, so a silent re-wording would put a network residual back into the auto banner. Both new domain test names match the item's `-run 'Confinement|Caps'` Acceptance filter.
+
+NOTES (2026-09-22): `TestLandlockResidualsMatchHostABI` skips on this box (no landlock in this kernel); (a), (d) and (e) were verified red against the pre-item production files by stashing `landlock_linux.go` + `probe/confinement.go` and re-running.
 
 **What.** `fix(platform)`: the landlock half of `apogee-qi3`, the audit's High "a network-deny box
 does not fence UDP or pathname-UNIX-socket egress, and reports no Residual". **Audit corrected:** the

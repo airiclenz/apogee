@@ -58,11 +58,16 @@ type ConfinementCaps struct {
 	FSWrite       bool
 	NetworkEgress bool
 
-	// Residuals names the write-class accesses this backend knowingly cannot fence on this
-	// host while FSWrite is true, each named by its syscall; empty when the fence is complete.
-	// Capability honesty (confinement-execution-contract §5): a backend that leaves an access
-	// open says so rather than reporting a fence it does not have. It is disclosure only —
-	// AutoEligible reads FSWrite alone, so a residual never blocks Auto, it only gets said.
+	// Residuals names the accesses this backend knowingly cannot fence on this host while
+	// the matching enforcement bit is true, each named by its syscall; empty when both
+	// fences are complete. Two classes ride here: WRITE-class residuals, open while FSWrite
+	// is true (landlock ABI 1-2 and truncate(2)), and NETWORK-EGRESS-class residuals, open
+	// inside a network-deny box while NetworkEgress is true (ResidualUDPEgress and
+	// ResidualUnixEgress below). Capability honesty (confinement-execution-contract §5): a
+	// backend that leaves an access open says so rather than reporting a fence it does not
+	// have. It is disclosure only — AutoEligible reads FSWrite alone, so a residual of
+	// either class never blocks Auto, it only gets said. probe.CapabilityLine words every
+	// token; probe.ResidualNotice is write-class only and filters the network ones out.
 	Residuals []string
 
 	// Unavailable is the disclosure of WHY FSWrite is false — one short sentence naming the
@@ -73,6 +78,24 @@ type ConfinementCaps struct {
 	// disclosure only — AutoEligible reads FSWrite alone and never this.
 	Unavailable string
 }
+
+// The network-egress-class residual tokens, spelled once here so internal/platform (which
+// discloses them) and internal/probe (which words and filters them) name ONE definition
+// rather than two that drift apart. A network-deny box fences TCP connect and bind and
+// nothing else: the kernel and userspace fences apogee has both leave datagram egress and
+// pathname AF_UNIX egress open, so a box asked to deny the network says which two classes
+// it still lets through (confinement-execution-contract §5).
+const (
+	// ResidualUDPEgress is the datagram egress a network-deny box cannot fence: landlock's
+	// network rights cover TCP only (no UDP right exists in the ABI), and bwrap's unshared
+	// net namespace is a total cut rather than a per-protocol one.
+	ResidualUDPEgress = "connect(2) UDP"
+
+	// ResidualUnixEgress is the pathname AF_UNIX egress a network-deny box cannot fence:
+	// a filesystem-addressed socket is reached through the path fence, not the net fence,
+	// so a deny box leaves an already-reachable socket path connectable.
+	ResidualUnixEgress = "connect(2) AF_UNIX"
+)
 
 // AutoEligible reports whether these capabilities satisfy the Auto gate. Under ADR 0012
 // the network is open by default, so Auto requires filesystem-write confinement ONLY

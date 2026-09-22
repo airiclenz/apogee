@@ -74,7 +74,8 @@ func TestLandlockProbeNetwork(t *testing.T) {
 // backend that discloses the wrong thing consistently. This pins the disclosure to the kernel the
 // tests actually run on: below ABI 3 landlock has no LANDLOCK_ACCESS_FS_TRUNCATE bit and must say
 // so; at ABI 3 and above the fence is complete and must say nothing (C-06, live-reproduced
-// 2026-08-25). Together the two make the truncate residual un-fakeable in either direction.
+// 2026-08-25). Together the two make the truncate residual un-fakeable in either direction, and
+// the network half is pinned the same way from ABI 4 up.
 func TestLandlockResidualsMatchHostABI(t *testing.T) {
 	t.Parallel()
 	c := NewLandlockConfiner()
@@ -84,7 +85,13 @@ func TestLandlockResidualsMatchHostABI(t *testing.T) {
 	}
 	wantResiduals := []string(nil)
 	if c.abi < landlockABITruncate {
-		wantResiduals = []string{"truncate(2)"}
+		wantResiduals = append(wantResiduals, "truncate(2)")
+	}
+	// The same un-fakeability, applied to the network half: a kernel that can deny TCP at all
+	// must say that the deny box still passes UDP and pathname AF_UNIX, and one that cannot deny
+	// the network must not claim a gap in a fence it never offers.
+	if c.abi >= landlockABINetwork {
+		wantResiduals = append(wantResiduals, domain.ResidualUDPEgress, domain.ResidualUnixEgress)
 	}
 	if !slices.Equal(caps.Residuals, wantResiduals) {
 		t.Errorf("host landlock ABI %d discloses Residuals = %v, want %v", c.abi, caps.Residuals, wantResiduals)
@@ -94,6 +101,10 @@ func TestLandlockResidualsMatchHostABI(t *testing.T) {
 func TestLandlockCapabilitiesHonest(t *testing.T) {
 	t.Parallel()
 
+	// The standing gap in landlock's network fence: the ABI has TCP bind and connect rights and
+	// nothing more, so every kernel that can deny the network at all leaves these two classes out.
+	networkResiduals := []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress}
+
 	tests := []struct {
 		name             string
 		abi              int
@@ -101,7 +112,7 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		wantNetwork      bool
 		wantAutoEligible bool
 		wantAccess       uint64   // mask applyLandlock would request; asserted only when wantFSWrite
-		wantResiduals    []string // write-class accesses this ABI leaves unfenced while FSWrite is true
+		wantResiduals    []string // accesses this ABI leaves unfenced: write-class while FSWrite is true, egress-class while NetworkEgress is
 		probeErrno       syscall.Errno
 		wantUnavailable  string // the WHY behind FSWrite=false; "" on every fenceable row
 	}{
@@ -118,8 +129,12 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 		// still fs-only, still Auto-eligible; TRUNCATE is finally requestable, so the fence is
 		// complete and nothing is disclosed.
 		{"abi3_kernel_6_2", 3, true, false, true, fullFSWriteAccess, nil, 0, ""},
-		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess, nil, 0, ""}, // network egress now enforceable
-		{"abi6_newer", 6, true, true, true, fullFSWriteAccess, nil, 0, ""},
+		// Network egress is now enforceable — and the enforcement is TCP-only, so the same
+		// honesty that discloses truncate(2) below ABI 3 discloses the two egress classes a
+		// deny box still passes. They are disjoint from the write-class residual by
+		// construction: truncate(2) stops at ABI 2 and the network rights start at ABI 4.
+		{"abi4_kernel_6_7", 4, true, true, true, fullFSWriteAccess, networkResiduals, 0, ""},
+		{"abi6_newer", 6, true, true, true, fullFSWriteAccess, networkResiduals, 0, ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -145,12 +160,12 @@ func TestLandlockCapabilitiesHonest(t *testing.T) {
 			if got := caps.FSWrite; got != tt.wantAutoEligible {
 				t.Errorf("abi %d: fs-confinement availability = %v, want %v (Auto needs fs only, ADR 0012)", tt.abi, got, tt.wantAutoEligible)
 			}
-			// Capability honesty's second half (contract §5): a fence that leaves a write-class
-			// access open must SAY which one. Disclosing it is what keeps FSWrite=true honest at
-			// ABI 1–2 — and a backend that grows a residual without disclosing it, or keeps
-			// disclosing one it has since closed, fails here.
+			// Capability honesty's second half (contract §5): a fence that leaves an access open
+			// must SAY which one. Disclosing it is what keeps FSWrite=true honest at ABI 1–2 and
+			// NetworkEgress=true honest from ABI 4 — and a backend that grows a residual without
+			// disclosing it, or keeps disclosing one it has since closed, fails here.
 			if !slices.Equal(caps.Residuals, tt.wantResiduals) {
-				t.Errorf("abi %d: Residuals = %v, want %v (an unfenced write-class access must be disclosed)",
+				t.Errorf("abi %d: Residuals = %v, want %v (an unfenced access must be disclosed)",
 					tt.abi, caps.Residuals, tt.wantResiduals)
 			}
 			// A residual is disclosure, never a gate: Auto still keys on FSWrite alone.

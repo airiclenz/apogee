@@ -168,6 +168,52 @@ func TestResidualNotice(t *testing.T) {
 	}
 }
 
+// The network-egress residuals are disclosure for the capability line, never a startup banner: a
+// landlock host at ABI 4+ discloses the UDP and pathname-AF_UNIX egress its deny box cannot fence,
+// and that host must enter auto exactly as quietly as it did before it started saying so. Asserted
+// in the ONE cell that would otherwise fire — auto + confine + FSWrite — so a filter that stopped
+// filtering could not hide behind a mode or a flag. (TestResidualNotice's matrix owns the
+// write-class story; this is its network counterpart, standalone by design.)
+func TestResidualNoticeIsSilentForNetworkOnlyResiduals(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		residuals []string
+		wantSaid  bool
+	}{
+		{"udp_alone", []string{domain.ResidualUDPEgress}, false},
+		{"unix_alone", []string{domain.ResidualUnixEgress}, false},
+		{"both_network_classes", []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress}, false},
+		// The filter is a deny-list, not an allow-list: a write-class token riding alongside the
+		// network ones still reaches the operator, and reaches it WITHOUT them in the sentence.
+		{"a_write_class_token_alongside_them", []string{"truncate(2)", domain.ResidualUDPEgress, domain.ResidualUnixEgress}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			caps := domain.ConfinementCaps{FSWrite: true, NetworkEgress: true, Residuals: tt.residuals}
+
+			got := probe.ResidualNotice("landlock", caps, domain.ModeAuto, true)
+
+			if (got != "") != tt.wantSaid {
+				t.Fatalf("ResidualNotice(residuals=%v) = %q; wantNotice = %v", tt.residuals, got, tt.wantSaid)
+			}
+			if got == "" {
+				return
+			}
+			if !strings.Contains(got, "truncate(2)") {
+				t.Errorf("notice drops the write-class token it exists to say:\n%s", got)
+			}
+			for _, unwanted := range []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress} {
+				if strings.Contains(got, unwanted) {
+					t.Errorf("notice words the network residual %q; the auto banner is write-class only:\n%s", unwanted, got)
+				}
+			}
+		})
+	}
+}
+
 // The auto ladder an UNATTENDED run is held to is the one a LAUNCH is held to (ADR 0033, decision
 // 3) — never stricter, and never silently escalating: the verdict fires iff confinement was asked
 // for AND the backend cannot fence, which is the mirror of caps.AutoEligible(). Both surfaces that

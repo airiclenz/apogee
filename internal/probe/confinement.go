@@ -99,6 +99,9 @@ func DegradedNotice(backendName string, caps domain.ConfinementCaps, mode domain
 // ResidualNotice returns the one-line-plus-consequence notice for Auto entered with confinement
 // asked for, on a backend that CAN fence the filesystem but discloses a write-class access it
 // cannot cover (caps.Residuals — landlock ABI 1–2, where truncate(2) has no bit; contract §5).
+// It is write-class ONLY: the network-egress-class tokens are filtered out (writeClassResiduals),
+// so a backend that discloses nothing but the egress a deny box leaves open says nothing here and
+// no host gains a startup banner for a fence it never asked for. CapabilityLine still names them.
 // The fence is doing its job and Auto is not degraded, so nothing is refused and nothing is
 // loosened: the operator is simply told the one thing the fence does not stop, and which kernel
 // closes it.
@@ -109,14 +112,35 @@ func DegradedNotice(backendName string, caps domain.ConfinementCaps, mode domain
 // not a refusal, which is why no caller may treat it as a blocker. "" in every other cell, and
 // pure so the wording is table-testable without capturing os.Stderr.
 func ResidualNotice(backendName string, caps domain.ConfinementCaps, mode domain.Mode, confineToWorkspace bool) string {
-	if mode != domain.ModeAuto || !confineToWorkspace || !caps.FSWrite || len(caps.Residuals) == 0 {
+	if mode != domain.ModeAuto || !confineToWorkspace || !caps.FSWrite {
+		return ""
+	}
+	writeClass := writeClassResiduals(caps.Residuals)
+	if len(writeClass) == 0 {
 		return ""
 	}
 	return fmt.Sprintf(
 		"apogee: auto mode confines terminal commands, but the %s backend on this kernel cannot fence %s —\n"+
 			"  a confined command can still empty an existing file outside the workspace (landlock ABI 1–2, kernel < 6.2).\n"+
 			"  A kernel ≥ 6.2 closes it; until then treat auto's fence as create-and-write only.",
-		backendName, strings.Join(caps.Residuals, ", "))
+		backendName, strings.Join(writeClass, ", "))
+}
+
+// writeClassResiduals drops the network-egress-class tokens from a residual set, leaving the
+// write-class ones ResidualNotice speaks for. It is a DENY-list on the two domain.Residual*
+// network tokens rather than an allow-list of known write-class names: a backend that grows a
+// NEW unfenced write-class access must still reach the notice, and silence is the one failure
+// mode capability honesty cannot tolerate. CapabilityLine reads the unfiltered set — the whole
+// disclosure belongs on the honesty surface; only the auto-mode banner is write-class.
+func writeClassResiduals(residuals []string) []string {
+	writeClass := make([]string, 0, len(residuals))
+	for _, residual := range residuals {
+		if residual == domain.ResidualUDPEgress || residual == domain.ResidualUnixEgress {
+			continue
+		}
+		writeClass = append(writeClass, residual)
+	}
+	return writeClass
 }
 
 // AutoUnattendedBlocked returns the reason an UNATTENDED auto run may not start on this host, or ""

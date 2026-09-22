@@ -208,6 +208,16 @@ func (c *landlockConfiner) unavailableReason() string {
 // kernel that does fence creation and writing, so the gap is DISCLOSED instead — it
 // rides in Residuals, named by its syscall, and every surface that words the caps says
 // so (internal/probe's CapabilityLine and ResidualNotice).
+//
+// NetworkEgress is disclosed the same way, and for a gap that no kernel closes: landlock's
+// network rights are LANDLOCK_ACCESS_NET_BIND_TCP and LANDLOCK_ACCESS_NET_CONNECT_TCP and
+// nothing else, so a box that opts into network-deny still lets UDP datagrams out and still
+// lets a command connect to a pathname AF_UNIX socket it can reach through the path fence.
+// That is a standing fact about the backend, not a per-box answer, so the two tokens are
+// disclosed wherever NetworkEgress is true — a deny box is what makes them matter, and the
+// caps are read before any box exists. Only probe.CapabilityLine words them: they are not
+// write-class, so probe.ResidualNotice filters them out and no host gains a startup banner
+// for them.
 func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 	caps := domain.ConfinementCaps{
 		FSWrite:       c.abi >= landlockABIFSWrite,
@@ -215,7 +225,10 @@ func (c *landlockConfiner) Capabilities() domain.ConfinementCaps {
 		Unavailable:   c.unavailableReason(),
 	}
 	if c.abi >= landlockABIFSWrite && c.abi < landlockABITruncate {
-		caps.Residuals = []string{"truncate(2)"}
+		caps.Residuals = append(caps.Residuals, "truncate(2)")
+	}
+	if caps.NetworkEgress {
+		caps.Residuals = append(caps.Residuals, domain.ResidualUDPEgress, domain.ResidualUnixEgress)
 	}
 	return caps
 }

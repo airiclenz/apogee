@@ -39,8 +39,15 @@ func TestSelectLinuxConfiner(t *testing.T) {
 			newNS:       fenceableNamespace,
 			wantBackend: "landlock",
 			wantNSCalls: 0,
-			wantCaps:    domain.ConfinementCaps{FSWrite: true, NetworkEgress: true},
-			wantLine:    "landlock (fs-write: available · network: available)",
+			// ABI 4 can deny TCP, and TCP is all landlock's network rights cover, so the
+			// selected backend's caps carry the two egress classes a deny box still passes —
+			// and the line the user reads names them.
+			wantCaps: domain.ConfinementCaps{
+				FSWrite:       true,
+				NetworkEgress: true,
+				Residuals:     []string{domain.ResidualUDPEgress, domain.ResidualUnixEgress},
+			},
+			wantLine: "landlock (fs-write: available · network: available · unfenced: connect(2) UDP, connect(2) AF_UNIX)",
 		},
 		// No landlock, bwrap works: the second rung is the backend, its caps untouched.
 		{
