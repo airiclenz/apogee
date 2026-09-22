@@ -787,7 +787,11 @@ keep passing: every `contextfiles_test.go` case, item 12's tests. CHANGELOG side
 **Acceptance.** `go build ./... && go test ./internal/agent/... -run 'Restore|Snapshot|ContextFile|StandingBlock|Fence'`
 **Commit:** `fix(agent): a restored snapshot cannot forge the engine's own structure`
 
-## 14. SECURITY.md and AGENTS.md state what hook hydration trusts
+## 14. SECURITY.md and AGENTS.md state what hook hydration trusts — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): prose guard swept — `rg -n 'bd hooks install|bd init|core\.hooksPath' AGENTS.md README.md SECURITY.md docs/ .agents/` leaves no unqualified hydration instruction; the only instruction site is the AGENTS.md hooks bullet (now qualified), and the remaining hits are historical (`docs/reviews/`, `docs/adr/`, archived plans), correctly outside Files.
+
+NOTES (2026-09-22): AGENTS.md carries an unrelated uncommitted owner edit (the `bd create --id` bullet, line 34) made mid-run — it is NOT part of this item; staging AGENTS.md wholesale would sweep it into this commit, so stage hunk 1 only (`git add -p`) or let the owner keep it back.
 
 **What.** `docs(security)`: closes `apogee-242`, the audit's Critical "repo-shipped `.beads/hooks/*`
 become live git hooks with the user's full privileges", by the ratified won't-fix-and-document call.

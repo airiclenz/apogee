@@ -45,6 +45,20 @@ Out of scope: a model behaving badly within its permitted mode, denial of servic
 your own machine, findings that require a compromised `~/.apogee` or a hostile local user,
 and third-party model servers or MCP servers themselves.
 
+**A checkout's own git hooks are a trust decision, not something apogee fences.** This
+repository ships git hooks under `.beads/hooks/`, and the documented hydration step —
+`bd init` or `bd hooks install` — activates them by pointing git's `core.hooksPath` at that
+checkout-controlled directory. From that moment your next `git commit`, `git checkout` or
+`git push` runs shell out of the repository with your full user privileges. Those hooks are
+git's to run and the repository's to write; nothing in apogee vets, pins or sandboxes them,
+and no guarantee above applies to them. So hydrating a checkout means trusting its
+`.beads/hooks/` exactly as you trust any other code you choose to run: read those files
+before you hydrate a clone of a fork or of a repository you do not control, and do not
+hydrate one you would not execute. This is out of scope as a vulnerability report against
+apogee. (apogee's own git tool calls run git with `core.hooksPath=` blanked, so no
+repository hook runs inside one — that fences the tools, not your shell, and not the
+hydration decision.)
+
 ## Reporting
 
 Please do not open a public issue for a vulnerability. Use GitHub's private reporting —
