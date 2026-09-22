@@ -229,6 +229,8 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- A collapsed sub-agent row whose promoted one-line report failed the promote-guard painted a bare `done` (a lone run: an unopenable `+1 more line`); it now keeps its count and fill, with the engine's verdict in the gist's place.
+
 - **The driven `esc×2` stop gesture no longer depends on how busy the box is.** `internal/tui`
   measures the gesture's window (`escStopWindow`, one second) when each press is FOLDED rather than
   when it is sent, so two presses the kit put 70 ms apart on the wire (`tuitest`'s `escapeGap`) are
