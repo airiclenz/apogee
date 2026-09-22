@@ -162,12 +162,20 @@ func TestParseRetryAfter(t *testing.T) {
 }
 
 // A Retry-After the client is willing to honour replaces the exponential backoff entirely —
-// proven here by a wait that finishes far inside the 1s a header-less 429 would have cost.
+// proven here by the GAP the server itself observes between the two requests. Timing the whole
+// call would have measured the backoff plus two real round trips, dialling and JSON, so on a
+// loaded box a passing client could still blow a bound set at the backoff constant; the gap
+// between the two arrivals is the wait and nothing else.
 func TestRespond_HonorsRetryAfterHeader(t *testing.T) {
 	t.Parallel()
 
 	var calls atomic.Int32
+	var mu sync.Mutex
+	var seen []time.Time
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		seen = append(seen, time.Now())
+		mu.Unlock()
 		if calls.Add(1) == 1 {
 			w.Header().Set("Retry-After", "0")
 			w.WriteHeader(http.StatusTooManyRequests)
@@ -177,9 +185,7 @@ func TestRespond_HonorsRetryAfterHeader(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	start := time.Now()
 	got, err := NewClient(srv.URL, "m", WithMaxRetries(2)).Respond(context.Background(), Request{})
-	elapsed := time.Since(start)
 	if err != nil {
 		t.Fatalf("Respond: %v", err)
 	}
@@ -189,8 +195,15 @@ func TestRespond_HonorsRetryAfterHeader(t *testing.T) {
 	if n := calls.Load(); n != 2 {
 		t.Errorf("server calls = %d, want 2 (429 then success)", n)
 	}
-	if elapsed >= retry429BaseDelay {
-		t.Errorf("elapsed = %v, want well under the %v header-less 429 base", elapsed, retry429BaseDelay)
+
+	mu.Lock()
+	arrivals := append([]time.Time(nil), seen...)
+	mu.Unlock()
+	if len(arrivals) != 2 {
+		t.Fatalf("server saw %d requests, want 2 (429 then success)", len(arrivals))
+	}
+	if gap := arrivals[1].Sub(arrivals[0]); gap >= retry429BaseDelay {
+		t.Errorf("the server saw %v between the two requests, want well under the %v a header-less 429 would have waited", gap, retry429BaseDelay)
 	}
 }
 

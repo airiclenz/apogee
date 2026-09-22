@@ -458,8 +458,17 @@ func TestExtractPDF_CapsAPhantomPageCount(t *testing.T) {
 // billion of them sizes the agent's memory from its own trailer. The fixture is a real,
 // otherwise-readable document with only that number rewritten, so the refusal can come from
 // nothing but the declared count.
+//
+// "Before the parser allocates" is MEASURED rather than timed, the way the inflate bomb below
+// is: a wall clock only ever stood in for the allocation, and a loaded box can break a clock.
+// The allocation is measured in this serial test — no t.Parallel(), so no sibling's allocations
+// land in the delta — with a ceiling loose enough for a minimal.pdf parse and far below the four
+// billion entries the trailer asks for.
 func TestExtractPDF_RefusesAnAbsurdXrefSize(t *testing.T) {
-	t.Parallel()
+	// The refusal costs a couple of kibibytes today; eight mebibytes is thousands of times that
+	// and still nothing beside a table of four billion entries, so the ceiling stays true as the
+	// fixture and the toolchain drift.
+	const allocCeiling = 8 << 20
 
 	readable := readPDFFixture(t, "minimal.pdf")
 	data := bytes.Replace(readable, []byte("/Size 6"), []byte("/Size 4000000000"), 1)
@@ -467,9 +476,10 @@ func TestExtractPDF_RefusesAnAbsurdXrefSize(t *testing.T) {
 		t.Fatalf("the fixture's trailer no longer spells /Size 6; the test rewrites nothing")
 	}
 
-	start := time.Now()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
 	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
-	elapsed := time.Since(start)
+	runtime.ReadMemStats(&after)
 
 	if !strings.HasPrefix(failMessage, "could not extract text from this PDF:") {
 		t.Fatalf("failMessage = %q, want the could-not-extract message", failMessage)
@@ -483,8 +493,9 @@ func TestExtractPDF_RefusesAnAbsurdXrefSize(t *testing.T) {
 	if text != "" || pages != 0 {
 		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
 	}
-	if elapsed > 100*time.Millisecond {
-		t.Errorf("refusal took %s, want it decided before the parser allocates", elapsed)
+	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > allocCeiling {
+		t.Errorf("refusing the trailer allocated %d bytes, want under %d: the xref table was sized from the declared count",
+			allocated, allocCeiling)
 	}
 }
 

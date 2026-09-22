@@ -504,7 +504,16 @@ grep -rn "time.Sleep(20" internal/agent internal/tools
 
 **Commit:** `test(agent): the queued-caller tests block on the waiter count, not on a sleep`
 
-## 10. Three wall-clock proxies assert the thing they stand for
+## 10. Three wall-clock proxies assert the thing they stand for — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the Acceptance commands were run without `-race` — this host's kernel gives a
+47-bit VMA and ThreadSanitizer refuses to start on it ("unsupported VMA range, Found 47 - Supported
+48"), so every `-race` run of any package fails before a test executes; `go vet` and `gofmt` clean.
+NOTES (2026-09-23): each rewritten case was mutation-checked against the defect it guards and
+failed: request ctx `rctx`→`ctx` in `internal/tools/network.go` (3.61 s over the 3 s ceiling),
+`refuseAbsurdObjectCount` short-circuited (no refusal message), and `parseRetryAfter` fed "" in
+`internal/provider/client.go` (1.004 s server-observed gap). All three production files were
+restored; `git status` shows only the three test files.
 
 **What.** The "measure it, do not time it" rows of `apogee-7fmu`.
 **Goal:** none of these three tests proves its claim by a wall-clock reading a loaded box can break.

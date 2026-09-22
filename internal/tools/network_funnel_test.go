@@ -936,9 +936,15 @@ func TestNetworkFunnel_TimeoutResolution(t *testing.T) {
 // case — the funnel tests use httptest's 127.0.0.1 literals, "localhost" (answered from
 // /etc/hosts by the files-first lookup order), or an injected guard resolver.
 func TestNetworkFunnel_OneBudgetCoversResolveAndRequest(t *testing.T) {
+	// The two outcomes this case separates are a shared budget (~budget) and a per-phase one
+	// (~lookup+budget). They are told apart by a MULTIPLE of the budget, not by a fixed slack:
+	// the ceiling below is 1.5*budget, which sits strictly between the two because lookup is
+	// 0.8*budget. Room for a loaded box therefore comes from scaling both constants up in
+	// absolute terms — a second of headroom at this size — and never from raising the multiple,
+	// which is what the opposing per-phase outcome is pinned by.
 	const (
-		budget = 600 * time.Millisecond
-		lookup = 500 * time.Millisecond // most of the budget, spent before the request starts
+		budget = 2 * time.Second
+		lookup = 1600 * time.Millisecond // 0.8*budget, spent before the request starts
 	)
 
 	restore := net.DefaultResolver
@@ -960,15 +966,22 @@ func TestNetworkFunnel_OneBudgetCoversResolveAndRequest(t *testing.T) {
 		}
 	})
 
+	// A watchdog rather than a bare Background: an unbounded call has to FAIL this case rather
+	// than hang it, and its cancellation arrives far above the ceiling asserted below.
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	watchdog := time.AfterFunc(20*budget, cancel)
+	defer watchdog.Stop()
+
 	start := time.Now()
-	resp, msg, err := newFunnelTool(guard).do(context.Background(), netRequest{
+	resp, msg, err := newFunnelTool(guard).do(ctx, netRequest{
 		url:     "http://slow-dns.example/page",
 		timeout: budget,
 	})
 	elapsed := time.Since(start)
 
 	if err != nil {
-		t.Fatalf("err = %v, want nil — a spent budget is the funnel's OWN bound, so it is the message shape; only caller cancellation is a Go error (ADR 0007)", err)
+		t.Fatalf("err = %v, want nil — a spent budget is the funnel's OWN bound, so it is the message shape; only caller cancellation is a Go error (ADR 0007), and here that is the watchdog firing after %v", err, 20*budget)
 	}
 	if msg == "" {
 		t.Fatalf("a call that never reached a server must report a failure; got resp %+v", resp)
@@ -979,8 +992,8 @@ func TestNetworkFunnel_OneBudgetCoversResolveAndRequest(t *testing.T) {
 	if elapsed < lookup {
 		t.Fatalf("do returned in %v, before the %v lookup could have finished — the test is not exercising the pre-flight it claims to", elapsed, lookup)
 	}
-	if slack := 250 * time.Millisecond; elapsed > budget+slack {
-		t.Errorf("do took %v for a %v budget with a %v lookup: the request was given a budget of its OWN instead of sharing the pre-flight's (per-phase worst case %v)", elapsed, budget, lookup, lookup+budget)
+	if ceiling := budget + budget/2; elapsed > ceiling {
+		t.Errorf("do took %v for a %v budget with a %v lookup, over the %v ceiling: the request was given a budget of its OWN instead of sharing the pre-flight's (per-phase worst case %v)", elapsed, budget, lookup, ceiling, lookup+budget)
 	}
 	t.Logf("slow lookup %v + hanging dial under a %v budget: do returned in %v", lookup, budget, elapsed)
 }
