@@ -306,15 +306,24 @@ type Budget struct {
 	CharsPerToken float64 // the chars→token ratio, calibrated against reported usage
 
 	// The window allocation (internal/context.Allocate): how many tokens of ContextLimit each
-	// part of a request may claim. ResponseReserve is held back for the reply; the rest is split
-	// across SystemPrompt, FileContext, and History (they sum to ContextLimit - ResponseReserve).
-	// Every field is 0 when the window is unknown. It is ADVISORY: the context reducers
-	// (tool-result capping, automatic Compaction) read it; nothing in the request path is
-	// reshaped by it here.
+	// part of a request may claim. ResponseReserve is held back for the reply; SystemPrompt and
+	// FileContext are what this session's standing content MEASURED plus headroom, so a session
+	// that seeds no workspace context files reserves almost nothing for them; History is the rest
+	// of the working room, capped at what the emergency fold can still render (internal/agent's
+	// HistoryCap), so the three no longer sum to ContextLimit - ResponseReserve — on a known
+	// window the cap is what the surplus falls out of. Every field is 0 when the window is
+	// unknown. It is ADVISORY: the context reducers (tool-result capping, automatic Compaction)
+	// read it; nothing in the request path is reshaped by it here.
 	ResponseReserve int
 	SystemPrompt    int
 	FileContext     int
 	History         int
+
+	// StandingAdvisory is the FIXED 15%-of-working-room share the oversize notice measures the
+	// whole standing system content against (ADR 0026: oversize is advisory). It is deliberately
+	// not SystemPrompt: a measured reservation grows with the content it measures, so reading the
+	// reservation as the ceiling would mean the notice could never fire.
+	StandingAdvisory int
 }
 
 // LoopView is the read-only window every reaction has onto loop state beyond its own

@@ -23,7 +23,10 @@ import (
 // stubs with a summary before the request is built, so the fold is silenced to observe the prune.
 func pruneConfig(sink domain.EventSink) domain.Config {
 	cfg := baseConfig(sink)
-	cfg.Context.MaxContextTokens = 8192 // History allocation ≈ 3.9k tokens; the 60% trigger ≈ 9.4k chars
+	// History allocation = 3,584 tokens (a.budget().History: the working room less the measured
+	// standing reservations, capped at the fold's transcript budget), so the 60% trigger ≈ 8.6k
+	// chars at the uncalibrated ratio.
+	cfg.Context.MaxContextTokens = 8192
 	cfg.Context.CompactionEnabled = false
 	cfg.Context.PruneToolResults = true
 	return cfg

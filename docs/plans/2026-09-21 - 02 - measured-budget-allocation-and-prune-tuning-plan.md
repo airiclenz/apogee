@@ -111,7 +111,16 @@ proportionally, sum intact; (e) `StandingAdvisory` equals the 15% share regardle
 **Acceptance.** `go build ./... && go vet ./internal/context && go test ./internal/context -run 'TestAllocate' -count=1`
 **Commit:** `feat(context): Allocate reserves the measured standing parts and floors History`
 
-## 2. `(*Agent).budget()` feeds the measurement
+## 2. `(*Agent).budget()` feeds the measurement — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): the row name the measurement splits on is now the named constant `standingContextFilesRow` in `internal/agent/standingblocks.go` (the table row uses it), so the table's spelling and the Budget's split have one author rather than a magic string in each; `standingblocks.go` joins FILES for it.
+NOTES (2026-09-22): `HistoryCap` also replaces the inline `max(b.Window-compactMaxTokens-compactPromptOverheadTokens, compactMinTranscriptTokens)` in `deriveGrowthBounds`, so the cap and the fold's transcript budget are literally one expression — that identity is the item's survivability argument, and two copies could drift.
+NOTES (2026-09-22): `internal/agent/floorguards_test.go` joins FILES: `TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass` shares `numberedLines(200)` with `toolresultfloor_test.go` as the payload that must sit BETWEEN the guard's cap and the structural floor, and the smaller History pushed that pinned count past the floor. Both sites now take it from the new `betweenTheCeilings(t)` helper, which derives the largest such payload under 90% of `a.budget().History` instead of pinning a line count.
+NOTES (2026-09-22): the item's `60%\|48%\|working room\|3\.9k` sweep is a floor, so two files outside its Files list carry the same retired figure and were folded in (comment text only): `internal/agent/autocompact_test.go` and `internal/agent/subagent_test.go`, each stating the "~3.9k-token History allocation" of the 8k window, now say ~3.6k.
+NOTES (2026-09-22): `internal/agent/filerefs_test.go` `TestResolveFileRefs_BoundsExtractionByTheClampBudget` needed its size tolerance widened from `2*floorChars + 200` to `+ 600`: at its 1024-token window the cap makes History the fold's minimum transcript (256 tokens), so the extraction budget is ~2k characters and the fixed 200 no longer covers the annotated header, the not-extracted marker and the ~315-character page the walk finishes past the budget. The comment now names what the slack covers; the test's own claims (short page count, marker present) are unchanged.
+NOTES (2026-09-22): `internal/agent/fillnotice_test.go`'s fixtures now come from a new `fillCharsAt(t, pct)` helper (pct of `a.budget().History`, plus one token so truncation cannot report a percent one short) rather than pinned byte counts, and the file header restates the new 3,584-token line — the item allowed either, and this takes both.
+NOTES (2026-09-22): `internal/agent/prune_test.go`'s `pruneConfig` comment is re-derived to the CURRENT band (History 3,584 tokens ⇒ the 60% trigger ≈ 8.6k chars); item 4 owns the move to 70% and the ~10k figure.
+NOTES (2026-09-22): `TestE2EStreamPTY` (cmd/apogee) failed once under the full `go test ./...` run and passes both in isolation and on a full `go test ./cmd/apogee` — a PTY timing flake under parallel load, on a path this item does not touch.
 
 **What.** Recast at the regression check (2026-09-21). Depends on item 1. In `internal/agent`, `(*Agent).budget()` measures the standing content
 it already renders — the `context files` row of `standingBlocks()` is the file-context part, every

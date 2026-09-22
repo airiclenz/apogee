@@ -1099,9 +1099,10 @@ const uncalibratedRoomMargin = 2
 // never as a comfort margin. That is also why it reads Window rather than the working ceiling
 // ContextLimit: a `working-window:` bound is a soft line the reducers keep the session under, and
 // folding at it would fire this guard on every request a bounded session deliberately lets run
-// past its working room while still fitting the server's window. The ~60%-of-working-room History
-// allocation stays the boundary trigger's business (Budget.HistoryExceedsAllocation), not this
-// one's — and that one DOES follow the working ceiling, which is how the bound actually bites.
+// past its working room while still fitting the server's window. The History allocation — the
+// working room less the measured standing reservations, never below half of it and never above the
+// fold's transcript budget — stays the boundary trigger's business
+// (Budget.HistoryExceedsAllocation), not this one's — and that one DOES follow the working ceiling, which is how the bound actually bites.
 //
 // With an UNKNOWN window (no discovery, no config: Allocate returns the zero Allocation, leaving
 // no working room) BOTH sides of the compare change. The room becomes
@@ -1428,25 +1429,67 @@ func (a *Agent) composeUserMessage(ctx context.Context, turn int, in domain.User
 // binds a small one simply keeps the small one (config refuses the per-entry contradiction, where
 // both numbers do describe one server). A working window with NO advertised window is honoured as
 // written — the operator named the only room anyone named.
+//
+// The two standing parts are MEASURED here (standingMeasured), so each reserves what this
+// session's own standing content costs rather than a fixed share of the working room: a session
+// with no workspace context files leaves that room to History instead of holding a quarter of the
+// window for content that does not exist. History is the remainder, and this is where it is
+// PRODUCED — every reader (the fill notice, Prune, HistoryExceedsAllocation, the fold trigger and
+// structuralFloor) reads the one number set here.
 func (a *Agent) budget() domain.Budget {
 	window := a.cfg.Context.MaxContextTokens
 	limit := window
 	if working := a.cfg.Context.WorkingWindow; working > 0 && (window <= 0 || working < window) {
 		limit = working
 	}
-	// The standing parts are unmeasured here, so each falls back to its fixed fraction of the
-	// working room (internal/context.Measured).
 	alloc := apogeectx.Allocate(limit, a.cfg.Context.ResponseReserve, a.cfg.Context.ResponseReserveFraction,
-		apogeectx.Measured{SystemPrompt: -1, FileContext: -1})
+		a.standingMeasured())
+	history := alloc.History
+	// The cap keeps ADR 0018 §8's survivability ordering at every window: History — the bound both
+	// structural clamps and the boundary trigger read — must stay at or under what the emergency
+	// fold can still render, or content that survives the clamp is content the fold cannot shed.
+	// It is gated on and computed from the ADVERTISED window, the only window the fold renders
+	// against: a session bounded by `working-window:` alone has no advertised window, and capping
+	// it against a zero would collapse History to compactMinTranscriptTokens for every reader.
+	if window > 0 {
+		history = min(history, HistoryCap(window))
+	}
 	return domain.Budget{
-		Window:          window,
-		ContextLimit:    limit,
-		Used:            a.tokens.Used(),
-		CharsPerToken:   a.tokens.CharsPerToken(),
-		ResponseReserve: alloc.ResponseReserve,
-		SystemPrompt:    alloc.SystemPrompt,
-		FileContext:     alloc.FileContext,
-		History:         alloc.History,
+		Window:           window,
+		ContextLimit:     limit,
+		Used:             a.tokens.Used(),
+		CharsPerToken:    a.tokens.CharsPerToken(),
+		ResponseReserve:  alloc.ResponseReserve,
+		SystemPrompt:     alloc.SystemPrompt,
+		FileContext:      alloc.FileContext,
+		History:          history,
+		StandingAdvisory: alloc.StandingAdvisory,
+	}
+}
+
+// standingMeasured measures this request's standing content for the Allocation: the context-files
+// row of the standing table (standingblocks.go) is the file-context part and every other row
+// together is the system-prompt part, each converted through the Agent's own estimator — the same
+// chars→token ratio the reducers read, so a reservation and the trigger it protects share one
+// scale.
+//
+// It takes ONE render of the table per call and memoises nothing: the standing content moves on
+// SetMode, SetScratchDir, the date, an opened delegation seat, ExtraReadRoots and every task_list
+// call, so a cached measurement would reserve room for a render the request no longer carries.
+// When nothing seeds the message the table renders nothing (the ride-along rule), and both parts
+// measure zero — MEASURED zero, which floors at its 2% share, never the unmeasured fallback.
+func (a *Agent) standingMeasured() apogeectx.Measured {
+	system, files := 0, 0
+	for _, row := range a.standingRenders() {
+		if row.name == standingContextFilesRow {
+			files += len(row.rendered)
+			continue
+		}
+		system += len(row.rendered)
+	}
+	return apogeectx.Measured{
+		SystemPrompt: a.tokens.EstimateTokens(system),
+		FileContext:  a.tokens.EstimateTokens(files),
 	}
 }
 

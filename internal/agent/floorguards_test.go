@@ -733,7 +733,7 @@ func TestFloorGuard_ToolResultCapTrimsAnOlderResultUnderBypass(t *testing.T) {
 	for _, tc := range cases {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			big := numberedLines(200)
+			big := betweenTheCeilings(t)
 			sink := &recordingSink{}
 			cfg := configWithTools(sink, fakeTool{name: "lookup", readOnly: true, result: big})
 			cfg.Context.MaxContextTokens = floorWindow

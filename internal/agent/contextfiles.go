@@ -287,6 +287,6 @@ func (a *Agent) ContextFilesReport() domain.ContextFilesReport {
 
 	budget := a.budget()
 	report.StandingTokens = budget.EstimateTokens(len(a.standingSystem()))
-	report.SystemShare = budget.SystemPrompt
+	report.SystemShare = budget.StandingAdvisory
 	return report
 }

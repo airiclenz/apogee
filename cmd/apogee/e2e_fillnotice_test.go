@@ -17,6 +17,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/agent"
 	"github.com/airiclenz/apogee/internal/config"
 	apogeectx "github.com/airiclenz/apogee/internal/context"
 	"github.com/airiclenz/apogee/internal/domain"
@@ -46,8 +47,11 @@ const (
 	fillFixtureCount = 3
 
 	// fillNoticeConfig is the `extraConfig` a notice journey runs with: the pinned window, so the
-	// Budget carries an allocation to measure against, and the key switched on.
-	fillNoticeConfig = "context-window: 8192\n" + fillNoticeName + ": true\n"
+	// Budget carries an allocation to measure against, the key switched on, and the default system
+	// prompt OFF — with no prompt and no workspace context file nothing seeds the standing message
+	// (the ride-along rule: standingRenders returns nil), so both standing parts measure zero and
+	// seedFillFixtures can size its files from that allocation exactly.
+	fillNoticeConfig = "context-window: 8192\nuse-default-prompt: false\n" + fillNoticeName + ": true\n"
 
 	// fillNoticeOffConfig is the same home with the key ABSENT — the shipped default.
 	fillNoticeOffConfig = "context-window: 8192\n"
@@ -172,12 +176,22 @@ func fillNoticeFirings(t *testing.T, lines []map[string]any) []string {
 // compaction line apiece — rather than hand-pinned, so a change to the allocation moves the
 // fixtures with the line they are measured against. Each file is lines of one fixed width, which
 // read_file renders back verbatim under its one-line header.
+//
+// The allocation is taken exactly as the binary's own Budget takes it: fillNoticeConfig seeds no
+// system prompt and the workspace holds no context file, so both standing parts measure zero
+// (Measured{0, 0}, the MEASURED zero — not the unmeasured fallback) and floor at their 2% share;
+// and History is then held under the emergency fold's transcript budget, which is what binds at
+// this window (agent.HistoryCap — cmd/apogee is package main and cannot name the fold's own
+// constants, and a re-pinned literal here would drift from that arithmetic silently).
 func seedFillFixtures(t *testing.T, workspace string) {
 	t.Helper()
 
-	history := apogeectx.Allocate(fillNoticeWindow, 0, 0, apogeectx.Measured{SystemPrompt: -1, FileContext: -1}).History
+	history := min(
+		apogeectx.Allocate(fillNoticeWindow, 0, 0, apogeectx.Measured{SystemPrompt: 0, FileContext: 0}).History,
+		agent.HistoryCap(fillNoticeWindow),
+	)
 	if history <= 0 {
-		t.Fatalf("Allocate(%d, 0, 0, unmeasured) allocated no History; the notice would have no line to measure against",
+		t.Fatalf("the %d-token window allocated no History; the notice would have no line to measure against",
 			fillNoticeWindow)
 	}
 	size := int(float64(history) * apogeectx.DefaultCharsPerToken * fillFixtureShare)

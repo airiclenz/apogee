@@ -103,6 +103,21 @@ type growthBounds struct {
 	transcriptBudget int
 }
 
+// HistoryCap reports the ceiling the Budget holds History under on a known ADVERTISED window: the
+// emergency fold's own transcript budget — the window less the summary's reply reserve
+// (compactMaxTokens) and prompt overhead (compactPromptOverheadTokens), floored at
+// compactMinTranscriptTokens. It is the SAME number deriveGrowthBounds hands the fold below, and
+// deliberately so: ADR 0018 §8's survivability ordering says the structural floor must sit at or
+// under what a fold can still render, and pinning both to this one expression is what keeps the
+// ordering true at every window instead of only above ~8.9k tokens.
+//
+// Exported because a Driver's own end-to-end tests size their fixtures against the History a
+// binary actually allocates (cmd/apogee is package main and cannot name the constants above), and
+// a re-pinned literal there would drift from this arithmetic silently.
+func HistoryCap(window int) int {
+	return max(window-compactMaxTokens-compactPromptOverheadTokens, compactMinTranscriptTokens)
+}
+
 // deriveGrowthBounds derives the growthBounds from one Budget view (Agent.budget).
 func deriveGrowthBounds(b domain.Budget) growthBounds {
 	// The fallback is named ONCE: every bound below with no window to derive from takes it.
@@ -120,7 +135,7 @@ func deriveGrowthBounds(b domain.Budget) growthBounds {
 		g.historyFloor = fallback
 	}
 	if b.Window > 0 {
-		g.transcriptBudget = max(b.Window-compactMaxTokens-compactPromptOverheadTokens, compactMinTranscriptTokens)
+		g.transcriptBudget = HistoryCap(b.Window)
 	}
 	return g
 }

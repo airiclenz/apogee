@@ -95,7 +95,7 @@ func TestAutoCompactFoldsWhenHistoryOverBudget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	seedLargeConv(a) // ~42k chars, well over the ~3.9k-token History allocation for an 8k window
+	seedLargeConv(a) // ~42k chars, well over the ~3.6k-token History allocation for an 8k window
 	seeded := a.conv.Len()
 
 	if err := a.Submit(domain.UserInput{Text: "the fresh question"}); err != nil {

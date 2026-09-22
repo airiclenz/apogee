@@ -2207,7 +2207,7 @@ func foldedSummaryRequest(reqs []stubllm.Request, summary string) (stubllm.Reque
 // which is what makes the quiescent Turn boundary a safe place to fold.
 func TestSubAgent_ChildFoldsMidDelegationAndFinishes(t *testing.T) {
 	sink := &recordingSink{}
-	// ~25k chars ≈ 6.2k tokens, past the ~3.9k-token History allocation of the 8k window below.
+	// ~25k chars ≈ 6.2k tokens, past the ~3.6k-token History allocation of the 8k window below.
 	bulky := fakeTool{name: "read_thing", readOnly: true, result: strings.Repeat("x", 25000)}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, bulky)
 	cfg.Context.MaxContextTokens = 8192

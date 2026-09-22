@@ -58,7 +58,7 @@ func TestAutoCompactSkipsMidExchangeThenFoldsAtNextOpening(t *testing.T) {
 	)
 	cfg := autoCompactConfig(sink)
 	toolReg := domain.NewToolRegistry()
-	// The tool result alone (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
+	// The tool result alone (~25k chars ≈ 6.2k tokens) exceeds the ~3.6k-token History allocation for
 	// the 8k window, so committing it mid-Exchange pushes the history over budget.
 	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: strings.Repeat("x", 25000)}); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -134,7 +134,7 @@ func TestAutoCompactSaturatesWhenPrefixExceedsAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	// Oversized protected prefix (~25k chars ≈ 6.2k tokens > the ~3.9k-token History allocation) plus
+	// Oversized protected prefix (~25k chars ≈ 6.2k tokens > the ~3.6k-token History allocation) plus
 	// a foldable tail: every fold keeps the prefix and stays over budget.
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("g", 25000)})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a1"})
@@ -193,7 +193,7 @@ func TestAutoCompactSkippedFoldDoesNotSaturate(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 	// Protected prefix (the first user message) + one oversized assistant answer: the ~25k-char answer
-	// (~6.2k tokens) pushes the ~2-message history well past the ~3.9k-token allocation, yet only ONE
+	// (~6.2k tokens) pushes the ~2-message history well past the ~3.6k-token allocation, yet only ONE
 	// message sits past the prefix, so Compact skips (minCompactTail = 2).
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "the overarching goal"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: strings.Repeat("x", 25000)})
@@ -359,7 +359,7 @@ func TestAutoCompactFoldsMidExchangeOnAnAgentThatCompactsMidExchange(t *testing.
 	)
 	cfg := autoCompactConfig(sink)
 	toolReg := domain.NewToolRegistry()
-	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
+	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.6k-token History allocation for
 	// the 8k window, so committing it mid-Exchange puts the NEXT Turn over budget; the small one
 	// keeps the Exchange open afterwards without pushing it back over.
 	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: strings.Repeat("x", 25000)}); err != nil {
@@ -462,7 +462,7 @@ func TestAutoCompactFailedFoldStandsDownForTheRestOfTheExchange(t *testing.T) {
 	)
 	cfg := autoCompactConfig(sink)
 	toolReg := domain.NewToolRegistry()
-	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.9k-token History allocation for
+	// The oversized result (~25k chars ≈ 6.2k tokens) exceeds the ~3.6k-token History allocation for
 	// the 8k window; the small one keeps the Exchange open afterwards without shrinking it back.
 	if err := toolReg.Register(fakeTool{name: "probe", readOnly: true, result: strings.Repeat("x", 25000)}); err != nil {
 		t.Fatalf("Register(probe): %v", err)
@@ -523,7 +523,7 @@ func TestAutoCompactFailedFoldReArmsAtTheNextExchangeOpening(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	// Oversized protected prefix (~25k chars ≈ 6.2k tokens > the ~3.9k-token History allocation) plus
+	// Oversized protected prefix (~25k chars ≈ 6.2k tokens > the ~3.6k-token History allocation) plus
 	// a foldable tail: over budget at every opening, and a faulted fold leaves it that way.
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("g", 25000)})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a1"})

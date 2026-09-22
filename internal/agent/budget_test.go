@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	apogeectx "github.com/airiclenz/apogee/internal/context"
@@ -30,11 +31,44 @@ func TestBudgetIsHonestBeforeCalibration(t *testing.T) {
 	if b.ContextLimit != 8192 {
 		t.Errorf("ContextLimit = %d, want the configured window 8192", b.ContextLimit)
 	}
-	if want := apogeectx.Allocate(8192, 0, 0, apogeectx.Measured{SystemPrompt: -1, FileContext: -1}); b.ResponseReserve != want.ResponseReserve ||
-		b.SystemPrompt != want.SystemPrompt || b.FileContext != want.FileContext || b.History != want.History {
-		t.Errorf("allocation = {reserve %d sys %d file %d hist %d}, want context.Allocate %+v",
-			b.ResponseReserve, b.SystemPrompt, b.FileContext, b.History, want)
+	want := apogeectx.Allocate(8192, 0, 0, standingMeasure(a))
+	if b.ResponseReserve != want.ResponseReserve || b.SystemPrompt != want.SystemPrompt ||
+		b.FileContext != want.FileContext || b.StandingAdvisory != want.StandingAdvisory ||
+		b.History != cappedHistory(want, 8192) {
+		t.Errorf("allocation = {reserve %d sys %d file %d hist %d advisory %d}, want context.Allocate %+v capped to History %d",
+			b.ResponseReserve, b.SystemPrompt, b.FileContext, b.History, b.StandingAdvisory, want, cappedHistory(want, 8192))
 	}
+}
+
+// standingMeasure renders the standing table for a and returns the measurement budget() hands
+// Allocate: the context-files row as the file part, every other row together as the system part,
+// each estimated through the Agent's own ratio. It restates the split on purpose — a test that
+// called a.standingMeasured() would assert nothing about WHICH rows land on which side.
+func standingMeasure(a *Agent) apogeectx.Measured {
+	system, files := 0, 0
+	for _, row := range a.standingRenders() {
+		if row.name == standingContextFilesRow {
+			files += len(row.rendered)
+			continue
+		}
+		system += len(row.rendered)
+	}
+	b := a.budget()
+	return apogeectx.Measured{
+		SystemPrompt: b.EstimateTokens(system),
+		FileContext:  b.EstimateTokens(files),
+	}
+}
+
+// cappedHistory is the History budget() produces from alloc: the allocation itself, held under the
+// emergency fold's own transcript budget (HistoryCap) whenever a window is ADVERTISED, and left
+// uncapped when none is — the fold renders against the advertised window, so there is nothing to
+// cap against without one.
+func cappedHistory(alloc apogeectx.Allocation, window int) int {
+	if window <= 0 {
+		return alloc.History
+	}
+	return min(alloc.History, HistoryCap(window))
 }
 
 // TestBudgetViewReflectsCalibratedUsage drives one real Turn whose stream carries server usage and
@@ -244,17 +278,72 @@ func TestBudgetSplitsTheAdvertisedWindowFromTheWorkingRoom(t *testing.T) {
 			if b.ContextLimit != tc.wantLimit {
 				t.Errorf("ContextLimit = %d, want the working room %d", b.ContextLimit, tc.wantLimit)
 			}
-			want := apogeectx.Allocate(tc.wantLimit, 0, 0, apogeectx.Measured{SystemPrompt: -1, FileContext: -1})
+			want := apogeectx.Allocate(tc.wantLimit, 0, 0, standingMeasure(a))
 			if b.ResponseReserve != want.ResponseReserve || b.SystemPrompt != want.SystemPrompt ||
-				b.FileContext != want.FileContext || b.History != want.History {
-				t.Errorf("allocation = {reserve %d sys %d file %d hist %d}, want the working room's %+v",
-					b.ResponseReserve, b.SystemPrompt, b.FileContext, b.History, want)
+				b.FileContext != want.FileContext || b.History != cappedHistory(want, tc.wantWin) {
+				t.Errorf("allocation = {reserve %d sys %d file %d hist %d}, want the working room's %+v capped to History %d",
+					b.ResponseReserve, b.SystemPrompt, b.FileContext, b.History, want, cappedHistory(want, tc.wantWin))
 			}
-			if sum := b.SystemPrompt + b.FileContext + b.History; sum != tc.wantLimit-b.ResponseReserve {
-				t.Errorf("allocation sums to %d, want ContextLimit - ResponseReserve = %d",
-					sum, tc.wantLimit-b.ResponseReserve)
+			// No allocation-sum assertion: on an advertised window History is the allocation held
+			// under the fold's transcript budget, so the three parts no longer sum to the working
+			// room. The last row is the other half of that rule — with NO advertised window there
+			// is nothing to cap against, and History stays the allocation exactly.
+			if tc.wantWin == 0 && b.History != want.History {
+				t.Errorf("History = %d with no advertised window, want the uncapped allocation %d",
+					b.History, want.History)
 			}
 		})
+	}
+}
+
+// TestBudgetReservesWhatTheStandingContentMeasures is the payoff of the measured allocation: two
+// sessions on the same window, one carrying a large AGENTS.md and one carrying none, no longer
+// reserve the same fixed quarter of the working room for file context. The session with the file
+// reserves what that file MEASURES and pays for it out of History; the session without it leaves
+// that room to History instead of holding it for content that does not exist. Neither drops
+// History below half the working room — the floor the reducers' reclaim target keeps whatever the
+// standing content costs.
+func TestBudgetReservesWhatTheStandingContentMeasures(t *testing.T) {
+	t.Parallel()
+
+	// 32768: large enough that the fold's transcript budget (HistoryCap) never binds here, so what
+	// this test reads is the ALLOCATION rather than the cap.
+	const window = 32768
+
+	agentsDir := t.TempDir()
+	writeWorkspaceFile(t, agentsDir, "AGENTS.md", strings.Repeat("workspace conventions. ", 2000)) // ~46 KB
+
+	budgetFor := func(t *testing.T, dir string) domain.Budget {
+		t.Helper()
+		cfg := contextConfig(&recordingSink{}, dir, "AGENTS.md")
+		cfg.SystemPrompt = "You are a test agent."
+		cfg.Context.MaxContextTokens = window
+		a, err := newAgent(cfg, echoResponder(t, "unused"))
+		if err != nil {
+			t.Fatalf("newAgent: %v", err)
+		}
+		return a.budget()
+	}
+
+	withFile := budgetFor(t, agentsDir)
+	without := budgetFor(t, t.TempDir()) // the same config, naming a file the workspace does not hold
+
+	if withFile.FileContext <= without.FileContext {
+		t.Errorf("FileContext = %d with a 46 KB AGENTS.md and %d without: the reservation did not follow the measurement",
+			withFile.FileContext, without.FileContext)
+	}
+	if withFile.History >= without.History {
+		t.Errorf("History = %d with the file and %d without: the file's room did not come out of History",
+			withFile.History, without.History)
+	}
+	for _, tc := range []struct {
+		name string
+		b    domain.Budget
+	}{{"with the file", withFile}, {"without it", without}} {
+		working := tc.b.ContextLimit - tc.b.ResponseReserve
+		if tc.b.History < working/2 {
+			t.Errorf("%s: History = %d, want at least half the working room %d", tc.name, tc.b.History, working)
+		}
 	}
 }
 

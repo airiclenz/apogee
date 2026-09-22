@@ -430,7 +430,9 @@ func TestResolveFileRefs_SplitsTheFloorAcrossReferences(t *testing.T) {
 // which an unbounded extraction would never emit.
 func TestResolveFileRefs_BoundsExtractionByTheClampBudget(t *testing.T) {
 	// The committed fixture is twenty pages of ~315 characters each. The window is small enough
-	// that twice its History allocation lands inside the document rather than past it.
+	// that twice its History allocation — here the fold's minimum transcript budget, which caps
+	// History on any window this far under the fold's own overhead — lands inside the document
+	// rather than past it.
 	const (
 		window        = 1024
 		documentPages = 20
@@ -453,7 +455,12 @@ func TestResolveFileRefs_BoundsExtractionByTheClampBudget(t *testing.T) {
 	if !strings.Contains(got, "not extracted: content budget") {
 		t.Errorf("the extractor's not-extracted marker is missing; the walk was not bounded:\n%.300s", got)
 	}
-	if limit := 2*floorChars + 200; len(got) > limit {
+	// The slack covers what rides beside the extracted text: the annotated header line, the
+	// extractor's not-extracted marker, and the page it finishes past the budget (the walk stops
+	// at a page boundary, and this fixture's pages are ~315 characters each). It is sized against
+	// those, not against the budget — at this window the History allocation is the fold's minimum
+	// transcript (compactMinTranscriptTokens), so the budget itself is only ~2k characters.
+	if limit := 2*floorChars + 600; len(got) > limit {
 		t.Errorf("block is %d chars, past the %d the extraction budget and its marker allow", len(got), limit)
 	}
 }

@@ -16,11 +16,34 @@ import (
 )
 
 // floorWindow is the discovered context window these tests budget against: 8192 tokens ⇒ a
-// History allocation of ~3.9k tokens which, at the uncalibrated 4.0 chars/token, puts the floor
-// at ~15.7k characters. Small enough to overshoot with a readable payload, large enough that the
-// two ceilings (the floor's History allocation and the Mechanism's 40% of working room) are far
-// apart enough to test independently.
+// History allocation of 3,584 tokens — the working room less the measured standing reservations,
+// capped at the emergency fold's transcript budget (agent.HistoryCap), which is what binds at this
+// window — and, at the uncalibrated 4.0 chars/token, a floor at ~14.3k characters. Small enough to
+// overshoot with a readable payload, large enough that the two ceilings (the floor's History
+// allocation and the Mechanism's 40% of working room) are far apart enough to test independently.
 const floorWindow = 8192
+
+// betweenTheCeilings is a numberedLines payload sized to sit BETWEEN the two ceilings at
+// floorWindow: over the tool-result cap's 40%-of-working-room share and under the structural
+// floor's whole History allocation. It is DERIVED from the allocation — the largest such payload
+// still under 90% of the floor — rather than a pinned line count, because History follows what a
+// session's standing content measures (Agent.budget) and a pinned count would silently cross it.
+func betweenTheCeilings(t *testing.T) string {
+	t.Helper()
+	cfg := configWithTools(&recordingSink{})
+	cfg.Context.MaxContextTokens = floorWindow
+	a, err := newAgent(cfg, echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	b := a.budget()
+	ceiling := int(float64(b.History)*b.CharsPerToken) * 9 / 10
+	n := 1
+	for len(numberedLines(n+1)) < ceiling {
+		n++
+	}
+	return numberedLines(n)
+}
 
 // numberedLines builds an n-line payload whose first and last lines are distinguishable, so a
 // clamped result can be checked for a preserved head and tail around the elision marker.
@@ -165,10 +188,10 @@ func TestToolResultCapKeepsTheTighterCapAboveTheFloor(t *testing.T) {
 
 	b := a.budget()
 	floorChars := int(float64(b.History) * b.CharsPerToken)
-	// The guard's ceiling is 40% of the working room (floor.toolResultBudgetFraction);
-	// the floor's is the whole History allocation (~60% of it). A payload at ~85% of the floor
-	// sits between the two.
-	between := numberedLines(200)
+	// The guard's ceiling is 40% of the working room (floor.toolResultBudgetFraction); the floor's
+	// is the whole History allocation, which at this window is the fold's transcript budget and
+	// comfortably the larger of the two. A payload at ~90% of the floor sits between them.
+	between := betweenTheCeilings(t)
 	if len(between) >= floorChars {
 		t.Fatalf("payload of %d chars must sit UNDER the floor of %d chars", len(between), floorChars)
 	}
@@ -214,7 +237,7 @@ func TestToolResultCapOptOutSendsTheResultWhole(t *testing.T) {
 		t.Fatalf("newAgent: %v", err)
 	}
 
-	between := numberedLines(200)
+	between := betweenTheCeilings(t)
 	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: "go"})
 	a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: []domain.ToolCall{{ID: "c1", Tool: "lookup"}}})
 	a.appendToolResult(0, domain.ToolCall{}, domain.ToolResult{CallID: "c1", Content: between}, "", nil)

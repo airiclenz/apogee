@@ -491,8 +491,8 @@ func TestContextFilesReportMirrorsTheCache(t *testing.T) {
 
 // TestContextFilesReportMeasuresStandingContent: the report costs the WHOLE standing system
 // content — the rendered prompt and the context-file blocks, exactly as seeded — against the
-// Budget's own system-prompt share, so a repo whose conventions have outgrown their allocation
-// says so.
+// Budget's fixed advisory ceiling (StandingAdvisory), so a repo whose conventions have outgrown
+// what the window can comfortably spend on them says so.
 func TestContextFilesReportMeasuresStandingContent(t *testing.T) {
 	t.Parallel()
 
@@ -521,8 +521,8 @@ func TestContextFilesReportMeasuresStandingContent(t *testing.T) {
 		t.Errorf("StandingTokens = %d, want %d (the estimate over the whole seeded system content)",
 			report.StandingTokens, want)
 	}
-	if share := apogeectx.Allocate(8192, 0, 0, apogeectx.Measured{SystemPrompt: -1, FileContext: -1}).SystemPrompt; report.SystemShare != share {
-		t.Errorf("SystemShare = %d, want the Budget's allocation %d", report.SystemShare, share)
+	if share := a.budget().StandingAdvisory; report.SystemShare != share {
+		t.Errorf("SystemShare = %d, want the Budget's advisory ceiling %d", report.SystemShare, share)
 	}
 	if !report.Oversize() {
 		t.Errorf("report %+v does not report over-share; a 5.7 KB context file overruns an 8k window's share", report)

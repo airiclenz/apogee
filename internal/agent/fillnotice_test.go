@@ -5,8 +5,11 @@ package agent
 // trailer on the closing tool result the model reads next, and through the post-tool-result
 // cascade directly (adviseOneCall), where one result's size can be chosen to the character. The
 // numbers rest on the uncalibrated ratio (4 chars per token, no usage in the scripts) and the 8192
-// window's History allocation of 3,933 tokens (internal/context.Allocate: 20% reserve, 15% system,
-// 25% file context), so 50% of the line is ~7.9k chars, 75% ~11.8k, 90% ~14.2k and 100% ~15.7k.
+// window's History allocation of 3,584 tokens — the working room less the MEASURED standing
+// reservations, capped at the emergency fold's transcript budget (HistoryCap(8192)), which is what
+// binds at this window — so 50% of the line is ~7.2k chars, 75% ~10.8k, 90% ~12.9k and 100%
+// ~14.3k. The fixtures below take those sizes from fillCharsAt rather than pinning them, so a
+// rung a case names is the rung its fixture reaches whatever the allocation is.
 
 import (
 	"context"
@@ -24,6 +27,21 @@ func fillConfig(sink domain.EventSink) domain.Config {
 	cfg.Context.MaxContextTokens = 8192
 	cfg.ContextFillNotice = true
 	return cfg
+}
+
+// fillCharsAt returns the character count that lands a fillConfig conversation at pct percent of
+// the compaction line — pct of the window's History allocation (a.budget().History), plus one
+// token so integer truncation cannot report a percent one short of the rung the caller named, at
+// the uncalibrated ratio. Fixtures are sized from it rather than pinned, because History follows
+// what a session's standing content measures.
+func fillCharsAt(t *testing.T, pct int) int {
+	t.Helper()
+	a, err := newAgent(fillConfig(&recordingSink{}), echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	b := a.budget()
+	return int(float64(b.History*pct/100+1) * b.CharsPerToken)
 }
 
 // fillAgent builds an Agent on cfg holding one assistant tool call, so adviseOneCall can commit
@@ -99,11 +117,15 @@ func TestContextFillNoticeFiresOncePerRungOnTheClosingToolResult(t *testing.T) {
 		contentTurn("done"),
 	)
 	cfg := fillConfig(sink)
-	// "start" (5) + three calls (12 each) + each fence's own text ride beside the bodies: the
-	// first lands at 8,277 chars = 2,070 tokens = 52% of 3,933; the second near 78%; the third
-	// near 95%.
+	// "start" (5) and the first call ("probe" + `{"n":1}` = 12) ride beside the first body, so it
+	// is sized 17 chars short of the 52% mark; the two that follow are the steps from there to 78%
+	// and on to 96%, and each fence's own text rides along with them.
 	cfg.Tools = domain.NewToolRegistry()
-	if err := cfg.Tools.Register(sizedTool(8260, 3800, 2500)); err != nil {
+	if err := cfg.Tools.Register(sizedTool(
+		fillCharsAt(t, 52)-17,
+		fillCharsAt(t, 78)-fillCharsAt(t, 52),
+		fillCharsAt(t, 96)-fillCharsAt(t, 78),
+	)); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	a, err := newAgent(cfg, up)
@@ -134,7 +156,9 @@ func TestContextFillNoticeFiresOncePerRungOnTheClosingToolResult(t *testing.T) {
 			t.Errorf("tool message %d: span Turn = %d, want %d", i, span.Turn, i)
 		}
 	}
-	const wantLine = "context: 52% of the way to automatic compaction — 2.1k tokens used of a 8.2k window"
+	// 52% of the 3,584-token line is 1,864 tokens with fillCharsAt's extra one, which
+	// formatTokens renders "1.9k"; the window is the advertised 8192.
+	const wantLine = "context: 52% of the way to automatic compaction — 1.9k tokens used of a 8.2k window"
 	if !strings.HasSuffix(msgs[0].Content, domain.RenderAdvice(msgs[0].Advice[0], wantLine)) {
 		t.Errorf("first tool message = %q, want it to end with the shipped fence around %q", msgs[0].Content, wantLine)
 	}
@@ -148,10 +172,11 @@ func TestContextFillNoticeFiresOncePerRungOnTheClosingToolResult(t *testing.T) {
 func TestContextFillNoticeReportsTheHighestRungOneResultCrosses(t *testing.T) {
 	sink := &recordingSink{}
 	a := fillAgent(t, fillConfig(sink))
-	// 6,291 + "read_file" (9) = 6,300 chars = 1,575 tokens = 40%; the result adds the same again.
-	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("h", 6291)})
+	// The committed history sits at 40% of the line ("read_file", the standing call's 9 chars,
+	// rides with it); the result is the step from there to 80%.
+	a.conv.Append(domain.Message{Role: domain.RoleUser, Content: strings.Repeat("h", fillCharsAt(t, 40)-9)})
 
-	msg := adviseOneCall(t, a, strings.Repeat("x", 6300))
+	msg := adviseOneCall(t, a, strings.Repeat("x", fillCharsAt(t, 80)-fillCharsAt(t, 40)))
 
 	fired := noticeFirings(sink)
 	if len(fired) != 1 || fired[0].Detail != "rung 75 (80%)" {
@@ -414,8 +439,10 @@ func TestContextFillNoticeWindowAndSilence(t *testing.T) {
 		wantWindow string // empty: no notice at all
 	}{
 		{name: "advertised window", window: 8192, body: 8300, wantWindow: "8.2k"},
-		// 32768 with no advertised window: History = 15,730 tokens, and 34,600 chars = 8,650 = 55%.
-		{name: "working window with no advertised one", working: 32768, body: 34600, wantWindow: "32.8k"},
+		// 32768 with no advertised window: nothing caps History (the fold renders against the
+		// ADVERTISED window and there is none), so it is the measured allocation of 25,165 tokens,
+		// and 55,360 chars = 13.8k tokens = 55%.
+		{name: "working window with no advertised one", working: 32768, body: 55360, wantWindow: "32.8k"},
 		{name: "no window is silence", body: 40000},
 	}
 

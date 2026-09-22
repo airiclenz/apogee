@@ -46,6 +46,12 @@ type standingBlock struct {
 	ridesAlong bool
 }
 
+// standingContextFilesRow names the table's workspace-context-files row. It is a constant because
+// the Budget's measurement splits the table by it (loop.go's standingMeasured: this row is the
+// file-context part, every other row together is the system-prompt part), so the name the table
+// writes and the name the split reads have one author.
+const standingContextFilesRow = "context files"
+
 // standingBlocks returns the table, in ADR 0023 §6 wire order: the user's standing instructions
 // first, then the harness's own orientation, then — for a delegation only — what the child's
 // final reply is for, then the model's own checklist, then the workspace's own conventions.
@@ -61,7 +67,7 @@ func standingBlocks() []standingBlock {
 		{name: "orientation", render: (*Agent).orientationBlock, fences: []string{orientationHeader()}, ridesAlong: true},
 		{name: "delegate report", render: (*Agent).delegateReportBlock, fences: []string{delegateReportFence}, ridesAlong: true},
 		{name: "task list", render: (*Agent).taskListBlock, fences: []string{TaskListFence}, ridesAlong: true},
-		{name: "context files", render: (*Agent).contextBlocks, fences: []string{contextFileHeader, contextFileFooter}},
+		{name: standingContextFilesRow, render: (*Agent).contextBlocks, fences: []string{contextFileHeader, contextFileFooter}},
 	}
 }
 

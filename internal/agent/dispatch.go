@@ -1748,15 +1748,14 @@ func (a *Agent) appendToolResult(
 // content that survives the clamp is, by construction, content the fold can still render.
 //
 // The threshold sits deliberately far above the tool-result-cap Floor guard's: the whole History
-// allocation (~60% of the working room, ~48% of the window at the default reserve), chosen because
-// it sits BELOW the emergency fold's own transcript budget at every window an agent can
-// realistically run in, which is the property that keeps the fold survivable — while the
-// guard's tighter 40%-of-working-room cap shapes the ordinary case. That ordering is
-// arithmetic, not an invariant: the fold budgets its transcript at window - compactMaxTokens -
-// compactPromptOverheadTokens (= window - 4608), so the floor stays under it only while
-// 0.6*(window - reserve) < window - 4608 — windows above ~8.9k tokens at the default reserve.
-// Smaller windows invert the two and lose the property; they sit far under the ~32k target window
-// and are too small to run a coding Turn in (ADR 0018 §8 states the same condition).
+// allocation — the working room less what this session's standing content MEASURES (plus headroom,
+// each part floored at 2% of the room), never below half the working room — chosen because it sits
+// at or below the emergency fold's own transcript budget, which is the property that keeps the fold
+// survivable, while the guard's tighter 40%-of-working-room cap shapes the ordinary case. That
+// ordering used to be arithmetic that only held above ~8.9k tokens; it is now construction: the
+// Budget caps History at the fold's transcript budget itself (HistoryCap, applied where History is
+// produced in Agent.budget), so content that survives this clamp is content the fold can render at
+// EVERY advertised window (ADR 0018 §8).
 func (a *Agent) structuralFloor() int {
 	return deriveGrowthBounds(a.budget()).historyFloor
 }

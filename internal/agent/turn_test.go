@@ -442,7 +442,7 @@ func TestGrowthBounds_WorkingWindowKeepsReaderNumbers(t *testing.T) {
 		t.Errorf("structuralFloor() = %d, want the working-room History allocation %d", gotFloor, b.History)
 	}
 	advertisedHistory := apogeectx.Allocate(advertised, cfg.Context.ResponseReserve, cfg.Context.ResponseReserveFraction,
-		apogeectx.Measured{SystemPrompt: -1, FileContext: -1}).History
+		standingMeasure(a)).History
 	if gotFloor >= advertisedHistory {
 		t.Errorf("structuralFloor() = %d, not below the advertised window's allocation %d: the working window did not lower it", gotFloor, advertisedHistory)
 	}
