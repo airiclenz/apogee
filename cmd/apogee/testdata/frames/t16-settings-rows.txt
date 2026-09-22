@@ -5,19 +5,19 @@
 │                                                                                                                                          │
 │                                                                                                                                          │
 │   Upstream                                                                                                                             ┃ │
-│   servers                  1 server               · ⏎ opens $EDITOR                                                                    ┃ │
-│   server                   probe-target                                                                                                │ │
-│   sub-agents-server        auto (session server)  · ⏎ opens $EDITOR                                                                    │ │
-│   sub-agents-choice        fixed                                                                                                       │ │
+│   servers                             1 server               · ⏎ opens $EDITOR                                                         ┃ │
+│   server                              probe-target                                                                                     │ │
+│   sub-agents-server                   auto (session server)  · ⏎ opens $EDITOR                                                         │ │
+│   sub-agents-choice                   fixed                                                                                            │ │
 │                                                                                                                                        │ │
 │   Autonomy                                                                                                                             │ │
-│ ❯ mode                     plan                                                                                                        │ │
+│ ❯ mode                                plan                                                                                             │ │
 │                                                                                                                                        │ │
 │   System prompt                                                                                                                        │ │
 │   system-prompt-text                                                                                                                   │ │
 │   system-prompt-file                                                                                                                   │ │
-│   use-default-prompt       true                                                                                                        │ │
-│   system-prompt-models     none                   · ⏎ opens $EDITOR                                                                    │ │
+│   use-default-prompt                  true                                                                                             │ │
+│   system-prompt-models                none                   · ⏎ opens $EDITOR                                                         │ │
 │                                                                                                                                          │
 │ ↑/↓ select · ⏎ edit · ⌫ reset · esc close                                                                                                │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
