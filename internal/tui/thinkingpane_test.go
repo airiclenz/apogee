@@ -344,7 +344,7 @@ func TestThinkingCommand(t *testing.T) {
 		if !m.openPanes().has(paneThinking) {
 			t.Error("the open pane is not in the frame's pane set — it would be drawn on rows nothing budgeted")
 		}
-		painted := strip(m.frameOverlays().thinking)
+		painted := strip(m.frameOverlays().block(paneThinking))
 		if !strings.Contains(painted, thinkingTitle) || !strings.Contains(painted, "weigh the options") {
 			t.Errorf("the frame does not stack the pane it opened:\n%s", painted)
 		}
@@ -361,7 +361,7 @@ func TestThinkingCommand(t *testing.T) {
 		m.input.SetValue("/thinking")
 		m = step(t, m, keyEnter())
 
-		painted := strip(m.frameOverlays().thinking)
+		painted := strip(m.frameOverlays().block(paneThinking))
 		if want := thinkingTitle + " — " + usageAgentFallback; !strings.Contains(painted, want) {
 			t.Errorf("the box is not titled %q:\n%s", want, painted)
 		}

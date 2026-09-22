@@ -222,7 +222,7 @@ func TestAdviceCommand(t *testing.T) {
 		if !m.openPanes().has(paneAdvice) {
 			t.Error("the open pane is not in the frame's pane set — it would be drawn on rows nothing budgeted")
 		}
-		painted := strip(m.frameOverlays().advice)
+		painted := strip(m.frameOverlays().block(paneAdvice))
 		for _, want := range []string{adviceTitle, "style-check (user origin) @ post-tool-result", "keep the diff small"} {
 			if !strings.Contains(painted, want) {
 				t.Errorf("the frame does not stack the pane it opened — %q missing:\n%s", want, painted)
@@ -302,7 +302,7 @@ func TestAdviceOpensOnTheNewestFiring(t *testing.T) {
 	if last := spec.rows[len(spec.rows)-1][0]; last != "turn 39 advice" {
 		t.Errorf("the last drawn row is %q, want the newest firing's detail", last)
 	}
-	painted := strip(m.frameOverlays().advice)
+	painted := strip(m.frameOverlays().block(paneAdvice))
 	if strings.Contains(painted, "turn 0 advice") {
 		t.Errorf("the oldest firing is drawn on an opened pane that should show the tail:\n%s", painted)
 	}

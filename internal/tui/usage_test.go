@@ -293,7 +293,7 @@ func TestUsageVerbOpensThePaneAndEscCloses(t *testing.T) {
 	if !m.openPanes().has(paneUsage) {
 		t.Error("the open report is not in the frame's pane set — it would be drawn on rows nothing budgeted")
 	}
-	if !strings.Contains(strip(m.frameOverlays().usage), usageTitle) {
+	if !strings.Contains(strip(m.frameOverlays().block(paneUsage)), usageTitle) {
 		t.Error("the frame does not stack the report it opened")
 	}
 

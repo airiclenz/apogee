@@ -288,7 +288,7 @@ func TestDropdownSpanMatchesTheDrawnFrame(t *testing.T) {
 	if !ok {
 		t.Fatal("the open dropdown is not on the published frame")
 	}
-	block := m.frameOverlays().dropdown
+	block := m.frameOverlays().block(paneDropdown)
 	if want := frameBlockRow(t, m, block); y0 != want {
 		t.Errorf("the dropdown's span starts at row %d, the frame draws it at row %d", y0, want)
 	}
@@ -316,10 +316,10 @@ func TestDropdownSpanWithAStagedStripBelowIt(t *testing.T) {
 	if ov.queued == "" {
 		t.Fatalf("%d staged interjections drew no strip — test premise broken", staged)
 	}
-	if want := frameBlockRow(t, m, ov.dropdown); y0 != want {
+	if want := frameBlockRow(t, m, ov.block(paneDropdown)); y0 != want {
 		t.Errorf("beside the strip the dropdown's span starts at row %d, the frame draws it at row %d", y0, want)
 	}
-	if want := lipgloss.Height(ov.dropdown); h != want {
+	if want := lipgloss.Height(ov.block(paneDropdown)); h != want {
 		t.Errorf("beside the strip the dropdown's span is %d rows, the frame draws %d", h, want)
 	}
 	if got := frameBlockRow(t, m, ov.queued); got != y0+h {

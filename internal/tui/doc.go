@@ -925,7 +925,10 @@
 // is), the key contract, the dismiss, the budget→render path and the whole mouse family (rect,
 // window, click, wheel), written once and named once — each kind one row of [reportRows] — with every rectangle in the transcript-side slot a
 // lookup into the geometry View publishes while it stacks that slot (model.go) rather than a prefix
-// sum of its own; popup.go the one bordered pane every overlay — those five, the autocomplete
+// sum of its own; panes.go the pane table — one [paneSpec] row per framePane ({name, slot, modal,
+// open, render}, filled in init() and read at call time), which is what [Model.openPanes], the
+// overlay builder and the transcript-side slot walk each iterate, so a pane is one row and the
+// framePane order is the one order the frame both gives way and stacks in; popup.go the one bordered pane every overlay — those five, the autocomplete
 // dropdown, the ask and approval prompts — is painted through, and the [popupPlacement] it hands
 // back with each paint is where the pointer READS that pane: which line the row block starts on and
 // how many lines each row took, walked by [popupPlacement.rowAt], so the package holds one mapping

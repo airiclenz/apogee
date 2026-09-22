@@ -369,33 +369,6 @@ func (m Model) reportKey(r reportKind, msg tea.KeyPressMsg) (bool, tea.Model, te
 // Where a report is drawn, and what the pointer does there
 // ----------------------------------------------------------------------------
 
-// block is the rendered block of one pane of the frame, "" when that pane is not on it. It is what
-// lets the slot's order be WALKED (transcriptSlotPanes, model.go) instead of re-listed field by field
-// at every rectangle in it.
-func (o frameOverlays) block(p framePane) string {
-	switch p {
-	case panePrompt:
-		return o.prompt
-	case paneBrowser:
-		return o.browser
-	case panePicker:
-		return o.picker
-	case paneSettings:
-		return o.settings
-	case paneUsage:
-		return o.usage
-	case paneInspector:
-		return o.inspector
-	case paneThinking:
-		return o.thinking
-	case paneAdvice:
-		return o.advice
-	case paneDropdown:
-		return o.dropdown
-	}
-	return ""
-}
-
 // reportPaneRect is where the named report is drawn: the screen row its top border lands on and how
 // many rows it takes. ok is false when it is not on the frame at all — closed, or given way to a
 // window too short to seat it (frameRowPlan).

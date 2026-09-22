@@ -412,8 +412,8 @@ type pointerPane struct {
 }
 
 // pointerPanes is the click chain and the wheel chain in ONE order, the order the two gestures have
-// always been asked in — the CLICK-CHAIN order, which is NOT the slot's stacking order
-// (transcriptSlotPanes, model.go) — so a row a notch would walk is a row a click can highlight, and a
+// always been asked in — the CLICK-CHAIN order, which is NOT the slot's stacking order (the
+// framePane order, model.go) — so a row a notch would walk is a row a click can highlight, and a
 // pane added later is asked by both gestures the day it is entered here. The table is a package
 // value rather than a field: the Model is copied on every Update (ADR 0011), and a table of funcs is
 // nothing a frame needs to carry.

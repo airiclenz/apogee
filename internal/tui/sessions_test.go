@@ -1830,20 +1830,20 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 		block    func(frameOverlays) string // this pane's own block, "" when the allocation seated nothing
 		open     func(t *testing.T, width, height, draft int) Model
 	}{
-		{"session browser", false, "session number 00", func(o frameOverlays) string { return o.browser },
+		{"session browser", false, "session number 00", func(o frameOverlays) string { return o.block(paneBrowser) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 				m.sessionBrowser = browserWithSessions(8)
 				return m
 			}},
-		{"server picker", false, "host-00", func(o frameOverlays) string { return o.picker },
+		{"server picker", false, "host-00", func(o frameOverlays) string { return o.block(panePicker) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height,
 					Options{Workspace: "/ws/a", Server: &fakeServerHost{list: staticServers(servers)}}), draft)
 				m.picker = picker{open: true, kind: pickerServer}
 				return m
 			}},
-		{"approval prompt", true, "", func(o frameOverlays) string { return o.prompt },
+		{"approval prompt", true, "", func(o frameOverlays) string { return o.block(panePrompt) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 				m.state = stateAwaitingApproval
@@ -1856,7 +1856,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 				m.layout() // the prompt is up: the box gives back the rows the pane needs (draftRowsCeiling)
 				return m
 			}},
-		{"ask prompt", true, "yes, go ahead", func(o frameOverlays) string { return o.prompt },
+		{"ask prompt", true, "yes, go ahead", func(o frameOverlays) string { return o.block(panePrompt) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := withDraft(t, modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"}), draft)
 				m.state = stateAwaitingAsk
@@ -1872,7 +1872,7 @@ func TestFrameNeverExceedsTheTerminalHeight(t *testing.T) {
 		// window is what it has to be spent inside of. The probe is the first row's verb, which a
 		// granted window always seats and no other part of the frame writes. The draft sits ABOVE the
 		// "/" being typed — the menu is a completion of the last line, not of the whole box.
-		{"autocomplete dropdown", false, "/advice", func(o frameOverlays) string { return o.dropdown },
+		{"autocomplete dropdown", false, "/advice", func(o frameOverlays) string { return o.block(paneDropdown) },
 			func(t *testing.T, width, height, draft int) Model {
 				m := modelWithOverlayRoomAt(t, width, height, Options{Workspace: "/ws/a"})
 				value := "/"
@@ -2147,10 +2147,10 @@ func TestDecisionSurfaceStaysOnTheFrame(t *testing.T) {
 								t.Fatalf("composed frame is %d rows on a %d-row terminal (+%d):\n%s",
 									len(frame), height, len(frame)-height, plainFrame)
 							}
-							if m.frameOverlays().prompt == "" {
+							if m.frameOverlays().block(panePrompt) == "" {
 								t.Fatalf("the frame seated no prompt pane at all while its keys are live:\n%s", plainFrame)
 							}
-							pane := ansiPattern.ReplaceAllString(m.frameOverlays().prompt, "")
+							pane := ansiPattern.ReplaceAllString(m.frameOverlays().block(panePrompt), "")
 							if !strings.Contains(pane, p.probe) {
 								t.Errorf("the pane does not carry %q — the decision's own identity:\n%s", p.probe, plainFrame)
 							}

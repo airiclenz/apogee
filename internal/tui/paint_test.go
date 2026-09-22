@@ -1341,7 +1341,7 @@ func TestPaintedSettingsPaneAtItsFourRowFloor(t *testing.T) {
 			m := paintedAs(t, settingsFrameModel(t, 80, smallestOverlayWindow, 40), tc.method)
 			rows := paintFrame(t, m, tc.method)
 
-			if got := lipgloss.Height(m.frameOverlays().settings); got != popupChrome {
+			if got := lipgloss.Height(m.frameOverlays().block(paneSettings)); got != popupChrome {
 				t.Fatalf("the pane is %d rows at the smallest window a pane is drawn in, want %d",
 					got, popupChrome)
 			}
@@ -1382,7 +1382,7 @@ func TestPaintedSettingsGiveWayFactRidesTheStatusLine(t *testing.T) {
 			rows := paintFrame(t, m, tc.method)
 			painted := strings.Join(mapStrip(rows), "\n")
 
-			if got := m.frameOverlays().settings; got != "" {
+			if got := m.frameOverlays().block(paneSettings); got != "" {
 				t.Fatalf("the pane was seated at %d rows — test premise broken:\n%s", m.height, strip(got))
 			}
 			if strings.Contains(painted, settingsTitle) {

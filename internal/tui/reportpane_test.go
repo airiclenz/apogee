@@ -255,34 +255,10 @@ func TestReportScrollClampsToTheLastFullWindow(t *testing.T) {
 	}
 }
 
-// TestTranscriptSlotPanesStateTheStackingOrderOnce pins the list every rectangle in the
-// transcript-side slot is measured through: each pane of that slot is named in it exactly once, and
-// the /inspect box therefore begins exactly where the /usage box ends. The two hand-written `above`
-// slices this replaced already differed by one element — a pane that joined the frame without
-// joining both of them was a bug neither of them could be read to find.
-func TestTranscriptSlotPanesStateTheStackingOrderOnce(t *testing.T) {
-	t.Parallel()
-
-	named := map[framePane]int{}
-	for _, p := range transcriptSlotPanes {
-		named[p]++
-	}
-	for p := framePane(0); p < paneKinds; p++ {
-		want := 1
-		if p == paneDropdown {
-			// The autocomplete dropdown is in the OTHER slot, hugging the input box, so it is no part
-			// of this arithmetic. Every other pane of the frame must be.
-			want = 0
-		}
-		if named[p] != want {
-			t.Errorf("pane %d is named %d times in the slot's order, want %d", p, named[p], want)
-		}
-	}
-}
-
-// TestTheTwoReportRectsStackInTheSlotsStatedOrder is the geometric half of the claim above, on the
-// one frame that draws both reports: the /inspect pane opens on the row the /usage report closes on,
-// with nothing between them and nothing overlapping.
+// TestTheTwoReportRectsStackInTheSlotsStatedOrder is the geometric half of the slot-order claim
+// (TestEveryFramePaneHasASpec, panes_test.go), on the one frame that draws both reports: the
+// /inspect pane opens on the row the /usage report closes on, with nothing between them and nothing
+// overlapping.
 func TestTheTwoReportRectsStackInTheSlotsStatedOrder(t *testing.T) {
 	t.Parallel()
 
@@ -303,41 +279,6 @@ func TestTheTwoReportRectsStackInTheSlotsStatedOrder(t *testing.T) {
 	}
 	if inspectRows <= 0 {
 		t.Errorf("the /inspect box is %d rows tall", inspectRows)
-	}
-}
-
-// TestFrameOverlayBlocksAnswerForEveryPane pins the lookup the slot's order is walked through: every
-// framePane resolves to its OWN block, so a pane whose field the lookup forgot could not be measured
-// as an empty one and silently drop the rows it takes off every rectangle below it.
-func TestFrameOverlayBlocksAnswerForEveryPane(t *testing.T) {
-	t.Parallel()
-
-	ov := frameOverlays{
-		prompt:   "prompt",
-		browser:  "browser",
-		picker:   "picker",
-		settings: "settings",
-		usage:    "usage",
-		dropdown: "dropdown",
-	}
-	ov.inspector = "inspector"
-	ov.thinking = "thinking"
-	ov.advice = "advice"
-
-	for p, want := range map[framePane]string{
-		panePrompt:    ov.prompt,
-		paneBrowser:   ov.browser,
-		panePicker:    ov.picker,
-		paneSettings:  ov.settings,
-		paneUsage:     ov.usage,
-		paneInspector: ov.inspector,
-		paneThinking:  ov.thinking,
-		paneAdvice:    ov.advice,
-		paneDropdown:  ov.dropdown,
-	} {
-		if got := ov.block(p); got != want {
-			t.Errorf("pane %d resolves to %q, want %q", p, got, want)
-		}
 	}
 }
 

@@ -2576,14 +2576,16 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 // View
 // ----------------------------------------------------------------------------
 
-// frameOverlays holds the blocks View stacks between the transcript and the input box: the
-// approval or ask prompt, the /sessions browser, the /model | /server picker, the /settings
-// configuration pane, the four report panes, the autocomplete dropdown, and the staged-interjection
-// strip. Each field is "" when its overlay is closed.
+// frameOverlays holds the blocks View stacks between the transcript and the input box: one per
+// framePane — the approval or ask prompt, the /sessions browser, the /model | /server picker, the
+// /settings configuration pane, the four report panes and the autocomplete dropdown — plus the
+// staged-interjection strip and the skill-hint row, which are no framePane. Each block is "" when
+// its overlay is closed.
 //
-// They sit in two slots, and every one of them is FLUSH on the chrome its slot abuts: the ones named
-// in transcriptSlotPanes go directly above the ▔ hairline (the frame's blank gap row falls above
-// them, not between them and the chrome), the last three directly above the input box.
+// They sit in two slots (paneSlot, panes.go), and every one of them is FLUSH on the chrome its slot
+// abuts: the transcript-side panes go directly above the ▔ hairline (the frame's blank gap row falls
+// above them, not between them and the chrome), the dropdown and the two strips directly above the
+// input box.
 //
 // They are gathered as ONE value because two readers need them and must never disagree: View
 // composes them into the frame, and [Model.transcriptRows] measures them to say how many screen
@@ -2593,17 +2595,9 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 // allocation they all share ([Model.frameRowPlan]): they are siblings spending the same viewport,
 // not each the only thing in it.
 type frameOverlays struct {
-	prompt    string // the approval or the ask popup (they belong to different states, so never both)
-	browser   string // the /sessions history browser
-	picker    string // the /model | /server picker
-	settings  string // the /settings configuration pane (full-height — frameRowPlan)
-	usage     string // the /usage token-accounting report (usage.go)
-	inspector string // the /inspect raw-protocol pane (inspector.go)
-	thinking  string // the /thinking plain-reasoning pane (thinkingpane.go)
-	advice    string // the /advice pane of advise firings (advicepane.go)
-	dropdown  string // the command / @file / skill autocomplete
-	queued    string // the staged-interjection strip (ADR 0025)
-	hint      string // the skill-suggestion row closing the band above the box (ADR 0061)
+	panes  [paneKinds]string // one rendered block per framePane (paneSpecs), read through block
+	queued string            // the staged-interjection strip (ADR 0025)
+	hint   string            // the skill-suggestion row closing the band above the box (ADR 0061)
 }
 
 // height is the number of screen rows these overlays take from the transcript. An absent overlay
@@ -2611,7 +2605,12 @@ type frameOverlays struct {
 // rather than measured.
 func (o frameOverlays) height() int {
 	rows := 0
-	for _, block := range []string{o.prompt, o.browser, o.picker, o.settings, o.usage, o.inspector, o.thinking, o.advice, o.dropdown, o.queued, o.hint} {
+	for _, block := range o.panes {
+		if block != "" {
+			rows += lipgloss.Height(block)
+		}
+	}
+	for _, block := range []string{o.queued, o.hint} {
 		if block != "" {
 			rows += lipgloss.Height(block)
 		}
@@ -2627,7 +2626,8 @@ func (o frameOverlays) transcriptRows(budget int) int {
 	return max(0, budget-o.height())
 }
 
-// frameOverlays renders every overlay block of the frame as the Model stands. It is a pure function
+// frameOverlays renders every overlay block of the frame as the Model stands — each pane through its
+// row of the pane table (paneSpecs), then the two strips. It is a pure function
 // of the Model — nothing here mutates and nothing depends on the frame being composed — so View and
 // the mouse mapping may each call it and are guaranteed the same answer. That guarantee is per Model
 // VALUE and says nothing across two of them, which is exactly why the click chain snapshots one: a
@@ -2635,20 +2635,9 @@ func (o frameOverlays) transcriptRows(budget int) int {
 // different frame's (handleMouseClick, mouse.go).
 func (m Model) frameOverlays() frameOverlays {
 	var o frameOverlays
-	if m.state == stateAwaitingApproval && m.pending != nil {
-		o.prompt = m.approvalPrompt(m.pending.Request)
+	for p := framePane(0); p < paneKinds; p++ {
+		o.panes[p] = paneSpecs[p].render(m)
 	}
-	if m.state == stateAwaitingAsk && m.pendingAsk != nil {
-		o.prompt = m.askPrompt(m.pendingAsk.Request)
-	}
-	o.browser = m.renderSessionBrowser()
-	o.picker = m.renderPicker()
-	o.settings = m.renderSettings()
-	o.usage = m.renderReport(usageReport)
-	o.inspector = m.renderReport(inspectReport)
-	o.thinking = m.renderReport(thinkingReport)
-	o.advice = m.renderReport(adviceReport)
-	o.dropdown = m.renderAutocomplete()
 	o.queued = m.renderPendingInterjections()
 	o.hint = m.renderSkillHints()
 	return o
@@ -2670,40 +2659,6 @@ func (m Model) frameOverlays() frameOverlays {
 func (m Model) transcriptRows() int {
 	return m.frameOverlays().transcriptRows(m.transcriptBudget())
 }
-
-// transcriptSlotPanes is the frame's transcript-side overlay slot, in the ONE order View stacks it:
-// the approval-or-ask prompt, the /sessions browser, the /model | /server picker, the /settings pane,
-// then the four reports that close it. Every rectangle in the slot begins below the blocks BEFORE it in
-// this run, so the order is stated HERE, once: View walks it to paint (stackTranscriptSlot) and every
-// rect the pointer asks is a lookup into what that walk published (frameSpans). The two hand-written
-// `above` slices this replaced already differed by one element, and View's own appends were a third
-// statement of the same order — a pane that joined the frame without joining all three was a bug none
-// of them could be read to find.
-//
-// The order is not arbitrary, and each position is a decision:
-//
-// The /sessions browser and the /model | /server picker take the approval/ask prompt's position
-// because none of them co-occur — both overlays are idle-only and modal, and the prompts belong to
-// busy states.
-//
-// The /settings pane shares that position too, and on every window it is seated in it is the only
-// thing in the slot: its verb is idle-only and it swallows every key, so no prompt, browser, picker or
-// dropdown can be up beside it. What differs is its height — it was granted the transcript's whole
-// budget (frameRowPlan), so the block above it is usually nothing at all.
-//
-// The /usage report is the one pane here that CAN be up beside another: its verb is whileRunning, so
-// it opens over an approval or ask prompt the run is blocked on. It goes near the end of the slot —
-// nearest the chrome — so the surface the human is answering keeps the position it has when the report
-// is not up. The /inspect pane sits under the report it is shaped after, for that same reason: its
-// verb is whileRunning as well, and the surface being answered keeps its position when the
-// raw-protocol view is opened over it. The /thinking pane follows on the same terms, and the /advice
-// pane closes the slot, nearest the chrome of them all.
-//
-// It is a list of its own rather than a reading of the framePane constants, whose order is the order
-// panes GIVE WAY in (framePane) — a different question that happens to have the same answer today. The
-// autocomplete dropdown and the staged band are in the OTHER slot, above the input box, and are no
-// part of this arithmetic.
-var transcriptSlotPanes = []framePane{panePrompt, paneBrowser, panePicker, paneSettings, paneUsage, paneInspector, paneThinking, paneAdvice}
 
 // blockSpan is where one block of the composed frame landed: the screen row its first line is drawn on
 // and how many rows it takes, so the block owns the rows [y0, y0+rows). The zero value says the block
@@ -2749,7 +2704,8 @@ func (s frameSpans) pane(p framePane) (y0, h int, ok bool) {
 }
 
 // stackTranscriptSlot appends the open panes of the transcript-side slot to rows, in the order the
-// frame states for it (transcriptSlotPanes), and reports where each of them landed. y0 is the screen
+// frame states for it — the framePane order, walked over the pane table and filtered on the slot
+// (paneSpecs, panes.go) — and reports where each of them landed. y0 is the screen
 // row the first block of the slot starts on: the rows the transcript kept plus the frame's single
 // blank gap row, which falls ABOVE the slot rather than below it.
 //
@@ -2770,7 +2726,10 @@ func (s frameSpans) pane(p framePane) (y0, h int, ok bool) {
 // neither is on the frame and the pointer has nothing to name in either case.
 func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, frameSpans, int) {
 	spans := frameSpans{composed: true}
-	for _, p := range transcriptSlotPanes {
+	for p := framePane(0); p < paneKinds; p++ {
+		if paneSpecs[p].slot != slotTranscript {
+			continue
+		}
 		block := ov.block(p)
 		if block == "" {
 			continue
@@ -2804,11 +2763,15 @@ func stackTranscriptSlot(rows []string, ov frameOverlays, y0 int) ([]string, fra
 // than the staged rows: it is advice about the draft, and the draft is in the box under it. It is no
 // framePane either — Tab reaches it, never a click — so it too has no span. The two share one
 // bandPlan, which is what keeps the block they compose to one frame rather than two.
+//
+// The dropdown is the slot's one framePane tenant (the sole slotInput row of paneSpecs —
+// TestEveryFramePaneHasASpec pins it), which is why this walk names it rather than filtering the
+// table the way its sibling does.
 func stackInputSlot(rows []string, ov frameOverlays, y0 int) ([]string, blockSpan) {
 	var dropdown blockSpan
-	if ov.dropdown != "" {
-		dropdown = blockSpan{y0: y0, rows: lipgloss.Height(ov.dropdown)}
-		rows = append(rows, ov.dropdown)
+	if block := ov.block(paneDropdown); block != "" {
+		dropdown = blockSpan{y0: y0, rows: lipgloss.Height(block)}
+		rows = append(rows, block)
 	}
 	if ov.queued != "" {
 		rows = append(rows, ov.queued)
@@ -2919,7 +2882,7 @@ func (m Model) View() tea.View {
 	// it and starting directly below that gap row. The walk also PUBLISHES where each pane landed and
 	// which row it ended above; View has no use for the spans because it is painting, and the pointer
 	// reads them off the same composition rather than re-deriving a prefix sum per pane
-	// (transcriptSlotPanes, frameSpans).
+	// (paneSpecs, frameSpans).
 	rows, spans, belowSlot := stackTranscriptSlot(rows, ov, transcriptHeight+gapHeight)
 	// Then the ▔ top-edge hairline capping the chrome, and the status line under it.
 	rows = append(rows, m.topRule(), m.statusLine())
@@ -4001,10 +3964,17 @@ func nonEmpty(parts ...string) []string {
 // taken out of it first.
 const transcriptReserve = 3
 
-// framePane identifies one boxed overlay in the frame's row allocation. The order of the constants
-// is the order the panes GIVE WAY in, last first: on a window that cannot seat every open pane the
-// dropdown loses its rows before the picker or the browser, and the modal approval or ask prompt —
-// the one the run is blocked on — keeps its rows last of all.
+// framePane identifies one boxed overlay in the frame's row allocation, and indexes its row of the
+// pane table (paneSpecs, panes.go). The order of the constants is the order the panes GIVE WAY in,
+// last first: on a window that cannot seat every open pane the dropdown loses its rows before the
+// picker or the browser, and the modal approval or ask prompt — the one the run is blocked on —
+// keeps its rows last of all.
+//
+// It is ALSO the order the transcript-side slot STACKS its panes in, top to bottom
+// (stackTranscriptSlot): the pane that gives way first is drawn nearest the chrome, so the surface
+// the human is acting in keeps its position when a passive pane opens under it. One order, stated
+// here once — every rectangle in the slot is measured through the walk that stacks it (frameSpans),
+// and there is no second list for it to disagree with. Each position is a decision:
 //
 // The /usage report sits at the transient end beside the dropdown, and above it: it is a pane
 // nothing is being decided on — a question already answered, dismissed by the esc that is its only
@@ -4057,38 +4027,15 @@ func (s framePaneSet) with(p framePane) framePaneSet { return s | 1<<p }
 // has reports whether p is in the set.
 func (s framePaneSet) has(p framePane) bool { return s&(1<<p) != 0 }
 
-// openPanes is the set of boxed overlays this Model has open. Each member's predicate is the same
-// one its renderer returns "" on, so the allocation is divided between exactly the panes that will
-// be drawn.
+// openPanes is the set of boxed overlays this Model has open: every framePane whose row of the pane
+// table (paneSpecs, panes.go) says so. Each row's predicate is the same one its renderer returns ""
+// on, so the allocation is divided between exactly the panes that will be drawn.
 func (m Model) openPanes() framePaneSet {
 	var s framePaneSet
-	if (m.state == stateAwaitingApproval && m.pending != nil) ||
-		(m.state == stateAwaitingAsk && m.pendingAsk != nil) {
-		s = s.with(panePrompt)
-	}
-	if m.sessionBrowser.open {
-		s = s.with(paneBrowser)
-	}
-	if m.picker.open {
-		s = s.with(panePicker)
-	}
-	if m.settings.open {
-		s = s.with(paneSettings)
-	}
-	if m.usagePane.open {
-		s = s.with(paneUsage)
-	}
-	if m.inspector.open {
-		s = s.with(paneInspector)
-	}
-	if m.thinkingPane.open {
-		s = s.with(paneThinking)
-	}
-	if m.advicePane.open {
-		s = s.with(paneAdvice)
-	}
-	if m.autocomplete.active && len(m.autocomplete.items) > 0 {
-		s = s.with(paneDropdown)
+	for p := framePane(0); p < paneKinds; p++ {
+		if paneSpecs[p].open(m) {
+			s = s.with(p)
+		}
 	}
 	return s
 }

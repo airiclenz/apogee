@@ -213,7 +213,7 @@ func TestSettingsPaneEscCloses(t *testing.T) {
 	if pane := m.renderSettings(); pane != "" {
 		t.Errorf("a closed pane still rendered:\n%s", strip(pane))
 	}
-	if got := m.frameOverlays().settings; got != "" {
+	if got := m.frameOverlays().block(paneSettings); got != "" {
 		t.Errorf("the frame still stacks the pane's block:\n%s", strip(got))
 	}
 }
@@ -447,7 +447,7 @@ func TestSettingsPaneSeatsItsHeaderAndLegendAtEveryHeight(t *testing.T) {
 	for _, height := range []int{smallestOverlayWindow, 13, 14, 16, 20, 24, 30} {
 		t.Run(fmt.Sprintf("%d rows", height), func(t *testing.T) {
 			t.Parallel()
-			pane := strip(settingsFrameModel(t, 80, height, 40).frameOverlays().settings)
+			pane := strip(settingsFrameModel(t, 80, height, 40).frameOverlays().block(paneSettings))
 			if pane == "" {
 				return // the pane gave way whole; the status line carries that fact (its own test)
 			}
@@ -462,7 +462,7 @@ func TestSettingsPaneSeatsItsHeaderAndLegendAtEveryHeight(t *testing.T) {
 
 	// With rows to spare the whole region is seated — label, description, blank — and the list
 	// scrolls under it.
-	pane := strip(settingsFrameModel(t, 80, 30, 40).frameOverlays().settings)
+	pane := strip(settingsFrameModel(t, 80, 30, 40).frameOverlays().block(paneSettings))
 	if want := settingsDescLabel + " what key-00 is for"; !strings.Contains(pane, want) {
 		t.Errorf("the header does not describe the selected row (%q):\n%s", want, pane)
 	}
@@ -499,7 +499,7 @@ func TestSettingsRowCellsStripEscapes(t *testing.T) {
 func TestSettingsPaneBreathesAboveItsHint(t *testing.T) {
 	t.Parallel()
 	m := settingsFrameModel(t, 80, 24, 40)
-	lines := popupLines(m.frameOverlays().settings)
+	lines := popupLines(m.frameOverlays().block(paneSettings))
 
 	desc := -1
 	for i, line := range lines {
@@ -509,7 +509,7 @@ func TestSettingsPaneBreathesAboveItsHint(t *testing.T) {
 		}
 	}
 	if desc < 0 {
-		t.Fatalf("the pane paints no %q header:\n%s", settingsDescLabel, strip(m.frameOverlays().settings))
+		t.Fatalf("the pane paints no %q header:\n%s", settingsDescLabel, strip(m.frameOverlays().block(paneSettings)))
 	}
 	// The region is settingsDescLines tall and closes with a blank of its own: with a one-line
 	// description that is two blanks, the second of them the block's breathing row.
@@ -526,7 +526,7 @@ func TestSettingsPaneBreathesAboveItsHint(t *testing.T) {
 		t.Errorf("the line over the key legend is %q, want the blank the list closes on", got)
 	}
 	if got := popupInterior(lines[len(lines)-2]); got == "" {
-		t.Errorf("the pane closes on a blank rather than on its key legend:\n%s", strip(m.frameOverlays().settings))
+		t.Errorf("the pane closes on a blank rather than on its key legend:\n%s", strip(m.frameOverlays().block(paneSettings)))
 	}
 }
 
@@ -542,8 +542,8 @@ func TestSettingsPaneClaimsTheWholeTranscriptBudget(t *testing.T) {
 
 	ov := m.frameOverlays()
 	budget := m.transcriptBudget()
-	if got := lipgloss.Height(ov.settings); got != budget {
-		t.Errorf("the pane is %d rows of the %d the frame had to give:\n%s", got, budget, strip(ov.settings))
+	if got := lipgloss.Height(ov.block(paneSettings)); got != budget {
+		t.Errorf("the pane is %d rows of the %d the frame had to give:\n%s", got, budget, strip(ov.block(paneSettings)))
 	}
 	if got := ov.transcriptRows(budget); got != 0 {
 		t.Errorf("the transcript kept %d rows under a full-height pane, want none", got)
@@ -552,10 +552,10 @@ func TestSettingsPaneClaimsTheWholeTranscriptBudget(t *testing.T) {
 		t.Errorf("composed frame is %d rows on a %d-row terminal", got, m.height)
 	}
 	// Well past maxPickerRows: the pane asks for every row it has and the budget is the only cap.
-	shown := strings.Count(strip(ov.settings), "key-")
+	shown := strings.Count(strip(ov.block(paneSettings)), "key-")
 	if shown <= maxPickerRows {
 		t.Errorf("the pane showed %d key rows, want more than the picker's %d-row taste:\n%s",
-			shown, maxPickerRows, strip(ov.settings))
+			shown, maxPickerRows, strip(ov.block(paneSettings)))
 	}
 }
 
@@ -582,7 +582,7 @@ func TestSettingsPaneFitsEveryWindowItIsDrawnIn(t *testing.T) {
 					}
 					// Seated or not, the frame says the pane is open: the pane's own title where it was
 					// drawn, the status line's give-way note where it was not.
-					pane := m.frameOverlays().settings
+					pane := m.frameOverlays().block(paneSettings)
 					switch {
 					case pane == "" && !strings.Contains(plainFrame, settingsGiveWayNote):
 						t.Errorf("the pane gave way with nothing on the status line:\n%s", plainFrame)
@@ -612,7 +612,7 @@ func TestSettingsGiveWayLeavesItsFactOnTheStatusLine(t *testing.T) {
 	if m.settingsSeated() {
 		t.Fatal("the pane is seated at eleven rows — test premise broken")
 	}
-	if got := m.frameOverlays().settings; got != "" {
+	if got := m.frameOverlays().block(paneSettings); got != "" {
 		t.Errorf("an unseated pane rendered:\n%s", strip(got))
 	}
 	if got := strip(m.statusLine()); !strings.Contains(got, settingsGiveWayNote) {

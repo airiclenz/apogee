@@ -400,7 +400,7 @@ func TestInspectVerbOpensThePaneAndEscCloses(t *testing.T) {
 	if !m.openPanes().has(paneInspector) {
 		t.Error("the open pane is not in the frame's pane set — it would be drawn on rows nothing budgeted")
 	}
-	if !strings.Contains(strip(m.frameOverlays().inspector), inspectorTitle) {
+	if !strings.Contains(strip(m.frameOverlays().block(paneInspector)), inspectorTitle) {
 		t.Error("the frame does not stack the pane it opened")
 	}
 
@@ -409,7 +409,7 @@ func TestInspectVerbOpensThePaneAndEscCloses(t *testing.T) {
 	if m = step(t, m, keyEsc()); m.inspector.open {
 		t.Error("esc did not close the pane")
 	}
-	if m.frameOverlays().inspector != "" {
+	if m.frameOverlays().block(paneInspector) != "" {
 		t.Error("the closed pane is still stacked in the frame")
 	}
 	if got := m.transcriptRows(); got <= rowsBehind {

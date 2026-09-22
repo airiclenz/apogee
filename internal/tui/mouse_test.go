@@ -2749,7 +2749,7 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 		{"approval prompt, one-line reason", func(t *testing.T) (Model, string) {
 			m, _ := newApprovalModel(t, domain.ApprovalRequest{Tool: "run", Reason: "go"})
 			deepTranscript(&m)
-			return m, m.frameOverlays().prompt
+			return m, m.frameOverlays().block(panePrompt)
 		}},
 		{"approval prompt, a body that wraps", func(t *testing.T) (Model, string) {
 			m, _ := newApprovalModel(t, domain.ApprovalRequest{
@@ -2757,7 +2757,7 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 				Reason: strings.Repeat("a rather long reason that has to wrap across several lines ", 4),
 			})
 			deepTranscript(&m)
-			return m, m.frameOverlays().prompt
+			return m, m.frameOverlays().block(panePrompt)
 		}},
 		{"ask prompt with choices", func(t *testing.T) (Model, string) {
 			m := newTestModel(t)
@@ -2766,13 +2766,13 @@ func TestFrameRowBoundaryAgreesWithTheMouseMapping(t *testing.T) {
 				Request: domain.AskRequest{Question: "which one?", Choices: []string{"a", "b", "c", "d", "e"}},
 				Reply:   make(chan domain.AskAnswer, 1),
 			})
-			return m, m.frameOverlays().prompt
+			return m, m.frameOverlays().block(panePrompt)
 		}},
 		{"sessions browser", func(t *testing.T) (Model, string) {
 			m := newTestModel(t)
 			deepTranscript(&m)
 			m.sessionBrowser = browserWithSessions(12)
-			return m, m.frameOverlays().browser
+			return m, m.frameOverlays().block(paneBrowser)
 		}},
 		{"no overlay at all", func(t *testing.T) (Model, string) {
 			m := newTestModel(t)
@@ -4500,7 +4500,7 @@ func TestTheClickChainKeepsItsFrameToItself(t *testing.T) {
 
 // TestPointerPanesWalkInTheClickChainOrder pins the table's order literally: it is the CLICK-CHAIN
 // order — settings, then the four reports in the order the slot draws them, then the two modals, the
-// prompt slot and the dropdown — and NOT the slot's stacking order (transcriptSlotPanes), which puts
+// prompt slot and the dropdown — and NOT the slot's stacking order (the framePane order), which puts
 // the prompt first. The reports are asked before the modal half and the prompt after it because a
 // click on a lower report dismisses the one above it before it reaches it, and no pane is entered
 // twice: a pane asked twice would be dismissed by its own first answer.

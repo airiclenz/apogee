@@ -257,7 +257,7 @@ func TestModalPromptDismissesTheDropdown(t *testing.T) {
 					t.Errorf("the %q menu survived the %s prompt: a stale menu may not share the frame with a decision surface",
 						d.value, a.name)
 				}
-				if got := m.frameOverlays().dropdown; got != "" {
+				if got := m.frameOverlays().block(paneDropdown); got != "" {
 					t.Errorf("the frame still draws the dropdown beside the prompt:\n%s", got)
 				}
 				if got := m.frameRowPlan(m.openPanes()).panes[paneDropdown]; got != 0 {
