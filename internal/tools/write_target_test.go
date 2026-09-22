@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/undo"
 )
@@ -52,8 +53,8 @@ func TestWriteScopeTargetResolvesOnceAndRefusesAnEmptyPath(t *testing.T) {
 	if target.Real != security.EvalRealPath(target.Named) {
 		t.Errorf("Real = %q, want Named resolved", target.Real)
 	}
-	if target.input != filepath.Join("sub", "f.txt") || target.scope.root != root {
-		t.Errorf("value carries input %q under root %q, want the argument under the scope's root", target.input, target.scope.root)
+	if target.input != filepath.Join("sub", "f.txt") || target.scope.fence.Root != root {
+		t.Errorf("value carries input %q under root %q, want the argument under the scope's fence root", target.input, target.scope.fence.Root)
 	}
 
 	if _, err := scope.target(""); !errors.Is(err, errPathRequired) {
@@ -67,11 +68,12 @@ func TestWriteScopeOfReadsThePermitOffTheContext(t *testing.T) {
 	root := t.TempDir()
 	outside := outsideTarget(t)
 
-	if got := writeScopeOf(context.Background(), root).permit; got != "" {
-		t.Errorf("permit without a stamp = %q, want empty", got)
+	if got := writeScopeOf(context.Background(), root).fence; got != security.WorkspaceFence(root) {
+		t.Errorf("fence without a stamp = %+v, want the bare workspace fence at %q", got, root)
 	}
-	if got := writeScopeOf(escapePermit(outside), root).permit; got != security.EvalRealPath(outside) {
-		t.Errorf("permit = %q, want the stamped Real %q", got, security.EvalRealPath(outside))
+	want := security.Fence{Root: root, Permit: domain.WriteEscapePermit{Real: security.EvalRealPath(outside)}}
+	if got := writeScopeOf(escapePermit(outside), root).fence; got != want {
+		t.Errorf("fence = %+v, want the root paired with the stamped permit %+v", got, want)
 	}
 }
 
@@ -337,24 +339,24 @@ func TestWriteTargetJournaled(t *testing.T) {
 		t.Fatalf("target: %v", err)
 	}
 
-	gotEscape := "unset"
-	err = target.journaled(postAbsent, func(escape string) (bool, error) {
-		gotEscape = escape
+	gotFence := security.Fence{Root: "unset"}
+	err = target.journaled(postAbsent, func(fence security.Fence) (bool, error) {
+		gotFence = fence
 		return true, os.Remove(doomed)
 	})
 
 	if err != nil {
 		t.Fatalf("journaled: %v", err)
 	}
-	if gotEscape != "" {
-		t.Errorf("body was handed escape %q, want empty without a permit", gotEscape)
+	if gotFence != security.WorkspaceFence(root) {
+		t.Errorf("body was handed fence %+v, want the bare workspace fence at %q without a permit", gotFence, root)
 	}
 	if wrote := journal.Wrote(); len(wrote) != 1 || wrote[0] != doomed {
 		t.Errorf("journal.Wrote() = %v, want the removed path", wrote)
 	}
 
 	bodyErr := errors.New("refused")
-	err = workspaceTarget(t, root, "other.txt").journaled(postAbsent, func(string) (bool, error) { return false, bodyErr })
+	err = workspaceTarget(t, root, "other.txt").journaled(postAbsent, func(security.Fence) (bool, error) { return false, bodyErr })
 	if !errors.Is(err, bodyErr) {
 		t.Errorf("journaled returned %v, want the body's error unchanged", err)
 	}

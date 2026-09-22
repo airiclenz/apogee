@@ -81,24 +81,12 @@ func statInRoot(path, root string) (os.FileInfo, error) {
 // pane shows the operator the resolved path before they answer (confinement-execution-contract
 // §4). When the answer is yes — or the mode is the one whose contract is that the VM is the box —
 // dispatch stamps the execution context with a domain.WriteEscapePermit naming exactly that
-// resolved path. All this package does with it is read the permitted target (below) and pin the
-// write family's OWN read-back and pre-flight stat to it — the writeScope's permit and the
-// writeTarget.pin that routes on it (write_target.go). There is no per-tool logic and no per-tool
-// decision — the permit either governs this call's target or it does not, and every verb asks the
-// same question in the same place.
+// resolved path. All this package does with it is read it off the context into the
+// security.Fence its writeScope holds (writeScopeOf, write_target.go) and pin the write family's
+// OWN read-back and pre-flight stat to it — the writeTarget.pin that asks the Fence whether it
+// Governs the call's argument. There is no per-tool logic and no per-tool decision — the Fence
+// either governs this call's target or it does not, and every verb asks the same question in the
+// same place.
 //
-// The floor is unconditional: a call with no permit passes "" and behaves byte-for-byte as it did
-// before ADR 0049, and no READ tool takes a permit at all.
-
-// writeEscapeTarget answers the ONE resolved absolute path this execution may write outside the
-// workspace fence, or "" when there is none — the string internal/security's mutating primitives
-// take as their permitted target. It sits beside confinementBox because it answers the same shape
-// of question: what did the engine authorise for THIS execution, read at the site that needs it
-// rather than threaded through every tool.
-func writeEscapeTarget(ctx context.Context) string {
-	permit, ok := domain.WriteEscapePermitFrom(ctx)
-	if !ok {
-		return ""
-	}
-	return permit.Real
-}
+// The floor is unconditional: a call with no permit holds a Fence with the zero Permit and behaves
+// byte-for-byte as it did before ADR 0049, and no READ tool takes a permit at all.

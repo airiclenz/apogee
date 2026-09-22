@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -735,12 +736,12 @@ func TestJournaledTargetsCommitsOnlyLandedPaths(t *testing.T) {
 	journal := undo.New()
 	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
 	err := journaledTargets(
-		scope.permit,
+		scope.fence,
 		[]journaledPath{
 			mutationOf(t, scope, "landed.txt", postReadBack),
 			mutationOf(t, scope, "skipped.txt", postReadBack),
 		},
-		func(string) ([]bool, error) {
+		func(security.Fence) ([]bool, error) {
 			writeFixtureFile(t, landedPath, "after the landed write")
 			return []bool{true, false}, nil
 		})
@@ -774,12 +775,12 @@ func TestJournaledTargetsCapturesEveryPathBeforeTheBody(t *testing.T) {
 	journal := undo.New()
 	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
 	err := journaledTargets(
-		scope.permit,
+		scope.fence,
 		[]journaledPath{
 			mutationOf(t, scope, "first.txt", postReadBack),
 			mutationOf(t, scope, "second.txt", postReadBack),
 		},
-		func(string) ([]bool, error) {
+		func(security.Fence) ([]bool, error) {
 			writeFixtureFile(t, mutatedPath, "post-body bytes")
 			return []bool{false, true}, nil
 		})
@@ -807,9 +808,9 @@ func TestJournaledTargetsJournalsNothingWhenTheBodyFails(t *testing.T) {
 	journal := undo.New()
 	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
 	err := journaledTargets(
-		scope.permit,
+		scope.fence,
 		[]journaledPath{mutationOf(t, scope, "kept.txt", postAbsent)},
-		func(string) ([]bool, error) { return nil, refusal })
+		func(security.Fence) ([]bool, error) { return nil, refusal })
 
 	if !errors.Is(err, refusal) {
 		t.Fatalf("journaledTargets returned %v, want the body's own error", err)
@@ -835,9 +836,9 @@ func TestJournaledTargetsReadBackFailureJournalsNothing(t *testing.T) {
 	journal := undo.New()
 	scope := writeScopeOf(undo.WithJournal(context.Background(), journal), root)
 	err := journaledTargets(
-		scope.permit,
+		scope.fence,
 		[]journaledPath{mutationOf(t, scope, "vanished.txt", postReadBack)},
-		func(string) ([]bool, error) {
+		func(security.Fence) ([]bool, error) {
 			if removeErr := os.Remove(vanishedPath); removeErr != nil {
 				t.Fatalf("remove %s: %v", vanishedPath, removeErr)
 			}
@@ -865,9 +866,9 @@ func TestJournaledTargetsWritesWithoutAJournal(t *testing.T) {
 	bodyRan := false
 	scope := writeScopeOf(context.Background(), root)
 	err := journaledTargets(
-		scope.permit,
+		scope.fence,
 		[]journaledPath{mutationOf(t, scope, "solo.txt", postReadBack)},
-		func(string) ([]bool, error) {
+		func(security.Fence) ([]bool, error) {
 			bodyRan = true
 			writeFixtureFile(t, targetPath, "after the body")
 			return []bool{true}, nil

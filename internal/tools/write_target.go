@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 	"github.com/airiclenz/apogee/internal/undo"
 )
@@ -21,8 +22,9 @@ import (
 // workspaceScopedWriter marker names, and then reads, stats, discloses and writes through the value
 // it got back, so the six things a write verb does to its path can never be six resolutions of it.
 //
-// The fence itself is unchanged: every method reaches the filesystem through the same os.Root-pinned
-// primitives path_safety.go's free functions reach. What the value ADDS is the undo capture (ADR
+// The fence itself is security's: every mutation a method lands goes through a verb of the
+// security.Fence the scope holds, and every read through the same os.Root-pinned primitives
+// path_safety.go's free functions reach. What the value ADDS is the undo capture (ADR
 // 0051): write and journaled are the package's two write funnels, and the capture they take — a
 // pre-image read through the value before the mutation, committed through it after — is a method of
 // the value, so a writer that holds one cannot land bytes past the journal without also spelling a
@@ -34,24 +36,28 @@ import (
 var errPathRequired = errors.New("path is required")
 
 // writeScope is what ONE execution of a write tool may write, and through which fence: the
-// workspace root, the one resolved out-of-workspace path an approved escape permits (ADR 0049; ""
-// for every ordinary call), and the undo journal recording this execution (ADR 0051; nil outside an
-// engine, or under one that keeps none). It is built per call from the execution context because
-// the permit and the journal are stamped there by dispatch (writeScopeOf), and holds nothing a tool
-// could not read for itself — its job is to answer the question once and hand every later operation
-// the same answer. The context itself does not ride along: everything the value needs of it is read
-// here, once.
+// security.Fence — the workspace root plus the one resolved out-of-workspace path an approved
+// escape permits (ADR 0049; a zero Permit for every ordinary call) — and the undo journal recording
+// this execution (ADR 0051; nil outside an engine, or under one that keeps none). It is built per
+// call from the execution context because the permit and the journal are stamped there by dispatch
+// (writeScopeOf), and holds nothing a tool could not read for itself — its job is to answer the
+// question once and hand every later operation the same answer. The context itself does not ride
+// along: everything the value needs of it is read here, once.
 type writeScope struct {
-	root    string
-	permit  string
+	fence   security.Fence
 	journal *undo.Journal
 }
 
-// writeScopeOf reads the scope of one execution off its context: the workspace root the tool was
-// built with, the approved-escape permit dispatch stamped for THIS call, if any, and the undo
-// journal the engine put in force, if any.
+// writeScopeOf reads the scope of one execution off its context: the Fence is the workspace root
+// the tool was built with paired with the escape permit dispatch stamped for THIS call, if any
+// (a bare context yields the zero permit, so the fence is the workspace root alone), and the undo
+// journal is the one the engine put in force, if any.
 func writeScopeOf(ctx context.Context, root string) writeScope {
-	return writeScope{root: root, permit: writeEscapeTarget(ctx), journal: undo.FromContext(ctx)}
+	permit, _ := domain.WriteEscapePermitFrom(ctx)
+	return writeScope{
+		fence:   security.Fence{Root: root, Permit: permit},
+		journal: undo.FromContext(ctx),
+	}
 }
 
 // target resolves the one argument the marker names into the value every later operation of this
@@ -60,7 +66,7 @@ func writeScopeOf(ctx context.Context, root string) writeScope {
 // the write reads and lands on are one reading of the call. An empty argument is the one error:
 // there is nothing to resolve, and errPathRequired is the refusal every writer spells for it.
 func (s writeScope) target(input string) (writeTarget, error) {
-	target, ok := resolveTargetUnbounded(input, s.root)
+	target, ok := resolveTargetUnbounded(input, s.fence.Root)
 	if !ok {
 		return writeTarget{}, errPathRequired
 	}
@@ -72,26 +78,21 @@ func (s writeScope) target(input string) (writeTarget, error) {
 // pin answers the (input, root) pair a fenced read or stat of THIS CALL'S OWN write target must
 // use, and whether that target is knowably absent.
 //
-// The workspace branch is checked FIRST and is unconditional: a permit never moves an in-workspace
-// read, so a call carrying one behaves identically to one that does not for every path inside the
-// fence. "Inside" is decided by RESOLUTION, which is why a workspace-spelled path that leaves the
-// fence through a symlink is not inside it. Outside, the pair is repointed only when the target's
-// disclosed Real IS the permitted path — the same equality security's mutation root routes on
-// (internal/security/writepermit.go) — and then only to that target's own parent directory, so the
-// one name reachable through the returned root is the approved one (ADR 0049).
+// The workspace root is the unconditional answer for every call the Fence does not govern
+// (security.Fence.Governs — the ONE question the mutation root routes on, asked here of the same
+// argument): with no permit, with a permit naming another path, and for every in-workspace path
+// under any permit, so a call carrying one behaves identically to one that does not for every path
+// inside the fence. Governs decides by RESOLUTION, which is why a workspace-spelled path that leaves
+// the fence through a symlink to the permitted target IS governed. For the governed call the pair is
+// repointed to the target's own parent directory, so the one name reachable through the returned
+// root is the approved one (ADR 0049).
 //
 // absent is true when that parent is not an openable directory. The target cannot exist then, and
 // the caller reports ordinary absence: pinning a root that cannot be opened would surface a fence
 // refusal instead, which for a not-yet-created destination is both wrong and unexplainable.
 func (t writeTarget) pin() (pinInput, pinRoot string, absent bool) {
-	if t.scope.permit == "" {
-		return t.input, t.scope.root, false
-	}
-	if _, err := resolveInRoot(t.input, t.scope.root); err == nil {
-		return t.input, t.scope.root, false
-	}
-	if t.Real != filepath.Clean(t.scope.permit) {
-		return t.input, t.scope.root, false
+	if !t.scope.fence.Governs(t.input) {
+		return t.input, t.scope.fence.Root, false
 	}
 	parent := filepath.Dir(t.Real)
 	if !rootUsable(parent) {
@@ -164,7 +165,8 @@ func (t writeTarget) refuseVirtual() error {
 // to and including its separator ("file not found: "). A refusal NEVER gains suggestions — a "did
 // you mean" on a refusal would read as absence and hide it.
 func (t writeTarget) notFound(err error, prefix string) string {
-	return notFoundOrRefusal(err, prefix, t.scope.root, workspaceRelative(t.input, t.scope.root), t.input)
+	root := t.scope.fence.Root
+	return notFoundOrRefusal(err, prefix, root, workspaceRelative(t.input, root), t.input)
 }
 
 // redirected reports whether the argument's OWN path went somewhere other than where it reads —
@@ -221,16 +223,16 @@ func (t writeTarget) note() string {
 // ordinary relative name would create a colon-named file inside the workspace and report the write
 // as landed.
 //
-// The permit handed to security is the scope's approved-escape target (ADR 0049): empty for every
-// ordinary call, so the workspace root alone bounds the write exactly as it always did, and
-// otherwise the ONE resolved path the operator was shown and approved — which security re-resolves
-// the argument against before anything lands.
+// The write is the scope's Fence's (ADR 0049): a zero Permit for every ordinary call, so the
+// workspace root alone bounds the write exactly as it always did, and otherwise the ONE resolved
+// path the operator was shown and approved — which the Fence re-resolves the argument against
+// (Governs) before anything lands.
 func (t writeTarget) write(data []byte, perm os.FileMode) error {
 	if err := t.refuseVirtual(); err != nil {
 		return err
 	}
 	pre := t.capturePreImage()
-	if err := security.SafeWriteFile(t.scope.root, t.input, data, perm, t.scope.permit); err != nil {
+	if err := t.scope.fence.WriteFile(t.input, data, perm); err != nil {
 		return err
 	}
 	pre.commit(data, true)
@@ -253,12 +255,12 @@ const (
 
 // journaled runs body as a mutation of this ONE target that lands or removes bytes this process
 // never holds — a delete, or one end of a copy or move — through the sibling funnel
-// (journaledTargets): the pre-image is captured before body runs, body is handed the
-// approved-escape target (ADR 0049), and the record is committed under post only when body reports
-// the target landed. body's error is returned unchanged; the fence primitive stays body's choice.
-func (t writeTarget) journaled(post postImage, body func(escape string) (landed bool, err error)) error {
-	return journaledTargets(t.scope.permit, []journaledPath{t.mutation(post)}, func(escape string) ([]bool, error) {
-		landed, err := body(escape)
+// (journaledTargets): the pre-image is captured before body runs, body is handed the scope's
+// Fence (ADR 0049), and the record is committed under post only when body reports the target
+// landed. body's error is returned unchanged; which verb of the Fence it calls stays body's choice.
+func (t writeTarget) journaled(post postImage, body func(fence security.Fence) (landed bool, err error)) error {
+	return journaledTargets(t.scope.fence, []journaledPath{t.mutation(post)}, func(fence security.Fence) ([]bool, error) {
+		landed, err := body(fence)
 		return []bool{landed}, err
 	})
 }
@@ -272,11 +274,11 @@ type journaledPath struct {
 
 // journaledTargets is the multi-path form of journaled, and the funnel proper: copy_file, move_file
 // and delete_file land bytes this process never holds, and one of them changes two paths. It takes
-// the paths as the VALUES the verb resolved (writeTarget.mutation) and the approved-escape target
-// of the scope that resolved them, captures a pre-image for EVERY path before body runs, hands body
-// that target (ADR 0049), then commits exactly the paths body reports as landed — each under its own
-// post-image policy — and returns body's error unchanged. journaled is its one-target spelling; the
-// directory copy and the move call it directly with the slice they assemble.
+// the paths as the VALUES the verb resolved (writeTarget.mutation) and the Fence of the scope that
+// resolved them, captures a pre-image for EVERY path before body runs, hands body that Fence (ADR
+// 0049), then commits exactly the paths body reports as landed — each under its own post-image
+// policy — and returns body's error unchanged. journaled is its one-target spelling; the directory
+// copy and the move call it directly with the slice they assemble.
 //
 // landed carries one entry per path, in paths' order; a nil or short slice means the missing paths
 // did not land. It is REPORTED rather than inferred from err because a move can fail half way —
@@ -289,14 +291,14 @@ type journaledPath struct {
 // the reason an unreadable pre-image does: a record that describes a file it does not match turns
 // every later undo of that path into a conflict it never had.
 //
-// The fence primitive stays the BODY's choice — security.SafeRename, SafeCopyFileFrom and
-// SafeRemove differ in what they take and in how their failures triage — so this owns only the
-// capture and the commit. Outside an engine, or under one that keeps no journal, every capture is
-// nil and body runs byte-for-byte as it would have alone.
+// The Fence verb stays the BODY's choice — Rename, CopyFileFrom and Remove differ in what they
+// take and in how their failures triage — so this owns only the capture and the commit. Outside an
+// engine, or under one that keeps no journal, every capture is nil and body runs byte-for-byte as
+// it would have alone.
 func journaledTargets(
-	escape string,
+	fence security.Fence,
 	paths []journaledPath,
-	body func(escape string) (landed []bool, err error),
+	body func(fence security.Fence) (landed []bool, err error),
 ) error {
 	for _, path := range paths {
 		// Every path here is one this mutation WRITES, so a virtual-mount reference is refused
@@ -313,7 +315,7 @@ func journaledTargets(
 		captured[i] = path.target.capturePreImage()
 	}
 
-	landed, err := body(escape)
+	landed, err := body(fence)
 
 	for i, path := range paths {
 		if i >= len(landed) || !landed[i] {
@@ -357,16 +359,17 @@ func (t writeTarget) mutation(post postImage) journaledPath {
 // behaves byte-for-byte as it did before this existed.
 
 // preImage is one pending journal record: what a mutation is about to replace, plus the value the
-// mutation reached it through — whose scope carries the root and approved-escape permit a revert
-// has to go back through to reach the same file the write reached, and whose read is the fence a
-// read-back (commitReadBack) goes through. It exists only between the capture and the commit.
+// mutation reached it through — whose read is the fence a read-back (commitReadBack) goes through —
+// and the Fence the record identifies the mutation by (journalTarget): the root and permit a revert
+// has to go back through to reach the same file the write reached. It exists only between the
+// capture and the commit.
 type preImage struct {
-	target    writeTarget
-	path      string
-	permitted string
-	data      []byte
-	existed   bool
-	perm      os.FileMode
+	target  writeTarget
+	path    string
+	fence   security.Fence
+	data    []byte
+	existed bool
+	perm    os.FileMode
 }
 
 // capturePreImage reads the current bytes of the file a mutation of this target is about to
@@ -382,17 +385,17 @@ func (t writeTarget) capturePreImage() *preImage {
 	if t.scope.journal == nil {
 		return nil
 	}
-	path, permitted := t.journalTarget()
+	path, fence := t.journalTarget()
 	data, err := t.read()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
 	captured := &preImage{
-		target:    t,
-		path:      path,
-		permitted: permitted,
-		data:      data,
-		existed:   err == nil,
+		target:  t,
+		path:    path,
+		fence:   fence,
+		data:    data,
+		existed: err == nil,
 	}
 	if captured.existed {
 		captured.perm = t.perm()
@@ -417,9 +420,9 @@ func (p *preImage) commit(post []byte, exists bool) {
 		return
 	}
 	p.target.scope.journal.Record(undo.Mutation{
-		Root:       p.target.scope.root,
+		Root:       p.fence.Root,
 		Path:       p.path,
-		Permitted:  p.permitted,
+		Permitted:  p.fence.Permit.Real,
 		Perm:       p.perm,
 		Pre:        p.data,
 		PreExisted: p.existed,
@@ -448,8 +451,9 @@ func (p *preImage) commitReadBack() {
 }
 
 // journalTarget answers the pair a journal record identifies this mutation by: the absolute
-// path that IS the record's identity, and the approved-escape permit a revert must carry to
-// reach it (empty for every ordinary write).
+// path that IS the record's identity, and the Fence a revert must go back through to reach it —
+// the scope's own Fence for the approved escape, and the bare workspace fence for every ordinary
+// write, so a record never claims a permit the write did not run under.
 //
 // The ordinary answer is the path the argument NAMES, root-joined and cleaned — not its
 // symlink-resolved twin — because that is the spelling internal/security's fenced primitives
@@ -457,14 +461,11 @@ func (p *preImage) commitReadBack() {
 // path would be refused as an escape on any host whose root is itself reached through a
 // symlink (macOS /tmp). The approved escape is the one exception and takes the RESOLVED path,
 // because that is what the permit names and what the approval pane disclosed (ADR 0049) — and
-// it is recognised by exactly the test pin uses, so a record can never claim a permit the write
-// itself did not run under.
-func (t writeTarget) journalTarget() (path, permitted string) {
-	if t.scope.permit == "" || t.Real != filepath.Clean(t.scope.permit) {
-		return t.Named, ""
+// it is recognised by exactly the question pin asks (security.Fence.Governs), so the record and
+// the write route on one answer.
+func (t writeTarget) journalTarget() (path string, fence security.Fence) {
+	if !t.scope.fence.Governs(t.input) {
+		return t.Named, security.WorkspaceFence(t.scope.fence.Root)
 	}
-	if _, err := resolveInRoot(t.input, t.scope.root); err == nil {
-		return t.Named, ""
-	}
-	return t.Real, t.scope.permit
+	return t.Real, t.scope.fence
 }

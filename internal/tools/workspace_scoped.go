@@ -73,7 +73,7 @@ type writeTarget struct {
 	// input is the argument as the model spelled it — what the fenced primitives take, and what a
 	// refusal quotes back.
 	input string
-	// scope is the execution the value was resolved for: its root and its approved-escape permit.
+	// scope is the execution the value was resolved for: its Fence (root and permit) and journal.
 	scope writeScope
 }
 
@@ -108,7 +108,7 @@ func WorkspaceWriteTarget(t domain.Tool, call domain.ToolCall) (string, bool) {
 // name included. That makes the surfaces agree with the gate by construction: the operator is
 // shown the very path the blast-radius classification judged, never a second reading of the
 // same call. Where the two could be read apart — a final name that is itself a symlink, which
-// SafeWriteFile REPLACES rather than follows — this errs towards disclosing more than the
+// Fence.WriteFile REPLACES rather than follows — this errs towards disclosing more than the
 // write will touch, which is the safe direction for a security surface and the one the gate
 // already took.
 func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
@@ -134,7 +134,7 @@ func ResolvedWriteTarget(t domain.Tool, call domain.ToolCall) string {
 // is the root-only spelling of it for a reader, which holds no writeTarget — every writer now
 // reads the tail off its value.
 func resolvedTargetNote(input, root string) string {
-	target, err := writeScope{root: root}.target(input)
+	target, err := writeScope{fence: security.WorkspaceFence(root)}.target(input)
 	if err != nil {
 		return ""
 	}
@@ -177,7 +177,7 @@ func pathArgWriteTarget(call domain.ToolCall, root string) (writeTarget, bool) {
 	if err := decodeArgs(call.Arguments, &args); err != nil {
 		return writeTarget{}, false
 	}
-	target, err := writeScope{root: root}.target(args.Path)
+	target, err := writeScope{fence: security.WorkspaceFence(root)}.target(args.Path)
 	if err != nil {
 		return writeTarget{}, false
 	}
@@ -204,7 +204,7 @@ func destinationArgWriteTarget(call domain.ToolCall, root string) (writeTarget, 
 	if err := decodeArgs(call.Arguments, &args); err != nil {
 		return writeTarget{}, false
 	}
-	target, err := writeScope{root: root}.target(args.Destination)
+	target, err := writeScope{fence: security.WorkspaceFence(root)}.target(args.Destination)
 	if err != nil {
 		return writeTarget{}, false
 	}

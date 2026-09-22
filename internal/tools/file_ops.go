@@ -120,7 +120,7 @@ func (t *CopyFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool
 // destination name: it either fully lands or the destination is untouched. A source that is a
 // DIRECTORY takes the recursive branch (copyDirectory) before the shared per-file check runs —
 // that check's "not a file" arm stays for move_file, whose rename of a directory would run
-// SafeRename unjournalled.
+// Fence.Rename unjournalled.
 //
 // The source's root AND the spelling of the source path are chosen ONCE per call, together
 // (readScope.locate, the workspace-first absolute-only order): the argument AS GIVEN under the
@@ -166,8 +166,8 @@ func (t *CopyFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 	// funnel (writeTarget.journaled, ADR 0051): pre-image bytes when overwrite:true clobbers a
 	// file, pre-absent when the copy creates one — which is what makes an undo restore the first
 	// and remove the second. The source is a read and records nothing.
-	err = destination.journaled(postReadBack, func(escape string) (bool, error) {
-		if err := security.SafeCopyFileFrom(sourceRoot, source, t.root, args.Destination, escape); err != nil {
+	err = destination.journaled(postReadBack, func(fence security.Fence) (bool, error) {
+		if err := fence.CopyFileFrom(sourceRoot, source, args.Destination); err != nil {
 			return false, err
 		}
 		return true, nil
@@ -188,7 +188,7 @@ const maxCopyDirectoryFiles = 2000
 // through the fence of its own root (directoryFiles), every destination path is resolved through
 // the scope of this execution — N targets, one per file — and handed to ONE journaledTargets call
 // (writeTarget.mutation), so an undo takes the whole copy back as one step and a clobbered file's
-// pre-image is captured before anything lands — and each file is copied with SafeCopyFileFrom,
+// pre-image is captured before anything lands — and each file is copied with Fence.CopyFileFrom,
 // the same primitive a single-file copy uses, so the symlink-spelling rules, the source's mode
 // and the staged-and-renamed destination all hold per file. The result names the file count.
 //
@@ -244,14 +244,14 @@ func (t *CopyFile) copyDirectory(
 		}
 		paths[i] = target.mutation(postReadBack)
 	}
-	err = journaledTargets(scope.permit, paths, func(escape string) ([]bool, error) {
+	err = journaledTargets(scope.fence, paths, func(fence security.Fence) ([]bool, error) {
 		landed := make([]bool, len(files))
 		for i, rel := range files {
 			if err := ctx.Err(); err != nil {
 				return landed, err
 			}
-			if err := security.SafeCopyFileFrom(sourceRoot, filepath.Join(source, rel), t.root,
-				filepath.Join(args.Destination, rel), escape); err != nil {
+			if err := fence.CopyFileFrom(sourceRoot, filepath.Join(source, rel),
+				filepath.Join(args.Destination, rel)); err != nil {
 				// Say how far the copy got: the files before this one are in place (and
 				// journalled), so the model knows what to retry and an undo knows what to take back.
 				return landed, fmt.Errorf("copied %d of %d files, then %s: %w", i, len(files), rel, err)
@@ -432,7 +432,7 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // failure (empty on success). An UNPERMITTED fence refusal is NEVER retried: the fallback would
 // refuse it again, and reporting the escape once is what tells the model the truth about why.
 //
-// A symlinked-parent refusal is terminal for the same reason and one more. SafeRename validates
+// A symlinked-parent refusal is terminal for the same reason and one more. Fence.Rename validates
 // BOTH chains — the source's and the destination's — before it renames anything, so this error
 // means one of them crosses an in-root link; retrying it as copy-then-remove would refuse the
 // same chain in different words, or worse, refuse only ONE half and leave the move split (the
@@ -441,11 +441,13 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 //
 // An APPROVED escape (ADR 0049) is the one case where a fence refusal from the rename is
 // EXPECTED and the fallback is the real route: one rename is one syscall through one pinned root,
-// so it can never span the workspace fence and a permitted target outside it (SafeRename takes no
-// permit for exactly that reason). The pair does span it — SafeCopyFileFrom carries the permit to
-// the DESTINATION, SafeRemove unlinks the source under the workspace fence with no permit at all —
-// which is also what keeps move_file's undisclosed source unconditionally in-workspace: the Gate
-// showed the operator a destination, never a source, so nothing may leave through that half.
+// so it can never span the workspace fence and a permitted target outside it (Fence.Rename never
+// consults the permit for exactly that reason). Whether the destination is that approved target is
+// the Fence's own question (Governs), asked of the same argument the rename took. The pair does
+// span it — Fence.CopyFile carries the permit to the DESTINATION, and the source is unlinked
+// through the bare workspace fence (security.WorkspaceFence, no permit at all) — which is also
+// what keeps move_file's undisclosed source unconditionally in-workspace: the Gate showed the
+// operator a destination, never a source, so nothing may leave through that half (ADR 0049 D5).
 //
 // A move is TWO journal records (ADR 0051) because it changes two files: the source, whose
 // pre-image bytes are the only copy of it left once it is gone, and the destination, which the
@@ -459,13 +461,13 @@ func (t *MoveFile) Execute(ctx context.Context, call domain.ToolCall) (domain.To
 // [false, true], recording the destination alone, because the source really is still there.
 func (t *MoveFile) move(scope writeScope, args fileOpsArgs, source, destination writeTarget) string {
 	err := journaledTargets(
-		scope.permit,
+		scope.fence,
 		[]journaledPath{
 			source.mutation(postAbsent),
 			destination.mutation(postReadBack),
 		},
-		func(permitted string) ([]bool, error) {
-			err := security.SafeRename(t.root, args.Source, args.Destination)
+		func(fence security.Fence) ([]bool, error) {
+			err := fence.Rename(args.Source, args.Destination)
 			if err == nil {
 				return []bool{true, true}, nil
 			}
@@ -479,13 +481,13 @@ func (t *MoveFile) move(scope writeScope, args fileOpsArgs, source, destination 
 			if errors.Is(err, security.ErrRootInaccessible) {
 				return nil, err
 			}
-			if errors.Is(err, ErrPathEscape) && permitted == "" {
+			if errors.Is(err, ErrPathEscape) && !fence.Governs(args.Destination) {
 				return nil, err
 			}
-			if copyErr := security.SafeCopyFile(t.root, args.Source, args.Destination, permitted); copyErr != nil {
+			if copyErr := fence.CopyFile(args.Source, args.Destination); copyErr != nil {
 				return nil, copyErr
 			}
-			if removeErr := security.SafeRemove(t.root, args.Source, ""); removeErr != nil {
+			if removeErr := security.WorkspaceFence(t.root).Remove(args.Source); removeErr != nil {
 				// The destination now holds the file and the source still does. Say so: a bare
 				// error would leave the model guessing which half of the move happened — and
 				// report the half that DID happen, so an undo can still take the destination back.
@@ -508,7 +510,7 @@ func (t *MoveFile) move(scope writeScope, args fileOpsArgs, source, destination 
 // pre-flight stat of the source stays the plain workspace-rooted one the shared check makes — the
 // value is for the journal, never for widening what the source may be.
 func checkFileOpsPaths(scope writeScope, args fileOpsArgs) (source, destination writeTarget, refusal string) {
-	destination, refusal = checkFileOpsPathsFrom(scope, args, args.Source, scope.root)
+	destination, refusal = checkFileOpsPathsFrom(scope, args, args.Source, scope.fence.Root)
 	if refusal != "" {
 		return writeTarget{}, writeTarget{}, refusal
 	}
@@ -525,7 +527,7 @@ func checkFileOpsPaths(scope writeScope, args fileOpsArgs) (source, destination 
 // the model-facing refusal (empty when the operation may proceed): a source under sourceRoot that
 // exists and is a regular FILE, and a destination under destinationRoot the operation is allowed
 // to land on — absent, or an existing file the call explicitly asked to overwrite. The "not a
-// file" arm is move_file's: a directory move would run SafeRename unjournalled, so it is refused
+// file" arm is move_file's: a directory move would run Fence.Rename unjournalled, so it is refused
 // here, while copy_file branches on a directory source BEFORE reaching this check (copyDirectory).
 //
 // The two roots differ for copy_file alone, whose source may have matched a configured read-only

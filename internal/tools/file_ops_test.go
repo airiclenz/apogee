@@ -186,7 +186,7 @@ func TestCopyFile_CopiesADirectory(t *testing.T) {
 // TestCopyFile_DirectoryRefusals pins every refusal the directory branch gives, each ONE sentence
 // the model can act on: an occupied destination for want of overwrite (and that with overwrite the
 // copy lands INTO it), a file where a directory would go, a destination outside the workspace —
-// refused up front because the approved-escape permit is exact-path and a tree is many paths — and
+// refused up front because the Fence's permit is exact-path and a tree is many paths — and
 // a tree with nothing in it.
 func TestCopyFile_DirectoryRefusals(t *testing.T) {
 	t.Parallel()

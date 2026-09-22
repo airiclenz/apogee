@@ -106,7 +106,7 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	// removal is a different blast radius and a different tool. The stat goes through the
 	// workspace fence, so an escaping path is refused here with the uniform escape wording
 	// rather than reported as an ordinary absence. Like checkFileOpsPaths this is for the
-	// MESSAGE first — SafeRemove re-decides containment at operation time — but the directory
+	// MESSAGE first — Fence.Remove re-decides containment at operation time — but the directory
 	// refusal also carries weight of its own, since os.Remove would happily unlink an EMPTY
 	// directory. A name swapped between the two steps can therefore cost at most one empty
 	// directory inside the workspace: still within the blast radius the call already declared,
@@ -120,17 +120,17 @@ func (t *DeleteFile) Execute(ctx context.Context, call domain.ToolCall) (domain.
 	}
 	// Read before the removal: afterwards the name is gone and resolves to itself through its
 	// parent, so the one delete worth disclosing — a name that pointed somewhere else — would
-	// report nothing. SafeRemove unlinks THE NAME, so this discloses more than the call touches
+	// report nothing. Fence.Remove unlinks THE NAME, so this discloses more than the call touches
 	// (the link's target survives), which is the direction a security surface errs in and the one
 	// the gate already took (writeTarget.note, ResolvedWriteTarget).
 	resolved := target.note()
 	// The funnel reads the bytes before the unlink, for the plainest reason in the family:
 	// afterwards there are none. That pre-image IS the file (writeTarget.journaled, ADR 0051) —
-	// the journal's copy is the only one left once SafeRemove returns, and it is what `/undo`
+	// the journal's copy is the only one left once Fence.Remove returns, and it is what `/undo`
 	// writes back, with the mode the file carried rather than a default one. The path goes
 	// post-absent, which is what makes the undo a restore rather than a rewrite.
-	err = target.journaled(postAbsent, func(escape string) (bool, error) {
-		if err := security.SafeRemove(t.root, args.Path, escape); err != nil {
+	err = target.journaled(postAbsent, func(fence security.Fence) (bool, error) {
+		if err := fence.Remove(args.Path); err != nil {
 			return false, err
 		}
 		return true, nil
