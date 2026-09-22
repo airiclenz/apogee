@@ -839,11 +839,11 @@ func (m *Model) replayScrollback(blob []byte, title string, inExchange bool) {
 
 // noteContextFiles records what the session that just started loaded from the workspace: one
 // note naming every context file and its size, a note of its own for each file that is present
-// but unreadable (the loud skip), and — when the standing system content has outgrown the window
-// share allocated to it — the warning that says so. It is called at each of the three boundaries
-// the host owns, immediately after the boundary reseeded the view: construction, /clear|/new
-// (startNewSession), and a /sessions restore. Each of those re-read the files, so the notice
-// always describes the bytes the NEXT request will actually carry.
+// but unreadable (the loud skip), and — when the standing system content has outgrown the
+// Budget's fixed advisory ceiling for it — the warning that says so. It is called at each of the
+// three boundaries the host owns, immediately after the boundary reseeded the view: construction,
+// /clear|/new (startNewSession), and a /sessions restore. Each of those re-read the files, so the
+// notice always describes the bytes the NEXT request will actually carry.
 //
 // The SENTENCES themselves are not spelled here: [notice.ContextFileNotices] composes them, so
 // this Driver and the unattended ones word one event one way. What stays here is the host's own

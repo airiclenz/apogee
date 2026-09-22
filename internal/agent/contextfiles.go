@@ -95,7 +95,7 @@ func loadContextFiles(workspaceDir string, names []string) []contextFile {
 // as present-but-unreadable.
 //
 // The read itself is deliberately unbounded — context files are the user's own conventions, and
-// oversize is reported by ContextFilesReport against the Budget's system share rather than
+// oversize is reported by ContextFilesReport against the Budget's advisory ceiling rather than
 // truncated here.
 func readContextFile(workspaceDir, name string) ([]byte, error) {
 	f, err := security.SafeOpen(workspaceDir, name)
@@ -260,13 +260,14 @@ func (a *Agent) contextBlocks() string {
 // ContextFilesReport reports what this session's workspace context files contributed and what
 // the standing system content they ride in costs — one note per cache entry (loaded or
 // unreadable, in list order), the estimated token size of the WHOLE seeded system content, and
-// the Budget share that content is allocated. It is the data behind the host's session notice;
-// nothing on this path reaches the model.
+// the fixed advisory ceiling the Budget carries for that content — never the room it reserves
+// for it, which is measured from the content and so could never be exceeded by it. It is the
+// data behind the host's session notice; nothing on this path reaches the model.
 //
 // The measure is taken at CALL time, not at the boundary that filled the cache, and that is the
 // point: the context window may bind seconds after a cold start (the first heartbeat), so a
-// report taken then has no allocation to compare against and simply reports a zero share, while
-// the same session's next /new — after the window bound — can say the content is over its share.
+// report taken then has no ceiling to compare against and simply reports a zero share, while the
+// same session's next /new — after the window bound — can say the content is over its share.
 //
 // StandingTokens measures standingSystem(), the very string buildRequest seeds, so what the user
 // is told is what the model is sent rather than a second, drifting estimate of it. Like the

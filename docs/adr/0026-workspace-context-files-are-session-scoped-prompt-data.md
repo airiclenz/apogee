@@ -239,3 +239,15 @@ The orientation block also gains a line naming the header the blocks ride under,
 a session that actually holds one, so the fenced content below it is read as project text rather
 than as more harness facts. Content is still DATA in the sense §3 means: never a template, never
 validated, never able to fail startup.
+
+## Addendum (2026-09-22) — the oversize ceiling is ADVISORY, no longer the reserved share
+
+§8 measures the whole standing system content against `Budget.SystemPrompt`, and the Considered
+option above refuses a configurable size limit "because the Budget already allocates a
+system-prompt share". The Budget now reserves what the standing content **measures** (the
+measurement plus 10% headroom), so that reservation grows with the very content §8 weighs against
+it, and reading it as the ceiling would mean the warning could never fire. The comparison is
+against `Budget.StandingAdvisory` instead — the unchanged 15% of working room, carried on the
+Budget as an advisory field of its own beside the reservations. Trigger, wording and the "never a
+cap" posture are untouched, and so is the option's rejection: the ceiling is still a number the
+Budget already knows, it is simply no longer the room the Budget holds.

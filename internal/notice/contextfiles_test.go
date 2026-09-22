@@ -54,3 +54,25 @@ func TestContextFileNoticesAllLoadedFitsBudget(t *testing.T) {
 		t.Errorf("notices = %#v, want %#v", got, want)
 	}
 }
+
+// The ceiling the warning is measured against is the Budget's FIXED advisory share, never the
+// room reserved for the standing content: that reservation is measured FROM the content (plus
+// headroom), so content read against it could never be over and the warning could never fire.
+// Here a 128k window leaves 102.4k of working room, so the advisory ceiling is 15,360 tokens
+// while the 20,000 tokens of standing content reserve 22,000 and sit comfortably inside that
+// reservation. The warning still fires, word for word.
+func TestContextFileNoticesWarnsAgainstTheAdvisoryCeiling(t *testing.T) {
+	got := notice.ContextFileNotices(domain.ContextFilesReport{
+		Files:          []domain.ContextFileNote{{Name: "AGENTS.md", Bytes: 3174}},
+		StandingTokens: 20000,
+		SystemShare:    15360,
+	})
+
+	want := []notice.ContextNotice{
+		{Text: "context: AGENTS.md (3.1 KiB)"},
+		{Text: "standing system content ~19.5k tokens exceeds its Budget share (~15.0k) — trim context files, the task list or the system prompt", Anomaly: true},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("notices = %#v, want %#v", got, want)
+	}
+}

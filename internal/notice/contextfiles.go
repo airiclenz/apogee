@@ -20,7 +20,7 @@ type ContextNotice struct {
 // ContextFileNotices composes the session notice for a workspace's context files, in the order a
 // reader meets them: the line naming every file that loaded and its size, then one line per file
 // that is present but unreadable (the loud skip), then — when the standing system content has
-// outgrown the window share allocated to it — the advisory warning that says so.
+// outgrown the Budget's fixed advisory ceiling for it — the advisory warning that says so.
 //
 // A report with no files at all yields NO notices, the oversize warning included: a repo with
 // none of the configured names is the common case and stays completely silent, and a warning

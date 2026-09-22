@@ -246,7 +246,13 @@ Existing `unknownwindow_test.go` keeps passing.
 **Acceptance.** `go build ./... && go vet ./internal/agent ./cmd/apogee && go test ./internal/agent -run 'TestBudget|TestGrowthBounds|TestResolveFileRefs|TestToolResultFloor|TestToolResultCap|TestUnknownWindow|TestContextFiles|TestContextFillNotice' -count=1 && go test ./cmd/apogee -run 'FillNotice' -count=1`
 **Commit:** `feat(agent): the Budget reserves the measured standing content`
 
-## 3. The oversize notice reads the advisory ceiling
+## 3. The oversize notice reads the advisory ceiling — ✅ DONE (2026-09-22)
+
+NOTES (2026-09-22): `internal/agent/contextfiles_test.go` needed no edit — item 2 already repinned `TestContextFilesReportMeasuresStandingContent` to `a.budget().StandingAdvisory` and its `Oversize()` assertion, which is exactly what this item's Tests ask it to keep; it is therefore not in FILES.
+NOTES (2026-09-22): the item's grep is a floor, so two comments outside its Files list that call the ceiling an ALLOCATION were folded in (comment text only): `internal/agent/contextfiles.go`'s `ContextFilesReport` method doc ("the Budget share that content is allocated" / "no allocation to compare against") and `internal/tui/model.go`'s `noteContextFiles` doc ("the window share allocated to it").
+NOTES (2026-09-22): consequential edit — internal/tui/model.go: made necessary by the ceiling no longer being an allocation (doc comment on noteContextFiles only; no behaviour change)
+NOTES (2026-09-22): the rendered wording is untouched, so the phrase "its Budget share" survives in `internal/notice/contextfiles.go`'s emitted string and in the `ContextNotice` doc that quotes it; only the comments that called that share an ALLOCATION were reworded.
+NOTES (2026-09-22): the ADR 0026 addendum is one dated `## Addendum (2026-09-22)` section covering both named lines (§8's `Budget.SystemPrompt` and the Considered-options rejection); §8 and the option line themselves are left as written, per the item's "addendum, not a rewrite".
 
 **What.** Depends on item 2. The one-liner `report.SystemShare = budget.StandingAdvisory` in
 `ContextFilesReport` (`internal/agent/contextfiles.go`) landed in item 2 (regression decision 2b);

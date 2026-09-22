@@ -1,7 +1,7 @@
 package domain
 
 // The workspace context files' REPORT — what a session actually loaded (Config.ContextFiles)
-// and what the standing system content costs against the Budget's own share of the window.
+// and what the standing system content costs against the Budget's fixed advisory ceiling for it.
 // It is a read-only view the engine composes at a session boundary and the host renders as
 // its session notice; nothing here reaches the model. The types live in domain because both
 // sides of that seam speak them (ADR 0010), and the one predicate over them — Oversize — is
@@ -24,21 +24,25 @@ type ContextFileNote struct {
 // or unreadable file in list order (empty when a repo has none of the configured names — the
 // common case, which the host reports by saying nothing). StandingTokens is the estimated token
 // size of the WHOLE standing system content — the rendered system prompt and the context-file
-// blocks, exactly as seeded into a request — and SystemShare is the Budget's SystemPrompt
-// allocation, the share that content is meant to fit in. Both are measured at the moment the
-// report is taken, so a report taken after the context window bound knows what a report taken
-// during a cold start could not; SystemShare is 0 while the window is unknown.
+// blocks, exactly as seeded into a request — and SystemShare is the Budget's fixed ADVISORY
+// CEILING for that content (Budget.StandingAdvisory), the size it is meant to stay under. It is
+// deliberately not the room the Budget reserves for the standing content: that reservation is
+// MEASURED from the content itself, so content read against it could never be over. Both numbers
+// are taken at the moment the report is, so a report taken after the context window bound knows
+// what a report taken during a cold start could not; SystemShare is 0 while the window is
+// unknown.
 type ContextFilesReport struct {
 	Files          []ContextFileNote
 	StandingTokens int
 	SystemShare    int
 }
 
-// Oversize reports whether the standing system content has outgrown the window share allocated
-// to it — the single condition behind the host's warning line. An unknown window (a zero share,
-// so nothing was allocated) never trips it: the same "no basis to bound" rule the Budget's own
-// allocation-gated comparisons keep. It is advisory in the strongest sense — nothing is capped
-// or truncated on the strength of it; the human is simply told.
+// Oversize reports whether the standing system content has outgrown the advisory ceiling the
+// Budget carries for it — the single condition behind the host's warning line. An unknown window
+// (a zero ceiling, so there is nothing to measure against) never trips it: the same "no basis to
+// bound" rule the Budget's own allocation-gated comparisons keep. It is advisory in the
+// strongest sense — nothing is capped or truncated on the strength of it; the human is simply
+// told.
 func (r ContextFilesReport) Oversize() bool {
 	return r.SystemShare > 0 && r.StandingTokens > r.SystemShare
 }
