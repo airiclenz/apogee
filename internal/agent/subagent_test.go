@@ -2841,7 +2841,14 @@ func TestUserSteeredTrailer_SingularAndPlural(t *testing.T) {
 func outputPathAgent(t *testing.T, mode domain.Mode, outputPath string, wrapUp []provider.Delta) (*Agent, *requestLogResponder, *recordingSink, string) {
 	t.Helper()
 
-	ws := t.TempDir()
+	// The workspace root is resolved, not as t.TempDir() spells it. The ledger records the
+	// RESOLVED output target, so an expectation joined against an unresolved root would compare
+	// two spellings of the same directory — which is exactly what macOS hands back, where
+	// t.TempDir() returns /var/folders/... and /var is a symlink to /private/var.
+	ws, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatalf("EvalSymlinks(t.TempDir()): %v", err)
+	}
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, mode, reader, tools.NewWriteFile(ws))
