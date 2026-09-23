@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
@@ -670,4 +671,124 @@ func TestSnapshotSurface_ConcurrentCaptureRecordAndPreview_IsRaceClean(t *testin
 	work.Wait()
 	close(stop)
 	readers.Wait()
+}
+
+// ----------------------------------------------------------------------------
+// Snapshot calls and a running walk — they wait for it to land
+// ----------------------------------------------------------------------------
+
+// parkedWalkQuiet is how long a call queued behind a parked walk is watched for an early
+// return. It bounds a NEGATIVE check, so it only has to be long enough for a call that does
+// not wait to have returned; a call that does wait never returns until the gate releases.
+const parkedWalkQuiet = 200 * time.Millisecond
+
+// assertStillWaiting fails the test when c delivers before the parked walk is released.
+func assertStillWaiting[T any](t *testing.T, c <-chan T, what string) {
+	t.Helper()
+
+	select {
+	case <-c:
+		t.Fatalf("%s returned while the walk was parked, want it to wait for the walk to land", what)
+	case <-time.After(parkedWalkQuiet):
+	}
+}
+
+// parkRevert starts a Revert on a goroutine and returns once it has parked inside the image
+// source, with the channel its report arrives on.
+func parkRevert(t *testing.T, journal *Journal, gate *gatedSnapshotter) <-chan Report {
+	t.Helper()
+
+	entered := gate.arm()
+	reverted := make(chan Report, 1)
+	go func() {
+		report, _ := journal.Revert()
+		reverted <- report
+	}()
+	waitOn(t, entered, "the revert to park inside the image source")
+	return reverted
+}
+
+func TestMarkPre_WhileARevertWalks_WaitsAndLeavesTheRedo(t *testing.T) {
+	journal, gate, root := gatedJournal(t)
+	parkableExchange(t, journal, root)
+
+	reverted := parkRevert(t, journal, gate)
+
+	journal.BeginGroup()
+	marked := make(chan error, 1)
+	go func() { marked <- journal.MarkPre(context.Background()) }()
+	assertStillWaiting(t, marked, "MarkPre")
+
+	gate.unblock()
+	waitOn(t, reverted, "the revert to finish")
+	if err := waitOn(t, marked, "MarkPre to return once the walk landed"); err != nil {
+		t.Fatalf("MarkPre: %v", err)
+	}
+
+	// Taken after the walk, the pre-image is the reverted tree, so an exchange that then writes
+	// nothing diffs to nothing and leaves the reverted group on the redo stack. A pre-image of
+	// the half-walked tree would diff against the finished revert and clear it.
+	if err := journal.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, ok := journal.RedoPreview(); !ok {
+		t.Error("the reverted exchange is not on the redo stack, want it offered back")
+	}
+}
+
+func TestClose_WhileARevertWalks_WaitsAndKeepsThePreviousPostImage(t *testing.T) {
+	journal, gate, root := gatedJournal(t)
+	seedFile(t, root, "tracked.txt", "human")
+	exchange(t, journal, func() { subprocessWrite(t, root, "earlier.txt", "earlier") })
+	exchange(t, journal, func() {
+		subprocessWrite(t, root, "tracked.txt", "agent")
+		funnelWrite(t, journal, root, "doc.txt", "agent doc")
+	})
+
+	journal.mu.Lock()
+	postBefore := journal.groups[0].post
+	journal.mu.Unlock()
+
+	reverted := parkRevert(t, journal, gate)
+
+	closed := make(chan error, 1)
+	go func() { closed <- journal.Close(context.Background()) }()
+	assertStillWaiting(t, closed, "Close")
+
+	gate.unblock()
+	waitOn(t, reverted, "the revert to finish")
+	if err := waitOn(t, closed, "Close to return once the walk landed"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// The walk put the tree back to where the earlier exchange left it, so a close that waited
+	// re-captures that same image. One that captured mid-walk records the half-walked tree.
+	journal.mu.Lock()
+	postAfter := journal.groups[0].post
+	journal.mu.Unlock()
+	if postAfter != postBefore {
+		t.Errorf("the earlier exchange's post tree moved from %s to %s, want it unchanged", postBefore, postAfter)
+	}
+}
+
+func TestClose_ContextEndsWhileARevertWalks_ReturnsTheContextError(t *testing.T) {
+	journal, gate, root := gatedJournal(t)
+	parkableExchange(t, journal, root)
+
+	reverted := parkRevert(t, journal, gate)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	closed := make(chan error, 1)
+	go func() { closed <- journal.Close(ctx) }()
+	cancel()
+
+	if err := waitOn(t, closed, "Close to give up once its context ended"); !errors.Is(err, context.Canceled) {
+		t.Errorf("Close returned %v, want context.Canceled", err)
+	}
+
+	gate.unblock()
+	waitOn(t, reverted, "the revert to finish")
+	if _, ok := journal.RedoPreview(); !ok {
+		t.Error("the reverted exchange is not on the redo stack after a cancelled close, want it offered back")
+	}
 }

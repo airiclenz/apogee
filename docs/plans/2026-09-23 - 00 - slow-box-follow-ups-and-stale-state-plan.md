@@ -268,7 +268,9 @@ deliver A's clear ⇒ B still shown. Each must fail against the pre-item tree.
 
 **Commit:** `fix(tui): a late reset tick never clears a fresher esc, ctrl+c or flash`
 
-## 8. Snapshot calls wait for a running undo walk to land
+## 8. Snapshot calls wait for a running undo walk to land — ✅ DONE (2026-09-23)
+NOTES (2026-09-23): the ctx-cancelled Close returns ctx.Err() without closing or saving (the walk's own landing saves), so Close's "EVERY path saves" doc line now reads "every path that runs the close"; the landing is a shared `landWalk` helper deferred inside landReverted/landRedone rather than inlined in each.
+NOTES (2026-09-23): `go test -race` cannot run on this box (ThreadSanitizer: unsupported VMA range, 47-bit); the package was run without -race, `-count=5`, and the three new tests were confirmed to fail against the pre-item journal.go/redo.go/snapshot.go.
 
 **What.** Fixes `apogee-eykc`, opened by commit `9f684b83` (audit plan item 1): `Journal.Revert` and
 `Journal.Redo` walk lock-free after `takeWalk`, and `Close`, `MarkPre`, `Preview` and `RedoPreview`

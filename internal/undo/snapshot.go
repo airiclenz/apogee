@@ -73,10 +73,17 @@ func (j *Journal) snapshots() bool { return j.snap != nil && j.workspace != "" }
 // snapshotter were wired: `/undo` still reaches every path the funnel journals, which is the
 // coverage ADR 0051 shipped. The caller's business with the error is to tell the human that
 // the wider coverage is not in force, never to abandon the exchange.
+//
+// Called while a revert or a redo walks, it waits for that walk to land before it opens a
+// group or captures anything, so a pre-image is never taken over a half-walked tree; it
+// returns ctx.Err(), having done nothing, when ctx ends first.
 func (j *Journal) MarkPre(ctx context.Context) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	if err := j.awaitWalk(ctx); err != nil {
+		return err
+	}
 	if !j.snapshots() {
 		return nil
 	}
@@ -115,16 +122,24 @@ func (j *Journal) MarkPre(ctx context.Context) error {
 // This is where a group becomes durable: a journal given an index path ([WithIndexPath]) writes
 // journal.json here, and a save that fails is returned without disturbing the closed group.
 //
-// EVERY path out of it saves, including the ones that end the exchange early. The exchange that
-// just ran may already have discarded the redo stack in memory — [Journal.Record] clears it at its
+// EVERY path out of it that runs the close saves, including the ones that end the exchange
+// early. The exchange that just ran may already have discarded the redo stack in memory — [Journal.Record] clears it at its
 // first record, and records nothing on disk — so a close that skipped the save would leave
 // journal.json offering the next process a `/redo` this journal has thrown away, re-applying an
 // old tree over the very write that discarded it (ADR 0074 decision 6). A failure of the close and
 // a failure of the save are reported together, and neither disturbs the closed group.
+//
+// Called while a revert or a redo walks, it waits for that walk to land first — a post-image
+// captured mid-walk would record a half-walked tree as the group's post state and clear the
+// redo stack the walk is about to fill. When ctx ends before the walk lands it returns
+// ctx.Err() having closed and saved nothing: the walk's own landing saves the journal.
 func (j *Journal) Close(ctx context.Context) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	if err := j.awaitWalk(ctx); err != nil {
+		return err
+	}
 	return errors.Join(j.closeGroup(ctx), j.persist())
 }
 

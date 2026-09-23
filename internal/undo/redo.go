@@ -1,6 +1,7 @@
 package undo
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -25,10 +26,13 @@ var ErrNothingToRedo = errors.New("undo: nothing to redo")
 // Ordinal counts from the oldest group still on the redo stack, so the top group's ordinal
 // is the number of redo steps available, and Generation is the stamp [Journal.Redo] must be
 // given back.
+//
+// Like [Journal.Preview] it waits for a running revert or redo to land before it reads.
 func (j *Journal) RedoPreview() (Step, bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	_ = j.awaitWalk(context.Background())
 	if len(j.redo) == 0 {
 		return Step{}, false
 	}
@@ -54,7 +58,8 @@ func (j *Journal) RedoPreview() (Step, bool) {
 // It pops before it walks and walks with the lock released, exactly as [Journal.Revert]
 // does, so a concurrent [Journal.Record] is answered rather than queued behind the
 // re-application. The generation check stays in the first hold: a stale redo must refuse
-// having touched nothing at all.
+// having touched nothing at all. As with Revert, only Record and Generation are answered
+// mid-walk; everything else waits for the walk to land (see [Journal]).
 func (j *Journal) Redo(generation uint64) (Report, error) {
 	step, err := j.takeRedoTop(generation)
 	if err != nil {
@@ -67,11 +72,13 @@ func (j *Journal) Redo(generation uint64) (Report, error) {
 }
 
 // takeRedoTop refuses a stale or empty redo and otherwise pops the group `/redo` re-applies,
-// freezing its step. It is [Journal.Redo]'s whole first hold.
+// freezing its step. It is [Journal.Redo]'s whole first hold, entered only once any earlier
+// walk has landed, so the generation it checks is the one that walk left.
 func (j *Journal) takeRedoTop(generation uint64) (walk, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	_ = j.awaitWalk(context.Background())
 	if len(j.redo) == 0 {
 		return walk{}, ErrNothingToRedo
 	}
@@ -93,6 +100,7 @@ func (j *Journal) takeRedoTop(generation uint64) (walk, error) {
 func (j *Journal) landRedone(step walk) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	defer j.landWalk()
 
 	j.groups = slices.Insert(j.groups, min(step.depth, len(j.groups)), step.group)
 	return j.persist()

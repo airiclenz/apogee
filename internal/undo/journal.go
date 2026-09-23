@@ -1,6 +1,7 @@
 package undo
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -211,6 +212,13 @@ func (g *group) snapshotted() bool { return g.pre != "" && g.post != "" }
 // [Journal.Record] arriving during the step opens a group of its own instead of mutating
 // an entry the step is reading.
 //
+// Record and Generation are the only calls a walk never delays. Every other call that reads
+// or reshapes the stacks — [Journal.Close], [Journal.MarkPre], [Journal.Preview],
+// [Journal.RedoPreview], and a second Revert or Redo — WAITS for the running walk to land
+// first (context-aware where it has a context), so a close never captures a post-image of a
+// half-walked tree, a pre-image is never taken over one, and a preview never describes a
+// stack the walk is about to change.
+//
 // Without a [Snapshotter] the stack holds this process's own funnel records, in memory and
 // nowhere else, exactly as ADR 0051 built it. With one ([WithSnapshotter] and [WithWorkspace]
 // together) each group also carries the pair of whole-tree images taken around its exchange,
@@ -230,6 +238,10 @@ type Journal struct {
 	snap       Snapshotter
 	workspace  string
 	indexPath  string
+
+	// walkDone is non-nil while a revert or a redo walks with the lock released, and is
+	// closed — then cleared — when that walk lands. [Journal.awaitWalk] parks on it.
+	walkDone chan struct{}
 }
 
 // Option configures a [Journal] at construction. The options are independent of one another
@@ -345,10 +357,14 @@ func (j *Journal) Generation() uint64 {
 // journal's recorded absolute addresses — a root-joined named path for an ordinary write,
 // the permit-pinned resolved target for an approved escape — which is what makes the
 // preview the disclosure surface the human authorises the revert from.
+//
+// A preview asked for while a revert or a redo walks waits for that walk to land, so it
+// describes the stack the walk leaves behind rather than the one it is changing.
 func (j *Journal) Preview() (Step, bool) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	_ = j.awaitWalk(context.Background())
 	if len(j.groups) == 0 {
 		return Step{}, false
 	}
@@ -391,8 +407,12 @@ type walk struct {
 // takeWalk freezes what a lock-free step needs — the group's resolver and the paths it acts
 // on, both read while the lock is still held — and stamps the journal as moved, so a
 // [Journal.Record] arriving during the walk opens a group of its own rather than joining the
-// one being walked. Callers hold the lock and have already popped g off its stack.
+// one being walked. It also marks the walk as running, which is what every call that must
+// not act mid-walk waits on ([Journal.awaitWalk]); the landing ([Journal.landWalk]) clears
+// it. Callers hold the lock, have already awaited any earlier walk, and have popped g off
+// its stack.
 func (j *Journal) takeWalk(g *group, ordinal int) walk {
+	j.walkDone = make(chan struct{})
 	j.pending = true
 	j.generation++
 	return walk{
@@ -402,6 +422,36 @@ func (j *Journal) takeWalk(g *group, ordinal int) walk {
 		ordinal: ordinal,
 		taken:   j.generation,
 		depth:   len(j.groups),
+	}
+}
+
+// awaitWalk blocks until no revert or redo is walking, releasing the lock while it waits and
+// holding it again on return, so the caller acts on the journal the walk left behind. It
+// returns ctx.Err() — with the lock held and nothing changed — when ctx ends first. It loops
+// because a second step may take the journal between the landing and the re-lock. A channel,
+// not a sync.Cond, so a caller bounded by a deadline ([Journal.Close] runs under one) can
+// stop waiting. Callers hold the lock.
+func (j *Journal) awaitWalk(ctx context.Context) error {
+	for j.walkDone != nil {
+		done := j.walkDone
+		j.mu.Unlock()
+		select {
+		case <-done:
+			j.mu.Lock()
+		case <-ctx.Done():
+			j.mu.Lock()
+			return ctx.Err()
+		}
+	}
+	return nil
+}
+
+// landWalk marks the running walk as over and wakes every call waiting on it. Every landing
+// runs it, whatever else it decides. Callers hold the lock.
+func (j *Journal) landWalk() {
+	if j.walkDone != nil {
+		close(j.walkDone)
+		j.walkDone = nil
 	}
 }
 
@@ -461,6 +511,9 @@ func runStep(w walk, d direction) Report {
 // is answered while the restores are still going on instead of queueing behind them. A
 // record that arrives mid-walk lands in a group of its own, never in the one being reverted.
 //
+// Only Record and Generation are answered mid-walk: a second Revert, a Redo, a preview or a
+// snapshot call waits for this walk to land first (see [Journal]).
+//
 // It returns [ErrNothingToUndo], and does nothing, when no group remains.
 func (j *Journal) Revert() (Report, error) {
 	step, err := j.takeTop()
@@ -474,11 +527,13 @@ func (j *Journal) Revert() (Report, error) {
 }
 
 // takeTop pops the top un-undone group and freezes its step, or reports that there is none
-// to take. It is [Journal.Revert]'s whole first hold.
+// to take. It is [Journal.Revert]'s whole first hold, entered only once any earlier walk has
+// landed, so it pops from the stack that walk left.
 func (j *Journal) takeTop() (walk, error) {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 
+	_ = j.awaitWalk(context.Background())
 	if len(j.groups) == 0 {
 		return walk{}, ErrNothingToUndo
 	}
@@ -497,6 +552,7 @@ func (j *Journal) takeTop() (walk, error) {
 func (j *Journal) landReverted(step walk) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	defer j.landWalk()
 
 	if j.generation == step.taken {
 		j.redo = append(j.redo, step.group)
