@@ -317,15 +317,16 @@ func (e lineEditor) textWithCaret() string {
 // widget's own LineInfo, which is the wrap oracle (ADR 0030 §6), so the geometry holds across
 // bubbles releases and cannot disagree with what was drawn.
 //
-// The walk is seatCaret's, aimed at a visual target instead of a logical one, and it is that
-// shape for seatCaret's reason. A bare run of CursorDowns — what this used to be — cannot cross a
+// The walk is the one seatCaret used to take, aimed at a visual target instead of a logical one
+// (seatCaret now rebuilds the value around its target instead; a VISUAL row names no offset to split
+// at, so this one still walks). A bare run of CursorDowns — what this used to be — cannot cross a
 // logical line that wraps to a PHANTOM trailing sub-line (bubbles' wrap appends one to a line
 // whose content reaches the width), because the step's column guess clamps at len(line)-1 and
 // that sub-line starts at len(line): the caret stands still, and a click below such a line lands
 // a row short. So the OUTER loop steps whole logical lines — CursorEnd, which IS the last sub-row
 // phantom included, then CursorDown, which therefore always reaches the next logical line —
 // accumulating each line's visual row count (LineInfo().Height) until the target row falls inside
-// the line the caret stands on. seatCaret's no-progress break ends it on the last logical line,
+// the line the caret stands on. A no-progress break ends it on the last logical line,
 // where a target row past the value's end clamps into the value instead of running away.
 //
 // The INNER loop then seats the residual sub-row from the line's start. CursorDown moves off a
@@ -397,47 +398,49 @@ func (e lineEditor) caretByteOffset() int {
 }
 
 // seatCaret drives the textarea caret to a LOGICAL (row, column) and re-clamps the widget's
-// internal scroll onto it — the one seat both the completion splice (caretToOffset) and the
-// auto-grow re-clamp (reseatInput) are expressed in. Like reseatCaret it re-derives none of the
-// textarea's wrap and steps whole LOGICAL lines, which is what makes both total; unlike
-// reseatCaret its target IS a logical row, so it needs no visual-row arithmetic on top.
+// internal scroll onto it — the one seat the completion splice (caretToOffset), the auto-grow
+// re-clamp (reseatInput) and the /settings line step (stepLine) are expressed in. A row outside the
+// value clamps to its first or last line and a column outside the line to that line's start or end,
+// which is where the widget's own SetCursorColumn puts such a caret.
 //
-// The step is Height-aware, and that is the whole point. bubbles' CursorDown leaves a logical line
-// only when the caret already sits on that line's LAST wrapped sub-row (RowOffset+1 >= Height);
-// anywhere above it, the step guesses the next sub-row's column as min(StartColumn+Width+2,
-// len(line)-1). A logical line that ends with a space exactly at a row boundary wraps to a PHANTOM
-// trailing sub-line (bubbles' wrap appends one), and that len(line)-1 clamp can never reach it — so
-// a walk of bare CursorDowns stands still forever on such a line: it neither crosses it nor moves at
-// all. CursorEnd first puts the caret at the end of the logical line, which IS the last sub-row
-// (phantom included) at every width, so the following CursorDown always lands on the next logical
-// line. Each pass therefore advances Line() by exactly one and the walk cannot stall or spin; the
-// break is unreachable defence, since offsetToLineCol clamps row to a line the value has.
+// It costs one pass over the draft, and that is the whole point: bubbles v2.1.0 has no row setter
+// (the row is unexported, only the column is settable), so the seat this replaced walked there —
+// CursorEnd+CursorDown once per logical line above the target — and every CursorDown re-counted
+// every visual row above the caret to reposition the view, O(lines²) per seat. A 40k-character
+// paste spent most of its time here, because the box grows under a paste and every height change
+// re-seats (reseatInput). Instead the value is split at the target and rebuilt around it: the TAIL
+// is set as the whole value, MoveToBegin stands the caret at its start, and inserting the HEAD there
+// leaves the caret exactly after it — at (row, col). The rebuilt value is the same text (it was the
+// widget's own, already through its sanitizer, so the second pass changes nothing), and the widget
+// still re-derives all its own wrap: no wrap arithmetic of apogee's own enters the seat.
 //
-// MoveToBegin unscrolls to offset 0 first, so the walk down re-clamps the offset with the least
-// scroll that keeps the caret visible (bubbles repositions only when the caret falls OUTSIDE the
-// view, so a box that just grew keeps a stale downward offset — ISSUES #2). SetCursorColumn does
-// not reposition, so the final SetHeight — at the height the box already has, hence a no-op to the
-// geometry — re-runs the widget's own repositioning on the seated caret without moving it, which is
-// what keeps a caret deep inside a wrapped line on screen.
+// The scroll lands where the walk left it. SetValue scrolls the view to the top, and neither
+// MoveToBegin nor the insert moves it, so the closing SetHeight — at the height the box already
+// has, hence a no-op to the geometry — re-runs the widget's own repositioning with the caret at its
+// target: the least scroll that keeps it visible (bubbles repositions only when the caret falls
+// OUTSIDE the view, so a box that just grew keeps a stale downward offset — ISSUES #2). The walk's
+// incremental scrolls down, each clamped by the same viewport, arrived at that same offset
+// (TestLineEditorSeatCaretMatchesTheLineWalk pins the two frame for frame).
 func (e *lineEditor) seatCaret(row, col int) {
-	e.input.MoveToBegin()
-	for e.input.Line() < row {
-		before := e.input.Line()
-		e.input.CursorEnd()  // the logical line's last wrapped sub-row, phantom included
-		e.input.CursorDown() // ⇒ the next logical line
-		if e.input.Line() == before {
-			break // unreachable: the last logical line is the last row offsetToLineCol can name
-		}
+	value := e.input.Value()
+	lines := strings.Split(value, "\n")
+	row = clampInt(row, 0, len(lines)-1)
+	cut := 0
+	for _, ln := range lines[:row] {
+		cut += len(ln) + 1 // the +1 is the '\n' that split removed
 	}
-	e.input.SetCursorColumn(col)
+	cut += byteOffsetOf(lines[row], col) // clamps a column outside the line to its start or end
+	e.input.SetValue(value[cut:])
+	e.input.MoveToBegin()
+	e.input.InsertString(value[:cut])
 	e.input.SetHeight(e.input.Height())
 }
 
 // caretToOffset drives the caret to a BYTE offset into the current value — caretByteOffset's
 // inverse, and what re-seats the caret after a completion splices over a token in the MIDDLE of a
 // draft (acceptAutocomplete), where the widget's own MoveToEnd would jump to the wrong place.
-// offsetToLineCol names the logical row and column; seatCaret walks to them. An offset past the end
-// lands at the end.
+// offsetToLineCol names the logical row and column; seatCaret seats the caret there. An offset past
+// the end lands at the end.
 func (e *lineEditor) caretToOffset(byteOff int) {
 	value := e.input.Value()
 	row, col := offsetToLineCol(value, runeOffsetOf(value, byteOff))
@@ -485,8 +488,8 @@ func (e *lineEditor) deleteSelection(sel promptSel) {
 // bubbles repositions the view only when the caret falls outside it, so a box that auto-grows keeps
 // a stale downward offset — the first content line scrolls out of sight with a phantom blank row
 // below (ISSUES #2). Re-seating the caret where it already stands is the whole fix: seatCaret
-// unscrolls to the top and walks back down, which re-clamps the offset to the current height and
-// leaves the caret exactly where it was. layout() calls this only on a height change, which never
+// scrolls to the top and repositions onto the caret, which re-clamps the offset to the current
+// height and leaves the caret exactly where it was. layout() calls this only on a height change, which never
 // happens during vertical caret navigation, so the textarea's remembered goal column is untouched.
 func (e *lineEditor) reseatInput() {
 	e.seatCaret(e.input.Line(), e.input.Column())

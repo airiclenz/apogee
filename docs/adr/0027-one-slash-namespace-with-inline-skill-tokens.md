@@ -226,7 +226,10 @@ one behavioural repair on that path is decision 2's: a staged interjection now c
   appends a phantom trailing sub-line that `CursorDown` can never enter, so the old walk could
   stall — and `reseatInput`'s guard-free version could spin. `promptEditor.seatCaret` (a
   `CursorEnd`-then-`CursorDown` step, Height-aware) is now the one walk both express, and a
-  deadline-guarded test fails instead of wedging `go test` if it ever spins again. The mouse
+  deadline-guarded test fails instead of wedging `go test` if it ever spins again. (Since
+  2026-09-23 `lineEditor.seatCaret` walks no more: the walk was O(lines²) per seat, so it now
+  rebuilds the value around its target, pinned frame for frame against this walk — plan
+  `2026-09-23 - 01`, item 2.) The mouse
   path's `reseatCaret` (a click's VISUAL row) is unchanged and still lands imprecisely below a
   phantom-wrapped line — pre-existing, deliberately out of scope, and parked in `ISSUES.md`.
 - **CONTEXT.md's *Skill* entry gains the token grammar** and is cross-referenced against *File

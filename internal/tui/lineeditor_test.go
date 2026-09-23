@@ -313,3 +313,145 @@ func BenchmarkPromptKeyLongDraft(b *testing.B) {
 		m = next.(Model)
 	}
 }
+
+// Caret seating (lineEditor.seatCaret) as a function of the draft. The seat used to walk every
+// logical line above its target with CursorEnd+CursorDown, and each CursorDown re-counted every
+// visual row above the caret (the widget's repositionView): O(lines²) per seat, ~84 % of a 40k
+// bracketed paste, because the box grows under a paste and every height change re-seats the caret
+// (reseatInput). The direct seat rebuilds the value around the target instead, so the tests below
+// pin both halves of that change: the caret lands exactly where the walk put it — row, column,
+// scroll and the drawn frame — and a paste's allocations stop scaling with the square of its size.
+
+// walkSeat is the retired seat, kept as the oracle the direct one is held to: MoveToBegin, one
+// CursorEnd+CursorDown per logical line above the target, then the column and the re-clamp.
+func walkSeat(e *lineEditor, row, col int) {
+	e.input.MoveToBegin()
+	for e.input.Line() < row {
+		before := e.input.Line()
+		e.input.CursorEnd()
+		e.input.CursorDown()
+		if e.input.Line() == before {
+			break
+		}
+	}
+	e.input.SetCursorColumn(col)
+	e.input.SetHeight(e.input.Height())
+}
+
+// seatProbeField builds a narrow, short field holding value with its caret at the END and its view
+// drawn once, so the widget's viewport holds content and a scroll offset a seat has to move off.
+// Each probe builds its own: copies of one field share the widget's viewport pointer.
+func seatProbeField(value string) lineEditor {
+	e := newLineEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface), "")
+	e.input.SetWidth(seatProbeWidth)
+	e.input.SetHeight(3)
+	e.setValue(value)
+	_ = e.input.View()
+	return e
+}
+
+// seatProbeWidth is narrow enough that every probe draft soft-wraps.
+const seatProbeWidth = 12
+
+// Every row the value has, and every column of it plus one either side (the widget clamps those).
+// A row OUTSIDE the value is not compared: no caller names one (stepLine clamps, offsetToLineCol
+// clamps, reseatInput re-seats where the caret stands), and the walk did not clamp it — it ran
+// on to the last line's END, scrolling to show that line's last sub-row, before the column landed.
+// Not parallel: the table is cheap, and the fields it builds are compared frame for frame.
+func TestLineEditorSeatCaretMatchesTheLineWalk(t *testing.T) {
+	drafts := map[string]string{
+		"single":       "hello",
+		"empty":        "",
+		"multi-line":   "one\ntwo\n\nfour five\nsix",
+		"soft-wrapped": "alpha beta gamma delta epsilon\nzeta eta theta iota kappa lambda mu\nnu",
+		// A line whose content ends with a space exactly at a row boundary wraps to a PHANTOM
+		// trailing sub-line — the case a bare CursorDown walk could not cross.
+		"phantom":  "abcdefghij \nnext line here\nabcdefghij \nend",
+		"wide":     "日本語のテキストです。長い行\nplain\n😀😀😀😀😀😀😀😀",
+		"trailing": "text\n\n\n",
+	}
+	for name, draft := range drafts {
+		lines := strings.Split(draft, "\n")
+		for row := range lines {
+			width := len([]rune(lines[row]))
+			for col := -1; col <= width+1; col++ {
+				want := seatProbeField(draft)
+				walkSeat(&want, row, col)
+				got := seatProbeField(draft)
+				got.seatCaret(row, col)
+
+				if got.input.Line() != want.input.Line() || got.input.Column() != want.input.Column() {
+					t.Errorf("%s (%d,%d): seated at (%d,%d); the walk seats (%d,%d)", name, row, col,
+						got.input.Line(), got.input.Column(), want.input.Line(), want.input.Column())
+				}
+				if got.input.ScrollYOffset() != want.input.ScrollYOffset() {
+					t.Errorf("%s (%d,%d): scroll offset %d; the walk leaves %d", name, row, col,
+						got.input.ScrollYOffset(), want.input.ScrollYOffset())
+				}
+				if got.value() != draft {
+					t.Errorf("%s (%d,%d): the seat changed the value to %q", name, row, col, got.value())
+				}
+				if gv, wv := got.input.View(), want.input.View(); gv != wv {
+					t.Errorf("%s (%d,%d): frame differs from the walk's\n got: %q\nwant: %q", name, row, col, gv, wv)
+				}
+			}
+		}
+	}
+}
+
+// pasteDraft is a bracketed paste of about runes runes: numbered prose lines, each narrower than the
+// 80-column test box, so the paste grows the box and every line is a logical line the seat crosses.
+func pasteDraft(runes int) string {
+	var b strings.Builder
+	for i := 0; b.Len() < runes; i++ {
+		fmt.Fprintf(&b, "%d the quick brown fox jumps over the lazy dog\n", i)
+	}
+	return b.String()
+}
+
+// pasteAllocs is the allocations one bracketed paste of about runes runes costs through the prompt's
+// own route (Model.foldPaste → layout → reseatInput), on a fresh empty prompt.
+func pasteAllocs(t *testing.T, runes int) uint64 {
+	t.Helper()
+	m := newTestModel(t)
+	msg := tea.PasteMsg{Content: pasteDraft(runes)}
+	var stats runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&stats)
+	before := stats.Mallocs
+	next, _ := m.Update(msg)
+	runtime.ReadMemStats(&stats)
+	runtime.KeepAlive(next)
+	return stats.Mallocs - before
+}
+
+// Not parallel: Mallocs is process-wide, and a neighbour's allocations would be read as this one's.
+func TestPromptPasteAllocsScaleLinearly(t *testing.T) {
+	const shortRunes, longRunes, maxRatio = 4000, 40000, 40.0
+
+	short := pasteAllocs(t, shortRunes)
+	long := pasteAllocs(t, longRunes)
+
+	if ratio := float64(long) / float64(short); ratio > maxRatio {
+		t.Fatalf("a %d-rune paste allocates %d, %.1f× the %d of a %d-rune paste; want ≤ %.0f×",
+			longRunes, long, ratio, short, shortRunes, maxRatio)
+	}
+}
+
+// BenchmarkPromptPaste is one 40k-rune bracketed paste folded into an empty prompt through
+// Model.Update — the widget's insert, the box's re-flow and the caret's re-seat together.
+func BenchmarkPromptPaste(b *testing.B) {
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+	msg := tea.PasteMsg{Content: pasteDraft(40000)}
+	b.ResetTimer()
+
+	for range b.N {
+		b.StopTimer()
+		fresh := m
+		fresh.input.SetValue("")
+		b.StartTimer()
+		fresh.Update(msg)
+	}
+}

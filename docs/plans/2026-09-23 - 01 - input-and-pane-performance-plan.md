@@ -66,7 +66,12 @@ Recast at the regression check (2026-09-23).
 **Acceptance:** `go build ./... && go test -race -count=1 -run 'LineEditor|Prompt' ./internal/tui/`
 **Commit:** `perf(tui): the prompt textarea keeps its wrap cache on drafts over 99 lines`
 
-## 2. Caret seating is linear in the draft
+## 2. Caret seating is linear in the draft — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): consequential edit — docs/adr/0027-one-slash-namespace-with-inline-skill-tokens.md: made necessary by seatCaret no longer walking (the ADR said `seatCaret` "is now the one walk"); a dated parenthetical records the change, the decision text stays.
+NOTES (2026-09-23): the walk-equivalence table covers every row the value has (and every column plus one either side); for a row OUTSIDE the value the old walk ran to the last line's end before the column landed, leaving a larger scroll than needed, while the direct seat clamps the row and scrolls the least. No caller names such a row (stepLine and offsetToLineCol clamp, reseatInput re-seats in place), so no observed behaviour changes.
+NOTES (2026-09-23): the paste allocation ratio (40k vs 4k) is ~19× after the change against ~422× before; the test allows 40×. The part above linear is the widget's 99-slot wrap memo: foldPaste sizes it to the draft BEFORE the paste, so a 900-line paste misses the memo on each full pass while a 90-line one fits. Not caused by this item.
+NOTES (2026-09-23): `-race` cannot run on this host (ThreadSanitizer: unsupported VMA range, 47-bit VMA); the Acceptance was run without `-race`, and `make test` with APOGEE_TEST_RACE=0.
 
 **What:**
 Depends on item 1.
