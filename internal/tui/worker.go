@@ -82,7 +82,7 @@ func (w *worker) finish() {
 // between Steps (a nil box is simply an Exchange nothing can be interjected into). notify sends a
 // per-Turn snapshot and the interjection-delivery report into the running program (Run wires it to
 // the Bridge's late-bound sender); a nil notify disables per-Turn saves, which is exactly what the
-// seam tests that drive driveExchange in isolation pass. flush empties the sink's token-coalescing
+// seam tests that drive driveExchange in isolation pass. flush empties the sink's delta-coalescing
 // buffer at each Step boundary (Run wires it to the Bridge's sink; nil is a drive with no sink
 // behind it) — see stepToBoundary.
 func startExchange(parent context.Context, eng Engine, input domain.UserInput, box *interjectBox, notify func(tea.Msg), flush func()) (tea.Cmd, context.CancelFunc) {
@@ -171,8 +171,8 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 // future terminal status). The StepStatus set is open; only StatusTurnComplete continues.
 //
 // Every Step is followed immediately by flush, before its outcome is read: the teaSink coalesces
-// adjacent tokens behind a short window (sink.go), and this is the boundary that makes that window
-// a within-Step affair. It runs on EVERY path out of a Step — a fault, a completed Turn, a cancel —
+// adjacent tokens (and adjacent reasoning deltas) behind a short window (sink.go), and this is the
+// boundary that makes that window a within-Step affair. It runs on EVERY path out of a Step — a fault, a completed Turn, a cancel —
 // because the cancel path is the one no event would cover: a Turn Esc interrupted mid-stream emits
 // nothing further, so the tail of the stream would otherwise ride the window timer and land after
 // the Model had already folded cancelledMsg (see teaSink.flush).

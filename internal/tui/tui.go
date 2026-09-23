@@ -1813,10 +1813,10 @@ func Build(
 	// Model persists between Steps without any exported API. Bind (below) resolves it to the
 	// live program before the first worker can fire.
 	m := newModel(ctx, eng, opts, br.prog.send)
-	// The Step-boundary flush: the Sink coalesces adjacent tokens behind a short window, and the
-	// worker empties that buffer the instant a Step returns, so no token is ever delivered after
-	// the Step that emitted it (worker.go, sink.go). It is wired HERE rather than through newModel
-	// because the sink is the Bridge's, and Build is where the two meet.
+	// The Step-boundary flush: the Sink coalesces adjacent tokens (and reasoning deltas) behind a
+	// short window, and the worker empties that buffer the instant a Step returns, so no token is
+	// ever delivered after the Step that emitted it (worker.go, sink.go). It is wired HERE rather
+	// than through newModel because the sink is the Bridge's, and Build is where the two meet.
 	m.flushEvents = br.sink.flush
 	// The mailbox registrar: every box the Model installs is handed to the Bridge, whose
 	// InterjectionPending the composition root installs as Config.InterjectionPending — so the

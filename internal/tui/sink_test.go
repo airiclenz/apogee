@@ -280,3 +280,164 @@ func TestSinkForwardsSeamClosedWithoutTheLiveValue(t *testing.T) {
 		t.Errorf("the caller's own event was rewritten: Value = %#v", ev.Value)
 	}
 }
+
+// TestTeaSinkCoalescesReasoningDeltas proves reasoning deltas merge the way tokens do: a burst of
+// ReasoningEvents under one EventBase reaches the program as ONE ReasoningEvent carrying the text
+// joined in order — one /thinking repaint per window instead of one per provider delta.
+func TestTeaSinkCoalescesReasoningDeltas(t *testing.T) {
+	t.Parallel()
+	sink, prog := newBufferingSink(t)
+	base := domain.EventBase{Depth: 0, Turn: 3}
+
+	for _, chunk := range []string{"Let", " me", " think", " about", " this."} {
+		sink.Emit(domain.ReasoningEvent{EventBase: base, Text: chunk})
+	}
+	sink.flush()
+
+	want := []domain.Event{domain.ReasoningEvent{EventBase: base, Text: "Let me think about this."}}
+	if got := prog.events(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %#v; want %#v", got, want)
+	}
+}
+
+// TestTeaSinkNeverMergesReasoningAcrossKinds proves the kind is part of the merge key. One Turn's
+// reasoning and visible tokens share an EventBase exactly, so a buffer keyed on the EventBase alone
+// would fold thinking into the reply; here every change of kind — and the interleaved tool call —
+// flushes first, so the program sees the runs in emission order, each merged only within itself.
+func TestTeaSinkNeverMergesReasoningAcrossKinds(t *testing.T) {
+	t.Parallel()
+	sink, prog := newBufferingSink(t)
+	base := domain.EventBase{Depth: 0, Turn: 1}
+
+	for _, e := range []domain.Event{
+		domain.ReasoningEvent{EventBase: base, Text: "hm"},
+		domain.ReasoningEvent{EventBase: base, Text: "m"},
+		domain.TokenEvent{EventBase: base, Text: "So"},
+		domain.TokenEvent{EventBase: base, Text: " yes"},
+		domain.ReasoningEvent{EventBase: base, Text: "wait"},
+		domain.ToolCallEvent{EventBase: base},
+		domain.ReasoningEvent{EventBase: base, Text: "after"},
+		domain.ReasoningEvent{EventBase: base, Text: " tool"},
+	} {
+		sink.Emit(e)
+	}
+	sink.flush()
+
+	want := []domain.Event{
+		domain.ReasoningEvent{EventBase: base, Text: "hmm"},
+		domain.TokenEvent{EventBase: base, Text: "So yes"},
+		domain.ReasoningEvent{EventBase: base, Text: "wait"},
+		domain.ToolCallEvent{EventBase: base},
+		domain.ReasoningEvent{EventBase: base, Text: "after tool"},
+	}
+	if got := prog.events(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %#v; want %#v", got, want)
+	}
+}
+
+// TestTeaSinkNeverMergesReasoningAcrossRuns proves two concurrent siblings' thinking stays apart:
+// they share a Depth and a Turn but not a spawning call id, and the call id is what keeps one
+// delegate's reasoning out of the other's record (ADR 0039).
+func TestTeaSinkNeverMergesReasoningAcrossRuns(t *testing.T) {
+	t.Parallel()
+	sink, prog := newBufferingSink(t)
+	a := domain.EventBase{Depth: 1, Turn: 1, CallID: "call-a"}
+	b := domain.EventBase{Depth: 1, Turn: 1, CallID: "call-b"}
+
+	for _, e := range []domain.Event{
+		domain.ReasoningEvent{EventBase: a, Text: "a1"},
+		domain.ReasoningEvent{EventBase: a, Text: "a2"},
+		domain.ReasoningEvent{EventBase: b, Text: "b1"},
+		domain.ReasoningEvent{EventBase: a, Text: "a3"},
+	} {
+		sink.Emit(e)
+	}
+	sink.flush()
+
+	want := []domain.Event{
+		domain.ReasoningEvent{EventBase: a, Text: "a1a2"},
+		domain.ReasoningEvent{EventBase: b, Text: "b1"},
+		domain.ReasoningEvent{EventBase: a, Text: "a3"},
+	}
+	if got := prog.events(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("events = %#v; want %#v", got, want)
+	}
+}
+
+// thinkingTextOf feeds every ReasoningEvent in events to a fresh board, as the Model's fold does,
+// and returns the one run's in-flight record text.
+func thinkingTextOf(t *testing.T, events []domain.Event) string {
+	t.Helper()
+	var board thinkingBoard
+	for _, e := range events {
+		r, ok := e.(domain.ReasoningEvent)
+		if !ok {
+			t.Fatalf("non-reasoning event %#v", e)
+		}
+		board.append(r.Text, runOf(r.EventBase), r.Turn)
+	}
+	if len(board.live) != 1 {
+		t.Fatalf("board holds %d live records; want 1", len(board.live))
+	}
+	return board.live[0].text
+}
+
+// TestTeaSinkReasoningMergeKeepsTheThinkingRecord proves the merge is invisible to the /thinking
+// board wherever every chunk carries whole escapes and whole runes: the record built from the one
+// merged event is byte-identical to the record the unmerged deltas build.
+func TestTeaSinkReasoningMergeKeepsTheThinkingRecord(t *testing.T) {
+	t.Parallel()
+	base := domain.EventBase{Depth: 0, Turn: 2}
+	var deltas []domain.Event
+	for _, chunk := range []string{"Plan: ", "read \x1b[1mfile\x1b[0m", ", then ", "héllo — ", "日本語", " done.\n"} {
+		deltas = append(deltas, domain.ReasoningEvent{EventBase: base, Text: chunk})
+	}
+
+	sink, prog := newBufferingSink(t)
+	for _, e := range deltas {
+		sink.Emit(e)
+	}
+	sink.flush()
+	merged := prog.events()
+	if len(merged) != 1 {
+		t.Fatalf("sink delivered %d events; want 1 merged: %#v", len(merged), merged)
+	}
+
+	if got, want := thinkingTextOf(t, merged), thinkingTextOf(t, deltas); got != want {
+		t.Fatalf("merged record = %q; unmerged record = %q", got, want)
+	}
+}
+
+// TestTeaSinkReasoningMergeStripsASplitEscapeWhole pins the one place the merge changes what the
+// board holds: an escape sequence the provider split across two deltas. Unmerged, each half is
+// stripped on its own and the CSI's tail survives as literal text; merged, the seam sees the whole
+// sequence and strips all of it — the same edge the token path has always had.
+func TestTeaSinkReasoningMergeStripsASplitEscapeWhole(t *testing.T) {
+	t.Parallel()
+	base := domain.EventBase{Depth: 0, Turn: 1}
+	sink, prog := newBufferingSink(t)
+	sink.Emit(domain.ReasoningEvent{EventBase: base, Text: "red \x1b[3"})
+	sink.Emit(domain.ReasoningEvent{EventBase: base, Text: "1mtext"})
+	sink.flush()
+
+	if got, want := thinkingTextOf(t, prog.events()), "red text"; got != want {
+		t.Fatalf("merged record = %q; want %q", got, want)
+	}
+}
+
+// BenchmarkTeaSinkReasoningBurst measures one window's worth of reasoning deltas through the sink:
+// the whole burst lands as a single Msg, however many deltas the provider split it into.
+func BenchmarkTeaSinkReasoningBurst(b *testing.B) {
+	base := domain.EventBase{Depth: 0, Turn: 1}
+	b.ReportAllocs()
+	for b.Loop() {
+		prog := newStubProgram()
+		ref := &programRef{}
+		ref.bind(prog)
+		sink := &teaSink{prog: ref, window: time.Hour}
+		for range 64 {
+			sink.Emit(domain.ReasoningEvent{EventBase: base, Text: "a reasoning delta "})
+		}
+		sink.flush()
+	}
+}

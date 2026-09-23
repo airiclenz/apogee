@@ -185,7 +185,11 @@ Depends on items 6 and 7.
 **Acceptance:** `go test -race -count=1 -run 'Paint|Overlay|Settle|Thinking|ReachesLayout|EveryFramePaneHasASpec' ./internal/tui/`
 **Commit:** `perf(tui): render each open pane once per frame`
 
-## 9. Reasoning deltas coalesce like tokens
+## 9. Reasoning deltas coalesce like tokens — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): consequential edit — docs/adr/0011-tui-is-a-thin-renderer-over-a-worker-goroutine-engine.md: made necessary by extending the sink's coalescing to ReasoningEvent (dated note under C2, as the plan's regression guard asks)
+NOTES (2026-09-23): internal/tui/transcript.go left unchanged: its only coalescing mention (streamChunkBytes, "one per 30 ms flush") is about the visible-token stream buffer and stays true; nothing there calls the buffer token-only
+NOTES (2026-09-23): the Acceptance command's -race flag cannot run on this Pi (ThreadSanitizer "unsupported VMA range", 47-bit VMA); the same selection passed without -race
 
 **What:**
 **Goal:** consecutive `ReasoningEvent`s for the same EventBase (Depth, Turn, CallID) that queue up in the TUI sink reach `Update` as one message carrying their concatenated text in order; events for different runs/blocks, and any interleaved non-reasoning event, keep their order and are never merged across.

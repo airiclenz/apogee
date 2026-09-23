@@ -81,9 +81,9 @@ type Model struct {
 	sessions SessionHost   // persists the session per-Turn, at idle, and on quit; nil ⇒ off
 	notify   func(tea.Msg) // sends a Msg into the running program from the worker goroutine (the per-Turn snapshot)
 
-	// flushEvents empties the teaSink's token-coalescing buffer (sink.go). The worker calls it the
-	// moment each Step returns, so a coalesced token can never be delivered after the Step that
-	// emitted it — see stepToBoundary. Only Run can wire it, because the Bridge owns the sink; it
+	// flushEvents empties the teaSink's delta-coalescing buffer (sink.go). The worker calls it the
+	// moment each Step returns, so a coalesced token or reasoning delta can never be delivered
+	// after the Step that emitted it — see stepToBoundary. Only Run can wire it, because the Bridge owns the sink; it
 	// stays nil in the model tests, which inject eventMsg past the sink entirely.
 	flushEvents func()
 

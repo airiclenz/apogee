@@ -18,10 +18,17 @@ import (
 //
 // Delivery is lossless: no Event's content is ever dropped or reordered — the correctness floor
 // the bench-side ordering and the TUI both want. It is not, however, one-Msg-per-Event: adjacent
-// TokenEvents sharing an EventBase are coalesced — their text accumulates for a short window
-// (tokenCoalesceWindow) and lands as a single TokenEvent — which is the option phase-2 detail
-// plan §3 C2 held in reserve, taken because a provider emits one delta per visible byte-run
-// (internal/agent/loop.go) and every Msg costs the TUI a transcript render. Every other variant
+// deltas of one kind sharing an EventBase are coalesced — TokenEvents with TokenEvents,
+// ReasoningEvents with ReasoningEvents — their text accumulates for a short window
+// (tokenCoalesceWindow) and lands as a single Event of that kind — which is the option phase-2
+// detail plan §3 C2 held in reserve, taken because a provider emits one delta per visible
+// byte-run (internal/agent/loop.go) and every Msg costs the TUI a render (the transcript for a
+// token, the /thinking pane for a reasoning chunk). The kind is part of the merge key because
+// the reasoning and visible tokens of one Turn share an EventBase: a change of kind flushes, so
+// the two streams never merge into one another. Merging is coalescing, never dropping, with one
+// visible edge: the receiving seam strips escapes over the merged text, so an escape sequence
+// the provider split across two deltas is stripped whole rather than leaving its tail behind as
+// literal text (the token path has always had this over sink-merged tokens). Every other variant
 // flushes the open buffer ahead of itself, so what the Update loop sees is exactly the order the
 // engine emitted; flush() closes the window at the Step boundary, so a stream never spills past
 // the Step that produced it.
@@ -32,15 +39,19 @@ type teaSink struct {
 	// goroutine and the timer goroutine can never interleave halfway through a delivery:
 	// whatever order two goroutines take the lock in is the order the Update loop sees.
 	mu sync.Mutex
-	// pending is the accumulated TokenEvent text — a plain string, never a strings.Builder,
+	// pending is the accumulated delta text — a plain string, never a strings.Builder,
 	// per this package's no-copy-type hygiene (ADR 0011, doc.go).
 	pending string
-	// base is the (Depth, Turn, run identity) the pending text belongs to. Only tokens sharing
-	// all three may merge: a sub-agent's stream (Depth > 0) nests inside the parent's and is a
+	// base is the (Depth, Turn, run identity) the pending text belongs to. Only deltas sharing
+	// all three — and reasoning, below — may merge: a sub-agent's stream (Depth > 0) nests inside the parent's and is a
 	// different block in the transcript, a Turn boundary is a commit point, and two children of
 	// one reply share a depth but not a spawning call id (domain.EventBase.CallID), so the id is
 	// what keeps concurrent siblings' text from merging into one another's block (ADR 0039).
 	base domain.EventBase
+	// reasoning is the kind of the open buffer: true for ReasoningEvent text, false for
+	// TokenEvent text. It is part of the merge key beside base, because one Turn's reasoning and
+	// visible tokens share an EventBase and must never merge into one another.
+	reasoning bool
 	// buffering says a buffer is open, which an empty pending string cannot: a zero-length
 	// token must still be delivered rather than silently swallowed.
 	buffering bool
@@ -48,7 +59,7 @@ type teaSink struct {
 	// (its buffer was already flushed by an Emit) returns instead of cutting the NEXT
 	// buffer's window short.
 	gen uint64
-	// timer closes the current window. It is armed by the token that opens a buffer and
+	// timer closes the current window. It is armed by the delta that opens a buffer and
 	// never re-armed while that buffer grows, so a continuous stream still flushes once
 	// per window rather than sliding forever.
 	timer *time.Timer
@@ -56,9 +67,9 @@ type teaSink struct {
 	window time.Duration
 }
 
-// tokenCoalesceWindow is how long adjacent tokens may accumulate before the buffer is
+// tokenCoalesceWindow is how long adjacent deltas (tokens or reasoning) may accumulate before the buffer is
 // delivered: about two frames at 60 fps — imperceptible as latency, and it caps
-// token-driven repaints near ~33/s no matter how fast the provider streams.
+// delta-driven repaints near ~33/s no matter how fast the provider streams.
 const tokenCoalesceWindow = 30 * time.Millisecond
 
 // teaSink is the engine's EventSink.
@@ -67,9 +78,10 @@ var _ domain.EventSink = (*teaSink)(nil)
 // Emit forwards e to the Update loop as an eventMsg. It is called synchronously on the Step
 // goroutine, in Turn order; the async Send keeps the loop moving.
 //
-// Adjacent TokenEvents are coalesced (see the type doc): a token joins the open buffer,
-// anything else delivers that buffer first and then itself. The flush-before is not a
-// nicety — every other variant depends on the tokens that preceded it: StreamResetEvent
+// Adjacent TokenEvents, and adjacent ReasoningEvents, are coalesced (see the type doc): a delta
+// joins the open buffer when it matches its kind and EventBase, and anything else delivers that
+// buffer first and then itself. The flush-before is not a nicety — every other variant depends
+// on the deltas that preceded it: StreamResetEvent
 // discards them, MessageEvent/ToolCallEvent commit them as narration, and UsageEvent times
 // the generation the first token started.
 //
@@ -80,8 +92,12 @@ var _ domain.EventSink = (*teaSink)(nil)
 // Seam and Fired and a nil Value. The caller's own copy is untouched: a Reaction Runner wrapping
 // this sink matches on the value it was handed, not on what was forwarded.
 func (s *teaSink) Emit(e domain.Event) {
-	if tok, ok := e.(domain.TokenEvent); ok {
-		s.emitToken(tok)
+	switch d := e.(type) {
+	case domain.TokenEvent:
+		s.emitDelta(d.EventBase, d.Text, false)
+		return
+	case domain.ReasoningEvent:
+		s.emitDelta(d.EventBase, d.Text, true)
 		return
 	}
 	if seam, ok := e.(domain.SeamClosedEvent); ok {
@@ -94,23 +110,25 @@ func (s *teaSink) Emit(e domain.Event) {
 	s.prog.send(eventMsg{Event: e})
 }
 
-// emitToken merges tok into the open buffer, or opens a new one when nothing is buffered or
-// the stream moved to another (Depth, Turn, run identity). Nothing is delivered here unless a boundary
-// forces it: the window timer does the delivering.
-func (s *teaSink) emitToken(tok domain.TokenEvent) {
+// emitDelta merges one delta's text into the open buffer, or opens a new one when nothing is
+// buffered or the stream moved to another (Depth, Turn, run identity) or another kind (reasoning
+// versus visible tokens). Nothing is delivered here unless a boundary forces it: the window timer
+// does the delivering.
+func (s *teaSink) emitDelta(base domain.EventBase, text string, reasoning bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.buffering && s.base != tok.EventBase {
+	if s.buffering && (s.base != base || s.reasoning != reasoning) {
 		s.flushLocked()
 	}
 	if !s.buffering {
 		s.buffering = true
-		s.base = tok.EventBase
+		s.base = base
+		s.reasoning = reasoning
 		s.gen++
 		gen := s.gen
 		s.timer = time.AfterFunc(s.coalesceWindow(), func() { s.closeWindow(gen) })
 	}
-	s.pending += tok.Text
+	s.pending += text
 }
 
 // flush delivers whatever is buffered right now. It is the Step boundary's flush: the worker
@@ -143,7 +161,8 @@ func (s *teaSink) closeWindow(gen uint64) {
 	s.flushLocked()
 }
 
-// flushLocked delivers the buffered tokens as one TokenEvent and closes the buffer. The
+// flushLocked delivers the buffered deltas as one Event of the buffer's kind — a TokenEvent or a
+// ReasoningEvent — and closes the buffer. The
 // caller holds mu. It is a no-op when nothing is buffered, so every boundary can call it
 // unconditionally.
 //
@@ -153,9 +172,13 @@ func (s *teaSink) flushLocked() {
 	if !s.buffering {
 		return
 	}
-	merged := domain.TokenEvent{EventBase: s.base, Text: s.pending}
+	var merged domain.Event = domain.TokenEvent{EventBase: s.base, Text: s.pending}
+	if s.reasoning {
+		merged = domain.ReasoningEvent{EventBase: s.base, Text: s.pending}
+	}
 	s.pending = ""
 	s.base = domain.EventBase{}
+	s.reasoning = false
 	s.buffering = false
 	if s.timer != nil {
 		s.timer.Stop()

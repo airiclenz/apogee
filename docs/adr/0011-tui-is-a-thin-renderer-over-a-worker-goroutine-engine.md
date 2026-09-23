@@ -54,6 +54,13 @@ Event becomes one Msg, never dropped. If `TokenEvent` flooding later shows queue
 **coalesce adjacent `TokenEvent`s** (concatenate text in a window) behind the same interface
 — *coalescing, never dropping*; do not pre-optimise.
 
+> **Note (2026-09-23).** The coalescing is built (`internal/tui/sink.go`, a 30 ms window flushed
+> at every Step boundary) and now covers `ReasoningEvent` as well as `TokenEvent`: adjacent
+> deltas of the same kind and the same `EventBase` merge, a change of kind or `EventBase` — or
+> any other Event — flushes first, so order is kept and the two streams of one Turn never merge
+> into one another. Coalescing, never dropping, still holds; the one visible edge is that an
+> escape sequence a provider split across two deltas is stripped whole at the receiving seam.
+
 **C3 — Approval is a cross-goroutine rendezvous (`uiApprover`).** `Approve(ctx, req)` sends
 an `approvalReqMsg{req, reply}` to the `Update` loop and blocks on a **buffered** (cap 1)
 reply channel: `select { case d := <-reply: return d, nil; case <-ctx.Done(): return
