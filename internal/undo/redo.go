@@ -58,8 +58,9 @@ func (j *Journal) RedoPreview() (Step, bool) {
 // It pops before it walks and walks with the lock released, exactly as [Journal.Revert]
 // does, so a concurrent [Journal.Record] is answered rather than queued behind the
 // re-application. The generation check stays in the first hold: a stale redo must refuse
-// having touched nothing at all. As with Revert, only Record and Generation are answered
-// mid-walk; everything else waits for the walk to land (see [Journal]).
+// having touched nothing at all. As with Revert, Record, Generation, BeginGroup, Wrote and Save
+// are answered mid-walk; a second Redo or Revert, a preview or a snapshot call waits for the
+// walk to land (see [Journal]).
 func (j *Journal) Redo(generation uint64) (Report, error) {
 	step, err := j.takeRedoTop(generation)
 	if err != nil {

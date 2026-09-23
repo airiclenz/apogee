@@ -212,9 +212,11 @@ func (g *group) snapshotted() bool { return g.pre != "" && g.post != "" }
 // [Journal.Record] arriving during the step opens a group of its own instead of mutating
 // an entry the step is reading.
 //
-// Record and Generation are the only calls a walk never delays. Every other call that reads
-// or reshapes the stacks — [Journal.Close], [Journal.MarkPre], [Journal.Preview],
-// [Journal.RedoPreview], and a second Revert or Redo — WAITS for the running walk to land
+// [Journal.Record], [Journal.Generation], [Journal.BeginGroup], [Journal.Wrote] and
+// [Journal.Save] never wait on a walk; Wrote and Save read the stacks as they stand, without
+// the group being walked. The calls that snapshot the tree, describe a step or take one —
+// [Journal.Close], [Journal.MarkPre], [Journal.Preview], [Journal.RedoPreview], and a
+// second Revert or Redo — WAIT for the running walk to land
 // first (context-aware where it has a context), so a close never captures a post-image of a
 // half-walked tree, a pre-image is never taken over one, and a preview never describes a
 // stack the walk is about to change.
@@ -511,8 +513,8 @@ func runStep(w walk, d direction) Report {
 // is answered while the restores are still going on instead of queueing behind them. A
 // record that arrives mid-walk lands in a group of its own, never in the one being reverted.
 //
-// Only Record and Generation are answered mid-walk: a second Revert, a Redo, a preview or a
-// snapshot call waits for this walk to land first (see [Journal]).
+// Record, Generation, BeginGroup, Wrote and Save are answered mid-walk; a second Revert, a
+// Redo, a preview or a snapshot call waits for this walk to land first (see [Journal]).
 //
 // It returns [ErrNothingToUndo], and does nothing, when no group remains.
 func (j *Journal) Revert() (Report, error) {

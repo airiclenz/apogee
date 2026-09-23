@@ -61,8 +61,9 @@
 // own rather than merging into an entry the step is reading. Where the group lands is decided
 // on the re-take: a reverted one joins the redo stack only if nothing wrote meanwhile, since
 // a write clears that stack, and a redone one goes back UNDER any group opened during the
-// walk, so `/undo` still walks the stack newest-first (ADR 0074 decision 6). Record and
-// Generation are the only calls a walk never delays: Close, MarkPre, the two previews and a
+// walk, so `/undo` still walks the stack newest-first (ADR 0074 decision 6). Record,
+// Generation, BeginGroup, Wrote and Save never wait on a walk — Wrote and Save see the stacks
+// as they stand, without the group being walked. Close, MarkPre, the two previews and a
 // second revert or redo wait for the running walk to land, so no snapshot is taken over a
 // half-walked tree and no preview describes a stack the walk is still changing.
 //
