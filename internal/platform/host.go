@@ -39,11 +39,12 @@ type hostRules struct {
 	// spaces Win32 canonicalization strips removed — reporting whether it answered. The
 	// token backend resolves each box root through it before the labelling guardrails run
 	// (resolveBoxRoots): SetNamedSecurityInfo mutates the final form, so the guardrails
-	// must judge that form, not the spelling. Like longPath it is nil in the pure rule
-	// sets and wired to the real OS resolver (GetFinalPathNameByHandle) by Current on
-	// Windows; nil means final forms cannot be resolved here, which the backend refuses
-	// on rather than guesses about.
-	finalPath func(string) (string, bool) //nolint:unused // used by the windows build (platform_windows.go, confiner_windows.go)
+	// must judge that form, not the spelling — and resolves the journal directory those
+	// guardrails fence the same way (windowsJournalFence). Like longPath it is nil in the
+	// pure rule sets and wired to the real OS resolver (GetFinalPathNameByHandle) by
+	// Current on Windows; nil means final forms cannot be resolved here, which the backend
+	// refuses a box root on rather than guesses about.
+	finalPath func(string) (string, bool)
 }
 
 // posixRules is the POSIX rule set (Linux, macOS and the other Unix targets): `sh -c`,

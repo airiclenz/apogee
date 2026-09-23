@@ -177,7 +177,7 @@ func newTokenConfinerWithoutRecovery(home string) *tokenConfiner {
 	rules := currentRules()
 	c := &tokenConfiner{
 		rules:     rules,
-		protected: windowsProtectedRoots(os.LookupEnv, userProfileRoot()),
+		protected: windowsProtectedRoots(os.LookupEnv, userProfileRoot(), windowsJournalFence(rules, home)),
 		journal:   winlabel.Open(home),
 		// The incapable caps this backend starts from and keeps if the mint below fails: no
 		// sentence (a mint refusal has no host fact the user could change) but the typed cause

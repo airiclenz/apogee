@@ -2,6 +2,7 @@ package platform
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -235,15 +236,152 @@ func TestWindowsProtectedRootsFromEnvironment(t *testing.T) {
 		return value, ok
 	}
 
-	got := windowsProtectedRoots(lookup, `C:\Users\dev`)
-	want := []string{`C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)`, `C:\Users\dev`}
-	if len(got) != len(want) {
-		t.Fatalf("protected = %v, want %v", got, want)
+	tests := []struct {
+		name       string
+		journalDir string
+		want       []string
+	}{
+		{
+			name:       "journal_dir_is_protected",
+			journalDir: `C:\Users\dev\.apogee\confinement`,
+			want: []string{`C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)`, `C:\Users\dev`,
+				`C:\Users\dev\.apogee\confinement`},
+		},
+		{
+			// No apogee home (the off-Windows and no-profile case): no journal, nothing to fence.
+			name:       "empty_journal_dir_adds_nothing",
+			journalDir: "",
+			want:       []string{`C:\Windows`, `C:\Program Files`, `C:\Program Files (x86)`, `C:\Users\dev`},
+		},
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Errorf("protected[%d] = %q, want %q", i, got[i], want[i])
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := windowsProtectedRoots(lookup, `C:\Users\dev`, tt.journalDir)
+			if len(got) != len(tt.want) {
+				t.Fatalf("protected = %v, want %v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("protected[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestWindowsBoxRootsRefusesProtectedJournalDir(t *testing.T) {
+	t.Parallel()
+
+	// Box roots reach the guardrails already resolved (resolveBoxRoots), so these are the
+	// final forms. The journal directory sits INSIDE the user profile, which the profile entry
+	// does not cover: a box rooted at ~/.apogee neither is nor contains C:\Users\dev.
+	const (
+		profile    = `C:\Users\dev`
+		apogeeHome = `C:\Users\dev\.apogee`
+		journalDir = `C:\Users\dev\.apogee\confinement`
+	)
+	noEnv := func(string) (string, bool) { return "", false }
+	fenced := windowsProtectedRoots(noEnv, profile, journalDir)
+	unfenced := windowsProtectedRoots(noEnv, profile, "")
+
+	tests := []struct {
+		name     string
+		root     string
+		wantPath string // the protected location the refusal must name; "" means accepted
+		bites    bool   // accepted when the journal directory is not fenced
+	}{
+		{name: "apogee_home_contains_journal", root: apogeeHome, wantPath: journalDir, bites: true},
+		{name: "journal_dir_itself", root: journalDir, wantPath: journalDir, bites: true},
+		{name: "journal_dir_case_variant", root: `c:\users\DEV\.apogee\CONFINEMENT`, wantPath: journalDir, bites: true},
+		// Refused today through the profile entry, so it stays but carries no bite.
+		{name: "user_profile", root: profile, wantPath: profile},
+		{name: "sibling_workspace", root: `C:\Users\dev\work`},
+		{name: "sibling_under_apogee_home", root: `C:\Users\dev\.apogee\cache`},
+	}
+
+	rules := winTestRules(nil)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			box := domain.ConfinementBox{WorkspaceRoot: tt.root}
+			got, err := windowsBoxRoots(rules, box, fenced)
+			if tt.wantPath == "" {
+				if err != nil {
+					t.Fatalf("windowsBoxRoots(%q): unexpected refusal: %v", tt.root, err)
+				}
+				if len(got) != 1 || got[0] != tt.root {
+					t.Errorf("roots = %v, want [%q]", got, tt.root)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("windowsBoxRoots(%q) = %v, nil; want a protected-location refusal", tt.root, got)
+			}
+			if !errors.Is(err, domain.ErrConfinementUnavailable) {
+				t.Errorf("err = %v; want ErrConfinementUnavailable so dispatch demotes to a forced Gate", err)
+			}
+			wantMsg := fmt.Sprintf("refusing to label %q — it is or contains the protected location %q", tt.root, tt.wantPath)
+			if !strings.Contains(err.Error(), wantMsg) {
+				t.Errorf("err = %q; want it to contain %q", err, wantMsg)
+			}
+
+			if tt.bites {
+				if _, err := windowsBoxRoots(rules, box, unfenced); err != nil {
+					t.Errorf("without the journal fence %q was refused (%v): the case proves nothing", tt.root, err)
+				}
+			}
+		})
+	}
+}
+
+func TestWindowsJournalFenceProtectedForm(t *testing.T) {
+	t.Parallel()
+
+	const home = `C:\Users\dev\.apogee`
+	const junctioned = `D:\apogee`
+	withFinal := func(final map[string]string) hostRules {
+		rules := winTestRules(nil)
+		rules.finalPath = func(p string) (string, bool) {
+			resolved, ok := final[p]
+			return resolved, ok
 		}
+		return rules
+	}
+
+	tests := []struct {
+		name  string
+		rules hostRules
+		home  string
+		want  string
+	}{
+		{name: "no_home_fences_nothing", rules: withFinal(nil), home: "", want: ""},
+		{name: "no_resolver_is_lexical", rules: winTestRules(nil), home: home, want: winlabel.JournalDir(home)},
+		{
+			name:  "existing_journal_dir_resolves_to_its_target",
+			rules: withFinal(map[string]string{winlabel.JournalDir(home): winlabel.JournalDir(junctioned)}),
+			home:  home,
+			want:  winlabel.JournalDir(junctioned),
+		},
+		{
+			// The first run: the directory is created at the first label, but the home exists.
+			name:  "missing_journal_dir_resolves_through_home",
+			rules: withFinal(map[string]string{home: junctioned}),
+			home:  home,
+			want:  winlabel.JournalDir(junctioned),
+		},
+		{name: "nothing_resolves_is_lexical", rules: withFinal(nil), home: home, want: winlabel.JournalDir(home)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := windowsJournalFence(tt.rules, tt.home); got != tt.want {
+				t.Errorf("windowsJournalFence(%q) = %q, want %q", tt.home, got, tt.want)
+			}
+		})
 	}
 }
 

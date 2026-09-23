@@ -14,8 +14,8 @@ import (
 // Nothing here confines anything. This file holds the rules that decide what the backend is
 // allowed to do before it does it: the version floor below which there is no token backend at
 // all, and the labelling guardrails that say which roots may be labelled Low — a volume root
-// may not, a root that is or contains %SystemRoot%, %ProgramFiles% or the user profile may
-// not, a root this host cannot resolve may not — plus the network-deny box the token backend
+// may not, a root that is or contains %SystemRoot%, %ProgramFiles%, the user profile or the
+// confinement journal directory may not, a root this host cannot resolve may not — plus the network-deny box the token backend
 // must fail closed on. They stay in `platform` rather than moving to winlabel with the rest of
 // the label mechanism because they are the HOST's path rules (hostRules.split/Contains)
 // applied to a box, not part of the mechanism they veto.
@@ -47,10 +47,18 @@ func belowWindowsFloor(build uint32) bool { return build < windowsFloorBuild }
 // and near-unrevertable mutation of the machine, so a box root that IS one — or that
 // CONTAINS one, which a volume root or C:\Users does — is refused rather than labelled.
 //
-// lookup reads the environment (nil ⇒ os.LookupEnv) and userHome is the resolved user
-// profile, passed in rather than looked up so the whole guardrail is testable off Windows.
-// Empty values are dropped: an unset variable names no location and must not veto a box.
-func windowsProtectedRoots(lookup func(string) (string, bool), userHome string) []string {
+// The confinement journal directory (winlabel.JournalDir) is protected for a different
+// reason: it is the record of how to undo every label, and a box root that is or contains it
+// would label it Low — writable by the very child whose labels it records, so the child could
+// rewrite what the next Recover acts on. The user-profile entry does not cover it: a box
+// rooted INSIDE the profile (~/.apogee, ~/.apogee/confinement) neither is nor contains it.
+//
+// lookup reads the environment (nil ⇒ os.LookupEnv), userHome is the resolved user profile
+// and journalDir the resolved journal directory (windowsJournalFence), all passed in rather
+// than looked up so the whole guardrail is testable off Windows. Empty values are dropped: an
+// unset variable names no location and must not veto a box, and a backend with no apogee home
+// keeps no journal to fence.
+func windowsProtectedRoots(lookup func(string) (string, bool), userHome, journalDir string) []string {
 	if lookup == nil {
 		lookup = os.LookupEnv
 	}
@@ -76,7 +84,34 @@ func windowsProtectedRoots(lookup func(string) (string, bool), userHome string) 
 		add(value)
 	}
 	add(userHome)
+	add(journalDir)
 	return out
+}
+
+// windowsJournalFence returns the confinement journal directory under the apogee home in the
+// form the labelling guardrails compare: its final on-disk form when r resolves it, the
+// lexical form otherwise. Box roots reach the guardrails already resolved (resolveBoxRoots),
+// so a journal directory reached through a junction must be judged by its target too.
+//
+// The directory need not exist yet — WriteJournal creates it at the first label — so when it
+// does not resolve, the apogee home is resolved instead and the directory name joined back
+// on; only when neither resolves is the lexical path used. An empty home yields "", which
+// windowsProtectedRoots drops: that backend keeps no journal and refuses every label anyway.
+func windowsJournalFence(r hostRules, home string) string {
+	if home == "" {
+		return ""
+	}
+	dir := winlabel.JournalDir(home)
+	if r.finalPath == nil {
+		return dir
+	}
+	if final, ok := r.finalPath(dir); ok {
+		return final
+	}
+	if final, ok := r.finalPath(home); ok {
+		return winlabel.JournalDir(final)
+	}
+	return dir
 }
 
 // windowsBoxRoots resolves box to the minimal set of non-overlapping roots the backend
@@ -92,7 +127,7 @@ func windowsProtectedRoots(lookup func(string) (string, bool), userHome string) 
 //     read as "outside the guardrail" here, i.e. it would wave the path through the fence.
 //   - A volume root (C:\, \\server\share). Nothing above the box may be labelled.
 //   - A root that is, or contains, a protected location (%SystemRoot%, %ProgramFiles%,
-//     the user-profile root, …).
+//     the user-profile root, the confinement journal directory, …).
 //
 // Surviving roots are then collapsed: a root nested inside another is dropped, because a
 // tree labelled twice would be journalled twice and restored inconsistently. Duplicates

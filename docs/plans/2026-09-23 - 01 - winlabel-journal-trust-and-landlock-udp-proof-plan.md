@@ -119,7 +119,10 @@ internal/platform/winlabel/walk_other_test.go — TestNonWindowsProcessAliveSpar
 - `GOOS=windows go test -c -o /dev/null ./internal/platform/`
 **Commit:** `fix(winlabel): a journal owner is alive only while its PID and creation time both match`
 
-## 5. A Windows box root may not contain the confinement journal directory
+## 5. A Windows box root may not contain the confinement journal directory — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): windowsJournalFence (winguard.go, pure over hostRules) resolves the journal dir through rules.finalPath; when the dir does not exist yet (first run — WriteJournal creates it at the first label) it resolves the apogee home and joins `confinement` back on before falling back to the lexical form. The plan named only "finalPath when it exists, lexical otherwise"; the home step keeps a junctioned ~/.apogee fenced on first run.
+NOTES (2026-09-23): consequential edit — internal/platform/host.go: made necessary by windowsJournalFence reading hostRules.finalPath on every OS; the field's `//nolint:unused // used by the windows build` directive became false and was dropped, and its doc comment now names the journal-dir resolution.
 
 **What:**
 **Goal:** on Windows, confining a box whose writable root is, or is an ancestor of, `winlabel.JournalDir(home)` is refused through the same protected-roots refusal (and message shape) that `windowsProtectedRoots` already produces. The refusal names the resolved root.
