@@ -134,7 +134,10 @@ and the `max %d` counterpart from `MaxSubprocessTimeout`.
 
 **Commit:** `test(tools): terminal and python_exec pin the timeout figures their schemas render`
 
-## 4. The absurd-/Size allocation ceiling bites on a parse that would allocate
+## 4. The absurd-/Size allocation ceiling bites on a parse that would allocate — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the classic-trailer case TestExtractPDF_RefusesAnAbsurdXrefSize now runs under t.Parallel() — with its TotalAlloc ceiling dropped it measures nothing, so the file's serial rule for allocation-measured cases no longer applies to it.
+NOTES (2026-09-23): bite check run — with refuseAbsurdObjectCount short-circuited to "" the new case fails on the ceiling (64026808 bytes allocated against 8388608) as well as on the message; pdf.go restored afterwards.
 
 **What.** Test-only. `TestExtractPDF_RefusesAnAbsurdXrefSize` measures an 8 MiB `TotalAlloc` ceiling,
 but its fixture (`testdata/minimal.pdf`, a classic `xref`/`trailer`) makes an unrefused parse allocate

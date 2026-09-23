@@ -453,22 +453,18 @@ func TestExtractPDF_CapsAPhantomPageCount(t *testing.T) {
 	}
 }
 
-// TestExtractPDF_RefusesAnAbsurdXrefSize pins the guard that runs BEFORE the parser (F-25): the
-// cross-reference table is allocated one entry per DECLARED object, so a document naming four
-// billion of them sizes the agent's memory from its own trailer. The fixture is a real,
-// otherwise-readable document with only that number rewritten, so the refusal can come from
-// nothing but the declared count.
+// TestExtractPDF_RefusesAnAbsurdXrefSize pins the guard that runs BEFORE the parser (F-25) on a
+// classic trailer: a document naming four billion objects is refused on the declared count alone.
+// The fixture is a real, otherwise-readable document with only that number rewritten, so the
+// refusal can come from nothing but the declared count.
 //
-// "Before the parser allocates" is MEASURED rather than timed, the way the inflate bomb below
-// is: a wall clock only ever stood in for the allocation, and a loaded box can break a clock.
-// The allocation is measured in this serial test — no t.Parallel(), so no sibling's allocations
-// land in the delta — with a ceiling loose enough for a minimal.pdf parse and far below the four
-// billion entries the trailer asks for.
+// It asserts the refusal and nothing about allocation: a classic xref/trailer table is grown by
+// append as its rows are read, so an UNREFUSED parse of this fixture allocates nothing
+// proportional to /Size and a ceiling here could never fail. The allocation the guard prevents is
+// measured where the parser does size a table from the declared count — the xref stream, in
+// TestExtractPDF_RefusesAnAbsurdSizeInAnXrefStreamAllocation.
 func TestExtractPDF_RefusesAnAbsurdXrefSize(t *testing.T) {
-	// The refusal costs a couple of kibibytes today; eight mebibytes is thousands of times that
-	// and still nothing beside a table of four billion entries, so the ceiling stays true as the
-	// fixture and the toolchain drift.
-	const allocCeiling = 8 << 20
+	t.Parallel()
 
 	readable := readPDFFixture(t, "minimal.pdf")
 	data := bytes.Replace(readable, []byte("/Size 6"), []byte("/Size 4000000000"), 1)
@@ -476,10 +472,7 @@ func TestExtractPDF_RefusesAnAbsurdXrefSize(t *testing.T) {
 		t.Fatalf("the fixture's trailer no longer spells /Size 6; the test rewrites nothing")
 	}
 
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
 	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
-	runtime.ReadMemStats(&after)
 
 	if !strings.HasPrefix(failMessage, "could not extract text from this PDF:") {
 		t.Fatalf("failMessage = %q, want the could-not-extract message", failMessage)
@@ -493,8 +486,65 @@ func TestExtractPDF_RefusesAnAbsurdXrefSize(t *testing.T) {
 	if text != "" || pages != 0 {
 		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
 	}
+}
+
+// xrefStreamPDF assembles a document whose ONLY cross-reference section is an xref stream
+// declaring size objects: startxref points at the /Type /XRef stream object, so the parser takes
+// the readXrefStream path, which allocates its table as make([]xref, size) before it reads a row.
+// The stream is uncompressed with /W [1 2 1] and carries a single row, so neither the inflate
+// budget nor the field-width bound in preflightPDF has anything to refuse — only the declared
+// count can stop the parse.
+func xrefStreamPDF(t *testing.T, size int) []byte {
+	t.Helper()
+
+	const crossReferenceRow = "\x00\x00\x00\x00"
+	var document bytes.Buffer
+	document.WriteString("%PDF-1.5\n")
+	document.WriteString("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	document.WriteString("2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+	xref := document.Len()
+	fmt.Fprintf(&document, "3 0 obj\n<< /Type /XRef /Size %d /W [1 2 1] /Root 1 0 R /Length %d >>"+
+		"\nstream\n%s\nendstream\nendobj\n", size, len(crossReferenceRow), crossReferenceRow)
+	fmt.Fprintf(&document, "startxref\n%d\n%%%%EOF\n", xref)
+	return document.Bytes()
+}
+
+// TestExtractPDF_RefusesAnAbsurdSizeInAnXrefStreamAllocation MEASURES that the /Size guard runs
+// before the parser allocates, on the one path where the declared count sizes an allocation up
+// front: readXrefStream's make([]xref, size), about 32 bytes an entry. Two million entries is far
+// above what this few-hundred-byte file could hold, so the guard refuses it, yet small enough that
+// an unrefused parse allocates ~64 MB and still fits in memory — so the ceiling below fails if the
+// guard ever stops running first, rather than passing because the parse could not have allocated.
+//
+// The allocation is measured in this serial test — no t.Parallel(), so no sibling's allocations
+// land in the delta.
+func TestExtractPDF_RefusesAnAbsurdSizeInAnXrefStreamAllocation(t *testing.T) {
+	const (
+		declared = 2000000
+		// The refusal costs a couple of kibibytes; eight mebibytes is thousands of times that and
+		// still an eighth of the ~64 MB table an unrefused parse would allocate, so the ceiling
+		// stays true as the toolchain drifts and still bites if the guard is bypassed.
+		allocCeiling = 8 << 20
+	)
+
+	data := xrefStreamPDF(t, declared)
+	if len(data) >= declared {
+		t.Fatalf("fixture is %d bytes, want it smaller than the %d objects it declares", len(data), declared)
+	}
+
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+	runtime.ReadMemStats(&after)
+
+	if !strings.Contains(failMessage, fmt.Sprintf("declares %d objects in", declared)) {
+		t.Errorf("failMessage = %q, want the refusal naming the xref stream's declared count", failMessage)
+	}
+	if text != "" || pages != 0 {
+		t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > allocCeiling {
-		t.Errorf("refusing the trailer allocated %d bytes, want under %d: the xref table was sized from the declared count",
+		t.Errorf("refusing the xref stream allocated %d bytes, want under %d: the xref table was sized from the declared count",
 			allocated, allocCeiling)
 	}
 }
