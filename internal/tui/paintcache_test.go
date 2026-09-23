@@ -634,7 +634,8 @@ func allHitFlatFixture() *transcript {
 	tr := &transcript{}
 	for i := range allHitBlocks / 2 {
 		tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil)
-		tr.apply(domain.MessageEvent{Text: fmt.Sprintf("answer %d, long enough to wrap at least once at the width painted here", i)})
+		tr.apply(domain.MessageEvent{Text: fmt.Sprintf(
+			"answer %d, long enough to wrap at least once at the width painted here", i)})
 	}
 	return tr
 }
@@ -662,7 +663,8 @@ func allHitMultiFixture() *transcript {
 	delegate := func(spawn string) {
 		delegationCall(tr, "", spawn, "scout-"+spawn, "scout "+spawn, 0)
 		for k := range 8 {
-			delegatedRead(tr, spawn, fmt.Sprintf("%s-r%d", spawn, k), fmt.Sprintf("%s-%d.go", spawn, k), 1)
+			delegatedRead(tr, spawn, fmt.Sprintf("%s-r%d", spawn, k),
+				fmt.Sprintf("%s-%d.go", spawn, k), 1)
 		}
 	}
 	for i := range allHitBlocks / 6 {
@@ -727,8 +729,8 @@ func TestAllHitRepaintAllocatesLittlePerBlock(t *testing.T) {
 			}
 			t.Logf("%d blocks, %d B per block", blocks, bytes/uint64(blocks))
 			if per := bytes / uint64(blocks); per > maxAllHitBytesPerBlock {
-				t.Errorf("an all-hit repaint of %d blocks allocated %d KB, %d B per block; want ≤ %d B",
-					blocks, bytes>>10, per, maxAllHitBytesPerBlock)
+				t.Errorf("an all-hit repaint of %d blocks allocated %d KB, %d B per block; "+
+					"want ≤ %d B", blocks, bytes>>10, per, maxAllHitBytesPerBlock)
 			}
 		})
 	}
@@ -915,7 +917,8 @@ func TestWidgetCellsAreMeasuredOncePerPaintedBlock(t *testing.T) {
 		}
 	}
 	if overBytes == 0 {
-		t.Fatal("setup: no line overruns the limit in bytes; the fixture measures nothing either way")
+		t.Fatal("setup: no line overruns the limit in bytes; " +
+			"the fixture measures nothing either way")
 	}
 	if got := len(baseReserve(first, limit).lines); got == len(first.lines) {
 		t.Fatal("setup: the reserve broke no line; the fixture does not exercise a break")
@@ -923,7 +926,8 @@ func TestWidgetCellsAreMeasuredOncePerPaintedBlock(t *testing.T) {
 
 	var repaint renderedTranscript
 	if got := measured(func() { repaint = paint().reserveWidgetCells(limit) }); got != 0 {
-		t.Errorf("an all-hit repaint measured %d lines; want 0 (the %d byte-overrunning lines are stored)", got, overBytes)
+		t.Errorf("an all-hit repaint measured %d lines; "+
+			"want 0 (the %d byte-overrunning lines are stored)", got, overBytes)
 	}
 	sameReserve(t, "all-hit repaint", repaint, baseReserve(first, limit))
 
@@ -939,7 +943,8 @@ func TestWidgetCellsAreMeasuredOncePerPaintedBlock(t *testing.T) {
 		}
 	}
 	if want == 0 || int(got) != want {
-		t.Errorf("painting one new block measured %d lines; want its own %d over-width lines", got, want)
+		t.Errorf("painting one new block measured %d lines; want its own %d over-width lines",
+			got, want)
 	}
 	if got := measured(func() { grown.reserveWidgetCells(limit) }); got != 0 {
 		t.Errorf("the reserve over the grown paint measured %d lines; want 0", got)
@@ -973,7 +978,8 @@ func TestWidgetCellsReserveAsTheWidgetMeasures(t *testing.T) {
 					view.setRoot(root)
 					view.renderView(th, width, false, breadcrumbHint)
 					rooted := view.renderView(th, width, false, breadcrumbHint)
-					sameReserve(t, "run view", rooted.reserveWidgetCells(limit), baseReserve(rooted, limit))
+					sameReserve(t, "run view",
+						rooted.reserveWidgetCells(limit), baseReserve(rooted, limit))
 				}
 			})
 		}
@@ -987,7 +993,9 @@ func TestWidgetCellsSurviveRailedAndRetargeted(t *testing.T) {
 	t.Parallel()
 	th := newTheme(scheme.Default())
 	lines := []string{"short", strings.Repeat("x", 30) + vs16Warning}
-	p := blockPaint{lines: lines, targets: make([]lineMark, len(lines)), cells: measuredCells(lines, 10)}
+	p := blockPaint{
+		lines: lines, targets: make([]lineMark, len(lines)), cells: measuredCells(lines, 10),
+	}
 	if p.cells[0] != -1 || p.cells[1] != ansi.StringWidth(lines[1]) {
 		t.Fatalf("setup: cells = %v; want [-1 %d]", p.cells, ansi.StringWidth(lines[1]))
 	}
@@ -1009,8 +1017,10 @@ func TestWidgetCellsSurviveRailedAndRetargeted(t *testing.T) {
 	joined.add([]string{"head"}, targetHeader)
 	joined.join(p)
 	joined.add([]string{"tail"}, targetNone)
-	if len(joined.cells) != len(joined.lines) || joined.cells[0] != -1 || joined.cells[2] != p.cells[1] || joined.cells[3] != -1 {
-		t.Errorf("joined cells = %v over %d lines; want [-1 -1 %d -1]", joined.cells, len(joined.lines), p.cells[1])
+	if len(joined.cells) != len(joined.lines) || joined.cells[0] != -1 ||
+		joined.cells[2] != p.cells[1] || joined.cells[3] != -1 {
+		t.Errorf("joined cells = %v over %d lines; want [-1 -1 %d -1]",
+			joined.cells, len(joined.lines), p.cells[1])
 	}
 }
 

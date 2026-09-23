@@ -752,7 +752,8 @@ func TestTabAcceptedSkillLeavesTheBandAtOnce(t *testing.T) {
 		t.Fatalf("draft = %q, want the accepted token in it", m.input.Value())
 	}
 	if rec.calls != calls {
-		t.Fatalf("the accept ranked %d times, want the invoked id filtered without a rank", rec.calls-calls)
+		t.Fatalf("the accept ranked %d times, want the invoked id filtered without a rank",
+			rec.calls-calls)
 	}
 	for _, h := range m.skillHints {
 		if h.ID == "security-audit" {
@@ -804,7 +805,8 @@ func TestOpeningAnOverlayClearsTheBandAtOnce(t *testing.T) {
 // edit path that used to rank the whole draft on every key and now only arms the debounce tick.
 func BenchmarkBandKeystroke(b *testing.B) {
 	var rec suggestCall
-	m := newModel(context.Background(), &fakeEngine{}, withTestUI(bandOpts(gatedSuggest(&rec))), nil)
+	opts := withTestUI(bandOpts(gatedSuggest(&rec)))
+	m := newModel(context.Background(), &fakeEngine{}, opts, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	m = next.(Model)
 	m.input.SetValue(strings.Repeat("audit the parser and the lexer ", 300))

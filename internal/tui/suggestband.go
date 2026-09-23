@@ -80,7 +80,9 @@ func (m Model) scheduleSkillHints(value string) (Model, tea.Cmd) {
 	}
 	m.skillHints = withoutInvoked(m.skillHints, refs.SkillRefs(value, m.knownSkillID))
 	gen := m.skillHintGen
-	return m, tea.Tick(skillHintDelay, func(time.Time) tea.Msg { return skillHintTickMsg{gen: gen} })
+	return m, tea.Tick(skillHintDelay, func(time.Time) tea.Msg {
+		return skillHintTickMsg{gen: gen}
+	})
 }
 
 // skillHintsWanted is the recompute's own guard, named once so the edit path arms a tick exactly

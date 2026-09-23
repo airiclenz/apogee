@@ -214,7 +214,8 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	root := t.paintRoot()
 	var lines []string
 	var targets []lineTarget
-	var cells []int // the widget widths the painted blocks stored, -1 where none did (renderedTranscript.cells)
+	// the widget widths the painted blocks stored, -1 where none did (renderedTranscript.cells)
+	var cells []int
 	var userBlocks []userBlock
 	var header userBlock
 
@@ -381,7 +382,8 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// a per-branch `i += …` — the one arithmetic in the renderer whose off-by-one would silently
 		// skip a block or paint it twice.
 		block := t.resolveBlock(i, in, width, blink, root, records)
-		records = block.ins // the buffer, grown if this block needed more; the next block overwrites it
+		// the buffer, grown if this block needed more; the next block overwrites it
+		records = block.ins
 		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root.ref, block.fold)
 		appendJoined(block.isUser, block.closes, in.depth, i,
 			t.paintBlock(i, key, func() blockPaint { return block.draw(th) }))
@@ -397,7 +399,9 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	if previewAt >= 0 {
 		paintPreview(root.last)
 	}
-	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells}
+	return renderedTranscript{
+		lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells,
+	}
 }
 
 // reserveWidgetCells holds every rendered line inside limit columns in the measure the VIEWPORT
@@ -700,7 +704,8 @@ type resolvedBlock struct {
 // as [resolvedBlock.ins], which the walk passes in again for the next block, so a hit states them
 // without allocating. Nothing a hit needs is built here beyond them — the painter's own inputs (a
 // group's member rows) are built inside draw, which only a miss calls.
-func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool, root paintRoot, buf []paintInput) resolvedBlock {
+func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool,
+	root paintRoot, buf []paintInput) resolvedBlock {
 	// A descent used to be announced by a label block of its own, and then by the delegation's own
 	// header row opening a ┌─┶ frame over its span. Neither happens now: under ADR 0063 a
 	// delegation has the collapsed row it wears in this list and its run view, and no third shape
