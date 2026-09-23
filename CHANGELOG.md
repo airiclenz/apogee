@@ -10,6 +10,28 @@ point is a **minor** bump, not a breaking change.
 
 ### Added
 
+- **Faster typing in long prompt drafts.** A draft past 99 lines no longer re-wraps every line above the caret on each keystroke: the input box's wrap cache now grows with the draft (and stays bounded, so editing one very long line no longer holds a copy per keystroke). Typed newlines (alt+enter / ctrl+j, and in the `/settings` text editor) are no longer refused at 99 lines — they work up to the 10000-line limit a paste already had.
+
+- **Pasting a large block into the prompt is fast again.** Seating the caret after the prompt box grew used to walk every line above it and re-count the box's rows at each step, so the cost grew with the square of the draft; a 40k-character paste spent most of several seconds there. The caret now goes straight to its place in one pass over the draft, and lands on the same row, column and scroll as before.
+
+- **Faster typing in a long prompt draft.** The input box's row count now measures a draft in one pass over its characters whatever the window width (it used to re-measure the whole row at every word, so a long line cost its length times the width), and one keypress and its frame count the draft's rows once instead of three times.
+
+- **Typing no longer re-ranks the skill-suggestion band on every key.** A burst of edits — typing or a paste — ranks the draft once, about 150 ms after the last edit; Enter still spends the hints on screen at send time, and an emptied draft, an opened `/` or `@` menu or a Tab-accepted skill takes the row down at once (ADR 0061, 2026-09-23 amendment).
+
+- **Wrapping one very long line in the `/thinking`, advice and `/inspect` panes is linear in its length.** A segment wider than its column is decoded to runes once and cut by offset, instead of re-decoding the whole remainder at every row; a 64 KB single-line record now wraps for ~360 KB of allocation instead of ~128 MB, with identical rows (invalid UTF-8 on a cut line still reads as U+FFFD).
+
+- **The `/thinking` pane stays responsive while reasoning streams.** The pane now re-wraps only the record whose text changed since the last frame, instead of re-wrapping every retained record on every reasoning chunk; a full board (64 records of 64 KB) renders in milliseconds rather than over a second per chunk. Output is unchanged.
+
+- **Report panes render with one row layout.** The `/thinking`, `/inspect`, `/usage` and `/advice` panes now size their scroll window from row counts and reuse the first layout for the overflow bar's narrower pass, so one render lays the rows out once instead of four times; a one-column pane no longer measures every row's width. Rendered output is unchanged.
+
+- **Open panes render once per frame.** The transcript's height clamp now measures every open pane (the prompts, /sessions, the pickers, /settings, the four reports, the autocomplete) through a height query that composes the pane's spec without painting it, so an Update's repaint tail renders no pane and View renders each open one once — the `/thinking` pane was drawn three times per reasoning chunk. A report's scroll keys no longer render the pane to find its window either. Rendered output is unchanged.
+
+- **Faster `/thinking` pane while a model reasons.** Reasoning chunks that arrive in a burst now reach the screen as one update per ~30 ms window, the same way reply tokens already do, so the pane repaints once per window instead of once per chunk. Thinking and reply text are never merged into each other, and different sub-agents' thinking stays separate. One visible difference: an escape sequence the provider split across two chunks is now removed completely instead of leaving part of it behind as literal text.
+
+- **Faster repaints of long transcripts and run views.** Repainting scrollback that the paint cache already holds no longer copies the whole colour theme (≈ 32 KB) onto the heap for every block, or rebuilds a record for every entry a collapsed sub-agent run covers: an all-hit repaint of 800 blocks now allocates ≈ 0.3 MB instead of ≈ 28 MB.
+
+- **Faster repaints of a long transcript.** Each transcript block now measures its lines' on-screen width once, when it is painted, and every later repaint reuses that measure. Before, every repaint re-measured every line of the scrollback. What is drawn is unchanged.
+
 - **A copy inside tmux reaches your clipboard again.** On tmux's default `set-clipboard external`, tmux dropped the OSC 52 escape apogee writes, so a drag-select flashed "copied N chars" and nothing pasted. Inside tmux (`TMUX` set) the copy now also hands the text to `tmux load-buffer -w`, which tmux forwards to the outer terminal's clipboard; OSC 52 and the system-clipboard write are unchanged, and outside tmux no tmux process starts. `set-clipboard off` still blocks the route (apogee-tmux-copy-dropped).
 
 - **A driven test pins the OSC 52 bytes a copy writes.** A `cmd/apogee` test drags over typed prompt text and, after `--continue`, over a restored transcript row, and asserts the exact `ESC ] 52 ; c ; <base64> BEL` each copy writes to the terminal — so a copy path that stops emitting the escape fails the suite instead of silently flashing "copied N chars".
