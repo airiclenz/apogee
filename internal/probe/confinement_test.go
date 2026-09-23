@@ -52,7 +52,7 @@ func TestDegradedNotice(t *testing.T) {
 // backend reports no filesystem confinement" has to run /confine status to learn whether the probe
 // timed out on a loaded box or bwrap was never installed. The wants below are the whole string the
 // program prints, so the reason's placement is pinned and not merely its presence, and the third
-// case is the cell two shipped backends land in with nothing to say: an empty sentence keeps the
+// case is the cell three shipped backends land in with nothing to say: an empty sentence keeps the
 // pre-existing notice exactly, never a dangling "why:".
 func TestDegradedNoticeNamesTheReason(t *testing.T) {
 	t.Parallel()
@@ -78,7 +78,8 @@ func TestDegradedNoticeNamesTheReason(t *testing.T) {
 			"apogee: auto mode is gating terminal commands — the namespace backend on this host reports no\n" +
 				"  filesystem confinement, so commands cannot be fenced and fall back to approval.\n" +
 				"  why: bwrap not on PATH\n" + remedy},
-		// The no-backend stub and a closed Windows token: nothing to say, so nothing is said.
+		// The no-backend stub, a macOS without sandbox-exec and a closed Windows token: nothing
+		// to say, so nothing is said.
 		{"a backend with nothing to say", "deny",
 			domain.ConfinementCaps{Cause: domain.CauseBackendAbsent},
 			"apogee: auto mode is gating terminal commands — the deny backend on this host reports no\n" +

@@ -85,9 +85,10 @@ func availability(ok bool) string {
 // fact off the startup notice instead of having to ask a second surface for it. The wording sits
 // HERE, with this package's other two, for the reason the file header gives: three surfaces, one
 // story. An empty sentence is not a missing reason (domain.ConfinementCaps.Unavailable) but it is
-// nothing to print — the no-backend stub every OS without a real facility gets, and a Windows
-// token the session has closed, both reach this cell with nothing to say — so an empty reason
-// emits no line rather than a dangling "why:", leaving the notice exactly as it read before.
+// nothing to print — the no-backend stub every OS without a real facility gets, a macOS without
+// sandbox-exec, and a Windows token the session has closed all reach this cell with nothing to
+// say — so an empty reason emits no line rather than a dangling "why:", leaving the notice
+// exactly as it read before.
 //
 // It returns "" (no notice) in every other cell: the three lower modes make no confinement
 // promise, an already-unconfined Auto has its own louder warning at the call site, and a

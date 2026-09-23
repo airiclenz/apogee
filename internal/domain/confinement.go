@@ -74,21 +74,21 @@ type ConfinementCaps struct {
 	// the reason this backend cannot fence on this host ("landlock ABI 0: ENOSYS", "bwrap not
 	// on PATH"); empty whenever FSWrite is true, and empty too on the backends that cannot
 	// fence and have no sentence to offer (the no-backend stub every OS without a real
-	// facility gets, and a Windows token backend the session has already closed). An empty
-	// sentence is therefore NOT the absence of a reason — Cause below is set wherever FSWrite
-	// is false, including in exactly those cells, and is what a caller reads to tell the
-	// reasons apart. It is the other half of capability honesty (contract §5): a backend that
-	// cannot fence says so AND says why, so the user diagnosing a gating Auto is told which
-	// host fact to change. It is disclosure only — AutoEligible reads FSWrite alone and never
+	// facility gets, a macOS without sandbox-exec, and a Windows token backend the session
+	// has already closed). An empty sentence is therefore NOT the absence of a reason — Cause
+	// below is set wherever FSWrite is false, including in exactly those cells, and is what a
+	// caller reads to tell the reasons apart. It is the other half of capability honesty
+	// (contract §5): a backend that cannot fence says so AND says why, so the user diagnosing
+	// a gating Auto is told which host fact to change. It is disclosure only — AutoEligible reads FSWrite alone and never
 	// this.
 	Unavailable string
 
 	// Cause is the MACHINE-readable half of the same disclosure: one enumerated token naming
 	// why FSWrite is false, so a caller can tell a probe that ran out of time from a backend
 	// that was never here without matching on Unavailable's prose. Every site returning caps
-	// that cannot fence sets one — including the two whose sentence is empty — and it is empty
-	// exactly when FSWrite is true. Disclosure only, like the sentence: AutoEligible never
-	// reads it.
+	// that cannot fence sets one — including the three whose sentence is empty — and it is
+	// empty exactly when FSWrite is true. Disclosure only, like the sentence: AutoEligible
+	// never reads it.
 	Cause ConfinementCause
 }
 

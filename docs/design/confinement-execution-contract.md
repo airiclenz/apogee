@@ -870,9 +870,9 @@ sentence naming what this backend could not do on this host, rendered by `probe.
 
 `Cause` is that same *why* in a form a caller can branch on (added 2026-09-22): a small closed enum
 (`backend-absent` / `probe-timed-out` / `launch-refused`) set at **every** site returning caps with
-`FSWrite = false` — including the two whose sentence is empty, `denyConfiner` and a Windows token
-backend the session has already closed — and empty exactly where `FSWrite` is true. An empty
-`Unavailable` therefore no longer means "the backend has nothing to say"; it means the incapacity has
+`FSWrite = false` — including the three whose sentence is empty, `denyConfiner`, a macOS without
+`sandbox-exec` and a Windows token backend the session has already closed — and empty exactly
+where `FSWrite` is true. An empty `Unavailable` therefore no longer means "the backend has nothing to say"; it means the incapacity has
 no host fact worth a sentence, and the cause names it regardless. Nothing renders it —
 `probe.CapabilityLine` and the startup notice word the sentence, and `AutoEligible()` still reads
 `FSWrite` alone. It exists so a reader can tell a probe that ran out of time (the namespace rung's
