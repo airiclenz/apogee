@@ -217,6 +217,29 @@ func TestCapture_ReprobesWhenTheConfigChanges(t *testing.T) {
 	}
 }
 
+// TestCapture_ReprobesAfterAMidSessionInit pins that a probe which reached no repository is never
+// memoised: it has no file to fingerprint, so a stored empty answer would hold for the process
+// lifetime, and a `git init` plus a command-valued key made after it would let the next call run
+// the driver.
+func TestCapture_ReprobesAfterAMidSessionInit(t *testing.T) {
+	gitPath := realGit(t)
+	root := t.TempDir()
+	if err := exec.Command(gitPath, "-C", root, "rev-parse", "--git-dir").Run(); err == nil {
+		t.Skip("the temp directory sits inside a repository; the no-repository case cannot be staged")
+	}
+	if res := captureStatus(t, gitPath, root); res.ExitCode == 0 {
+		t.Fatalf("status outside any repository exited 0: %q", res.CombinedOutput)
+	}
+
+	runRealGit(t, gitPath, root, "init", "-b", "main")
+	appendToConfig(t, root, "[filter \"x\"]\n\tclean = true\n")
+	res := captureStatus(t, gitPath, root)
+
+	if want := gitexec.CommandConfigRefusal([]string{"filter.x.clean"}); res.CombinedOutput != want {
+		t.Errorf("Capture after git init = %q, want the refusal %q", res.CombinedOutput, want)
+	}
+}
+
 // TestCapture_ReprobesWhenAnAbsentIncludeAppears pins two things at once: the probe follows
 // includes at all (a scoped `git config` read follows none unless asked), and a missing include
 // — which git skips silently — is watched from the start, so the file the model creates later

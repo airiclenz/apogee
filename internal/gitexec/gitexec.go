@@ -194,7 +194,8 @@ func confinementBox(ctx context.Context) *domain.ConfinementBox {
 //
 // The probe behind that refusal is memoised per repository (commandConfigProbes) and re-run
 // only when a file that decided its answer changes, so it costs its three subprocesses once per
-// config rather than on every git call.
+// config rather than on every git call. A root no repository reaches is never memoised: it is
+// probed afresh on every call, so a `git init` made mid-session is seen by the next one.
 func Capture(ctx context.Context, gitPath, root string, timeout time.Duration, args ...string) (subprocess.SubprocessResult, error) {
 	drivers, err := probeCommandConfig(ctx, gitPath, root, nil)
 	if err != nil {
@@ -388,19 +389,29 @@ const maxNamedCommandKeys = 5
 // call, serving the cache only while every print still matches. Invalidating after the
 // write-capable calls that pass through this package instead would miss exactly that writer.
 //
+// Why a probe that reached no repository is never stored: it has no file to fingerprint — git
+// named none, and no .git path is assumed or directory printed in its place — so its empty
+// answer would hold for the process lifetime, and a `git init` in root or an ancestor followed
+// by a command-valued key would let the next git TOOL execute that program unconfined. Such a
+// probe costs one subprocess (configFiles' rev-parse) and no listing, so re-running it per call
+// is cheap.
+//
 // Two goroutines probing the same not-yet-probed key both run the probe and store the same
 // answer; the duplicated work is wasted, never the outcome.
 var commandConfigProbes sync.Map
 
-// commandConfigProbe is one memoised answer: the command-valued names the repository's own
-// config carries, and the prints of the files that decided them.
+// commandConfigProbe is one probe's answer: the command-valued names the repository's own
+// config carries, the prints of the files that decided them, and whether the probe reached a
+// repository at all — an unreached probe answers the call that ran it and is never memoised.
 type commandConfigProbe struct {
-	names  []string
-	prints []fileprint
+	names   []string
+	prints  []fileprint
+	reached bool
 }
 
 // holds reports whether every file the answer depends on still prints as it did when the probe
-// ran. No prints at all — git named no file, as a fake git in a test does — holds trivially.
+// ran. No prints at all on a reached probe — git exited zero but named no file, as a fake git in
+// a test does — holds trivially; an unreached probe is never stored, so never asked.
 func (p commandConfigProbe) holds() bool {
 	for _, print := range p.prints {
 		if !print.holds() {
@@ -456,7 +467,8 @@ func (p fileprint) holds() bool {
 //
 // A FAILED probe is never cached. Its error is the subprocess contract's — ctx cancellation or a
 // confinement-unavailable demotion — which says nothing about the repository, so caching it
-// would let one cancelled Turn refuse every later git call on that root.
+// would let one cancelled Turn refuse every later git call on that root. Nor is a probe that
+// reached no repository: its empty answer serves the call that ran it only (commandConfigProbes).
 func probeCommandConfig(ctx context.Context, gitPath, root string, env []string) ([]string, error) {
 	key := gitPath + "\x00" + root + "\x00" + strings.Join(env, "\x00")
 	if cached, ok := commandConfigProbes.Load(key); ok {
@@ -468,7 +480,9 @@ func probeCommandConfig(ctx context.Context, gitPath, root string, env []string)
 	if err != nil {
 		return nil, err
 	}
-	commandConfigProbes.Store(key, probe)
+	if probe.reached {
+		commandConfigProbes.Store(key, probe)
+	}
 	return probe.names, nil
 }
 
@@ -490,16 +504,22 @@ func probeGit(ctx context.Context, gitPath, root string, env []string, args ...s
 // The scope files are printed BEFORE the listings, so a write racing a listing shows up as a
 // mismatch on the next call rather than as a stale hit; the includes are only known afterwards.
 //
-// A non-zero exit is the pass case, not an error: git exits 128 when the scope does not apply
-// at all (root is no repository; --worktree on a git that refuses the option). The error return
+// A root no repository reaches (configFiles reports it unreached) runs no listing at all: there is
+// no repo-local config to list, and the answer comes back unreached so it is never memoised.
+//
+// A non-zero listing exit is the pass case, not an error: git exits 128 when the scope does not
+// apply (--worktree on a git that refuses the option). The error return
 // is the subprocess contract's — ctx cancellation or a confinement-unavailable demotion — and it
 // stops the caller, so a probe that could not run never lets the real command run un-probed.
 func repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []string) (commandConfigProbe, error) {
-	files, top, err := configFiles(ctx, gitPath, root, env)
+	files, top, reached, err := configFiles(ctx, gitPath, root, env)
 	if err != nil {
 		return commandConfigProbe{}, err
 	}
-	var probe commandConfigProbe
+	if !reached {
+		return commandConfigProbe{}, nil
+	}
+	probe := commandConfigProbe{reached: true}
 	for _, file := range files {
 		probe.prints = append(probe.prints, takeFileprint(file))
 	}
@@ -537,14 +557,19 @@ func repoLocalCommandConfig(ctx context.Context, gitPath, root string, env []str
 // origins are spelled from. No .git/ path is assumed: a run redirected by GIT_DIR names that
 // store's files and is fingerprinted by its own config. --show-toplevel comes LAST because it
 // dies without a work tree (a bare store) after the paths have been printed, so the exit code is
-// not consulted and the paths are read from whatever stdout holds: a relative path is relative to
-// root, a missing top (that bare store, whose origins are absolute anyway) falls back to root,
-// and a git that printed nothing names no file — and so no print, never root itself.
-func configFiles(ctx context.Context, gitPath, root string, env []string) (files []string, top string, err error) {
+// not consulted for the paths, which are read from whatever stdout holds: a relative path is
+// relative to root, and a missing top (that bare store, whose origins are absolute anyway) falls
+// back to root. A git that printed nothing names no file — and so no print, never root itself.
+//
+// reached is false only when rev-parse printed no path AND exited non-zero — root is no
+// repository, or GIT_DIR names a store not yet created. That is the one answer with nothing to
+// fingerprint, so the caller neither lists config for it nor memoises it. A zero exit that printed
+// nothing (a fake git in a test) still counts as reached.
+func configFiles(ctx context.Context, gitPath, root string, env []string) (files []string, top string, reached bool, err error) {
 	res, err := probeGit(ctx, gitPath, root, env, "rev-parse",
 		"--git-path", "config", "--git-path", "config.worktree", "--git-path", "HEAD", "--show-toplevel")
 	if err != nil {
-		return nil, "", err
+		return nil, "", false, err
 	}
 	var lines []string
 	for _, line := range strings.Split(res.Stdout, "\n") {
@@ -563,7 +588,7 @@ func configFiles(ctx context.Context, gitPath, root string, env []string) (files
 		}
 		files = append(files, filepath.Clean(line))
 	}
-	return files, top, nil
+	return files, top, len(files) > 0 || res.ExitCode == 0, nil
 }
 
 // configFileCount is how many --git-path answers configFiles asks rev-parse for ahead of the

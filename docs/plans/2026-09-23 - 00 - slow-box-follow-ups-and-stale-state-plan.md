@@ -311,7 +311,7 @@ while parked; `unblock()`; assert only that the previous group's post tree id is
 
 **Commit:** `fix(undo): snapshot calls wait for a running undo walk to land`
 
-## 9. A command-config probe that reaches no repository is never memoised
+## 9. A command-config probe that reaches no repository is never memoised — ✅ DONE (2026-09-23)
 
 **What.** Fixes `apogee-se0`: in a root no repository reaches, `configFiles` gets no path from
 `git rev-parse --git-path …`, so the memoised `commandConfigProbe` carries no prints and `holds()`
