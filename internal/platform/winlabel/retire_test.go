@@ -2,6 +2,7 @@ package winlabel
 
 import (
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"strings"
@@ -356,7 +357,7 @@ func TestRetireCarriesAForeignPriorUntilThePathIsApogeesAgain(t *testing.T) {
 // the journal keeps, not the write itself.
 func judgingRevert(read func(string) (string, error), restored *map[string]string) func(Record) ([]Entry, error) {
 	return func(r Record) ([]Entry, error) {
-		if _, _, err := judgeEntries(r.Entries, read); err != nil {
+		if _, _, err := judgeEntries(r.Entries, read, identityNeverRead); err != nil {
 			return nil, err
 		}
 		restore, handoff := restorablePriors(r, nil)
@@ -470,7 +471,7 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 			t.Parallel()
 
 			alive := func(pid int) bool { return tt.live[pid] }
-			got, _ := revertibleRoots(journal, tt.siblings, alive, readsApogeesOwnLabel)
+			got, _ := revertibleRoots(journal, tt.siblings, alive, readsApogeesOwnLabel, identityNeverRead)
 			if len(got) != len(tt.want) {
 				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
 			}
@@ -621,7 +622,7 @@ func TestJudgeEntriesCarriesAForeignPriorAndDropsItAtTheBound(t *testing.T) {
 			t.Parallel()
 
 			entries := []Entry{tt.entry}
-			changed, settled, err := judgeEntries(entries, staticLabel(tt.current))
+			changed, settled, err := judgeEntries(entries, staticLabel(tt.current), identityNeverRead)
 			if err != nil {
 				t.Fatalf("judgeEntries = %v, want nil", err)
 			}
@@ -651,6 +652,13 @@ func staticLabel(current string) func(string) (string, error) {
 const apogeesOwnLowLabel = "S:AI(ML;OICIID;NW;;;LW)"
 
 func readsApogeesOwnLabel(string) (string, error) { return apogeesOwnLowLabel, nil }
+
+// identityNeverRead is the identity seam for tables whose entries journal NO identity: such an
+// entry is judged by the label rules alone and identityRefuses must never read it, so a call
+// here is itself the failure.
+func identityNeverRead(path string) (fileStat, error) {
+	panic("the identity of " + path + " was read for an entry that journalled none")
+}
 
 func TestRootClearableTable(t *testing.T) {
 	t.Parallel()
@@ -807,7 +815,7 @@ func TestRevertibleRootsClearsOnlyRootsApogeesOwnLabelVouchesFor(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			got, _ := revertibleRoots(tt.journal, tt.siblings, alwaysAlive, tt.read)
+			got, _ := revertibleRoots(tt.journal, tt.siblings, alwaysAlive, tt.read, identityNeverRead)
 			if len(got) != len(tt.want) {
 				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
 			}
@@ -834,7 +842,7 @@ func sparingRevert(home, own string, live map[int]bool, cleared *[]string) func(
 		// (TestRestorablePriorsHandsOffSiblingClaimedTrees); only the clear side decides what
 		// these cases assert.
 		_, handoff := restorablePriors(r, siblings)
-		clear, spared := revertibleRoots(r, siblings, func(pid int) bool { return live[pid] }, readsApogeesOwnLabel)
+		clear, spared := revertibleRoots(r, siblings, func(pid int) bool { return live[pid] }, readsApogeesOwnLabel, identityNeverRead)
 		*cleared = append(*cleared, clear...)
 		return handoffSparedRoots(handoff, spared), nil
 	}
@@ -888,15 +896,24 @@ func TestRevertibleRootsHandsBackTheRootsALiveSiblingSpared(t *testing.T) {
 			t.Parallel()
 
 			alive := func(pid int) bool { return tt.live[pid] }
-			clear, spared := revertibleRoots(tt.journal, tt.siblings, alive, tt.read)
+			clear, spared := revertibleRoots(tt.journal, tt.siblings, alive, tt.read, identityNeverRead)
 			if !sameRoots(clear, tt.wantClear) {
 				t.Errorf("clear = %v, want %v", clear, tt.wantClear)
 			}
-			if !sameRoots(spared, tt.wantSpared) {
+			if !sameRoots(entryPaths(spared), tt.wantSpared) {
 				t.Errorf("spared = %v, want %v", spared, tt.wantSpared)
 			}
 		})
 	}
+}
+
+// entryPaths lists the paths of entries in order, so a spared-entry list compares as roots.
+func entryPaths(entries []Entry) []string {
+	paths := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		paths = append(paths, entry.Path)
+	}
+	return paths
 }
 
 // sameRoots compares two root lists element for element, treating nil and empty as one answer.
@@ -926,7 +943,7 @@ func TestHandoffSparedRootsFoldsTheSparedRootsIntoThePriorHandoff(t *testing.T) 
 	tests := []struct {
 		name    string
 		handoff []Entry
-		spared  []string
+		spared  []Entry
 		want    []Entry
 	}{
 		{
@@ -936,13 +953,13 @@ func TestHandoffSparedRootsFoldsTheSparedRootsIntoThePriorHandoff(t *testing.T) 
 		},
 		{
 			name:   "a_spared_root_alone_becomes_the_whole_handoff",
-			spared: []string{`C:\work`},
+			spared: []Entry{{Path: `C:\work`, Root: true}},
 			want:   []Entry{{Path: `C:\work`, Root: true}},
 		},
 		{
 			name:    "a_spared_root_joins_the_priors_already_handed_off",
 			handoff: []Entry{{Path: `C:\work\vendor.dll`, PriorSDDL: foreignMedium, Judged: true}},
-			spared:  []string{`C:\work`},
+			spared:  []Entry{{Path: `C:\work`, Root: true}},
 			want: []Entry{
 				{Path: `C:\work\vendor.dll`, PriorSDDL: foreignMedium, Judged: true},
 				{Path: `C:\work`, Root: true},
@@ -951,8 +968,22 @@ func TestHandoffSparedRootsFoldsTheSparedRootsIntoThePriorHandoff(t *testing.T) 
 		{
 			name:    "a_spared_root_already_handed_off_for_its_prior_keeps_one_entry_and_loses_the_verdict",
 			handoff: []Entry{{Path: `c:\WORK`, Root: true, RootJudged: true, PriorSDDL: foreignMedium, Judged: true}},
-			spared:  []string{`C:\work`},
+			spared:  []Entry{{Path: `C:\work`, Root: true}},
 			want:    []Entry{{Path: `c:\WORK`, Root: true, PriorSDDL: foreignMedium, Judged: true}},
+		},
+		{
+			// The spared root is the journal's own ENTRY, so its identity survives the hand-off:
+			// a root rebuilt from its path alone would journal none, and the pass that finally
+			// clears it would fall back to a label read that a stand-in under the same name can
+			// pass (identityRefuses). Only the root instruction and the identity travel: the
+			// verdict is dropped as for every spared root, and a prior this revert has already
+			// settled is not revived.
+			name: "a_spared_root_keeps_the_identity_its_entry_journalled",
+			spared: []Entry{{
+				Path: `C:\work`, Root: true, RootJudged: true, PriorSDDL: foreignMedium, Judged: true,
+				Volume: 0xBEEF, FileIndex: 0x0003_0000_0000_002A,
+			}},
+			want: []Entry{{Path: `C:\work`, Root: true, Volume: 0xBEEF, FileIndex: 0x0003_0000_0000_002A}},
 		},
 	}
 
@@ -1175,7 +1206,7 @@ func TestRecoverSweepRetiresItsOwnJournalBesideADeadSiblingsOverASharedRoot(t *t
 		return func(r Record) ([]Entry, error) {
 			siblings := siblingJournals(home, own)
 			_, handoff := restorablePriors(r, siblings)
-			clear, spared := revertibleRoots(r, siblings, alive, readsApogeesOwnLabel)
+			clear, spared := revertibleRoots(r, siblings, alive, readsApogeesOwnLabel, identityNeverRead)
 			cleared = append(cleared, clear...)
 			return handoffSparedRoots(handoff, spared), nil
 		}
@@ -1197,5 +1228,344 @@ func TestRecoveryLivenessNeverCountsItsOwnProcess(t *testing.T) {
 		if got := alive(pid); got != want {
 			t.Errorf("alive(%d) = %v, want %v", pid, got, want)
 		}
+	}
+}
+
+// scriptedIdentity is the identity-read seam answering from a fixed view of the disk: a path in
+// now reports that object, and any other path is gone — spelled the way statHandle spells it, a
+// wrapped not-exist, so the seam proves identityRefuses unwraps what production hands it.
+func scriptedIdentity(now map[string]fileStat) statFunc {
+	return func(path string) (fileStat, error) {
+		if st, ok := now[path]; ok {
+			return st, nil
+		}
+		return fileStat{}, fmt.Errorf("open %q to read its file information: %w", path, fs.ErrNotExist)
+	}
+}
+
+// labelGone is the label-read seam for a path that no longer exists.
+func labelGone(path string) (string, error) {
+	return "", &fs.PathError{Op: "GetNamedSecurityInfo", Path: path, Err: fs.ErrNotExist}
+}
+
+func TestIdentityRefusesTable(t *testing.T) {
+	t.Parallel()
+
+	// The identity check behind every revert of an entry that journalled one (audit
+	// 2026-09-20, "a forgeable confinement journal"): a path is only a name, so an object
+	// planted under it since the label pass must be told from the one the pass wrote to,
+	// however it is labelled. An entry with no identity is never read, and a vanished path is
+	// left to the label rules, which already drop it.
+	const vol, fid = 0xCAFE, 0x0002_0000_0000_0101
+	journalled := Entry{Path: `C:\work`, Root: true, Volume: vol, FileIndex: fid}
+
+	tests := []struct {
+		name  string
+		entry Entry
+		read  statFunc
+		want  bool
+	}{
+		{
+			name:  "an_entry_with_no_identity_is_never_read_or_refused",
+			entry: Entry{Path: `C:\work`, Root: true},
+			read:  identityNeverRead,
+		},
+		{
+			name:  "the_same_object_is_not_refused",
+			entry: journalled,
+			read:  scriptedIdentity(map[string]fileStat{`C:\work`: {links: 1, volume: vol, index: fid}}),
+		},
+		{
+			name:  "another_object_under_the_same_name_is_refused",
+			entry: journalled,
+			read:  scriptedIdentity(map[string]fileStat{`C:\work`: {links: 1, volume: vol, index: fid + 1}}),
+			want:  true,
+		},
+		{
+			name:  "the_same_index_on_another_volume_is_refused",
+			entry: journalled,
+			read:  scriptedIdentity(map[string]fileStat{`C:\work`: {links: 1, volume: vol + 1, index: fid}}),
+			want:  true,
+		},
+		{
+			name:  "a_vanished_path_is_left_to_the_label_rules",
+			entry: journalled,
+			read:  scriptedIdentity(nil),
+		},
+		{
+			name:  "an_identity_that_cannot_be_read_is_refused",
+			entry: journalled,
+			read: func(string) (fileStat, error) {
+				return fileStat{volume: vol, index: fid}, errors.New("access is denied")
+			},
+			want: true,
+		},
+		{
+			name:  "an_identity_with_only_a_volume_serial_is_still_checked",
+			entry: Entry{Path: `C:\work`, Root: true, Volume: vol},
+			read:  scriptedIdentity(map[string]fileStat{`C:\work`: {links: 1, volume: vol, index: fid}}),
+			want:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := identityRefuses(tt.entry, tt.read); got != tt.want {
+				t.Errorf("identityRefuses(%+v) = %v, want %v", tt.entry, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestJudgeEntriesHoldsEveryEntryToItsIdentity(t *testing.T) {
+	t.Parallel()
+
+	// The pre-clear pass under the identity check. A replaced object takes neither verdict: its
+	// root stays unjudged, and its prior is CARRIED under the existing bounded life — even a
+	// prior an earlier pass had vouched for loses the vouching, since the object it vouched for
+	// is gone. A path that vanished still drops, and an entry with no identity is judged exactly
+	// as before.
+	const (
+		vol, fid      = 0xCAFE, 0x0002_0000_0000_0101
+		foreignPrior  = "S:AI(ML;OICI;NW;;;ME)"
+		carriedToLast = maxPriorCarries - 1
+	)
+	replaced := scriptedIdentity(map[string]fileStat{
+		`C:\work`:            {links: 1, volume: vol, index: fid + 1},
+		`C:\work\vendor.dll`: {links: 1, volume: vol, index: fid + 2},
+	})
+	intact := scriptedIdentity(map[string]fileStat{
+		`C:\work`:            {links: 1, volume: vol, index: fid},
+		`C:\work\vendor.dll`: {links: 1, volume: vol, index: fid + 3},
+	})
+
+	tests := []struct {
+		name        string
+		entry       Entry
+		readLabel   func(string) (string, error)
+		readID      statFunc
+		want        Entry
+		wantChanged bool
+		wantSettled bool
+	}{
+		{
+			name:      "a_replaced_root_labelled_low_is_left_unjudged",
+			entry:     Entry{Path: `C:\work`, Root: true, Volume: vol, FileIndex: fid},
+			readLabel: readsApogeesOwnLabel,
+			readID:    replaced,
+			want:      Entry{Path: `C:\work`, Root: true, Volume: vol, FileIndex: fid},
+		},
+		{
+			name:        "the_intact_root_is_judged_clearable_as_before",
+			entry:       Entry{Path: `C:\work`, Root: true, Volume: vol, FileIndex: fid},
+			readLabel:   readsApogeesOwnLabel,
+			readID:      intact,
+			want:        Entry{Path: `C:\work`, Root: true, RootJudged: true, Volume: vol, FileIndex: fid},
+			wantChanged: true,
+		},
+		{
+			name:        "a_replaced_prior_labelled_low_is_carried_not_restored",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Volume: vol, FileIndex: fid + 3},
+			readLabel:   readsApogeesOwnLabel,
+			readID:      replaced,
+			want:        Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Carried: 1, Volume: vol, FileIndex: fid + 3},
+			wantChanged: true,
+		},
+		{
+			name:        "a_vouched_prior_whose_object_was_replaced_loses_the_vouching",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Judged: true, Volume: vol, FileIndex: fid + 3},
+			readLabel:   readsApogeesOwnLabel,
+			readID:      replaced,
+			want:        Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Carried: 1, Volume: vol, FileIndex: fid + 3},
+			wantChanged: true,
+		},
+		{
+			name:        "a_replaced_prior_at_the_end_of_its_carry_is_dropped_and_settled",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Carried: carriedToLast, Volume: vol, FileIndex: fid + 3},
+			readLabel:   readsApogeesOwnLabel,
+			readID:      replaced,
+			want:        Entry{Path: `C:\work\vendor.dll`, Carried: maxPriorCarries, Volume: vol, FileIndex: fid + 3},
+			wantChanged: true,
+			wantSettled: true,
+		},
+		{
+			name:        "an_intact_prior_labelled_low_is_vouched_for_as_before",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Volume: vol, FileIndex: fid + 3},
+			readLabel:   readsApogeesOwnLabel,
+			readID:      intact,
+			want:        Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Judged: true, Volume: vol, FileIndex: fid + 3},
+			wantChanged: true,
+			wantSettled: true,
+		},
+		{
+			name:        "a_vanished_prior_with_an_identity_still_drops",
+			entry:       Entry{Path: `C:\work\gone.dll`, PriorSDDL: foreignPrior, Volume: vol, FileIndex: fid + 4},
+			readLabel:   labelGone,
+			readID:      intact,
+			want:        Entry{Path: `C:\work\gone.dll`, Volume: vol, FileIndex: fid + 4},
+			wantChanged: true,
+			wantSettled: true,
+		},
+		{
+			name:        "a_prior_with_no_identity_is_judged_by_its_label_alone",
+			entry:       Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior},
+			readLabel:   readsApogeesOwnLabel,
+			readID:      identityNeverRead,
+			want:        Entry{Path: `C:\work\vendor.dll`, PriorSDDL: foreignPrior, Judged: true},
+			wantChanged: true,
+			wantSettled: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			entries := []Entry{tt.entry}
+			changed, settled, err := judgeEntries(entries, tt.readLabel, tt.readID)
+			if err != nil {
+				t.Fatalf("judgeEntries = %v, want nil", err)
+			}
+			if entries[0] != tt.want {
+				t.Errorf("entry = %+v, want %+v", entries[0], tt.want)
+			}
+			if changed != tt.wantChanged || settled != tt.wantSettled {
+				t.Errorf("judgeEntries = changed %v, settled %v; want changed %v, settled %v",
+					changed, settled, tt.wantChanged, tt.wantSettled)
+			}
+		})
+	}
+}
+
+func TestIdentityMismatchedPriorNeverReachesTheRestoreMap(t *testing.T) {
+	t.Parallel()
+
+	// What reaches restorablePriors' restore map is written to the disk with SetSDDL, so a prior
+	// whose object was replaced must never land there — not when the stand-in carries apogee's
+	// Low label, and not when an earlier pass had already vouched for the original. It travels
+	// in the hand-off instead, carried, while the intact prior beside it is restored.
+	const (
+		vol, fid     = 0xCAFE, 0x0002_0000_0000_0101
+		foreignPrior = "S:AI(ML;OICI;NW;;;ME)"
+	)
+	r := Record{PID: 100, Entries: []Entry{
+		{Path: `C:\work\fresh.dll`, PriorSDDL: foreignPrior, Volume: vol, FileIndex: fid},
+		{Path: `C:\work\vouched.dll`, PriorSDDL: foreignPrior, Judged: true, Volume: vol, FileIndex: fid + 1},
+		{Path: `C:\work\intact.dll`, PriorSDDL: foreignPrior, Volume: vol, FileIndex: fid + 2},
+	}}
+	readID := scriptedIdentity(map[string]fileStat{
+		`C:\work\fresh.dll`:   {links: 1, volume: vol, index: fid + 10},
+		`C:\work\vouched.dll`: {links: 1, volume: vol, index: fid + 11},
+		`C:\work\intact.dll`:  {links: 1, volume: vol, index: fid + 2},
+	})
+
+	if _, _, err := judgeEntries(r.Entries, readsApogeesOwnLabel, readID); err != nil {
+		t.Fatalf("judgeEntries = %v, want nil", err)
+	}
+	restore, handoff := restorablePriors(r, nil)
+
+	if len(restore) != 1 || restore[`C:\work\intact.dll`] != foreignPrior {
+		t.Errorf("restore = %v, want only the intact prior", restore)
+	}
+	if got := entryPaths(handoff); !sameRoots(got, []string{`C:\work\fresh.dll`, `C:\work\vouched.dll`}) {
+		t.Errorf("handoff = %+v, want both replaced priors carried", handoff)
+	}
+	for _, entry := range handoff {
+		if entry.Judged || entry.Carried != 1 || entry.PriorSDDL != foreignPrior {
+			t.Errorf("handed-off entry %+v, want it unjudged, carried once and still holding its prior", entry)
+		}
+	}
+}
+
+func TestRevertibleRootsRefusesARootWhoseObjectWasReplaced(t *testing.T) {
+	t.Parallel()
+
+	// The clear side of the identity check. The persisted verdict (RootJudged) skips the label
+	// READ, never the identity: a root whose object was replaced under the same name is never in
+	// the clear set, whether the stand-in reads Low or the entry claims a verdict, and it is
+	// skipped, not handed back. A vanished root is not refused — ClearTree's clear of it is a
+	// no-op — and a root with no identity clears as before. A spared root comes back as its
+	// journal entry, identity and all, for handoffSparedRoots to keep.
+	const vol, fid = 0xCAFE, 0x0002_0000_0000_0101
+	disk := scriptedIdentity(map[string]fileStat{
+		`C:\work`:    {links: 1, volume: vol, index: fid},
+		`C:\scratch`: {links: 1, volume: vol, index: fid + 7},
+	})
+
+	tests := []struct {
+		name       string
+		journal    Record
+		siblings   []Record
+		live       map[int]bool
+		read       func(string) (string, error)
+		wantClear  []string
+		wantSpared []Entry
+	}{
+		{
+			name: "a_judged_root_whose_object_was_replaced_is_not_cleared",
+			journal: Record{PID: 100, Entries: []Entry{
+				{Path: `C:\scratch`, Root: true, RootJudged: true, Volume: vol, FileIndex: fid + 1},
+				{Path: `C:\work`, Root: true, RootJudged: true, Volume: vol, FileIndex: fid},
+			}},
+			read:      func(string) (string, error) { return clearSDDL, nil },
+			wantClear: []string{`C:\work`},
+		},
+		{
+			name: "an_unjudged_stand_in_labelled_low_is_not_cleared",
+			journal: Record{PID: 100, Entries: []Entry{
+				{Path: `C:\scratch`, Root: true, Volume: vol, FileIndex: fid + 1},
+			}},
+			read:      readsApogeesOwnLabel,
+			wantClear: []string{},
+		},
+		{
+			name: "a_vanished_judged_root_is_left_to_the_no_op_clear",
+			journal: Record{PID: 100, Entries: []Entry{
+				{Path: `C:\gone`, Root: true, RootJudged: true, Volume: vol, FileIndex: fid + 2},
+			}},
+			read:      labelGone,
+			wantClear: []string{`C:\gone`},
+		},
+		{
+			name: "a_judged_root_with_no_identity_clears_as_before",
+			journal: Record{PID: 100, Entries: []Entry{
+				{Path: `C:\legacy`, Root: true, RootJudged: true},
+			}},
+			read:      func(string) (string, error) { return clearSDDL, nil },
+			wantClear: []string{`C:\legacy`},
+		},
+		{
+			name: "a_spared_root_is_handed_back_with_its_identity",
+			journal: Record{PID: 100, Entries: []Entry{
+				{Path: `C:\work`, Root: true, RootJudged: true, Volume: vol, FileIndex: fid},
+			}},
+			siblings:   []Record{{PID: 200, Entries: []Entry{{Path: `C:\work`, Root: true}}}},
+			live:       map[int]bool{200: true},
+			read:       readsApogeesOwnLabel,
+			wantClear:  []string{},
+			wantSpared: []Entry{{Path: `C:\work`, Root: true, RootJudged: true, Volume: vol, FileIndex: fid}},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			alive := func(pid int) bool { return tt.live[pid] }
+			clear, spared := revertibleRoots(tt.journal, tt.siblings, alive, tt.read, disk)
+			if !sameRoots(clear, tt.wantClear) {
+				t.Errorf("clear = %v, want %v", clear, tt.wantClear)
+			}
+			if len(spared) != len(tt.wantSpared) {
+				t.Fatalf("spared = %+v, want %+v", spared, tt.wantSpared)
+			}
+			for i := range tt.wantSpared {
+				if spared[i] != tt.wantSpared[i] {
+					t.Errorf("spared[%d] = %+v, want %+v", i, spared[i], tt.wantSpared[i])
+				}
+			}
+		})
 	}
 }

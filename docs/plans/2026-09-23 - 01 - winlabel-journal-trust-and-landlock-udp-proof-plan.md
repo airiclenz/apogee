@@ -63,7 +63,11 @@ internal/platform/winlabel/session.go — Journal.record, Journal.flush; interna
 - `GOOS=windows go vet ./internal/platform/...`
 **Commit:** `feat(winlabel): journal the file identity of every labelled object`
 
-## 2. Recover acts only on an object whose identity still matches
+## 2. Recover acts only on an object whose identity still matches — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): an identity that exists but cannot be READ (a stat error other than not-exist) is refused the same way as a mismatch: the root is skipped and the prior carried. The plan left this case open. Declining costs nothing destructive and never acts on an unverified object; a not-exist error falls through to the label rules as the regression guard requires.
+NOTES (2026-09-23): the identity check in judgeEntries also runs on a prior an earlier pass already vouched for (Judged=true). On a mismatch its Judged flag is withdrawn and the prior carried, which is how "a mismatched prior is never in the restore map" holds across a retry. restorablePriors itself is unchanged: it already hands off every unjudged prior.
+NOTES (2026-09-23): identityRefuses tests not-exist with errors.Is(err, fs.ErrNotExist), not os.IsNotExist, because statHandle wraps its error with %w, which os.IsNotExist does not unwrap.
 
 **What:** fixes the audit High "a forgeable confinement journal …": today a planted or stale claim drives `ClearTree`/`SetSDDL` on whatever now sits at its path. Depends on item 1.
 **Goal:** during recovery or retire, an entry with a non-zero identity whose path exists but now names a different object is neither cleared nor restored; its prior is carried under the existing bounded life (`maxPriorCarries`) and then dropped. A missing path drops as today. An entry with a zero identity is judged exactly as before. `isVolumeRoot` still applies to every entry.

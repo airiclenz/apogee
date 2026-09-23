@@ -305,7 +305,7 @@ func revertSparingLiveSiblings(home, own string, alive func(int) bool) func(Reco
 		}
 		siblings := siblingJournals(home, own)
 		restore, handoff := restorablePriors(r, siblings)
-		clear, spared := revertibleRoots(r, siblings, alive, ReadSDDL)
+		clear, spared := revertibleRoots(r, siblings, alive, ReadSDDL, statHandle)
 		if err := revertJournal(clear, restore); err != nil {
 			return nil, err
 		}
@@ -323,7 +323,10 @@ func revertSparingLiveSiblings(home, own string, alive func(int) bool) func(Reco
 // on the path, because nothing else marks it as this run's, or a dead run's, to revert. The
 // clear side adds the guardrail the label pass makes on the way in — a volume root is refused
 // whatever it carries — and it REFUSES rather than aborting: a root that fails the test is
-// skipped by revertibleRoots and the rest of the journal reverts.
+// skipped by revertibleRoots and the rest of the journal reverts. Ahead of both rules, an entry
+// that journalled the IDENTITY of the object it labelled is held to it (identityRefuses): the
+// label is read off a path, and a stand-in created under that path since — labelled Low or not
+// — is neither cleared nor restored onto, its prior carried instead (judgeEntries).
 //
 // Every decision it takes lives in judgeEntries, which reads through an injected seam and is
 // therefore provable on any OS; what is Windows-tagged HERE is the real label read it is given
@@ -370,7 +373,7 @@ func revertSparingLiveSiblings(home, own string, alive func(int) bool) func(Reco
 // instruction to do nothing — while an entry that still names a ROOT keeps its clear
 // obligation and only loses its prior.
 func judgePriors(r Record, own string) error {
-	judged, priorJudged, err := judgeEntries(r.Entries, ReadSDDL)
+	judged, priorJudged, err := judgeEntries(r.Entries, ReadSDDL, statHandle)
 	if err != nil {
 		return err
 	}
@@ -448,7 +451,10 @@ func revertJournal(roots []string, priors map[string]string) error {
 // construction label them, so every prior a journal records is judged against the path's
 // CURRENT label before anything is cleared, and one that does not still carry the Low label
 // apogee wrote is dropped rather than applied (judgePriors, priorRestorable) — a prior is
-// restored only onto a path that still carried apogee's own mark.
+// restored only onto a path that still carried apogee's own mark. The mark is read off a path,
+// so an entry that journalled its object's identity must still name that very object as well
+// (identityRefuses): a root or prior path whose object was replaced since is left alone,
+// whatever label the replacement carries.
 //
 // A journal that cannot be DECODED is likewise left where it is: it names no roots to revert
 // and no owner to check, so acting on it is impossible and deleting it would throw away the

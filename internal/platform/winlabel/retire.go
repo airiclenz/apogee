@@ -1,7 +1,9 @@
 package winlabel
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"strings"
 )
@@ -166,6 +168,58 @@ func carryPrior(carried int) (next int, exhausted bool) {
 	return next, next >= maxPriorCarries
 }
 
+// carryEntry applies one carry verdict to entry in place (carryPrior): the count advances, and
+// an exhausted carry discards the prior. It reports whether it did discard it, which is the
+// only case in which a carry settles something (judgeEntries).
+func carryEntry(entry *Entry) (exhausted bool) {
+	next, exhausted := carryPrior(entry.Carried)
+	entry.Carried = next
+	if exhausted {
+		entry.PriorSDDL = ""
+	}
+	return exhausted
+}
+
+// identityRefuses is the IDENTITY check on one journalled entry: it reports whether the object
+// now sitting at the entry's path is demonstrably not — or cannot be shown to be — the object
+// the label pass wrote to, in which case the revert must neither clear nor restore anything
+// there. It is taken before, and independently of, the label read.
+//
+// A label read alone cannot answer the question it answers. The label rules (rootClearable,
+// priorRestorable) ask whether apogee's own Low label is still on the PATH, but a path is only
+// a name: the labelled object can be deleted and another created under the same name — and
+// labelled Low, by a later label pass, a Low child or anyone else — before a revert reads the
+// journal. Trusting the label then made the revert NULL-SACL a tree apogee never touched, or
+// write a journalled prior onto an object it never labelled (audit 2026-09-20, "a forgeable
+// confinement journal"). The identity the label pass recorded (Entry.Volume, Entry.FileIndex)
+// names the object itself, so a stand-in is told from the original however it is labelled.
+//
+//   - An entry with NO identity — a journal written before the identity existed, or a label
+//     pass whose identity read failed (withIdentity) — is never refused here, and readIdentity
+//     is never called for it: nothing recorded which object it was, so it is judged by the
+//     label-read rules alone, exactly as before.
+//   - A path that is GONE is not refused either. A vanished path is a completed revert: its
+//     prior drops (priorRestorable) and its clear is a no-op (ClearTree) — the rules the label
+//     read already applies — and refusing it here would only strand the entry.
+//   - A path that names ANOTHER object — a different volume serial or file index — is refused.
+//   - A path whose identity cannot be READ for any other reason is refused too. An object that
+//     cannot be shown to be the one the journal names is not vouched for, and declining costs
+//     nothing destructive: a root is skipped, and a prior is carried under its bounded life
+//     (carryPrior) rather than written or dropped.
+//
+// readIdentity is injected (statHandle in production, which is Windows-tagged) so the check is
+// table-testable on any OS — the retire seam pattern.
+func identityRefuses(entry Entry, readIdentity statFunc) bool {
+	if entry.Volume == 0 && entry.FileIndex == 0 {
+		return false
+	}
+	st, err := readIdentity(entry.Path)
+	if err != nil {
+		return !errors.Is(err, fs.ErrNotExist)
+	}
+	return st.volume != entry.Volume || st.index != entry.FileIndex
+}
+
 // priorRestorable is the READ-side check on one journalled prior: from the path's current
 // mandatory label and the error that read may have failed with, it reports what the revert may
 // do with the instruction to write that prior back.
@@ -238,15 +292,41 @@ func priorRestorable(current string, readErr error) priorVerdict {
 // unlabelled path and the verdict "not apogee's". Verdicts already recorded on earlier entries
 // stay recorded — they were taken off clean reads of their own paths.
 //
-// readLabel is injected (ReadSDDL in production, which is Windows-tagged) so every decision
-// the pre-clear pass makes is table-testable on any OS — the retire seam pattern.
-func judgeEntries(entries []Entry, readLabel func(string) (string, error)) (changed, settled bool, err error) {
+// Every entry the pass looks at is first held to its journalled IDENTITY (identityRefuses),
+// and that check is never skipped the way the label read is: a persisted verdict vouches that
+// apogee once read its own label on that path, not that the object behind the path is still
+// the one it labelled. An entry whose object was replaced takes neither verdict — its root is
+// left unjudged, and revertibleRoots refuses it on the same check — and its prior is CARRIED,
+// never restored, even one an earlier pass had already vouched for: Entry.Judged is withdrawn,
+// which is what keeps restorablePriors from ever writing it. A missing path is not a
+// replacement and falls through to the label rules, where it drops as it always has.
+//
+// readLabel and readIdentity are injected (ReadSDDL and statHandle in production, both
+// Windows-tagged) so every decision the pre-clear pass makes is table-testable on any OS — the
+// retire seam pattern.
+func judgeEntries(entries []Entry, readLabel func(string) (string, error), readIdentity statFunc) (changed, settled bool, err error) {
 	for i := range entries {
 		entry := &entries[i]
 		// A root that already carried a foreign label is ONE entry wearing both instructions
 		// (LabelTree), and both verdicts are taken off the same read of the same path.
 		judgeRoot := entry.Root && !entry.RootJudged
 		judgePrior := entry.PriorSDDL != "" && !entry.Judged
+		if !judgeRoot && entry.PriorSDDL == "" {
+			continue
+		}
+		// The identity is checked for a prior already vouched for as well as for an unjudged
+		// one: the object can be replaced between the pass that vouched for it and the retry
+		// that restores it.
+		if identityRefuses(*entry, readIdentity) {
+			if entry.PriorSDDL != "" {
+				entry.Judged = false
+				if carryEntry(entry) {
+					settled = true
+				}
+				changed = true
+			}
+			continue
+		}
 		if !judgeRoot && !judgePrior {
 			continue
 		}
@@ -266,10 +346,7 @@ func judgeEntries(entries []Entry, readLabel func(string) (string, error)) (chan
 			entry.PriorSDDL = ""
 			changed, settled = true, true
 		case priorCarry:
-			next, exhausted := carryPrior(entry.Carried)
-			entry.Carried = next
-			if exhausted {
-				entry.PriorSDDL = ""
+			if carryEntry(entry) {
 				settled = true
 			}
 			changed = true
@@ -405,11 +482,21 @@ func isDriveLetter(b byte) bool {
 // clear prong, reopened through the flag that closed it). The flag vouches only that apogee
 // once read apogee's own label on that path; it cannot vouch that the path is a tree.
 //
+// The IDENTITY check (identityRefuses) sits beside the guardrail, outside the skip, for the
+// same reason: a root whose journalled object has been replaced by another under the same name
+// is refused whatever the entry claims and however the new object is labelled — a stand-in
+// labelled Low reads exactly like apogee's own work, and a persisted verdict was taken over the
+// object that is gone. Like the clearability refusal it is a SKIP, never a hand-back: nothing
+// of apogee's is on the stand-in to owe a clear over.
+//
+// spared carries the ENTRIES, not their paths, so the hand-off keeps each root's identity
+// (handoffSparedRoots) and the later pass that clears it is held to the same object.
+//
 // Roots are compared case-folded (foldPath): C:\Work and c:\work name one location.
-// alive is injected (ProcessAlive in production, which is Windows-tagged) and readLabel with
-// it (ReadSDDL, likewise), so the decision is table-testable on any OS — the retire seam
-// pattern.
-func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabel func(string) (string, error)) (clear, spared []string) {
+// alive is injected (ProcessAlive in production, which is Windows-tagged), and readLabel and
+// readIdentity with it (ReadSDDL and statHandle, likewise), so the decision is table-testable
+// on any OS — the retire seam pattern.
+func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabel func(string) (string, error), readIdentity statFunc) (clear []string, spared []Entry) {
 	claimed := make(map[string]bool)
 	for _, sibling := range siblings {
 		if !alive(sibling.PID) {
@@ -425,13 +512,18 @@ func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabe
 			continue
 		}
 		if claimed[foldPath(entry.Path)] {
-			spared = append(spared, entry.Path)
+			spared = append(spared, entry)
 			continue
 		}
 		// The guardrail is outside the persisted-verdict skip on purpose: the flag stands in
 		// for a LABEL READ apogee itself took, and nothing else. A volume root is refused on
 		// the shape of its path, which no read and no journal can change.
 		if isVolumeRoot(entry.Path) {
+			continue
+		}
+		// So is the identity: the verdict was taken over an object, and it says nothing about
+		// whatever sits under the same name now.
+		if identityRefuses(entry, readIdentity) {
 			continue
 		}
 		if !entry.RootJudged {
@@ -461,16 +553,23 @@ func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabe
 // whatever that tree carries by then — F-08's clear prong, reopened. The later pass reads the
 // path again, which is exactly what should decide it.
 //
+// The spared root keeps its IDENTITY (Entry.Volume, Entry.FileIndex), which is why spared
+// arrives as the journal's own entries rather than bare paths: a root rebuilt from its path
+// alone would journal no identity, and the later pass that finally clears it would fall back
+// to the label read, which a stand-in under the same name can satisfy (identityRefuses). A
+// spared root that merges into a handed-off entry already carries it — that is the same
+// journal entry, handed off verbatim (restorablePriors).
+//
 // It is pure so the fold is table-testable on any OS — the retire seam pattern — and it is
 // spelled here rather than in the Windows-tagged caller that joins the two sets for that
 // reason.
-func handoffSparedRoots(handoff []Entry, spared []string) []Entry {
+func handoffSparedRoots(handoff []Entry, spared []Entry) []Entry {
 	if len(spared) == 0 {
 		return handoff
 	}
 	out := append([]Entry(nil), handoff...)
 	for _, root := range spared {
-		folded := foldPath(root)
+		folded := foldPath(root.Path)
 		merged := false
 		for i := range out {
 			if foldPath(out[i].Path) != folded {
@@ -481,7 +580,7 @@ func handoffSparedRoots(handoff []Entry, spared []string) []Entry {
 			break
 		}
 		if !merged {
-			out = append(out, Entry{Path: root, Root: true})
+			out = append(out, Entry{Path: root.Path, Root: true, Volume: root.Volume, FileIndex: root.FileIndex})
 		}
 	}
 	return out

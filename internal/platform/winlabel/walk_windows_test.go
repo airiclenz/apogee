@@ -186,3 +186,236 @@ func TestLabelTreeLabelsARootWhoseIdentityCannotBeRead(t *testing.T) {
 		}
 	}
 }
+
+// The identity half of the journal's trust (audit 2026-09-20, "a forgeable confinement
+// journal"): Recover acts only on the object a journal entry labelled. These drive the real
+// label APIs end to end — LabelTree journals, the object is deleted and recreated under the same
+// name, and Recover runs over the journal this process wrote, which it recovers as an
+// interrupted run (recoveryLiveness).
+
+// foreignSDDL is a label apogee never writes: an explicit Medium label, the stand-in for another
+// tool's work. foreignPriorSDDL is a second, distinct Medium label, so a restore of the one
+// cannot be mistaken for the other still sitting on the path.
+const (
+	foreignSDDL      = "S:(ML;;NW;;;ME)"
+	foreignPriorSDDL = "S:(ML;;NWNR;;;ME)"
+)
+
+// labelOrSkip writes sddl to path, skipping the test when the host will not let it: a machine
+// policy is not a defect of the revert under test.
+func labelOrSkip(t *testing.T, path, sddl string) {
+	t.Helper()
+
+	if err := SetSDDL(path, sddl); err != nil {
+		t.Skipf("cannot write %q to %q on this host: %v", sddl, path, err)
+	}
+}
+
+// mustReadLabel reads path's mandatory label, failing the test when it cannot.
+func mustReadLabel(t *testing.T, path string) string {
+	t.Helper()
+
+	label, err := ReadSDDL(path)
+	if err != nil {
+		t.Fatalf("read the label of %q: %v", path, err)
+	}
+	return label
+}
+
+// ownJournal is the journal file this process writes under home (Open).
+func ownJournal(home string) string { return JournalPath(home, os.Getpid()) }
+
+// rewriteOwnJournal applies edit to every entry of this process's journal under home and writes
+// it back — the state an older apogee, or a pass that persisted a verdict, leaves on the disk.
+func rewriteOwnJournal(t *testing.T, home string, edit func(*Entry)) {
+	t.Helper()
+
+	r, err := ReadJournal(ownJournal(home))
+	if err != nil {
+		t.Fatalf("read the journal: %v", err)
+	}
+	for i := range r.Entries {
+		edit(&r.Entries[i])
+	}
+	if err := WriteJournal(ownJournal(home), r); err != nil {
+		t.Fatalf("rewrite the journal: %v", err)
+	}
+}
+
+// requireIdentity skips when the entry journalled no identity — a volume that reports no file
+// index — since there is then nothing for the revert to hold the object to.
+func requireIdentity(t *testing.T, entry Entry) {
+	t.Helper()
+
+	if entry.Volume == 0 && entry.FileIndex == 0 {
+		t.Skipf("the volume holding %q reports no file identity; nothing to hold the revert to", entry.Path)
+	}
+}
+
+// recreate deletes path and creates a fresh object of the same kind under the same name,
+// skipping when the volume hands the new object the old identity (it never should: NTFS bumps
+// the sequence number of a reused record).
+func recreate(t *testing.T, path string, dir bool, journalled Entry) {
+	t.Helper()
+
+	if err := os.RemoveAll(path); err != nil {
+		t.Fatalf("delete %q: %v", path, err)
+	}
+	var err error
+	if dir {
+		err = os.Mkdir(path, 0o700)
+	} else {
+		err = os.WriteFile(path, []byte("planted"), 0o600)
+	}
+	if err != nil {
+		t.Fatalf("recreate %q: %v", path, err)
+	}
+	if vol, idx := freshFileIdentity(t, path); vol == journalled.Volume && idx == journalled.FileIndex {
+		t.Skipf("the volume reissued the journalled identity to the new %q", path)
+	}
+}
+
+func TestRecoverClearsOnlyTheRootObjectItJournalled(t *testing.T) {
+	// A journalled root is cleared only while the object behind its path is the one the label
+	// pass wrote to. A stand-in created under the same name is left exactly as it is — whether
+	// it reads Low (so the label read vouches for it) or the journal carries a persisted verdict
+	// that skips the read. The identity-less entry of an older journal has only the label read
+	// to go on and still clears, as it always has.
+	tests := []struct {
+		name          string
+		replace       bool
+		standIn       string
+		rootJudged    bool
+		stripIdentity bool
+		wantCleared   bool
+	}{
+		{name: "the_intact_root_is_cleared", wantCleared: true},
+		{name: "a_stand_in_labelled_low_is_left_alone", replace: true, standIn: lowSDDL},
+		{name: "a_persisted_verdict_does_not_clear_a_stand_in", replace: true, standIn: foreignSDDL, rootJudged: true},
+		{name: "a_legacy_entry_is_judged_by_its_label_alone", replace: true, standIn: lowSDDL, stripIdentity: true, wantCleared: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "box")
+			if err := os.Mkdir(root, 0o700); err != nil {
+				t.Fatalf("make the box root: %v", err)
+			}
+			home := t.TempDir()
+			j := Open(home)
+			labelForTest(t, root, j)
+			journalled := rootEntry(t, j, root)
+			requireIdentity(t, journalled)
+
+			rewriteOwnJournal(t, home, func(entry *Entry) {
+				entry.RootJudged = entry.RootJudged || tt.rootJudged
+				if tt.stripIdentity {
+					entry.Volume, entry.FileIndex = 0, 0
+				}
+			})
+			if tt.replace {
+				recreate(t, root, true, journalled)
+				labelOrSkip(t, root, tt.standIn)
+			}
+			before := mustReadLabel(t, root)
+
+			Recover(home)
+
+			after := mustReadLabel(t, root)
+			if tt.wantCleared {
+				if IsLowLabel(after) {
+					t.Errorf("label of %q = %q after Recover, want it cleared", root, after)
+				}
+				return
+			}
+			if after != before {
+				t.Errorf("label of %q = %q after Recover, want the stand-in's %q untouched", root, after, before)
+			}
+		})
+	}
+}
+
+func TestRecoverCarriesAPriorWhoseObjectWasReplaced(t *testing.T) {
+	// A journalled PRIOR is written back only onto the object the label pass took it from. A
+	// file recreated under the same name — whether it now reads Low, as the revert's own label
+	// would, or carries some other foreign label — gets nothing restored onto it, and the prior
+	// is CARRIED: the journal survives holding it, unjudged, one carry spent. A prior whose path
+	// has simply gone still drops, and the journal retires.
+	tests := []struct {
+		name      string
+		standIn   string
+		deleteOff bool
+	}{
+		{name: "a_stand_in_labelled_low_carries_the_prior", standIn: lowSDDL},
+		{name: "a_stand_in_with_a_foreign_label_carries_the_prior", standIn: foreignSDDL},
+		{name: "a_vanished_path_drops_the_prior", deleteOff: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root := filepath.Join(t.TempDir(), "box")
+			if err := os.Mkdir(root, 0o700); err != nil {
+				t.Fatalf("make the box root: %v", err)
+			}
+			file := filepath.Join(root, "vendor.dll")
+			if err := os.WriteFile(file, []byte("original"), 0o600); err != nil {
+				t.Fatalf("plant the labelled file: %v", err)
+			}
+			labelOrSkip(t, file, foreignPriorSDDL)
+			home := t.TempDir()
+			j := Open(home)
+			labelForTest(t, root, j)
+
+			var journalled Entry
+			for _, entry := range j.Entries() {
+				if strings.EqualFold(entry.Path, file) && entry.PriorSDDL != "" {
+					journalled = entry
+				}
+			}
+			if journalled.Path == "" {
+				t.Fatalf("journal entries %+v record no prior for %q", j.Entries(), file)
+			}
+			requireIdentity(t, journalled)
+
+			if tt.deleteOff {
+				if err := os.Remove(file); err != nil {
+					t.Fatalf("delete %q: %v", file, err)
+				}
+			} else {
+				recreate(t, file, false, journalled)
+				labelOrSkip(t, file, tt.standIn)
+			}
+
+			Recover(home)
+
+			if tt.deleteOff {
+				if survivors := ListJournals(home); len(survivors) != 0 {
+					t.Errorf("journals %v survived; a prior whose path is gone drops and the journal retires", survivors)
+				}
+				return
+			}
+			if label := mustReadLabel(t, file); label == journalled.PriorSDDL {
+				t.Errorf("label of the stand-in %q = %q: the journalled prior was restored onto an object the label pass never touched", file, label)
+			}
+			kept, err := ReadJournal(ownJournal(home))
+			if err != nil {
+				t.Fatalf("the journal did not survive the carry: %v", err)
+			}
+			var carried *Entry
+			for i := range kept.Entries {
+				if strings.EqualFold(kept.Entries[i].Path, file) {
+					carried = &kept.Entries[i]
+				}
+			}
+			if carried == nil {
+				t.Fatalf("kept journal %+v no longer carries the prior of %q", kept.Entries, file)
+			}
+			if carried.PriorSDDL != journalled.PriorSDDL || carried.Judged || carried.Carried != 1 {
+				t.Errorf("carried entry = %+v; want prior %q, unjudged, carried once", *carried, journalled.PriorSDDL)
+			}
+			if carried.Volume != journalled.Volume || carried.FileIndex != journalled.FileIndex {
+				t.Errorf("carried entry = %+v lost the identity of %+v", *carried, journalled)
+			}
+		})
+	}
+}
