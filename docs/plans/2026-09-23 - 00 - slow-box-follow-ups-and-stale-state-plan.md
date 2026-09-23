@@ -198,7 +198,7 @@ equals `gitTimeout`. Must fail against the pre-item tree.
 
 **Commit:** `fix(tools): a git diff or show gets at least the ordinary git budget`
 
-## 6. apogee probe model --timeout 0 keeps the default
+## 6. apogee probe model --timeout 0 keeps the default — ✅ DONE (2026-09-23)
 
 **What.** Fixes `--timeout 0` (and any negative value) silently unbounding each battery attempt,
 because `provider.WithRequestTimeout` maps zero to "the caller's context governs".

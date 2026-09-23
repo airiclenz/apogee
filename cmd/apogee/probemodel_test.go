@@ -878,6 +878,31 @@ func TestProbeModelTimeoutFlagBoundsTheBatteryAttempt(t *testing.T) {
 	}
 }
 
+// A --timeout of zero or below keeps the five-minute default rather than unbounding the attempt:
+// provider.WithRequestTimeout reads zero as "no per-attempt deadline", so the command must never
+// hand it one. A positive figure passes through unchanged, whichever side of the default it sits.
+func TestEffectiveBatteryTimeout(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		flag time.Duration
+		want time.Duration
+	}{
+		{"zero keeps the default", 0, 5 * time.Minute},
+		{"negative keeps the default", -time.Second, 5 * time.Minute},
+		{"short figure passes through", 200 * time.Millisecond, 200 * time.Millisecond},
+		{"long figure passes through", 10 * time.Minute, 10 * time.Minute},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := effectiveBatteryTimeout(tc.flag); got != tc.want {
+				t.Errorf("effectiveBatteryTimeout(%s) = %s; want %s", tc.flag, got, tc.want)
+			}
+		})
+	}
+}
+
 // And with no --timeout the battery is bounded by a figure a CPU-hosted model can meet. The
 // registered flag's own default is what the assertion reads, since the client carrying it is
 // built inside RunE and keeps the value unexported.

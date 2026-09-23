@@ -25,6 +25,18 @@ import (
 // finding the report can state — which is why the bound exists at all rather than being dropped.
 const batteryRequestTimeout = 300 * time.Second
 
+// effectiveBatteryTimeout is the per-attempt bound the battery client receives for a --timeout of
+// d: zero or negative keeps batteryRequestTimeout, following provider.WithDiscoveryTimeout. It
+// exists because provider.WithRequestTimeout reads zero as "the caller's context governs", which
+// for this command is no deadline at all — `--timeout 0` would otherwise let a stalled server hold
+// every attempt forever, the wedge the default bound is there to prevent.
+func effectiveBatteryTimeout(d time.Duration) time.Duration {
+	if d <= 0 {
+		return batteryRequestTimeout
+	}
+	return d
+}
+
 // errProbeModelNeedsEndpoint is the refusal when resolution left this command with nothing to
 // call. Selection itself refuses first since ADR 0036 — a config that names no startup server
 // never gets past ApplyConfig, and every entry it could select carries an endpoint
@@ -151,7 +163,7 @@ func probeModelCommand() *cobra.Command {
 			// Both of this command's clients are keyed, so a keyed
 			// Upstream cannot refuse the probe while a session against it works.
 			client := provider.NewClient(opts.Endpoint, label,
-				provider.WithRequestTimeout(batteryTimeout), provider.WithAPIKey(apiKey),
+				provider.WithRequestTimeout(effectiveBatteryTimeout(batteryTimeout)), provider.WithAPIKey(apiKey),
 				provider.WithWire(wire))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
 				Endpoint: opts.Endpoint,
@@ -190,7 +202,7 @@ func probeModelCommand() *cobra.Command {
 	flags.BoolVar(&noSave, "no-save", false,
 		"run the full battery and print the report, but record no fingerprint (ADR 0021's off-switch)")
 	flags.DurationVar(&batteryTimeout, "timeout", batteryRequestTimeout,
-		"bound on ONE attempt at a battery call; retries can multiply it (e.g. 10m for a CPU-hosted model)")
+		"bound on ONE attempt at a battery call; retries can multiply it (e.g. 10m for a CPU-hosted model); 0 or negative keeps the default")
 
 	return cmd
 }

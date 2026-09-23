@@ -61,7 +61,8 @@ never been configured for — with no `--model` the server is asked which one it
 serving. `--timeout` bounds ONE attempt at a battery call — not the command, and not the call,
 since a timed-out attempt is retried and the wait before the call itself gives up is that figure
 times the attempt budget. It defaults to five minutes, which one short exchange ordinarily costs a
-30B-class model quantised onto a CPU; raise it on a slower box (`--timeout 10m`).
+30B-class model quantised onto a CPU; raise it on a slower box (`--timeout 10m`). There is no
+unbounded setting: `--timeout 0`, like any negative value, keeps the five-minute default.
 Both `apogee probe` and `apogee probe model` resolve the entry's API key before
 they look at the server, and a source that refuses — an `api-key-cmd:` that fails, an
 `api-key-env:` naming a variable that is not set — fails the command with that source's own
