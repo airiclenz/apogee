@@ -161,6 +161,7 @@ func (e *lineEditor) setValue(s string) {
 // The caller routes the keys that are ITS OWN — a commit, a cancel — before reaching here, so the
 // field never has to know what ends an edit.
 func (e *lineEditor) editKey(msg tea.KeyPressMsg) tea.Cmd {
+	e.fitWrapMemo()
 	var cmd tea.Cmd
 	e.input, cmd = e.input.Update(msg)
 	return cmd
@@ -177,12 +178,61 @@ func (e *lineEditor) editKey(msg tea.KeyPressMsg) tea.Cmd {
 // through: the newline BINDING is off (lineEditor.singleLine) but pasted text carries its own line
 // breaks, and a value holding one would break the single row it is painted in (settingBufferCells).
 func (e *lineEditor) editMsg(msg tea.Msg) tea.Cmd {
+	e.fitWrapMemo()
 	var cmd tea.Cmd
 	e.input, cmd = e.input.Update(msg)
 	if e.oneLine {
 		e.flattenLine()
 	}
 	return cmd
+}
+
+// ----------------------------------------------------------------------------
+// The wrap memo's capacity — sized to the draft before every widget Update
+// ----------------------------------------------------------------------------
+
+const (
+	// wrapMemoFloor is the least capacity the widget's wrap memo is given: bubbles' own default
+	// MaxHeight, so a short draft keeps exactly the memo — and the visible-height clamp — it always
+	// had.
+	wrapMemoFloor = 99
+
+	// wrapMemoCeiling is the most: the widget's own logical-line limit (bubbles textarea maxLines),
+	// which a paste already obeys and a later SetValue truncates at. As MaxHeight it is also where
+	// the widget's legacy atContentLimit refuses the next typed newline, so a draft stops at the
+	// same line count however its lines arrived.
+	wrapMemoCeiling = 10000
+
+	// wrapMemoHeadroom is how many cache slots each logical line is given. One keypress wraps every
+	// line above the caret (cursorLineNumber) and then the edited line's NEW version, so a memo
+	// holding exactly one slot per line would still evict inside that pass; twice the line count
+	// leaves room for the new versions without evicting a line the same pass is about to read.
+	wrapMemoHeadroom = 2
+)
+
+// fitWrapMemo sizes the widget's wrap memo to the draft it holds, and runs right before EVERY
+// textarea Update — lineEditor.editKey and editMsg here, and the prompt's own routes that reach the
+// widget without them (Model.handleKey's fall-through, Model.foldPaste, Model.foldWidgetMsg).
+//
+// Why it has to: bubbles recreates its wrap memo at capacity MaxHeight at the top of every Update
+// whenever the two differ, and MaxHeight defaults to 99. A draft past 99 logical lines therefore
+// evicted its own lines inside one keypress — every cursorLineNumber rewrapped every line above
+// the caret, on every key. The capacity is instead the next power of two at or above twice the line
+// count, floored at wrapMemoFloor and capped at wrapMemoCeiling, so it changes (and the memo is
+// rebuilt) only when a doubling is crossed; it is NOT unbounded (MaxHeight 0), because the memo
+// keeps every stale version of an edited line it has room for, and typing into one long line would
+// then retain one wrap per keystroke.
+//
+// MaxHeight is also the widget's visible-height clamp and its legacy newline refusal
+// (atContentLimit). The first is never tighter than the 99 it always was — the box's height is
+// bounded by apogee's own sizing (Model.inputRows) — and the second moves to wrapMemoCeiling, which
+// lifts the old 99-line refusal of a TYPED newline to the limit a paste already had.
+func (e *lineEditor) fitWrapMemo() {
+	want := 1
+	for want < wrapMemoHeadroom*e.input.LineCount() {
+		want *= 2
+	}
+	e.input.MaxHeight = min(max(want, wrapMemoFloor), wrapMemoCeiling)
 }
 
 // flattenLine folds a multi-line value onto one line — each newline, each tab and each carriage

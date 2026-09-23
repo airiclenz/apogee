@@ -301,6 +301,7 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	}
 	m.sel = promptSel{} // the value is about to change; drop the selection before its coords go stale
 	m.dropRecall()      // a paste is an edit: the recalled entry is now the human's own draft
+	m.fitWrapMemo()     // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	if m.state.live() {
@@ -326,6 +327,7 @@ func (m Model) foldWidgetMsg(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if next, cmd, claimed := m.settingsEditorMsg(msg); claimed {
 		return next, cmd
 	}
+	m.fitWrapMemo() // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	return m, cmd

@@ -48,7 +48,12 @@
 - Pastes delivered as per-rune keystrokes (no bracketed paste): per-key costs shrink here, the O(n) key count stays.
 - Other IDEAS.md entries (sidepanel, copy regression, sub-agent gauge, sub-agent control).
 
-## 1. Prompt textarea keeps its wrap cache on long drafts
+## 1. Prompt textarea keeps its wrap cache on long drafts — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the retained-heap test edits one 1500-rune line with 3000 keys alternating a typed rune at the line's start and a forward delete, not 3000 appends to a 10k-char line — keeps every key a new same-length version so the heap measures memo capacity alone and the test runs in ~9 s on the Pi instead of minutes; measured ~1 MB fitted vs ~25 MB at MaxHeight 0, bound 2400 KB.
+NOTES (2026-09-23): longDraft numbers each line — the bubbles memo is keyed on line content, so identical lines share one entry and never thrash; measured allocs 400-vs-40 lines ≈ 9.5× fitted vs ≈ 32× at MaxHeight 99.
+NOTES (2026-09-23): Acceptance run without -race: ThreadSanitizer is unsupported on this Pi kernel (47-bit VMA); `go test -count=1 -run 'LineEditor|Prompt' ./internal/tui/` passes.
+NOTES (2026-09-23): MaxHeight is also the widget's visible-height clamp; it is never below the old 99, so on terminals over ~100 rows a draft of more than 49 lines may now grow the box past 99 rows, still bounded by Model.draftRowsCeiling (the Goal's "no new cap on visible height").
 
 **What:**
 Recast at the regression check (2026-09-23).

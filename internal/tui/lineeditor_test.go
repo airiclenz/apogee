@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"context"
+	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -163,4 +167,149 @@ func TestZeroFieldIsInertAndSaysSo(t *testing.T) {
 // and cursor shape — the fields are painted as plain text, so neither reaches what these tests read.
 func testPopupField(glyph, seed string) lineEditor {
 	return newPopupField(defaultCursorShape, lipgloss.Color(scheme.Default().Surface), glyph, seed)
+}
+
+// The wrap memo sized to the draft (lineEditor.fitWrapMemo). bubbles rebuilds its wrap memo at
+// capacity MaxHeight on every Update, and a keypress wraps every logical line above the caret: left
+// at the default 99, a longer draft evicted its own lines inside that one pass and rewrapped all of
+// them on every key. These pin the three things the sizing promises — a keypress's cost stops
+// scaling past the draft's own edit, the memo's retained heap stays bounded on one long line, and
+// the draft's line limit is the widget's own 10000 however the newlines arrive.
+
+// longDraft is lines logical lines of ordinary prose, each narrower than the test field so every
+// line wraps to one visual row. Each line is numbered: the memo is keyed on a line's content, so
+// identical lines would share one entry and no draft could outgrow it.
+func longDraft(lines int) string {
+	var b strings.Builder
+	for i := range lines - 1 {
+		fmt.Fprintf(&b, "%d the quick brown fox jumps over the lazy dog\n", i)
+	}
+	b.WriteString("tail")
+	return b.String()
+}
+
+// testDraftField builds an unconfined field at a fixed width holding value, caret at its end.
+func testDraftField(value string) lineEditor {
+	e := newLineEditor(defaultCursorShape, lipgloss.Color(scheme.Default().Surface), "")
+	e.input.SetWidth(testDraftWidth)
+	e.setValue(value)
+	return e
+}
+
+// testDraftWidth is the field width the draft tests type at: wider than a longDraft line.
+const testDraftWidth = 80
+
+// keypressAllocs is the allocations one keypress at the end of a lines-line draft costs, steady
+// state: the first key is typed before measuring so the memo is warm.
+func keypressAllocs(lines int) float64 {
+	e := testDraftField(longDraft(lines))
+	e.editKey(keyRune('x'))
+	return testing.AllocsPerRun(20, func() { e.editKey(keyRune('x')) })
+}
+
+// Not parallel: testing.AllocsPerRun refuses to run inside a parallel test.
+func TestLineEditorKeypressAllocsDoNotRewrapTheDraft(t *testing.T) {
+	const shortLines, longLines, maxRatio = 40, 400, 15.0
+
+	short := keypressAllocs(shortLines)
+	long := keypressAllocs(longLines)
+
+	if ratio := long / short; ratio > maxRatio {
+		t.Fatalf("a keypress on a %d-line draft allocates %.0f, %.1f× the %.0f on a %d-line draft; want ≤ %.0f×",
+			longLines, long, ratio, short, shortLines, maxRatio)
+	}
+}
+
+// The memo keeps every stale version of an edited line it has room for, so capacity is heap: editing
+// ONE long line must not retain one wrap per keystroke, which an unbounded memo (MaxHeight 0) did —
+// ~240 MB after 3000 keys on a 10k-character line. The keys alternate a typed rune at the line's
+// start with a forward delete, so every key makes a NEW version of a line whose length stays put:
+// the retained heap then measures the memo's capacity alone (~1 MB fitted, ~25 MB unbounded here).
+// Not parallel: HeapInuse is process-wide, and a neighbour's allocations would be read as this one's.
+func TestLineEditorLongLineKeepsTheMemoHeapBounded(t *testing.T) {
+	const (
+		lineRunes = 1500
+		keys      = 2 * lineRunes // every key a new version; the deletes never run out of line
+		maxGrowth = 2400 << 10    // ≥ 10× under the unbounded memo's growth, ~2× over the fitted one's
+	)
+	var stats runtime.MemStats
+	e := testDraftField(strings.Repeat("a", lineRunes))
+	e.input.MoveToBegin()
+	runtime.GC()
+	runtime.ReadMemStats(&stats)
+	before := stats.HeapInuse
+
+	for i := range keys {
+		if i%2 == 0 {
+			e.editKey(keyRune('b'))
+		} else {
+			e.editKey(tea.KeyPressMsg{Code: tea.KeyDelete})
+		}
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&stats)
+
+	if grown := int64(stats.HeapInuse) - int64(before); grown > maxGrowth {
+		t.Fatalf("%d edits of one %d-rune line grew HeapInuse by %d KB; want ≤ %d KB",
+			keys, lineRunes, grown>>10, maxGrowth>>10)
+	}
+	runtime.KeepAlive(e)
+}
+
+// A typed newline used to be refused on the 99th logical line (the widget's legacy MaxHeight
+// check), while a paste could already reach 10000. Driven through Model.Update on a draft the
+// recall route installs (SetValue), because the prompt's keys reach the widget without editKey.
+func TestPromptTypedNewlinesPassNinetyNineLines(t *testing.T) {
+	t.Parallel()
+	const draftLines = 150
+	m := newTestModel(t)
+	m.input.SetValue(longDraft(draftLines))
+
+	m = step(t, m, tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModAlt})
+	m = step(t, m, tea.KeyPressMsg{Code: 'j', Mod: tea.ModCtrl})
+	m = step(t, m, keyRune('z'))
+
+	if got := m.input.LineCount(); got != draftLines+2 {
+		t.Fatalf("alt+enter and ctrl+j on a %d-line draft left %d lines; want %d", draftLines, got, draftLines+2)
+	}
+	if !strings.HasSuffix(m.input.Value(), "tail\n\nz") {
+		t.Fatalf("the typed rune did not land after the new lines: value ends %q", lastRunes(m.input.Value(), 12))
+	}
+}
+
+// The lifted cap stops where the widget's own does: typed newlines end at 10000 lines, the limit a
+// paste obeys and a later SetValue truncates at.
+func TestLineEditorTypedNewlinesStopAtTheWidgetLimit(t *testing.T) {
+	t.Parallel()
+	e := testDraftField(strings.Repeat("\n", wrapMemoCeiling-3))
+
+	for range 5 {
+		e.editKey(keyEnter()) // the unconfigured field's own newline binding
+	}
+
+	if got := e.input.LineCount(); got != wrapMemoCeiling {
+		t.Fatalf("typing newlines past the limit left %d lines; want %d", got, wrapMemoCeiling)
+	}
+}
+
+// lastRunes is the final n runes of s, for a failure message that cannot print a whole draft.
+func lastRunes(s string, n int) string {
+	r := []rune(s)
+	return string(r[max(0, len(r)-n):])
+}
+
+// BenchmarkPromptKeyLongDraft is one printable key typed through Model.Update at the end of a
+// 400-line draft — the whole prompt path a keystroke takes, not the widget alone.
+func BenchmarkPromptKeyLongDraft(b *testing.B) {
+	const draftLines = 400
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+	m.input.SetValue(longDraft(draftLines))
+	b.ResetTimer()
+
+	for range b.N {
+		next, _ = m.Update(keyRune('x'))
+		m = next.(Model)
+	}
 }

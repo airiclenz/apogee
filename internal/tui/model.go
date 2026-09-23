@@ -1812,6 +1812,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		if next, handled := m.recallKey(msg, rec); handled {
 			return next, nil
 		}
+		m.fitWrapMemo() // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
 		if m.state.live() {
