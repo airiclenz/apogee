@@ -70,7 +70,9 @@ type Host struct {
 // kernel) and, when an endpoint is configured, the Upstream's discovery outcome. It runs no
 // agent, no tool and no model call, and it writes nothing.
 func GatherHost(ctx context.Context, in Inputs) Host {
-	caps := domain.ConfinementCaps{}
+	// No Confiner is the backend being absent, and the caps say so with the same typed cause the
+	// platform's no-backend stub returns: a Cause is set exactly when FSWrite is false.
+	caps := domain.ConfinementCaps{Cause: domain.CauseBackendAbsent}
 	if in.Confiner != nil {
 		caps = in.Confiner.Capabilities()
 	}

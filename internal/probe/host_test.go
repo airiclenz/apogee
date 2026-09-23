@@ -29,6 +29,21 @@ var (
 	llamaCppProps = &stubllm.Props{NCtx: 8192}
 )
 
+// A host probe handed no Confiner reports the backend absent: the caps keep ConfinementCaps'
+// invariant (a Cause is set exactly when FSWrite is false) with the same typed cause the
+// platform's no-backend stub returns.
+func TestGatherHostWithoutAConfinerReportsTheBackendAbsent(t *testing.T) {
+	t.Parallel()
+	host := probe.GatherHost(context.Background(), probe.Inputs{})
+
+	if host.Caps.FSWrite {
+		t.Errorf("Caps.FSWrite = true without a Confiner, want false")
+	}
+	if host.Caps.Cause != domain.CauseBackendAbsent {
+		t.Errorf("Caps.Cause = %q without a Confiner, want %q", host.Caps.Cause, domain.CauseBackendAbsent)
+	}
+}
+
 // The report states the host facts it was given and the confinement verdict it derived, on a
 // backend that CAN fence: auto is eligible, and the degradation notice — which exists only for
 // the gating case — must not appear.

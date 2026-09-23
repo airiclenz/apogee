@@ -84,7 +84,7 @@ docs/manual/configuration.md — commit-secrets paragraph (already states the in
 
 **Commit:** `docs(adr): ADR 0080 and 0056 record the one-budget commit-secrets contract`
 
-## 2. A host probe with no Confiner reports the backend absent
+## 2. A host probe with no Confiner reports the backend absent — ✅ DONE (2026-09-23)
 
 **What.** Fixes the one site breaking `domain.ConfinementCaps.Cause`'s invariant (a cause is set
 exactly when `FSWrite` is false), introduced by slow-box plan item 3.
