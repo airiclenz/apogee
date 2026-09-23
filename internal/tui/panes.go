@@ -1,6 +1,10 @@
 package tui
 
-import tea "charm.land/bubbletea/v2"
+import (
+	"sync/atomic"
+
+	tea "charm.land/bubbletea/v2"
+)
 
 // ----------------------------------------------------------------------------
 // The pane table: one row per framePane
@@ -22,6 +26,13 @@ const (
 // that paints it, and its three answers to the human's gestures — the key claim, the click and the
 // wheel. `open` is the same predicate `render` returns "" on, so the frame-wide row allocation
 // ([Model.frameRowPlan]) is divided between exactly the panes that will be drawn.
+//
+// height is render's height query: the screen rows render's block takes, answered from the pane's
+// spec without painting it (popupHeight), and 0 wherever render returns "" — a closed pane, one the
+// frame cannot seat, a width with no room for a box. It is what the frame's transcript clamp measures
+// the panes by ([Model.transcriptRows]), so the repaint tail of an Update ([Model.settle]) renders no
+// pane and View renders each open one once. It must agree with render to the row — the widget's scroll
+// clamp and the click map rest on it — and TestOverlayHeightQueryMatchesItsRender pins that for every row.
 //
 // modal says the pane swallows every key it does not act on while it is up — the /sessions browser,
 // the picker and the /settings pane through their modalClaim key, the approval or ask prompt through
@@ -50,6 +61,7 @@ type paneSpec struct {
 	modal   bool                                                             // whether it owns the keyboard while it is up
 	open    func(Model) bool                                                 // whether the Model has it open
 	render  func(Model) string                                               // its rendered block for one frame, "" when closed or unseated
+	height  func(Model) int                                                  // the rows render's block takes, without rendering it; 0 where render is ""
 	key     func(Model, tea.KeyPressMsg) (Model, tea.Cmd, bool)              // its key claim, in claimant currency; nil only for the prompt
 	keyOpen func(Model) bool                                                 // the key claim's gate; nil = always ask
 	click   func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) // its answer to a left-click on the frame
@@ -93,6 +105,7 @@ func init() {
 			modal:  true,
 			open:   Model.promptOpen,
 			render: Model.renderPrompt,
+			height: Model.promptHeight,
 			click:  promptPointerClick,
 			wheel:  Model.promptWheel,
 		},
@@ -104,6 +117,7 @@ func init() {
 			modal:   true,
 			open:    func(m Model) bool { return m.sessionBrowser.open },
 			render:  Model.renderSessionBrowser,
+			height:  Model.sessionBrowserHeight,
 			key:     modalClaim(Model.sessionBrowserKey),
 			keyOpen: func(m Model) bool { return m.state == stateIdle && m.sessionBrowser.open },
 			click:   Model.handleBrowserClick,
@@ -116,6 +130,7 @@ func init() {
 			modal:  true,
 			open:   func(m Model) bool { return m.picker.open },
 			render: Model.renderPicker,
+			height: Model.pickerHeight,
 			key:    modalClaim(Model.pickerKey),
 			// Asked in BOTH live states, because /schedule opens its cycle and mode popups mid-Exchange
 			// as well, and /sub-agents-server the one it retargets delegations from — those verbs are
@@ -136,6 +151,7 @@ func init() {
 			modal:   true,
 			open:    func(m Model) bool { return m.settings.open },
 			render:  Model.renderSettings,
+			height:  Model.settingsHeight,
 			key:     modalClaim(Model.settingsKey),
 			keyOpen: Model.settingsOwnsInput,
 			click:   settingsPointerClick,
@@ -158,6 +174,7 @@ func init() {
 			modal:  false,
 			open:   func(m Model) bool { return m.autocomplete.active && len(m.autocomplete.items) > 0 },
 			render: Model.renderAutocomplete,
+			height: Model.autocompleteHeight,
 			key:    paneClaim(Model.autocompleteKey),
 			// Every region opens in BOTH states (computeAutocomplete), so an interjection reaches a
 			// file, a skill and a reporting command as easily as a submitted message does; the
@@ -184,6 +201,7 @@ func reportPaneRow(name string, r reportKind) paneSpec {
 		modal:  false,
 		open:   func(m Model) bool { return m.reportState(r).open },
 		render: func(m Model) string { return m.renderReport(r) },
+		height: func(m Model) int { return m.reportHeight(r) },
 		key:    paneClaim(reportClaim(r)),
 		click: func(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 			return m.handleReportClick(r, pre, msg)
@@ -232,6 +250,62 @@ func (m Model) renderPrompt() string {
 	}
 	return ""
 }
+
+// promptHeight is the rows renderPrompt paints the decision prompt in, answered without painting it
+// (popupHeight); 0 where it paints nothing.
+func (m Model) promptHeight() int {
+	var (
+		spec   popupSpec
+		seated bool
+	)
+	switch {
+	case m.state == stateAwaitingApproval && m.pending != nil:
+		spec, seated = m.approvalPromptSpec(m.pending.Request)
+	case m.state == stateAwaitingAsk && m.pendingAsk != nil:
+		spec, seated = m.askPromptSpec(m.pendingAsk.Request)
+	}
+	if !seated {
+		return 0
+	}
+	return popupHeight(m.th, spec, m.width)
+}
+
+// sessionBrowserHeight is the rows renderSessionBrowser paints the browser in, answered without
+// painting it (listHeight); 0 where it paints nothing.
+func (m Model) sessionBrowserHeight() int {
+	c, ok := m.browserListContent()
+	if !ok {
+		return 0
+	}
+	return m.listHeight(filteredListContent(m.sessionBrowser.filter, c))
+}
+
+// pickerHeight is the rows renderPicker paints the picker in, answered without painting it
+// (listHeight); 0 where it paints nothing.
+func (m Model) pickerHeight() int {
+	c, ok := m.pickerListContent()
+	if !ok {
+		return 0
+	}
+	return m.listHeight(filteredListContent(m.picker.filter, c))
+}
+
+// autocompleteHeight is the rows renderAutocomplete paints the dropdown in, answered without painting
+// it (listHeight); 0 where it paints nothing.
+func (m Model) autocompleteHeight() int {
+	c, ok := m.autocompleteListContent()
+	if !ok {
+		return 0
+	}
+	return m.listHeight(c)
+}
+
+// paneRenders counts, per framePane, how many times the frame rendered that pane through its row of
+// the pane table ([Model.frameOverlays], the table's one render walk). It exists for the tests that
+// pin how often an Update and its View render each open pane (paintcache_test.go) and is read by
+// nothing else; it is atomic because panes render from parallel tests, and those tests read it only
+// when running alone.
+var paneRenders [paneKinds]atomic.Int64
 
 // block is the rendered block of one pane of the frame, "" when that pane is not on it. It is what
 // lets the slot's order be WALKED (stackTranscriptSlot, model.go) instead of re-listed field by field

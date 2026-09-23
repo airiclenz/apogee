@@ -318,6 +318,17 @@ func (m Model) askPrompt(req domain.AskRequest) string {
 // screen rather than a second arithmetic that can disagree with it. The doc above is the pane's; this
 // is the same pane, said twice over.
 func (m Model) askPromptPlaced(req domain.AskRequest) (string, popupPlacement) {
+	spec, seated := m.askPromptSpec(req)
+	if !seated {
+		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
+	return renderPopupPlaced(m.th, spec, m.width)
+}
+
+// askPromptSpec composes the ask pane's [popupSpec] for THIS frame — the one composition
+// [Model.askPromptPlaced] paints and [Model.promptHeight] measures. seated is false when the frame
+// cannot seat the pane at all.
+func (m Model) askPromptSpec(req domain.AskRequest) (popupSpec, bool) {
 	choicesShown := len(req.Choices) > 0 && m.input.Value() == ""
 
 	selected := -1
@@ -377,7 +388,7 @@ func (m Model) askPromptPlaced(req domain.AskRequest) (string, popupPlacement) {
 	}
 	maxBodyRows, rowLines, seated := m.popupBudget(panePrompt, wanted, capped, popupTitleBorderChrome, floor)
 	if !seated {
-		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
+		return popupSpec{}, false // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 
 	spec := popupSpec{
@@ -397,7 +408,7 @@ func (m Model) askPromptPlaced(req domain.AskRequest) (string, popupPlacement) {
 		maxRows:     rowLines,
 		scrollbar:   m.popupScrollbarOn(),
 	}
-	return renderPopupPlaced(m.th, spec, m.width)
+	return spec, true
 }
 
 // askAnchorRowLines is what the ask prompt's offering must keep to put ONE answer on the screen: the

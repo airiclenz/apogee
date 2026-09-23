@@ -405,6 +405,8 @@ func (m Model) settingRows() []SettingRow {
 // pointer can name a row" (settingsPaint): a step that paints for itself takes no pointer through the
 // list it replaced. The renderers keep their own signatures (renderSettingsEnum takes the row,
 // renderSettingsText the rows), so the column takes both and each arm spends the one it needs.
+// height is paint's height query — the rows that pane takes, answered without painting it
+// ([Model.settingsHeight]) — set exactly where paint is set and nil exactly where it is nil.
 type settingsStep struct {
 	target    func(m Model, rows []SettingRow) (SettingRow, bool)
 	key       func(m Model, msg tea.KeyPressMsg, row SettingRow) (tea.Model, tea.Cmd)
@@ -412,6 +414,7 @@ type settingsStep struct {
 	editing   func(m Model, row SettingRow) bool
 	editorMsg func(m Model, msg tea.Msg) (Model, tea.Cmd, bool)
 	paint     func(m Model, row SettingRow, rows []SettingRow) string
+	height    func(m Model, row SettingRow, rows []SettingRow) int
 }
 
 // settingsSteps is the pane's second steps, keyed by the [settingsKind] that names each. The key list
@@ -433,7 +436,8 @@ func init() {
 			editing: func(m Model, row SettingRow) bool {
 				return settingsPickable(row) && len(m.settingsVocabulary(row)) > 0
 			},
-			paint: func(m Model, row SettingRow, _ []SettingRow) string { return m.renderSettingsEnum(row) },
+			paint:  func(m Model, row SettingRow, _ []SettingRow) string { return m.renderSettingsEnum(row) },
+			height: func(m Model, row SettingRow, _ []SettingRow) int { return m.listHeight(m.settingsEnumContent(row)) },
 		},
 		settingsValueBuffer: {
 			target:    Model.settingsBufferTarget,
@@ -449,6 +453,7 @@ func init() {
 			editing:   func(_ Model, row SettingRow) bool { return settingsWritable(row) },
 			editorMsg: Model.settingsFieldMsg,
 			paint:     func(m Model, _ SettingRow, rows []SettingRow) string { return m.renderSettingsText(rows) },
+			height:    func(m Model, _ SettingRow, rows []SettingRow) int { return m.settingsTextHeight(rows) },
 		},
 		settingsResetArmed: {
 			target: Model.settingsResetTarget,
@@ -1592,6 +1597,28 @@ func (m Model) renderSettings() string {
 	return m.highlightSettingsEdit(view, display, place)
 }
 
+// settingsHeight is the rows renderSettings paints the pane in, answered without painting it
+// (popupHeight): the same branch — a step that paints for itself asks its row's height arm, the key
+// list its own spec — and 0 wherever renderSettings returns "". The drag-selection overlays shade
+// cells of lines already composed, so they cost no row and are not asked. It is the pane's height
+// query for the frame's transcript clamp ([Model.transcriptRows]).
+func (m Model) settingsHeight() int {
+	if !m.settings.open {
+		return 0
+	}
+	rows := m.settingRows()
+	if step, ok := settingsSteps[m.settings.kind]; ok && step.paint != nil {
+		if row, ok := step.target(m, rows); ok {
+			return step.height(m, row, rows)
+		}
+	}
+	spec, _, ok := m.settingsKeyListSpec(rows)
+	if !ok {
+		return 0
+	}
+	return popupHeight(m.th, spec, m.width)
+}
+
 // settingsKeyListSpec composes the key list's [popupSpec] for THIS frame — the display rows, the
 // description header and the row budget the frame granted the pane — with the display list it was
 // built from. ok is false when the frame cannot seat the pane at all.
@@ -1667,6 +1694,16 @@ func (m Model) renderSettingsText(rows []SettingRow) string {
 	return m.highlightSettingsText(view, place)
 }
 
+// settingsTextHeight is the rows renderSettingsText paints the field in, answered without painting it
+// (popupHeight); 0 where the frame cannot seat it.
+func (m Model) settingsTextHeight(rows []SettingRow) int {
+	spec, ok := m.settingsTextSpec(rows)
+	if !ok {
+		return 0
+	}
+	return popupHeight(m.th, spec, m.width)
+}
+
 // settingsTextLines is the field as the pane PAINTS it: one string per LINE of the value, the caret
 // drawn in as a glyph where the next keystroke lands ([lineEditor.textWithCaret]) and every line
 // escape-stripped like any other cell handed the popup module (doc.go).
@@ -1726,7 +1763,7 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 	}, true
 }
 
-// renderSettingsSubList paints a second-step sub-list in the pane the key list was read in; the enum
+// settingsSubListContent is a second-step sub-list in the pane the key list was read in; the enum
 // vocabulary (renderSettingsEnum) is the one content it draws today. Everything that makes it that
 // surface is stated once here: the pane it claims, the title over it, the body naming the key being
 // answered (settingsEnumPrompt, because the list where the human read that name is what this
@@ -1742,8 +1779,12 @@ func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 // a row to highlight (listContent.selected's own convention, and [listCursor.highlight] answers −1
 // for it by itself). Passing the choice count keeps that fact where the pane knows it rather than
 // making this painter guess from the rows it was handed.
-func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint string, choices int) string {
-	return m.renderList(listContent{
+//
+// It answers with the list surface's CONTENT rather than a paint, because the pane has two readers of
+// it: the paint (renderSettingsEnum, through renderList) and the pane's height query
+// ([Model.settingsHeight], through listHeight).
+func (m Model) settingsSubListContent(row SettingRow, values []popupRow, hint string, choices int) listContent {
+	return listContent{
 		pane:     paneSettings,
 		title:    settingsTitle,
 		body:     truncateToWidth(m.th, stripEscapes(settingsEnumPrompt(row)), popupInnerWidth(m.th, m.width)),
@@ -1752,11 +1793,11 @@ func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint str
 		rows:     values,
 		menuRows: true,
 		selected: m.settings.sub.highlight(choices),
-	})
+	}
 }
 
 // renderSettingsEnum paints the value sub-list — the second step of an enum edit — in the SAME pane,
-// as a MENU rather than as a list (renderSettingsSubList): four values a human is choosing between,
+// as a MENU rather than as a list (settingsSubListContent): four values a human is choosing between,
 // all of them on the screen at once, which is the approval prompt's shape and not the picker's
 // scrolled offering. The pane it replaces is still the one the frame allocated, so nothing about the
 // frame moves between the two steps except what is inside the border.
@@ -1771,6 +1812,12 @@ func (m Model) renderSettingsSubList(row SettingRow, values []popupRow, hint str
 // "(current)" cell of its own, so the question can be answered without remembering the answer to it —
 // and that cell is the whole of what this content brings to the shared painter.
 func (m Model) renderSettingsEnum(row SettingRow) string {
+	return m.renderList(m.settingsEnumContent(row))
+}
+
+// settingsEnumContent is the value sub-list renderSettingsEnum paints, as the list surface's content —
+// the one composition that paint and the pane's height query ([Model.settingsHeight]) both read.
+func (m Model) settingsEnumContent(row SettingRow) listContent {
 	current := m.settingsCurrentValue(row)
 	vocabulary := m.settingsVocabulary(row)
 	width := m.settingsEnumCellWidth(vocabulary)
@@ -1785,7 +1832,7 @@ func (m Model) renderSettingsEnum(row SettingRow) string {
 		}
 		values = append(values, popupRow{stripEscapes(value), cell})
 	}
-	return m.renderSettingsSubList(row, values, settingsEnumHint, len(values))
+	return m.settingsSubListContent(row, values, settingsEnumHint, len(values))
 }
 
 // settingsEnumValueCell is what the sub-list's right-hand column says about ONE value BEFORE the

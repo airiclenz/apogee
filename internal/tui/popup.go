@@ -510,7 +510,7 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 		hidden += hiddenBody
 	}
 
-	title := popupTitleLine(th, popupHeading(spec, body, hiddenBody), hidden, inner)
+	title := popupTitleLine(th, popupHeading(spec, len(body), hiddenBody), hidden, inner)
 
 	// The pad the body asks for is added AFTER the two reads above, because both of them are about the
 	// body's own LINES — what it could not show, and whether it is still showing enough of itself to
@@ -556,6 +556,104 @@ func renderPopupPlaced(th theme, spec popupSpec, width int) (string, popupPlacem
 	// it left-aligned by padding every row out to the widest row IT measured, which is the same
 	// GraphemeWidth pad one level in.
 	return strings.Join(drawTitledBox(th.measure, th.popupBorder, lines, width, borderTitle, th.presentTitle), "\n"), place
+}
+
+// popupHeight is how many screen rows renderPopupPlaced would paint spec in at the given TOTAL width,
+// answered without painting it: 0 where the painter draws nothing (a width with no content cell inside
+// the frame), otherwise the two borders plus every content line the composition would emit — the
+// title row, the body block with its pads, the row block and the hint. It is what the frame's
+// transcript clamp measures an open pane by ([Model.transcriptRows]), so an Update that only has to
+// know how tall a pane is no longer pays for its styling, its column layout and its box.
+//
+// It is the painter's own arithmetic asked for counts rather than lines — the body's elision split
+// (elisionSplit), its pads (popupBodyPad's rule), the row window (popupRowSeat) and the title the
+// two hidden counts decide (popupHeading, popupTitleLine) — so it cannot pick a different window than
+// the paint does. What it still composes is what a count genuinely depends on: the body prose wrapped
+// to the inner width, and a WRAPPING spec's rows wrapped likewise (popupRowBlocks), because only the
+// wrap says how many lines they take. A flat row costs one line at any width, so a non-wrapping
+// spec's rows are never laid out here. TestOverlayHeightQueryMatchesItsRender pins the agreement per pane.
+func popupHeight(th theme, spec popupSpec, width int) int {
+	if width <= th.popupBorder.GetHorizontalFrameSize() {
+		return 0 // renderPopupPlaced draws no pane here
+	}
+	inner := popupInnerWidth(th, width)
+
+	bodyLines, hiddenBody := popupBodyLineSpan(th, spec.body, spec.maxBodyRows, inner)
+	rowLines, hiddenRows := popupRowLineCount(th, spec, inner)
+	hidden := hiddenRows
+	if bodyLines == 0 {
+		hidden += hiddenBody
+	}
+	title := popupTitleLine(th, popupHeading(spec, bodyLines, hiddenBody), hidden, inner)
+
+	lines := popupBorderRows + rowLines
+	if title != "" && !spec.titleInBorder {
+		lines++
+	}
+	if pad := popupBodyPadLines(spec.bodyPadAbove, spec.bodyPadBelow); pad > 0 && bodyLines > 0 &&
+		(spec.maxBodyRows < 0 || bodyLines+pad <= spec.maxBodyRows) {
+		lines += pad // popupBodyPad's rule: the pads ride only a block the budget still has room for
+	}
+	lines += bodyLines
+	if spec.hint != "" {
+		lines++
+	}
+	return lines
+}
+
+// popupBorderRows is the two rows drawTitledBox draws around a pane's content: its top and bottom
+// borders.
+const popupBorderRows = 2
+
+// popupBodyLineSpan is popupBodyLines counted rather than composed: how many lines the body block
+// paints (its elision marker included) and how many of the prose's lines it hides.
+func popupBodyLineSpan(th theme, body string, maxBodyRows, inner int) (lines, hidden int) {
+	if body == "" {
+		return 0, 0
+	}
+	wrapped := len(popupBodyWrapped(th, body, inner))
+	if maxBodyRows == 0 {
+		return 0, wrapped
+	}
+	if maxBodyRows > 0 && wrapped > maxBodyRows {
+		head, tail, hidden := elisionSplit(wrapped, maxBodyRows)
+		return head + 1 + tail, hidden // +1: the marker row between the head and the tail
+	}
+	return wrapped, 0
+}
+
+// popupRowLineCount is popupRowLines counted rather than composed: how many lines the row block
+// paints and how many rows it owes the title row a count of. The overflow bar never changes the
+// count — it is drawn down a column of lines already there (popupRowScrollbar) — but a WRAPPING
+// spec's narrower second pass can re-seat the window, so that pass is counted too.
+func popupRowLineCount(th theme, spec popupSpec, inner int) (lines, hidden int) {
+	heights := popupRowLineHeights(th, spec, inner)
+	seat := popupRowSeat(spec, heights)
+	rowInner := inner - scrollbarWidth
+	if spec.scrollbar && rowInner > 1 && seat.end-seat.start < len(spec.rows) && spec.wrapRows {
+		heights = popupRowLineHeights(th, spec, rowInner)
+		seat = popupRowSeat(spec, heights)
+	}
+	if seat.start == seat.end {
+		if len(heights) == 0 && seat.capLines > 0 && seat.padBelow {
+			return 1, 0 // an empty offering still closes on the blank above its hint (popupRowLinesAt)
+		}
+		return 0, len(heights)
+	}
+	lines = popupRowPadLines(seat.padAbove, seat.padBelow) + spec.rowStyle.gapLines()*(seat.end-seat.start-1)
+	for _, h := range heights[seat.start:seat.end] {
+		lines += h
+	}
+	return lines, 0
+}
+
+// popupRowLineHeights is what each of spec's rows costs in lines at inner: one apiece for a flat
+// spec, whatever the wrap made of it for a wrapping one.
+func popupRowLineHeights(th theme, spec popupSpec, inner int) []int {
+	if !spec.wrapRows {
+		return popupFlatRowHeights(len(spec.rows))
+	}
+	return popupRowHeights(popupRowBlocks(th, spec.rows, true, inner))
 }
 
 // popupGutter separates two adjacent popup columns: two spaces, the minimum gap between the widest
@@ -1491,7 +1589,8 @@ func popupElisionMarkerFitting(th theme, hidden, budget int) string {
 //
 // WHICH windows those are is read off the composed block rather than re-derived from the budget the
 // block was composed against, because the block is where the two things that decide it meet: the
-// budget the frame granted, and how many lines the prose wrapped onto at this width. A block that
+// budget the frame granted, and how many lines the prose wrapped onto at this width — handed in as
+// the block's line count (bodyLines), which is all of it the answer reads. A block that
 // hid lines (hiddenBody > 0) and came back one line or none is a block whose every line went to the
 // elision marker — the pane is showing a count where its identity should be — and that is exactly
 // the case the fallback is for. A block still holding one of its own lines is a pane already saying
@@ -1501,11 +1600,11 @@ func popupElisionMarkerFitting(th theme, hidden, budget int) string {
 // title row spends the width it has on the FRONT of the name (popupTitleLine), which is where a
 // question identifies itself, and a heading that kept the body's own line breaks would spend that
 // width on the layout of prose that is not being shown.
-func popupHeading(spec popupSpec, body []string, hiddenBody int) string {
+func popupHeading(spec popupSpec, bodyLines, hiddenBody int) string {
 	if spec.title != "" || !spec.rowStyle.titleFromBody || !spec.titleInBorder {
 		return spec.title
 	}
-	if hiddenBody == 0 || len(body) > 1 {
+	if hiddenBody == 0 || bodyLines > 1 {
 		return "" // a line of the body is on the screen: the pane is naming itself already
 	}
 	return strings.Join(strings.Fields(spec.body), " ")

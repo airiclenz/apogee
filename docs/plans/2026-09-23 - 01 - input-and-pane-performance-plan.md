@@ -165,7 +165,13 @@ Depends on item 6.
 **Acceptance:** `go test -race -count=1 -run 'Popup|Report|Thinking|Inspect|Ask|Settings' ./internal/tui/`
 **Commit:** `perf(tui): lay a report pane's rows out once per render`
 
-## 8. Open panes render once per frame
+## 8. Open panes render once per frame — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): re-derived from the assumption that the height-only query could sit beside render in panes.go/reportpane.go alone: every non-report pane composes its popupSpec inline in its own renderer, so the spec step was split out of approvalPromptPlaced (approval.go → approvalPromptSpec), askPromptPlaced (ask.go → askPromptSpec), renderListPlaced (listsurface.go → listSpec/listHeight, plus filteredListContent) and renderSettingsEnum (settings.go → settingsEnumContent; renderSettingsSubList became settingsSubListContent, its only caller being the enum), and popup.go gained popupHeight — the painter's own line arithmetic (elisionSplit, popupBodyPad's rule, popupRowSeat, popupHeading/popupTitleLine) asked for counts; popupHeading now takes the body's line count instead of its lines.
+NOTES (2026-09-23): consequential edit — internal/tui/mouse.go: made necessary by transcriptRows no longer composing the overlays (the file-head comment said it "composes the frame").
+NOTES (2026-09-23): reportWindow (the scroll keys' and wheel's window) now reads the seat from row counts through a new reportRowSeat shared with reportFullWindow instead of calling renderPopupPlaced — otherwise a pgdown on a report still rendered it twice per Update+View; a wrapRows spec still asks the painter, as before.
+NOTES (2026-09-23): the render counter (paneRenders, panes.go) is incremented in frameOverlays, the table's one render walk, and counts closed panes' "" answers too, so the test's ceiling is ≤1 per paneSpecs row plus exactly 1 for each pane open after the Update. The height-equals-render test is named TestOverlayHeightQueryMatchesItsRender (not TestPane…) so the item's Acceptance regex selects it; it sweeps widths 2–140, heights 4–44 and the bar on/off over 16 fixtures (every pane, every /settings paint, ask with and without choices, empty browser/report). Mutating popupHeight's elision or empty-offering arithmetic makes it fail.
+NOTES (2026-09-23): BenchmarkThinkingPaneUpdateAndView added (paintcache_test.go): /thinking at the record cap, one reasoning-chunk Update + View ≈ 18 ms/op on this Pi. `-race` cannot run on this host (ThreadSanitizer: unsupported VMA range), so Acceptance ran without it; the whole internal/tui package and golangci-lint (pinned version) pass.
 
 **What:**
 Recast at the regression check (2026-09-23).

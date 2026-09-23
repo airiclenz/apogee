@@ -470,6 +470,17 @@ func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 // on the screen rather than a second arithmetic that can disagree with it. The doc above is the
 // pane's; this is the same pane, said twice over (askPromptPlaced is its twin).
 func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPlacement) {
+	spec, seated := m.approvalPromptSpec(req)
+	if !seated {
+		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
+	return renderPopupPlaced(m.th, spec, m.width)
+}
+
+// approvalPromptSpec composes the approval pane's [popupSpec] for THIS frame — the one composition
+// [Model.approvalPromptPlaced] paints and [Model.promptHeight] measures. seated is false when the
+// frame cannot seat the pane at all.
+func (m Model) approvalPromptSpec(req domain.ApprovalRequest) (popupSpec, bool) {
 	var parts []string
 	if line := subAgentPromptLine(req.SubAgentName, req.SubAgentTask); line != "" {
 		parts = append(parts, line)
@@ -545,7 +556,7 @@ func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPl
 	disclosed := isForcedApproval(req) // a forced pane opens on its disclosure and may yield it below
 	maxBodyRows, rowsShown, seated := m.approvalMenuBudget(len(rows), disclosed)
 	if !seated {
-		return "", popupPlacement{} // the frame cannot seat this pane beside its siblings (frameRowPlan)
+		return popupSpec{}, false // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	if disclosed && rowsShown < approvalMenuLines(len(rows), disclosed) {
 		disclosed = false
@@ -581,7 +592,7 @@ func (m Model) approvalPromptPlaced(req domain.ApprovalRequest) (string, popupPl
 		maxRows:   rowsShown,
 		scrollbar: m.popupScrollbarOn(),
 	}
-	return renderPopupPlaced(m.th, spec, m.width)
+	return spec, true
 }
 
 // approvalMenuLines is what the approval menu demands of the frame, in LINES: one per option — the

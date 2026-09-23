@@ -54,10 +54,10 @@ import (
 //     stays a contiguous run of content lines.
 //   - At the bottom, the approval and ask popups, the /sessions browser, the picker, the
 //     autocomplete dropdown and the staged-interjection strip take their rows OFF the transcript
-//     (Model.transcriptRows composes the frame from what is left). Those rows map to no content
-//     line at all, so a click on a popup border or a session row arms no transcript selection — the
-//     alternative, bounding by the height layout() stored, addressed reply lines that were not on
-//     screen. The
+//     (Model.transcriptRows measures what is left; View composes the frame from it). Those rows map
+//     to no content line at all, so a click on a popup border or a session row arms no transcript
+//     selection — the alternative, bounding by the height layout() stored, addressed reply lines
+//     that were not on screen. The
 //     WHEEL reads the same rows the same way and gives the same answer: a notch on them belongs to
 //     the pane that painted them, so it walks that pane's own list instead of scrolling a transcript
 //     that is not there (foldMouseWheel below routes all seven panes; the /settings pane takes the

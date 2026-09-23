@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"testing"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -636,4 +640,83 @@ func TestPaintCacheKeysOnTheRoot(t *testing.T) {
 
 	tr.setRoot(runRef{})
 	sameRender(t, "back at the top level", tr.renderView(th, 80, false, breadcrumbHint), coldRender(tr, th, 80, false))
+}
+
+// ----------------------------------------------------------------------------
+// One render of each open pane per frame (model.go, transcriptRows; panes.go, paneSpec.height)
+// ----------------------------------------------------------------------------
+
+// TestOverlayPanesRenderOncePerUpdateAndView pins the frame's pane-render budget: with each row of the
+// pane table open, one non-pointer Update — an engine Event, a reasoning chunk, a keypress — plus the
+// View that follows renders every pane at most once, and a pane still open after the Update exactly
+// once (View's). A closed pane's render is asked too, by View's one walk of the table, and answers ""
+// at once; it is counted like any other, which is why the ceiling is per row and not per open pane. The repaint tail of the Update ([Model.settle]) sizes the transcript clamp from the
+// panes' height queries, which render nothing; before them it rendered every open pane through
+// frameOverlays, and View and a second layout() rendered them again — the /thinking pane three times
+// per reasoning chunk.
+//
+// It reads the process-wide counter (paneRenders), so it does not run in parallel: the tests that
+// do are held until every serial one has finished.
+func TestOverlayPanesRenderOncePerUpdateAndView(t *testing.T) {
+	msgs := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{"a token event", eventMsg{Event: domain.TokenEvent{Text: "a streamed word "}}},
+		{"a reasoning chunk", eventMsg{Event: reasoningAt(runRef{}, 90, "one more reasoning chunk")}},
+		{"a keypress", keyDown()},
+	}
+	for _, fx := range paneFixtures() {
+		for _, in := range msgs {
+			t.Run(fx.name+"/"+in.name, func(t *testing.T) {
+				m := fx.build(t)
+				for p := range paneRenders {
+					paneRenders[p].Store(0)
+				}
+				next := step(t, m, in.msg)
+				next.View()
+				for p := framePane(0); p < paneKinds; p++ {
+					got := paneRenders[p].Load()
+					if got > 1 {
+						t.Errorf("the %s rendered %d times over one Update and its View, want at most once",
+							paneSpecs[p].name, got)
+					}
+					if paneSpecs[p].open(next) && got != 1 {
+						t.Errorf("the open %s rendered %d times over one Update and its View, want View's one",
+							paneSpecs[p].name, got)
+					}
+				}
+			})
+		}
+	}
+}
+
+// BenchmarkThinkingPaneUpdateAndView times what a reasoning chunk costs the frame with the /thinking
+// pane open at its record cap: the Update that folds it (its repaint tail sizing the transcript clamp
+// through the panes' height queries) and the View that draws the pane.
+func BenchmarkThinkingPaneUpdateAndView(b *testing.B) {
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	m = next.(Model)
+	line := strings.Repeat("reasoning word ", 20) + "\n"
+	record := strings.Repeat(line, thinkingRecordCap/len(line)+1)
+	for turn := range maxThinkingRecords {
+		m.thinking.append(record, runRef{}, turn)
+		m.thinking.commit(runRef{})
+	}
+	m.opts.UI.ShowScrollbar = true
+	m.thinkingPane = reportPane{open: true, follow: true}
+	m.layout()
+	if m.renderReport(thinkingReport) == "" {
+		b.Fatal("the frame seated no /thinking pane")
+	}
+	chunk := eventMsg{Event: reasoningAt(runRef{}, maxThinkingRecords, "another chunk ")}
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		next, _ := m.Update(chunk)
+		m = next.(Model)
+		m.View()
+	}
 }

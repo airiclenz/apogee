@@ -2358,7 +2358,7 @@ func (m *Model) layout() {
 	}
 
 	// The WIDGET's height IS the drawn height: transcriptRows is the budget less the rows THIS
-	// frame's overlays measure at, composed once here the way View composes them each frame. The
+	// frame's overlays measure at — each pane's height query, which renders none of them. The
 	// widget clamps every scroll to total − Height(), so feeding it the drawn height is what lets
 	// the tail come up to the last drawn row — fed the whole budget it held back exactly an open
 	// pane's height of content at every offset, unreachable by wheel, PageDown or block cursor.
@@ -2389,7 +2389,7 @@ func (m Model) transcriptWidgetRows() int {
 //
 // The question is asked rather than the answer simply re-applied because layout() re-renders the whole
 // transcript: a pane key that moved no rows — a selection step in the browser, a scroll in /usage —
-// pays one overlay composition, the same one View performs each frame, instead of a second full
+// pays one measure of the overlays (each pane's height query, no paint) instead of a second full
 // repaint of the history.
 func (m *Model) freshenTranscriptClamp() {
 	if m.viewport.Height() == m.transcriptWidgetRows() && m.input.Height() == m.inputRows() {
@@ -2629,9 +2629,11 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 // above them, not between them and the chrome), the dropdown and the two strips directly above the
 // input box.
 //
-// They are gathered as ONE value because two readers need them and must never disagree: View
-// composes them into the frame, and [Model.transcriptRows] measures them to say how many screen
-// rows the transcript still owns — which is what the mouse maps a click through.
+// They are gathered as ONE value for View, which composes them into the frame, and for the pointer's
+// span lookup ([Model.frameSpans]). How many screen rows the transcript still owns — which is what the
+// mouse maps a click through — is [Model.transcriptRows], which measures the panes through their
+// height queries instead of rendering them, and agrees with this value's height() by the pane
+// table's height-equals-render contract (paneSpec.height).
 //
 // How TALL each of them is drawn is settled before any of them is rendered, by the frame-wide row
 // allocation they all share ([Model.frameRowPlan]): they are siblings spending the same viewport,
@@ -2642,22 +2644,39 @@ type frameOverlays struct {
 	hint   string            // the skill-suggestion row closing the band above the box (ADR 0061)
 }
 
-// height is the number of screen rows these overlays take from the transcript. An absent overlay
-// is the empty string, which costs nothing — lipgloss.Height("") is 1, so the emptiness is tested
-// rather than measured.
+// height is the number of screen rows these overlays take from the transcript; an absent overlay
+// costs nothing (blockRows).
 func (o frameOverlays) height() int {
 	rows := 0
 	for _, block := range o.panes {
-		if block != "" {
-			rows += lipgloss.Height(block)
-		}
+		rows += blockRows(block)
 	}
-	for _, block := range []string{o.queued, o.hint} {
-		if block != "" {
-			rows += lipgloss.Height(block)
-		}
+	return rows + blockRows(o.queued) + blockRows(o.hint)
+}
+
+// blockRows is the screen rows one composed overlay block takes: none for an absent one (the empty
+// string — lipgloss.Height("") is 1, so the emptiness is tested rather than measured), its line count
+// otherwise.
+func blockRows(block string) int {
+	if block == "" {
+		return 0
 	}
-	return rows
+	return lipgloss.Height(block)
+}
+
+// overlayRows is the screen rows this frame's overlays take from the transcript, MEASURED rather than
+// rendered: each pane through its row's height query (paneSpec.height, panes.go), which answers from
+// the pane's spec without painting it, and the two strips — a line or two of their own, no pane —
+// through their composed blocks. It equals frameOverlays().height() on every Model value; that is the
+// pane table's height-equals-render contract (TestOverlayHeightQueryMatchesItsRender), and it is what lets
+// [Model.transcriptRows] — asked on every Update's repaint tail ([Model.settle]) — render no pane,
+// leaving View the one render of each.
+func (m Model) overlayRows() int {
+	rows := 0
+	for p := framePane(0); p < paneKinds; p++ {
+		rows += paneSpecs[p].height(m)
+	}
+	return rows + blockRows(m.renderPendingInterjections()) + blockRows(m.renderSkillHints())
 }
 
 // transcriptRows reports the rows the transcript keeps once these overlays have taken theirs out of
@@ -2671,13 +2690,14 @@ func (o frameOverlays) transcriptRows(budget int) int {
 // frameOverlays renders every overlay block of the frame as the Model stands — each pane through its
 // row of the pane table (paneSpecs), then the two strips. It is a pure function
 // of the Model — nothing here mutates and nothing depends on the frame being composed — so View and
-// the mouse mapping may each call it and are guaranteed the same answer. That guarantee is per Model
+// the pointer's span lookup may each call it and are guaranteed the same answer. That guarantee is per Model
 // VALUE and says nothing across two of them, which is exactly why the click chain snapshots one: a
 // dismissal mid-chain yields a different model, and every rect asked of it after that would be a
 // different frame's (handleMouseClick, mouse.go).
 func (m Model) frameOverlays() frameOverlays {
 	var o frameOverlays
 	for p := framePane(0); p < paneKinds; p++ {
+		paneRenders[p].Add(1)
 		o.panes[p] = paneSpecs[p].render(m)
 	}
 	o.queued = m.renderPendingInterjections()
@@ -2686,7 +2706,8 @@ func (m Model) frameOverlays() frameOverlays {
 }
 
 // transcriptRows is THE derivation of how many screen rows the transcript occupies in the frame:
-// the frame's budget ([Model.transcriptBudget]) less the rows this frame's overlays measure at.
+// the frame's budget ([Model.transcriptBudget]) less the rows this frame's overlays measure at
+// ([Model.overlayRows] — each pane's height query, so asking renders no pane).
 // View composes the body at exactly this height, [Model.contentLineAt] refuses every row past it,
 // pointTranscriptRow (mouse.go) bounds a click by it, and layout() sizes the viewport WIDGET to it
 // so the widget's own scroll clamp (maxYOffset = total − Height()) is its fourth reader — one
@@ -2699,7 +2720,7 @@ func (m Model) frameOverlays() frameOverlays {
 // compound with itself. The floor here is ZERO, not the one row layout() floors the WIDGET at
 // (see there): a frame whose overlays take the whole budget paints no transcript at all.
 func (m Model) transcriptRows() int {
-	return m.frameOverlays().transcriptRows(m.transcriptBudget())
+	return max(0, m.transcriptBudget()-m.overlayRows())
 }
 
 // blockSpan is where one block of the composed frame landed: the screen row its first line is drawn on
@@ -2883,8 +2904,10 @@ func (m Model) View() tea.View {
 		return v
 	}
 
-	// Rendered once, then measured by the same derivation the mouse maps through, so what is drawn
-	// over the transcript and what a click may address are the same rows by construction.
+	// Rendered once — the frame's one render of each open pane. The mouse maps a click through
+	// transcriptRows, which measures the panes through their height queries rather than this
+	// composition; that the two land on the same rows is the pane table's height-equals-render
+	// contract (paneSpec.height, pinned by TestOverlayHeightQueryMatchesItsRender).
 	ov := m.frameOverlays()
 
 	rows := make([]string, 0, frameBlocks)

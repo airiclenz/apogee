@@ -497,6 +497,29 @@ func (m Model) renderList(c listContent) string {
 // where. renderList above is this call with the placement dropped, for every caller that only
 // paints.
 func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
+	spec, seated := m.listSpec(c)
+	if !seated {
+		return "", popupPlacement{}, false // the frame cannot seat this pane beside its siblings (frameRowPlan)
+	}
+	view, place := renderPopupPlaced(m.th, spec, m.width)
+	return view, place, true
+}
+
+// listHeight is the rows the list pane c paints in, answered without painting it (popupHeight): 0
+// where renderListPlaced draws nothing. It is the list surface's height query for the frame's
+// transcript clamp ([Model.transcriptRows]).
+func (m Model) listHeight(c listContent) int {
+	spec, seated := m.listSpec(c)
+	if !seated {
+		return 0
+	}
+	return popupHeight(m.th, spec, m.width)
+}
+
+// listSpec composes the list pane c's [popupSpec] for THIS frame — the budget the frame granted it and
+// the pads that budget booked — the one composition renderListPlaced paints and listHeight measures.
+// ok is false when the frame cannot seat the pane at all.
+func (m Model) listSpec(c listContent) (popupSpec, bool) {
 	claim := popupFloor{}
 	if c.body != "" {
 		claim.body = popupBodyLineCount(m.th, c.body, m.width) + popupBodyPadLines(c.bodyPad, c.bodyPad)
@@ -524,9 +547,9 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 	// short terminal shrinks the pane instead of pushing the input box off the frame (D2).
 	maxBody, shown, seated := m.popupBudget(c.pane, len(c.rows)+pad, c.rowCap+pad, popupChrome, claim)
 	if !seated {
-		return "", popupPlacement{}, false // the frame cannot seat this pane beside its siblings (frameRowPlan)
+		return popupSpec{}, false
 	}
-	view, place := renderPopupPlaced(m.th, popupSpec{
+	return popupSpec{
 		title:        c.title,
 		body:         c.body,
 		bodyLead:     c.bodyLead,
@@ -541,8 +564,7 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 		hint:         c.hint,
 		maxRows:      shown,
 		scrollbar:    m.popupScrollbarOn(),
-	}, m.width)
-	return view, place, true
+	}, true
 }
 
 // renderFilterListPlaced paints an open FILTERING list overlay: the call above, with the filter line
@@ -557,8 +579,14 @@ func (m Model) renderListPlaced(c listContent) (string, popupPlacement, bool) {
 // An empty filter leaves the body block exactly as the pane left it — nothing at all, for both panes
 // that filter — so a list nobody has typed into is the list it was before a filter existed.
 func (m Model) renderFilterListPlaced(filter lineEditor, c listContent) (string, popupPlacement, bool) {
+	return m.renderListPlaced(filteredListContent(filter, c))
+}
+
+// filteredListContent is c with the filter line folded in as its body — the one statement of that fold,
+// read by the paint above and by the height query the frame's clamp asks ([Model.transcriptRows]).
+func filteredListContent(filter lineEditor, c listContent) listContent {
 	if line := overlayFilterLine(filter); line != "" {
 		c.body, c.bodyLead, c.bodyPad = line, pickerFilterLead, true
 	}
-	return m.renderListPlaced(c)
+	return c
 }

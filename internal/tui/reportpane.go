@@ -270,15 +270,23 @@ func (m Model) reportSpec(r reportKind, c reportContent) (popupSpec, bool) {
 // that count would keep moving with the offset it is supposed to correct.
 func (m Model) reportFullWindow(spec popupSpec) int {
 	spec.rowTop = 0
+	start, end := m.reportRowSeat(spec)
+	return end - start
+}
+
+// reportRowSeat is the [start, end) window of spec's rows the painter seats at spec's own rowTop,
+// asked from the rows' COUNTS on the terms [Model.reportFullWindow] states above — a wrapping spec
+// asks the painter itself. Both that clamp and the scroll keys' window ([Model.reportWindow]) read it.
+func (m Model) reportRowSeat(spec popupSpec) (start, end int) {
 	if spec.wrapRows {
 		_, place := renderPopupPlaced(m.th, spec, m.width)
-		return place.end - place.start
+		return place.start, place.end
 	}
 	if m.width <= m.th.popupBorder.GetHorizontalFrameSize() {
-		return 0 // the painter draws no pane here, so it seats no row either (renderPopupPlaced)
+		return 0, 0 // the painter draws no pane here, so it seats no row either (renderPopupPlaced)
 	}
 	seat := popupRowSeat(spec, popupFlatRowHeights(len(spec.rows)))
-	return seat.end - seat.start
+	return seat.start, seat.end
 }
 
 // renderReport paints the named report, or "" when it is closed or the frame cannot seat it.
@@ -291,6 +299,21 @@ func (m Model) renderReport(r reportKind) string {
 		return "" // the frame cannot seat this pane beside its siblings (frameRowPlan)
 	}
 	return renderPopup(m.th, spec, m.width)
+}
+
+// reportHeight is the rows renderReport paints the named report in, answered without painting it
+// (popupHeight): 0 wherever renderReport returns "". It is the report's height query for the frame's
+// transcript clamp ([Model.transcriptRows]); the content is still composed (reportContent), because
+// the rows' count is what the window is seated from, but nothing is laid out, styled or boxed.
+func (m Model) reportHeight(r reportKind) int {
+	if !m.reportState(r).open {
+		return 0
+	}
+	spec, seated := m.reportSpec(r, m.reportContent(r))
+	if !seated {
+		return 0
+	}
+	return popupHeight(m.th, spec, m.width)
 }
 
 // dismissReport takes the named report off the frame and gives its rows back to the transcript. Both
@@ -408,10 +431,10 @@ type reportWindow struct {
 	total      int // the rows it holds
 }
 
-// reportWindow composes the named report exactly as the frame does and reports the window it landed
-// on. It renders the pane to get the answer, the price settingsPaint already pays: the painter is the
-// authority on which rows are on the screen, and asking it costs less than an arithmetic that can
-// disagree with it.
+// reportWindow composes the named report's spec exactly as the frame does and reports the window the
+// painter lands it on — the painter's own windowing arithmetic (reportRowSeat → popupRowSeat), asked
+// from the rows' counts rather than from a paint, so a scroll key costs no second render of the pane
+// the frame is about to draw anyway.
 func (m Model) reportWindow(r reportKind) (reportWindow, bool) {
 	if !m.reportState(r).open {
 		return reportWindow{}, false
@@ -420,8 +443,8 @@ func (m Model) reportWindow(r reportKind) (reportWindow, bool) {
 	if !seated {
 		return reportWindow{}, false
 	}
-	_, place := renderPopupPlaced(m.th, spec, m.width)
-	return reportWindow{start: place.start, end: place.end, total: len(spec.rows)}, true
+	start, end := m.reportRowSeat(spec)
+	return reportWindow{start: start, end: end, total: len(spec.rows)}, true
 }
 
 // handleReportClick answers a left-click while the named report is up: inside the box it is claimed
