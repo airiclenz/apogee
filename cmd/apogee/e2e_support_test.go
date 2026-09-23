@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -49,6 +50,13 @@ type e2eSession struct {
 	// with on a host that cannot fence. Held on the session rather than passed per launch so a
 	// Relaunch boots on the same host facts the first run did.
 	deps rootDeps
+	// rec, when set, is handed every byte each launch of this session writes to the terminal,
+	// beside the driver's own screen — the raw stream, before the driver's ONLCR translation. Nil
+	// for every launch but the few that assert on escape sequences the screen consumes without a
+	// trace (e2e_copy_test.go's OSC 52). Held on the session so a Relaunch records into the same
+	// writer, and supplied before the first launch because [e2eSession.start] waits for that
+	// launch's first frame: a recorder attached afterwards would miss what it wrote.
+	rec io.Writer
 
 	drv  *tuitest.Driver
 	out  strings.Builder
@@ -86,6 +94,18 @@ func launchTUIIn(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ws, ex
 	return launchTUIInWith(t, drv, stub, ws, extraConfig, rootDeps{}, args...)
 }
 
+// launchTUIRecorded is [launchTUI] with rec receiving every byte each launch of the session writes
+// to the terminal (see [e2eSession.rec]). rec must be safe for concurrent use: the program writes
+// from its own goroutine while the test reads.
+func launchTUIRecorded(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, rec io.Writer,
+	args ...string) *e2eSession {
+	t.Helper()
+
+	e2eGuards(t)
+	home := e2eHome(t, stub)
+	return startSession(t, drv, stub, home, "", rootDeps{}, rec, args...)
+}
+
 // launchTUIInWith is [launchTUIIn] with the host facts the boot takes as dependencies stated by the
 // caller (rootDeps) — the door a run under installFenceableConfiner comes through. Zero deps are
 // the production runner and backend, which is what every other launch wants.
@@ -96,7 +116,7 @@ func launchTUIInWith(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ws
 	e2eGuards(t)
 	home := e2eHome(t, stub)
 	appendHomeConfig(t, home, extraConfig)
-	return startSession(t, drv, stub, home, ws, deps, args...)
+	return startSession(t, drv, stub, home, ws, deps, nil, args...)
 }
 
 // launchTUIOn is [launchTUIIn] on a HOME the caller wrote, for the one key no helper can add after
@@ -117,7 +137,7 @@ func launchTUIOnWith(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, ho
 	t.Helper()
 
 	e2eGuards(t)
-	return startSession(t, drv, stub, home, ws, deps, args...)
+	return startSession(t, drv, stub, home, ws, deps, nil, args...)
 }
 
 // e2eGuards is what every driven launch registers before it creates anything: the leak check and
@@ -137,15 +157,15 @@ func e2eGuards(t *testing.T) {
 
 // startSession builds the session around a home and a workspace and starts its first launch. An
 // empty ws takes the seeded scratch one; deps are the host facts every launch of the session hands
-// the root command.
+// the root command; rec, when non-nil, records every launch's terminal output ([e2eSession.rec]).
 func startSession(t *testing.T, drv *tuitest.Driver, stub *stubllm.Server, home, ws string,
-	deps rootDeps, args ...string) *e2eSession {
+	deps rootDeps, rec io.Writer, args ...string) *e2eSession {
 	t.Helper()
 
 	if ws == "" {
 		ws = e2eWorkspace(t)
 	}
-	s := &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args, deps: deps}
+	s := &e2eSession{t: t, home: home, ws: ws, stub: stub, args: args, deps: deps, rec: rec}
 	s.start(drv)
 	return s
 }
@@ -170,8 +190,14 @@ func appendHomeConfig(t *testing.T, home, extra string) {
 
 // start runs one launch under drv. The launcher seam is where the driver enters: it hands
 // tui.Build its own output and its own program options, and Build appends them last so they win.
+// A session with a recorder tees that output into it.
 func (s *e2eSession) start(drv *tuitest.Driver) {
 	s.t.Helper()
+
+	out := drv.Output()
+	if s.rec != nil {
+		out = io.MultiWriter(out, s.rec)
+	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	// Attached before the run so [tuitest.Driver.Kill] has a cancel even if the launcher is never
@@ -179,7 +205,7 @@ func (s *e2eSession) start(drv *tuitest.Driver) {
 	drv.Attach(nil, cancel)
 
 	launch := func(ctx context.Context, eng tui.Engine, br *tui.Bridge, opts tui.Options) error {
-		program, cleanup, err := tui.Build(ctx, eng, br, opts, drv.Output(), drv.ProgramOptions()...)
+		program, cleanup, err := tui.Build(ctx, eng, br, opts, out, drv.ProgramOptions()...)
 		if err != nil {
 			return err
 		}

@@ -606,6 +606,12 @@ hostile tree names its escape in the root's own name, and a root is named when i
 `launchTUIOn(t, drv, stub, home, ws, args...)` takes a HOME the caller wrote — the only way to reach
 a key that sits INSIDE the `servers:` entry, since nothing appended to the file afterwards can get
 in there. `llama-launcher:` is that key (T-16 step 11).
+`launchTUIRecorded(t, drv, stub, rec, args...)` is `launchTUI` with every byte each launch of the
+session writes to the terminal teed into `rec` — the raw stream, before the driver's ONLCR
+translation — for the escape sequences the emulator consumes without a trace on the frame: the OSC 52
+a copy writes is the case (`e2e_copy_test.go`). The recorder is held on the session, so a
+`RelaunchWith` records into the same writer, and it is supplied at the launch rather than attached
+after, because the launch waits for the first frame and a late recorder would miss it.
 
 `openerLookPath` (`cmd/apogee/wire_present.go`) is the same family of seam as `tuiScheduleClock`,
 `liveLauncherOps` and `configWatchTiming`: a package var that is nil in production, where

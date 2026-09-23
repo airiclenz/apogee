@@ -83,7 +83,13 @@ internal/tui/seams_guard_test.go — TestNoParallelTestSwapsAPackageSeam, packag
 
 **Commit:** `fix(tui): a copy inside tmux also goes through tmux load-buffer -w, which tmux forwards on its default set-clipboard`
 
-## 2. A driven test pins the OSC 52 bytes a copy writes
+## 2. A driven test pins the OSC 52 bytes a copy writes — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the recorder enters through a new `launchTUIRecorded` helper plus a `rec io.Writer` parameter on `startSession` (its two existing callers pass nil); the session holds it so `RelaunchWith` records into the same writer.
+NOTES (2026-09-23): darwin is skipped rather than given an empty PATH (the plan allows either): an empty PATH would change what the boot resolves beyond the clipboard route, and it cannot be exercised on this host.
+NOTES (2026-09-23): the stub script is built inline (`stubllm.Script`) rather than as a testdata YAML, keeping the item inside its two named test files; a title turn keyed on "The user's first request" keeps the reply word off wherever the frame shows the session title.
+NOTES (2026-09-23): consequential edit — docs/design/test-drivers.md: made necessary by the new `launchTUIRecorded` launch helper, which the doc's launch-helper enumeration names alongside launchTUIConfigured/In/On.
+NOTES (2026-09-23): `-race` cannot run on this host (ThreadSanitizer "unsupported VMA range", 47-bit VMA); the Acceptance test was run without `-race`. The recorder is mutex-guarded for `-race` hosts. Mutation check done: removing `tea.SetClipboard` from copyFlash makes the test fail; restored.
 
 **What:** test-only guard for the copy path: the existing copy tests assert only a non-nil Cmd and
 the flash, so nothing checks the bytes that reach the terminal. Depends on item 1.
