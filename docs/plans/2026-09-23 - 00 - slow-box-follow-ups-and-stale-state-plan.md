@@ -111,7 +111,7 @@ internal/probe/host_test.go — fakeConfiner, TestReportCapableHostAndLlamaCppEn
 
 **Commit:** `fix(probe): a host probe with no Confiner reports the backend absent`
 
-## 3. terminal and python_exec pin the timeout figures their schemas render
+## 3. terminal and python_exec pin the timeout figures their schemas render — ✅ DONE (2026-09-23)
 
 **What.** Test-only. Mirror `TestRunTestsSchemaAdvertisesTheTimeoutItApplies`
 (`internal/tools/run_tests_test.go`) for the two tools whose `timeout_seconds` description is

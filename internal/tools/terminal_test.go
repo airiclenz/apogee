@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -916,5 +917,35 @@ func TestSubprocessToolResultDenialStopLabel(t *testing.T) {
 				t.Errorf("IsError = %v, want %v", res.IsError, tc.wantErr)
 			}
 		})
+	}
+}
+
+// TestTerminalSchemaAdvertisesTheTimeoutItApplies pins the timeout_seconds figures terminal's schema
+// states to the budgets internal/subprocess actually applies: the description is rendered from
+// DefaultSubprocessTimeout and MaxSubprocessTimeout, so a changed budget moves the text with it.
+func TestTerminalSchemaAdvertisesTheTimeoutItApplies(t *testing.T) {
+	t.Parallel()
+
+	var schema struct {
+		Properties map[string]map[string]any `json:"properties"`
+	}
+	if err := json.Unmarshal(NewTerminal(t.TempDir(), nil).Schema(), &schema); err != nil {
+		t.Fatalf("schema is not valid JSON: %v", err)
+	}
+	prop, ok := schema.Properties["timeout_seconds"]
+	if !ok {
+		t.Fatal("schema is missing the timeout_seconds property")
+	}
+	if prop["type"] != "integer" {
+		t.Errorf("timeout_seconds type = %v, want integer", prop["type"])
+	}
+	description, _ := prop["description"].(string)
+	for _, want := range []string{
+		fmt.Sprintf("default %d", int(subprocess.DefaultSubprocessTimeout.Seconds())),
+		fmt.Sprintf("max %d", int(subprocess.MaxSubprocessTimeout.Seconds())),
+	} {
+		if !strings.Contains(description, want) {
+			t.Errorf("the timeout_seconds description must state %q (rendered, not restated by hand): %q", want, description)
+		}
 	}
 }
