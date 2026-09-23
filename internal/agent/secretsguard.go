@@ -32,8 +32,10 @@ import (
 // budget expired, or a git run failed mid-scan — no longer poses as a clean one: it forces the
 // approval look with incompleteScanHint, so a wedged or throttled git degrades the commit to a
 // human decision instead of waving the staged bytes through unexamined. That supersedes ADR 0080
-// decision 6 and ADR 0056 decision 4, whose silent skip on ANY git failure made a security
-// control that did not run indistinguishable from one that ran clean. The pre-check still never
+// decision 6, whose silent skip on ANY git failure made a security control that did not run
+// indistinguishable from one that ran clean, and narrows ADR 0056 decision 4, whose silent skip
+// still governs the tree-mutation snapshot (treeSnapshotTimeout) but no longer this pre-check
+// (both ADRs carry the 2026-09-23 amendment). The pre-check still never
 // FAILS a commit the tool would have made — the worst it does is ask.
 //
 // The shadow is what keeps the pre-check side-effect free on the real repository: the staged

@@ -49,7 +49,9 @@ no-repository answer memoised past a `git init`.
 - `treeSnapshotTimeout` and the tree-snapshot floor's silent skip — unchanged; ADR 0056 decision 4
   still governs them.
 
-## 1. ADR 0080 and ADR 0056 record the shipped commit-secrets budget
+## 1. ADR 0080 and ADR 0056 record the shipped commit-secrets budget — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the stale-site sweep (`rg -n '2 ?s' docs/manual CONTEXT.md docs/design internal/agent/secretsguard.go` plus a commit-secrets skip/timeout grep) found no other live prose stating a 2 s or skip-on-any-failure commit-secrets contract.
 
 **What.**
 **Goal:** ADR 0080 decision 6 and its Consequences carry a dated amendment stating the shipped

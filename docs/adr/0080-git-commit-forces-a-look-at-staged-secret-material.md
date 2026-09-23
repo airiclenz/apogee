@@ -126,3 +126,28 @@ asked for a brainstorming grill; the owner ratified the calls below on 2026-09-1
   the context records; a hook would also protect one repository rather than the agent.
 - **An allow-list key in v1.** Deferred until a real false-positive pattern shows up; the
   approval prompt is the allow-list until then.
+
+## Amendment (2026-09-23) — one budget, and an incomplete scan forces the look
+
+Decision 6 and the Consequences sentence "bounded by the timeout, side-effect free on the
+repository, and skipped the moment git is unavailable" describe the pre-check as it first
+shipped. The shipped contract is now:
+
+- **One budget, not one timeout per run.** A single `commitSecretsTimeout` of 30 s bounds the
+  whole pre-check — one context covers all four shadow runs (rev-parse, add, two diffs) — where
+  decision 6 gave each run its own 2 s. The box apogee is built for is a loaded local machine on
+  which a cold git over a large index is slow rather than broken; a healthy repository answers in
+  milliseconds and spends none of it.
+- **Three outcomes, not two.** A workspace root that resolves no repository to scan — git
+  absent, fenced or refused, not a repository, a path the tool itself would refuse — is still the
+  silent skip, and the text guard's verdict stands. But once the repository has resolved, an
+  expired budget or a git run that fails mid-scan no longer skips: the scan is incomplete, not
+  clean, and the call is forced to the Tier-2 approval look with the incomplete-scan hint. A
+  control that did not run is no longer indistinguishable from one that ran clean.
+- **Still never a failure.** The pre-check never fails a commit the tool would have made; the
+  worst it does is ask. "Must never slow or block" in decision 6 now reads: never beyond the one
+  budget, and never without the human's say.
+
+This narrows, rather than overrides, ADR 0056 decision 4: its silent-skip-on-any-failure rule no
+longer governs the commit-secrets pre-check, and still governs the tree-mutation snapshot
+(`treeSnapshotTimeout`), which is unchanged.
