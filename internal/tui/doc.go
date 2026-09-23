@@ -256,7 +256,7 @@
 // the visual contract). filecache.go
 // backs the "@" overlay with a short-TTL, single-walk workspace listing filtered in memory, so a
 // typing burst reuses one os.Root walk instead of re-scanning the disk per keystroke. mouse.go
-// implements click-to-position caret and drag-to-select (with OSC52 copy) in TWO rectangles —
+// implements click-to-position caret and drag-to-select (with OSC52, system-clipboard and tmux copy) in TWO rectangles —
 // apogee captures the mouse for transcript scrolling, which turns off the terminal's own click-drag
 // selection, so both are re-implemented here, the prompt's in rune offsets into the textarea Value
 // and the transcript's in content coordinates over the cached rendered lines ("copy what you see").
@@ -300,9 +300,11 @@
 // call joining its group). Freezing repaints under a held button was rejected — the stream must not
 // visibly stall — and the release slices the very lines the rule protected, which is what makes copy
 // equal sight by construction rather than by care. clipboard.go holds the second half of the copy
-// itself: OSC52 stays the primary and SSH-safe channel, and beside it a best-effort write to the
-// host's own clipboard program covers the terminals that ignore the escape, behind one injectable
-// package-level seam so a test can watch what a copy actually hands over. mousereassert.go keeps
+// itself: OSC52 stays the primary and SSH-safe channel, beside it a best-effort write to the
+// host's own clipboard program covers the terminals that ignore the escape, and inside tmux a
+// best-effort `tmux load-buffer -w` covers tmux's default `set-clipboard external`, which drops an
+// application's OSC52 — each write behind its own injectable package-level seam so a test can
+// watch what a copy actually hands over. mousereassert.go keeps
 // that whole reach ALIVE across a tool run: bubbletea writes the mouse-tracking escapes only when
 // the frame's MouseMode changes, so a tool child that reset tracking on its way out would leave
 // clicks, drags and the wheel dead for the rest of the session — the model re-asserts the

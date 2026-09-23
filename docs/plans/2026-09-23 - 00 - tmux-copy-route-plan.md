@@ -32,7 +32,12 @@ writes so the copy path cannot silently die again.
 - Detecting or rewriting the user's tmux options; screen/zellij routes.
 - The system-clipboard (atotto) route's behaviour.
 
-## 1. The copy hands the text to tmux when apogee runs inside it
+## 1. The copy hands the text to tmux when apogee runs inside it — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): systemClipboardCmd and the new tmuxClipboardCmd read their seam when the Cmd is built, not when its body runs — needed because fireBatch leaves the un-awaited clipboard Cmd running past the test's cleanup, which (seen failing under -count=20) handed one test's copy to the next test's recorder and could reach the restored real seam (a real xclip / tmux spawn on a developer box); production behaviour is unchanged.
+NOTES (2026-09-23): consequential edit — internal/tui/seams_guard_test.go: made necessary by recordSystemClipboard now also swapping writeTmuxClipboard and the new recordTmuxClipboard helper (the guard's doc comment named one helper and one seam).
+NOTES (2026-09-23): the Acceptance `go test -race` cannot run on this box (Raspberry Pi, ThreadSanitizer "unsupported VMA range"); the filter was run without -race, 40 repetitions green, and the whole internal/tui package passed once.
+NOTES (2026-09-23): the manual had no drag-select copy passage, so the sentence joins the one place commands.md names a drag-selection (the ⌃l paragraph).
 
 **What:** fix for `apogee-tmux-copy-dropped` (a defect, not a regression): inside tmux on its
 default `set-clipboard external`, tmux drops the OSC 52 apogee writes, so "copied N chars" flashes

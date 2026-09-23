@@ -20,9 +20,10 @@ import (
 // enclosing scope's — a serial subtest of a parallel test still races every other parallel test)
 // and assigns to one of them fails here with its file:line.
 //
-// Unlike cmd/apogee's, this package's one swap lives in a named helper — recordSystemClipboard
-// (mouse_test.go) assigns writeSystemClipboard for the two clipboard tests that call it — so the
-// walk resolves calls to this package's test-file functions transitively: a helper whose body
+// Unlike cmd/apogee's, this package's swaps live in named helpers — recordSystemClipboard
+// (mouse_test.go) assigns writeSystemClipboard and writeTmuxClipboard, and recordTmuxClipboard
+// assigns writeTmuxClipboard itself and the rest through recordSystemClipboard, for the clipboard
+// tests that call them — so the walk resolves calls to this package's test-file functions transitively: a helper whose body
 // assigns a seam, directly or through another helper, makes every parallel caller a finding,
 // reported at the call. The helpers are copied from cmd/apogee rather than shared: two packages,
 // two guards, and the code is test code.

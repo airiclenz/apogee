@@ -290,13 +290,34 @@ func TestDragSelectsAndCopies(t *testing.T) {
 // recordSystemClipboard substitutes the system-clipboard seam (clipboard.go) with a recorder that
 // returns err, restoring the real one when the test ends. The returned channel carries every text
 // handed over. The seam exists precisely because the real write shells out to a platform program
-// (pbcopy, xclip, clip.exe) that a unit test cannot count on having.
+// (pbcopy, xclip, clip.exe) that a unit test cannot count on having. It also swaps the tmux seam
+// for a no-op: a copy test fires the whole batch, and a suite run inside tmux must never spawn the
+// real `tmux load-buffer -w` and overwrite the developer's own buffer.
 func recordSystemClipboard(t *testing.T, err error) <-chan string {
 	t.Helper()
-	previous := writeSystemClipboard
-	t.Cleanup(func() { writeSystemClipboard = previous })
+	previous, previousTmux := writeSystemClipboard, writeTmuxClipboard
+	t.Cleanup(func() { writeSystemClipboard, writeTmuxClipboard = previous, previousTmux })
 	wrote := make(chan string, 4)
 	writeSystemClipboard = func(text string) error {
+		wrote <- text
+		return err
+	}
+	writeTmuxClipboard = func(string) error { return nil }
+	return wrote
+}
+
+// recordTmuxClipboard substitutes the tmux seam (clipboard.go) with a recorder that returns err,
+// restoring the real one when the test ends; the returned channel carries every text handed over.
+// It records the system clipboard first (recordSystemClipboard) so the copy it watches reaches no
+// real clipboard program either — and since cleanups run last-in first-out, the recorder here is
+// undone before that helper restores both real seams.
+func recordTmuxClipboard(t *testing.T, err error) <-chan string {
+	t.Helper()
+	recordSystemClipboard(t, nil)
+	previous := writeTmuxClipboard
+	t.Cleanup(func() { writeTmuxClipboard = previous })
+	wrote := make(chan string, 4)
+	writeTmuxClipboard = func(text string) error {
 		wrote <- text
 		return err
 	}
@@ -305,8 +326,8 @@ func recordSystemClipboard(t *testing.T, err error) <-chan string {
 
 // fireBatch runs the Cmds inside a tea.Batch the way the runtime does — each on its own goroutine,
 // no ordering — and returns WITHOUT waiting for them. Waiting would mean sitting out copyFlash's
-// two-second flash tick, which shares the batch with the two clipboard writes; the caller waits on
-// the one Cmd it cares about instead.
+// two-second flash tick, which shares the batch with the three clipboard writes (OSC52, the system
+// clipboard, tmux); the caller waits on the one Cmd it cares about instead.
 func fireBatch(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
 	msg := cmd()
@@ -324,7 +345,8 @@ func fireBatch(t *testing.T, cmd tea.Cmd) {
 // silently drops OSC 52 still ends up holding the selection. OSC 52 stays in the batch beside it —
 // this asserts the addition, not a replacement.
 //
-// serial: recordSystemClipboard swaps the package-level writeSystemClipboard seam.
+// serial: recordSystemClipboard swaps the package-level writeSystemClipboard and writeTmuxClipboard
+// seams.
 func TestDragCopyAlsoWritesTheSystemClipboard(t *testing.T) {
 	wrote := recordSystemClipboard(t, nil)
 
@@ -353,7 +375,8 @@ func TestDragCopyAlsoWritesTheSystemClipboard(t *testing.T) {
 // with no clipboard program the copy must degrade to exactly the old OSC-52-only behaviour — the
 // confirmation flash stands, the error surfaces nowhere, and nothing panics.
 //
-// serial: recordSystemClipboard swaps the package-level writeSystemClipboard seam.
+// serial: recordSystemClipboard swaps the package-level writeSystemClipboard and writeTmuxClipboard
+// seams.
 func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 	wrote := recordSystemClipboard(t, errors.New("no clipboard program on this host"))
 
@@ -378,6 +401,69 @@ func TestSystemClipboardFailureStillConfirmsTheCopy(t *testing.T) {
 	}
 	if msg := systemClipboardCmd("hello")(); msg != nil {
 		t.Fatalf("a failed system write produced msg %#v, want nil — it must dispatch nothing", msg)
+	}
+	<-wrote
+}
+
+// TestTmuxClipboardReceivesTheDragCopy pins the tmux route (apogee-tmux-copy-dropped): the copy a
+// prompt drag-release produces hands the SAME text to the tmux seam, beside OSC 52 and the system
+// write, so tmux on its default `set-clipboard external` — which drops an application's OSC 52 —
+// still forwards the selection to the outer terminal's clipboard.
+//
+// serial: recordTmuxClipboard swaps the package-level writeSystemClipboard and writeTmuxClipboard
+// seams.
+func TestTmuxClipboardReceivesTheDragCopy(t *testing.T) {
+	wrote := recordTmuxClipboard(t, nil)
+	m := modelWithInput(t, "héllo wörld")
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+
+	m = step(t, m, leftClick(2+0, y))
+	m = step(t, m, leftDrag(2+5, y))
+	_, cmd := stepCmd(t, m, leftRelease(2+5, y))
+	if cmd == nil {
+		t.Fatal("release of a non-empty selection should return a copy Cmd, got nil")
+	}
+	fireBatch(t, cmd)
+
+	select {
+	case got := <-wrote:
+		if got != "héllo" {
+			t.Fatalf("tmux received %q, want the selection %q", got, "héllo")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the copy never reached the tmux seam")
+	}
+}
+
+// TestTmuxClipboardFailureStillConfirmsTheCopy pins the tmux route as BEST-EFFORT: a tmux that
+// refuses the buffer (set-clipboard off, a dead server) leaves the confirmation flash standing,
+// surfaces the error nowhere, and the Cmd dispatches nothing.
+//
+// serial: recordTmuxClipboard swaps the package-level writeSystemClipboard and writeTmuxClipboard
+// seams.
+func TestTmuxClipboardFailureStillConfirmsTheCopy(t *testing.T) {
+	wrote := recordTmuxClipboard(t, errors.New("tmux: no server running"))
+	m := modelWithInput(t, "hello world")
+	const y = 24 - bottomRuleHeight - footerHeight - inputBorderRows
+
+	m = step(t, m, leftClick(2+0, y))
+	m = step(t, m, leftDrag(2+5, y))
+	m, cmd := stepCmd(t, m, leftRelease(2+5, y))
+	if cmd == nil {
+		t.Fatal("release of a non-empty selection should return a copy Cmd, got nil")
+	}
+	if !strings.Contains(m.flash, "copied 5 chars") {
+		t.Fatalf("flash = %q, want a failed tmux write to leave 'copied 5 chars' standing", m.flash)
+	}
+	fireBatch(t, cmd)
+
+	select {
+	case <-wrote:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the copy never reached the tmux seam")
+	}
+	if msg := tmuxClipboardCmd("hello")(); msg != nil {
+		t.Fatalf("a failed tmux write produced msg %#v, want nil — it must dispatch nothing", msg)
 	}
 	<-wrote
 }

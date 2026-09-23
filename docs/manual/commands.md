@@ -154,7 +154,11 @@ once and what the width was; the delegations' own rows and run views are unchang
 readline redraw: it forces a full repaint, which is the way back from a terminal that
 has smeared or eaten part of the frame. It sends nothing, edits nothing and interrupts
 nothing — the only thing it takes with it is a mouse drag-selection's highlight, which
-every keypress drops.
+every keypress drops. Releasing a drag-selection copies it — over the terminal's OSC 52
+escape and through your system clipboard program — and inside tmux the copy also goes
+through `tmux load-buffer -w`, which tmux forwards to your terminal's clipboard on its
+default `set-clipboard external`, where it drops the escape; `set-clipboard off` blocks
+that route too.
 
 ## The status line — what a live run reports
 

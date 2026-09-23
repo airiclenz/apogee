@@ -664,10 +664,10 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 }
 
 // handleMouseRelease finalises a drag on whichever selection is live. A non-empty span is copied
-// to the system clipboard over OSC52 and a transient note confirms it; the highlight stays until
-// the next click or edit — or, for a transcript span, until the lines under it change
-// (spanUnchanged) — so the human sees what was taken, even while the model keeps streaming beneath
-// it. A bare click (anchor == head) is not a selection and just leaves the caret/anchor where it
+// to the clipboard (OSC52, the system clipboard, and tmux inside tmux — copyFlash) and a transient
+// note confirms it; the highlight stays until the next click or edit — or, for a transcript span,
+// until the lines under it change (spanUnchanged) — so the human sees what was taken, even while
+// the model keeps streaming beneath it. A bare click (anchor == head) is not a selection and just leaves the caret/anchor where it
 // landed. The prompt copies the exact typed runes; the transcript copies the rendered text under
 // the span.
 //
@@ -832,13 +832,16 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	return m, nil
 }
 
-// copyFlash copies text to the clipboard over BOTH channels and shows a transient confirmation
-// counting the runes taken (flashClearMsg clears it after flashDuration). OSC52
-// (tea.SetClipboard) stays the primary: it is cross-terminal and SSH-safe, needing no local
-// program, and it is unchanged. The system write beside it (systemClipboardCmd, clipboard.go) is
-// the fallback for terminals that ignore the escape — where the flash used to promise a copy that
-// went nowhere (the ISSUES defect) — and is best-effort, so the confirmation stays unconditional.
-// Shared by the prompt and transcript drag-release paths so both confirm a copy identically.
+// copyFlash copies text to the clipboard over EVERY channel — OSC52, the system clipboard and,
+// inside tmux, tmux's own buffer — and shows a transient confirmation counting the runes taken
+// (flashClearMsg clears it after flashDuration). OSC52 (tea.SetClipboard) stays the primary: it is
+// cross-terminal and SSH-safe, needing no local program, and it is unchanged. The system write
+// beside it (systemClipboardCmd, clipboard.go) is the fallback for terminals that ignore the
+// escape — where the flash used to promise a copy that went nowhere (the ISSUES defect) — and the
+// tmux write (tmuxClipboardCmd) is the route tmux forwards on its default `set-clipboard external`,
+// where it drops an application's OSC52 (apogee-tmux-copy-dropped); it starts nothing outside tmux.
+// Both are best-effort, so the confirmation stays unconditional. Shared by the prompt, transcript
+// and /settings drag-release paths so all three confirm a copy identically.
 func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	n := len([]rune(text))
 	noun := "chars"
@@ -849,6 +852,7 @@ func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	return m, tea.Batch(
 		tea.SetClipboard(text),
 		systemClipboardCmd(text),
+		tmuxClipboardCmd(text),
 		flashCmd,
 	)
 }
