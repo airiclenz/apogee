@@ -157,7 +157,11 @@ internal/platform/winlabel/walk_windows.go — ProcessAlive, revertSparingLiveSi
 - `grep -n "confinement" docs/design/confinement-execution-contract.md` shows the §9 Guardrails bullet naming the journal dir, and `grep -n "apogee/confinement" SECURITY.md` prints a line
 **Commit:** `docs(winlabel): journal trust is file identity plus creation-time liveness`
 
-## 7. APOGEE_REQUIRE_LANDLOCK_NET makes a skipped UDP arm fail, and CI requires it
+## 7. APOGEE_REQUIRE_LANDLOCK_NET makes a skipped UDP arm fail, and CI requires it — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): new file internal/platform/confinetest/confinetest_test.go holds the Tests line's table test of the pure verdict (`skipOrFail`). The plan's **Files:** list does not name it, but a test in that package is the only way to run the verdict test on every OS, and the Acceptance line already runs `go test ./internal/platform/confinetest/`.
+NOTES (2026-09-23): the CI step anchors the test filter as `-run '^TestLandlockProbeNetwork$'`, where the plan wrote the bare `'TestLandlockProbeNetwork'`. The anchor keeps any future test whose name starts with it out of the step, and building.md quotes the same command.
+NOTES (2026-09-23): `go test ./internal/platform/` on this Windows host fails TestWindowsUnclearableDescendantKeepsTheJournal and TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry. Both also fail at the plan base ea51204c, in a detached worktree, so they are not a regression from this run. They look host-dependent: each needs a label write to be denied, and on this host the write succeeded. TestWindowsTokenProbeNetwork still skips as before.
 
 **What:** context for bead `apogee-ifrv`, which closes on the first green CI run of this step (owner-confirmed).
 **Goal:** with `APOGEE_REQUIRE_LANDLOCK_NET=1`, `TestLandlockProbeNetwork` fails rather than skips when landlock is absent, the ABI is below 4, or bash is missing for the UDP row. Every run logs the probed landlock ABI. The CI `check` job runs the test with that env and `-v`, and fails unless `--- PASS: TestLandlockProbeNetwork/udp_egress_under_network_deny` appears. `docs/manual/building.md` documents the variable.

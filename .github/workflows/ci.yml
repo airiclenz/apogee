@@ -58,6 +58,18 @@ jobs:
         run: make test
         env:
           APOGEE_TEST_SHARDS: 2
+      - name: landlock UDP arm runs (row #13)
+        # `make test` above counts a skipped TestLandlockProbeNetwork as a pass, so on its own it
+        # cannot tell a runner that proved row #13's UDP arm from one where landlock, ABI >= 4 or
+        # bash went missing. APOGEE_REQUIRE_LANDLOCK_NET=1 turns each of those skips into a
+        # failure, and the grep requires the subtest's own PASS line, so an arm that ran nothing
+        # cannot go green (bead apogee-ifrv). The test logs the probed landlock ABI either way.
+        run: |
+          set -o pipefail
+          go test -count=1 -v -run '^TestLandlockProbeNetwork$' ./internal/platform/ | tee landlock-net.log
+          grep -q -- '--- PASS: TestLandlockProbeNetwork/udp_egress_under_network_deny' landlock-net.log
+        env:
+          APOGEE_REQUIRE_LANDLOCK_NET: 1
       - name: probe discloses no write-class residual on a modern kernel
         # The negative half of checklist T-11: ubuntu-latest runs landlock ABI >= 3, which fences
         # truncate(2) like every other write. A truncate residual disclosed here is as wrong as one

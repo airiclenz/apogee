@@ -66,8 +66,23 @@ func TestLandlockProbe(t *testing.T) {
 	confinetest.Probe(t, newTestConfiner(t), Current(), FailFastPreamble(), newProbeDenialKiller)
 }
 
+// requireLandlockNetEnv, set to 1, makes TestLandlockProbeNetwork fail wherever it would skip:
+// no landlock, an ABI below landlockABINetwork, or no bash for row #13's datagram. CI sets it
+// on a runner known to carry ABI >= 4, so a silent skip there cannot pass for proof that the
+// UDP arm ran (docs/manual/building.md).
+const requireLandlockNetEnv = "APOGEE_REQUIRE_LANDLOCK_NET"
+
 func TestLandlockProbeNetwork(t *testing.T) {
-	confinetest.ProbeNetwork(t, newTestConfiner(t), Current())
+	c := newTestConfiner(t)
+	required := os.Getenv(requireLandlockNetEnv) == "1"
+	// Logged on every run, skipped or not, so a CI log says which kernel the arm met.
+	t.Logf("landlock ABI %d (probe errno %v); the network arm needs ABI >= %d; %s=1: %v",
+		c.abi, c.probeErrno, landlockABINetwork, requireLandlockNetEnv, required)
+	if required {
+		confinetest.ProbeNetworkRequired(t, c, Current())
+		return
+	}
+	confinetest.ProbeNetwork(t, c, Current())
 }
 
 // The battery's row #12 branches on the backend's OWN disclosure, so on its own it cannot catch a

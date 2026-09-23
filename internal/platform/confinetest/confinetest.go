@@ -242,8 +242,45 @@ const udpProbeWait = 2 * time.Second
 // there, acceptable because nothing is being enforced.
 func ProbeNetwork(t *testing.T, c domain.Confiner, sh Shell) {
 	t.Helper()
+	probeNetwork(t, c, sh, false)
+}
+
+// ProbeNetworkRequired is ProbeNetwork on a host that is supposed to run the whole arm: every
+// skip ProbeNetwork would take — a backend reporting NetworkEgress==false, or no bash for row
+// #13's datagram — is a test failure with the same wording instead. It exists so a runner known
+// to carry a network-capable backend can PROVE the arm ran rather than read a silent skip as a
+// pass. When to require it is the caller's decision (an environment variable, say), never this
+// package's.
+func ProbeNetworkRequired(t *testing.T, c domain.Confiner, sh Shell) {
+	t.Helper()
+	probeNetwork(t, c, sh, true)
+}
+
+// skipOrFail is the verdict on a step the host cannot run: skip it with reason, or — when the
+// caller required the step to run — fail with the same reason, marked as a requirement. It is
+// pure so the one decision that turns a skip into a failure is table-tested on every OS.
+func skipOrFail(required bool, reason string) (skip bool, msg string) {
+	if required {
+		return false, "required step cannot run: " + reason
+	}
+	return true, reason
+}
+
+// unrunnable ends t over a step the host cannot run, as skipOrFail decides.
+func unrunnable(t *testing.T, required bool, reason string) {
+	t.Helper()
+	if skip, msg := skipOrFail(required, reason); skip {
+		t.Skip(msg)
+	} else {
+		t.Fatal(msg)
+	}
+}
+
+// probeNetwork is the network arm itself; required turns each of its skips into a failure.
+func probeNetwork(t *testing.T, c domain.Confiner, sh Shell, required bool) {
+	t.Helper()
 	if !c.Capabilities().NetworkEgress {
-		t.Skip("confinetest: backend reports NetworkEgress==false; skipping network battery")
+		unrunnable(t, required, "confinetest: backend reports NetworkEgress==false; skipping network battery")
 	}
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
@@ -300,7 +337,7 @@ func ProbeNetwork(t *testing.T, c domain.Confiner, sh Shell) {
 		}
 		line, ok := udpSendLine(udpHost, udpPort)
 		if !ok {
-			t.Skip("confinetest: no bash on PATH for the /dev/udp redirection (cmd.exe); UDP egress row is skipped")
+			unrunnable(t, required, "confinetest: no bash on PATH for the /dev/udp redirection (cmd.exe); UDP egress row is skipped")
 		}
 		box := domain.ConfinementBox{WorkspaceRoot: ws, NetworkAllow: []string{"example.invalid:443"}}
 		sendErr := runDatagramProbe(t, c, box, line)

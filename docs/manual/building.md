@@ -138,6 +138,17 @@ binary runs there at all. An unraced run announces itself on stderr and in its `
 line, and it is not the `make check` gate — `make check` refuses to run with
 `APOGEE_TEST_RACE=0` set; race-enabled verification needs another box.
 
+`APOGEE_REQUIRE_LANDLOCK_NET=1` goes the other way: it makes a skip a failure. The landlock
+network test, `TestLandlockProbeNetwork` in `internal/platform`, normally skips on a host that
+cannot run it: no landlock, a landlock ABI below 4 (no network rights), or no `bash` for the UDP
+row's `/dev/udp` send. With the variable set, each of those is a test failure with the same
+reason, so a run can prove the UDP arm (confinement-execution-contract §6.2, row #13) actually
+ran. The test logs the probed landlock ABI whether the variable is set or not. CI's `check` job
+sets it in a step of its own, after `make test`:
+`go test -count=1 -v -run '^TestLandlockProbeNetwork$' ./internal/platform/`, which must also
+print `--- PASS: TestLandlockProbeNetwork/udp_egress_under_network_deny`. Leave it unset on a
+dev box whose kernel lacks landlock ABI 4, where the skip is the honest result.
+
 ## Releasing
 
 Cutting a release is four acts, in this order, and only the first two are automated.
