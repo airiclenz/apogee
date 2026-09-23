@@ -640,7 +640,8 @@ func allHitFlatFixture() *transcript {
 }
 
 // allHitRunViewFixture is one delegation whose span holds allHitBlocks blocks — answers and lone
-// reads alternating, so no two reads fold into an umbrella — and the ref of the run a view opens on.
+// reads alternating, so no two reads fold into an umbrella — and the ref of the run a view opens
+// on.
 func allHitRunViewFixture() (*transcript, runRef) {
 	tr := &transcript{}
 	tr.addUser("what changed?", nil)
@@ -775,14 +776,15 @@ func TestPaintCacheKeysOnTheRoot(t *testing.T) {
 // One render of each open pane per frame (model.go, transcriptRows; panes.go, paneSpec.height)
 // ----------------------------------------------------------------------------
 
-// TestOverlayPanesRenderOncePerUpdateAndView pins the frame's pane-render budget: with each row of the
-// pane table open, one non-pointer Update — an engine Event, a reasoning chunk, a keypress — plus the
-// View that follows renders every pane at most once, and a pane still open after the Update exactly
-// once (View's). A closed pane's render is asked too, by View's one walk of the table, and answers ""
-// at once; it is counted like any other, which is why the ceiling is per row and not per open pane. The repaint tail of the Update ([Model.settle]) sizes the transcript clamp from the
-// panes' height queries, which render nothing; before them it rendered every open pane through
-// frameOverlays, and View and a second layout() rendered them again — the /thinking pane three times
-// per reasoning chunk.
+// TestOverlayPanesRenderOncePerUpdateAndView pins the frame's pane-render budget: with each row of
+// the pane table open, one non-pointer Update — an engine Event, a reasoning chunk, a keypress —
+// plus the View that follows renders every pane at most once, and a pane still open after the
+// Update exactly once (View's). A closed pane's render is asked too, by View's one walk of the
+// table, and answers "" at once; it is counted like any other, which is why the ceiling is per row
+// and not per open pane. The repaint tail of the Update ([Model.settle]) sizes the transcript clamp
+// from the panes' height queries, which render nothing; before them it rendered every open pane
+// through frameOverlays, and View and a second layout() rendered them again — the /thinking pane
+// three times per reasoning chunk.
 //
 // It reads the process-wide counter (paneRenders), so it does not run in parallel: the tests that
 // do are held until every serial one has finished.
@@ -820,9 +822,9 @@ func TestOverlayPanesRenderOncePerUpdateAndView(t *testing.T) {
 	}
 }
 
-// BenchmarkThinkingPaneUpdateAndView times what a reasoning chunk costs the frame with the /thinking
-// pane open at its record cap: the Update that folds it (its repaint tail sizing the transcript clamp
-// through the panes' height queries) and the View that draws the pane.
+// BenchmarkThinkingPaneUpdateAndView times what a reasoning chunk costs the frame with the
+// /thinking pane open at its record cap: the Update that folds it (its repaint tail sizing the
+// transcript clamp through the panes' height queries) and the View that draws the pane.
 func BenchmarkThinkingPaneUpdateAndView(b *testing.B) {
 	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
@@ -856,7 +858,8 @@ func BenchmarkThinkingPaneUpdateAndView(b *testing.B) {
 
 // widgetCellsFixture is a scrollback whose lines overrun the viewport in BYTES — styled rows, and
 // answers filled to the column and ending in VS16 glyphs the widget counts two cells each — so
-// every repaint before stored widths had to measure them, and some really are broken by the reserve.
+// every repaint before stored widths had to measure them, and some really are broken by the
+// reserve.
 func widgetCellsFixture(width int) *transcript {
 	tr := &transcript{}
 	for i := range 12 {

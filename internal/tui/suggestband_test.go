@@ -82,9 +82,9 @@ func gatedSuggest(rec *suggestCall) func(string, func(string) bool, int) []skill
 }
 
 // typeDraft presses one printable key per rune, the way a human types into the box — through
-// Update, so the edit path that schedules the band is the real one — and then lets the typing pause:
-// it delivers the debounce tick at the model's current generation (settleBand), so every caller sees
-// the band the draft ranks to.
+// Update, so the edit path that schedules the band is the real one — and then lets the typing
+// pause: it delivers the debounce tick at the model's current generation (settleBand), so every
+// caller sees the band the draft ranks to.
 func typeDraft(t *testing.T, m Model, text string) Model {
 	t.Helper()
 	for _, r := range text {
@@ -102,9 +102,9 @@ func settleBand(t *testing.T, m Model) Model {
 
 // TestSkillHintsTrackTheDraft is the band's whole lifecycle in one property: it appears when the
 // draft says enough for the matcher to answer, and it goes away again when the draft no longer
-// does. Both halves run through the EDIT path — recomputeAutocomplete folds the recompute in, so a
-// band that tracked only the first keystroke or only a full submit would fail here rather than in a
-// human's terminal.
+// does. Both halves run through the EDIT path — recomputeAutocomplete arms the debounce tick and
+// settleBand lands it, so a band that tracked only the first pause or only a full submit would fail
+// here rather than in a human's terminal.
 func TestSkillHintsTrackTheDraft(t *testing.T) {
 	t.Parallel()
 
@@ -234,9 +234,9 @@ func TestSkillHintsRespectTheKnobAndTheOverlay(t *testing.T) {
 // TestSkillHintsStandDownOffTheLiveStates is the band's fifth silence, and the only one the
 // recompute cannot speak for: hints are derived on the EDIT path, so a run that leaves idle for an
 // approval, an ask or an error never passes through it and m.skillHints keeps whatever the last
-// keystroke ranked. The row must not paint there anyway — it would be advice about a draft nobody
-// is composing, over a surface that has taken the very key its legend names — and the frame must
-// not reserve it either, or the staged band loses its closing row to a row nobody draws.
+// pause ranked. The row must not paint there anyway — it would be advice about a draft nobody is
+// composing, over a surface that has taken the very key its legend names — and the frame must not
+// reserve it either, or the staged band loses its closing row to a row nobody draws.
 func TestSkillHintsStandDownOffTheLiveStates(t *testing.T) {
 	t.Parallel()
 
@@ -689,8 +689,8 @@ func TestStaleBandTickIsInert(t *testing.T) {
 	}
 }
 
-// Enter before the tick lands spends exactly what the row is showing, and the tick the last key armed
-// lands inert after the send rather than ranking an empty box.
+// Enter before the tick lands spends exactly what the row is showing, and the tick the last key
+// armed lands inert after the send rather than ranking an empty box.
 func TestSendBeforeTheTickSpendsWhatIsShown(t *testing.T) {
 	t.Parallel()
 
@@ -736,8 +736,9 @@ func TestEmptiedDraftClearsTheBandAtOnce(t *testing.T) {
 	}
 }
 
-// A skill accepted from the Tab menu leaves the band the moment it is written into the box — ADR 0061
-// §3's "a skill already invoked in the draft is never suggested at all" holds before any pause.
+// A skill accepted from the Tab menu leaves the band the moment it is written into the box — ADR
+// 0061 §3's "a skill already invoked in the draft is never suggested at all" holds before any
+// pause.
 func TestTabAcceptedSkillLeavesTheBandAtOnce(t *testing.T) {
 	t.Parallel()
 

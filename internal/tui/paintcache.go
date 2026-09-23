@@ -431,9 +431,9 @@ func (m Model) frameKey() frameKey {
 
 // blockKey builds the key for the block these records are the input of — ins[0] alone for an
 // ordinary entry, the whole folded run or the head plus its sub-agent span otherwise. It takes the
-// very value the painter is handed ([paintRoot.appendInputs]) and reads nothing else about the transcript,
-// which is what makes "the key names every input" checkable by reading one record rather than by
-// remembering what five painter files touch.
+// very value the painter is handed ([paintRoot.appendInputs]) and reads nothing else about the
+// transcript, which is what makes "the key names every input" checkable by reading one record
+// rather than by remembering what five painter files touch.
 //
 // live is the caller's because it is the PAINTER's own liveness rule and each branch has a
 // different one (blockState.live); root is the caller's for the same reason one level up — it is a

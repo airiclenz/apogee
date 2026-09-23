@@ -172,10 +172,11 @@ func driveResume(ctx context.Context, eng Engine, box *interjectBox, notify func
 //
 // Every Step is followed immediately by flush, before its outcome is read: the teaSink coalesces
 // adjacent tokens (and adjacent reasoning deltas) behind a short window (sink.go), and this is the
-// boundary that makes that window a within-Step affair. It runs on EVERY path out of a Step — a fault, a completed Turn, a cancel —
-// because the cancel path is the one no event would cover: a Turn Esc interrupted mid-stream emits
-// nothing further, so the tail of the stream would otherwise ride the window timer and land after
-// the Model had already folded cancelledMsg (see teaSink.flush).
+// boundary that makes that window a within-Step affair. It runs on EVERY path out of a Step — a
+// fault, a completed Turn, a cancel — because the cancel path is the one no event would cover: a
+// Turn Esc interrupted mid-stream emits nothing further, so the tail of the stream would otherwise
+// ride the window timer and land after the Model had already folded cancelledMsg (see
+// teaSink.flush).
 //
 // After each committed Turn it snapshots the engine and hands the snapshot to notify for a per-Turn
 // save (the session system's every-Turn cadence). The snapshot is valid here because between Steps

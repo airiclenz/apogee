@@ -352,8 +352,9 @@ func TestSlashMenuBoundsAHostileSkillID(t *testing.T) {
 // writes into a draft the human is still in the middle of.
 
 // bandedModel is a laid-out idle model whose suggestion band is showing all three hints — the state
-// tab answers in. The draft is TYPED through Update, so the band is derived by the same edit path a
-// human drives rather than assigned into the model by the test.
+// tab answers in. The draft is TYPED through Update and the typing pause settled (typeDraft), so
+// the band is derived by the same edit path and debounce tick a human drives rather than assigned
+// into the model by the test.
 func bandedModel(t *testing.T, opts Options) Model {
 	t.Helper()
 	m := typeDraft(t, modelWithOverlayRoom(t, 24, opts), "audit the parser")

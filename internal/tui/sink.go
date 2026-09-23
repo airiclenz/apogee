@@ -42,11 +42,12 @@ type teaSink struct {
 	// pending is the accumulated delta text — a plain string, never a strings.Builder,
 	// per this package's no-copy-type hygiene (ADR 0011, doc.go).
 	pending string
-	// base is the (Depth, Turn, run identity) the pending text belongs to. Only deltas sharing
-	// all three — and reasoning, below — may merge: a sub-agent's stream (Depth > 0) nests inside the parent's and is a
-	// different block in the transcript, a Turn boundary is a commit point, and two children of
-	// one reply share a depth but not a spawning call id (domain.EventBase.CallID), so the id is
-	// what keeps concurrent siblings' text from merging into one another's block (ADR 0039).
+	// base is the (Depth, Turn, run identity) the pending text belongs to. Only deltas sharing all
+	// three — and reasoning, below — may merge: a sub-agent's stream (Depth > 0) nests inside the
+	// parent's and is a different block in the transcript, a Turn boundary is a commit point, and
+	// two children of one reply share a depth but not a spawning call id (domain.EventBase.CallID),
+	// so the id is what keeps concurrent siblings' text from merging into one another's block (ADR
+	// 0039).
 	base domain.EventBase
 	// reasoning is the kind of the open buffer: true for ReasoningEvent text, false for
 	// TokenEvent text. It is part of the merge key beside base, because one Turn's reasoning and
@@ -67,8 +68,8 @@ type teaSink struct {
 	window time.Duration
 }
 
-// tokenCoalesceWindow is how long adjacent deltas (tokens or reasoning) may accumulate before the buffer is
-// delivered: about two frames at 60 fps — imperceptible as latency, and it caps
+// tokenCoalesceWindow is how long adjacent deltas (tokens or reasoning) may accumulate before the
+// buffer is delivered: about two frames at 60 fps — imperceptible as latency, and it caps
 // delta-driven repaints near ~33/s no matter how fast the provider streams.
 const tokenCoalesceWindow = 30 * time.Millisecond
 

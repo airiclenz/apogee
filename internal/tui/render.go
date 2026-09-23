@@ -50,12 +50,12 @@ type renderedTranscript struct {
 	// (Model.stickyHeaderSpan): a header is content lines frozen at the top of the viewport, and
 	// this only says WHICH lines without asking the offset.
 	header userBlock
-	// cells is PARALLEL to lines where it is set: each line's width in the VIEWPORT WIDGET's measure
-	// (widgetWidth), as its block stored it when the block was painted ([blockPaint.cells]), and
-	// unmeasured (-1) for every line no block measured — a separator, the breadcrumb, the rooted
-	// prompt, the streaming preview. reserveWidgetCells reads a stored width instead of measuring the
-	// line again and measures an unmeasured one exactly as it always did, so a hand-built transcript
-	// that sets no cells at all is reserved as before.
+	// cells is PARALLEL to lines where it is set: each line's width in the VIEWPORT WIDGET's
+	// measure (widgetWidth), as its block stored it when the block was painted
+	// ([blockPaint.cells]), and unmeasured (-1) for every line no block measured — a separator, the
+	// breadcrumb, the rooted prompt, the streaming preview. reserveWidgetCells reads a stored width
+	// instead of measuring the line again and measures an unmeasured one exactly as it always did,
+	// so a hand-built transcript that sets no cells at all is reserved as before.
 	cells []int
 }
 
@@ -71,11 +71,11 @@ type blockPaint struct {
 	lines   []string
 	targets []lineMark
 	// cells is nil, or PARALLEL to lines: each line's width in the viewport widget's measure
-	// (widgetWidth), or -1 where the line was not measured. It is filled once, when a cacheable block
-	// is painted ([transcript.paintBlock], [measuredCells]), so a repaint served from the cache hands
-	// reserveWidgetCells the widths the paint already knows instead of re-measuring every line of the
-	// scrollback. A width is a fact about the line alone — never a verdict against one limit — so it
-	// stays true for any viewport width the same paint is shown at.
+	// (widgetWidth), or -1 where the line was not measured. It is filled once, when a cacheable
+	// block is painted ([transcript.paintBlock], [measuredCells]), so a repaint served from the
+	// cache hands reserveWidgetCells the widths the paint already knows instead of re-measuring
+	// every line of the scrollback. A width is a fact about the line alone — never a verdict
+	// against one limit — so it stays true for any viewport width the same paint is shown at.
 	cells []int
 }
 
@@ -358,8 +358,8 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 
 	// records is the walk's one painter-record buffer: every block states its records into it
 	// ([transcript.resolveBlock]), so an all-hit repaint allocates them once per frame rather than
-	// once per block. A block's records live until the next block is resolved, and its paint is drawn
-	// (or served) before that.
+	// once per block. A block's records live until the next block is resolved, and its paint is
+	// drawn (or served) before that.
 	var records []paintInput
 	for i := root.first; i < root.last; {
 		// The preview is painted the moment the walk reaches its run's end. The test is >= rather
@@ -509,10 +509,10 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	return renderedTranscript{lines: lines, userBlocks: blocks, targets: targets, header: header}
 }
 
-// widgetWidth is ln's width in the measure the viewport WIDGET reads its lines in — ansi.StringWidth,
-// the call bubbles' viewport makes (ADR 0030 §6: a mirror's oracle is the widget) — and the one
-// place the reserve and the paint that stores widths for it ([measuredCells]) measure through. It
-// counts its calls (widgetMeasures) and does nothing else.
+// widgetWidth is ln's width in the measure the viewport WIDGET reads its lines in —
+// ansi.StringWidth, the call bubbles' viewport makes (ADR 0030 §6: a mirror's oracle is the widget)
+// — and the one place the reserve and the paint that stores widths for it ([measuredCells]) measure
+// through. It counts its calls (widgetMeasures) and does nothing else.
 func widgetWidth(ln string) int {
 	widgetMeasures.Add(1)
 	return ansi.StringWidth(ln)
@@ -527,8 +527,8 @@ var widgetMeasures atomic.Int64
 // than the width it was painted to, and -1 for the rest ([blockPaint.cells]). The BYTE length is
 // asked first and settles most lines for nothing: a display cell costs at least one byte, so a line
 // no longer than width in bytes cannot be wider than width in cells — nor than the viewport, which
-// is never narrower than the paint (transcriptWidth) — and reserveWidgetCells settles such a line by
-// its byte length again should it ever be asked about a narrower limit.
+// is never narrower than the paint (transcriptWidth) — and reserveWidgetCells settles such a line
+// by its byte length again should it ever be asked about a narrower limit.
 func measuredCells(lines []string, width int) []int {
 	cells := make([]int, len(lines))
 	for i, ln := range lines {
@@ -595,10 +595,10 @@ func (r paintRoot) painted(e entry) paintInput {
 	return in
 }
 
-// appendInputs states a whole block's entries as painter records ([entry.painted]), in the order the
-// block covers them, rebased to the root and appended to dst. [transcript.renderView] hands the SAME
-// records to [blockKey] and to the painter, so what the key names and what the paint reads cannot
-// part company. The walk hands it its one record buffer cut back to empty
+// appendInputs states a whole block's entries as painter records ([entry.painted]), in the order
+// the block covers them, rebased to the root and appended to dst. [transcript.renderView] hands the
+// SAME records to [blockKey] and to the painter, so what the key names and what the paint reads
+// cannot part company. The walk hands it its one record buffer cut back to empty
 // ([transcript.renderView]), so a repaint states every block's records into the same backing array
 // rather than a fresh one per block — a block covering a collapsed run's whole span is otherwise
 // one ≈ 832 B record per covered entry, on every hit.
@@ -664,13 +664,16 @@ func (t *transcript) paintRoot() paintRoot {
 type resolvedBlock struct {
 	shape blockShape   // which painter draws it, as the paint key names the branch (paintcache.go)
 	ins   []paintInput // the records the key names and the painter reads, the block's head first
-	live  bool         // whether the block still holds an open call — each shape's own rule (blockState.live)
-	fold  umbrellaFold // a Tools umbrella's large/folded answer, the zero value for every other shape (paintKey.large/folded)
-	// draw is the paint, called only when the cache misses (transcript.paintBlock). The theme is its
-	// ARGUMENT rather than something it closes over: a closure holding the ≈ 32 KB theme moved it to
-	// the heap on every block resolved, hit or miss, so the repaint of an all-hit scrollback cost a
-	// theme copy per block. It reads ins, and so is valid only until the walk resolves the next block
-	// into the same record buffer ([transcript.renderView]).
+	// live is whether the block still holds an open call — each shape's own rule (blockState.live).
+	live bool
+	// fold is a Tools umbrella's large/folded answer, the zero value for every other shape
+	// (paintKey.large/folded).
+	fold umbrellaFold
+	// draw is the paint, called only when the cache misses (transcript.paintBlock). The theme is
+	// its ARGUMENT rather than something it closes over: a closure holding the ≈ 32 KB theme moved
+	// it to the heap on every block resolved, hit or miss, so the repaint of an all-hit scrollback
+	// cost a theme copy per block. It reads ins, and so is valid only until the walk resolves the
+	// next block into the same record buffer ([transcript.renderView]).
 	draw func(th theme) blockPaint
 
 	next   int  // where the walk resumes: past the block's own entries, and past a collapsed span's elided ones
@@ -782,7 +785,8 @@ func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool
 		ins := root.appendInputs(buf[:0], t.entries[head:head+calls])
 		live := anyOpenCall(ins)
 		fold := umbrellaFold{large: t.umbrellaIsLarge(head), folded: t.umbrellaFolded(head)}
-		depth := in.depth // the head record's level, read here so draw closes over an int and not the record
+		// The head record's level, read here so draw closes over an int and not the record.
+		depth := in.depth
 		return resolvedBlock{
 			shape: shapeToolSuper,
 			ins:   ins,
@@ -883,7 +887,8 @@ func previewTail(s string) string {
 // of skill fetches are laid out by ONE rule and can never come to disagree about where a group's
 // block ends. shape names which of them this is, for the paint key alone (paintcache.go): what is
 // drawn is settled by the members themselves, and [renderSubAgentGroup] reads each row exactly as
-// the lone block it folded from. buf is the walk's record buffer, as [transcript.resolveBlock] states.
+// the lone block it folded from. buf is the walk's record buffer, as [transcript.resolveBlock]
+// states.
 func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool,
 	root paintRoot, buf []paintInput, grp []groupBlock, pos int, shape blockShape) resolvedBlock {
 	end := len(grp) - 1
@@ -909,7 +914,8 @@ func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool
 		count = len(grp)
 	}
 	live := anyOpenCall(ins)
-	depth := in.depth // the head record's level, read here so draw closes over an int and not the record
+	// The head record's level, read here so draw closes over an int and not the record.
+	depth := in.depth
 	// The walk resumes ON the member the block stopped at when that member is open — its span
 	// follows as blocks of its own — and past that member's whole span when it is collapsed,
 	// which is what elides it.

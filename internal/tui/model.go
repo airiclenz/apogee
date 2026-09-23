@@ -83,8 +83,8 @@ type Model struct {
 
 	// flushEvents empties the teaSink's delta-coalescing buffer (sink.go). The worker calls it the
 	// moment each Step returns, so a coalesced token or reasoning delta can never be delivered
-	// after the Step that emitted it — see stepToBoundary. Only Run can wire it, because the Bridge owns the sink; it
-	// stays nil in the model tests, which inject eventMsg past the sink entirely.
+	// after the Step that emitted it — see stepToBoundary. Only Run can wire it, because the Bridge
+	// owns the sink; it stays nil in the model tests, which inject eventMsg past the sink entirely.
 	flushEvents func()
 
 	// registerBox tells the Bridge which mailbox the engine's pre-emption seam reads
@@ -389,9 +389,9 @@ type Model struct {
 	//
 	// skillHints is what the band is showing RIGHT NOW: the matcher's answer for the draft as it
 	// stood at the last pause in the typing, re-ranked once the draft has been still for
-	// skillHintDelay ([Model.foldSkillHintTick]) and nil whenever there is nothing to say — the knob
-	// is off, no catalog is wired, a "/" or "@" menu is open, the draft is empty, or it holds too
-	// little evidence to name a skill honestly. Each edit drops from it any skill the draft now
+	// skillHintDelay ([Model.foldSkillHintTick]) and nil whenever there is nothing to say — the
+	// knob is off, no catalog is wired, a "/" or "@" menu is open, the draft is empty, or it holds
+	// too little evidence to name a skill honestly. Each edit drops from it any skill the draft now
 	// invokes, at once, without waiting for the re-rank ([Model.scheduleSkillHints]).
 	//
 	// skillHintGen numbers the edits that arm the band's debounce tick: each edit and each spend
@@ -751,8 +751,8 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// the Model has to reach the same one (ADR 0011), and a cache rebuilt per copy would never hit.
 	m.transcript.paints = newPaintCache()
 
-	// And the /thinking pane its wrap memo (thinkingpane.go), for the same reason and built the same
-	// once: every copy of the Model has to reach the one memo, or no render would ever hit it.
+	// And the /thinking pane its wrap memo (thinkingpane.go), for the same reason and built the
+	// same once: every copy of the Model has to reach the one memo, or no render would ever hit it.
 	m.thinking.rows = newThinkingRowCache()
 
 	// Resolve the footer's spelling of that same workspace once, for the same reason: the home
@@ -2629,11 +2629,11 @@ func (m *Model) refreshViewportAnchored(line, row int) {
 // above them, not between them and the chrome), the dropdown and the two strips directly above the
 // input box.
 //
-// They are gathered as ONE value for View, which composes them into the frame, and for the pointer's
-// span lookup ([Model.frameSpans]). How many screen rows the transcript still owns — which is what the
-// mouse maps a click through — is [Model.transcriptRows], which measures the panes through their
-// height queries instead of rendering them, and agrees with this value's height() by the pane
-// table's height-equals-render contract (paneSpec.height).
+// They are gathered as ONE value for View, which composes them into the frame, and for the
+// pointer's span lookup ([Model.frameSpans]). How many screen rows the transcript still owns —
+// which is what the mouse maps a click through — is [Model.transcriptRows], which measures the
+// panes through their height queries instead of rendering them, and agrees with this value's
+// height() by the pane table's height-equals-render contract (paneSpec.height).
 //
 // How TALL each of them is drawn is settled before any of them is rendered, by the frame-wide row
 // allocation they all share ([Model.frameRowPlan]): they are siblings spending the same viewport,
@@ -2655,8 +2655,8 @@ func (o frameOverlays) height() int {
 }
 
 // blockRows is the screen rows one composed overlay block takes: none for an absent one (the empty
-// string — lipgloss.Height("") is 1, so the emptiness is tested rather than measured), its line count
-// otherwise.
+// string — lipgloss.Height("") is 1, so the emptiness is tested rather than measured), its line
+// count otherwise.
 func blockRows(block string) int {
 	if block == "" {
 		return 0
@@ -2664,13 +2664,14 @@ func blockRows(block string) int {
 	return lipgloss.Height(block)
 }
 
-// overlayRows is the screen rows this frame's overlays take from the transcript, MEASURED rather than
-// rendered: each pane through its row's height query (paneSpec.height, panes.go), which answers from
-// the pane's spec without painting it, and the two strips — a line or two of their own, no pane —
-// through their composed blocks. It equals frameOverlays().height() on every Model value; that is the
-// pane table's height-equals-render contract (TestOverlayHeightQueryMatchesItsRender), and it is what lets
-// [Model.transcriptRows] — asked on every Update's repaint tail ([Model.settle]) — render no pane,
-// leaving View the one render of each.
+// overlayRows is the screen rows this frame's overlays take from the transcript, MEASURED rather
+// than rendered: each pane through its row's height query (paneSpec.height, panes.go), which
+// answers from the pane's spec without painting it, and the two strips — a line or two of their
+// own, no pane — through their composed blocks. It equals frameOverlays().height() on every Model
+// value; that is the pane table's height-equals-render contract
+// (TestOverlayHeightQueryMatchesItsRender), and it is what lets [Model.transcriptRows] — asked on
+// every Update's repaint tail ([Model.settle]) — render no pane, leaving View the one render of
+// each.
 func (m Model) overlayRows() int {
 	rows := 0
 	for p := framePane(0); p < paneKinds; p++ {
@@ -2687,10 +2688,10 @@ func (o frameOverlays) transcriptRows(budget int) int {
 	return max(0, budget-o.height())
 }
 
-// frameOverlays renders every overlay block of the frame as the Model stands — each pane through its
-// row of the pane table (paneSpecs), then the two strips. It is a pure function
-// of the Model — nothing here mutates and nothing depends on the frame being composed — so View and
-// the pointer's span lookup may each call it and are guaranteed the same answer. That guarantee is per Model
+// frameOverlays renders every overlay block of the frame as the Model stands — each pane through
+// its row of the pane table (paneSpecs), then the two strips. It is a pure function of the Model —
+// nothing here mutates and nothing depends on the frame being composed — so View and the pointer's
+// span lookup may each call it and are guaranteed the same answer. That guarantee is per Model
 // VALUE and says nothing across two of them, which is exactly why the click chain snapshots one: a
 // dismissal mid-chain yields a different model, and every rect asked of it after that would be a
 // different frame's (handleMouseClick, mouse.go).
