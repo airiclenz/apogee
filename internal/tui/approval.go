@@ -93,6 +93,14 @@ func approvalKeysFor(req domain.ApprovalRequest) map[string]domain.ApprovalDecis
 // duration and be wrong on a loaded box, where an input backlog outlives any latch short enough to
 // be worth having.
 //
+// The pane asks TWICE, and arms on the second answer. Bubble Tea writes a query out of its own output
+// buffer ahead of the renderer's frame on the same tick, so the first marker leaves BEFORE the frame
+// that shows the pane, and its answer can come home — and a key typed after it can be read — while the
+// pane is still on the wire. What that first answer does prove is that the frame has been written:
+// the frame was in the renderer before the Cmd that asked had even run, and the flush that sent the
+// query sent the frame with it. So the second marker, asked from that answer, goes out behind the
+// frame, and ITS answer is written from behind every byte typed before the pane could be on screen.
+//
 // apogee asks for a cursor position NOWHERE else, so every [tea.CursorPositionMsg] the Model sees is
 // one of these markers coming home ([Model.foldInputDrained]); nothing reads the position itself.
 func approvalDrainMarker() tea.Cmd {
@@ -133,8 +141,9 @@ func approvalMenuKeys(menu []approvalOption) map[string]domain.ApprovalDecision 
 // position in the input stream this pane's promise is about. The arm has to be written from here
 // rather than from the paint because the paint cannot write: View is a value receiver (model.go) and
 // frameOverlays is documented pure, so "the frame has been shown" is only ever knowable in Update —
-// and the marker, asked by the Update that opened the pane, is answered from behind the very frame
-// that Update painted.
+// and the marker asked by the Update that opened the pane leaves ahead of the very frame that Update
+// painted, so its answer only proves the frame written and asks the arming marker in turn
+// (approvalDrainMarker, approvalDrainRelayed).
 //
 // TWO generations ride with it, because the two things that can go stale are different. approvalSeq
 // names this pane for its BACKSTOP tick, so a tick that outlives its pane — answered, cancelled,
@@ -152,7 +161,8 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	m.approvalSeq++
 	seq := m.approvalSeq
 	m.inputDrainAsked++
-	m.approvalDrainMark = m.inputDrainAsked // the answer this pane arms on, and no earlier one
+	m.approvalDrainMark = m.inputDrainAsked // the answer this pane relays from, and no earlier one
+	m.approvalDrainRelayed = false          // the first answer asks again; only the second arms
 	m.dismissAutocomplete()                 // a stale menu never shares the frame with a decision surface
 	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
 	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts.
@@ -167,10 +177,13 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 }
 
 // foldInputDrained counts one answer to a drain marker and, when it is the answer the open pane is
-// waiting on, brings that pane's decision keys to life. This is the pane's real latch: the terminal
-// could not have written this report before it had taken every byte queued ahead of it, so an answer
-// that reaches Update is the proof that the keys typed before the pane opened have already been
-// delivered — and swallowed, because they arrived while the pane was unarmed.
+// waiting on, advances that pane's latch. The pane's FIRST marker left ahead of the frame that shows
+// it (approvalDrainMarker), so its answer proves only that the frame has been written: the fold then
+// asks a second marker, from behind that frame, and moves the pane's mark onto it. The SECOND answer
+// brings the decision keys to life. This is the pane's real latch: the terminal could not have
+// written that report before it had taken every byte queued ahead of it, the frame included, so an
+// answer that reaches Update is the proof that the keys typed before the pane could be seen have
+// already been delivered — and swallowed, because they arrived while the pane was unarmed.
 //
 // The counting is what makes an answer THIS pane's. Reports come back in the order the markers went
 // out, so the mark the fold recorded (approvalDrainMark) is reached only by the report its own
@@ -185,6 +198,12 @@ func (m Model) foldInputDrained() (tea.Model, tea.Cmd) {
 	}
 	if m.pending == nil || m.approvalDrainMark == 0 || m.inputDrainSeen < m.approvalDrainMark {
 		return m, nil
+	}
+	if !m.approvalDrainRelayed {
+		m.approvalDrainRelayed = true
+		m.inputDrainAsked++
+		m.approvalDrainMark = m.inputDrainAsked
+		return m, approvalDrainMarker()
 	}
 	m.approvalArmed = true
 	return m, nil
@@ -328,6 +347,7 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 	m.pending = nil
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
 	m.approvalDrainMark = 0 // and so does the marker it was waiting on; the next pane asks for its own
+	m.approvalDrainRelayed = false
 	tick := m.resumeRunning()
 	return m, tick
 }

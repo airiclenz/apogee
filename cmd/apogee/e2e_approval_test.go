@@ -389,11 +389,13 @@ func holdKey(drv driven, key, marker string) func() int {
 				return
 			default:
 			}
-			if _, _, ok := drv.Frame().Find(marker); ok {
+			// The look and the press are one step (TypeUnlessShown): a press sent after a
+			// separate look could land behind a pane that painted, and was armed, in between —
+			// a legitimate press this test would then misread as one that beat the paint.
+			painted := drv.Screen().BytesWritten()
+			if !drv.TypeUnlessShown(key, marker) {
 				return
 			}
-			painted := drv.Screen().BytesWritten()
-			drv.Type(key)
 			sent++
 			time.Sleep(gap)
 			for deadline := time.Now().Add(pace); drv.Screen().BytesWritten() == painted && time.Now().Before(deadline); {

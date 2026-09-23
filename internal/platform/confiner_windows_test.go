@@ -1748,18 +1748,41 @@ func TestWindowsPlantedJournalDoesNotRelabelAForeignPath(t *testing.T) {
 		t.Fatalf("plant the journal: %v", err)
 	}
 
-	winlabel.Recover(home)
+	// An unlabelled path CARRIES the prior rather than dropping it (priorRestorable): the
+	// instruction is never obeyed, but it travels on until the carry bound retires it. Each
+	// Recover is one revert of the carried journal, so the loop runs past the bound with
+	// headroom and the victim is re-read after every pass.
+	passes := 0
+	for ; passes < 32; passes++ {
+		winlabel.Recover(home)
 
-	after, err := winlabel.ReadSDDL(victim)
-	if err != nil {
-		t.Fatalf("read the label of %q after recovery: %v", victim, err)
-	}
-	if after != before {
-		t.Errorf("label of %q = %q after recovery, want %q untouched; a planted journal made apogee label a path it never labelled",
-			victim, after, before)
+		after, err := winlabel.ReadSDDL(victim)
+		if err != nil {
+			t.Fatalf("read the label of %q after recovery pass %d: %v", victim, passes+1, err)
+		}
+		if after != before {
+			t.Fatalf("label of %q = %q after recovery pass %d, want %q untouched; a planted journal made apogee label a path it never labelled",
+				victim, after, passes+1, before)
+		}
+		if passes == 0 {
+			left := winlabel.ListJournals(home)
+			if len(left) != 1 {
+				t.Fatalf("journals = %v after the first recovery, want the planted journal carried", left)
+			}
+			carried, err := winlabel.ReadJournal(left[0])
+			if err != nil {
+				t.Fatalf("read the carried journal: %v", err)
+			}
+			if len(carried.Entries) != 1 || carried.Entries[0].Carried != 1 || carried.Entries[0].Judged {
+				t.Fatalf("carried entries = %+v, want the one prior carried once and unjudged", carried.Entries)
+			}
+		}
+		if len(winlabel.ListJournals(home)) == 0 {
+			break
+		}
 	}
 	if left := winlabel.ListJournals(home); len(left) != 0 {
-		t.Errorf("journals = %v after recovery, want the planted journal retired — a dropped instruction must not be re-attempted every run", left)
+		t.Errorf("journals = %v after %d recoveries, want the planted journal retired by the carry bound — a carried instruction must not be re-attempted forever", left, passes)
 	}
 }
 

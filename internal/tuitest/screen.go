@@ -142,6 +142,16 @@ func (s *Screen) Snapshot() Frame {
 	return newFrame(s.term.Width(), s.term.Height(), s.term.CellAt, pos.X, pos.Y, s.term.Render())
 }
 
+// holding runs fn over the current frame with the emulator held: no output is parsed, and so no
+// query is answered, until fn returns. A driver writes a key from inside it to place that key in the
+// program's input AHEAD of the answer to anything the program has not yet been seen to paint.
+func (s *Screen) holding(fn func(Frame)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pos := s.term.CursorPosition()
+	fn(newFrame(s.term.Width(), s.term.Height(), s.term.CellAt, pos.X, pos.Y, s.term.Render()))
+}
+
 // Render is the current screen with its SGR sequences intact — what a failing wait prints beneath
 // the plain frame so a colour bug is visible in the output rather than only in a rerun.
 func (s *Screen) Render() string {

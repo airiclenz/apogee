@@ -88,6 +88,11 @@ type Watcher struct {
 	// stopOnce keeps a second Stop — a teardown that runs its closers twice — from closing an
 	// already-closed channel.
 	stopOnce sync.Once
+
+	// sampled, when set, runs on the poll goroutine between each tick's stat and its second clock
+	// read — the one place a stall lets the file move under a sample already taken. It is nil in
+	// production and set only by this package's tests, before Start, to stage that stall for real.
+	sampled func()
 }
 
 // New builds a watcher over path at the production cadence. It touches nothing, and
@@ -149,23 +154,33 @@ func (w *Watcher) poll(last fileState) {
 	// clock at the observation, never on the tick's own timestamp: a tick received late carries the
 	// time it was due, so a goroutine held off the CPU for most of a Settle would otherwise count
 	// the stall as quiet time and report the change the moment it first looked at it.
+	//
+	// The clock is read on BOTH sides of the stat, because the goroutine can be held off the CPU
+	// between the two as well. A change starts its Settle from the later reading, so the window is
+	// never shortened by a stall before the observation; a still sample ends it only on the earlier
+	// reading, so a sample taken before reportAt — and possibly before the rest of the burst landed —
+	// is never taken for quiet just because the clock was read after a stall.
 	var reportAt time.Time
 	for {
 		select {
 		case <-w.stop:
 			return
 		case <-ticker.C:
+			before := time.Now()
 			current, ok := w.sample()
 			if !ok {
 				continue
 			}
-			now := time.Now()
+			if w.sampled != nil {
+				w.sampled()
+			}
+			after := time.Now()
 			if !current.equal(last) {
 				last = current
-				reportAt = now.Add(w.Settle)
+				reportAt = after.Add(w.Settle)
 				continue
 			}
-			if reportAt.IsZero() || now.Before(reportAt) {
+			if reportAt.IsZero() || before.Before(reportAt) {
 				continue
 			}
 			reportAt = time.Time{}

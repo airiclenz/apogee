@@ -1151,3 +1151,51 @@ func TestOverlappingClosesNeverStrandTheSharedRootsLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoverSweepRetiresItsOwnJournalBesideADeadSiblingsOverASharedRoot(t *testing.T) {
+	t.Parallel()
+
+	// A process that closed a confiner and then recovers — a daemon Driver rebuilding one, or
+	// the constructor after a kill — finds its OWN journal beside a dead sibling's, both naming
+	// one root. The pass recovers the self-owned journal as an interrupted run, so the sibling
+	// exclusion must read it the same way: counted alive there, each journal spares the root to
+	// the other, neither retires, and the root keeps apogee's label until the process exits.
+	const self, dead = 100, 200
+	home := t.TempDir()
+	for _, pid := range []int{self, dead} {
+		r := Record{PID: pid, Entries: []Entry{{Path: `C:\work`, Root: true, RootJudged: true}}}
+		if err := WriteJournal(JournalPath(home, pid), r); err != nil {
+			t.Fatalf("seed the journal of %d: %v", pid, err)
+		}
+	}
+
+	alive := recoveryLiveness(self, func(pid int) bool { return pid == self })
+	var cleared []string
+	recoverSweep(home, alive, func(own string) func(Record) ([]Entry, error) {
+		return func(r Record) ([]Entry, error) {
+			siblings := siblingJournals(home, own)
+			_, handoff := restorablePriors(r, siblings)
+			clear, spared := revertibleRoots(r, siblings, alive, readsApogeesOwnLabel)
+			cleared = append(cleared, clear...)
+			return handoffSparedRoots(handoff, spared), nil
+		}
+	})
+
+	if len(cleared) == 0 {
+		t.Error("the shared root was never cleared; the self-owned journal and the dead one spared it to each other")
+	}
+	if survivors := ListJournals(home); len(survivors) != 0 {
+		t.Errorf("journals survived recovery: %v — a journal of this process must not count as a live claim while the pass recovers it", survivors)
+	}
+}
+
+func TestRecoveryLivenessNeverCountsItsOwnProcess(t *testing.T) {
+	t.Parallel()
+
+	alive := recoveryLiveness(100, func(pid int) bool { return pid == 100 || pid == 200 })
+	for pid, want := range map[int]bool{100: false, 200: true, 300: false} {
+		if got := alive(pid); got != want {
+			t.Errorf("alive(%d) = %v, want %v", pid, got, want)
+		}
+	}
+}

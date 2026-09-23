@@ -656,6 +656,10 @@ type pendingDecision struct {
 	// it, so no answer left over from a dead pane is still owed to anything. Zero means no pane is
 	// waiting on a marker. A plain int (ADR 0011).
 	approvalDrainMark int
+	// approvalDrainRelayed records that the pane's first marker has come home and the fold has asked
+	// the second, the one whose answer arms it: the first left ahead of the pane's own frame, so it
+	// proves only that the frame was written (approvalDrainMarker, approval.go).
+	approvalDrainRelayed bool
 }
 
 // reset lets go of the question and its payload together — the whole value, so a payload added to it

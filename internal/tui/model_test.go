@@ -1385,6 +1385,11 @@ func TestModelApprovalFoldReturnsTheArmTick(t *testing.T) {
 // terminal can only write that answer from behind every byte the human had already typed. So a key
 // delivered before it — the backlog a pane on a loaded box has to survive — is swallowed however
 // long ago it was pressed, and the first key after it rules.
+//
+// The fold's own marker leaves AHEAD of the frame that shows the pane (Bubble Tea flushes a query
+// before the renderer's frame on one tick), so its answer only proves the frame written: it asks a
+// second marker from behind that frame, and a key delivered between the two answers is still one
+// typed before the pane could be seen.
 func TestModelApprovalArmsOnTheDrainedInputPosition(t *testing.T) {
 	t.Parallel()
 	m, reply := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
@@ -1396,9 +1401,23 @@ func TestModelApprovalArmsOnTheDrainedInputPosition(t *testing.T) {
 	default:
 	}
 
+	m, relay := stepCmd(t, m, tea.CursorPositionMsg{})
+	if m.approvalArmed {
+		t.Fatal("the pane armed on the answer to a marker that left ahead of its own frame")
+	}
+	if relay == nil {
+		t.Fatal("the first answer asked no second marker from behind the pane's frame")
+	}
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		t.Fatalf("a key delivered between the two drain answers ruled %q", got)
+	default:
+	}
+
 	m = step(t, m, tea.CursorPositionMsg{})
 	if !m.approvalArmed {
-		t.Fatal("the pane did not arm on the terminal's answer to its own drain marker")
+		t.Fatal("the pane did not arm on the terminal's answer to the marker asked behind its frame")
 	}
 
 	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
@@ -1445,7 +1464,11 @@ func TestModelApprovalDrainAnswerForAnEarlierPaneArmsNothing(t *testing.T) {
 	default:
 	}
 
-	m = step(t, m, tea.CursorPositionMsg{}) // and now the second pane's own
+	m = step(t, m, tea.CursorPositionMsg{}) // and now the second pane's own, which asks again
+	if m.approvalArmed {
+		t.Fatal("the second pane armed on the marker that left ahead of its frame")
+	}
+	m = step(t, m, tea.CursorPositionMsg{}) // the one asked from behind its frame
 	if !m.approvalArmed {
 		t.Fatal("the second pane did not arm on its own drain answer")
 	}
@@ -1487,8 +1510,9 @@ func TestModelApprovalUnsolicitedCursorReportArmsNoLaterPane(t *testing.T) {
 	}
 
 	m = step(t, m, tea.CursorPositionMsg{})
+	m = step(t, m, tea.CursorPositionMsg{})
 	if !m.approvalArmed {
-		t.Fatal("the pane did not arm on the answer to its own marker")
+		t.Fatal("the pane did not arm on the answers to its own two markers")
 	}
 }
 

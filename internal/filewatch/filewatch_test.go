@@ -8,6 +8,7 @@ package filewatch
 import (
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -47,6 +48,20 @@ func writeWatchedFile(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write %s: %v", path, err)
+	}
+}
+
+// writeBurst writes each content to path in turn, the way an editor's save lands, and skips the test
+// when the burst took long enough that the box, not the watcher, decides whether it coalesces: a
+// burst spread over a whole Settle is two changes, and two reports are then the right answer.
+func writeBurst(t *testing.T, path string, contents ...string) {
+	t.Helper()
+	start := time.Now()
+	for _, content := range contents {
+		writeWatchedFile(t, path, content)
+	}
+	if took := time.Since(start); took >= testSettle/2 {
+		t.Skipf("the burst took %v, too close to the %v Settle to be one change", took, testSettle)
 	}
 }
 
@@ -102,11 +117,54 @@ func TestWatchCoalescesABurstIntoOneReport(t *testing.T) {
 	writeWatchedFile(t, path, "auto-title: false\n")
 
 	w := startWatcher(t, path)
-	writeWatchedFile(t, path, "")
-	writeWatchedFile(t, path, "auto-title: tr")
-	writeWatchedFile(t, path, "auto-title: true\n")
+	writeBurst(t, path, "", "auto-title: tr", "auto-title: true\n")
 
 	awaitChange(t, w, "a burst of three writes")
+	expectNoChange(t, w, testQuiet, "the burst had already been reported once")
+}
+
+// A still sample is quiet only as of the stat that took it. A poll goroutine held off the CPU between
+// the stat and its clock read wakes past reportAt, and reporting then would announce a sample the
+// rest of the burst has since overtaken — the next tick sees that write and reports the save a second
+// time. The stall is staged on the poll goroutine itself, after the stat and before the clock read,
+// and the burst's second write lands inside it.
+func TestWatchNeverSettlesOnASampleTakenBeforeAStall(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	writeWatchedFile(t, path, "auto-title: false\n")
+
+	w := New(path)
+	w.Interval = testInterval
+	w.Settle = testSettle
+	var armed atomic.Bool
+	stalled := make(chan error, 1)
+	w.sampled = func() {
+		if !armed.CompareAndSwap(true, false) {
+			return
+		}
+		time.Sleep(testSettle + testSettle/2)
+		stalled <- os.WriteFile(path, []byte("auto-title: true\n# a second line\n"), 0o600)
+	}
+	w.Start()
+	t.Cleanup(w.Stop)
+
+	writeWatchedFile(t, path, "auto-title: true\n")
+	// Let the poll observe the first write, so the stalled tick is a still one with a Settle
+	// pending. Should it not have yet, the stalled tick observes it instead and the burst
+	// still coalesces, so the arming cannot make a correct watcher fail.
+	time.Sleep(testSettle / 5)
+	armed.Store(true)
+	select {
+	case err := <-stalled:
+		if err != nil {
+			t.Fatalf("write inside the stall: %v", err)
+		}
+	case <-time.After(testDeadline):
+		t.Fatal("the poll never reached the staged stall")
+	}
+
+	awaitChange(t, w, "a burst whose second write landed inside a stall")
 	expectNoChange(t, w, testQuiet, "the burst had already been reported once")
 }
 

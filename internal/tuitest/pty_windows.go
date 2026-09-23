@@ -49,6 +49,9 @@ func (d *PTYDriver) TTYState() (echo, canonical bool) { d.t.Skip(ptySkip); retur
 // Type skips.
 func (d *PTYDriver) Type(string) { d.t.Skip(ptySkip) }
 
+// TypeUnlessShown skips.
+func (d *PTYDriver) TypeUnlessShown(string, string) bool { d.t.Skip(ptySkip); return false }
+
 // Press skips.
 func (d *PTYDriver) Press(Key) { d.t.Skip(ptySkip) }
 

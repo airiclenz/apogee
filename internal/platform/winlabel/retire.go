@@ -56,6 +56,47 @@ func retire(path string, r Record, revert func(Record) ([]Entry, error)) ([]Entr
 	return nil, nil
 }
 
+// recoveryLiveness is the one liveness view a Recover pass reads: every PID alive says is
+// running, EXCEPT self. A journal carrying this process's own PID at recovery is an interrupted
+// run — a confiner of this process that never retired it, or a dead process whose PID was
+// reused — so the pass reverts it, and the sibling exclusion (revertibleRoots) must read it the
+// same way. Counted alive there, it spares its root to a dead sibling that in turn spares the
+// root back, and neither journal ever retires (Recover).
+func recoveryLiveness(self int, alive func(int) bool) func(int) bool {
+	return func(pid int) bool { return pid != self && alive(pid) }
+}
+
+// recoverSweep is Recover's loop over the journals under home: every journal whose owner is
+// not alive is retired through revert(own), and the sweep repeats while any journal retired,
+// because a retirement can unblock a hand-off another journal made to it earlier in the same
+// sweep. Each continuing sweep removes at least one file, so the loop is bounded by the journal
+// count. A journal that cannot be decoded is left where it is for Residue to report.
+//
+// alive and revert are injected — recoveryLiveness over ProcessAlive and
+// revertSparingLiveSiblings in production, both Windows-tagged — so the sweep is testable on
+// any OS, the retire seam pattern.
+func recoverSweep(home string, alive func(int) bool, revert func(own string) func(Record) ([]Entry, error)) {
+	for {
+		retiredAny := false
+		for _, path := range ListJournals(home) {
+			r, err := ReadJournal(path)
+			if err != nil {
+				continue
+			}
+			if alive(r.PID) {
+				continue
+			}
+			remaining, err := retire(path, r, revert(path))
+			if err == nil && len(remaining) == 0 {
+				retiredAny = true
+			}
+		}
+		if !retiredAny {
+			return
+		}
+	}
+}
+
 // clearTreeOutcome is ClearTree's below-root verdict: nil when failures is zero —
 // every descendant is verifiably cleared or gone — else an error carrying the count and the
 // first failure. Returning an error is what makes retire KEEP the journal, so

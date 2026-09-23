@@ -179,6 +179,23 @@ func (d *Driver) Type(text string) {
 	d.send([]byte(text))
 }
 
+// TypeUnlessShown types text only if marker is not on the screen, and reports whether it typed. The
+// look and the keystroke are one step: the emulator parses nothing between them, so a key it types
+// provably precedes, in the program's input, the terminal's answer to any query the program sent
+// after painting the marker. A separate Frame().Find and Type leave a window in which the frame
+// paints and a query is answered between the two, and the key then lands after it.
+func (d *Driver) TypeUnlessShown(text, marker string) (typed bool) {
+	d.t.Helper()
+	d.screen.holding(func(f Frame) {
+		if _, _, shown := f.Find(marker); shown {
+			return
+		}
+		d.send([]byte(text))
+		typed = true
+	})
+	return typed
+}
+
 // Press sends one key's byte sequence.
 func (d *Driver) Press(key Key) {
 	d.t.Helper()

@@ -247,7 +247,11 @@ func ClearTree(root string) error {
 // IS the label walk above, and this is the one place it is handed to a journal (Open). The
 // non-Windows build supplies nil from the same function, which is what lets Retire be declared
 // ONCE, unguarded, beside the rest of the journal's lifecycle.
-func osRevert() revertFunc { return revertSparingLiveSiblings }
+func osRevert() revertFunc {
+	return func(home, own string) func(Record) ([]Entry, error) {
+		return revertSparingLiveSiblings(home, own, ProcessAlive)
+	}
+}
 
 // revertSparingLiveSiblings returns the production revert for the journal at own under home:
 // revertJournal over the journal's roots MINUS every root a sibling journal with a live owning
@@ -264,14 +268,19 @@ func osRevert() revertFunc { return revertSparingLiveSiblings }
 // sessions closing at once from each sparing the shared root to the other and then deleting
 // both records of it: the join of the two hand-off sets is the whole of what this revert did
 // NOT do, and retire keeps the file for all of it.
-func revertSparingLiveSiblings(home, own string) func(Record) ([]Entry, error) {
+//
+// alive is the liveness the sibling exclusion reads: ProcessAlive at teardown, and at recovery
+// the pass's own view (recoveryLiveness), under which a journal of this very process is an
+// interrupted run rather than a live claim. The two must agree within one Recover pass, or a
+// journal it recovers as dead also spares its roots as alive and the pair deadlock (Recover).
+func revertSparingLiveSiblings(home, own string, alive func(int) bool) func(Record) ([]Entry, error) {
 	return func(r Record) ([]Entry, error) {
 		if err := judgePriors(r, own); err != nil {
 			return nil, err
 		}
 		siblings := siblingJournals(home, own)
 		restore, handoff := restorablePriors(r, siblings)
-		clear, spared := revertibleRoots(r, siblings, ProcessAlive, ReadSDDL)
+		clear, spared := revertibleRoots(r, siblings, alive, ReadSDDL)
 		if err := revertJournal(clear, restore); err != nil {
 			return nil, err
 		}
@@ -427,28 +436,19 @@ func revertJournal(roots []string, priors map[string]string) error {
 // moment that sibling retires later in the same sweep, and which order the two are visited in
 // is an accident of their PIDs' spellings — one more sweep finishes the restore now rather
 // than deferring it to the next session. Each continuing sweep removes at least one file, so
-// the loop is bounded by the journal count.
+// the loop is bounded by the journal count (recoverSweep).
+//
+// One liveness view serves the whole pass (recoveryLiveness): the journal this process owns is
+// recovered as an interrupted run, so the sibling exclusion must not count it as a live claim
+// either. Read two ways — dead when choosing what to recover, alive when sparing a dead
+// sibling's root — the self-owned journal and a dead sibling sharing its root each spare the
+// root to the other, neither retires, and the foreign prior on that root stays stripped until
+// the process exits.
 func Recover(home string) {
-	self := os.Getpid()
-	for {
-		retiredAny := false
-		for _, path := range ListJournals(home) {
-			r, err := ReadJournal(path)
-			if err != nil {
-				continue
-			}
-			if r.PID != self && ProcessAlive(r.PID) {
-				continue
-			}
-			remaining, err := retire(path, r, revertSparingLiveSiblings(home, path))
-			if err == nil && len(remaining) == 0 {
-				retiredAny = true
-			}
-		}
-		if !retiredAny {
-			return
-		}
-	}
+	alive := recoveryLiveness(os.Getpid(), ProcessAlive)
+	recoverSweep(home, alive, func(own string) func(Record) ([]Entry, error) {
+		return revertSparingLiveSiblings(home, own, alive)
+	})
 }
 
 // ProcessAlive reports whether pid names a running process, so recovery never reverts the
