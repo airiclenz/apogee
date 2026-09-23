@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"strings"
 	"sync"
-	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -400,8 +399,8 @@ func (m Model) refuseChildMessage(note string) (tea.Model, tea.Cmd) {
 	if !m.inRunView() {
 		return m, nil
 	}
-	m.flash = note
-	return m, tea.Tick(flashDuration, func(time.Time) tea.Msg { return flashClearMsg{} })
+	cmd := m.showFlash(note)
+	return m, cmd
 }
 
 // foldChildDelivery takes the staged row a child's delivery report accounts for off the band. Every

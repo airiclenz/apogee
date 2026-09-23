@@ -139,8 +139,18 @@ func (s transcriptSel) spanUnchanged(oldLines, newLines []string) bool {
 	return true
 }
 
-// flashClearMsg clears the transient status-line note (m.flash) once flashDuration elapses.
-type flashClearMsg struct{}
+// flashClearMsg clears the transient status-line note (m.flash) once flashDuration elapses. gen is
+// the flash that scheduled it (Model.flashGen); a clear for a flash since replaced is a no-op.
+type flashClearMsg struct{ gen int }
+
+// showFlash puts note in the status line's flash slot under a fresh generation and returns the
+// tick that clears it after flashDuration — cleared only if no later flash has replaced it.
+func (m *Model) showFlash(note string) tea.Cmd {
+	m.flash = note
+	m.flashGen++
+	gen := m.flashGen
+	return tea.Tick(flashDuration, func(time.Time) tea.Msg { return flashClearMsg{gen: gen} })
+}
 
 // flashDuration is how long a flash — a mouse-copy confirmation, a refusal raised inside a run
 // view — lingers in the status line.
@@ -835,11 +845,11 @@ func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 	if n == 1 {
 		noun = "char"
 	}
-	m.flash = fmt.Sprintf("copied %d %s", n, noun)
+	flashCmd := m.showFlash(fmt.Sprintf("copied %d %s", n, noun))
 	return m, tea.Batch(
 		tea.SetClipboard(text),
 		systemClipboardCmd(text),
-		tea.Tick(flashDuration, func(time.Time) tea.Msg { return flashClearMsg{} }),
+		flashCmd,
 	)
 }
 

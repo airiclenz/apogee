@@ -340,6 +340,12 @@ type Model struct {
 	lastCtrlC time.Time // when the last Ctrl+C landed; a second within the window quits
 	lastEsc   time.Time // when the last Esc landed while busy; a second within the window stops the worker
 	quitting  bool      // a quit whose exit is deferred: to the worker's terminal Msg while busy (C4), else to the closing flush reaching disk (quit)
+	// ctrlCGen and escGen number the arms of the two gestures: each arm bumps its counter and
+	// stamps the value on the reset tick it schedules, so a tick delivered late for an earlier arm
+	// is a no-op rather than clearing the fresher one (and its hint) — the house gen pattern
+	// (spinnerTickMsg, heartbeatTickMsg). Plain ints, so they ride the value-copied Model (ADR 0011).
+	ctrlCGen int
+	escGen   int
 
 	// activityBusy is the last value published through [Options.ReportActivity] — the high-water
 	// mark that turns a per-Update reading into a per-TRANSITION report (schedule.go). Its zero
@@ -503,6 +509,9 @@ type Model struct {
 	// flash is a transient status-line note (e.g. "copied 12 chars") shown after a mouse copy or a
 	// refused child message (interject.go) and cleared by flashClearMsg after flashDuration.
 	flash string
+	// flashGen numbers the flashes set by showFlash (mouse.go); a flashClearMsg clears only the
+	// flash whose generation it carries, so a late clear for flash A never takes down flash B.
+	flashGen int
 	// mouseReasserts counts the mouse-tracking re-asserts sent so far (mousereassert.go), which is
 	// the only thing --tui-diag can say about them. A plain int, riding the value-copied Model
 	// (ADR 0011).
@@ -1041,14 +1050,20 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case ctrlCResetMsg:
 		// The Ctrl+C quit window elapsed without a second press: disarm the gesture so the
-		// "press ctrl+c again to quit" hint clears (handleKey's ctrl+c case).
-		m.lastCtrlC = time.Time{}
+		// "press ctrl+c again to quit" hint clears (handleKey's ctrl+c case). A tick scheduled
+		// by an earlier arm is stale — a fresher arm owns the gesture now — and changes nothing.
+		if msg.gen == m.ctrlCGen {
+			m.lastCtrlC = time.Time{}
+		}
 		return m, nil
 
 	case escStopResetMsg:
 		// The Esc stop window elapsed without a second press: disarm the gesture so the
-		// "press esc again to stop" hint clears (handleKey's esc case).
-		m.lastEsc = time.Time{}
+		// "press esc again to stop" hint clears (handleKey's esc case). A tick scheduled by an
+		// earlier arm is stale and changes nothing.
+		if msg.gen == m.escGen {
+			m.lastEsc = time.Time{}
+		}
 		return m, nil
 
 	case eventMsg:
@@ -1307,8 +1322,11 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.handleMouseRelease(msg)
 
 	case flashClearMsg:
-		// The transient mouse-copy note has lingered long enough; clear it (mouse.go).
-		m.flash = ""
+		// The transient mouse-copy note has lingered long enough; clear it (mouse.go) — unless a
+		// fresher flash has replaced it since this tick was scheduled.
+		if msg.gen == m.flashGen {
+			m.flash = ""
+		}
 		return m, nil
 
 	default:
@@ -1323,16 +1341,18 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 const ctrlCQuitWindow = time.Second
 
 // ctrlCResetMsg disarms the Ctrl+C quit gesture once the window elapses, clearing the
-// "press ctrl+c again to quit" hint when the human does not follow through.
-type ctrlCResetMsg struct{}
+// "press ctrl+c again to quit" hint when the human does not follow through. gen is the arm that
+// scheduled it (Model.ctrlCGen); a tick for an earlier arm is a no-op.
+type ctrlCResetMsg struct{ gen int }
 
 // escStopWindow is how long after one Esc a second press still stops the in-flight worker. A
 // lone Esc no longer kills a running turn; only a second press inside this window confirms it.
 const escStopWindow = time.Second
 
 // escStopResetMsg disarms the Esc stop gesture once the window elapses, clearing the
-// "press esc again to stop" hint when the human does not follow through.
-type escStopResetMsg struct{}
+// "press esc again to stop" hint when the human does not follow through. gen is the arm that
+// scheduled it (Model.escGen); a tick for an earlier arm is a no-op.
+type escStopResetMsg struct{ gen int }
 
 // keyClaimant is one surface's answer to "is this keypress yours?" — the unit [keyClaimOrder]
 // states the overlay precedence in, so the order is a list to read rather than a run of hand-written
@@ -1586,7 +1606,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m.quit()
 		}
 		m.lastCtrlC = now
-		return m, tea.Tick(ctrlCQuitWindow, func(time.Time) tea.Msg { return ctrlCResetMsg{} })
+		m.ctrlCGen++
+		gen := m.ctrlCGen
+		return m, tea.Tick(ctrlCQuitWindow, func(time.Time) tea.Msg { return ctrlCResetMsg{gen: gen} })
 	case "ctrl+l":
 		// The readline/terminal meaning of the key — redraw — and here it is a repair tool. The
 		// renderer paints each frame as a DIFF against its own model of the screen, so a terminal
@@ -1635,7 +1657,9 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.lastEsc = now
-		return m, tea.Tick(escStopWindow, func(time.Time) tea.Msg { return escStopResetMsg{} })
+		m.escGen++
+		gen := m.escGen
+		return m, tea.Tick(escStopWindow, func(time.Time) tea.Msg { return escStopResetMsg{gen: gen} })
 	case "enter":
 		switch m.state {
 		case stateIdle:

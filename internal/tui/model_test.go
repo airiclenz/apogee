@@ -973,6 +973,68 @@ func TestModelStopKeys(t *testing.T) {
 			t.Error("ctrl+c after the window quit instead of only re-arming")
 		}
 	})
+
+	// The reset ticks carry the generation of the arm that scheduled them; the cases below deliver
+	// the FIRST arm's tick after a second arm, which is what a tick running late looks like. The
+	// messages are built by hand rather than drained from the Cmd, which would block for the window.
+	t.Run("a late esc reset tick never disarms a fresher arm", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+		cancelled := startStubWorker(t, &m)
+		m = step(t, m, keyEsc())
+		firstArm := escStopResetMsg{gen: m.escGen}
+		m.lastEsc = m.lastEsc.Add(-2 * escStopWindow) // pretend the window lapsed
+		m = step(t, m, keyEsc())                      // re-arms
+		m = step(t, m, firstArm)
+		if m.lastEsc.IsZero() {
+			t.Fatal("the first arm's late reset tick disarmed the second arm")
+		}
+		if got := ansi.Strip(m.statusRight(200)); !strings.Contains(got, escStopHintPlain) {
+			t.Errorf("the arm hint was cleared by a stale tick; status right = %q", got)
+		}
+		m = step(t, m, keyEsc())
+		if !cancelled() {
+			t.Error("the second esc re-armed instead of stopping the worker")
+		}
+	})
+
+	t.Run("a late ctrl+c reset tick never disarms a fresher arm", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+		m = step(t, m, keyCtrlC())
+		firstArm := ctrlCResetMsg{gen: m.ctrlCGen}
+		m.lastCtrlC = m.lastCtrlC.Add(-2 * ctrlCQuitWindow) // pretend the window lapsed
+		m = step(t, m, keyCtrlC())                          // re-arms
+		m = step(t, m, firstArm)
+		if m.lastCtrlC.IsZero() {
+			t.Fatal("the first arm's late reset tick disarmed the second arm")
+		}
+		if got := ansi.Strip(m.statusRight(200)); !strings.Contains(got, "press ctrl+c again to quit") {
+			t.Errorf("the arm hint was cleared by a stale tick; status right = %q", got)
+		}
+		_, cmd := stepCmd(t, m, keyCtrlC())
+		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); !isQuit {
+			t.Error("the second ctrl+c re-armed instead of quitting")
+		}
+	})
+
+	t.Run("a late flash clear never clears a fresher flash", func(t *testing.T) {
+		t.Parallel()
+		m := newTestModel(t)
+		next, _ := m.copyFlash("first")
+		m = next.(Model)
+		firstFlash := flashClearMsg{gen: m.flashGen}
+		next, _ = m.copyFlash("second flash")
+		m = next.(Model)
+		m = step(t, m, firstFlash)
+		if want := "copied 12 chars"; m.flash != want {
+			t.Errorf("flash = %q after the first flash's late clear, want the fresher %q", m.flash, want)
+		}
+		m = step(t, m, flashClearMsg{gen: m.flashGen})
+		if m.flash != "" {
+			t.Errorf("flash = %q, want the fresher flash's own clear to take it down", m.flash)
+		}
+	})
 }
 
 // armedEscModel is a running model with the esc stop gesture ARMED over a transcript built by

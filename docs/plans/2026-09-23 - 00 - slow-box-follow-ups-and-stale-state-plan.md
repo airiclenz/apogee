@@ -227,7 +227,9 @@ docs/manual/probe.md — the --timeout sentence
 
 **Commit:** `fix(probe): apogee probe model --timeout 0 keeps the five-minute default`
 
-## 7. A late reset tick never clears a fresher esc, ctrl+c or flash
+## 7. A late reset tick never clears a fresher esc, ctrl+c or flash — ✅ DONE (2026-09-23)
+NOTES (2026-09-23): the two flash senders (copyFlash in mouse.go, refuseChildMessage in interject.go) now share a new `Model.showFlash` helper in mouse.go that sets the note, bumps `flashGen` and returns the stamped clear tick; interject.go drops its now-unused `time` import.
+NOTES (2026-09-23): acceptance run without `-race` — ThreadSanitizer is unsupported on this box (VMA range 47); the three new subtests were confirmed to fail with the gen checks neutralised.
 
 **What.** Fixes `apogee-ukw`: `escStopResetMsg`, `ctrlCResetMsg` and `flashClearMsg` are empty
 structs and their handlers in `internal/tui/model.go` `Update` clear the state for ANY such message,
