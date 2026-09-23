@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync/atomic"
 
 	lipgloss "charm.land/lipgloss/v2"
 )
@@ -570,11 +571,61 @@ const popupGutter = "  "
 // pad of the last column carries no information, and the pane's black fill covers that gap
 // already, which is what keeps a single-cell spec byte-identical to the plain labels it was
 // composed from.
+//
+// A ONE-column list (no row carries a second cell) short-circuits the measure: its single column pads
+// every cell out to the widest and the trim then takes that pad straight back off, so the composed
+// line is the cell itself, TABs expanded and right-trimmed, and no row's width is needed to write it.
+// The one fact the widths would still settle is the collapse — a column no row filled measures 0 and
+// every line composes to "" — and that is asked of the cells only until one measures wider than
+// nothing, which on any list with something in it is the first non-blank cell. A list with columns
+// keeps measuring every row, because its alignment is the whole-list contract above.
 func layoutPopupRows(th theme, rows []popupRow) []string {
+	popupLayouts.Add(1)
+	if popupRowsOneColumn(rows) {
+		return layoutPopupColumn(th, rows)
+	}
 	widths := popupColumnWidths(th, rows)
 	out := make([]string, len(rows))
 	for i, row := range rows {
 		out[i] = layoutPopupRow(th, row, widths)
+	}
+	return out
+}
+
+// popupLayouts counts layoutPopupRows runs, process-wide. It exists for the tests that pin how often
+// a pane lays its rows out per render (reportpane_test.go) and is read by nothing else; it is atomic
+// because panes render from parallel tests, and those tests read it only when running alone.
+var popupLayouts atomic.Int64
+
+// popupRowsOneColumn reports whether no row carries more than one cell — the list layoutPopupColumn
+// composes without measuring it.
+func popupRowsOneColumn(rows []popupRow) bool {
+	for _, row := range rows {
+		if len(row) > 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// layoutPopupColumn is layoutPopupRows for a one-column list: each line is its cell with the TABs
+// expanded and the trailing blanks trimmed — what layoutPopupRow writes once the pad it adds is taken
+// back off — and every line is "" where the column collapses because no cell measures a cell wide.
+func layoutPopupColumn(th theme, rows []popupRow) []string {
+	out := make([]string, len(rows))
+	filled := false
+	for i, row := range rows {
+		if len(row) == 0 {
+			continue
+		}
+		cell := expandTabs(row[0])
+		if !filled && th.measure.Width(cell) > 0 {
+			filled = true
+		}
+		out[i] = strings.TrimRight(cell, " ")
+	}
+	if !filled {
+		clear(out) // the column no row filled collapses, and every line with it (layoutPopupRow)
 	}
 	return out
 }
@@ -740,18 +791,25 @@ type popupRowBlock struct {
 // out of the rows' own width, and whether it is reserved at all depends on a window that is not known
 // until the rows have been composed — so the block is composed at the full inner width first, and
 // only a window that left a row out is composed AGAIN one column narrower and painted with the bar
-// down the freed column (popupRowScrollbar). The two passes cannot disagree about the reservation:
+// down the freed column (popupRowScrollbar). Only a WRAPPING spec lays its rows out again for that
+// pass, because only its rows break to the width they are composed at; a non-wrapping row's laid-out
+// line is the same at any width (the styling pass elides it), so the second pass restyles the first
+// pass's rows at the narrower width. The two passes cannot disagree about the reservation:
 // narrowing a wrapping row can only cost it lines, never win them back, so a window that overflowed
 // at the full width overflows at the narrower one too. A pane too narrow to seat both the bar and a
 // row of text keeps its rows: past that floor truncateToWidth draws nothing at all, and a bar beside
 // an empty column would be the pane hiding its content to describe it.
 func popupRowLines(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
-	block := popupRowLinesAt(th, spec, inner, blackFill)
+	blocks := popupRowBlocks(th, spec.rows, spec.wrapRows, inner)
+	block := popupRowLinesAt(th, spec, blocks, inner, blackFill)
 	rowInner := inner - scrollbarWidth
 	if !spec.scrollbar || rowInner <= 1 || block.end-block.start >= len(spec.rows) {
 		return block
 	}
-	return popupRowScrollbar(th, popupRowLinesAt(th, spec, rowInner, blackFill), len(spec.rows), rowInner, blackFill)
+	if spec.wrapRows {
+		blocks = popupRowBlocks(th, spec.rows, true, rowInner) // a wrapped row breaks to the narrower width
+	}
+	return popupRowScrollbar(th, popupRowLinesAt(th, spec, blocks, rowInner, blackFill), len(spec.rows), rowInner, blackFill)
 }
 
 // popupRowScrollbar paints the overflow bar down the last column of a row block composed one column
@@ -790,15 +848,23 @@ func popupRowScrollbar(th theme, block popupRowBlock, rows, rowInner int, blackF
 	return block
 }
 
-// popupRowLinesAt is popupRowLines' composition at ONE given inner width: the whole of the windowing
-// and the styling, with no say in what the rows are drawn INTO. It is split out for the bar, which
-// changes that width and so has to be able to ask for the same composition twice.
-func popupRowLinesAt(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
-	blocks := popupRowBlocks(th, spec.rows, spec.wrapRows, inner)
-	heights := popupRowHeights(blocks)
+// popupRowSeating is the row window a spec lands on — the [start, end) rows seated, the line budget
+// they were windowed against, and which of the two house pads survived the seating.
+type popupRowSeating struct {
+	start, end         int
+	capLines           int
+	padAbove, padBelow bool
+}
 
+// popupRowSeat windows a spec's rows given what each costs in lines (heights): the pads reserved out
+// of the budget, the rows seated against what is left, and both pads handed back where that seats
+// nothing. It is the whole of the painter's windowing arithmetic (popupRowLinesAt) and it needs no
+// composed row to run, so a caller that knows its rows' heights without laying them out — a report,
+// whose rows never wrap and so cost a line apiece (reportFullWindow) — asks the painter's own answer
+// rather than a second derivation of it.
+func popupRowSeat(spec popupSpec, heights []int) popupRowSeating {
 	gap := spec.rowStyle.gapLines()
-	padAbove, padBelow := popupRowPads(spec, len(blocks))
+	padAbove, padBelow := popupRowPads(spec, len(heights))
 	capLines := spec.maxRows
 	if capLines < 0 {
 		// Negative spends whatever the whole list needs.
@@ -823,10 +889,21 @@ func popupRowLinesAt(th theme, spec popupSpec, inner int, blackFill lipgloss.Sty
 	// back to the rows — both ends together, never one — only where what remains cannot seat the
 	// anchor row at all: a window at its floor gives up its breathing room rather than a decision.
 	start, end := window(capLines - popupRowPadLines(padAbove, padBelow))
-	if start == end && len(blocks) > 0 {
+	if start == end && len(heights) > 0 {
 		padAbove, padBelow = false, false
 		start, end = window(capLines)
 	}
+	return popupRowSeating{start: start, end: end, capLines: capLines, padAbove: padAbove, padBelow: padBelow}
+}
+
+// popupRowLinesAt is popupRowLines' composition at ONE given inner width: the whole of the windowing
+// and the styling of rows already laid out into blocks (popupRowBlocks — composed at this same width
+// for a wrapping spec), with no say in what the rows are drawn INTO. It is split out for the bar,
+// which changes that width and so has to be able to ask for the same composition twice.
+func popupRowLinesAt(th theme, spec popupSpec, blocks [][]string, inner int, blackFill lipgloss.Style) popupRowBlock {
+	gap := spec.rowStyle.gapLines()
+	seat := popupRowSeat(spec, popupRowHeights(blocks))
+	start, end, capLines, padAbove, padBelow := seat.start, seat.end, seat.capLines, seat.padAbove, seat.padBelow
 	if start == end {
 		if len(blocks) == 0 && capLines > 0 && padBelow {
 			// An offering with NO rows still closes on the blank above its hint: there is no decision

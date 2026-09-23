@@ -148,7 +148,11 @@ NOTES (2026-09-23): `-race` cannot run on this box (ThreadSanitizer: unsupported
 **Acceptance:** `go test -race -count=1 -run 'Thinking' ./internal/tui/`
 **Commit:** `perf(tui): the /thinking pane wraps each record once per column`
 
-## 7. A report pane lays its rows out once per render
+## 7. A report pane lays its rows out once per render — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): consequential edit — internal/tui/thinkingpane_test.go: made necessary by the plan's "extend BenchmarkThinkingPaneRender", which item 6 created there (not in popup_test.go/reportpane_test.go); it now opens the pane with the bar on and times `renderReport(thinkingReport)` per chunk.
+NOTES (2026-09-23): the window arithmetic is extracted as `popupRowSeat` (returns `popupRowSeating`), shared by `popupRowLinesAt` (which now takes pre-laid-out blocks) and `reportFullWindow`; a `wrapRows` spec in `reportFullWindow` still asks the painter (no report sets it today). The layout counter is a package `atomic.Int64` (`popupLayouts`) read by a non-parallel test, following the lineeditor_test.go HeapInuse precedent.
+NOTES (2026-09-23): "single-column popups measure no per-row width" is met by `layoutPopupColumn`, which measures cells only until one is wider than zero (to keep the "" collapse); there is no measure-call counter, the test pins byte equality with the measured layout instead. `-race` cannot run on this host (ThreadSanitizer: unsupported VMA range, 47-bit arm64), so the Acceptance run was without `-race`.
 
 **What:**
 Depends on item 6.

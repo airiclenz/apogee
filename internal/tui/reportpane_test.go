@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -597,5 +598,105 @@ func TestTheUsageReportDoesNotFollowItsTail(t *testing.T) {
 	if got := reportWindowOrFail(t, forced, usageReport); got.start != 0 {
 		t.Errorf("window starts at %d with the follow set by hand, want the clamped top (0) — /usage does not honour it",
 			got.start)
+	}
+}
+
+// reportRenderByComposition is renderReport as it painted before the clamp's window was read off the
+// row counts: the window asked of a whole composition of the spec at its top, then the pane painted.
+func reportRenderByComposition(m Model, r reportKind) string {
+	if !m.reportState(r).open {
+		return ""
+	}
+	spec, seated := m.reportSpec(r, m.reportContent(r))
+	if !seated {
+		return ""
+	}
+	full := spec
+	full.rowTop = 0
+	_, place := renderPopupPlaced(m.th, full, m.width)
+	last := max(0, len(spec.rows)-(place.end-place.start))
+	spec.rowTop = clampInt(m.reportState(r).top, 0, last)
+	if r.follows() && m.reportState(r).follow {
+		spec.rowTop = last
+	}
+	return renderPopup(m.th, spec, m.width)
+}
+
+// TestRenderReportPaintsAsTheComposedWindow pins that sizing the clamp's window from row counts paints
+// the /thinking and /inspect panes exactly as asking a composition did: overflowing and not, the bar
+// on and off, following and detached, at every frame height from one that seats no pane through the
+// floor grants to a tall one.
+func TestRenderReportPaintsAsTheComposedWindow(t *testing.T) {
+	t.Parallel()
+
+	builds := []struct {
+		name  string
+		kind  reportKind
+		build func(*testing.T, int) Model
+	}{
+		{"/thinking", thinkingReport, thinkingPaneModel},
+		{"/inspect", inspectReport, inspectorPaneModel},
+	}
+	for _, b := range builds {
+		t.Run(b.name, func(t *testing.T) {
+			t.Parallel()
+			thumbs, seated := 0, 0
+			for _, records := range []int{2, 40} {
+				base := b.build(t, records)
+				for _, bar := range []bool{false, true} {
+					for _, height := range []int{6, 9, 11, 14, 20, 40} {
+						for _, top := range []int{0, 3, 1 << 20} {
+							for _, follow := range []bool{false, true} {
+								m := base
+								m.opts.UI.ShowScrollbar = bar
+								m.height = height
+								m.layout()
+								*m.reportState(b.kind) = reportPane{open: true, top: top, follow: follow}
+								got, want := m.renderReport(b.kind), reportRenderByComposition(m, b.kind)
+								if got != want {
+									t.Errorf("records=%d bar=%v height=%d top=%d follow=%v: pane differs\ngot:\n%s\nwant:\n%s",
+										records, bar, height, top, follow, strip(got), strip(want))
+								}
+								if got != "" {
+									seated++
+								}
+								if strings.Contains(got, glyphScrollThumb) {
+									thumbs++
+								}
+							}
+						}
+					}
+				}
+			}
+			if seated == 0 || thumbs == 0 {
+				t.Errorf("the matrix painted %d panes, %d with the bar: it never reached an overflowing, barred pane", seated, thumbs)
+			}
+		})
+	}
+}
+
+// TestRenderReportLaysItsRowsOutOnce pins the render's layout count: one renderReport of a
+// non-wrapping report runs layoutPopupRows exactly once — the clamp's window read off the row
+// counts, and the overflow bar's narrower pass restyling the first pass's rows — where it once ran it
+// four times (two compositions, each laid out again for the bar).
+//
+// Not parallel: popupLayouts is process-wide, and a neighbour's render would be counted as this one's.
+func TestRenderReportLaysItsRowsOutOnce(t *testing.T) {
+	for _, tc := range reportCases(t) {
+		t.Run(tc.name, func(t *testing.T) {
+			m := tc.model
+			m.opts.UI.ShowScrollbar = true
+			m.layout()
+			if win, ok := m.reportWindow(tc.kind); !ok || win.end-win.start >= win.total {
+				t.Fatalf("precondition: the report must overflow its window, got %+v", win)
+			}
+			before := popupLayouts.Load()
+			if out := m.renderReport(tc.kind); !strings.Contains(out, glyphScrollThumb) {
+				t.Fatal("precondition: the pane painted no overflow bar")
+			}
+			if got := popupLayouts.Load() - before; got != 1 {
+				t.Errorf("one renderReport laid its rows out %d times, want 1", got)
+			}
+		})
 	}
 }

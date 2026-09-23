@@ -2494,3 +2494,130 @@ func TestPopupCallersPaintTheOverflowBar(t *testing.T) {
 		}
 	})
 }
+
+// layoutPopupRowsMeasured is layoutPopupRows as it composes a list with columns — every row measured
+// (popupColumnWidths) and padded to the widest — the reference the one-column short-circuit has to
+// agree with byte for byte.
+func layoutPopupRowsMeasured(th theme, rows []popupRow) []string {
+	widths := popupColumnWidths(th, rows)
+	out := make([]string, len(rows))
+	for i, row := range rows {
+		out[i] = layoutPopupRow(th, row, widths)
+	}
+	return out
+}
+
+// A one-column list skips the measure and still composes the lines the measured layout writes:
+// TABs expanded, trailing blanks trimmed, a row with no cell blank, and every line "" where no cell
+// measures a cell wide (the collapse) — including a column of blanks, which measures wide and so does
+// NOT collapse, and trims to "" row by row instead.
+func TestLayoutPopupColumnMatchesTheMeasuredLayout(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	cases := map[string][]popupRow{
+		"none":             {},
+		"plain":            {{"alpha"}, {"beta gamma"}, {"δ"}},
+		"tabs and trails":  {{"a\tb  "}, {"\tlead"}, {"trail\t"}},
+		"cellless rows":    {{}, {"only"}, {}},
+		"every row empty":  {{""}, {}, {""}},
+		"blank cells only": {{"   "}, {" "}},
+		"zero-width only":  {{"\u200b"}, {"\x1b[1m\x1b[0m"}},
+		"zero-width first": {{"\u200b"}, {"wide 世界"}, {"✔\ufe0f"}},
+	}
+	for name, rows := range cases {
+		if !popupRowsOneColumn(rows) {
+			t.Fatalf("%s: precondition: the corpus is not one column", name)
+		}
+		got, want := layoutPopupRows(th, rows), layoutPopupRowsMeasured(th, rows)
+		if !slices.Equal(got, want) {
+			t.Errorf("%s: one-column layout = %q, want the measured %q", name, got, want)
+		}
+	}
+	multi := []popupRow{{"a", "b"}, {"ccc"}}
+	if popupRowsOneColumn(multi) {
+		t.Error("a list with a second cell was read as one column")
+	}
+	if got, want := layoutPopupRows(th, multi), layoutPopupRowsMeasured(th, multi); !slices.Equal(got, want) {
+		t.Errorf("columned layout = %q, want %q", got, want)
+	}
+}
+
+// popupRowLinesTwoPass is popupRowLines as it composed before the bar's pass reused the first
+// layout: the rows laid out afresh at each width.
+func popupRowLinesTwoPass(th theme, spec popupSpec, inner int, blackFill lipgloss.Style) popupRowBlock {
+	block := popupRowLinesAt(th, spec, popupRowBlocks(th, spec.rows, spec.wrapRows, inner), inner, blackFill)
+	rowInner := inner - scrollbarWidth
+	if !spec.scrollbar || rowInner <= 1 || block.end-block.start >= len(spec.rows) {
+		return block
+	}
+	narrow := popupRowBlocks(th, spec.rows, spec.wrapRows, rowInner)
+	return popupRowScrollbar(th, popupRowLinesAt(th, spec, narrow, rowInner, blackFill), len(spec.rows), rowInner, blackFill)
+}
+
+// The bar's narrower pass reuses the first pass's layout for a non-wrapping spec and still paints
+// every line the two-layout composition painted — wide, tabbed and elided rows, one column and
+// several, the bar on and off, overflowing and not — and a wrapping spec, which lays out again,
+// matches too.
+func TestPopupRowLinesReusedLayoutPaintsAsTwoLayouts(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	blackFill := lipgloss.NewStyle().Background(th.surface)
+	const inner = 24
+	corpora := map[string][]popupRow{
+		"one column": {{"short"}, {strings.Repeat("x", inner-popupRowIndent)}, {"tab\there"}, {"世界 wide runes that run on"}, {"e"}, {"f"}},
+		"columned":   {{"k", "a value long enough to elide"}, {"key", "v"}, {"", "\tt"}, {"kk", strings.Repeat("y", inner)}, {"g", "h"}},
+	}
+	for name, rows := range corpora {
+		for _, wrap := range []bool{false, true} {
+			for _, bar := range []bool{false, true} {
+				for shown := 0; shown <= len(rows)+2; shown++ {
+					spec := popupSpec{rows: rows, selected: -1, maxRows: shown, scrollbar: bar, wrapRows: wrap,
+						rowPadAbove: true, rowStyle: popupRowStyle{padBelow: true}, hint: "hint"}
+					for top := range len(rows) {
+						spec.rowTop = top
+						got, want := popupRowLines(th, spec, inner, blackFill), popupRowLinesTwoPass(th, spec, inner, blackFill)
+						if !slices.Equal(got.lines, want.lines) || got.start != want.start || got.end != want.end || got.hidden != want.hidden {
+							t.Errorf("%s wrap=%v bar=%v shown=%d top=%d: got [%d,%d) hidden %d %q, want [%d,%d) hidden %d %q",
+								name, wrap, bar, shown, top, got.start, got.end, got.hidden, got.lines, want.start, want.end, want.hidden, want.lines)
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+// popupRowSeat asked from row COUNTS names the window the painter draws, for every grant a flat list
+// can get — floor grants that hand the pads back (maxRows ≤ pads+1) and grants of nothing included —
+// with and without the bar, a hint, the top pad, a scroll offset or a selection.
+func TestPopupRowSeatFromCountsIsThePaintersWindow(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	const width = 40
+	for _, n := range []int{0, 1, 5, 12} {
+		rows := make([]popupRow, n)
+		for i := range rows {
+			rows[i] = popupRow{fmt.Sprintf("row %d", i)}
+		}
+		for maxRows := -1; maxRows <= n+3; maxRows++ {
+			for _, hint := range []string{"", "hint"} {
+				for _, padAbove := range []bool{false, true} {
+					for _, bar := range []bool{false, true} {
+						for _, sel := range []int{-1, 2} {
+							for _, top := range []int{0, 3, n} {
+								spec := popupSpec{rows: rows, selected: sel, rowTop: top, maxRows: maxRows, hint: hint,
+									rowPadAbove: padAbove, rowStyle: popupRowStyle{padBelow: true}, scrollbar: bar}
+								seat := popupRowSeat(spec, popupFlatRowHeights(n))
+								_, place := renderPopupPlaced(th, spec, width)
+								if seat.start != place.start || seat.end != place.end {
+									t.Errorf("n=%d max=%d hint=%q pad=%v bar=%v sel=%d top=%d: counts seat [%d,%d), painter [%d,%d)",
+										n, maxRows, hint, padAbove, bar, sel, top, seat.start, seat.end, place.start, place.end)
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+}

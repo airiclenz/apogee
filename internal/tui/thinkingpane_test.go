@@ -629,7 +629,8 @@ func TestThinkingRowsHandBuiltBoardRendersUncached(t *testing.T) {
 
 // BenchmarkThinkingPaneRender measures one /thinking render at the board's ceiling — every
 // committed record at [thinkingRecordCap] plus a live one — with one reasoning chunk landing
-// between renders, the shape of a pane open while a Turn streams.
+// between renders, the shape of a pane open while a Turn streams. The render is the whole pane
+// (renderReport): the rows, the clamp's window and the paint, overflow bar on.
 func BenchmarkThinkingPaneRender(b *testing.B) {
 	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
 	m.width, m.height = 120, 40
@@ -640,12 +641,17 @@ func BenchmarkThinkingPaneRender(b *testing.B) {
 		m.thinking.commit(runRef{})
 	}
 	m.thinking.append(record, runRef{}, maxThinkingRecords)
-	m.thinkingContent()
+	m.opts.UI.ShowScrollbar = true
+	m.thinkingPane = reportPane{open: true, follow: true}
+	m.layout()
+	if m.renderReport(thinkingReport) == "" {
+		b.Fatal("the frame seated no /thinking pane")
+	}
 
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
 		m.thinking.append("another chunk ", runRef{}, maxThinkingRecords)
-		m.thinkingContent()
+		m.renderReport(thinkingReport)
 	}
 }
