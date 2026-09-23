@@ -11,9 +11,11 @@ import (
 //
 // This file holds the pane whole, the way usage.go and inspector.go each hold one: the rows it
 // composes out of the thinking board (thinking.go, which retains and paints nothing) and the
-// [reportContent] it hands the shared report module (reportpane.go). Nothing here keeps state —
-// the rows are derived for the frame that asks for them, so a chunk arriving between two paints
-// can never leave the pane showing a list nobody folded.
+// [reportContent] it hands the shared report module (reportpane.go). The row LIST keeps no state —
+// it is derived for the frame that asks for it, so a chunk arriving between two paints can never
+// leave the pane showing a list nobody folded. What is remembered between frames is only each
+// record's wrapped text ([thinkingRowCache]), validated on the text itself, so a remembered wrap
+// can never outlive the text it was wrapped from.
 //
 // What the pane is FOR is what its rendering rules follow from: reading the model's own reasoning
 // as prose. So the rows carry NO prefixes, no JSON, no tool-call passages, no per-record elision
@@ -141,24 +143,120 @@ func (m Model) thinkingHeading(rec thinkingRecord) string {
 // The kinds are composed in the same pass rather than derived from the rows afterwards: a heading
 // is a heading because of where it was put, and a line of reasoning that happened to read like one
 // would be styled as a section label by any rule read back off the text.
+//
+// The text rows come through the board's wrap memo ([thinkingRowCache]), so a frame re-wraps only
+// the records whose text moved since the last one at this column and scope. The HEADING never does:
+// it is composed fresh on every call, because [Model.runLabel] reads the transcript, and a
+// delegate's record that arrives before its run's head entry must go on from the fallback label to
+// the real one without its text changing by a byte.
 func (m Model) thinkingRows(column int) ([]popupRow, []popupRowKind) {
 	records := m.scopedThinking()
 	if len(records) == 0 {
 		return []popupRow{{thinkingEmptyRow}}, []popupRowKind{popupRowPlain}
 	}
-	rows := make([]popupRow, 0, len(records)*2)
-	kinds := make([]popupRowKind, 0, len(records)*2)
-	for _, rec := range records {
+	wrapped := m.thinking.rows.wrapRecords(records, column, m.viewedRun())
+	total := len(records)
+	for _, text := range wrapped {
+		total += len(text)
+	}
+	rows := make([]popupRow, 0, total)
+	kinds := make([]popupRowKind, 0, total)
+	for i, rec := range records {
 		rows = append(rows, popupRow{m.thinkingHeading(rec)})
 		kinds = append(kinds, popupRowHeading)
-		for _, line := range strings.Split(rec.text, "\n") {
-			for _, row := range wrapReadable("", line, column) {
-				rows = append(rows, popupRow{row})
-				kinds = append(kinds, popupRowPlain)
-			}
+		for _, row := range wrapped[i] {
+			rows = append(rows, popupRow{row})
+			kinds = append(kinds, popupRowPlain)
 		}
 	}
 	return rows, kinds
+}
+
+// wrapThinkingText is one record's text as the pane's plain rows at column: split on the text's own
+// newlines first and each line wrapped on its own ([Model.thinkingRows] says why).
+func wrapThinkingText(text string, column int) []string {
+	var rows []string
+	for _, line := range strings.Split(text, "\n") {
+		rows = append(rows, wrapReadable("", line, column)...)
+	}
+	return rows
+}
+
+// thinkingRowKey names one record's place in the scoped list the memo can recognise across frames:
+// whose it is, its Turn, and how many earlier records in the same list share both — an ordinal
+// rather than a list index, so the board dropping its oldest record past [maxThinkingRecords] does
+// not shift every key. The key is only where to LOOK; whether what is found still holds is decided
+// by the text ([thinkingRowEntry]).
+type thinkingRowKey struct {
+	run     runRef
+	turn    int
+	ordinal int
+}
+
+// thinkingRowEntry is one memoised record: the text it was wrapped from and the rows that wrap
+// made. The rows are handed out read-only — [Model.thinkingRows] copies them into its own list.
+type thinkingRowEntry struct {
+	text string
+	rows []string
+}
+
+// thinkingRowCache is the /thinking pane's wrap memo: each scoped record's wrapped text rows, for
+// the one column and scope the last render used. It lives behind a pointer on the board (thinking.go
+// says why) and is nil-receiver-safe, so a board built without one renders uncached.
+//
+// It is a VALIDATION memo, like the transcript's paint cache (paintcache.go): an entry is served only
+// when the record's text is == the text it was wrapped from. Length is not enough — at
+// [thinkingRecordCap] an ASCII record holds exactly that many bytes however many more chunks land,
+// so a length key would freeze the pane on the first full record. The comparison costs nothing in
+// the steady state, since an unchanged record is the SAME string on both sides. A column or scope
+// change drops every entry; each render keeps only the entries it used, so a dropped, trimmed-away
+// or out-of-scope record's rows are released on the next frame.
+//
+// wraps counts records actually wrapped over the memo's life — a diagnostic the tests pin the reuse
+// property on. Nothing in production reads it.
+type thinkingRowCache struct {
+	column  int
+	scope   runRef
+	entries map[thinkingRowKey]thinkingRowEntry
+	wraps   int
+}
+
+// newThinkingRowCache returns an empty memo. Production builds exactly one, in newModel.
+func newThinkingRowCache() *thinkingRowCache {
+	return &thinkingRowCache{entries: make(map[thinkingRowKey]thinkingRowEntry)}
+}
+
+// wrapRecords returns each record's wrapped text rows at column, in the order given, re-wrapping
+// only the records whose text the memo does not hold for this column and scope. A nil memo wraps
+// every record and remembers nothing.
+func (c *thinkingRowCache) wrapRecords(records []thinkingRecord, column int, scope runRef) [][]string {
+	wrapped := make([][]string, len(records))
+	if c == nil {
+		for i, rec := range records {
+			wrapped[i] = wrapThinkingText(rec.text, column)
+		}
+		return wrapped
+	}
+	if c.column != column || c.scope != scope {
+		clear(c.entries)
+		c.column, c.scope = column, scope
+	}
+	kept := make(map[thinkingRowKey]thinkingRowEntry, len(records))
+	for i, rec := range records {
+		key := thinkingRowKey{run: rec.run, turn: rec.turn}
+		for _, seen := kept[key]; seen; _, seen = kept[key] {
+			key.ordinal++
+		}
+		entry, ok := c.entries[key]
+		if !ok || entry.text != rec.text {
+			entry = thinkingRowEntry{text: rec.text, rows: wrapThinkingText(rec.text, column)}
+			c.wraps++
+		}
+		kept[key] = entry
+		wrapped[i] = entry.rows
+	}
+	c.entries = kept
+	return wrapped
 }
 
 // thinkingContent is what the pane tells the shared report module about itself for one frame

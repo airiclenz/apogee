@@ -84,9 +84,18 @@ type thinkingRecord struct {
 //
 // It is written by exactly one fold ([Model.foldThinking]) and by the two worker boundaries no
 // Event announces — every launch ([Model.enterRunning]) and every unwind ([Model.finishWorker]).
+//
+// rows is the pane's wrap memo (thinkingpane.go, [thinkingRowCache]) and the one field here the
+// pane writes. It is a POINTER for the reason the transcript's paint cache is (paintcache.go): the
+// Model is copied by value on every Update (ADR 0011), so a memo held by value would be a fresh,
+// empty one in every copy and would never hit. newModel (model.go) allocates it; a board built any
+// other way — every test's thinkingBoardWith — carries nil and renders uncached. None of the
+// mutators below touch it: the memo validates each entry on the record's text, so it needs no word
+// from them, and the records themselves carry no key for it.
 type thinkingBoard struct {
 	done []thinkingRecord
 	live []thinkingRecord
+	rows *thinkingRowCache
 }
 
 // append records one revealed chunk of thinking from the run that emitted it, under the Turn the

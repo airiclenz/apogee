@@ -131,7 +131,12 @@ NOTES (2026-09-23): the Acceptance command's -race flag cannot run on this host 
 **Acceptance:** `go test -race -count=1 -run 'Readable|Inspector' ./internal/tui/`
 **Commit:** `perf(tui): wrap readable text in one pass instead of re-slicing the remainder`
 
-## 6. The /thinking pane wraps each record once per column
+## 6. The /thinking pane wraps each record once per column — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the memo is a validation cache, not an invalidated one — entries are keyed on (run, turn, ordinal among same run+turn in the scoped list) and served only when the stored text == the record's text; a column or scope (viewedRun) change clears it and each render keeps only the entries it used. So push/drop/commitAt/commitAll carry no explicit invalidation (the assumed approach's "mutators invalidate what they touch"); the per-mutator table test pins that only text-changing mutators cost a wrap.
+NOTES (2026-09-23): the memo pointer lives on thinkingBoard (field `rows *thinkingRowCache`, off thinkingRecord) and is allocated in newModel (model.go); thinkingBoardWith boards carry nil and render uncached.
+NOTES (2026-09-23): consequential edit — internal/tui/model.go: made necessary by the memo pointer, which newModel must allocate.
+NOTES (2026-09-23): `-race` cannot run on this box (ThreadSanitizer: unsupported VMA range, 47-bit VMA on the Pi kernel); the Acceptance command was run without `-race`. BenchmarkThinkingPaneRender at the 64×64 KB cap: ~5.5 ms/op on the Pi (base measured ≈ 1.6 s per chunk).
 
 **What:**
 **Goal:** a `/thinking` render re-wraps only records whose text changed since the last render at that column and scope; committed records are never re-wrapped while the column and scope hold; output equals base.

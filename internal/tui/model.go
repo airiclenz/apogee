@@ -751,6 +751,10 @@ func newModel(parent context.Context, eng Engine, opts Options, notify func(tea.
 	// the Model has to reach the same one (ADR 0011), and a cache rebuilt per copy would never hit.
 	m.transcript.paints = newPaintCache()
 
+	// And the /thinking pane its wrap memo (thinkingpane.go), for the same reason and built the same
+	// once: every copy of the Model has to reach the one memo, or no render would ever hit it.
+	m.thinking.rows = newThinkingRowCache()
+
 	// Resolve the footer's spelling of that same workspace once, for the same reason: the home
 	// lookup is an environment read, and neither it nor the workspace changes for the life of the
 	// session. A failed lookup leaves home "", which simply returns the path unrespelled — a footer

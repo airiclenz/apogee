@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"context"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -470,5 +472,180 @@ func TestThinkingPaneFollowsTheReasoningArrivingUnderIt(t *testing.T) {
 	newest := grown.rows[len(grown.rows)-1][0]
 	if painted := strip(m.renderReport(thinkingReport)); !strings.Contains(painted, newest) {
 		t.Errorf("the pane does not draw its newest row %q:\n%s", newest, painted)
+	}
+}
+
+// thinkingWraps renders the /thinking pane's rows at the model's own column and returns how many
+// records that render wrapped, read off the board's wrap memo ([thinkingRowCache.wraps]).
+func thinkingWraps(t *testing.T, m Model) int {
+	t.Helper()
+	if m.thinking.rows == nil {
+		t.Fatal("precondition: the model's board carries no wrap memo — newModel must allocate one")
+	}
+	before := m.thinking.rows.wraps
+	m.thinkingRows(m.thinkingWrapColumn())
+	return m.thinking.rows.wraps - before
+}
+
+// thinkingRowText flattens a row list to its single cells, for comparing two renders.
+func thinkingRowText(rows []popupRow) []string {
+	text := make([]string, len(rows))
+	for i, row := range rows {
+		text[i] = row[0]
+	}
+	return text
+}
+
+// TestThinkingRowsWrapEachRecordOnce pins the memo's reuse property: a render over an unchanged
+// board wraps nothing, one chunk re-wraps the one record it landed on, and a width or scope change
+// re-wraps everything the pane then speaks for — each time with output a cold render agrees with.
+func TestThinkingRowsWrapEachRecordOnce(t *testing.T) {
+	t.Parallel()
+
+	child := runRef{depth: 1, spawn: "call-a"}
+	m := newTestModel(t)
+	for turn := range 3 {
+		m = m.foldEvent(reasoningAt(runRef{}, turn, "main reasoning for turn "+strconv.Itoa(turn)))
+		m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, turn)})
+	}
+	m = m.foldEvent(reasoningAt(child, 1, "child committed reasoning"))
+	m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(child, 1)})
+	m = m.foldEvent(reasoningAt(child, 2, "child live reasoning"))
+	m = m.foldEvent(reasoningAt(runRef{}, 3, "main live reasoning"))
+
+	if got := thinkingWraps(t, m); got != 4 {
+		t.Errorf("first render wrapped %d records, want all 4 in scope", got)
+	}
+	if got := thinkingWraps(t, m); got != 0 {
+		t.Errorf("second render over an unchanged board wrapped %d records, want 0", got)
+	}
+
+	m = m.foldEvent(reasoningAt(runRef{}, 3, " and one more chunk"))
+	if got := thinkingWraps(t, m); got != 1 {
+		t.Errorf("a render after one chunk wrapped %d records, want 1", got)
+	}
+
+	m.width = 120
+	if got := thinkingWraps(t, m); got != 4 {
+		t.Errorf("a render after a width change wrapped %d records, want all 4", got)
+	}
+
+	m.viewStack = []runView{{ref: child}}
+	if got := thinkingWraps(t, m); got != 2 {
+		t.Errorf("a render after a scope change wrapped %d records, want the 2 the new scope holds", got)
+	}
+
+	warm, _ := m.thinkingRows(m.thinkingWrapColumn())
+	cold := m
+	cold.thinking = thinkingBoardWith(m.thinking.done, m.thinking.live)
+	uncached, _ := cold.thinkingRows(cold.thinkingWrapColumn())
+	if !slices.Equal(thinkingRowText(warm), thinkingRowText(uncached)) {
+		t.Errorf("warm rows = %q, want the cold render's %q", thinkingRowText(warm), thinkingRowText(uncached))
+	}
+}
+
+// TestThinkingRowsRewrapARecordAtTheCap is the memo's regression guard: a record held at exactly
+// [thinkingRecordCap] bytes keeps that length however many chunks land, so a chunk arriving on it
+// must still re-wrap it and the pane must show the new tail.
+func TestThinkingRowsRewrapARecordAtTheCap(t *testing.T) {
+	t.Parallel()
+
+	m := newTestModel(t)
+	m = m.foldEvent(reasoningAt(runRef{}, 1, strings.Repeat("x", thinkingRecordCap)))
+	if got := len(m.thinking.live[0].text); got != thinkingRecordCap {
+		t.Fatalf("precondition: live record holds %d bytes, want exactly the cap %d", got, thinkingRecordCap)
+	}
+	thinkingWraps(t, m)
+
+	const tail = "\nthe newest thought"
+	m = m.foldEvent(reasoningAt(runRef{}, 1, tail))
+	if got := len(m.thinking.live[0].text); got != thinkingRecordCap {
+		t.Fatalf("precondition: live record holds %d bytes after the chunk, want still the cap", got)
+	}
+	if got := thinkingWraps(t, m); got != 1 {
+		t.Errorf("a chunk on a record at the cap re-wrapped %d records, want 1", got)
+	}
+	rows, _ := m.thinkingRows(m.thinkingWrapColumn())
+	if last := rows[len(rows)-1][0]; last != strings.TrimPrefix(tail, "\n") {
+		t.Errorf("last row = %q, want the new tail %q", last, strings.TrimPrefix(tail, "\n"))
+	}
+}
+
+// TestThinkingHeadingFollowsTheRunHead pins that the memo holds text rows only: a delegate's heading
+// reads the fallback label until the run's head entry lands and the real one after, with the
+// record's text unchanged and so not re-wrapped.
+func TestThinkingHeadingFollowsTheRunHead(t *testing.T) {
+	t.Parallel()
+
+	child := runRef{depth: 1, spawn: "s1"}
+	m := newTestModel(t)
+	m = m.foldEvent(reasoningAt(child, 1, "child thinks"))
+	m.viewStack = []runView{{ref: child}}
+
+	rows, _ := m.thinkingRows(m.thinkingWrapColumn())
+	if got, want := rows[0][0], usageAgentFallback+" · turn 1"; got != want {
+		t.Fatalf("heading before the head lands = %q, want %q", got, want)
+	}
+
+	m = m.foldEvent(domain.ToolCallEvent{Call: domain.ToolCall{
+		ID: "s1", Tool: subAgentToolName, Arguments: []byte(`{"task":"survey the tests"}`),
+	}})
+	m = m.foldEvent(domain.SubAgentNamedEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Name: "scout"})
+	before := m.thinking.rows.wraps
+	rows, _ = m.thinkingRows(m.thinkingWrapColumn())
+	if got, want := rows[0][0], "scout · turn 1"; got != want {
+		t.Errorf("heading after the head lands = %q, want %q", got, want)
+	}
+	if got := m.thinking.rows.wraps - before; got != 0 {
+		t.Errorf("the heading change re-wrapped %d records, want 0", got)
+	}
+}
+
+// TestThinkingRowsHandBuiltBoardRendersUncached pins the nil-safe memo: a board built without one
+// renders every time, cold, with the same rows the memoised board gives.
+func TestThinkingRowsHandBuiltBoardRendersUncached(t *testing.T) {
+	t.Parallel()
+
+	records := []thinkingRecord{
+		{run: runRef{}, turn: 1, text: "one\n\ntwo " + strings.Repeat("word ", 30)},
+		{run: runRef{}, turn: 2, text: "three"},
+	}
+	cached := newTestModel(t)
+	cached.thinking.done = records
+	hand := newTestModel(t)
+	hand.thinking = thinkingBoardWith(records, nil)
+
+	want, _ := cached.thinkingRows(cached.thinkingWrapColumn())
+	for range 2 {
+		got, _ := hand.thinkingRows(hand.thinkingWrapColumn())
+		if !slices.Equal(thinkingRowText(got), thinkingRowText(want)) {
+			t.Errorf("hand-built rows = %q, want %q", thinkingRowText(got), thinkingRowText(want))
+		}
+	}
+	if hand.thinking.rows != nil {
+		t.Error("a hand-built board grew a wrap memo")
+	}
+}
+
+// BenchmarkThinkingPaneRender measures one /thinking render at the board's ceiling — every
+// committed record at [thinkingRecordCap] plus a live one — with one reasoning chunk landing
+// between renders, the shape of a pane open while a Turn streams.
+func BenchmarkThinkingPaneRender(b *testing.B) {
+	m := newModel(context.Background(), &fakeEngine{}, testOpts, nil)
+	m.width, m.height = 120, 40
+	line := strings.Repeat("reasoning word ", 20) + "\n"
+	record := strings.Repeat(line, thinkingRecordCap/len(line)+1)
+	for turn := range maxThinkingRecords {
+		m.thinking.append(record, runRef{}, turn)
+		m.thinking.commit(runRef{})
+	}
+	m.thinking.append(record, runRef{}, maxThinkingRecords)
+	m.thinkingContent()
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		m.thinking.append("another chunk ", runRef{}, maxThinkingRecords)
+		m.thinkingContent()
 	}
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -343,6 +344,54 @@ func TestThinkingBoardEndsAtEveryBoundary(t *testing.T) {
 			want := []thinkingRecord{{turn: 1, text: "left over from before"}}
 			if got := m.thinking.done; !slices.Equal(got, want) {
 				t.Errorf("committed records = %+v, want %+v", got, want)
+			}
+		})
+	}
+}
+
+// TestThinkingBoardMutatorsInvalidateOnlyWhatTheyTouch is the wrap memo's per-mutator table: after a
+// render, each board mutator is applied and the next render counts the records it re-wrapped. Only a
+// mutator that changes a record's TEXT costs a wrap; moving, dropping or trimming records costs none.
+func TestThinkingBoardMutatorsInvalidateOnlyWhatTheyTouch(t *testing.T) {
+	t.Parallel()
+
+	child := runRef{depth: 1, spawn: "call-a"}
+	cases := []struct {
+		name      string
+		mutate    func(b *thinkingBoard)
+		wantWraps int
+	}{
+		{"append to a live record re-wraps it", func(b *thinkingBoard) { b.append(" more", runRef{}, 90) }, 1},
+		{"append opening a new record wraps it", func(b *thinkingBoard) { b.append("fresh", runRef{}, 91) }, 1},
+		{"commit moves the record without a wrap", func(b *thinkingBoard) { b.commit(runRef{}) }, 0},
+		{"commitAll moves every record without a wrap", func(b *thinkingBoard) { b.commitAll() }, 0},
+		{"drop forgets the record without a wrap", func(b *thinkingBoard) { b.drop(runRef{}) }, 0},
+		{"drop of an out-of-scope run wraps nothing", func(b *thinkingBoard) { b.drop(child) }, 0},
+		{"push past the record cap wraps only the pushed record", func(b *thinkingBoard) {
+			b.push(thinkingRecord{run: runRef{}, turn: 95, text: "pushed"})
+		}, 1},
+		{"commitAt past the record cap trims without a wrap", func(b *thinkingBoard) { b.commitAt(0) }, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := newTestModel(t)
+			for turn := 1; turn <= maxThinkingRecords; turn++ {
+				m.thinking.append("record "+strconv.Itoa(turn), runRef{}, turn)
+				m.thinking.commit(runRef{})
+			}
+			m.thinking.append("live main", runRef{}, 90)
+			m.thinking.append("live child", child, 1)
+			m.thinkingRows(m.thinkingWrapColumn())
+
+			tc.mutate(&m.thinking)
+			before := m.thinking.rows.wraps
+			m.thinkingRows(m.thinkingWrapColumn())
+
+			if got := m.thinking.rows.wraps - before; got != tc.wantWraps {
+				t.Errorf("render after the mutator wrapped %d records, want %d", got, tc.wantWraps)
 			}
 		})
 	}
