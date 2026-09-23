@@ -1292,7 +1292,9 @@ func (a *Agent) RedoRevert(generation uint64) (undo.Report, error) {
 // exchangeObserver seam (Agent.exchangeClosed, construct.go). It runs on every row that ENDS an
 // Exchange (a final reply, a faulted Turn, a step-capped delegation, the host's AbortExchange)
 // and on no row that leaves one open: a cancelled Turn is re-attempted inside the same Exchange,
-// so its group stays open for the re-attempt's writes.
+// so its group stays open for the re-attempt's writes. An Exchange that reached no write-capable
+// call opened no group, and its close leaves the previous Exchange's group untouched — the
+// journal decides that (undo.Journal.Close), so this call need not.
 //
 // Depth 0 only, exactly as loop.go's BeginGroup is: a delegated child shares the parent's journal,
 // and its Exchange ends inside the parent's, so closing there would cut one instruction's writes

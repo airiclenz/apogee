@@ -83,8 +83,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// And open the undo group this Exchange's writes will accumulate into (ADR 0051). It
 		// only MARKS the boundary — the group materializes on the first write after it, or, where
 		// snapshots are in force, at the Exchange's close when the workspace tree moved at all
-		// (ADR 0074) — so an Exchange that changes no file never becomes an undo step the human
-		// has to walk past.
+		// since the pre-image its first write-capable call took (ADR 0074) — so an Exchange that
+		// changes no file never becomes an undo step the human has to walk past, and one that
+		// reached no write-capable call opens no group and so closes none.
 		// This is the one site that opens one, which is what makes an interjection join the
 		// Exchange it steered rather than start a new step (ADR 0025 — it commits mid-Exchange
 		// and never reaches here), and what keeps a continuation Turn inside the same group.

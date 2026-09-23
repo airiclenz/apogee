@@ -133,6 +133,16 @@ func (j *Journal) MarkPre(ctx context.Context) error {
 // captured mid-walk would record a half-walked tree as the group's post state and clear the
 // redo stack the walk is about to fill. When ctx ends before the walk lands it returns
 // ctx.Err() having closed and saved nothing: the walk's own landing saves the journal.
+//
+// An exchange that opened no group closes none. While a boundary is still outstanding — a
+// [Journal.BeginGroup], a walk or a [Load] marked one and no [Journal.MarkPre] or
+// [Journal.Record] has opened a group since — the last group on the stack belongs to an
+// EARLIER exchange that has already closed. Re-closing it would re-capture its post-image over
+// whatever changed since: after an undo that diff is the undo itself, which would clear the
+// redo stack, and without one it is the human's own edits, which a later `/undo` would then
+// revert with the agent's. So that close leaves every group, the redo stack and the generation
+// exactly as they were, and only saves. The boundary is read AFTER the wait, because the walk
+// being waited on is itself one of the things that marks it.
 func (j *Journal) Close(ctx context.Context) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -140,11 +150,16 @@ func (j *Journal) Close(ctx context.Context) error {
 	if err := j.awaitWalk(ctx); err != nil {
 		return err
 	}
+	if j.pending {
+		return j.persist()
+	}
 	return errors.Join(j.closeGroup(ctx), j.persist())
 }
 
 // closeGroup is the closing work itself, with the save left to [Journal.Close] so that every way
-// out of here — the four early ones included — is followed by one. Callers hold the lock.
+// out of here — the four early ones included — is followed by one. It acts on the last group on
+// the stack, which [Journal.Close] only lets it reach when the exchange ending now opened that
+// group: never with a boundary outstanding. Callers hold the lock.
 func (j *Journal) closeGroup(ctx context.Context) error {
 	if len(j.groups) == 0 {
 		return nil

@@ -345,7 +345,9 @@ against the pre-item tree.
 
 **Commit:** `fix(gitexec): a command-config probe that reaches no repository is never memoised`
 
-## 10. An exchange that opened no group closes none
+## 10. An exchange that opened no group closes none — ✅ DONE (2026-09-23)
+NOTES (2026-09-23): consequential edit — internal/agent/agent.go: made necessary by Close skipping a group-less exchange; closeUndoGroup's doc comment now says an Exchange that opened no group closes none and that the journal decides it (the plan's regression guard widened the comment sweep to internal/agent/*.go).
+NOTES (2026-09-23): `go test -race` cannot run on this box (race runtime: "Found 47 - Supported 48" VMA bits); Acceptance was run without -race.
 
 **What.** Fixes `apogee-undo-chat-turn-recloses` (latent since `ac9cbcf6`, not a regression):
 `Journal.Close` → `closeGroup` never consults `pending`, so an exchange that made no write-capable

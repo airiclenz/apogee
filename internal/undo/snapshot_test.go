@@ -551,6 +551,56 @@ func TestRedo_MaterialisedGroupClearsTheStack_BareBeginGroupDoesNot(t *testing.T
 	})
 }
 
+func TestClose_ExchangeThatOpenedNoGroup_ClosesNone(t *testing.T) {
+	t.Run("after an undo the redo stack and the generation survive", func(t *testing.T) {
+		journal, _, root := snapshotJournal(t)
+		seedFile(t, root, "notes.md", "v0")
+		exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "v1") })
+		exchange(t, journal, func() { subprocessWrite(t, root, "notes.md", "v2") })
+		if _, err := journal.Revert(); err != nil {
+			t.Fatalf("Revert: %v", err)
+		}
+		before := journal.Generation()
+
+		journal.BeginGroup()
+		if err := journal.Close(context.Background()); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		if _, ok := journal.RedoPreview(); !ok {
+			t.Error("an exchange that wrote nothing cleared the redo stack")
+		}
+		if got := journal.Generation(); got != before {
+			t.Errorf("Generation() = %d, want %d unchanged", got, before)
+		}
+	})
+
+	t.Run("a human edit between exchanges stays out of the previous group", func(t *testing.T) {
+		journal, _, root := snapshotJournal(t)
+		agentFile := seedFile(t, root, "a.md", "a-before")
+		humanFile := seedFile(t, root, "b.md", "b-before")
+		exchange(t, journal, func() { subprocessWrite(t, root, "a.md", "a-after") })
+		subprocessWrite(t, root, "b.md", "b-human")
+
+		journal.BeginGroup()
+		if err := journal.Close(context.Background()); err != nil {
+			t.Fatalf("Close: %v", err)
+		}
+
+		if len(journal.groups) != 1 {
+			t.Fatalf("journal holds %d groups, want 1", len(journal.groups))
+		}
+		if got := journal.groups[0].touched; len(got) != 1 || got[0] != "a.md" {
+			t.Errorf("touched = %v, want [a.md]", got)
+		}
+		if _, err := journal.Revert(); err != nil {
+			t.Fatalf("Revert: %v", err)
+		}
+		assertContent(t, agentFile, "a-before")
+		assertContent(t, humanFile, "b-human")
+	})
+}
+
 // ----------------------------------------------------------------------------
 // Approved out-of-workspace writes — funnel-journaled either way (ADR 0074 decision 9)
 // ----------------------------------------------------------------------------

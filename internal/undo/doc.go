@@ -36,7 +36,9 @@
 // tool call, [Journal.Close] at the Exchange's end — and the diff between them is the
 // scope a revert may reach beyond the funnel's own records (ADR 0074). That is what
 // puts the writes the funnel never sees — subprocesses, MCP servers, git checkouts —
-// back within reach of `/undo`. The two paths never contest a path: where both saw one
+// back within reach of `/undo`. An Exchange that opened no group — it reached no
+// write-capable call and recorded nothing — closes none: its Close leaves the earlier,
+// already-closed group exactly as it was. The two paths never contest a path: where both saw one
 // file the funnel's pre-image wins, because it was read at the mutation site, so the
 // diff only ever ADDS. An approved out-of-workspace write is outside the work-tree and
 // stays the funnel's alone, per process (ADR 0074 decision 9), and a journal given no
