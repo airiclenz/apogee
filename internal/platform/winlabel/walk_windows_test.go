@@ -74,6 +74,55 @@ func TestJudgePriorsClearsARootOnlyJournalItCannotRewrite(t *testing.T) {
 	}
 }
 
+func TestJudgePriorsRewriteKeepsTheOwnersCreationTime(t *testing.T) {
+	// The pre-clear rewrite persists a verdict about the SAME owner's journal, so it keeps the
+	// owner's creation time along with its PID: dropping it would turn every judged journal
+	// into a legacy "not recorded" owner, judged by a PID the OS may since have recycled.
+	root := lowLabelledDir(t)
+	own := filepath.Join(t.TempDir(), "labels-4242.json")
+	r := Record{PID: 4242, Started: 133_000_000_000_000_002, Entries: []Entry{{Path: root, Root: true}}}
+
+	if err := judgePriors(r, own); err != nil {
+		t.Fatalf("judgePriors over an unjudged root: %v", err)
+	}
+	rewritten, err := ReadJournal(own)
+	if err != nil {
+		t.Fatalf("read the journal the root verdict rewrote: %v", err)
+	}
+	if rewritten.PID != r.PID || rewritten.Started != r.Started {
+		t.Errorf("rewritten journal owner = PID %d Started %d, want PID %d Started %d",
+			rewritten.PID, rewritten.Started, r.PID, r.Started)
+	}
+}
+
+func TestJournalFlushStampsThisProcesssCreationTime(t *testing.T) {
+	t.Parallel()
+
+	// Every journal this process writes names its owner by PID AND creation time, so a later
+	// reader can tell this process from a stranger that inherits its PID once it is gone.
+	want, ok := processStarted(os.Getpid())
+	if !ok || want == 0 {
+		t.Fatalf("processStarted(self) = %d, %v; this process's own creation time must be readable", want, ok)
+	}
+
+	home := t.TempDir()
+	j := Open(home)
+	j.mu.Lock()
+	_, err := j.record(Entry{Path: `C:\work`, Root: true})
+	j.mu.Unlock()
+	if err != nil {
+		t.Fatalf("record the root: %v", err)
+	}
+
+	rec, err := ReadJournal(JournalPath(home, os.Getpid()))
+	if err != nil {
+		t.Fatalf("read the flushed journal: %v", err)
+	}
+	if rec.Started != want {
+		t.Errorf("flushed journal Started = %d, want this process's creation time %d", rec.Started, want)
+	}
+}
+
 // freshFileIdentity reads path's volume serial and file index through a handle of the test's
 // own, independent of statHandle, so the comparison below checks the walk against the OS
 // rather than against itself.

@@ -38,6 +38,12 @@ func Recover(_ string) {}
 // nothing here can have labelled one.
 func ProcessAlive(_ int) bool { return false }
 
+// processStarted is the non-Windows stub of the creation-time read. It reports (0, false), the
+// "not recorded" value Record.Started decodes to from any journal that never carried it —
+// nothing on this host journals a label, so there is no owner here whose creation time
+// matters.
+func processStarted(_ int) (uint64, bool) { return 0, false }
+
 // ReadSDDL is the non-Windows stub of the mandatory-label read.
 func ReadSDDL(_ string) (string, error) { return "", errNoLabelFacility }
 

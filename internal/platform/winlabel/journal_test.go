@@ -582,6 +582,37 @@ func TestJournalWrittenByAnOlderApogeeHasNoFileIdentity(t *testing.T) {
 	}
 }
 
+func TestJournalRoundTripsTheOwnersCreationTime(t *testing.T) {
+	t.Parallel()
+
+	// Record.Started is what tells a journal's owner from a stranger holding its recycled PID,
+	// so it must survive the file in both directions: written by this apogee and read back
+	// whole, and absent from a journal an older apogee left — where zero is the honest decode,
+	// "not recorded", and the owner is judged by its PID alone.
+	home := t.TempDir()
+	path := JournalPath(home, 9913)
+	written := Record{PID: 9913, Started: 133_000_000_000_000_000, Entries: []Entry{{Path: `C:\work`, Root: true}}}
+	if err := WriteJournal(path, written); err != nil {
+		t.Fatalf("write journal: %v", err)
+	}
+	read, err := ReadJournal(path)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if read.Started != written.Started {
+		t.Errorf("Started = %d after a round trip, want %d", read.Started, written.Started)
+	}
+
+	legacy := `{"pid":9914,"entries":[{"path":"C:\\work","root":true}]}`
+	var older Record
+	if err := json.Unmarshal([]byte(legacy), &older); err != nil {
+		t.Fatalf("decode the older journal: %v", err)
+	}
+	if older.PID != 9914 || older.Started != 0 {
+		t.Errorf("older journal decoded as PID %d Started %d, want PID 9914 Started 0", older.PID, older.Started)
+	}
+}
+
 func TestWithIdentityJournalsZeroOnAFailedRead(t *testing.T) {
 	t.Parallel()
 

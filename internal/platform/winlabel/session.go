@@ -160,6 +160,10 @@ func (j *Journal) flush() error {
 		return nil
 	}
 	j.rec.PID = os.Getpid()
+	// A failed read stamps 0 — "not recorded" — rather than refusing the write: the journal is
+	// the record every label is made against, and an owner with no creation time is still
+	// judged exactly as every journal before this field was.
+	j.rec.Started, _ = processStarted(j.rec.PID)
 	return WriteJournal(j.path, j.rec)
 }
 

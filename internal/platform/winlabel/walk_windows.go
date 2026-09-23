@@ -386,7 +386,7 @@ func judgePriors(r Record, own string) error {
 			surviving = append(surviving, entry)
 		}
 	}
-	if err := WriteJournal(own, Record{PID: r.PID, Entries: surviving}); err != nil && priorJudged {
+	if err := WriteJournal(own, Record{PID: r.PID, Started: r.Started, Entries: surviving}); err != nil && priorJudged {
 		return err
 	}
 	return nil
@@ -501,6 +501,29 @@ func ProcessAlive(pid int) bool {
 	}
 	const stillActive = 259 // STILL_ACTIVE
 	return code == stillActive
+}
+
+// processStarted returns the creation time of the process with this PID — the FILETIME
+// GetProcessTimes reports, folded into one uint64 of 100-nanosecond intervals since 1601 — and
+// whether it could be read. It is the value Record.Started journals beside the owning PID: a
+// PID the OS has recycled names a different process, and that process's creation time is what
+// gives it away. A PID that names no process, or one this token may not query, reads (0,
+// false), and 0 is never a real creation time.
+func processStarted(pid int) (uint64, bool) {
+	if pid <= 0 {
+		return 0, false
+	}
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return 0, false
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
+		return 0, false
+	}
+	started := uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime)
+	return started, started != 0
 }
 
 // ReadSDDL returns the object's mandatory-label descriptor in SDDL form, or "" when it carries

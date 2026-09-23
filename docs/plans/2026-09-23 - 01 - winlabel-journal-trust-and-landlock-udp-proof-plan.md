@@ -82,7 +82,10 @@ internal/platform/winlabel/walk_windows.go — judgePriors
 - `GOOS=windows go test -c -o /dev/null ./internal/platform/winlabel/`
 **Commit:** `fix(winlabel): recover acts only on an object whose identity still matches its journal entry`
 
-## 3. A journal Record carries its owner's process creation time
+## 3. A journal Record carries its owner's process creation time — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): Started is stamped in Journal.flush only (not also in Open): flush is the one writer of this process's own record, and a failed creation-time read stamps 0 ("not recorded") and never refuses the write.
+NOTES (2026-09-23): `go test ./internal/platform/` fails TestWindowsUnclearableDescendantKeepsTheJournal and TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry on this host with and without this item's changes (checked on a stash of the base tree). They look host-policy dependent (the denial each one relies on is not enforced here). They sit outside this item's acceptance and were not caused by it.
 
 **What:**
 **Goal:** every `winlabel.Record` the running process writes carries its own creation time (FILETIME, as a uint64) in a new additive field, and it survives every rewrite of the file. A legacy record decodes with it at 0.

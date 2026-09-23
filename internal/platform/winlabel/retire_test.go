@@ -148,6 +148,37 @@ func TestRetireLabelJournalRewritesTheFileToTheHandedOffEntries(t *testing.T) {
 	}
 }
 
+func TestRetireRewriteKeepsTheOwnersCreationTime(t *testing.T) {
+	t.Parallel()
+
+	// A handoff rewrite describes the same owner as the file it replaces, so it keeps the
+	// owner's creation time along with its PID. Dropping it would hand every later liveness
+	// read a legacy "not recorded" owner, judged by a PID the OS may since have recycled.
+	home := t.TempDir()
+	path := JournalPath(home, 4322)
+	journal := Record{PID: 4322, Started: 133_000_000_000_000_001, Entries: []Entry{
+		{Path: `C:\work`, Root: true},
+		{Path: `C:\scratch`, Root: true},
+	}}
+	if err := WriteJournal(path, journal); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+
+	handoff := []Entry{{Path: `C:\work`, Root: true}}
+	if _, err := retire(path, journal, func(Record) ([]Entry, error) { return handoff, nil }); err != nil {
+		t.Fatalf("retire = %v, want nil — a handoff is not a failed revert", err)
+	}
+
+	kept, err := ReadJournal(path)
+	if err != nil {
+		t.Fatalf("the journal did not survive the handoff: %v", err)
+	}
+	if kept.PID != journal.PID || kept.Started != journal.Started {
+		t.Errorf("rewritten journal owner = PID %d Started %d, want PID %d Started %d",
+			kept.PID, kept.Started, journal.PID, journal.Started)
+	}
+}
+
 func TestRestorablePriorsHandsOffSiblingClaimedTrees(t *testing.T) {
 	t.Parallel()
 

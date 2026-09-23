@@ -36,6 +36,14 @@ type Record struct {
 	// PID owns this journal. A journal whose process is still alive belongs to a running
 	// apogee and must never be recovered by another one.
 	PID int `json:"pid"`
+	// Started is the owning process's creation time, the FILETIME GetProcessTimes reports
+	// (100-nanosecond intervals since 1601, as one uint64), stamped on every flush beside PID
+	// (Journal.flush) and threaded through every rewrite of the file (retire, judgePriors). A
+	// PID alone is recycled by the OS, so a stranger that inherits a dead owner's PID reads as
+	// that owner still running; the creation time is what tells the two apart. A journal
+	// written by an older apogee — or by a process whose own creation time could not be read —
+	// decodes it as 0, which says only "not recorded".
+	Started uint64 `json:"started,omitempty"`
 	// Entries are the labelled roots (Root == true) plus every path found already carrying a
 	// FOREIGN explicit label, whose prior descriptor teardown puts back verbatim. One entry
 	// per path, and never one whose prior is a label apogee itself could have written — see

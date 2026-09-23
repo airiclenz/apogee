@@ -47,7 +47,7 @@ func retire(path string, r Record, revert func(Record) ([]Entry, error)) ([]Entr
 		return remaining, nil
 	}
 	if len(remaining) > 0 {
-		if err := WriteJournal(path, Record{PID: r.PID, Entries: remaining}); err != nil {
+		if err := WriteJournal(path, Record{PID: r.PID, Started: r.Started, Entries: remaining}); err != nil {
 			return nil, err
 		}
 		return remaining, nil
