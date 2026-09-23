@@ -179,9 +179,9 @@ func outsideRegion(value string, start, end int) string {
 	return value[:start] + value[end:]
 }
 
-// recomputeAutocomplete re-derives the overlay AND the skill-suggestion band from the current input
-// and stores both, and hands back
-// the skill-catalog reload the moment the catalog-listing region OPENS — the input entering the
+// recomputeAutocomplete re-derives the overlay from the current input and stores it, schedules the
+// skill-suggestion band's debounced re-rank (scheduleSkillHints), and hands back that tick together
+// with the skill-catalog reload the moment the catalog-listing region OPENS — the input entering the
 // merged "/" menu that it was not in before. The reload swaps the shared
 // skills.Provider that both those rows and the agent loop read, so a skill added since launch — or
 // since the menu last closed — both shows in the dropdown and resolves when invoked. It is
@@ -214,14 +214,16 @@ func (m Model) recomputeAutocomplete() (Model, tea.Cmd) {
 	}
 	m.skillRegion = inMenu
 	m.autocomplete = m.computeAutocomplete(caret)
-	// The skill-suggestion band is re-derived from the same edit, here rather than at each caller,
+	// The skill-suggestion band is scheduled from the same edit, here rather than at each caller,
 	// because every caller of this function IS the edit path: a typed key, a paste, a splice, an undo,
 	// a withdrawn interjection put back in the box. Folding it in is what makes "the band tracks the
 	// draft" a property of the path instead of a rule five call sites have to remember — and it has to
 	// come AFTER the overlay is stored, since an open "/" or "@" menu is one of the four reasons the
-	// band says nothing (suggestband.go).
-	m = m.recomputeSkillHints(value)
-	return m, reload
+	// band says nothing (suggestband.go). The edit does not rank: it arms the debounce tick that will
+	// (scheduleSkillHints), and that tick rides out on the same Cmd as the reload.
+	var hintTick tea.Cmd
+	m, hintTick = m.scheduleSkillHints(value)
+	return m, tea.Batch(reload, hintTick)
 }
 
 // skillsReloadedMsg reports that the catalog re-scan reloadSkillsCmd dispatched has finished and the

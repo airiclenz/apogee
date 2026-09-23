@@ -99,7 +99,12 @@ Recast at the regression check (2026-09-23).
 **Acceptance:** `go test -race -count=1 -run 'InputAccent|InputRows|WrapRow|InputContentRows|HiddenDraft|PromptScroll' ./internal/tui/`
 **Commit:** `perf(tui): count prompt rows in one linear pass per frame`
 
-## 4. The skill band re-ranks once per pause, not per keystroke
+## 4. The skill band re-ranks once per pause, not per keystroke — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the debounce is armed inside `recomputeAutocomplete` (its Cmd now batches the reload with the tick), so every edit-path caller — including `prompteditor.go`'s paste and `interject.go`'s restore — picks it up with no call-site change; the tick is registered in `doc.go`'s suggestion-band paragraph (a one-shot generation tick, the ctrlCResetMsg/flashClearMsg shape), not in the spinner/heartbeat chain notes.
+NOTES (2026-09-23): a current tick landing while an overlay is open (only the Tab-opened suggestion menu can be, since the edit path already cleared the row for "/" and "@") leaves the row untouched so Esc brings the band back; `spendSkillHints` also bumps the generation so a pre-send tick lands inert.
+NOTES (2026-09-23): CONTEXT.md carries no per-keystroke wording for Suggestion, so it is unchanged; ADR 0061's body lines ("free to change with every keystroke", "re-ranked per keystroke") are left as written and superseded by the dated amendment.
+NOTES (2026-09-23): `-race` cannot run on this host (ThreadSanitizer: unsupported VMA range on the Pi kernel); the Acceptance command was run without `-race` and passed, as did the whole `./internal/tui/` package.
 
 **What:**
 **Goal:** a burst of edits (typing or a paste) runs `skills.Catalog.Suggest` once, ~150 ms after the last edit; a stale re-rank never paints; Enter spends the hints on screen at send time.

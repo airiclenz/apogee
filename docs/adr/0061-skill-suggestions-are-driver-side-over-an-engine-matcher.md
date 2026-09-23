@@ -146,3 +146,18 @@ no id, description or body is added to the standing system prompt because the ca
 a body can now enter a turn by the model's own call as well as by the user's `/token`. Decisions 1
 and 3, and the 2026-08-27 matcher amendment, are untouched; ADR 0065 §6 reuses that same ranking and
 evidence gate for `load_skill`'s confident-hit rung.
+
+## Amendment (2026-09-23) — the band re-ranks once per pause, not per keystroke
+
+Consequences' "the draft is re-ranked per keystroke" is **superseded**, and so is Decision 3's "free
+to change with every keystroke" read as a cadence. Measured on a Pi-class host, ranking a 10k-char
+draft on every key was about a fifth of each keystroke's cost, and a paste paid it again for nothing
+the human could read mid-burst. The band is now **debounced**: each edit arms a one-shot tick and the
+draft is ranked once, about 150 ms after the last edit of a burst (`skillHintDelay`,
+`internal/tui/suggestband.go`); a tick armed by an edit since superseded, or by a draft since sent,
+lands inert and never paints. Decision 3 itself is unchanged: `⏎` spends the hints **on screen at
+send time**, whether or not the pause after the last keystroke has elapsed, and a skill already
+invoked in the draft is dropped from the row on the edit that invokes it — a Tab-accepted `/id`
+leaves the band at once, without waiting for the re-rank. Clearing is never debounced either: an
+emptied draft, an opened `/` or `@` menu, the knob switched off and a send all take the row down on
+the edit or keypress that causes them. Decisions 1, 2 and 4 are untouched.

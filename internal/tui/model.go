@@ -388,9 +388,15 @@ type Model struct {
 	// draft, never anything the model is told about.
 	//
 	// skillHints is what the band is showing RIGHT NOW: the matcher's answer for the draft as it
-	// stands, re-derived on every edit beside the autocomplete overlay ([Model.recomputeSkillHints])
-	// and nil whenever there is nothing to say — the knob is off, no catalog is wired, a "/" or "@"
-	// menu is open, or the draft holds too little evidence to name a skill honestly.
+	// stood at the last pause in the typing, re-ranked once the draft has been still for
+	// skillHintDelay ([Model.foldSkillHintTick]) and nil whenever there is nothing to say — the knob
+	// is off, no catalog is wired, a "/" or "@" menu is open, the draft is empty, or it holds too
+	// little evidence to name a skill honestly. Each edit drops from it any skill the draft now
+	// invokes, at once, without waiting for the re-rank ([Model.scheduleSkillHints]).
+	//
+	// skillHintGen numbers the edits that arm the band's debounce tick: each edit and each spend
+	// opens a new generation, and a skillHintTickMsg carrying an older one is a no-op (the
+	// ctrlCGen/flashGen pattern).
 	//
 	// spentSkills is the session's dedup set: a skill named in the band at the moment a message
 	// went out is spent and is never suggested again, so the band cannot nag about the same skill
@@ -399,9 +405,11 @@ type Model struct {
 	// and an in-TUI /sessions restore (resumeLoaded, sessions.go). A nil map reads as empty, so the
 	// zero-value Model needs no construction step.
 	//
-	// Both are plain reference headers, safe in the value-copied Model (ADR 0011).
-	skillHints  []skills.Suggestion
-	spentSkills map[string]bool
+	// The two collections are plain reference headers and the generation a plain int, all safe in
+	// the value-copied Model (ADR 0011).
+	skillHints   []skills.Suggestion
+	skillHintGen int
+	spentSkills  map[string]bool
 
 	// acts is the live activity board the status line renders while a worker runs — thinking,
 	// responding, a named tool, retrying, compacting, stopping (activity.go) — one slot per RUN
@@ -1324,6 +1332,12 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		// Releasing after a drag copies the live selection — prompt or transcript — to the
 		// clipboard (mouse.go).
 		return m.handleMouseRelease(msg)
+
+	case skillHintTickMsg:
+		// The draft has stood still for skillHintDelay since the edit that armed this tick: re-rank
+		// the suggestion band over it — unless a later edit or a send has retired this generation
+		// (suggestband.go).
+		return m.foldSkillHintTick(msg), nil
 
 	case flashClearMsg:
 		// The transient mouse-copy note has lingered long enough; clear it (mouse.go) — unless a

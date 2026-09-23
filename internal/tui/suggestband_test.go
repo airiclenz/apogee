@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"slices"
 	"strings"
 	"testing"
@@ -81,13 +82,22 @@ func gatedSuggest(rec *suggestCall) func(string, func(string) bool, int) []skill
 }
 
 // typeDraft presses one printable key per rune, the way a human types into the box — through
-// Update, so the edit path that re-derives the band is the real one.
+// Update, so the edit path that schedules the band is the real one — and then lets the typing pause:
+// it delivers the debounce tick at the model's current generation (settleBand), so every caller sees
+// the band the draft ranks to.
 func typeDraft(t *testing.T, m Model, text string) Model {
 	t.Helper()
 	for _, r := range text {
 		m = step(t, m, keyRune(r))
 	}
-	return m
+	return settleBand(t, m)
+}
+
+// settleBand is the pause after a burst of edits: the debounce tick the last edit armed, delivered
+// through Update at the generation that edit opened.
+func settleBand(t *testing.T, m Model) Model {
+	t.Helper()
+	return step(t, m, skillHintTickMsg{gen: m.skillHintGen})
 }
 
 // TestSkillHintsTrackTheDraft is the band's whole lifecycle in one property: it appears when the
@@ -115,6 +125,7 @@ func TestSkillHintsTrackTheDraft(t *testing.T) {
 	for range len("the parser") {
 		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
 	}
+	m = settleBand(t, m)
 
 	if got := len(m.skillHints); got != 0 {
 		t.Fatalf("band still shows %d hints on a draft under the gate (draft %q)", got, rec.draft)
@@ -604,5 +615,202 @@ func TestSuggestBandPrecision(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The band re-ranks once per pause (skillHintDelay), not per edit
+// ----------------------------------------------------------------------------
+//
+// Every edit arms a debounce tick and the rank runs only when the tick for the LATEST edit lands.
+// The tests deliver that tick by hand (settleBand) — never by waiting — so what they pin is a count
+// of Suggest calls, not a clock.
+
+// A burst of fifty keypresses ranks nothing while it lasts and exactly once when it pauses.
+func TestBandRanksOncePerBurstOfKeys(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+	draft := strings.Repeat("audit the parser ", 3)[:50]
+	for _, r := range draft {
+		m = step(t, m, keyRune(r))
+	}
+	if rec.calls != 0 {
+		t.Fatalf("the band ranked %d times while the keys were still coming, want 0", rec.calls)
+	}
+
+	m = settleBand(t, m)
+
+	if rec.calls != 1 {
+		t.Fatalf("fifty keypresses and one pause ranked %d times, want 1", rec.calls)
+	}
+	if len(m.skillHints) != 3 {
+		t.Errorf("band shows %d hints after the pause, want 3", len(m.skillHints))
+	}
+}
+
+// A bracketed paste is one edit: one tick, one rank.
+func TestBandRanksOncePerPaste(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	m := modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec)))
+	m = settleBand(t, step(t, m, tea.PasteMsg{Content: "audit the parser\nand the lexer too"}))
+
+	if rec.calls != 1 {
+		t.Fatalf("a paste ranked %d times, want 1", rec.calls)
+	}
+	if len(m.skillHints) != 3 {
+		t.Errorf("band shows %d hints after a paste, want 3", len(m.skillHints))
+	}
+}
+
+// A tick armed by an edit since superseded ranks nothing, changes nothing and owes nothing.
+func TestStaleBandTickIsInert(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "audit the parser")
+	stale := m.skillHintGen
+	m = step(t, m, keyRune('s')) // a newer edit retires the generation above
+	calls, hints, view := rec.calls, m.skillHints, m.View().Content
+
+	next, cmd := stepCmd(t, m, skillHintTickMsg{gen: stale})
+
+	if rec.calls != calls {
+		t.Errorf("a stale tick ranked %d times, want 0", rec.calls-calls)
+	}
+	if cmd != nil {
+		t.Error("a stale tick returned a Cmd")
+	}
+	if !slices.Equal(next.skillHints, hints) || next.View().Content != view {
+		t.Error("a stale tick changed the band or the frame")
+	}
+}
+
+// Enter before the tick lands spends exactly what the row is showing, and the tick the last key armed
+// lands inert after the send rather than ranking an empty box.
+func TestSendBeforeTheTickSpendsWhatIsShown(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "audit the parser")
+	for _, r := range " now" {
+		m = step(t, m, keyRune(r))
+	}
+	pending := m.skillHintGen
+	calls := rec.calls
+
+	m = step(t, m, keyEnter())
+
+	for _, h := range bandSuggestions {
+		if !m.spentSkills[h.ID] {
+			t.Errorf("%q was on the row at send but is not spent", h.ID)
+		}
+	}
+	m = step(t, m, skillHintTickMsg{gen: pending})
+	if rec.calls != calls {
+		t.Errorf("the pre-send tick ranked %d times after the send, want 0", rec.calls-calls)
+	}
+	if len(m.skillHints) != 0 {
+		t.Errorf("band shows %d hints after the send, want none", len(m.skillHints))
+	}
+}
+
+// Emptying the draft takes the row down on the edit that empties it, without waiting for a pause.
+func TestEmptiedDraftClearsTheBandAtOnce(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "audit the parser")
+	for range len("audit the parser") {
+		m = step(t, m, tea.KeyPressMsg{Code: tea.KeyBackspace})
+	}
+
+	if m.input.Value() != "" {
+		t.Fatalf("draft = %q, want it emptied", m.input.Value())
+	}
+	if len(m.skillHints) != 0 || m.renderSkillHints() != "" {
+		t.Error("the band outlives an emptied draft until the next pause")
+	}
+}
+
+// A skill accepted from the Tab menu leaves the band the moment it is written into the box — ADR 0061
+// §3's "a skill already invoked in the draft is never suggested at all" holds before any pause.
+func TestTabAcceptedSkillLeavesTheBandAtOnce(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "audit the parser")
+	calls := rec.calls
+
+	m = step(t, step(t, m, keyTab()), keyEnter()) // accept the strongest row: /security-audit
+
+	if !strings.Contains(m.input.Value(), "/security-audit") {
+		t.Fatalf("draft = %q, want the accepted token in it", m.input.Value())
+	}
+	if rec.calls != calls {
+		t.Fatalf("the accept ranked %d times, want the invoked id filtered without a rank", rec.calls-calls)
+	}
+	for _, h := range m.skillHints {
+		if h.ID == "security-audit" {
+			t.Error("the accepted skill is still on the band before the next pause")
+		}
+	}
+	if len(m.skillHints) != 2 {
+		t.Errorf("band shows %d hints, want the two not accepted", len(m.skillHints))
+	}
+}
+
+// With the knob off an edit arms nothing: the band's half of the edit path returns a nil Cmd.
+func TestTypingWithTheKnobOffArmsNoTick(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	opts := bandOpts(gatedSuggest(&rec))
+	opts.UI.SkillSuggestions = false
+	m := modelWithOverlayRoom(t, 24, opts)
+	m = step(t, m, keyRune('a'))
+
+	if _, cmd := m.recomputeAutocomplete(); cmd != nil {
+		t.Error("an edit with the band switched off armed a tick")
+	}
+	if _, cmd := stepCmd(t, m, keyRune('b')); cmd != nil {
+		t.Error("a keypress with the band switched off returned a Cmd")
+	}
+}
+
+// An edit that opens a "/" menu takes the row down on that edit, not at the next pause.
+func TestOpeningAnOverlayClearsTheBandAtOnce(t *testing.T) {
+	t.Parallel()
+
+	var rec suggestCall
+	m := typeDraft(t, modelWithOverlayRoom(t, 24, bandOpts(gatedSuggest(&rec))), "audit the parser")
+	for _, r := range " /co" {
+		m = step(t, m, keyRune(r))
+	}
+
+	if !m.autocomplete.active {
+		t.Fatal("the /-menu did not open")
+	}
+	if len(m.skillHints) != 0 {
+		t.Errorf("band holds %d hints under the menu the edit just opened", len(m.skillHints))
+	}
+}
+
+// BenchmarkBandKeystroke is one printable key typed through Model.Update with the band wired — the
+// edit path that used to rank the whole draft on every key and now only arms the debounce tick.
+func BenchmarkBandKeystroke(b *testing.B) {
+	var rec suggestCall
+	m := newModel(context.Background(), &fakeEngine{}, withTestUI(bandOpts(gatedSuggest(&rec))), nil)
+	next, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
+	m = next.(Model)
+	m.input.SetValue(strings.Repeat("audit the parser and the lexer ", 300))
+	b.ResetTimer()
+
+	for range b.N {
+		next, _ = m.Update(keyRune('x'))
+		m = next.(Model)
 	}
 }
