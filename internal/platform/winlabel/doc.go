@@ -33,6 +33,21 @@
 // record → label triple per descendant. The backend's label pass is a bare loop over the box's
 // roots, so there is no fourth call site that could label without journalling.
 //
+// What a revert trusts a journal for is narrower than what the journal says. A path is only a
+// name, so every entry also records the file identity of the object it labelled — the volume
+// serial and file index (Entry.Volume, Entry.FileIndex) — and a revert neither clears nor
+// restores anything on a path whose object no longer matches it (identityRefuses); a
+// mismatched prior is carried under its bounded life and then dropped, never written. An
+// entry with no identity, from an older journal or a failed read, keeps the label-read rules
+// alone. An owner reads as alive only while its PID runs AND that process's creation time
+// matches the one the journal recorded (Record.Started, ProcessAlive), so a stranger that
+// inherits a dead owner's recycled PID never spares that owner's roots; a record with no
+// creation time falls back to the PID check. The journal directory itself
+// (JournalDir, ~/.apogee/confinement) is a protected root: package platform refuses a box
+// root that is, or contains, it, so a Low child can never rewrite what the next Recover acts
+// on. What stays out of scope is a same-user Medium-integrity process forging a journal: it
+// can forge anything it can read, which SECURITY.md already places outside the fence.
+//
 // The package is a LEAF: the standard library plus golang.org/x/sys/windows, and nothing
 // from apogee — not internal/domain, not internal/platform. Errors come back plain and
 // package platform wraps domain.ErrConfinementUnavailable once at the call site, which

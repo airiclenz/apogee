@@ -45,6 +45,17 @@ Out of scope: a model behaving badly within its permitted mode, denial of servic
 your own machine, findings that require a compromised `~/.apogee` or a hostile local user,
 and third-party model servers or MCP servers themselves.
 
+**The Windows confinement journal.** On Windows the box is a mandatory label on the disk, and
+`~/.apogee/confinement` holds the journal that undoes it after an interrupted run. That
+directory is a protected root: a box root that is, or contains, it is refused, so a confined
+child can never write the record of its own labels. A revert trusts the journal only as far as
+it can check it: each entry is bound to the file identity (volume serial and file index) of
+the object it labelled, and a label is neither cleared nor restored on an object whose identity
+no longer matches; a journal's owner counts as still running only while both its PID and its
+process creation time match, so a recycled PID cannot keep a dead run's labels in place. A
+same-user, Medium-integrity process that forges a journal is out of scope — it can forge
+anything it can read, which is the hostile-local-user case above.
+
 **A checkout's own git hooks are a trust decision, not something apogee fences.** This
 repository ships git hooks under `.beads/hooks/`, and the documented hydration step —
 `bd init` or `bd hooks install` — activates them by pointing git's `core.hooksPath` at that

@@ -1173,13 +1173,26 @@ verbatim below the floor — no new wording, no new surface.
   existing descendants ahead of the walk's hard-link skip (ADR 0020 §2, amended 2026-08-30). The
   pass is **memoised per box** — once per session, not per command — and is the one piece of
   I/O §2.2 now permits.
-- **Guardrails:** a volume root, `%SystemRoot%`, `%ProgramFiles%`/`%ProgramFiles(x86)%` or the
-  user-profile root is **refused** with `ErrConfinementUnavailable`, never labelled.
+- **Guardrails:** a volume root, `%SystemRoot%`, `%ProgramFiles%`/`%ProgramFiles(x86)%`, the
+  user-profile root or the confinement journal directory (`~/.apogee/confinement`,
+  `winlabel.JournalDir`) — or a root that contains one of them — is **refused** with
+  `ErrConfinementUnavailable`, never labelled. The journal directory is fenced *(2026-09-23)*
+  because a box that labelled it Low would hand the confined child the record of how to undo
+  its own labels.
 - **Teardown reverts the labels.** The backend implements `io.Closer`; the composition root defers it
   beside its existing `Close()` calls. **`domain.Confiner` does not change** — the hook is an
   optional-interface assertion. A **journal** written under the apogee home *before* the first label
   makes an interrupted cleanup recoverable by the next `NewConfiner()` and visible to
   `apogee probe host`.
+- **What the journal is trusted for *(2026-09-23)*.** Each entry records the **file identity**
+  (volume serial + file index) of the object it labelled, and a revert neither clears nor
+  restores a label on a path whose object no longer matches it — a mismatched prior is carried
+  under its bounded life, then dropped, never written. An entry with no identity (an older
+  journal, a failed read) keeps the label-read rules alone. A journal's owner counts as alive
+  only while its PID runs **and** that process's **creation time** (`GetProcessTimes`, journalled
+  as `Record.Started`) matches, so a recycled PID never keeps a dead run's roots spared; a record
+  without a creation time falls back to the PID check. A same-user Medium-integrity process that
+  forges a journal is out of scope (SECURITY.md): it can forge anything it can read.
 - **Construction performs no disk I/O**, with the single exception of the recovery pass above —
   which is why the selector has two spellings. `NewConfiner()` is the SESSION constructor and
   finishes an outstanding restore; `NewReportConfiner()` is what `cmd/apogee/probe.go` builds, and

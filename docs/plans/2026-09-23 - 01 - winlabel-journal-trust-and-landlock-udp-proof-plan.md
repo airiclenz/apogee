@@ -137,7 +137,11 @@ internal/platform/winlabel/journal.go — JournalDir; internal/platform/winguard
 - `GOOS=windows go test -c -o /dev/null ./internal/platform/`
 **Commit:** `fix(platform): a Windows box may not label the confinement journal directory`
 
-## 6. The docs state what the journal trusts and what it no longer trusts
+## 6. The docs state what the journal trusts and what it no longer trusts — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the rule's grep found no stale sites outside the three named files — items 2 and 4 had already rewritten the retire.go, walk_windows.go and session.go liveness comments, the remaining "PID-only" mentions describe only the legacy Started == 0 fallback, and no "trusted verbatim" or claim-trust prose exists; those sites were verified, not edited.
+NOTES (2026-09-23): SECURITY.md had no protected-root list to extend, so the journal dir went into a new "The Windows confinement journal" paragraph after the out-of-scope line. The contract §9 Guardrails bullet now also says "or a root that contains one of them", matching winguard.go's is-or-contains rule.
+NOTES (2026-09-23): ADR 0020's Guardrails bullet (a Read-first anchor, not in Files) still lists only the original four protected roots. It was left as the historical record, since contract §9 is the live list; a dated amendment there is optional follow-up.
 
 **What:** Depends on items 2, 4 and 5.
 **Goal:** SECURITY.md, the winlabel package doc and the confinement execution contract say that journal entries are bound to file identity, that liveness uses PID + creation time, that `~/.apogee/confinement` is a protected root, and that a same-user Medium process forging a journal is out of scope. No prose anywhere still says journal liveness is PID-only or that a claim is trusted verbatim.
