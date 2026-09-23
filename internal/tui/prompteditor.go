@@ -65,6 +65,13 @@ type promptEditor struct {
 	// the cache survives each Update (ADR 0011); nil-safe (fileSuggestions falls back).
 	files *fileCache
 
+	// rowCount memoises the draft's wrapped row count on (value, width), so the several readers one
+	// Update and View make of it — the box's height (rows), the transcript clamp settle re-derives
+	// from it, and the hidden-row count on the box's border ([Model.hiddenDraftRows]) — measure the
+	// draft once between edits. A pointer for the same reason as files (ADR 0011); nil-safe, so a
+	// literal Model that never went through newPromptEditor counts afresh every time.
+	rowCount *rowCountMemo
+
 	// sel is the prompt's mouse drag-selection (mouse.go); the zero value is "no selection". It
 	// is cleared by any keypress, a submit/reset, or a resize, so its visual coords never go
 	// stale. It and the Model's transcriptSel never coexist (region arbitration in the mouse
@@ -198,7 +205,7 @@ func newPromptEditor(shape tea.CursorShape, surface color.Color) promptEditor {
 	// repurposed: shift+enter works on terminals that support the Kitty keyboard protocol,
 	// and alt+enter / ctrl+j are byte-distinct fallbacks that insert a newline everywhere.
 	e.input.KeyMap.InsertNewline.SetKeys("shift+enter", "alt+enter", "ctrl+j")
-	return promptEditor{lineEditor: e, files: &fileCache{}}
+	return promptEditor{lineEditor: e, files: &fileCache{}, rowCount: &rowCountMemo{}}
 }
 
 // submitParse parses the editor's current input through the chat mini-language (command.go): the
@@ -260,7 +267,37 @@ func (e *promptEditor) reset() {
 // growing at the cap, where the textarea scrolls internally. innerWidth is a Model concern (it
 // derives from the window), so the Model passes it in rather than the editor duplicating it.
 func (e promptEditor) rows(innerWidth int) int {
-	return clampInt(inputContentRows(e.input.Value(), innerWidth), minInputRows, maxInputRows)
+	return clampInt(e.contentRows(innerWidth), minInputRows, maxInputRows)
+}
+
+// contentRows is [inputContentRows] of the current draft at innerWidth, served from the rowCount
+// memo while neither has changed since it was last measured — unclamped, the figure both rows and
+// [Model.hiddenDraftRows] start from.
+func (e promptEditor) contentRows(innerWidth int) int {
+	return e.rowCount.rows(e.input.Value(), innerWidth)
+}
+
+// rowCountMemo is the last (value, width) the draft's rows were counted at and the count. The value
+// comparison is a byte compare at worst, where a recount re-wraps every rune of the draft.
+type rowCountMemo struct {
+	value  string
+	width  int
+	count  int
+	valid  bool
+	misses int // recounts taken; read by the tests that pin one measure per frame
+}
+
+// rows reports inputContentRows(value, width), recounting only when the pair differs from the one
+// memoised. A nil memo recounts every time.
+func (c *rowCountMemo) rows(value string, width int) int {
+	if c == nil {
+		return inputContentRows(value, width)
+	}
+	if !c.valid || c.width != width || c.value != value {
+		c.value, c.width, c.count, c.valid = value, width, inputContentRows(value, width), true
+		c.misses++
+	}
+	return c.count
 }
 
 // foldKeyboardEnhancements folds the terminal's answer to bubbletea's kitty-keyboard query into

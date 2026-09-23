@@ -206,11 +206,14 @@ func inputCellSpans(measure widthAuthority, value string, width, from, to int) [
 // sum of this over the value's logical lines, which is the widget's own decomposition
 // (totalVisualLines). So the box's height and the rows an accent lands on come off one ruler.
 //
-// The row and the pending word are re-measured from the line rather than accumulated per rune,
-// which is not a detail: a grapheme cluster measures as a whole, so summing its runes one at a time
-// would under-count exactly the sequences (an emoji carrying VARIATION SELECTOR-16) the widget
-// counts as two cells. The two slices measured are the widget's own operands — the runes already on
-// the row, and the pending word — so the mirror weighs the same text at the same moments it does.
+// The row and the pending word are measured as whole runs, never summed per rune, which is not a
+// detail: a grapheme cluster measures as a whole, so summing its runes one at a time would
+// under-count exactly the sequences (an emoji carrying VARIATION SELECTOR-16) the widget counts as
+// two cells. The two runs weighed are the widget's own operands — the runes already on the row, and
+// the pending word — so the mirror weighs the same text at the same moments it does. Each run's
+// width is carried forward as it grows ([growingWidth]) and only its trailing grapheme cluster is
+// re-measured with what joins it, so the line costs one pass over its runes whatever the width —
+// re-measuring the whole row at every placement made a long line cost its length times the width.
 //
 // The line is sanitised before any of that runs (sanitizeInputLine), because the widget sanitises on
 // the way IN: every write path passes its runes through one sanitizer, so a tab arrives as four
@@ -229,34 +232,74 @@ func wrapRowStarts(line []rune, width int) []int {
 	consumed := 0 // runes of line already placed on a row
 	wordLen := 0  // the pending word: a run of non-space runes
 	spaces := 0   // the whitespace run trailing that word
+	// The widget's `lines[row]` and `word`, measured as they grow.
+	var row, word growingWidth
 	for _, r := range line {
 		if unicode.IsSpace(r) {
 			spaces++
 		} else {
 			wordLen++
+			word.extend(line, consumed+wordLen) // the widget's `word`, r included
 		}
-		word := line[consumed : consumed+wordLen] // the widget's `word`, r included
 		switch {
 		case spaces > 0: // the group is finished: place it, on a new row if it does not fit
-			row := line[starts[len(starts)-1]:consumed] // the widget's `lines[row]`
-			if runesWidth(row)+runesWidth(word)+spaces > width {
+			end := consumed + wordLen + spaces
+			if row.cells+word.cells+spaces > width {
 				starts = append(starts, consumed)
+				row = growingWidth{last: consumed}
 			}
-			consumed += wordLen + spaces
+			row.extend(line, end)
+			consumed = end
 			wordLen, spaces = 0, 0
-		case runesWidth(word)+runewidth.RuneWidth(r) > width: // a word wider than a row: break it here
+			word = growingWidth{last: consumed}
+		case word.cells+runewidth.RuneWidth(r) > width: // a word wider than a row: break it here
 			if consumed > starts[len(starts)-1] { // the current row already holds something
 				starts = append(starts, consumed)
 			}
+			// Either way the row now holds exactly the word: it opened a fresh row, or the row it
+			// joined held nothing.
 			consumed += wordLen
 			wordLen = 0
+			row, word = word, growingWidth{last: consumed}
 		}
 	}
-	row, word := line[starts[len(starts)-1]:consumed], line[consumed:consumed+wordLen]
-	if runesWidth(row)+runesWidth(word)+spaces >= width {
+	if row.cells+word.cells+spaces >= width {
 		starts = append(starts, consumed) // the trailing row a width-filling line keeps for the caret
 	}
 	return starts
+}
+
+// growingWidth is the uniseg display width ([runesWidth]'s ruler) of a rune run that only ever grows
+// at its end — the row and the pending word of [wrapRowStarts]. Appending to a run can only merge
+// runes into its LAST grapheme cluster (a combining mark after a space, a second regional indicator,
+// a VARIATION SELECTOR-16 after an emoji); every boundary before that cluster's start is already
+// decided by the runes on both sides of it. So the width is kept, and a growth re-measures only
+// from that cluster's start to the new end: the result is exactly runesWidth of the whole run, at
+// the cost of the runes added plus one cluster.
+//
+// The zero value is the empty run starting at offset 0; an empty run starting elsewhere is
+// growingWidth{last: offset}.
+type growingWidth struct {
+	cells     int // the run's width
+	last      int // the offset in the line its final grapheme cluster starts at (its start while empty)
+	lastCells int // that final cluster's width
+}
+
+// extend grows the run to end at offset end of line, re-measuring from its final cluster only.
+func (g *growingWidth) extend(line []rune, end int) {
+	if end <= g.last {
+		return
+	}
+	g.cells -= g.lastCells
+	s, at, state := string(line[g.last:end]), g.last, -1
+	for len(s) > 0 {
+		var cluster string
+		var w int
+		cluster, s, w, state = uniseg.FirstGraphemeClusterInString(s, state)
+		g.cells += w
+		g.last, g.lastCells = at, w
+		at += utf8.RuneCountInString(cluster)
+	}
 }
 
 // inputContentRows reports how many visual rows the input value occupies at innerWidth, mirroring

@@ -2,16 +2,21 @@ package tui
 
 import (
 	"context"
+	"math/rand"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 
 	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 	lipgloss "charm.land/lipgloss/v2"
 	"github.com/charmbracelet/x/ansi"
+	"github.com/mattn/go-runewidth"
+	"github.com/rivo/uniseg"
 )
 
 // ----------------------------------------------------------------------------
@@ -415,5 +420,178 @@ func TestAccentSpansFollowTheCatalog(t *testing.T) {
 	bare.layout()
 	if got := bare.resolvingTokens(); got != nil {
 		t.Errorf("an empty catalog resolved %v", got)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Row counting cost (inputaccent.go wrapRowStarts, prompteditor.go rowCountMemo)
+// ----------------------------------------------------------------------------
+
+// baseWrapRowStarts is wrapRowStarts as it stood before the row and word widths were carried
+// forward: the row and the pending word re-measured whole at every step. It is the reference the
+// incremental measure must agree with rune for rune.
+func baseWrapRowStarts(line []rune, width int) []int {
+	if width < 1 {
+		width = 1
+	}
+	line = sanitizeInputLine(line)
+	starts := []int{0}
+	consumed := 0 // runes of line already placed on a row
+	wordLen := 0  // the pending word: a run of non-space runes
+	spaces := 0   // the whitespace run trailing that word
+	for _, r := range line {
+		if unicode.IsSpace(r) {
+			spaces++
+		} else {
+			wordLen++
+		}
+		word := line[consumed : consumed+wordLen] // the widget's `word`, r included
+		switch {
+		case spaces > 0: // the group is finished: place it, on a new row if it does not fit
+			row := line[starts[len(starts)-1]:consumed] // the widget's `lines[row]`
+			if runesWidth(row)+runesWidth(word)+spaces > width {
+				starts = append(starts, consumed)
+			}
+			consumed += wordLen + spaces
+			wordLen, spaces = 0, 0
+		case runesWidth(word)+runewidth.RuneWidth(r) > width: // a word wider than a row: break it here
+			if consumed > starts[len(starts)-1] { // the current row already holds something
+				starts = append(starts, consumed)
+			}
+			consumed += wordLen
+			wordLen = 0
+		}
+	}
+	row, word := line[starts[len(starts)-1]:consumed], line[consumed:consumed+wordLen]
+	if runesWidth(row)+runesWidth(word)+spaces >= width {
+		starts = append(starts, consumed) // the trailing row a width-filling line keeps for the caret
+	}
+	return starts
+}
+
+// wrapRowCorpus is the line shapes where carrying a width forward could drift from measuring the
+// run whole: every grapheme cluster that spans what the mirror appends in separate steps.
+var wrapRowCorpus = []string{
+	"",
+	"hello world, this is plain ASCII prose that wraps",
+	"日本語のテキスト 絵文字 と かな カナ",
+	"emoji 😀😃 in 🎉 prose 🚀",
+	"warn ⚠️ here ⚠️⚠️⚠️ end aa⚠️bb⚠️cc",
+	"family 👨‍👩‍👧‍👦 and 👩‍💻 zwj ❤️‍🔥 joins",
+	"flags 🇩🇪🇫🇷 and a lone 🇺 then 🇺🇸🇬🇧🇯🇵",
+	"cafe\u0301 re\u0301sume\u0301 and n\u0303o combining marks",
+	"a \u0301b  \u0301\u0302c space then combining",
+	"\tabc\tdef ghi\t\tjkl",
+	"aaa aaa aaa aaax aaaaaaaa bbbbbbbbbbbbbbbbbbbbbbbbbbbbb c",
+	"     spaces    only     ",
+	"averyveryverylongwordindeed with some short ones after",
+}
+
+// The incremental measure answers exactly what the whole-run measure did, over every corpus line at
+// every width that can break it — the soft-wrap boundaries of each line included — and over
+// generated lines built from the same awkward clusters.
+func TestWrapRowStartsMatchesTheWholeRunMeasure(t *testing.T) {
+	t.Parallel()
+	check := func(line string, width int) {
+		t.Helper()
+		runes := []rune(line)
+		if got, want := wrapRowStarts(runes, width), baseWrapRowStarts(runes, width); !reflect.DeepEqual(got, want) {
+			t.Errorf("wrapRowStarts(%q, %d) = %v, want %v", line, width, got, want)
+		}
+	}
+	for _, line := range wrapRowCorpus {
+		for width := 1; width <= uniseg.StringWidth(line)+2; width++ {
+			check(line, width)
+		}
+	}
+	glyphs := []string{"a", "b", " ", " ", "\t", "あ", "⚠️", "\u0301", "\u200d", "👩", "💻", "🇺", "🇸", "😀", "\ufe0f"}
+	rng := rand.New(rand.NewSource(20260923))
+	for i := 0; i < 2000; i++ {
+		var sb strings.Builder
+		for n := rng.Intn(32); n > 0; n-- {
+			sb.WriteString(glyphs[rng.Intn(len(glyphs))])
+		}
+		check(sb.String(), 1+rng.Intn(16))
+	}
+}
+
+// longProseLine is one 64 KB logical line of short words — a pasted paragraph with no newline.
+func longProseLine() []rune {
+	const sentence = "the quick brown fox jumps over the lazy dog and keeps on running "
+	return []rune(strings.Repeat(sentence, 64<<10/len(sentence)))
+}
+
+// wrapRowStartsTotalAlloc is the bytes one wrapRowStarts call over line allocates at width.
+func wrapRowStartsTotalAlloc(line []rune, width int) uint64 {
+	var stats runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&stats)
+	before := stats.TotalAlloc
+	runtime.KeepAlive(wrapRowStarts(line, width))
+	runtime.ReadMemStats(&stats)
+	return stats.TotalAlloc - before
+}
+
+// A line's wrap costs its length, not its length times the width: re-measuring the whole row at
+// every placement made width 400 cost ≈ 10× width 40 on the same line. Not parallel: TotalAlloc is
+// process-wide, and a neighbour's allocations would be read as this one's.
+func TestWrapRowStartsAllocationIsIndependentOfWidth(t *testing.T) {
+	line := longProseLine()
+	narrow, wide := wrapRowStartsTotalAlloc(line, 40), wrapRowStartsTotalAlloc(line, 400)
+	if wide > 2*narrow {
+		t.Fatalf("wrapRowStarts over a %d-rune line allocated %d KB at width 400 against %d KB at width 40; want ≤ 2×",
+			len(line), wide>>10, narrow>>10)
+	}
+}
+
+// A promptEditor built literally — no newPromptEditor, so no row-count memo — still counts its
+// draft's rows, every time, and the Model reading it through hiddenDraftRows agrees.
+func TestInputContentRowsWithoutAMemo(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m.promptEditor.rowCount = nil
+	value := strings.Repeat("word ", 60)
+	m.input.SetValue(value)
+	w := m.inputInnerWidth()
+	for range 2 {
+		if got, want := m.promptEditor.contentRows(w), inputContentRows(value, w); got != want {
+			t.Fatalf("contentRows = %d, want %d", got, want)
+		}
+	}
+	if got, want := m.hiddenDraftRows(), max(0, inputContentRows(value, w)-m.input.Height()); got != want {
+		t.Fatalf("hiddenDraftRows = %d, want %d", got, want)
+	}
+	e := promptEditor{lineEditor: newLineEditor(defaultCursorShape, lipgloss.Color("#000000"), "")}
+	e.input.SetValue(value)
+	if got, want := e.rows(w), clampInt(inputContentRows(value, w), minInputRows, maxInputRows); got != want {
+		t.Fatalf("a literal promptEditor's rows = %d, want %d", got, want)
+	}
+}
+
+// One keypress and the frame it paints measure the draft's rows once: the box's height, the
+// transcript clamp and the hidden-row count on the border all read the one memoised count.
+func TestInputContentRowsMeasuredOncePerKeypressAndView(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m.input.SetValue(strings.Repeat("a long draft that wraps ", 40))
+	m.input.CursorEnd()
+	memo := m.promptEditor.rowCount
+	memo.misses = 0
+	m = step(t, m, keyRune('x'))
+	_ = m.View()
+	if memo.misses != 1 {
+		t.Fatalf("one keypress + View counted the draft's rows %d times; want 1", memo.misses)
+	}
+	_ = m.View()
+	if memo.misses != 1 {
+		t.Fatalf("a repaint of an unchanged draft recounted its rows (%d counts)", memo.misses)
+	}
+}
+
+func BenchmarkInputContentRows(b *testing.B) {
+	value := string(longProseLine())
+	b.ReportAllocs()
+	for b.Loop() {
+		inputContentRows(value, 120)
 	}
 }

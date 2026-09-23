@@ -2510,10 +2510,11 @@ func (m Model) draftRowsCeiling() int {
 // hiddenDraftRows is how many of the draft's wrapped rows the box is not drawing this frame: what
 // the widget scrolls out of sight once the content outgrows the height the frame could pay for
 // (draftRowsCeiling) or the box's own taste (maxInputRows). It measures the draft through the same
-// mirror of the widget's wrap that sizes the box (inputContentRows), so the count is the box's own
-// arithmetic rather than a second guess at it.
+// mirror of the widget's wrap that sizes the box (inputContentRows), read through the same
+// (value, width) memo ([promptEditor.contentRows]), so the count is the box's own arithmetic rather
+// than a second guess at it — and costs no second measure of the draft in the frame.
 func (m Model) hiddenDraftRows() int {
-	return max(0, inputContentRows(m.input.Value(), m.inputInnerWidth())-m.input.Height())
+	return max(0, m.promptEditor.contentRows(m.inputInnerWidth())-m.input.Height())
 }
 
 // refreshViewport re-renders the transcript into the viewport and, unless the human has

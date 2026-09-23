@@ -84,7 +84,9 @@ Depends on item 1.
 **Acceptance:** `go test -race -count=1 -run 'LineEditor|Paste|Seat|CaretToOffset|ClickPositions|LineBreaks' ./internal/tui/`
 **Commit:** `perf(tui): seat the prompt caret directly instead of walking every line`
 
-## 3. Prompt row counting is linear and computed once per frame
+## 3. Prompt row counting is linear and computed once per frame — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the Acceptance command's `-race` cannot run on this box (ThreadSanitizer aborts with "FATAL: Found 47 - Supported 48", the Pi's 47-bit VMA); the same selection passes without `-race`, as does the whole `./internal/tui/` package.
 
 **What:**
 Recast at the regression check (2026-09-23).
