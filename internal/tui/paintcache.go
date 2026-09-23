@@ -138,17 +138,6 @@ func (e entry) painted() paintInput {
 	}
 }
 
-// paintInputs states a whole block's entries as the painters' input records, in the order the block
-// covers them. [transcript.renderView] builds one of these per block and hands the SAME value to
-// [blockKey] and to the painter, so what the key names and what the paint reads cannot part company.
-func paintInputs(entries []entry) []paintInput {
-	ins := make([]paintInput, len(entries))
-	for i := range entries {
-		ins[i] = entries[i].painted()
-	}
-	return ins
-}
-
 // headsRun is [entry.headsRun] asked of the record instead of the entry — the same two fields, read
 // where a painter can reach them, so the block and the entry carrying it cannot disagree about what
 // a delegation is.
@@ -442,7 +431,7 @@ func (m Model) frameKey() frameKey {
 
 // blockKey builds the key for the block these records are the input of — ins[0] alone for an
 // ordinary entry, the whole folded run or the head plus its sub-agent span otherwise. It takes the
-// very value the painter is handed ([paintInputs]) and reads nothing else about the transcript,
+// very value the painter is handed ([paintRoot.appendInputs]) and reads nothing else about the transcript,
 // which is what makes "the key names every input" checkable by reading one record rather than by
 // remembering what five painter files touch.
 //

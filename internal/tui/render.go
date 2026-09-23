@@ -299,6 +299,11 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		appendJoined(false, false, depth, at, preview)
 	}
 
+	// records is the walk's one painter-record buffer: every block states its records into it
+	// ([transcript.resolveBlock]), so an all-hit repaint allocates them once per frame rather than
+	// once per block. A block's records live until the next block is resolved, and its paint is drawn
+	// (or served) before that.
+	var records []paintInput
 	for i := root.first; i < root.last; {
 		// The preview is painted the moment the walk reaches its run's end. The test is >= rather
 		// than == because the walk SKIPS index ranges — a collapsed run's span, a folded tool run's
@@ -318,9 +323,11 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// folded run or a collapsed span is stated by the code that resolved that span rather than by
 		// a per-branch `i += …` — the one arithmetic in the renderer whose off-by-one would silently
 		// skip a block or paint it twice.
-		block := t.resolveBlock(th, i, in, width, blink, root)
+		block := t.resolveBlock(i, in, width, blink, root, records)
+		records = block.ins // the buffer, grown if this block needed more; the next block overwrites it
 		key := blockKey(block.shape, block.ins, th, width, blink, block.live, root.ref, block.fold)
-		appendJoined(block.isUser, block.closes, in.depth, i, t.paintBlock(i, key, block.draw))
+		appendJoined(block.isUser, block.closes, in.depth, i,
+			t.paintBlock(i, key, func() blockPaint { return block.draw(th) }))
 		// A block ending on an OPEN span does not end the run: that span follows, railed one level
 		// deeper, and the separator between the two belongs to THAT rail rather than to the block's
 		// own depth. Without it the frame would break for one blank row directly under the ┌─┶ that
@@ -473,13 +480,24 @@ func (r paintRoot) painted(e entry) paintInput {
 	return in
 }
 
-// inputs states a whole block's entries as painter records ([paintInputs]), rebased to the root.
-func (r paintRoot) inputs(entries []entry) []paintInput {
-	return r.rebase(paintInputs(entries))
+// appendInputs states a whole block's entries as painter records ([entry.painted]), in the order the
+// block covers them, rebased to the root and appended to dst. [transcript.renderView] hands the SAME
+// records to [blockKey] and to the painter, so what the key names and what the paint reads cannot
+// part company. The walk hands it its one record buffer cut back to empty
+// ([transcript.renderView]), so a repaint states every block's records into the same backing array
+// rather than a fresh one per block — a block covering a collapsed run's whole span is otherwise
+// one ≈ 832 B record per covered entry, on every hit.
+func (r paintRoot) appendInputs(dst []paintInput, entries []entry) []paintInput {
+	at := len(dst)
+	for i := range entries {
+		dst = append(dst, entries[i].painted())
+	}
+	r.rebase(dst[at:])
+	return dst
 }
 
-// rebase rewrites a block's painter records to the root's level, in place — the records are built
-// fresh for the block being resolved ([paintInputs]), never shared with the entries
+// rebase rewrites a block's painter records to the root's level, in place — the records are stated
+// afresh for the block being resolved ([paintRoot.appendInputs]), never shared with the entries
 // they were read off. It is the one place the rebase reaches a multi-entry block, so a block's head
 // and its span can never be painted at levels that disagree, and it is what the paint key reads:
 // the records the rows are drawn from are the records the key names (paintcache.go).
@@ -529,11 +547,16 @@ func (t *transcript) paintRoot() paintRoot {
 // cause. Here the span a shape resolved and the step past it are stated in the same breath, by the
 // code that resolved the span.
 type resolvedBlock struct {
-	shape blockShape        // which painter draws it, as the paint key names the branch (paintcache.go)
-	ins   []paintInput      // the records the key names and the painter reads, the block's head first
-	live  bool              // whether the block still holds an open call — each shape's own rule (blockState.live)
-	fold  umbrellaFold      // a Tools umbrella's large/folded answer, the zero value for every other shape (paintKey.large/folded)
-	draw  func() blockPaint // the paint, called only when the cache misses (transcript.paintBlock)
+	shape blockShape   // which painter draws it, as the paint key names the branch (paintcache.go)
+	ins   []paintInput // the records the key names and the painter reads, the block's head first
+	live  bool         // whether the block still holds an open call — each shape's own rule (blockState.live)
+	fold  umbrellaFold // a Tools umbrella's large/folded answer, the zero value for every other shape (paintKey.large/folded)
+	// draw is the paint, called only when the cache misses (transcript.paintBlock). The theme is its
+	// ARGUMENT rather than something it closes over: a closure holding the ≈ 32 KB theme moved it to
+	// the heap on every block resolved, hit or miss, so the repaint of an all-hit scrollback cost a
+	// theme copy per block. It reads ins, and so is valid only until the walk resolves the next block
+	// into the same record buffer ([transcript.renderView]).
+	draw func(th theme) blockPaint
 
 	next   int  // where the walk resumes: past the block's own entries, and past a collapsed span's elided ones
 	isUser bool // the block is a user prompt, and so a sticky-header section (userBlock)
@@ -554,7 +577,12 @@ type resolvedBlock struct {
 // subAgentSpan, toolSuperGroup, sameLabelRun); everything it hands back speaks in paint records
 // instead, which is what keeps a painter to what it needs to draw and nothing it could write through
 // (paintcache.go, ADR 0011).
-func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, blink bool, root paintRoot) resolvedBlock {
+//
+// buf is the walk's one record buffer: the block's records are appended to buf[:0] and handed back
+// as [resolvedBlock.ins], which the walk passes in again for the next block, so a hit states them
+// without allocating. Nothing a hit needs is built here beyond them — the painter's own inputs (a
+// group's member rows) are built inside draw, which only a miss calls.
+func (t *transcript) resolveBlock(head int, in paintInput, width int, blink bool, root paintRoot, buf []paintInput) resolvedBlock {
 	// A descent used to be announced by a label block of its own, and then by the delegation's own
 	// header row opening a ┌─┶ frame over its span. Neither happens now: under ADR 0063 a
 	// delegation has the collapsed row it wears in this list and its run view, and no third shape
@@ -570,7 +598,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// open (transcript.go), so the block that stops at one steps past a member with no span rather
 	// than into a railed one, and a framed member's span is skipped whole, by the rule below.
 	if grp, pos, ok := subAgentGroupAt(t.entries, head); ok {
-		return t.resolveGroup(th, head, in, width, blink, root, grp, pos, shapeSubAgentGroup)
+		return t.resolveGroup(head, in, width, blink, root, buf, grp, pos, shapeSubAgentGroup)
 	}
 	// A sub-agent run is ONE block, always (layout.md, ADR 0063): its head paints with the
 	// cascading summary and the whole span is then skipped outright, which is what elides the
@@ -591,12 +619,12 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// branch closes with no ┊ at all: the closer belongs to a list resuming after one of its
 	// members, and a delegation standing here stands alone.
 	if span := subAgentSpan(t.entries, head); subAgentFramed(in, span) {
-		ins := root.inputs(t.entries[head : head+span+1])
+		ins := root.appendInputs(buf[:0], t.entries[head:head+span+1])
 		return resolvedBlock{
 			shape: shapeSubAgentRun,
 			ins:   ins,
 			live:  !subAgentReported(in) || anyOpenCall(ins[1:]),
-			draw: func() blockPaint {
+			draw: func(th theme) blockPaint {
 				return renderSubAgentRun(th, ins[0], ins[1:], width, blink)
 			},
 			next: head + span + 1, // the span is elided whole: it is read in the run's own view
@@ -615,7 +643,7 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// headsRun stay keyed on sub_agent, so a fetch heads no run to open and the ordinary member
 	// painter is what its expanded row falls to (renderSubAgentGroup).
 	if grp, pos, ok := ownGroupAt(t.entries, head, loadSkillToolName); ok {
-		return t.resolveGroup(th, head, in, width, blink, root, grp, pos, shapeSkillGroup)
+		return t.resolveGroup(head, in, width, blink, root, buf, grp, pos, shapeSkillGroup)
 	}
 	// Any run of 2+ groupable calls folds under one umbrella (toolSuperGroup) — a single same-label
 	// run and adjacent runs of DIFFERENT tools alike, because a run is a ROW of the umbrella rather
@@ -636,17 +664,18 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// head flag's move is a fresh paint too.
 	if sup := toolSuperGroup(t.entries, head); len(sup) > 0 {
 		calls := sup.calls()
-		ins := root.inputs(t.entries[head : head+calls])
+		ins := root.appendInputs(buf[:0], t.entries[head:head+calls])
 		live := anyOpenCall(ins)
 		fold := umbrellaFold{large: t.umbrellaIsLarge(head), folded: t.umbrellaFolded(head)}
+		depth := in.depth // the head record's level, read here so draw closes over an int and not the record
 		return resolvedBlock{
 			shape: shapeToolSuper,
 			ins:   ins,
 			live:  live,
 			fold:  fold,
-			draw: func() blockPaint {
-				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, in.depth),
-					blockState{live: live, blink: blink}, fold).railed(th, in.depth)
+			draw: func(th theme) blockPaint {
+				return renderSuperGroup(th, superRunViews(ins, sup), railedWidth(width, depth),
+					blockState{live: live, blink: blink}, fold).railed(th, depth)
 			},
 			next: head + calls,
 		}
@@ -654,12 +683,13 @@ func (t *transcript) resolveBlock(th theme, head int, in paintInput, width int, 
 	// One entry, one block. Which kinds can still be waiting, and which head a prompt stop, are the
 	// kind's own answers (entrykind.go); everything else keys as settled and marks no stop.
 	live := in.kind.hasLiveStar() && !in.done
+	ins := append(buf[:0], in)
 	return resolvedBlock{
 		shape: shapeEntry,
-		ins:   []paintInput{in},
+		ins:   ins,
 		live:  live,
-		draw: func() blockPaint {
-			return renderEntryLines(th, in, width, blink)
+		draw: func(th theme) blockPaint {
+			return renderEntryLines(th, ins[0], width, blink)
 		},
 		next: head + 1,
 		// A prompt stop, but only the human's OWN: a message addressed to a running sub-agent is
@@ -738,9 +768,9 @@ func previewTail(s string) string {
 // of skill fetches are laid out by ONE rule and can never come to disagree about where a group's
 // block ends. shape names which of them this is, for the paint key alone (paintcache.go): what is
 // drawn is settled by the members themselves, and [renderSubAgentGroup] reads each row exactly as
-// the lone block it folded from.
-func (t *transcript) resolveGroup(th theme, head int, in paintInput, width int, blink bool,
-	root paintRoot, grp []groupBlock, pos int, shape blockShape) resolvedBlock {
+// the lone block it folded from. buf is the walk's record buffer, as [transcript.resolveBlock] states.
+func (t *transcript) resolveGroup(head int, in paintInput, width int, blink bool,
+	root paintRoot, buf []paintInput, grp []groupBlock, pos int, shape blockShape) resolvedBlock {
 	end := len(grp) - 1
 	for k := pos; k < len(grp); k++ {
 		if t.entries[grp[k].at].expanded {
@@ -757,23 +787,14 @@ func (t *transcript) resolveGroup(th theme, head int, in paintInput, width int, 
 	// One record per covered entry, stated once and read by both the key and the rows: a
 	// member's own record sits at its offset from the head and its span is the records behind
 	// it, so what the paint reads is exactly what the key named (paintcache.go).
-	ins := root.inputs(t.entries[head : head+cover])
-	members := make([]subAgentMember, 0, end-pos+1)
-	for k := pos; k <= end; k++ {
-		at := grp[k].at - head
-		members = append(members, subAgentMember{
-			head:   ins[at],
-			span:   ins[at+1 : at+1+grp[k].span],
-			offset: at,
-			last:   k == len(grp)-1,
-		})
-	}
+	ins := root.appendInputs(buf[:0], t.entries[head:head+cover])
 	// count opens the header, and only the group's FIRST block carries one.
 	count := 0
 	if pos == 0 {
 		count = len(grp)
 	}
 	live := anyOpenCall(ins)
+	depth := in.depth // the head record's level, read here so draw closes over an int and not the record
 	// The walk resumes ON the member the block stopped at when that member is open — its span
 	// follows as blocks of its own — and past that member's whole span when it is collapsed,
 	// which is what elides it.
@@ -786,9 +807,21 @@ func (t *transcript) resolveGroup(th theme, head int, in paintInput, width int, 
 		shape: shape,
 		ins:   ins,
 		live:  live,
-		draw: func() blockPaint {
-			return renderSubAgentGroup(th, count, members, railedWidth(width, in.depth),
-				blockState{live: live, blink: blink}).railed(th, in.depth)
+		// The member rows are the painter's input alone, so they are built on the miss that paints
+		// them: a hit reads only the key, which the records already name.
+		draw: func(th theme) blockPaint {
+			members := make([]subAgentMember, 0, end-pos+1)
+			for k := pos; k <= end; k++ {
+				at := grp[k].at - head
+				members = append(members, subAgentMember{
+					head:   ins[at],
+					span:   ins[at+1 : at+1+grp[k].span],
+					offset: at,
+					last:   k == len(grp)-1,
+				})
+			}
+			return renderSubAgentGroup(th, count, members, railedWidth(width, depth),
+				blockState{live: live, blink: blink}).railed(th, depth)
 		},
 		next: next,
 		// pos > 0 is this block RESUMING a list an open member ended — precisely the spec's

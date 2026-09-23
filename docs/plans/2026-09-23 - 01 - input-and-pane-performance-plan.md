@@ -201,7 +201,11 @@ NOTES (2026-09-23): the Acceptance command's -race flag cannot run on this Pi (T
 **Acceptance:** `go test -race -count=1 -run 'Sink|Reasoning|Thinking' ./internal/tui/`
 **Commit:** `perf(tui): coalesce queued reasoning deltas like tokens`
 
-## 10. A cache-hit transcript block allocates nothing large
+## 10. A cache-hit transcript block allocates nothing large — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the draw closure takes the theme as its argument instead of closing over it, and `resolveBlock`/`resolveGroup` no longer take `th` at all (so `-gcflags=-m` reports no "moved to heap: th" or "moved to heap: in" in render.go); the group's member rows are built inside draw, on the miss only.
+NOTES (2026-09-23): multi-entry blocks keep the <1 KB bound rather than a scoped one — every block's records are stated into one per-render buffer (`paintRoot.appendInputs`, replacing `paintRoot.inputs` and the now-unused `paintInputs`), so a hit materialises nothing per block; measured 294 / 335 / 440 B per block for the single-entry, run-view and multi-entry (group, umbrella, collapsed run) fixtures, against ≈ 34.9 / 34.9 / 44.8 KB at the base.
+NOTES (2026-09-23): the Acceptance command's `-race` cannot run on this host (ThreadSanitizer: unsupported VMA range, 47-bit arm64 kernel); the same selection was run without `-race`.
 
 **What:**
 **Goal:** repainting a transcript (or run view) whose blocks all hit the paint cache allocates under 1 KB per block.

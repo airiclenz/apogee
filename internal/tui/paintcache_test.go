@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -602,6 +603,132 @@ func BenchmarkRenderViewStreaming(b *testing.B) {
 		tr.renderView(th, 100, false, breadcrumbHint)
 		repaint(b, tr)
 	})
+	// Run view: the same repaint rooted at a delegation, the walk the run view drives
+	// (runview.go) — its own blocks served warm, the header and prompt painted per frame.
+	b.Run("run view", func(b *testing.B) {
+		tr, root := allHitRunViewFixture()
+		tr = warmed(tr)
+		tr.setRoot(root)
+		tr.renderView(th, 100, false, breadcrumbHint)
+		repaint(b, tr)
+	})
+}
+
+// ----------------------------------------------------------------------------
+// A cache-hit block allocates nothing large (render.go, resolveBlock / resolveGroup)
+// ----------------------------------------------------------------------------
+
+// allHitBlocks is how many blocks each all-hit fixture below paints: the scrollback the base
+// measurement was taken over (≈ 28 MB for one all-hit repaint of a run view this long).
+const allHitBlocks = 800
+
+// maxAllHitBytesPerBlock is the ceiling one cache-hit block may cost a repaint: nothing a block
+// resolves on a hit may be theme-sized (≈ 32 KB) or record-sized per covered entry (≈ 832 B each);
+// what remains is the frame's own line and target slices, amortised over its blocks.
+const maxAllHitBytesPerBlock = 1 << 10
+
+// allHitFlatFixture is allHitBlocks top-level blocks: prompts and answers, one entry each.
+func allHitFlatFixture() *transcript {
+	tr := &transcript{}
+	for i := range allHitBlocks / 2 {
+		tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil)
+		tr.apply(domain.MessageEvent{Text: fmt.Sprintf("answer %d, long enough to wrap at least once at the width painted here", i)})
+	}
+	return tr
+}
+
+// allHitRunViewFixture is one delegation whose span holds allHitBlocks blocks — answers and lone
+// reads alternating, so no two reads fold into an umbrella — and the ref of the run a view opens on.
+func allHitRunViewFixture() (*transcript, runRef) {
+	tr := &transcript{}
+	tr.addUser("what changed?", nil)
+	delegationCall(tr, "", "s1", "repo-scout", "scout the repo", 0)
+	for i := range allHitBlocks / 2 {
+		tr.apply(domain.MessageEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"},
+			Text: fmt.Sprintf("the child's answer %d", i)})
+		delegatedRead(tr, "s1", fmt.Sprintf("r%d", i), fmt.Sprintf("f%d.go", i), 1)
+	}
+	return tr, runRef{depth: 1, spawn: "s1"}
+}
+
+// allHitMultiFixture is allHitBlocks top-level blocks where most cover MANY entries: a two-member
+// delegation list (resolveGroup) and a lone collapsed run, each span eight reads deep, and a
+// two-read Tools umbrella, among the prompts and answers that keep them apart.
+func allHitMultiFixture() *transcript {
+	tr := &transcript{}
+	delegate := func(spawn string) {
+		delegationCall(tr, "", spawn, "scout-"+spawn, "scout "+spawn, 0)
+		for k := range 8 {
+			delegatedRead(tr, spawn, fmt.Sprintf("%s-r%d", spawn, k), fmt.Sprintf("%s-%d.go", spawn, k), 1)
+		}
+	}
+	for i := range allHitBlocks / 6 {
+		tr.addUser(fmt.Sprintf("question %d", i), nil)
+		delegate(fmt.Sprintf("a%d", i)) // the group: two adjacent delegations
+		delegate(fmt.Sprintf("b%d", i))
+		tr.apply(domain.MessageEvent{Text: fmt.Sprintf("answer %d", i)})
+		readCall(tr, fmt.Sprintf("u%d-1", i), "x.go", 1, 5, 0) // the umbrella: two adjacent reads
+		readCall(tr, fmt.Sprintf("u%d-2", i), "y.go", 1, 5, 0)
+		tr.apply(domain.MessageEvent{Text: fmt.Sprintf("more %d", i)})
+		delegate(fmt.Sprintf("c%d", i)) // a lone collapsed run
+	}
+	return tr
+}
+
+// allHitRenderBytes is what one all-hit repaint of tr allocates, averaged over a few repaints after
+// one that fills the cache, and how many blocks that repaint served — every one of them a hit.
+func allHitRenderBytes(t *testing.T, tr *transcript, th theme) (bytes uint64, blocks int) {
+	t.Helper()
+	const width, repaints = 100, 5
+	tr.renderView(th, width, false, breadcrumbHint) // fill the cache
+	hits, misses := tr.paints.hits, tr.paints.misses
+	var stats runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&stats)
+	before := stats.TotalAlloc
+	for range repaints {
+		runtime.KeepAlive(tr.renderView(th, width, false, breadcrumbHint))
+	}
+	runtime.ReadMemStats(&stats)
+	if got := tr.paints.misses - misses; got != 0 {
+		t.Fatalf("the all-hit repaints took %d misses; want 0", got)
+	}
+	return (stats.TotalAlloc - before) / repaints, (tr.paints.hits - hits) / repaints
+}
+
+// A repaint whose blocks all hit the cache costs each block no theme copy and no materialised
+// records: resolving a block used to build its paint closure over the ≈ 32 KB theme and the head
+// record, both moved to the heap on every call, hit or miss, and a multi-entry block stated one
+// ≈ 832 B record per covered entry just to key it. Not parallel: TotalAlloc is process-wide, and a
+// neighbour's allocations would be read as this one's.
+func TestAllHitRepaintAllocatesLittlePerBlock(t *testing.T) {
+	th := newTheme(scheme.Default())
+	runView := func() *transcript {
+		tr, root := allHitRunViewFixture()
+		tr.setRoot(root)
+		return tr
+	}
+	for _, fx := range []struct {
+		name  string
+		build func() *transcript
+	}{
+		{"single-entry blocks", allHitFlatFixture},
+		{"a run view", runView},
+		{"multi-entry blocks", allHitMultiFixture},
+	} {
+		t.Run(fx.name, func(t *testing.T) {
+			tr := warmed(fx.build())
+			bytes, blocks := allHitRenderBytes(t, tr, th)
+			if blocks < allHitBlocks*3/4 {
+				t.Fatalf("the fixture painted %d blocks; want about %d", blocks, allHitBlocks)
+			}
+			t.Logf("%d blocks, %d B per block", blocks, bytes/uint64(blocks))
+			if per := bytes / uint64(blocks); per > maxAllHitBytesPerBlock {
+				t.Errorf("an all-hit repaint of %d blocks allocated %d KB, %d B per block; want ≤ %d B",
+					blocks, bytes>>10, per, maxAllHitBytesPerBlock)
+			}
+		})
+	}
 }
 
 // equalLines is the plain slice comparison the blink assertion needs (the house has no shared one).
