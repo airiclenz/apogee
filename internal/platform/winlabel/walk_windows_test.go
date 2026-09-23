@@ -123,6 +123,39 @@ func TestJournalFlushStampsThisProcesssCreationTime(t *testing.T) {
 	}
 }
 
+func TestProcessAliveRequiresTheJournalledCreationTime(t *testing.T) {
+	t.Parallel()
+
+	// A running PID is the owner only when its creation time is the one the journal recorded: a
+	// recycled PID runs a stranger, and a stranger read as the owner leaves the dead owner's
+	// journal unrecovered and its roots spared for as long as the stranger runs. A record that
+	// never journalled a creation time (Started == 0) keeps the PID-only check.
+	self := os.Getpid()
+	started, ok := processStarted(self)
+	if !ok {
+		t.Fatalf("processStarted(self) = %d, %v; this process's own creation time must be readable", started, ok)
+	}
+
+	tests := []struct {
+		name    string
+		started uint64
+		want    bool
+	}{
+		{name: "the_journalled_creation_time_reads_alive", started: started, want: true},
+		{name: "a_different_creation_time_reads_dead", started: started + 1, want: false},
+		{name: "a_legacy_record_keeps_the_pid_only_check", started: 0, want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := ProcessAlive(self, tt.started); got != tt.want {
+				t.Errorf("ProcessAlive(self, %d) = %v, want %v (this process started at %d)", tt.started, got, tt.want, started)
+			}
+		})
+	}
+}
+
 // freshFileIdentity reads path's volume serial and file index through a handle of the test's
 // own, independent of statHandle, so the comparison below checks the walk against the OS
 // rather than against itself.

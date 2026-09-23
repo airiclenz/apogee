@@ -100,7 +100,10 @@ internal/platform/winlabel/journal.go — Record; internal/platform/winlabel/wal
 - `GOOS=windows go test -c -o /dev/null ./internal/platform/winlabel/`
 **Commit:** `feat(winlabel): journal the owner's process creation time`
 
-## 4. Journal-owner liveness is pinned to PID and creation time
+## 4. Journal-owner liveness is pinned to PID and creation time — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): `ProcessAlive(pid, started)` reads a live PID whose creation time cannot be read as dead when `started` is non-zero (the owner is unconfirmed); the creation-time fold is shared with `processStarted` through a new unexported `creationTime(handle)` so writer and checker cannot disagree. `recoveryLiveness` still excludes self by PID alone.
+NOTES (2026-09-23): the bite test drives `ProcessAlive(os.Getpid(), started+1)` directly (walk_windows_test.go); `rewriteJournalOwner` stamps the new owner's real creation time through a test-local `processCreationTime` helper (0 for a PID that no longer runs), so `TestWindowsRecoveryLeavesALiveProcessAlone` exercises the pinned check. The known host-policy failures (TestWindowsUnclearableDescendantKeepsTheJournal, TestWindowsFailedRootLabelWriteUnwindsItsJournalEntry) fail identically with and without this item.
 
 **What:** fixes the audit's PID-only liveness: a recycled PID reads as alive, so its journal is never recovered and its roots are spared forever. Depends on item 3.
 **Goal:** a journal owner counts as alive only when a process with its PID is running and, if the record's `Started` is non-zero, that process's creation time equals `Started`. A record with `Started == 0` keeps the PID-only check. Every liveness consumer in winlabel and its callers uses this rule.

@@ -2039,7 +2039,12 @@ func rewriteJournalPID(t *testing.T, home, path string) {
 	rewriteJournalOwner(t, home, path, deadPID(t))
 }
 
-// rewriteJournalOwner rewrites a journal under the PID-named file its new owner would use.
+// rewriteJournalOwner rewrites a journal under the PID-named file its new owner would use, and
+// stamps it with that owner's creation time. The journal as read carries THIS process's
+// creation time (Record.Started), and liveness pins the owner to PID and creation time both
+// (winlabel.ProcessAlive): left in place it would name a live PID with a stranger's creation
+// time, and the new owner would read as dead. A PID that no longer runs has no creation time to
+// read and is stamped 0, which is the PID-only check that already reads it dead.
 func rewriteJournalOwner(t *testing.T, home, path string, pid int) {
 	t.Helper()
 	journal, err := winlabel.ReadJournal(path)
@@ -2047,12 +2052,29 @@ func rewriteJournalOwner(t *testing.T, home, path string, pid int) {
 		t.Fatalf("read journal %q: %v", path, err)
 	}
 	journal.PID = pid
+	journal.Started = processCreationTime(pid)
 	if err := os.Remove(path); err != nil {
 		t.Fatalf("remove journal %q: %v", path, err)
 	}
 	if err := winlabel.WriteJournal(winlabel.JournalPath(home, pid), journal); err != nil {
 		t.Fatalf("rewrite journal: %v", err)
 	}
+}
+
+// processCreationTime reads pid's creation time as Record.Started journals it — the FILETIME
+// GetProcessTimes reports, folded into one uint64 — through a handle of the test's own, or 0
+// when the process cannot be opened or queried.
+func processCreationTime(pid int) uint64 {
+	handle, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, uint32(pid))
+	if err != nil {
+		return 0
+	}
+	defer func() { _ = windows.CloseHandle(handle) }()
+	var creation, exit, kernel, user windows.Filetime
+	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
+		return 0
+	}
+	return uint64(creation.HighDateTime)<<32 | uint64(creation.LowDateTime)
 }
 
 // deadPID returns a PID that is not running, by starting a process and waiting for it to exit.
@@ -2063,7 +2085,7 @@ func deadPID(t *testing.T) int {
 		t.Fatalf("start a throwaway process: %v", err)
 	}
 	pid := cmd.Process.Pid
-	if winlabel.ProcessAlive(pid) {
+	if winlabel.ProcessAlive(pid, 0) {
 		t.Skipf("pid %d is still reported alive after exiting; cannot synthesise a dead owner", pid)
 	}
 	return pid
@@ -2093,7 +2115,7 @@ func liveChildPID(t *testing.T) (int, func()) {
 		_ = cmd.Wait()
 	}
 	t.Cleanup(kill)
-	if !winlabel.ProcessAlive(cmd.Process.Pid) {
+	if !winlabel.ProcessAlive(cmd.Process.Pid, 0) {
 		t.Skipf("pid %d is not reported alive; cannot synthesise a live owner", cmd.Process.Pid)
 	}
 	return cmd.Process.Pid, kill

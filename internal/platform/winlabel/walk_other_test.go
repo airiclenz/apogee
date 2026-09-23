@@ -45,7 +45,7 @@ func TestNonWindowsStubsReportUnsupported(t *testing.T) {
 func TestNonWindowsProcessAliveSparesNothing(t *testing.T) {
 	t.Parallel()
 
-	if ProcessAlive(os.Getpid()) {
+	if ProcessAlive(os.Getpid(), 0) {
 		t.Error("ProcessAlive reported this very process alive off Windows; recovery would then spare roots forever")
 	}
 }

@@ -298,7 +298,7 @@ func osRevert() revertFunc {
 // the pass's own view (recoveryLiveness), under which a journal of this very process is an
 // interrupted run rather than a live claim. The two must agree within one Recover pass, or a
 // journal it recovers as dead also spares its roots as alive and the pair deadlock (Recover).
-func revertSparingLiveSiblings(home, own string, alive func(int) bool) func(Record) ([]Entry, error) {
+func revertSparingLiveSiblings(home, own string, alive func(pid int, started uint64) bool) func(Record) ([]Entry, error) {
 	return func(r Record) ([]Entry, error) {
 		if err := judgePriors(r, own); err != nil {
 			return nil, err
@@ -482,11 +482,18 @@ func Recover(home string) {
 	})
 }
 
-// ProcessAlive reports whether pid names a running process, so recovery never reverts the
-// labels of a live apogee. A PID that cannot be opened is treated as gone. It is exported for
-// package platform's Windows-tagged lifecycle tests, which drive it against a real child
-// process (D6).
-func ProcessAlive(pid int) bool {
+// ProcessAlive reports whether the journal owner named by pid and started is still running, so
+// recovery never reverts the labels of a live apogee. The PID alone cannot say that: Windows
+// recycles PIDs, and a stranger that inherits a dead owner's PID would otherwise read as that
+// owner for as long as it runs — its journal never recovered, its roots spared from every
+// sibling's clear. So a non-zero started (Record.Started, the owner's creation time) must also
+// equal the running process's creation time; a process whose creation time differs, or cannot
+// be read, is a different process and the owner reads as gone. started == 0 is a record that
+// never journalled it (a journal written before Record.Started existed, or a flush whose read
+// failed), which keeps the PID-only check. A PID that cannot be opened is treated as gone. It
+// is exported for package platform's Windows-tagged lifecycle tests, which drive it against a
+// real child process (D6).
+func ProcessAlive(pid int, started uint64) bool {
 	if pid <= 0 {
 		return false
 	}
@@ -500,7 +507,14 @@ func ProcessAlive(pid int) bool {
 		return false
 	}
 	const stillActive = 259 // STILL_ACTIVE
-	return code == stillActive
+	if code != stillActive {
+		return false
+	}
+	if started == 0 {
+		return true
+	}
+	running, ok := creationTime(handle)
+	return ok && running == started
 }
 
 // processStarted returns the creation time of the process with this PID — the FILETIME
@@ -518,6 +532,14 @@ func processStarted(pid int) (uint64, bool) {
 		return 0, false
 	}
 	defer func() { _ = windows.CloseHandle(handle) }()
+	return creationTime(handle)
+}
+
+// creationTime reads the creation time of the process behind handle, folded as processStarted
+// describes, and whether it could be read. It is the one fold both the journal's writer
+// (processStarted) and its liveness check (ProcessAlive) use, so the two cannot disagree on
+// what a matching creation time looks like.
+func creationTime(handle windows.Handle) (uint64, bool) {
 	var creation, exit, kernel, user windows.Filetime
 	if err := windows.GetProcessTimes(handle, &creation, &exit, &kernel, &user); err != nil {
 		return 0, false

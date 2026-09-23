@@ -36,7 +36,7 @@ func Recover(_ string) {}
 // ProcessAlive is the non-Windows stub of the liveness probe. It reports false, the answer
 // that spares nothing — the safe direction, since a spared root leaves a label in place and
 // nothing here can have labelled one.
-func ProcessAlive(_ int) bool { return false }
+func ProcessAlive(_ int, _ uint64) bool { return false }
 
 // processStarted is the non-Windows stub of the creation-time read. It reports (0, false), the
 // "not recorded" value Record.Started decodes to from any journal that never carried it —

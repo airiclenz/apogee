@@ -58,14 +58,15 @@ func retire(path string, r Record, revert func(Record) ([]Entry, error)) ([]Entr
 	return nil, nil
 }
 
-// recoveryLiveness is the one liveness view a Recover pass reads: every PID alive says is
-// running, EXCEPT self. A journal carrying this process's own PID at recovery is an interrupted
+// recoveryLiveness is the one liveness view a Recover pass reads: every owner alive says is
+// running — its PID and, where the record journalled one, its creation time (ProcessAlive) —
+// EXCEPT self, which is excluded by PID alone. A journal carrying this process's own PID at recovery is an interrupted
 // run — a confiner of this process that never retired it, or a dead process whose PID was
 // reused — so the pass reverts it, and the sibling exclusion (revertibleRoots) must read it the
 // same way. Counted alive there, it spares its root to a dead sibling that in turn spares the
 // root back, and neither journal ever retires (Recover).
-func recoveryLiveness(self int, alive func(int) bool) func(int) bool {
-	return func(pid int) bool { return pid != self && alive(pid) }
+func recoveryLiveness(self int, alive func(pid int, started uint64) bool) func(pid int, started uint64) bool {
+	return func(pid int, started uint64) bool { return pid != self && alive(pid, started) }
 }
 
 // recoverSweep is Recover's loop over the journals under home: every journal whose owner is
@@ -77,7 +78,7 @@ func recoveryLiveness(self int, alive func(int) bool) func(int) bool {
 // alive and revert are injected — recoveryLiveness over ProcessAlive and
 // revertSparingLiveSiblings in production, both Windows-tagged — so the sweep is testable on
 // any OS, the retire seam pattern.
-func recoverSweep(home string, alive func(int) bool, revert func(own string) func(Record) ([]Entry, error)) {
+func recoverSweep(home string, alive func(pid int, started uint64) bool, revert func(own string) func(Record) ([]Entry, error)) {
 	for {
 		retiredAny := false
 		for _, path := range ListJournals(home) {
@@ -85,7 +86,7 @@ func recoverSweep(home string, alive func(int) bool, revert func(own string) fun
 			if err != nil {
 				continue
 			}
-			if alive(r.PID) {
+			if alive(r.PID, r.Started) {
 				continue
 			}
 			remaining, err := retire(path, r, revert(path))
@@ -496,10 +497,10 @@ func isDriveLetter(b byte) bool {
 // alive is injected (ProcessAlive in production, which is Windows-tagged), and readLabel and
 // readIdentity with it (ReadSDDL and statHandle, likewise), so the decision is table-testable
 // on any OS — the retire seam pattern.
-func revertibleRoots(r Record, siblings []Record, alive func(int) bool, readLabel func(string) (string, error), readIdentity statFunc) (clear []string, spared []Entry) {
+func revertibleRoots(r Record, siblings []Record, alive func(pid int, started uint64) bool, readLabel func(string) (string, error), readIdentity statFunc) (clear []string, spared []Entry) {
 	claimed := make(map[string]bool)
 	for _, sibling := range siblings {
-		if !alive(sibling.PID) {
+		if !alive(sibling.PID, sibling.Started) {
 			continue
 		}
 		for _, root := range sibling.Roots() {

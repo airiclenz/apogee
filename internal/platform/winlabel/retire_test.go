@@ -501,7 +501,7 @@ func TestRevertibleRootsSparesOnlyALiveSiblingsRoots(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			alive := func(pid int) bool { return tt.live[pid] }
+			alive := func(pid int, _ uint64) bool { return tt.live[pid] }
 			got, _ := revertibleRoots(journal, tt.siblings, alive, readsApogeesOwnLabel, identityNeverRead)
 			if len(got) != len(tt.want) {
 				t.Fatalf("revertibleRoots = %v, want %v", got, tt.want)
@@ -762,7 +762,7 @@ func TestRevertibleRootsClearsOnlyRootsApogeesOwnLabelVouchesFor(t *testing.T) {
 	// claims is spared as before. Both filters run here, purely, because the label read is
 	// Windows-only.
 	const foreignMedium = "S:AI(ML;;NW;;;ME)"
-	alwaysAlive := func(int) bool { return true }
+	alwaysAlive := func(int, uint64) bool { return true }
 
 	tests := []struct {
 		name     string
@@ -873,7 +873,7 @@ func sparingRevert(home, own string, live map[int]bool, cleared *[]string) func(
 		// (TestRestorablePriorsHandsOffSiblingClaimedTrees); only the clear side decides what
 		// these cases assert.
 		_, handoff := restorablePriors(r, siblings)
-		clear, spared := revertibleRoots(r, siblings, func(pid int) bool { return live[pid] }, readsApogeesOwnLabel, identityNeverRead)
+		clear, spared := revertibleRoots(r, siblings, func(pid int, _ uint64) bool { return live[pid] }, readsApogeesOwnLabel, identityNeverRead)
 		*cleared = append(*cleared, clear...)
 		return handoffSparedRoots(handoff, spared), nil
 	}
@@ -926,7 +926,7 @@ func TestRevertibleRootsHandsBackTheRootsALiveSiblingSpared(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			alive := func(pid int) bool { return tt.live[pid] }
+			alive := func(pid int, _ uint64) bool { return tt.live[pid] }
 			clear, spared := revertibleRoots(tt.journal, tt.siblings, alive, tt.read, identityNeverRead)
 			if !sameRoots(clear, tt.wantClear) {
 				t.Errorf("clear = %v, want %v", clear, tt.wantClear)
@@ -1231,7 +1231,7 @@ func TestRecoverSweepRetiresItsOwnJournalBesideADeadSiblingsOverASharedRoot(t *t
 		}
 	}
 
-	alive := recoveryLiveness(self, func(pid int) bool { return pid == self })
+	alive := recoveryLiveness(self, func(pid int, _ uint64) bool { return pid == self })
 	var cleared []string
 	recoverSweep(home, alive, func(own string) func(Record) ([]Entry, error) {
 		return func(r Record) ([]Entry, error) {
@@ -1254,11 +1254,81 @@ func TestRecoverSweepRetiresItsOwnJournalBesideADeadSiblingsOverASharedRoot(t *t
 func TestRecoveryLivenessNeverCountsItsOwnProcess(t *testing.T) {
 	t.Parallel()
 
-	alive := recoveryLiveness(100, func(pid int) bool { return pid == 100 || pid == 200 })
+	alive := recoveryLiveness(100, func(pid int, _ uint64) bool { return pid == 100 || pid == 200 })
 	for pid, want := range map[int]bool{100: false, 200: true, 300: false} {
-		if got := alive(pid); got != want {
+		if got := alive(pid, 0); got != want {
 			t.Errorf("alive(%d) = %v, want %v", pid, got, want)
 		}
+	}
+}
+
+// ownerLiveAt is the liveness seam for a host where exactly one process runs: the one with this
+// PID and this creation time. A record naming the PID with a different Started names a stranger
+// holding a recycled PID, and a record with Started == 0 keeps the PID-only check — the rule
+// ProcessAlive applies to the real process table.
+func ownerLiveAt(pid int, started uint64) func(int, uint64) bool {
+	return func(p int, s uint64) bool { return p == pid && (s == 0 || s == started) }
+}
+
+func TestLivenessJudgesTheRecordsOwnerNotJustItsPID(t *testing.T) {
+	t.Parallel()
+
+	// A PID the OS has recycled names a different process, and only the journalled creation time
+	// tells the two apart. Every consumer must hand the liveness check the record's Started
+	// beside its PID: a sibling whose PID now runs a stranger claims no root, and a journal whose
+	// PID was recycled is recovered rather than skipped as live forever.
+	const pid, started = 200, 133_000_000_000_000_007
+	alive := ownerLiveAt(pid, started)
+	journal := Record{PID: 100, Entries: []Entry{{Path: `C:\work`, Root: true}}}
+
+	tests := []struct {
+		name        string
+		sibling     Record
+		wantSpared  bool
+		wantSkipped bool
+	}{
+		{
+			name:        "the_owner_itself_is_alive_and_claims_its_root",
+			sibling:     Record{PID: pid, Started: started, Entries: []Entry{{Path: `C:\work`, Root: true}}},
+			wantSpared:  true,
+			wantSkipped: true,
+		},
+		{
+			name:    "a_stranger_on_the_recycled_pid_is_not_the_owner",
+			sibling: Record{PID: pid, Started: started + 1, Entries: []Entry{{Path: `C:\work`, Root: true}}},
+		},
+		{
+			name:        "a_legacy_record_keeps_the_pid_only_check",
+			sibling:     Record{PID: pid, Entries: []Entry{{Path: `C:\work`, Root: true}}},
+			wantSpared:  true,
+			wantSkipped: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			clear, spared := revertibleRoots(journal, []Record{tt.sibling}, alive, readsApogeesOwnLabel, identityNeverRead)
+			if gotSpared := len(spared) == 1 && len(clear) == 0; gotSpared != tt.wantSpared {
+				t.Errorf("revertibleRoots clear = %v spared = %v, want the root spared = %v", clear, spared, tt.wantSpared)
+			}
+
+			home := t.TempDir()
+			if err := WriteJournal(JournalPath(home, tt.sibling.PID), tt.sibling); err != nil {
+				t.Fatalf("seed the journal: %v", err)
+			}
+			var reverted bool
+			recoverSweep(home, recoveryLiveness(100, alive), func(string) func(Record) ([]Entry, error) {
+				return func(Record) ([]Entry, error) {
+					reverted = true
+					return nil, nil
+				}
+			})
+			if gotSkipped := !reverted; gotSkipped != tt.wantSkipped {
+				t.Errorf("recoverSweep skipped the journal = %v, want %v", gotSkipped, tt.wantSkipped)
+			}
+		})
 	}
 }
 
@@ -1584,7 +1654,7 @@ func TestRevertibleRootsRefusesARootWhoseObjectWasReplaced(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			alive := func(pid int) bool { return tt.live[pid] }
+			alive := func(pid int, _ uint64) bool { return tt.live[pid] }
 			clear, spared := revertibleRoots(tt.journal, tt.siblings, alive, tt.read, disk)
 			if !sameRoots(clear, tt.wantClear) {
 				t.Errorf("clear = %v, want %v", clear, tt.wantClear)
