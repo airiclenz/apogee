@@ -20,8 +20,8 @@ package tui
 // P3.14 sub-agent renderer extends these seams rather than reworking them.
 
 import (
-	"slices"
 	"strings"
+	"sync/atomic"
 
 	"github.com/charmbracelet/x/ansi"
 )
@@ -50,6 +50,13 @@ type renderedTranscript struct {
 	// (Model.stickyHeaderSpan): a header is content lines frozen at the top of the viewport, and
 	// this only says WHICH lines without asking the offset.
 	header userBlock
+	// cells is PARALLEL to lines where it is set: each line's width in the VIEWPORT WIDGET's measure
+	// (widgetWidth), as its block stored it when the block was painted ([blockPaint.cells]), and
+	// unmeasured (-1) for every line no block measured — a separator, the breadcrumb, the rooted
+	// prompt, the streaming preview. reserveWidgetCells reads a stored width instead of measuring the
+	// line again and measures an unmeasured one exactly as it always did, so a hand-built transcript
+	// that sets no cells at all is reserved as before.
+	cells []int
 }
 
 // blockPaint is one painted block: its physical lines and, parallel to them, what each line is to
@@ -63,6 +70,13 @@ type renderedTranscript struct {
 type blockPaint struct {
 	lines   []string
 	targets []lineMark
+	// cells is nil, or PARALLEL to lines: each line's width in the viewport widget's measure
+	// (widgetWidth), or -1 where the line was not measured. It is filled once, when a cacheable block
+	// is painted ([transcript.paintBlock], [measuredCells]), so a repaint served from the cache hands
+	// reserveWidgetCells the widths the paint already knows instead of re-measuring every line of the
+	// scrollback. A width is a fact about the line alone — never a verdict against one limit — so it
+	// stays true for any viewport width the same paint is shown at.
+	cells []int
 }
 
 // plainPaint is the paint of a block that carries no click surface at all — an assistant answer, a
@@ -93,20 +107,54 @@ func (p *blockPaint) addFor(member int, lines []string, kind targetKind) {
 	for range lines {
 		p.targets = append(p.targets, lineMark{kind: kind, member: member})
 	}
+	p.padCells()
 }
 
 // join appends another paint whole — its lines and its own target marks — so a block composed of
 // sub-paints (a tool block of one branch or of many) keeps their marks without re-deriving them.
 func (p *blockPaint) join(q blockPaint) {
+	if q.cells != nil && p.cells == nil {
+		p.cells = make([]int, len(p.lines), len(p.lines)+len(q.lines))
+		for i := range p.cells {
+			p.cells[i] = -1
+		}
+	}
 	p.lines = append(p.lines, q.lines...)
 	p.targets = append(p.targets, q.targets...)
+	if p.cells != nil {
+		p.cells = append(p.cells, q.cells...)
+		p.padCells()
+	}
+}
+
+// padCells keeps a measured paint's cells in lockstep with its lines: every line appended since the
+// last measure is unmeasured (-1), which reserveWidgetCells answers by measuring it as it always
+// did. A paint with no cells stays without them.
+func (p *blockPaint) padCells() {
+	for p.cells != nil && len(p.cells) < len(p.lines) {
+		p.cells = append(p.cells, -1)
+	}
 }
 
 // railed frames the paint for its sub-agent depth (railLines) while carrying its target marks
 // through untouched: the rail prefixes each line in place and adds none, so the marks stay in
 // lockstep with the lines they belong to.
+//
+// A measured paint stays measured: the rail changes every line it prefixes, so each line the paint
+// had a width for is measured again as railed, and a line it had none for stays unmeasured.
 func (p blockPaint) railed(th theme, depth int) blockPaint {
-	return blockPaint{lines: railLines(th, p.lines, depth), targets: p.targets}
+	lines := railLines(th, p.lines, depth)
+	var cells []int
+	if p.cells != nil {
+		cells = make([]int, len(p.cells))
+		for i, c := range p.cells {
+			cells[i] = -1
+			if c >= 0 && i < len(lines) {
+				cells[i] = widgetWidth(lines[i])
+			}
+		}
+	}
+	return blockPaint{lines: lines, targets: p.targets, cells: cells}
 }
 
 // retargeted restates what a click on this paint's already-marked lines MEANS, leaving the lines
@@ -127,7 +175,7 @@ func (p blockPaint) retargeted(kind targetKind) blockPaint {
 		}
 		marks[i] = mark
 	}
-	return blockPaint{lines: p.lines, targets: marks}
+	return blockPaint{lines: p.lines, targets: marks, cells: p.cells}
 }
 
 // renderView renders the committed entries plus any in-progress assistant buffer into the
@@ -166,6 +214,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	root := t.paintRoot()
 	var lines []string
 	var targets []lineTarget
+	var cells []int // the widget widths the painted blocks stored, -1 where none did (renderedTranscript.cells)
 	var userBlocks []userBlock
 	var header userBlock
 
@@ -195,6 +244,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		if len(lines) > header.count {
 			lines = append(lines, railJoin(th, prevBlockDepth, depth, closes))
 			targets = append(targets, lineTarget{}) // a separator belongs to neither block
+			cells = append(cells, -1)
 		}
 		// A ROOTED paint registers none, whatever it is laying down: inside a view the breadcrumb is
 		// the only sticky header there is (header, above), and a user row that claimed the slot would
@@ -214,6 +264,11 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 				target = lineTarget{kind: mark.kind, entry: head + mark.member}
 			}
 			targets = append(targets, target)
+			cell := -1
+			if i < len(block.cells) {
+				cell = block.cells[i]
+			}
+			cells = append(cells, cell)
 		}
 		prevBlockDepth = depth
 	}
@@ -244,6 +299,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		head := t.entries[root.first-1]
 		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width, backHint))
 		targets = append(targets, lineTarget{kind: targetBreadcrumb})
+		cells = append(cells, -1)
 		// The header is TWO rows: the trail, and a blank one beneath it holding the view's content
 		// off the band exactly as the frame's own gap row holds the transcript off the bottom block.
 		// The spacer is unpainted and carries no target — it is a row of nothing, and a click on it
@@ -251,6 +307,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 		// than scrolling away and letting the first block ride against it.
 		lines = append(lines, "")
 		targets = append(targets, lineTarget{})
+		cells = append(cells, -1)
 		header = userBlock{start: 0, count: 2}
 		if strings.TrimSpace(head.tool.task) != "" {
 			prompt := paintInput{
@@ -340,7 +397,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	if previewAt >= 0 {
 		paintPreview(root.last)
 	}
-	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets, header: header}
+	return renderedTranscript{lines: lines, userBlocks: userBlocks, targets: targets, header: header, cells: cells}
 }
 
 // reserveWidgetCells holds every rendered line inside limit columns in the measure the VIEWPORT
@@ -373,8 +430,38 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 // line it came from — every physical row a header occupies is the same click surface
 // ([blockPaint.add]) — and a block's span is moved by the rows added above it and stretched by the
 // rows added inside it, so the accounting the mouse reads is still the one the paint laid down.
+//
+// It is paid once per block, not once per repaint: a block stores its lines' widget widths when it
+// is painted ([blockPaint.cells]), so a repaint served from the cache measures none of the lines it
+// was handed and only the unmeasured ones — separators, the breadcrumb, the streaming preview — are
+// measured here, each settled by its byte length first. What it returns carries no cells: its
+// broken rows were never measured.
 func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
-	if limit < 1 || !slices.ContainsFunc(r.lines, func(ln string) bool { return overWidgetWidth(ln, limit) }) {
+	if limit < 1 {
+		return r
+	}
+	// widthOf is line i's width in the widget's measure: the width its block stored when it was
+	// painted (renderedTranscript.cells), measured here only for a line no block measured.
+	widthOf := func(i int) int {
+		if i < len(r.cells) && r.cells[i] >= 0 {
+			return r.cells[i]
+		}
+		return widgetWidth(r.lines[i])
+	}
+	// first is the first line the widget would cut — nothing above it moves — and firstWidth its
+	// width, so the line that settles the question is not measured twice. The byte length is asked
+	// before any width, as overWidgetWidth asks it.
+	first, firstWidth := -1, 0
+	for i, ln := range r.lines {
+		if len(ln) <= limit {
+			continue
+		}
+		if w := widthOf(i); w > limit {
+			first, firstWidth = i, w
+			break
+		}
+	}
+	if first < 0 {
 		return r
 	}
 
@@ -385,8 +472,13 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	shift := make([]int, len(r.lines)+1)
 	for i, ln := range r.lines {
 		segs := []string{ln}
-		if overWidgetWidth(ln, limit) {
-			segs = dropBlankTail(splitAtWidgetWidth(ln, limit))
+		switch {
+		case i == first:
+			segs = dropBlankTail(splitAtWidgetWidth(ln, firstWidth, limit))
+		case i > first && len(ln) > limit:
+			if w := widthOf(i); w > limit {
+				segs = dropBlankTail(splitAtWidgetWidth(ln, w, limit))
+			}
 		}
 		target := lineTarget{}
 		if i < len(r.targets) {
@@ -417,12 +509,35 @@ func (r renderedTranscript) reserveWidgetCells(limit int) renderedTranscript {
 	return renderedTranscript{lines: lines, userBlocks: blocks, targets: targets, header: header}
 }
 
-// overWidgetWidth reports whether the viewport widget would cut ln at limit columns. The BYTE
-// length is asked first and settles most lines for nothing: a display cell costs at least one byte,
-// so a line shorter than limit in bytes cannot be wider than limit in cells, and the escape-parsing
-// scan is spent only where the answer is actually in doubt.
-func overWidgetWidth(ln string, limit int) bool {
-	return len(ln) > limit && ansi.StringWidth(ln) > limit
+// widgetWidth is ln's width in the measure the viewport WIDGET reads its lines in — ansi.StringWidth,
+// the call bubbles' viewport makes (ADR 0030 §6: a mirror's oracle is the widget) — and the one
+// place the reserve and the paint that stores widths for it ([measuredCells]) measure through. It
+// counts its calls (widgetMeasures) and does nothing else.
+func widgetWidth(ln string) int {
+	widgetMeasures.Add(1)
+	return ansi.StringWidth(ln)
+}
+
+// widgetMeasures counts widgetWidth calls, process-wide. It exists for the tests that pin how many
+// lines a repaint measures (paintcache_test.go) and is read by nothing else; it is atomic because
+// the transcript renders from parallel tests, and those tests read it only when running alone.
+var widgetMeasures atomic.Int64
+
+// measuredCells is the widget width of every line of a freshly painted block that could be wider
+// than the width it was painted to, and -1 for the rest ([blockPaint.cells]). The BYTE length is
+// asked first and settles most lines for nothing: a display cell costs at least one byte, so a line
+// no longer than width in bytes cannot be wider than width in cells — nor than the viewport, which
+// is never narrower than the paint (transcriptWidth) — and reserveWidgetCells settles such a line by
+// its byte length again should it ever be asked about a narrower limit.
+func measuredCells(lines []string, width int) []int {
+	cells := make([]int, len(lines))
+	for i, ln := range lines {
+		cells[i] = -1
+		if len(ln) > width {
+			cells[i] = widgetWidth(ln)
+		}
+	}
+	return cells
 }
 
 // dropBlankTail drops the rows a break opened for cells that show NOTHING — the trailing pad of a
@@ -440,9 +555,9 @@ func dropBlankTail(segs []string) []string {
 // splitAtWidgetWidth cuts ln into limit-column runs in the widget's measure — the viewport's own
 // soft wrap (bubbles/v2@v2.1.0 viewport.go:415-440), which is what makes the rows this returns the
 // rows that widget used to draw for the same line. ansi.Cut carries the styling of the run it
-// slices through onto each piece, so a broken row is coloured like the line it came from.
-func splitAtWidgetWidth(ln string, limit int) []string {
-	width := ansi.StringWidth(ln)
+// slices through onto each piece, so a broken row is coloured like the line it came from. width is
+// ln's own widget width (widgetWidth), which the caller has already had to know to decide the cut.
+func splitAtWidgetWidth(ln string, width, limit int) []string {
 	out := make([]string, 0, width/limit+1)
 	for idx := 0; idx < width; idx += limit {
 		out = append(out, ansi.Cut(ln, idx, idx+limit))

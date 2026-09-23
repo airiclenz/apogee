@@ -217,7 +217,11 @@ NOTES (2026-09-23): the Acceptance command's `-race` cannot run on this host (Th
 **Acceptance:** `go test -race -count=1 -run 'Paint|Render|RunView' ./internal/tui/`
 **Commit:** `perf(tui): stop the theme escaping to the heap on every cached block`
 
-## 11. Widget cells are measured once per painted block
+## 11. Widget cells are measured once per painted block — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): `overWidgetWidth` is replaced by `widgetWidth` (a counted `ansi.StringWidth`, the one measure the reserve and the paint-time `measuredCells` share). The byte-length short-circuit stays inline in `reserveWidgetCells` and `measuredCells`. `splitAtWidgetWidth` now takes the line's already-known width, so a broken line is measured once instead of three times.
+NOTES (2026-09-23): the per-line widths are stored in a new `blockPaint.cells` (parallel to lines, -1 = unmeasured), filled in `paintBlock` on a cacheable miss at `key.width`, and carried into a new `renderedTranscript.cells`. `railed` re-measures the lines it had widths for, `retargeted` keeps them, and `add`/`addFor`/`join` keep the widths in step with the lines. Separators, the breadcrumb, the rooted prompt, the streaming preview, uncacheable kinds and a hand-built `renderedTranscript` stay unmeasured, and the reserve measures them as before.
+NOTES (2026-09-23): the Acceptance command's `-race` cannot run on this host (ThreadSanitizer: unsupported VMA range, 47-bit arm64). The same selection ran without `-race` and passed, as did the full `./internal/tui/` package and `make lint` (0 issues).
 
 **What:**
 Depends on item 10.

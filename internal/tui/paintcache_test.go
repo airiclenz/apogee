@@ -5,10 +5,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/scheme"
@@ -845,5 +847,182 @@ func BenchmarkThinkingPaneUpdateAndView(b *testing.B) {
 		next, _ := m.Update(chunk)
 		m = next.(Model)
 		m.View()
+	}
+}
+
+// ----------------------------------------------------------------------------
+// Widget cells are measured once per painted block (render.go, reserveWidgetCells)
+// ----------------------------------------------------------------------------
+
+// widgetCellsFixture is a scrollback whose lines overrun the viewport in BYTES — styled rows, and
+// answers filled to the column and ending in VS16 glyphs the widget counts two cells each — so
+// every repaint before stored widths had to measure them, and some really are broken by the reserve.
+func widgetCellsFixture(width int) *transcript {
+	tr := &transcript{}
+	for i := range 12 {
+		tr.addUser(fmt.Sprintf("question %d — what does the fold do here?", i), nil)
+		tr.commitAssistant(strings.Repeat("a", width-4)+vs16Warning+vs16Warning, runRef{})
+		readCall(tr, fmt.Sprintf("r%d", i), fmt.Sprintf("f%d.go", i), 1, 5, 0)
+	}
+	return tr
+}
+
+// baseReserve is the reserve as it measured before any block stored a width: the same paint with
+// its stored cells dropped, so every line is measured where it stands.
+func baseReserve(r renderedTranscript, limit int) renderedTranscript {
+	r.cells = nil
+	return r.reserveWidgetCells(limit)
+}
+
+// sameReserve fails when two reserved paints differ in a line, a target, a user-block span or the
+// header.
+func sameReserve(t *testing.T, what string, got, want renderedTranscript) {
+	t.Helper()
+	sameRender(t, what, got, want)
+	if !slices.Equal(got.userBlocks, want.userBlocks) {
+		t.Errorf("%s: userBlocks = %+v; want %+v", what, got.userBlocks, want.userBlocks)
+	}
+	if got.header != want.header {
+		t.Errorf("%s: header = %+v; want %+v", what, got.header, want.header)
+	}
+}
+
+// A repaint served from the cache measures none of its cached lines in the widget's measure: each
+// block stored its lines' widths when it was painted, so the reserve reads them instead of
+// re-measuring the scrollback every frame. A block that changes is measured again — its own lines,
+// and nothing of the blocks around it. Not parallel: widgetMeasures is process-wide, and a
+// neighbour's render would be counted as this one's.
+func TestWidgetCellsAreMeasuredOncePerPaintedBlock(t *testing.T) {
+	th := newTheme(scheme.Default())
+	const width = 60
+	limit := width + bodyRightGutter
+	tr := warmed(widgetCellsFixture(width))
+	paint := func() renderedTranscript { return tr.renderView(th, width, false, breadcrumbHint) }
+	measured := func(f func()) int64 {
+		before := widgetMeasures.Load()
+		f()
+		return widgetMeasures.Load() - before
+	}
+
+	first := paint()
+	overBytes := 0
+	for _, ln := range first.lines {
+		if len(ln) > limit {
+			overBytes++
+		}
+	}
+	if overBytes == 0 {
+		t.Fatal("setup: no line overruns the limit in bytes; the fixture measures nothing either way")
+	}
+	if got := len(baseReserve(first, limit).lines); got == len(first.lines) {
+		t.Fatal("setup: the reserve broke no line; the fixture does not exercise a break")
+	}
+
+	var repaint renderedTranscript
+	if got := measured(func() { repaint = paint().reserveWidgetCells(limit) }); got != 0 {
+		t.Errorf("an all-hit repaint measured %d lines; want 0 (the %d byte-overrunning lines are stored)", got, overBytes)
+	}
+	sameReserve(t, "all-hit repaint", repaint, baseReserve(first, limit))
+
+	// One block more: only its lines are measured, once, when it is painted.
+	tr.commitAssistant(strings.Repeat("b", width-4)+vs16Warning+vs16Warning, runRef{})
+	var grown renderedTranscript
+	got := measured(func() { grown = paint() })
+	added := grown.lines[len(first.lines)+1:] // past the separator the new block opened with
+	want := 0
+	for _, ln := range added {
+		if len(ln) > width {
+			want++
+		}
+	}
+	if want == 0 || int(got) != want {
+		t.Errorf("painting one new block measured %d lines; want its own %d over-width lines", got, want)
+	}
+	if got := measured(func() { grown.reserveWidgetCells(limit) }); got != 0 {
+		t.Errorf("the reserve over the grown paint measured %d lines; want 0", got)
+	}
+}
+
+// The stored widths change nothing the reserve decides: over wide and narrow viewports, and under
+// either painter measure (WcWidth before a terminal answers mode 2027, GraphemeWidth after), the
+// reserved lines, targets and spans equal what measuring every line where it stands produced —
+// through a cold paint, a warm one and the rooted run view alike.
+func TestWidgetCellsReserveAsTheWidgetMeasures(t *testing.T) {
+	t.Parallel()
+	for _, method := range []struct {
+		name   string
+		method ansi.Method
+	}{{"wcwidth", ansi.WcWidth}, {"grapheme", ansi.GraphemeWidth}} {
+		for _, width := range []int{24, 60, 120} {
+			t.Run(fmt.Sprintf("%s/%d", method.name, width), func(t *testing.T) {
+				t.Parallel()
+				th := newTheme(scheme.Default())
+				th.measure = widthAuthority{method: method.method}
+				for _, limit := range []int{width, width + bodyRightGutter} {
+					tr := warmed(widgetCellsFixture(width))
+					cold := coldRender(tr, th, width, false)
+					tr.renderView(th, width, false, breadcrumbHint) // fill the cache
+					warm := tr.renderView(th, width, false, breadcrumbHint)
+					sameReserve(t, "warm", warm.reserveWidgetCells(limit), baseReserve(cold, limit))
+
+					view, root := allHitRunViewFixture()
+					view = warmed(view)
+					view.setRoot(root)
+					view.renderView(th, width, false, breadcrumbHint)
+					rooted := view.renderView(th, width, false, breadcrumbHint)
+					sameReserve(t, "run view", rooted.reserveWidgetCells(limit), baseReserve(rooted, limit))
+				}
+			})
+		}
+	}
+}
+
+// A measured paint stays measured through the two rebuilds a block can go through after it is
+// drawn: railing re-measures every line it had a width for as the railed line, and retargeting —
+// which keeps the lines — keeps the widths.
+func TestWidgetCellsSurviveRailedAndRetargeted(t *testing.T) {
+	t.Parallel()
+	th := newTheme(scheme.Default())
+	lines := []string{"short", strings.Repeat("x", 30) + vs16Warning}
+	p := blockPaint{lines: lines, targets: make([]lineMark, len(lines)), cells: measuredCells(lines, 10)}
+	if p.cells[0] != -1 || p.cells[1] != ansi.StringWidth(lines[1]) {
+		t.Fatalf("setup: cells = %v; want [-1 %d]", p.cells, ansi.StringWidth(lines[1]))
+	}
+
+	railed := p.railed(th, 2)
+	wantRailed := []int{-1, ansi.StringWidth(railed.lines[1])}
+	if !slices.Equal(railed.cells, wantRailed) {
+		t.Errorf("railed cells = %v; want %v", railed.cells, wantRailed)
+	}
+	if got := p.retargeted(targetTask).cells; !slices.Equal(got, p.cells) {
+		t.Errorf("retargeted cells = %v; want %v", got, p.cells)
+	}
+	if got := (blockPaint{lines: lines}).railed(th, 2).cells; got != nil {
+		t.Errorf("an unmeasured paint railed carries cells %v; want none", got)
+	}
+
+	// Joining keeps lines and cells in lockstep, whichever side was measured.
+	var joined blockPaint
+	joined.add([]string{"head"}, targetHeader)
+	joined.join(p)
+	joined.add([]string{"tail"}, targetNone)
+	if len(joined.cells) != len(joined.lines) || joined.cells[0] != -1 || joined.cells[2] != p.cells[1] || joined.cells[3] != -1 {
+		t.Errorf("joined cells = %v over %d lines; want [-1 -1 %d -1]", joined.cells, len(joined.lines), p.cells[1])
+	}
+}
+
+// BenchmarkReserveWidgetCellsAllHit is what the reserve costs a repaint served from the cache: the
+// scrollback's stored widths read instead of every overrunning line measured again.
+func BenchmarkReserveWidgetCellsAllHit(b *testing.B) {
+	th := newTheme(scheme.Default())
+	const width = 100
+	tr := warmed(widgetCellsFixture(width))
+	for range 40 {
+		tr.commitAssistant(strings.Repeat("word ", 60), runRef{})
+	}
+	tr.renderView(th, width, false, breadcrumbHint)
+	b.ReportAllocs()
+	for b.Loop() {
+		tr.renderView(th, width, false, breadcrumbHint).reserveWidgetCells(width + bodyRightGutter)
 	}
 }

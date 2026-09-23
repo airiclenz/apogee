@@ -475,6 +475,11 @@ type umbrellaFold struct {
 // key still matches, otherwise draw it and memoise the result. draw is a closure so the expensive
 // call — the markdown parse, the styling, the wrap — is not made at all on a hit, which is the
 // entire point.
+//
+// A paint it stores is stored MEASURED: its lines' widget widths are taken once, here, at the width
+// the key names ([measuredCells]), so every repaint the row serves hands reserveWidgetCells the
+// widths instead of the lines to measure again (render.go). A paint that is never stored — an
+// uncacheable kind, a block with no cache behind it — carries none and is measured as before.
 func (t *transcript) paintBlock(head int, key paintKey, draw func() blockPaint) blockPaint {
 	if !key.kind.cacheable() {
 		t.paints.miss()
@@ -484,6 +489,9 @@ func (t *transcript) paintBlock(head int, key paintKey, draw func() blockPaint) 
 		return paint
 	}
 	paint := draw()
+	if t.paints != nil {
+		paint.cells = measuredCells(paint.lines, key.width)
+	}
 	t.paints.store(head, key, paint)
 	return paint
 }
