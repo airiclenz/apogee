@@ -1648,11 +1648,11 @@ func (m Model) handleAskClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd,
 // on — the arm (clickArm, model.go) — and the pane's own default is never one of those.
 //
 // The pane's ARMING latch gates that second click on top of the arm, exactly as it gates ⏎
-// (approvalArmDelay, approval.go; model.go's ⏎ case): the pane's promise is that the human saw the
+// (approvalDrainMarker, approval.go; model.go's ⏎ case): the pane's promise is that the human saw the
 // call before they ruled on it, and a click is as capable as a keystroke of having been aimed at the
 // frame before this one. An unarmed activating click is swallowed and leaves the arm STANDING, so
-// once the tick lands the next click on that row rules — the latch costs the gesture nothing but the
-// milliseconds it exists for.
+// once the pane arms the next click on that row rules — the latch costs the gesture nothing but the
+// round trip it waits for.
 //
 // Everything else INSIDE the box it swallows: a click naming no row — the reason, the argument block,
 // a pad line, the border — is the pane's and does nothing. Nothing is selected by it, so

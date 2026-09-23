@@ -272,9 +272,10 @@ func TestE2ESmokePTY(t *testing.T) {
 	// Steps 3 and 4 — the write asks first, "a" allows it, and the file on disk carries the line.
 	submit(drv, `Append a line saying "smoke test" to a.txt.`)
 	drv.WaitText("Always allow this session")
-	// The decision keys are dead for the first 100 ms the pane is on screen (approvalArmDelay), so
-	// that a keystroke already in flight cannot answer a question the human has not read yet. A
-	// driver types faster than a human and has to wait for the arm the same way.
+	// The decision keys are dead until the terminal answers the pane's drain marker (approval.go),
+	// so that a keystroke already in flight cannot answer a question the human has not read yet. A
+	// driver types faster than a human and has to wait for the arm the same way; the kit's emulator
+	// answers the marker like any terminal, so the wait is one round trip.
 	drv.WaitQuiet(settled)
 	drv.Type("a")
 	drv.WaitText("Appended the smoke test line")

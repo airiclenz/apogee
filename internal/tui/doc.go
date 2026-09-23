@@ -817,9 +817,12 @@
 // never be paintable and unreachable (the Model still owns the pending request and the menu
 // selection) — and the ARMING rule that makes the pane's keys answerable only after the human has
 // seen it: the decision letters and the ⏎ that takes the highlighted row go live one
-// [approvalArmDelay] after the fold, when the [approvalArmedMsg] tick that fold returned lands
-// ([Model.foldApprovalArmed]), because the paint cannot write the Model (View is a value receiver,
-// [Model.frameOverlays] is pure) so "the frame has been shown" is only knowable from Update; Esc
+// when the terminal answers the drain marker that fold sent ([approvalDrainMarker],
+// [Model.foldInputDrained]) — a cursor report written from behind every byte the human had already
+// typed, so an input backlog can never answer a pane it outlived, with [approvalArmBackstop] as the
+// backstop for a terminal that answers none ([Model.foldApprovalArmed]) — because the paint cannot
+// write the Model (View is a value receiver, [Model.frameOverlays] is pure) so "the frame has been
+// shown" is only knowable from Update; Esc
 // stays live throughout, since the safe direction is never the one made harder to reach; ask.go the ask_user pane lifted out of model.go beside approval.go (ADR 0043) and
 // shaped like it, both halves in one file — the fold that borrows the input box for a question
 // ([Model.foldAskRequest]), the keys the offering claims while that box is still empty

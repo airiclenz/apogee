@@ -320,6 +320,16 @@ type Model struct {
 	// that is reset with the question it timed would hand the next pane a number a tick still in
 	// flight already carries. A plain int, riding the value-copied Model (ADR 0011).
 	approvalSeq int
+	// inputDrainAsked and inputDrainSeen are the approval pane's OTHER clock, and the one its keys
+	// really arm on: how many input-drain markers have been asked of the terminal
+	// (approvalDrainMarker, approval.go) and how many of their answers have come back. A terminal
+	// answers in the order it was asked, so the two counters give every pane a place in the queue
+	// (pendingDecision.approvalDrainMark) that an answer meant for an earlier pane can never reach.
+	// They live on the Model rather than on the question for the same reason approvalSeq does — a
+	// clock reset with the question it timed would hand the next pane a number an answer still in
+	// flight already carries. Two plain ints, riding the value-copied Model (ADR 0011).
+	inputDrainAsked int
+	inputDrainSeen  int
 	// askDraft holds what was in the input box when an ask_user question BORROWED it: the question
 	// empties the box for the answer (D5 pre-selects the first choice on an empty box), and an
 	// unsent message the human was part-way through typing is not the question's to throw away.
@@ -626,10 +636,17 @@ type pendingDecision struct {
 	pendingAsk *askReqMsg
 	askChecked []bool
 	// approvalArmed reports whether the open approval pane's DECISION keys (a/s/d and the ⏎ that
-	// takes the highlighted row) are live yet. False from the fold until the approvalArmedMsg that
-	// approvalArmDelay schedules lands, so a keystroke already in flight when the pane appeared
+	// takes the highlighted row) are live yet. False from the fold until the terminal answers the
+	// pane's drain marker — or, on a terminal that answers none, until the approvalArmedMsg that
+	// approvalArmBackstop schedules lands — so a keystroke already in flight when the pane appeared
 	// cannot answer a call the human has not read (approval.go). Esc is deliberately outside it.
 	approvalArmed bool
+	// approvalDrainMark is the marker answer THIS pane arms on: its place in the queue of markers the
+	// session has asked the terminal for (Model.inputDrainAsked). It rides here beside the latch
+	// because it is per-QUESTION state — the one call that forgets the question forgets the mark with
+	// it, so no answer left over from a dead pane is still owed to anything. Zero means no pane is
+	// waiting on a marker. A plain int (ADR 0011).
+	approvalDrainMark int
 }
 
 // reset lets go of the question and its payload together — the whole value, so a payload added to it
@@ -1070,9 +1087,17 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		return m.foldApprovalRequest(msg)
 
 	case approvalArmedMsg:
-		// The tick foldApprovalRequest scheduled has landed, so the frame carrying the pane has
-		// been painted: the decision keys may start answering it (approval.go).
+		// The BACKSTOP tick foldApprovalRequest scheduled has landed without the terminal ever
+		// answering the pane's drain marker: the decision keys are armed anyway, because a pane
+		// with no way to say yes is not a decision surface (approvalArmBackstop, approval.go).
 		return m.foldApprovalArmed(msg)
+
+	case tea.CursorPositionMsg:
+		// The terminal's answer to an approval pane's drain marker — the one thing apogee asks a
+		// cursor position for. It reports from BEHIND every byte the human had already typed, so
+		// its arrival is what arms the pane those keys must not have answered (approval.go). The
+		// position itself is read by nothing.
+		return m.foldInputDrained()
 
 	case askReqMsg:
 		// The worker's Asker hands a free-text question to the Update loop; record it, switch

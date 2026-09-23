@@ -363,11 +363,11 @@ func raisePane(drv driven) {
 // The pump paces itself to the PROGRAM rather than to the clock: a press goes out, the screen is
 // given [settled] to move under it, and only then does the next one follow. A press every few
 // milliseconds out-runs a loaded box — keys queue in the pty faster than the Update loop drains
-// them, and the ones still unread when the pane finally paints are delivered AFTER its arming
-// latch, so a hold that never overlapped the pane is what answers it. Pacing keeps at most one
-// press in flight, which is what lets the hold last as long as the pane takes to appear — on a
-// throttled box that is well past the ≤60 ms a fixed gap bought — without any of it spilling past
-// the latch.
+// them, and a hold that had already spent its whole ceiling before the pane painted never overlaps
+// the pane at all, which makes the claim vacuous. Pacing keeps at most one press in flight, which
+// is what lets the hold last as long as the pane takes to appear — on a throttled box that is well
+// past the ≤60 ms a fixed gap bought — so the keys really are in flight at the moment the pane
+// opens, which is the thing the latch has to survive.
 //
 // It is bounded twice over — by the marker and by [holdKeyMax] — so a pane that never appears ends
 // the pump rather than filling the prompt box for as long as the test runs. The count it returns is
@@ -435,8 +435,9 @@ func clearPrompt(drv driven, held int) {
 }
 
 // pressAndSettle rules on a pane the way a deliberate operator does and asserts what T-13 step 4
-// asks: no perceptible wait. The latch is 100 ms and the frame has already been quiet for longer
-// than that, so the pane must be gone well inside the ceiling below.
+// asks: no perceptible wait. The frame has already been quiet, so the pane has long since armed on
+// the terminal's answer to its drain marker and the pane must be gone well inside the ceiling
+// below.
 func pressAndSettle(t *testing.T, drv driven, key string) {
 	t.Helper()
 

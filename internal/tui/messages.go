@@ -56,11 +56,14 @@ type approvalReqMsg struct {
 	Reply   chan domain.ApprovalDecision
 }
 
-// approvalArmedMsg arms the pending approval prompt's decision keys, one tick after the pane was
-// folded in (approvalArmDelay). It is the answer to "a keystroke already in the input buffer when
-// the pane appears must not answer it": the pane claims a/s/d and ⏎ the moment it opens, so without
-// this the frame that shows the human what they are ruling on can be overtaken by a key they aimed
-// at whatever was on the screen before it.
+// approvalArmedMsg arms the pending approval prompt's decision keys on the BACKSTOP the fold
+// scheduled beside its drain marker (approvalArmBackstop, approval.go). The rule it backs up is
+// "a keystroke already in the input buffer when the pane appears must not answer it": the pane
+// claims a/s/d and ⏎ the moment it opens, so without an arming latch the frame that shows the human
+// what they are ruling on can be overtaken by a key they aimed at whatever was on the screen before
+// it. On every terminal that answers a cursor report the marker arms the pane first and this tick
+// finds it armed already; what the tick is for is the terminal that answers nothing, where a pane
+// that never armed would be a decision surface with no way to say yes.
 //
 // seq names WHICH pane the tick was scheduled for (the spinner's and the heartbeat's gen idiom):
 // Update arms only when it still matches the open pane's approvalSeq, so a tick left over from a

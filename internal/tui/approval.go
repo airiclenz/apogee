@@ -83,13 +83,31 @@ func approvalKeysFor(req domain.ApprovalRequest) map[string]domain.ApprovalDecis
 	return approvalMenuKeys(approvalMenuFor(req))
 }
 
-// approvalArmDelay is how long after the approval pane is folded in that its DECISION keys start
-// answering it. It is longer than one painted frame at any sane refresh rate — the Bubble Tea
-// runtime paints on the Update that opened the pane, so the human has seen the call before the
-// tick lands — and far shorter than a human reaction, so an operator who reads the pane and rules
-// on it never waits for anything. What it costs is the only thing it means to cost: a keystroke
-// already in the input buffer when the pane appeared can no longer answer it.
-const approvalArmDelay = 100 * time.Millisecond
+// approvalDrainMarker is the question whose ANSWER arms the approval pane: a cursor-position report
+// (DSR/CPR), asked of the terminal on the Update that opened the pane. The terminal writes its reply
+// into the very input stream the keyboard writes to, BEHIND every byte already typed — so a reply
+// that comes back is proof that everything the human had pressed before the pane existed has been
+// read, parsed and delivered. That POSITION in the input is what the pane's promise is really about:
+// the keys it must not be answered by are the keys that were already in flight when it opened,
+// however long the box then took to deliver them. A clock cannot say that — it can only guess a
+// duration and be wrong on a loaded box, where an input backlog outlives any latch short enough to
+// be worth having.
+//
+// apogee asks for a cursor position NOWHERE else, so every [tea.CursorPositionMsg] the Model sees is
+// one of these markers coming home ([Model.foldInputDrained]); nothing reads the position itself.
+func approvalDrainMarker() tea.Cmd {
+	return func() tea.Msg { return tea.RequestCursorPosition() }
+}
+
+// approvalArmBackstop is how long the pane waits for that answer before arming without it. It is NOT
+// the latch — the marker is — it is the answer to a terminal that reports no cursor position at all:
+// a pane that never armed would be a decision surface with no way to say yes, and Esc-only is not a
+// decision. Every terminal apogee is run in answers a DSR, and so do both test drivers
+// (internal/tuitest), so on every real path the marker arms the pane first, in the time one round
+// trip takes. That is why this is sized as a CEILING rather than as a reaction time: long enough that
+// even a badly loaded box's round trip wins the race and the backstop never fires, short enough that
+// a human on a terminal that answers nothing is not left holding a pane they cannot rule on.
+const approvalArmBackstop = 2 * time.Second
 
 func approvalMenuKeys(menu []approvalOption) map[string]domain.ApprovalDecision {
 	keys := make(map[string]domain.ApprovalDecision, len(menu))
@@ -102,21 +120,30 @@ func approvalMenuKeys(menu []approvalOption) map[string]domain.ApprovalDecision 
 }
 
 // foldApprovalRequest folds the worker's approval request into the view: record the request,
-// switch state, open the menu on Allow, and arm its decision keys a tick later.
+// switch state, open the menu on Allow, and ask the terminal the one question whose answer arms its
+// decision keys.
 //
 // The worker's Approver hands the gate to the Update loop; this fold records the request and
 // switches state. View renders the prompt and handleApprovalKey replies on msg.Reply (the C3
 // rendezvous; P2.4).
 //
-// The pane opens with its decision keys DEAD (approvalArmed false) and the returned Tick is what
-// brings them to life one approvalArmDelay later. The arm has to be written from here rather than
-// from the paint because the paint cannot write: View is a value receiver (model.go) and
-// frameOverlays is documented pure, so "the frame has been shown" is only ever knowable in Update,
-// and a Tick scheduled by the Update that opened the pane is the Update-side proof that the frame
-// which followed it is on the screen. approvalSeq names this pane for its own tick so a tick that
-// outlives its pane — answered, cancelled, replaced by the next queued child's request — arms
-// nothing (Update's approvalArmedMsg case) — the counter lives on the Model, not on the question,
-// so it is never reset back onto a number a tick still in flight already carries.
+// The pane opens with its decision keys DEAD (approvalArmed false) and the returned drain marker is
+// what brings them to life (approvalDrainMarker, [Model.foldInputDrained]): the keys answer once the
+// terminal has reported back from BEHIND everything the human had already typed, which is the
+// position in the input stream this pane's promise is about. The arm has to be written from here
+// rather than from the paint because the paint cannot write: View is a value receiver (model.go) and
+// frameOverlays is documented pure, so "the frame has been shown" is only ever knowable in Update —
+// and the marker, asked by the Update that opened the pane, is answered from behind the very frame
+// that Update painted.
+//
+// TWO generations ride with it, because the two things that can go stale are different. approvalSeq
+// names this pane for its BACKSTOP tick, so a tick that outlives its pane — answered, cancelled,
+// replaced by the next queued child's request — arms nothing (Update's approvalArmedMsg case).
+// approvalDrainMark is this pane's place in the marker queue: one marker goes out per fold and a
+// terminal answers in the order it was asked, so the Nth report is the Nth pane's and an answer
+// still in flight from a pane that has since gone arms nothing either. Both counters live on the
+// Model rather than on the question, so neither is ever reset back onto a number an answer still in
+// flight already carries.
 func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	m.state = stateAwaitingApproval
 	m.pending = &msg
@@ -124,20 +151,50 @@ func (m Model) foldApprovalRequest(msg approvalReqMsg) (tea.Model, tea.Cmd) {
 	m.approvalArmed = false      // a key already in flight must not answer the pane it arrived with
 	m.approvalSeq++
 	seq := m.approvalSeq
-	m.dismissAutocomplete() // a stale menu never shares the frame with a decision surface
+	m.inputDrainAsked++
+	m.approvalDrainMark = m.inputDrainAsked // the answer this pane arms on, and no earlier one
+	m.dismissAutocomplete()                 // a stale menu never shares the frame with a decision surface
 	// The pane BORROWS the box below it, so the box stops inviting what it was inviting: inside a
 	// run view that was the child's own legend, whose "esc back" this pane's Cancel row contradicts.
 	// The state flip above is all it takes — the legend is derived from it at paint and yields to
 	// the pane for as long as the question stands ([Model.legend]) — and so is the frame: the pane
 	// the decision turns on outranks the draft's extra rows (draftRowsCeiling), and Update's tail
 	// lays out when either height has moved from under its last set ([Model.settle]).
-	return m, tea.Tick(approvalArmDelay, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} })
+	return m, tea.Batch(
+		approvalDrainMarker(),
+		tea.Tick(approvalArmBackstop, func(time.Time) tea.Msg { return approvalArmedMsg{seq: seq} }),
+	)
 }
 
-// foldApprovalArmed brings the open approval pane's decision keys to life. It arms only the pane
-// the tick was scheduled for: a stale generation, or a pane that has since been answered or
-// cancelled, leaves the latch exactly where it was — so a tick can never arm a pane the human has
-// been looking at for less than approvalArmDelay.
+// foldInputDrained counts one answer to a drain marker and, when it is the answer the open pane is
+// waiting on, brings that pane's decision keys to life. This is the pane's real latch: the terminal
+// could not have written this report before it had taken every byte queued ahead of it, so an answer
+// that reaches Update is the proof that the keys typed before the pane opened have already been
+// delivered — and swallowed, because they arrived while the pane was unarmed.
+//
+// The counting is what makes an answer THIS pane's. Reports come back in the order the markers went
+// out, so the mark the fold recorded (approvalDrainMark) is reached only by the report its own
+// marker asked for: an answer still in flight from a pane that was answered or cancelled lands on a
+// lower count and arms nothing, and the pane it left behind keeps its full look-at-it window. An
+// answer past what was ASKED for is not counted at all — nothing else in apogee requests a cursor
+// position, so an unsolicited report is a terminal talking to itself, and it must not be allowed to
+// spend the next pane's mark before that pane has one.
+func (m Model) foldInputDrained() (tea.Model, tea.Cmd) {
+	if m.inputDrainSeen < m.inputDrainAsked {
+		m.inputDrainSeen++
+	}
+	if m.pending == nil || m.approvalDrainMark == 0 || m.inputDrainSeen < m.approvalDrainMark {
+		return m, nil
+	}
+	m.approvalArmed = true
+	return m, nil
+}
+
+// foldApprovalArmed is the BACKSTOP half of the same rule ([approvalArmBackstop]): it brings the
+// open pane's decision keys to life on a terminal that answered no drain marker, so a pane is never
+// left standing with no way to say yes. It arms only the pane the tick was scheduled for: a stale
+// generation, or a pane that has since been answered or cancelled, leaves the latch exactly where it
+// was — so a tick can never arm a pane the human has been looking at for less than the backstop.
 func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
 	if m.pending == nil || msg.seq != m.approvalSeq {
 		return m, nil
@@ -165,7 +222,7 @@ func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
 // menu claims ↑/↓ and the decision letters and nothing more.
 //
 // The decision letters are also the one thing on this pane that is not live the instant it opens:
-// they answer only once approvalArmed is set (foldApprovalArmed), in the same guard-on-Model-state
+// they answer only once approvalArmed is set (foldInputDrained), in the same guard-on-Model-state
 // shape [Model.askChoiceKey] uses, because a pane that claims a/s/d on the frame it appears on can
 // be answered by a keystroke aimed at whatever the human was looking at a moment earlier. An
 // unarmed letter is SWALLOWED rather than passed on: falling through would scroll the transcript
@@ -270,6 +327,7 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 	m.pending.Reply <- decision
 	m.pending = nil
 	m.approvalArmed = false // the latch belongs to the pane that just closed, not to the next one
+	m.approvalDrainMark = 0 // and so does the marker it was waiting on; the next pane asks for its own
 	tick := m.resumeRunning()
 	return m, tick
 }
@@ -372,12 +430,15 @@ func (m Model) sendApproval(decision domain.ApprovalDecision) (tea.Model, tea.Cm
 // where a/d/s are live and this pane is not on the frame. The "" below is the sub-twelve-row case,
 // where the frame draws no pane at all.
 //
-// The other half of that promise is TIME rather than geometry, and it is the fold's, not the
-// paint's: a/s/d and ⏎ are dead until one approvalArmDelay after the pane opened
-// (foldApprovalRequest, foldApprovalArmed), so the frame this function returns is on the screen
-// before any key can answer it. Without that the pane could be drawn and answered by the same
-// keystroke — one already in the input buffer, aimed at whatever the human was reading a moment
-// earlier — and the pane's whole guarantee is about what the human was shown before they ruled.
+// The other half of that promise is the INPUT STREAM rather than geometry, and it is the fold's,
+// not the paint's: a/s/d and ⏎ are dead until the terminal has answered the drain marker the fold
+// sent (approvalDrainMarker, foldInputDrained), which it can only do from behind every byte the
+// human had already typed — so the frame this function returns is on the screen, and the backlog
+// aimed at the frame before it is spent, before any key can answer. Without that the pane could be
+// drawn and answered by the same keystroke — one already in the input buffer, aimed at whatever the
+// human was reading a moment earlier — and the pane's whole guarantee is about what the human was
+// shown before they ruled. A clock could not make that promise: on a box slow enough that the input
+// backlog outlives the latch, a held key answers a pane no frame was ever seen for.
 func (m Model) approvalPrompt(req domain.ApprovalRequest) string {
 	view, _ := m.approvalPromptPlaced(req)
 	return view

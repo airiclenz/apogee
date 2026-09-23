@@ -208,7 +208,7 @@ func TestE2EPopupClickApproval(t *testing.T) {
 	waitIdle(drv)
 
 	submit(drv, popupApprovalPrompt)
-	pane := awaitApprovalPane(drv) // settles past the 100 ms arming latch, so the clicks below are live
+	pane := awaitApprovalPane(drv) // settles past the arming latch, so the clicks below are live
 
 	allowX, allowY, ok := pane.Find("Allow")
 	if !ok {

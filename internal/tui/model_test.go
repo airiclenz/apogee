@@ -1137,9 +1137,10 @@ func newUnarmedApprovalModel(t *testing.T, req domain.ApprovalRequest) (Model, c
 	return m, reply
 }
 
-// armApproval delivers the open pane's own arming message, standing in for the approvalArmDelay
-// tick the fold scheduled. It reads the generation off the model rather than sleeping, so the
-// suite never pays the delay and never races it.
+// armApproval delivers the open pane's own arming message, standing in for the approvalArmBackstop
+// tick the fold scheduled beside its drain marker. It reads the generation off the model rather than
+// sleeping, so the suite never pays the backstop and never races it. Either arming path leaves the
+// same latch set, so a test about what an ARMED pane does may reach for whichever is cheaper.
 func armApproval(t *testing.T, m Model) Model {
 	t.Helper()
 	m = step(t, m, approvalArmedMsg{seq: m.approvalSeq})
@@ -1313,8 +1314,154 @@ func TestModelApprovalFoldReturnsTheArmTick(t *testing.T) {
 		t.Error("the prompt opened with its decision keys already armed")
 	}
 	if cmd == nil {
-		t.Fatal("the approval fold returned no arming tick")
+		t.Fatal("the approval fold returned no arming cmds")
 	}
+}
+
+// The pane arms on the DRAINED INPUT POSITION rather than on a clock: what brings its decision keys
+// to life is the terminal's answer to the drain marker the fold sent (approvalDrainMarker), and the
+// terminal can only write that answer from behind every byte the human had already typed. So a key
+// delivered before it — the backlog a pane on a loaded box has to survive — is swallowed however
+// long ago it was pressed, and the first key after it rules.
+func TestModelApprovalArmsOnTheDrainedInputPosition(t *testing.T) {
+	t.Parallel()
+	m, reply := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "write"})
+
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		t.Fatalf("a key delivered before the drain marker was answered ruled %q", got)
+	default:
+	}
+
+	m = step(t, m, tea.CursorPositionMsg{})
+	if !m.approvalArmed {
+		t.Fatal("the pane did not arm on the terminal's answer to its own drain marker")
+	}
+
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		if got != domain.ApprovalAllow {
+			t.Errorf("decision = %v, want ApprovalAllow", got)
+		}
+	default:
+		t.Error("'a' sent no decision after the input drained past the pane")
+	}
+}
+
+// The answer names the pane it was asked for, the way the backstop tick does: a report still coming
+// home from a pane that has been cancelled lands on a count BEHIND the open pane's mark and arms
+// nothing, so the new pane still gets its full look-at-it window and the keys queued behind the old
+// pane's marker cannot answer it.
+func TestModelApprovalDrainAnswerForAnEarlierPaneArmsNothing(t *testing.T) {
+	t.Parallel()
+	m, _ := newUnarmedApprovalModel(t, domain.ApprovalRequest{Tool: "write_file", Reason: "first"})
+
+	startStubWorker(t, &m)
+	m = step(t, m, keyEsc())
+	m = step(t, m, keyEsc())
+	m = step(t, m, cancelledMsg{Result: domain.StepResult{Status: domain.StatusCancelled}})
+	if m.state != stateIdle {
+		t.Fatalf("state = %v, want idle after the first prompt was cancelled", m.state)
+	}
+
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "run", Reason: "second", CacheKey: ordinaryGateKey},
+		Reply:   reply,
+	})
+
+	m = step(t, m, tea.CursorPositionMsg{}) // the FIRST pane's marker, answered late
+	if m.approvalArmed {
+		t.Fatal("the first pane's drain answer armed the second pane")
+	}
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		t.Fatalf("'a' answered the second pane on the first one's drain answer (sent %q)", got)
+	default:
+	}
+
+	m = step(t, m, tea.CursorPositionMsg{}) // and now the second pane's own
+	if !m.approvalArmed {
+		t.Fatal("the second pane did not arm on its own drain answer")
+	}
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		if got != domain.ApprovalAllow {
+			t.Errorf("decision = %v, want ApprovalAllow", got)
+		}
+	default:
+		t.Error("'a' sent no decision after the second pane's own drain answer")
+	}
+}
+
+// A cursor report nobody asked for spends no pane's mark. apogee requests a position only to mark
+// the input, so a terminal that volunteers one — or repeats itself — must not leave the count
+// standing ahead of the next pane, which would open ALREADY drained and be answered by the very
+// backlog the marker exists to outlast.
+func TestModelApprovalUnsolicitedCursorReportArmsNoLaterPane(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	for range 3 {
+		m = step(t, m, tea.CursorPositionMsg{})
+	}
+
+	reply := make(chan domain.ApprovalDecision, 1)
+	m = step(t, m, approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write", CacheKey: ordinaryGateKey},
+		Reply:   reply,
+	})
+	if m.approvalArmed {
+		t.Fatal("the pane opened armed on reports asked for before it existed")
+	}
+	m = step(t, m, tea.KeyPressMsg{Code: 'a'})
+	select {
+	case got := <-reply:
+		t.Fatalf("a key ruled %q on a pane armed by an unsolicited report", got)
+	default:
+	}
+
+	m = step(t, m, tea.CursorPositionMsg{})
+	if !m.approvalArmed {
+		t.Fatal("the pane did not arm on the answer to its own marker")
+	}
+}
+
+// The fold ASKS for the arm rather than waiting it out: the batch it returns carries the drain
+// marker beside the backstop tick. Without that question no terminal would ever answer, and every
+// pane would open with its keys dead until approvalArmBackstop expired.
+func TestModelApprovalFoldAsksTheTerminalForItsDrainMarker(t *testing.T) {
+	t.Parallel()
+	_, cmd := stepCmd(t, newTestModel(t), approvalReqMsg{
+		Request: domain.ApprovalRequest{Tool: "write_file", Reason: "write", CacheKey: ordinaryGateKey},
+		Reply:   make(chan domain.ApprovalDecision, 1),
+	})
+
+	batch, batched := cmdMsg(cmd).(tea.BatchMsg)
+	if !batched {
+		t.Fatalf("the fold returned %T; want a batch of the drain marker and its backstop", cmdMsg(cmd))
+	}
+	// Each member runs on a goroutine of its own, because one of them IS the backstop: a tea.Tick
+	// parks for approvalArmBackstop, and expandBatch — which runs them in order — would wait it out
+	// to reach the marker.
+	msgs := make(chan tea.Msg, len(batch))
+	for _, member := range batch {
+		go func() { msgs <- cmdMsg(member) }()
+	}
+	for range batch {
+		select {
+		case msg := <-msgs:
+			if msg == tea.RequestCursorPosition() {
+				return
+			}
+		case <-time.After(time.Second):
+			t.Fatal("the fold's batch answered nothing within a second; want its drain marker")
+		}
+	}
+	t.Fatal("the fold's batch carries no drain marker: the pane would arm on its backstop alone")
 }
 
 // The pending request renders into the View: the tool, its Reason, and the arguments.

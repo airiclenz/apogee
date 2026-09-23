@@ -195,7 +195,7 @@ keys above describe. What that second row actually remembers is worth knowing be
 **The mouse answers it too, in two clicks.** A click on one of the four rows moves the `❯` onto it,
 the way `↑`/`↓` do; a **second** click on that same row takes it, the way `⏎` does. It is always two,
 and the row a second click can take is the row *you* clicked onto — the `Allow` the prompt opens on
-is never one press away from being granted, and the arming delay gates the deciding click exactly as
+is never one press away from being granted, and the arming latch gates the deciding click exactly as
 it gates `⏎`. The same two-click rule runs every other pane that asks you something: the `/sessions`
 browser, the `/model` and `/server` pickers, a question from the model, and the `/` | `@` menu, where
 the second click completes the token the way `⇥` does. A click **outside** one of these boxes never
