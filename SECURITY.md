@@ -52,7 +52,9 @@ child can never write the record of its own labels. A revert trusts the journal 
 it can check it: each entry is bound to the file identity (volume serial and file index) of
 the object it labelled, and a label is neither cleared nor restored on an object whose identity
 no longer matches; a journal's owner counts as still running only while both its PID and its
-process creation time match, so a recycled PID cannot keep a dead run's labels in place. A
+process creation time match, so a recycled PID cannot keep a dead run's labels in place; a
+record written before creation times were journalled carries none, and for it the PID check
+alone decides. A
 same-user, Medium-integrity process that forges a journal is out of scope — it can forge
 anything it can read, which is the hostile-local-user case above.
 
