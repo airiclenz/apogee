@@ -175,7 +175,7 @@ only on the message).
 
 **Commit:** `test(doctext): the absurd-/Size allocation ceiling bites on an xref stream`
 
-## 5. A git diff or show gets at least the ordinary git budget
+## 5. A git diff or show gets at least the ordinary git budget — ✅ DONE (2026-09-23)
 
 **What.** Fixes `gitDiffTimeout` (10 s) being shorter than `gitTimeout` (15 s) while its comment
 says a diff "can be larger".

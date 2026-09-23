@@ -52,9 +52,10 @@ import (
 // wedges a Turn (the §2.4 teardown reaps the process group when it fires).
 const gitTimeout = 15 * time.Second
 
-// gitDiffTimeout bounds a diff-range, which can be larger; it matches the oracle's
-// separate diff ceiling.
-const gitDiffTimeout = 10 * time.Second
+// gitDiffTimeout bounds a diff or a show. It is twice gitTimeout, and never below it: a
+// diff-range or a blob read on slow storage is the large case, so it gets more room than an
+// ordinary status or log, not less.
+const gitDiffTimeout = 30 * time.Second
 
 // runGit runs git with gitArgs in root under the per-call timeout and the hardened, scrubbed
 // environment, honouring the confinement handle the disposition installed (if any), and returns
@@ -188,8 +189,8 @@ func (c gitReadCall) argv() []string {
 	return append(args, c.pathspecs...)
 }
 
-// gitReadTimeout keys the per-call ceiling on the verb: a diff and a blob read can be larger
-// and keep gitDiffTimeout (the oracle's separate diff ceiling); status and log keep gitTimeout.
+// gitReadTimeout keys the per-call ceiling on the verb: a diff and a blob read (show) are the
+// large case and get gitDiffTimeout, at least the ordinary budget; status and log keep gitTimeout.
 func gitReadTimeout(verb string) time.Duration {
 	switch verb {
 	case "diff", "show":

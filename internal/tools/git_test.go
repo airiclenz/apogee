@@ -2660,3 +2660,19 @@ func TestRenderBranchList(t *testing.T) {
 		t.Errorf("renderBranchList = %q, want %q", got, want)
 	}
 }
+
+// TestGitReadTimeoutGivesDiffAndShowAtLeastTheOrdinaryBudget pins that the large reads — a diff
+// and a blob read — never get less room than an ordinary git call, and that log keeps the
+// ordinary budget.
+func TestGitReadTimeoutGivesDiffAndShowAtLeastTheOrdinaryBudget(t *testing.T) {
+	t.Parallel()
+
+	for _, verb := range []string{"diff", "show"} {
+		if got := gitReadTimeout(verb); got < gitTimeout {
+			t.Errorf("gitReadTimeout(%q) = %v, want >= gitTimeout (%v)", verb, got, gitTimeout)
+		}
+	}
+	if got := gitReadTimeout("log"); got != gitTimeout {
+		t.Errorf("gitReadTimeout(\"log\") = %v, want gitTimeout (%v)", got, gitTimeout)
+	}
+}
