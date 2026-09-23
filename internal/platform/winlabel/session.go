@@ -43,6 +43,38 @@ type Journal struct {
 	// nil is the honest non-Windows answer — no facility labelled anything, so there is
 	// nothing to put back — and Retire treats it as exactly that.
 	revert revertFunc
+	// stat is the OS seam the label walk reads a path's handle facts through — its hard-link
+	// count and its file identity, from ONE open — fixed at Open from the build's osStat. It is
+	// a per-journal field for the same reason revert is: a test can hand one journal a stat
+	// that fails for a chosen path without a global another test could race over. The
+	// non-Windows stat reports unsupported with a zero identity, and nothing there labels.
+	stat statFunc
+}
+
+// fileStat is what one handle on a path reports to the label walk: how many directory
+// entries name the underlying file (a hard link shares its security descriptor with every
+// other name — descendantDecision), and the object's identity, which the journal records so a
+// later revert can tell the object it labelled from one planted under the same name since
+// (Entry.Volume, Entry.FileIndex).
+type fileStat struct {
+	links  uint32
+	volume uint32
+	index  uint64
+}
+
+// statFunc is the shape of the handle read the label walk drives (Journal.stat).
+type statFunc func(path string) (fileStat, error)
+
+// withIdentity returns entry carrying st's identity, or entry unchanged when the read that
+// produced st failed: a failed identity read journals NO identity — judged later by the
+// label-read rules, as an older journal's entry is — and never refuses the box.
+func withIdentity(entry Entry, st fileStat, err error) Entry {
+	if err != nil {
+		return entry
+	}
+	entry.Volume = st.volume
+	entry.FileIndex = st.index
+	return entry
 }
 
 // revertFunc is the shape of the revert Retire drives: given the journal's home and its own
@@ -62,7 +94,7 @@ type revertFunc func(home, own string) func(Record) ([]Entry, error)
 // made against a record of how to undo it, so no journal means no label rather than an
 // unrevertable one.
 func Open(home string) *Journal {
-	j := &Journal{labelled: make(map[string]bool), revert: osRevert()}
+	j := &Journal{labelled: make(map[string]bool), revert: osRevert(), stat: osStat()}
 	if home == "" {
 		return j
 	}

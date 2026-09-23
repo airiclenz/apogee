@@ -89,6 +89,21 @@ type Entry struct {
 	// and none has found apogee's mark on it. An older journal has no such field and decodes
 	// 0, which is the honest answer: no revert has carried it yet.
 	Carried int `json:"carried,omitempty"`
+	// Volume and FileIndex are the IDENTITY of the object this entry was journalled over:
+	// the volume serial number and the NTFS file index a handle on the path reported just
+	// before its label was written (fileStat, read from the same open that yields the path's
+	// hard-link count). A path is only a name — the object behind it can be deleted and
+	// another planted under the same name before a revert reads the journal, and a revert that
+	// trusted the name alone would clear or restore a label on an object apogee never touched.
+	// The identity is what lets a later pass tell the object it labelled from a stand-in.
+	//
+	// Both are zero when the identity could not be read — a failed read never refuses the box
+	// or aborts the walk, it journals no identity — and an older journal has no such fields
+	// and decodes zero as well. Zero is the honest answer in both cases: nothing recorded which
+	// object this was, so the entry is judged by the label-read rules alone, as every entry was
+	// before the identity existed.
+	Volume    uint32 `json:"vol,omitempty"`
+	FileIndex uint64 `json:"fid,omitempty"`
 }
 
 // Roots returns the journalled box roots, the trees teardown walks.

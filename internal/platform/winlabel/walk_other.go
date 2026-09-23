@@ -49,3 +49,10 @@ func SetSDDL(_, _ string) error { return errNoLabelFacility }
 // as "no disk mutation to undo" — one method, one doc comment, one contract, instead of two
 // build-tagged copies that can silently diverge.
 func osRevert() revertFunc { return nil }
+
+// osStat supplies the non-Windows stub of the handle read: a zero link count and a zero file
+// identity, reported unsupported. Nothing on this host labels anything, so no journal entry
+// is ever built from it; it exists so Open, declared once and unguarded, has a seam to fix.
+func osStat() statFunc {
+	return func(string) (fileStat, error) { return fileStat{}, errNoLabelFacility }
+}

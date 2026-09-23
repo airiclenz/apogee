@@ -44,7 +44,10 @@
 
 ---
 
-## 1. A journal entry records the identity of the object it labelled
+## 1. A journal entry records the identity of the object it labelled — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): the identity helper is a per-journal stat seam (`Journal.stat`, fixed at `Open` from `osStat()`), not a standalone `fileIdentity(path)`. The Windows `statHandle` returns the link count and identity from one open, `hardLinkCount` (still used by `ClearTree`) wraps it, and the non-Windows `osStat` stub returns a zero `fileStat` with `errNoLabelFacility`. The seam follows the `revert` field's pattern, so the failed-read test can fail one path's read without a package global. The untagged `withIdentity(entry, st, err)` makes the zero-on-failure rule testable on any OS.
+NOTES (2026-09-23): retry fix: the legacy JSON literal in `TestJournalWrittenByAnOlderApogeeHasNoFileIdentity` now doubles each backslash (`C:\\work`, `C:\\work\\vendor\\lib.dll`). The single-backslash form was invalid JSON (`\w`, `\v`, `\l`). The host has no Go on PATH, so verification used go1.26.6 windows/arm64 unpacked into the session scratchpad, with GOPATH/GOCACHE also there and GOTOOLCHAIN=local. All three Acceptance commands pass natively on Windows, the six identity tests PASS under `-v`, and `GOOS=linux go vet` and a `GOOS=darwin` test compile of the package are clean. gofmt is clean once the checkout's CRLF endings are stripped.
 
 **What:**
 **Goal:** every `winlabel.Entry` the session journal writes carries the labelled object's volume serial and file index in new additive JSON fields. A journal written by an older apogee decodes with those fields at zero.

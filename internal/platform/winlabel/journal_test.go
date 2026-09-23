@@ -1,6 +1,8 @@
 package winlabel
 
 import (
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -509,5 +511,95 @@ func TestJournalWrittenByAnOlderApogeeIsUnjudged(t *testing.T) {
 		if entry.Judged {
 			t.Errorf("entry %+v decoded as already judged; an older journal has been vetted by nothing", entry)
 		}
+	}
+}
+
+func TestJournalRoundTripsFileIdentity(t *testing.T) {
+	t.Parallel()
+
+	// Entry.Volume and Entry.FileIndex name the object a label pass wrote to, so a later
+	// revert can tell it from one planted under the same name since. They are only worth
+	// recording if they SURVIVE the file, and an entry without them — a failed identity read —
+	// must write no key at all, so a journal this apogee writes stays decodable by the one a
+	// user may roll back to.
+	home := t.TempDir()
+	path := JournalPath(home, 6161)
+	written := Record{
+		PID: 6161,
+		Entries: []Entry{
+			{Path: `C:\work`, Root: true, Volume: 0xDEADBEEF, FileIndex: 0x0001_0000_0000_2A2A},
+			{Path: `C:\work\vendor\lib.dll`, PriorSDDL: "S:AI(ML;;NW;;;ME)", Volume: 0xDEADBEEF, FileIndex: 42},
+			{Path: `C:\other`, Root: true},
+		},
+	}
+
+	if err := WriteJournal(path, written); err != nil {
+		t.Fatalf("write journal: %v", err)
+	}
+	read, err := ReadJournal(path)
+	if err != nil {
+		t.Fatalf("read journal: %v", err)
+	}
+	if len(read.Entries) != len(written.Entries) {
+		t.Fatalf("entries = %+v, want %+v", read.Entries, written.Entries)
+	}
+	for i, want := range written.Entries {
+		if read.Entries[i] != want {
+			t.Errorf("entries[%d] = %+v, want %+v", i, read.Entries[i], want)
+		}
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read journal file: %v", err)
+	}
+	for _, key := range []string{`"vol"`, `"fid"`} {
+		if got := strings.Count(string(raw), key); got != 2 {
+			t.Errorf("the journal spells %s %d time(s) in %s, want exactly the two entries that carry an identity", key, got, raw)
+		}
+	}
+}
+
+func TestJournalWrittenByAnOlderApogeeHasNoFileIdentity(t *testing.T) {
+	t.Parallel()
+
+	// A journal left by an apogee that predates the identity has no fields to read, and zero is
+	// the honest decode: nothing recorded which object the entry was written over, so it is
+	// judged by the label-read rules alone.
+	legacy := `{"pid":9912,"entries":[{"path":"C:\\work","root":true},` +
+		`{"path":"C:\\work\\vendor\\lib.dll","prior_sddl":"S:AI(ML;;NW;;;ME)","judged":true}]}`
+	var read Record
+	if err := json.Unmarshal([]byte(legacy), &read); err != nil {
+		t.Fatalf("decode the older journal: %v", err)
+	}
+	if len(read.Entries) != 2 {
+		t.Fatalf("entries = %+v, want the two planted", read.Entries)
+	}
+	for _, entry := range read.Entries {
+		if entry.Volume != 0 || entry.FileIndex != 0 {
+			t.Errorf("entry %+v decoded with an identity; an older journal recorded none", entry)
+		}
+	}
+}
+
+func TestWithIdentityJournalsZeroOnAFailedRead(t *testing.T) {
+	t.Parallel()
+
+	// The identity is best-effort by design: a failed handle read journals NO identity rather
+	// than refusing the box, and whatever the failed read returned alongside its error is
+	// never trusted as an identity.
+	base := Entry{Path: `C:\work`, Root: true, PriorSDDL: "S:(ML;;NW;;;HI)"}
+	read := fileStat{links: 1, volume: 7, index: 99}
+
+	got := withIdentity(base, read, nil)
+	if got.Volume != 7 || got.FileIndex != 99 {
+		t.Errorf("withIdentity(ok) = %+v, want volume 7 and file index 99", got)
+	}
+	if got.Path != base.Path || got.Root != base.Root || got.PriorSDDL != base.PriorSDDL {
+		t.Errorf("withIdentity(ok) = %+v changed more than the identity of %+v", got, base)
+	}
+
+	if got := withIdentity(base, read, errors.New("planted read failure")); got != base {
+		t.Errorf("withIdentity(failed) = %+v, want the entry unchanged %+v (no identity)", got, base)
 	}
 }

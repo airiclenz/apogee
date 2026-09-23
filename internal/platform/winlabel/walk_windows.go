@@ -78,7 +78,11 @@ func LabelTree(root string, j *Journal) error {
 	if err != nil {
 		return fmt.Errorf("cannot read the mandatory label of %q: %v", root, err)
 	}
-	journalled, err := j.record(Entry{Path: root, Root: true, PriorSDDL: prior})
+	// The identity is read BEFORE the label goes on, so the journal names the object this
+	// pass is about to mutate. A failed read journals no identity (withIdentity) and is not a
+	// refusal: the root is labelled exactly as it was before the identity existed.
+	rootStat, rootStatErr := j.stat(root)
+	journalled, err := j.record(withIdentity(Entry{Path: root, Root: true, PriorSDDL: prior}, rootStat, rootStatErr))
 	if err != nil {
 		return err
 	}
@@ -110,9 +114,11 @@ func LabelTree(root string, j *Journal) error {
 			return nil
 		}
 		prior, priorErr := ReadSDDL(path)
-		links, linksErr := hardLinkCount(path)
+		// One open per path: the link count the decision needs and the identity the journal
+		// records come from the same handle (statHandle).
+		st, statErr := j.stat(path)
 		shouldJournal, shouldLabel := descendantDecision(descendantFacts{
-			prior: prior, priorErr: priorErr, links: links, linksErr: linksErr,
+			prior: prior, priorErr: priorErr, links: st.links, linksErr: statErr,
 		})
 		if !shouldLabel {
 			// Either the prior could not be read — so labelling would destroy a
@@ -127,7 +133,7 @@ func LabelTree(root string, j *Journal) error {
 			// A Low prior here is apogee's own label — a tree being re-walked, or one a
 			// concurrent session labelled — and the journal drops it rather than recording
 			// an instruction to put it back.
-			if _, err := j.record(Entry{Path: path, PriorSDDL: prior}); err != nil {
+			if _, err := j.record(withIdentity(Entry{Path: path, PriorSDDL: prior}, st, statErr)); err != nil {
 				return err
 			}
 		}
@@ -147,7 +153,8 @@ func LabelTree(root string, j *Journal) error {
 // one security descriptor, so labelling the in-box name marks the file Low wherever else it is
 // linked (descendantDecision).
 //
-// The count comes from a HANDLE: nothing in fs.FileInfo carries it on Windows.
+// The count comes from a HANDLE (statHandle, which opens it): nothing in fs.FileInfo carries
+// it on Windows.
 // FILE_READ_ATTRIBUTES is the whole access asked for — the least the query needs, and one an
 // exclusively-locked file still grants — every share mode is allowed so opening never disturbs
 // another process, FILE_FLAG_BACKUP_SEMANTICS lets the same call answer for directories (which
@@ -155,24 +162,42 @@ func LabelTree(root string, j *Journal) error {
 // handle on the path itself rather than on a link target, the same posture the walk's own skip
 // takes.
 func hardLinkCount(path string) (uint32, error) {
+	st, err := statHandle(path)
+	return st.links, err
+}
+
+// statHandle is the one handle read behind hardLinkCount, returning everything that read
+// reports: the link count and the object's identity — its volume serial number and its
+// 64-bit NTFS file index, which together name one file on the machine however many names it
+// has or gains. LabelTree reads both through this single open (Journal.stat, osStat), so
+// journalling the identity costs no second CreateFile per descendant; the open semantics are
+// hardLinkCount's own, reparse points included — the handle is on the path, never a target.
+func statHandle(path string) (fileStat, error) {
 	pathW, err := windows.UTF16PtrFromString(path)
 	if err != nil {
-		return 0, fmt.Errorf("encode %q: %w", path, err)
+		return fileStat{}, fmt.Errorf("encode %q: %w", path, err)
 	}
 	handle, err := windows.CreateFile(pathW, windows.FILE_READ_ATTRIBUTES,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil, windows.OPEN_EXISTING,
 		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
-		return 0, fmt.Errorf("open %q to count its links: %w", path, err)
+		return fileStat{}, fmt.Errorf("open %q to read its file information: %w", path, err)
 	}
 	defer func() { _ = windows.CloseHandle(handle) }()
 	var info windows.ByHandleFileInformation
 	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
-		return 0, fmt.Errorf("read the file information of %q: %w", path, err)
+		return fileStat{}, fmt.Errorf("read the file information of %q: %w", path, err)
 	}
-	return info.NumberOfLinks, nil
+	return fileStat{
+		links:  info.NumberOfLinks,
+		volume: info.VolumeSerialNumber,
+		index:  uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow),
+	}, nil
 }
+
+// osStat supplies the Windows build's half of Journal's stat seam: the real handle read.
+func osStat() statFunc { return statHandle }
 
 // ClearTree removes the mandatory label from root and everything beneath it, returning it to
 // the unlabelled (implicitly Medium) state it was in before the run. A path that has since
