@@ -116,7 +116,10 @@ NOTES (2026-09-23): `-race` cannot run on this host (ThreadSanitizer: unsupporte
 **Acceptance:** `go test -race -count=1 -run 'Band|Suggest|SkillHint|Hint|Tab|Autocomplete|SlashMenu' ./internal/tui/ ./internal/skills/`
 **Commit:** `perf(tui): debounce the skill band so a burst of edits ranks once`
 
-## 5. Readable wrapping is linear in line length
+## 5. Readable wrapping is linear in line length — ✅ DONE (2026-09-23)
+
+NOTES (2026-09-23): cutReadable now takes and returns a []rune (rest is a subslice); a new appendReadableSegment holds the per-segment loop and keeps a fitting segment's original bytes, and readableRow spells each row in one allocation — measured 364 KB / 711 allocs for a 64 KB no-space line (≈5.6×, under the 8× bound).
+NOTES (2026-09-23): the Acceptance command's -race flag cannot run on this host (ThreadSanitizer: unsupported VMA range, 47-bit arm64); ran the same selection without -race.
 
 **What:**
 **Goal:** `wrapReadable`/`cutReadable` (`internal/tui/inspector.go`) wrap a line of L runes in O(L) time and allocation, with output identical to base.

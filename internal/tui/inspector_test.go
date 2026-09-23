@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -1215,5 +1216,98 @@ func TestInspectorFollowsTheTrafficArrivingUnderIt(t *testing.T) {
 	}
 	if !raw.inspector.follow {
 		t.Error("ctrl+r took the follow with it — the chord flips the rendering and nothing else")
+	}
+}
+
+// baseWrapReadable is wrapReadable as it stood before the one-decode walk: every cut re-decoded the
+// whole remainder into runes and back. It is kept here as the oracle the linear walk must match
+// row for row, invalid UTF-8 included.
+func baseWrapReadable(prefix, text string, column int) []string {
+	cut := func(lead, segment string) (string, string) {
+		budget := max(column-len([]rune(lead)), 1)
+		runes := []rune(segment)
+		if len(runes) <= budget {
+			return lead + segment, ""
+		}
+		for i := budget; i > 0; i-- {
+			if runes[i] != ' ' {
+				continue
+			}
+			return lead + string(runes[:i]), strings.TrimLeft(string(runes[i:]), " ")
+		}
+		return lead + string(runes[:budget]), string(runes[budget:])
+	}
+	var rows []string
+	lead := prefix
+	for _, segment := range strings.Split(text, "\n") {
+		for {
+			row, rest := cut(lead, segment)
+			rows = append(rows, strings.TrimRight(row, " "))
+			lead = readableContinuationIndent
+			if rest == "" {
+				break
+			}
+			segment = rest
+		}
+	}
+	return rows
+}
+
+// The linear walk wraps every shape of passage exactly as the re-slicing one did: long single
+// lines, wide runes, spaces landing on the column, runs with no break at all, and a line of invalid
+// UTF-8 longer than the column, whose cut rows carry U+FFFD while a line that fits keeps its bytes.
+func TestReadableWrapMatchesTheBaseAlgorithm(t *testing.T) {
+	t.Parallel()
+	invalid := strings.Repeat("ab\xffc\xfe ", 40)
+	corpus := []struct {
+		name, prefix, text string
+	}{
+		{name: "empty", prefix: readableTextPrefix, text: ""},
+		{name: "fits", prefix: readableTextPrefix, text: "a short passage"},
+		{name: "long single line of words", prefix: readableTextPrefix, text: strings.Repeat("the quick brown fox ", 200)},
+		{name: "no break opportunity", prefix: readableTextPrefix, text: strings.Repeat("a", 1000)},
+		{name: "wide runes", prefix: "", text: strings.Repeat("漢字かな ", 90) + strings.Repeat("語", 300)},
+		{name: "space at the column", prefix: "", text: strings.Repeat(strings.Repeat("x", 23)+" ", 50)},
+		{name: "space just past the column", prefix: "", text: strings.Repeat(strings.Repeat("y", 24)+" ", 50)},
+		{name: "runs of spaces and trailing spaces", prefix: readableTextPrefix, text: strings.Repeat("word     ", 60) + "      "},
+		{name: "paragraphs", prefix: readableTextPrefix, text: strings.Repeat("line one is long enough to wrap twice over at this column\n\n", 8)},
+		{name: "invalid UTF-8 longer than the column", prefix: readableTextPrefix, text: invalid},
+		{name: "invalid UTF-8 that fits", prefix: "", text: "ok\xff"},
+	}
+	for _, tc := range corpus {
+		for _, column := range []int{1, 2, 24, readableWrapColumn} {
+			want := baseWrapReadable(tc.prefix, tc.text, column)
+			got := wrapReadable(tc.prefix, tc.text, column)
+			if !slices.Equal(got, want) {
+				t.Errorf("%s at column %d: got %d rows %q, want %d rows %q", tc.name, column, len(got), got, len(want), want)
+			}
+		}
+	}
+}
+
+// oneRecordLine is a 64 KB single-line record with nothing to break on — the shape that cost the
+// re-slicing wrap ~128 MB.
+func oneRecordLine() string { return strings.Repeat("a", 64<<10) }
+
+// A 64 KB line wraps for a small multiple of its own size, not its size times its row count. Not
+// parallel: TotalAlloc is process-wide, and a neighbour's allocations would be read as this one's.
+func TestReadableWrapAllocationIsLinear(t *testing.T) {
+	line := oneRecordLine()
+	var stats runtime.MemStats
+	runtime.GC()
+	runtime.ReadMemStats(&stats)
+	before := stats.TotalAlloc
+	runtime.KeepAlive(wrapReadable(readableTextPrefix, line, readableWrapColumn))
+	runtime.ReadMemStats(&stats)
+	if spent, bound := stats.TotalAlloc-before, uint64(8*len(line)); spent > bound {
+		t.Fatalf("wrapping a %d-byte line allocated %d KB, want at most %d KB (8× the input)", len(line), spent>>10, bound>>10)
+	}
+}
+
+func BenchmarkWrapReadable(b *testing.B) {
+	line := oneRecordLine()
+	b.ReportAllocs()
+	for b.Loop() {
+		wrapReadable(readableTextPrefix, line, readableWrapColumn)
 	}
 }

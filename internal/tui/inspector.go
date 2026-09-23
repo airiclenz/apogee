@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -745,36 +746,71 @@ func wrapReadable(prefix, text string, column int) []string {
 	var rows []string
 	lead := prefix
 	for _, segment := range strings.Split(text, "\n") {
-		for {
-			row, rest := cutReadable(lead, segment, column)
-			rows = append(rows, strings.TrimRight(row, " "))
-			lead = readableContinuationIndent
-			if rest == "" {
-				break
-			}
-			segment = rest
-		}
+		rows = appendReadableSegment(rows, lead, segment, column)
+		lead = readableContinuationIndent
 	}
 	return rows
 }
 
-// cutReadable takes the next row off one segment: everything that fits after lead within column
-// runes, and whatever is left over. It prefers the last space at or before the budget and cuts
-// mid-rune-run only when the segment offers none, so a wrapped paragraph breaks on words wherever
-// words exist.
-func cutReadable(lead, segment string, column int) (row, rest string) {
-	budget := max(column-len([]rune(lead)), 1)
+// appendReadableSegment appends one newline-free segment's rows to rows: the first after lead, every
+// later one after readableContinuationIndent.
+//
+// A segment that fits its budget is kept as the bytes it came in. One that does not is decoded to
+// runes ONCE and cut by rune offset from there, so a line of L runes costs O(L) however many rows
+// it spans — re-decoding the remainder at every cut made a 64 KB line cost O(L²). The decode is
+// also why a cut segment's invalid UTF-8 comes out as U+FFFD on every row, as it always has.
+func appendReadableSegment(rows []string, lead, segment string, column int) []string {
+	budget := max(column-utf8.RuneCountInString(lead), 1)
+	if utf8.RuneCountInString(segment) <= budget {
+		return append(rows, strings.TrimRight(lead+segment, " "))
+	}
 	runes := []rune(segment)
+	for {
+		row, rest := cutReadable(lead, runes, column)
+		rows = append(rows, strings.TrimRight(row, " "))
+		if len(rest) == 0 {
+			return rows
+		}
+		runes = rest
+		lead = readableContinuationIndent
+	}
+}
+
+// cutReadable takes the next row off one segment's runes: everything that fits after lead within
+// column runes, and whatever is left over. It prefers the last space at or before the budget and
+// cuts mid-rune-run only when the segment offers none, so a wrapped paragraph breaks on words
+// wherever words exist. The rest is a subslice of runes, never a copy.
+func cutReadable(lead string, runes []rune, column int) (row string, rest []rune) {
+	budget := max(column-utf8.RuneCountInString(lead), 1)
 	if len(runes) <= budget {
-		return lead + segment, ""
+		return readableRow(lead, runes), nil
 	}
 	for i := budget; i > 0; i-- {
 		if runes[i] != ' ' {
 			continue
 		}
-		return lead + string(runes[:i]), strings.TrimLeft(string(runes[i:]), " ")
+		rest = runes[i:]
+		for len(rest) > 0 && rest[0] == ' ' {
+			rest = rest[1:]
+		}
+		return readableRow(lead, runes[:i]), rest
 	}
-	return lead + string(runes[:budget]), string(runes[budget:])
+	return readableRow(lead, runes[:budget]), runes[budget:]
+}
+
+// readableRow spells lead and runes as one string in a single allocation.
+func readableRow(lead string, runes []rune) string {
+	size := len(lead)
+	for _, r := range runes {
+		size += utf8.RuneLen(r)
+	}
+	var row strings.Builder
+	row.Grow(size)
+	row.WriteString(lead)
+	for _, r := range runes {
+		row.WriteRune(r)
+	}
+	return row.String()
 }
 
 // inspectContent is what the pane tells the shared module about itself for one frame: its name, the
