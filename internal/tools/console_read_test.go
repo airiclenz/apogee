@@ -132,7 +132,10 @@ func TestConsoleRead_WaitReturnsAsSoonAsOutputArrives(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute err = %v, want nil", err)
 	}
-	if !strings.Contains(res.Content, "late") {
+	// The read returns on the first chunk, and a loaded box can hand the console "la" before
+	// "te\n" — so any non-empty prefix of the write is the output arriving, not a miss.
+	got, _, _ := strings.Cut(res.Content, "\n")
+	if got = strings.TrimSuffix(got, "\r"); got == "" || !strings.HasPrefix("late", got) {
 		t.Errorf("result = %q, want the output that arrived inside the window", res.Content)
 	}
 	if elapsed > 1500*time.Millisecond {
