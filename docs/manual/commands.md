@@ -136,10 +136,11 @@ the bar, and `esc`, or simply typing your next message, gives the keys back. `�
 **sub-agent** does something else: it opens that delegation's **run view**, which gives the
 whole transcript area over to that one run — its task at the top, its own tool calls and
 its answer below, following its latest line as it works. A click on the run's row opens the
-same thing. The first row of the view is the way back: `← main › scout`, and `esc` — or a
-click on that row — goes one level up, one press per level. While a view is open the status
-line says `esc back` in place of the stop hint, because stopping is the whole run's and
-belongs to the top level: back out first, then `esc` twice. Inside the view of a run that is
+same thing. The black band at the top of the view is the way back: `← main › scout` in its
+middle row, and `esc` — or a click anywhere on the band — goes one level up, one press per
+level. While a view is open the status line says `esc back` in place of the stop hint,
+because stopping is the whole run's and belongs to the top level: back out first, then
+`esc` twice. Inside the view of a run that is
 still working the prompt box addresses **that sub-agent** — the box reads
 `Message scout…` and `⏎` sends your message to the delegate, which picks it up between its
 own steps, exactly as a message to the main agent is picked up between its. A run that has

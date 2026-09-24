@@ -4068,6 +4068,25 @@ func TestSubAgentGroupMemberClickOpensItsSpan(t *testing.T) {
 		}
 	})
 
+	t.Run("every row of the breadcrumb band brings the list back", func(t *testing.T) {
+		t.Parallel()
+		for _, line := range []int{0, breadcrumbTrailRow + 1} {
+			m := modelWithSubAgentGroup(t)
+			m = clickLine(t, m, memberRows(t, m, middle)[0])
+			if kind := m.lineTargets[line].kind; kind != targetBreadcrumb {
+				t.Fatalf("setup: band line %d is marked %v, not the breadcrumb", line, kind)
+			}
+			// The band is frozen at the top of the view, so line L of it is drawn on row L.
+			if got := m.drawnLineAt(line); got != line {
+				t.Fatalf("setup: row %d draws line %d, not band line %d", line, got, line)
+			}
+			m = clickCell(t, m, 4, line)
+			if m.inRunView() {
+				t.Errorf("a click on band line %d did not leave the middle delegation's view", line)
+			}
+		}
+	})
+
 	t.Run("the group header toggles nothing", func(t *testing.T) {
 		t.Parallel()
 		m := modelWithSubAgentGroup(t)

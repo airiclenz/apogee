@@ -2,6 +2,7 @@ package tui
 
 import (
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"testing"
@@ -967,6 +968,85 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 	})
 }
 
+// TestBlockCursorStandsOnTheBreadcrumbTrail pins where ⌥↓ lands inside a view: the band is one click
+// surface, but its first row is blank, so the cursor's stop is the TRAIL — the row that says where ⏎
+// goes — and the bar is drawn there rather than on an empty slab of black above the words.
+func TestBlockCursorStandsOnTheBreadcrumbTrail(t *testing.T) {
+	t.Parallel()
+
+	m := modelViewingChild(t, &fakeEngine{}, childOver)
+
+	m = step(t, m, keyAltDown())
+
+	if got := cursorLine(t, m); got != breadcrumbTrailRow {
+		t.Fatalf("⌥↓ entered on line %d, want the trail on line %d", got, breadcrumbTrailRow)
+	}
+	rows := make([]string, m.transcriptRows())
+	for i := range rows {
+		rows[i] = fmt.Sprintf("row %d", i)
+	}
+	shaded := strings.Split(m.highlightBlockCursor(strings.Join(rows, "\n")), "\n")
+	for i, row := range shaded {
+		if lit := row != rows[i]; lit != (i == breadcrumbTrailRow) {
+			t.Errorf("row %d shaded = %v, want the bar on the trail row %d alone", i, lit, breadcrumbTrailRow)
+		}
+	}
+}
+
+// TestShortScreenFreezesOnlyTheTrail is the band giving way on a frame with no room for it: at twelve
+// rows the transcript keeps four, which the whole four-row header would cover entirely. There the
+// trail alone is frozen, and the rows beneath it draw the run.
+func TestShortScreenFreezesOnlyTheTrail(t *testing.T) {
+	t.Parallel()
+
+	tr, root := rootedFixture()
+	m := step(t, newTestModel(t), tea.WindowSizeMsg{Width: 80, Height: 12})
+	m.transcript = *tr
+	m.transcript.setRoot(root)
+	m.viewStack = []runView{{ref: root}}
+	m.refreshViewport()
+	if got := m.transcriptRows(); got != 4 {
+		t.Fatalf("setup: the transcript keeps %d rows at height 12, want 4", got)
+	}
+
+	start, count := m.stickyHeaderSpan()
+
+	if start != breadcrumbTrailRow || count != 1 {
+		t.Fatalf("sticky header span = (%d, %d), want the trail alone at (%d, 1)", start, count, breadcrumbTrailRow)
+	}
+	if got := strip(m.lines[m.drawnLineAt(0)]); !strings.Contains(got, "← main › repo-scout") {
+		t.Errorf("row 0 draws %q, want the trail", got)
+	}
+	content := 0
+	for row := 1; row < m.transcriptRows(); row++ {
+		line := m.drawnLineAt(row)
+		if line >= m.header.count && strings.TrimSpace(strip(m.lines[line])) != "" {
+			content++
+		}
+	}
+	if content == 0 {
+		t.Errorf("no row under the trail draws the run's own content:\n%s", strings.Join(m.lines, "\n"))
+	}
+
+	// Scrolled to the top, the band's pad and spacer may not slide under the frozen trail: row 1
+	// draws the run's first line, as the same screen did before the band existed.
+	// Two ways up: the reader's own scroll, and a repaint landing while the view is parked at the top.
+	scrolled := m
+	for range len(m.lines) {
+		next, _ := scrolled.scrollViewport(tea.KeyPressMsg{Code: tea.KeyPgUp})
+		scrolled = next.(Model)
+	}
+	if got := scrolled.drawnLineAt(1); got < scrolled.header.count {
+		t.Errorf("scrolled to the top, row 1 draws header line %d (%q), want the run's own content", got, strip(scrolled.lines[got]))
+	}
+	m.viewport.GotoTop()
+	m.detached = true
+	m.refreshViewport()
+	if got := m.drawnLineAt(1); got < m.header.count || strings.TrimSpace(strip(m.lines[got])) == "" {
+		t.Errorf("at the top, row 1 draws line %d (%q), want the run's first line", got, strip(m.lines[got]))
+	}
+}
+
 // TestRunViewBreadcrumbHintFollowsTheKey is the same guard on the row ABOVE the transcript. The
 // header and the status line's right slot advertise ONE key (statusRight, "the two rows advertise
 // one key"), so the breadcrumb may not go on promising `esc back` while a child's ask or approval
@@ -975,14 +1055,15 @@ func TestRunViewDecisionPaneOwnsTheLegend(t *testing.T) {
 func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
 	t.Parallel()
 
-	// header is the row the sticky overlay freezes at the top of the view (render.go), plainly.
+	// header is the trail row of the band the sticky overlay freezes at the top of the view
+	// (render.go), plainly.
 	header := func(t *testing.T, m Model) string {
 		t.Helper()
 		m.refreshViewport()
 		if len(m.lines) == 0 {
 			t.Fatal("the view painted no lines at all")
 		}
-		return strip(m.lines[0])
+		return strip(m.lines[breadcrumbTrailRow])
 	}
 
 	for _, tc := range []struct {

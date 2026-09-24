@@ -573,8 +573,8 @@ type Model struct {
 	// miss, which is what makes a repaint a CONSEQUENCE of a fold rather than a call each arm has
 	// to remember. A comparable struct, so the compare is one `!=`.
 	painted frameKey
-	// header is the sticky header the PAINT owns rather than the scrollback: the breadcrumb row of a
-	// transcript rooted at one run and the blank spacer beneath it
+	// header is the sticky header the PAINT owns rather than the scrollback: the three-row
+	// breadcrumb band of a transcript rooted at one run and the blank spacer beneath it
 	// (renderedTranscript.header, render.go), and the zero value while
 	// the whole transcript is on screen. It takes the overlay slot outright when it is there — inside
 	// a run view the breadcrumb is the only header, and the paint registers no user block beside it.
@@ -1868,6 +1868,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 func (m Model) scrollViewport(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.viewport, cmd = m.viewport.Update(msg)
+	m.floorShortScreenOffset()
 	m.detached = !m.viewport.AtBottom()
 	return m, cmd
 }
@@ -2580,6 +2581,7 @@ func (m *Model) refreshViewport() {
 	m.cursor = m.cursor.clamp(m.lineTargets)
 	if m.detached {
 		m.viewport.SetContentLines(rendered.lines)
+		m.floorShortScreenOffset()
 		// Content that SHRANK under the held offset is clamped back to the bottom by
 		// SetContentLines; the human is looking at the tail again, so following resumes and the
 		// invariant "detached ⇔ off the bottom" stays total. Growth never lands here — the offset
@@ -2592,6 +2594,7 @@ func (m *Model) refreshViewport() {
 	}
 	m.viewport.SetContentLines(rendered.lines)
 	m.viewport.GotoBottom() // the real tail: the content ends where the transcript ends
+	m.floorShortScreenOffset()
 }
 
 // refreshViewportAnchored re-renders the transcript and then holds ONE content line on the screen
@@ -2618,6 +2621,7 @@ func (m *Model) refreshViewport() {
 func (m *Model) refreshViewportAnchored(line, row int) {
 	m.refreshViewport()
 	m.viewport.SetYOffset(line - row)
+	m.floorShortScreenOffset()
 	m.detached = !m.viewport.AtBottom()
 }
 
@@ -3012,7 +3016,17 @@ func (m Model) stickyHeaderSpan() (start, count int) {
 	// user block at all (render.go), so inside a view there is one header and it never hands over:
 	// the trail back up is true at every offset, where a prompt's header is only true above its own
 	// replies.
+	//
+	// A screen too short to show the whole header AND a row of the run under it freezes the trail
+	// alone: the band and the spacer are breathing room, and on a frame with none to spare freezing
+	// them would cover every row the view has, leaving a header over nothing. The rows are read off
+	// the viewport widget, which layout() sizes to [Model.transcriptRows] and the repaint tail keeps
+	// there ([Model.freshenTranscriptClamp]): this runs once per row on the mouse's and the block
+	// cursor's paths, where re-deriving the overlays' heights every time would be paid per row.
 	if m.header.count > 0 {
+		if m.viewport.Height() <= m.header.count+1 {
+			return m.header.start + breadcrumbTrailRow, 1
+		}
 		return m.header.start, m.header.count
 	}
 	if len(m.userBlocks) == 0 {
@@ -3042,6 +3056,26 @@ func (m Model) stickyHeaderSpan() (start, count int) {
 		return 0, 0 // this header is fully pushed out; the next one is already the natural top
 	}
 	return b.start + push, b.count - push // the still-visible (bottom) header rows
+}
+
+// floorShortScreenOffset keeps the view from scrolling the run's header rows under the frozen trail
+// on a screen too short for the whole band ([Model.stickyHeaderSpan]). There the trail alone is
+// frozen at row 0 and every row below it draws offset + row, so an offset above the band's last row
+// would draw the trail a second time, the band's pad and the spacer where the run belongs. Flooring
+// the offset at that last row puts the run's first line on row 1 at the top of the scroll, which is
+// what the same screen drew before the band existed. Every path that moves the offset (the repaint,
+// the anchored repaint, a user scroll, a view restore) calls it after moving; SetYOffset clamps, so
+// on content too short to reach the floor the offset stays where the widget can hold it.
+func (m *Model) floorShortScreenOffset() {
+	if m.header.count == 0 {
+		return
+	}
+	if _, count := m.stickyHeaderSpan(); count == m.header.count {
+		return
+	}
+	if floor := m.header.start + m.header.count - 1; m.viewport.YOffset() < floor {
+		m.viewport.SetYOffset(floor)
+	}
 }
 
 // contentLineAt maps a viewport row to the index into m.lines of the content ACTUALLY DRAWN there,

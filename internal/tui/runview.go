@@ -247,6 +247,7 @@ func (m Model) upRun() Model {
 	m.refreshViewport()
 	if left.detached {
 		m.viewport.SetYOffset(left.yOffset)
+		m.floorShortScreenOffset()
 		m.detached = !m.viewport.AtBottom()
 	}
 	return m

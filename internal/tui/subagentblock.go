@@ -189,7 +189,8 @@ func breadcrumbTrail(entries []entry, run runRef) string {
 	return breadcrumbBack + " " + strings.Join(append([]string{usageMainLabel}, names...), " "+breadcrumbSep+" ")
 }
 
-// breadcrumbRow paints that trail as the run view's own sticky header: the trail in the transcript's
+// breadcrumbRow paints that trail as the middle row of the run view's own sticky header band
+// (breadcrumbPadRow paints the rows above and below it): the trail in the transcript's
 // body column, the key that leaves the view held bodyIndent off the right edge, on the black
 // `surface` field the input box and the status line already stand on (th.breadcrumb) — the header
 // is a band of the frame, not the prompt block whose gray it once borrowed.
@@ -215,6 +216,23 @@ func breadcrumbRow(th theme, trail string, width int, hint string) string {
 		return th.breadcrumb.Render(squareLine(th.measure, body, width))
 	}
 	return th.breadcrumb.Render(squareLine(th.measure, body+strings.Repeat(" ", gap)+hint, width))
+}
+
+// breadcrumbBandRows is how many rows the run view's breadcrumb band paints: a blank row above the
+// trail, the trail, and a blank row below it (renderView's rooted opening). breadcrumbTrailRow is
+// where in that band the trail itself stands — the one row of the three that says anything, and so
+// the one a reader's eye and the block cursor's bar land on (cursorStops) and the one a screen too
+// short for the whole band still freezes (Model.stickyHeaderSpan).
+const (
+	breadcrumbBandRows = 3
+	breadcrumbTrailRow = 1
+)
+
+// breadcrumbPadRow is the band's blank row: nothing but the breadcrumb's black field, squared to the
+// full width so the band reads as one slab of the frame with the trail riding in its middle rather
+// than as a single row pressed against the top edge and the first block beneath it.
+func breadcrumbPadRow(th theme, width int) string {
+	return th.breadcrumb.Render(squareLine(th.measure, "", width))
 }
 
 // insideCollapsedRunAtDepth is insideCollapsedRun's answer for a run with no spawning call id: each

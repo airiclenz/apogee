@@ -44,8 +44,8 @@ type renderedTranscript struct {
 	// exact accounting the paint used (ADR 0030's rule, one authority per measurement).
 	targets []lineTarget
 	// header is the sticky header the PAINT itself owns, as the lines it occupies at the top of the
-	// slice: the breadcrumb row of a paint rooted at one run, plus the blank spacer beneath it
-	// (transcript.setRoot), and the zero value — count 0 — for the ordinary whole-transcript paint,
+	// slice: the three-row breadcrumb band of a paint rooted at one run, plus the blank spacer
+	// beneath it (transcript.setRoot), and the zero value — count 0 — for the ordinary whole-transcript paint,
 	// whose sticky headers are the user blocks beside it. The overlay is one mechanism either way
 	// (Model.stickyHeaderSpan): a header is content lines frozen at the top of the viewport, and
 	// this only says WHICH lines without asking the offset.
@@ -298,18 +298,28 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	// advertising rows to unfold.
 	if root.rooted() {
 		head := t.entries[root.first-1]
-		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref), width, backHint))
-		targets = append(targets, lineTarget{kind: targetBreadcrumb})
-		cells = append(cells, -1)
-		// The header is TWO rows: the trail, and a blank one beneath it holding the view's content
-		// off the band exactly as the frame's own gap row holds the transcript off the bottom block.
-		// The spacer is unpainted and carries no target — it is a row of nothing, and a click on it
-		// belongs to no block — but it is part of the header, so it freezes with the trail rather
-		// than scrolling away and letting the first block ride against it.
+		// The header is FOUR rows. The first three are the band: a blank black row, the trail, and
+		// another blank black row (breadcrumbBandRows), all three one click surface — the band is the
+		// way back up as a whole, so a click that lands a row above or below the words still leaves
+		// the view. The fourth is a blank row beneath the band holding the view's content off it
+		// exactly as the frame's own gap row holds the transcript off the bottom block. That spacer is
+		// unpainted and carries no target — it is a row of nothing, and a click on it belongs to no
+		// block — but it is part of the header, so it freezes with the band rather than scrolling
+		// away and letting the first block ride against it.
+		pad := breadcrumbPadRow(th, width)
+		for row := range breadcrumbBandRows {
+			ln := pad
+			if row == breadcrumbTrailRow {
+				ln = breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref), width, backHint)
+			}
+			lines = append(lines, ln)
+			targets = append(targets, lineTarget{kind: targetBreadcrumb})
+			cells = append(cells, -1)
+		}
 		lines = append(lines, "")
 		targets = append(targets, lineTarget{})
 		cells = append(cells, -1)
-		header = userBlock{start: 0, count: 2}
+		header = userBlock{start: 0, count: len(lines)}
 		if strings.TrimSpace(head.tool.task) != "" {
 			prompt := paintInput{
 				kind:       entryUser,

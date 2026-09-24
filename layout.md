@@ -1208,7 +1208,9 @@ shapes and no third: the collapsed row it wears in the conversation, and this. T
 those rows is a collapsed run, and opening one opens its view.
 
 ```text
+▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
   ← main › scout                                                             esc back
+▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒▒
 
 ❯ Take the second half of the survey
 
@@ -1241,7 +1243,9 @@ by it, and opens nothing but the view. The blocks between keep
 own, and everything the transcript does elsewhere — the scroll bar, the block cursor,
 drag-selection, `see more`, the live star — it does here.
 
-**The breadcrumb is the header, and it is the way back.** The first row of the view names the trail
+**The breadcrumb is the header, and it is the way back.** The view opens on a black band three rows
+tall (`▒` in the sketch marks its two blank rows, which are painted, not empty), and its middle row
+names the trail
 from the human's own conversation down to the run on screen — `← main › planner › repo-scout`, one
 crumb per level, each run named the way every other surface names it (the delegation's name, else
 its task's first line, else the generic word) — with `esc back` held `bodyIndent` off the right
@@ -1252,17 +1256,22 @@ is squared out to the full width so the terminal's own background never shows th
 is painted on the **`surface`** role — the same black field the prompt box's interior and the status
 line stand on — and not on the prompt block's gray: the header is a band of apogee's own frame
 rather than something the human said, so the view reads as one pane with a band at the top and a
-band at the bottom. The header is **two rows**: the trail, and a blank one beneath it, unpainted,
-holding the view's first block off the band exactly as the frame's gap row holds the transcript off
-the bottom block. The spacer freezes with the trail rather than scrolling away, and it is a click
-target for nothing.
+band at the bottom. The header is **four rows**: the band's blank black row, the trail, the band's
+second blank black row — all three on the one `surface` field, squared to the full width — and a
+blank row beneath the band, unpainted, holding the view's first block off it exactly as the frame's
+gap row holds the transcript off the bottom block. The spacer freezes with the band rather than
+scrolling away, and it is a click target for nothing. On a screen too short to show the whole
+header and a row of the run beneath it, the trail alone is frozen: the band and the spacer are
+breathing room, and a header covering every row the view has would leave the reader looking at
+nothing. The block cursor's stop on the band is the trail row, the one row of the three that says
+where `⏎` goes.
 Where the width cannot pay for both, the hint gives way whole rather than truncating — a key hint
 nobody can read advertises nothing, and the trail is what the header is for. It gives way for a
 second reason too: while a child's ask or approval pane stands inside the view, `esc` answers the
 pane and no longer walks up, so the header drops the hint exactly where the status line's right slot
 drops it — the two rows advertise one key, and neither may name a press the other does not have. The
 trail itself stays, because where the reader is is still true. A motionless click
-anywhere on the row goes **one** level up, and `esc` does the same: the trail is a sign rather than
+anywhere on the band — any of its three rows — goes **one** level up, and `esc` does the same: the trail is a sign rather than
 a set of jump targets, so leaving a run two deep is two presses.
 
 **`esc` means back before it means stop.** While a view is open the status line's right slot reads

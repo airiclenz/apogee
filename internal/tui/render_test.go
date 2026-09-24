@@ -584,23 +584,25 @@ func TestRootedPaintRegistersNoUserBlock(t *testing.T) {
 	if len(view.userBlocks) != 0 {
 		t.Errorf("the rooted paint registered %d user blocks, want none: %+v", len(view.userBlocks), view.userBlocks)
 	}
-	if want := (userBlock{start: 0, count: 2}); view.header != want {
+	if want := (userBlock{start: 0, count: 4}); view.header != want {
 		t.Errorf("the rooted paint's header span = %+v, want %+v", view.header, want)
 	}
-	if view.targets[0].kind != targetBreadcrumb {
-		t.Errorf("line 0 is a %v, want the breadcrumb's own kind", view.targets[0].kind)
+	for line := range breadcrumbBandRows {
+		if view.targets[line].kind != targetBreadcrumb {
+			t.Errorf("band line %d is a %v, want the breadcrumb's own kind", line, view.targets[line].kind)
+		}
 	}
 
-	// The header's second row: blank, clickable by nobody, and ALONE — the block beneath it must
+	// The header's fourth row: blank, clickable by nobody, and ALONE — the block beneath it must
 	// not add a railed separator of its own on top of the spacer, or the view opens with two blank
 	// rows where the spec draws one.
-	if got := strip(view.lines[1]); got != "" {
-		t.Errorf("the header's second row is %q, want the blank spacer", got)
+	if got := strip(view.lines[3]); got != "" {
+		t.Errorf("the header's fourth row is %q, want the blank spacer", got)
 	}
-	if view.targets[1].kind != targetNone {
-		t.Errorf("the spacer row is a %v, want no target at all", view.targets[1].kind)
+	if view.targets[3].kind != targetNone {
+		t.Errorf("the spacer row is a %v, want no target at all", view.targets[3].kind)
 	}
-	if got := strip(view.lines[2]); !strings.Contains(got, "scout the repo") {
+	if got := strip(view.lines[4]); !strings.Contains(got, "scout the repo") {
 		t.Errorf("the row under the spacer is %q, want the task the run was handed", got)
 	}
 }
@@ -649,10 +651,10 @@ func TestRunViewHeaderIsDrawnByTheStickyOverlay(t *testing.T) {
 	m.refreshViewport()
 
 	start, count := m.stickyHeaderSpan()
-	if start != 0 || count != 2 {
-		t.Fatalf("sticky header span = (%d, %d), want the breadcrumb and its spacer at (0, 2)", start, count)
+	if start != 0 || count != 4 {
+		t.Fatalf("sticky header span = (%d, %d), want the breadcrumb band and its spacer at (0, 4)", start, count)
 	}
-	row := strip(m.lines[0])
+	row := strip(m.lines[breadcrumbTrailRow])
 	if want := bodyIndent + "← main › repo-scout"; !strings.HasPrefix(row, want) {
 		t.Errorf("the header row is %q; want it to lead with %q", row, want)
 	}
@@ -662,13 +664,19 @@ func TestRunViewHeaderIsDrawnByTheStickyOverlay(t *testing.T) {
 	if got, want := m.th.measure.Width(row), m.transcriptWidth(); got != want {
 		t.Errorf("the header row is %d columns wide, want the transcript's own %d", got, want)
 	}
-	overlaid := strings.Split(m.applyStickyHeader("a\nb\nc"), "\n")
-	if overlaid[0] != m.lines[0] {
-		t.Errorf("the overlay drew %q at row 0, want the breadcrumb %q", strip(overlaid[0]), row)
+	overlaid := strings.Split(m.applyStickyHeader("a\nb\nc\nd\ne"), "\n")
+	for line := range 4 {
+		if overlaid[line] != m.lines[line] {
+			t.Errorf("the overlay drew %q at row %d, want the header's own row %q",
+				strip(overlaid[line]), line, strip(m.lines[line]))
+		}
 	}
-	// Row 1 freezes with the trail: the spacer is part of the header, so scrolling can never bring
+	// Row 3 freezes with the band: the spacer is part of the header, so scrolling can never bring
 	// a block up against the band.
-	if got := strip(overlaid[1]); got != "" {
-		t.Errorf("the overlay drew %q at row 1, want the header's blank spacer", got)
+	if got := strip(overlaid[3]); got != "" {
+		t.Errorf("the overlay drew %q at row 3, want the header's blank spacer", got)
+	}
+	if overlaid[4] != "e" {
+		t.Errorf("the overlay drew %q at row 4, want the row under the header left as it was", strip(overlaid[4]))
 	}
 }

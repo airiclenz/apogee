@@ -30,7 +30,14 @@
 - The footer's static window while a view is open
 - A parent agent stopping or messaging its sub-agents (IDEAS item 3; see the handoff `docs/handoffs/2026-09-24 - 00 - sub-agent-control-handoff.md`)
 
-## 1. The run view's breadcrumb is a three-row black band, clickable as one
+## 1. The run view's breadcrumb is a three-row black band, clickable as one — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the ⌥↓ guard took the plan's second option: `cursorStops` (via a new `surfaceStop`) puts the breadcrumb band's stop on the trail row (`breadcrumbTrailRow`), and `highlightBlockCursor` is unchanged. This keeps the cursor's line drawn on a short screen, where only the trail is frozen.
+NOTES (2026-09-24): `Model.stickyHeaderSpan` checks for a short screen with `m.viewport.Height()` (which layout() sizes to `transcriptRows()`), not `transcriptRows()` as the plan says. The span is asked once per row on the mouse and block-cursor paths, and `transcriptRows()` recomputes the overlay heights each time. The result is the same (the height-12 test asserts `transcriptRows()==4`).
+NOTES (2026-09-24): IDEAS.md is gitignored (`.gitignore:14`), so it cannot be committed and is left out of FILES. The local edit removes the first "Sub-Agents" item. The second item's "same plan" now names the plan path, because the item it pointed back to is gone.
+NOTES (2026-09-24): consequential edit — internal/tui/mouse.go: made necessary by the band (the targetBreadcrumb case comment described one header row)
+NOTES (2026-09-24): retry fix: on a short screen the view no longer scrolls the band's pad and spacer under the frozen trail. The new `Model.floorShortScreenOffset` (model.go) keeps the viewport's YOffset at or above header.count-1. Every path that moves the offset calls it: refreshViewport (both branches), refreshViewportAnchored, scrollViewport, and the view-restore in runview.go. TestShortScreenFreezesOnlyTheTrail gained a PgUp-to-top case and a GotoTop-then-detached-repaint case, and both assert that row 1 draws the run. Without the floor, both fail.
+NOTES (2026-09-24): consequential edit — cmd/apogee/testdata/frames/t17-run-view.txt, cmd/apogee/testdata/frames/t18-run-view-finished.txt: made necessary by the band. Re-recorded with `go test ./cmd/apogee -update`; the only change is the band's blank row above and below the trail.
 
 **What:**
 **Goal:** A rooted paint's sticky header (`renderedTranscript.header`) is four lines:

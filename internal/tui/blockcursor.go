@@ -46,16 +46,36 @@ type blockCursor struct {
 // [lineTarget] is compared whole, so two adjacent blocks (different entries) and a member row
 // beside its neighbour inside one group (different entries, same kind) stay separate stops — both
 // are separate things to a click, and this is exactly the mouse's own map read back.
+//
+// The run view's breadcrumb band is the one surface whose first line does NOT name it: the band
+// opens on a blank row, and the trail stands on the row below (breadcrumbTrailRow). Its stop is
+// that trail row, so the bar lands on the words that say where ⏎ goes, and a screen too short to
+// freeze the whole band — which freezes the trail alone (Model.stickyHeaderSpan) — still shows the
+// line the cursor stands on.
 func cursorStops(targets []lineTarget) []int {
 	var stops []int
 	prev := lineTarget{}
 	for i, target := range targets {
 		if target.kind != targetNone && target != prev {
-			stops = append(stops, i)
+			stops = append(stops, surfaceStop(targets, i))
 		}
 		prev = target
 	}
 	return stops
+}
+
+// surfaceStop is the line the cursor stands on for the surface whose first line is first: that line
+// itself, except on the breadcrumb band, whose trail sits breadcrumbTrailRow below its opening pad
+// row. A band shorter than that (a hand-built map) keeps its first line.
+func surfaceStop(targets []lineTarget, first int) int {
+	if targets[first].kind != targetBreadcrumb {
+		return first
+	}
+	trail := first + breadcrumbTrailRow
+	if trail < len(targets) && targets[trail] == targets[first] {
+		return trail
+	}
+	return first
 }
 
 // clamp keeps an active cursor standing on a stop of the paint that is now on the screen, and ends

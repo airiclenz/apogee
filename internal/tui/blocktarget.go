@@ -24,8 +24,9 @@ package tui
 // how an umbrella of ten opens one of them (renderToolBlock, renderSuperGroup). What the kind means has
 // not moved: it is the toggle, whatever line it lands on.
 //
-// targetBreadcrumb is the run view's header row (transcript.setRoot, render.go): the ← main › name
-// trail a paint rooted at one delegation draws over itself. It is not a toggle at all — its click
+// targetBreadcrumb is the run view's header band (transcript.setRoot, render.go): the ← main › name
+// trail a paint rooted at one delegation draws over itself, and the blank black row above and below
+// it — every row of the band wears it, so the band is one click target. It is not a toggle at all — its click
 // goes UP a level rather than opening anything — so it names no entry, and the toggle switch every
 // other kind runs through leaves it alone (Model.toggleBlockAt).
 //

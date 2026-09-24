@@ -1452,6 +1452,59 @@ func TestBreadcrumbRowIsPaintedEdgeToEdgeOnTheSurfaceField(t *testing.T) {
 	}
 }
 
+// The run view's header is a BAND, not a row: a blank black row, the trail, and another blank black
+// row, every one of them squared to the width on the surface field and every one of them the way
+// back up. Beneath the band sits the unpainted spacer, which carries no target at all, and the four
+// together are the header the overlay freezes.
+func TestRunViewHeaderIsABandOfThreeBreadcrumbRows(t *testing.T) {
+	t.Parallel()
+
+	const width = 80
+	th := newTheme(scheme.Default())
+	surfaceField := backgroundToken(t, th.statusBar.Render("x"))
+	tr, root := rootedFixture()
+	tr.setRoot(root)
+
+	view := tr.renderView(th, width, false, breadcrumbHint)
+
+	for line := range breadcrumbBandRows {
+		row := view.lines[line]
+		if got := ansi.StringWidth(row); got != width {
+			t.Errorf("band line %d is %d columns wide, want %d: %q", line, got, width, strip(row))
+		}
+		if col, ok := firstCellWithoutBackground(row); !ok {
+			t.Errorf("band line %d has a bare (no-background) cell at column %d: %q", line, col, strip(row))
+		}
+		for _, bg := range backgroundSGR.FindAllString(row, -1) {
+			if bg != surfaceField {
+				t.Errorf("band line %d carries the background %q, want the surface field %q", line, bg, surfaceField)
+			}
+		}
+		if view.targets[line] != (lineTarget{kind: targetBreadcrumb}) {
+			t.Errorf("band line %d is marked %+v, want the breadcrumb's own target", line, view.targets[line])
+		}
+		text := strings.TrimSpace(strip(row))
+		if line == breadcrumbTrailRow {
+			if !strings.HasPrefix(text, "← main › repo-scout") {
+				t.Errorf("band line %d reads %q, want the trail", line, text)
+			}
+			continue
+		}
+		if text != "" {
+			t.Errorf("band line %d reads %q, want no glyphs at all", line, text)
+		}
+	}
+	if got := view.lines[breadcrumbBandRows]; got != "" {
+		t.Errorf("the spacer under the band is %q, want an unpainted empty row", got)
+	}
+	if got := view.targets[breadcrumbBandRows]; got != (lineTarget{}) {
+		t.Errorf("the spacer under the band is marked %+v, want no target", got)
+	}
+	if view.header.count != 4 {
+		t.Errorf("the header counts %d rows, want the band's three and the spacer", view.header.count)
+	}
+}
+
 // backgroundSGR matches ONE background parameter run inside a rendered line — "48;5;n" or
 // "48;2;r;g;b". It answers which field a row stands on, where firstCellWithoutBackground
 // (popup_test.go) answers only whether it stands on one at all.
@@ -1597,10 +1650,12 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 			t.Errorf("the report's last line appears %d times in the view, want exactly 1:\n%s",
 				hits, strings.Join(lines, "\n"))
 		}
-		// Row 0 is the breadcrumb the head became; the task the child was handed opens the view
-		// directly beneath it, and its own work follows (render.go's rooted paint).
-		if !strings.Contains(lines[0], breadcrumbBack) {
-			t.Fatalf("line 0 is %q, not the breadcrumb:\n%s", lines[0], strings.Join(lines, "\n"))
+		// Row 1 is the breadcrumb the head became, riding in the middle of its band; the task the
+		// child was handed opens the view directly beneath the header, and its own work follows
+		// (render.go's rooted paint).
+		if !strings.Contains(lines[breadcrumbTrailRow], breadcrumbBack) {
+			t.Fatalf("line %d is %q, not the breadcrumb:\n%s",
+				breadcrumbTrailRow, lines[breadcrumbTrailRow], strings.Join(lines, "\n"))
 		}
 		task := -1
 		for i, ln := range lines {
@@ -1615,9 +1670,12 @@ func TestFinishedRunSaysItsReportOnce(t *testing.T) {
 		if !strings.Contains(lines[task], "survey the tests") {
 			t.Errorf("the task row reads %q, want the prompt the child was handed", lines[task])
 		}
-		for i, ln := range lines[1:task] {
+		if strings.TrimSpace(lines[0]) != "" {
+			t.Errorf("line 0 (%q) is the band's top row, want it blank", lines[0])
+		}
+		for i, ln := range lines[breadcrumbTrailRow+1 : task] {
 			if strings.TrimSpace(ln) != "" {
-				t.Errorf("line %d (%q) stands between the breadcrumb and the task row", i+1, ln)
+				t.Errorf("line %d (%q) stands between the breadcrumb and the task row", i+breadcrumbTrailRow+1, ln)
 			}
 		}
 		if last := lines[len(lines)-1]; !strings.Contains(last, "here they are") {
