@@ -282,6 +282,9 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 	// value firingConfig's beat is dialled under, so an unattended run opens the connection a
 	// session on this entry opens (ADR 0031's Driver parity).
 	cfg.Wire = in.entry.Wire
+	// And its `request-extra:` passthrough (ADR 0085), for the wire's reason: every body an
+	// unattended run sends to this entry carries the keys a session on it sends.
+	cfg.RequestExtra = string(in.entry.RequestExtra)
 	// The Model profile the resolution above matched for THIS model (ADR 0044) — off the spec
 	// rather than off opts, so the run reads responses in the same shape a session on the same
 	// model would, and a built-in match has already narrated itself through the notices.
@@ -492,9 +495,14 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// (ADR 0031's Driver parity). Both of its Upstreams are constants for the run — the run's own
 	// server, and the Sub-agent server resolved just above when one was named — because an unattended
 	// run has no live door to move either through; the gate is `auto-title:` as it stood at startup
-	// for the same reason.
+	// for the same reason. The session binding carries the entry's wire and request-extra too, so a
+	// naming call speaks the protocol this entry speaks and sends the keys every other request to it
+	// sends.
 	cfg.Namer = newFiringNamer(
-		upstreamBinding{Endpoint: in.entry.Endpoint, Model: spec.Model, APIKey: apiKey},
+		upstreamBinding{
+			Endpoint: in.entry.Endpoint, Model: spec.Model, APIKey: apiKey,
+			Wire: in.entry.Wire, RequestExtra: string(in.entry.RequestExtra),
+		},
 		effortDialect, routing.target, in.opts.AutoTitle)
 
 	// And the one thing an unattended run cannot get from the engine: the `run_on` argument on

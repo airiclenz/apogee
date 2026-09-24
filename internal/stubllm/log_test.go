@@ -81,3 +81,43 @@ func renderSampling(s Sampling) string {
 	}
 	return fmt.Sprintf("{MaxTokens:%s Temperature:%s}", maxTokens, temperature)
 }
+
+// TestServerLogsTheRawBody pins [Request.Body] on both wires: the log carries the body byte for
+// byte, keys no decoded member names included, so a claim about a merged `request-extra:` key
+// (ADR 0085) is read off what actually arrived.
+func TestServerLogsTheRawBody(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		body string
+		send func(*testing.T, *Server, string) reply
+	}{
+		{
+			name: "chat completions",
+			body: `{"model":"stub-model","messages":[{"role":"user","content":"hi"}],"provider":{"order":["x"]}}`,
+			send: post,
+		},
+		{
+			name: "messages",
+			body: `{"model":"stub-model","max_tokens":64,"messages":[{"role":"user","content":"hi"}],"provider":{"order":["x"]}}`,
+			send: postMessages,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			server := New(t, Script{Model: "stub-model", Turns: []Turn{{Text: "ok"}}})
+			tc.send(t, server, tc.body)
+
+			requests := server.Requests()
+			if len(requests) != 1 {
+				t.Fatalf("requests = %+v, want one", requests)
+			}
+			if got := string(requests[0].Body); got != tc.body {
+				t.Errorf("Body = %s, want the body as sent %s", got, tc.body)
+			}
+		})
+	}
+}

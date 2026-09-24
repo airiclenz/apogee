@@ -72,7 +72,7 @@ func TestMoveResolvesACommandKeySource(t *testing.T) {
 
 	agent := &fakeSwitcher{}
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "",
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "", "",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	mover := sessionMover{
 		agent:  agent,
@@ -109,7 +109,7 @@ func TestMoveRefusesWhenTheKeySourceFails(t *testing.T) {
 
 	agent := &fakeSwitcher{}
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "",
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "", "",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	mover := sessionMover{
 		agent:  agent,

@@ -431,8 +431,10 @@ type wireTap struct {
 // unnamed wire folds to openai and the Client never speaks a protocol it does not have — ADR 0078),
 // the silence bound the Config states for a streamed reply (provider.WithStreamIdleTimeout over
 // cfg.StreamIdleTimeout — always, so a zero field disables the cut rather than leaving the Client
-// on its own default), and, only when cfg.Inspector asks for it, the Inspector's wire observer
-// (armWireCapture). It is called at every dial site — New, Resume, SwitchUpstream and the routed
+// on its own default), the server entry's `request-extra:` passthrough (provider.WithRequestExtra
+// over cfg.RequestExtra, ADR 0085 — always, since "" merges nothing and sends the codec's bytes;
+// this is the engine's single producer of that Option), and, only when cfg.Inspector asks for
+// it, the Inspector's wire observer (armWireCapture). It is called at every dial site — New, Resume, SwitchUpstream and the routed
 // spawn — with the Config of the Agent that will speak over the connection, which is what keeps
 // the wire a per-server fact: a switch dials the arrived-at server's wire, a routed child its
 // target's, and neither inherits the departed or parent server's protocol — while the silence
@@ -442,6 +444,7 @@ func dialOptions(cfg domain.Config) ([]provider.Option, *wireTap) {
 	opts := []provider.Option{
 		provider.WithWire(provider.WireFor(cfg.Wire)),
 		provider.WithStreamIdleTimeout(cfg.StreamIdleTimeout),
+		provider.WithRequestExtra(cfg.RequestExtra),
 	}
 	return append(opts, capture...), tap
 }

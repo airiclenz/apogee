@@ -161,10 +161,13 @@ func probeModelCommand() *cobra.Command {
 			// discovery above does (the startup `servers:` entry's own key source, which
 			// APOGEE_API_KEY overlays; no flag — a secret does not belong in shell history).
 			// Both of this command's clients are keyed, so a keyed
-			// Upstream cannot refuse the probe while a session against it works.
+			// Upstream cannot refuse the probe while a session against it works. The battery
+			// also carries the entry's `request-extra:` passthrough (ADR 0085), so the model is
+			// measured under the body a session on this entry sends it; the label discovery
+			// above sends no body and needs none.
 			client := provider.NewClient(opts.Endpoint, label,
 				provider.WithRequestTimeout(effectiveBatteryTimeout(batteryTimeout)), provider.WithAPIKey(apiKey),
-				provider.WithWire(wire))
+				provider.WithWire(wire), provider.WithRequestExtra(string(opts.StartupEntry.RequestExtra)))
 			result := probe.GatherModel(cmd.Context(), probe.ModelInputs{
 				Endpoint: opts.Endpoint,
 				Model:    label,

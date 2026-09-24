@@ -286,12 +286,14 @@ Every served request lands in the log, which is the stub's half of an assertion:
 actually sent, in order, and which turn answered it.
 
 - `server.Requests() []Request` — `N`, `Wire`, `Model`, `Messages`, `Tools`, `Stream`,
-  `Sampling`, `Effort`, `Unmatched`, `TurnIndex`, `At`. `Sampling` is the `max_tokens` and
+  `Sampling`, `Effort`, `Body`, `Unmatched`, `TurnIndex`, `At`. `Sampling` is the `max_tokens` and
   `temperature` the body carried (nil where it carried none); `Effort` is the thinking-effort
   key it carried, in whichever dialect the provider spoke — `chat_template_kwargs`, `reasoning`,
   `reasoning_effort` or the Messages wire's `output_config.effort`, recorded verbatim — so a
   test about "what did the engine ask the sampler for" reads the log instead of a fake that
-  captured the request before the client shaped it.
+  captured the request before the client shaped it. `Body` is the request body exactly as it
+  arrived, on either wire — the witness for keys no decoded member names, such as a server
+  entry's `request-extra:` passthrough (ADR 0085) merged over the body.
 - `server.Probes() []Probe` — the discovery GETs (`/v1/models`, `/props`), each with its `Path`,
   the `Header`s it carried and `At`. They are logged apart from completions: `Requests()`, its
   numbering and `LastMessage` stay about what the agent asked the model, so a test counting a

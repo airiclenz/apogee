@@ -32,6 +32,9 @@ type serverBinding struct {
 	Wire              *string
 	ServerName        *string
 	ServerDescription *string
+	// RequestExtra is the server's `request-extra:` passthrough (ADR 0085), a dial fact like the
+	// endpoint: the canonical JSON dialOptions hands the Client, "" for an entry that names none.
+	RequestExtra *string
 	// The per-model bindings: the wire model id and the system-prompt template.
 	Model        *string
 	SystemPrompt *string
@@ -69,6 +72,9 @@ func (b serverBinding) applyTo(cfg domain.Config) domain.Config {
 	}
 	if b.ServerDescription != nil {
 		cfg.ServerDescription = *b.ServerDescription
+	}
+	if b.RequestExtra != nil {
+		cfg.RequestExtra = *b.RequestExtra
 	}
 	if b.Model != nil {
 		cfg.Model = *b.Model
@@ -118,8 +124,9 @@ func (s RebindSpec) binding() serverBinding {
 	}
 }
 
-// binding states a server switch as a serverBinding: the dial facts and the seat's human words are
-// present, and so are all four token bounds — applied as the spec states them, the zeroes included,
+// binding states a server switch as a serverBinding: the dial facts — the request-extra
+// passthrough among them, "" included, so a move to an entry that names none clears the retired
+// one's — and the seat's human words are present, and so are all four token bounds — applied as the spec states them, the zeroes included,
 // because an absent pin is a fact about the new server rather than a licence to keep the retired
 // one's number (see each field's contract in rebind.go). Model is present as `""`: a switch UNBINDS
 // the model rather than guessing what the new server serves (ADR 0024), and that unbinding is a
@@ -133,6 +140,7 @@ func (s UpstreamSpec) binding() serverBinding {
 		Wire:                    &s.Wire,
 		ServerName:              &s.ServerName,
 		ServerDescription:       &s.ServerDescription,
+		RequestExtra:            &s.RequestExtra,
 		Model:                   &unbound,
 		MaxContextTokens:        &s.MaxContextTokens,
 		WorkingWindow:           &s.WorkingWindow,
@@ -142,20 +150,26 @@ func (s UpstreamSpec) binding() serverBinding {
 }
 
 // binding states a routed delegation's target as a serverBinding, with every field's contract from
-// delegationtarget.go read as presence: the dial facts, Model, WorkingWindow, MaxOutputTokens and
-// Profile are always present (their zeroes ARE the target's answer); ContextWindow is present only
+// delegationtarget.go read as presence: the dial facts (the request-extra passthrough among them,
+// "" included, so a child routed to an entry that names none never keeps the parent's), the
+// target's entry name as ServerName, Model, WorkingWindow, MaxOutputTokens and Profile are always
+// present (their zeroes ARE the target's answer); ContextWindow is present only
 // when positive, since a target that names no window leaves the parent's standing rather than
 // building the child windowless, and a negative cannot be meant so it folds in with 0;
 // ResponseReserveFraction is present only when positive, since an entry that states no share
 // leaves the parent's run-wide split standing; EffortDialect is present only when the target names
 // one, since the zero there says "this target names none" and keeps the parent's shape; Bypass
-// passes through as the pointer it already is (ADR 0045 §2's replace-or-inherit rule). The seat's
-// human words and the system prompt are not a target's to state.
+// passes through as the pointer it already is (ADR 0045 §2's replace-or-inherit rule). The name is
+// the one of the seat's human words a target states — it identifies the server the child dials,
+// where the parent's name would describe the box the child left; the description and the system
+// prompt are not a target's to state.
 func (t *DelegationTarget) binding() serverBinding {
 	b := serverBinding{
 		Endpoint:        &t.Endpoint,
 		APIKey:          &t.APIKey,
 		Wire:            &t.Wire,
+		ServerName:      &t.ServerName,
+		RequestExtra:    &t.RequestExtra,
 		Model:           &t.Model,
 		WorkingWindow:   &t.WorkingWindow,
 		MaxOutputTokens: &t.MaxOutputTokens,

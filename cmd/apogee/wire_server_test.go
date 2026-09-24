@@ -509,7 +509,7 @@ func launcherWiringFixture(t *testing.T, ops launcherOps, endpoint string) (
 	agent := &fakeSwitcher{}
 	host := &fakeStamper{}
 	holder := newUpstreamHolder()
-	holder.Bind(endpoint, "", "", "", heartbeat.NewMonitor(endpoint, "", ""))
+	holder.Bind(endpoint, "", "", "", "", heartbeat.NewMonitor(endpoint, "", ""))
 	widths := &parallelAgentsSpy{}
 	wiring := launcherWiring{
 		sessionMover: sessionMover{
@@ -1369,7 +1369,7 @@ func TestMoveCarriesTheEntrysWindowAndReplyCap(t *testing.T) {
 	agent := &fakeSwitcher{}
 	host := &fakeStamper{}
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "",
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "", "",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384})
 	mover := sessionMover{agent: agent, holder: holder, host: host, live: live,
@@ -1459,7 +1459,7 @@ func TestMoveCarriesTheEntrysResponseReserveShare(t *testing.T) {
 
 	agent := &fakeSwitcher{}
 	holder := newUpstreamHolder()
-	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "",
+	holder.Bind("http://old.invalid:1111", "old-key", "old-model", "", "",
 		heartbeat.NewMonitor("http://old.invalid:1111", "old-model", "old-key"))
 	live := newLiveSettings(config.Options{ContextWindow: 16384, ResponseReserve: 0.2})
 	mover := sessionMover{

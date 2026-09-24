@@ -270,6 +270,11 @@ type UpstreamSpec struct {
 	// nothing about the seat, which is what every session did before this existed.
 	ServerName        string
 	ServerDescription string
+	// RequestExtra is the new server's `request-extra:` passthrough (ADR 0085) — the entry's
+	// canonical JSON object, merged over every request body the replacement Client encodes. It
+	// rides the switch for the wire's reason: it is a fact about the server being dialled. "" ⇒
+	// the entry names none — applied, not skipped, so the retired server's keys never reach this one.
+	RequestExtra string
 	// MaxContextTokens is the BOUND context window in tokens on the new server — the caller has
 	// already applied the new entry's `context-window:` pin over whatever the session ran on, exactly
 	// as RebindSpec.MaxContextTokens carries the resolved window for a model change. 0 ⇒ nobody named

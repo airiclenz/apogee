@@ -68,7 +68,9 @@ type Config struct {
 	//
 	// Like every other input of that block they are per-session constants (ADR 0023 §6): they move
 	// only where the human moves the server, through SwitchUpstream's `/server` door, which is what
-	// keeps the rendered line prefix-cache-stable for the life of a binding.
+	// keeps the rendered line prefix-cache-stable for the life of a binding. A routed child is built
+	// with its Delegation target's entry name as ServerName (DelegationTarget.binding), fixed for
+	// that child's life, so its Config names the server it dials rather than the parent's.
 	ServerName        string
 	ServerDescription string
 

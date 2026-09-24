@@ -47,7 +47,9 @@ type upstreamHolder struct {
 	apiKey   string
 	model    string
 	wire     string
-	monitor  *heartbeat.Monitor
+	// requestExtra is the entry's `request-extra:` canonical JSON (ADR 0085), "" for none.
+	requestExtra string
+	monitor      *heartbeat.Monitor
 }
 
 // upstreamBinding is everything a fresh call to this session's Upstream must be built from: where it
@@ -70,6 +72,10 @@ type upstreamBinding struct {
 	Model    string
 	APIKey   string
 	Wire     string
+	// RequestExtra is the entry's `request-extra:` passthrough as canonical JSON (ADR 0085), ""
+	// for an entry that names none; an out-of-band call built from the binding carries it the way
+	// the engine's own Client does. A string, so the binding stays comparable.
+	RequestExtra string
 }
 
 // newUpstreamHolder builds the holder EMPTY: no Monitor, no binding, nothing to observe. The
@@ -84,17 +90,18 @@ func newUpstreamHolder() *upstreamHolder {
 
 // Bind installs the Monitor for the server the session is now on, together with the binding it
 // observes: the endpoint, the resolved key, and that server's discovery hint (empty when the entry
-// pins no model, where the first beat binds one) and the wire that server speaks (the entry's
-// `wire:` key, ADR 0078). It is how a Monitor first ARRIVES — Swap below is the same write for a
-// session that already had one — so it is the single writer of the five fields, and they move
-// together under one lock.
-func (h *upstreamHolder) Bind(endpoint, apiKey, model, wire string, monitor *heartbeat.Monitor) {
+// pins no model, where the first beat binds one), the wire that server speaks (the entry's `wire:`
+// key, ADR 0078) and its `request-extra:` passthrough (ADR 0085). It is how a Monitor first
+// ARRIVES — Swap below is the same write for a session that already had one — so it is the single
+// writer of the six fields, and they move together under one lock.
+func (h *upstreamHolder) Bind(endpoint, apiKey, model, wire, requestExtra string, monitor *heartbeat.Monitor) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.endpoint = endpoint
 	h.apiKey = apiKey
 	h.model = model
 	h.wire = wire
+	h.requestExtra = requestExtra
 	h.monitor = monitor
 }
 
@@ -144,8 +151,8 @@ func (h *upstreamHolder) SetModel(model string) {
 // The bound model is CLEARED, for the same reason the session record's stamped model is: a switch
 // unbinds the model, and until the new server's first beat rebinds one, claiming the old server's
 // model would be a claim about a server this session no longer talks to.
-func (h *upstreamHolder) Swap(endpoint, apiKey, wire string, monitor *heartbeat.Monitor) {
-	h.Bind(endpoint, apiKey, "", wire, monitor)
+func (h *upstreamHolder) Swap(endpoint, apiKey, wire, requestExtra string, monitor *heartbeat.Monitor) {
+	h.Bind(endpoint, apiKey, "", wire, requestExtra, monitor)
 }
 
 // Endpoint reports the Upstream the session is on right now — the launch endpoint until a move
@@ -176,7 +183,9 @@ func (h *upstreamHolder) Endpoint() string {
 func (h *upstreamHolder) Binding() upstreamBinding {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return upstreamBinding{Endpoint: h.endpoint, Model: h.model, APIKey: h.apiKey, Wire: h.wire}
+	return upstreamBinding{
+		Endpoint: h.endpoint, Model: h.model, APIKey: h.apiKey, Wire: h.wire, RequestExtra: h.requestExtra,
+	}
 }
 
 // current reads the live Monitor under the mutex and hands it back, so callers hold the lock for a
@@ -289,8 +298,11 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 		// by the entry the session is on NOW when the model is offered a seat to choose (ADR 0069).
 		// They ride the switch for the pins' reason: the entry is in hand here, and a session that
 		// moved to another box must not go on describing the one it left.
-		ServerName:              entry.Name,
-		ServerDescription:       entry.Description,
+		ServerName:        entry.Name,
+		ServerDescription: entry.Description,
+		// The arrived-at entry's `request-extra:` passthrough (ADR 0085), "" included: the
+		// replacement client merges THIS server's keys and never the retired one's.
+		RequestExtra:            string(entry.RequestExtra),
 		MaxContextTokens:        window,
 		WorkingWindow:           working,
 		MaxOutputTokens:         entry.MaxOutputTokens,
@@ -301,7 +313,7 @@ func (m sessionMover) move(entry config.ServerEntry) (tui.ServerSwitchResult, er
 	// The replacement Monitor carries the new entry's forced effort dialect and its wire, the way
 	// the first bind's does: both are per-server facts, so they move with the server (ADR 0060
 	// decision 3, ADR 0078).
-	m.holder.Swap(entry.Endpoint, apiKey, entry.Wire, heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
+	m.holder.Swap(entry.Endpoint, apiKey, entry.Wire, string(entry.RequestExtra), heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
 		provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect)),
 		provider.WithWire(provider.WireFor(entry.Wire))))
 	m.host.SetModel("")

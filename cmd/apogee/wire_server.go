@@ -88,6 +88,9 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// Agent is constructed from it here, and a session that starts on an anthropic entry must open
 	// the Messages connection from its very first Turn. The zero value folds to openai at the dial.
 	cfg.Wire = entry.Wire
+	// And its `request-extra:` passthrough (ADR 0085): the engine's Client merges it over every body
+	// it sends to this server, from the first Turn on. "" merges nothing.
+	cfg.RequestExtra = string(entry.RequestExtra)
 	// The same server in the HUMAN's words, for the orientation block to name the session seat by
 	// when the model is offered a seat to choose (ADR 0069). They ride the Config rather than a
 	// later push for the pins' reason: a session that starts on a described entry must be able to
@@ -145,7 +148,7 @@ func (b serverBinder) bind(entry config.ServerEntry) error {
 	// the picker, the footer and the wire all read. And with the entry's wire (ADR 0078), because
 	// discovery differs per wire: an anthropic entry is asked under its own headers and never for
 	// a /props it does not serve.
-	b.holder.Bind(entry.Endpoint, apiKey, entry.Model, entry.Wire,
+	b.holder.Bind(entry.Endpoint, apiKey, entry.Model, entry.Wire, string(entry.RequestExtra),
 		heartbeat.NewMonitor(entry.Endpoint, entry.Model, apiKey,
 			provider.WithEffortDialect(provider.EffortDialectFor(entry.EffortDialect)),
 			provider.WithWire(provider.WireFor(entry.Wire))))

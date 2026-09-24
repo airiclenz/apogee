@@ -329,7 +329,8 @@ func (s *Server) probe(r *http.Request) {
 // handleChat decodes a chat-completions request and serves it.
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var request chatRequest
-	if !decodeRequest(w, r, &request) {
+	body, ok := decodeRequest(w, r, &request)
+	if !ok {
 		return
 	}
 	s.serve(w, r, Request{
@@ -340,6 +341,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		Stream:   request.Stream,
 		Sampling: request.sampling(),
 		Effort:   request.effort(),
+		Body:     body,
 	})
 }
 
@@ -347,25 +349,29 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 // gating and Turn as the chat route, rendered in the Messages reply shape.
 func (s *Server) handleMessages(w http.ResponseWriter, r *http.Request) {
 	var request anthropicRequest
-	if !decodeRequest(w, r, &request) {
+	body, ok := decodeRequest(w, r, &request)
+	if !ok {
 		return
 	}
-	s.serve(w, r, request.logEntry())
+	entry := request.logEntry()
+	entry.Body = body
+	s.serve(w, r, entry)
 }
 
-// decodeRequest reads a request body under maxRequestBytes into v and reports whether it
-// could; a failure is already answered 400 when it returns false.
-func decodeRequest(w http.ResponseWriter, r *http.Request, v any) bool {
+// decodeRequest reads a request body under maxRequestBytes into v and returns the bytes it read
+// (the log's [Request.Body]) with whether it could; a failure is already answered 400 when it
+// returns false.
+func decodeRequest(w http.ResponseWriter, r *http.Request, v any) ([]byte, bool) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxRequestBytes))
 	if err != nil {
 		http.Error(w, "stubllm: read request: "+err.Error(), http.StatusBadRequest)
-		return false
+		return nil, false
 	}
 	if err := json.Unmarshal(body, v); err != nil {
 		http.Error(w, "stubllm: undecodable request: "+err.Error(), http.StatusBadRequest)
-		return false
+		return nil, false
 	}
-	return true
+	return body, true
 }
 
 // serve matches the decoded request against the script and plays the Turn it took, on the wire

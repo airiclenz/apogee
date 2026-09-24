@@ -50,6 +50,14 @@ type DelegationTarget struct {
 	// child is on another server, and a wire is a fact about the server, so "" here means the
 	// target names none and folds to openai — the parent's wire says nothing about this box.
 	Wire string
+	// ServerName is the flagged `servers:` entry's name — the server the routed child dials, in the
+	// human's words. It lands on the child's Config as written, "" included, so a routed child is
+	// never identified by the name of the parent's server.
+	ServerName string
+	// RequestExtra is the flagged entry's `request-extra:` passthrough (ADR 0085) — canonical JSON
+	// the child's Client merges over every body it sends. The TARGET's own value, "" included: a
+	// passthrough is a fact about the server, so a routed child never carries the parent's.
+	RequestExtra string
 	// Model is the model id a routed child sends on the wire — the entry's `model:` pin, else the
 	// model its heartbeat observed bound there. Required for the same reason Endpoint is: a
 	// delegation that cannot name a model is not a usable target, it is the fallback.

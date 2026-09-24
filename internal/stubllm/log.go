@@ -33,6 +33,10 @@ type Request struct {
 	// Effort is the thinking-effort intent the request expressed, in whichever wire dialect it
 	// spoke, recorded verbatim from the body.
 	Effort Effort
+	// Body is the request body exactly as it arrived, for the claims no decoded member names — a
+	// server entry's `request-extra:` keys (ADR 0085) merged over the body on either wire. It is
+	// the log's own copy; a test may keep it.
+	Body []byte
 	// Unmatched reports that no Turn answered: the stub replied HTTP 500.
 	Unmatched bool
 	// TurnIndex is the index of the Turn that answered, or -1 when Unmatched.

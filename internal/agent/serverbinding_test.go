@@ -12,12 +12,13 @@ import (
 // read off a Config so a projection is judged on exactly the cells the value owns and nothing the
 // parent carries beside them (its tools, its sinks, its mode) can hide a stray write.
 type bindingCells struct {
-	Endpoint, APIKey, Wire, ServerName, ServerDescription, Model, SystemPrompt string
-	MaxContextTokens, WorkingWindow, MaxOutputTokens                           int
-	ResponseReserveFraction                                                    float64
-	Profile                                                                    domain.ModelProfile
-	EffortDialect                                                              domain.EffortDialect
-	Bypass                                                                     bool
+	Endpoint, APIKey, Wire, ServerName, ServerDescription, RequestExtra string
+	Model, SystemPrompt                                                 string
+	MaxContextTokens, WorkingWindow, MaxOutputTokens                    int
+	ResponseReserveFraction                                             float64
+	Profile                                                             domain.ModelProfile
+	EffortDialect                                                       domain.EffortDialect
+	Bypass                                                              bool
 }
 
 func cellsOf(cfg domain.Config) bindingCells {
@@ -27,6 +28,7 @@ func cellsOf(cfg domain.Config) bindingCells {
 		Wire:                    cfg.Wire,
 		ServerName:              cfg.ServerName,
 		ServerDescription:       cfg.ServerDescription,
+		RequestExtra:            cfg.RequestExtra,
 		Model:                   cfg.Model,
 		SystemPrompt:            cfg.SystemPrompt,
 		MaxContextTokens:        cfg.Context.MaxContextTokens,
@@ -48,6 +50,7 @@ func bindingParent() domain.Config {
 		Wire:              "openai",
 		ServerName:        "session",
 		ServerDescription: "the orchestrator's box",
+		RequestExtra:      `{"provider":{"order":["session"]}}`,
 		Model:             "smart-70b",
 		SystemPrompt:      "parent prompt",
 		Profile: domain.ModelProfile{Thinking: domain.ThinkingProfile{
@@ -76,6 +79,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 		endpoint = "http://grunt.local:1111"
 		key      = "grunt-key"
 		wire     = "anthropic"
+		extra    = `{"provider":{"order":["grunt"]}}`
 		model    = "cheap-4b"
 		window   = 32768
 		working  = 24000
@@ -136,13 +140,14 @@ func TestServerBindingApplyTo(t *testing.T) {
 			},
 		},
 		{
-			name: "switch states the dial facts, the seat's words and all four bounds, and unbinds the model",
+			name: "switch states the dial facts, the request-extra, the seat's words and all four bounds, and unbinds the model",
 			binding: UpstreamSpec{
 				Endpoint:                endpoint,
 				APIKey:                  key,
 				Wire:                    wire,
 				ServerName:              "grunt",
 				ServerDescription:       "the cheap box",
+				RequestExtra:            extra,
 				MaxContextTokens:        window,
 				WorkingWindow:           working,
 				MaxOutputTokens:         ceiling,
@@ -154,6 +159,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Wire = wire
 				c.ServerName = "grunt"
 				c.ServerDescription = "the cheap box"
+				c.RequestExtra = extra
 				c.Model = ""
 				c.MaxContextTokens = window
 				c.WorkingWindow = working
@@ -170,6 +176,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Wire = ""
 				c.ServerName = ""
 				c.ServerDescription = ""
+				c.RequestExtra = ""
 				c.Model = ""
 				c.MaxContextTokens = 0
 				c.WorkingWindow = 0
@@ -178,11 +185,13 @@ func TestServerBindingApplyTo(t *testing.T) {
 			},
 		},
 		{
-			name: "target states the dial facts, the model, the window, both inner bounds, the share, the profile, the dialect and the posture",
+			name: "target states the dial facts, its name, the request-extra, the model, the window, both inner bounds, the share, the profile, the dialect and the posture",
 			binding: (&DelegationTarget{
 				Endpoint:                endpoint,
 				APIKey:                  key,
 				Wire:                    wire,
+				ServerName:              "grunt",
+				RequestExtra:            extra,
 				Model:                   model,
 				ContextWindow:           window,
 				WorkingWindow:           working,
@@ -196,6 +205,8 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Endpoint = endpoint
 				c.APIKey = key
 				c.Wire = wire
+				c.ServerName = "grunt"
+				c.RequestExtra = extra
 				c.Model = model
 				c.MaxContextTokens = window
 				c.WorkingWindow = working
@@ -207,7 +218,7 @@ func TestServerBindingApplyTo(t *testing.T) {
 			},
 		},
 		{
-			name: "target with no window, no share, no dialect and no posture keeps the parent's four and zeroes the rest",
+			name: "target with no window, no share, no dialect and no posture keeps the parent's four and zeroes the rest, the name and the request-extra included",
 			binding: (&DelegationTarget{
 				Endpoint: endpoint,
 				Model:    model,
@@ -216,6 +227,8 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Endpoint = endpoint
 				c.APIKey = ""
 				c.Wire = ""
+				c.ServerName = ""
+				c.RequestExtra = ""
 				c.Model = model
 				c.WorkingWindow = 0
 				c.MaxOutputTokens = 0
@@ -234,6 +247,8 @@ func TestServerBindingApplyTo(t *testing.T) {
 				c.Endpoint = endpoint
 				c.APIKey = ""
 				c.Wire = ""
+				c.ServerName = ""
+				c.RequestExtra = ""
 				c.Model = model
 				c.WorkingWindow = 0
 				c.MaxOutputTokens = 0

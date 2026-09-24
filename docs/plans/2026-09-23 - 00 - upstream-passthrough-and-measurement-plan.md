@@ -108,7 +108,13 @@ internal/provider/client_test.go — TestWireObserver_RecordsPostedBodyWithoutCr
 **Acceptance:** `go test -race -count=1 ./internal/provider/`
 **Commit:** `feat(provider): merge a server's request-extra over each encoded body`
 
-## 4. Wire `request-extra` into every Client built for an entry
+## 4. Wire `request-extra` into every Client built for an entry — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the DelegationTarget's new name field is `ServerName` (beside `RequestExtra`), projected present-always onto Config.ServerName; the upstreamHolder's Bind/Swap arity grew by a `requestExtra` argument and the 9 test calls were updated.
+NOTES (2026-09-24): every test the item lists (driven Turn/delegation/`/server` cases with and without a target value, firingConfig, title generator over holder Bind/Swap, routed delegation-naming, probe battery, TestFiringNamerSpeaksTheEntrysWire) lives in the new cmd/apogee/request_extra_test.go rather than being split across naming_test.go and probemodel_test.go; all are stubllm-scripted, none uses an httptest closure.
+NOTES (2026-09-24): the witness is a new stubllm `Request.Body` (the raw body as received, both wires), documented under test-drivers.md "The request log" and pinned by TestServerLogsTheRawBody in internal/stubllm/log_test.go.
+NOTES (2026-09-24): consequential edit — internal/domain/config.go: made necessary by DelegationTarget.binding now projecting the target's name onto ServerName (the ServerName comment said it moves only through the `/server` door).
+NOTES (2026-09-24): `go test -race` cannot run on this box (ThreadSanitizer: 47-bit VA); the item's tests ran unraced — `go test ./internal/agent/ ./internal/stubllm/` ok and the acceptance's cmd/apogee -run set (plus TestE2ESeat*, TestServer*) ok; `go vet ./...` clean.
 
 Depends on items 2 and 3.
 **What:** Recast at the regression check (2026-09-23). Also fixes pre-existing: Firing namer binding omitted Wire.
