@@ -179,11 +179,12 @@ func SubAgentDepthFromContext(ctx context.Context) int {
 // spawnCallIDCtxKey keys the running Agent's spawn call ID in a tool call's context.
 type spawnCallIDCtxKey struct{}
 
-// WithSpawnCallID returns a context carrying id as the run identity of the agent whose tool call
+// WithSpawnCallID returns a context carrying id as the spawning call of the agent whose tool call
 // runs under it: the id of the sub_agent call that spawned it, the same value that stamps every
 // Event that agent emits (EventBase.CallID). It is what tells two SIBLING runs of a depth-0
-// fan-out apart, where depth alone cannot (ADR 0039) — so a Driver can place a tool-built request
-// inside the run that raised it rather than merely at the right level.
+// fan-out apart where depth alone cannot (ADR 0039), as far as their call ids differ — a call id
+// can collide, and the unique run identity is EventBase.RunID — so a Driver can place a tool-built
+// request inside the run that raised it rather than merely at the right level.
 //
 // It rides beside WithSubAgentDepth and is installed just as unconditionally: "" is the honest
 // identity of the top-level agent, which no sub_agent call spawned.

@@ -53,7 +53,7 @@ func adviseOneCall(t *testing.T, a *Agent, body string) domain.Message {
 
 	result := domain.ToolResult{CallID: "c1", Content: body}
 	advised := a.firePostToolResult(context.Background(), domain.ToolCall{ID: "c1", Tool: "read_file"}, &result)
-	a.appendToolResult(0, domain.ToolCall{}, result, "", advised)
+	a.appendToolResult(0, domain.ToolCall{}, "", result, "", advised)
 	return a.conv.At(a.conv.Len() - 1)
 }
 

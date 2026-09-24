@@ -887,7 +887,7 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
 // completion order is the model's call order; the row records the child's RESOLVED output target,
 // never the unresolved argument.
-func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result domain.ToolResult, outcome dispatchOutcome) {
+func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID string) (result domain.ToolResult, outcome dispatchOutcome) {
 	var (
 		spawnIndex   = a.delegations.open(call.ID)
 		ledgerName   string
@@ -994,7 +994,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 		return errorToolResult(call.ID, err.Error()), dispatchDone
 	}
 
-	sub, err := a.newChildAgentOn(seat, call.ID, task, delegationName(args.Name))
+	sub, err := a.newChildAgentOn(seat, call.ID, runID, task, delegationName(args.Name))
 	if err != nil {
 		giveBack()
 		return errorToolResult(call.ID, "could not construct sub-agent: "+err.Error()), dispatchDone
@@ -1072,7 +1072,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall) (result d
 	// the one rename that is not the namer's (ADR 0068), and it reaches the same readers by the same
 	// event, stamped with the child's identity as every rename is.
 	if inheritedName != "" {
-		a.emitSubAgentNamed(a.turns.index, call.ID, inheritedName)
+		a.emitSubAgentNamed(a.turns.index, call.ID, sub.runID, inheritedName)
 	}
 	// Named CONCURRENTLY with the run it names, and only once the child is addressable: the name is
 	// worth having while the delegation is still on screen, so waiting for a completion before
@@ -1214,6 +1214,7 @@ func (a *Agent) startDelegationNaming(ctx context.Context, callID string, sub *A
 	// emits one event.
 	req := domain.DelegationNaming{Task: sub.task, Routed: sub.ownsUpstream}
 	turn := a.turns.index
+	runID := sub.runID
 	nctx, cancel := context.WithCancel(ctx)
 	wg.Add(1)
 	go func() {
@@ -1234,7 +1235,7 @@ func (a *Agent) startDelegationNaming(ctx context.Context, callID string, sub *A
 			return
 		}
 		sub.setName(line)
-		a.emitSubAgentNamed(turn, callID, line)
+		a.emitSubAgentNamed(turn, callID, runID, line)
 	}()
 	return cancel
 }
@@ -1390,7 +1391,8 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 // checklist would rewrite a list the parent is still working from.
 type delegation struct {
 	depth       int    // parent+1, so the child's events nest (ADR 0013)
-	spawnCallID string // the sub_agent call being served — the child's run identity, stamped on every Event it emits (domain.EventBase.CallID)
+	spawnCallID string // the sub_agent call being served, stamped on every Event the child emits (domain.EventBase.CallID); the model's id, so it can collide
+	runID       string // the child's RUN IDENTITY, minted by the tree's runIDMinter and stamped on every Event it emits (domain.EventBase.RunID)
 	task        string // that call's delegated task — the child's identity in words, on every Approval it raises
 	name        string // the call's optional short name, already normalised by delegationName; "" = unnamed
 
@@ -1412,6 +1414,7 @@ type delegation struct {
 	latch          *delegationLatch   // the parent's holder, shared — or an empty one for a session-seated child (ADR 0069 decision 3)
 	journal        *undo.Journal      // the parent's undo journal, shared: delegated writes belong to the current Exchange's undo step (ADR 0051)
 	consoles       *console.Registry  // the engine's one Console registry, shared: the cap of four is per engine, not per delegation (ADR 0059 §6)
+	runIDs         *runIDMinter       // the tree's run-id minter, shared: the child's own delegations draw from the root's counter, so no two runs in the tree share an id
 }
 
 // newChildAgent constructs the nested Agent for a sub-agent, threading this Agent's privileges
@@ -1450,11 +1453,13 @@ type delegation struct {
 // whichever server answers, and only the POSTURE key ADR 0045 §2 puts on the flagged entry —
 // Bypass, which gates no tool — may differ, and only because the host was configured to say so.
 //
-// spawnCallID is the id of the sub_agent tool call being served — the child's RUN IDENTITY,
-// stamped on every Event it emits (domain.EventBase.CallID). It is what tells one delegated
-// stream from another once siblings share a depth (ADR 0039), so it is threaded at
+// spawnCallID is the id of the sub_agent tool call being served, stamped on every Event the child
+// emits (domain.EventBase.CallID) — the id of the tool-call block its run answers. It is the model's
+// or server's id and can collide, so it is not the child's run identity: newChildAgent mints that
+// from the tree's shared runIDMinter (newChildAgentOn takes it minted), and it is what tells one
+// delegated stream from another once siblings share a depth (ADR 0039). Both are threaded at
 // construction rather than at each emission: the child's own tools, Reactions and nested
-// delegations all emit through its base() and inherit it for free.
+// delegations all emit through its base() and inherit them for free.
 //
 // task is that same call's delegated task — the child's identity in WORDS rather than in ids, and
 // the only one a human can read. It rides every Approval the child raises
@@ -1472,7 +1477,7 @@ type delegation struct {
 // which is what every spawn took before ADR 0069 and what every caller that never names a seat
 // still means. runSubAgent calls the seat-taking form directly.
 func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
-	return a.newChildAgentOn(seatConfigured, spawnCallID, task, name)
+	return a.newChildAgentOn(seatConfigured, spawnCallID, a.runIDs.mint(), task, name)
 }
 
 // newChildAgentOn is newChildAgent with the Delegation SEAT stated (ADR 0069) — the one axis a
@@ -1487,7 +1492,11 @@ func (a *Agent) newChildAgent(spawnCallID, task, name string) (*Agent, error) {
 // was put (ADR 0045 decision 1's identity-once-there rule, read for the seat the model chose).
 // seatSubAgentsServer routes when a target is latched and otherwise degrades to the session server
 // (ADR 0045 §4), recording that on the child so its result carries the note.
-func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name string) (*Agent, error) {
+//
+// runID is the child's run identity, minted by the caller from the tree's runIDMinter BEFORE the
+// delegation's first event (prepareCall, runDelegation), so the head ToolCallEvent, the lifecycle
+// phases and every event the child emits carry the same id.
+func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, runID, task, name string) (*Agent, error) {
 	childCfg := a.cfg
 	childCfg.Mode = a.Mode() // inherit the parent's LIVE mode at spawn (Shift+Tab may have changed it),
 	//                          read under the lock since this runs on the worker goroutine during dispatch
@@ -1607,6 +1616,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 	d := &delegation{
 		depth:        a.depth + 1,
 		spawnCallID:  spawnCallID,
+		runID:        runID,
 		task:         task,
 		name:         name,
 		seatFallback: seatFallback,
@@ -1671,6 +1681,7 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 		latch:    a.delegation,
 		journal:  a.journal,
 		consoles: a.consoles,
+		runIDs:   a.runIDs,
 	}
 	if routedDialect != provider.EffortDialectNone {
 		d.effortDialect = routedDialect

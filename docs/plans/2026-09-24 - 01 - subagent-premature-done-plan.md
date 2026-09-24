@@ -41,7 +41,13 @@
 - 7: guard folded
 - 8: guard folded (owner decision: also owns `docs/manual/headless.md` and the ADR 0075 amendment)
 
-## 1. Engine mints a run id per delegation and stamps it on every event
+## 1. Engine mints a run id per delegation and stamps it on every event — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): `appendToolResult` and `runSubAgent` each gained a run-id parameter (`newChildAgentOn` gained one, as the plan says). Their existing test call sites were updated mechanically to pass `""`, or `parent.runIDs.mint()` in the live test: advise_argv_test.go, advise_test.go, toolresultfloor_test.go, toolresultmarker_test.go, live_delegate_cap_test.go, seat_test.go and subagent_test.go.
+NOTES (2026-09-24): consequential edit — internal/agent/dispatch_test.go: made necessary by the random per-root run-id prefix. TestDispatchGroup_OnePipelineAtEveryWidth compares the per-call events of two separate root Agents (width 1 and width 2) with DeepEqual, so the test now injects one fixed prefix (`newRunIDMinter("0badc0de")`) into both. The assertion is unchanged: ids are minted in emitted-call order at either width, so those events still match byte for byte.
+NOTES (2026-09-24): consequential edit — internal/domain/ask.go, internal/domain/present.go, internal/domain/seampayload.go, internal/domain/events_test.go: made necessary by the plan's comment grep. Their comments called a spawn call id the "run identity"; they now say "spawning call" and point to EventBase.RunID.
+NOTES (2026-09-24): a call that a pre-tool-exec Reaction redirects INTO sub_agent gets its run id in runDelegation. Its head ToolCallEvent carries no SpawnRunID, but its phases, child events and ToolResultEvent do. A call redirected OUT of sub_agent keeps on its ToolResultEvent the SpawnRunID its head carried, so the result still closes the block that call opened. Both cases are documented on the domain fields.
+NOTES (2026-09-24): the run id is stamped only on Events. The context carrier (WithSpawnCallID), PresentRequest.SpawnCallID and the Reaction seam payload's call_id still carry only the call id. Item 2 owns the JSON and session-record surfaces.
 
 **What:** Fixes cause #1/#2 of apogee-subagent-premature-done at the source: call ids are not unique across a delegation tree.
 **Regression guard.** This item explicitly supersedes ADR 0075 §7 ("EventBase is not extended") and §8 ("the call tree is rebuildable by correlating ToolCallEvent ids") for delegation identity. Call ids are the model's or server's and can collide, which is the defect this plan fixes, so the run id is engine-owned identity, not Driver-stamped. The owner ratified this on 2026-09-24 ("Engine run id"). Add ADR 0075 to the header Sources; item 8 writes the dated ADR 0075 amendment.

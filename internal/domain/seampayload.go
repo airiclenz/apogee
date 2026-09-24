@@ -21,7 +21,7 @@ type ScheduleRef struct {
 // The first block is present on every firing and identifies it: which reaction fired, on what,
 // when, and in which run. Depth and Turn are the emitting agent's, so a Reaction fired by a
 // sub-agent reports the child's nesting level rather than the top-level agent's, and CallID is that
-// child's run identity — the id of the sub_agent call that spawned it, empty at Depth 0. Every
+// child's spawning call — the id of the sub_agent call that spawned it, empty at Depth 0. Every
 // field after that block is per-Moment and omitted when it does not apply, so a script can branch
 // on "event" and read only what that event carries. The last two members are what only an in-loop
 // Moment has: the pending call's `arguments` at pre-tool-exec, and the returned `result` at
@@ -47,8 +47,8 @@ type SeamPayload struct {
 	Depth int `json:"depth"`
 	// Turn is the Turn index the Moment belongs to.
 	Turn int `json:"turn"`
-	// CallID is the run identity of the emitting agent — the id of the sub_agent call that
-	// spawned it — and is empty at Depth 0.
+	// CallID is the spawning call of the emitting agent — the id of the sub_agent call that
+	// spawned it (EventBase.CallID, which can collide across runs) — and is empty at Depth 0.
 	CallID string `json:"call_id,omitempty"`
 	// Schedule names the Schedule this Firing ran for; absent outside a Firing.
 	Schedule *ScheduleRef `json:"schedule,omitempty"`

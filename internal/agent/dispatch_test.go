@@ -2081,6 +2081,10 @@ func TestDispatchGroup_OnePipelineAtEveryWidth(t *testing.T) {
 				if err != nil {
 					t.Fatalf("width %d: newAgent: %v", width, err)
 				}
+				// One fixed run-id prefix for both widths: the prefix is drawn at random per root
+				// Agent, so without it the two runs' delegation ids differ by construction, while
+				// the counter — minted in emitted-call order at either width — is the per-call fact.
+				a.runIDs = newRunIDMinter("0badc0de")
 				a.conv.Append(domain.Message{Role: domain.RoleAssistant, ToolCalls: c.calls})
 
 				if out := a.dispatchGroup(context.Background(), 0, width, c.calls); out != dispatchDone {

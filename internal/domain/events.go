@@ -19,7 +19,8 @@ import (
 // once — the engine funnels them through one seam and the sink still receives a LINEAR stream.
 // What a driver must not assume is that a linear stream is a serial one: concurrent emitters
 // interleave in an unspecified order, so events belonging to one agent are recognised by their
-// identity (EventBase.Depth and EventBase.CallID), never by contiguity.
+// identity (EventBase.RunID — or EventBase.Depth and EventBase.CallID for an event recorded
+// before the run id existed), never by contiguity.
 type EventSink interface {
 	Emit(Event)
 }
@@ -42,17 +43,17 @@ type Event interface {
 type EventBase struct {
 	Depth int
 	Turn  int
-	// CallID is the RUN IDENTITY of the agent that emitted the event: the id of the
-	// sub_agent tool call that spawned it. It is stamped once, at that agent's
-	// construction, and every event the agent emits carries it — including the events of
-	// the tools it runs — so an observer can attribute a delegated event to the delegation
-	// that asked for it. It is empty at Depth 0: the top-level agent was spawned by no call.
+	// CallID is the id of the sub_agent tool call that spawned the agent that emitted the event.
+	// It is stamped once, at that agent's construction, and every event the agent emits carries
+	// it — including the events of the tools it runs. It is empty at Depth 0: the top-level agent
+	// was spawned by no call. It is the same id the parent's ToolCallEvent and ToolResultEvent
+	// carry for that delegation, so it names the tool-call block a run answers.
 	//
-	// Depth alone cannot do this once children run CONCURRENTLY (ADR 0039): two siblings
-	// spawned by one reply share a depth, so a depth-keyed observer would braid their
-	// streams together. The call id is unique per spawning call, so it separates them, and
-	// it also identifies the tool call whose result the run will become — the same id the
-	// parent's ToolCallEvent and ToolResultEvent carry for that delegation.
+	// It is NOT a unique run identity. A call id is the model's or the server's to choose, and it
+	// can collide: a text-format parser numbering calls per Turn hands two siblings of one reply
+	// the same id, and a nested delegation can reuse its parent's. A reader that tells runs apart
+	// keys them by RunID and falls back to (Depth, CallID) only when RunID is "" — an event
+	// recorded before RunID existed.
 	//
 	// It names the SPAWNING call and never the event's own subject. A variant that also
 	// reports a call of its OWN — AuditEvent's audited call, ToolResultEvent's completed
@@ -60,6 +61,22 @@ type EventBase struct {
 	// therefore SHADOWS this field, so the spawning id is reached there as
 	// ev.EventBase.CallID.
 	CallID string
+	// RunID is the RUN IDENTITY of the agent that emitted the event: the engine-minted id of the
+	// delegation it runs, stamped once at that agent's construction and carried by every event it
+	// emits, exactly as CallID is. It is empty at Depth 0: the top-level agent is no delegation.
+	//
+	// Depth alone cannot separate runs once children run CONCURRENTLY (ADR 0039): two siblings
+	// spawned by one reply share a depth. The spawning CallID cannot either, because call ids can
+	// collide. The run id can: the engine mints it (`<prefix>.<n>`, a random per-root-Agent prefix
+	// and a counter shared by the whole delegation tree), so two delegations never share one —
+	// within one engine or across engines — even when their call ids are equal. The parent's
+	// ToolCallEvent and ToolResultEvent for the delegation carry the same id as SpawnRunID, which
+	// is how a reader pairs a run with the tool-call block it answers.
+	//
+	// It is identity only, never sent to any model: the ids on the wire stay the model's and the
+	// server's own. A reader holding an event whose RunID is "" at Depth > 0 — one recorded before
+	// the id existed — falls back to (Depth, CallID).
+	RunID string
 }
 
 func (b EventBase) eventDepth() int { return b.Depth }
@@ -134,6 +151,13 @@ type ToolCallEvent struct {
 	// field only a Driver reads cannot tell the caller its write landed somewhere else — so it
 	// travels in the result string, while this field carries the same fact to the surfaces.
 	ResolvedPath string
+	// SpawnRunID is the run id of the delegation this call spawns (EventBase.RunID of every event
+	// that child emits), minted by the engine before this event is emitted. It is set only on a
+	// call named sub_agent at emission and "" on every other call — including a call a
+	// pre-tool-exec Reaction later redirects INTO sub_agent, whose run id is minted when the
+	// delegation starts and first appears on its SubAgentPhaseEvent. Observation only: the call's
+	// id on the wire is never rewritten.
+	SpawnRunID string
 }
 
 // ToolResultEvent reports a tool's result after execution (and after any
@@ -152,11 +176,19 @@ type ToolCallEvent struct {
 // !Result.IsError. A call that never reached the ladder (an unknown tool, a refused argument
 // object, a pre-tool-exec fault, a delegation skipped for a pending interjection) resolved no
 // target and carries "".
+//
+// SpawnRunID is the run id of the delegation this result answers — the same id the call's
+// ToolCallEvent carried and the child's events carry as EventBase.RunID — so a reader pairs the
+// result with its run even when two delegations share a call id. It is "" for a call that never
+// held a delegation's run id (every leaf call). A sub_agent call a pre-tool-exec Reaction redirected
+// to another tool keeps the id its ToolCallEvent carried, so its result still closes the block that
+// call opened.
 type ToolResultEvent struct {
 	EventBase
 	Result      ToolResult
 	Tool        string
 	WriteTarget string
+	SpawnRunID  string
 }
 
 // SubAgentPhase names the point in a delegation's life that a SubAgentPhaseEvent reports.
@@ -190,9 +222,9 @@ const (
 // consumer that applies the payload here must tolerate seeing the same result again.
 //
 // Its EventBase is the CHILD RUN's identity rather than the emitting parent's: Depth is the child's
-// nesting level and CallID the id of the sub_agent call that spawned it — the same stamp every
-// event the child itself emits carries, and the id of the parent's tool-call block the phase is
-// about.
+// nesting level, RunID the child's run id and CallID the id of the sub_agent call that spawned it —
+// the same stamp every event the child itself emits carries. RunID matches the SpawnRunID of the
+// parent's tool-call block the phase is about; CallID names that block too, but can collide.
 //
 // Result is the child's ToolResult on SubAgentFinished and the zero value on SubAgentStarted.
 //
@@ -228,8 +260,9 @@ type SubAgentPhaseEvent struct {
 // name is announced once for the new spawn so every reader wears it from the start.
 //
 // Its EventBase is the CHILD run's identity, exactly as SubAgentPhaseEvent's is: Depth is the
-// child's nesting level and CallID the id of the sub_agent call that spawned it — the same stamp
-// every event that child emits carries, and the id of the parent's tool-call block being renamed.
+// child's nesting level, RunID the child's run id and CallID the id of the sub_agent call that
+// spawned it — the same stamp every event that child emits carries, naming the parent's tool-call
+// block being renamed.
 // That is what lets a reader apply the rename to one member of a concurrent fan-out without
 // threading anything through.
 //
@@ -258,8 +291,8 @@ type SubAgentNamedEvent struct {
 // error is its whole account.
 //
 // Its EventBase is the CHILD run's identity, exactly as SubAgentPhaseEvent's is: Depth is the
-// child's nesting level and CallID the id of the sub_agent call that spawned it — the stamp every
-// event that child emits carries — so an observer attributes the delivery to the run it steers
+// child's nesting level, RunID its run id and CallID the id of the sub_agent call that spawned it —
+// the stamp every event that child emits carries — so an observer attributes the delivery to the run it steers
 // without threading anything through. Turn is the Turn the message is about to reach.
 //
 // It is emitted only for agents at Depth > 0. A top-level Agent's Run performs no drain and emits

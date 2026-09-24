@@ -3,8 +3,7 @@ package domain
 import "testing"
 
 // TestAuditEventCallIDShadowsTheSpawningCall pins the one name collision in the Event set. Every
-// variant promotes EventBase.CallID — the RUN identity, the sub_agent call that spawned the
-// emitting agent — but AuditEvent also reports a call of its own (the audited one) under the same
+// variant promotes EventBase.CallID — the sub_agent call that spawned the emitting agent — but AuditEvent also reports a call of its own (the audited one) under the same
 // name, so its own member shadows the promoted one. Both facts travel; only the spelling of the
 // reach differs. A future refactor that quietly drops one of them breaks this test, which is the
 // point: an observer reading ev.CallID on an AuditEvent must keep getting the audited call, and
@@ -28,8 +27,9 @@ func TestAuditEventCallIDShadowsTheSpawningCall(t *testing.T) {
 }
 
 // TestEventBaseCallIDSeparatesSiblings pins what the field is FOR (ADR 0039): two events from two
-// children of one reply are indistinguishable by Depth — they share it — so the run identity is
-// the only thing that tells them apart. EventBase stays comparable, which the TUI's token
+// children of one reply are indistinguishable by Depth — they share it — so the spawning call id
+// tells them apart whenever the two ids differ (TestEventBaseRunIDSeparatesCollidingCalls covers
+// the case where they do not). EventBase stays comparable, which the TUI's token
 // coalescing depends on (internal/tui/sink.go merges only tokens sharing a whole base), so the
 // separation costs one == rather than a field-by-field comparison.
 func TestEventBaseCallIDSeparatesSiblings(t *testing.T) {
@@ -47,6 +47,23 @@ func TestEventBaseCallIDSeparatesSiblings(t *testing.T) {
 	}
 	if top.CallID != "" {
 		t.Errorf("a top-level event carries CallID %q, want empty — it was spawned by no call", top.CallID)
+	}
+}
+
+// TestEventBaseRunIDSeparatesCollidingCalls pins why RunID exists: a call id is the model's or the
+// server's and two siblings of one reply can carry the SAME one, so only the engine-minted run id
+// separates their streams. Both identities travel on the comparable base.
+func TestEventBaseRunIDSeparatesCollidingCalls(t *testing.T) {
+	t.Parallel()
+
+	first := TokenEvent{EventBase: EventBase{Depth: 1, Turn: 3, CallID: "call_0", RunID: "ab12cd34.1"}, Text: "a"}
+	second := TokenEvent{EventBase: EventBase{Depth: 1, Turn: 3, CallID: "call_0", RunID: "ab12cd34.2"}, Text: "b"}
+
+	if first.EventBase == second.EventBase {
+		t.Error("two siblings with a colliding call id compare equal; the run id must separate them")
+	}
+	if first.RunID == second.RunID {
+		t.Errorf("both siblings carry run id %q, want distinct ids", first.RunID)
 	}
 }
 

@@ -291,7 +291,7 @@ func TestLiveDelegateCapAndWorkingWindow(t *testing.T) {
 		ID:        "live-delegate-cap",
 		Tool:      tools.SubAgentToolName,
 		Arguments: args,
-	})
+	}, parent.runIDs.mint())
 	if outcome != dispatchDone {
 		t.Fatalf("delegation outcome = %v, want dispatchDone — the run was cancelled or rolled back", outcome)
 	}

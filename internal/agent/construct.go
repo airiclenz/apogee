@@ -185,16 +185,19 @@ func (a *Agent) seedTopLevel(cfg domain.Config) {
 	a.delegation = &delegationLatch{}                      // an empty Delegation-target latch: no routing until the host pushes one (ADR 0045)
 	a.journal = undo.New()                                 // the per-Exchange undo record (ADR 0051)
 	a.consoles = console.New()                             // the engine's live Consoles (ADR 0059)
+	a.runIDs = newRunIDMinter(randomRunIDPrefix())         // the run-id minter every delegation in this tree draws from, prefix drawn once for this root
 	a.now = time.Now                                       // the request-render clock for the system prompt's {{datetime}}
 }
 
 // seed copies the delegation into the Agent under construction — every fact once, before anything
 // can observe the child. The order matters in one place: the routed spawn's capture seam is bound
-// LAST, after the identity it stamps on WireEvents (depth, spawning call id) is in place, so a
-// routed child's events never carry the zero values a top-level Agent would.
+// LAST, after the identity it stamps on WireEvents (depth, run id, spawning call id) is in place, so
+// a routed child's events never carry the zero values a top-level Agent would.
 func (d *delegation) seed(a *Agent) {
 	a.depth = d.depth
 	a.callID = d.spawnCallID
+	a.runID = d.runID
+	a.runIDs = d.runIDs
 	a.task = d.task
 	a.name = d.name // written bare: the child is unpublished until it is returned, so no reader can race the lock setName takes later
 	a.consoleOwner = d.consoleOwner
@@ -229,7 +232,7 @@ func (d *delegation) seed(a *Agent) {
 //
 // Ordering between concurrent emitters is deliberately unspecified: the mutex makes the stream
 // linear and gives each observer a happens-before edge to the previous event, and the events
-// themselves carry the identity an observer demultiplexes by (EventBase.CallID).
+// themselves carry the identity an observer demultiplexes by (EventBase.RunID).
 type serialEventSink struct {
 	mu    sync.Mutex
 	inner domain.EventSink

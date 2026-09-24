@@ -25,7 +25,7 @@ import (
 // spawnOn is the one-line child construction these tests repeat, for a named seat.
 func spawnOn(t *testing.T, parent *Agent, seat delegationSeat) *Agent {
 	t.Helper()
-	child, err := parent.newChildAgentOn(seat, "call_sub", "the delegated task", "")
+	child, err := parent.newChildAgentOn(seat, "call_sub", "", "the delegated task", "")
 	if err != nil {
 		t.Fatalf("newChildAgentOn: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestSeat_RunSubAgentRefusesAnUnknownRunOn(t *testing.T) {
 		ID:        "c1",
 		Tool:      tools.SubAgentToolName,
 		Arguments: json.RawMessage(`{"task":"scout the config keys","run_on":"banana"}`),
-	})
+	}, "")
 
 	if outcome != dispatchDone {
 		t.Fatalf("outcome = %v, want dispatchDone", outcome)

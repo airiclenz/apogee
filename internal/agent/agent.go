@@ -2,11 +2,15 @@ package agent
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/console"
@@ -341,6 +345,13 @@ type Agent struct {
 	// Consoles that delegation opened (Close) and nothing else.
 	consoles *console.Registry
 
+	// runIDs mints the run id of every delegation this Agent's tree spawns (runIDMinter). The root
+	// Agent draws it once (seedTopLevel) and every delegate is handed the ROOT's instance
+	// (delegation.seed), exactly as the Console registry is shared, so no two delegations anywhere
+	// in one tree are handed the same id. Live host state, never serialized: a run id names a run of
+	// this process, and a resumed session's root draws a fresh prefix.
+	runIDs *runIDMinter
+
 	// tasks is the model's own checklist — the complete list of what this run is doing, written
 	// only through the task_list tool and re-rendered into the standing content on every request
 	// (ADR 0072). Unlike the journal and the registry above it IS session state (ADR 0022 §8):
@@ -373,7 +384,8 @@ type Agent struct {
 	tokenNoticeAt   int                 // token-budget notice (stepnotice.go, tokenBudgetNotice): stepNoticeAt's twin for the note that fires at three quarters of tokenCap
 	tokenNoticeLive bool                // and stepNoticeLive's twin, cleared by the same fold, prune and rollback routes (rearmTokenNotice)
 	depth           int                 // sub-agent nesting level: 0 = top-level; a sub-agent runs at parent+1 (ADR 0013)
-	callID          string              // this Agent's run identity: the id of the sub_agent call that spawned it, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0
+	callID          string              // the id of the sub_agent call that spawned this Agent, stamped on every Event it emits (domain.EventBase.CallID); empty at depth 0. The model's or server's id, so it can collide — runID is the run identity
+	runID           string              // this Agent's RUN IDENTITY: the engine-minted id of the delegation it runs (runIDMinter), stamped on every Event it emits (domain.EventBase.RunID); empty at depth 0. Unlike callID it is unique across the whole tree, which is what tells two runs whose spawning calls share an id apart
 	consoleOwner    string              // this Agent's Console PRIVILEGE identity: the engine-minted key (console.Registry.MintOwner) its Consoles are stamped with and its end reaps by; empty at depth 0. Deliberately not callID — that id is the model's to choose, and two siblings of one Turn can collide on it (ADR 0059 §6)
 	task            string              // the task this Agent was delegated, from the spawning sub_agent call's arguments — what an Approval prompt names it by (domain.ApprovalRequest.SubAgentTask); empty at depth 0
 	seatFallback    bool                // this delegation ASKED for the Sub-agent server (run_on) and no usable target was latched, so it was built on the session server instead (ADR 0069 decision 9): delegationResult appends the note that says so. False for every other spawn, the absent ask included
@@ -1799,3 +1811,44 @@ func (a *Agent) LastFault() string { return a.turns.fault() }
 
 // Compact (the /compact command's engine half) lives in compact.go alongside its provider
 // adapter and the generative reducer it drives (internal/context.Compact).
+
+// runIDMinter mints the run ids of one Agent tree's delegations: `<prefix>.<n>`, where prefix is
+// drawn once per root Agent and n is a 1-based counter the whole tree shares. The counter makes the
+// ids distinct within the tree whatever call ids the model or server chose — the collision the
+// spawning call id cannot rule out — and the random prefix keeps two engines' ids apart (a bench
+// driving several roots, a resumed session beside the recording it resumed). Safe for concurrent
+// use: a pooled fan-out's children mint their own delegations' ids at the same time.
+type runIDMinter struct {
+	prefix string
+	next   atomic.Uint64
+}
+
+// runIDPrefixBytes is how many random bytes a root Agent's run-id prefix is drawn from: four, so
+// the prefix is eight hex characters.
+const runIDPrefixBytes = 4
+
+// newRunIDMinter returns a minter whose ids all start with prefix. A test injects a fixed prefix
+// here; a root Agent takes randomRunIDPrefix's.
+func newRunIDMinter(prefix string) *runIDMinter {
+	return &runIDMinter{prefix: prefix}
+}
+
+// mint returns the next run id. A nil minter mints "", the "no run id" a reader falls back from —
+// the honest answer for an Agent built without a tree to draw from.
+func (m *runIDMinter) mint() string {
+	if m == nil {
+		return ""
+	}
+	return m.prefix + "." + strconv.FormatUint(m.next.Add(1), 10)
+}
+
+// randomRunIDPrefix draws a root Agent's run-id prefix from crypto/rand. crypto/rand.Read does not
+// fail on a supported platform; should it ever, the prefix falls back to the clock's nanoseconds,
+// which still separates two roots in practice, rather than refusing to build the Agent.
+func randomRunIDPrefix() string {
+	var b [runIDPrefixBytes]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return fmt.Sprintf("%08x", uint32(time.Now().UnixNano()))
+	}
+	return hex.EncodeToString(b[:])
+}

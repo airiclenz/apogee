@@ -306,6 +306,12 @@ type dispatchSlot struct {
 	call    domain.ToolCall
 	tool    domain.Tool
 	verdict resolution
+	// runID is the run id of the delegation this slot holds — minted by prepareCall before the
+	// ToolCallEvent of a call named sub_agent, or by runDelegation for a call a pre-tool-exec
+	// Reaction redirected into sub_agent — and "" for every leaf call. Every event about the
+	// delegation carries it: the head ToolCallEvent and the ToolResultEvent (SpawnRunID), the
+	// lifecycle phases, and, as the child's EventBase.RunID, everything the child emits.
+	runID string
 	// writeTarget is the call's classified write target — the resolved absolute path of a
 	// workspace-scoped writer's target, "" for every other call — carried from the ladder's one
 	// resolution to the commit point, so the ToolResultEvent is stamped from the same resolution
@@ -453,7 +459,13 @@ func (a *Agent) prepareCall(
 	preempt bool,
 	index, group int,
 ) dispatchSlot {
-	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call)})
+	// A delegation's run id is minted BEFORE its head event, so the ToolCallEvent that opens the
+	// delegation already carries the id every later event about it will (dispatchSlot.runID).
+	var runID string
+	if isSubAgentCall(call) {
+		runID = a.runIDs.mint()
+	}
+	a.cfg.Events.Emit(domain.ToolCallEvent{EventBase: a.base(turn), Call: call, ResolvedPath: a.resolvedPath(call), SpawnRunID: runID})
 
 	// The pre-tool-exec Moment: reactions reshape the pending call through the shared
 	// ToolCallEdit, so their edits compose and the pipeline executes what the cascade left behind.
@@ -462,12 +474,13 @@ func (a *Agent) prepareCall(
 		// than a call run against a half-applied decision.
 		return dispatchSlot{
 			call:       call,
+			runID:      runID,
 			result:     errorToolResult(call.ID, "pre-tool-exec reaction failed"),
 			hookFailed: true,
 		}
 	}
 
-	slot := dispatchSlot{call: call}
+	slot := dispatchSlot{call: call, runID: runID}
 	if a.refusePastCeiling(turn, index, group, &slot) {
 		return slot
 	}
@@ -516,7 +529,7 @@ func (a *Agent) preemptDelegation(turn int, slot *dispatchSlot) bool {
 		return false
 	}
 	slot.run = false
-	slot.result = a.skipDelegation(turn, slot.call, skippedDelegationResult(slot.call.ID))
+	slot.result = a.skipDelegation(turn, slot, skippedDelegationResult(slot.call.ID))
 	return true
 }
 
@@ -544,7 +557,7 @@ func (a *Agent) refusePastCeiling(turn, index, group int, slot *dispatchSlot) bo
 	}
 	slot.run = false
 	slot.ceilingRefused = true
-	slot.result = a.skipDelegation(turn, slot.call, fanOutCeilingResult(slot.call.ID, group, rounds, width))
+	slot.result = a.skipDelegation(turn, slot, fanOutCeilingResult(slot.call.ID, group, rounds, width))
 	return true
 }
 
@@ -582,7 +595,7 @@ func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 	}
 	switch slot.verdict.kind {
 	case resolveDelegate:
-		slot.result, slot.outcome = a.runDelegation(ctx, turn, slot.call)
+		slot.result, slot.outcome = a.runDelegation(ctx, turn, slot)
 		// A cancelled group is discarded unappended and never reaches commitCall; the record is
 		// owed only for a child that ran to a result.
 		slot.delegated = slot.outcome != dispatchCancelled
@@ -606,7 +619,7 @@ func (a *Agent) runCall(ctx context.Context, turn int, slot *dispatchSlot) {
 // skipped for a pending interjection never ran and records nothing.
 func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 	if slot.hookFailed {
-		a.appendToolResult(turn, slot.call, slot.result, "", nil)
+		a.appendToolResult(turn, slot.call, slot.runID, slot.result, "", nil)
 		return
 	}
 	if slot.delegated {
@@ -619,7 +632,7 @@ func (a *Agent) commitCall(ctx context.Context, turn int, slot *dispatchSlot) {
 		slot.result.Content = withBodyNote(slot.result.Content, slot.widthNote)
 	}
 	advised := a.firePostToolResult(ctx, slot.call, &slot.result)
-	a.appendToolResult(turn, slot.call, slot.result, slot.writeTarget, advised)
+	a.appendToolResult(turn, slot.call, slot.runID, slot.result, slot.writeTarget, advised)
 }
 
 // fanOutWidthNoteFormat is the ONE structural fact a fan-out states to the parent model about HOW
@@ -751,9 +764,10 @@ func (a *Agent) interjectionPending() bool {
 // Cancelled, since nothing is rolled back — and returns it for the caller to commit in call order.
 // Its callers are the two ways a delegation is settled before it starts, preemptDelegation (a
 // queued message) and refusePastCeiling (the fan-out ceiling), at either width, so a lone
-// delegation is closed exactly as a pooled one.
-func (a *Agent) skipDelegation(turn int, call domain.ToolCall, result domain.ToolResult) domain.ToolResult {
-	a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
+// delegation is closed exactly as a pooled one. The phase carries the run id the slot's head
+// ToolCallEvent carried, so the bracket closes the block that event opened.
+func (a *Agent) skipDelegation(turn int, slot *dispatchSlot, result domain.ToolResult) domain.ToolResult {
+	a.emitSubAgentPhase(turn, slot.call, slot.runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
 	return result
 }
 
@@ -774,19 +788,30 @@ func (a *Agent) skipDelegation(turn int, call domain.ToolCall, result domain.Too
 // resolver's depth-bound row and the withheld-tool floor (ADR 0013 defence in depth) — so the
 // bound holds even if the call is reached by another route. The audit record is NOT booked here:
 // it is commitCall's, on the dispatching goroutine (dispatchSlot.delegated).
-func (a *Agent) runDelegation(ctx context.Context, turn int, call domain.ToolCall) (domain.ToolResult, dispatchOutcome) {
+//
+// The slot's run id is the child's (dispatchSlot.runID). A slot that reaches here without one — a
+// call a pre-tool-exec Reaction redirected INTO sub_agent after its ToolCallEvent went out
+// unminted — is minted one now, before the started phase, so every event of the delegation itself
+// still carries an id; only its head event lacks it, and a reader falls back to (depth, call id)
+// there.
+func (a *Agent) runDelegation(ctx context.Context, turn int, slot *dispatchSlot) (domain.ToolResult, dispatchOutcome) {
+	call := slot.call
+	if slot.runID == "" {
+		slot.runID = a.runIDs.mint()
+	}
+	runID := slot.runID
 	applied, requested := a.stepCapFor(call)
-	a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{
+	a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{
 		Phase:        domain.SubAgentStarted,
 		StepCap:      applied,
 		CapRequested: requested,
 	})
-	result, outcome := a.runSubAgent(ctx, call)
+	result, outcome := a.runSubAgent(ctx, call, runID)
 	if outcome == dispatchCancelled {
-		a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Cancelled: true})
+		a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Cancelled: true})
 		return result, dispatchCancelled
 	}
-	a.emitSubAgentPhase(turn, call, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
+	a.emitSubAgentPhase(turn, call, runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
 	return result, dispatchDone
 }
 
@@ -804,9 +829,9 @@ func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
 }
 
 // emitSubAgentPhase surfaces one delegation lifecycle boundary. The event is stamped with the
-// CHILD's identity — one level deeper than this Agent, under the spawning call's id — rather than
-// with the emitting parent's, so it carries the same run identity as the events the child itself
-// emits and names the tool-call block an observer attaches it to.
+// CHILD's identity — one level deeper than this Agent, under the child's run id and the spawning
+// call's id — rather than with the emitting parent's, so it carries the same run identity as the
+// events the child itself emits and names the tool-call block an observer attaches it to.
 //
 // runDelegation brackets every child with the started/finished pair whatever width it ran under,
 // so nothing that runs is ever left looking queued. A delegation skipped for a pending
@@ -818,11 +843,8 @@ func (a *Agent) stepCapFor(call domain.ToolCall) (applied, requested int) {
 // Cancelled marks a finished phase that closes a ROLLED-BACK delegation rather than a reported one
 // (ADR 0075 decision 12). It rides the event so an observer can tell the two apart; a started phase
 // is never cancelled.
-func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, event domain.SubAgentPhaseEvent) {
-	base := a.base(turn)
-	base.Depth++
-	base.CallID = call.ID
-	event.EventBase = base
+func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, runID string, event domain.SubAgentPhaseEvent) {
+	event.EventBase = a.childBase(turn, call.ID, runID)
 	a.cfg.Events.Emit(event)
 }
 
@@ -830,7 +852,7 @@ func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, event domain.S
 // the one other rename the engine makes, the name a CONTINUED delegation inherits from the capped
 // run it picks up (runSubAgent, plan 2026-09-18 - 00, P6), announced for the new spawn id. It is
 // stamped exactly as emitSubAgentPhase stamps a lifecycle boundary — the CHILD's identity, one
-// level deeper than this Agent and under the spawning call's id — because a reader applies the
+// level deeper than this Agent, under the child's run id and the spawning call's id — because a reader applies the
 // rename to the run those events opened, which under a fan-out is one member of several. Turn is
 // the parent Turn the spawning call belongs to, read on the dispatch goroutine and handed in, so
 // the naming goroutine touches no loop state of its own.
@@ -838,11 +860,19 @@ func (a *Agent) emitSubAgentPhase(turn int, call domain.ToolCall, event domain.S
 // It is the naming act's whole wire presence: no usage, no tokens, no Turn of its own. The call
 // that produced the name is neither a Reaction nor an Exchange (ADR 0022 addendum), so nothing
 // else about it belongs on the stream.
-func (a *Agent) emitSubAgentNamed(turn int, callID, name string) {
+func (a *Agent) emitSubAgentNamed(turn int, callID, runID, name string) {
+	a.cfg.Events.Emit(domain.SubAgentNamedEvent{EventBase: a.childBase(turn, callID, runID), Name: name})
+}
+
+// childBase is the EventBase of an event this Agent emits ABOUT one of its delegations rather than
+// about itself: the child's identity — one level deeper, under the child's run id and the spawning
+// call's id — which is the stamp every event the child itself emits carries.
+func (a *Agent) childBase(turn int, callID, runID string) domain.EventBase {
 	base := a.base(turn)
 	base.Depth++
 	base.CallID = callID
-	a.cfg.Events.Emit(domain.SubAgentNamedEvent{EventBase: base, Name: name})
+	base.RunID = runID
+	return base
 }
 
 // collidingArgumentKeysPrefix and collidingArgumentKeysAdvice are the two halves of the ONE
@@ -1355,8 +1385,8 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 	// permits, the prompt slot), are listed with their readers and lifetimes in one table:
 	// docs/design/confinement-execution-contract.md §11, "Per-call context carriers".
 	//
-	// Install this Agent's run identity — its nesting depth and the id of the sub_agent call that
-	// spawned it — for EVERY call, the top-level agent's included: depth 0 and an empty spawn id
+	// Install this Agent's placement — its nesting depth and the id of the sub_agent call that
+	// spawned it (a call id can collide; the unique run identity is EventBase.RunID) — for EVERY call, the top-level agent's included: depth 0 and an empty spawn id
 	// are the honest identity of the outermost run, not a missing value, so a tool that builds its
 	// own host request (present_document, ask_user) reads a number it can trust rather than one it
 	// must guess at. Depth places such a request at the right level, the spawn id inside the right
@@ -1682,6 +1712,9 @@ func pathWithin(abs, root string) bool {
 // that is not a write or never resolved one — stamped onto the event as it is, whatever the
 // result's fate (domain.ToolResultEvent).
 //
+// spawnRunID is the run id of the delegation the result answers (dispatchSlot.runID), "" for a leaf
+// call — observation only, stamped on the event as SpawnRunID and never on the committed message.
+//
 // advised is the post-tool-result cascade's advise slot (reactions.go) — the spans this result's
 // message carries as a fenced trailer, nil for the two routes that commit a result no cascade ran
 // on (a pre-tool-exec fault, a hook-failed delegation slot).
@@ -1697,6 +1730,7 @@ func pathWithin(abs, root string) bool {
 func (a *Agent) appendToolResult(
 	turn int,
 	call domain.ToolCall,
+	spawnRunID string,
 	result domain.ToolResult,
 	writeTarget string,
 	advised []advice,
@@ -1731,6 +1765,7 @@ func (a *Agent) appendToolResult(
 		Result:      result,
 		Tool:        call.Tool,
 		WriteTarget: writeTarget,
+		SpawnRunID:  spawnRunID,
 	})
 }
 

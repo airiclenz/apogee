@@ -227,7 +227,7 @@ func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
 	case domain.ToolResultEvent:
 		return ev.EventBase, true
 	case domain.SubAgentPhaseEvent:
-		return ev.EventBase, true // the CHILD run's identity: the delegation's own depth and call id
+		return ev.EventBase, true // the CHILD run's identity: the delegation's own depth, run id and call id
 	case domain.ChildInterjectionEvent:
 		return ev.EventBase, true // likewise the CHILD run's identity: the run the message was addressed to
 	case domain.ApprovalEvent:
@@ -246,6 +246,124 @@ func eventBaseOf(e domain.Event) (domain.EventBase, bool) {
 		return ev.EventBase, true // the base's CallID, not the audited call's shadowing member
 	default:
 		return domain.EventBase{}, false
+	}
+}
+
+// TestSubAgent_RunIDIdentifiesEachDelegation pins the engine-minted run identity (plan
+// 2026-09-24 - 01, item 1) through a nested delegation whose two levels REUSE one call id — the
+// collision a call id cannot rule out. The top-level agent stamps no run id; the head ToolCallEvent
+// of each delegation carries a fresh SpawnRunID; every event its child emits, its lifecycle phases
+// included, carries that id as RunID; its ToolResultEvent pairs back by the same id; and the
+// grandchild's id differs from the child's although both were spawned by a call named "c1".
+func TestSubAgent_RunIDIdentifiesEachDelegation(t *testing.T) {
+	sink := &recordingSink{}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore)
+	cfg.Delegation.MaxDepth = 2 // a grandchild exists only under a bound above the default
+
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "level 1"), // [0] parent → child
+		subAgentCallScript("c1", "level 2"), // [1] child → grandchild, under the SAME call id
+		contentScript("grandchild done"),    // [2] grandchild finishes
+		contentScript("child done"),         // [3] child finishes
+		contentScript("parent done"),        // [4] parent finishes
+	}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// The run id of the delegation opened at each depth, read off its head ToolCallEvent: the
+	// parent's head (depth 0) opens the child's run (depth 1), the child's head the grandchild's.
+	runAt := map[int]string{}
+	for _, e := range sink.events {
+		call, ok := e.(domain.ToolCallEvent)
+		if !ok || call.Call.Tool != tools.SubAgentToolName {
+			continue
+		}
+		if call.SpawnRunID == "" {
+			t.Fatalf("the sub_agent call at depth %d carries no SpawnRunID", call.Depth)
+		}
+		runAt[call.Depth+1] = call.SpawnRunID
+	}
+	if runAt[1] == "" || runAt[2] == "" {
+		t.Fatalf("delegation heads = %v, want one at depth 0 and one at depth 1", runAt)
+	}
+	if runAt[1] == runAt[2] {
+		t.Errorf("child and grandchild share run id %q; the grandchild's must differ although both calls are c1", runAt[1])
+	}
+
+	for _, e := range sink.events {
+		base, ok := eventBaseOf(e)
+		if !ok {
+			t.Fatalf("eventBaseOf does not know %T — teach it the new variant", e)
+		}
+		if base.RunID != runAt[base.Depth] {
+			t.Errorf("%T at Depth %d carries RunID %q, want %q", e, base.Depth, base.RunID, runAt[base.Depth])
+		}
+		if result, isResult := e.(domain.ToolResultEvent); isResult && result.Tool == tools.SubAgentToolName {
+			if want := runAt[result.Depth+1]; result.SpawnRunID != want {
+				t.Errorf("the sub_agent result at depth %d carries SpawnRunID %q, want its run's %q", result.Depth, result.SpawnRunID, want)
+			}
+		}
+	}
+}
+
+// TestSubAgent_NamedEventCarriesTheChildsRunID pins that a generated name lands on the run it
+// names: the rename is stamped with the CHILD's run id — the SpawnRunID its head call carried —
+// and not merely with a call id another delegation could share.
+func TestSubAgent_NamedEventCarriesTheChildsRunID(t *testing.T) {
+	sink := newLockedSink()
+	namer := &stubNamer{reply: "Generated Name"}
+	runNamingParent(t, namingParent(t, sink, namer, "", func(context.Context) { sink.awaitRename() }))
+
+	named := sink.namings()
+	if len(named) != 1 {
+		t.Fatalf("SubAgentNamedEvents = %d, want exactly one rename", len(named))
+	}
+	var head string
+	sink.mu.Lock()
+	for _, e := range sink.events {
+		if call, ok := e.(domain.ToolCallEvent); ok && call.Call.Tool == tools.SubAgentToolName {
+			head = call.SpawnRunID
+		}
+	}
+	sink.mu.Unlock()
+	if head == "" {
+		t.Fatal("the delegation's head ToolCallEvent carries no SpawnRunID")
+	}
+	if named[0].RunID != head {
+		t.Errorf("SubAgentNamedEvent.RunID = %q, want the child's run id %q", named[0].RunID, head)
+	}
+}
+
+// TestRunIDMinter_MintsDistinctIDs pins the minter's shape: `<prefix>.<n>` from a 1-based counter
+// under an injected prefix, a random eight-hex-character prefix per root otherwise — so two roots'
+// first ids differ — and "" from a nil minter, the id a reader falls back from.
+func TestRunIDMinter_MintsDistinctIDs(t *testing.T) {
+	t.Parallel()
+
+	m := newRunIDMinter("0badc0de")
+	if first, second := m.mint(), m.mint(); first != "0badc0de.1" || second != "0badc0de.2" {
+		t.Errorf("injected-prefix ids = %q, %q; want 0badc0de.1, 0badc0de.2", first, second)
+	}
+
+	one, two := newRunIDMinter(randomRunIDPrefix()), newRunIDMinter(randomRunIDPrefix())
+	if len(one.prefix) != 2*runIDPrefixBytes {
+		t.Errorf("random prefix %q has %d characters, want %d", one.prefix, len(one.prefix), 2*runIDPrefixBytes)
+	}
+	if a, b := one.mint(), two.mint(); a == b {
+		t.Errorf("two roots minted the same first id %q; the per-root prefix must separate them", a)
+	}
+
+	var none *runIDMinter
+	if got := none.mint(); got != "" {
+		t.Errorf("nil minter minted %q, want empty", got)
 	}
 }
 
@@ -372,7 +490,7 @@ func TestSubAgent_RecursionPointRefusesAtBound(t *testing.T) {
 	cfg := domain.Config{Delegation: domain.DelegationConfig{MaxDepth: 2}}
 	atBound := &Agent{cfg: cfg, depth: cfg.Delegation.MaxDepth}
 	res, outcome := atBound.runSubAgent(context.Background(),
-		domain.ToolCall{ID: "c1", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(subAgentArgs("recurse"))})
+		domain.ToolCall{ID: "c1", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(subAgentArgs("recurse"))}, "")
 	if outcome != dispatchDone {
 		t.Fatalf("outcome = %v, want dispatchDone", outcome)
 	}
@@ -644,7 +762,7 @@ func TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns(t *testing.T) {
 	res, outcome := parent.runSubAgent(context.Background(), domain.ToolCall{
 		ID: "c1", Tool: tools.SubAgentToolName,
 		Arguments: json.RawMessage(`{"task":"do the narrowed thing","tools":["read_thing","frobnicate","zap"]}`),
-	})
+	}, "")
 
 	if outcome != dispatchDone {
 		t.Fatalf("outcome = %v, want dispatchDone", outcome)
@@ -659,7 +777,7 @@ func TestSubAgent_UnknownToolNameIsRefusedBeforeAnyChildRuns(t *testing.T) {
 	res, _ = parent.runSubAgent(context.Background(), domain.ToolCall{
 		ID: "c2", Tool: tools.SubAgentToolName,
 		Arguments: json.RawMessage(`{"task":"do the narrowed thing","tools":"readonly"}`),
-	})
+	}, "")
 	if !res.IsError || !strings.Contains(res.Content, `unknown keyword "readonly"`) {
 		t.Errorf("result = %+v, want the decoder's keyword correction", res)
 	}
@@ -1017,12 +1135,12 @@ func TestSubAgent_RejectsEmptyAndBadArgs(t *testing.T) {
 	t.Parallel()
 	a := &Agent{depth: 0}
 
-	res, outcome := a.runSubAgent(context.Background(), domain.ToolCall{ID: "c1", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{}`)})
+	res, outcome := a.runSubAgent(context.Background(), domain.ToolCall{ID: "c1", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{}`)}, "")
 	if outcome != dispatchDone || !res.IsError || !strings.Contains(res.Content, "non-empty task") {
 		t.Errorf("empty task = %+v, want a non-empty-task error result", res)
 	}
 
-	res, _ = a.runSubAgent(context.Background(), domain.ToolCall{ID: "c2", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{not json`)})
+	res, _ = a.runSubAgent(context.Background(), domain.ToolCall{ID: "c2", Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{not json`)}, "")
 	if !res.IsError || !strings.Contains(res.Content, "invalid sub_agent arguments") {
 		t.Errorf("bad args = %+v, want an invalid-arguments error result", res)
 	}
@@ -2419,7 +2537,7 @@ func TestNewChildAgentOn_SessionSeatGetsAnEmptyLatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
-	child, err := parent.newChildAgentOn(seatSession, "c1", "stay here", "")
+	child, err := parent.newChildAgentOn(seatSession, "c1", "", "stay here", "")
 	if err != nil {
 		t.Fatalf("newChildAgentOn: %v", err)
 	}

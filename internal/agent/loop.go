@@ -1679,11 +1679,12 @@ func (a *Agent) newProjection(msgs []domain.Message, turn int) *domain.Request {
 
 // base is the EventBase every Event this Agent emits carries: the given Turn index, the
 // Agent's sub-agent nesting Depth (0 for the top-level Agent, parent+1 for a sub-agent — ADR
-// 0013), and its run identity — the id of the sub_agent call that spawned it (empty at depth
-// 0) — so a sub-agent's events nest into the parent's stream at Depth > 0, attributable to the
-// delegation that asked for them, with no per-call threading. Both facts are read from the
-// EMITTING Agent rather than passed around: a nested sub-agent re-emits through its OWN Agent,
-// constructed at the deeper depth with the deeper call's id (newChildAgent).
+// 0013), its run identity — the engine-minted run id of the delegation it runs — and the id of
+// the sub_agent call that spawned it (both empty at depth 0), so a sub-agent's events nest into
+// the parent's stream at Depth > 0, attributable to the delegation that asked for them, with no
+// per-call threading. Every fact is read from the EMITTING Agent rather than passed around: a
+// nested sub-agent re-emits through its OWN Agent, constructed at the deeper depth with the
+// deeper delegation's run id and call id (newChildAgentOn).
 func (a *Agent) base(turn int) domain.EventBase {
-	return domain.EventBase{Depth: a.depth, Turn: turn, CallID: a.callID}
+	return domain.EventBase{Depth: a.depth, Turn: turn, CallID: a.callID, RunID: a.runID}
 }

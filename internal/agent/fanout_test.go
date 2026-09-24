@@ -453,6 +453,71 @@ func TestFanOut_SinkReceivesALinearStampedStream(t *testing.T) {
 	}
 }
 
+// TestFanOut_CollidingCallIDsGetDistinctRunIDs pins the defect the run id fixes: a reply whose two
+// sub_agent calls carry the SAME call id — a text-format parser numbering per Turn does this — still
+// opens two runs the engine tells apart. Under an injected prefix the ids are the tree's counter in
+// emitted-call order; each child's events carry its own id; and each result pairs back to its own
+// head by SpawnRunID where the shared call id could not.
+func TestFanOut_CollidingCallIDsGetDistinctRunIDs(t *testing.T) {
+	sink := &linearSink{}
+	up := newRoutedResponder().
+		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c1", "task two"})).
+		route("task one", nil, contentScript("child one done")).
+		route("task two", nil, contentScript("child two done")).
+		route("delegate two things", nil, contentScript("parent done"))
+
+	a := fanOutAgent(t, sink, 2, up)
+	a.runIDs = newRunIDMinter("0badc0de")
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var heads []string
+	var results []domain.ToolResultEvent
+	answeredBy := map[string]string{}
+	for _, e := range sink.events {
+		switch ev := e.(type) {
+		case domain.ToolCallEvent:
+			if ev.Depth == 0 && ev.Call.Tool == tools.SubAgentToolName {
+				heads = append(heads, ev.SpawnRunID)
+			}
+		case domain.ToolResultEvent:
+			if ev.Depth == 0 {
+				results = append(results, ev)
+			}
+		case domain.MessageEvent:
+			if ev.Depth == 1 {
+				answeredBy[ev.Text] = ev.RunID
+			}
+		}
+	}
+	if !slices.Equal(heads, []string{"0badc0de.1", "0badc0de.2"}) {
+		t.Fatalf("delegation heads carry SpawnRunIDs %v, want [0badc0de.1 0badc0de.2]", heads)
+	}
+	if answeredBy["child one done"] != heads[0] || answeredBy["child two done"] != heads[1] {
+		t.Errorf("children's messages carry RunIDs %v, want child one on %s and child two on %s", answeredBy, heads[0], heads[1])
+	}
+	if len(results) != 2 {
+		t.Fatalf("depth-0 tool results = %d, want 2", len(results))
+	}
+	for i, res := range results {
+		if res.SpawnRunID != heads[i] {
+			t.Errorf("result %d carries SpawnRunID %q, want its own head's %q", i, res.SpawnRunID, heads[i])
+		}
+	}
+	if !strings.Contains(results[0].Result.Content, "child one done") || !strings.Contains(results[1].Result.Content, "child two done") {
+		t.Errorf("results = %q / %q, want each child's own report in call order", results[0].Result.Content, results[1].Result.Content)
+	}
+
+	phases := map[string]int{}
+	for _, ph := range subAgentPhases(sink.events) {
+		phases[ph.RunID]++
+	}
+	if phases[heads[0]] != 2 || phases[heads[1]] != 2 {
+		t.Errorf("phases per run = %v, want a started and a finished phase under each run id", phases)
+	}
+}
+
 // TestPartitionDispatch_LeafToolsRunBeforeDelegations pins decision 11's ordering rule on its own:
 // the split is a pure function of the reply, so the same reply orders the same way whatever the
 // bound server's cap turns out to be.

@@ -92,10 +92,11 @@ type PresentRequest struct {
 	// every tool call (WithSubAgentDepth) rather than one only a child installs.
 	Depth int
 
-	// SpawnCallID is the run identity of the presenting agent: the id of the sub_agent call that
+	// SpawnCallID is the spawning call of the presenting agent: the id of the sub_agent call that
 	// spawned it (EventBase.CallID), empty for the top-level agent. Depth alone cannot tell two
 	// SIBLING runs of a depth-0 fan-out apart (ADR 0039), so this is what lets a Driver place the
-	// presentation inside the run that raised it instead of merely at the right level. It rides
+	// presentation inside the run that raised it instead of merely at the right level — as far as
+	// the call ids differ: a call id can collide, unlike EventBase.RunID. It rides
 	// WithSpawnCallID, installed beside the depth.
 	SpawnCallID string
 }
