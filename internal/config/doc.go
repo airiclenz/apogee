@@ -23,7 +23,7 @@
 // The files, one line each.
 //
 // config.go is the core: the on-disk schema (fileConfig), the precedence that resolves it onto
-// [Options] ([ResolveOptions], one accessor per key), the `servers:` entry a session starts on,
+// [Options] ([ResolveOptions], one pass per source over the registry rows), the `servers:` entry a session starts on,
 // and the apogee-home path resolution every other file here asks for. options.go is [Options] —
 // the Driver's parsed invocation plus every value resolution writes onto it, which is what
 // ApplyConfig fills. registry.go is the declarative table describing every schema key exactly

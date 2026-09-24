@@ -375,7 +375,15 @@ internal/config/config_test.go — resolveSources, everyKeyFileConfig, TestApply
 - `go test -race -count=1 -run 'Registry|KeyAccessors|EveryConfigKey|ApplyConfig|Env|Flag|Override|Mode|Delegate|CursorShape|SubAgents|LoadFileConfig' ./internal/config/`; `go test -race -count=1 -run 'DocsEnv' ./cmd/apogee/`
 **Commit:** `refactor(config): scalar keys, env and flag sources derive from the key's field`
 
-## 17. List rows move onto the registry and keyAccessor retires
+## 17. List rows move onto the registry and keyAccessor retires — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the Goal's list of hand-written rows leaves out tools.disabled, tools.enabled, url-safety.allow-hosts and url-safety.deny-hosts. As the Approach says ("list rows get fields"), those four get a `listField` descriptor (keyfield.go) instead of a hand-written fromFile. context-files.names stays hand-written because it shares a carrier with context-files.enable.
+NOTES (2026-09-24): the hand-written projections stay named functions in config.go, next to the fileConfig shape they read (fileServers, fileSubAgentsServer, fileUnconfinedHosts, fileMCPServers, fileModelProfiles, plus the existing fileSystemPrompt, fileContextFiles and projectReactions). Each registry row points to its function with `fromFile:`. That keeps the `mcp` import out of registry.go.
+NOTES (2026-09-24): Key gains the unexported fields fromEnv and fromFlag. bindRows derives them for field rows, and they are set only where the row names EnvVar or FlagName. bindRows takes over accessorsOver's init panics: a field row that also hand-writes a projection, or a row with neither a field nor a fromFile. The third panic, a hand-written entry that names no row, can no longer happen.
+NOTES (2026-09-24): keyfield_test.go: TestFieldCarriedByEveryScalarRow is renamed TestFieldCarriedByEveryValueRow, because the list rows now carry a field. TestFieldAccessorsOverRefuseTwoFileProjections is renamed TestFieldBindRowsRefuseTwoFileProjections and now tests bindRows on probe rows.
+NOTES (2026-09-24): mustKey (registry.go) has no production callers any more. It stays because many tests use it, and its comment now says it serves the tests.
+NOTES (2026-09-24): consequential edit — internal/config/doc.go: made necessary by retiring keyAccessors (the file-map line said "one accessor per key").
+NOTES (2026-09-24): scripts/test-timings.seed still names the deleted TestKeyAccessorsBindDescribedKeys. It is a generated timing seed that `make test-timings-seed` refreshes, so it was left alone.
 
 **What:**
 **Goal:** `internal/config` has no `keyAccessor`/`keyAccessors`; hand-written rows (servers, sub-agents-server, system-prompt ×4, context-files ×2, unconfined-hosts, mcp-servers, reactions, model-profiles) carry their `fromFile` on the row; `applyFile`, `applyEnv`, `applyFlags` and `overrideSources` range over `KeyRegistry` with the first-refusal order unchanged; ADR 0035 and ADR 0043 carry dated amendments. Depends on item 16.

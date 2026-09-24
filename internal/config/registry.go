@@ -162,10 +162,16 @@ const (
 // A row may instead carry a FIELD (keyfield.go): one typed declaration of the Options field the
 // key lives in and the fileConfig field that states it, from which bindRows derives the row's
 // Read, its landing and resolution's file, env and flag projections, so a row that has one writes
-// none of them by hand. Every row whose value is one scalar carries one — every bool, count, share,
-// duration, name and word — but `context-files.enable`, which owns no field, `sub-agents-server`,
-// whose Read shows a word for the empty value, and the two system-prompt keys, which resolve with
-// their block; the list and structured rows write theirs by hand.
+// none of them by hand. Every row whose value is one scalar or one name list carries one — every
+// bool, count, share, duration, name, word and list — but `context-files.enable`, which owns no
+// field, `sub-agents-server`, whose Read shows a word for the empty value, and the system-prompt
+// and context-files keys, which resolve with their block; those and the structured rows write
+// their file projection on the row by hand (fromFile).
+//
+// The row is also the whole of how resolution carries its key: the file, env and flag passes
+// (applyFile, applyEnv, applyFlags) and the override marker (overrideSources) range over this
+// table and call the row's own projections, so a key described here is a key resolution reads by
+// the act of being described, and the variable and flag NAMES (EnvVar, FlagName) have one home.
 type Key struct {
 	Path       string
 	Kind       Kind
@@ -185,9 +191,20 @@ type Key struct {
 
 	// field is the row's typed descriptor, nil for a row that writes its projections by hand.
 	field fieldSpec
-	// fromFile is resolution's file projection bindRows derived from field; nil for a row without
-	// one, whose projection is its hand-written keyAccessors entry (accessorsOver).
+	// fromFile is resolution's file pass for the key: what the key resolves to from the FILE ALONE —
+	// the file's value where the file states the key, its built-in default where it does not.
+	// Every row has one, and the write is unconditional, so a full pass resets every field the
+	// schema owns rather than leaving a stale one standing. bindRows derives it for a field row; a
+	// row without a field writes it in the table.
 	fromFile func(o *Options, fc fileConfig) error
+	// fromEnv projects a variable's text and fromFlag the already-parsed flag value onto the key's
+	// field. bindRows derives both for a field row — the env projection is the row's bound Set, the
+	// flag projection an unjudged typed copy — and only where the row names the source (EnvVar,
+	// FlagName). Nil for a key with no source of that kind, which is most of the schema: a
+	// per-machine or per-model fact does not belong to one invocation, and ADR 0012 fences two keys
+	// to the global file outright. A nil projection IS that fence — the pass skips the row.
+	fromEnv  func(o *Options, text string) error
+	fromFlag func(o *Options, flags Options)
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
@@ -216,6 +233,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:      "The servers you run models on — name, endpoint, and what each one needs.",
 		Read:      func(o Options) string { return countSummary(len(o.Servers), "server") },
 		Structure: func(o Options) any { return o.Servers },
+		fromFile:  fileServers,
 	},
 	{
 		// A kind of its own rather than an enum, even though its values ARE a closed set: EnumValues
@@ -250,6 +268,7 @@ var KeyRegistry = bindRows([]Key{
 			}
 			return o.SubAgentsServer
 		},
+		fromFile: fileSubAgentsServer,
 	},
 	{
 		// The gate over the row above (ADR 0069), and EDITABLE where that one is not: this key's
@@ -304,7 +323,8 @@ var KeyRegistry = bindRows([]Key{
 		// trailing-newline normalisation is a block scalar's chomp, and what a reader takes out of the
 		// file is what this lands, whichever way the file spelt it — so the prose Text reports is the
 		// prose Set puts back, newline for newline.
-		Set: land(asIs, func(o *Options) *string { return &o.SystemPrompt.Global.Text }),
+		Set:      land(asIs, func(o *Options) *string { return &o.SystemPrompt.Global.Text }),
+		fromFile: fileSystemPrompt,
 	},
 	{
 		// A plain path on a plain line, so the pane types it like any other string. What it names is
@@ -318,8 +338,9 @@ var KeyRegistry = bindRows([]Key{
 		// The path AS WRITTEN, blank when the key names no file: this value SEEDS an edit field, so a
 		// word standing in for emptiness would be a word the next commit persisted as a path, and a row
 		// reading "none" against a blank default would arm a reset for a key with no line to remove.
-		Read: func(o Options) string { return o.SystemPrompt.Global.File },
-		Set:  land(asIs, func(o *Options) *string { return &o.SystemPrompt.Global.File }),
+		Read:     func(o Options) string { return o.SystemPrompt.Global.File },
+		Set:      land(asIs, func(o *Options) *string { return &o.SystemPrompt.Global.File }),
+		fromFile: fileSystemPrompt,
 	},
 	{
 		// The last rung of the prompt ladder (ADR 0064 §2), sitting where the template spells it:
@@ -336,6 +357,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:      "Per-model system prompts, keyed by resolved model name; a match replaces the global prompt whole.",
 		Read:      func(o Options) string { return countSummary(len(o.SystemPrompt.Models), "model") },
 		Structure: func(o Options) any { return o.SystemPrompt.Models },
+		fromFile:  fileSystemPrompt,
 	},
 	{
 		// The additive channel (ADR 0067): a LIST of prose fragments, so it is structured like
@@ -346,6 +368,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:      "Prompt fragments appended, in listed order, to whichever system prompt is selected.",
 		Read:      func(o Options) string { return countSummary(len(o.SystemPrompt.Layers), "layer") },
 		Structure: func(o Options) any { return o.SystemPrompt.Layers },
+		fromFile:  fileSystemPrompt,
 	},
 	{
 		Path: "context-files.enable", Kind: KindBool, Default: "true",
@@ -354,7 +377,8 @@ var KeyRegistry = bindRows([]Key{
 		// Answered from the resolved LIST rather than from the switch: the block resolves to the names
 		// in force (nil when the feature is off, however it got there — `enable: false`, or an empty
 		// `names:`), and the effective outcome is what the row is asked about.
-		Read: func(o Options) string { return boolValue(len(o.ContextFiles) > 0) },
+		Read:     func(o Options) string { return boolValue(len(o.ContextFiles) > 0) },
+		fromFile: fileContextFiles,
 	},
 	{
 		// The one list the file writes on a single line, and therefore the one a text field can edit
@@ -366,6 +390,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:     "Workspace-root file names folded into the system prompt, in list order.",
 		Read:     func(o Options) string { return listValue(o.ContextFiles) },
 		Set:      land(parseList, func(o *Options) *[]string { return &o.ContextFiles }),
+		fromFile: fileContextFiles,
 	},
 	{
 		// The field carries what the FILE says — an absent key states what an explicit `true` does;
@@ -384,6 +409,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:       "Machines acknowledged as disposable, where auto mode runs unconfined.",
 		Read:       func(o Options) string { return countSummary(len(o.UnconfinedHosts), "host") },
 		Structure:  func(o Options) any { return o.UnconfinedHosts },
+		fromFile:   fileUnconfinedHosts,
 	},
 	{
 		Path: "web-search-endpoint", Kind: KindString,
@@ -398,6 +424,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:      "External MCP servers connected at startup; their tools always ask in auto.",
 		Read:      func(o Options) string { return countSummary(len(o.MCPServers), "server") },
 		Structure: func(o Options) any { return o.MCPServers },
+		fromFile:  fileMCPServers,
 	},
 	{
 		// The roster switch, a name list on one line like context-files.names — so the pane edits it
@@ -410,8 +437,13 @@ var KeyRegistry = bindRows([]Key{
 		Desc:     "Built-in tools to take off the menu, by name; the model is neither offered nor able to call them.",
 		// The NAMES rather than a count: the list is short, which tools are off is the whole of what
 		// the row is asked, and the value seeds the edit field — blank when nothing is disabled.
-		Read: func(o Options) string { return listValue(o.ToolsDisabled) },
-		Set:  land(parseList, func(o *Options) *[]string { return &o.ToolsDisabled }),
+		field: listField(func(o *Options) *[]string { return &o.ToolsDisabled },
+			func(fc fileConfig) []string {
+				if fc.Tools == nil {
+					return nil
+				}
+				return fc.Tools.Disabled
+			}),
 	},
 	{
 		// The switch's ADD direction (ADR 0057 decision 3), beside it here because the template puts
@@ -425,8 +457,13 @@ var KeyRegistry = bindRows([]Key{
 		Desc: "Built-in tools to put back on the menu — for a tool this build leaves off by default.",
 		// The names, for the roster row's reason above; "[]" for a list nobody has set, since adding
 		// nothing back is the default rather than an unanswered row.
-		Read: func(o Options) string { return listValue(o.ToolsEnabled) },
-		Set:  land(parseList, func(o *Options) *[]string { return &o.ToolsEnabled }),
+		field: listField(func(o *Options) *[]string { return &o.ToolsEnabled },
+			func(fc fileConfig) []string {
+				if fc.Tools == nil {
+					return nil
+				}
+				return fc.Tools.Enabled
+			}),
 	},
 	{
 		// The host layer over the network tools' url-safety guard, a name list on one line like the
@@ -439,15 +476,25 @@ var KeyRegistry = bindRows([]Key{
 		Desc:     "Hosts the network tools may reach, with their subdomains; empty means every host.",
 		// The names, for the roster's reason above — and "[]" for a list nobody has set, since an empty
 		// allow list means every host rather than none.
-		Read: func(o Options) string { return listValue(o.URLAllowHosts) },
-		Set:  land(parseList, func(o *Options) *[]string { return &o.URLAllowHosts }),
+		field: listField(func(o *Options) *[]string { return &o.URLAllowHosts },
+			func(fc fileConfig) []string {
+				if fc.URLSafety == nil {
+					return nil
+				}
+				return fc.URLSafety.AllowHosts
+			}),
 	},
 	{
 		Path: "url-safety.deny-hosts", Kind: KindStringList,
 		Editable: true,
 		Desc:     "Hosts the network tools may never reach, with their subdomains; deny wins over the allow list.",
-		Read:     func(o Options) string { return listValue(o.URLDenyHosts) },
-		Set:      land(parseList, func(o *Options) *[]string { return &o.URLDenyHosts }),
+		field: listField(func(o *Options) *[]string { return &o.URLDenyHosts },
+			func(fc fileConfig) []string {
+				if fc.URLSafety == nil {
+					return nil
+				}
+				return fc.URLSafety.DenyHosts
+			}),
 	},
 	{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
@@ -948,6 +995,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:      "Commands run when a Moment closes or a seam fires; advise text reaches the model fenced, a gate answers before the Approver does.",
 		Read:      func(o Options) string { return countSummary(distinctReactionIDs(o.Reactions), "reaction") },
 		Structure: func(o Options) any { return o.Reactions },
+		fromFile:  projectReactions,
 	},
 	{
 		// Summarized by its COUNT, like every other block of entries no row can hold. What the summary
@@ -958,6 +1006,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:      "How apogee equips and speaks to a model — tool-call format, thinking style, tool roster — per name pattern.",
 		Read:      func(o Options) string { return countSummary(len(o.ModelProfiles), "model profile") },
 		Structure: func(o Options) any { return o.ModelProfiles },
+		fromFile:  fileModelProfiles,
 	},
 })
 
@@ -1379,7 +1428,7 @@ func validateColorSchemeName(value string) error {
 // checks a SPELLING, and what each name is drawn as is the renderer's business alone. The empty
 // value is the request for the default and is accepted, as it is everywhere else. The refusal
 // itself is the domain's sentence ([domain.UnknownCursorShapeError]), wrapped with the key this
-// pane is about to write; the file pass lands the key through the row's Set (keyAccessors), so the
+// pane is about to write; the file pass lands the key through the row's Set (checkedField), so the
 // startup refusal, the live re-read's and the one this pane writes are the same sentence, and so
 // is the renderer's parse.
 func validateCursorShapeName(value string) error {
@@ -1391,7 +1440,7 @@ func validateCursorShapeName(value string) error {
 
 // validateSubAgentsChoice refuses a `sub-agents-choice:` outside the two words the key takes, through
 // the same parse the file pass and the live apply both go through ([ParseSubAgentsChoice]) — the
-// file pass lands the key through the row's Set (keyAccessors) — so a value refused at the
+// file pass lands the key through the row's Set (checkedField) — so a value refused at the
 // /settings pane and a value refused at launch are refused by one implementation in one wording. The empty string is not a defect: it is the key left out, and the
 // parse answers it with the same `fixed` the row's default declares.
 func validateSubAgentsChoice(value string) error {
@@ -1462,20 +1511,29 @@ func countSummary(n int, noun string) string {
 // bindRows binds the three into the one call Key.Set documents, once, as the table is built.
 
 // bindRows derives every field row's Read and landing from its field, binds every landing the
-// table holds under the admission its row carries, derives a field row's file projection over that
-// bound Set (the checked-text keys land through it), and hands the table back; a row
-// with no landing keeps its nil Set. A field row that hand-writes a Read or a Set as well panics:
-// two answers for one key, and nothing would say which the surfaces read. It is called on the
-// literal itself so LookupKey and every table built over the registry (keyAccessors) see the bound
-// rows from the first read — an init-time pass would run after those package-level tables had
-// copied their rows.
+// table holds under the admission its row carries, derives a field row's file, env and flag
+// projections over that bound Set (the checked-text keys and the env pass land through it), and
+// hands the table back; a row with no landing keeps its nil Set. It panics — at init, since the
+// registry is a package-level table — on the two ways a row can half-describe its key: a field row
+// that hand-writes a Read, a Set or a projection as well (two answers for one key, and nothing
+// would say which the surfaces or the passes read), and a row with neither a field nor a
+// hand-written fromFile (a key the file pass would never read). It is called on the literal itself
+// so LookupKey and every pass over the registry see the bound rows from the first read — an
+// init-time pass would run after any package-level table built over the rows had copied them.
 func bindRows(rows []Key) []Key {
 	for i := range rows {
-		if field := rows[i].field; field != nil {
-			if rows[i].Read != nil || rows[i].Set != nil {
-				panic("apogee: config registry row " + rows[i].Path +
-					" carries a field and a hand-written Read or Set — the field derives both")
-			}
+		field := rows[i].field
+		switch {
+		case field != nil && (rows[i].Read != nil || rows[i].Set != nil):
+			panic("apogee: config registry row " + rows[i].Path +
+				" carries a field and a hand-written Read or Set — the field derives both")
+		case field != nil && (rows[i].fromFile != nil || rows[i].fromEnv != nil || rows[i].fromFlag != nil):
+			panic("apogee: config registry row " + rows[i].Path + " derives its file, env and flag " +
+				"projections from its field, and hand-writes one as well")
+		case field == nil && rows[i].fromFile == nil:
+			panic("apogee: config registry row " + rows[i].Path + " has neither a field nor a " +
+				"hand-written fromFile, so the file pass would never read it")
+		case field != nil:
 			rows[i].Read = field.read
 			rows[i].Set = field.landing()
 		}
@@ -1489,8 +1547,15 @@ func bindRows(rows []Key) []Key {
 				return landing(canonical, o)
 			}
 		}
-		if field := rows[i].field; field != nil {
+		if field != nil {
 			rows[i].fromFile = field.fileProjection(rows[i].Path, rows[i].Default, rows[i].Set)
+			if rows[i].EnvVar != "" {
+				set := rows[i].Set
+				rows[i].fromEnv = func(o *Options, text string) error { return set(text, o) }
+			}
+			if rows[i].FlagName != "" {
+				rows[i].fromFlag = field.flagCopy()
+			}
 		}
 	}
 	return rows
@@ -1623,11 +1688,9 @@ func LookupKey(path string) (Key, bool) {
 }
 
 // mustKey returns the registry row for a path and panics when the table has none. It exists for
-// the package-level tables built OVER the registry — resolution's keyAccessors table — where
-// a missing row is a defect in this package's own literals rather than anything an input can
-// cause, exactly the regexp.MustCompile-on-a-literal-pattern case. Every such table is
-// initialised at process start, so the panic can only ever fire on the first run after the
-// edit that removed the row, and TestKeyAccessorsBindDescribedKeys names it before then.
+// the tests that name a row by its path, where a missing row is a defect in this package's own
+// literals rather than anything an input can cause — exactly the regexp.MustCompile-on-a-
+// literal-pattern case.
 func mustKey(path string) Key {
 	k, ok := LookupKey(path)
 	if !ok {

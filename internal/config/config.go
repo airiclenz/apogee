@@ -327,225 +327,74 @@ func (s SessionSettings) Validate() error {
 	return nil
 }
 
-// keyAccessor binds one registry row to the plumbing that carries its key through resolution:
-// which sources the key is read FROM, and where a value read from each of them is written TO. The
-// registry says what a key IS; this table says how it travels, and the two are one row apart so a
-// key described to the /settings surface cannot be a key resolution forgot to read.
+// The hand-written file projections: resolution's file pass (Key.fromFile) for every registry row
+// that carries no field (keyfield.go) — the structured and list rows whose value is more than one
+// typed copy, and the keys that share a carrier. Each is named here, beside the fileConfig shape
+// it reads, and referenced from its row, so the compiler still checks every projection and the row
+// stays the one place that says how its key travels.
 //
-// There is no carrier between the sources and the [Options] the composition root builds everything
-// from: every accessor writes onto that struct directly, and the whole of resolution is three
-// passes over this table — the file, then the environment, then the flags — so applying them in
-// that order IS the precedence rule (ResolveOptions), and a key is carried by the act of being
-// described here.
-//
-// The environment-variable and flag NAMES are read off the row (EnvVar, FlagName) rather than
-// restated as a literal at each site that used to spell them — the env pass, the flag pass and the
-// override marker. Source metadata therefore has exactly one home, and renaming APOGEE_MODE or
-// --mode is an edit to one registry row instead of a three-site edit that can half-land.
-//
-// The accessors are closures over the typed carriers themselves (fileConfig, Options) rather than
-// reflection over them, so the compiler still checks every projection:
-//
-//   - fromFile writes what the key resolves to from the FILE ALONE: the file's value where the file
-//     states the key, its built-in default where the file does not. Every row has one, and the write
-//     is unconditional — the file is the only source below the default, so there is nothing left to
-//     fall through TO, and a full pass resets every field the schema owns rather than leaving a
-//     stale one standing. That is also what makes [LoadFileConfig] answer with usable Options. A
-//     row that carries a field (keyfield.go) — every scalar row — has its fromFile DERIVED from it
-//     rather than written in this table: the file's typed value copied onto the field under the
-//     row's own "stated" predicate, never re-parsed from text and never through Set, so a block the
-//     file carries is judged by its own validator at ResolveOptions. The exceptions REFUSE a value
-//     the key cannot take at the pass, in the row's own sentence: the keys the file spells as a
-//     STRING a parse can fail on (`sub-agents-choice`, `delegate-timeout`, `stream-idle-timeout`,
-//     `re-stream-budget`, `cursor-shape`) land through the row's own Set, so the startup refusal,
-//     the live re-read's and the settings pane's are one wording, and `ui.stall-after` lands
-//     through the block's own duration parser.
-//   - fromEnv projects a variable's text and fromFlag the already-parsed flag value, each onto the
-//     same field. They run only where their source SET the key (a non-empty variable, an explicitly
-//     changed flag), so neither can shadow the value below it. Both derive from the row's field:
-//     the env projection is the row's own bound Set — the variable's text is admitted and landed
-//     exactly as a value typed at the settings pane is, so a value the pane refuses is a value the
-//     environment cannot smuggle in — and the flag projection copies the parsed flag value onto the
-//     field unjudged. Both are nil for a key with no source of that kind, which is most of the schema — a
-//     per-machine or per-model fact does not belong to one invocation, and ADR 0012 fences two keys
-//     to the global file outright. A nil accessor IS that fence: the pass skips the row, so there is
-//     no path for those sources to reach the key.
-//
-// Two shapes need a word. The keys that SHARE a carrier — the four system-prompt keys and the two
-// context-files keys — each write the whole block their key sits in, because the Options field IS
-// that block and the block's own mapper (toSystemPromptSettings, toContextFilesSettings) applies
-// the defaults for whatever the file left out. The rows of one block therefore
-// write the same value, which is why they share one named projection. And confine-to-workspace's
-// accessor carries the file's own value only: the EFFECTIVE one also depends on whether a Host
-// acknowledgement names this machine, which needs the host identity — a fact no row holds, so that
-// collapse stays in ResolveOptions (resolveConfineToWorkspace).
-//
-// What this table does NOT carry is the raw startup overrides (`--endpoint`, `APOGEE_ENDPOINT`,
-// `APOGEE_API_KEY`, `--model`, `APOGEE_MODEL`): since ADR 0036 those name no config key at all —
-// they build or overlay a startup server entry — so they are resolved on their own, off the
-// registry, rather than pretending to be file keys that no longer exist.
-type keyAccessor struct {
-	row      Key
-	fromFile func(o *Options, fc fileConfig) error
-	fromEnv  func(o *Options, text string) error
-	fromFlag func(o *Options, flags Options)
+// None of these keys has a variable or a flag: a list that names MACHINES, a host acknowledgement
+// or a per-model block is a config act rather than an invocation one. What the rows do NOT carry is
+// the raw startup overrides (`--endpoint`, `APOGEE_ENDPOINT`, `APOGEE_API_KEY`, `--model`,
+// `APOGEE_MODEL`): since ADR 0036 those name no config key at all — they build or overlay a startup
+// server entry — so they are resolved on their own, off the registry (startupOverrideSources). And
+// confine-to-workspace's row carries the file's own value only: the EFFECTIVE one also depends on
+// whether a Host acknowledgement names this machine, which needs the host identity — a fact no row
+// holds, so that collapse stays in ResolveOptions (resolveConfineToWorkspace).
+
+// fileServers projects the `servers:` list. File-only: the list names MACHINES, which is a config
+// act rather than an invocation one — its invocation-settable neighbour is the `server:` pointer.
+func fileServers(o *Options, fc fileConfig) error {
+	o.Servers = nil
+	if len(fc.Servers) > 0 {
+		o.Servers = fc.Servers
+	}
+	return nil
 }
 
-// keyAccessors is that table: one entry per registry row, in the order the registry lists the keys,
-// built over the registry (accessorsOver) from the rows' derived file projections and the
-// hand-written entries below. The order does not affect the outcome — each key writes its own
-// field, and precedence is the order the SOURCES are applied in. Its completeness is checked twice:
-// accessorsOver panics at init on a row with neither a field nor a hand-written fromFile, and
-// TestKeyAccessorsBindDescribedKeys holds every entry to its row — a row advertising a variable or a
-// flag has the plumbing that reads it, and no entry carries plumbing its row does not name.
-var keyAccessors = accessorsOver(KeyRegistry, handWrittenAccessors)
+// fileSubAgentsServer projects `sub-agents-server:`. File-only, unlike the `server:` pointer: which
+// machine takes the DELEGATIONS is a config act — `/sub-agents-server` records the choice back into
+// the file — not something one invocation overrides, so the key has neither a variable nor a flag.
+func fileSubAgentsServer(o *Options, fc fileConfig) error {
+	o.SubAgentsServer = fc.SubAgentsServer
+	return nil
+}
 
-// handWrittenAccessors is the part of that table no field derives: every row without a field — the
-// structured, list and system-prompt rows and `context-files.enable`. A field row has no entry here
-// — accessorsOver refuses one — because the field already says where the file's, the variable's
-// and the flag's value goes. Listed in the registry's order so it reads beside the table it is built over.
-var handWrittenAccessors = []keyAccessor{
-	{
-		// File-only: the list names MACHINES, which is a config act rather than an invocation one —
-		// its invocation-settable neighbour is the `server:` pointer below it.
-		row: mustKey("servers"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.Servers = nil
-			if len(fc.Servers) > 0 {
-				o.Servers = fc.Servers
-			}
-			return nil
-		},
-	},
-	{
-		// File-only, unlike the pointer above it: which machine takes the DELEGATIONS is a config
-		// act — `/sub-agents-server` records the choice back into the file — not something one
-		// invocation overrides, so the key has neither a variable nor a flag.
-		row:      mustKey("sub-agents-server"),
-		fromFile: func(o *Options, fc fileConfig) error { o.SubAgentsServer = fc.SubAgentsServer; return nil },
-	},
-	{
-		// The first of the four keys that are ONE prompt (ADR 0023, ADR 0067) and therefore one carrier. Its
-		// zero value is no prompt at all — the promptless request apogee sent before the ADR — so the
-		// block needs no default beyond what the file states.
-		row:      mustKey("system-prompt-text"),
-		fromFile: fileSystemPrompt,
-	},
-	{
-		row:      mustKey("system-prompt-file"),
-		fromFile: fileSystemPrompt,
-	},
-	{
-		row:      mustKey("system-prompt-models"),
-		fromFile: fileSystemPrompt,
-	},
-	{
-		// The fourth key of the same carrier (ADR 0067): it appends rather than selects, but it is
-		// read off the same block, so it shares the mapper its three siblings do.
-		row:      mustKey("system-prompt-layers"),
-		fromFile: fileSystemPrompt,
-	},
-	{
-		// The `context-files:` pair, one carrier like the system-prompt trio above — and the one
-		// carrier Options does not hold whole: it takes the RESOLVED name list, because the composition
-		// root has no use for the switch that produced it (contextFilesSettings.resolved).
-		row:      mustKey("context-files.enable"),
-		fromFile: fileContextFiles,
-	},
-	{
-		row:      mustKey("context-files.names"),
-		fromFile: fileContextFiles,
-	},
-	{
-		// Global-config-only for the reason above — a hostile repo must not be able to name your
-		// host — and carried past resolution so the session can report the list back and extend it.
-		row: mustKey("unconfined-hosts"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.UnconfinedHosts = nil
-			if len(fc.UnconfinedHosts) > 0 {
-				o.UnconfinedHosts = fc.UnconfinedHosts
-			}
-			return nil
-		},
-	},
-	{
-		// The on-disk entries are mapped across one by one, as they are everywhere else in this
-		// package: the schema shape and the resolved one stay independently evolvable.
-		row: mustKey("mcp-servers"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.MCPServers = nil
-			if len(fc.MCPServers) > 0 {
-				servers := make([]mcp.ServerConfig, len(fc.MCPServers))
-				for i, m := range fc.MCPServers {
-					servers[i] = m.toServerConfig()
-				}
-				o.MCPServers = servers
-			}
-			return nil
-		},
-	},
-	{
-		// Each half of the `tools:` block projects on its own, the way the `url-safety:` pair below
-		// does: a block that names only one of them configures that one and leaves the other empty.
-		row: mustKey("tools.disabled"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ToolsDisabled = nil
-			if fc.Tools != nil && len(fc.Tools.Disabled) > 0 {
-				o.ToolsDisabled = fc.Tools.Disabled
-			}
-			return nil
-		},
-	},
-	{
-		row: mustKey("tools.enabled"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ToolsEnabled = nil
-			if fc.Tools != nil && len(fc.Tools.Enabled) > 0 {
-				o.ToolsEnabled = fc.Tools.Enabled
-			}
-			return nil
-		},
-	},
-	{
-		// Each list of the `url-safety:` block projects on its own: a block that names only one of
-		// them configures that one and leaves the other at its default.
-		row: mustKey("url-safety.allow-hosts"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.URLAllowHosts = nil
-			if fc.URLSafety != nil && len(fc.URLSafety.AllowHosts) > 0 {
-				o.URLAllowHosts = fc.URLSafety.AllowHosts
-			}
-			return nil
-		},
-	},
-	{
-		row: mustKey("url-safety.deny-hosts"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.URLDenyHosts = nil
-			if fc.URLSafety != nil && len(fc.URLSafety.DenyHosts) > 0 {
-				o.URLDenyHosts = fc.URLSafety.DenyHosts
-			}
-			return nil
-		},
-	},
-	{
-		// The user-origin observe lane. A list of blocks is a shape no scalar row writes, so the
-		// projection is the resolver itself (projectReactions) and the row's own value is a count.
-		row:      mustKey("reactions"),
-		fromFile: projectReactions,
-	},
-	{
-		// Ordered by pattern on the way in (toProfileEntries), so the same file always resolves to
-		// the same slice; the map is carried whole rather than merged pattern by pattern (ADR 0044).
-		row: mustKey("model-profiles"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ModelProfiles = nil
-			if len(fc.ModelProfiles) > 0 {
-				o.ModelProfiles = toProfileEntries(fc.ModelProfiles)
-			}
-			return nil
-		},
-	},
+// fileUnconfinedHosts projects `unconfined-hosts:`. Global-config-only — a hostile repo must not be
+// able to name your host — and carried past resolution so the session can report the list back
+// and extend it.
+func fileUnconfinedHosts(o *Options, fc fileConfig) error {
+	o.UnconfinedHosts = nil
+	if len(fc.UnconfinedHosts) > 0 {
+		o.UnconfinedHosts = fc.UnconfinedHosts
+	}
+	return nil
+}
+
+// fileMCPServers projects `mcp-servers:`. The on-disk entries are mapped across one by one, as they
+// are everywhere else in this package: the schema shape and the resolved one stay independently
+// evolvable.
+func fileMCPServers(o *Options, fc fileConfig) error {
+	o.MCPServers = nil
+	if len(fc.MCPServers) > 0 {
+		servers := make([]mcp.ServerConfig, len(fc.MCPServers))
+		for i, m := range fc.MCPServers {
+			servers[i] = m.toServerConfig()
+		}
+		o.MCPServers = servers
+	}
+	return nil
+}
+
+// fileModelProfiles projects `model-profiles:`, ordered by pattern on the way in
+// (toProfileEntries) so the same file always resolves to the same slice; the map is carried whole
+// rather than merged pattern by pattern (ADR 0044).
+func fileModelProfiles(o *Options, fc fileConfig) error {
+	o.ModelProfiles = nil
+	if len(fc.ModelProfiles) > 0 {
+		o.ModelProfiles = toProfileEntries(fc.ModelProfiles)
+	}
+	return nil
 }
 
 // The file projections shared by the key groups that resolve into ONE carrier: four system-prompt
@@ -554,8 +403,12 @@ var handWrittenAccessors = []keyAccessor{
 // block differ in nothing but the key they are described by, and a named function is the honest
 // way to say that. context-files is the one that is not a plain copy: Options carries the RESOLVED
 // name list rather than the block, because the composition root has no use for the switch that
-// produced it. The `present:`, `ui:` and `sessions:` blocks have no shared projection: each of their
-// keys carries a field (keyfield.go) that lands its own member of the block.
+// produced it. The four system-prompt keys are ONE prompt (ADR 0023, ADR 0067) whose zero value is
+// no prompt at all — the promptless request apogee sent before the ADR — so the block needs no
+// default beyond what the file states. The `present:`, `ui:` and `sessions:` blocks have no shared
+// projection: each of their keys carries a field (keyfield.go) that lands its own member of the
+// block. The user-origin `reactions:` lane projects through its resolver itself (projectReactions):
+// a list of blocks is a shape no field writes, and the row's own value is a count.
 func fileSystemPrompt(o *Options, fc fileConfig) error {
 	o.SystemPrompt = fc.toSystemPromptSettings()
 	return nil
@@ -2540,8 +2393,11 @@ func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 //
 // WHICH field carries a key — and what the file has to say to state it, which differs by kind (an
 // empty string, a nil pointer, a zero number, a present-but-empty list) — is the key's own registry
-// row (keyAccessors). A key added to the schema is therefore read here by the act of being
+// row (Key.fromFile). A key added to the schema is therefore read here by the act of being
 // described, rather than by a branch someone had to remember to add beside thirty-seven others.
+// The rows are applied in the registry's order, which is also the order a first refusal is met in;
+// the order does not otherwise affect the outcome — each key writes its own field, and precedence
+// is the order the SOURCES are applied in.
 //
 // A value a key refuses is refused HERE, in the row's own sentence, and the pass stops at it: the
 // keys the file spells as text a parse can refuse land through the row's Set (checkedField,
@@ -2550,7 +2406,7 @@ func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 // both places — and a bad value edited into the file under a running session REFUSES on the
 // re-read, through the loader's error, where it once resolved to the key's default in silence.
 func applyFile(o *Options, fc fileConfig) error {
-	for _, k := range keyAccessors {
+	for _, k := range KeyRegistry {
 		if err := k.fromFile(o, fc); err != nil {
 			return err
 		}
@@ -2701,7 +2557,7 @@ func (lc legacyFileConfig) block() string {
 // Environment variable names, prefixed APOGEE_ to namespace the process environment.
 //
 // They fall in three groups. EnvServer/EnvMode/EnvBypass are read through the registry rows their
-// keys carry (keyAccessors). EnvConfig/EnvWorkspace are read by ApplyConfig directly, because
+// keys carry (Key.EnvVar). EnvConfig/EnvWorkspace are read by ApplyConfig directly, because
 // they name the roots resolution itself runs in and so cannot be config keys. EnvEndpoint/
 // EnvModel/EnvAPIKey are the raw startup overrides ADR 0036 DETACHED from the schema: they no
 // longer describe config keys — they build or overlay the startup server entry — so they are
@@ -2718,7 +2574,7 @@ const (
 )
 
 // applyEnv overlays the APOGEE_* variables; an unset (or empty) variable leaves the value below it
-// standing. Which variable carries which key is the registry's to say (keyAccessors), so this reads
+// standing. Which variable carries which key is the registry's to say (Key.EnvVar), so this reads
 // names out of the rows rather than repeating them: a key whose row names no variable has no
 // environment source at all. The variables that name no config key — APOGEE_ENDPOINT,
 // APOGEE_API_KEY, APOGEE_MODEL — are not read here at all: since ADR 0036 they override the
@@ -2729,16 +2585,16 @@ const (
 // refusal names its source. getenv is injected so the pass is testable without mutating the
 // process environment.
 func applyEnv(o *Options, getenv func(string) string) error {
-	for _, k := range keyAccessors {
-		if k.fromEnv == nil || k.row.EnvVar == "" {
+	for _, k := range KeyRegistry {
+		if k.fromEnv == nil || k.EnvVar == "" {
 			continue
 		}
-		v := getenv(k.row.EnvVar)
+		v := getenv(k.EnvVar)
 		if v == "" {
 			continue
 		}
 		if err := k.fromEnv(o, v); err != nil {
-			return fmt.Errorf("apogee: invalid %s %q: %w", k.row.EnvVar, v, sansPrefix{err})
+			return fmt.Errorf("apogee: invalid %s %q: %w", k.EnvVar, v, sansPrefix{err})
 		}
 	}
 	return nil
@@ -2761,11 +2617,11 @@ func (e sansPrefix) Unwrap() error { return e.err }
 // key whose row names no flag cannot be carried by one. `--endpoint` and `--model` are absent for
 // the same reason APOGEE_ENDPOINT is (ADR 0036): they name no config key.
 func applyFlags(o *Options, flags Options, changed func(string) bool) {
-	for _, k := range keyAccessors {
-		if k.fromFlag == nil || k.row.FlagName == "" {
+	for _, k := range KeyRegistry {
+		if k.fromFlag == nil || k.FlagName == "" {
 			continue
 		}
-		if !changed(k.row.FlagName) {
+		if !changed(k.FlagName) {
 			continue
 		}
 		k.fromFlag(o, flags)
@@ -2795,13 +2651,13 @@ const (
 // claim a source that did not actually win. Keys absent from the map resolved from the file or the
 // default, which is the majority and needs no entry.
 func overrideSources(changed func(string) bool, getenv func(string) string) map[string]Source {
-	sources := make(map[string]Source, len(keyAccessors))
-	for _, k := range keyAccessors {
+	sources := make(map[string]Source, len(KeyRegistry))
+	for _, k := range KeyRegistry {
 		switch {
-		case k.fromFlag != nil && k.row.FlagName != "" && changed(k.row.FlagName):
-			sources[k.row.Path] = SourceFlag
-		case k.fromEnv != nil && k.row.EnvVar != "" && getenv(k.row.EnvVar) != "":
-			sources[k.row.Path] = SourceEnv
+		case k.fromFlag != nil && k.FlagName != "" && changed(k.FlagName):
+			sources[k.Path] = SourceFlag
+		case k.fromEnv != nil && k.EnvVar != "" && getenv(k.EnvVar) != "":
+			sources[k.Path] = SourceEnv
 		}
 	}
 	return sources
@@ -3032,7 +2888,7 @@ type startupOverrides struct {
 }
 
 // startupOverride binds one raw override to the sources it is read from. It exists for the same
-// reason keyAccessor does — so the environment-variable and flag NAMES have exactly one home,
+// reason a registry row does — so the environment-variable and flag NAMES have exactly one home,
 // and a source that is advertised is a source that is read — but it deliberately hangs off no
 // registry row: since ADR 0036 these names describe no config key, and the bijection guard pins
 // registry rows to `fileConfig` tags that no longer exist for them.

@@ -327,3 +327,18 @@ for the ten `ui.*` keys simply implement that column by calling the value's own 
 `cursor-shape` stays a top-level key outside `UIPrefs`, and `ui.inspector` stays inside it: the
 engine acts on that one (`domain.Config.Inspector`), so the value carries it and the renderer only
 words its empty pane with it.
+
+## Amendment (2026-09-24) — every key's file semantics live on its row
+
+The 2026-08-21 and 2026-09-16 amendments put the read projections and the inverse on the row;
+resolution still read the file through a second table beside it, `keyAccessors`, built over the
+rows. That table is retired. A row now carries resolution's projections too: `fromFile` for every
+row, and `fromEnv`/`fromFlag` where the row names a variable or a flag. `bindRows` derives all three
+from a row's typed field (`keyfield.go`), which every scalar and name-list key carries. The rows
+without a field write their `fromFile` on the row: the structured rows and the keys that share one
+carrier (the four system-prompt keys, the two `context-files` keys). `bindRows` panics at init on a
+row that half-describes its key: a field row with a projection of its own as well, or a row with
+neither a field nor a `fromFile`. `applyFile`, `applyEnv`, `applyFlags` and `overrideSources` range
+over `KeyRegistry` in its order, so the first-refusal order is unchanged. What does not change: the
+row is still the one table the pane and resolution read, a `ui.*` row's `Set` still calls
+`UIPrefs.Set` (no third parser), and a block-mapped key's `Set` still re-runs the block's validator.

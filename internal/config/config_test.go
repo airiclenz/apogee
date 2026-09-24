@@ -525,10 +525,10 @@ func TestMultiSourceKeysReadTheRegistry(t *testing.T) {
 	for _, tt := range tests {
 		multiSource[tt.path] = true
 	}
-	for _, k := range keyAccessors {
-		if (k.fromEnv != nil || k.fromFlag != nil) && !multiSource[k.row.Path] {
+	for _, k := range KeyRegistry {
+		if (k.fromEnv != nil || k.fromFlag != nil) && !multiSource[k.Path] {
 			t.Errorf("key %q reads an environment variable or a flag, but only the keys listed here do — "+
-				"either it stopped being file-only or this table has fallen behind the schema", k.row.Path)
+				"either it stopped being file-only or this table has fallen behind the schema", k.Path)
 		}
 	}
 }
@@ -546,54 +546,6 @@ func TestRegistryModeDefaultIsTheLadderDefault(t *testing.T) {
 	if row.Default != string(domain.ModeAskBefore) {
 		t.Errorf("registry mode default = %q, want %q (the mode a session with no config starts in)",
 			row.Default, string(domain.ModeAskBefore))
-	}
-}
-
-// The accessor table over the registry cannot half-describe a key: EVERY row needs the projection
-// that reads its key out of the file and lands it on the Options, exactly once; every row
-// advertising a variable or a flag must have the plumbing that reads that source; every accessor
-// must name a described key; and no accessor may carry plumbing for a source its row does not name
-// (which would be dead code advertising nothing). Without this, a key added to the schema and
-// described in the registry could still be a key resolution never reads, and adding `EnvVar:` to a
-// row would silently advertise a variable nothing looks at. Since the passes that carry a key ARE
-// these accessors, a missing one is a nil call at startup rather than a value quietly left at its
-// default — the guard is what turns that into a test failure instead.
-func TestKeyAccessorsBindDescribedKeys(t *testing.T) {
-	t.Parallel()
-
-	bound := map[string]keyAccessor{}
-	for _, k := range keyAccessors {
-		if _, ok := LookupKey(k.row.Path); !ok {
-			t.Errorf("keyAccessors binds %q, which the registry does not describe", k.row.Path)
-		}
-		if _, dup := bound[k.row.Path]; dup {
-			t.Errorf("keyAccessors binds %q twice — one key, one entry", k.row.Path)
-		}
-		if k.fromFile == nil {
-			t.Errorf("keyAccessors entry %q has no fromFile, so neither the config file nor the key's "+
-				"own default would ever reach the Options", k.row.Path)
-		}
-		if k.fromEnv != nil && k.row.EnvVar == "" {
-			t.Errorf("keyAccessors entry %q reads an environment variable its row does not name", k.row.Path)
-		}
-		if k.fromFlag != nil && k.row.FlagName == "" {
-			t.Errorf("keyAccessors entry %q reads a flag its row does not name", k.row.Path)
-		}
-		bound[k.row.Path] = k
-	}
-	for _, row := range KeyRegistry {
-		k, ok := bound[row.Path]
-		if !ok {
-			t.Errorf("registry row %q has no accessor — the key would be shown by /settings and never "+
-				"read by resolution", row.Path)
-			continue
-		}
-		if row.EnvVar != "" && k.fromEnv == nil {
-			t.Errorf("registry row %q names %s but the accessor reads no environment value", row.Path, row.EnvVar)
-		}
-		if row.FlagName != "" && k.fromFlag == nil {
-			t.Errorf("registry row %q names --%s but the accessor reads no flag value", row.Path, row.FlagName)
-		}
 	}
 }
 
@@ -1593,7 +1545,7 @@ func TestResolveStartupOverridesEmptyFlagBeatsTheVariable(t *testing.T) {
 	}
 }
 
-// The override table cannot half-describe a source, on TestKeyAccessorsBindDescribedKeys'
+// The override table cannot half-describe a source, on TestRegistryRowInvariants'
 // reasoning: every entry must read the variable it names and the flag it names, the three
 // detached variables must each be bound exactly once, and no override name may collide with a
 // registry row's — since ADR 0036 these names describe no config key, and an overlap would mean

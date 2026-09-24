@@ -8,21 +8,22 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The descriptor's row set: every row whose value is one scalar carries a field — every bool,
-// count, share, duration, name and word — except the four that resolve with something no field
-// holds: `context-files.enable` (derived from the resolved list), `sub-agents-server` (whose Read
-// shows a word for the empty value) and the two system-prompt keys (one carrier with their block).
-// A field row has its file projection derived, and needs no hand-written accessor at all.
-func TestFieldCarriedByEveryScalarRow(t *testing.T) {
+// The descriptor's row set: every row whose value is one scalar or one name list carries a field —
+// every bool, count, share, duration, name, word and list — except the ones that resolve with
+// something no field holds: `context-files.enable` (derived from the resolved list) and its
+// `context-files.names` sibling (one carrier with it), `sub-agents-server` (whose Read shows a word
+// for the empty value) and the two system-prompt keys (one carrier with their block). A field row
+// has its Read, Set and file projection derived; every other row writes its file projection on
+// the row.
+func TestFieldCarriedByEveryValueRow(t *testing.T) {
 	t.Parallel()
 
 	fieldless := map[string]bool{
-		"context-files.enable": true, "sub-agents-server": true,
+		"context-files.enable": true, "context-files.names": true, "sub-agents-server": true,
 		"system-prompt-text": true, "system-prompt-file": true,
 	}
 	for _, row := range KeyRegistry {
-		scalar := row.Kind != KindStructured && row.Kind != KindStringList
-		wantField := scalar && !fieldless[row.Path]
+		wantField := row.Kind != KindStructured && !fieldless[row.Path]
 		if (row.field != nil) != wantField {
 			t.Errorf("registry row %q (kind %q) carries a field = %v, want %v", row.Path, row.Kind,
 				row.field != nil, wantField)
@@ -31,79 +32,80 @@ func TestFieldCarriedByEveryScalarRow(t *testing.T) {
 			t.Errorf("registry row %q carries a field but bindRows derived no Read, Set or fromFile", row.Path)
 		}
 	}
-	for _, k := range handWrittenAccessors {
-		if k.row.field != nil {
-			t.Errorf("hand-written accessor %q restates plumbing its field already derives", k.row.Path)
-		}
-	}
 }
 
-// The init guard over the two tables: a field row with a hand-written entry of any kind, a row with
-// neither, and a hand-written entry naming no row all panic — while a field row with a variable and
-// a flag (`bypass`) gets its env and flag passes derived from the field.
-func TestFieldAccessorsOverRefuseTwoFileProjections(t *testing.T) {
+// The init guard in bindRows: a field row that hand-writes any projection as well, and a row with
+// neither a field nor a fromFile, both panic — while a field row with a variable and a flag gets
+// its env and flag projections derived from the field.
+func TestFieldBindRowsRefuseTwoFileProjections(t *testing.T) {
 	t.Parallel()
 
 	stateless := func(*Options, fileConfig) error { return nil }
+	fieldRow := func() Key {
+		return Key{
+			Path: "probe", Kind: KindBool, Default: "false", EnvVar: "APOGEE_PROBE", FlagName: "probe",
+			Desc: "A probe row.",
+			field: boolField(func(o *Options) *bool { return &o.Bypass },
+				func(fileConfig) *bool { return nil }),
+		}
+	}
 	tests := []struct {
 		name      string
-		rows      []Key
-		written   []keyAccessor
+		row       func() Key
 		wantPanic string
 	}{
 		{
-			name:      "field row with a hand-written fromFile",
-			rows:      []Key{mustKey("auto-compact")},
-			written:   []keyAccessor{{row: mustKey("auto-compact"), fromFile: stateless}},
+			name: "field row with a hand-written fromFile",
+			row: func() Key {
+				k := fieldRow()
+				k.fromFile = stateless
+				return k
+			},
 			wantPanic: "derives its file, env and flag projections from its field",
 		},
 		{
-			name: "field row with hand-written env and flag plumbing",
-			rows: []Key{mustKey("bypass")},
-			written: []keyAccessor{{
-				row:      mustKey("bypass"),
-				fromFlag: func(o *Options, flags Options) { o.Bypass = flags.Bypass },
-			}},
+			name: "field row with hand-written flag plumbing",
+			row: func() Key {
+				k := fieldRow()
+				k.fromFlag = func(o *Options, flags Options) { o.Bypass = flags.Bypass }
+				return k
+			},
 			wantPanic: "derives its file, env and flag projections from its field",
 		},
 		{
-			name:      "row with neither a field nor a fromFile",
-			rows:      []Key{mustKey("servers")},
+			name: "row with neither a field nor a fromFile",
+			row: func() Key {
+				return Key{Path: "probe", Kind: KindStructured, Desc: "A probe row.",
+					Read: func(Options) string { return "" }}
+			},
 			wantPanic: "neither a field nor a hand-written fromFile",
 		},
 		{
-			name:      "hand-written entry naming no row",
-			rows:      []Key{mustKey("auto-compact")},
-			written:   []keyAccessor{{row: mustKey("servers"), fromFile: stateless}},
-			wantPanic: "servers",
-		},
-		{
 			name: "field row with a variable and a flag",
-			rows: []Key{mustKey("bypass")},
+			row:  fieldRow,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			var built []keyAccessor
+			var built []Key
 			recovered := func() (r any) {
 				defer func() { r = recover() }()
-				built = accessorsOver(tt.rows, tt.written)
+				built = bindRows([]Key{tt.row()})
 				return nil
 			}()
 			if tt.wantPanic == "" {
 				if recovered != nil {
-					t.Fatalf("accessorsOver panicked: %v", recovered)
+					t.Fatalf("bindRows panicked: %v", recovered)
 				}
 				if len(built) != 1 || built[0].fromFile == nil || built[0].fromEnv == nil || built[0].fromFlag == nil {
-					t.Fatalf("accessorsOver = %+v, want one entry with the derived fromFile, fromEnv and "+
-						"fromFlag", built)
+					t.Fatalf("bindRows = %+v, want one row with the derived fromFile, fromEnv and fromFlag", built)
 				}
 				return
 			}
 			msg, _ := recovered.(string)
 			if !strings.Contains(msg, tt.wantPanic) {
-				t.Errorf("accessorsOver panic = %v, want one naming %q", recovered, tt.wantPanic)
+				t.Errorf("bindRows panic = %v, want one naming %q", recovered, tt.wantPanic)
 			}
 		})
 	}

@@ -2,9 +2,7 @@ package config
 
 import (
 	"fmt"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -15,8 +13,8 @@ import (
 // resolution's file projection and, for a key with a variable or a flag, the env and flag passes
 // are all derived, instead of each being written out beside the others as a restatement of the
 // same field. A row that carries one (Key.field) writes none of them by hand; bindRows derives
-// Read, Set and the file projection as the table is built, and accessorsOver builds resolution's
-// accessor table over the rows so a derived row needs no hand-written entry there.
+// Read, Set and the file, env and flag projections onto the row as the table is built, and the
+// resolution passes call them off the row.
 //
 // What the descriptor deliberately does NOT do is route the file pass through the row's Set. The
 // file value is an UNVALIDATED TYPED COPY: the yaml decode already typed it, and the key's own
@@ -161,6 +159,24 @@ func intField(at func(*Options) *int, file func(fileConfig) *int) scalarField[in
 // back as the same number.
 func floatField(at func(*Options) *float64, file func(fileConfig) *float64) scalarField[float64] {
 	return scalarField[float64]{at: at, file: file, parse: parseFloat, format: formatFloat}
+}
+
+// listField is the descriptor of a name list held in its own Options field. The file states the
+// list only when it names at least one entry: an absent or empty list resolves to the row's
+// default, which parseList reads as nil — the same nil Set lands `[]` as, so "nothing set" and an
+// emptied list read back alike.
+func listField(at func(*Options) *[]string, file func(fileConfig) []string) scalarField[[]string] {
+	return scalarField[[]string]{
+		at: at,
+		file: func(fc fileConfig) *[]string {
+			names := file(fc)
+			if len(names) == 0 {
+				return nil
+			}
+			return &names
+		},
+		parse: parseList, format: listValue,
+	}
 }
 
 // checkedField is the descriptor of a key the file spells as TEXT that lands through the row's own
@@ -311,55 +327,3 @@ func named[S ~string](s string) (S, error) { return S(s), nil }
 
 // formatFloat spells the one fractional key in the shortest form that reads back as the same number.
 func formatFloat(f float64) string { return strconv.FormatFloat(f, 'g', -1, 64) }
-
-// accessorsOver builds resolution's accessor table over the registry rows, in the rows' order: a
-// row that carries a field gets the file projection bindRows derived for it, its bound Set as the
-// env pass where the row names a variable, and its field's flag copy where the row names a flag;
-// every other row takes its hand-written entry whole. It panics — at init, since keyAccessors is a
-// package-level table — on the three ways the two tables can disagree: a field row that also has a
-// hand-written entry (two projections for one key), a row with neither a field nor a hand-written
-// fromFile (a key the file pass never reads), and a hand-written entry naming a row the table does
-// not have or naming one twice.
-func accessorsOver(rows []Key, handWritten []keyAccessor) []keyAccessor {
-	byPath := make(map[string]keyAccessor, len(handWritten))
-	for _, k := range handWritten {
-		if _, dup := byPath[k.row.Path]; dup {
-			panic("apogee: config key " + k.row.Path + " has two hand-written accessors — one key, one entry")
-		}
-		byPath[k.row.Path] = k
-	}
-	accessors := make([]keyAccessor, 0, len(rows))
-	for _, row := range rows {
-		k, written := byPath[row.Path]
-		delete(byPath, row.Path)
-		switch {
-		case row.field != nil && written:
-			panic("apogee: config key " + row.Path + " derives its file, env and flag projections from " +
-				"its field, and has a hand-written accessor as well")
-		case row.field != nil:
-			k.fromFile = row.fromFile
-			if row.EnvVar != "" {
-				set := row.Set
-				k.fromEnv = func(o *Options, text string) error { return set(text, o) }
-			}
-			if row.FlagName != "" {
-				k.fromFlag = row.field.flagCopy()
-			}
-		case !written || k.fromFile == nil:
-			panic("apogee: config key " + row.Path + " has neither a field nor a hand-written fromFile, " +
-				"so the file pass would never read it")
-		}
-		k.row = row
-		accessors = append(accessors, k)
-	}
-	if len(byPath) > 0 {
-		stray := make([]string, 0, len(byPath))
-		for path := range byPath {
-			stray = append(stray, path)
-		}
-		sort.Strings(stray)
-		panic("apogee: hand-written config accessors name keys the registry does not describe: " +
-			strings.Join(stray, ", "))
-	}
-	return accessors
-}

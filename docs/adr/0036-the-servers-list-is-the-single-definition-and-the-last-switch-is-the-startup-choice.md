@@ -136,6 +136,13 @@ row, and the bijection guard `TestRegistryIsBijectionWithFileConfig` pins those 
 overrides' own resolver and binding test are `startupOverrideSources` and
 `TestStartupOverrideSourcesBindTheDetachedNames`. Nothing this decision decides changes.)*
 
+*(Amended 2026-09-24: the `keyAccessors` table is retired. Each registry row now carries its own
+file, env and flag projections — derived from the row's typed field, or, for a row without one,
+its `fromFile` written on the row — and the resolution passes range over `KeyRegistry` itself.
+`TestKeyAccessorsBindDescribedKeys` folded into `TestRegistryRowInvariants`, which holds every row
+to a file projection and to exactly the env and flag plumbing its row names; the bijection guard
+is unchanged. The detached overrides still resolve off the registry, as this decision says.)*
+
 **7. An empty list guides into `/settings`, whose scope does not change.** No entries and no
 override → the TUI starts pre-bound and opens the `/settings` pane, with a status-line fact naming
 `~/.apogee/config.yaml` and a restart. The pane behaves exactly as ADR 0035 shipped it: the

@@ -194,7 +194,8 @@ func enumValues(t *testing.T, path string) []string {
 // TestRegistryRowInvariants pins the properties every surface reading the registry relies on,
 // so a new row cannot half-describe a key: unique paths, a description for every row, editing
 // only where an in-place editor exists, an enum vocabulary that includes the row's own
-// default, and masking confined to the one secret the schema carries.
+// default, masking confined to the one secret the schema carries, and resolution's projections
+// matching the sources the row names.
 func TestRegistryRowInvariants(t *testing.T) {
 	t.Parallel()
 
@@ -233,6 +234,24 @@ func TestRegistryRowInvariants(t *testing.T) {
 		}
 		if k.FlagName != "" && k.EnvVar == "" {
 			t.Errorf("registry row %q has a flag but no env var; every flag-settable key has both", k.Path)
+		}
+		// The row is the whole of how resolution carries its key, so it cannot half-describe one:
+		// every row needs the projection that reads its key out of the file, a row advertising a
+		// variable or a flag must carry the plumbing that reads that source, and no row may carry
+		// plumbing for a source it does not name (dead code advertising nothing). Since the passes
+		// call these projections off the row, a missing one would be a key /settings shows and
+		// resolution never reads — this turns that into a test failure.
+		if k.fromFile == nil {
+			t.Errorf("registry row %q has no fromFile, so neither the config file nor the key's own "+
+				"default would ever reach the Options", k.Path)
+		}
+		if (k.EnvVar != "") != (k.fromEnv != nil) {
+			t.Errorf("registry row %q names variable %q but carries an env projection = %v", k.Path,
+				k.EnvVar, k.fromEnv != nil)
+		}
+		if (k.FlagName != "") != (k.fromFlag != nil) {
+			t.Errorf("registry row %q names flag %q but carries a flag projection = %v", k.Path,
+				k.FlagName, k.fromFlag != nil)
 		}
 	}
 }

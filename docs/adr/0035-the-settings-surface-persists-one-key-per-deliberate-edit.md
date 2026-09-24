@@ -269,3 +269,17 @@ umbrella, or one with a call in flight, has no fold and that its header click cl
 children is superseded: child state survives beneath a fold and is there again on reopen. A small
 umbrella that grows large follows `ui.tools-open` from then on, its own flag ignored while it is
 large. Plan `docs/plans/2026-09-18 - 01` carries the ratified calls.
+
+## Amendment (2026-09-24) — the registry row carries its key through resolution
+
+Decision 4's registry is now the whole of resolution's per-key plumbing, not only its metadata.
+Every row carries its own file projection (`fromFile`): derived from the row's typed field for
+every scalar and name-list key, and written on the row for the structured rows and the keys that
+share a carrier (`servers`, `sub-agents-server`, the four system-prompt keys, the two
+`context-files` keys, `unconfined-hosts`, `mcp-servers`, `reactions`, `model-profiles`). The env
+and flag projections are derived from the field for the rows that name a variable or a flag. The
+file, env and flag passes and the override marker range over `KeyRegistry` directly, in the
+registry's order, so the first refusal a file meets is the one it met before. The separate
+accessor table beside the registry (`keyAccessors`) is gone, and its binding test folded into
+`TestRegistryRowInvariants`. The bijection guard this decision names, and the `Set`/`Read` inverse
+test, stay as they are. Nothing a user sees changes.
