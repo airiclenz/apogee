@@ -95,6 +95,13 @@ type Config struct {
 	// happens once, at the dial seam.
 	Wire string
 
+	// RequestExtra is the bound `servers:` entry's `request-extra:` passthrough (ADR 0085): the
+	// canonical JSON of an object the provider Client merges over every request body it encodes, or
+	// "" when the entry names none. It is opaque here — the engine never reads inside it — and it is
+	// a string rather than a map so Config stays comparable. The zero value sends exactly the bytes
+	// sent before this field existed.
+	RequestExtra string
+
 	// Autonomy.
 	Mode   Mode // Plan / Ask-Before / Allow-Edits / Auto (the privilege ladder)
 	Bypass bool // ADR 0006/0076 D9: armed advise and shape Reactions off, structure on (the hard-constraint floor)

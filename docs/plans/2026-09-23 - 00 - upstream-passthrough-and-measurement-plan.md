@@ -69,7 +69,11 @@ CONTEXT.md — Upstream, Heartbeat (and its Beat), Context cost; internal/provid
 **Acceptance:** `A="docs/adr/0085-apogee-measures-upstreams-and-passes-routing-through.md"; test -f "$A" && grep -q "Amends: ADR 0024" "$A" && grep -qi "router" "$A" && grep -qi "fallback pool" "$A" && grep -q "0028" "$A" && grep -q "0047" "$A" && grep -q "0082" "$A" && grep -q "request-extra" "$A" && grep -q "Upstream attempt" CONTEXT.md && grep -q "Server stats" CONTEXT.md`
 **Commit:** `docs(adr): record that apogee measures upstreams and passes routing through`
 
-## 2. `request-extra:` config key on server entries
+## 2. `request-extra:` config key on server entries — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the shape refusals (non-mapping, explicit null, not JSON-representable) are raised at decode by RequestExtra.UnmarshalYAML plus an entry-level ServerEntry.UnmarshalYAML that adds the entry name (yaml.v3 skips field Unmarshalers for `null`, so the entry-level one refuses that). The reserved-key refusal sits in ValidateServers beside `wire:`. Decode-time refusals name the entry by name and line, not by index, because the node has no index.
+NOTES (2026-09-24): added RequestExtra.MarshalYAML so an entry re-rendered through yaml.Marshal (configmigrate.go renders []ServerEntry) round-trips as a mapping. Covered by TestServerEntryRequestExtraRoundTrips.
+NOTES (2026-09-24): `-race` cannot run on this host (ThreadSanitizer: "unsupported VMA range", 47-bit VMA on the Pi kernel). The acceptance packages were run with `go test -count=1` instead, and they pass.
 
 **What:** Recast at the regression check (2026-09-23).
 **Goal:** A server entry accepts `request-extra:` as a YAML mapping; config load refuses a non-mapping value and any top-level reserved key (`model`, `messages`, `stream`, `stream_options`, `tools`, `system`) with an error naming the entry and the key; the value reaches `domain.Config` for the session's active entry.

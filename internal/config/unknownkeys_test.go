@@ -51,6 +51,11 @@ func TestUnknownKeysWalksTheSchemaAsDeepAsItGoes(t *testing.T) {
 			want:  nil,
 		},
 		{
+			name:  "a servers entry's request-extra passthrough is not descended",
+			given: "servers: [{name: a, request-extra: {provider: {order: [x]}}}]\n",
+			want:  nil,
+		},
+		{
 			name:  "the retired sub-agents flag is exempt on a servers entry",
 			given: "servers: [{name: a, sub-agents: true}]\n",
 			want:  nil,

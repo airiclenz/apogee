@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -1824,25 +1825,172 @@ type UnconfinedHost struct {
 // dial in exactly one spelling (`output_config.effort`), so an `effort-dialect:` on an anthropic
 // entry would name a wire the request never travels on, and ValidateServers refuses the pair
 // rather than letting one key silently outrank the other.
+//
+// RequestExtra is the entry's opaque request-body passthrough (`request-extra:`, ADR 0085): a YAML
+// mapping apogee never interprets, overlaid on every request body the entry's Client encodes, so a
+// provider's own routing or sampling knob (OpenRouter's `provider:` block, a vendor flag) reaches
+// the upstream without apogee learning its name. It is carried past the decode as canonical JSON —
+// see RequestExtra for why a string rather than a map.
 type ServerEntry struct {
-	Name            string     `yaml:"name"`
-	Endpoint        string     `yaml:"endpoint"`
-	Description     string     `yaml:"description,omitempty"`
-	APIKey          string     `yaml:"api-key,omitempty"`
-	APIKeyCmd       string     `yaml:"api-key-cmd,omitempty"`
-	APIKeyEnv       string     `yaml:"api-key-env,omitempty"`
-	PlaintextKeyOK  bool       `yaml:"plaintext-key-ok,omitempty"`
-	Model           string     `yaml:"model,omitempty"`
-	LlamaLauncher   string     `yaml:"llama-launcher,omitempty"`
-	LaunchProfile   string     `yaml:"launch-profile,omitempty"`
-	ParallelAgents  int        `yaml:"parallel-agents,omitempty"`
-	Bypass          *bool      `yaml:"bypass,omitempty"`
-	ContextWindow   TokenCount `yaml:"context-window,omitempty"`
-	WorkingWindow   int        `yaml:"working-window,omitempty"`
-	MaxOutputTokens int        `yaml:"max-output-tokens,omitempty"`
-	ResponseReserve float64    `yaml:"response-reserve,omitempty"`
-	EffortDialect   string     `yaml:"effort-dialect,omitempty"`
-	Wire            string     `yaml:"wire,omitempty"`
+	Name            string       `yaml:"name"`
+	Endpoint        string       `yaml:"endpoint"`
+	Description     string       `yaml:"description,omitempty"`
+	APIKey          string       `yaml:"api-key,omitempty"`
+	APIKeyCmd       string       `yaml:"api-key-cmd,omitempty"`
+	APIKeyEnv       string       `yaml:"api-key-env,omitempty"`
+	PlaintextKeyOK  bool         `yaml:"plaintext-key-ok,omitempty"`
+	Model           string       `yaml:"model,omitempty"`
+	LlamaLauncher   string       `yaml:"llama-launcher,omitempty"`
+	LaunchProfile   string       `yaml:"launch-profile,omitempty"`
+	ParallelAgents  int          `yaml:"parallel-agents,omitempty"`
+	Bypass          *bool        `yaml:"bypass,omitempty"`
+	ContextWindow   TokenCount   `yaml:"context-window,omitempty"`
+	WorkingWindow   int          `yaml:"working-window,omitempty"`
+	MaxOutputTokens int          `yaml:"max-output-tokens,omitempty"`
+	ResponseReserve float64      `yaml:"response-reserve,omitempty"`
+	EffortDialect   string       `yaml:"effort-dialect,omitempty"`
+	Wire            string       `yaml:"wire,omitempty"`
+	RequestExtra    RequestExtra `yaml:"request-extra,omitempty"`
+}
+
+// RequestExtra is a server entry's `request-extra:` mapping as the rest of apogee holds it: the
+// canonical JSON of the object the file wrote (keys sorted, by encoding/json), or "" when the key
+// is absent. It is a comparable string rather than a map[string]any because ServerEntry — and the
+// domain.Config and delegation target it is copied onto — is compared with `!=` across the tree;
+// a map field would make every one of those comparisons a compile error or, behind an interface,
+// a runtime panic. Nested maps exist only inside the decoder below.
+//
+// Being a string KIND is also what keeps the unknown-key walk (unknownkeys.go) quiet: the walk
+// descends only struct-shaped schema types, so neither `request-extra` itself nor any key inside
+// the passthrough is ever announced as unknown — the keys in there are the provider's, not ours.
+type RequestExtra string
+
+// UnmarshalYAML accepts exactly a mapping and stores its canonical JSON. Any other shape — a scalar,
+// a list — is refused, and so is a mapping encoding/json cannot represent: a `.nan` or `.inf`
+// anywhere inside it, or a nested mapping with a non-string key. Both refusals are
+// requestExtraErrors, which ServerEntry.UnmarshalYAML completes with the entry's name, because
+// yaml.v3 hands a field's Unmarshaler the value node alone.
+//
+// An explicit `null` never reaches here — yaml.v3 short-circuits it before it looks for an
+// Unmarshaler — so ServerEntry.UnmarshalYAML refuses that one itself.
+func (r *RequestExtra) UnmarshalYAML(node *yaml.Node) error {
+	node = resolveAlias(node)
+	if node.Kind != yaml.MappingNode {
+		return &requestExtraError{line: node.Line, reason: "is not a mapping — write the keys to " +
+			"add to every request body this server is sent, as a block (request-extra: {provider: " +
+			"{order: [x]}}), or remove the key"}
+	}
+	var value any
+	if err := node.Decode(&value); err != nil {
+		return &requestExtraError{line: node.Line, reason: "does not decode: " + err.Error()}
+	}
+	canonical, err := json.Marshal(value)
+	if err != nil {
+		return &requestExtraError{line: node.Line, reason: "cannot be sent as JSON — every key " +
+			"must be a string and every number finite (" + err.Error() + ")"}
+	}
+	*r = RequestExtra(canonical)
+	return nil
+}
+
+// MarshalYAML writes the passthrough back as the mapping it was read from, so a ServerEntry that is
+// ever re-rendered into a config file round-trips instead of landing as a JSON string the decoder
+// above would refuse. "" never reaches here under the field's omitempty; it renders as null anyway.
+func (r RequestExtra) MarshalYAML() (any, error) {
+	if r == "" {
+		return nil, nil
+	}
+	var value any
+	if err := json.Unmarshal([]byte(r), &value); err != nil {
+		return nil, fmt.Errorf("request-extra: %w", err)
+	}
+	return value, nil
+}
+
+// requestExtraError is a `request-extra:` refusal still missing the entry it belongs to: the value
+// node knows its line and nothing about the entry around it.
+type requestExtraError struct {
+	line   int
+	reason string
+}
+
+func (e *requestExtraError) Error() string {
+	return fmt.Sprintf("request-extra: (line %d) %s", e.line, e.reason)
+}
+
+// requestExtraReservedKeys are the top-level body keys `request-extra:` may not name, because the
+// encoder owns them: the model, the conversation, the streaming switch and its options, the tool
+// menu and the Anthropic system prompt. Overlaying any of them — even deleting one with `null` —
+// would change what the session is rather than add a provider knob beside it (ADR 0085).
+var requestExtraReservedKeys = []string{
+	"model", "messages", "stream", "stream_options", "tools", "system",
+}
+
+// UnmarshalYAML decodes a `servers:` entry and names the entry in a `request-extra:` refusal, which
+// the field's own Unmarshaler cannot do. Every other decode error passes through untouched.
+func (e *ServerEntry) UnmarshalYAML(node *yaml.Node) error {
+	type plain ServerEntry
+	if err := node.Decode((*plain)(e)); err != nil {
+		var extra *requestExtraError
+		if errors.As(err, &extra) {
+			return fmt.Errorf("servers: entry %q: %w", entryNameOf(node), extra)
+		}
+		return err
+	}
+	if value, ok := mappingValue(node, "request-extra"); ok && value.ShortTag() == "!!null" {
+		return fmt.Errorf("servers: entry %q: %w", entryNameOf(node),
+			&requestExtraError{line: value.Line, reason: "is empty — write the keys to add to every " +
+				"request body this server is sent, or remove the key"})
+	}
+	return nil
+}
+
+// entryNameOf reads a `servers:` entry's `name:` straight off its node, for a refusal raised before
+// the decoded entry can be trusted to carry it.
+func entryNameOf(node *yaml.Node) string {
+	if value, ok := mappingValue(node, "name"); ok {
+		return strings.TrimSpace(value.Value)
+	}
+	return ""
+}
+
+// mappingValue returns the value node a mapping node holds under key, aliases followed.
+func mappingValue(node *yaml.Node, key string) (*yaml.Node, bool) {
+	node = resolveAlias(node)
+	if node.Kind != yaml.MappingNode {
+		return nil, false
+	}
+	for i := 0; i+1 < len(node.Content); i += 2 {
+		if node.Content[i].Value == key {
+			return resolveAlias(node.Content[i+1]), true
+		}
+	}
+	return nil, false
+}
+
+// validateRequestExtra refuses a passthrough that names a key the encoder owns, at the top level
+// only — a nested `model` inside a provider's own block is that provider's business. A reserved key
+// is refused whatever its value, `null` included: under the merge's RFC 7396 semantics a `null`
+// DELETES the key, which would strip the model or the conversation from the request. It also
+// refuses a value that is not a JSON object, which only a hand-built entry can carry — the decoder
+// produces nothing else.
+func validateRequestExtra(extra RequestExtra) error {
+	if extra == "" {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(extra), &fields); err != nil || fields == nil {
+		return errors.New("is not a mapping — write the keys to add to every request body this " +
+			"server is sent, as a block, or remove the key")
+	}
+	for _, key := range requestExtraReservedKeys {
+		if _, taken := fields[key]; taken {
+			return fmt.Errorf("names %q, which apogee writes itself — request-extra adds keys beside "+
+				"the request apogee builds and may not replace or delete %s", key,
+				strings.Join(requestExtraReservedKeys, ", "))
+		}
+	}
+	return nil
 }
 
 // canonicaliseServers trims the whitespace around every entry's `name:` and `endpoint:`, so the
@@ -1940,6 +2088,12 @@ func canonicaliseServers(fc *fileConfig) {
 // absent being `openai` spelled by omission — and is refused the same way. One more rule rides it:
 // an `anthropic` entry may name no `effort-dialect:` at all, because that wire spells the effort
 // dial itself and a dialect word beside it would describe a request that is never sent.
+//
+// The entry's optional `request-extra:` passthrough (ADR 0085) is checked for the one defect the
+// decoder cannot see: a top-level key the encoder owns — `model`, `messages`, `stream`,
+// `stream_options`, `tools`, `system` — refused even as `null`, since the merge reads `null` as a
+// deletion (validateRequestExtra). Its SHAPE — a mapping, representable as JSON — is the decoder's
+// refusal (RequestExtra.UnmarshalYAML), because by the time this runs a non-mapping is long gone.
 //
 // What it deliberately does NOT check is the delegation posture: `bypass:` is legal
 // on every entry, because which one takes the delegations is the root `sub-agents-server:` key's
@@ -2054,6 +2208,9 @@ func ValidateServers(servers []ServerEntry) error {
 		if s.Wire == "anthropic" && s.EffortDialect != "" {
 			return fmt.Errorf("apogee: servers: entry %d (%q): effort-dialect: %q — wire: anthropic sets "+
 				"the effort spelling itself — drop effort-dialect", i+1, s.Name, s.EffortDialect)
+		}
+		if err := validateRequestExtra(s.RequestExtra); err != nil {
+			return fmt.Errorf("apogee: servers: entry %d (%q): request-extra: %w", i+1, s.Name, err)
 		}
 	}
 	return nil

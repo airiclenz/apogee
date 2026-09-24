@@ -17,6 +17,7 @@ import (
 	"github.com/airiclenz/apogee/internal/mcp"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/profiles"
+	"gopkg.in/yaml.v3"
 )
 
 func strptr(s string) *string { return &s }
@@ -5939,5 +5940,103 @@ func TestDefaultParallelAgentsFollowsTheKeySource(t *testing.T) {
 				t.Errorf("DefaultParallelAgents(%+v) = %d, want %d", tt.entry, got, tt.want)
 			}
 		})
+	}
+}
+
+// A server entry's `request-extra:` passthrough (ADR 0085) loads as the canonical JSON of the mapping
+// the file wrote, and every shape the Client could not merge — a non-mapping, a value JSON cannot
+// carry, a top-level key the encoder owns — is a load error that names the entry and the key, so
+// the user is pointed at the block to fix rather than at a request the upstream rejected later.
+func TestServerEntryRequestExtraLoads(t *testing.T) {
+	t.Parallel()
+	const head = "server: box\nservers:\n  - name: box\n    endpoint: http://127.0.0.1:1111\n"
+	tests := []struct {
+		name    string
+		extra   string // the request-extra lines, indented under the entry; "" leaves the key out
+		want    RequestExtra
+		wantErr string // a substring the refusal must carry beyond the entry and the key
+	}{
+		{name: "the key absent", want: ""},
+		{
+			name: "a nested mapping, keys sorted",
+			extra: "    request-extra:\n" +
+				"      provider: {order: [x, y], allow_fallbacks: false}\n      top_k: 20\n",
+			want: `{"provider":{"allow_fallbacks":false,"order":["x","y"]},"top_k":20}`,
+		},
+		{
+			name:  "a non-reserved null is a deletion, accepted",
+			extra: "    request-extra: {temperature: null}\n",
+			want:  `{"temperature":null}`,
+		},
+		{name: "a scalar", extra: "    request-extra: 5\n", wantErr: "not a mapping"},
+		{name: "a list", extra: "    request-extra: [a, b]\n", wantErr: "not a mapping"},
+		{name: "an explicit null", extra: "    request-extra: null\n", wantErr: "empty"},
+		{name: "a NaN inside", extra: "    request-extra: {temperature: .nan}\n", wantErr: "JSON"},
+		{name: "a nested non-string key", extra: "    request-extra: {provider: {1: x}}\n", wantErr: "JSON"},
+		{name: "reserved model", extra: "    request-extra: {model: other}\n", wantErr: `"model"`},
+		{name: "reserved messages", extra: "    request-extra: {messages: []}\n", wantErr: `"messages"`},
+		{name: "reserved stream", extra: "    request-extra: {stream: false}\n", wantErr: `"stream"`},
+		{name: "reserved stream_options", extra: "    request-extra: {stream_options: {}}\n",
+			wantErr: `"stream_options"`},
+		{name: "reserved tools", extra: "    request-extra: {tools: []}\n", wantErr: `"tools"`},
+		{name: "reserved system", extra: "    request-extra: {system: hi}\n", wantErr: `"system"`},
+		{name: "reserved model as null", extra: "    request-extra: {model: null}\n", wantErr: `"model"`},
+		{name: "reserved tools as null", extra: "    request-extra: {tools: null}\n", wantErr: `"tools"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			opts := Options{ConfigDir: testConfigHome(t, head+tt.extra)}
+			err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" },
+				os.ReadFile, noNotify)
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("ApplyConfig refused %q: %v", tt.extra, err)
+				}
+				if opts.StartupEntry.RequestExtra != tt.want {
+					t.Errorf("StartupEntry.RequestExtra = %q; want %q",
+						opts.StartupEntry.RequestExtra, tt.want)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("ApplyConfig accepted %q; want a refusal", tt.extra)
+			}
+			for _, part := range []string{`"box"`, "request-extra", tt.wantErr} {
+				if !strings.Contains(err.Error(), part) {
+					t.Errorf("the refusal does not carry %s: %v", part, err)
+				}
+			}
+		})
+	}
+}
+
+// The passthrough is carried as a string so ServerEntry stays comparable, and it round-trips
+// through the YAML writer as the mapping it was read from, never as a quoted JSON string the
+// decoder would refuse on the next load.
+func TestServerEntryRequestExtraRoundTrips(t *testing.T) {
+	t.Parallel()
+	in := ServerEntry{Name: "box", Endpoint: "http://h", RequestExtra: `{"provider":{"order":["x"]}}`}
+	out, err := yaml.Marshal([]ServerEntry{in})
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(out), `'{`) || !strings.Contains(string(out), "request-extra:") {
+		t.Fatalf("rendered %q; want request-extra as a YAML mapping", out)
+	}
+	var back []ServerEntry
+	if err := yaml.Unmarshal(out, &back); err != nil {
+		t.Fatalf("yaml.Unmarshal of the rendered entry: %v", err)
+	}
+	if len(back) != 1 || back[0] != in {
+		t.Errorf("round trip = %+v; want %+v", back, in)
+	}
+	// Absent stays absent: an entry with no passthrough renders no key at all.
+	plain, err := yaml.Marshal([]ServerEntry{{Name: "box", Endpoint: "http://h"}})
+	if err != nil {
+		t.Fatalf("yaml.Marshal: %v", err)
+	}
+	if strings.Contains(string(plain), "request-extra") {
+		t.Errorf("an entry with no passthrough rendered %q", plain)
 	}
 }
