@@ -261,11 +261,12 @@
 // selection, so both are re-implemented here, the prompt's in rune offsets into the textarea Value
 // and the transcript's in content coordinates over the cached rendered lines ("copy what you see").
 // A THIRD rectangle joins them while /settings is open: the pane's row list, where a click selects a
-// key, the wheel walks the list and the row being typed into takes a caret seat and a drag of its own
-// ([Model.settingsPaint], whose geometry is the painter's own — renderPopupPlaced reports where the
-// rows landed rather than the mouse re-deriving it) — and, where the multi-line prompt field has
-// replaced that list, the field itself, over all of its rows ([Model.settingsTextPaint], which reads
-// the same placement plus the wrap the painter chose). A FOURTH, a FIFTH, a SIXTH and a SEVENTH join
+// key and the wheel walks the list ([Model.settingsPaint], whose geometry is the painter's own —
+// renderPopupPlaced reports where the rows landed rather than the mouse re-deriving it) — and the open
+// FIELD, the row being typed into or the multi-line prompt field that replaced the list, takes a caret
+// seat, a drag and a highlight through ONE geometry for both ([Model.settingsFieldPaint], which reads
+// the same placement plus the wrap the painter chose, and undoes the caret glyph through
+// [lineEditor.caretGlyph]). A FOURTH, a FIFTH, a SIXTH and a SEVENTH join
 // them while /usage, /inspect, /thinking and /advice are open, and they are ONE rectangle written once
 // (reportpane.go), not four: a report has
 // nothing to select, so a click inside it is only swallowed, a click outside dismisses it and then

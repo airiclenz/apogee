@@ -130,7 +130,7 @@ const (
 // offsets are carried: the caret is a GLYPH inside the painted cell here (settingsCaret), so it moves
 // the text under a drag, and a visual cell recorded at the press would name a different rune a moment
 // later. The highlight derives its columns from the offsets at paint time instead
-// ([Model.highlightSettingsEdit]).
+// ([Model.highlightSettingsField]).
 type settingsPane struct {
 	open bool
 	kind settingsKind
@@ -1594,7 +1594,7 @@ func (m Model) renderSettings() string {
 	view, place := renderPopupPlaced(m.th, spec, m.width)
 	// The drag-selection is overlaid on the COMPOSED pane, the highlightInput idiom: the module takes
 	// plain cells and styles rows whole (doc.go), so a shaded run cannot be handed to it as a cell.
-	return m.highlightSettingsEdit(view, display, place)
+	return m.highlightSettingsField(view, m.settingsFieldGeometry(place, &display, 0))
 }
 
 // settingsHeight is the rows renderSettings paints the pane in, answered without painting it
@@ -1691,7 +1691,7 @@ func (m Model) renderSettingsText(rows []SettingRow) string {
 	// The drag-selection is overlaid on the COMPOSED field, the key list's own idiom one state along:
 	// the module takes plain cells and styles rows whole (doc.go), so a shaded run cannot be handed to
 	// it as a cell.
-	return m.highlightSettingsText(view, place)
+	return m.highlightSettingsField(view, m.settingsFieldGeometry(place, nil, 0))
 }
 
 // settingsTextHeight is the rows renderSettingsText paints the field in, answered without painting it
@@ -1722,7 +1722,7 @@ func (m Model) settingsTextLines() []string {
 
 // settingsTextSpec composes the multi-line field's [popupSpec] for THIS frame. It is a step of its own
 // for settingsKeyListSpec's reason: the painter is not the composition's only reader, since a click
-// maps back through the very rows, the very wrap and the very window that were drawn (settingsTextPaint,
+// maps back through the very rows, the very wrap and the very window that were drawn (settingsFieldPaint,
 // mouse.go). ok is false when the frame cannot seat the pane at all.
 func (m Model) settingsTextSpec(rows []SettingRow) (popupSpec, bool) {
 	lines := m.settingsTextLines()

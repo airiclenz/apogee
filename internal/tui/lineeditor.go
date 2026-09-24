@@ -310,6 +310,52 @@ func (e lineEditor) textWithCaret() string {
 	return string(r[:off]) + e.caret + string(r[off:])
 }
 
+// caretGlyph is where textWithCaret drew the field's caret glyph: the rune offset it stands at — the
+// caret's own, which is the same number in the value and in the painted text because nothing before
+// it moved — and how many runes it takes. It is the ONE place the shift a drawn-in caret puts on a
+// painted field is stated: every reader that maps between the text a surface drew and the value the
+// field holds (the /settings value row and multi-line field, mouse.go) takes it from here and undoes
+// it through [glyphShift]'s two directions, so a click and a highlight cannot correct for the glyph
+// in two different ways. A field with no glyph ([lineEditor.caret] "") shifts nothing.
+func (e lineEditor) caretGlyph() glyphShift {
+	return glyphShift{at: e.caretRune(), runes: len([]rune(e.caret))}
+}
+
+// glyphShift is the caret glyph's place in a painted field ([lineEditor.caretGlyph]): every rune of
+// the value from the caret on is painted that many runes further along than it stands in the value.
+type glyphShift struct {
+	at    int // the rune offset the glyph is drawn at, in the value and the painted text alike
+	runes int // the runes the glyph itself takes in the painted text
+}
+
+// toValue maps a PAINTED offset — the rune a click's column names in the drawn text
+// (cellToRuneOffsetIn) — back to an offset into the value. A point on the glyph itself names the
+// caret, and every point past the glyph stands the glyph's width further along than its value rune.
+func (g glyphShift) toValue(painted int) int {
+	switch {
+	case painted <= g.at:
+		return painted
+	case painted < g.at+g.runes:
+		return g.at // inside a glyph wider than one rune: the caret it stands for
+	default:
+		return painted - g.runes
+	}
+}
+
+// toPainted maps a span [lo, hi) of the VALUE to the span of the painted text that draws exactly
+// those runes — the highlight's direction. A rune at or past the caret is drawn after the glyph, so a
+// span opening AT the caret opens past it and the glyph itself is never shaded as selected text; an
+// end at the caret stays before it.
+func (g glyphShift) toPainted(lo, hi int) (int, int) {
+	if lo >= g.at {
+		lo += g.runes
+	}
+	if hi > g.at {
+		hi += g.runes
+	}
+	return lo, hi
+}
+
 // reseatCaret drives the textarea caret to an absolute visual (soft-wrapped) row through the
 // widget's own primitives. It serves caretTo — a mouse click names a VISUAL row, which is the
 // only thing this walk can express; a caret named by a LOGICAL row and column is seated by

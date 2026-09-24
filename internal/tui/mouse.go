@@ -1092,7 +1092,7 @@ func (m Model) settingsPaint() (settingsPaint, bool) {
 	}
 	rows := m.settingRows()
 	// A step that paints for itself has replaced the key list — the value sub-list is a menu of its
-	// own, and the multi-line field is answered by settingsTextPaint — so no pointer names a key row
+	// own, and the multi-line field is answered by settingsFieldPaint — so no pointer names a key row
 	// there. Which steps those are is the step table's to say ([settingsStep.paint]), asked through
 	// the same target the painter re-derives: a step whose row is gone has fallen back to the list, and
 	// the list is what the pointer is over.
@@ -1131,79 +1131,100 @@ func (m Model) settingsContentX() int {
 
 // settingsValueX is the screen column a row's VALUE cell starts at: the pane's content origin, the
 // marker column every row leads with (popupRowIndent), and the columns laid out before the value
-// (popupCellColumn, over the widths the module measured across the whole list). Both readers of the
-// edit row spend it — the click that seats a caret and the highlight that shades a span — so the two
-// can never land on different columns of the same row.
+// (popupCellColumn, over the widths the module measured across the whole list). It is the value row's
+// text column in the field geometry both its readers spend ([Model.settingsFieldGeometry]) — the click
+// that seats a caret and the highlight that shades a span — so the two can never land on different
+// columns of the same row.
 func (m Model) settingsValueX(display settingsDisplay) int {
 	return m.settingsContentX() + popupRowIndent +
 		popupCellColumn(m.th, popupColumnWidths(m.th, display.rows), settingsValueColumn)
 }
 
-// settingsCaretAt is the rune offset in the edit field's value that a display-cell column of its value
-// cell names. The cell is the row's PAINTED text — the caret glyph standing in it included
-// (settingsEditText) — so the column is read in the painter's own measure (cellToRuneOffsetIn) and the
-// glyph is then taken back out: it occupies a cell at the caret, and every rune after it is painted one
-// position further along than it stands in the value.
-func (m Model) settingsCaretAt(cells int) int {
-	text := []rune(m.settingsEditText())
-	off := cellToRuneOffsetIn(m.th.measure, text, cells)
-	if off > m.settings.editor.caretRune() {
-		off-- // past the caret glyph: the painted position is one ahead of the value's own
-	}
-	return off
-}
-
-// settingsEditCells is the display-cell span a range of the field's value occupies inside the value
-// cell — settingsCaretAt read the other way, for the highlight. The offsets are mapped THROUGH the
-// painted text, the caret glyph shifting everything after it one position along, and measured in the
-// painter's authority, so the shaded run covers exactly the glyphs a release would copy.
-func (m Model) settingsEditCells(a, b int) (int, int) {
-	text := []rune(m.settingsEditText())
-	if len(text) == 0 {
-		return 0, 0 // no field open: the caret glyph alone is one rune, so this is "nothing to shade"
-	}
-	caret := m.settings.editor.caretRune()
-	value := len(text) - 1 // the painted text is the value plus the caret glyph
-	cell := func(off int) int {
-		off = clampInt(off, 0, value)
-		if off > caret {
-			off++ // step over the caret glyph the painter drew before this rune
-		}
-		return m.th.measure.Width(string(text[:clampInt(off, 0, len(text))]))
-	}
-	lo, hi := a, b
-	if lo > hi {
-		lo, hi = hi, lo
-	}
-	return cell(lo), cell(hi)
-}
-
-// settingsTextPaint is the open MULTI-LINE field as it was DRAWN this frame: the prompt's lines as they
-// were painted (the caret glyph among them), where each line begins as a rune offset into that painted
-// text, the lines each of them wrapped to, and which window of them the pane is showing. It is
-// settingsPaint's counterpart for the state where the field IS the pane, and it carries one thing more —
-// the wrap — because a line of prose can cost several painted rows where a key row never does.
+// settingsFieldPaint is the open /settings FIELD as it was drawn this frame — the value row standing in
+// the key list, or the multi-line field that replaced the list — reduced to the one shape both are:
+// painted sub-rows, each a run of the field's PAINTED text (the caret glyph among it,
+// [lineEditor.textWithCaret]) drawn on one line, plus the column that text begins at. The value row is
+// one sub-row; the multi-line field is one per wrapped line in the window. Everything a pointer or a
+// highlight asks of either field is asked of this, so the caret-at ([Model.settingsFieldCaretAt]), the
+// shading ([Model.settingsFieldShades]) and the claim a click makes cannot answer the two fields
+// differently.
 //
 // origin is the pane's TOP BORDER, in whichever coordinates the caller asked for: the pane's own
-// painted rows for the highlight, the SCREEN's for the pointer. One builder answers both, so the row a
-// click names and the row a span is shaded on cannot come apart. It is the box's own origin rather than
-// the block's because that is the coordinate the placement maps in (popupPlacement.rowAt).
-type settingsTextPaint struct {
-	starts []int          // where each line begins as a rune offset into the painted text
-	subs   [][]int        // where each of the wrapped sub-lines begins in its own line (popupWrapOffsets)
-	place  popupPlacement // where the painter put the field's lines, and what each of them wrapped to
-	origin int            // the pane's top border, in the caller's own coordinates
+// painted rows for the highlight, the SCREEN's for the pointer. One builder answers both
+// ([Model.settingsFieldGeometry]), so the row a click names and the row a span is shaded on cannot come
+// apart. It is the box's own origin rather than the block's because that is the coordinate the
+// placement maps in (popupPlacement.rowAt).
+type settingsFieldPaint struct {
+	place  popupPlacement     // where the painter put the pane's rows, and what each of them wrapped to
+	origin int                // the pane's top border, in the caller's own coordinates
+	x      int                // the column the field's text begins at on every sub-row
+	rows   []settingsFieldRow // the field's sub-rows inside the drawn window, top to bottom
+	glyph  glyphShift         // where the caret glyph stands in the painted text ([lineEditor.caretGlyph])
 }
 
-// top is the first painted line of the row block, in the caller's coordinates — the pane's origin plus
-// whatever the box drew above its rows.
-func (p settingsTextPaint) top() int { return p.origin + p.place.rowsAt }
+// settingsFieldRow is one painted line of the field: the row it is drawn on, the runes drawn there,
+// and the offset those runes begin at in the field's whole painted text.
+type settingsFieldRow struct {
+	y     int
+	start int
+	text  []rune
+}
 
-// settingsTextGeometry reads the placement the painter reported into the coordinates a pointer or a
-// highlight works in. It re-derives none of the wrap: blocks are the painter's own composition, and the
-// only arithmetic here is the running rune offset of each line into the painted text — the one fact the
-// module never had, because it is about the VALUE and not about the pane.
-func (m Model) settingsTextGeometry(place popupPlacement, origin int) settingsTextPaint {
+// onRow reports whether a row is one of the PANE's rows — a key row, a section label or spacer, a line
+// of the field — rather than its title, description header, legend or border. It is the claim a click
+// makes on an open field: a click on a row that is not the field is still the pane's and is swallowed,
+// and a click on the chrome is left to whoever else wants it. Over the multi-line field the pane's rows
+// ARE the field's lines, so there the two answers are one.
+func (p settingsFieldPaint) onRow(y int) bool {
+	_, _, ok := p.place.rowAt(y - p.origin)
+	return ok
+}
+
+// settingsFieldGeometry reads the placement the painter reported into the coordinates a pointer or a
+// highlight works in. It re-derives none of the pane's layout: the window, the wrap and the gaps are
+// the painter's own (popupPlacement), and the walk over them is the one rowAt takes.
+//
+// display is the key list the pane was composed from when the field is the VALUE ROW standing in it,
+// and nil when the field is the multi-line prompt that replaced the list — which of the two the caller
+// painted is the caller's to say, since a text step whose row has gone paints the key list. A value row
+// scrolled out of the window emits no sub-row, and a pane in any other state emits none at all, so a
+// highlight shades nothing and a click seats no caret there.
+func (m Model) settingsFieldGeometry(place popupPlacement, display *settingsDisplay, origin int) settingsFieldPaint {
+	p := settingsFieldPaint{place: place, origin: origin, glyph: m.settings.editor.caretGlyph()}
+	var at func(row, sub int) ([]rune, int, bool)
+	switch {
+	case display != nil && m.settings.kind == settingsValueBuffer:
+		p.x = m.settingsValueX(*display)
+		text := []rune(m.settingsEditText())
+		at = func(row, sub int) ([]rune, int, bool) {
+			return text, 0, row == display.selected && sub == 0
+		}
+	case display == nil && m.settings.kind == settingsTextEditor:
+		p.x = m.settingsContentX() + popupRowIndent
+		at = m.settingsTextSubRows(place)
+	default:
+		return p
+	}
+	y := origin + place.rowsAt
+	for i := place.start; i < place.end && i < len(place.blocks); i++ {
+		if i > place.start {
+			y += place.gap
+		}
+		for sub := range place.blocks[i] {
+			if text, start, ok := at(i, sub); ok {
+				p.rows = append(p.rows, settingsFieldRow{y: y, start: start, text: text})
+			}
+			y++
+		}
+	}
+	return p
+}
+
+// settingsTextSubRows answers, for the multi-line field, which painted text one wrapped sub-line of a
+// prose line holds and where it begins in the whole painted text. The runes are the painter's own
+// (place.blocks); the only arithmetic is the running rune offset of each line into the painted text —
+// the one fact the module never had, because it is about the VALUE and not about the pane.
+func (m Model) settingsTextSubRows(place popupPlacement) func(row, sub int) ([]rune, int, bool) {
 	lines := m.settingsTextLines()
 	starts := make([]int, len(lines))
 	subs := make([][]int, len(lines))
@@ -1215,153 +1236,118 @@ func (m Model) settingsTextGeometry(place popupPlacement, origin int) settingsTe
 			subs[i] = popupWrapOffsets(line, place.blocks[i])
 		}
 	}
-	return settingsTextPaint{starts: starts, subs: subs, place: place, origin: origin}
+	return func(row, sub int) ([]rune, int, bool) {
+		if row < 0 || row >= len(lines) || sub < 0 || sub >= len(subs[row]) {
+			return nil, 0, false
+		}
+		return []rune(place.blocks[row][sub]), starts[row] + subs[row][sub], true
+	}
 }
 
-// settingsTextPaint composes the open field exactly as the frame does and reports where its lines
-// landed, in SCREEN rows. ok is false wherever there is nothing to address: the pane closed or given
-// way, the field not open, or a frame that cannot seat the pane.
-func (m Model) settingsTextPaint() (settingsTextPaint, bool) {
+// settingsFieldPaint composes the open field exactly as the frame does and reports where it landed, in
+// SCREEN rows. ok is false wherever there is nothing to address: the pane closed or given way, no field
+// open, or a frame that cannot seat the pane.
+func (m Model) settingsFieldPaint() (settingsFieldPaint, bool) {
 	paneTop, _, ok := m.settingsPaneRect()
 	if !ok {
-		return settingsTextPaint{}, false
+		return settingsFieldPaint{}, false
 	}
 	rows := m.settingRows()
-	if _, open := m.settingsTextTarget(rows); !open {
-		return settingsTextPaint{}, false
+	switch m.settings.kind {
+	case settingsValueBuffer:
+		spec, display, seated := m.settingsKeyListSpec(rows)
+		if !seated {
+			return settingsFieldPaint{}, false
+		}
+		_, place := renderPopupPlaced(m.th, spec, m.width)
+		return m.settingsFieldGeometry(place, &display, paneTop), true
+	case settingsTextEditor:
+		if _, open := m.settingsTextTarget(rows); !open {
+			return settingsFieldPaint{}, false
+		}
+		spec, seated := m.settingsTextSpec(rows)
+		if !seated {
+			return settingsFieldPaint{}, false
+		}
+		_, place := renderPopupPlaced(m.th, spec, m.width)
+		return m.settingsFieldGeometry(place, nil, paneTop), true
 	}
-	spec, seated := m.settingsTextSpec(rows)
-	if !seated {
-		return settingsTextPaint{}, false
-	}
-	_, place := renderPopupPlaced(m.th, spec, m.width)
-	return m.settingsTextGeometry(place, paneTop), true
+	return settingsFieldPaint{}, false
 }
 
-// lineAt maps a row to the field LINE drawn on it and to which of that line's wrapped sub-lines the row
-// shows. ok is false above or below the drawn window, so a click on the pane's title, its description
-// header or its legend names no part of the prompt.
-//
-// The walk is the placement's own (popupPlacement.rowAt): the field's lines ARE the pane's rows, so
-// there is nothing here for a second arithmetic to disagree with the painter about.
-func (p settingsTextPaint) lineAt(y int) (line, sub int, ok bool) {
-	return p.place.rowAt(y - p.origin)
+// settingsFieldCaretAt is the rune offset in the field's VALUE that a point names: the sub-row under
+// the pointer, the column read across its painted text in the painter's own measure
+// (cellToRuneOffsetIn), and the caret glyph then taken back out ([glyphShift.toValue]). ok is false off
+// the field's sub-rows.
+func (m Model) settingsFieldCaretAt(p settingsFieldPaint, x, y int) (int, bool) {
+	for _, row := range p.rows {
+		if row.y != y {
+			continue
+		}
+		painted := row.start + cellToRuneOffsetIn(m.th.measure, row.text, max(0, x-p.x))
+		return p.glyph.toValue(painted), true
+	}
+	return 0, false
 }
 
-// span is the range of PAINTED text one wrapped sub-line covers — its runes, and the offset it begins
-// at in the same painted text starts is counted in. It is what both readers of a sub-line need: the
-// click converts a column inside it to an offset, and the highlight converts an offset back to a
-// column. The bounds check is unreachable defence — every caller walks the window lineAt maps against
-// — and it answers with an empty span, which shades nothing and seats no caret.
-func (p settingsTextPaint) span(line, sub int) (text []rune, start int) {
-	if line < 0 || line >= len(p.place.blocks) || sub < 0 || sub >= len(p.place.blocks[line]) {
-		return nil, 0
-	}
-	return []rune(p.place.blocks[line][sub]), p.starts[line] + p.subs[line][sub]
+// fieldShade is one run of a field's selection as it is shaded: the row, and the columns [x0, x1) —
+// in the coordinates the paint was built in.
+type fieldShade struct {
+	y, x0, x1 int
 }
 
-// settingsTextCaretAt is the rune offset in the field's VALUE that a screen point names: the sub-line
-// under the pointer, the column read across it in the painter's own measure (cellToRuneOffsetIn), and
-// the caret glyph then taken back out — it occupies a cell of its own, so every rune after it is painted
-// one position further along than it stands in the value (settingsCaretAt's correction, one field over).
-func (m Model) settingsTextCaretAt(p settingsTextPaint, x, y int) (int, bool) {
-	line, sub, ok := p.lineAt(y)
-	if !ok {
-		return 0, false
+// settingsFieldShades is where the field's drag-selection is shaded: each painted sub-row lit for
+// exactly the part of the span it holds, so a span that begins mid-line and ends mid-line three lines
+// down lights those three lines and nothing either side of it. The span is converted from the VALUE's
+// offsets to the PAINTED text's first ([glyphShift.toPainted]) and measured in the painter's authority,
+// so the shaded run covers exactly the glyphs a release would copy — and the cells a click on them
+// seats the caret in ([Model.settingsFieldCaretAt] undoes the same shift). Nothing is shaded without
+// an active, non-empty span (fieldSel.nonEmpty).
+func (m Model) settingsFieldShades(p settingsFieldPaint) []fieldShade {
+	if !m.settings.sel.nonEmpty() {
+		return nil
 	}
-	text, start := p.span(line, sub)
-	cells := max(0, x-m.settingsContentX()-popupRowIndent)
-	off := start + cellToRuneOffsetIn(m.th.measure, text, cells)
-	if off > m.settings.editor.caretRune() {
-		off--
+	lo, hi := p.glyph.toPainted(m.settings.sel.span())
+	var shades []fieldShade
+	for _, row := range p.rows {
+		a, b := max(lo, row.start), min(hi, row.start+len(row.text))
+		if b <= a {
+			continue
+		}
+		shades = append(shades, fieldShade{
+			y:  row.y,
+			x0: p.x + m.th.measure.Width(string(row.text[:a-row.start])),
+			x1: p.x + m.th.measure.Width(string(row.text[:b-row.start])),
+		})
 	}
-	return off, true
+	return shades
 }
 
-// handleSettingsTextClick answers a left-click inside the open multi-line field: it seats the caret at
-// the glyph under the pointer and arms a collapsed selection there, exactly as a click in the value
-// buffer does. claimed is false off the field's own lines, which leaves the pane's chrome — and the
-// transcript above a short pane — to whoever else wants the click.
-//
-// pre is the pre-click frame the field's own geometry is read from (handleMouseClick); the caret and
-// the selection are seated on the live model.
-func (m Model) handleSettingsTextClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	paint, ok := pre.settingsTextPaint()
-	if !ok {
-		return m, nil, false
+// highlightSettingsField overlays the open field's drag-selection on the composed pane —
+// highlightInput's idiom one surface along, for the value row and the multi-line field alike. It is
+// done on the pane's PAINTED lines rather than in the cells the rows are composed from because the
+// popup module takes plain, escape-free cells and styles its rows whole (doc.go): a pre-shaded cell
+// would hand it the very escapes its contract forbids. p is built in the pane's own coordinates
+// (origin 0), so its rows index the view's lines directly.
+func (m Model) highlightSettingsField(view string, p settingsFieldPaint) string {
+	shades := m.settingsFieldShades(p)
+	if len(shades) == 0 {
+		return view
 	}
-	off, ok := pre.settingsTextCaretAt(paint, msg.X, msg.Y)
-	if !ok {
-		return m, nil, false
-	}
-	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
-	m.settings.editor.caretToRune(off)
-	m.settings.sel.seat(off, cell{})
-	return m, nil, true
-}
-
-// handleSettingsTextMotion extends the field's selection as the mouse drags with the left button held —
-// across its lines, which is the whole difference from the one-row buffer's drag. Motion that strays off
-// the field's lines is still the pane's: the span keeps what it had rather than collapsing onto the
-// chrome the pointer wandered over.
-func (m Model) handleSettingsTextMotion(msg tea.MouseMotionMsg) (Model, bool) {
-	paint, ok := m.settingsTextPaint()
-	if !ok {
-		return m, false
-	}
-	off, ok := m.settingsTextCaretAt(paint, msg.X, msg.Y)
-	if !ok {
-		return m, true
-	}
-	m.settings.editor.caretToRune(off)
-	m.settings.sel.extend(off, cell{})
-	return m, true
-}
-
-// highlightSettingsText overlays the multi-line field's drag-selection on the composed pane —
-// highlightSettingsEdit's job over a span that can cross lines. Each painted sub-line is shaded for
-// exactly the part of the selection it holds, so a span that begins mid-line and ends mid-line three
-// lines down lights those three lines and nothing either side of it.
-//
-// The span is converted from the VALUE's offsets to the PAINTED text's first: the caret glyph stands in
-// the cell it is drawn at, so every rune from the caret on is painted one position along (settingsEditCells
-// makes the same correction for the value row).
-func (m Model) highlightSettingsText(view string, place popupPlacement) string {
-	if m.settings.kind != settingsTextEditor || !m.settings.sel.nonEmpty() {
-		return view // no selection, or a click in progress, which shades nothing (fieldSel.nonEmpty)
-	}
-	lo, hi := m.settings.sel.span()
-	caret := m.settings.editor.caretRune()
-	if lo >= caret {
-		lo++ // the span opens at or past the caret: the glyph is painted before it
-	}
-	if hi > caret {
-		hi++ // and the same for its end, which is exclusive
-	}
-	paint := m.settingsTextGeometry(place, 0)
 	lines := strings.Split(view, "\n")
-	row := paint.top()
-	x := m.settingsContentX() + popupRowIndent
-	for i := paint.place.start; i < paint.place.end && i < len(paint.place.blocks); i++ {
-		for sub := range paint.place.blocks[i] {
-			text, start := paint.span(i, sub)
-			a, b := max(lo, start), min(hi, start+len(text))
-			if b > a && row >= 0 && row < len(lines) {
-				c0 := m.th.measure.Width(string(text[:a-start]))
-				c1 := m.th.measure.Width(string(text[:b-start]))
-				lines[row] = shadeCells(m.th.measure, lines[row], x+c0, x+c1, m.th.selection)
-			}
-			row++
+	for _, s := range shades {
+		if s.y >= 0 && s.y < len(lines) {
+			lines[s.y] = shadeCells(m.th.measure, lines[s.y], s.x0, s.x1, m.th.selection)
 		}
 	}
 	return strings.Join(lines, "\n")
 }
 
-// handleSettingsClick answers a left-click inside the open /settings pane: on the row being typed into
-// it seats the caret at the clicked glyph and arms a selection there, on any other KEY row it moves the
-// selection to that row, and on a section label, a spacer or the pane's chrome it does nothing at all.
-// ok is false when the point falls outside the pane's row block, which leaves the click to the prompt
-// and the transcript exactly as it was.
+// handleSettingsClick answers a left-click inside the open /settings pane: in an open field — the row
+// being typed into, or the multi-line field — it seats the caret at the clicked glyph and arms a
+// selection there, on any other KEY row it moves the selection to that row, and on a section label, a
+// spacer or the pane's chrome it does nothing at all. ok is false when the point falls outside the
+// pane's row block, which leaves the click to the prompt and the transcript exactly as it was.
 //
 // A click the pane DOES claim drops both of the other selections: starting one selection clears the
 // others, the arbitration this file has always made, and here it also says the pointer has moved to
@@ -1373,8 +1359,20 @@ func (m Model) highlightSettingsText(view string, place popupPlacement) string {
 // as the receiver while this is the FIRST handler in the chain, and it is written down anyway: the one
 // invariant the chain holds is that no rect in it is ever read off a model a dismissal has moved.
 func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
-	if m.settings.kind == settingsTextEditor {
-		return m.handleSettingsTextClick(pre, msg) // the field IS the pane there: its own geometry answers
+	if m.settings.kind == settingsValueBuffer || m.settings.kind == settingsTextEditor {
+		// One branch for both fields, over their one geometry: a click on one of the pane's rows is
+		// claimed — on the field it seats the caret, on another key row of the value buffer's list it is
+		// swallowed and the buffer stays where it is — and a click on the chrome is left to the chain.
+		paint, ok := pre.settingsFieldPaint()
+		if !ok || !paint.onRow(msg.Y) {
+			return m, nil, false
+		}
+		m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
+		if off, on := pre.settingsFieldCaretAt(paint, msg.X, msg.Y); on {
+			m.settings.editor.caretToRune(off)
+			m.settings.sel.seat(off, cell{})
+		}
+		return m, nil, true
 	}
 	paint, ok := pre.settingsPaint()
 	if !ok {
@@ -1385,15 +1383,7 @@ func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		return m, nil, false
 	}
 	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
-	switch {
-	case m.settings.kind == settingsValueBuffer:
-		if display != paint.display.selected {
-			break // another row: the buffer stays where it is, and the click is swallowed
-		}
-		off := pre.settingsCaretAt(max(0, msg.X-pre.settingsValueX(paint.display)))
-		m.settings.editor.caretToRune(off)
-		m.settings.sel.seat(off, cell{})
-	case m.settings.kind == settingsKeyList:
+	if m.settings.kind == settingsKeyList {
 		if key, isKey := paint.display.settingKeyAt(display); isKey {
 			m.settings.selected = key
 		}
@@ -1401,32 +1391,24 @@ func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 	return m, nil, true
 }
 
-// handleSettingsMotion extends the edit field's selection as the mouse drags with the left button held:
-// the caret follows the moving end, exactly as it does in the prompt, while the click-set anchor stays
-// put. A drag never STARTS one, and motion that strays off the edited row is ignored so a stray past
-// its ends neither collapses the span nor hijacks another row.
+// handleSettingsMotion extends the open field's selection as the mouse drags with the left button held
+// — within the value row, or across the multi-line field's lines: the caret follows the moving end,
+// exactly as it does in the prompt, while the click-set anchor stays put. A drag never STARTS one, and
+// motion that strays off the field is still the pane's drag, ignored so a stray past its ends neither
+// collapses the span nor hijacks another row. Motion is read off the LIVE model, whose frame is the one
+// the pointer is moving over.
 func (m Model) handleSettingsMotion(msg tea.MouseMotionMsg) (Model, bool) {
 	if !m.settings.sel.active {
 		return m, false
 	}
-	if m.settings.kind == settingsTextEditor {
-		return m.handleSettingsTextMotion(msg)
-	}
-	if m.settings.kind != settingsValueBuffer {
-		return m, false
-	}
-	paint, ok := m.settingsPaint()
+	paint, ok := m.settingsFieldPaint()
 	if !ok {
-		return m, false
+		return m, false // no field open, or the pane gave way to a short window: nothing to drag in
 	}
-	if _, _, drawn := m.settingsPaneRect(); !drawn {
-		return m, false // the pane gave way to a short window: none of it is on the frame to drag in
-	}
-	display, inRows := paint.rowAt(m, msg.Y)
-	if !inRows || display != paint.display.selected {
+	off, on := m.settingsFieldCaretAt(paint, msg.X, msg.Y)
+	if !on {
 		return m, true // off the field, but still the pane's drag: the span keeps what it had
 	}
-	off := m.settingsCaretAt(max(0, msg.X-m.settingsValueX(paint.display)))
 	m.settings.editor.caretToRune(off)
 	m.settings.sel.extend(off, cell{})
 	return m, true
@@ -1474,36 +1456,6 @@ func (m Model) settingsWheel(msg tea.MouseWheelMsg) (Model, bool) {
 		m.settings.selected = clampInt(sel+1, 0, n-1)
 	}
 	return m, true
-}
-
-// highlightSettingsEdit overlays the edit row's drag-selection on the composed pane — highlightInput's
-// idiom one surface along. It is done on the pane's PAINTED lines rather than in the cell the row is
-// composed from because the popup module takes plain, escape-free cells and styles its rows whole
-// (doc.go): a pre-shaded cell would hand it the very escapes its contract forbids.
-//
-// The row is found through the placement the paint reported and the columns through the layout the
-// module measured, so a span can never be shaded onto the row above or across the wrong column. With no
-// active selection, none of any width, or the edited row scrolled out of the window, the view is
-// returned unchanged.
-func (m Model) highlightSettingsEdit(view string, display settingsDisplay, place popupPlacement) string {
-	if m.settings.kind != settingsValueBuffer || !m.settings.sel.nonEmpty() {
-		return view // no selection, or a click in progress, which shades nothing (fieldSel.nonEmpty)
-	}
-	if display.selected < place.start || display.selected >= place.end {
-		return view
-	}
-	lines := strings.Split(view, "\n")
-	row := place.rowsAt + (display.selected - place.start)
-	if row < 0 || row >= len(lines) {
-		return view
-	}
-	x := m.settingsValueX(display)
-	c0, c1 := m.settingsEditCells(m.settings.sel.anchorOff, m.settings.sel.headOff)
-	if c1 <= c0 {
-		return view
-	}
-	lines[row] = shadeCells(m.th.measure, lines[row], x+c0, x+c1, m.th.selection)
-	return strings.Join(lines, "\n")
 }
 
 // ----------------------------------------------------------------------------

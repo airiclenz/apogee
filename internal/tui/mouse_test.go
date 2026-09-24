@@ -3224,7 +3224,7 @@ func TestSettingsTextClickSeatsTheCaretInTheProse(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			m := settingsTextEditModel(t, c.prose)
-			paint, ok := m.settingsTextPaint()
+			paint, ok := m.settingsFieldPaint()
 			if !ok {
 				t.Fatal("the field is not on the frame")
 			}
@@ -3284,6 +3284,88 @@ func TestSettingsTextDragSelectsAcrossLines(t *testing.T) {
 	}
 	if flash := fmt.Sprintf("copied %d chars", len([]rune(want))); !strings.Contains(m.flash, flash) {
 		t.Fatalf("flash = %q, want %q", m.flash, flash)
+	}
+}
+
+// The two /settings fields share one pointer geometry (settingsFieldPaint), and this is its contract
+// stated as one table: the cells a drag-selection is SHADED on are the cells the selected text is
+// painted on, and a click on the first and the last of them seats the caret on the span's first and
+// last runes. The caret glyph is drawn inside the painted text, so each field is walked with the span
+// on both sides of it — the glyph standing just past the span and just before it — and with two-cell
+// glyphs, where a mapping that counted runes rather than display cells would shade and seat one glyph
+// out.
+func TestSettingsFieldShadesTheCellsAClickSeats(t *testing.T) {
+	t.Parallel()
+	valueRow := func(t *testing.T, value string) Model {
+		t.Helper()
+		row := settingsStringRow()
+		row.Value = value
+		m, _ := settingsEditModel(t, []SettingRow{row}, &settingsWriteLog{})
+		return step(t, m, keyEnter())
+	}
+	fields := []struct {
+		name string
+		open func(t *testing.T, value string) Model
+	}{
+		{"value row", valueRow},
+		{"multi-line", settingsTextEditModel},
+	}
+	texts := []struct {
+		name   string
+		value  string
+		lo, hi int // the selected span, in runes of the value
+	}{
+		{"ascii", "http://box:1111", 7, 10},
+		{"double-width", "日本語abc", 1, 3},
+		{"ascii on a second line", "You are apogee.\nWork step by step.", 21, 25},
+		{"double-width on a second line", "You are apogee.\n日本語abc", 17, 19},
+	}
+	sides := []struct {
+		name    string
+		caretLo bool // the caret stands at the span's start (a right-to-left drag) rather than its end
+	}{
+		{"span before caret", false},
+		{"span after caret", true},
+	}
+	for _, f := range fields {
+		for _, tx := range texts {
+			if f.name == "value row" && strings.Contains(tx.value, "\n") {
+				continue // the value row is one line: a paste's newline folds (lineEditor.flattenLine)
+			}
+			for _, side := range sides {
+				t.Run(f.name+"/"+tx.name+"/"+side.name, func(t *testing.T) {
+					t.Parallel()
+					m := f.open(t, tx.value)
+					anchor, head := tx.lo, tx.hi
+					if side.caretLo {
+						anchor, head = tx.hi, tx.lo
+					}
+					m.settings.editor.caretToRune(head)
+					m.settings.sel = fieldSel{active: true, anchorOff: anchor, headOff: head}
+					selected := string([]rune(tx.value)[tx.lo:tx.hi])
+					x, y := frameCell(t, m, selected)
+					paint, ok := m.settingsFieldPaint()
+					if !ok {
+						t.Fatal("the field is not on the frame")
+					}
+
+					shades := m.settingsFieldShades(paint)
+
+					want := []fieldShade{{y: y, x0: x, x1: x + m.th.measure.Width(selected)}}
+					if !reflect.DeepEqual(shades, want) {
+						t.Fatalf("shaded %+v, want %+v — the cells %q is painted on", shades, want, selected)
+					}
+					for _, aim := range []struct {
+						x, off int
+					}{{want[0].x0, tx.lo}, {want[0].x1 - 1, tx.hi - 1}} {
+						clicked := step(t, m, leftClick(aim.x, y))
+						if got := clicked.settings.editor.caretRune(); got != aim.off {
+							t.Errorf("a click on shaded column %d seated the caret at rune %d, want %d", aim.x, got, aim.off)
+						}
+					}
+				})
+			}
+		}
 	}
 }
 

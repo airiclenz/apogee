@@ -440,7 +440,11 @@ internal/tui/mouse_test.go — TestSelectionDeleteKeys, TestSettingsDragSelectsA
 - `go test -race -count=1 -run 'TestSelectionText|TestDragSelectsAndCopies|TestBareClickReleaseDoesNotCopy|TestSelectionDelete|TestButtonlessMotionIsTheRelease|TestSettingsDragSelectsAndCopies|TestSettingsTextDragSelectsAcrossLines|TestPromptAndTranscriptSelectionsAreExclusive' ./internal/tui/`
 **Commit:** `refactor(tui): one selection protocol serves the prompt and the settings fields`
 
-## 20. One pointer geometry for the settings fields
+## 20. One pointer geometry for the settings fields — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the caret-glyph shift is one lineEditor method, `caretGlyph()`, which returns a small `glyphShift` value (lineeditor.go) carrying both directions side by side (`toValue` for the click, `toPainted` for the highlight); the shared geometry calls it once per build for both fields, so no per-rune caretRune recomputation lands in the highlight.
+NOTES (2026-09-24): unifying the two highlights took the multi-line field's span rule for both: a span that opens AT the caret (a right-to-left drag in the value row) no longer shades the caret glyph, so the shaded cells are exactly the selected runes. The new table test pins this.
+NOTES (2026-09-24): `settingsFieldGeometry(place, display *settingsDisplay, origin)` takes the key list's display for the value row and nil for the multi-line field, because a text step whose row has gone paints the key list, so the caller has to say which field it drew. Highlight shading is split into `settingsFieldShades` (the runs) and `highlightSettingsField` (the paint) so the table test can compare the runs with the cells a click seats.
 
 **What:**
 **Goal:** the settings value row and multi-line field share one paint geometry, one caret-at, one click branch, one motion branch and one `highlightSettingsField`; the caret-glyph offset shift lives once on `lineEditor`; none of `settingsCaretAt`, `settingsEditCells`, `highlightSettingsEdit`, `handleSettingsTextClick`, `handleSettingsTextMotion` remains; a table test proves the shaded cells are the cells a click places the caret in. Depends on item 19.

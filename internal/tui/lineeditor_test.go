@@ -119,6 +119,45 @@ func TestTextWithCaretDrawsTheGlyphWhereTheCaretStands(t *testing.T) {
 	}
 }
 
+// The caret glyph's shift is stated once, on the field that draws it (caretGlyph), and read both ways:
+// a painted offset maps back to the value with the glyph's cell naming the caret, and a value span maps
+// forward to the painted runes that draw exactly it — a span opening at the caret opens past the glyph,
+// a span ending at it stops before it. A field with no glyph shifts nothing either way.
+func TestCaretGlyphMapsBetweenThePaintedTextAndTheValue(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name           string
+		glyph          string
+		caret          int
+		painted        int // a painted offset to map back
+		wantValue      int
+		lo, hi         int // a value span to map forward
+		wantLo, wantHi int
+	}{
+		{"before the glyph", settingsCaret, 3, 2, 2, 0, 2, 0, 2},
+		{"on the glyph", settingsCaret, 3, 3, 3, 1, 3, 1, 3},
+		{"past the glyph", settingsCaret, 3, 5, 4, 3, 5, 4, 6},
+		{"a span across the glyph", settingsCaret, 3, 6, 5, 1, 5, 1, 6},
+		{"no glyph", "", 3, 5, 5, 3, 5, 3, 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			e := testPopupField(tc.glyph, "abcdefgh")
+			e.caretToRune(tc.caret)
+
+			g := e.caretGlyph()
+
+			if got := g.toValue(tc.painted); got != tc.wantValue {
+				t.Errorf("toValue(%d) = %d, want %d", tc.painted, got, tc.wantValue)
+			}
+			if lo, hi := g.toPainted(tc.lo, tc.hi); lo != tc.wantLo || hi != tc.wantHi {
+				t.Errorf("toPainted(%d, %d) = (%d, %d), want (%d, %d)", tc.lo, tc.hi, lo, hi, tc.wantLo, tc.wantHi)
+			}
+		})
+	}
+}
+
 // Merge policy (plan 2026-08-19 §Ratified design calls 2): routing the three raw buffers through one
 // field must leave every surface drawing the caret it drew before. The glyph is the parameter that
 // keeps them apart, so the three are pinned by value here — a shared field stays behaviour-preserving
