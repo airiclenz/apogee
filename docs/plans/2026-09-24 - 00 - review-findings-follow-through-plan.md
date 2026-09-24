@@ -480,7 +480,15 @@ docs/manual/commands.md — /settings "A buffer is a real field"
 - `go test -race -count=1 -run 'TestSettings.*Select|TestSelectionDelete' ./internal/tui/`
 **Commit:** `feat(tui): Backspace and Delete remove a selection in a settings field`
 
-## 22. session.Live owns session identity
+## 22. session.Live owns session identity — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): Begin takes the birth instant beside the title (`Begin(title, at)`) so the host's Save can keep stamping CreatedAt and UpdatedAt from one clock read, exactly as today; Live's own `now` mints ids only.
+
+NOTES (2026-09-24): Activate returns the hold error rather than swallowing it (followers move regardless, per the owner call behind apogee-refused-hold-followers-move); the host's discard of it moves to item 23. The identity is an exported `session.Identity` value (ID, Title, CreatedAt, ParentID) that Begin returns.
+
+NOTES (2026-09-24): sessionHost.Save's "mint on the spot when nextID is empty" fallback was not ported: in Live every path to an inactive identity (NewLive, Rotate) mints, so it is unreachable there.
+
+NOTES (2026-09-24): no CHANGELOG entry — the module is not wired into any Driver until item 23, so nothing user-visible changes here.
 
 **What:** Recast at the regression check (2026-09-24).
 **Goal:** `internal/session/live.go` defines `Live` with `NewLive(store, now, resumed, onMove...)`, `Begin`, `Rotate`, `Park`, `Activate`, `DropParked`, `ID`, `ActiveID`, `Close`, unit-tested on its own; `internal/session` still imports no snapshot, undo or tui package.

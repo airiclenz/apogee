@@ -32,11 +32,17 @@
 //
 // A session has one live instance. Store.Hold takes the exclusive OS lock on <id>.lock beside the
 // record (internal/platform.AcquireLock — kernel-owned, so a dead holder leaves nothing stale) and
-// keeps it until released; the composition root's host holds the record it runs from the record's
-// birth to the end of the run, and every door that would open the same record in another apogee —
-// a --resume or --continue start, the browser's delete — asks first and is refused with a
+// keeps it until released; the Driver running a record holds it from the record's birth to the end
+// of the run, and every door that would open the same record in another apogee — a --resume or
+// --continue start, the browser's delete — asks first and is refused with a
 // *HeldError, whose Error() is the one line those doors print. Delete and Prune hold before they
 // remove, so a record another instance is running is never swept out from under it, and unlink
 // the lock only after the record is gone and the hold released — the single stated exception to
 // the lock file's "never removed" rule.
+//
+// live.go holds Live, the running session's identity — the id minted at each boundary, the Title,
+// CreatedAt and ParentID a later Save must preserve — and the hold that follows it: taken at the
+// record's birth, parked ahead of a resume, moved at Rotate and Activate (where the onMove followers
+// hear the new id) and released at Close. It is Driver-neutral (ADR 0031): it resolves no resume
+// argument and sweeps nothing (ADR 0083 §5).
 package session
