@@ -76,7 +76,7 @@ type promptEditor struct {
 	// is cleared by any keypress, a submit/reset, or a resize, so its visual coords never go
 	// stale. It and the Model's transcriptSel never coexist (region arbitration in the mouse
 	// handlers).
-	sel promptSel
+	sel fieldSel
 
 	// recall is the prompt-recall state (recall.go): this workspace's recorded inputs, loaded once
 	// at start-up from [Options.Recall]. The zero value is "nothing to recall", which is where an
@@ -336,9 +336,9 @@ func (m Model) foldPaste(msg tea.PasteMsg) (tea.Model, tea.Cmd) {
 	if !m.inputEditable() {
 		return m, nil
 	}
-	m.sel = promptSel{} // the value is about to change; drop the selection before its coords go stale
-	m.dropRecall()      // a paste is an edit: the recalled entry is now the human's own draft
-	m.fitWrapMemo()     // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
+	m.sel = fieldSel{} // the value is about to change; drop the selection before its coords go stale
+	m.dropRecall()     // a paste is an edit: the recalled entry is now the human's own draft
+	m.fitWrapMemo()    // the widget rebuilds its wrap memo to MaxHeight on Update (lineeditor.go)
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
 	if m.state.live() {

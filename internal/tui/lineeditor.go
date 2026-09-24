@@ -448,7 +448,7 @@ func (e *lineEditor) caretToOffset(byteOff int) {
 }
 
 // caretToRune drives the caret to a RUNE offset into the current value — caretToOffset for a caller
-// that counts in runes rather than in bytes, which is what a SELECTION counts in (promptSel) and what
+// that counts in runes rather than in bytes, which is what a SELECTION counts in (fieldSel) and what
 // a click on a painted cell resolves to (cellToRuneOffsetIn, mouse.go). The conversion lives here so
 // no caller has to pair the two functions itself and get the order right.
 func (e *lineEditor) caretToRune(off int) {
@@ -463,8 +463,8 @@ func (e *lineEditor) caretToRune(off int) {
 // The span arrives as an argument rather than being read off the caller's selection state because
 // handleKey's chokepoint has already dropped the live selection by the time the two keys are routed
 // (model.go): what it stashed there is the authority, and passing it in keeps that the ONLY copy.
-// The span is normalised first — a right-to-left drag stores head before anchor, the same posture
-// selectionText copies under (mouse.go) — and sliced in RUNES, so a multi-byte selection loses whole
+// The span is read in reading order (fieldSel.span — a right-to-left drag stores head before anchor,
+// the same posture the release copies under) and sliced in RUNES, so a multi-byte selection loses whole
 // characters instead of splitting one.
 //
 // The rebuild-and-reseat shape is removeCompletionToken's (autocomplete.go): SetValue over the two
@@ -472,11 +472,8 @@ func (e *lineEditor) caretToRune(off int) {
 // cursor wherever the new value put it. caretToOffset counts BYTES while a selection counts RUNES,
 // so byteOffsetOf bridges the two — read against the NEW value, whose first lo runes are exactly
 // the head that survived the cut.
-func (e *lineEditor) deleteSelection(sel promptSel) {
-	lo, hi := sel.anchorOff, sel.headOff
-	if lo > hi {
-		lo, hi = hi, lo
-	}
+func (e *lineEditor) deleteSelection(sel fieldSel) {
+	lo, hi := sel.span()
 	r := []rune(e.input.Value())
 	lo = clampInt(lo, 0, len(r))
 	hi = clampInt(hi, lo, len(r))

@@ -36,8 +36,8 @@ func (m Model) foldAskRequest(msg askReqMsg) (tea.Model, tea.Cmd) {
 	// The box is borrowed for the answer, so ⏎ sends rather than queues: the legend says so for as
 	// long as the question stands, derived from the state at paint ([Model.legend]) — and hands the
 	// box back the moment submitAnswer moves the state on.
-	m.sel = promptSel{} // the input was emptied for the answer; drop any stale selection
-	m.dropRecall()      // and any walk in progress: the box now belongs to the question
+	m.sel = fieldSel{} // the input was emptied for the answer; drop any stale selection
+	m.dropRecall()     // and any walk in progress: the box now belongs to the question
 	return m, m.input.Focus()
 }
 

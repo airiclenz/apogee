@@ -126,7 +126,7 @@ const (
 // sel is a drag-selection inside that field, and it is the pane's own rather than the Model's
 // ([Model.sel]): the prompt box is still drawn under this pane, so a span stored in the prompt's slot
 // would be highlighted down there, on a box the pane's own modality keeps the human out of. It is a
-// [promptSel] because it IS one — the same two ends of the same kind of field — but only the two RUNE
+// [fieldSel] because it IS one — the same two ends of the same kind of field — but only the two RUNE
 // offsets are carried: the caret is a GLYPH inside the painted cell here (settingsCaret), so it moves
 // the text under a drag, and a visual cell recorded at the press would name a different rune a moment
 // later. The highlight derives its columns from the offsets at paint time instead
@@ -145,7 +145,7 @@ type settingsPane struct {
 	// pane's one field ([lineEditor]) stays the one it already had.
 	sub     listCursor
 	editor  lineEditor
-	sel     promptSel
+	sel     fieldSel
 	failure settingFailure
 	answer  settingAnswer
 }
@@ -483,7 +483,7 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// down (model.go): typing past a span, committing it or walking away from it all move on from what
 	// was selected, and clearing at the pane's one chokepoint keeps every branch below from having to
 	// remember to.
-	m.settings.sel = promptSel{}
+	m.settings.sel = fieldSel{}
 	rows := m.settingRows()
 	n := len(rows)
 	m.settings.clampSelection(n)
@@ -561,7 +561,7 @@ func (m Model) settingsEditorMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
 // The value is about to change under the highlight, so the span goes first — settingsKey's chokepoint
 // rule for the edits that arrive as keystrokes, and the same one here.
 func (m Model) settingsFieldMsg(msg tea.Msg) (Model, tea.Cmd, bool) {
-	m.settings.sel = promptSel{}
+	m.settings.sel = fieldSel{}
 	return m, m.settings.editor.editMsg(msg), true
 }
 

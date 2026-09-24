@@ -359,7 +359,7 @@ func TestSelectionWinsOverTheAccent(t *testing.T) {
 	t.Parallel()
 
 	m := accentTestModel(t, 80, "", "/clean-code please check this")
-	m.sel = promptSel{
+	m.sel = fieldSel{
 		active:    true,
 		anchorOff: 0, headOff: 11,
 		anchorVis: cell{0, 0}, headVis: cell{0, 11},

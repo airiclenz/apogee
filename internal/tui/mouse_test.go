@@ -528,7 +528,7 @@ func TestClickOnBottomChromeSelectsNothing(t *testing.T) {
 	for _, r := range rows {
 		t.Run(r.name, func(t *testing.T) {
 			live := m
-			live.sel = promptSel{active: true, anchorOff: 0, headOff: 5}
+			live.sel = fieldSel{active: true, anchorOff: 0, headOff: 5}
 
 			live = step(t, live, leftClick(2+3, r.y))
 
@@ -549,7 +549,7 @@ func TestClickOnBottomChromeSelectsNothing(t *testing.T) {
 func TestClickOffFieldDeselects(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
-	m.sel = promptSel{active: true, anchorOff: 0, headOff: 5}
+	m.sel = fieldSel{active: true, anchorOff: 0, headOff: 5}
 
 	m = step(t, m, leftClick(5, 0)) // y=0 is the transcript, well above the input box
 	if m.sel.active {
@@ -584,7 +584,7 @@ func TestClickPositionsCaretWhileRunning(t *testing.T) {
 func TestKeypressClearsSelection(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
-	m.sel = promptSel{active: true, anchorOff: 0, headOff: 5}
+	m.sel = fieldSel{active: true, anchorOff: 0, headOff: 5}
 
 	m = step(t, m, tea.KeyPressMsg{Code: 'x'})
 	if m.sel.active {
@@ -723,7 +723,7 @@ func TestShadeCellsPreservesGlyphs(t *testing.T) {
 func TestHighlightInputPreservesGlyphs(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "hello world")
-	m.sel = promptSel{
+	m.sel = fieldSel{
 		active:    true,
 		anchorOff: 0, headOff: 5,
 		anchorVis: cell{0, 0}, headVis: cell{0, 5},
@@ -953,7 +953,7 @@ func TestPasteInsertsAndRefreshes(t *testing.T) {
 	t.Parallel()
 	m := modelWithInput(t, "")
 	before := m.input.Height()
-	m.sel = promptSel{active: true, anchorOff: 0, headOff: 3} // a stale selection to be dropped
+	m.sel = fieldSel{active: true, anchorOff: 0, headOff: 3} // a stale selection to be dropped
 
 	m = step(t, m, tea.PasteMsg{Content: "line1\nline2\nline3"})
 

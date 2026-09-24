@@ -70,15 +70,63 @@ import (
 // lines from the top of the value; col is the display column within that row.
 type cell struct{ row, col int }
 
-// promptSel is the prompt's drag-selection. It carries the same span two ways: rune offsets
-// into the textarea Value (anchorOff/headOff — what gets copied, so real newlines survive and
-// soft-wraps do not) and absolute visual cells (anchorVis/headVis — what gets highlighted,
-// derived straight from the mouse so no wrap math is needed to draw it). anchor is the drag's
-// fixed end (set on press); head is the moving end (updated on drag). The zero value is none.
-type promptSel struct {
+// fieldSel is an editable field's drag-selection — the prompt's ([Model.sel]) and the /settings
+// pane's edit field's ([settingsPane.sel]) — and the one protocol both surfaces keep it by: a press
+// seats it (seat), a drag moves its moving end (extend), and the release that copies it, the
+// highlight that paints it and the delete keys that cut it all read it through span, nonEmpty and
+// taken, so the two fields cannot disagree about what a selection is.
+//
+// It carries the same span two ways: rune offsets into the field's value (anchorOff/headOff — what
+// gets copied, so real newlines survive and soft-wraps do not) and absolute visual cells
+// (anchorVis/headVis — what gets highlighted, derived straight from the mouse so no wrap math is
+// needed to draw it). Only the prompt draws from the cells; the /settings field carries the offsets
+// alone and derives its columns at paint time (settingsPane says why), so its seat and extend pass
+// the zero cell. anchor is the drag's fixed end (set on press); head is the moving end (updated on
+// drag). The zero value is none.
+type fieldSel struct {
 	active             bool
 	anchorOff, headOff int
 	anchorVis, headVis cell
+}
+
+// seat arms a collapsed selection at off — a press: a caret placed by the pointer, not yet a span.
+// vis is the visual cell the press landed on (the zero cell on a surface that does not draw from it).
+func (s *fieldSel) seat(off int, vis cell) {
+	*s = fieldSel{active: true, anchorOff: off, headOff: off, anchorVis: vis, headVis: vis}
+}
+
+// extend moves the selection's head to off (and vis) as a drag goes on; the anchor stays where the
+// press seated it.
+func (s *fieldSel) extend(off int, vis cell) {
+	s.headOff, s.headVis = off, vis
+}
+
+// span is the selection's rune range in reading order: lo <= hi whichever way the drag ran, since a
+// right-to-left drag stores its head before its anchor.
+func (s fieldSel) span() (lo, hi int) {
+	lo, hi = s.anchorOff, s.headOff
+	if lo > hi {
+		lo, hi = hi, lo
+	}
+	return lo, hi
+}
+
+// nonEmpty reports whether the selection is one the human can SEE: active and not collapsed. A
+// collapsed one is a click in progress — a caret, not a selection — so it shades nothing, copies
+// nothing and cuts nothing; this is the one predicate the highlight, the release and the delete keys
+// all ask.
+func (s fieldSel) nonEmpty() bool {
+	return s.active && s.anchorOff != s.headOff
+}
+
+// taken is the text the selection takes out of value: the exact runes of its span, clamped to the
+// value (selectionText), and "" for a selection that is not nonEmpty.
+func (s fieldSel) taken(value string) string {
+	if !s.nonEmpty() {
+		return ""
+	}
+	lo, hi := s.span()
+	return selectionText(value, lo, hi)
 }
 
 // contentCell is an absolute position in the rendered transcript: line indexes into the cached
@@ -89,7 +137,7 @@ type contentCell struct{ line, col int }
 
 // transcriptSel is the transcript's drag-selection in content coordinates. anchor is the drag's
 // fixed end (set on press); head is the moving end (updated on drag). The zero value is none.
-// Unlike promptSel it stores no rune offsets: the copied text is sliced from the rendered lines
+// Unlike fieldSel it stores no rune offsets: the copied text is sliced from the rendered lines
 // (screen-space), not from a source string.
 type transcriptSel struct {
 	active       bool
@@ -452,7 +500,7 @@ var pointerPanes = []framePane{
 func settingsPointerClick(m, pre Model, msg tea.MouseClickMsg) (Model, tea.Cmd, bool) {
 	next, cmd, claimed := m.handleSettingsClick(pre, msg)
 	if !claimed {
-		next.settings.sel = promptSel{}
+		next.settings.sel = fieldSel{}
 	}
 	return next, cmd, claimed
 }
@@ -559,24 +607,19 @@ func (m Model) handleMouseClick(msg tea.MouseClickMsg) (tea.Model, tea.Cmd) {
 		if visRow, visCol, ok := pre.pointInputRow(msg.X, msg.Y); ok {
 			m.transcriptSel = transcriptSel{} // the prompt claims it: drop any transcript selection
 			m.dropRecall()                    // a click IN the box is acting in it: the arrows go back to the caret
-			off := m.caretTo(visRow, visCol)
-			m.sel = promptSel{
-				active:    true,
-				anchorOff: off, headOff: off,
-				anchorVis: cell{visRow, visCol}, headVis: cell{visRow, visCol},
-			}
+			m.sel.seat(m.caretTo(visRow, visCol), cell{visRow, visCol})
 			return m, nil
 		}
 	}
 	if line, col, ok := pre.pointTranscriptRow(msg.X, msg.Y); ok {
-		m.sel = promptSel{} // the transcript claims it: drop any prompt selection
+		m.sel = fieldSel{} // the transcript claims it: drop any prompt selection
 		m.transcriptSel = transcriptSel{
 			active: true,
 			anchor: contentCell{line, col}, head: contentCell{line, col},
 		}
 		return m, nil
 	}
-	m.sel = promptSel{} // a click off both fields deselects
+	m.sel = fieldSel{} // a click off both fields deselects
 	m.transcriptSel = transcriptSel{}
 	return m, nil
 }
@@ -649,9 +692,7 @@ func (m Model) handleMouseMotion(msg tea.MouseMotionMsg) (tea.Model, tea.Cmd) {
 	}
 	if m.sel.active && m.inputEditable() {
 		if visRow, visCol, ok := m.pointInputRow(msg.X, msg.Y); ok {
-			off := m.caretTo(visRow, visCol)
-			m.sel.headOff = off
-			m.sel.headVis = cell{visRow, visCol}
+			m.sel.extend(m.caretTo(visRow, visCol), cell{visRow, visCol})
 		}
 		return m, nil
 	}
@@ -681,29 +722,10 @@ func (m Model) handleMouseRelease(msg tea.MouseReleaseMsg) (tea.Model, tea.Cmd) 
 	switch {
 	case m.settings.sel.active:
 		// The /settings edit field copies what a release took, exactly as the prompt does: the value is
-		// a string the human is typing, so the exact runes are what belongs on the clipboard. A bare
-		// click leaves the caret where it landed and copies nothing.
-		if m.settings.sel.anchorOff == m.settings.sel.headOff {
-			m.settings.sel.active = false
-			return m, nil
-		}
-		text := selectionText(m.settings.editor.value(), m.settings.sel.anchorOff, m.settings.sel.headOff)
-		if text == "" {
-			m.settings.sel.active = false
-			return m, nil
-		}
-		return m.copyFlash(text)
+		// a string the human is typing, so the exact runes are what belongs on the clipboard.
+		return m.releaseField(&m.settings.sel, m.settings.editor.value())
 	case m.sel.active:
-		if m.sel.anchorOff == m.sel.headOff {
-			m.sel.active = false
-			return m, nil
-		}
-		text := selectionText(m.input.Value(), m.sel.anchorOff, m.sel.headOff)
-		if text == "" {
-			m.sel.active = false
-			return m, nil
-		}
-		return m.copyFlash(text)
+		return m.releaseField(&m.sel, m.input.Value())
 	case m.transcriptSel.active:
 		if m.transcriptSel.anchor == m.transcriptSel.head {
 			pressed := m.transcriptSel.anchor.line
@@ -832,6 +854,20 @@ func (m Model) toggleBlockAt(line, releaseRow int) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// releaseField finalises a drag on an editable field's selection — the prompt's or the /settings
+// field's, the one release both surfaces share (fieldSel). What the span took is copied exactly as
+// typed (copyFlash); a bare click, or a span over nothing, copies nothing, leaves the caret where it
+// landed and retires the selection. sel points into m — the release's own copy of the Model, which
+// is why this step takes the Model by pointer — so the retirement lands on the Model it returns.
+func (m *Model) releaseField(sel *fieldSel, value string) (tea.Model, tea.Cmd) {
+	text := sel.taken(value)
+	if text == "" {
+		sel.active = false
+		return *m, nil
+	}
+	return m.copyFlash(text)
+}
+
 // copyFlash copies text to the clipboard over EVERY channel — OSC52, the system clipboard and,
 // inside tmux, tmux's own buffer — and shows a transient confirmation counting the runes taken
 // (flashClearMsg clears it after flashDuration). OSC52 (tea.SetClipboard) stays the primary: it is
@@ -863,7 +899,7 @@ func (m Model) copyFlash(text string) (tea.Model, tea.Cmd) {
 // stored absolute rows onto the visible block. With no active (non-empty) selection the view is
 // returned unchanged.
 func (m Model) highlightInput(view string) string {
-	if !m.sel.active || m.sel.anchorOff == m.sel.headOff {
+	if !m.sel.nonEmpty() {
 		return view
 	}
 	top, bot := m.sel.anchorVis, m.sel.headVis
@@ -1258,9 +1294,9 @@ func (m Model) handleSettingsTextClick(pre Model, msg tea.MouseClickMsg) (Model,
 	if !ok {
 		return m, nil, false
 	}
-	m.sel, m.transcriptSel = promptSel{}, transcriptSel{}
+	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
 	m.settings.editor.caretToRune(off)
-	m.settings.sel = promptSel{active: true, anchorOff: off, headOff: off}
+	m.settings.sel.seat(off, cell{})
 	return m, nil, true
 }
 
@@ -1278,7 +1314,7 @@ func (m Model) handleSettingsTextMotion(msg tea.MouseMotionMsg) (Model, bool) {
 		return m, true
 	}
 	m.settings.editor.caretToRune(off)
-	m.settings.sel.headOff = off
+	m.settings.sel.extend(off, cell{})
 	return m, true
 }
 
@@ -1291,16 +1327,10 @@ func (m Model) handleSettingsTextMotion(msg tea.MouseMotionMsg) (Model, bool) {
 // the cell it is drawn at, so every rune from the caret on is painted one position along (settingsEditCells
 // makes the same correction for the value row).
 func (m Model) highlightSettingsText(view string, place popupPlacement) string {
-	if m.settings.kind != settingsTextEditor || !m.settings.sel.active {
-		return view
+	if m.settings.kind != settingsTextEditor || !m.settings.sel.nonEmpty() {
+		return view // no selection, or a click in progress, which shades nothing (fieldSel.nonEmpty)
 	}
-	lo, hi := m.settings.sel.anchorOff, m.settings.sel.headOff
-	if lo > hi {
-		lo, hi = hi, lo
-	}
-	if lo == hi {
-		return view // a click in progress shades nothing (promptSel's own rule)
-	}
+	lo, hi := m.settings.sel.span()
 	caret := m.settings.editor.caretRune()
 	if lo >= caret {
 		lo++ // the span opens at or past the caret: the glyph is painted before it
@@ -1354,7 +1384,7 @@ func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 	if !ok {
 		return m, nil, false
 	}
-	m.sel, m.transcriptSel = promptSel{}, transcriptSel{}
+	m.sel, m.transcriptSel = fieldSel{}, transcriptSel{}
 	switch {
 	case m.settings.kind == settingsValueBuffer:
 		if display != paint.display.selected {
@@ -1362,7 +1392,7 @@ func (m Model) handleSettingsClick(pre Model, msg tea.MouseClickMsg) (Model, tea
 		}
 		off := pre.settingsCaretAt(max(0, msg.X-pre.settingsValueX(paint.display)))
 		m.settings.editor.caretToRune(off)
-		m.settings.sel = promptSel{active: true, anchorOff: off, headOff: off}
+		m.settings.sel.seat(off, cell{})
 	case m.settings.kind == settingsKeyList:
 		if key, isKey := paint.display.settingKeyAt(display); isKey {
 			m.settings.selected = key
@@ -1398,7 +1428,7 @@ func (m Model) handleSettingsMotion(msg tea.MouseMotionMsg) (Model, bool) {
 	}
 	off := m.settingsCaretAt(max(0, msg.X-m.settingsValueX(paint.display)))
 	m.settings.editor.caretToRune(off)
-	m.settings.sel.headOff = off
+	m.settings.sel.extend(off, cell{})
 	return m, true
 }
 
@@ -1456,11 +1486,8 @@ func (m Model) settingsWheel(msg tea.MouseWheelMsg) (Model, bool) {
 // active selection, none of any width, or the edited row scrolled out of the window, the view is
 // returned unchanged.
 func (m Model) highlightSettingsEdit(view string, display settingsDisplay, place popupPlacement) string {
-	if m.settings.kind != settingsValueBuffer || !m.settings.sel.active {
-		return view
-	}
-	if m.settings.sel.anchorOff == m.settings.sel.headOff {
-		return view // a click in progress shades nothing (promptSel's own rule)
+	if m.settings.kind != settingsValueBuffer || !m.settings.sel.nonEmpty() {
+		return view // no selection, or a click in progress, which shades nothing (fieldSel.nonEmpty)
 	}
 	if display.selected < place.start || display.selected >= place.end {
 		return view

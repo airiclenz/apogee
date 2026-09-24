@@ -419,7 +419,11 @@ cmd/apogee/wire_settings_test.go — TestFloorGuardTableMatchesTheConfigKeys; in
 - `go test -race -count=1 -run 'Apply|LiveSettings|Setting|FloorGuard' ./cmd/apogee/`; `go test -race -count=1 -run 'Registry|Copy' ./internal/config/`
 **Commit:** `refactor(cmd/apogee): pure setting applies mirror through Key.Copy`
 
-## 19. One selection protocol for the prompt and settings fields
+## 19. One selection protocol for the prompt and settings fields — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the shared release helper `releaseField` takes the Model by pointer (`func (m *Model) releaseField(sel *fieldSel, value string)`), so the `sel` it retires points into the same Model copy it returns; handleMouseRelease calls it as `m.releaseField(&m.settings.sel, …)` / `m.releaseField(&m.sel, …)`.
+NOTES (2026-09-24): `settingsEditCells` in highlightSettingsEdit still receives the raw anchor/head offsets; the pointer geometry is item 20's, so that call was left as it was.
+NOTES (2026-09-24): gofmt re-aligned three trailing comments in ask.go, model.go and prompteditor.go after the rename shortened the type name by one character.
 
 **What:**
 **Goal:** the selection type is named `fieldSel` and owns `seat`, `extend`, `span()`, `nonEmpty()` and `taken(value)`; `handleMouseRelease` copies through one helper for both surfaces; behaviour unchanged.

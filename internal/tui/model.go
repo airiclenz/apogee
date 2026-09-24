@@ -1045,8 +1045,8 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.ready = true
-		m.sel = promptSel{} // the box moved/reflowed: its stored visual coords are stale
-		m.dropRecall()      // and the box the human recalled into is no longer the box in front of them
+		m.sel = fieldSel{} // the box moved/reflowed: its stored visual coords are stale
+		m.dropRecall()     // and the box the human recalled into is no longer the box in front of them
 		m.layout()
 		// A resize is also the cheapest moment to say the mouse mode again: the renderer only
 		// writes it on a MouseMode DIFF, so a terminal that lost tracking while a tool child held
@@ -1595,7 +1595,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// the span is stashed on the way past. The clear itself stays unconditional: whichever branch
 	// below claims the key, the stale coordinates are already gone.
 	sel := m.sel
-	m.sel = promptSel{}
+	m.sel = fieldSel{}
 
 	// And any click-armed row goes with it, for the same reason one step along: the latch means "the
 	// POINTER put the highlight here", and a key that walks the list — or any other key, which is a
@@ -1798,14 +1798,14 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.inputEditable() {
 		// Backspace and Del take the SELECTION when the box holds one — the carve-out the chokepoint
 		// above stashed the span for. The predicate is exactly what paints the highlight
-		// (highlightInput, mouse.go): an active, non-empty span. Anything less would let a span the
+		// (highlightInput, mouse.go): an active, non-empty span (fieldSel.nonEmpty). Anything less would let a span the
 		// human cannot see swallow the keypress — a release that copied nothing leaves the offsets
 		// standing with active false, and a collapsed span is a caret, not a selection.
 		//
 		// The order against the empty-box case below is deliberate rather than incidental: a
 		// selection implies a non-empty box, so the two can never both apply, and saying so here
 		// keeps it true if either side ever moves.
-		if sel.active && sel.anchorOff != sel.headOff {
+		if sel.nonEmpty() {
 			switch msg.String() {
 			case "backspace", "delete":
 				m.deleteSelection(sel)

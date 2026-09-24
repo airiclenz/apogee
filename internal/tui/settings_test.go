@@ -3119,7 +3119,7 @@ func TestSettingsPasteDropsTheFieldSelection(t *testing.T) {
 	t.Parallel()
 	m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
 	m = step(t, m, keyEnter())
-	m.settings.sel = promptSel{active: true, anchorOff: 0, headOff: 4}
+	m.settings.sel = fieldSel{active: true, anchorOff: 0, headOff: 4}
 
 	if pasted := step(t, m, tea.PasteMsg{Content: "x"}); pasted.settings.sel.active {
 		t.Errorf("the paste left the drag-selection armed: %+v", pasted.settings.sel)
