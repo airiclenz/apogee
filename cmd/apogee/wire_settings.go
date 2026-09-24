@@ -1357,7 +1357,10 @@ var settingsTable = []settingsEntry{
 	{
 		key: "working-window",
 		// No member of the applier is needed: the room reaches no engine seam and rides no
-		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense.
+		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense. A
+		// Firing is not the mirror's only reader: a `/server` move resolves an entry's bound over
+		// this number (workingPin), so mirroring it onto the holder is what lets a room the human
+		// just set bound both.
 		reaches: reachesWithoutAMember,
 		apply:   applyMirror,
 	},
