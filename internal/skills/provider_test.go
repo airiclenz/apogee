@@ -170,7 +170,7 @@ func TestProviderShippedGateFlipsOnTheNextReload(t *testing.T) {
 }
 
 // TestProviderSourceDirsFollowSetSources pins the read-root seam's live-ness at its source: the
-// host mounts SourceDirs as the read tools' extra read-only roots (domain.Config.ExtraReadRoots),
+// host mounts SourceDirs as the read tools' extra read-only roots (domain.Config.ReadMounts.Roots),
 // and a mount frozen at construction would leave the model reading a dir the catalogue no longer
 // scans — or refusing one it does. SourceDirs answers off the CURRENT sources, so a
 // `use-project-skills` flip moves the mount with no Reload and no re-wiring, and it needs no

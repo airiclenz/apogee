@@ -106,32 +106,37 @@ func projectConfig(
 		// the tool out of the roster; wiring it is what puts the door in the menu.
 		Skills:      skillProvider,
 		SkillLookup: skillProvider,
-		// The skill source dirs, mounted as read-only roots for the model's read tools: an
-		// attached skill names its folder, and this is what makes that address readable
-		// (read_file, list_dir, grep, find_files — nothing else; the dirs stay unwritable).
-		// ReadRoots rather than SourceDirs, which only DISPLAYS the sources: it hands back each
-		// dir's symlink-RESOLVED real path and drops a workspace anchor that resolves outside the
-		// workspace, so a cloned repo shipping `.apogee/skills` as a symlink to /home or /etc
-		// cannot relocate the read fence the way it could before (audit 2026-08-25 F-13).
-		// It is the PROVIDER's method value, so the mount is live in both senses — it follows a
-		// mid-session `use-project-skills` flip through SetSources, and it is re-read per tool
-		// call rather than frozen here.
-		// Sub-agents need no wiring of their own: a child's registry is a Subset of the parent's
-		// tool INSTANCES (domain.ToolRegistry.Subset), so the same read tools — and with them
-		// this same func — ride along at every depth.
-		// The toolchain roots the host probed (toolchain_roots.go) follow the skill libraries on
-		// the same func, in that order, so the orientation line and the mount list one library:
-		// one probe per process, so a Firing raised inside a session composes over the answer the
-		// session already has, and a headless or daemon run starts the probe itself.
-		ExtraReadRoots: composeReadRoots(skillProvider.ReadRoots, hostToolchain.roots),
-		// The same mount for the source that has NO host path: apogee's own shipped skills live in
-		// the binary, so their bundled files are reachable only under the `shipped:<id>` address
-		// their SKILL.md block announces (ADR 0065 §3). Without this the announced files: line
-		// would name a folder every read tool refuses — the one thing an announced path may not
-		// do. Like ReadRoots it is the PROVIDER's method value, so a `use-shipped-skills` flip
-		// moves the mount with no re-wiring, and sub-agents inherit it through the same tool
-		// instances.
-		VirtualReadRoots: skillProvider.VirtualReadRoots,
+		// The read-only mounts. Roots and Virtual are the projection's; Scratch is left to the host
+		// that moves the session's scratch dir, which sets that one sub-field after this (wire_live.go,
+		// wire_firing.go, probecontext.go) — never the whole value, which would wipe these two.
+		ReadMounts: apogee.ReadMounts{
+			// The skill source dirs, mounted as read-only roots for the model's read tools: an
+			// attached skill names its folder, and this is what makes that address readable
+			// (read_file, list_dir, grep, find_files — nothing else; the dirs stay unwritable).
+			// ReadRoots rather than SourceDirs, which only DISPLAYS the sources: it hands back each
+			// dir's symlink-RESOLVED real path and drops a workspace anchor that resolves outside the
+			// workspace, so a cloned repo shipping `.apogee/skills` as a symlink to /home or /etc
+			// cannot relocate the read fence the way it could before (audit 2026-08-25 F-13).
+			// It is the PROVIDER's method value, so the mount is live in both senses — it follows a
+			// mid-session `use-project-skills` flip through SetSources, and it is re-read per tool
+			// call rather than frozen here.
+			// Sub-agents need no wiring of their own: a child's registry is a Subset of the parent's
+			// tool INSTANCES (domain.ToolRegistry.Subset), so the same read tools — and with them
+			// this same func — ride along at every depth.
+			// The toolchain roots the host probed (toolchain_roots.go) follow the skill libraries on
+			// the same func, in that order, so the orientation line and the mount list one library:
+			// one probe per process, so a Firing raised inside a session composes over the answer the
+			// session already has, and a headless or daemon run starts the probe itself.
+			Roots: composeReadRoots(skillProvider.ReadRoots, hostToolchain.roots),
+			// The same mount for the source that has NO host path: apogee's own shipped skills live in
+			// the binary, so their bundled files are reachable only under the `shipped:<id>` address
+			// their SKILL.md block announces (ADR 0065 §3). Without this the announced files: line
+			// would name a folder every read tool refuses — the one thing an announced path may not
+			// do. Like ReadRoots it is the PROVIDER's method value, so a `use-shipped-skills` flip
+			// moves the mount with no re-wiring, and sub-agents inherit it through the same tool
+			// instances.
+			Virtual: skillProvider.VirtualReadRoots,
+		},
 		// The two structural context switches: CompactionEnabled carries the `auto-compact` key
 		// (default on) — the budget-driven automatic trigger; the on-demand /compact runs
 		// regardless of it — and PruneToolResults the `prune-tool-results` key (default on), the

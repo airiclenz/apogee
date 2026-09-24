@@ -101,7 +101,7 @@ func (p *Provider) SourceDirs() []string { return sourceDirs(p.sources()) }
 // ReadRoots lists the same dirs as the paths a host may MOUNT — each one symlink-resolved, and a
 // workspace anchor that resolves outside the workspace dropped altogether (load.go's readRoots,
 // F-13). It exists for the host that mounts the skill library as a read-only root for the model's
-// read tools (domain.Config.ExtraReadRoots): the bundled files of a skill live beside its SKILL.md,
+// read tools (domain.Config.ReadMounts.Roots): the bundled files of a skill live beside its SKILL.md,
 // so the dirs discovery scans are exactly the dirs those files are under. A dir that does not exist
 // is still listed — this reports where skills COME FROM, and the mount side skips an unusable root
 // of its own accord, exactly as loadDir skips a missing source dir.
@@ -115,7 +115,7 @@ func (p *Provider) ReadRoots() []string { return readRoots(p.sources()) }
 // keyed by the prefix their addresses are spelled with — today the embedded shipped source alone,
 // under `shipped:` (load.go's virtualReadRoots). It is ReadRoots' counterpart for the source that
 // has no host path, and the host hands it to the read tools through the same live seam
-// (domain.Config.VirtualReadRoots), so a shipped skill's announced `files: shipped:<id>` line names
+// (domain.Config.ReadMounts.Virtual), so a shipped skill's announced `files: shipped:<id>` line names
 // a folder the model can actually read.
 //
 // Like SourceDirs and ReadRoots it reads the CURRENT sources, so a `use-shipped-skills` flip moves

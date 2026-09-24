@@ -100,13 +100,13 @@ func orientationHeader() string { return orientationTemplate[orientationHeaderLi
 
 // orientationBlock renders this request's orientation block, or "" when there is no fact to
 // state. Every input is read FRESH per request — the workspace from Config, the scratch dir
-// through the lock-guarded ScratchDir(), the read roots through the live Config.ExtraReadRoots
+// through the lock-guarded ScratchDir(), the read roots through the live Config.ReadMounts.Roots
 // func — so a session boundary that moves the scratch dir or a host that remounts its read
 // roots is honoured by the next request with no re-wiring.
 //
 // A fact the session does not have is OMITTED rather than rendered empty: no scratch dir until
 // the host has actually created one (CONTEXT.md: "advertised writable only once it actually
-// exists"), no library line without roots (Config.ExtraReadRoots is nil ⇒ workspace-only, so
+// exists"), no library line without roots (Config.ReadMounts.Roots is nil ⇒ workspace-only, so
 // the func itself is nil-guarded), no workspace line for a Driver that scopes the engine to
 // none, and no context-files line for a session that loaded none. With every bullet omitted the
 // header would stand alone saying nothing, so the block is "" instead and standingSystem
@@ -158,8 +158,8 @@ func (a *Agent) orientationBlock() string {
 	if scratch := a.ScratchDir(); scratch != "" {
 		bullets = append(bullets, fmt.Sprintf(orientationTemplate[orientationScratchLine], scratch))
 	}
-	if a.cfg.ExtraReadRoots != nil {
-		if roots := a.cfg.ExtraReadRoots(); len(roots) > 0 {
+	if a.cfg.ReadMounts.Roots != nil {
+		if roots := a.cfg.ReadMounts.Roots(); len(roots) > 0 {
 			bullets = append(bullets, fmt.Sprintf(
 				orientationTemplate[orientationRootsLine],
 				strings.Join(roots, ", "),

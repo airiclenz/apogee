@@ -39,8 +39,8 @@ func readCallFor(t *testing.T, path string) domain.ToolCall {
 // mountFixture lays out the two dirs every case here needs — a workspace and a directory outside
 // it holding one file — and returns the workspace, the outside dir, and that file's absolute path.
 //
-// Both are symlink-RESOLVED, because ExtraReadRoots' contract is that every mounted root is
-// already the host's real path (domain.Config.ExtraReadRoots) — a root that is not its own real
+// Both are symlink-RESOLVED, because ReadMounts.Roots' contract is that every mounted root is
+// already the host's real path (domain.Config.ReadMounts.Roots) — a root that is not its own real
 // path is skipped at the mount and simply never matches. On Linux t.TempDir() already satisfies
 // that; on macOS it sits under /var, a symlink to /private/var, so an unresolved root would mount
 // nothing and the test would be measuring the wrong refusal.
@@ -75,7 +75,7 @@ func readThrough(t *testing.T, registry *domain.ToolRegistry, path string) (cont
 }
 
 // TestResolveToolsMountsExtraReadRoots is the engine half of the wiring: a Config carrying
-// ExtraReadRoots yields a default tool set whose read_file reads under that root, and the same
+// ReadMounts.Roots yields a default tool set whose read_file reads under that root, and the same
 // Config without it yields one that refuses the very same path. The engine never defaults the
 // field — mounting is the host's act, and nothing here knows the root happens to hold skills.
 func TestResolveToolsMountsExtraReadRoots(t *testing.T) {
@@ -84,8 +84,8 @@ func TestResolveToolsMountsExtraReadRoots(t *testing.T) {
 	workspace, outside, file := mountFixture(t)
 
 	mounted := resolveTools(domain.Config{
-		WorkspaceDir:   workspace,
-		ExtraReadRoots: func() []string { return []string{outside} },
+		WorkspaceDir: workspace,
+		ReadMounts:   domain.ReadMounts{Roots: func() []string { return []string{outside} }},
 	})
 	content, isErr := readThrough(t, mounted, file)
 	if isErr {
@@ -115,8 +115,8 @@ func TestSubsetInheritsExtraReadRoots(t *testing.T) {
 	workspace, outside, file := mountFixture(t)
 
 	parent := resolveTools(domain.Config{
-		WorkspaceDir:   workspace,
-		ExtraReadRoots: func() []string { return []string{outside} },
+		WorkspaceDir: workspace,
+		ReadMounts:   domain.ReadMounts{Roots: func() []string { return []string{outside} }},
 	})
 	content, isErr := readThrough(t, parent.Subset("read_file"), file)
 	if isErr {
@@ -139,12 +139,12 @@ func TestExtraReadRootsAreLiveThroughTheEngine(t *testing.T) {
 	var mounted bool
 	registry := resolveTools(domain.Config{
 		WorkspaceDir: workspace,
-		ExtraReadRoots: func() []string {
+		ReadMounts: domain.ReadMounts{Roots: func() []string {
 			if !mounted {
 				return nil
 			}
 			return []string{outside}
-		},
+		}},
 	})
 
 	if content, isErr := readThrough(t, registry, file); !isErr {

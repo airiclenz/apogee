@@ -26,7 +26,7 @@ func TestShippedSkillAnnouncesOnlyReadableAddresses(t *testing.T) {
 	provider := skills.NewProvider(skills.Sources{UseShippedSkills: true})
 	a, _ := refAgentWithWindow(t, t.TempDir(), 200_000, func(cfg *domain.Config) {
 		cfg.Skills = provider
-		cfg.VirtualReadRoots = provider.VirtualReadRoots
+		cfg.ReadMounts.Virtual = provider.VirtualReadRoots
 	})
 
 	block := a.resolveSkillRefs(1, []string{"debugging"}, 1<<20)

@@ -196,7 +196,7 @@ func sourceDirs(src Sources) []string {
 }
 
 // readRoots renders the same anchors as the MOUNT view: the host hands these to the read tools as
-// extra read-only roots (domain.Config.ExtraReadRoots), and every entry is the anchor's
+// extra read-only roots (domain.Config.ReadMounts.Roots), and every entry is the anchor's
 // symlink-RESOLVED real path rather than the path as configured. It is openAnchor's two-way rule
 // restated for the mount (audit 2026-08-25 F-13). An untrusted anchor — the workspace's
 // .apogee/skills and its bare skills/ — is resolved THROUGH its base, so a repo that ships any

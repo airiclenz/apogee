@@ -1505,7 +1505,7 @@ func (a *Agent) budget() domain.Budget {
 // scale.
 //
 // It takes ONE render of the table per call and memoises nothing: the standing content moves on
-// SetMode, SetScratchDir, the date, an opened delegation seat, ExtraReadRoots and every task_list
+// SetMode, SetScratchDir, the date, an opened delegation seat, ReadMounts.Roots and every task_list
 // call, so a cached measurement would reserve room for a render the request no longer carries.
 // When nothing seeds the message the table renders nothing (the ride-along rule), and both parts
 // measure zero — MEASURED zero, which floors at its 2% share, never the unmeasured fallback.

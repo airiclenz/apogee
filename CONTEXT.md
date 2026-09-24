@@ -1120,8 +1120,9 @@ writes and the one native write Ask-Before does not gate, so the bullet is true 
 terminal route into it stays refused in Plan and gated in Ask-Before).
 Writable, and readable by every read tool: the announced path is a live read root for
 `read_file`, `grep`, `list_dir`, `find_files`, `copy_file`'s source and `present_document`
-(`Config.ScratchReadRoot`, 2026-09-15 — a seam of its own beside `ExtraReadRoots`, which stays the
-announced **library** roots), so what the model drafts there it can read back and show.
+(the `Scratch` mount of the one `Config.ReadMounts` value, 2026-09-15 — a mount of its own beside
+`Roots`, which stays the announced **library** roots, and `Virtual`, the `shipped:` trees), so what
+the model drafts there it can read back and show.
 Created `0700` when the session id is minted, follows the **active** session across rotation,
 advertised writable only once it actually exists, and swept by a
 best-effort 14-day startup GC. Per-session constant, so prompt use is KV-cache safe. A **Firing**

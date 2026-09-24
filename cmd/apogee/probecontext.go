@@ -396,7 +396,7 @@ func probeContextConfig(opts config.Options, roots stateRoots, mode domain.Mode,
 	cfg.Events = discardEvents{}
 	scratchDir := filepath.Join(roots.scratch, session.NewID(time.Now()))
 	cfg.ScratchDir = scratchDir
-	cfg.ScratchReadRoot = func() string { return scratchDir }
+	cfg.ReadMounts.Scratch = func() string { return scratchDir }
 	cfg.ParallelAgents = config.ResolveParallelAgents(opts.StartupEntry.ParallelAgents, 0,
 		config.DefaultParallelAgents(opts.StartupEntry))
 	cfg.EffortDialect = domain.EffortDialect(provider.EffortDialectFor(opts.StartupEntry.EffortDialect))

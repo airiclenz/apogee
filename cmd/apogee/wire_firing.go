@@ -234,7 +234,7 @@ func bindFiringConfig(in firingInputs) (firingBinding, error) {
 
 	// The skill catalog for this run, held in a variable rather than built inline so the SAME
 	// provider serves both halves of the skills contract: it resolves an attached ID into the prompt
-	// (Config.Skills) AND names the dirs whose files the model may then read (Config.ExtraReadRoots
+	// (Config.Skills) AND names the dirs whose files the model may then read (Config.ReadMounts.Roots
 	// below). A fresh one is per run because the project half of it is per workspace.
 	skillProvider := in.skills
 	if skillProvider == nil {
@@ -451,7 +451,7 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// And the same dir as the read root the read tools reach it back through: a Firing's model
 	// is told the dir is writable exactly as a session's is, and must be able to read what it
 	// wrote there (ADR 0031's Driver parity).
-	cfg.ScratchReadRoot = func() string { return scratchDir }
+	cfg.ReadMounts.Scratch = func() string { return scratchDir }
 	// The dialect resolved above, spelled in the domain's mirror of the provider vocabulary —
 	// the same five words on this side of the boundary (internal/agent's toProviderDialect
 	// converts them back at the wire seam, where the provider package holds no domain import).

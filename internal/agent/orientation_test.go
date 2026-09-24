@@ -54,7 +54,7 @@ func TestOrientation_RidesDirectlyAfterThePrompt(t *testing.T) {
 	cfg := contextSeamConfig(t, &recordingSink{}, dir, "AGENTS.md")
 	cfg.SystemPrompt = "You are apogee working in {{workspace}}."
 	cfg.ScratchDir = orientationScratchDir
-	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot, orientationSecondRoot} }
+	cfg.ReadMounts.Roots = func() []string { return []string{orientationFirstRoot, orientationSecondRoot} }
 
 	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
@@ -102,7 +102,7 @@ func TestOrientation_ReachesTheWire(t *testing.T) {
 // other bullet the block carries is the Delegation bounds line: the workspace seeds the default
 // roster, which holds sub_agent, and a session that can delegate always has a width to state.
 func TestOrientation_OmitsFactsTheSessionDoesNotHave(t *testing.T) {
-	cfg := orientationConfig(t) // no ScratchDir, nil ExtraReadRoots
+	cfg := orientationConfig(t) // no ScratchDir, nil ReadMounts.Roots
 
 	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
@@ -121,11 +121,11 @@ func TestOrientation_OmitsFactsTheSessionDoesNotHave(t *testing.T) {
 	}
 }
 
-// TestOrientation_EmptyReadRootsOmitTheLine: a live ExtraReadRoots func that currently mounts
+// TestOrientation_EmptyReadRootsOmitTheLine: a live ReadMounts.Roots func that currently mounts
 // nothing is the same as no func at all — the nil guard is not the only one that matters.
 func TestOrientation_EmptyReadRootsOmitTheLine(t *testing.T) {
 	cfg := orientationConfig(t)
-	cfg.ExtraReadRoots = func() []string { return nil }
+	cfg.ReadMounts.Roots = func() []string { return nil }
 
 	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 
@@ -612,7 +612,7 @@ func fullSeat() *DelegationSeat {
 func TestOrientation_PlainToolStatesNoDelegationsBullet(t *testing.T) {
 	cfg := orientationConfig(t) // no injected registry: the default roster's plain sub_agent, no `run_on`
 	cfg.ScratchDir = orientationScratchDir
-	cfg.ExtraReadRoots = func() []string { return []string{orientationFirstRoot} }
+	cfg.ReadMounts.Roots = func() []string { return []string{orientationFirstRoot} }
 
 	a := newProfileAgent(t, cfg, echoResponder(t, "All done."))
 

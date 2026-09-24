@@ -158,6 +158,17 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if _, err := os.Stat(wantScratch); err != nil {
 		t.Errorf("the scratch dir was not created: %v", err)
 	}
+	// All three read mounts, set at two different times on the one ReadMounts value — the
+	// projection fills Roots and Virtual, the composer adds Scratch after it — so a whole-value
+	// assign at either site would leave the other's mounts nil here.
+	if cfg.ReadMounts.Roots == nil || cfg.ReadMounts.Virtual == nil {
+		t.Errorf("Config.ReadMounts lost the projection's mounts (Roots nil: %v, Virtual nil: %v)",
+			cfg.ReadMounts.Roots == nil, cfg.ReadMounts.Virtual == nil)
+	}
+	if cfg.ReadMounts.Scratch == nil || cfg.ReadMounts.Scratch() != wantScratch {
+		t.Errorf("Config.ReadMounts.Scratch does not answer %q — the model could not read back what it "+
+			"wrote to the scratch dir it was told is writable", wantScratch)
+	}
 
 	// The file-only keys, every one of which must reach an unattended run exactly as it reaches an
 	// interactive session: one configuration, whichever Driver reads it (ADR 0031).
@@ -197,10 +208,10 @@ func TestFiringConfigSetsEveryUnattendedField(t *testing.T) {
 	if cfg.Skills != provider {
 		t.Error("Config.Skills is not the provider the Driver shared; a live catalog would stop following")
 	}
-	if cfg.ExtraReadRoots == nil {
-		t.Fatal("Config.ExtraReadRoots is nil; the model could not read the files of a skill it was given")
+	if cfg.ReadMounts.Roots == nil {
+		t.Fatal("Config.ReadMounts.Roots is nil; the model could not read the files of a skill it was given")
 	}
-	assertReadRootsCompose(t, cfg.ExtraReadRoots, provider.ReadRoots())
+	assertReadRootsCompose(t, cfg.ReadMounts.Roots, provider.ReadRoots())
 	// The three bounds the BOUND entry carries outrank the top-level keys, and a pin answers the
 	// fan-out width without spending a round trip on a question already settled.
 	if cfg.Context.MaxContextTokens != int(entry.ContextWindow) {
@@ -376,11 +387,11 @@ func TestFiringConfigMountsNoEscapingSkillRoot(t *testing.T) {
 		t.Fatalf("SourceDirs() = %v; want the relocated anchor %q among them — the fixture no longer sets up the case",
 			provider.SourceDirs(), escaping)
 	}
-	if cfg.ExtraReadRoots == nil {
-		t.Fatal("Config.ExtraReadRoots is nil; the model could not read the files of a skill it was given")
+	if cfg.ReadMounts.Roots == nil {
+		t.Fatal("Config.ReadMounts.Roots is nil; the model could not read the files of a skill it was given")
 	}
-	if got := cfg.ExtraReadRoots(); slices.Contains(got, escaping) {
-		t.Errorf("Config.ExtraReadRoots() = %v mounts the relocated anchor %q; the composer took the display "+
+	if got := cfg.ReadMounts.Roots(); slices.Contains(got, escaping) {
+		t.Errorf("Config.ReadMounts.Roots() = %v mounts the relocated anchor %q; the composer took the display "+
 			"view (SourceDirs) where only the resolved mount view (ReadRoots) may be mounted", got, escaping)
 	}
 }
@@ -423,11 +434,11 @@ func TestFiringConfigDefaultsItsSeams(t *testing.T) {
 	if cfg.Skills == nil {
 		t.Fatal("Config.Skills is nil; a nil provider must build one from the roots, not leave the run without a catalog")
 	}
-	if cfg.ExtraReadRoots == nil {
-		t.Fatal("Config.ExtraReadRoots is nil; the fresh catalog's dirs were not mounted")
+	if cfg.ReadMounts.Roots == nil {
+		t.Fatal("Config.ReadMounts.Roots is nil; the fresh catalog's dirs were not mounted")
 	}
-	if want := filepath.Join(roots.config, "skills"); !slices.Contains(cfg.ExtraReadRoots(), want) {
-		t.Errorf("Config.ExtraReadRoots() = %v; want the home library %q among them", cfg.ExtraReadRoots(), want)
+	if want := filepath.Join(roots.config, "skills"); !slices.Contains(cfg.ReadMounts.Roots(), want) {
+		t.Errorf("Config.ReadMounts.Roots() = %v; want the home library %q among them", cfg.ReadMounts.Roots(), want)
 	}
 	if len(srv.Probes()) == 0 {
 		t.Error("the discovery beat never ran; a nil beat seam must take observeServer, and an unpinned " +
@@ -1323,11 +1334,11 @@ func assertReadRootsCompose(t *testing.T, roots func() []string, skillRoots []st
 	hostToolchain.wait()
 	got := roots()
 	if len(got) < len(skillRoots) || !slices.Equal(got[:len(skillRoots)], skillRoots) {
-		t.Fatalf("ExtraReadRoots() = %v; want the provider's own resolved mounts %v as its leading prefix",
+		t.Fatalf("ReadMounts.Roots() = %v; want the provider's own resolved mounts %v as its leading prefix",
 			got, skillRoots)
 	}
 	if tail, want := got[len(skillRoots):], hostToolchain.roots(); !slices.Equal(tail, want) {
-		t.Errorf("ExtraReadRoots() = %v; want the probed toolchain roots %v after the skill roots, got %v",
+		t.Errorf("ReadMounts.Roots() = %v; want the probed toolchain roots %v after the skill roots, got %v",
 			got, want, tail)
 	}
 }

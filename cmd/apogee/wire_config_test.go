@@ -99,11 +99,11 @@ func assertCarriesProjection(t *testing.T, got, want apogee.Config) {
 			got.Skills, got.SkillLookup, want.Skills, want.SkillLookup)
 	}
 	hostToolchain.wait()
-	if got.ExtraReadRoots == nil || !slices.Equal(got.ExtraReadRoots(), want.ExtraReadRoots()) {
-		t.Errorf("Config.ExtraReadRoots() = %v, want the projection's %v", callRoots(got.ExtraReadRoots), want.ExtraReadRoots())
+	if got.ReadMounts.Roots == nil || !slices.Equal(got.ReadMounts.Roots(), want.ReadMounts.Roots()) {
+		t.Errorf("Config.ReadMounts.Roots() = %v, want the projection's %v", callRoots(got.ReadMounts.Roots), want.ReadMounts.Roots())
 	}
-	if got.VirtualReadRoots == nil || !maps.Equal(got.VirtualReadRoots(), want.VirtualReadRoots()) {
-		t.Errorf("Config.VirtualReadRoots is nil or answers other mounts than the projection's %v", want.VirtualReadRoots())
+	if got.ReadMounts.Virtual == nil || !maps.Equal(got.ReadMounts.Virtual(), want.ReadMounts.Virtual()) {
+		t.Errorf("Config.ReadMounts.Virtual is nil or answers other mounts than the projection's %v", want.ReadMounts.Virtual())
 	}
 	if got.Context.CompactionEnabled != want.Context.CompactionEnabled || got.Context.PruneToolResults != want.Context.PruneToolResults {
 		t.Errorf("Config.Context switches = (%v, %v), want (%v, %v)",

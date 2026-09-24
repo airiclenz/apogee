@@ -43,7 +43,7 @@ func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 		t.Fatalf("setup: %v", err)
 	}
 	cfg := validCfg(t)
-	cfg.ExtraReadRoots = func() []string { return []string{extra} }
+	cfg.ReadMounts.Roots = func() []string { return []string{extra} }
 
 	tool, ok := registryWithMCP(cfg.WorkspaceDir, cfg, false, nil).Lookup("read_file")
 	if !ok {
@@ -58,7 +58,7 @@ func TestRegistryWithMCPThreadsExtraReadRoots(t *testing.T) {
 		t.Fatalf("read_file returned a Go error: %v", err)
 	}
 	if result.IsError || !strings.Contains(result.Content, "bundled bytes") {
-		t.Errorf("read under the mounted root failed: %q — the MCP build dropped ExtraReadRoots", result.Content)
+		t.Errorf("read under the mounted root failed: %q — the MCP build dropped ReadMounts.Roots", result.Content)
 	}
 }
 
@@ -70,7 +70,7 @@ func TestRegistryWithMCPThreadsVirtualReadRoots(t *testing.T) {
 	t.Parallel()
 	provider := skills.NewProvider(skills.Sources{UseShippedSkills: true})
 	cfg := validCfg(t)
-	cfg.VirtualReadRoots = provider.VirtualReadRoots
+	cfg.ReadMounts.Virtual = provider.VirtualReadRoots
 
 	sk, ok := provider.Get("debugging")
 	if !ok {
@@ -89,7 +89,7 @@ func TestRegistryWithMCPThreadsVirtualReadRoots(t *testing.T) {
 		t.Fatalf("list_dir returned a Go error: %v", err)
 	}
 	if result.IsError || !strings.Contains(result.Content, "SKILL.md") {
-		t.Errorf("listing the announced %q failed: %q — the MCP build dropped VirtualReadRoots", sk.Dir, result.Content)
+		t.Errorf("listing the announced %q failed: %q — the MCP build dropped ReadMounts.Virtual", sk.Dir, result.Content)
 	}
 }
 
@@ -313,8 +313,8 @@ func (stubHostAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, 
 // the engine's own default roster shares — with the seat-choice gate the engine has no Config field
 // for (ADR 0031) passed as the configured value. A tool-NAMES equivalence between the two registries
 // could not have caught a composer that drifted: a name depends only on the roster rungs and the
-// three nil-gated delegates, so dropping the URLGuard, the SecretEnvVars scrub, the ExtraReadRoots
-// mounts or the VirtualReadRoots ones — the very hazards this file's other tests each name one of —
+// three nil-gated delegates, so dropping the URLGuard, the SecretEnvVars scrub, the ReadMounts.Roots
+// mounts or the ReadMounts.Virtual ones — the very hazards this file's other tests each name one of —
 // leaves every tool name identical while the user's policy quietly stops applying.
 //
 // So the pin is field-by-field rather than by name, on the Config THIS composition root builds
@@ -335,9 +335,9 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	cfg.EnabledTools = []string{"web_search"}
 	cfg.Profile.Tools = domain.ToolRosterDelta{Enabled: []string{"console_open"}}
 	cfg.SecretEnvVars = []string{"SOME_PROVIDER_KEY"}
-	cfg.ExtraReadRoots = func() []string { return []string{t.TempDir()} }
-	cfg.ScratchReadRoot = func() string { return t.TempDir() }
-	cfg.VirtualReadRoots = func() map[string]fs.FS { return nil }
+	cfg.ReadMounts.Roots = func() []string { return []string{t.TempDir()} }
+	cfg.ReadMounts.Scratch = func() string { return t.TempDir() }
+	cfg.ReadMounts.Virtual = func() map[string]fs.FS { return nil }
 
 	host := reflect.ValueOf(tools.HostToolsOf(cfg, true))
 	mountsType := reflect.TypeFor[tools.ReadMounts]()

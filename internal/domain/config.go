@@ -2,7 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"io/fs"
 	"slices"
 	"strings"
 	"time"
@@ -253,69 +252,29 @@ type Config struct {
 	// workspace so a file-edit task never escapes its sandbox (ADR 0001 isolation).
 	WorkspaceDir string
 
-	// ExtraReadRoots names directories OUTSIDE WorkspaceDir that the built-in READ-ONLY file
-	// tools (read_file, list_dir, grep, find_files) may reach — read-only mounts beside the
-	// workspace fence — plus copy_file's SOURCE, which is itself a read (2026-08-12); that
-	// tool's destination stays workspace-fenced like every other write.
-	// nil ⇒ workspace-only, byte-identical to the fence before this field
-	// existed. It applies to the DEFAULT tool set only, like DisabledTools: an injected
+	// ReadMounts names the read-only trees OUTSIDE WorkspaceDir that the built-in READ-ONLY file
+	// tools (read_file, list_dir, grep, find_files, present_document) may reach — plus copy_file's
+	// SOURCE, which is itself a read (2026-08-12); that tool's destination stays workspace-fenced
+	// like every other write. Its three mounts and the contract they share (read-only, absolute
+	// addresses only, evaluated LIVE once per tool call, zero ⇒ workspace-only) are documented once,
+	// on domain.ReadMounts. It applies to the DEFAULT tool set only, like DisabledTools: an injected
 	// Config.Tools is the host's own assembly and is taken exactly as given.
 	//
-	// The func is evaluated LIVE — once per tool call — so a host whose set of mounts moves
-	// mid-session (a setting a human can flip) is honoured by the next read with no re-wiring
-	// and no reconstruction. Only ABSOLUTE paths resolve against these roots; a relative
-	// argument keeps resolving against WorkspaceDir alone, so no one name can mean two files.
-	// Each root keeps its own fence, so a symlink inside one that escapes it is still refused,
-	// and a root that does not exist yet is skipped rather than failing the call.
+	// It is a GENERIC seam and the engine never defaults it: the TUI mounts its skill source dirs
+	// (Roots) and apogee's shipped skills (Virtual) through it, but nothing here knows what a skill
+	// is — any Driver can mount whatever its user has opened up (ADR 0031). Resolving Roots to real
+	// paths is where the TRUST decision lives, and it belongs to the host: a dir a WORKSPACE
+	// contributed has to be vouched for by whoever knows which base it may not leave (the TUI's
+	// skill provider makes that call in its ReadRoots). Roots is also what the orientation
+	// announces as the read-only LIBRARY roots.
 	//
-	// Every root MUST be the host's symlink-RESOLVED real path: a root reached through a symlink
-	// is refused at the mount and simply never matches, because the fence resolves containment
-	// through real paths while the read relativises lexically, and the two must not disagree
-	// about the same root. Resolving is also where the TRUST decision lives, and it belongs to
-	// the host, not here: a dir a WORKSPACE contributed has to be vouched for by whoever knows
-	// which base it may not leave — a repo that ships its skills folder as a symlink out of the
-	// workspace must not widen the fence by being mounted (the TUI's skill provider makes exactly
-	// that call in its ReadRoots).
-	//
-	// It is a GENERIC seam and the engine never defaults it: the TUI mounts its skill source
-	// dirs through it, but nothing here knows what a skill is — the engine stays skill-agnostic
-	// and any Driver can mount whatever its user has opened up (ADR 0031). Read-only is
-	// structural, not a promise: nothing receives it for a WRITE (the workspaceScopedWriter
-	// discipline, ADR 0012 D1), so mounting a directory never makes it writable — copy_file may
-	// READ its source from a mount, and still writes only inside WorkspaceDir.
-	ExtraReadRoots func() []string
-
-	// ScratchReadRoot reports the session's LIVE scratch dir for the same READ-ONLY tools (and
-	// present_document), so the one dir the orientation announces writable is readable back
-	// through every read tool — a probe the model wrote where it was told to, and could not read
-	// back, was the 2026-09-14 regression this seam closes. It carries ExtraReadRoots' contract —
-	// read-only through these tools, absolute paths only, evaluated LIVE once per tool call,
-	// default-tool-set only — and differs in two things: it is ONE dir, and it is handed over in
-	// the spelling the host ANNOUNCES (a symlinked `~/.apogee` included); the tools resolve it to
-	// its real path themselves, so the announced spelling is accepted verbatim.
-	//
-	// It is a func rather than a copy of ScratchDir because the dir MOVES: ScratchDir is the
+	// Scratch is a func rather than a copy of ScratchDir because the dir MOVES: ScratchDir is the
 	// construction seed and Agent.SetScratchDir moves the live value at every session boundary,
-	// while the tools are built once from this Config — so the host that moves it is the host
-	// that answers here (the TUI's engine holder; a Firing's fixed dir). It rides beside
-	// ExtraReadRoots rather than inside it because that func is ALSO what the orientation
-	// announces as the read-only LIBRARY roots, and the scratch dir has a bullet of its own there.
-	// nil, or a func answering "" ⇒ nothing added — a Driver that manages no sessions is
-	// byte-identical to the fence before this field existed.
-	ScratchReadRoot func() string
-
-	// VirtualReadRoots names read-only trees the same READ-ONLY tools may reach that have NO host
-	// path at all — served from an fs.FS and addressed by the prefix their contents are announced
-	// under (`shipped:<id>`), keyed by that prefix. It carries ExtraReadRoots' contract clause for
-	// clause — read-only, absolute-address-only, evaluated LIVE once per tool call, nil ⇒ none,
-	// default-tool-set only — and differs in exactly one thing: there is no path a root string
-	// could have named, which is why it is a second seam rather than more entries in the first.
-	//
-	// It is as generic as its sibling: apogee's embedded shipped skills are the first thing mounted
-	// through it, but nothing here knows what a skill is (ADR 0031). A WRITE never reaches it —
-	// the address spelling itself is refused on the write side — so mounting a tree here can no
-	// more make it writable than mounting a directory there can.
-	VirtualReadRoots func() map[string]fs.FS
+	// while the tools are built once from this Config — so the host that moves it is the host that
+	// answers here (the TUI's engine holder; a Firing's fixed dir). A host sets the mounts it owns
+	// as sub-fields, never as a whole value: the TUI and a Firing fill Scratch after the projection
+	// filled Roots and Virtual, and a whole-value assign would wipe those.
+	ReadMounts ReadMounts
 
 	// ExternalEffects is the single injectable boundary for non-forkable effects
 	// (network, MCP). nil ⇒ live. The bench injects a deterministic stub for v1;

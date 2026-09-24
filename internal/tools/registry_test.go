@@ -551,9 +551,11 @@ func TestHostToolsOfFillsEveryHostField(t *testing.T) {
 		EnabledTools:      []string{"web_search"},
 		Profile:           domain.ModelProfile{Tools: domain.ToolRosterDelta{Enabled: []string{"console_open"}}},
 		SecretEnvVars:     []string{"SOME_PROVIDER_KEY"},
-		ExtraReadRoots:    func() []string { return []string{t.TempDir()} },
-		ScratchReadRoot:   func() string { return t.TempDir() },
-		VirtualReadRoots:  func() map[string]fs.FS { return nil },
+		ReadMounts: ReadMounts{
+			Roots:   func() []string { return []string{t.TempDir()} },
+			Scratch: func() string { return t.TempDir() },
+			Virtual: func() map[string]fs.FS { return nil },
+		},
 	}, true))
 	for _, name := range zeroHostFields(host) {
 		t.Errorf("HostToolsOf left HostTools.%s zero for a Config that sets every field it "+

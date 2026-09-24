@@ -8,7 +8,7 @@ package main
 // model asked to look at a standard-library file or a dependency's source was refused the very
 // trees its build had just read (session-mining review 2026-09-14). The host probes the two
 // paths once, off the boot path, and folds them onto the same live roots func the skill
-// libraries ride (domain.Config.ExtraReadRoots), so they appear on the orientation's
+// libraries ride (domain.Config.ReadMounts.Roots), so they appear on the orientation's
 // `Read-only library roots:` line and every read tool accepts them.
 //
 // The probe is a HOST function, here and not in internal/tools: which trees a Driver mounts is

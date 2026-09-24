@@ -263,7 +263,16 @@ cmd/apogee/wire_tools_test.go — TestHostToolsForFillsEveryHostField, TestRegis
 - `go test -race -count=1 -run 'ReadScope|Virtual|HostTools|ExtraRoot|DeclareReadOnly' ./internal/tools/`; `go test -race -count=1 -run 'HostToolsFor|RegistryWithMCPThreads' ./cmd/apogee/`
 **Commit:** `refactor(tools): the read mounts are one domain.ReadMounts value`
 
-## 12. Config carries the one ReadMounts
+## 12. Config carries the one ReadMounts — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the header Sources line the regression guard asks to fix already reads "the Scratch-dir paragraph on read mounts" at this tree — nothing to change there
+NOTES (2026-09-24): domain.Config's three long field docs collapse into one ReadMounts field doc that keeps only the Config-specific clauses (default-tool-set only, the engine never defaults it, the host owns the real-path trust call, why Scratch is a func, and the sub-fields-only rule); the shared four-clause contract stays on domain.ReadMounts (item 11). The now-unused "io/fs" import leaves config.go
+NOTES (2026-09-24): the Firing-shows-all-three-mounts test lives in TestFiringConfigSetsEveryUnattendedField (Roots and Virtual non-nil, Scratch answers the record's scratch dir); TestEveryDriverCarriesTheProjectedConfig keeps comparing Roots and Virtual through assertCarriesProjection — Scratch is not the projection's, the session sets it later in wireSession
+NOTES (2026-09-24): gofmt realigned HostToolsOf's whole keyed literal in internal/tools/registry.go once the multi-line ReadMounts literal became one line (alignment only)
+NOTES (2026-09-24): consequential edit — internal/agent/loop.go: made necessary by removing Config.ExtraReadRoots (standingMeasured's comment named it)
+NOTES (2026-09-24): consequential edit — cmd/apogee/wire_engine.go: made necessary by removing Config.ScratchReadRoot (lateEngine.ScratchDir's comment named it)
+NOTES (2026-09-24): consequential edit — cmd/apogee/toolchain_roots.go: made necessary by removing Config.ExtraReadRoots (package comment named it)
+NOTES (2026-09-24): internal/skills/load.go:75's "(VirtualReadRoots)" names the skills Provider method, not the Config field, and stays; load.go:199 was updated
 
 **What:**
 **Goal:** `domain.Config` carries `ReadMounts domain.ReadMounts` and none of `ExtraReadRoots`, `ScratchReadRoot`, `VirtualReadRoots`; the facade exposes an alias; `CONTEXT.md`'s read-mounts entry names the one value. Depends on item 11. Allowed over the file cap (owner call).

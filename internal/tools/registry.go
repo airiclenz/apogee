@@ -147,9 +147,9 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // concept from the in-process tools' host allow/deny, and conflating them would silently restrict the
 // network tools to the confinement list. The web-search endpoint (empty ⇒ web_search's built-in
 // DuckDuckGo default; "off" disables it), the Asker, Presenter and SkillLookup delegates (each nil
-// ⇒ its tool is not offered — ADR 0019, ADR 0065) and the read-only mounts (Config's three mount
-// funcs, gathered into the one ReadMounts — carried as funcs, never evaluated here, so WHICH dirs
-// are mounted stays the host's live question) are handed through verbatim. The roster ladder's two
+// ⇒ its tool is not offered — ADR 0019, ADR 0065) and the read-only mounts (Config.ReadMounts —
+// carried as funcs, never evaluated here, so WHICH dirs are mounted stays the host's live
+// question) are handed through verbatim. The roster ladder's two
 // configuration rungs ride Config too: the GLOBAL `tools.disabled:` / `tools.enabled:` lists and,
 // most specific, the bound model's profile axis — the third axis of the one Model profile the
 // composition root already resolved, on Config.Profile so it cannot drift from the other two (ADR
@@ -162,19 +162,15 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // the engine passes false and the composition root passes the configured value.
 func HostToolsOf(cfg domain.Config, seatChoice bool) HostTools {
 	return HostTools{
-		URLGuard:          security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
-		WebSearchEndpoint: cfg.WebSearchEndpoint,
-		Asker:             cfg.Asker,
-		Presenter:         cfg.Presenter,
-		SkillLookup:       cfg.SkillLookup,
-		Disabled:          cfg.DisabledTools,
-		Enabled:           cfg.EnabledTools,
-		ProfileRoster:     cfg.Profile.Tools,
-		ReadMounts: ReadMounts{
-			Roots:   cfg.ExtraReadRoots,
-			Scratch: cfg.ScratchReadRoot,
-			Virtual: cfg.VirtualReadRoots,
-		},
+		URLGuard:           security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
+		WebSearchEndpoint:  cfg.WebSearchEndpoint,
+		Asker:              cfg.Asker,
+		Presenter:          cfg.Presenter,
+		SkillLookup:        cfg.SkillLookup,
+		Disabled:           cfg.DisabledTools,
+		Enabled:            cfg.EnabledTools,
+		ProfileRoster:      cfg.Profile.Tools,
+		ReadMounts:         cfg.ReadMounts,
 		SecretEnvVars:      cfg.SecretEnvVars,
 		SubAgentSeatChoice: seatChoice,
 	}

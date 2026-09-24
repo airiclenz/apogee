@@ -136,6 +136,11 @@ const TaskListFence = agent.TaskListFence
 // registries, injected state roots). See domain.Config for the field contract.
 type Config = domain.Config
 
+// ReadMounts are the read-only trees (extra disk roots, the session's scratch dir, virtual
+// mounts) the built-in read tools may reach beside the workspace — Config.ReadMounts. See
+// domain.ReadMounts for the contract the three share.
+type ReadMounts = domain.ReadMounts
+
 // ContextConfig governs the structural context reducers (Budget, Compaction).
 type ContextConfig = domain.ContextConfig
 
