@@ -14,9 +14,10 @@
 # handed so the shards spend the box rather than multiply the load — that is sharding's job.
 #
 # A shard is a `go test` process of its own, so every test runs exactly as it does today: none
-# is skipped, weakened, reordered within its shard, or run with different flags — with ONE
-# flag this script sets itself, `-parallel` (see "the parallel bound" below), which changes how
-# many of a process's parallel tests run at once and nothing about any test. Measured on a
+# is skipped, weakened, reordered within its shard, or run with different flags — with TWO
+# flags this script sets itself: `-parallel` (see "the parallel bound" below), which changes how
+# many of a process's parallel tests run at once and nothing about any test, and `-timeout`
+# (see "the timeout" below), which moves the binary's hang alarm to fit that. Measured on a
 # 9-core box before the cmd/apogee sweep: `go test -race ./...` 212s, sharded 82s cold (no
 # timing cache) and around 55s warm.
 #
@@ -60,10 +61,21 @@ TIMINGS_SEED=scripts/test-timings.seed
 # arm64 rpi kernels, where a race binary aborts at startup with `FATAL: Found 39 - Supported 48`
 # (the roster `-list` calls below included). A developer convenience, never a gate: `make check`
 # and CI stay raced, and the run says so on stderr and in its `==>` line.
+#
+# The timeout. `go test`'s default of 10m per test binary assumes the binary fans its tests out
+# GOMAXPROCS-wide; a shard here runs them `-parallel 1` by design (see "the parallel bound"
+# below), so its wall time is close to the SUM of its tests. On a slow box that sum passes 10m
+# with nothing hung: on a Raspberry Pi 5 (4 cores, raced) cmd/apogee costs ~1100-1300 s serial —
+# about 2x the seed — so each of its two default shards needs 600-650 s and died at the alarm
+# with a 4 s test running. 30m covers the slowest plan in reach (APOGEE_TEST_SLOW=1 on that Pi
+# puts the whole package in one shard, ~22m by the same numbers) and still ends a real hang with a goroutine dump
+# long before CI's job limit would kill it without one. A caller's own `-timeout` wins: the
+# extra flags follow these on every `go test` line, and the last value of a flag is the one used.
+TEST_TIMEOUT=30m
 if [ "${APOGEE_TEST_RACE:-}" = 0 ]; then
-	GOFLAGS_TEST=(-count=1)
+	GOFLAGS_TEST=(-count=1 -timeout "$TEST_TIMEOUT")
 else
-	GOFLAGS_TEST=(-race -count=1)
+	GOFLAGS_TEST=(-race -count=1 -timeout "$TEST_TIMEOUT")
 fi
 
 # Which timings the packer reads: the last run's cache when there is one, else the committed
