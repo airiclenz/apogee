@@ -161,14 +161,14 @@ func (v virtualTarget) stat() (fs.FileInfo, error) {
 // reference is a spelling no host path can take (virtualMountRef), so the two resolvers can never
 // both accept one input.
 func (s readScope) virtualLocate(input string) (virtualTarget, bool) {
-	if s.virtual == nil {
+	if s.mounts.Virtual == nil {
 		return virtualTarget{}, false
 	}
 	mount, rel, ok := virtualMountRef(input)
 	if !ok {
 		return virtualTarget{}, false
 	}
-	fsys := s.virtual()[mount]
+	fsys := s.mounts.Virtual()[mount]
 	if fsys == nil {
 		return virtualTarget{}, false
 	}

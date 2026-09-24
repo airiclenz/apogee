@@ -1,7 +1,6 @@
 package tools
 
 import (
-	"io/fs"
 	"strings"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -67,50 +66,13 @@ type HostTools struct {
 	// zero delta ⇒ this rung says nothing and the global lists and the build default decide.
 	ProfileRoster domain.ToolRosterDelta
 
-	// ExtraReadRoots reports directories the READ-ONLY tools may reach outside the workspace.
-	// The contract, in four clauses:
-	//
-	//   - READ-ONLY: the read tools take it, and copy_file for its SOURCE alone — a copy's source
-	//     is a read (2026-08-12). Every WRITE stays workspace-fenced, copy_file's destination
-	//     included, as does every execution tool (the workspaceScopedWriter discipline, ADR 0012
-	//     D1) — mounting a directory here never makes it writable.
-	//   - ABSOLUTE paths only: a relative argument keeps resolving against the workspace root
-	//     alone, so no one name can mean two files.
-	//   - LIVE: the func is evaluated once per tool call, so a mid-session change on the host's
-	//     side is honoured by the next read with no re-wiring.
-	//   - nil ⇒ workspace-only, byte-identical to the fence before this field existed.
-	//
-	// It is a generic seam: a skills library is the first thing mounted through it, but nothing
-	// in this package knows that (ADR 0031 — engine seams stay driver-agnostic). Each root keeps
-	// its own os.Root fence, so a symlink inside one that escapes it is still refused, and a root
-	// that does not exist yet is skipped rather than failing the call.
-	ExtraReadRoots func() []string
-
-	// ScratchReadRoot reports the session's live scratch dir — the one dir the host ANNOUNCES to
-	// the model as writable (the orientation's `Scratch dir:` bullet) and so the one dir the read
-	// tools must never refuse: a model that writes a probe where it was told to and cannot read it
-	// back was misled by its own host. It carries ExtraReadRoots' four clauses — read-only through
-	// these tools (the WRITE side is the confinement box's business, not this seam's), absolute
-	// paths only, live per call, nil or "" ⇒ nothing added — and differs in two things: it is ONE
-	// dir, and it is handed over in the spelling the host announces, which the read scope resolves
-	// to its real path itself (ReadMounts.Scratch). It is a seam of its own rather than an entry
-	// in ExtraReadRoots because that func is also what the host announces as its LIBRARY roots,
-	// and the scratch dir has a bullet of its own there.
-	ScratchReadRoot func() string
-
-	// VirtualReadRoots reports read-only trees the host mounts under a NAME rather than under a
-	// host path, keyed by the prefix their addresses are spelled with (`shipped:`). It carries
-	// ExtraReadRoots' four clauses unchanged — read-only, live per call, nil ⇒ none — and adds
-	// the one property that makes it a separate seam: there is no host path at all, so no root
-	// string could have named these trees (apogee's shipped skills are compiled into the binary,
-	// ADR 0065 §3). Consulted BEFORE the disk roots, which costs nothing: a mount reference is a
-	// spelling no host path can take (path_virtual.go).
-	//
-	// It is generic in the same way ExtraReadRoots is: shipped skills are the first thing mounted
-	// through it, but nothing in this package knows what a skill is (ADR 0031). A write NEVER
-	// reaches it — the spelling itself is refused on the write side — so mounting a tree here can
-	// no more make it writable than mounting a directory there can.
-	VirtualReadRoots func() map[string]fs.FS
+	// ReadMounts are the read-only trees the READ tools resolve a path over beside the workspace:
+	// Roots, the extra disk roots; Scratch, the session's live scratch dir as announced; Virtual,
+	// the trees mounted under a NAME rather than a host path (`shipped:`). The contract — read-only
+	// (copy_file takes it for its SOURCE alone), absolute paths only, each func evaluated live once
+	// per call, zero ⇒ workspace-only — is domain.ReadMounts'. It is one field so no read tool can be
+	// wired with one kind of mount and without the others.
+	ReadMounts ReadMounts
 
 	// SecretEnvVars names environment variables the EXECUTION tools (terminal, python_exec,
 	// run_tests) must drop from the environment they hand a subprocess, on top of apogee's own
@@ -185,9 +147,9 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // concept from the in-process tools' host allow/deny, and conflating them would silently restrict the
 // network tools to the confinement list. The web-search endpoint (empty ⇒ web_search's built-in
 // DuckDuckGo default; "off" disables it), the Asker, Presenter and SkillLookup delegates (each nil
-// ⇒ its tool is not offered — ADR 0019, ADR 0065) and the read-only mounts (ExtraReadRoots,
-// ScratchReadRoot, VirtualReadRoots — carried as funcs, never evaluated here, so WHICH dirs are
-// mounted stays the host's live question) are handed through verbatim. The roster ladder's two
+// ⇒ its tool is not offered — ADR 0019, ADR 0065) and the read-only mounts (Config's three mount
+// funcs, gathered into the one ReadMounts — carried as funcs, never evaluated here, so WHICH dirs
+// are mounted stays the host's live question) are handed through verbatim. The roster ladder's two
 // configuration rungs ride Config too: the GLOBAL `tools.disabled:` / `tools.enabled:` lists and,
 // most specific, the bound model's profile axis — the third axis of the one Model profile the
 // composition root already resolved, on Config.Profile so it cannot drift from the other two (ADR
@@ -200,17 +162,19 @@ func NewDefaultRegistryWithHost(root string, host HostTools) *domain.ToolRegistr
 // the engine passes false and the composition root passes the configured value.
 func HostToolsOf(cfg domain.Config, seatChoice bool) HostTools {
 	return HostTools{
-		URLGuard:           security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
-		WebSearchEndpoint:  cfg.WebSearchEndpoint,
-		Asker:              cfg.Asker,
-		Presenter:          cfg.Presenter,
-		SkillLookup:        cfg.SkillLookup,
-		Disabled:           cfg.DisabledTools,
-		Enabled:            cfg.EnabledTools,
-		ProfileRoster:      cfg.Profile.Tools,
-		ExtraReadRoots:     cfg.ExtraReadRoots,
-		ScratchReadRoot:    cfg.ScratchReadRoot,
-		VirtualReadRoots:   cfg.VirtualReadRoots,
+		URLGuard:          security.NewURLGuard(cfg.URLAllowHosts, cfg.URLDenyHosts),
+		WebSearchEndpoint: cfg.WebSearchEndpoint,
+		Asker:             cfg.Asker,
+		Presenter:         cfg.Presenter,
+		SkillLookup:       cfg.SkillLookup,
+		Disabled:          cfg.DisabledTools,
+		Enabled:           cfg.EnabledTools,
+		ProfileRoster:     cfg.Profile.Tools,
+		ReadMounts: ReadMounts{
+			Roots:   cfg.ExtraReadRoots,
+			Scratch: cfg.ScratchReadRoot,
+			Virtual: cfg.VirtualReadRoots,
+		},
 		SecretEnvVars:      cfg.SecretEnvVars,
 		SubAgentSeatChoice: seatChoice,
 	}
@@ -260,8 +224,8 @@ func DefaultTools(root string) []domain.Tool {
 // appended only when host.SkillLookup is set, ReadOnly (fetching prompt text writes nothing) and
 // no ExternalEffectTool either — the catalog it searches is in this process.
 //
-// host.ExtraReadRoots, host.ScratchReadRoot and host.VirtualReadRoots are threaded, as ONE
-// ReadMounts, into the four read-only file tools (read_file, list_dir, grep, find_files), into
+// host.ReadMounts — the disk roots, the scratch root and the virtual mounts, as ONE value — is
+// threaded into the four read-only file tools (read_file, list_dir, grep, find_files), into
 // present_document (a document under a read mount may be shown — 2026-09-15) and — since
 // 2026-08-12, for its SOURCE alone — into copy_file, each of which resolves an ABSOLUTE path over
 // those roots (or a mount reference over those mounts) when the workspace refuses it; a zero
@@ -303,7 +267,7 @@ func builtinTools(root string, host HostTools) []domain.Tool {
 // every one of them resolves and launches through is the same value — which is what lets a test
 // hand all of them a host carrying fakes.
 func builtinToolsWith(root string, host HostTools, h execHost) []domain.Tool {
-	mounts := host.readMounts()
+	mounts := host.ReadMounts
 	return []domain.Tool{
 		NewReadFile(root, mounts),
 		NewWriteFile(root),
@@ -377,13 +341,6 @@ func (h HostTools) backedTools(all []domain.Tool) []domain.Tool {
 		kept = append(kept, tool)
 	}
 	return kept
-}
-
-// readMounts pairs the host's three read-only mount seams into the one value every read tool
-// takes, so a tool can never be wired with the disk roots and without the scratch root or the
-// virtual mounts.
-func (h HostTools) readMounts() ReadMounts {
-	return ReadMounts{Roots: h.ExtraReadRoots, Scratch: h.ScratchReadRoot, Virtual: h.VirtualReadRoots}
 }
 
 // rosterDeltas reads the two CONFIGURATION rungs of the ladder off HostTools: the global lists the

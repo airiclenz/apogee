@@ -49,7 +49,7 @@ type ListDir struct {
 // mount it names. A zero ReadMounts means workspace-only: byte-identical to the fence before
 // either mount seam existed.
 func NewListDir(root string, mounts ReadMounts) *ListDir {
-	return &ListDir{toolSpec: listDirSpec, scope: mounts.scope(root)}
+	return &ListDir{toolSpec: listDirSpec, scope: readScope{root: root, mounts: mounts}}
 }
 
 // ReadOnly reports that list_dir performs no writes (domain.ReadOnlyTool).

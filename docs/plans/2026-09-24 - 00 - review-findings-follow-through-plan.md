@@ -243,7 +243,11 @@ internal/tui/command_test.go — TestCommandTableDrivesParserAndMenu, TestTheAct
 - `go test -race -count=1 -run 'Command|Help|Effort|Undo|Redo|Confine|ColorScheme|Skills|Schedule|Fork|Compact|Continue|Rename|Actuation|DocMap|Seam' ./internal/tui/`
 **Commit:** `refactor(tui): each slash command's behaviour lives on its command row`
 
-## 11. One ReadMounts value on the tools side
+## 11. One ReadMounts value on the tools side — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): consequential edit — internal/domain/doc.go: made necessary by the new internal/domain/readmounts.go (the package file map, checked by TestDocMapNamesEveryFile)
+NOTES (2026-09-24): consequential edit — internal/domain/config.go: made necessary by removing HostTools.ExtraReadRoots (the skillFilesLine comment named `tools.HostTools.ExtraReadRoots`; now `tools.HostTools.ReadMounts.Roots`); comment only, Config's three fields are untouched until item 12
+NOTES (2026-09-24): readScope is built with the literal `readScope{root: root, mounts: mounts}` at the six constructors (the plan offered that or a newReadScope helper); the four-clause contract that lived on HostTools.ExtraReadRoots/ScratchReadRoot/VirtualReadRoots now lives once on domain.ReadMounts
 
 **What:**
 **Goal:** `domain.ReadMounts{Roots, Scratch, Virtual}` (funcs, live) holds the one contract doc; `tools.ReadMounts` is an alias of it; `HostTools` carries one `ReadMounts` field; `readScope` holds `{root, mounts}`; the host-field drift tests check every sub-field.

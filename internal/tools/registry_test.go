@@ -534,8 +534,9 @@ func TestHostToolsSubAgentSeatChoice_ShapesTheRegisteredSubAgent(t *testing.T) {
 // quietly stops applying on one of the two paths.
 //
 // So the pin is field-by-field: with every Config field this composer reads set to something
-// non-zero and seat choice on, every field of the struct it returns must come back non-zero. A field
-// added to HostTools and missed by the composer fails here.
+// non-zero and seat choice on, every field of the struct it returns must come back non-zero — and
+// every sub-field of its ReadMounts, each mount on its own. A field added to HostTools and missed
+// by the composer fails here.
 func TestHostToolsOfFillsEveryHostField(t *testing.T) {
 	t.Parallel()
 
@@ -554,13 +555,34 @@ func TestHostToolsOfFillsEveryHostField(t *testing.T) {
 		ScratchReadRoot:   func() string { return t.TempDir() },
 		VirtualReadRoots:  func() map[string]fs.FS { return nil },
 	}, true))
+	for _, name := range zeroHostFields(host) {
+		t.Errorf("HostToolsOf left HostTools.%s zero for a Config that sets every field it "+
+			"reads — a host policy that stops here is one the operator configured and never got", name)
+	}
+}
+
+// zeroHostFields names every zero field of a HostTools value, descending into ReadMounts: a
+// struct-level zero check on it passes with ONE of its three funcs set, so a composer that carried
+// the disk roots and dropped the scratch root would slip past it. Each mount is checked on its own,
+// named `ReadMounts.<field>`.
+func zeroHostFields(host reflect.Value) []string {
+	mountsType := reflect.TypeFor[ReadMounts]()
+	var zero []string
 	for i := range host.NumField() {
-		if host.Field(i).IsZero() {
-			t.Errorf("HostToolsOf left HostTools.%s zero for a Config that sets every field it "+
-				"reads — a host policy that stops here is one the operator configured and never got",
-				host.Type().Field(i).Name)
+		field, name := host.Field(i), host.Type().Field(i).Name
+		if field.Type() != mountsType {
+			if field.IsZero() {
+				zero = append(zero, name)
+			}
+			continue
+		}
+		for j := range field.NumField() {
+			if field.Field(j).IsZero() {
+				zero = append(zero, name+"."+mountsType.Field(j).Name)
+			}
 		}
 	}
+	return zero
 }
 
 // TestHostToolsOfLeavesSeatChoiceToTheCaller pins the one field Config does not carry: the engine

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"slices"
 
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/security"
 )
 
@@ -169,39 +170,11 @@ func escapeOrMessage(err error, absent string) string {
 	return absent
 }
 
-// ReadMounts are the read-only trees a read tool resolves a path over BESIDE its own workspace
-// root: Roots names extra DISK roots (host paths the operator opened up — a skills library),
-// Scratch names the session's own scratch dir (the one dir the host announces WRITABLE, which must
-// therefore be readable too), and Virtual names trees that have no host path at all, keyed by the
-// prefix their addresses are spelled under (`shipped:` — path_virtual.go). All three are evaluated
-// LIVE, once per tool call, so a mid-session change on the host's side is honoured by the next
-// read with no re-wiring.
-//
-// The ZERO value is workspace-only and is byte-identical to the fence before any seam existed,
-// which is why it is the value every test and every tool-less host passes. It is one struct rather
-// than three parameters because the three answer ONE question — what else may this tool read — and
-// a tool that grows a fourth kind of mount should not grow a fifth constructor argument.
-type ReadMounts struct {
-	// Roots reports extra read-only DISK roots, each the host's symlink-RESOLVED real path
-	// (readScope's contract). nil ⇒ the workspace root alone.
-	Roots func() []string
-	// Scratch reports the session's live scratch dir in the spelling the host ANNOUNCES it under
-	// (Config.ScratchReadRoot) — resolved to its real path here, on the way into the scope, because
-	// an announced spelling may run through a symlinked home and the disk-root contract is real
-	// paths only. It rides beside Roots rather than inside it so the host's own view of Roots (the
-	// LIBRARY roots it announces on the orientation's `Read-only library roots:` line) stays what it
-	// is. nil, or a func answering "" ⇒ no scratch root.
-	Scratch func() string
-	// Virtual reports the host's virtual mounts by prefix, colon included. nil ⇒ none.
-	Virtual func() map[string]fs.FS
-}
-
-// scope builds the resolver a read tool fences itself with: the workspace root, plus whatever
-// mounts the host named. It is the ONE place the halves are paired, so no tool can be wired with
-// the disk roots and without the scratch root or the virtual ones.
-func (m ReadMounts) scope(root string) readScope {
-	return readScope{root: root, extra: m.Roots, scratch: m.Scratch, virtual: m.Virtual}
-}
+// ReadMounts is the one value a read tool is wired with: the read-only trees it resolves a path
+// over beside its own workspace root. It is an alias of domain.ReadMounts, which holds the
+// contract (read-only, absolute paths only, live per call, zero ⇒ workspace-only), so the host's
+// HostTools field, every read-tool constructor and the Config the host builds speak one type.
+type ReadMounts = domain.ReadMounts
 
 // readScope resolves the path argument of a READ-ONLY tool over the workspace root plus any
 // extra read-only roots the host configured. It is a generic seam: a skills library is the
@@ -213,7 +186,7 @@ func (m ReadMounts) scope(root string) readScope {
 //
 // Two properties are deliberate. Extra roots are reachable by ABSOLUTE path only: a relative
 // argument keeps resolving against the workspace root alone, so no one name can mean two
-// files. And the zero value — extra nil, or a func returning nothing — behaves exactly as the
+// files. And the zero value — mounts.Roots nil, or a func returning nothing — behaves exactly as the
 // single-root helpers it wraps: the fallback never runs, and a refusal carries the workspace's
 // own unchanged message.
 //
@@ -225,20 +198,19 @@ func (m ReadMounts) scope(root string) readScope {
 // accepts the path and written to the workspace root the tool pins itself. No write HALF of any
 // tool takes a readScope and none may: every write stays workspace-fenced through the
 // workspaceScopedWriter discipline (ADR 0012 D1), so a root mounted here never becomes writable.
+//
+// A scope is always the literal readScope{root: root, mounts: mounts}: the mounts travel as the
+// one value, so no tool can be wired with the disk roots and without the scratch root or the
+// virtual ones.
 type readScope struct {
 	// root is the workspace root — always tried first, and the only root a relative path is
 	// ever resolved against.
 	root string
-	// extra reports the extra read-only roots, evaluated once per call. nil means
-	// workspace-only.
-	extra func() []string
-	// scratch reports the session scratch dir as announced, evaluated once per call and folded in
-	// as one more disk root — after extra's, resolved to its real path (extraRoots). nil, or a
-	// func answering "", means no scratch root.
-	scratch func() string
-	// virtual reports the host's virtual read mounts by prefix, evaluated once per call and
-	// consulted BEFORE any disk root (path_virtual.go). nil means disk-only.
-	virtual func() map[string]fs.FS
+	// mounts are the host's read-only mounts, each func evaluated once per call. Roots are the
+	// extra disk roots; Scratch is the session scratch dir as announced, folded in as one more
+	// disk root after Roots', resolved to its real path (extraRoots); Virtual is consulted BEFORE
+	// any disk root (path_virtual.go). The zero value means workspace-only.
+	mounts ReadMounts
 }
 
 // extraRoots evaluates the live root funcs for ONE call, answering nil when there is nothing to
@@ -256,13 +228,13 @@ func (s readScope) extraRoots(input string) []string {
 		return nil
 	}
 	var roots []string
-	if s.extra != nil {
-		roots = s.extra()
+	if s.mounts.Roots != nil {
+		roots = s.mounts.Roots()
 	}
-	if s.scratch == nil {
+	if s.mounts.Scratch == nil {
 		return roots
 	}
-	dir := s.scratch()
+	dir := s.mounts.Scratch()
 	if dir == "" {
 		return roots
 	}
@@ -509,7 +481,7 @@ func virtualSearchTarget(v virtualTarget, given string) (searchTarget, string) {
 // per-root refusal, never an error of its own.
 //
 // A root that is not its OWN real path — one reached through a symlink — is skipped the same way
-// (audit 2026-08-25 F-13): the host's contract (domain.Config.ExtraReadRoots) is that every root
+// (audit 2026-08-25 F-13): the host's contract (domain.ReadMounts.Roots) is that every root
 // it mounts is already symlink-resolved, so a root that is not was never vouched for by anybody.
 //
 // That rule is also what lets the fence's two containment judgements agree. security.ResolveInRoot judges

@@ -70,7 +70,7 @@ type ReadFile struct {
 // mount it names. A zero ReadMounts means workspace-only: byte-identical to the fence before
 // either mount seam existed.
 func NewReadFile(root string, mounts ReadMounts) *ReadFile {
-	return &ReadFile{toolSpec: readFileSpec, scope: mounts.scope(root)}
+	return &ReadFile{toolSpec: readFileSpec, scope: readScope{root: root, mounts: mounts}}
 }
 
 // ReadOnly reports that read_file performs no writes (domain.ReadOnlyTool).

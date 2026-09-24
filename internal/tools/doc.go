@@ -326,7 +326,8 @@
 // failure is rendered as, and readScope — the READ-only
 // multi-root resolver that tries the workspace first and then any extra read-only roots the
 // host mounts, returning the matched root so a caller pins every later fenced operation to it —
-// plus ReadMounts, the one value a read tool is wired with, and searchTarget, the resolved subject
+// plus ReadMounts (an alias of domain.ReadMounts, which holds its contract), the one value a read
+// tool is wired with, and searchTarget, the resolved subject
 // grep and find_files walk. path_virtual.go is that resolver's VIRTUAL half: read-only trees the
 // host mounts under a NAME (`shipped:<id>`) rather than under a host path, because they have none
 // — the mount-reference grammar, the fs.FS-backed target every read tool serves them through, and

@@ -319,8 +319,8 @@ func (stubHostAsker) Ask(context.Context, domain.AskRequest) (domain.AskAnswer, 
 //
 // So the pin is field-by-field rather than by name, on the Config THIS composition root builds
 // (validCfg) with seat choice on: with every field the composer reads set to something non-zero,
-// EVERY field of the struct it returns must come back non-zero. TestHostToolsOfFillsEveryHostField
-// (internal/tools) is the same pin on the composer's own side.
+// EVERY field of the struct it returns must come back non-zero, and every mount of its ReadMounts.
+// TestHostToolsOfFillsEveryHostField (internal/tools) is the same pin on the composer's own side.
 func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	t.Parallel()
 
@@ -340,11 +340,24 @@ func TestHostToolsForFillsEveryHostField(t *testing.T) {
 	cfg.VirtualReadRoots = func() map[string]fs.FS { return nil }
 
 	host := reflect.ValueOf(tools.HostToolsOf(cfg, true))
+	mountsType := reflect.TypeFor[tools.ReadMounts]()
 	for i := range host.NumField() {
-		if host.Field(i).IsZero() {
+		field, name := host.Field(i), host.Type().Field(i).Name
+		if field.Type() == mountsType {
+			// A struct-level zero check passes with ONE mount set, so each is checked on its own.
+			for j := range field.NumField() {
+				if field.Field(j).IsZero() {
+					t.Errorf("HostToolsOf left tools.HostTools.%s.%s zero for a Config that mounts "+
+						"it — the MCP-aware assembly must carry every read mount the engine's own "+
+						"build would have", name, mountsType.Field(j).Name)
+				}
+			}
+			continue
+		}
+		if field.IsZero() {
 			t.Errorf("HostToolsOf left tools.HostTools.%s zero for a Config that sets every field "+
 				"it reads — the MCP-aware assembly must carry every host policy the engine's own "+
-				"build would have", host.Type().Field(i).Name)
+				"build would have", name)
 		}
 	}
 }

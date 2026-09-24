@@ -65,7 +65,7 @@ type FindFiles struct {
 // mount it names. A zero ReadMounts means workspace-only: byte-identical to the fence before
 // either mount seam existed.
 func NewFindFiles(root string, mounts ReadMounts) *FindFiles {
-	return &FindFiles{toolSpec: findFilesSpec, scope: mounts.scope(root)}
+	return &FindFiles{toolSpec: findFilesSpec, scope: readScope{root: root, mounts: mounts}}
 }
 
 // ReadOnly reports that find_files performs no writes (domain.ReadOnlyTool).

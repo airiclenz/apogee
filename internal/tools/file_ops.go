@@ -91,7 +91,7 @@ func NewCopyFile(root string, mounts ReadMounts) *CopyFile {
 	return &CopyFile{
 		toolSpec: copyFileSpec,
 		root:     root,
-		scope:    mounts.scope(root),
+		scope:    readScope{root: root, mounts: mounts},
 	}
 }
 

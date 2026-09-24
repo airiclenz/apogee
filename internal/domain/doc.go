@@ -85,7 +85,9 @@
 // the structured half of an outcome, written for a host rather than for the model. cwdline.go
 // is CwdLinePrefix and StripCwdLine — the shape of the `cwd:` line a subprocess tool opens its
 // result with, and the one strip every host-side reader of that result shares, so a host reads
-// it without importing internal/tools. confinement.go is the Confiner interface, its
+// it without importing internal/tools. readmounts.go is ReadMounts — the read-only trees (disk
+// roots, the session scratch dir, virtual mounts) a read tool resolves a path over beside its
+// workspace root, and the one contract they share. confinement.go is the Confiner interface, its
 // capability and box value types, the per-call Confinement / SubprocessPermit context
 // carriers (ADR 0012), and the WriteEscapePermit that carries one approved out-of-workspace
 // write target (ADR 0049). Those carriers, the ask.go and promptslot.go ones, and the undo,

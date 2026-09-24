@@ -996,7 +996,7 @@ const SkillDirToken = "{{SKILL_DIR}}"
 // model off the terminal (a shell command naming the home skill library trips the dangerous-action
 // guard's ~/.apogee write rule, the dedicated reads do not). It is hard-wired harness text, never
 // the user-definable system prompt: the address is only useful together with the read-only tools'
-// extra-roots mount (tools.HostTools.ExtraReadRoots), which the same harness wires.
+// extra-roots mount (tools.HostTools.ReadMounts.Roots), which the same harness wires.
 const skillFilesLine = "files: %s — this skill's bundled files; read one (read_file, " +
 	"list_dir, grep or find_files) or copy one out (copy_file) only when these " +
 	"instructions call for it — use these tools, never terminal commands, to " +

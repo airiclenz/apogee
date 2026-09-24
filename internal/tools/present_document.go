@@ -78,7 +78,7 @@ func NewPresentDocument(root string, mounts ReadMounts, presenter domain.Present
 	return &PresentDocument{
 		toolSpec:  presentDocumentSpec,
 		root:      root,
-		scope:     mounts.scope(root),
+		scope:     readScope{root: root, mounts: mounts},
 		presenter: presenter,
 	}
 }

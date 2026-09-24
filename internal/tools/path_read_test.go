@@ -95,7 +95,7 @@ func scopeFixture(t *testing.T) (workspace, extra string, scope readScope) {
 	writeFixtureFile(t, filepath.Join(workspace, "in-workspace.txt"), "workspace bytes")
 	writeFixtureFile(t, filepath.Join(extra, "skill.md"), "skill bytes")
 
-	return workspace, extra, readScope{root: workspace, extra: func() []string { return []string{extra} }}
+	return workspace, extra, readScope{root: workspace, mounts: ReadMounts{Roots: func() []string { return []string{extra} }}}
 }
 
 // TestReadScopeResolve pins which root a path is accepted under: the workspace first
@@ -176,7 +176,7 @@ func TestReadScopeWorkspaceOnlyUnchanged(t *testing.T) {
 
 	scopes := map[string]readScope{
 		"nil func":    {root: workspace},
-		"empty slice": {root: workspace, extra: func() []string { return nil }},
+		"empty slice": {root: workspace, mounts: ReadMounts{Roots: func() []string { return nil }}},
 	}
 
 	for name, scope := range scopes {
@@ -214,12 +214,12 @@ func TestReadScopeExtraRootsAreLive(t *testing.T) {
 	writeFixtureFile(t, filepath.Join(extra, "skill.md"), "skill bytes")
 
 	var mounted bool
-	scope := readScope{root: workspace, extra: func() []string {
+	scope := readScope{root: workspace, mounts: ReadMounts{Roots: func() []string {
 		if !mounted {
 			return nil
 		}
 		return []string{extra}
-	}}
+	}}}
 	target := filepath.Join(extra, "skill.md")
 
 	if _, _, err := scope.resolve(target); !errors.Is(err, ErrPathEscape) {
@@ -268,7 +268,7 @@ func TestReadScopeScratchRootIsLive(t *testing.T) {
 	announced := filepath.Join(link, "session-a")
 
 	var scratch string
-	scope := readScope{root: workspace, scratch: func() string { return scratch }}
+	scope := readScope{root: workspace, mounts: ReadMounts{Scratch: func() string { return scratch }}}
 	spelled := filepath.Join(announced, "probe.txt")
 
 	if _, _, err := scope.resolve(spelled); !errors.Is(err, ErrPathEscape) {
@@ -317,9 +317,11 @@ func TestReadScopeScratchRootLeavesTheHostSliceAlone(t *testing.T) {
 	backing := make([]string, 1, 4)
 	backing[0] = extra
 	scope := readScope{
-		root:    workspace,
-		extra:   func() []string { return backing },
-		scratch: func() string { return scratch },
+		root: workspace,
+		mounts: ReadMounts{
+			Roots:   func() []string { return backing },
+			Scratch: func() string { return scratch },
+		},
 	}
 
 	root, _, err := scope.resolve(filepath.Join(scratch, "probe.txt"))
@@ -349,7 +351,7 @@ func TestReadScopeSkipsUnusableExtraRoot(t *testing.T) {
 	notADir := filepath.Join(tempRoot(t), "a-file")
 	writeFixtureFile(t, notADir, "not a directory")
 
-	scope := readScope{root: workspace, extra: func() []string { return []string{missing, notADir, extra} }}
+	scope := readScope{root: workspace, mounts: ReadMounts{Roots: func() []string { return []string{missing, notADir, extra} }}}
 
 	root, _, err := scope.resolve(filepath.Join(extra, "skill.md"))
 	if err != nil {
@@ -361,7 +363,7 @@ func TestReadScopeSkipsUnusableExtraRoot(t *testing.T) {
 
 	// A path under the absent root alone is refused, with the workspace's message.
 	underMissing := filepath.Join(missing, "skill.md")
-	onlyMissing := readScope{root: workspace, extra: func() []string { return []string{missing} }}
+	onlyMissing := readScope{root: workspace, mounts: ReadMounts{Roots: func() []string { return []string{missing} }}}
 	_, _, err = onlyMissing.resolve(underMissing)
 	_, wantErr := security.ResolveInRoot(underMissing, workspace)
 	if err == nil || err.Error() != wantErr.Error() {
@@ -412,7 +414,7 @@ func TestReadScopeRefusesAnExtraRootReachedThroughASymlink(t *testing.T) {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
 
-	linked := readScope{root: workspace, extra: func() []string { return []string{link} }}
+	linked := readScope{root: workspace, mounts: ReadMounts{Roots: func() []string { return []string{link} }}}
 	throughLink := filepath.Join(link, "secret.txt")
 
 	if _, _, err := linked.resolve(throughLink); !errors.Is(err, ErrPathEscape) {
@@ -425,7 +427,7 @@ func TestReadScopeRefusesAnExtraRootReachedThroughASymlink(t *testing.T) {
 		t.Errorf("readBounded(%q) returned %d bytes, want a refusal", throughLink, len(data))
 	}
 
-	resolvedMount := readScope{root: workspace, extra: func() []string { return []string{target} }}
+	resolvedMount := readScope{root: workspace, mounts: ReadMounts{Roots: func() []string { return []string{target} }}}
 	direct := filepath.Join(target, "secret.txt")
 	data, failMessage := resolvedMount.readBounded(direct)
 	if failMessage != "" {
@@ -456,7 +458,7 @@ func TestReadScopeReadsAnExtraRootFileBySymlinkSpelling(t *testing.T) {
 	if err := os.Symlink(extra, link); err != nil {
 		t.Skipf("symlinks unavailable: %v", err)
 	}
-	scope := readScope{root: workspace, extra: func() []string { return []string{extra} }}
+	scope := readScope{root: workspace, mounts: ReadMounts{Roots: func() []string { return []string{extra} }}}
 	spelled := filepath.Join(link, "skill", "SKILL.md")
 
 	data, failMessage := scope.readBounded(spelled)

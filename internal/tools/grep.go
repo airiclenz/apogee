@@ -170,7 +170,7 @@ type Grep struct {
 // A zero ReadMounts means workspace-only: byte-identical to the fence before either mount seam
 // existed.
 func NewGrep(root string, mounts ReadMounts) *Grep {
-	return &Grep{toolSpec: grepSpec, scope: mounts.scope(root)}
+	return &Grep{toolSpec: grepSpec, scope: readScope{root: root, mounts: mounts}}
 }
 
 // ReadOnly reports that grep performs no writes (domain.ReadOnlyTool).
