@@ -145,7 +145,7 @@ func TestRenderDiffDetailStandalone(t *testing.T) {
 	// wrap rail rather than stopping at the last glyph — so a body of unequal lines reads as one
 	// field with a straight right edge and a short line's trailing space says added/removed like the
 	// rest of it — while the columns left of the marker stay in the plain detail tone (ratified
-	// calls 2 and 3 of docs/plans/"2026-08-19 - 05"; renderHangingRow).
+	// calls 2 and 3 of docs/plans/archived/"2026-08-19 - 05"; renderHangingRow).
 	//
 	// Those columns are the four the body hangs under AND the row's own number gutter: the number
 	// says WHERE the line is, not that it changed, so it sits outside the band exactly as the split

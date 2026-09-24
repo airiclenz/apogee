@@ -50,7 +50,7 @@ func splitPlain(rows []string) []string {
 // meet, and each pane numbering its own file across it (before 204 against after 205).
 //
 // EITHER pane squares its filled rows to the pane's width now, which is what carries a band to the
-// pane's edge (ratified call 2 of docs/plans/"2026-08-19 - 05") — so the trailing blanks below are
+// pane's edge (ratified call 2 of docs/plans/archived/"2026-08-19 - 05") — so the trailing blanks below are
 // the tint's own field on a changed row and an invisible pad on a context one, and the divider
 // stands in the column it always did.
 func TestSplitDiffRowsPaintsTheLayoutSketch(t *testing.T) {
@@ -276,7 +276,7 @@ func TestSplitDiffRowsColourTheMarkerWithItsLine(t *testing.T) {
 }
 
 // A short line's band runs to the pane's EDGE rather than to its last glyph (ratified call 2 of
-// docs/plans/"2026-08-19 - 05"): the tint is where the change is said now, and a band that stopped
+// docs/plans/archived/"2026-08-19 - 05"): the tint is where the change is said now, and a band that stopped
 // at the text would say nothing under the trailing space — which on a pane of code is most of the
 // row. The pad has to sit INSIDE the SGR run, because a styled row closes with a reset and spaces
 // appended after it would show the terminal's own background through the very band they were added
@@ -365,7 +365,7 @@ func TestSplitDiffMarkerColumnMatchesTheStackedReading(t *testing.T) {
 
 // The STACKED reading holds its number out of the band exactly as the panes do: a line number says
 // WHERE a line is, not that it changed, so it is painted chrome and the tint starts at the marker
-// (ratified call 3 of docs/plans/"2026-08-19 - 05", "the gutter stays chrome"). The marker itself
+// (ratified call 3 of docs/plans/archived/"2026-08-19 - 05", "the gutter stays chrome"). The marker itself
 // rides the band on purpose — it is the palette-proof signal (ADR 0052's 2026-08-19 amendment) —
 // so what the two readings agree about is precisely where the band begins.
 //

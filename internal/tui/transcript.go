@@ -562,7 +562,7 @@ func (t *transcript) runEnd(spawn string) int {
 //
 // The notes slide to the tail instead of the work sliding around them: a note is the HOST speaking
 // to the human, so it belongs after the stretch it interrupted rather than inside a delegate's run
-// (design call 4 of docs/plans/"2026-08-18 - 00 - open-defects-plan"). Nothing about the note
+// (design call 4 of docs/plans/archived/"2026-08-18 - 00 - open-defects-plan"). Nothing about the note
 // itself changes — same depth 0, same text, same unrailed block.
 func (t *transcript) tailBeforeHostNotes(e entry) int {
 	at := len(t.entries)

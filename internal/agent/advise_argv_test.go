@@ -24,7 +24,7 @@ import (
 )
 
 // armSentence is the advise admission arm's frozen instrumentation sentence, verbatim from
-// ../apogee-sim/docs/plans/2026-09-08 - 01 - advise-admission-arm-pre-registration.md. armDigest is
+// ../apogee-sim/docs/plans/archived/2026-09-08 - 01 - advise-admission-arm-pre-registration.md. armDigest is
 // the SHA-256 that document pins over the span AS DELIVERED on the firing event — Detail, sentence
 // plus its one trailing newline — which is what apogee-sim reads to attribute an effect. The two
 // are reproduced here so a change to the trailer's plumbing that alters the delivered bytes fails

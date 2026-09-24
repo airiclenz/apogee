@@ -234,7 +234,7 @@ func TestHangingWrapCollapsesTheHangItCannotHold(t *testing.T) {
 // A style that carries a BACKGROUND is filled out to its wrap rail, on the first row and on every
 // wrapped continuation alike: that is how a diff line's tint reaches the block's edge under a short
 // line's trailing space instead of stopping at the last glyph (ratified calls 2 and 6 of
-// docs/plans/"2026-08-19 - 05"). The pad has to sit INSIDE the SGR run — a styled line closes with a
+// docs/plans/archived/"2026-08-19 - 05"). The pad has to sit INSIDE the SGR run — a styled line closes with a
 // reset, so spaces appended after it would show the terminal's own background through the very band
 // they were added to fill — which is what the reset-at-the-end assertion below pins.
 //

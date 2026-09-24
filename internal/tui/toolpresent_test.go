@@ -2757,7 +2757,7 @@ func TestStackedDiffLinesRendersTheLayoutSketch(t *testing.T) {
 
 	// Every numbered row parts into a chrome gutter and a banded text — the number and its trailing
 	// space on one side of the style seam, the marker and the code on the other (detailLine.Gutter,
-	// ratified call 3 of docs/plans/"2026-08-19 - 05"). The ⋯ rule shows neither and carries no
+	// ratified call 3 of docs/plans/archived/"2026-08-19 - 05"). The ⋯ rule shows neither and carries no
 	// gutter at all.
 	want := []detailLine{
 		{Gutter: " 88 ", Text: "  func paint(w int) error {"},

@@ -2,7 +2,7 @@
 #
 # Thin convenience wrapper over the Go toolchain. The source of truth for the
 # build is `go build`; these targets just give the common invocations one-word
-# names and bundle the Phase-2 acceptance gate (docs/plans/phase-2-detail-plan.md §7)
+# names and bundle the Phase-2 acceptance gate (docs/plans/archived/phase-2-detail-plan.md §7)
 # into a single `make check`.
 
 BINARY  := apogee

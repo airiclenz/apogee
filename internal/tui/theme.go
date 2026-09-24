@@ -45,7 +45,7 @@ const (
 	glyphMenuUnselected = "·" // U+00B7 MIDDLE DOT — an unselected row of a menu-style popup (popupSpec.menuRows): glyphUser's counterpart, deliberately NOT glyphBullet's "•", because a menu row is an option waiting to be pointed at rather than an item of a list
 	glyphSubRail        = "│"
 	glyphMemberGutter   = "│" // U+2502 LIGHT VERTICAL — the gutter continuing an EXPANDED group member's rows under its ┝ (memberGutter, render.go). Its shape is glyphSubRail's and deliberately NOT shared with it: the member gutter is painted in the detail tone and the sub-agent rail in the label gold (design call 8), so an open member nested inside a run cannot be read as a frame of the run.
-	glyphRailCorner     = "┌" // U+250C LIGHT DOWN AND RIGHT — the corner a delegation's header row opened its frame with, at the very left of the row, before ADR 0063 left a run the collapsed row and its view (subAgentOpenMarker, docs/layout/tool-layout.md "Grouped Sub-agents"). It is the one cell of that marker painted in the rail's gold, because it IS the rail's top end (design call 2 of docs/plans/"2026-08-11 - 01")
+	glyphRailCorner     = "┌" // U+250C LIGHT DOWN AND RIGHT — the corner a delegation's header row opened its frame with, at the very left of the row, before ADR 0063 left a run the collapsed row and its view (subAgentOpenMarker, docs/layout/tool-layout.md "Grouped Sub-agents"). It is the one cell of that marker painted in the rail's gold, because it IS the rail's top end (design call 2 of docs/plans/archived/"2026-08-11 - 01")
 	glyphRailTee        = "┶" // U+2536 LIGHT UP AND HORIZONTAL AND HEAVY LEFT — where the frame's arm meets the delegation's own branch on that header row. It stands in the row's detail tone with the ─ beside it, not in the rail's gold: it is this row's branch marker, the ┝/┕ of a member that happens to be open (design call 2)
 	glyphRailClose      = "┊" // U+250A BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL — the lone line closing a group member's span where the next row of its group follows it (no DELEGATION opens a span in place since ADR 0063; a grouped skill fetch expands INLINE and does), in the rail's gold (railJoin; a group's last member and a lone run show none). Its dashes are the point: the frame stops rather than continuing, which is what a solid │ under the last row of a span would say
 	glyphDone           = "✓" // U+2713 CHECK MARK — a FINISHED delegation's mark, after its name on the row and before the leaders, in the scheme's `success` green (theme.successMark, design call 6). A failed run wears no glyph at all: its red outcome slot is the whole of the failure marking (summaryStyle)
@@ -145,7 +145,7 @@ type theme struct {
 	// volumes, so a block does not change what it IS by being opened. That is why the pair is two
 	// roles of one ramp rather than two free colours, and why the shipped schemes are guarded to keep
 	// them apart in each direction their terminal calls "brighter" (design call 9 of
-	// docs/plans/"2026-08-06 - 03"; TestBuiltinSchemesKeepBothMutedStepsDistinct).
+	// docs/plans/archived/"2026-08-06 - 03"; TestBuiltinSchemesKeepBothMutedStepsDistinct).
 	//
 	// EVERY detail line rides this ramp, a diff line included: a diff line's text is the plain tone
 	// of its state like any other, and what says added or removed is the BAND under it (diffAdded /
@@ -164,7 +164,7 @@ type theme struct {
 	// and not the detail gray that paints the slot because the slot is apogee's reading of what the
 	// call came to — "12 lines", "exit 0 · 1.2s" — rather than a line of the output itself, so it
 	// speaks in the same voice as the marker that counts the body away (design call 2 of
-	// docs/plans/"2026-08-11 - 00"). A stated role rather than a tone computed at render time, since
+	// docs/plans/archived/"2026-08-11 - 00"). A stated role rather than a tone computed at render time, since
 	// every colour on screen is a role a scheme can name (ADR 0040).
 	toolMarkerBright lipgloss.Style
 	subRail          lipgloss.Style // the sub-agent frame: the │ rail down a Depth > 0 block, the ┌ that opened a delegation's header row and the ┊ that closed its span (both pre-ADR 0063) (toolLabel's `tool-header` role — one tone for the whole frame)

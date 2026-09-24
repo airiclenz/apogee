@@ -762,7 +762,7 @@ type stackedRow struct {
 // The number is handed over as the line's GUTTER rather than as the head of its text because the
 // two are painted differently — the band a diff kind wears is the text's field, and a number inside
 // that string would be tinted along with it, where ratified call 3 of
-// docs/plans/"2026-08-19 - 05" holds the number gutter chrome. The marker stays ON the band: it is
+// docs/plans/archived/"2026-08-19 - 05" holds the number gutter chrome. The marker stays ON the band: it is
 // the change's palette-proof signal and rides the tint on purpose (ADR 0052's 2026-08-19
 // amendment), which is exactly how the split panes part the same three pieces (splitCell.paint).
 //

@@ -16,7 +16,7 @@ import (
 // Windows paths apogee actually runs on, that trade was measured and it is a pure loss: the
 // atomicity never arrives, and paying for it costs a flicker mitigation that does.
 //
-// THE MEASUREMENT (docs/plans/2026-08-06 - 04, finding 34). Captured out of a real pseudoconsole,
+// THE MEASUREMENT (docs/plans/archived/2026-08-06 - 04 - windows-tui-ghosting-plan.md, finding 34). Captured out of a real pseudoconsole,
 // both arms of an A/B on this exact switch: ConPTY forwards apogee's `CSI ?2026h` and `CSI ?2026l`
 // back to back as an EMPTY pair, and re-serializes the frame's cells AFTER that window has already
 // closed. The two arms' 9260- and 9228-byte captures are byte-identical once the two empty pairs

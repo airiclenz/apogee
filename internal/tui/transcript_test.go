@@ -1955,7 +1955,7 @@ func TestSubAgentStreamStaysInsideItsCollapsedRun(t *testing.T) {
 
 // A delegate's live words stand inside the RUN VIEW of the child that streamed them, at the top
 // level of that view and with no rail to say otherwise (ADR 0063, render.go's rooted paint). This is
-// design call 4 of docs/plans/"2026-08-11 - 01" as the view states it: what the LIVE paint draws is
+// design call 4 of docs/plans/archived/"2026-08-11 - 01" as the view states it: what the LIVE paint draws is
 // exactly what the COMMITTED paint draws, so nothing a reader is watching jumps when a token stops
 // streaming and starts being scrollback. The same run is painted twice — once with the words still
 // in the buffer, once after its MessageEvent has folded those same words into an entry of the run —

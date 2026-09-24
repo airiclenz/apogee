@@ -245,7 +245,7 @@ func insideCollapsedRunAtDepth(entries []entry, depth int) bool {
 // refuses to write one in the first place.
 //
 // A LONE run is drawn in the very shape a grouped one is (design call 3 of
-// docs/plans/"2026-08-11 - 01"): the same cascading summary of the work behind it
+// docs/plans/archived/"2026-08-11 - 01"): the same cascading summary of the work behind it
 // (subAgentSummary), and the same ✓ after its name once it has reported (subAgentFinished).
 // Whether the delegations either side of it happened to fold it into a list is a fact about the
 // frame around a delegation and never about the delegation, so the two paths ask the same two
@@ -477,7 +477,7 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 }
 
 // subAgentFinished asks whether a delegation has earned the done ✓ its row wears after its name
-// (design call 6 of docs/plans/"2026-08-11 - 01"): it has reported, and what it reported was not a
+// (design call 6 of docs/plans/archived/"2026-08-11 - 01"): it has reported, and what it reported was not a
 // failure. A run still working wears nothing — the blinking star is what says it is going — and a
 // FAILED run wears nothing either, because the spec makes its red outcome slot the whole of the
 // failure marking (summaryStyle); a ✓ and a red verdict on one row would be the block saying both

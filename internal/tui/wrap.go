@@ -37,7 +37,7 @@ func wrapRail(width int) int { return max(1, width) }
 // renderToRail renders ONE wrapped line on style, padding it out to rail columns inside that style
 // when — and only when — the style carries a background. It is the one rule every wrap rail in this
 // package inherits, which is what lets the diff band reach the block's edge with no call site
-// knowing anything about diffs (ratified call 6 of docs/plans/"2026-08-19 - 05"; the six detailStyle
+// knowing anything about diffs (ratified call 6 of docs/plans/archived/"2026-08-19 - 05"; the six detailStyle
 // painters are unchanged).
 //
 // The BACKGROUND is what the question asks, not the kind of line: a band that stopped at the last
@@ -79,7 +79,7 @@ func hangPrefixWidth(th theme, marker string, width int) int {
 // prefix off first — the marker on the first row, the blank indent under it on every continuation —
 // paints that prefix with the band's background CLEARED, and fills only the text out to the rail
 // left of it. It is the division gutteredWrap already draws between its gutter and its text, and it
-// is what ratified call 3 of docs/plans/"2026-08-19 - 05" asks of every frame: the band is the
+// is what ratified call 3 of docs/plans/archived/"2026-08-19 - 05" asks of every frame: the band is the
 // TEXT's field, so the ┝/┕ branch glyph and the blank column beneath it stay chrome rather than
 // reading as part of the change. Prefix and band tile the row exactly once between them, so a banded
 // row still measures the full width.

@@ -469,7 +469,7 @@ func loneDelegation(tr *transcript, id, task, path, report string) {
 }
 
 // A LONE delegation wears the very ROW a grouped one does (design call 3 of
-// docs/plans/"2026-08-11 - 01"): folding changes what stands AROUND a delegation and never the
+// docs/plans/archived/"2026-08-11 - 01"): folding changes what stands AROUND a delegation and never the
 // delegation itself, so the row a reader learned to read in a fan-out reads the same when the run
 // happened to stand by itself. Under ADR 0063 that row is the whole of the shape either way — a run
 // opens as a VIEW and never as a rail in place, so neither shape has a frame of its own to differ in.

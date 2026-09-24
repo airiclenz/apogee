@@ -204,7 +204,7 @@ func leaderRowIn(th theme, left string, paint func(string) string, summary branc
 // slotSeparator is what the outcome slot joins its two halves with — the middle dot the typed stats
 // already speak in ("exit 0 · 1.2s", `· recursive` on a target: qualifiedTarget) — so a slot that
 // gained a remainder count reads as one phrase in one voice rather than as two marks that happened
-// to land in the same column (design call 4 of docs/plans/"2026-08-11 - 00").
+// to land in the same column (design call 4 of docs/plans/archived/"2026-08-11 - 00").
 const slotSeparator = " · "
 
 // affordableSlot is the outcome slot's text at THIS width: the summary, and the remainder count
@@ -277,7 +277,7 @@ func toolRowCells(th theme, width int) int {
 // both verdicts stand, failure wins — a run the engine faulted is red whatever its words say.
 //
 // It is the MARKER role and not the two-tone detail gray the rest of the row wears (design call 2 of
-// docs/plans/"2026-08-11 - 00"). The slot is apogee's reading of what the call came to rather than a
+// docs/plans/archived/"2026-08-11 - 00"). The slot is apogee's reading of what the call came to rather than a
 // line the tool printed — "12 lines", "exit 0 · 1.2s", the quoted line a promotion lifted out of the
 // body — and it is the very role the "+N more lines" count it now carries has always worn
 // (slotText), never the tone of the output it is summarising. Under `dark` the old tone was the very
@@ -351,7 +351,7 @@ func failedSummary(text string) bool {
 // `stopped at its step cap` — a run the engine stopped mid-task, which did not finish — stays in the
 // ordinary marker tone, and diagnostics' `clean`, a test command's `PASS` and a process's `exit 0`
 // are readings a TOOL made of its own work rather than a verdict apogee reached about a run it drove
-// (ratified call 3 of docs/plans/"2026-08-31 - 05"). The match is on the WHOLE phrase for the same
+// (ratified call 3 of docs/plans/archived/"2026-08-31 - 05"). The match is on the WHOLE phrase for the same
 // reason: a sentence that merely contains the word — a report line, a target reading "done deal" —
 // is not this verdict.
 func succeededSummary(text string) bool {

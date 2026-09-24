@@ -335,7 +335,7 @@ func renderExpandedMember(th theme, tv toolView, marker, gutter string, width, r
 // marker and every row after it with gutter, where hangingWrap would indent them by the marker's
 // width in blanks. The prefixes are painted in the detail tone and the wrapped text in its own
 // style, so a diff line's band starts where the gutter beside it ends and the gutter stays chrome
-// (ratified call 3 of docs/plans/"2026-08-19 - 05").
+// (ratified call 3 of docs/plans/archived/"2026-08-19 - 05").
 //
 // Its rail is therefore the room LEFT of the prefix, not the block width: a banded style fills out
 // to the same column the wrap broke at (renderToRail), so the two prefixes and the band tile the

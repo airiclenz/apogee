@@ -248,7 +248,7 @@ func (r splitRow) paint(th theme, gutter, code int) []string {
 // The number wears the muted role OUTSIDE the band and the marker rides INSIDE it, so a diff line's
 // tint runs from the marker column to the pane's edge on the first row and on every continuation
 // row alike, while the number gutter beside it stays chrome (ratified calls 2 and 3 of
-// docs/plans/"2026-08-19 - 05"). The marker is a glyph signal ON the band rather than a colour of
+// docs/plans/archived/"2026-08-19 - 05"). The marker is a glyph signal ON the band rather than a colour of
 // its own — the mark that still reads on a monochrome pipe and on a terminal that drops backgrounds
 // — which is ADR 0052's 2026-08-19 amendment superseding the "the marker travels with the TEXT's
 // colour" rationale of its ratified calls 6 and 7.

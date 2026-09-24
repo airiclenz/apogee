@@ -1,6 +1,6 @@
 name: CI
 
-# Phase-0 CI (docs/plans/phase-0-detail-plan.md §2). Gates formatting now,
+# Phase-0 CI (docs/plans/archived/phase-0-detail-plan.md §2). Gates formatting now,
 # tests as they land (the capstone harness, P0.6). Cross-compiles the v1 platform matrix
 # so the single static binary keeps building everywhere, Windows fast-follow included.
 # Two further gates run as jobs of their own: `lint` (golangci-lint over the module) and

@@ -23,7 +23,7 @@ package tui
 // block that names one has no live state to express: a Firing runs in a session of its own.
 //
 // marker replaces the branch marker the SINGLE shape's row would lead with — the ┌─┶ a lone
-// delegation opened its frame with (design call 3 of docs/plans/"2026-08-11 - 01") until ADR 0063
+// delegation opened its frame with (design call 3 of docs/plans/archived/"2026-08-11 - 01") until ADR 0063
 // left a run its collapsed row and its view, since when no caller names one. Its ZERO VALUE is the
 // ┝/┕ of the tree, so every block keeps the marker it always drew without saying so. It reaches the single shape alone: a group's markers are
 // the LIST's — which row closes it is the list's own arithmetic — and a caller cannot hand one in.

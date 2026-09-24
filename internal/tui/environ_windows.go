@@ -25,7 +25,7 @@ import (
 // the renderer's belief about a line, the diff renderer then reads those cells as already
 // correct, and nothing repaints them until a full redraw — the "only a terminal resize fixes it"
 // symptom of the 2026-08 Windows ghosting investigation. The measurements taken there
-// (docs/plans/2026-08-06 - 04, item 4) confirmed noCaps in exactly that role: the AMPLIFIER, not
+// (docs/plans/archived/2026-08-06 - 04 - windows-tui-ghosting-plan.md, item 4) confirmed noCaps in exactly that role: the AMPLIFIER, not
 // the trigger. The identical noCaps stream paints correctly in conhost, so this file does not by
 // itself fix the ghost — it removes the mechanism that makes any error unrecoverable, and it is
 // worth landing on its own merits, because a renderer that believes a modern Windows terminal

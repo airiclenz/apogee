@@ -60,7 +60,7 @@ type detailLine struct {
 	//
 	// It is a member of its own rather than the head of Text because the two are painted
 	// differently: a diff kind's band is the TEXT's field, so a number sharing that string would be
-	// tinted along with it, where ratified call 3 of docs/plans/"2026-08-19 - 05" ("the gutter stays
+	// tinted along with it, where ratified call 3 of docs/plans/archived/"2026-08-19 - 05" ("the gutter stays
 	// chrome") holds the numbers out of the band. No wrap rail can make that split for itself — it
 	// receives one opaque string and cannot tell a number from the code beside it — so the line
 	// arrives at the style seam already parted ([bodyFrame.paint], which widens the row's hanging
@@ -112,7 +112,7 @@ type branchSummary struct {
 	// vocabulary ALONE (succeededSummary). No other tool's `clean`, `PASS` or `exit 0` earns it —
 	// those are a tool's reading of its own work, where `done` is the ENGINE's reading of a run it
 	// drove to its boundary, and only that reading is a verdict apogee is willing to paint green
-	// (ratified call 3 of docs/plans/"2026-08-31 - 05").
+	// (ratified call 3 of docs/plans/archived/"2026-08-31 - 05").
 	//
 	// It rides WITH the text for the reason the failure verdict does: the wording is put to the
 	// vocabulary once, at the seams that WORD a slot (typedSummary live, namedSummary on replay),
@@ -139,7 +139,7 @@ type branchSummary struct {
 // failed result is summarised with (erroredSummary), the "error: …" line a tool that words its own
 // short verdict carries (enrichWithResult), and the three bare verdicts a call that never ran — or
 // never finished — carries. The painter reads them to give the outcome slot its red
-// (summaryStyle, render.go), and design call 11 of docs/plans/"2026-08-10 - 04" makes that red the
+// (summaryStyle, render.go), and design call 11 of docs/plans/archived/"2026-08-10 - 04" makes that red the
 // ONLY failure marking — no glyph and no header changes colour — so the vocabulary and the mark stay
 // one fact in one place.
 //
@@ -580,7 +580,7 @@ type toolView struct {
 	task string
 
 	// finished says this view's row wears the done ✓ after its name (design call 6 of
-	// docs/plans/"2026-08-11 - 01"; leaderRow). It is a PAINT-TIME reading and never a presented
+	// docs/plans/archived/"2026-08-11 - 01"; leaderRow). It is a PAINT-TIME reading and never a presented
 	// fact: whether a delegation came off is on its entry (entry.done) and in the verdict its own
 	// summary words, and the painters that already copy a view to say what a collapsed delegation
 	// shows are the ones that set it (collapsedSubAgentView, renderSubAgentGroup). Keeping it here
@@ -1035,7 +1035,7 @@ func (tv toolView) promotable() bool {
 // longer the bare verdict word typedSummary would recognise: the failure the head's own summary
 // worded stands, and the success green a finished run is painted in is read from the verdict word
 // itself (succeededSummary) — `done` is the ENGINE's reading of a run it drove to its boundary and
-// the one verdict apogee paints green (ratified call 3 of docs/plans/"2026-08-31 - 05").
+// the one verdict apogee paints green (ratified call 3 of docs/plans/archived/"2026-08-31 - 05").
 func (tv toolView) demoted() toolView {
 	if !tv.promotable() {
 		return tv

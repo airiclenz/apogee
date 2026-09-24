@@ -77,7 +77,7 @@ internal/tui/toolsummary_pin_test.go — TestToolSummaryPinUsesRegisteredToolNam
 - `go vet ./internal/tui/`
 **Commit:** `fix(tui): git_show gets its own tool card, and the registry is pinned to the tool set`
 
-## 2. Code and CI stop naming moved plans
+## 2. Code and CI stop naming moved plans — ✅ DONE (2026-09-24)
 
 **What:**
 **Goal:** no tracked non-Markdown file outside `docs/` names a `docs/plans/<file>` (full name or `"YYYY-MM-DD - NN"` prefix) that exists only under `docs/plans/archived/`, except the deliberate quoted-path fixture in `internal/refs/refs_test.go`.

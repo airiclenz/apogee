@@ -76,7 +76,7 @@ type toolPresenter struct {
 	// Its second string is the output left once the failure has been read off it. That lays out as
 	// the body beneath the branch, so a failed call shows what it printed exactly as a clean one
 	// does — the failed half of the mirror the slot wording completes (design call 4 of
-	// docs/plans/"2026-08-13 - 00").
+	// docs/plans/archived/"2026-08-13 - 00").
 	failure func(content string) (word, output string, ok bool)
 
 	// detail renders a result that carries NO domain.ToolSummary — the degraded floor for a

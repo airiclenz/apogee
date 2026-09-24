@@ -18,7 +18,7 @@ import (
 // Parser-seam follow-through, item 1 — the live smoke test (manual, opt-in)
 // ----------------------------------------------------------------------------
 //
-// docs/plans/parser-seam-follow-through-plan.md §1 asks for ONE end-to-end run of the parser
+// docs/plans/archived/parser-seam-follow-through-plan.md §1 asks for ONE end-to-end run of the parser
 // seam against a REAL small model before tagging, because every seam-wiring test drives fake
 // responders. This harness is that run. It drives the real Agent through the real provider
 // client against a live OpenAI-compatible server, but — unlike TestE2ELiveModel, which exercises
@@ -71,7 +71,7 @@ func TestSmokeLiveProfileSeam(t *testing.T) {
 	// name), but are env-overridable so the same harness can be pointed at whatever inline
 	// delimiters a given model actually emits — e.g. the live smoke test discovered that
 	// gemma-4-e4b-it-qat emits "<|channel>…<channel|>", not <think>, so exercising the strip
-	// path against it needs those markers (docs/plans/parser-seam-follow-through-plan.md §1).
+	// path against it needs those markers (docs/plans/archived/parser-seam-follow-through-plan.md §1).
 	start := envOr("APOGEE_SMOKE_THINK_START", "<think>")
 	end := envOr("APOGEE_SMOKE_THINK_END", "</think>")
 	delimited := domain.ModelProfile{

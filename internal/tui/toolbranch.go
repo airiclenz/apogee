@@ -345,7 +345,7 @@ const subAgentOpenMarker = glyphRailCorner + "─" + glyphRailTee + " "
 // paintRowMarker dresses a leader row's leading marker. Every marker but one is the row's own chrome
 // and takes its detail tone with the target beside it; the delegation frame's corner is the
 // exception, because it is the top end of the RAIL running down the span below it and has to be read
-// as the same line (design call 2 of docs/plans/"2026-08-11 - 01"): ┌ alone takes the rail's gold,
+// as the same line (design call 2 of docs/plans/archived/"2026-08-11 - 01"): ┌ alone takes the rail's gold,
 // while the arm and the branch it reaches — and the ┝/┕/│ of every other shape — stay in the tone
 // their row is in.
 //

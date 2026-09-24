@@ -1643,7 +1643,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		// renderer paints each frame as a DIFF against its own model of the screen, so a terminal
 		// that disagrees with that model about where a write landed leaves cells the diff believes
 		// are already correct and never repaints (the Windows ghosting: see
-		// docs/plans/2026-08-06 - 04 - windows-tui-ghosting-plan.md). tea.ClearScreen drives the
+		// docs/plans/archived/2026-08-06 - 04 - windows-tui-ghosting-plan.md). tea.ClearScreen drives the
 		// renderer's MoveTo(0,0) + Erase(), which marks the whole screen for a full repaint on the
 		// next frame — the same resync a terminal resize performs today, without resizing.
 		//

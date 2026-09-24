@@ -35,7 +35,7 @@ import (
 // path can hand it to the painter instead of writing the lay-out loop itself.
 //
 // Every field is a difference the five frames actually have today, and each is preserved exactly as
-// that frame spends it (the merge policy of docs/plans/"2026-08-19 - 04"): nothing here is a new
+// that frame spends it (the merge policy of docs/plans/archived/"2026-08-19 - 04"): nothing here is a new
 // choice, and no frame gained a capability by being written down.
 type bodyFrame struct {
 	// lead is the prefix a detail line's FIRST row carries. It is asked per line and told whether
@@ -87,7 +87,7 @@ func (f bodyFrame) continuation(th theme) string {
 // A line carrying a chrome gutter of its own ([detailLine.Gutter] — the stacked diff reading's line
 // number) has it appended to the frame's prefix rather than to its text, and every primitive here
 // paints its prefix outside the band (renderHangingRow, gutteredWrap). That is what holds the
-// numbers off the tint (ratified call 3 of docs/plans/"2026-08-19 - 05") without any wrap rail
+// numbers off the tint (ratified call 3 of docs/plans/archived/"2026-08-19 - 05") without any wrap rail
 // having to tell a number from the code beside it — and, because the prefix widens, a wrapped
 // number's continuation rows hang under the text with the gutter blank.
 //
