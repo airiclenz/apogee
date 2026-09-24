@@ -40,6 +40,12 @@ const (
 	// DeltaContextOverflow is the terminal "prompt too long" signal (a 400 the server
 	// flagged as a context-window rejection).
 	DeltaContextOverflow DeltaKind = "context_overflow"
+	// DeltaAttempt carries the measurement of one HTTP attempt (Delta.Attempt): one per
+	// attempt, including a pre-first-byte retry send abandoned and a failed final attempt,
+	// yielded as the attempt ends — immediately before the terminal Done / Error /
+	// ContextOverflow it ends on. It is not terminal and changes no other kind's order. Only a
+	// Client stamped by WithServerIdentity yields it; an unstamped stream carries none.
+	DeltaAttempt DeltaKind = "attempt"
 )
 
 // Delta is one event from a streamed completion. Only the fields relevant to Kind are
@@ -73,6 +79,8 @@ type Delta struct {
 	// machine-readable, and it is what lets a stream capture be bisected to the chunk a
 	// server shaped wrong. Zero on every stream that decoded cleanly.
 	MalformedChunks int
+	// Attempt is meaningful only on DeltaAttempt: the attempt's measurement.
+	Attempt *Attempt
 }
 
 // Stream performs a streaming completion and yields Deltas as they arrive. It is the SSE
@@ -96,7 +104,9 @@ type Delta struct {
 // Retryable, so the loop can re-stream it the way it re-streams an in-band 502; a chunk that
 // fails to decode is skipped and counted, never dropped silently (Delta.MalformedChunks), and a
 // stream that decoded nothing at all but skipped some is a fault naming that count rather than
-// an empty Done.
+// an empty Done. A Client stamped by WithServerIdentity also yields one DeltaAttempt per HTTP
+// attempt — each retry send abandoned as it is abandoned, the final attempt immediately before
+// its terminal delta — and an unstamped one yields none.
 func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 	return func(yield func(Delta) bool) {
 		req.Stream = true
@@ -106,6 +116,11 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			return
 		}
 
+		// Attempt measurement, when the Client carries an identity: every attempt send makes is
+		// timed and yielded as a DeltaAttempt as it ends. Unstamped, rec is nil and every call on
+		// it is a no-op, so the stream is exactly the one it always was.
+		rec := c.newAttemptRecorder(ctx, req, yield)
+
 		// Streaming is not bounded by a per-attempt timeout — a long generation is not a
 		// fault; retries cover only connection/status before the first byte. The idle window
 		// bounds the wait for headers instead: the whole of send — attempts and hold-offs —
@@ -114,11 +129,26 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 		headersCtx, cancelHeaders := context.WithCancel(ctx)
 		defer cancelHeaders()
 		headers := newIdleTimer(c.streamIdleTimeout, cancelHeaders)
-		resp, cancel, err := c.send(headersCtx, body, 0)
+		if rec != nil {
+			rec.headers, rec.stop = headers, cancelHeaders
+		}
+		resp, cancel, err := c.send(headersCtx, body, 0, rec)
+		if rec != nil && rec.broken {
+			// The consumer broke on an abandoned attempt's delta; nothing more may be yielded.
+			headers.stopOrFired()
+			if err == nil {
+				cancel()
+				_ = resp.Body.Close()
+			}
+			return
+		}
 		if headers.stopOrFired() && ctx.Err() == nil {
 			if err == nil {
 				cancel()
 				_ = resp.Body.Close()
+				if !rec.end(AttemptIdle) {
+					return
+				}
 			}
 			yield(Delta{
 				Kind:      DeltaError,
@@ -132,10 +162,15 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			return
 		}
 		defer cancel()
+		resp.Body = rec.watch(resp.Body)
 		defer func() { _ = resp.Body.Close() }()
 
 		if resp.StatusCode != http.StatusOK {
-			yield(c.statusDelta(resp, carriedEffort))
+			fault := c.statusDelta(resp, carriedEffort)
+			if !rec.end(statusOutcome(fault, resp.StatusCode)) {
+				return
+			}
+			yield(fault)
 			return
 		}
 
@@ -148,6 +183,9 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			idle := newIdleBody(resp.Body, c.streamIdleTimeout)
 			defer idle.stop()
 			stream = idle
+			if rec != nil {
+				rec.idle = idle
+			}
 		}
 
 		// Wire capture, when armed: tee the body as it is read and hand the observer one record
@@ -160,7 +198,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			stream = io.TeeReader(stream, &raw)
 			defer func() { c.observeWire(WireResponse, c.streamCapture(raw.Bytes())) }()
 		}
-		c.codec.parseSSE(stream, carriedEffort, yield)
+		c.codec.parseSSE(stream, carriedEffort, rec.wrap(yield))
 	}
 }
 
@@ -316,6 +354,10 @@ func (c *Client) statusDelta(resp *http.Response, carriedEffort bool) Delta {
 	return Delta{Kind: DeltaError, Err: message}
 }
 
+// inBandErrPrefix opens every in-band fault's text; it is how the attempt recorder tells an
+// in-band error from the other faults of a 200 body (faultOutcome).
+const inBandErrPrefix = "apogee: upstream in-band error"
+
 // providerUnavailable is the aggregator error_type slug for "the upstream I routed to is
 // gone" — a transient class even when it arrives with a 4xx or a non-numeric code.
 const providerUnavailable = "provider_unavailable"
@@ -331,7 +373,7 @@ const providerUnavailable = "provider_unavailable"
 // in a 200 needs the same explanation as one that arrived as a status.
 func (c *Client) inBandErrorDelta(werr wireError, raw string, carriedEffort bool) Delta {
 	f := classify(werr.intCode(), werr.ErrorType, werr.Message, carriedEffort)
-	text := fmt.Sprintf("apogee: upstream in-band error %d: %s", f.code, c.sanitize(raw))
+	text := fmt.Sprintf("%s %d: %s", inBandErrPrefix, f.code, c.sanitize(raw))
 	if f.overflow {
 		return Delta{Kind: DeltaContextOverflow, Err: text}
 	}

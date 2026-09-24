@@ -192,6 +192,10 @@ type Client struct {
 	// encode rather than at construction, which never fails.
 	requestExtra    *mergePatch
 	requestExtraErr error
+
+	// identity is the server entry WithServerIdentity stamped; nil ⇒ Stream measures no
+	// attempts and yields no DeltaAttempt.
+	identity *serverIdentity
 }
 
 // wireCodec is the protocol-specific half of a Client: one implementation per Wire, selected
@@ -447,7 +451,7 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 		return RawResponse{}, fmt.Errorf("apogee: marshal request: %w", err)
 	}
 
-	resp, cancel, err := c.send(ctx, body, c.requestTimeout)
+	resp, cancel, err := c.send(ctx, body, c.requestTimeout, nil)
 	if err != nil {
 		return RawResponse{}, err
 	}
@@ -503,8 +507,9 @@ func (c *Client) encode(req Request) (body []byte, carriedEffort bool, err error
 // caller surfaces it as the final error instead of the turn hanging on a long ban.
 // attemptTimeout > 0 bounds each attempt so a stuck attempt becomes retryable without
 // touching the caller's context — but it must outlive the body read, so it rides the
-// returned cancel rather than a local defer.
-func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Duration) (*http.Response, context.CancelFunc, error) {
+// returned cancel rather than a local defer. rec, when non-nil, is told where each attempt
+// begins and handed every attempt send abandons; the attempt it returns is the caller's to end.
+func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Duration, rec *attemptRecorder) (*http.Response, context.CancelFunc, error) {
 	url := c.baseURL + c.codec.path()
 
 	// One request record per call, not per attempt: every retry posts these same bytes, and
@@ -520,13 +525,16 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 			}
 		}
 
+		rec.begin(attempt)
 		attemptCtx, cancel := c.attemptContext(ctx, attemptTimeout)
 		resp, err := c.do(attemptCtx, url, body)
 		if err != nil {
 			cancel()
 			if ctx.Err() != nil {
+				rec.abandon(0, err, true)
 				return nil, nil, ctx.Err() // caller cancelled — not a transient fault
 			}
+			rec.abandon(0, err, false)
 			lastErr = err
 			wait = c.retryDelay(0, attempt+1)
 			continue // transport/timeout fault — retry if budget remains
@@ -540,6 +548,7 @@ func (c *Client) send(ctx context.Context, body []byte, attemptTimeout time.Dura
 			}
 			drain(resp) // free the connection for reuse before retrying
 			cancel()
+			rec.abandon(resp.StatusCode, nil, false)
 			if ok {
 				wait = after
 			} else {

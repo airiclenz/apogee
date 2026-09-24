@@ -133,7 +133,13 @@ cmd/apogee/naming.go — newFiringNamer; cmd/apogee/delegation.go — targetBind
 **Acceptance:** `go test -race -count=1 ./internal/agent/ ./internal/stubllm/ && go test -race -count=1 -run 'RequestExtra|FiringNamer|TestNamingCall|TestDelegationNamer|TestDelegationWiring|TestTitleGenerator|TestFiringConfig|TestProbeModel|TestUpstreamHolder|TestMove' ./cmd/apogee/`
 **Commit:** `feat: send each server entry's request-extra on every request to it`
 
-## 5. `DeltaAttempt` — the Client times every HTTP attempt
+## 5. `DeltaAttempt` — the Client times every HTTP attempt — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the header's tok/s line already names `last` (Regression guard's wording update was in place at the base) — no plan edit needed.
+NOTES (2026-09-24): ttft/last are timed at the Delta level, as the Approach says; since both codecs yield DeltaToolCall only at flush (just before Done), a reply that is tool calls alone — no reasoning, no content — reads ttft ≈ last ≈ end of stream, so item 8's tok/s must tolerate last − ttft ≈ 0.
+NOTES (2026-09-24): Attempt.Model falls back to the requested model id when the server names none or the attempt never reached Done, so failed attempts still file under the model the store filters on (item 8).
+NOTES (2026-09-24): the in-band outcome is recognised by the fault text's prefix, now a shared constant (`inBandErrPrefix`) used by inBandErrorDelta itself; a consumer that breaks the range mid-stream gets no attempt delta (nothing may be yielded after a false yield).
+NOTES (2026-09-24): `-race` cannot run on this kernel (ThreadSanitizer: unsupported VMA range, 47-bit); the Acceptance ran unraced — the verifier/`make check` on a race-capable box must run the raced form.
 
 **What:**
 **Goal:** `provider.WithServerIdentity(name, endpoint)` stamps the Client; `Client.Stream` yields one `DeltaAttempt` per HTTP attempt (including pre-first-byte retries and failed attempts) carrying server name, redacted endpoint (scheme+host+path), served model, request id (shared across a call's attempts), attempt index, ttfb, ttft, duration, output tokens (0 = not reported) and outcome (`ok`, a fault-class string, or `cancelled` on context cancellation); SSE keepalive comments advance ttfb but never ttft; no other Delta kind changes.
