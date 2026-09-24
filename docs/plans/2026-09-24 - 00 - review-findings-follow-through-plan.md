@@ -199,7 +199,10 @@ internal/undo/context.go, internal/tasklist/context.go, internal/console/context
 - `go vet ./internal/agent/`; `go vet ./internal/domain/`
 **Commit:** `docs(contract): one table of the per-call context carriers`
 
-## 9. A hook subprocess spawns only under a permit
+## 9. A hook subprocess spawns only under a permit — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the refusal is an unexported sentinel `errNoSubprocessPermit` in internal/tools/exec_common.go rather than a new domain error, so the item stays inside its three named files; the agent path passes the error through verbatim.
+NOTES (2026-09-24): §10 of docs/design/confinement-execution-contract.md (in-flight under item 8) still reads true ("the seam keeps the may-not-spawn default") but does not yet name RunHookSubprocess as the enforcement site; that file was left alone.
 
 **What:** Defect: `domain.SubprocessPermitFromContext` has no production reader, so the contract "a hook that reads false must not spawn" is unenforced (not exploitable today: the one caller installs the permit just before spawning).
 **Goal:** `tools.RunHookSubprocess` refuses to spawn, with an error naming the missing permit, when the context carries no permit or a false one; the sync-exec path, which installs the permit, still spawns.

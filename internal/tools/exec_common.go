@@ -2,6 +2,7 @@ package tools
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -188,6 +189,10 @@ func runSubprocess(ctx context.Context, spec subprocess.SubprocessSpec) (subproc
 	return subprocess.RunSubprocess(ctx, spec)
 }
 
+// errNoSubprocessPermit is RunHookSubprocess's refusal when its context carries no
+// domain.SubprocessPermit: nobody authorised the spawn, so nothing is started.
+var errNoSubprocessPermit = errors.New("apogee: hook subprocess refused: no subprocess permit on its context")
+
 // maxSubprocessErrorExcerptBytes caps how much of a failed command's diagnostics RunHookSubprocess
 // quotes back in its error, so a noisy failure cannot drag the whole capped buffer into a log line.
 const maxSubprocessErrorExcerptBytes = 256
@@ -202,11 +207,15 @@ const maxSubprocessErrorExcerptBytes = 256
 // confinement handoff, which fails CLOSED: a handle on ctx carrying no Confiner refuses the run
 // rather than running unfenced.
 //
-// The funnel itself stays unexported; this is the whole of its outside surface. The caller
-// installs its permit's box on ctx (domain.WithConfinement) before calling — no handle means an
-// unfenced run, which is exactly what a permit carrying no box authorises. dir empty runs in
-// apogee's own working directory. timeout zero takes the funnel's default and a timeout past the
-// ceiling is clamped to it. stdin empty gives the child no input.
+// The funnel itself stays unexported; this is the whole of its outside surface. The door enforces
+// the permit itself: a ctx carrying no domain.SubprocessPermit (domain.SubprocessPermitFromContext
+// reports ok=false — a bare context.Background() included) is refused with errNoSubprocessPermit
+// before argv[0] is resolved or anything is spawned. A PRESENT permit is a grant whatever it
+// carries; a nil Confinement on it is the unfenced grant, not a refusal. The caller installs its
+// permit's box on ctx (domain.WithConfinement) beside the permit — no handle means an unfenced run,
+// which is exactly what a permit carrying no box authorises. dir empty runs in apogee's own working
+// directory. timeout zero takes the funnel's default and a timeout past the ceiling is clamped to
+// it. stdin empty gives the child no input.
 //
 // workspaceRoot names the fence argv[0] is judged against: before the spec is built, argv[0] goes
 // through security.ResolveProgram with that root and the box a Confinement handle on ctx carries
@@ -233,9 +242,9 @@ const maxSubprocessErrorExcerptBytes = 256
 //
 // The returned output is the child's stdout ALONE, never interleaved with its diagnostics, so a
 // caller consuming it as a payload gets exactly the bytes the command produced. err is non-nil for
-// a cancelled context, a refused confinement, a timeout, a wedged output drain and any non-zero
-// exit: to a caller reading stdout as data every one of those means "no usable output", and the
-// message quotes the command's diagnostics to say which.
+// a missing permit, a cancelled context, a refused confinement, a timeout, a wedged output drain
+// and any non-zero exit: to a caller reading stdout as data every one of those means "no usable
+// output", and the message quotes the command's diagnostics to say which.
 func RunHookSubprocess(
 	ctx context.Context,
 	argv []string,
@@ -246,6 +255,9 @@ func RunHookSubprocess(
 	timeout time.Duration,
 	stdin string,
 ) (string, error) {
+	if _, ok := domain.SubprocessPermitFromContext(ctx); !ok {
+		return "", errNoSubprocessPermit
+	}
 	if len(argv) > 0 {
 		program, err := security.ResolveProgram(nil, argv[0], workspaceRoot, confinementBox(ctx))
 		if err != nil {

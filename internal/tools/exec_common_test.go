@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
@@ -117,6 +118,79 @@ func TestSubprocessEnvAppendsExtrasAfterTheScrub(t *testing.T) {
 	}
 }
 
+// unfencedPermitCtx is the context a test calls RunHookSubprocess under: a bare background context
+// carrying the unfenced domain.SubprocessPermit — the grant syncPermitCtx mints with
+// confine-to-workspace off — because the door refuses a context that carries no permit at all.
+func unfencedPermitCtx() context.Context {
+	return domain.WithSubprocessPermit(context.Background(), domain.SubprocessPermit{})
+}
+
+// TestRunHookSubprocessSpawnsOnlyUnderAPermit pins the permit contract at the door a hook spawns
+// through (domain.SubprocessPermitFromContext): a context nobody granted a permit on is refused
+// with an error naming the missing permit and NO child is started — the canary is a marker file
+// the command would have created — while a present permit carrying no Confinement is the unfenced
+// grant, not a refusal, and the same command runs.
+func TestRunHookSubprocessSpawnsOnlyUnderAPermit(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell canary; the permit check it pins is platform-independent")
+	}
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		ctx       context.Context
+		wantSpawn bool
+	}{
+		{name: "no permit is refused", ctx: context.Background(), wantSpawn: false},
+		{name: "a permit with no confinement spawns unfenced", ctx: unfencedPermitCtx(), wantSpawn: true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, ok := domain.ConfinementFromContext(tc.ctx); ok {
+				t.Fatalf("test context carries a Confinement handle; the case must run unfenced")
+			}
+			marker := filepath.Join(t.TempDir(), "spawned")
+
+			out, err := RunHookSubprocess(
+				tc.ctx,
+				[]string{"/bin/sh", "-c", `: > "$1" && printf ran`, "sh", marker},
+				"",
+				t.TempDir(),
+				nil,
+				nil,
+				30*time.Second,
+				"",
+			)
+
+			_, statErr := os.Stat(marker)
+			spawned := statErr == nil
+			if spawned != tc.wantSpawn {
+				t.Errorf("child spawned = %v, want %v (err = %v)", spawned, tc.wantSpawn, err)
+			}
+			if !tc.wantSpawn {
+				if !errors.Is(err, errNoSubprocessPermit) {
+					t.Fatalf("err = %v, want errNoSubprocessPermit", err)
+				}
+				if !strings.Contains(err.Error(), "subprocess permit") {
+					t.Errorf("err = %v, want it to name the missing subprocess permit", err)
+				}
+				if out != "" {
+					t.Errorf("stdout = %q, want it empty on a refusal", out)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("RunHookSubprocess: %v", err)
+			}
+			if out != "ran" {
+				t.Errorf("stdout = %q, want %q", out, "ran")
+			}
+		})
+	}
+}
+
 // TestRunHookSubprocessScrubsApogeeCredentials pins the reason the exported door exists at all: a
 // hook that spawns must not hand apogee's own key to the child. The check is made from INSIDE the
 // process — what the child can actually read — rather than off the spec, and the control variable
@@ -130,7 +204,7 @@ func TestRunHookSubprocessScrubsApogeeCredentials(t *testing.T) {
 	t.Setenv("APOGEE_TEST_ENDPOINT", "http://192.0.2.1:1111")
 
 	out, err := RunHookSubprocess(
-		context.Background(),
+		unfencedPermitCtx(),
 		[]string{"/bin/sh", "-c", `printf 'key=[%s] endpoint=[%s]' "$APOGEE_API_KEY" "$APOGEE_TEST_ENDPOINT"`},
 		"",
 		t.TempDir(),
@@ -165,7 +239,7 @@ func TestRunHookSubprocessScrubsTheConfiguredSecretNames(t *testing.T) {
 
 	// The configured spelling differs in case from the exported one, as it may in a config file.
 	out, err := RunHookSubprocess(
-		context.Background(),
+		unfencedPermitCtx(),
 		[]string{"/bin/sh", "-c", `printf 'own=[%s] configured=[%s] endpoint=[%s]' "$APOGEE_API_KEY" "$APOGEE_TEST_PROVIDER_KEY" "$APOGEE_TEST_ENDPOINT"`},
 		"",
 		t.TempDir(),
@@ -192,7 +266,7 @@ func TestRunHookSubprocessReturnsStdoutAloneAndFeedsStdin(t *testing.T) {
 	t.Parallel()
 
 	out, err := RunHookSubprocess(
-		context.Background(),
+		unfencedPermitCtx(),
 		[]string{"/bin/sh", "-c", `echo "warning: noisy formatter" >&2; cat`},
 		"",
 		t.TempDir(),
@@ -219,7 +293,7 @@ func TestRunHookSubprocessFailsOnANonZeroExit(t *testing.T) {
 	t.Parallel()
 
 	out, err := RunHookSubprocess(
-		context.Background(),
+		unfencedPermitCtx(),
 		[]string{"/bin/sh", "-c", `echo "cannot parse input" >&2; exit 3`},
 		"",
 		t.TempDir(),
@@ -311,7 +385,7 @@ func TestRunHookSubprocessRefusesAProgramInsideTheWorkspace(t *testing.T) {
 	planted := plantExecutable(t, root, "node_modules/.bin/formatter")
 
 	out, err := RunHookSubprocess(
-		context.Background(),
+		unfencedPermitCtx(),
 		[]string{planted, "--quiet"},
 		"",
 		root,
@@ -348,7 +422,7 @@ func TestRunHookSubprocessResolvesABareProgramNameToAnAbsolutePath(t *testing.T)
 	}
 
 	out, err := RunHookSubprocess(
-		context.Background(),
+		unfencedPermitCtx(),
 		[]string{"sh", "-c", `printf %s "$0"`},
 		"",
 		t.TempDir(),
@@ -380,7 +454,7 @@ func TestRunHookSubprocessAppendsTheCallersExtraEnv(t *testing.T) {
 	t.Setenv("APOGEE_REACTION_EVENT", "inherited-and-overridden")
 
 	out, err := RunHookSubprocess(
-		context.Background(),
+		unfencedPermitCtx(),
 		[]string{"/bin/sh", "-c", `printf 'event=[%s] name=[%s]' "$APOGEE_REACTION_EVENT" "$APOGEE_REACTION_NAME"`},
 		"",
 		t.TempDir(),

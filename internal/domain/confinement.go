@@ -271,7 +271,9 @@ func WithSubprocessPermit(ctx context.Context, p SubprocessPermit) context.Conte
 
 // SubprocessPermitFromContext returns the SubprocessPermit installed by WithSubprocessPermit and
 // whether one is present. ok is false on any context nobody granted a permit on — including a bare
-// context.Background() — and a hook that reads false must not spawn a subprocess.
+// context.Background() — and a hook that reads false must not spawn a subprocess. The rule is
+// enforced at the one door a hook spawns through: tools.RunHookSubprocess reads this first and
+// refuses, before anything is resolved or started, on a context where ok is false.
 func SubprocessPermitFromContext(ctx context.Context) (SubprocessPermit, bool) {
 	p, ok := ctx.Value(subprocessPermitCtxKey{}).(SubprocessPermit)
 	return p, ok
