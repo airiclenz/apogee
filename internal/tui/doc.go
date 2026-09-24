@@ -507,10 +507,12 @@
 // is superseded, so its record is dropped) and a MessageEvent (that run's Turn is committed) each
 // ending an in-flight record, beside the worker boundaries enterRunning and finishWorker, which
 // commit every one of them: a stop or a fault sends no closing message, and what an agent thought
-// before dying is the point of the pane. It succeeds the single-buffer reasoning tail this seam
-// first landed as, whose stated purpose was to be the retention a reasoning display would be built
-// on; the board is that retention and a strict superset of it, so the tail is retired rather than
-// kept beside it.
+// before dying is the point of the pane. The one other writer is the session boundary
+// (resetSessionBoards — /clear, /new, a /sessions resume, /fork), which empties the board, and the
+// /advice board with it: what they hold was the closed conversation's. It succeeds the
+// single-buffer reasoning tail this seam first landed as, whose stated purpose was to be the
+// retention a reasoning display would be built on; the board is that retention and a strict
+// superset of it, so the tail is retired rather than kept beside it.
 //
 // thinkingpane.go is the /thinking pane itself — the report that READS that board (usage.go and
 // inspector.go each hold one pane the same way), keeping no state of its own: the rows are derived

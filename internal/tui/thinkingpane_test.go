@@ -655,3 +655,105 @@ func BenchmarkThinkingPaneRender(b *testing.B) {
 		m.renderReport(thinkingReport)
 	}
 }
+
+// TestSessionBoundaryEmptiesThinkingAndAdvice pins the boundary's reach into both boards: a session
+// opened by /clear or /new (bound and pre-bound) or by a /sessions resume opens with an empty
+// /thinking pane and an empty /advice pane, as a launch does — neither board is persisted, so
+// whatever they still held was the closed conversation's. A pane open across the boundary stays
+// open and paints its empty row, and the Inspector's wire ring, a view of the run rather than of
+// the session, keeps what it captured.
+func TestSessionBoundaryEmptiesThinkingAndAdvice(t *testing.T) {
+	t.Parallel()
+
+	const (
+		oldThought = "the closed session's thought"
+		oldAdvice  = "the closed session's advice"
+	)
+	// seed folds one committed main-run reasoning record and one advise firing — what the closed
+	// conversation left on the two boards.
+	seed := func(m Model) Model {
+		m = m.foldEvent(reasoningAt(runRef{}, 1, oldThought))
+		m = m.foldEvent(domain.MessageEvent{EventBase: eventBaseAt(runRef{}, 1)})
+		return m.foldEvent(advisedAt(runRef{}, 1, adviceActionAdvise, "style-check", domain.OriginUser, oldAdvice))
+	}
+	bound := func(t *testing.T) Model { return newTestModel(t) }
+	prebound := func(t *testing.T) Model {
+		m := newTestModelEng(t, noServerBoundEngine(), preboundOpts(PreboundFirstBoot, ""))
+		return step(t, m, keyEsc()) // close the unasked picker; the pre-bound state outlives it
+	}
+	typed := func(verb string) func(t *testing.T, m Model) Model {
+		return func(t *testing.T, m Model) Model {
+			m, _ = typeCommand(t, m, verb)
+			return m
+		}
+	}
+
+	tests := []struct {
+		name  string
+		start func(t *testing.T) Model
+		cross func(t *testing.T, m Model) Model
+	}{
+		{"/clear", bound, clearSession},
+		{"/new", bound, typed("/new")},
+		{"a /sessions restore", bound, restoreSession},
+		{"a pre-bound /clear", prebound, typed("/clear")},
+		{"a pre-bound /new", prebound, typed("/new")},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := seed(tc.start(t))
+			if len(m.thinking.done) != 1 || len(m.advice) != 1 {
+				t.Fatalf("precondition: the boards hold %d thinking and %d advice records, want 1 each", len(m.thinking.done), len(m.advice))
+			}
+
+			m = tc.cross(t, m)
+
+			thinking, _ := typeCommand(t, m, "/thinking")
+			painted := strip(thinking.frameOverlays().block(paneThinking))
+			if !strings.Contains(painted, thinkingEmptyRow) || strings.Contains(painted, oldThought) {
+				t.Errorf("/thinking after %s does not paint the empty board:\n%s", tc.name, painted)
+			}
+			advice, _ := typeCommand(t, m, "/advice")
+			painted = strip(advice.frameOverlays().block(paneAdvice))
+			if !strings.Contains(painted, adviceEmptyRow) || strings.Contains(painted, oldAdvice) {
+				t.Errorf("/advice after %s does not paint the empty board:\n%s", tc.name, painted)
+			}
+		})
+	}
+
+	t.Run("a pane open across /clear stays open on its empty row", func(t *testing.T) {
+		t.Parallel()
+
+		m, _ := typeCommand(t, seed(newTestModel(t)), "/thinking")
+		if painted := strip(m.frameOverlays().block(paneThinking)); !strings.Contains(painted, oldThought) {
+			t.Fatalf("precondition: the open pane does not show the thought:\n%s", painted)
+		}
+
+		m = clearSession(t, m)
+
+		if !m.thinkingPane.open {
+			t.Fatal("/clear closed the /thinking pane; the boundary empties the board, not the pane")
+		}
+		painted := strip(m.frameOverlays().block(paneThinking))
+		if !strings.Contains(painted, thinkingEmptyRow) || strings.Contains(painted, oldThought) {
+			t.Errorf("the pane open across /clear does not paint the empty board:\n%s", painted)
+		}
+	})
+
+	t.Run("the wire ring survives /clear", func(t *testing.T) {
+		t.Parallel()
+
+		m := seed(newTestModel(t))
+		m = m.foldEvent(wireEvent(domain.WireDirectionRequest, `{"model":"m"}`, 1, 0))
+		before := len(m.wire)
+
+		m = clearSession(t, m)
+
+		if got := len(m.wire); got != before || got == 0 {
+			t.Errorf("wire ring holds %d records after /clear, want the %d captured before it", got, before)
+		}
+	})
+}

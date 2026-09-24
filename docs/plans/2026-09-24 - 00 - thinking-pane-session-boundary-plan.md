@@ -33,7 +33,9 @@
 - Unifying `resetSessionView` with `resumeLoaded`'s hand-copied reset beyond the one shared call below
 - Closing open report panes at `/clear`
 
-## 1. The thinking and advice boards reset at every session boundary
+## 1. The thinking and advice boards reset at every session boundary — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): TestSessionBoundaryEmptiesThinkingAndAdvice also covers bound `/new` and pre-bound `/new` beside the plan's three cases (same reset path); bite check confirmed: with resetSessionBoards' body stubbed out every boundary subtest fails.
 
 **What:**
 **Goal:** After `/clear`, `/new` (bound and pre-bound) and a `resumeLoaded` restore, `m.thinking` holds no records and `m.advice` is empty. The thinking board keeps its wrap memo, and `m.wire`, `m.attempts` and the report-pane state are unchanged.

@@ -200,6 +200,7 @@ func (m *Model) resetSessionView() {
 	// A refused clear returns before this runs, so the set survives exactly as long as the session it
 	// belongs to does.
 	m.spentSkills = nil
+	m.resetSessionBoards() // the /thinking and /advice boards fall with the conversation they recorded
 	m.transcript.reset()
 	m.transcript.addStartup(newStartupView(m.opts))
 	// A bound reset's clear was a session boundary, so the engine re-read the workspace context files:
@@ -247,6 +248,22 @@ func (m *Model) resetSessionView() {
 	// the next worker launch caches the boundary the new session actually starts from.
 	m.boundary = domain.Session{}
 	m.hasBoundary = false
+}
+
+// resetSessionBoards empties the two boards a session boundary takes with it — the /thinking board
+// (thinking.go) and the /advice board (advicepane.go) — so a new or switched session opens on both
+// exactly as a launch does. It is the one owner of that list, called by both boundaries: /clear
+// and /new through resetSessionView, a /sessions resume and /fork through resumeLoaded. Neither
+// board is persisted, so a restored session has nothing of its own to reopen them at; left
+// standing, they would show the closed conversation's thinking and advice under the new one.
+//
+// What it deliberately does NOT touch: the Inspector's wire ring and the attempt ring are views of
+// the RUN rather than of the session (inspector.go), so they keep surviving the boundary; and the
+// panes' own state (thinkingPane, advicePane) is left as it is, so a pane open across the boundary
+// stays open and paints its empty row.
+func (m *Model) resetSessionBoards() {
+	m.thinking.reset()
+	m.advice = nil
 }
 
 // runCommand drives a recognised local /command. Past its three gates it hands the line to the

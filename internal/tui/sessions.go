@@ -620,6 +620,9 @@ func (m *Model) resumeLoaded(msg sessionLoadedMsg) tea.Cmd {
 	// this far HAS replaced the conversation, and the set is never stored, so there is no resumed
 	// session's own spend to reopen at, only the outgoing one's to leave behind.
 	m.spentSkills = nil
+	// The /thinking and /advice boards fall for the same reason, through the one call /clear makes:
+	// neither is stored, so there is no resumed session's own to reopen them at (resetSessionBoards).
+	m.resetSessionBoards()
 	// The live reading belongs to the conversation that just went away, so it falls whole and the
 	// gauge is relit from the record — the same one call /clear makes, differing only in having a
 	// stored fill to reopen at (liveStats.reset).

@@ -396,3 +396,30 @@ func TestThinkingBoardMutatorsInvalidateOnlyWhatTheyTouch(t *testing.T) {
 		})
 	}
 }
+
+// TestThinkingBoardResetKeepsTheRowMemo pins what a session boundary does to the board: every
+// completed record and every in-flight one goes, both slices set to nil rather than resliced (a
+// [:0] reslice would let the next push append into an array an earlier Model copy still shares —
+// ADR 0011), and the wrap memo newModel installed stays the same pointer, because a nil memo
+// renders uncached for the rest of the process.
+func TestThinkingBoardResetKeepsTheRowMemo(t *testing.T) {
+	t.Parallel()
+
+	memo := newThinkingRowCache()
+	b := thinkingBoard{rows: memo}
+	b.append("a committed thought", runRef{}, 1)
+	b.commit(runRef{})
+	b.append("an in-flight thought", runRef{depth: 1, spawn: "call-a"}, 2)
+	if len(b.done) == 0 || len(b.live) == 0 {
+		t.Fatalf("precondition: the board holds %d completed and %d in-flight records, want both non-empty", len(b.done), len(b.live))
+	}
+
+	b.reset()
+
+	if b.done != nil || b.live != nil {
+		t.Errorf("after reset done = %+v, live = %+v; want both nil", b.done, b.live)
+	}
+	if b.rows != memo {
+		t.Error("reset replaced the wrap memo; it must keep the one newModel installed")
+	}
+}

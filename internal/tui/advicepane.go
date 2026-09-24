@@ -11,8 +11,9 @@ import (
 // The /advice pane — every advise firing the model was handed, as plain text
 //
 // This file holds the pane whole, the way thinkingpane.go holds /thinking: the BOARD the fold keeps
-// ([Model.advice], written by [Model.foldAdvice] and read by nothing else), the rows the pane
-// composes out of it, and the [reportContent] it hands the shared report module (reportpane.go).
+// ([Model.advice], written by [Model.foldAdvice], emptied at every session boundary by
+// [Model.resetSessionBoards], and read by nothing else), the rows the pane composes out of it, and
+// the [reportContent] it hands the shared report module (reportpane.go).
 // The pane itself keeps no state beyond its reportPane — the rows are derived for the frame that
 // asks for them, so a firing arriving between two paints can never leave the pane showing a list
 // nobody folded.

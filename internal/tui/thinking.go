@@ -82,8 +82,10 @@ type thinkingRecord struct {
 // its delegates' chunks in one stream (ADR 0039), so one shared in-flight record would shred each
 // agent's Turn into a record per interleaved chunk and spend the board's whole capacity in seconds.
 //
-// It is written by exactly one fold ([Model.foldThinking]) and by the two worker boundaries no
-// Event announces — every launch ([Model.enterRunning]) and every unwind ([Model.finishWorker]).
+// It is written by exactly one fold ([Model.foldThinking]), by the two worker boundaries no
+// Event announces — every launch ([Model.enterRunning]) and every unwind ([Model.finishWorker]) —
+// and by every session boundary ([Model.resetSessionBoards]: /clear, /new, a /sessions resume and
+// /fork), which empties it, because the thinking it holds was the closed conversation's.
 //
 // rows is the pane's wrap memo (thinkingpane.go, [thinkingRowCache]) and the one field here the
 // pane writes. It is a POINTER for the reason the transcript's paint cache is (paintcache.go): the
@@ -140,6 +142,17 @@ func (b *thinkingBoard) drop(run runRef) {
 	if i := b.liveIndex(run); i >= 0 {
 		b.live = removeRecord(b.live, i)
 	}
+}
+
+// reset empties the board at a session boundary ([Model.resetSessionBoards]): no completed record
+// and nothing in flight, as newModel leaves it. Both slices are set to nil rather than resliced to
+// [:0], so the next push allocates a fresh array instead of appending into one an earlier copy of
+// the value-copied Model still shares (ADR 0011, the reason push copies on its over-cap trim). The
+// rows memo is KEPT: newModel installs it, a nil memo renders uncached, and every entry it holds is
+// validated on a record's text, so a stale entry can never be read for a record that is gone.
+func (b *thinkingBoard) reset() {
+	b.done = nil
+	b.live = nil
 }
 
 // commitAt pushes live record i onto the completed list and takes it out of the in-flight slice.
