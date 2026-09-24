@@ -91,7 +91,10 @@ cmd/apogee/e2e_smoke_test.go — closePane, submit; cmd/apogee/testdata/stubllm/
 
 **Commit:** `test(cmd/apogee): an e2e /clear leaves the /thinking pane empty`
 
-## 3. Docs state the boards' session lifetime
+## 3. Docs state the boards' session lifetime — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): commands.md rows keep "nothing saved with the session" (still true) and append "— emptied at `/clear`, `/new`, a `/sessions` resume and `/fork`" rather than replacing the phrase; layout.md:2072 "It shows the whole session" left as is (scope across runs, still accurate).
+NOTES (2026-09-24): no CHANGELOG or CLOSES of its own — item 1's sidecar already carries the user-facing entry and apogee-thinking-pane-survives-clear, and this item has no **Closes:** line.
 
 **What:**
 **Goal:** `CONTEXT.md` and `docs/manual/commands.md` say that the `/thinking` and `/advice` boards empty at every session boundary (`/clear`, `/new`, `/sessions` resume, `/fork`).

@@ -1985,7 +1985,8 @@ record.
 **It is always recording, and there is nothing to arm.** No config key gates it: the reasoning is
 already crossing the frame on its way to the activity line, and the pane is a second reader of what
 is already there. Nothing it keeps is sent back to the model, written into the transcript or saved
-with the session — it is a board beside the conversation, and a resumed session opens with it empty.
+with the session — it is a board beside the conversation, emptied at every session boundary
+(`/clear`, `/new`, a `/sessions` resume, `/fork`), so a new or resumed session opens with it empty.
 
 **One heading, then the text.** Each record is one turn's thinking under one heading row — `turn 4`
 for the main agent, `repo-scout · turn 2` for a delegation, the same name the run view spells — and
@@ -2051,7 +2052,8 @@ and `/inspect` is where their bytes are read.
 action `advise` or `notice` lands on the board; a Floor guard's retry or intercept does not, because
 that is the engine correcting the model rather than advice the model read. Nothing the board keeps is
 sent back to the model, written into the transcript or saved with the session — it is a board beside
-the conversation, and a resumed session opens with it empty.
+the conversation, emptied at every session boundary (`/clear`, `/new`, a `/sessions` resume, `/fork`),
+so a new or resumed session opens with it empty.
 
 **One heading, then the firings.** Each run of firings from one agent in one turn stands under one
 heading row — `turn 4` for the main agent, `repo-scout · turn 2` for a delegation, the very words the

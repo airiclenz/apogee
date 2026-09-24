@@ -448,7 +448,8 @@ rendering, no protocol and no prefixes (the wire, and its raw bytes, are the Ins
 shows follows the **Run view** exactly as the Inspector's ring does: with a view open it is that
 delegation's thinking alone, named in the pane's title, and at the top level the main agent's
 alone. It is **Driver state**, bounded (a record's last 64 KB; the board's 64 most recent records,
-oldest dropped) and never persisted — a resumed session opens with an empty board, while the
+oldest dropped) and never persisted — it empties at every session boundary (`/clear`, `/new`, a
+`/sessions` resume, `/fork`), so a new or resumed session opens with an empty board, while the
 canonical reasoning of each committed Turn stays where it always was, on the engine's own message.
 _Avoid_: "reasoning pane" (the channel is the **Thinking channel** and `/thinking` is the verb),
 "thinking transcript" (a board beside the conversation, never an entry in it), "reasoning tail"
@@ -1535,7 +1536,8 @@ the first span's offset is the message as it stood before any advice — and tha
 gone on resume, so a replay never re-reads a stale SHA or timestamp. The bench attributes an advise
 reaction's effect by the span's reaction id; `/advice` shows what the model saw, by Turn — the
 TUI's fourth report pane, fed by the `ReactionFiredEvent` each injection books, never by the ledger
-itself (ADR 0076 D6, 2026-09-20 amendment).
+itself (ADR 0076 D6, 2026-09-20 amendment). Its board is **Driver state** like the Thinking pane's,
+and empties with it at every session boundary (`/clear`, `/new`, a `/sessions` resume, `/fork`).
 _Avoid_: "injection" (the system-prompt fold the trailer replaced), "advice message" (a trailer on
 the tool result, not a message of its own), "advice history" (nothing persists).
 
