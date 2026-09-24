@@ -59,6 +59,9 @@ const (
 // the last fold has no State to stand at (forkPoints). Otherwise the picker opens over the
 // eligible prompts — the rows are derived per frame like every other kind's, so the offering is
 // read again at accept.
+//
+// Idle-only for the cut's sake — CutSnapshot reads the engine, which is the Model's own only at idle
+// (C1) — and synchronous like /sessions: no worker, and no host call on this path.
 func (m Model) runFork() (tea.Model, tea.Cmd) {
 	if m.sessions == nil {
 		return m.pickerNote(noSessionHostNote)

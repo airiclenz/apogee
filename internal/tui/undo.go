@@ -30,7 +30,7 @@ import (
 // because the pair the human reads about is two commands over two stacks and the shared half is
 // the listing, which lives in internal/undo where every Driver reaches it.
 //
-// Routing is synchronous and idle-only (commandrun.go says why — these verbs mutate the
+// Routing is synchronous and idle-only (runUndo and runRedo say why — these verbs mutate the
 // workspace), and the notes below are built from that shared listing so the TUI words only the
 // verb and the line that applies it.
 
@@ -60,6 +60,10 @@ const redoNothingNote = "nothing to redo — /undo has put nothing back since th
 // group and stashes the generation that preview quoted; `confirm` hands that stamp back to the
 // engine, which reverts the step or refuses it as stale. It never launches a worker, so it always
 // returns a nil Cmd.
+//
+// Synchronous like /confine — the engine call is a journal read or a batch of restores, no upstream
+// and no worker — but idle-only where /confine's report is not: it WRITES to the workspace, and the
+// group it reverts is the one a running Step is still filling.
 func (m Model) runUndo(action undoAction) (tea.Model, tea.Cmd) {
 	if action == undoConfirm {
 		return m.confirmUndo()
@@ -68,7 +72,9 @@ func (m Model) runUndo(action undoAction) (tea.Model, tea.Cmd) {
 }
 
 // runRedo routes a parsed /redo line, /undo's mirror over the redo stack: bare previews what the
-// last `/undo confirm` took away, `confirm` puts it back. Synchronous and worker-free like runUndo.
+// last `/undo confirm` took away, `confirm` puts it back. Synchronous and worker-free like runUndo,
+// and idle-only for runUndo's reasons: it writes to the workspace, and the stack it reads is the one
+// a running Step's first write clears.
 func (m Model) runRedo(action undoAction) (tea.Model, tea.Cmd) {
 	if action == undoConfirm {
 		return m.confirmRedo()

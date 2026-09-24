@@ -15,7 +15,8 @@ import (
 // classifies a raw input line into a local /command or an agent message, and extracts
 // @file references from a message. apogee-code's webview (media/chat.js, array Ws) is the
 // behavioral oracle. Keeping it a pure function of the input string makes it unit-testable
-// without standing up a Model.
+// without standing up a Model. The one reach toward the Model is the registry's run column,
+// which NAMES each verb's method so the row says what the verb does; nothing here calls one.
 
 // inputKind classifies a parsed input line.
 type inputKind int
@@ -123,11 +124,20 @@ type parsedInput struct {
 //
 // parseArgs is the verb's own grammar, for the rows whose arguments are richer than a token list.
 // parseInput calls it with the verb's tokens and puts what it returns on parsedInput.verbArgs,
-// whole and opaque; runCommand reads it back as its own type through [verbArgsOf]. A nil hook means
+// whole and opaque; the row's run reads it back as its own type through [typedVerb]. A nil hook means
 // the verb has no grammar beyond the tokens themselves (parsedInput.args) or the line's raw tail
 // (parsedInput.rest — /schedule's prompt), which is every other row. A hook that cannot parse what
 // it was given returns its own zero value beside an error carrying the usage line, and the router
 // reports that line rather than driving the verb.
+//
+// run is what the verb DOES once [Model.runCommand]'s gates have let the line through: the verb's
+// own method, named through the adapter that hands it the part of the line it reads (commandrun.go
+// — [bareVerb], [tokenVerb], [restVerb], [typedVerb], [actuationVerb]). Every row carries one
+// (TestEveryCommandRowRuns), so a verb cannot be parsed and offered and then do nothing. It stays a
+// field apart from parseArgs because the two run at different moments — the parse when the line is
+// classified, the run only after the gates — and it lives on the row alone: parsedInput carries the
+// verb's name, never its run, because a parsed line can sit on the Model (deferredCommands) and a
+// func value there is state the copy-per-Update Model need not hold (ADR 0011).
 type commandSpec struct {
 	name             string
 	summary          string
@@ -139,6 +149,7 @@ type commandSpec struct {
 	touchesServer    bool
 	gatedByEffort    bool
 	parseArgs        func([]string) (any, error)
+	run              commandRun
 }
 
 // verbGrammar adapts one verb's own parse — a function from argument tokens to that verb's argument
@@ -156,9 +167,9 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // "/<verb>" for a verb in this table; any other slash-prefixed line is treated as an ordinary
 // message (never silently swallowed).
 //
-// /new is an alias of /clear — both verbs are recognised here and route to the same context-reset
-// logic in runCommand. /sessions opens the history-browser overlay (idle-only, handled
-// synchronously in runCommand like /clear); /rename names THIS session instead of a browsed one —
+// /new is an alias of /clear — both verbs are recognised here and both rows run the same
+// context-reset logic (startNewSession). /sessions opens the history-browser overlay (idle-only and
+// synchronous like /clear); /rename names THIS session instead of a browsed one —
 // with an argument it takes what was typed, and BARE it asks the model for a title (autotitle.go),
 // which is the reason it is idle-only: that bare form issues a completion, and a completion fired
 // into a live Exchange would contend with the answer being streamed. /model and /server open the
@@ -260,34 +271,46 @@ func verbGrammar[T any](parse func([]string) (T, error)) func([]string) (any, er
 // hand-curated grouping, and it settles where a future verb goes without a judgement call.
 // TestCommandSpecsReadAlphabetically pins it, so a row added out of place fails loudly instead of
 // quietly un-sorting the menu.
-var commandSpecs = []commandSpec{
-	{name: "advice", summary: "what advice the model saw, by Turn", whileRunning: true, noRecall: true},
-	{name: "clear", summary: "reset the model's memory of this session", noRecall: true},
-	{name: "color-scheme", summary: "list, switch or export the screen's colour schemes", takesArgs: true, parseArgs: verbGrammar(parseColorScheme)},
-	{name: "compact", summary: "summarise the conversation to reclaim context", opensExchange: true},
-	{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseConfine)},
-	{name: "continue", summary: "ask the model to keep going", opensExchange: true},
-	{name: "effort", summary: "set how hard the model thinks — a picker of this model's levels", whileRunning: true, gatedByEffort: true},
-	{name: "fork", summary: "branch a new session from one of this session's prompts"},
-	{name: "help", summary: "list the commands and keys", whileRunning: true, noRecall: true},
-	{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true},
-	{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
-	{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true},
-	{name: "redo", summary: "put back what the last /undo removed (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseRedo)},
-	{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true},
-	{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true},
-	{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true},
-	{name: "server", summary: "switch to another configured server", takesArgs: true, runsBareAtAccept: true, touchesServer: true},
-	{name: "sessions", summary: "browse, resume, rename or delete saved sessions"},
-	{name: "settings", summary: "view the configuration this session resolved", noRecall: true},
-	{name: "skills", summary: "list the available skills, or export a shipped one", takesArgs: true, runsBareAtAccept: true, whileRunning: true, parseArgs: verbGrammar(parseSkills)},
-	{name: "stop-server", summary: "stop the server this session is on", touchesServer: true},
-	{name: "sub-agents-server", summary: "pick the servers: entry that takes delegations (bare = pick)", takesArgs: true, runsBareAtAccept: true, whileRunning: true},
-	{name: "thinking", summary: "the model's plain thinking — the main agent, or the viewed run", whileRunning: true, noRecall: true},
-	{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseUndo)},
-	{name: "unload-model", summary: "free the model of the server this session is on", touchesServer: true},
-	{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true},
-	{name: "version", summary: "show the apogee version", whileRunning: true},
+//
+// The table is filled in init rather than by its declaration, the house pattern pickerOfferings set
+// (picker.go): the rows' run fields name Model methods that read the table back (/help's runHelp →
+// helpNote → commandSpecs), a reference loop the compiler refuses as an initialization cycle for a
+// variable's initializer and permits for an init function. The cost is the one rule that pattern
+// carries: no package-level variable may read commandSpecs — or anything that consults it, such as
+// commandByName or parseInput — in its own declaration, because every declaration is initialized
+// before init runs and would see an empty table.
+var commandSpecs []commandSpec
+
+func init() {
+	commandSpecs = []commandSpec{
+		{name: "advice", summary: "what advice the model saw, by Turn", whileRunning: true, noRecall: true, run: bareVerb(Model.runAdviceCommand)},
+		{name: "clear", summary: "reset the model's memory of this session", noRecall: true, run: bareVerb(Model.startNewSession)},
+		{name: "color-scheme", summary: "list, switch or export the screen's colour schemes", takesArgs: true, parseArgs: verbGrammar(parseColorScheme), run: typedVerb(Model.runColorScheme)},
+		{name: "compact", summary: "summarise the conversation to reclaim context", opensExchange: true, run: bareVerb(Model.runCompact)},
+		{name: "confine", summary: "report or change auto mode's blast radius", takesArgs: true, whileRunning: true, parseArgs: verbGrammar(parseConfine), run: typedVerb(Model.runConfine)},
+		{name: "continue", summary: "ask the model to keep going", opensExchange: true, run: bareVerb(Model.runContinue)},
+		{name: "effort", summary: "set how hard the model thinks — a picker of this model's levels", whileRunning: true, gatedByEffort: true, run: bareVerb(Model.runEffortCommand)},
+		{name: "fork", summary: "branch a new session from one of this session's prompts", run: bareVerb(Model.runFork)},
+		{name: "help", summary: "list the commands and keys", whileRunning: true, noRecall: true, run: bareVerb(Model.runHelp)},
+		{name: "inspect", summary: "the recent wire traffic, readable — ctrl+r for the raw bytes", whileRunning: true, noRecall: true, run: bareVerb(Model.runInspectCommand)},
+		{name: "model", summary: "switch model — the launcher's profiles, or what the server serves", takesArgs: true, runsBareAtAccept: true, touchesServer: true, run: tokenVerb(Model.runModelCommand)},
+		{name: "new", summary: "start a fresh conversation (same as /clear)", noRecall: true, run: bareVerb(Model.startNewSession)},
+		{name: "redo", summary: "put back what the last /undo removed (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseRedo), run: typedVerb(Model.runRedo)},
+		{name: "rename", summary: "rename this session (bare = ask the model)", takesArgs: true, run: tokenVerb(Model.runRename)},
+		{name: "schedule", summary: "run a prompt on a cycle (bare = list what is live)", takesArgs: true, whileRunning: true, run: restVerb(Model.runSchedule)},
+		{name: "schedule-stop", summary: "take a schedule off the clock", whileRunning: true, run: bareVerb(Model.runScheduleStop)},
+		{name: "server", summary: "switch to another configured server", takesArgs: true, runsBareAtAccept: true, touchesServer: true, run: tokenVerb(Model.runServerCommand)},
+		{name: "sessions", summary: "browse, resume, rename or delete saved sessions", run: bareVerb(Model.openSessionBrowser)},
+		{name: "settings", summary: "view the configuration this session resolved", noRecall: true, run: bareVerb(Model.runSettingsCommand)},
+		{name: "skills", summary: "list the available skills, or export a shipped one", takesArgs: true, runsBareAtAccept: true, whileRunning: true, parseArgs: verbGrammar(parseSkills), run: typedVerb(Model.runSkillsCommand)},
+		{name: "stop-server", summary: "stop the server this session is on", touchesServer: true, run: actuationVerb(verbStop)},
+		{name: "sub-agents-server", summary: "pick the servers: entry that takes delegations (bare = pick)", takesArgs: true, runsBareAtAccept: true, whileRunning: true, run: tokenVerb(Model.runSubAgentsServerCommand)},
+		{name: "thinking", summary: "the model's plain thinking — the main agent, or the viewed run", whileRunning: true, noRecall: true, run: bareVerb(Model.runThinkingCommand)},
+		{name: "undo", summary: "put back the files the last exchange wrote (bare = preview)", takesArgs: true, parseArgs: verbGrammar(parseUndo), run: typedVerb(Model.runUndo)},
+		{name: "unload-model", summary: "free the model of the server this session is on", touchesServer: true, run: actuationVerb(verbUnload)},
+		{name: "usage", summary: "session token usage — main agent and every sub-agent", whileRunning: true, noRecall: true, run: bareVerb(Model.runUsageCommand)},
+		{name: "version", summary: "show the apogee version", whileRunning: true, run: bareVerb(Model.runVersion)},
+	}
 }
 
 // parseInput classifies a raw input line. A blank line yields a kindMessage with empty text

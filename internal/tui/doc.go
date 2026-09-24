@@ -837,11 +837,15 @@
 // around them), so a choice can never be paintable and unreachable (the Model still owns the
 // pending question, the highlight and the ticked set); commandrun.go the third cluster lifted out
 // of model.go (ADR 0043) — what a
-// recognised /command DOES ([Model.runCommand]'s switchboard, [Model.startNewSession]'s session
-// reset, [Model.launchExchange]'s worker start) beside the refusal an unknown line meets
+// recognised /command DOES ([Model.runCommand]'s three gates before the row's own
+// commandSpec.run, the adapters a row names its verb through, the verbs with no file of their own
+// — [Model.runContinue], [Model.runCompact], [Model.runVersion], [Model.runHelp] —
+// [Model.startNewSession]'s session reset, [Model.launchExchange]'s worker start) beside the
+// refusal an unknown line meets
 // ([Model.refuseUnknownSlash]), the queue an idle-only line typed mid-run joins
 // ([Model.queueCommand], drained by [Model.runDeferredCommands]) and the [Model.commandRunnable]
-// gate both invocation routes share, while the parse that classifies the line stays in command.go and
+// gate both invocation routes share, while the parse that classifies the line and the table whose
+// rows declare each verb stay in command.go and
 // [Model.submit] stays with the input concern; heartbeat.go the fourth cluster lifted out of
 // model.go beside them (ADR 0043) — the upstream heartbeat end to end (ADR 0024): the
 // [heartbeatState] the footer and the send gate read, the tick chain that keeps it current

@@ -338,6 +338,10 @@ const noServersNote = "no servers configured — add a servers: block to config.
 //
 // Surplus arguments are refused before either branch: the grammar belongs to the verb, not to the
 // offering behind it.
+//
+// Idle-only either way: the advertised form drives the heartbeat's own rebind path, and the profile
+// form hands a BLOCKING launcher verb to the actuation latch, which the beat after it completes
+// (actuation.go, ADR 0029).
 func (m Model) runModelCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 1 {
 		return m.pickerNote(modelUsage)
@@ -431,6 +435,9 @@ func (m Model) modelSwitchBlocked() (string, bool) {
 // nothing. Unlike /model it consults neither the heartbeat nor the offline state — where the session
 // can go is config, not an observation, and a server switch is the one useful thing to do WHILE the
 // current server is unreachable.
+//
+// Synchronous and idle-only like /model: the seam it drives mutates the engine and constructs a
+// client, which Agent.SwitchUpstream allows only at a boundary.
 func (m Model) runServerCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 1 {
 		return m.pickerNote(serverUsage)
@@ -629,6 +636,10 @@ const subAgentsDescriptionSeparator = " · "
 // still route no delegations at all (a Driver that composed no such host, ADR 0031) — and the name
 // is resolved against the targets the picker would have listed, so the two forms can never disagree
 // about what exists — the picker's synthetic `auto` row included, which this form takes by name.
+//
+// Unlike its two neighbours it runs MID-RUN (ADR 0045): it moves where the next delegation is
+// spawned, touches neither this session's engine nor a sub-agent already in flight, and is wanted
+// exactly while an orchestration is working.
 func (m Model) runSubAgentsServerCommand(args []string) (tea.Model, tea.Cmd) {
 	if len(args) > 1 {
 		return m.pickerNote(subAgentsServerUsage)

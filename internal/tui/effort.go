@@ -25,7 +25,7 @@ import (
 // it used to carry is deleted, parser and usage line with it: a half-removed parser is worse than
 // either end state.
 //
-// Routing is synchronous and safe mid-Exchange (commandrun.go says why), and both the offering and
+// Routing is synchronous and safe mid-Exchange (runEffortCommand says why), and both the offering and
 // the report builder are pure, so the rows and the wording are table-testable without a Model.
 
 // noEffortDialNote is the whole answer a hand-typed /effort earns on a model detection saw no dial
@@ -39,6 +39,11 @@ const noEffortDialNote = "this model reports no thinking-effort dial"
 // three can never disagree about whether this model has a dial — and it is asked HERE rather than at
 // the accept, because a popup opened over a dial that does not exist would offer levels no request
 // could carry.
+//
+// Synchronous like /confine and safe mid-Exchange for the reason /confine's status form is: the verb
+// itself only opens a popup, and the engine doors the accept drives are goroutine-safe and are read
+// when the NEXT request is built, never during the one in flight (ADR 0050). The no-dial note is
+// reached by a hand-typed line alone — the menu withholds the row on such a model (ADR 0060).
 func (m Model) runEffortCommand() (tea.Model, tea.Cmd) {
 	if !m.effortSupport().Supported {
 		return m.pickerNote(noEffortDialNote)

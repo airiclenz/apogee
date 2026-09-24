@@ -430,6 +430,18 @@ func TestTheActuationLatchRefusesExactlyTheServerAndExchangeVerbs(t *testing.T) 
 	}
 }
 
+// TestEveryCommandRowRuns pins that what a verb DOES lives on its row: runCommand has no per-verb
+// switch to fall back on, so a row without a run would parse, be offered by the menu and pass every
+// gate, and then do nothing at all.
+func TestEveryCommandRowRuns(t *testing.T) {
+	t.Parallel()
+	for _, spec := range commandSpecs {
+		if spec.run == nil {
+			t.Errorf("/%s carries no run — a recognised verb that drives nothing", spec.name)
+		}
+	}
+}
+
 // Structural guard on the grammar hook. A verb whose arguments are richer than a token list
 // declares its own parse on its own row (commandSpec.parseArgs) instead of in a second switch keyed
 // by name, and three things follow. A hook only ever sees arguments the parser hands over, so a

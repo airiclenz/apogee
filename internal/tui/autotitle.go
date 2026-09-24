@@ -356,6 +356,10 @@ const renameUsage = "try /rename <name>"
 // Both forms set titleTouched: a human named this session, so no automatic title may overwrite it
 // (Ratified design 5). And every branch says what happened — the refusals included, because unlike
 // the automatic call this one was asked for by name.
+//
+// The verb is idle-only because of the bare form: it issues the same out-of-band completion the
+// first prompt fires, and firing one into a live Exchange would contend with the answer being
+// streamed. It drives no worker either way; the generated form answers as a manualTitleMsg.
 func (m Model) runRename(args []string) (tea.Model, tea.Cmd) {
 	if m.sessions == nil {
 		// No persistence host: there is no Session record, so there is nothing named to change. Said

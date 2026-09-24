@@ -75,6 +75,10 @@ func parseSkills(args []string) (skillsArgs, error) {
 // runSkillsCommand routes a parsed /skills line: report the catalog, or export a shipped skill.
 // The listing returns whatever Cmd its re-scan needs (skills.go); the export is synchronous and
 // always returns nil.
+//
+// No upstream call and no worker either way: the listing only reports what discovery found, and
+// its walk rides a Cmd goroutine like the merged "/" menu's, so the listing lands on that scan's
+// message rather than holding the render loop for the length of a disk walk.
 func (m Model) runSkillsCommand(args skillsArgs) (tea.Model, tea.Cmd) {
 	if args.action == skillsExport {
 		return m.exportShippedSkill(args.id)

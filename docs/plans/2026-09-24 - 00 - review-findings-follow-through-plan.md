@@ -219,7 +219,16 @@ internal/agent/syncexec_test.go — TestSyncArgvRunsUnfencedAndReturnsStdout, Te
 - `go test -race -count=1 -run 'SyncArgv|Advise|Gate|Hook' ./internal/agent/`
 **Commit:** `fix(tools): a hook subprocess spawns only under a subprocess permit`
 
-## 10. Each slash command's behaviour lives on its row
+## 10. Each slash command's behaviour lives on its row — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): a fifth adapter, actuationVerb(verb), serves /unload-model and /stop-server (both called startServerActuation with a constant, which none of the four named adapters can express); it carries the two arms' reasoning in its doc.
+NOTES (2026-09-24): consequential edit — internal/tui/autotitle.go: made necessary by removing the /rename arm (its idle-only reasoning moved onto runRename's doc)
+NOTES (2026-09-24): consequential edit — internal/tui/colorscheme.go: made necessary by removing the /color-scheme arm (its reasoning moved onto runColorScheme's doc)
+NOTES (2026-09-24): consequential edit — internal/tui/fork.go: made necessary by removing the /fork arm (its idle-only reasoning moved onto runFork's doc)
+NOTES (2026-09-24): consequential edit — internal/tui/picker.go: made necessary by removing the /model, /server and /sub-agents-server arms (their reasoning moved onto the three runX docs)
+NOTES (2026-09-24): consequential edit — internal/tui/skillscmd.go: made necessary by removing the /skills arm (its reasoning moved onto runSkillsCommand's doc)
+NOTES (2026-09-24): consequential edit — internal/tui/undo.go: made necessary by removing the /undo and /redo arms (their reasoning moved onto runUndo/runRedo's docs; the file header's "commandrun.go says why" pointer now names them)
+NOTES (2026-09-24): consequential edit — internal/tui/effort.go: made necessary by removing the /effort arm (its mid-Exchange reasoning moved onto runEffortCommand's doc; the file header's "commandrun.go says why" pointer now names runEffortCommand)
 
 **What:**
 **Goal:** `commandSpec` rows carry a `run` field; `runCommand` keeps its three gates (parse error, actuation latch, upstream block) and has no per-verb switch; `TestEveryCommandRowRuns` asserts `run != nil` for every row.

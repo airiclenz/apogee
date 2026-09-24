@@ -33,6 +33,9 @@ const colorSchemeSource = "color-scheme"
 // runColorScheme routes a parsed /color-scheme line from the idle state: list what can be switched
 // to, switch to one, or export an editable copy of a built-in. Only the switch returns a Cmd (the
 // repaint its new palette needs); the other two always return nil.
+//
+// Synchronous and idle-only like /settings, whose write and apply seams the switch form reuses in
+// full: no engine call and no worker, only one config key and — for the export — one file.
 func (m Model) runColorScheme(args colorSchemeArgs) (tea.Model, tea.Cmd) {
 	switch args.action {
 	case colorSchemeSwitch:

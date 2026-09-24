@@ -11,11 +11,13 @@ import (
 // ----------------------------------------------------------------------------
 //
 // The refusal a typed line can meet before anything runs, the gate that decides whether a line
-// runs now or is queued for the next idle, the queue's drain, and the three drivers that DO run:
-// the Exchange launch both send paths share, the session reset /clear means, and the /command
-// switchboard itself. Lifted out of model.go as one concern: what a recognised verb does and what
-// an unrunnable one is answered with are the same question. The parse that classifies the line
-// stays in command.go; [Model.submit] stays in model.go with the input concern it belongs to.
+// runs now or is queued for the next idle, the queue's drain, and the drivers that DO run: the
+// Exchange launch both send paths share, the session reset /clear means, the /command dispatch
+// (its gates, then the row's own run), the adapters a commandSpecs row names its verb through, and
+// the verbs with no file of their own (/continue, /compact, /version, /help). Lifted out of
+// model.go as one concern: what a recognised verb does and what an unrunnable one is answered with
+// are the same question. The parse that classifies the line and the table that declares each verb
+// stay in command.go; [Model.submit] stays in model.go with the input concern it belongs to.
 
 // refuseUnknownSlash answers the sole-token typo guard (parseInput's kindUnknownSlash): a note
 // naming the word that resolved to nothing, and the line left exactly where it was. It is the
@@ -247,19 +249,11 @@ func (m *Model) resetSessionView() {
 	m.hasBoundary = false
 }
 
-// runCommand handles a recognised local /command. /continue and /compact open a worker: /continue
-// a canned "Please continue" turn, /compact a generative summary call; /clear (and its alias /new)
-// resets the session view and reprints the start-up box synchronously and stays idle
-// (startNewSession), /settings opens the configuration pane the same synchronous way
-// (settings.go), /version records the build version as a note the same synchronous way,
-// /skills records the discovered skill catalog — or exports a shipped skill — the same synchronous
-// way (skillscmd.go, skills.go), /color-scheme
-// lists, switches or exports a palette the same synchronous way (colorscheme.go), and /confine
-// reports or swaps Auto's blast radius the same synchronous way (confine.go), /effort opens the
-// thinking-effort picker over the levels the model reports the same synchronous way (effort.go),
-// and /undo previews
-// or executes the revert of the last exchange's file writes — /redo putting that revert back — the
-// same synchronous way (undo.go).
+// runCommand drives a recognised local /command. Past its three gates it hands the line to the
+// verb's own row: commandSpec.run (command.go) is what the verb DOES, declared beside what the
+// parser reads for it, how the menu offers it and which gates it answers to, so there is no
+// per-verb switch here to fall out of step with the table. A name the table does not carry drives
+// nothing — the table is the authority, as it is for every other reader of a row.
 //
 // It is reached at stateIdle — where the engine is quiescent and ClearContext/Compact are safe to
 // launch — OR, for a reporting line alone, while a worker runs. Its callers own that gate
@@ -301,7 +295,7 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 
 	// /continue and /compact are the two commands that open an Exchange, so they answer to the
 	// heartbeat exactly as a typed message does (blockedUpstream). Which verbs those are is the
-	// table's own commandSpec.opensExchange, not a name list here: the purely local verbs below —
+	// table's own commandSpec.opensExchange, not a name list here: the purely local verbs —
 	// /clear, /sessions, /version, /confine, /server — stay live while the server is away (moving to
 	// another server is the one useful thing to do with an unreachable one); /model consults the
 	// heartbeat itself, because "which models are served" is a question only a reachable server can
@@ -311,203 +305,119 @@ func (m Model) runCommand(parsed parsedInput) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	switch parsed.command {
-	case "continue":
-		if m.eng.InExchange() {
-			// The session was restored mid-task (only ever true right after an interrupted resume —
-			// the TUI aborts on every live cancel): /continue resumes the OPEN Exchange rather than
-			// opening a new one. Drive Step-only from the boundary (startResume) — no Submit, no new
-			// user block; the interrupted note already stands, so the transcript is left untouched.
-			box := newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
-			cmd, cancel := startResume(m.parent, m.eng, box, m.notify, m.flushEvents)
-			batch := m.enterRunning(cmd, cancel, box, actThinking) // the resumed work is a request in flight (as in submit)
-			return m, batch
-		}
-		// The canned turn carries no skills: a skill is invoked by naming its /token in a real
-		// message, and this turn's text is apogee's own "Please continue", not the human's line.
-		// A draft the accept path left standing in the box is still a DRAFT — it carries its own
-		// tokens when it is eventually sent, and nothing is silently borrowed from it here.
-		m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
-		m.transcript.addUser("/continue", nil)
-		box := newInterjectBox() // the canned turn is a launch like any other (launchExchange)
-		cmd, cancel := startExchange(m.parent, m.eng,
-			domain.UserInput{Text: "Please continue"}, box, m.notify, m.flushEvents)
-		batch := m.enterRunning(cmd, cancel, box, actThinking) // a canned turn is still a request in flight (as in submit)
-		return m, batch
-
-	case "clear", "new":
-		// /new is an alias of /clear: both start a fresh session — wipe the view, reset the engine's
-		// memory, and reprint the start-up box (startNewSession).
-		return m.startNewSession()
-
-	case "sessions":
-		// Open the history-browser overlay: list saved sessions off the Update loop and render the
-		// pane above the input (sessions.go). Synchronous and idle-safe like /clear — no worker.
-		return m.openSessionBrowser()
-
-	case "fork":
-		// Open the fork picker over this session's prompts (fork.go): ⏎ cuts a child record at the
-		// chosen one through the record write queue and switches to it when the write lands.
-		// Idle-only for the cut's sake — CutSnapshot reads the engine, which is the Model's own only
-		// at idle (C1) — and synchronous here like /sessions: no worker, no host call on this path.
-		return m.runFork()
-
-	case "settings":
-		// Open the configuration pane over the binary's key registry (settings.go). Synchronous and
-		// idle-safe like /sessions: it reads one display seam ([SettingsHost.Rows]) and drives no
-		// worker, no engine call and no file I/O of its own.
-		return m.runSettingsCommand()
-
-	case "usage":
-		// Open the per-agent token report (usage.go). The /settings shape with none of its caveats:
-		// synchronous, no engine call and no worker — and safe mid-Exchange, because every number it
-		// shows is already folded onto this Model.
-		return m.runUsageCommand()
-
-	case "inspect":
-		// Open the raw-protocol pane over the Inspector's ring (inspector.go). The /usage shape
-		// exactly: synchronous, no engine call and no worker, safe mid-Exchange — every record it
-		// shows was folded onto this Model when the engine reported it.
-		return m.runInspectCommand()
-
-	case "thinking":
-		// Open the plain-reasoning pane over the thinking board (thinkingpane.go). The /inspect shape
-		// exactly: synchronous, no engine call and no worker, safe mid-Exchange — every chunk it shows
-		// was folded onto this Model when the engine revealed it, and it is scoped as the view is,
-		// the viewed run's thinking alone inside a run view.
-		return m.runThinkingCommand()
-
-	case "advice":
-		// Open the advice pane over the advice board (advicepane.go). The /thinking shape exactly:
-		// synchronous, no engine call and no worker, safe mid-Exchange — every firing it shows was
-		// folded onto this Model when the engine booked it. Unlike /thinking it is not scoped by the
-		// view: the whole session's firings, each group named by its run.
-		return m.runAdviceCommand()
-
-	case "color-scheme":
-		// List, switch or export a colour scheme (colorscheme.go, ADR 0040). Synchronous and
-		// idle-safe like /settings, whose write and apply seams the switch form reuses in full: no
-		// engine call and no worker, only one config key and — for the export — one file.
-		return m.runColorScheme(verbArgsOf[colorSchemeArgs](parsed))
-
-	case "rename":
-		// Name THIS session: take the argument as the title, or — bare — ask the model for one
-		// (autotitle.go). Idle-only because of that bare form: it issues the same out-of-band
-		// completion the first prompt fires, and firing one into a live Exchange would contend with
-		// the answer being streamed. It drives no worker either way; the generated form answers as a
-		// manualTitleMsg.
-		return m.runRename(parsed.args)
-
-	case "model":
-		// Open the picker over the launcher's Launch profiles when llama-launcher is configured and
-		// over what the upstream advertises when it is not, or take the name given as an argument
-		// (picker.go). Idle-only either way: the advertised form drives the heartbeat's own rebind
-		// path, and the profile form hands a BLOCKING launcher verb to the actuation latch, which the
-		// beat after it completes (actuation.go, ADR 0029).
-		return m.runModelCommand(parsed.args)
-
-	case "server":
-		// Open the server picker over what config.yaml names, or take the server named as an
-		// argument (picker.go). Synchronous and idle-safe like /model: the seam it drives mutates
-		// the engine and constructs a client, which Agent.SwitchUpstream allows only at a boundary.
-		return m.runServerCommand(parsed.args)
-
-	case "sub-agents-server":
-		// Open the picker over the `servers:` entries a delegation may run on, or take the entry named
-		// as an argument (picker.go, ADR 0045). Unlike its two neighbours this one runs MID-RUN: it
-		// moves where the next delegation is spawned, touches neither this session's engine nor a
-		// sub-agent already in flight, and is wanted exactly while an orchestration is working.
-		return m.runSubAgentsServerCommand(parsed.args)
-
-	case "unload-model":
-		// Free the model of the server this session is talking to. No picker and no argument: the
-		// session's own endpoint is the only thing either actuation verb may act on (ADR 0029 D3), and
-		// it is read on this loop rather than captured, so the verb acts on where the session is NOW.
-		return m.startServerActuation(verbUnload)
-
-	case "stop-server":
-		// Stop that server outright. Idle-only like its siblings and latched like a profile load — the
-		// call blocks through the launcher's stop escalation — and afterwards the ordinary offline
-		// crossing narrates the rest, because the downtime is real (actuation.go, ADR 0029).
-		return m.startServerActuation(verbStop)
-
-	case "version":
-		// Synchronous like /clear: print the resolved build version (Options.Version, item 1's
-		// seam) as a transcript note and stay idle — no upstream call, no worker.
-		m.transcript.addNote("apogee " + m.opts.Version)
+	spec, ok := commandByName(parsed.command)
+	if !ok {
 		return m, nil
-
-	case "help":
-		// Synchronous like /version: print every verb of the registry with its summary and the key
-		// legend (help.go) as a transcript note — no upstream call, no worker. The legend reads the
-		// editor's key-disambiguation flag so it names the newline chord the box itself advertises.
-		m.transcript.addNote(helpNote(m.keyDisambiguation))
-		return m, nil
-
-	case "skills":
-		// Re-scan the source dirs and print the catalog as a note, or export a shipped skill into
-		// the global library (skillscmd.go routes the two; skills.go builds the report). No upstream
-		// call and no worker either way — the listing only reports what discovery found, and its
-		// walk rides a Cmd goroutine like the merged "/" menu's so the listing lands on that scan's
-		// message rather than holding the render loop for the length of a disk walk.
-		return m.runSkillsCommand(verbArgsOf[skillsArgs](parsed))
-
-	case "schedule":
-		// List the live Schedules, or put a prompt on a cycle — directly from the argument form,
-		// or through the cycle/mode popups (schedule.go). Live mid-run like the reporting verbs:
-		// it drives the scheduler library and never this session's engine, and a Firing is a
-		// separate headless run over its own Agent (ADR 0033). It takes the line's RAW tail: the
-		// prompt is the human's text, and a Firing submits it verbatim.
-		return m.runSchedule(parsed.rest)
-
-	case "schedule-stop":
-		// Take a Schedule off the clock: the only live one directly, or the one picked from the
-		// overlay (schedule.go). Live mid-run for the same reason /schedule is.
-		return m.runScheduleStop()
-
-	case "compact":
-		// Compaction is a real upstream call (summary generation), so it rides a worker goroutine
-		// like /continue rather than blocking the Update loop (ADR 0011). Esc cancels it via
-		// stopWorker; the terminal compactDoneMsg records the outcome.
-		m.layout() // reflow the input box after the caller emptied it (or cut the accepted verb out); the verb lays nothing out (enterRunning)
-		// No mailbox: /compact drives no Exchange, so there is nothing to interject INTO. A row
-		// staged while it runs stays on the display queue and goes out at the terminal fold. The
-		// Bridge is told the same (the nil box enterRunning installs): there is no Exchange for the
-		// seam to pre-empt in. Typing is live through a compaction too — the row simply waits for
-		// the terminal fold — so the legend, derived from stateRunning at paint, says "queue" here
-		// as well; and compaction emits no Events until it lands, so the phrase the verb sets is the
-		// one that stands until then.
-		cmd, cancel := startCompact(m.parent, m.eng)
-		batch := m.enterRunning(cmd, cancel, nil, actCompacting)
-		return m, batch
-
-	case "confine":
-		// Report or swap the blast radius. Synchronous and idle-safe like /clear: no upstream
-		// call is involved, only the engine's live flag and (for --save) one config write.
-		return m.runConfine(verbArgsOf[confineArgs](parsed))
-
-	case "effort":
-		// Open the thinking-effort picker over the levels the bound model reports, or — on a model
-		// that reports no dial, which the menu withholds the row from but a hand-typed line still
-		// reaches — answer with the one note saying so (effort.go, ADR 0060). Synchronous like
-		// /confine and safe mid-Exchange for the reason /confine's status form is: the engine doors
-		// the accept drives are goroutine-safe and are read when the NEXT request is built, never
-		// during the one in flight.
-		return m.runEffortCommand()
-
-	case "undo":
-		// Preview, or execute, the revert of the last exchange's file writes (undo.go, ADR 0051).
-		// Synchronous like /confine — the engine call is a journal read or a batch of restores, no
-		// upstream and no worker — but idle-only where /confine's report is not: it WRITES to the
-		// workspace, and the group it reverts is the one a running Step is still filling.
-		return m.runUndo(verbArgsOf[undoAction](parsed))
-
-	case "redo":
-		// Preview, or execute, putting back what the last /undo took away (undo.go, ADR 0074).
-		// Idle-only and synchronous for /undo's reasons, which it mirrors exactly: it writes to the
-		// workspace, and the stack it reads is the one a running Step's first write clears.
-		return m.runRedo(verbArgsOf[undoAction](parsed))
 	}
+	return spec.run(m, parsed)
+}
+
+// commandRun is the shape of commandSpec.run: the Model the verb acts on and the whole parsed
+// line, answered the way every Update path answers. A row never writes one by hand — it names the
+// verb's own method through the adapter that reads the part of the line that verb takes
+// ([bareVerb], [tokenVerb], [restVerb], [typedVerb], [actuationVerb]), so each method keeps the
+// signature its own argument shape asks for and the table stays one line per verb.
+type commandRun func(Model, parsedInput) (tea.Model, tea.Cmd)
+
+// bareVerb adapts a verb that reads nothing off its line — the rows without takesArgs, whose
+// surplus tokens are ignored as they always were, and /effort, whose level grammar went with the
+// picker (commandSpecs).
+func bareVerb(run func(Model) (tea.Model, tea.Cmd)) commandRun {
+	return func(m Model, _ parsedInput) (tea.Model, tea.Cmd) { return run(m) }
+}
+
+// tokenVerb adapts a verb that reads its argument tokens (parsedInput.args) and declares no grammar
+// of its own: /rename's words and the one optional name of /model, /server and /sub-agents-server.
+func tokenVerb(run func(Model, []string) (tea.Model, tea.Cmd)) commandRun {
+	return func(m Model, parsed parsedInput) (tea.Model, tea.Cmd) { return run(m, parsed.args) }
+}
+
+// restVerb adapts a verb that reads the line's RAW tail (parsedInput.rest) rather than its tokens:
+// /schedule, whose prompt must reach the model spaced and lined as it was typed.
+func restVerb(run func(Model, string) (tea.Model, tea.Cmd)) commandRun {
+	return func(m Model, parsed parsedInput) (tea.Model, tea.Cmd) { return run(m, parsed.rest) }
+}
+
+// typedVerb adapts a verb that declares a grammar of its own (commandSpec.parseArgs): it reads the
+// opaque parse back as the type the verb's method takes ([verbArgsOf]), so the row's parseArgs
+// (through [verbGrammar]) and its run are the write and read sides of the same value. T is inferred
+// from the method; a row whose two sides named different types would read the zero value — the
+// bare form — on every line, which is why the pair sits side by side on the one row.
+func typedVerb[T any](run func(Model, T) (tea.Model, tea.Cmd)) commandRun {
+	return func(m Model, parsed parsedInput) (tea.Model, tea.Cmd) { return run(m, verbArgsOf[T](parsed)) }
+}
+
+// actuationVerb adapts the two verbs that act on the server this session is talking to —
+// /unload-model frees its model, /stop-server stops it outright (actuation.go, ADR 0029). No picker
+// and no argument: the session's own endpoint is the only thing either verb may act on (ADR 0029
+// D3), and [Model.startServerActuation] reads it on this loop rather than capturing it, so the verb
+// acts on where the session is NOW. Both are idle-only and latched like a profile load — the stop
+// blocks through the launcher's escalation — and after a stop the ordinary offline crossing
+// narrates the rest, because the downtime is real.
+func actuationVerb(verb string) commandRun {
+	return func(m Model, _ parsedInput) (tea.Model, tea.Cmd) { return m.startServerActuation(verb) }
+}
+
+// runContinue drives /continue: the canned "Please continue" turn, or — on a session restored
+// mid-task — the resumption of the Exchange that was left open. It opens an Exchange, so it rides a
+// worker and answers to the heartbeat and the actuation latch like a typed message (runCommand's
+// gates, read off commandSpec.opensExchange).
+//
+// InExchange is only ever true right after an interrupted resume — the TUI aborts on every live
+// cancel — and then the verb resumes the OPEN Exchange rather than opening a new one: Step-only from
+// the boundary (startResume), no Submit and no new user block, because the interrupted note already
+// stands and the transcript is left untouched.
+//
+// The canned turn carries no skills: a skill is invoked by naming its /token in a real message, and
+// this turn's text is apogee's own "Please continue", not the human's line. A draft the accept path
+// left standing in the box is still a DRAFT — it carries its own tokens when it is eventually sent,
+// and nothing is silently borrowed from it here. The order is the typed prompt's: follow-the-tail
+// re-armed, then the user block, then the launch.
+func (m Model) runContinue() (tea.Model, tea.Cmd) {
+	if m.eng.InExchange() {
+		box := newInterjectBox() // a resumed Exchange is a running one; it takes interjections too
+		cmd, cancel := startResume(m.parent, m.eng, box, m.notify, m.flushEvents)
+		batch := m.enterRunning(cmd, cancel, box, actThinking) // the resumed work is a request in flight (as in submit)
+		return m, batch
+	}
+	m.detached = false // the canned turn re-arms follow-the-tail, exactly as a typed prompt does
+	m.transcript.addUser("/continue", nil)
+	box := newInterjectBox() // the canned turn is a launch like any other (launchExchange)
+	cmd, cancel := startExchange(m.parent, m.eng,
+		domain.UserInput{Text: "Please continue"}, box, m.notify, m.flushEvents)
+	batch := m.enterRunning(cmd, cancel, box, actThinking) // a canned turn is still a request in flight (as in submit)
+	return m, batch
+}
+
+// runCompact drives /compact. Compaction is a real upstream call (summary generation), so it rides
+// a worker goroutine like /continue rather than blocking the Update loop (ADR 0011). Esc cancels it
+// via stopWorker; the terminal compactDoneMsg records the outcome ([Model.foldCompactDone]).
+//
+// No mailbox: /compact drives no Exchange, so there is nothing to interject INTO. A row staged while
+// it runs stays on the display queue and goes out at the terminal fold. The Bridge is told the same
+// (the nil box enterRunning installs): there is no Exchange for the seam to pre-empt in. Typing is
+// live through a compaction too — the row simply waits for the terminal fold — so the legend,
+// derived from stateRunning at paint, says "queue" here as well; and compaction emits no Events
+// until it lands, so the phrase the verb sets is the one that stands until then.
+func (m Model) runCompact() (tea.Model, tea.Cmd) {
+	m.layout() // reflow the input box after the caller emptied it (or cut the accepted verb out); the verb lays nothing out (enterRunning)
+	cmd, cancel := startCompact(m.parent, m.eng)
+	batch := m.enterRunning(cmd, cancel, nil, actCompacting)
+	return m, batch
+}
+
+// runVersion drives /version: the resolved build version (Options.Version) as a transcript note.
+// Synchronous like /clear and safe mid-run — no upstream call, no worker, no engine.
+func (m Model) runVersion() (tea.Model, tea.Cmd) {
+	m.transcript.addNote("apogee " + m.opts.Version)
+	return m, nil
+}
+
+// runHelp drives /help: every verb of the registry with its summary, then the key legend (help.go),
+// as a transcript note. Synchronous like /version — no upstream call, no worker. The legend reads the
+// editor's key-disambiguation flag so it names the newline chord the box itself advertises.
+func (m Model) runHelp() (tea.Model, tea.Cmd) {
+	m.transcript.addNote(helpNote(m.keyDisambiguation))
 	return m, nil
 }
 
