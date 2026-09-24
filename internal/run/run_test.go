@@ -1106,8 +1106,9 @@ func toolResult(depth int, id string) domain.ToolResultEvent {
 }
 
 // usageAt is one Turn's token accounting at depth, reported by the agent spawnCallID
-// delegated to ("" for the Firing's own top-level agent — the run identity every event now
-// carries, domain.EventBase.CallID).
+// delegated to ("" for the Firing's own top-level agent). It carries no run id, so it is the
+// stream from before run ids existed, bracketed by (depth, spawning call id); a test pinning the
+// run-id key stamps domain.EventBase.RunID on it.
 func usageAt(depth int, spawnCallID string, total int) domain.UsageEvent {
 	return domain.UsageEvent{
 		EventBase:   domain.EventBase{Depth: depth, CallID: spawnCallID},
@@ -1291,6 +1292,59 @@ func TestEventTapAttributesTwoRunsFromOneTurnByCallID(t *testing.T) {
 		if runs[i] != want[i] {
 			t.Errorf("subAgentRuns()[%d] = %+v, want %+v", i, runs[i], want[i])
 		}
+	}
+}
+
+// TestEventTapAttributesSiblingsThatShareACallIDByRunID pins the run identity the brackets are keyed
+// by: two delegations of one reply whose call ids COLLIDE — a text-format parser numbering calls per
+// Turn hands both "call_1" — are still two runs, told apart by the engine-minted run id every event
+// of theirs carries (domain.EventBase.RunID) and their call and result carry as SpawnRunID. A tap
+// keyed by call id alone opens the second bracket over the first, folds both children's readings
+// and the rename into it, files the mix under the first result, and drops the second run.
+//
+// The stream also carries a leaf tool's result under the same colliding id, from the Firing's own
+// level: a result that names no spawned run closes no delegation, whatever its call id.
+func TestEventTapAttributesSiblingsThatShareACallIDByRunID(t *testing.T) {
+	t.Parallel()
+
+	const window = 32000
+	tap := &eventTap{window: window}
+
+	call := func(task, runID string) domain.ToolCallEvent {
+		ev := subAgentCall(0, "call_1", task)
+		ev.SpawnRunID = runID
+		return ev
+	}
+	usage := func(runID string, total int, cumulative Usage) domain.UsageEvent {
+		ev := usageWithTotals(1, "call_1", total, cumulative, false)
+		ev.RunID = runID
+		return ev
+	}
+	result := func(runID string) domain.ToolResultEvent {
+		ev := toolResult(0, "call_1")
+		ev.SpawnRunID = runID
+		return ev
+	}
+	named := subAgentNamed(1, "call_1", "audit config keys")
+	named.RunID = "r.1"
+
+	tap.Emit(call("audit the issues", "r.1"))
+	tap.Emit(call("write the docs", "r.2"))
+	tap.Emit(usage("r.1", 4000, Usage{Calls: 1, TotalTokens: 4000}))
+	tap.Emit(usage("r.2", 9000, Usage{Calls: 1, TotalTokens: 9000}))
+	tap.Emit(named)
+	tap.Emit(usage("r.1", 7000, Usage{Calls: 2, TotalTokens: 11000}))
+	tap.Emit(toolResult(0, "call_1")) // a leaf tool's result under the same id closes neither run
+	tap.Emit(result("r.2"))           // the second child finishes first
+	tap.Emit(result("r.1"))
+
+	want := []SubAgentUsage{
+		{Used: 9000, Limit: window, Task: "write the docs", Usage: Usage{Calls: 1, TotalTokens: 9000}},
+		{Used: 7000, Limit: window, Task: "audit the issues", Name: "audit config keys",
+			Usage: Usage{Calls: 2, TotalTokens: 11000}},
+	}
+	if runs := tap.subAgentRuns(); !slices.Equal(runs, want) {
+		t.Errorf("subAgentRuns() = %+v, want %+v", runs, want)
 	}
 }
 
