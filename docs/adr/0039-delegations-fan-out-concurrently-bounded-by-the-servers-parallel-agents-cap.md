@@ -202,6 +202,25 @@ the parent's single `EventSink` is serialized at the boundary; the sink contract
 one-sink-per-driver (per-child sinks were rejected — every Driver would grow multiplexing,
 reshaping the ADR 0011/0031 contract for no gain).
 
+> **Amended 2026-09-24 — the run id, not the call-ID, identifies a child's stream (plan
+> `2026-09-24 - 01 - subagent-premature-done-plan`; owner call 2026-09-24).** The spawning call-ID
+> is not unique. It is the model's or the server's to choose: a text-format parser numbering calls
+> per Turn hands two siblings of one reply the same id, and a nested delegation can reuse its
+> parent's. Keyed on it, the TUI paired one child's result with a sibling's run and ticked that
+> sibling's row done while its own child was still working. So `EventBase` gains a second additive
+> field, `RunID`: the engine mints it once per delegation (`<prefix>.<n>`, a random prefix per
+> top-level Agent and a counter shared by its whole delegation tree) and stamps it at child
+> construction exactly as the call-ID is stamped. The parent's `ToolCallEvent` and
+> `ToolResultEvent` for that delegation carry it as `SpawnRunID`. The TUI now groups and pairs
+> per-child blocks by the run id, the transcript codec persists it beside the call-ID (`runID`,
+> `spawnRunID`, additive members as the call-ID's was), and the headless Event lines carry it
+> (ADR 0075, amended the same day). Per-child usage attribution (`SubAgentUsage`) still brackets by
+> the call-ID; this amendment does not move it. The call-ID stays on every event
+> and keeps naming the tool-call block a run answers. A record or event written before the run id
+> existed falls back to (depth, call-ID). The run id is identity only: it is never sent to a model,
+> and the ids on the wire are never rewritten. Addressing a running child (`InterjectChild`,
+> ADR 0063 D1) still goes by the spawning call-ID.
+
 **6 — The TUI renders one live block per child.** At fan-out, one block per child appears
 in call order; each accretes its own child's events via the call-ID and shows a live tail
 under the existing collapsed cap, expandable like any tool block. Approvals from concurrent

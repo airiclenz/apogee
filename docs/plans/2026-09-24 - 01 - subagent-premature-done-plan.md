@@ -209,7 +209,14 @@ internal/eventjson/encode.go — childInterjectionData; internal/tui/transcript_
 **Acceptance:** `go test -race -count=1 ./internal/agent/ ./internal/eventjson/ ./internal/tui/`
 **Commit:** `fix(tui): say why a steering message did not reach its sub-agent`
 
-## 8. Docs: run identity, the no-report verdict and the undelivered reasons
+## 8. Docs: run identity, the no-report verdict and the undelivered reasons — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): re-derived from the assumption that the Event lines are at `v:1`: the tree is at `v:2` (item 2's note), so the ADR 0075 amendment records `run_id`/`spawn_run_id` as additive within `v:2`. CONTEXT.md's **Event lines** entry still says "Versioned `v:1`". That is older drift and was left as it is.
+NOTES (2026-09-24): no CHANGELOG entry. Items 2, 6 and 7 already carry the user-facing entries for `run_id`/`spawn_run_id`, the no-report verdict and the undelivered reasons. This item only brings the docs in line with them.
+NOTES (2026-09-24): docs/manual/reactions.md's `call_id` row no longer calls the id the run identity. Its new text says two delegations can share one. No `run_id` was added to the Reaction document, because the seam payload still carries only the call id (item 1's note).
+NOTES (2026-09-24): layout.md "## The `/inspect` popup": the Inspector's run-view scope now reads as filtering by the viewed run's run id. The TUI (scopedWire, runRef ==) now compares the run id as well as the depth and call id.
+NOTES (2026-09-24): the ADR 0039 amendment states that per-child usage attribution (`SubAgentUsage`, internal/run/run.go eventTap) still brackets by call id. The code does this (`t.open[ev.CallID]`), and the amendment says so rather than claiming every consumer moved to the run id.
+NOTES (2026-09-24): ADR 0063 (lines 39, 58) and ADR 0013 (line 293) still describe the call-ID as what tells child streams apart, or as the addressing key. The plan leaves ADR bodies other than 0039/0075 untouched, and addressing keeps the call id, so they were not changed.
 
 **What:** Depends on items 1–7. This is the one owner of every doc amendment this plan makes.
 **Regression guard.** Also owns docs/manual/headless.md (the `run_id` envelope member, `spawn_run_id` and ChildInterjection `reason` keys) and a dated amendment to docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md §7/§8, recording the run id supersession. Add both paths to Files and extend the grep to docs/manual/headless.md.

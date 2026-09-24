@@ -140,7 +140,7 @@ Present on every notice:
 | `workspace` | The run's workspace: absolute, with symlinks resolved. |
 | `depth` | The emitting agent's sub-agent nesting level; `0` is the top-level agent. |
 | `turn` | The turn index the notice belongs to. |
-| `call_id` | The emitting agent's run identity — the id of the `sub_agent` call that spawned it. Absent at depth 0. |
+| `call_id` | The id of the `sub_agent` call that spawned the emitting agent. Absent at depth 0. It names the spawning call, not a unique run: the id is the model's or the server's to choose, and two delegations of one fan-out can share it. |
 | `schedule` | `{"id": …, "name": …}` — the schedule this firing ran for. Present only on a `/schedule` or daemon firing; `name` is omitted for an unnamed schedule, and `APOGEE_REACTION_SCHEDULE_NAME` is then unset. |
 
 Per notice, added to that block:

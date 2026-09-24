@@ -61,10 +61,16 @@ _Avoid_: "embedder" (names the linking, not the responsibility of pacing the loo
 The unit of everything the loop reports: a value the engine emits on its `EventSink`, a **sealed**
 sum type — the variant set is Apogee-owned and grows only additively, so a consumer switches on the
 variants it knows and ignores the rest. Every variant carries the emitting agent's nesting Depth,
-its **Turn** index and, for a **Sub-agent**, the call id of the delegation that spawned it. Emission
+its **Turn** index and, for a **Sub-agent**, the **run id** of its delegation and the call id of the
+`sub_agent` call that spawned it. The run id is the run's identity: the engine mints it once per
+delegation (`<prefix>.<n>`, a random prefix per top-level agent and a counter shared by its whole
+delegation tree), so no two delegations share one. The call id is the model's or the server's to
+choose and may repeat — a text-format parser can hand two siblings of one reply the same id — so it
+names the tool-call block a run answers, never the run itself. Emission
 is serialized by the engine, so a **Driver** sees one linear stream even under a concurrent depth-0
-fan-out — but a linear stream is not a serial one, and the events of one agent are recognised by that
-identity, never by contiguity. Events are Go values and nothing more: the engine attaches no
+fan-out — but a linear stream is not a serial one, and the events of one agent are recognised by
+their run id (by depth and call id on an event recorded before the run id existed), never by
+contiguity. Events are Go values and nothing more: the engine attaches no
 timestamp, no sequence number and no session identity, and a Driver stamps those itself if its
 surface needs them. See
 [ADR 0001](docs/adr/0001-agent-loop-is-an-embeddable-library-driven-by-an-external-bench.md) and
@@ -80,7 +86,7 @@ whichever **Driver** reads it — that term means only that, and the lines are o
 They are a Driver's protocol, not the engine's surface: the engine stays wire-silent and hands out
 Go values, and headless composes the bytes. They carry every Event variant except the **Inspector**'s
 raw-protocol one, each as one object with a shared envelope (`event`, `v`, `seq`, `time`, `session`,
-`turn`, `depth`, `call_id`) and the variant's own members under `data`; its event names are
+`turn`, `depth`, `call_id`, `run_id`) and the variant's own members under `data`; its event names are
 snake_case, deliberately distinct from a notice **[Moment](#reactions-and-moments)**'s kebab-case
 vocabulary, because the same moment is not filtered the same way in both. They are bracketed by two
 frames that are *not* Events — `run_started` and `run_finished`, the latter carrying the run's
@@ -218,9 +224,13 @@ When one reply carries several `sub_agent` calls, the **top-level** agent runs t
 **concurrently** up to the server's **Parallel agents** cap (depth-0 only — a sub-agent's
 own delegations run serially inline; a reply split across **Delegation seats** takes the
 smaller of the two caps), and only up to the **Fan-out ceiling** — the `sub_agent` calls past it
-are refused, not queued; every event a sub-agent emits carries the **call-ID**
-of the `sub_agent` call that spawned it, so interleaved streams stay attributable
-([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)).
+are refused, not queued; every event a sub-agent emits carries the engine-minted **run id** of its
+delegation and the **call-ID** of the `sub_agent` call that spawned it, so interleaved streams stay
+attributable — by the run id, because a call-ID may repeat across one fan-out and the run id never
+does; the parent's call and result carry the same run id, which is how a run is paired with the
+block it answers
+([ADR 0039](docs/adr/0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md),
+amended 2026-09-24).
 A delegation the group has **not started** when an **Interjection** is staged for its parent is
 **skipped**, not run: it commits, in call order, the tool result `sub-agent not started: the user
 sent a message while this group was running; delegate again if the task is still needed` with a
@@ -243,8 +253,10 @@ pops the mailbox before every Step after the first and delivers each message thr
 `Agent.Interject`, so it commits at the child's own between-Steps boundary as an ordinary
 **Interjection** — the one place a `Run` drains for an embedder, because per ADR 0013 D5 nobody
 else can drive a child's Steps. Every queued message earns one
-`domain.ChildInterjectionEvent{Input, Landed}` on the shared sink, so a Driver never has to guess
-whether it arrived, and a child that received such messages returns its result with the trailer
+`domain.ChildInterjectionEvent{Input, Landed, Reason}` on the shared sink, so a Driver never has to
+guess whether it arrived — nor, for one that did not, why: the `Reason` says the child `completed`,
+was `capped`, `faulted` or was `cancelled` before the boundary the message waited for, or `refused`
+it there. A child that received such messages returns its result with the trailer
 `(the user sent N message(s) to this sub-agent while it ran)` on every outcome but a cancelled
 dispatch — a parent reading a result shaped by instructions it never issued must be able to see
 that from the result alone. Every `sub_agent` result — report or fault — is **capped at 64 KiB**
@@ -461,9 +473,10 @@ A **Session** is one conversation the engine holds — the versioned `domain.Ses
 Session is *persisted*: the on-disk `session.Record` wrapper (`internal/session`) around **two
 opaque payloads** — the untouched engine Session **and** the versioned **transcript blob**
 written by the neutral codec in `internal/session` (the scrollback: user/assistant text, tool
-cards, notes, sub-agent `Depth` and the
-**call-ID** of the `sub_agent` call that spawned each delegated entry, so a resumed fan-out
-regroups per child) — plus
+cards, notes, sub-agent `Depth`, the **run id** of the delegation each delegated entry belongs to
+and the **call-ID** of the `sub_agent` call that spawned it, so a resumed fan-out regroups per
+child even where two children share a call-ID; a record written before the run id existed regroups
+by `Depth` and call-ID) — plus
 browsable `Meta` (title, timestamps, workspace, model, message count, last context fill). A
 forked record carries its parent's id in `Meta.ParentID` — an additive key like the Schedule
 identity, empty on every record that is not a fork, cleared (never refused) on load when it is
@@ -888,8 +901,11 @@ unchanged. It is ADR 0025's boundary unmoved, and the child is the one exception
 rejected (a Run drain, an interjection Event) are superseded for **depth > 0 only**
 ([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)). A staged row addressed to
 a child names its run (`queued for <name> — …`), and the child's own delivery report is what takes
-it off the band: a message that landed becomes that child's user block inside its run, and one the
-child finished before reading becomes the note `<name> finished before your message landed`.
+it off the band: a message that landed becomes that child's user block inside its run, and one that
+did not becomes a note naming why — `<name> finished before your message landed`, `<name> stopped
+at its cap before your message landed`, `<name> failed before your message landed`, `<name> was
+cancelled before your message landed`, or `<name> could not take your message` where the child,
+still running, refused it at the boundary.
 _Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mechanism shaping the
 model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;
 it means deliver-at-the-next-boundary), "queued input" alone (the queue is the staging, the

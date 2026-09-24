@@ -57,7 +57,8 @@ forbids.
 **3. A separate encoder, sharing convention with Hooks but not shape.** `hooks.Payload` is untouched.
 The Event lines are a new package, `internal/eventjson`, re-exported on the public facade. A line is
 `{"event":…,"v":1,"seq":…,"time":…,"session":…,"turn":…,"depth":…,"call_id":…,"data":{…}}` — variant
-members nested under `data`, never flattened into the envelope. Flat works for five hook events and
+members nested under `data`, never flattened into the envelope. (Amended 2026-09-24: the envelope
+gained `run_id` after `call_id`, additively within `v:2` — see the amendment under decision 8.) Flat works for five hook events and
 `jq -r .path`; across 17 variants it becomes a union of some sixty optional keys whose names
 genuinely collide. Binding details of the envelope:
 
@@ -126,6 +127,26 @@ meaningful only per-stream, so it has no single owner on the engine. `workspace`
 **8. No parent call id, no exchange id.** The call tree is rebuildable by correlating `ToolCallEvent`
 ids, which a consumer must do anyway; the exchange boundary is already observable as
 `TurnEvent.Status`. Inventing an Exchange identity would give the engine one it does not have.
+
+> **Amended 2026-09-24 — a delegation carries an engine-minted run id (plan
+> `2026-09-24 - 01 - subagent-premature-done-plan`, items 1–2; owner call 2026-09-24).** This
+> supersedes decision 7's "`EventBase` is not extended" and decision 8's "rebuildable by correlating
+> `ToolCallEvent` ids" for **delegation identity**, and nothing else. A call id is the model's or the
+> server's to choose and it repeats: a text-format parser numbering calls per Turn hands two siblings
+> of one reply the same id, and a nested delegation can reuse its parent's. Keyed on call ids, a
+> consumer paired one child's result with a sibling's run. So the engine now mints a **run id** per
+> delegation (`<prefix>.<n>`: a random prefix per top-level Agent and a counter shared by its whole
+> delegation tree) and stamps it on `EventBase.RunID` of every event the delegated agent emits,
+> exactly as `CallID` is stamped. The parent's `ToolCallEvent` and `ToolResultEvent` for that
+> delegation carry the same id as `SpawnRunID`. On the lines this is an envelope member `run_id`,
+> placed right after `call_id` and `null` at depth 0, on the frames and on a delegated event recorded
+> without one. It is also a `data.spawn_run_id` member, always present and last, on `tool_call` and
+> `tool_result` (`""` on a call that spawns no delegation). Both are additive within `v:2` (decision
+> 10). The call tree of delegations is rebuilt from `spawn_run_id` → `run_id`, and `call_id` stays
+> what it always named: the spawning call, not a unique run. The run id is identity only. It is
+> never sent to a model, the ids on the wire are never rewritten, and the Driver-stamped `time`,
+> `seq` and `session` of decision 7 are untouched. No Exchange identity is added. Addressing a
+> running child (`InterjectChild`, ADR 0063 D1) still goes by the spawning call id.
 
 **9. Lossless and ordered; it blocks rather than drops.** Writes happen inside `Emit`, through a
 `bufio.Writer` flushed per line; the engine already serializes emission (`serialEventSink`,

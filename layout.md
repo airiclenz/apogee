@@ -971,7 +971,8 @@ wears, so a run says it finished once in two places rather than twice in two col
 exception is anchored on the **delegation vocabulary** and reaches nothing else: it is the engine's
 word for a run it drove to its own boundary, where a tool's `clean`, `PASS` or `exit 0` is that
 tool's reading of its own work and stays in the marker tone, as does a run `stopped at its step
-cap`, which did not finish. Where both verdicts stand the red wins. Every other kind of summary,
+cap`, which did not finish, and one that `ended without a report`, which reached its boundary with
+nothing to hand back. Where both verdicts stand the red wins. Every other kind of summary,
 promoted and quoted ones included, takes the marker tone. The sketch at the
 top of this file shows both states side by side: a collapsed `Terminal` row over its remainder
 marker, and a `Diff Preview` deliberately drawn open so the shape of a full body appears too — a
@@ -1069,13 +1070,21 @@ child has reported. Once the report arrives the slot
 carries the **report's first line**, or `· done` where the report was long enough to become a
 body — unless the engine wrapped that report in an **outcome envelope**, which takes the slot
 instead: `· stopped at its step cap` where the step cap stopped the run mid-task (`· stopped at
-its token budget` / `· stopped at its time limit` where one of its sibling bounds did), and
+its token budget` / `· stopped at its time limit` where one of its sibling bounds did),
+`· ended without a report` where the child reached its own boundary but handed back no report —
+narration of a next step, a pasted file or dump, or the engine's `[delegate returned no report]`
+marker, read with the same classifier the capped path judges a report by — and
 `· steered by 2 messages` appended to whichever verdict stands where the human addressed the child
 while it ran (ADR 0063 D3); a failed run's red slot carries that same steering cell after its
 cause. A capped run still closes with a wrap-up report; the envelope takes the slot ahead of that
 report's first line deliberately (ADR 0063), so the row says why the run stopped rather than what
 it managed to say last, and the capped child's closing report is read one level down, inside the
-run view. The collapsed row is the only place in the parent's conversation any of that can be read,
+run view. The no-report verdict is the row's reading alone: it is neither a failure nor a success,
+so it takes no red and no green and reads in the step cap's marker tone, the row wears **no done ✓**
+beside it, and the parent model receives the result exactly as the engine wrote it. The ✓ itself is
+earned per run — by that run's own child handing back a report, matched to its row by the run id
+rather than the call id, so a sibling finishing first never ticks another row. The collapsed row is
+the only place in the parent's conversation any of that can be read,
 the run's own conversation being a level down. The count is **transitive** — every call in the span counts, whatever its
 depth — so one number says how much work happened in there, at every nesting level by the same
 rule. The middle cell is the other half of that summary: **how full the delegate's own context
@@ -1304,9 +1313,13 @@ that still knows where it is going; a message waiting for the model itself is un
 only one place it could go. The name is read at paint rather than captured at staging, so the band,
 the breadcrumb and `/usage` cannot come to call the same run different things. The row leaves the
 band on the child's own delivery report, whatever that report says: a message that **landed**
-becomes the child's own `❯` block inside its run, at the boundary it actually reached, and one the
-child finished before reading becomes the note `<name> finished before your message landed` at the
-top level, where the reader finds it on the way out.
+becomes the child's own `❯` block inside its run, at the boundary it actually reached, and one that
+did not becomes a note at the top level, where the reader finds it on the way out, worded by why it
+did not land — `<name> finished before your message landed` (the child completed first),
+`<name> stopped at its cap before your message landed`, `<name> failed before your message landed`,
+`<name> was cancelled before your message landed`, or `<name> could not take your message` (the
+child, still running, refused it at the boundary). A reason this build does not know, or a record
+written before the reason existed, reads as the first.
 
 ---
 
@@ -1951,7 +1964,8 @@ is a chord and not a character. Its verb is safe while the agent works, which is
 worth reading is being made.
 
 **It shows the run you are reading.** With a **run view** open the pane is that delegation's own wire
-stream and nothing else — the records whose depth and spawning call id are the viewed run's — and the
+stream and nothing else — the records stamped with the viewed run's run id, which a sibling sharing
+its spawning call id never carries — and the
 box says which: the title reads `raw wire traffic · repo-scout` rather than the bare name. At the top
 level it is the whole ring as it was recorded. There is no key for the scope and no manual filter: a
 fan-out braids several runs into one arrival-ordered ring, a reader who opened a child is asking about

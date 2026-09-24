@@ -172,12 +172,12 @@ contract is
 [ADR 0075](../adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md).
 
 ```json
-{"event":"tool_call","v":2,"seq":3,"time":"2026-09-07T14:12:33.884201Z","session":"20260907-141233-7f2a","turn":0,"depth":0,"call_id":null,"data":{"call":{"id":"call_1","tool":"read_file","arguments":{"path":"a.txt"}},"resolved_path":""}}
+{"event":"tool_call","v":2,"seq":3,"time":"2026-09-07T14:12:33.884201Z","session":"20260907-141233-7f2a","turn":0,"depth":0,"call_id":null,"run_id":null,"data":{"call":{"id":"call_1","tool":"read_file","arguments":{"path":"a.txt"}},"resolved_path":"","spawn_run_id":""}}
 ```
 
 ### The envelope
 
-Every line is that same envelope — nine members, the variant's own content nested under `data`
+Every line is that same envelope — ten members, the variant's own content nested under `data`
 rather than flattened beside it:
 
 | Member | What it carries |
@@ -189,12 +189,16 @@ rather than flattened beside it:
 | `session` | the run's session id, `null` on a line written before the run had one |
 | `turn` | the Turn the event belongs to, `null` on the frames |
 | `depth` | `0` for the run itself, `1` and deeper for a delegated run, `null` on the frames |
-| `call_id` | the delegating call the event came from, `null` when there is none |
+| `call_id` | the id of the `sub_agent` call that spawned the emitting agent, `null` when there is none. It is the model's or the server's id and may repeat — two delegations of one fan-out can share it — so it names a call, never a run |
+| `run_id` | the delegated run the event came from: an id apogee mints once per delegation, unique however the call ids repeat, `null` at depth `0`, on the frames and on a delegated event recorded without one. This is the key that tells two sub-agents' lines apart |
 | `data` | the kind's own members, snake_case, an object on every line |
 
 Every member is **always present**, and is `null` where the line has no value for it, so a consumer
 never has to test for a missing key. `depth` is what separates the run's own events from a
-sub-agent's: the lines carry every depth, not just the top.
+sub-agent's: the lines carry every depth, not just the top. `run_id` is what separates one
+sub-agent from another, and the parent's `tool_call` and `tool_result` for a delegation carry the
+same id as `data.spawn_run_id` (`""` on any other call), which is how a delegated run is paired with
+the call that spawned it.
 
 ### The twenty-one line kinds
 
@@ -212,7 +216,7 @@ moment, and the case difference is the signal.
 | `tool_result` | that call's outcome after execution, with `data.tool` — the tool it ran under, as the pre-tool-exec Reactions left the call — and `data.write_target`, the resolved path the call wrote (the same resolution `tool_call`'s `resolved_path` comes from; `""` for a call that is not a write, and a value that is a *changed* file only together with `is_error: false`) |
 | `sub_agent_phase` | one delegation crossing a lifecycle boundary; `data.cancelled` marks a `finished` that closes a rolled-back bracket rather than reporting a result |
 | `sub_agent_named` | the name a delegated run was given |
-| `child_interjection` | input steered into a running delegation, and whether it landed |
+| `child_interjection` | input steered into a running delegation, whether it landed, and — as `data.reason` on one that did not — why: `completed`, `capped`, `faulted` or `cancelled` (the child ended that way before the boundary the message waited for) or `refused` (the child, still running, refused it there); `""` on a landed message. The set is open: read an unknown value as `completed` |
 | `approval` | an approval request: its phase, the request, the decision |
 | `turn` | a Turn boundary, at every depth: its status, whether it faulted, whether it hit the step cap |
 | `reaction_fired` | a Reaction acted: an engine builtin (a Floor guard or the context-fill notice) or armed Reaction, at which Moment, and what it did |
