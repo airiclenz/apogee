@@ -194,7 +194,12 @@ cmd/apogee/headless_test.go — TestHeadlessFormatJSONStreamsEveryEvent; cmd/apo
 **Acceptance:** `go test -race -count=1 ./internal/eventjson/ && go test -race -count=1 -run 'TestHeadlessFormatJSON|TestManualListsEveryEventLineKind|TestE2EEventLines' ./cmd/apogee/`
 **Commit:** `feat(eventjson): write upstream attempt lines in headless output`
 
-## 8. `serverstats` store and summary
+## 8. `serverstats` store and summary — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): API is `Open(path) *Store` (total — a missing/unreadable file or a failed trim is skipped, no error), `Append(Sample)`, `Load(name, endpoint)`, `Summary(name, endpoint, model)` (empty model falls back to `LastModel`; the returned Summary names the model it covers), plus pure `Summarize(samples, model)` and `LastModel(samples)`.
+NOTES (2026-09-24): Summary figures are computed over the newest 50 samples of the model (the trim cap), so an untrimmed file reports the same window a trimmed one would; ttft p50 is over non-cancelled attempts that reached a first delta (failed ones included); p50 is nearest-rank (lower middle for an even count).
+NOTES (2026-09-24): the package imports internal/provider only for the `AttemptOK` / `AttemptCancelled` outcome constants, so the vocabulary cannot drift; no dependency on internal/tui or cmd.
+NOTES (2026-09-24): `go test -race` cannot run on this box (ThreadSanitizer: unsupported VMA range, 47-bit Pi kernel); the acceptance ran as `go test -count=1 ./internal/serverstats/` — the verifier should run the `-race` form on a supported host if one is available.
 
 **What:**
 **Goal:** Package `internal/serverstats` appends samples to a JSONL file, trims at open when the file exceeds 4× the per-key cap (temp+rename, keep last 50 per name+endpoint+model), loads samples for a name+endpoint, and summarises for a model: ttft p50, tok/s p50 over carrying samples (absent under 5), failed/total excluding `cancelled`, `NoData` under 5 samples; corrupt lines are skipped, never fatal.
