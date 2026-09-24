@@ -419,6 +419,8 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A new session opens with empty `/thinking` and `/advice` panes.** `/clear`, `/new`, a `/sessions` resume and `/fork` used to leave the closed conversation's thinking records and advise firings on both boards, so the new session's panes showed reasoning and advice it never produced. Every session boundary now empties both boards, as a launch does; a pane open across the boundary stays open and shows its empty row. The Inspector's wire ring and the attempt ring still survive `/clear`, as documented. (apogee-thinking-pane-survives-clear)
+
 - **A scheduled or headless run now tells its model the Sub-agent server's width.** When a
   Firing was given both a Sub-agent server and its seat description, it applied the server
   first and the seat second, and installing a seat clears the width a server has stated. The
