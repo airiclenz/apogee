@@ -391,6 +391,8 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A reply of tool calls alone now gets a real ttft and tok/s.** An upstream attempt whose reply carried only tool calls was clocked when the codec flushed the assembled call at the stream's end, so its ttft landed on its last token and its output rate collapsed or went missing in `/inspect` and the server pickers. Both wires now clock each tool-call fragment as it arrives, so ttft marks the first fragment and the rate spans first to last fragment; the deltas a stream yields are unchanged (apogee-tool-call-ttft-at-flush).
+
 - **`/undo` and `/redo` no longer hold the journal's lock across their filesystem work.**
   `Journal.Revert` and `Journal.Redo` now capture the exchange's ordinal, pop the group,
   set the boundary and bump the generation under one short hold, then walk the step — every

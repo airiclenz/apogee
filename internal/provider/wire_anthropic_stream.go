@@ -60,10 +60,12 @@ const sseDataPrefix = "data: "
 // (anthropicFinishReason), and usage assembled from message_start's input side and
 // message_delta's output side. A payload that fails to decode is skipped and counted, exactly
 // as on the openai wire, and an unknown event or delta type is ignored, so a new event the API
-// adds cannot fault a stream. carriedEffort is the request's, for the in-band error delta.
-// Returning false from yield (consumer broke) stops cleanly.
-func (a *anthropicCodec) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) bool) {
+// adds cannot fault a stream. carriedEffort is the request's, for the in-band error delta;
+// toolFragment, when non-nil, runs on every tool_use start and input_json_delta as it arrives
+// (openToolCalls). Returning false from yield (consumer broke) stops cleanly.
+func (a *anthropicCodec) parseSSE(body io.Reader, carriedEffort bool, toolFragment func(), yield func(Delta) bool) {
 	s := &anthropicStream{codec: a, carriedEffort: carriedEffort, yield: yield}
+	s.open.onFragment = toolFragment
 	scanner := newSSEScanner(body)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())

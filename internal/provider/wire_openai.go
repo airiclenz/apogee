@@ -211,12 +211,13 @@ func formatMessage(m Message, hasTools bool) chatMessage {
 // oracle's parseSSEStream. Returning false from yield (consumer broke) stops cleanly.
 // carriedEffort is carried through from the request Stream built — the in-band error
 // delta needs it, and this is the only seam between that request and the error it explains.
+// toolFragment, when non-nil, runs on every tool-call fragment as it arrives (openToolCalls).
 // Wire capture is not this parser's business: Client.Stream tees the body before it
 // arrives here, so the parser reads exactly what it would read unobserved.
-func (o *openaiCodec) parseSSE(body io.Reader, carriedEffort bool, yield func(Delta) bool) {
+func (o *openaiCodec) parseSSE(body io.Reader, carriedEffort bool, toolFragment func(), yield func(Delta) bool) {
 	scanner := newSSEScanner(body)
 
-	var open openToolCalls
+	open := openToolCalls{onFragment: toolFragment}
 	var pendingFinish string
 	var pendingUsage *Usage
 	// The id the server put on the reply's chunks: the first one that names a model settles it

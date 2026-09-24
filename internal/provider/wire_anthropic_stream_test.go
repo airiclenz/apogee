@@ -81,7 +81,7 @@ func parseAnthropicSSE(t *testing.T, body string) []Delta {
 	t.Helper()
 	client := NewClient("http://unused.invalid", "m", WithWire(WireAnthropic))
 	var deltas []Delta
-	client.codec.parseSSE(strings.NewReader(body), false, func(d Delta) bool {
+	client.codec.parseSSE(strings.NewReader(body), false, nil, func(d Delta) bool {
 		deltas = append(deltas, d)
 		return true
 	})
@@ -313,7 +313,7 @@ func TestAnthropicParseSSE_ConsumerBreakStopsTheRead(t *testing.T) {
 
 	client := NewClient("http://unused.invalid", "m", WithWire(WireAnthropic))
 	var seen []Delta
-	client.codec.parseSSE(strings.NewReader(anthropicToolStreamSSE), false, func(d Delta) bool {
+	client.codec.parseSSE(strings.NewReader(anthropicToolStreamSSE), false, nil, func(d Delta) bool {
 		seen = append(seen, d)
 		return false
 	})

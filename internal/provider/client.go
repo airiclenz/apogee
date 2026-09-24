@@ -217,8 +217,10 @@ type wireCodec interface {
 	// the bare error, which the Client wraps.
 	decodeWhole(body io.Reader) (RawResponse, *wireError, error)
 	// parseSSE reads one streamed 200 body and yields Deltas until it ends, however it ends.
-	// carried reports that the request expressed a thinking effort (see encode).
-	parseSSE(body io.Reader, carried bool, yield func(Delta) bool)
+	// carried reports that the request expressed a thinking effort (see encode). toolFragment,
+	// when non-nil, runs as each tool-call fragment arrives — calls are held until the stream
+	// ends, so it is the only signal of when one was generated; it never changes what is yielded.
+	parseSSE(body io.Reader, carried bool, toolFragment func(), yield func(Delta) bool)
 }
 
 // Option configures a Client (functional-options pattern — most fields have a sane

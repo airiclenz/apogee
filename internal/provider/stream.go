@@ -198,7 +198,7 @@ func (c *Client) Stream(ctx context.Context, req Request) iter.Seq[Delta] {
 			stream = io.TeeReader(stream, &raw)
 			defer func() { c.observeWire(WireResponse, c.streamCapture(raw.Bytes())) }()
 		}
-		c.codec.parseSSE(stream, carriedEffort, rec.wrap(yield))
+		c.codec.parseSSE(stream, carriedEffort, rec.toolFragment(), rec.wrap(yield))
 	}
 }
 
@@ -431,6 +431,10 @@ type openToolCalls struct {
 	// and is empty while neither has. It is the one message source both wires render as the
 	// terminal DeltaError, and once set every later fold reports the stream ended.
 	tripped string
+	// onFragment, when set, runs as each fragment arrives at fold — the one moment a tool call's
+	// generation is visible, since nothing is emitted until flush. It is the attempt recorder's
+	// tool-call clock (attemptRecorder.toolFragment); nil costs nothing.
+	onFragment func()
 }
 
 // toolCallBytesTripped is the fault a streamed reply ends on when its accumulated tool-call
@@ -462,6 +466,9 @@ const noIndex = -1
 // into the silent drop. A fragment addressing nothing — no index, no id, and no call yet
 // open — is still dropped silently, as it always has been.
 func (o *openToolCalls) fold(frag sseToolCall) bool {
+	if o.onFragment != nil {
+		o.onFragment()
+	}
 	target := o.address(frag)
 	if o.tripped != "" {
 		return true

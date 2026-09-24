@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -325,4 +326,82 @@ func deltaKinds(deltas []Delta) []DeltaKind {
 		kinds = append(kinds, d.Kind)
 	}
 	return kinds
+}
+
+// A reply of tool calls alone is clocked by its fragments as they arrive, not by the assembled
+// DeltaToolCall the codec flushes at the stream's end — otherwise TTFT ≈ Last and the attempt's
+// generation rate collapses. The server pauses between the first fragment and the second, and
+// again before the terminator: TTFT must sit a pause before Last, and Last a pause before the end.
+func TestAttemptToolCallOnlyReplyClockedByFragments(t *testing.T) {
+	t.Parallel()
+	const pause = 200 * time.Millisecond
+	cases := []struct {
+		name  string
+		wire  Wire
+		parts [3]string // first fragment, second fragment, terminator
+	}{
+		{
+			name: "openai",
+			wire: WireOpenAI,
+			parts: [3]string{
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0,\"id\":\"c1\"," +
+					"\"function\":{\"name\":\"grep\",\"arguments\":\"{\\\"q\\\":\"}}]}}]}\n\n",
+				"data: {\"choices\":[{\"delta\":{\"tool_calls\":[{\"index\":0," +
+					"\"function\":{\"arguments\":\"\\\"x\\\"}\"}}]},\"finish_reason\":\"tool_calls\"}]}\n\n",
+				"data: {\"choices\":[],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":9,\"total_tokens\":12}}\n\n" +
+					"data: [DONE]\n\n",
+			},
+		},
+		{
+			name: "anthropic",
+			wire: WireAnthropic,
+			parts: [3]string{
+				"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-x\"," +
+					"\"usage\":{\"input_tokens\":3,\"output_tokens\":1}}}\n\n" +
+					"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0," +
+					"\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_1\",\"name\":\"grep\",\"input\":{}}}\n\n",
+				"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0," +
+					"\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"q\\\":\\\"x\\\"}\"}}\n\n",
+				"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n" +
+					"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"}," +
+					"\"usage\":{\"output_tokens\":9}}\n\n" +
+					"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Content-Type", "text/event-stream")
+				flusher, _ := w.(http.Flusher)
+				for i, part := range tc.parts {
+					if i > 0 {
+						time.Sleep(pause)
+					}
+					_, _ = io.WriteString(w, part)
+					flusher.Flush()
+				}
+			}))
+			defer srv.Close()
+
+			attempts, kinds := attemptsOf(collectStream(identified(srv, WithWire(tc.wire)), Request{}))
+			if len(attempts) != 1 || attempts[0].Outcome != AttemptOK {
+				t.Fatalf("attempts = %+v, want one ok", attempts)
+			}
+			if want := []DeltaKind{DeltaToolCall, DeltaDone}; !slices.Equal(kinds, want) {
+				t.Fatalf("kinds = %v, want %v", kinds, want)
+			}
+			a := attempts[0]
+			if a.TTFT == 0 || a.Last-a.TTFT < pause*3/4 {
+				t.Errorf("ttft %v, last %v: want ttft at the first fragment, a pause before last", a.TTFT, a.Last)
+			}
+			if a.Duration-a.Last < pause*3/4 {
+				t.Errorf("last %v, duration %v: want last at the final fragment, not the flush", a.Last, a.Duration)
+			}
+			if a.OutputTokens != 9 {
+				t.Errorf("output tokens = %d, want 9", a.OutputTokens)
+			}
+		})
+	}
 }

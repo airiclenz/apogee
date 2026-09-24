@@ -252,16 +252,17 @@ func (r *attemptRecorder) watch(body io.ReadCloser) io.ReadCloser {
 	return r.body
 }
 
-// wrap returns the yield the codec parses into: every model delta advances the TTFT and Last
-// clocks, and a terminal delta is preceded by the attempt it ends. A nil recorder returns yield
-// itself.
+// wrap returns the yield the codec parses into: every content and reasoning delta advances the
+// TTFT and Last clocks, and a terminal delta is preceded by the attempt it ends. A DeltaToolCall
+// does not: a codec holds its calls until the stream ends, so the flush says nothing of when
+// they were generated — toolFragment clocks them instead. A nil recorder returns yield itself.
 func (r *attemptRecorder) wrap(yield func(Delta) bool) func(Delta) bool {
 	if r == nil {
 		return yield
 	}
 	return func(d Delta) bool {
 		switch d.Kind {
-		case DeltaContent, DeltaThinking, DeltaToolCall:
+		case DeltaContent, DeltaThinking:
 			r.mark()
 		case DeltaDone:
 			r.served = d.Model
@@ -282,6 +283,18 @@ func (r *attemptRecorder) wrap(yield func(Delta) bool) func(Delta) bool {
 		}
 		return yield(d)
 	}
+}
+
+// toolFragment returns the callback a codec runs as each tool-call fragment arrives, so a
+// tool call advances the TTFT and Last clocks when the model produced it rather than when the
+// assembled call was flushed at the stream's end — without it a reply of tool calls alone reads
+// TTFT ≈ Last and its generation rate collapses. A nil recorder returns nil, and the codec runs
+// nothing.
+func (r *attemptRecorder) toolFragment() func() {
+	if r == nil {
+		return nil
+	}
+	return r.mark
 }
 
 // mark advances the model-delta clocks: TTFT once, Last every time.
