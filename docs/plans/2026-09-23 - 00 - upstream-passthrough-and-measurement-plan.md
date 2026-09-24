@@ -174,7 +174,13 @@ internal/agent/construct.go — dialOptions; internal/agent/dialer_test.go — f
 **Acceptance:** `go test -race -count=1 ./internal/agent/ ./internal/domain/ && go test -race -count=1 -run TestEveryDomainEventVariantIsAliased . && go test -race -count=1 -run 'TestFoldEvent|TestProgressSave' ./internal/tui/`
 **Commit:** `feat(agent): emit an upstream attempt event for every model call attempt`
 
-## 7. Headless `upstream_attempt` lines
+## 7. Headless `upstream_attempt` lines — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): durations are written as whole milliseconds (`time.Duration.Milliseconds()`, sub-millisecond remainder truncated); the kind sits after `seam_closed`, directly before the two frames, as the regression guard asked.
+NOTES (2026-09-24): `TestKindsAreTwenty` renamed `TestKindsAreTwentyOne` with the count it pins, so the name keeps stating the count.
+NOTES (2026-09-24): consequential edit — internal/eventjson/doc.go: made necessary by the new variant (its "eighteen variants" count became nineteen).
+NOTES (2026-09-24): consequential edit — docs/adr/0075-the-headless-event-stream-is-a-versioned-driver-protocol.md: made necessary by the new kind (§4's "twenty kinds today" amendment now records twenty-one, `upstream_attempt` via ADR 0085).
+NOTES (2026-09-24): `-race` cannot run on this kernel (ThreadSanitizer: unsupported VMA range); the Acceptance ran unraced and passes — the raced form must run on a race-capable box.
 
 Depends on item 6.
 **What:**

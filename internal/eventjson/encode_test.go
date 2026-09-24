@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -318,6 +319,29 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"tool":"terminal","call_id":"audited-call",` +
 				`"decision":"dangerous-refused","reason":"recursive delete","is_error":true}`,
 		},
+		{
+			// Durations travel as whole milliseconds; a sub-millisecond remainder is truncated.
+			name: "upstream_attempt",
+			event: domain.UpstreamAttemptEvent{
+				EventBase:    domain.EventBase{Depth: 1, Turn: 2, CallID: "call-7"},
+				Server:       "local",
+				Endpoint:     "http://127.0.0.1:8080/v1",
+				Model:        "gpt-oss-20b",
+				RequestID:    "req-3",
+				Index:        1,
+				TTFB:         120 * time.Millisecond,
+				TTFT:         1800*time.Millisecond + 400*time.Microsecond,
+				Last:         4200 * time.Millisecond,
+				Duration:     4250 * time.Millisecond,
+				OutputTokens: 96,
+				Outcome:      "ok",
+			},
+			wantKind: "upstream_attempt",
+			wantBase: domain.EventBase{Depth: 1, Turn: 2, CallID: "call-7"},
+			wantData: `{"server":"local","endpoint":"http://127.0.0.1:8080/v1","model":"gpt-oss-20b",` +
+				`"request_id":"req-3","index":1,"ttfb_ms":120,"ttft_ms":1800,"last_ms":4200,` +
+				`"duration_ms":4250,"output_tokens":96,"outcome":"ok"}`,
+		},
 	}
 
 	for _, c := range cases {
@@ -450,16 +474,16 @@ func TestEncodeSkipsAnUnknownEvent(t *testing.T) {
 	}
 }
 
-// TestKindsAreTwenty pins the vocabulary itself — the eighteen serialized variants, the opt-in
+// TestKindsAreTwentyOne pins the vocabulary itself — the nineteen serialized variants, the opt-in
 // seam_closed among them, plus the two frames — so a kind added to the encoder without a manual
 // entry, or an entry without a kind, is a failing test rather than a documentation drift.
-func TestKindsAreTwenty(t *testing.T) {
+func TestKindsAreTwentyOne(t *testing.T) {
 	t.Parallel()
 
 	kinds := Kinds()
 
-	if len(kinds) != 20 {
-		t.Fatalf("len(Kinds()) = %d, want 20: %v", len(kinds), kinds)
+	if len(kinds) != 21 {
+		t.Fatalf("len(Kinds()) = %d, want 21: %v", len(kinds), kinds)
 	}
 	seen := make(map[string]bool, len(kinds))
 	for _, kind := range kinds {

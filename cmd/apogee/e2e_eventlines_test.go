@@ -117,7 +117,8 @@ func eventLinesGolden(name string) string {
 }
 
 // eventLinesRedactions is what has to come out of the stream before it can be compared to a file on
-// disk: the clock, the run's own id, the build string and the temporary workspace. Everything else
+// disk: the clock, the run's own id, the build string, the temporary workspace and an upstream
+// attempt's timings, request id and stub host:port. Everything else
 // a line carries is either scripted (the model, the token chunks, the two usage blocks) or derived
 // from the prompt, and is therefore the same on every run — which is the point of comparing at
 // all. Nothing here redacts a NAME or a KEY: a member that silently disappeared would still be a
@@ -132,6 +133,11 @@ func eventLinesRedactions(workspace string) []tuitest.Redaction {
 		tuitest.Redact(`"session":"[^"]*"`, `"session":"<session>"`),
 		tuitest.Redact(`"version":"[^"]*"`, `"version":"<version>"`),
 		tuitest.Redact(regexp.QuoteMeta(workspace), "<workspace>"),
+		// An upstream_attempt line carries the attempt's measured clocks, the call's minted request
+		// id and the endpoint of a stub server listening on a port the kernel picked.
+		tuitest.Redact(`"(ttfb|ttft|last|duration)_ms":\d+`, `"${1}_ms":"<ms>"`),
+		tuitest.Redact(`"request_id":"[^"]*"`, `"request_id":"<request>"`),
+		tuitest.Redact(`127\.0\.0\.1:\d+`, `<host:port>`),
 	}
 }
 

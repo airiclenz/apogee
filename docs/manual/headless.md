@@ -181,7 +181,7 @@ rather than flattened beside it:
 
 | Member | What it carries |
 |---|---|
-| `event` | the line kind: one of the twenty names below |
+| `event` | the line kind: one of the twenty-one names below |
 | `v` | the contract version — `2` today, on **every** line |
 | `seq` | 1-based, counting every line the run wrote, the two frames included |
 | `time` | RFC3339Nano, stamped as the line is written |
@@ -195,9 +195,9 @@ Every member is **always present**, and is `null` where the line has no value fo
 never has to test for a missing key. `depth` is what separates the run's own events from a
 sub-agent's: the lines carry every depth, not just the top.
 
-### The twenty line kinds
+### The twenty-one line kinds
 
-Eighteen of them are engine events, and the two frames are not. The names are snake_case on
+Nineteen of them are engine events, and the two frames are not. The names are snake_case on
 purpose — a [Reaction notice](reactions.md)'s kebab-case name for a neighbouring moment is a *different*
 moment, and the case difference is the signal.
 
@@ -221,6 +221,7 @@ moment, and the case difference is the signal.
 | `usage` | one model call's token accounting and the run's cumulative totals; `data.model` is the id the call asked for and `data.served_model` the id the server answered with (empty when it named none) |
 | `audit` | a tool call's allow/deny decision and its reason |
 | `seam_closed` | one in-loop seam finished passing: `data.seam` is its closing notice's name (`post-response-finished`, …) and `data.fired` the reactions that acted there, in order — **opt-in**, absent from the stream unless `--seams` asks for it |
+| `upstream_attempt` | one HTTP attempt a model call made against its server, at every depth and for compaction's summary call too — a retried, failed or cancelled attempt is a line of its own: `data.server` (the server entry's name), `data.endpoint` (scheme, host and path only — no credentials, no query), `data.model` (the id the server answered with, else the one asked for), `data.request_id` (shared by every attempt of one call) and `data.index` (0-based within it), the clocks `ttfb_ms` (send → first body byte), `ttft_ms` (send → first model delta), `last_ms` (send → last model delta) and `duration_ms` (send → the attempt's end) in whole milliseconds, `0` where not reached, `data.output_tokens` (`0` when the server reported none) and `data.outcome` — `ok`, a fault class (`http_<code>`, `overflow`, `in_band`, `transport`, `idle`, `stream_fault`) or `cancelled` |
 | `run_started` | the opening frame — not an event |
 | `run_finished` | the closing frame — not an event |
 

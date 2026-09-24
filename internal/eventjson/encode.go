@@ -6,7 +6,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// The twenty line kinds of ADR 0075 §4 — eighteen Event variants plus the two frames that
+// The twenty-one line kinds of ADR 0075 §4 — nineteen Event variants plus the two frames that
 // bracket a run and are not Events. They are snake_case on purpose: a notice Moment's kebab-case
 // name for a neighbouring moment is a DIFFERENT moment, and the case difference is the signal.
 // seam_closed is the one kind the Writer holds back unless asked for (Options.Seams): the mapping
@@ -30,6 +30,7 @@ const (
 	kindUsage             = "usage"
 	kindAudit             = "audit"
 	kindSeamClosed        = "seam_closed"
+	kindUpstreamAttempt   = "upstream_attempt"
 	kindRunStarted        = "run_started"
 	kindRunFinished       = "run_finished"
 )
@@ -58,6 +59,7 @@ func Kinds() []string {
 		kindUsage,
 		kindAudit,
 		kindSeamClosed,
+		kindUpstreamAttempt,
 		kindRunStarted,
 		kindRunFinished,
 	}
@@ -169,6 +171,20 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 		return kindSeamClosed, e.EventBase, seamClosedData{
 			Seam:  string(e.Seam.Closing()),
 			Fired: firedOrEmpty(e.Fired),
+		}, true
+	case domain.UpstreamAttemptEvent:
+		return kindUpstreamAttempt, e.EventBase, upstreamAttemptData{
+			Server:       e.Server,
+			Endpoint:     e.Endpoint,
+			Model:        e.Model,
+			RequestID:    e.RequestID,
+			Index:        e.Index,
+			TTFBMs:       e.TTFB.Milliseconds(),
+			TTFTMs:       e.TTFT.Milliseconds(),
+			LastMs:       e.Last.Milliseconds(),
+			DurationMs:   e.Duration.Milliseconds(),
+			OutputTokens: e.OutputTokens,
+			Outcome:      e.Outcome,
 		}, true
 	default:
 		return "", domain.EventBase{}, nil, false
@@ -331,6 +347,27 @@ type auditData struct {
 type seamClosedData struct {
 	Seam  string   `json:"seam"`
 	Fired []string `json:"fired"`
+}
+
+// upstreamAttemptData is the upstream_attempt line: the measurement of one HTTP attempt a model
+// call made against its server (ADR 0085). Every duration is whole milliseconds from the attempt's
+// send — ttfb to the first body byte, ttft to the first model delta, last to the last one,
+// duration to the attempt's end — and 0 where that point was never reached. endpoint is already
+// redacted to scheme, host and path; output_tokens 0 means the server reported none; outcome is
+// "ok", a fault class ("http_<code>", "overflow", "in_band", "transport", "idle", "stream_fault")
+// or "cancelled".
+type upstreamAttemptData struct {
+	Server       string `json:"server"`
+	Endpoint     string `json:"endpoint"`
+	Model        string `json:"model"`
+	RequestID    string `json:"request_id"`
+	Index        int    `json:"index"`
+	TTFBMs       int64  `json:"ttfb_ms"`
+	TTFTMs       int64  `json:"ttft_ms"`
+	LastMs       int64  `json:"last_ms"`
+	DurationMs   int64  `json:"duration_ms"`
+	OutputTokens int    `json:"output_tokens"`
+	Outcome      string `json:"outcome"`
 }
 
 // The nested mirrors. A domain struct that rides inside a variant gets its own tagged shape here
