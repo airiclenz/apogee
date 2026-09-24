@@ -222,18 +222,20 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.engine.seedReactions(w.hooks, w.live.generation())
 
 	// The store-backed session host: it persists the active session (per-Turn, at idle, and on
-	// quit) and backs the /sessions browser. It owns id minting and the metadata policy — the
-	// facts only the binary knows (workspace root, resolved model) — so the renderer stays free of
-	// file I/O (phase-2 detail plan §3 C5). Seeded active on a resumed record, it updates that
-	// session's file rather than starting a new one.
-	// The scratch seam rides the host because the host owns session identity: it creates the
-	// active session's `scratch/<id>/` dir at each identity boundary and pushes the move into the
-	// engine holder, so the confinement box follows /clear|/new and /sessions resume. The seed
-	// below puts the boot session's dir on the Config the binder captures, which is what makes it
-	// writable from the engine's very first tool call (workspace-clobber hardening, 2026-08-22).
-	// The undo seam rides the host beside the scratch seam and for the same reason — the store is
-	// named by the id the host mints — but carries the ID rather than a path: opening a journal
-	// needs the apogee home and the workspace too, and those are this root's to know (ADR 0074).
+	// quit) and backs the /sessions browser. It runs on the session.Live that owns id minting and
+	// the hold, and keeps the metadata policy — the facts only the binary knows (workspace root,
+	// resolved model) — so the renderer stays free of file I/O (phase-2 detail plan §3 C5). Seeded
+	// active on a resumed record, it updates that session's file rather than starting a new one.
+	// The scratch seam rides the host because the dir is named by the session's id: Live's onMove
+	// follower creates the active session's `scratch/<id>/` dir at each identity boundary and pushes
+	// the move into the engine holder, so the confinement box follows /clear|/new and /sessions
+	// resume. The seed below puts the boot session's dir on the Config the binder captures, which
+	// is what makes it writable from the engine's very first tool call (workspace-clobber
+	// hardening, 2026-08-22).
+	// The undo seam rides the host beside the scratch seam, as Live's second follower, and for the
+	// same reason — the store is named by the session's id — but carries the ID rather than a path:
+	// opening a journal needs the apogee home and the workspace too, and those are this root's to
+	// know (ADR 0074).
 	w.host = newSessionHost(w.store, w.roots.workspace, w.opts.Model, w.resumed,
 		w.roots.scratch, w.engine.SetScratchDir,
 		w.roots.snapshots, func(id string) { w.openSessionJournal(ctx, id) })

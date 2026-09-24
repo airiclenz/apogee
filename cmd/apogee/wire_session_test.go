@@ -1293,11 +1293,14 @@ func TestSessionHostLoadParksTheHoldForActivate(t *testing.T) {
 		host.Activate(rec.Meta)
 		assertHeld(t, store, first, true)
 		assertHeld(t, store, second, false)
-		host.mu.Lock()
-		adopted := host.heldID == first && host.pendingID == "" && host.pendingRelease == nil
-		host.mu.Unlock()
-		if !adopted {
-			t.Error("Activate did not adopt the parked hold as the live one")
+		// Adopted as the LIVE hold, not left parked: a Delete releases only a parked hold of its id,
+		// so a live one makes the store refuse this process's own Delete and the record survives.
+		var held *session.HeldError
+		if err := host.Delete(first); !errors.As(err, &held) {
+			t.Errorf("Delete of the adopted id = %v; want the HeldError of the live hold Activate adopted", err)
+		}
+		if _, err := store.Load(first); err != nil {
+			t.Errorf("the adopted record did not survive the refused Delete: %v", err)
 		}
 	})
 
@@ -1339,15 +1342,10 @@ func TestSessionHostLoadParksTheHoldForActivate(t *testing.T) {
 
 	t.Run("self-resume neither probes nor parks", func(t *testing.T) {
 		active := host.ActiveID()
+		// A probe or a park of the active id would be a second flock this process's own pid refuses.
 		rec, err := host.Load(active)
 		if err != nil {
 			t.Fatalf("Load of the active id was refused: %v", err)
-		}
-		host.mu.Lock()
-		parked := host.pendingID
-		host.mu.Unlock()
-		if parked != "" {
-			t.Errorf("Load of the active id parked a hold on %q", parked)
 		}
 		host.Activate(rec.Meta)
 		assertHeld(t, store, active, true)

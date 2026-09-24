@@ -504,7 +504,13 @@ cmd/apogee/wire_session_test.go — assertHeld, TestSessionHostScratchFollowsThe
 - `! go list -deps ./internal/session | grep -E 'internal/(snapshot|undo|tui)$'`
 **Commit:** `feat(session): Live owns a session's identity, rotation and hold`
 
-## 23. sessionHost runs on session.Live
+## 23. sessionHost runs on session.Live — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): session.NewLive is built inside newSessionHost (its signature unchanged), with followScratch and followJournal passed as the onMove method values, rather than at the wire_live.go call site: the followers read the host's scratchRoot/scratchMoved/journalMoved, so the host is where they bind; wire_live.go gets only its comment brought up to date. Live mints from a closure over the host's now, so a test that swaps h.now after construction (saveAt) keeps stamping and minting from one clock, as before.
+
+NOTES (2026-09-24): Fork's "parent.ID is the fallback for a host holding no identity" branch was dropped as unreachable (Live.ID never answers "" — every boundary mints), mirroring item 22's dropped Save fallback; the tui.SessionHost parameter stays, named `_`.
+
+NOTES (2026-09-24): TestSessionHostLoadParksTheHoldForActivate observes adoption as a refused Delete of the activated id (a live hold, not a parked one, makes the store refuse this process's own Delete); the self-resume arm's pendingID read is dropped — a Load that succeeds on the active id already proves nothing probed or parked it, since a second flock would refuse this process's own pid.
 
 **What:**
 **Goal:** `cmd/apogee`'s `sessionHost` delegates identity to `session.Live`; it holds no `pendingRelease` or `heldID` state of its own; `tui.SessionHost` is unchanged; `followScratch`/`followJournal` are `onMove` callbacks. Depends on item 22 and item 7 (shared file).
