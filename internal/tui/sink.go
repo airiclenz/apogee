@@ -45,9 +45,9 @@ type teaSink struct {
 	// base is the (Depth, Turn, run identity) the pending text belongs to. Only deltas sharing all
 	// three — and reasoning, below — may merge: a sub-agent's stream (Depth > 0) nests inside the
 	// parent's and is a different block in the transcript, a Turn boundary is a commit point, and
-	// two children of one reply share a depth but not a spawning call id (domain.EventBase.CallID),
-	// so the id is what keeps concurrent siblings' text from merging into one another's block (ADR
-	// 0039).
+	// two children of one reply share a depth but never a run id (domain.EventBase.RunID — their
+	// spawning call ids can collide), so the run identity is what keeps concurrent siblings' text
+	// from merging into one another's block (ADR 0039).
 	base domain.EventBase
 	// reasoning is the kind of the open buffer: true for ReasoningEvent text, false for
 	// TokenEvent text. It is part of the merge key beside base, because one Turn's reasoning and

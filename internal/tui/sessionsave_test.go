@@ -563,7 +563,7 @@ func TestQueuedForkWaitsForTheSaveAndCarriesTheChild(t *testing.T) {
 	seedConversation(&m)
 	m.transcript.apply(domain.ToolCallEvent{EventBase: domain.EventBase{Depth: 0},
 		Call: domain.ToolCall{ID: "s1", Tool: "sub_agent", Arguments: []byte(`{"task":"survey"}`)}})
-	m.transcript.addUserAt(1, "s1", domain.UserInput{Text: "the delegate's brief"})
+	m.transcript.addUserAt(runRef{depth: 1, spawn: "s1"}, domain.UserInput{Text: "the delegate's brief"})
 	prefix := entriesToRecords(m.transcript.entries)
 	wantMsgs := m.transcript.userMessageCount()
 	if wantMsgs != 2 {

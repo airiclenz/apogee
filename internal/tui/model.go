@@ -236,8 +236,8 @@ type Model struct {
 
 	// wire is the Inspector's bounded ring: the most recent maxWireRecords halves of an Upstream
 	// round-trip, as the fold recorded them (foldWire). Each half carries the wire stream it came
-	// from — the (depth, callID) pair of the agent that made the call — because the one ring holds
-	// every run's traffic interleaved, and that pair is what pairs a request to its own reply
+	// from — the run (depth, callID and run id) of the agent that made the call — because the one ring
+	// holds every run's traffic interleaved, and that run is what pairs a request to its own reply
 	// (hasUnrecordedReply). It sits BESIDE the transcript rather than in
 	// it — a wire record is not a conversation entry and must not disturb entry folding — and it is
 	// rebuilt rather than appended into, so it rides safely in the value-copied Model (ADR 0011). It
@@ -246,8 +246,8 @@ type Model struct {
 	wire []wireRecord
 
 	// attempts is the Inspector's second bounded ring: the most recent maxAttemptRecords upstream
-	// HTTP attempts as the fold recorded them (foldAttempt), each with the (depth, callID) of the
-	// run that made the call and the request id its retries share. Unlike wire it fills whether or
+	// HTTP attempts as the fold recorded them (foldAttempt), each with the run (depth, callID and run
+	// id) that made the call and the request id its retries share. Unlike wire it fills whether or
 	// not `ui.inspector` is on — the engine emits every attempt's measurement (ADR 0085) — and it is
 	// rebuilt rather than appended into, on the same value-copy terms (ADR 0011).
 	attempts []attemptRecord
@@ -3758,14 +3758,14 @@ func (m Model) shownSlot(view runRef) (runRef, runActivity, string) {
 		return runRef{}, top, ""
 	}
 	if view != (runRef{}) {
-		return view, m.acts.at(view), m.transcript.runName(view.spawn)
+		return view, m.acts.at(view), m.transcript.runName(view)
 	}
 	kids := m.acts.children()
 	switch len(kids) {
 	case 0:
 		return runRef{}, m.acts.at(runRef{}), ""
 	case 1:
-		return kids[0], m.acts.at(kids[0]), m.transcript.runName(kids[0].spawn)
+		return kids[0], m.acts.at(kids[0]), m.transcript.runName(kids[0])
 	}
 	oldest, _ := m.acts.oldestChild()
 	slot := m.acts.at(oldest)

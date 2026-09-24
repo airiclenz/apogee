@@ -210,7 +210,7 @@ func TestRunViewOpenRunAtRefusesTheViewedRunsOwnHead(t *testing.T) {
 	if got := m.viewedRun().spawn; got != "s1" {
 		t.Fatalf("setup: ⏎ on the delegation opened run %q; want the run it heads", got)
 	}
-	head, ok := runHeadAt(m.transcript.entries, m.viewedRun().spawn)
+	head, ok := runHeadAt(m.transcript.entries, m.viewedRun())
 	if !ok {
 		t.Fatal("setup: the transcript holds no head for the run on screen, so there is no self-redirect to ask about")
 	}

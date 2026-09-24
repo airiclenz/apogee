@@ -80,9 +80,9 @@ const maxAdviceRecords = 256
 // the reaction that fired, its origin and Moment, and the Detail the engine booked — the capped
 // fenced text for an advise entry, the rung for the notice, escape-stripped at this seam (doc.go).
 //
-// run is the {depth, spawn} run identity every fold in the view keys on (runRef — transcript.go),
-// where the ZERO value is the human's own top-level conversation; turn is domain.EventBase.Turn off
-// the firing's own event.
+// run is the {depth, spawn, run id} run identity every fold in the view keys on (runRef —
+// transcript.go), where the ZERO value is the human's own top-level conversation; turn is
+// domain.EventBase.Turn off the firing's own event.
 type adviceRecord struct {
 	run      runRef
 	turn     int
@@ -130,7 +130,7 @@ func (m Model) adviceHeading(run runRef, turn int) string {
 	if run.depth == 0 {
 		return heading
 	}
-	return m.runLabel(run.spawn) + " · " + heading
+	return m.runLabel(run) + " · " + heading
 }
 
 // adviceFiringRow is the one row every firing opens with — `<reaction> (<origin> origin) @

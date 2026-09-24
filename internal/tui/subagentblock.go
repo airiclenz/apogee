@@ -72,10 +72,10 @@ func subAgentFramed(head paintInput, span int) bool {
 // but not yet called a tool has produced no nested entry at all — subAgentSpan is 0 there, and a
 // rule reading it would let exactly the first tokens through. Every enclosing run is asked, so a
 // nested run streaming inside a collapsed parent is elided by the parent's state as well as by its
-// own: the chain is walked by SPAWNING CALL — this run's head, then the run that head sits in, up
-// to the top — which is what keeps the answer exact while siblings run at once (ADR 0039), where
-// the most recent open head at a level names whichever child was announced last rather than the one
-// that is talking.
+// own: the chain is walked by RUN — this run's head ([entry.headsRunFor]), then the run that head
+// sits in, up to the top — which is what keeps the answer exact while siblings run at once (ADR
+// 0039), where the most recent open head at a level names whichever child was announced last rather
+// than the one that is talking, and where two siblings' spawning call ids can even be equal.
 //
 // A run with no spawning call to walk from — a hand-built test transcript, a record replayed from a
 // blob written before the id was stamped — still answers by the depth rule this began as: the most
@@ -88,61 +88,62 @@ func subAgentFramed(head paintInput, span int) bool {
 // and its view — so opening a view leaves the head collapsed the whole time it is open. The zero
 // root stops the walk at the top of the transcript, which is the rule as it was written.
 func insideCollapsedRun(entries []entry, run, root runRef) bool {
-	if run.spawn == "" {
+	if run.isTop() {
 		return insideCollapsedRunAtDepth(entries, run.depth)
 	}
-	for spawn := run.spawn; spawn != "" && spawn != root.spawn; {
-		head, ok := runHead(entries, spawn)
+	for r := run; !r.isTop() && r != root; {
+		head, ok := runHead(entries, r)
 		if !ok {
 			return false
 		}
 		if !head.expanded {
 			return true
 		}
-		spawn = head.spawnCallID // this run is open: the run it sits in may still be collapsed
+		r = head.run() // this run is open: the run it sits in may still be collapsed
 	}
 	return false
 }
 
 // runUnder reports whether run IS root or lies anywhere inside it — the question a rooted paint asks
 // of the live streaming buffer, which is the one block that is not an entry and so cannot be placed
-// by the walk's own bounds (render.go). The chain is walked by SPAWNING CALL for
-// [insideCollapsedRun]'s reason: with siblings live (ADR 0039) a depth says which level a run stands
+// by the walk's own bounds (render.go). The chain is walked by RUN for [insideCollapsedRun]'s
+// reason: with siblings live (ADR 0039) a depth says which level a run stands
 // at and never which run it is.
 //
 // The zero root is the whole transcript, and every run is under that.
 func runUnder(entries []entry, run, root runRef) bool {
-	if root.spawn == "" {
+	if root.isTop() {
 		return true
 	}
-	for spawn := run.spawn; spawn != ""; {
-		if spawn == root.spawn {
+	for r := run; !r.isTop(); {
+		if r == root {
 			return true
 		}
-		head, ok := runHead(entries, spawn)
+		head, ok := runHead(entries, r)
 		if !ok {
 			return false
 		}
-		spawn = head.spawnCallID
+		r = head.run()
 	}
 	return false
 }
 
-// runHead finds the sub_agent call block that opened the run spawn names.
-func runHead(entries []entry, spawn string) (entry, bool) {
-	at, ok := runHeadAt(entries, spawn)
+// runHead finds the sub_agent call block that opened run ([entry.headsRunFor]: by run id, or by the
+// legacy (depth, spawning call) key for a run recorded before run ids existed).
+func runHead(entries []entry, run runRef) (entry, bool) {
+	at, ok := runHeadAt(entries, run)
 	if !ok {
 		return entry{}, false
 	}
 	return entries[at], true
 }
 
-// runHeadAt is [runHead] as a POSITION: where the sub_agent call block that opened the run spawn
-// names sits in the list, which is what a paint rooted at that run needs — the run IS the head's
-// [subAgentSpan], and a span is a range of indices. −1 and false where the list holds no such head.
-func runHeadAt(entries []entry, spawn string) (int, bool) {
+// runHeadAt is [runHead] as a POSITION: where the sub_agent call block that opened run sits in the
+// list, which is what a paint rooted at that run needs — the run IS the head's [subAgentSpan], and a
+// span is a range of indices. −1 and false where the list holds no such head.
+func runHeadAt(entries []entry, run runRef) (int, bool) {
 	for i := len(entries) - 1; i >= 0; i-- {
-		if entries[i].headsRunFor(spawn) {
+		if entries[i].headsRunFor(run) {
 			return i, true
 		}
 	}
@@ -160,7 +161,7 @@ const (
 	breadcrumbHint = "esc back"
 )
 
-// breadcrumbTrail is the header's TEXT for a paint rooted at the run spawn names: the trail of run
+// breadcrumbTrail is the header's TEXT for a paint rooted at run: the trail of run
 // names from the human's own conversation down to that run — "← main › planner › repo-scout" — so a
 // reader two levels in sees both where they are and what stands between them and the top.
 //
@@ -170,19 +171,19 @@ const (
 // delegation therefore reads as something rather than as a hole in the trail, and the /usage pane
 // and this row cannot come to call the same run different things.
 //
-// The walk climbs by SPAWNING CALL rather than by depth, for [insideCollapsedRun]'s reason: with
-// siblings live (ADR 0039) a depth says which level a run stands at and never which run it is. A
-// spawn the list holds no head for ends the climb where it stands — the trail names what it can and
-// still leads back to main, which is the one crumb that is always true.
-func breadcrumbTrail(entries []entry, spawn string) string {
+// The walk climbs by RUN rather than by depth, for [insideCollapsedRun]'s reason: with siblings
+// live (ADR 0039) a depth says which level a run stands at and never which run it is. A run the list
+// holds no head for ends the climb where it stands — the trail names what it can and still leads
+// back to main, which is the one crumb that is always true.
+func breadcrumbTrail(entries []entry, run runRef) string {
 	var names []string
-	for id := spawn; id != ""; {
-		at, ok := runHeadAt(entries, id)
+	for r := run; !r.isTop(); {
+		at, ok := runHeadAt(entries, r)
 		if !ok {
 			break
 		}
 		names = append(names, usageAgentName(entries[at]))
-		id = entries[at].spawnCallID
+		r = entries[at].run()
 	}
 	slices.Reverse(names) // climbed from the run upwards; the trail reads downwards
 	return breadcrumbBack + " " + strings.Join(append([]string{usageMainLabel}, names...), " "+breadcrumbSep+" ")

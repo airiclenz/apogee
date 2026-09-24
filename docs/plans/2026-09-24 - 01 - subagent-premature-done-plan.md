@@ -86,7 +86,18 @@ cmd/apogee/e2e_eventlines_test.go — TestE2EEventLinesGolden; internal/session/
 **Acceptance:** `go test -race -count=1 ./internal/eventjson/ ./internal/session/ ./internal/run/` and `go test -race -count=1 -run 'TestE2EEventLines' ./cmd/apogee/`
 **Commit:** `feat(session): persist and emit delegation run ids`
 
-## 3. TUI keys runs by run id and pairs results by run
+## 3. TUI keys runs by run id and pairs results by run — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): re-derived from the assumption that every run consumer picks up the run id through runOf alone — render.go (paintRoot/breadcrumb/preview runEnd), interject.go (runLabel on the refusal note and the queued-row label; queuedInterjection gains a `run` field beside `spawn`, which still addresses InterjectChild per the plan's out-of-scope note), thinkingpane.go (runLabel) and activity.go (the oldestChild tie-break, which now also breaks on run id so colliding siblings stay deterministic) called the spawn-keyed helpers directly and were moved to the run-aware signatures
+NOTES (2026-09-24): helper signatures changed rather than duplicated — headsRunFor/runHead/runHeadAt/breadcrumbTrail/runEnd/runName/runLabel/openSubAgentHead/addUserAt take a runRef; addToolCall/addToolResult gain a spawnRunID argument. The legacy match (no run id on either side) also requires the head to stand at depth-1, per the Goal; the run id decides when both the event and the head carry one
+NOTES (2026-09-24): addSubAgentPhase lets a head with no spawnRunID (a call a Reaction redirected INTO sub_agent, whose run id is first named by its started phase) adopt the phase's run id, so its entries and result then match by run id
+NOTES (2026-09-24): test helpers added beside the existing ones rather than re-signing them (fanout_test.go: stampedDelegation, stampedBase, stampedPhase, stampedHeadIndex); the "second run finishes" test was widened to both orders, since only the first-run-finishes order fails on the base tree
+NOTES (2026-09-24): consequential edit — internal/tui/transcriptbridge_test.go: made necessary by the bridge now mapping session.Entry RunID/SpawnRunID (the session.Entry member enumeration in TestTranscriptCodecPersistsANamedDelegationAsItsTarget; it had been failing since item 2 widened the struct); the new round-trip test lives beside the other codec tests there
+NOTES (2026-09-24): consequential edit — internal/tui/inspector_test.go: made necessary by runLabel taking a runRef
+NOTES (2026-09-24): consequential edit — internal/tui/sessionsave_test.go: made necessary by addUserAt taking a runRef
+NOTES (2026-09-24): consequential edit — internal/tui/workspacepath_test.go: made necessary by addToolCall's new spawnRunID argument
+NOTES (2026-09-24): consequential edit — internal/tui/messages.go: made necessary by the run id replacing presentedMsg.SpawnCallID as the run identity (comment now names it the legacy key)
+NOTES (2026-09-24): consequential edit — internal/tui/sink.go: made necessary by the run id replacing the spawning call id as what keeps siblings' coalesced text apart (comment only)
 
 **What:** Depends on items 1 and 2. This fixes cause #1: a child's leaf result closed a sibling head with an equal call id and showed ✓ early. It also fixes cause #2: with duplicate `sub_agent` ids in one reply, the first child's finish ticked the other row.
 **Regression guard.** The premise that every runRef consumer goes through runOf is false. Every site in internal/tui that builds a `runRef{…}` literal directly (find them with `grep -n "runRef{" internal/tui/*.go`, e.g. the run-view open in runview.go, closeRun's commitResidue in transcript.go, and inspector.go's record comparisons) must carry the run id too. At least one tui test must stamp RunID end to end through the run view and the inspector, not only through hand-built legacy events. item 3 owns transcriptbridge writing and reading session.Entry RunID/SpawnRunID.

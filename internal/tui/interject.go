@@ -36,6 +36,10 @@ import (
 //     human's own conversation. It is what the band labels the row by and what the delivery fold
 //     reconciles against ([Model.foldChildDelivery]) — a child row is never in the [interjectBox],
 //     because the engine mailbox IS its queue.
+//   - run is the whole run ref of that child ([runRef], the viewed run at staging), run id included:
+//     spawn is the engine's ADDRESS for the child and can collide with a sibling's, so the band's
+//     label is resolved from run instead ([Model.runLabel]). Zero on a row for the human's own
+//     conversation, exactly as spawn is empty there.
 //
 // A child row therefore only ever waits out the window between the ⏎ and the child's own account
 // of it, and that window closes strictly inside the Exchange: the delegation's scope reports every
@@ -48,6 +52,7 @@ type queuedInterjection struct {
 	input      domain.UserInput
 	skillSpans []skillSpan
 	spawn      string
+	run        runRef
 }
 
 // interjectBox is the per-Exchange mailbox: the Update goroutine pushes staged rows into it and
@@ -352,10 +357,11 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 	if parsed.text == "" {
 		return m, nil
 	}
-	spawn := m.viewedRun().spawn
+	run := m.viewedRun()
+	spawn := run.spawn
 	head, ok := m.viewedChild()
 	if !ok || childPhaseOf(head) != childRunning {
-		return m.refuseChildMessage(childNotRunningNote(m.runLabel(spawn)))
+		return m.refuseChildMessage(childNotRunningNote(m.runLabel(run)))
 	}
 	in := domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs}
 	// Called from the Update goroutine, which the seam is written for: InterjectChild only appends
@@ -372,6 +378,7 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 		input:      in,
 		skillSpans: parsed.skillSpans,
 		spawn:      spawn,
+		run:        run,
 	})
 	m.spendSkillHints() // the line has left the human's hands: the suggestion band is spent as at idle
 	m.promptEditor.reset()
@@ -822,7 +829,7 @@ func (m Model) queuedRowBody(it queuedInterjection) string {
 	if it.spawn == "" {
 		return text
 	}
-	return "queued for " + m.runLabel(it.spawn) + " — " + text
+	return "queued for " + m.runLabel(it.run) + " — " + text
 }
 
 // queuedRowText flattens one staged row's raw text to a single line: the band is chrome, not

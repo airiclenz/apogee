@@ -55,7 +55,7 @@ func (m Model) viewedChild() (entry, bool) {
 	if !m.inRunView() {
 		return entry{}, false
 	}
-	return runHead(m.transcript.entries, m.viewedRun().spawn)
+	return runHead(m.transcript.entries, m.viewedRun())
 }
 
 // childPhase is a delegation's life as the PROMPT BOX needs it: three states, because the box has
@@ -85,12 +85,12 @@ func childPhaseOf(head entry) childPhase {
 	return childScheduled
 }
 
-// runLabel names the run spawn opened, the way every other surface that names one does
-// ([usageAgentName]): the short name its call carried, else the task's first line, else the
-// constant. A spawn the transcript holds no head for falls back to that same constant, so a notice
-// worded about a run reads as something rather than as a hole in the sentence.
-func (m Model) runLabel(spawn string) string {
-	if head, ok := runHead(m.transcript.entries, spawn); ok {
+// runLabel names run, the way every other surface that names one does ([usageAgentName]): the short
+// name its call carried, else the task's first line, else the constant. A run the transcript holds
+// no head for falls back to that same constant, so a notice worded about a run reads as something
+// rather than as a hole in the sentence.
+func (m Model) runLabel(run runRef) string {
+	if head, ok := runHead(m.transcript.entries, run); ok {
 		return usageAgentName(head)
 	}
 	return usageAgentFallback
@@ -171,8 +171,9 @@ func (m Model) openRunAt(index int) (Model, bool) {
 	// The refs are compared WHOLE rather than by spawn id: at the top level the viewed run is the
 	// zero ref, which no head's ref can equal — a run's entries stand one level below the call that
 	// opened them, so the depth here is never 0 — and an id-only comparison would make an entry
-	// carrying no call id match it.
-	ref := runRef{depth: head.depth + 1, spawn: head.callID}
+	// carrying no call id match it. The ref carries the head's spawned run id too, so a view opened on
+	// one of two siblings whose call ids collide scopes to that sibling alone.
+	ref := head.spawned()
 	if m.viewedRun() == ref {
 		return m, false
 	}
@@ -263,7 +264,7 @@ func (m Model) upRun() Model {
 // replay was about to restore.
 func (m *Model) reseatViewStack() {
 	for len(m.viewStack) > 0 {
-		if _, ok := runHeadAt(m.transcript.entries, m.viewedRun().spawn); ok {
+		if _, ok := runHeadAt(m.transcript.entries, m.viewedRun()); ok {
 			break
 		}
 		m.viewStack = m.viewStack[:len(m.viewStack)-1]

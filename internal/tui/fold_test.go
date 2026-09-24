@@ -838,7 +838,7 @@ func TestFoldStatsWritesTheFoldsTraceAtEveryDepth(t *testing.T) {
 	entries := m.transcript.entries
 	head := -1
 	for i, e := range entries {
-		if e.headsRunFor("s1") {
+		if e.headsRunFor(runRef{depth: 1, spawn: "s1"}) {
 			head = i
 		}
 	}

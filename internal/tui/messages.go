@@ -106,8 +106,10 @@ type presentedMsg struct {
 	// rails the block at the level its run is drawn at.
 	Depth int
 	// SpawnCallID is the id of the sub_agent call that spawned the presenting agent, empty at the
-	// top level. It is the entry's run identity: with siblings fanned out at one depth it is the
-	// only thing that picks the run this presentation belongs INSIDE (transcript.place).
+	// top level. With siblings fanned out at one depth it is what picks the run this presentation
+	// belongs INSIDE (transcript.place) — on the legacy (depth, spawning call) key, since a
+	// domain.PresentRequest carries no run id: where two siblings' call ids collide it lands behind
+	// the most recent of them (transcript.addPresented).
 	SpawnCallID string
 }
 

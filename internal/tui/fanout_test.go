@@ -510,3 +510,263 @@ func TestNoteBetweenSiblingDelegationsKeepsOneGroup(t *testing.T) {
 			last.kind, plainRender(tr))
 	}
 }
+
+// ----------------------------------------------------------------------------
+// Runs keyed by RUN ID — call ids the model or server chose can collide
+// ----------------------------------------------------------------------------
+
+// stampedDelegation folds a sub_agent call exactly as the engine emits one: made from run parent,
+// under callID — the model's or the server's id, which may collide with another call's — and
+// carrying the run id the engine minted for the delegation (domain.ToolCallEvent.SpawnRunID). It
+// returns the run the call spawns, the ref every event of that child carries.
+func stampedDelegation(tr *transcript, parent runRef, callID, runID, name string) runRef {
+	tr.apply(domain.ToolCallEvent{
+		EventBase:  stampedBase(parent),
+		Call:       domain.ToolCall{ID: callID, Tool: "sub_agent", Arguments: []byte(`{"task":"work","name":"` + name + `"}`)},
+		SpawnRunID: runID,
+	})
+	return runRef{depth: parent.depth + 1, spawn: callID, id: runID}
+}
+
+// stampedBase is the EventBase every event of run carries: its depth, its spawning call id and its
+// run id — the three facts runOf reads back.
+func stampedBase(run runRef) domain.EventBase {
+	return domain.EventBase{Depth: run.depth, CallID: run.spawn, RunID: run.id}
+}
+
+// stampedPhase folds one lifecycle phase of run, stamped with the child's own identity as the
+// engine stamps it (domain.SubAgentPhaseEvent); a finished phase carries the report.
+func stampedPhase(tr *transcript, run runRef, phase domain.SubAgentPhase, report string) {
+	tr.apply(domain.SubAgentPhaseEvent{
+		EventBase: stampedBase(run),
+		Phase:     phase,
+		Result:    domain.ToolResult{CallID: run.spawn, Content: report},
+	})
+}
+
+// stampedHeadIndex finds the index of the sub_agent call block that spawned run id runID — the head
+// the run id names, whatever call id it shares with a sibling.
+func stampedHeadIndex(t *testing.T, tr *transcript, runID string) int {
+	t.Helper()
+	for i := range tr.entries {
+		if e := tr.entries[i]; e.headsRun() && e.spawnRunID == runID {
+			return i
+		}
+	}
+	t.Fatalf("no sub_agent head spawning run %q in %d entries", runID, len(tr.entries))
+	return -1
+}
+
+// TestAChildsLeafResultNeverClosesASiblingHeadSharingItsID is cause #1 of the premature ✓: a child's
+// own leaf call carried the same id as a SIBLING delegation's head, and its result — matched on the
+// id alone — closed that sibling's row while its child was still working. The result belongs to the
+// child's run, so it closes the child's own leaf call and nothing else.
+func TestAChildsLeafResultNeverClosesASiblingHeadSharingItsID(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	first := stampedDelegation(tr, runRef{}, "c0", "r.1", "alpha")
+	second := stampedDelegation(tr, runRef{}, "c1", "r.2", "beta")
+	stampedPhase(tr, first, domain.SubAgentStarted, "")
+	stampedPhase(tr, second, domain.SubAgentStarted, "")
+
+	tr.apply(domain.ToolCallEvent{
+		EventBase: stampedBase(first),
+		Call:      domain.ToolCall{ID: "c1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)},
+	})
+	tr.apply(domain.ToolResultEvent{
+		EventBase: stampedBase(first),
+		Result:    domain.ToolResult{CallID: "c1", Content: "1 - 10"},
+	})
+
+	head := tr.entries[stampedHeadIndex(t, tr, "r.2")]
+	if head.done || subAgentReported(head.painted()) {
+		t.Errorf("the sibling head c1 reads done=%v reported=%v; a child's leaf result closed it",
+			head.done, subAgentReported(head.painted()))
+	}
+	for _, e := range tr.entries {
+		if e.kind == entryToolCall && e.tool.name == "read_file" && !e.done {
+			t.Errorf("the child's own read %q stayed open: its result paired elsewhere", e.callID)
+		}
+		if e.kind == entryToolResult {
+			t.Errorf("the child's result fell to the orphan branch (%q) instead of its own call", e.text)
+		}
+	}
+}
+
+// TestSiblingsSharingACallIDTickOnlyTheirOwnRow is cause #2: with two sub_agent calls of one reply
+// under ONE id, the first child's finish ticked the other row. Each phase and each result carries
+// its own run id, so each lands on the head that spawned that run — whichever of the two finishes.
+func TestSiblingsSharingACallIDTickOnlyTheirOwnRow(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name            string
+		finished, other string
+	}{
+		{"the first run finishes", "r.1", "r.2"},
+		{"the second run finishes", "r.2", "r.1"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tr := &transcript{}
+			runs := map[string]runRef{
+				"r.1": stampedDelegation(tr, runRef{}, "c0", "r.1", "alpha"),
+				"r.2": stampedDelegation(tr, runRef{}, "c0", "r.2", "beta"),
+			}
+			stampedPhase(tr, runs["r.1"], domain.SubAgentStarted, "")
+			stampedPhase(tr, runs["r.2"], domain.SubAgentStarted, "")
+
+			stampedPhase(tr, runs[tc.finished], domain.SubAgentFinished, "the report")
+
+			if head := tr.entries[stampedHeadIndex(t, tr, tc.finished)]; !subAgentReported(head.painted()) {
+				t.Error("the finished run's own row did not tick")
+			}
+			if head := tr.entries[stampedHeadIndex(t, tr, tc.other)]; subAgentReported(head.painted()) {
+				t.Error("the still-running sibling's row ticked on the other run's finish")
+			}
+
+			tr.apply(domain.ToolResultEvent{
+				Result:     domain.ToolResult{CallID: "c0", Content: "the report"},
+				SpawnRunID: tc.finished,
+			})
+
+			finished, other := tr.entries[stampedHeadIndex(t, tr, tc.finished)], tr.entries[stampedHeadIndex(t, tr, tc.other)]
+			if !finished.done || other.done {
+				t.Errorf("run %s's result closed done=(%s %v, %s %v); want the head that spawned %s alone",
+					tc.finished, tc.finished, finished.done, tc.other, other.done, tc.finished)
+			}
+		})
+	}
+}
+
+// TestALegacyRecordStillPairsByCallID is the fallback: a record written before run ids existed —
+// and any event carrying none — is keyed on (depth, spawning call id) exactly as before, so a
+// restored session pairs, groups and names its runs as it always did, and a legacy stream folded
+// after it still pairs.
+func TestALegacyRecordStillPairsByCallID(t *testing.T) {
+	t.Parallel()
+	live := &transcript{}
+	subAgentCall(live, "s1", "survey the tests", 0)
+	childCall(live, "s1", "c1", "a.go")
+	subAgentReport(live, "s1", "all clear", 0)
+
+	data, err := encodeTranscript(live)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	entries, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+	tr := &transcript{}
+	tr.replay(entries)
+	subAgentCall(tr, "s2", "build the docs", 0)
+	childCall(tr, "s2", "c1", "b.go")
+	subAgentReport(tr, "s2", "built", 0)
+
+	for i, e := range tr.entries {
+		if e.kind == entryToolCall && !e.done {
+			t.Errorf("entries[%d] (%s %q) stayed open: the legacy pairing broke", i, e.tool.name, e.callID)
+		}
+		if e.kind == entryToolResult {
+			t.Errorf("entries[%d] is an orphan result %q: the legacy pairing broke", i, e.text)
+		}
+	}
+	for _, spawn := range []string{"s1", "s2"} {
+		at := headIndex(t, tr, spawn)
+		if got := subAgentSpan(tr.entries, at); got != 1 {
+			t.Errorf("run %s spans %d entries, want its one read", spawn, got)
+		}
+	}
+	if got, want := breadcrumbTrail(tr.entries, runRef{depth: 1, spawn: "s1"}), "← main › survey the tests"; got != want {
+		t.Errorf("restored trail = %q, want %q", got, want)
+	}
+}
+
+// TestALandedMessageLandsUnderTheRunItsRunIDNames: a message the human sent into one of two siblings
+// whose spawning call ids collide is that child's own block, placed inside the run its delivery
+// event's run id names — never behind the most recent head sharing the id.
+func TestALandedMessageLandsUnderTheRunItsRunIDNames(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	first := stampedDelegation(tr, runRef{}, "c0", "r.1", "alpha")
+	second := stampedDelegation(tr, runRef{}, "c0", "r.2", "beta")
+	tr.apply(domain.ToolCallEvent{
+		EventBase: stampedBase(second),
+		Call:      domain.ToolCall{ID: "x1", Tool: "read_file", Arguments: []byte(`{"path":"b.go"}`)},
+	})
+
+	tr.apply(domain.ChildInterjectionEvent{
+		EventBase: stampedBase(first),
+		Input:     domain.UserInput{Text: "check the docs too"},
+		Landed:    true,
+	})
+
+	at := stampedHeadIndex(t, tr, "r.1")
+	if got := subAgentSpan(tr.entries, at); got != 1 {
+		t.Fatalf("run r.1 spans %d entries, want the delivered message alone", got)
+	}
+	if got := tr.entries[at+1]; got.kind != entryUser || got.run() != first {
+		t.Errorf("entries[%d] = %v in run %+v, want the message inside run %+v", at+1, got.kind, got.run(), first)
+	}
+
+	tr.apply(domain.ChildInterjectionEvent{
+		EventBase: stampedBase(first),
+		Input:     domain.UserInput{Text: "too late"},
+	})
+	if got := tr.entries[len(tr.entries)-1].text; !strings.HasPrefix(got, "alpha ") {
+		t.Errorf("undelivered note = %q, want it naming the run its run id names (alpha)", got)
+	}
+}
+
+// TestARunViewOnAStampedRunScopesEverySurface drives run ids END TO END through the run view: two
+// siblings share a spawning call id, the view is opened from the first one's head, and /inspect,
+// /thinking, the breadcrumb and the status line all speak for that run alone.
+func TestARunViewOnAStampedRunScopesEverySurface(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m.opts.UI.Inspector = true
+	m.transcript.reset()
+	m.transcript.addUser("survey the repo", nil)
+	first := stampedDelegation(&m.transcript, runRef{}, "c0", "r.1", "alpha")
+	second := stampedDelegation(&m.transcript, runRef{}, "c0", "r.2", "beta")
+	for _, child := range []struct {
+		run  runRef
+		name string
+	}{{first, "alpha"}, {second, "beta"}} {
+		wire := wireEventOfCall(domain.WireDirectionRequest, child.name+"-body", 1, 1, "c0")
+		wire.RunID = child.run.id
+		m = m.foldEvent(wire)
+		m = m.foldEvent(domain.ReasoningEvent{EventBase: stampedBase(child.run), Text: child.name + "-thought"})
+	}
+	m = m.foldEvent(domain.ToolCallEvent{
+		EventBase: stampedBase(first),
+		Call:      domain.ToolCall{ID: "x1", Tool: "read_file", Arguments: []byte(`{"path":"a.go"}`)},
+	})
+
+	m, ok := m.openRunAt(stampedHeadIndex(t, &m.transcript, "r.1"))
+	if !ok || m.viewedRun() != first {
+		t.Fatalf("the view opened on %+v (ok=%v), want the first sibling's run %+v", m.viewedRun(), ok, first)
+	}
+
+	if got, want := breadcrumbTrail(m.transcript.entries, m.viewedRun()), "← main › alpha"; got != want {
+		t.Errorf("breadcrumb = %q, want %q", got, want)
+	}
+	inspected := paneText(t, m)
+	if !strings.Contains(inspected, "alpha-body") || strings.Contains(inspected, "beta-body") {
+		t.Errorf("/inspect is not scoped to the viewed run:\n%s", inspected)
+	}
+	var thoughts []string
+	for _, rec := range m.scopedThinking() {
+		thoughts = append(thoughts, rec.text)
+	}
+	if got := strings.Join(thoughts, "|"); got != "alpha-thought" {
+		t.Errorf("/thinking holds %q, want the viewed run's thought alone", got)
+	}
+	if !strings.Contains(m.thinkingContent().title, "alpha") {
+		t.Errorf("/thinking title = %q, want it naming the viewed run", m.thinkingContent().title)
+	}
+	_, slot, name := m.shownSlot(m.viewedRun())
+	if name != "alpha" || slot.act.kind != actTool {
+		t.Errorf("status line speaks for %q doing %v, want alpha's own tool phrase", name, slot.act.kind)
+	}
+}

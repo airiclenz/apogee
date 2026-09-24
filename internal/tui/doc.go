@@ -70,7 +70,8 @@
 // scheme's `tool-header` role), coherent with the gold ✦ tool markers; the arm and tee reaching
 // across to the delegation's branch stay in that row's own detail tone ([paintRowMarker]). A run's stretch stays CONTIGUOUS however its events
 // arrive: a concurrent fan-out interleaves N children's events at one depth, and each entry is
-// placed at the end of the run its spawning call id names ([transcript.place], ADR 0039) instead of
+// placed at the end of the run its run id names ([transcript.place], ADR 0039 — the spawning call id
+// only for a record from before run ids, since call ids can collide) instead of
 // at the end of the list — so every rule here reads adjacency off the entries exactly as it did
 // while delegation was serial. A HOST note — a `· cancelled` line, a Firing block, anything the
 // program says to the human rather than the conversation ([isHostNote]) — is worded at whatever
@@ -942,7 +943,7 @@
 // the request bodies and response payloads the engine reports as domain.WireEvents while
 // `ui.inspector` arms the capture, folded beside the transcript rather than into it (a wire record
 // is not a conversation entry), shown in the /usage report's shape and paired request-to-reply
-// within one (depth, callID) wire stream, since the one ring interleaves every run's traffic;
+// within one run's wire stream (run id, depth, callID), since the one ring interleaves every run's traffic;
 // reportpane.go the pane those two, /thinking and /advice ARE — the reportPane value ({open, top,
 // follow, raw}, the follow pinning /inspect, /thinking and /advice to the tail as the transcript
 // is), the key contract, the dismiss, the budget→render path and the whole mouse family (rect,

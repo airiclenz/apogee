@@ -1041,7 +1041,7 @@ func TestInspectorScopesToTheViewedRun(t *testing.T) {
 			t.Errorf("the scoped pane shows %q — a record of another run:\n%s", other, scoped)
 		}
 	}
-	if got, want := m.inspectContent().title, inspectorTitle+" · "+m.runLabel("s1"); got != want {
+	if got, want := m.inspectContent().title, inspectorTitle+" · "+m.runLabel(m.viewedRun()); got != want {
 		t.Errorf("scoped title = %q, want %q — the box has to name what is under it", got, want)
 	}
 

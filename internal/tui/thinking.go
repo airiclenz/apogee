@@ -64,10 +64,11 @@ const maxThinkingRecords = 64
 // thinkingRecord is one agent's thinking for one Turn: whose it is, which Turn it belongs to, and
 // the escape-stripped chunks that agent revealed, in the order the engine revealed them.
 //
-// run is the {depth, spawn} run identity every fold in the view keys on (runRef — transcript.go),
-// where the ZERO value is the human's own top-level conversation; turn is domain.EventBase.Turn off
-// the chunk's own event, the same stamp the Inspector's wire records carry (inspector.go). A plain
-// value type of strings and ints, so it rides safely in the value-copied Model (ADR 0011).
+// run is the {depth, spawn, run id} run identity every fold in the view keys on (runRef —
+// transcript.go), where the ZERO value is the human's own top-level conversation; turn is
+// domain.EventBase.Turn off the chunk's own event, the same stamp the Inspector's wire records carry
+// (inspector.go). A plain value type of strings and ints, so it rides safely in the value-copied
+// Model (ADR 0011).
 type thinkingRecord struct {
 	run  runRef
 	turn int

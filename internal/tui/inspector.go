@@ -67,16 +67,17 @@ import (
 // attempts list with the capture off too, ABOVE the wire half — which then still carries its own
 // disarmed row (or the armed-and-empty one), because the key that captures the bytes is the one
 // actionable answer to their absence and a list of attempts answers a different question. The run
-// view scopes the attempts exactly as it scopes the wire records, by the run's (depth, callID).
+// view scopes the attempts exactly as it scopes the wire records, by the run that made the call
+// ([runRef]: its run id, with depth and callID).
 
 // wireRecord is one half of one Upstream round-trip as the Inspector holds it: which half, the
-// Turn, depth and spawning call id of the agent that made the call, and the payload in BOTH of the
+// Turn, depth, spawning call id and run id of the agent that made the call, and the payload in BOTH of the
 // renderings the pane can show — escape-stripped and rendered ONCE, when the event was folded: the
 // pretty-printed protocol (lines) and the readable one (readable, wireReadableLines).
 //
-// depth and callID together name the WIRE STREAM the half belongs to (domain.EventBase): a
-// fan-out interleaves runs in one ring, and the call id is what separates two siblings a shared
-// depth would braid. Turn orders the halves inside a stream; it does not identify one.
+// depth, callID and runID together name the WIRE STREAM the half belongs to (domain.EventBase,
+// [wireRecord.run]): a fan-out interleaves runs in one ring, the call id separates two siblings a
+// shared depth would braid, and the run id separates two whose call ids collide. Turn orders the halves inside a stream; it does not identify one.
 //
 // Both renderings are kept formatted rather than raw for one reason: the pane re-derives its rows
 // on every frame, and a frame is painted for every streamed token, so parsing twenty JSON bodies
@@ -89,10 +90,17 @@ type wireRecord struct {
 	turn           int
 	depth          int
 	callID         string
+	runID          string
 	lines          []string
 	hidden         int
 	readable       []string
 	readableHidden int
+}
+
+// run is the run that made the record's call — its wire stream — the same ref [runOf] builds from
+// its event's base.
+func (rec wireRecord) run() runRef {
+	return runRef{depth: rec.depth, spawn: rec.callID, id: rec.runID}
 }
 
 // inspectorPane is the /inspect overlay's state — a reportPane (reportpane.go) under the name of the
@@ -206,6 +214,7 @@ func (m Model) foldWire(e domain.Event) Model {
 		turn:           we.Turn,
 		depth:          we.Depth,
 		callID:         we.CallID,
+		runID:          we.RunID,
 		lines:          lines,
 		hidden:         hidden,
 		readable:       readable,
@@ -835,8 +844,14 @@ type attemptRecord struct {
 	turn      int
 	depth     int
 	callID    string
+	runID     string
 	requestID string
 	row       string
+}
+
+// run is the run that made the attempt's call, the same ref [runOf] builds from its event's base.
+func (rec attemptRecord) run() runRef {
+	return runRef{depth: rec.depth, spawn: rec.callID, id: rec.runID}
 }
 
 // maxAttemptRecords is the attempt ring's bound. An attempt is one short row, not a replayed
@@ -867,6 +882,7 @@ func (m Model) foldAttempt(e domain.Event) Model {
 		turn:      ae.Turn,
 		depth:     ae.Depth,
 		callID:    ae.CallID,
+		runID:     ae.RunID,
 		requestID: ae.RequestID,
 		row:       attemptRow(ae),
 	})
@@ -920,7 +936,7 @@ func (m Model) scopedAttempts() []attemptRecord {
 	viewed := m.viewedRun()
 	scoped := make([]attemptRecord, 0, len(m.attempts))
 	for _, rec := range m.attempts {
-		if (runRef{depth: rec.depth, spawn: rec.callID}) == viewed {
+		if rec.run() == viewed {
 			scoped = append(scoped, rec)
 		}
 	}
@@ -932,8 +948,7 @@ func (m Model) scopedAttempts() []attemptRecord {
 // braids calls of several runs into one ring; keying on it too costs nothing and keeps two runs'
 // groups apart even where an id is empty.
 type attemptGroupKey struct {
-	depth     int
-	callID    string
+	run       runRef
 	requestID string
 }
 
@@ -948,7 +963,7 @@ func attemptRows(records []attemptRecord) ([]popupRow, []popupRowKind) {
 	var order []attemptGroupKey
 	groups := make(map[attemptGroupKey][]attemptRecord, len(records))
 	for _, rec := range records {
-		key := attemptGroupKey{depth: rec.depth, callID: rec.callID, requestID: rec.requestID}
+		key := attemptGroupKey{run: rec.run(), requestID: rec.requestID}
 		if _, seen := groups[key]; !seen {
 			order = append(order, key)
 		}
@@ -997,7 +1012,7 @@ func (m Model) inspectContent() reportContent {
 	}
 	title := inspectorTitle
 	if m.inRunView() {
-		title += " · " + m.runLabel(m.viewedRun().spawn)
+		title += " · " + m.runLabel(m.viewedRun())
 	}
 	rows, kinds := m.inspectorRows()
 	return reportContent{
@@ -1010,9 +1025,9 @@ func (m Model) inspectContent() reportContent {
 }
 
 // scopedWire is the record list the pane speaks for in THIS frame: the whole ring at the top level,
-// and only the viewed delegation's records while a run view is open — the record's (depth, callID)
-// against the runRef the view is rooted at (runOf's mapping, ADR 0039), which is one `==` because
-// that pair is the run identity every event carries.
+// and only the viewed delegation's records while a run view is open — the record's run
+// ([wireRecord.run]) against the runRef the view is rooted at (runOf's mapping, ADR 0039), which is
+// one `==` because those three facts are the run identity every event carries.
 //
 // It is a slice and not a filter passed around because everything the pane composes has to see the
 // SAME list: the headers, the elision counts and the unanswered-request note are all statements
@@ -1029,7 +1044,7 @@ func (m Model) scopedWire() []wireRecord {
 	viewed := m.viewedRun()
 	scoped := make([]wireRecord, 0, len(m.wire))
 	for _, rec := range m.wire {
-		if (runRef{depth: rec.depth, spawn: rec.callID}) == viewed {
+		if rec.run() == viewed {
 			scoped = append(scoped, rec)
 		}
 	}
@@ -1094,9 +1109,9 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 // hasUnrecordedReply says whether the record at index i is a request the pane's list will never show
 // an answer for. It is asked over the very list the rows were composed from (scopedWire) and never
 // over the ring behind it, so a scoped pane pairs within what it is showing. The successor rule that
-// settles it applies WITHIN one wire stream — the pair (depth, callID), the run identity every event
-// carries (domain.EventBase) — and never across a list that holds more than one: records arrive in
-// arrival order from the one writer (foldWire), so a fan-out
+// settles it applies WITHIN one wire stream — the run ([wireRecord.run]: run id, depth and callID),
+// the run identity every event carries (domain.EventBase) — and never across a list that holds more
+// than one: records arrive in arrival order from the one writer (foldWire), so a fan-out
 // interleaves runs and the half that merely follows a request may belong to a sibling and say
 // nothing about it. Inside a stream the halves stay in round-trip order, so the record that
 // follows a request THERE is its own answer or nothing.
@@ -1108,7 +1123,7 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 //
 // Accepted residual: UNROUTED concurrent sub-agents speak over their parent's connection, whose
 // tap is bound to the parent (internal/agent/construct.go, internal/agent/subagent.go), so their
-// records carry the parent's (depth, callID) and braid into one stream — the note can still land
+// records carry the parent's run and braid into one stream — the note can still land
 // under the wrong request of such a pair. No field on the event separates them; a ROUTED spawn
 // (ADR 0045) builds its own client and tap and is separated.
 func hasUnrecordedReply(records []wireRecord, i int) bool {
@@ -1117,7 +1132,7 @@ func hasUnrecordedReply(records []wireRecord, i int) bool {
 		return false
 	}
 	for _, next := range records[i+1:] {
-		if next.depth != rec.depth || next.callID != rec.callID {
+		if next.run() != rec.run() {
 			continue
 		}
 		return next.direction != domain.WireDirectionResponse

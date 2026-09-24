@@ -690,8 +690,8 @@ func TestTranscriptCodecReplaysAPromotedSummaryAsShown(t *testing.T) {
 	t.Parallel()
 	tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 	tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
-		Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", runRef{})
-	tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, runRef{})
+		Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", "", runRef{})
+	tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, "", runRef{})
 
 	data, err := encodeTranscript(tr)
 	if err != nil {
@@ -734,8 +734,8 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 		// is the shape whose summary is the tool's words and not the block's.
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
-			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", runRef{})
-		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, runRef{})
+			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", "", runRef{})
+		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, "", runRef{})
 		if len(tr.entries) != 1 || !tr.entries[0].tool.Summary.quoted {
 			t.Fatalf("fixture: the promoted output carries no quoted mark to travel (%+v)", tr.entries)
 		}
@@ -776,8 +776,8 @@ func TestTranscriptCodecRoundTripsTheQuotedSummaryMark(t *testing.T) {
 
 		tr := &transcript{ws: newWorkspaceRoot("/home/me/proj")}
 		tr.addToolCall(domain.ToolCall{ID: "c1", Tool: "terminal",
-			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", runRef{})
-		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, runRef{})
+			Arguments: []byte(`{"command":"cat /home/me/proj/paths.txt"}`)}, "", "", runRef{})
+		tr.addToolResult(domain.ToolResult{CallID: "c1", Content: "/home/me/proj/docs/plan.md\n"}, "", runRef{})
 
 		data, err := encodeTranscript(tr)
 		if err != nil {
@@ -1325,7 +1325,7 @@ func TestTranscriptCodecPersistsANamedDelegationAsItsTarget(t *testing.T) {
 			return out
 		}
 		wantEntry := []string{
-			"Kind", "At", "Text", "Depth", "CallID", "SpawnCallID", "Done", "Aborted",
+			"Kind", "At", "Text", "Depth", "CallID", "SpawnCallID", "RunID", "SpawnRunID", "Done", "Aborted",
 			"CtxUsed", "CtxLimit", "CtxModel",
 			"UsageCalls", "UsagePromptTokens", "UsageCachedPromptTokens", "UsageCompletionTokens",
 			"UsageTotalTokens",
@@ -1517,6 +1517,45 @@ func TestTranscriptCodecRoundTripsTheSpawningCallID(t *testing.T) {
 			t.Errorf("the rest of the legacy entry decoded as %+v, want the nested block unchanged", got[0])
 		}
 	})
+}
+
+// TestTranscriptCodecRoundTripsTheRunIDs pins the run identity across a resume: every delegated
+// entry's run id and a delegation head's spawned run id travel through the record, so a resumed
+// session keys its runs — and a run view it restores — exactly as the live one did, even where two
+// siblings' spawning call ids collide. Top-level entries write neither member.
+func TestTranscriptCodecRoundTripsTheRunIDs(t *testing.T) {
+	t.Parallel()
+	tr := &transcript{}
+	tr.addUser("delegate it", nil)
+	first := stampedDelegation(tr, runRef{}, "c0", "r.1", "alpha")
+	second := stampedDelegation(tr, runRef{}, "c0", "r.2", "beta")
+	tr.apply(domain.MessageEvent{EventBase: stampedBase(first), Text: "alpha's answer"})
+	tr.apply(domain.MessageEvent{EventBase: stampedBase(second), Text: "beta's answer"})
+
+	data, err := encodeTranscript(tr)
+	if err != nil {
+		t.Fatalf("encodeTranscript: %v", err)
+	}
+	got, err := decodeTranscript(data)
+	if err != nil {
+		t.Fatalf("decodeTranscript: %v", err)
+	}
+
+	if n := strings.Count(string(data), `"spawnRunID"`); n != 2 {
+		t.Errorf("wire blob carries %d spawnRunID members, want 2 (the two heads only):\n%s", n, data)
+	}
+	if len(got) != len(tr.entries) {
+		t.Fatalf("decoded %d entries, want %d", len(got), len(tr.entries))
+	}
+	for i := range tr.entries {
+		if got[i].runID != tr.entries[i].runID || got[i].spawnRunID != tr.entries[i].spawnRunID {
+			t.Errorf("entry %d replayed runID/spawnRunID %q/%q, want %q/%q", i,
+				got[i].runID, got[i].spawnRunID, tr.entries[i].runID, tr.entries[i].spawnRunID)
+		}
+	}
+	if at, ok := runHeadAt(got, second); !ok || usageAgentName(got[at]) != "beta" {
+		t.Errorf("the restored record resolves run r.2 to head %d (ok=%v), want beta's", at, ok)
+	}
 }
 
 // TestTranscriptCodecRoundTripsRecordedRegions pins the half of a diff-bodied block its Details

@@ -204,25 +204,49 @@ func (b streamBuf) tail(lines int) string {
 	return b.String()
 }
 
-// runRef is WHERE an event came from — the two facts on [domain.EventBase] that together name the
-// agent that emitted it: its sub-agent nesting level, and the id of the sub_agent tool call that
-// spawned it. The zero value is the human's own top-level conversation (depth 0, no spawning call),
-// which is what a hand-built transcript and every event of a session that delegated nothing carry.
+// runRef is WHERE an event came from — the three facts on [domain.EventBase] that together name the
+// agent that emitted it: its sub-agent nesting level, the id of the sub_agent tool call that spawned
+// it, and the engine-minted run id of the delegation it runs. The zero value is the human's own
+// top-level conversation (depth 0, no spawning call, no run id), which is what a hand-built
+// transcript and every event of a session that delegated nothing carry.
 //
 // Depth alone stopped being an identity when siblings started running at once (ADR 0039): two
-// children of one reply stand at the SAME depth and their events interleave, so every fold that
-// used to key on depth — which buffer these tokens grow, which run this entry belongs to, which run
-// a context reading fills — keys on the pair instead. It is comparable, so "the same run" is one
-// `==`.
+// children of one reply stand at the SAME depth and their events interleave. The spawning call id
+// is not one either: it is the model's or the server's to choose and it can collide — a text-format
+// parser numbering calls per Turn hands two siblings the same id, and a nested delegation can reuse
+// its parent's. The run id is the identity: the engine mints it unique across the whole delegation
+// tree (domain.EventBase.RunID), so every fold that asks "which run?" — which buffer these tokens
+// grow, which run this entry belongs to, which head a phase or a result closes — is answered by it.
+// An event recorded before the run id existed carries id "", and is answered by the (depth, spawn)
+// pair it always was ([entry.headsRunFor]).
+//
+// It is comparable, so "the same run" is one `==`: every event one agent emits carries the same
+// three values, and a ref built from a head ([entry.spawned]) or from an entry ([entry.run]) carries
+// the same three again — which is why no site may build one from two of the three.
 type runRef struct {
 	depth int
 	spawn string
+	id    string
 }
 
 // runOf reads the run an Event was emitted by off its base. It is the one place the transcript
 // turns an Event into a run identity, so the fold helpers below all speak in runs.
 func runOf(base domain.EventBase) runRef {
-	return runRef{depth: base.Depth, spawn: base.CallID}
+	return runRef{depth: base.Depth, spawn: base.CallID, id: base.RunID}
+}
+
+// isTop reports whether r is the human's own top-level conversation — no spawning call and no run
+// id — rather than a delegation.
+func (r runRef) isTop() bool {
+	return r.spawn == "" && r.id == ""
+}
+
+// inRun stamps e with the run it belongs to — its depth, spawning call and run id, the three halves
+// of [runRef] — so a producer committing a delegated entry cannot carry two of them and drop the
+// third.
+func inRun(e entry, run runRef) entry {
+	e.depth, e.spawnCallID, e.runID = run.depth, run.spawn, run.id
+	return e
 }
 
 // parkedText is one run's in-progress assistant text, set aside because ANOTHER run's tokens took
@@ -328,8 +352,19 @@ type entry struct {
 	// several children run at once (ADR 0039) — depth cannot, because siblings share it — and it
 	// is a different fact from callID above, which is the entry's OWN tool call.
 	spawnCallID string
-	tool        toolView
-	done        bool
+	// runID is the RUN IDENTITY of the entry's run: the engine-minted run id of the delegation
+	// whose agent emitted the event (domain.EventBase.RunID), empty for the human's own top-level
+	// conversation and for an entry recorded before the id existed. spawnCallID names the same run
+	// but can collide; this cannot, so every run-keyed question asks it first ([entry.run]).
+	runID string
+	// spawnRunID is, on a sub_agent call block, the run id of the delegation that call spawned
+	// (domain.ToolCallEvent.SpawnRunID) — the runID every entry of that run carries, and the key
+	// its phases, its name and its result find this head by ([entry.headsRunFor]). Empty on every
+	// other entry, and on a head recorded before the id existed or one a Reaction redirected INTO
+	// sub_agent until its started phase names the id (addSubAgentPhase).
+	spawnRunID string
+	tool       toolView
+	done       bool
 	// aborted is a depth-0 entryUser only: the Exchange this prompt opened was SCRAPPED before it
 	// completed — the human stopped it (foldCancelled) or the loop faulted (foldLoopError) while
 	// it held no finished Turn, so the settle (Engine.SettleExchange) fell back to the rollback
@@ -485,7 +520,7 @@ type startupView struct {
 // from the insertion point on has just moved up one. dropFrom is that assumption's guard.
 func (t *transcript) place(e entry) {
 	e = t.stamp(e)
-	at := t.runEnd(e.spawnCallID)
+	at := t.runEnd(e.run())
 	if at >= len(t.entries) {
 		at = t.tailBeforeHostNotes(e)
 	}
@@ -528,22 +563,21 @@ func (t *transcript) commit(e entry) {
 	t.touch()
 }
 
-// runEnd is the index one past the last entry of the run that the sub_agent call spawn opened —
-// the insertion point for that run's next entry, and the point its live preview paints at
-// (renderView). The run's stretch is its head's [subAgentSpan], so this asks the same derivation
-// the painter asks and the two cannot disagree about where a run ends.
+// runEnd is the index one past the last entry of run — the insertion point for that run's next
+// entry, and the point its live preview paints at (renderView). The run's stretch is its head's
+// [subAgentSpan], so this asks the same derivation the painter asks and the two cannot disagree
+// about where a run ends. The head is the one [entry.headsRunFor] names, so a run whose spawning
+// call id collides with a sibling's still grows behind its own block.
 //
 // The end of the LIST is the answer for the top-level conversation (no spawning call), and for a
-// spawning call this transcript has no head for — a replayed record written before the id existed,
-// a hand-built test transcript. Both are the append every entry made before runs were grouped.
-func (t *transcript) runEnd(spawn string) int {
-	if spawn == "" {
+// run this transcript has no head for — a replayed record written before the id existed, a
+// hand-built test transcript. Both are the append every entry made before runs were grouped.
+func (t *transcript) runEnd(run runRef) int {
+	if run.isTop() {
 		return len(t.entries)
 	}
-	for i := len(t.entries) - 1; i >= 0; i-- {
-		if h := t.entries[i]; h.headsRunFor(spawn) {
-			return i + 1 + subAgentSpan(t.entries, i)
-		}
+	if i, ok := runHeadAt(t.entries, run); ok {
+		return i + 1 + subAgentSpan(t.entries, i)
 	}
 	return len(t.entries)
 }
@@ -604,7 +638,7 @@ func (t *transcript) continuesOpenRun(e entry, at int) bool {
 // the ones place has to step over. A note carrying a run — an approval or a fired Reaction inside
 // a delegation — is that run's own record and stays exactly where its run puts it.
 func isHostNote(e entry) bool {
-	return e.kind.isHostNote() && e.depth == 0 && e.spawnCallID == ""
+	return e.kind.isHostNote() && e.depth == 0 && e.run().isTop()
 }
 
 // enclosingBlock is the index of the nearest block SHALLOWER than depth before at — the delegation
@@ -620,8 +654,7 @@ func enclosingBlock(entries []entry, at, depth int) int {
 	return -1
 }
 
-// runName is the short name the model gave the delegation that the sub_agent call spawn opened, or
-// "" when it gave none. It is the status line's answer to "which delegate is this?" (activity.spawn
+// runName is the short name the model gave the delegation run names, or "" when it gave none. It is the status line's answer to "which delegate is this?" (activity.spawn
 // → activity.text): with a fan-out running, the slot names ONE delegate at a time, and the depth it
 // used to name it by is shared by every sibling.
 //
@@ -631,18 +664,16 @@ func enclosingBlock(entries []entry, at, depth int) int {
 // named call the two agree, but on an unnamed one the Target is the delegated task, and a status
 // line that swapped a whole sentence in for "sub-agent" would push the context gauge off the row.
 //
-// "" is also the answer for the top-level conversation (no spawning call) and for a spawning call
-// this transcript has no head for — a replayed record, a hand-built test transcript, a child whose
-// first event beat its parent's tool call in. All three read as unnamed, which is exactly the
-// phrase the status line drew before names existed.
-func (t *transcript) runName(spawn string) string {
-	if spawn == "" {
+// "" is also the answer for the top-level conversation (no spawning call) and for a run this
+// transcript has no head for — a replayed record, a hand-built test transcript, a child whose first
+// event beat its parent's tool call in. All three read as unnamed, which is exactly the phrase the
+// status line drew before names existed.
+func (t *transcript) runName(run runRef) string {
+	if run.isTop() {
 		return ""
 	}
-	for i := len(t.entries) - 1; i >= 0; i-- {
-		if h := t.entries[i]; h.headsRunFor(spawn) {
-			return h.tool.agentName
-		}
+	if h, ok := runHead(t.entries, run); ok {
+		return h.tool.agentName
 	}
 	return ""
 }
@@ -798,14 +829,11 @@ func (t *transcript) addInterjected(text string, spans []skillSpan) {
 //
 // It goes in through [transcript.place] like every other delegated entry rather than being
 // appended, and that is load-bearing with siblings live: an appended entry lands past the LAST
-// run's stretch, where [subAgentSpan] would read it as the sibling's.
-func (t *transcript) addUserAt(depth int, spawn string, in domain.UserInput) {
-	t.place(entry{
-		kind:        entryUser,
-		text:        in.Text,
-		depth:       depth,
-		spawnCallID: spawn,
-	})
+// run's stretch, where [subAgentSpan] would read it as the sibling's. run is the WHOLE run ref of
+// the child that received it (runOf over the delivery event), run id included, so a message to one
+// of two siblings whose spawning call ids collide lands under the head that child's run id names.
+func (t *transcript) addUserAt(run runRef, in domain.UserInput) {
+	t.place(inRun(entry{kind: entryUser, text: in.Text}, run))
 }
 
 // addNote appends a neutral note (e.g. "cancelled") — a transcript record of a UI-level
@@ -865,11 +893,14 @@ func (t *transcript) addEphemeralNote(text string) {
 // the depth is what rails the block at the level the rest of that run is drawn at (renderBlock), and
 // placing it inside the run's stretch is what keeps the stretch CONTIGUOUS — a depth-0 append landing
 // between a child's entries would end [subAgentSpan] there and cut the rail off mid-run.
+//
+// It is the one delegated producer that places by the LEGACY key: a domain.PresentRequest carries
+// no run id, so the entry is placed on (depth, spawning call id) alone — the fallback
+// [entry.headsRunFor] keeps for an event recorded before run ids existed — and a document shown by
+// one of two siblings whose spawning call ids collide lands behind the most recent of them.
 func (t *transcript) addPresented(msg presentedMsg) {
-	t.place(entry{
-		kind:        entryPresented,
-		depth:       msg.Depth,
-		spawnCallID: msg.SpawnCallID,
+	t.place(inRun(entry{
+		kind: entryPresented,
 		presented: presentedView{
 			Title:    clipDetail(stripEscapes(msg.Title)),
 			Path:     stripEscapes(msg.Path),
@@ -877,7 +908,7 @@ func (t *transcript) addPresented(msg presentedMsg) {
 			Method:   msg.Method,
 			Reason:   clipDetail(stripEscapes(msg.Reason)),
 		},
-	})
+	}, runRef{depth: msg.Depth, spawn: msg.SpawnCallID}))
 }
 
 // addStartup appends the one-time start-up box — the logo and the session's host / model /
@@ -1188,9 +1219,9 @@ func (t *transcript) apply(e domain.Event) {
 	case domain.ToolCallEvent:
 		run := runOf(e.EventBase)
 		t.finalizeNarration(run)
-		t.addToolCall(e.Call, e.ResolvedPath, run)
+		t.addToolCall(e.Call, e.ResolvedPath, e.SpawnRunID, run)
 	case domain.ToolResultEvent:
-		t.addToolResult(e.Result, runOf(e.EventBase))
+		t.addToolResult(e.Result, e.SpawnRunID, runOf(e.EventBase))
 	case domain.SubAgentPhaseEvent:
 		t.addSubAgentPhase(e)
 	case domain.SubAgentNamedEvent:
@@ -1226,10 +1257,10 @@ func (t *transcript) apply(e domain.Event) {
 // Depth > 0 UsageEvent folds nothing: a Depth 0 reading is the human's own conversation, and
 // that one belongs to the status gauge alone (foldStats).
 //
-// A reading belongs to the still-open run its own SPAWNING CALL opened (domain.EventBase.CallID,
-// stamped on every delegated event): with siblings running at once the depth no longer picks a run
-// out — two children fill two windows at depth 1, and the most recent open head is simply whichever
-// was announced last. A reading carrying no call id at all — a legacy record, a hand-built test
+// A reading belongs to the still-open run it names (domain.EventBase.RunID, or for a record from
+// before run ids the spawning call id, stamped on every delegated event): with siblings running at
+// once the depth no longer picks a run out — two children fill two windows at depth 1, and the most
+// recent open head is simply whichever was announced last. A reading carrying no call id at all — a legacy record, a hand-built test
 // stream — still falls back to the depth rule this fold was born with: the most recent still-open
 // head standing at depth N-1. It is never transitive either way: each agent fills its OWN window,
 // so a nested run's reading stops at the nested head and says nothing about its parent's fill. A
@@ -1273,7 +1304,7 @@ func (t *transcript) applyUsage(e domain.Event, window int, sessionModel string)
 	if !fills && !counted {
 		return
 	}
-	head := t.openSubAgentHead(usage.CallID, usage.Depth)
+	head := t.openSubAgentHead(runOf(usage.EventBase))
 	if head == nil {
 		return
 	}
@@ -1307,22 +1338,23 @@ func childWindow(usage domain.UsageEvent, sessionWindow int) int {
 	return sessionWindow
 }
 
-// openSubAgentHead picks the still-open run head a delegated reading belongs to: the one its own
-// spawning call opened (callID), or — for a reading carrying no call id, a legacy record or a
-// hand-built stream — the most recent open head standing one level above depth. It returns nil
-// when nothing matches, which is the reading that arrived after its run reported or before its
-// call: it folds nothing at all, exactly as applyUsage describes.
-func (t *transcript) openSubAgentHead(callID string, depth int) *entry {
+// openSubAgentHead picks the still-open run head a delegated reading belongs to: the one that
+// opened run ([entry.headsRunFor] — by run id, or by the spawning call for a record from before run
+// ids), or — for a reading carrying neither, a legacy record or a hand-built stream — the most recent
+// open head standing one level above the reading's depth. It returns nil when nothing matches,
+// which is the reading that arrived after its run reported or before its call: it folds nothing at
+// all, exactly as applyUsage describes.
+func (t *transcript) openSubAgentHead(run runRef) *entry {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		head := &t.entries[i]
 		if !head.opensRun() {
 			continue
 		}
-		if callID != "" {
-			if head.callID != callID {
+		if run.isTop() {
+			if head.depth != run.depth-1 {
 				continue
 			}
-		} else if head.depth != depth-1 {
+		} else if !head.headsRunFor(run) {
 			continue
 		}
 		return head
@@ -1400,7 +1432,7 @@ func (t *transcript) commitAssistant(canonical string, run runRef) {
 	if text == "" {
 		return
 	}
-	t.place(entry{kind: entryAssistant, text: text, depth: run.depth, spawnCallID: run.spawn})
+	t.place(inRun(entry{kind: entryAssistant, text: text}, run))
 }
 
 // finalizeNarration commits the in-progress buffer as the pre-tool narration when the first
@@ -1420,7 +1452,7 @@ func (t *transcript) finalizeNarration(run runRef) {
 	if text == "" {
 		return
 	}
-	t.place(entry{kind: entryAssistant, text: text, depth: run.depth, spawnCallID: run.spawn})
+	t.place(inRun(entry{kind: entryAssistant, text: text}, run))
 }
 
 // closeRun commits what a finished run streamed and never committed — the half-sentence a delegate
@@ -1436,7 +1468,7 @@ func (t *transcript) closeRun(head entry) {
 	if !head.headsRun() {
 		return
 	}
-	t.commitResidue(runRef{depth: head.depth + 1, spawn: head.callID})
+	t.commitResidue(head.spawned())
 }
 
 // commitResidue commits everything the run streamed and never committed — its parked text plus the
@@ -1450,7 +1482,7 @@ func (t *transcript) commitResidue(run runRef) {
 	if text == "" {
 		return
 	}
-	t.place(entry{kind: entryAssistant, text: text, depth: run.depth, spawnCallID: run.spawn})
+	t.place(inRun(entry{kind: entryAssistant, text: text}, run))
 }
 
 // commitCancelled commits what the TOP-LEVEL reply had streamed when the human stopped it, as a
@@ -1488,7 +1520,9 @@ func (t *transcript) commitCancelled() {
 //
 // The entry's two ids are different facts and both are kept: callID is the call the block IS —
 // what the paired result folds into, and, for a sub_agent call, what its own children's entries
-// group behind — while spawnCallID is the run this block sits IN (place).
+// group behind — while spawnCallID (with runID) is the run this block sits IN (place). A sub_agent
+// call also records spawnRunID, the run id of the delegation it spawns (domain.ToolCallEvent's), which
+// is what its own run's entries, phases and result find it by ([entry.headsRunFor]).
 // resolved is the engine's disclosure for this call — where its path argument really points, when
 // that is not where the argument says (domain.ToolCallEvent.ResolvedPath) — and empty on every
 // ordinary call. It reaches the block through the presenter, which spells it beside the target.
@@ -1496,28 +1530,35 @@ func (t *transcript) commitCancelled() {
 // A header-folding card (toolView.collapsesToHeader) is the one block not born collapsed: it is
 // seeded from the shared fold preference (taskListOpen), so a card the model writes while the
 // reader has the lists open opens too, and one written after a fold stays folded with the rest.
-func (t *transcript) addToolCall(call domain.ToolCall, resolved string, run runRef) {
+func (t *transcript) addToolCall(call domain.ToolCall, resolved, spawnRunID string, run runRef) {
 	tv := presentToolCall(call, resolved, t.ws)
-	t.place(entry{
-		kind:        entryToolCall,
-		depth:       run.depth,
-		callID:      call.ID,
-		spawnCallID: run.spawn,
-		tool:        tv,
-		expanded:    tv.collapsesToHeader && t.taskListOpen,
-	})
+	t.place(inRun(entry{
+		kind:       entryToolCall,
+		callID:     call.ID,
+		spawnRunID: spawnRunID,
+		tool:       tv,
+		expanded:   tv.collapsesToHeader && t.taskListOpen,
+	}, run))
 }
 
 // addToolResult folds a tool result into its call's block. It scans from the tail for the
-// most recent un-paired tool-call entry with a matching CallID and enriches that call's view
-// with the result's one-line summary, marking it done. A result the tool flagged as an error
-// (IsError) is a normal in-band outcome the model reacts to — not a recovered fault (that is
-// ErrorEvent) — so it is summarised, not raised. A result that matches no open call (the
-// defensive orphan case) is appended as a standalone result block so its outcome is not lost.
-func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
+// most recent un-paired tool-call entry with a matching CallID IN THE SAME RUN — the run that
+// emitted the result (run), and for a delegation's result the same spawned run (spawnRunID,
+// domain.ToolResultEvent's) — and enriches that call's view with the result's one-line summary,
+// marking it done. A result the tool flagged as an error (IsError) is a normal in-band outcome the
+// model reacts to — not a recovered fault (that is ErrorEvent) — so it is summarised, not raised. A
+// result that matches no open call (the defensive orphan case) is appended as a standalone result
+// block so its outcome is not lost.
+//
+// The run is part of the match because a call id is the model's or the server's to choose and can
+// collide: a child's leaf call may share its id with a sibling delegation's head, and a reply may
+// carry two sub_agent calls under one id. Matching on the id alone closed the wrong block — a
+// sibling's row ticked ✓ while its child was still working.
+func (t *transcript) addToolResult(result domain.ToolResult, spawnRunID string, run runRef) {
 	for i := len(t.entries) - 1; i >= 0; i-- {
 		e := &t.entries[i]
-		if e.kind == entryToolCall && !e.done && e.callID == result.CallID {
+		if e.kind == entryToolCall && !e.done && e.callID == result.CallID && e.run() == run &&
+			e.spawnRunID == spawnRunID {
 			t.touch()
 			// The size of what came back is read off the result itself, before any presenter shapes
 			// it, and on every pairing — a delegation's report included, whatever its phase already
@@ -1550,14 +1591,16 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 	if result.IsError {
 		text = erroredSummary + "\n" + text
 	}
-	t.place(entry{kind: entryToolResult, text: text, depth: run.depth, spawnCallID: run.spawn})
+	t.place(inRun(entry{kind: entryToolResult, text: text}, run))
 }
 
 // addSubAgentPhase folds a delegation's lifecycle boundary onto the block that delegation IS
 // (domain.SubAgentPhaseEvent): its child started running, or its child finished and the report rides
-// the event. The block is found by the event's own call id — the id of the sub_agent call that
-// spawned the child, which is exactly the id addToolResult pairs the eventual result by — so a
-// delegation is marked wherever it sits, however many siblings are running beside it (ADR 0039).
+// the event. The block is found by the event's own run — the run id the engine minted for the
+// delegation, which the head recorded off its call and the eventual result carries too
+// ([entry.headsRunFor]; the spawning call id only for an event from before run ids) — so a
+// delegation is marked wherever it sits, however many siblings are running beside it (ADR 0039),
+// and even where two of them were called under one id.
 //
 // It exists because the result burst is not a liveness signal: a group's results arrive together, in
 // call order, after the last child has joined, so without this a member that finished first would go
@@ -1597,18 +1640,22 @@ func (t *transcript) addToolResult(result domain.ToolResult, run runRef) {
 // answer from it, so a cancelled head would tick ✓ and lose its live star — the interrupted mark
 // closeInterruptedCalls gives it is the honest one.
 func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
+	run := runOf(e.EventBase)
 	if e.Phase == domain.SubAgentFinished {
-		t.commitResidue(runOf(e.EventBase))
+		t.commitResidue(run)
 	}
 	if e.Cancelled {
 		return
 	}
-	for i := len(t.entries) - 1; i >= 0; i-- {
+	if i, ok := runHeadAt(t.entries, run); ok {
 		en := &t.entries[i]
-		if !en.headsRunFor(e.CallID) {
-			continue
-		}
 		t.touch()
+		// A head whose call carried no run id — one a pre-tool-exec Reaction redirected INTO
+		// sub_agent, whose run id is minted only as the delegation starts — adopts the one its phase
+		// names, so the run's entries and its result find it by run id from here on.
+		if en.spawnRunID == "" {
+			en.spawnRunID = run.id
+		}
 		en.phase = e.Phase
 		if e.Phase == domain.SubAgentStarted {
 			en.stepCap, en.capRequested = e.StepCap, e.CapRequested
@@ -1616,15 +1663,13 @@ func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 		if e.Phase == domain.SubAgentFinished && !en.done {
 			en.tool.enrichWithResult(e.Result, t.ws)
 		}
-		return
 	}
 }
 
 // addSubAgentName folds the name a delegation the model left unnamed has just been GIVEN out of band
 // onto the block that delegation IS (domain.SubAgentNamedEvent, ADR 0068). The block is found by the
-// event's own call id, exactly as addSubAgentPhase finds it — the id of the sub_agent call that
-// spawned the child — so a rename lands on one member of a group however many siblings are running
-// beside it (ADR 0039).
+// event's own run, exactly as addSubAgentPhase finds it ([entry.headsRunFor]) — so a rename lands on
+// one member of a group however many siblings are running beside it (ADR 0039).
 //
 // It renames the head rather than any surface, because every surface that names a run already reads
 // the head and nothing else: the collapsed row's header, the breadcrumb trail, the run view's
@@ -1642,14 +1687,9 @@ func (t *transcript) addSubAgentPhase(e domain.SubAgentPhaseEvent) {
 // Nothing is appended, ever: a name is a fact about a block the transcript already holds, and an
 // event naming no such block — a rename for a run this view never saw — renames nothing at all.
 func (t *transcript) addSubAgentName(e domain.SubAgentNamedEvent) {
-	for i := len(t.entries) - 1; i >= 0; i-- {
-		en := &t.entries[i]
-		if !en.headsRunFor(e.CallID) {
-			continue
-		}
-		en.tool.rename(stripEscapes(e.Name))
+	if i, ok := runHeadAt(t.entries, runOf(e.EventBase)); ok {
+		t.entries[i].tool.rename(stripEscapes(e.Name))
 		t.touch()
-		return
 	}
 }
 
@@ -1665,11 +1705,12 @@ func (t *transcript) addSubAgentName(e domain.SubAgentNamedEvent) {
 // the status line's own word for an unnamed one, and escape-strips through addNote like every
 // other note worded from model-supplied text.
 func (t *transcript) addChildInterjection(e domain.ChildInterjectionEvent) {
+	run := runOf(e.EventBase)
 	if e.Landed {
-		t.addUserAt(e.Depth, e.CallID, e.Input)
+		t.addUserAt(run, e.Input)
 		return
 	}
-	name := t.runName(e.CallID)
+	name := t.runName(run)
 	if name == "" {
 		name = subAgentActivityName
 	}
@@ -2101,12 +2142,35 @@ func (e entry) opensRun() bool {
 	return e.headsRun() && !e.done
 }
 
-// headsRunFor reports whether e is the head of the run the sub_agent call callID opened — what a
-// walk asks when it is looking for one NAMED run rather than for any. The id is compared as given:
-// a caller handing it an empty one matches a head that carries none, exactly as the inline
-// comparison it replaces did.
-func (e entry) headsRunFor(callID string) bool {
-	return e.headsRun() && e.callID == callID
+// headsRunFor reports whether e is the head of run — the sub_agent call block that opened it, what a
+// walk asks when it is looking for one NAMED run rather than for any. Where both the run and the head
+// carry a run id the ids alone decide, because spawning call ids can collide (two sub_agent calls of
+// one reply under one id, a nested delegation reusing its parent's) and run ids cannot. Where either
+// carries none — an event or a head recorded before run ids existed, a hand-built test stream, a
+// head a Reaction redirected into sub_agent before its started phase names the id — the head is
+// matched on the LEGACY key: its call id is the run's spawning call and it stands one level above
+// the run.
+func (e entry) headsRunFor(run runRef) bool {
+	if !e.headsRun() {
+		return false
+	}
+	if run.id != "" && e.spawnRunID != "" {
+		return e.spawnRunID == run.id
+	}
+	return e.callID == run.spawn && e.depth == run.depth-1
+}
+
+// run is the run e belongs to — the ref of the agent whose event folded into it, the same ref
+// [runOf] built from that event's base, so an entry and the events of its run compare `==`.
+func (e entry) run() runRef {
+	return runRef{depth: e.depth, spawn: e.spawnCallID, id: e.runID}
+}
+
+// spawned is the run the delegation e heads — the ref every event of that run carries: one level
+// below the head, spawned by its call, under the run id its call recorded. It is meaningful on a
+// head alone ([entry.headsRun]).
+func (e entry) spawned() runRef {
+	return runRef{depth: e.depth + 1, spawn: e.callID, id: e.spawnRunID}
 }
 
 // ownGroup is the group entries[i] opens, or nil when it opens none: the adjacent calls to the tool
@@ -2291,7 +2355,7 @@ func prevSiblingAt(entries []entry, at, depth int) int {
 // producers unstripped before.
 func (t *transcript) addApproval(req domain.ApprovalRequest, decision domain.ApprovalDecision, run runRef) {
 	text := fmt.Sprintf("approval %s: %s", decision, stripEscapes(req.Tool))
-	t.place(entry{kind: entryNote, text: text, depth: run.depth, spawnCallID: run.spawn})
+	t.place(inRun(entry{kind: entryNote, text: text}, run))
 }
 
 // addReaction records a fired Reaction — the ONE firing event of the Reaction core (ADR 0076 D1) —
@@ -2314,7 +2378,7 @@ func (t *transcript) addReaction(e domain.ReactionFiredEvent) {
 		text += " (" + e.Detail + ")"
 	}
 	run := runOf(e.EventBase)
-	t.place(entry{kind: entryNote, text: stripEscapes(text), depth: run.depth, spawnCallID: run.spawn})
+	t.place(inRun(entry{kind: entryNote, text: stripEscapes(text)}, run))
 }
 
 // addError appends a recovered-fault notice (ADR 0007 — an ErrorEvent does not stop the
@@ -2325,12 +2389,10 @@ func (t *transcript) addReaction(e domain.ReactionFiredEvent) {
 // untrusted for exactly the reasons the tool card's content is, and source is the model's own tool
 // name when a tool faulted.
 func (t *transcript) addError(source, msg string, run runRef) {
-	t.place(entry{
-		kind:        entryError,
-		text:        stripEscapes(source + ": " + msg),
-		depth:       run.depth,
-		spawnCallID: run.spawn,
-	})
+	t.place(inRun(entry{
+		kind: entryError,
+		text: stripEscapes(source + ": " + msg),
+	}, run))
 }
 
 // addPrune appends the host note for one pruning pass — the engine dropped results tool calls
@@ -2342,12 +2404,10 @@ func (t *transcript) addError(source, msg string, run runRef) {
 // takes no run at all), so a delegate's prune lands inside the delegate's own block rather than
 // interrupting the parent's conversation with a child's housekeeping.
 func (t *transcript) addPrune(results, tokens int, run runRef) {
-	t.place(entry{
-		kind:        entryNote,
-		text:        fmt.Sprintf("pruned %d tool results (~%d tokens)", results, tokens),
-		depth:       run.depth,
-		spawnCallID: run.spawn,
-	})
+	t.place(inRun(entry{
+		kind: entryNote,
+		text: fmt.Sprintf("pruned %d tool results (~%d tokens)", results, tokens),
+	}, run))
 }
 
 // compactedNoteText is the one wording a fold leaves in the scrollback, at every depth and from
@@ -2365,12 +2425,10 @@ const compactedNoteText = "context compacted"
 // — the maintenance UsageEvent the summary call emits (foldStats). The wording is one string for
 // both, because it is the same thing that happened.
 func (t *transcript) addCompacted(run runRef) {
-	t.place(entry{
-		kind:        entryCompacted,
-		text:        compactedNoteText,
-		depth:       run.depth,
-		spawnCallID: run.spawn,
-	})
+	t.place(inRun(entry{
+		kind: entryCompacted,
+		text: compactedNoteText,
+	}, run))
 }
 
 // addRefClipped appends the host note for one clipped reference — an @file or an attached skill
@@ -2383,12 +2441,10 @@ func (t *transcript) addCompacted(run runRef) {
 // Placed at the run that emitted it, as addPrune is: a delegate's interjected reference is the
 // delegate's own message.
 func (t *transcript) addRefClipped(e domain.RefClippedEvent, run runRef) {
-	t.place(entry{
-		kind:        entryNote,
-		text:        stripEscapes(e.Notice()),
-		depth:       run.depth,
-		spawnCallID: run.spawn,
-	})
+	t.place(inRun(entry{
+		kind: entryNote,
+		text: stripEscapes(e.Notice()),
+	}, run))
 }
 
 // ----------------------------------------------------------------------------

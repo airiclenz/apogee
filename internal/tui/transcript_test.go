@@ -3513,23 +3513,31 @@ func TestRunHeadPredicates(t *testing.T) {
 		}
 	})
 
-	t.Run("headsRunFor narrows by the spawning call id", func(t *testing.T) {
+	t.Run("headsRunFor narrows by the run id, else by the spawning call one level up", func(t *testing.T) {
 		t.Parallel()
 
+		legacy := runRef{depth: 1, spawn: "s1"}
+		withID := func(e *entry) { e.spawnRunID = "r1" }
 		for _, tc := range []struct {
-			name  string
-			e     entry
-			spawn string
-			want  bool
+			name string
+			e    entry
+			run  runRef
+			want bool
 		}{
-			{"the head the id names", head(nil), "s1", true},
-			{"a sibling delegation", head(func(e *entry) { e.callID = "s2" }), "s1", false},
-			{"a call to another tool carrying the id", head(func(e *entry) { e.tool.name = "read_file" }), "s1", false},
-			{"an id asked of a head that carries none", head(func(e *entry) { e.callID = "" }), "", true},
-			{"a named head asked for no id at all", head(nil), "", false},
+			{"the head the id names", head(nil), legacy, true},
+			{"a sibling delegation", head(func(e *entry) { e.callID = "s2" }), legacy, false},
+			{"a call to another tool carrying the id", head(func(e *entry) { e.tool.name = "read_file" }), legacy, false},
+			{"an id asked of a head that carries none", head(func(e *entry) { e.callID = "" }), runRef{depth: 1}, true},
+			{"a named head asked for no id at all", head(nil), runRef{depth: 1}, false},
+			{"a head at another level than the run's parent", head(nil), runRef{depth: 2, spawn: "s1"}, false},
+			{"the head the run id names", head(withID), runRef{depth: 1, spawn: "s1", id: "r1"}, true},
+			{"a head sharing the call id under another run id", head(withID), runRef{depth: 1, spawn: "s1", id: "r2"}, false},
+			{"the run id decides over a differing call id", head(withID), runRef{depth: 1, spawn: "s9", id: "r1"}, true},
+			{"a legacy event asked of a stamped head", head(withID), legacy, true},
+			{"a stamped event asked of a legacy head", head(nil), runRef{depth: 1, spawn: "s1", id: "r1"}, true},
 		} {
-			if got := tc.e.headsRunFor(tc.spawn); got != tc.want {
-				t.Errorf("%s: headsRunFor(%q) = %v, want %v", tc.name, tc.spawn, got, tc.want)
+			if got := tc.e.headsRunFor(tc.run); got != tc.want {
+				t.Errorf("%s: headsRunFor(%+v) = %v, want %v", tc.name, tc.run, got, tc.want)
 			}
 		}
 	})
@@ -3614,7 +3622,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 			t.Errorf("entries[2] = %v/%q, want the message placed at the end of s1's stretch",
 				got.kind, got.spawnCallID)
 		}
-		if got := tr.entries[3]; !got.headsRunFor("s2") {
+		if got := tr.entries[3]; !got.headsRunFor(runRef{depth: 1, spawn: "s2"}) {
 			t.Errorf("entries[3] no longer heads s2's run (%v); the message was appended, not placed", got.kind)
 		}
 	})
@@ -3717,7 +3725,7 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 		t.Parallel()
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
-		if got := tr.runName("s1"); got != "" {
+		if got := tr.runName(runRef{depth: 1, spawn: "s1"}); got != "" {
 			t.Fatalf("setup: runName = %q, want an unnamed delegation", got)
 		}
 		tr.apply(domain.SubAgentNamedEvent{
@@ -3725,7 +3733,7 @@ func TestAddSubAgentNameSetsBothHalvesOfTheHeadsName(t *testing.T) {
 			Name:      "test-surveyor",
 		})
 
-		if got := tr.runName("s1"); got != "test-surveyor" {
+		if got := tr.runName(runRef{depth: 1, spawn: "s1"}); got != "test-surveyor" {
 			t.Errorf("runName = %q, want the generated name", got)
 		}
 	})
@@ -4106,14 +4114,14 @@ func TestTranscriptWritersBumpTheGeneration(t *testing.T) {
 		{"commitCancelled", func(tr *transcript) { tr.commitCancelled() }},
 		{"park", func(tr *transcript) { tr.park() }},
 		{"addToolCall", func(tr *transcript) {
-			tr.addToolCall(domain.ToolCall{ID: "t2", Tool: "terminal", Arguments: []byte(`{"command":"ls"}`)}, "", runRef{})
+			tr.addToolCall(domain.ToolCall{ID: "t2", Tool: "terminal", Arguments: []byte(`{"command":"ls"}`)}, "", "", runRef{})
 		}},
 		{"addToolResult", func(tr *transcript) {
-			tr.addToolResult(domain.ToolResult{CallID: "t1", Content: "ok"}, runRef{})
+			tr.addToolResult(domain.ToolResult{CallID: "t1", Content: "ok"}, "", runRef{})
 		}},
 		{"addSubAgentPhase", func(tr *transcript) { subAgentStarted(tr, "s1", 1) }},
 		{"addSubAgentName", func(tr *transcript) {
-			tr.addSubAgentName(domain.SubAgentNamedEvent{EventBase: domain.EventBase{CallID: "s1"}, Name: "repo-scout"})
+			tr.addSubAgentName(domain.SubAgentNamedEvent{EventBase: domain.EventBase{Depth: 1, CallID: "s1"}, Name: "repo-scout"})
 		}},
 		{"applyUsage", func(tr *transcript) { subAgentUsage(tr, 1, 1200, 32768) }},
 		{"enrichFiring", func(tr *transcript) {

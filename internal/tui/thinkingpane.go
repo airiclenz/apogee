@@ -126,7 +126,7 @@ func (m Model) thinkingHeading(rec thinkingRecord) string {
 	if rec.run.depth == 0 {
 		return turn
 	}
-	return m.runLabel(rec.run.spawn) + " · " + turn
+	return m.runLabel(rec.run) + " · " + turn
 }
 
 // thinkingRows composes the report at the given wrap column: for each record the pane speaks for
@@ -271,7 +271,7 @@ func (c *thinkingRowCache) wrapRecords(records []thinkingRecord, column int, sco
 func (m Model) thinkingContent() reportContent {
 	title := thinkingTitle
 	if m.inRunView() {
-		title += " — " + m.runLabel(m.viewedRun().spawn)
+		title += " — " + m.runLabel(m.viewedRun())
 	}
 	rows, kinds := m.thinkingRows(m.thinkingWrapColumn())
 	return reportContent{

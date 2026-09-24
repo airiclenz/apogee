@@ -298,7 +298,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	// advertising rows to unfold.
 	if root.rooted() {
 		head := t.entries[root.first-1]
-		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref.spawn), width, backHint))
+		lines = append(lines, breadcrumbRow(th, breadcrumbTrail(t.entries, root.ref), width, backHint))
 		targets = append(targets, lineTarget{kind: targetBreadcrumb})
 		cells = append(cells, -1)
 		// The header is TWO rows: the trail, and a blank one beneath it holding the view's content
@@ -336,7 +336,7 @@ func (t *transcript) renderView(th theme, width int, blink bool, backHint string
 	previewAt := -1
 	if t.streaming && runUnder(t.entries, t.pendingRun, root.ref) &&
 		!insideCollapsedRun(t.entries, t.pendingRun, root.ref) {
-		previewAt = t.runEnd(t.pendingRun.spawn)
+		previewAt = t.runEnd(t.pendingRun)
 	}
 	// paintPreview appends the in-progress buffer as a block of its own run, at index at. What it
 	// paints is previewTail over the buffer's own tail — the buffer hands out only the lines the
@@ -590,7 +590,7 @@ type paintRoot struct {
 }
 
 // rooted reports whether this paint covers ONE run rather than the whole transcript.
-func (r paintRoot) rooted() bool { return r.ref.spawn != "" }
+func (r paintRoot) rooted() bool { return !r.ref.isTop() }
 
 // painted states one entry as its painter's record ([entry.painted]), rebased to the root.
 func (r paintRoot) painted(e entry) paintInput {
@@ -637,10 +637,10 @@ func (r paintRoot) rebase(ins []paintInput) []paintInput {
 // blank screen.
 func (t *transcript) paintRoot() paintRoot {
 	whole := paintRoot{last: len(t.entries)}
-	if t.root.spawn == "" {
+	if t.root.isTop() {
 		return whole
 	}
-	at, ok := runHeadAt(t.entries, t.root.spawn)
+	at, ok := runHeadAt(t.entries, t.root)
 	if !ok {
 		return whole
 	}

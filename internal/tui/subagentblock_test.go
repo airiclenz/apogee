@@ -1351,21 +1351,21 @@ func TestBreadcrumbTrailNamesTheWayBackUp(t *testing.T) {
 	})
 
 	cases := []struct {
-		name  string
-		spawn string
-		want  string
+		name string
+		run  runRef
+		want string
 	}{
-		{"the top level itself", "", "← main"},
-		{"one level down", "s1", "← main › planner"},
-		{"two levels down", "s2", "← main › planner › repo-scout"},
-		{"an unnamed run takes its task", "s3", "← main › planner › repo-scout › read the tests"},
-		{"a run with neither takes the constant", "s4", "← main › planner › repo-scout › " + usageAgentFallback},
-		{"a run the list has no head for", "gone", "← main"},
+		{"the top level itself", runRef{}, "← main"},
+		{"one level down", runRef{depth: 1, spawn: "s1"}, "← main › planner"},
+		{"two levels down", runRef{depth: 2, spawn: "s2"}, "← main › planner › repo-scout"},
+		{"an unnamed run takes its task", runRef{depth: 3, spawn: "s3"}, "← main › planner › repo-scout › read the tests"},
+		{"a run with neither takes the constant", runRef{depth: 3, spawn: "s4"}, "← main › planner › repo-scout › " + usageAgentFallback},
+		{"a run the list has no head for", runRef{depth: 1, spawn: "gone"}, "← main"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := breadcrumbTrail(tr.entries, c.spawn); got != c.want {
-				t.Errorf("breadcrumbTrail(%q) = %q, want %q", c.spawn, got, c.want)
+			if got := breadcrumbTrail(tr.entries, c.run); got != c.want {
+				t.Errorf("breadcrumbTrail(%+v) = %q, want %q", c.run, got, c.want)
 			}
 		})
 	}
@@ -1929,10 +1929,10 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		tr := build(t)
 		rename(tr, "s1", name)
 
-		if got, want := breadcrumbTrail(tr.entries, "s1"), "← main › "+name; got != want {
+		if got, want := breadcrumbTrail(tr.entries, runRef{depth: 1, spawn: "s1"}), "← main › "+name; got != want {
 			t.Errorf("trail = %q, want %q", got, want)
 		}
-		if got, want := breadcrumbTrail(tr.entries, "s2"), "← main › build the docs"; got != want {
+		if got, want := breadcrumbTrail(tr.entries, runRef{depth: 1, spawn: "s2"}), "← main › build the docs"; got != want {
 			t.Errorf("sibling trail = %q, want %q — the rename named one member", got, want)
 		}
 	})
@@ -1949,7 +1949,7 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 			Name:      name,
 		})
 
-		if got, want := m.runLabel("s1"), name; got != want {
+		if got, want := m.runLabel(runRef{depth: 1, spawn: "s1"}), name; got != want {
 			t.Errorf("runLabel = %q, want %q", got, want)
 		}
 		if got := m.legend(); !strings.Contains(got, name) {
@@ -2032,7 +2032,7 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 		tr := &transcript{}
 		delegationCall(tr, "", "s1", "planner", "plan the work", 0)
 
-		if got, want := breadcrumbTrail(tr.entries, "s1"), "← main › planner"; got != want {
+		if got, want := breadcrumbTrail(tr.entries, runRef{depth: 1, spawn: "s1"}), "← main › planner"; got != want {
 			t.Errorf("trail = %q, want %q", got, want)
 		}
 	})
@@ -2056,14 +2056,14 @@ func TestGeneratedDelegationNameReachesEverySurface(t *testing.T) {
 			t.Fatalf("decodeTranscript: %v", err)
 		}
 
-		head, ok := runHead(entries, "s1")
+		head, ok := runHead(entries, runRef{depth: 1, spawn: "s1"})
 		if !ok {
 			t.Fatalf("the record came back without the renamed run head: %+v", entries)
 		}
 		if got := usageAgentName(head); got != name {
 			t.Errorf("restored name = %q, want the generated %q off the persisted Target", got, name)
 		}
-		if got, want := breadcrumbTrail(entries, "s1"), "← main › "+name; got != want {
+		if got, want := breadcrumbTrail(entries, runRef{depth: 1, spawn: "s1"}), "← main › "+name; got != want {
 			t.Errorf("restored trail = %q, want %q", got, want)
 		}
 	})

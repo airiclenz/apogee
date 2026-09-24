@@ -64,10 +64,10 @@ type activity struct {
 	// spawn is WHICH sub-agent is acting: the id of the sub_agent call that spawned the agent
 	// whose event set this activity (domain.EventBase.CallID), empty for the top-level agent.
 	// Depth cannot answer that once children run CONCURRENTLY (ADR 0039) — siblings share it —
-	// and the slot names one delegate at a time, so it must name the right one. It is the LOOKUP
-	// key, not the name: the delegation's name is resolved against the transcript at compose time
-	// (transcript.runName), so a run head that has not folded yet simply reads as unnamed rather
-	// than freezing a stale answer here.
+	// and the slot names one delegate at a time, so it must name the right one. It is not the name:
+	// the delegation's name is resolved against the transcript at compose time, by the slot's whole
+	// run key (runActivities, transcript.runName), so a run head that has not folded yet simply
+	// reads as unnamed rather than freezing a stale answer here.
 	spawn string
 	since time.Time // when this activity began — the elapsed clock's origin
 }
@@ -163,8 +163,8 @@ func (a runActivities) children() []runRef {
 // oldestChild is the delegate whose slot opened FIRST, and false when no delegate holds one. It is
 // what the merged phrase's clock counts from, so that clock measures the fan-out rather than
 // whichever sibling happened to speak last. Ties — two children whose first events landed inside
-// the same clock tick — break on the spawning call id, so the answer is stable across repaints
-// rather than a map iteration's accident.
+// the same clock tick — break on the spawning call id, then on the run id where two siblings' call
+// ids collide, so the answer is stable across repaints rather than a map iteration's accident.
 func (a runActivities) oldestChild() (runRef, bool) {
 	var oldest runRef
 	found := false
@@ -174,7 +174,9 @@ func (a runActivities) oldestChild() (runRef, bool) {
 			continue
 		}
 		since, best := a[run].since, a[oldest].since
-		if since.Before(best) || (since.Equal(best) && run.spawn < oldest.spawn) {
+		tied := since.Equal(best)
+		if since.Before(best) || (tied && run.spawn < oldest.spawn) ||
+			(tied && run.spawn == oldest.spawn && run.id < oldest.id) {
 			oldest = run
 		}
 	}
