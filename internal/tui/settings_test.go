@@ -4080,3 +4080,89 @@ func TestSettingsStepsPaintThroughTheTable(t *testing.T) {
 		t.Error("settingsPaint answers nothing while the key list is what is on the screen")
 	}
 }
+
+// A drag-selection in either /settings field is cut by Backspace and by Del, exactly as in the prompt
+// box (TestSelectionDeleteKeys): the whole span goes and the caret is seated where it began. The one-line
+// buffer and the multi-line prose are both asked, because the two steps route their keys separately
+// (settingsBufferKey, settingsTextKey) and the carve-out stands ahead of both.
+func TestSettingsFieldSelectionDeleteKeys(t *testing.T) {
+	t.Parallel()
+	buffer := func(t *testing.T) Model {
+		m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
+		return step(t, m, keyEnter())
+	}
+	prose := func(t *testing.T) Model { return settingsTextEditModel(t, "You are apogee.\nWork step by step.") }
+	cases := []struct {
+		name     string
+		open     func(t *testing.T) Model
+		from, to string // the runs the drag starts on and ends on
+		key      tea.KeyPressMsg
+		want     string
+		wantOff  int
+	}{
+		{"buffer backspace", buffer, "http://box:1111", "://box", tea.KeyPressMsg{Code: tea.KeyBackspace}, "://box:1111", 0},
+		{"buffer delete", buffer, "http://box:1111", "://box", tea.KeyPressMsg{Code: tea.KeyDelete}, "://box:1111", 0},
+		{"prose backspace", prose, "Work step", "step by", tea.KeyPressMsg{Code: tea.KeyBackspace}, "You are apogee.\nstep by step.", 16},
+		{"prose delete", prose, "Work step", "step by", tea.KeyPressMsg{Code: tea.KeyDelete}, "You are apogee.\nstep by step.", 16},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m := c.open(t)
+			x, y := frameCell(t, m, c.from)
+			m = step(t, m, leftClick(x, y))
+			head, headY := frameCell(t, m, c.to)
+			m = step(t, m, leftDrag(head, headY))
+			m = step(t, m, leftRelease(head, headY))
+			if !m.settings.sel.nonEmpty() {
+				t.Fatalf("the drag armed no selection to delete: %+v", m.settings.sel)
+			}
+
+			m = step(t, m, c.key)
+
+			if got := m.settings.editor.value(); got != c.want {
+				t.Fatalf("field = %q, want %q — the selected span gone", got, c.want)
+			}
+			if got := m.settings.editor.caretRune(); got != c.wantOff {
+				t.Errorf("caret at rune %d, want %d — the span's start", got, c.wantOff)
+			}
+			if m.settings.sel.active {
+				t.Errorf("the selection outlived the text it named: %+v", m.settings.sel)
+			}
+		})
+	}
+}
+
+// With nothing selected, Backspace and Del in a /settings field keep their caret meanings — one rune
+// before or after it — and a bare click, which leaves a COLLAPSED span, is among the "nothing
+// selected" cases: a caret, not a selection.
+func TestSettingsFieldWithoutSelectionDeletesOneRune(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		key  tea.KeyPressMsg
+		want string
+	}{
+		{"backspace", tea.KeyPressMsg{Code: tea.KeyBackspace}, "http://box:111"},
+		{"delete", tea.KeyPressMsg{Code: tea.KeyDelete}, "ttp://box:1111"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			m, _ := settingsEditModel(t, []SettingRow{settingsStringRow()}, &settingsWriteLog{})
+			m = step(t, m, keyEnter())
+			if c.key.Code == tea.KeyDelete {
+				// Del takes the rune AFTER the caret, so seat it on the first one with a bare click.
+				x, y := frameCell(t, m, "http://box:1111")
+				m = step(t, m, leftClick(x, y))
+				m = step(t, m, leftRelease(x, y))
+			}
+
+			m = step(t, m, c.key)
+
+			if got := m.settings.editor.value(); got != c.want {
+				t.Fatalf("field = %q, want %q — one rune deleted", got, c.want)
+			}
+		})
+	}
+}

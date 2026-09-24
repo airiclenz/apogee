@@ -482,13 +482,18 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	// Any keypress drops a drag-selection in the edit field, for handleKey's own reason one surface
 	// down (model.go): typing past a span, committing it or walking away from it all move on from what
 	// was selected, and clearing at the pane's one chokepoint keeps every branch below from having to
-	// remember to.
+	// remember to. Backspace and Del are carved out of that meaning exactly as handleKey carves them —
+	// they DELETE what is selected — so the span is stashed on the way past.
+	sel := m.settings.sel
 	m.settings.sel = fieldSel{}
 	rows := m.settingRows()
 	n := len(rows)
 	m.settings.clampSelection(n)
 	if step, ok := settingsSteps[m.settings.kind]; ok {
 		if row, ok := step.target(m, rows); ok {
+			if next, claimed := m.settingsDeleteSelection(step, sel, msg); claimed {
+				return next, nil
+			}
 			return step.key(m, msg, row)
 		}
 		return m.settingsAbandonStep()
@@ -514,6 +519,30 @@ func (m Model) settingsKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m.settingsArmReset(rows)
 	}
 	return m, nil
+}
+
+// settingsDeleteSelection is the prompt box's selection delete (handleKey, model.go) in the pane's
+// field: Backspace or Del over a span the human can SEE — the predicate the highlight paints by
+// (fieldSel.nonEmpty) — takes exactly that span and seats the caret where it began
+// ([lineEditor.deleteSelection]). It asks only of a step that types into the field, which is the
+// table's to say ([settingsSteps] — the rows with an editorMsg arm); with no span standing, the key
+// is left to the step, where Backspace and Del mean what they mean beside a caret.
+//
+// It is answered AHEAD of the step's own key route so neither step has to learn about spans, and
+// after the step's target has been re-derived so a field whose row went away still falls back to
+// the key list rather than editing a value nobody will commit. Nothing is laid out here: a cut in the
+// multi-line field changes the rows the pane measures, and Update's repaint tail asks exactly that
+// after every fold (settle's height half, model.go).
+func (m Model) settingsDeleteSelection(step settingsStep, sel fieldSel, msg tea.KeyPressMsg) (Model, bool) {
+	if step.editorMsg == nil || !sel.nonEmpty() {
+		return m, false
+	}
+	switch msg.String() {
+	case "backspace", "delete":
+		m.settings.editor.deleteSelection(sel)
+		return m, true
+	}
+	return m, false
 }
 
 // settingsOwnsInput reports whether the pane is the surface the keyboard is on: open, at the one

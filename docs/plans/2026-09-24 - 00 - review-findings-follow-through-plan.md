@@ -461,7 +461,11 @@ internal/tui/mouse_test.go — TestSettingsTextClickSeatsTheCaretInTheProse, Tes
 - `go test -race -count=1 -run 'TestSettingsClick|TestSettingsDrag|TestSettingsText|TestSettingsEntryDropsTheHighlight|TestTranscriptDragOutlivesASettingsHighlight|TestSettingsPaneValueFieldEditsAtTheCaret|TestSettingsPaneTextEditorPaintsTheCaret|TestSettingsWheel|Field' ./internal/tui/`
 **Commit:** `refactor(tui): the settings fields share one pointer geometry`
 
-## 21. Backspace and Delete remove a settings-field selection
+## 21. Backspace and Delete remove a settings-field selection — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): re-derived from "through `fieldSel.taken`" — the carve-out asks `fieldSel.nonEmpty` (the predicate the highlight paints by, and the one handleKey asks) and cuts through the existing `lineEditor.deleteSelection`; the branch is a new `Model.settingsDeleteSelection`, called from `settingsKey` after the step's target is re-derived and ahead of `step.key`, gated on the step having an `editorMsg` arm (exactly settingsValueBuffer and settingsTextEditor).
+NOTES (2026-09-24): consequential edit — internal/tui/lineeditor.go: made necessary by settingsKey becoming a second caller of deleteSelection (its comment named handleKey's chokepoint as the only one).
+NOTES (2026-09-24): docs/layout/settings-screen-layout.md also gains the Backspace/Delete sentence in the multi-line field's mouse paragraph, since the carve-out covers that field too.
 
 **What:**
 **Goal:** in a `/settings` value or multi-line field with a non-empty selection, Backspace and Delete remove the selected text (as in the prompt box), leaving the caret at the selection start; with no selection they behave as today; `docs/manual/commands.md`'s claim that the field selects "exactly as … in the prompt box" holds. Depends on item 20.

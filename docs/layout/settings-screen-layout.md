@@ -133,9 +133,10 @@ longer names. Choosing a different server is how this key changes.
 
 The field opens **in place**, on the row and in the value's own column, seeded with what the key
 holds. It is a real editor: cursor keys, `home`/`end` and word jumps move the caret, and the mouse
-seats it and drags a selection exactly as in the prompt box. A paste lands **in the field** — never
-in the chat box the pane is drawn over — folded onto the one line the row can show, each newline
-becoming the space that stood where the break was. The hint reads `⏎ save · esc cancel`.
+seats it and drags a selection exactly as in the prompt box — `backspace` or `delete` over a
+selection removes the selected text and leaves the caret where it began. A paste lands **in the
+field** — never in the chat box the pane is drawn over — folded onto the one line the row can show,
+each newline becoming the space that stood where the break was. The hint reads `⏎ save · esc cancel`.
 
 ### The multi-line field (`system-prompt-text`)
 
@@ -161,6 +162,7 @@ The mouse reaches this field too, over all of it rather than over one row: a cli
 the glyph under the pointer — on a wrapped continuation as readily as on a line's own row — a drag
 selects across the lines and its release copies exactly those runes, the newlines among them, and the
 wheel walks the prose a line at a time (the window follows the caret, so moving it *is* the scroll).
+`backspace` or `delete` over a selection removes it, newlines and all, as in the one-line field.
 A paste lands here with its lines intact, which is what this field is for.
 
 ### The external edit (`· ⏎ opens $EDITOR`)

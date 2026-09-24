@@ -534,8 +534,9 @@ with a fixed set of values — such as `mode:`, `server:`, `ui.spinner:` or `cur
 string or a number opens a buffer on the row itself, and `⏎` on the inline system prompt
 opens a multi-line field over the list, where `⏎` makes a new line, `ctrl+s` saves and `esc`
 discards. A buffer is a real field: the arrow keys, `home`/`end` and word jumps move the
-caret, and the mouse seats it and drags a selection exactly as it does in the prompt box. Each
-committed edit is spliced straight into `~/.apogee/config.yaml` — your
+caret, and the mouse seats it and drags a selection exactly as it does in the prompt box —
+`backspace` or `delete` over a selection removes the selected text and leaves the caret where it
+began. Each committed edit is spliced straight into `~/.apogee/config.yaml` — your
 comments, your layout and every other key untouched, the result re-parsed and compared
 against the original before it replaces the file — and a top-level key that was still one of the
 commented examples lands directly below it; a nested key joins the end of its block when the

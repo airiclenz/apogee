@@ -507,8 +507,9 @@ func (e *lineEditor) caretToRune(off int) {
 // caret (the issue register — the highlight used to vanish and the selected text survive).
 //
 // The span arrives as an argument rather than being read off the caller's selection state because
-// handleKey's chokepoint has already dropped the live selection by the time the two keys are routed
-// (model.go): what it stashed there is the authority, and passing it in keeps that the ONLY copy.
+// the caller's chokepoint has already dropped the live selection by the time the two keys are routed
+// (handleKey for the prompt, model.go; settingsKey for the /settings field, settings.go): what it
+// stashed there is the authority, and passing it in keeps that the ONLY copy.
 // The span is read in reading order (fieldSel.span — a right-to-left drag stores head before anchor,
 // the same posture the release copies under) and sliced in RUNES, so a multi-byte selection loses whole
 // characters instead of splitting one.
