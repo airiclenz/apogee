@@ -111,6 +111,13 @@ after the fact, where it costs no cache.
 > an unchanged cap re-renders the block byte-identical. Availability state stays out of the block, as
 > written above.
 
+> **Note 2026-09-24 (plan `2026-09-24 - 00`, item 13).** Because the seat door FORGETS the far width
+> and a usable target STATES it, the two are order-sensitive wherever both are applied together.
+> `lateEngine.Bind` (`cmd/apogee/wire_engine.go`) replays the pending seat BEFORE the pending
+> target, so a session bound late states the pending target's width from its first request; the
+> reverse order wiped the width the target had just stated and told the model the session width
+> until the next heartbeat beat.
+
 **7 — A mixed reply is sized by the smaller cap; a single-seat reply keeps its seat's cap — this
 amends [ADR 0039](0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)
 decision 3.** One depth-0 reply may now fan out to both seats at once, which ADR 0039 never had to

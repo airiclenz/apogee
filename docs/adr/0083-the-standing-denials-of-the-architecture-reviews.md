@@ -99,6 +99,15 @@ move on one clock is the one case a whole-value swap is the safe shape, and it s
 applying to another pair), or a demonstrated lost-update or torn-read across today's per-field
 locks that a single value would close rather than open.
 
+> **Note 2026-09-24 (review 09-20 #15; plan `2026-09-24 - 00`, *Ratified design calls*).** The
+> 2026-09-20 review proposed the `lateEngine` half of this residue again in a smaller shape: its
+> typed `pending*` fields folded into one ordered replay list of `func(*Agent) error`, refusable
+> entries last. **Declined** (owner, 2026-09-24): the typed pending fields are kept, as the
+> `lateEngine` pending-plus-`Bind`-plus-apply ladder this section already accepts as residue. Only
+> the card's defect was taken: `Bind` replayed the delegation target before the seat, so the seat
+> forgot the far width the target had just stated; it now replays the seat first ([ADR 0069](0069-the-top-level-model-picks-the-delegation-seat.md)
+> decision 6, 2026-09-24 note).
+
 ## 3. A delegate's runtime state is not one value; delegation is not the whole spawn (2026-09-16, review 09-16 #26)
 
 **Proposed.** `Agent.delegate *delegateState` (nil at depth 0) holding the delegate-only fields

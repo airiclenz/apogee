@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -9,6 +11,8 @@ import (
 
 	"github.com/airiclenz/apogee"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -85,6 +89,61 @@ func TestLateEngineRemembersTheDelegationSeatUntilTheBind(t *testing.T) {
 	engine.SetDelegationSeat(nil)
 	if engine.pendingSeat != nil {
 		t.Errorf("pendingSeat after the opt-out = %+v; want nil", engine.pendingSeat)
+	}
+}
+
+// A seat and a target pushed before the bind are replayed onto one Agent, and the two doors do not
+// commute: the seat door FORGETS the far width the engine states to the model, and a usable target
+// STATES it (ADR 0069 decision 6, 2026-09-24 note). Replayed target-first, the seat would wipe the
+// width the target had just stated, and a late-bound session would tell its model the session width
+// until the next heartbeat beat. The width is observed where the model reads it — the orientation's
+// Delegation bounds clause on the first request — with the two widths distinct, so the session
+// width answering instead of the far one cannot pass.
+func TestLateEngineBindKeepsTheFarWidthOfThePendingTarget(t *testing.T) {
+	t.Parallel()
+
+	const sessionWidth, farWidth = 2, 5
+	upstream := stubllm.New(t, stubllm.Script{
+		Model: "session-model",
+		Turns: []stubllm.Turn{{Text: "nothing to delegate"}},
+	})
+
+	engine := newLateEngine(domain.ModeAskBefore, true)
+	t.Cleanup(func() { _ = engine.Close() })
+	engine.SetDelegationSeat(&apogee.DelegationSeat{Name: "grunt", Description: "the cheap box", Model: "grunt-model"})
+	engine.SetDelegationTarget(&apogee.DelegationTarget{
+		Endpoint: "http://127.0.0.1:1", ServerName: "grunt", Model: "grunt-model", ParallelAgents: farWidth,
+	})
+
+	// The Delegation bounds bullet is rendered only when the Agent's own roster holds sub_agent, and
+	// the orientation block rides on a standing system message, so the Config carries both.
+	roster := apogee.NewToolRegistry()
+	if err := roster.Register(tools.NewSubAgent()); err != nil {
+		t.Fatalf("Register sub_agent: %v", err)
+	}
+	cfg := validCfg(t)
+	cfg.Endpoint, cfg.Model = upstream.URL, upstream.Model
+	cfg.Tools = roster
+	cfg.SystemPrompt = "You are apogee, a terminal coding agent."
+	cfg.ParallelAgents = sessionWidth
+	if err := engine.Bind(func() (*apogee.Agent, error) { return apogee.New(cfg) }); err != nil {
+		t.Fatalf("Bind: %v", err)
+	}
+
+	if err := engine.Submit(apogee.UserInput{Text: "say something"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := engine.Step(context.Background()); err != nil {
+		t.Fatalf("Step: %v", err)
+	}
+
+	requests := upstream.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the bound session sent no request")
+	}
+	system := seatSystemText(requests[0])
+	if want := fmt.Sprintf("up to %d run at once", farWidth); !strings.Contains(system, want) {
+		t.Errorf("the first request's orientation does not state the pending target's width %q:\n%s", want, system)
 	}
 }
 

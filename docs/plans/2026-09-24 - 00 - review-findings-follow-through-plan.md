@@ -290,7 +290,9 @@ internal/agent/orientation.go — library roots line; apogee.go — Config alias
 - `go test -race -count=1 -run 'ExtraReadRoots|ReadMounts|Skill|Orientation_' ./internal/agent/`; `go test -race -count=1 -run 'RegistryWithMCPThreads|EveryDriverCarriesTheProjectedConfig|HostToolsFor|ReadRoots|Firing' ./cmd/apogee/`
 **Commit:** `refactor: Config carries one ReadMounts from the host to the read tools`
 
-## 13. A late-bound Agent keeps the far delegation width
+## 13. A late-bound Agent keeps the far delegation width — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): internal/run/run.go (run.Once, item 14's file, in flight) applies SetDelegationTarget before SetDelegationSeat too — the same order defect on the headless Firing path, where no heartbeat ever re-states the target; not edited here (outside this item's Files and owned by a sibling in flight).
 
 **What:** Defect: `lateEngine.Bind` replays the pending delegation target before the pending seat; `SetDelegationSeat` calls `forgetFarWidth`, so a late-bound Agent loses the far width until the next heartbeat beat.
 **Goal:** `Bind` replays the seat before the target, with a comment stating the order; a late-bound Agent reports the pending target's far width immediately after `Bind`. ADR 0083 §2 gains a dated note that the typed pending fields are kept (card #15 declined).

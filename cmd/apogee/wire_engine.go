@@ -251,11 +251,16 @@ func (e *lateEngine) Bind(construct func() (*apogee.Agent, error)) error {
 	if c := e.pendingContextFiles; c != nil {
 		agent.SetContextFiles(c.enable, c.names)
 	}
-	if t := e.pendingDelegation; t != nil {
-		agent.SetDelegationTarget(t)
-	}
+	// The seat BEFORE the target, and the order is load-bearing (ADR 0069 D6): installing a seat
+	// forgets the far width the engine states to the model (Agent.SetDelegationSeat), and a usable
+	// target is what states it. Replayed the other way round, the seat would wipe the width the
+	// pending target had just stated, and the model would be told the session width until the
+	// next heartbeat beat re-stated the target.
 	if s := e.pendingSeat; s != nil {
 		agent.SetDelegationSeat(s)
+	}
+	if t := e.pendingDelegation; t != nil {
+		agent.SetDelegationTarget(t)
 	}
 	if s := e.pendingScratch; s != nil {
 		agent.SetScratchDir(*s)
