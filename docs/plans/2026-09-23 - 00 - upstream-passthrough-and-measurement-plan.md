@@ -1,0 +1,229 @@
+# Upstream passthrough and measurement — plan
+
+**Goal:** Give every server entry an opaque `request-extra:` body passthrough (Layer 1) and measure every upstream HTTP attempt per server — ttfb, ttft, duration, tok/s, outcome — surfaced in the `/server` and `/sub-agents-server` pickers, `/inspect` and headless JSON (Layer 2). Apogee measures and passes routing hints through; it never routes.
+**Date:** 2026-09-23
+**Status:** unexecuted
+**sized for:** ~200k-context host
+**base:** d72dfd8a
+**Sources:** `docs/handoffs/2026-09-21 - 00 - provider-routing-speed-brainstorm.md`; ADR 0024, 0028, 0031, 0047, 0075, 0076, 0082; `CONTEXT.md`; `layout.md`
+**Closes:** apogee-glh
+
+**Ratified design calls** (owner, 2026-09-23 grilling session):
+- **Precedence:** `request-extra:` overlays the encoded body; reserved keys `model`, `messages`, `stream`, `stream_options`, `tools`, `system` are refused at config load, even as `null`.
+- **Merge:** RFC 7396 JSON Merge Patch — objects deep-merge, scalars/arrays replace, `null` deletes.
+- **Reach:** applied in the entry's Client encode, so every body-carrying request through that entry (Turns, delegations, compaction) carries it.
+- **Reach (naming and probe):** the title-naming call (`namingCall`, cmd/apogee/title.go) and the `apogee probe` completion client (cmd/apogee/probemodel.go) also carry the entry's request-extra (owner, 2026-09-23)
+- **Surface:** picker summary + `/inspect` detail + headless `upstream_attempt` events; no status-bar change.
+- **Store:** cross-session `~/.apogee/server-stats.jsonl`, keyed by server name + redacted endpoint; each sample records served model; summary filters to the bound model (else the last recorded one, labelled).
+- **TTFT:** two clocks — `ttfb` (send → first body byte, keepalives count) and `ttft` (send → first model delta of any kind: reasoning, content, tool-call).
+- **Sample:** one per HTTP attempt, measured in `provider.Client`; outcome `ok` | fault class | `cancelled`; carries attempt index and request id. Cancelled attempts excluded from percentiles and the failure rate.
+- **tok/s:** reported output tokens ÷ (`last` − `ttft`), both timed from send — `last` to the last model delta, `ttft` to the first (`DeltaAttempt` carries both); no usage → no tok/s, never an estimate; `— tok/s` under 5 carrying samples.
+- **Keepalive starvation:** idle-timer semantics unchanged (ADR 0082); filed as bead `apogee-keepalive-starvation`.
+- **Event path:** `DeltaAttempt` on the Delta stream → `domain.UpstreamAttemptEvent` from the loop → Driver subscriber writes the store; no side-channel observer.
+- **Counted attempts:** all depths and compaction; both pickers show the summary.
+- **Privacy:** endpoint stored as scheme+host+path (userinfo, query, fragment stripped); no prompt text, bodies or key names; root `server-stats: off` stops writes and the picker summary, events still fire.
+- **Store upkeep:** O_APPEND one line per attempt; at startup a file over 4× cap is rewritten via temp+rename keeping the last 50 per (name, endpoint, model); a lost concurrent append is acceptable.
+- **Picker row:** `name — endpoint · ttft 1.8s · 42 tok/s · 2/20 failed`; `· no data` under 5 samples; narrow widths drop the endpoint first, then truncate the summary, never the name.
+- **ADR:** ADR 0085 records the above and rejects the dynamic scoring router; Layer 3 fallback pools named as future work.
+- **Per-server idle timeout:** out of scope; bead `apogee-per-server-idle-timeout`.
+- **Stale docs:** fixed here — `heartbeat.NewMonitor` comment, ADR 0024 decision 6 amendment note, manual OpenRouter notes.
+
+**Standing requirements:**
+- skills: coding-standards
+- Bubble Tea v2 names only (`tea.KeyPressMsg`, `msg.String()`); never hold a `strings.Builder` by value in the Model.
+- With no `request-extra:` configured, request bodies stay byte-identical (`TestOpenAICodecBodyIsUnchanged`, the anthropic literal-body tests).
+- No OpenRouter-specific Go code: the passthrough is opaque, the manual carries the provider examples.
+
+**Out of scope:** Layer 3 fallback pools (future ADR against 0028/0047/0082); any cost/speed scoring router (rejected, ADR 0085); a no-progress timeout (`apogee-keepalive-starvation`); per-server `stream-idle-timeout` (`apogee-per-server-idle-timeout`); live TTFT in the status bar.
+
+**Regression check (2026-09-23, d72dfd8a):**
+- 1: guard folded (ADR 0085 `Amends: ADR 0024 §6`; ADR-content acceptance greps).
+- 2: recast (decision 2: canonical-JSON string past decoding); guards folded (entry-naming UnmarshalYAML, json.Marshal check at load, copy deferred to item 4); report's reflect.DeepEqual guard superseded by the decision.
+- 3: recast (decision 3: string option, decoded once, fresh value per encode); guards folded (RawMessage merge keeps untouched bytes; per-wire effort assertions).
+- 4: recast (decision 4: dialOptions the single producer; monitor sites untouched); guards folded (always-present binding, firingConfig copy, stubllm witness); yields to ADR 0031 Driver parity; report's naming-call and DeepEqual guards superseded by decisions 2/4.
+- 5: guard folded (decision 5: `last`; armed only with WithServerIdentity; own ttfb reader; closed outcome vocabulary).
+- 6: recast (decision 6: identity from dialOptions; alias + fold row); guard folded (dialer records identity); supersedes internal/domain/config.go's ServerName "exactly ONE place" comment.
+- 7: guard folded (golden + redactions, headless kinds test, count test, prose counts).
+- 8: guard folded (slack trim rule, open-append-close, `last` in Sample).
+- 9: guard folded (decision 9: registry row + manual prose; template/Options gates; Driver-side sinks at wire_boot/firingConfig); yields to ADR 0037 decision 8 (Editable, live apply).
+- 10: guard folded (serverChoices projection, in-memory index, nil-pointer summary).
+- 11: guard folded (fold.go call site + foldCases row; capture-off and run-view scope stated; bounded ring).
+- 12: guard folded (widened stale-prose finder, wire_live.go/delegation.go; correction acceptance).
+- 2 (re-check): guards folded (named canonical-JSON string field replaces the Approach's map; `request-extra` tag + non-struct kind so the unknown-key walk stays quiet; unknownkeys_test row).
+- 3 (re-check): guard folded (Goal signature `WithRequestExtra(string)`; "" and `{}` keep codec bytes).
+- 4 (re-check): recast (decision 4, owner 2026-09-23: namingCall and the `apogee probe` battery client carry request-extra — replaces the "out of reach" call and the earlier naming-call supersession; fixes pre-existing: Firing namer binding omitted Wire); guards folded (Bind/Swap test call sites, target name projected onto ServerName with TestServerBindingApplyTo rows and binding() doc updated, bindFiringConfig as the copy site).
+- 6 (re-check): guards folded (Goal narrowed to dialOptions-built Clients; collector stays silent, compaction passes an attempt-only observer; depends on items 4 and 5).
+
+## 1. ADR 0085 — apogee measures upstreams and passes routing through
+
+**What:**
+**Goal:** `docs/adr/0085-apogee-measures-upstreams-and-passes-routing-through.md` exists, records every ratified call in this plan's header, rejects the dynamic scoring router with its reasons (pricing tables are provider-tuned, 1–2-server users have nothing to choose, double-routing above a scoring provider), names Layer 3 fallback pools as future work citing ADR 0028/0047/0082, and `CONTEXT.md` defines **Upstream attempt** and **Server stats** (distinct from ADR 0079's byte-denominated "context cost").
+**Regression guard.** ADR 0085 carries `Amends: ADR 0024 §6` in its frontmatter (house form, ADR 0084 line 3) and a decision stating a configured `model` hint is trusted as configured, never replaced when unlisted (landed in b6e51496 with no ADR) — item 12's ADR 0024 note cites it. Acceptance greps the ADR itself for the router rejection, the fallback pools, ADR 0028/0047/0082 and `request-extra`.
+**Approach (assumed at the header base):** Follow the neighbouring ADR format (0082, 0084). Add the two terms to the `CONTEXT.md` section that defines Servers/Heartbeat; link the ADR.
+**Files:** docs/adr/0085-apogee-measures-upstreams-and-passes-routing-through.md, CONTEXT.md
+**Read first:** docs/adr/0084-the-budget-reserves-what-the-standing-content-measures.md — frontmatter Status/Amends; docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md — decision 6, ADR 0044 struck-clause note;
+CONTEXT.md — Upstream, Heartbeat (and its Beat), Context cost; internal/provider/discovery.go — resolveHint, HintResolution; cmd/apogee/upstream.go — hintNotice
+**Tests:** none (docs).
+**Acceptance:** `A="docs/adr/0085-apogee-measures-upstreams-and-passes-routing-through.md"; test -f "$A" && grep -q "Amends: ADR 0024" "$A" && grep -qi "router" "$A" && grep -qi "fallback pool" "$A" && grep -q "0028" "$A" && grep -q "0047" "$A" && grep -q "0082" "$A" && grep -q "request-extra" "$A" && grep -q "Upstream attempt" CONTEXT.md && grep -q "Server stats" CONTEXT.md`
+**Commit:** `docs(adr): record that apogee measures upstreams and passes routing through`
+
+## 2. `request-extra:` config key on server entries
+
+**What:** Recast at the regression check (2026-09-23).
+**Goal:** A server entry accepts `request-extra:` as a YAML mapping; config load refuses a non-mapping value and any top-level reserved key (`model`, `messages`, `stream`, `stream_options`, `tools`, `system`) with an error naming the entry and the key; the value reaches `domain.Config` for the session's active entry.
+**Regression guard.** Past YAML decoding, the validated request-extra is carried as a comparable canonical-JSON string (sorted keys, "" when absent) on ServerEntry's carried form, domain.Config and the delegation target — never a map[string]any on a struct that existing `!=` comparisons touch.
+The key decodes through a custom UnmarshalYAML (yaml.v3 alone fails `request-extra: 5` inside parseConfigFile naming neither entry nor key) whose error names the entry and `request-extra`; the normalised value is `json.Marshal`-ed at load and refused on error (`.nan`, a nested non-string key), naming the entry. This item adds the `domain.Config` field only; copying it at `serverBinder.bind` / `firingConfig` is item 4's.
+The ServerEntry field is tagged `yaml:"request-extra,omitempty"` and has a non-struct Go kind (a named string type, canonical JSON, "" when absent), so the reflective unknown-key walk (unknownkeys.go walkUnknownKeys/descendUnknownKeys) neither descends it (`servers[0].request-extra.provider` announced) nor, as a `-`/untagged field would be, reports `servers[0].request-extra` itself; nested maps live only inside the UnmarshalYAML/validator.
+**Approach (assumed at the header base):** Add `RequestExtra` — a named string type carrying the canonical JSON, "" when absent — to `config.ServerEntry` (`internal/config/config.go`) with yaml tag `request-extra,omitempty`; validate beside the `wire:` validation in the server-entry validator; carry it onto `domain.Config` wherever the active entry's fields (`Wire`, `EffortDialect`) are copied. Nested values are `map[string]any` / `[]any` only inside the decoder/validator (normalise YAML's `map[any]any` if the decoder yields it), which marshals them to that string.
+**Files:** internal/config/config.go, internal/config/config_test.go, internal/config/unknownkeys_test.go, internal/domain/config.go
+**Read first:** internal/config/config.go — ServerEntry, ValidateServers, parseConfigFile; internal/config/unknownkeys.go — walkUnknownKeys, descendUnknownKeys;
+internal/config/unknownkeys_test.go — TestUnknownKeysWalksTheSchemaAsDeepAsItGoes; internal/config/config_test.go — TestApplyConfigHoldsTheStartupEntry; internal/domain/config.go — Config.Wire
+**Tests:** table test — valid nested map accepted and carried as canonical JSON (sorted keys; "" when absent); a scalar and a list value each refused with an error naming the entry and `request-extra`; each reserved key refused (also as `null`); a non-reserved `null` accepted; a value that cannot be JSON-marshalled (`.nan`, a nested non-string key) refused naming the entry; `domain.Config` carries a `RequestExtra` string field; the existing `ServerEntry` `!=` tests compile and pass unmodified; a `TestUnknownKeysWalksTheSchemaAsDeepAsItGoes` row `servers: [{name: a, request-extra: {provider: {order: [x]}}}]` → no notice, beside the `reactions … body: {deep: 1}` row.
+**Acceptance:** `go test -race -count=1 ./internal/config/ ./internal/domain/`
+**Commit:** `feat(config): accept a request-extra body passthrough on server entries`
+
+## 3. Merge `request-extra` over the encoded body in the Client
+
+**What:** Recast at the regression check (2026-09-23).
+**Goal:** `provider.WithRequestExtra(string)` makes every body the Client sends an RFC 7396 merge of the canonical-JSON patch over the codec's encoded JSON, for both wires; with no option, "" or `{}` the bytes are identical to the codec's output; the wire observer (`/inspect`) sees the merged body.
+**Regression guard.** `provider.WithRequestExtra` takes that canonical-JSON string, the Client decodes it once at construction, and the merge builds a fresh value per encode and never writes into the option's decoded map (parallel encodes share it).
+The merge works over `map[string]json.RawMessage`, recursing only into keys the patch names, so untouched subtrees (tool `parameters`, anthropic `tool_use.input`) keep their codec bytes. The signature is `WithRequestExtra(string)` (item 4 calls it with item 2's carried string), never a map; "" and `{}` both skip the merge.
+The Client test's openai case sets `Request.EffortDialect=EffortDialectReasoning` (`applyEffort` writes `reasoning.effort` only there); the anthropic case asserts `output_config.effort` (that wire never writes `reasoning.effort`) beside `reasoning.exclude` and `provider.order`.
+**Approach (assumed at the header base):** A small unexported merge-patch function in `internal/provider` (objects recurse, `null` deletes, anything else replaces). Apply it in `Client.encode` right after `c.codec.encode(req)` returns, before `send`/`observeWire`, only when the map is non-empty (skip unmarshal/marshal entirely otherwise — that is what keeps the pinned bytes). `carriedEffort` is reported from the codec as today.
+**Files:** internal/provider/client.go, internal/provider/mergepatch.go, internal/provider/mergepatch_test.go, internal/provider/client_test.go
+**Read first:** internal/provider/client.go — Client.encode, Client.send, observeWire, NewClient; internal/provider/stream.go — Client.Stream; internal/provider/wire_openai.go — applyEffort;
+internal/provider/client_test.go — TestWireObserver_RecordsPostedBodyWithoutCredentials; internal/provider/wire_openai_test.go — TestOpenAICodecBodyIsUnchanged
+**Tests:** merge-patch table (deep merge, array replace, null delete, add key; the decoded patch is unchanged after two merges); Client test capturing the body via `WithWireObserver` with `request-extra: {provider: {order: [x]}, reasoning: {exclude: true}}` alongside an effort setting — openai wire with `EffortDialectReasoning`: `reasoning.effort` and `reasoning.exclude` present; anthropic wire: `output_config.effort`, `reasoning.exclude` and `provider.order` present; a patch touching only `provider` leaves `tools[0].function.parameters` byte-identical; parallel encodes on one Client under `-race`; `WithRequestExtra("")` and `WithRequestExtra("{}")` each leave the body byte-identical to the codec's; the existing byte-pinned tests pass unmodified.
+**Acceptance:** `go test -race -count=1 ./internal/provider/`
+**Commit:** `feat(provider): merge a server's request-extra over each encoded body`
+
+## 4. Wire `request-extra` into every Client built for an entry
+
+Depends on items 2 and 3.
+**What:** Recast at the regression check (2026-09-23). Also fixes pre-existing: Firing namer binding omitted Wire.
+**Goal:** Every Client apogee builds for a server entry — the session's main Client, a `/server` switch, a delegation homed on another entry, the title/delegation naming call (`namingCall`) and the `apogee probe` battery client — carries that entry's `request-extra`; a driven test with a scripted upstream sees the merged key on a Turn and on a delegation to a second entry.
+**Regression guard.** Per-entry facts reach the engine's completion Clients only through dialOptions(cfg) — the session's entry via domain.Config (UpstreamSpec where the active entry is copied) and a delegation's entry via its delegation target, which gains the entry's name, endpoint and request-extra; dialOptions is the engine's single producer of WithRequestExtra; the cmd/apogee Heartbeat-monitor sites (wire_server.go, upstream.go, delegation.go monitor builders) build Discover-only monitors and are not touched — correct Files and Approach accordingly.
+`serverBinding` carries the value ALWAYS present in `UpstreamSpec.binding()` and `DelegationTarget.binding()`, "" included, so a `/server` move or a delegation to an entry with none clears it (`applyTo` and the routed `childCfg` otherwise keep the old one); set it in upstream.go's `UpstreamSpec` literal and `resolveDelegationTarget`; extend `bindingCells`. `bindFiringConfig` (headless, daemon, schedule, and `apogee probe context` through probeContextConfig) copies `cfg.RequestExtra = in.entry.RequestExtra` beside `cfg.Wire` — the item yields to ADR 0031's Driver parity (wire_firing.go, domain/config.go).
+The delegation target's name is projected present-always onto `ServerName` in `DelegationTarget.binding()` (item 6's dial identity reads it): update the three DelegationTarget rows' `want` in TestServerBindingApplyTo and the binding() doc comment ("The seat's human words … are not a target's to state").
+**Reach (naming and probe)** (owner, 2026-09-23; replaces this item's former "out of reach" call): namingCall (title.go) and the `apogee probe` battery client (probemodel.go) carry the entry's canonical-JSON request-extra. `upstreamBinding` gains `RequestExtra string` (still comparable) and namingCall appends `WithRequestExtra(binding.RequestExtra)`; every producer of that binding fills it — upstreamHolder.Bind/Swap→Binding(), delegation.go targetBinding, naming.go newFiringNamer's routed binding and wire_firing.go's Firing-namer session binding (`cfg.Namer`) — and the probe battery `NewClient` gains `WithRequestExtra(opts.StartupEntry.RequestExtra)` (the Discover clients need none). A Bind/Swap arity change updates its 9 test calls (keysource_test.go :75 :112; upstream_test.go :52 :67 :1021 :1072; wire_server_test.go :512 :1372 :1462), or the value is carried without changing the arity.
+Fixes pre-existing: Firing namer binding omitted Wire — wire_firing.go's `cfg.Namer` session binding gains `Wire: in.entry.Wire` beside `RequestExtra`, so headless and daemon runs on a `wire: anthropic` entry stop sending naming calls over the openai path.
+The driven test's witness is a raw-body/extras field added to stubllm's `Request` (documented under test-drivers.md "The request log") or the `reasoning` key read via `Effort.Reasoning`.
+**Approach (assumed at the header base):** The engine's one producer of per-entry options for completion Clients is `internal/agent/construct.go` `dialOptions` (from `domain.Config`): append `provider.WithRequestExtra(cfg.RequestExtra)` there; the Driver-side producers are `namingCall` (from `upstreamBinding`) and the probe battery client (see the guard). Carry the value onto `domain.Config` at the copy sites — `serverBinder.bind` (`cmd/apogee/wire_server.go`), `bindFiringConfig` (`cmd/apogee/wire_firing.go`), the `/server` move's `UpstreamSpec` (`cmd/apogee/upstream.go` → `internal/agent/rebind.go`, `serverbinding.go`) — and onto the `DelegationTarget` in `resolveDelegationTarget` (`cmd/apogee/delegation.go`), whose `binding()` lands it on the routed child's Config. The `heartbeat.NewMonitor` builders in `wire_server.go`, `upstream.go` and `delegation.go` only Discover and are not touched.
+**Files:** internal/agent/construct.go, internal/agent/serverbinding.go, internal/agent/serverbinding_test.go, internal/agent/rebind.go, internal/agent/delegationtarget.go, cmd/apogee/wire_server.go (serverBinder.bind), cmd/apogee/wire_firing.go (bindFiringConfig, cfg.Namer), cmd/apogee/upstream.go (upstreamBinding, upstreamHolder.Bind/Swap/Binding, the move's UpstreamSpec literal), cmd/apogee/delegation.go (resolveDelegationTarget, targetBinding), cmd/apogee/naming.go (newFiringNamer), cmd/apogee/title.go (namingCall), cmd/apogee/probemodel.go (battery client), cmd/apogee/request_extra_test.go, cmd/apogee/naming_test.go, cmd/apogee/probemodel_test.go; cmd/apogee/keysource_test.go, cmd/apogee/upstream_test.go and cmd/apogee/wire_server_test.go when Bind/Swap's arity changes; internal/stubllm/log.go and docs/design/test-drivers.md when the raw-body witness is taken
+**Read first:** internal/agent/serverbinding.go — DelegationTarget.binding; internal/agent/construct.go — dialOptions; cmd/apogee/title.go — namingCall; cmd/apogee/upstream.go — upstreamHolder.Bind/Swap;
+cmd/apogee/naming.go — newFiringNamer; cmd/apogee/delegation.go — targetBinding; cmd/apogee/wire_firing.go — bindFiringConfig (cfg.Wire, cfg.Namer); cmd/apogee/probemodel.go — battery client
+**Tests:** driven test (see `docs/design/test-drivers.md`) with two scripted upstreams: main entry's `request-extra` key appears in the Turn body; a delegation to the second entry carries the second entry's key and not the first's; `/server` switch picks up the new entry's value; after `/server` moves to an entry with NO request-extra the old key is absent; a delegation to an entry with none carries none; a `firingConfig` test (name matching `RequestExtra`) copies the entry's value; `bindingCells` covers the field and the three DelegationTarget rows of TestServerBindingApplyTo want the target's name as `ServerName`; a naming call (title generator over the holder's binding) on an entry with request-extra carries the key, and after a `Swap` to an entry with none the key is absent (name matching `RequestExtra`); a routed delegation-naming call carries the target's key; `apogee probe model`'s battery request carries the startup entry's key (probemodel_test, name matching `RequestExtra`); `TestFiringNamerSpeaksTheEntrysWire` — `firingConfig` on a `wire: anthropic` entry names over the anthropic path (fails against the pre-item tree) and its session binding carries the entry's request-extra.
+**Acceptance:** `go test -race -count=1 ./internal/agent/ ./internal/stubllm/ && go test -race -count=1 -run 'RequestExtra|FiringNamer|TestNamingCall|TestDelegationNamer|TestDelegationWiring|TestTitleGenerator|TestFiringConfig|TestProbeModel|TestUpstreamHolder|TestMove' ./cmd/apogee/`
+**Commit:** `feat: send each server entry's request-extra on every request to it`
+
+## 5. `DeltaAttempt` — the Client times every HTTP attempt
+
+**What:**
+**Goal:** `provider.WithServerIdentity(name, endpoint)` stamps the Client; `Client.Stream` yields one `DeltaAttempt` per HTTP attempt (including pre-first-byte retries and failed attempts) carrying server name, redacted endpoint (scheme+host+path), served model, request id (shared across a call's attempts), attempt index, ttfb, ttft, duration, output tokens (0 = not reported) and outcome (`ok`, a fault-class string, or `cancelled` on context cancellation); SSE keepalive comments advance ttfb but never ttft; no other Delta kind changes.
+**Regression guard.** DeltaAttempt also carries `last` (send → last model delta) so tok/s = output tokens ÷ (last − ttft); update the header's tok/s line wording to match.
+`DeltaAttempt` is emitted only when `WithServerIdentity` was applied (an unarmed stream stays byte-identical — the `WithWireObserver` precedent — so the stream_test.go / reliability_test.go delta-sequence pins stay green), and the Client gains an identity accessor (like `Client.Wire` / `StreamIdleTimeout`) for item 6's `fakeDialer`. ttfb is timed by a reader wrapper of its own under the tee, independent of `idleBody` (absent when the idle cut is 0). The outcome vocabulary is closed — `ok | http_<code> | overflow | in_band | transport | idle | stream_fault | cancelled` (`fault` carries no class string) — and pinned in a table test.
+**Approach (assumed at the header base):** Add `DeltaAttempt` to the `DeltaKind` set in `internal/provider/stream.go` with an `Attempt` payload struct on `Delta`. Time `send` per retry in `Client.send`'s loop; ttfb at the first successful `idleBody.Read`; ttft at the first parsed content/thinking/tool-call delta; emit the attempt delta just before `DeltaDone`/`DeltaError`/`DeltaContextOverflow` and for each retried attempt as it is abandoned. Outcome strings derive from the existing `fault` classification.
+**Files:** internal/provider/stream.go, internal/provider/client.go, internal/provider/attempt.go, internal/provider/attempt_test.go
+**Read first:** internal/provider/stream.go — Client.Stream, idleBody, statusDelta, inBandErrorDelta; internal/provider/client.go — Client.send, WithWireObserver; internal/provider/fault.go — fault, classify
+**Tests:** fake server scripts: 429 then success → two attempts, same request id, indices 0/1; keepalive comments for 2s then content → ttfb ≪ ttft; `last` ≥ ttft on a multi-delta reply; no usage block → output tokens 0; ctx cancel mid-stream → `cancelled`; endpoint `https://u:p@h/api?key=x` redacted to `https://h/api`; a row under `WithStreamIdleTimeout(0)` still records ttfb; a bare `NewClient` (no identity) yields no `DeltaAttempt`; an outcome table covering every vocabulary member.
+**Acceptance:** `go test -race -count=1 ./internal/provider/`
+**Commit:** `feat(provider): time every upstream HTTP attempt on the delta stream`
+
+## 6. `UpstreamAttemptEvent` — the engine emits every attempt
+
+Depends on items 4 and 5.
+**What:** Recast at the regression check (2026-09-23).
+**Goal:** `domain.UpstreamAttemptEvent` (EventBase plus every `DeltaAttempt` field) is emitted for every attempt at every depth, including compaction's own summary loop; `DeltaAttempt` never reaches content, tool-call or completion accounting; every Client dialOptions builds (session, `/server` switch, routed child) carries `WithServerIdentity` for its entry.
+**Regression guard.** WithServerIdentity is produced in dialOptions from the same carried facts as item 4 (not at monitor sites); item 6 also adds the apogee.go alias for UpstreamAttemptEvent (TestEveryDomainEventVariantIsAliased) and a fold case wherever TestFoldEventCoversEveryEventVariant requires one (a no-op there is fine; item 11 renders it in the inspector) — add those files to Files and the tests to Acceptance.
+`dialRecord` / `fakeDialer` (dialer_test.go) record each dial's identity via item 5's accessor, and `TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn` asserts it for the session, a `/server` switch and a routed child (the child's from its delegation target's name and endpoint). Supersedes the `ServerName` doc comment in internal/domain/config.go ("display facts and never dial facts … exactly ONE place"): dialOptions becomes a second reader, and the comment is rewritten here.
+The collector stays silent (collectCompletion's doc; TestCollectCompletionWithoutObserverIsSilent, collect_test.go:142, unmodified): `compactCompleter.Complete` passes an observer that emits only `DeltaAttempt` in place of today's nil, and collectCompletion itself emits nothing. Depends on item 4 for the delegation target's name the routed child's identity reads.
+**Approach (assumed at the header base):** Let `internal/agent/collect.go` (`collectCompletion`) hand `provider.DeltaAttempt` to its observer without folding it, and emit from the observers — the loop's sink in `Agent.streamResponse` (`internal/agent/loop.go`) and an attempt-only observer that `compactCompleter.Complete` passes in `internal/agent/compact.go`. Add `WithServerIdentity` beside `WithRequestExtra` at the item-4 producer sites. Any Responder test double that switches on Delta kinds must ignore the new kind.
+**Files:** internal/domain/events.go, internal/domain/config.go, internal/agent/collect.go, internal/agent/loop.go, internal/agent/compact.go, internal/agent/attempt_event_test.go, internal/agent/construct.go, internal/agent/dialer_test.go, apogee.go, internal/tui/fold_test.go (and internal/tui/fold.go if the case needs a line there)
+**Read first:** internal/agent/collect.go — collectCompletion; internal/agent/collect_test.go — TestCollectCompletionWithoutObserverIsSilent; internal/agent/loop.go — streamResponse; internal/agent/compact.go — compactCompleter.Complete;
+internal/agent/construct.go — dialOptions; internal/agent/dialer_test.go — fakeDialer, TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn; internal/tui/fold_test.go — foldCases
+**Tests:** scripted Responder yielding attempts around content → events in order with Depth/Turn; a delegation's attempt carries Depth 1; a compaction summary emits its attempt through its attempt-only observer while TestCollectCompletionWithoutObserverIsSilent passes unmodified; transcript and usage unchanged versus a run without attempt deltas; the dialer test asserts each dial's identity (session, switch, routed child); a `foldCases` row for `UpstreamAttemptEvent` (inert in the transcript, `wantProgressSave` false); the apogee.go alias.
+**Acceptance:** `go test -race -count=1 ./internal/agent/ ./internal/domain/ && go test -race -count=1 -run TestEveryDomainEventVariantIsAliased . && go test -race -count=1 -run 'TestFoldEvent|TestProgressSave' ./internal/tui/`
+**Commit:** `feat(agent): emit an upstream attempt event for every model call attempt`
+
+## 7. Headless `upstream_attempt` lines
+
+Depends on item 6.
+**What:**
+**Goal:** Headless JSON (ADR 0075) writes one `upstream_attempt` line per `UpstreamAttemptEvent` with every field in snake_case and durations in milliseconds; `docs/manual/headless.md` documents the line.
+**Regression guard.** The new kind turns red `TestE2EEventLinesGolden` "a completed run" (byte-compared run.jsonl), `TestHeadlessFormatJSONStreamsEveryEvent` and `TestKindsAreTwenty`. Insert the kind before the two frames (that test slices `kinds[:len(kinds)-2]`) and add `UpstreamAttemptEvent` at the same position in its emission list; bump the count test; add `eventLinesRedactions` for the `*_ms` members, `request_id` and the endpoint's host:port, then re-record run.jsonl. Every prose count of kinds moves with it: `grep -rn -i 'twenty\|eighteen\|seventeen' docs/manual/headless.md internal/eventjson cmd/apogee/headless_test.go docs/adr/0075*`.
+**Approach (assumed at the header base):** Add the case beside the `UsageEvent` encoding in `internal/eventjson/encode.go`; follow its field naming.
+**Files:** internal/eventjson/encode.go, internal/eventjson/encode_test.go, docs/manual/headless.md, cmd/apogee/e2e_eventlines_test.go, cmd/apogee/testdata/eventlines/run.jsonl, cmd/apogee/headless_test.go
+**Read first:** internal/eventjson/encode.go — Encode, Kinds; internal/eventjson/encode_test.go — TestKindsAreTwenty; cmd/apogee/e2e_eventlines_test.go — TestE2EEventLinesGolden, eventLinesRedactions;
+cmd/apogee/headless_test.go — TestHeadlessFormatJSONStreamsEveryEvent; cmd/apogee/docs_eventlines_test.go — TestManualListsEveryEventLineKind; docs/manual/headless.md — "The twenty line kinds"
+**Tests:** encode test pinning one line's exact JSON; the kind-count test bumped; the headless every-event test emits the new event; the event-lines golden re-recorded under the new redactions.
+**Acceptance:** `go test -race -count=1 ./internal/eventjson/ && go test -race -count=1 -run 'TestHeadlessFormatJSON|TestManualListsEveryEventLineKind|TestE2EEventLines' ./cmd/apogee/`
+**Commit:** `feat(eventjson): write upstream attempt lines in headless output`
+
+## 8. `serverstats` store and summary
+
+**What:**
+**Goal:** Package `internal/serverstats` appends samples to a JSONL file, trims at open when the file exceeds 4× the per-key cap (temp+rename, keep last 50 per name+endpoint+model), loads samples for a name+endpoint, and summarises for a model: ttft p50, tok/s p50 over carrying samples (absent under 5), failed/total excluding `cancelled`, `NoData` under 5 samples; corrupt lines are skipped, never fatal.
+**Regression guard.** The trim fires when a key holds more than 4×50 samples or the line count exceeds 4 × (distinct keys × 50) — internal/recall's slack rule (`compactAt`) — so a many-key file is not rewritten on every Open. `Append` opens, appends and closes per call (recall's `appendLine`), never holding an fd across another process's temp+rename; a trim or rename failure is non-fatal and skipped; perms 0o600/0o700 as recall. `Sample` carries item 5's `last`, and tok/s = output tokens ÷ (last − ttft).
+**Approach (assumed at the header base):** One deep module: `Open(path)`, `Append(Sample)`, `Summary(name, endpoint, model)`, `LastModel(name, endpoint)`. Pure summary math separated from file I/O for table tests. Appends use `O_APPEND` with one `json.Marshal` line per write. No dependency on `internal/tui` or `cmd`.
+**Files:** internal/serverstats/store.go, internal/serverstats/summary.go, internal/serverstats/store_test.go, internal/serverstats/summary_test.go
+**Read first:** internal/recall/store.go — Store.Append, appendLine, compact, atomicWrite, readRecords; cmd/apogee/wire.go — resolveRoots, stateRoots; internal/config/config.go — ApogeeHome
+**Tests:** percentile and threshold table; model filter; cancelled excluded; tok/s p50 from (last − ttft); trim keeps last 50 per key; a file of 6 keys × 50 lines is not rewritten on Open; an Append after another handle's trim lands in the renamed file; corrupt line skipped; two goroutines appending concurrently produce parseable lines.
+**Acceptance:** `go test -race -count=1 ./internal/serverstats/`
+**Commit:** `feat(serverstats): store and summarise per-server upstream attempts`
+
+## 9. Record attempts into the store; `server-stats:` key
+
+Depends on items 6 and 8.
+**What:**
+**Goal:** Root config `server-stats: on|off` (default `on`); when on, the TUI and headless Drivers append every `UpstreamAttemptEvent` to `~/.apogee/server-stats.jsonl`; when off, the file is neither written nor read; events still fire either way.
+**Regression guard.** Item 9 adds the `server-stats` KeyRegistry row in internal/config/registry.go (registry_test bijection) and documents `server-stats:` in docs/manual/configuration.md itself so TestManualDocumentsEverySettingsKey stays green at item 9; item 12 then only extends that prose.
+The key also needs its internal/config/defaults/config.yaml line (`TestTemplateMentionsEveryRegistryKey`, `TestRegistryFollowsTheTemplateOrder`), an `Options` field, and entries in `everyKeyFileConfig` / `TestEveryConfigKeyReachesTheOptions`. Yields to ADR 0037 decision 8 (no key is restart-gated): the row is Editable with a `settingsTable` apply in wire_settings.go, in registry order, that opens or stops the store live. The subscriber wraps `cfg.Events` at the two cmd/apogee sites — wire_boot.go (`w.cfg.Events = w.hooks`) and `firingConfig` — never internal/run's eventTap (headless.go keeps Driver sinks in the command); `rootWiring.close` closes the store.
+**Approach (assumed at the header base):** Add the root key in `internal/config/config.go` beside `stream-idle-timeout`. Open the store next to the other `~/.apogee` roots (`cmd/apogee/wire.go`); subscribe in the Driver event tap that already sees `UsageEvent` (the TUI sink path and `internal/run/run.go`'s eventTap) — one subscriber function shared by both.
+**Files:** internal/config/config.go, internal/config/config_test.go, internal/config/registry.go, internal/config/defaults/config.yaml, internal/config/options.go, docs/manual/configuration.md, cmd/apogee/wire.go, cmd/apogee/wire_boot.go, cmd/apogee/wire_firing.go, cmd/apogee/wire_settings.go, cmd/apogee/serverstats.go, cmd/apogee/serverstats_test.go
+**Read first:** internal/config/registry.go — KeyRegistry; internal/config/config_test.go — TestEveryConfigKeyReachesTheOptions, everyKeyFileConfig; internal/config/defaults_test.go — TestTemplateMentionsEveryRegistryKey;
+cmd/apogee/docs_settings_test.go — TestManualDocumentsEverySettingsKey; cmd/apogee/wire_settings_test.go — TestEveryEditableSettingKeyHasAnApply; cmd/apogee/wire_boot.go — resolveConfig (w.cfg.Events); cmd/apogee/wire_firing.go — firingConfig
+**Tests:** driven test with a scripted upstream: one Turn writes one line with the entry's name and redacted endpoint; `server-stats: off` writes nothing; a headless Firing records through `firingConfig`'s wrap; the settings-pane toggle opens and stops the store live; config test for the key's parse and default.
+**Acceptance:** `go test -race -count=1 ./internal/config/ && go test -race -count=1 -run 'ServerStats|Settings|Manual' ./cmd/apogee/`
+**Commit:** `feat: record upstream attempts into per-server stats`
+
+## 10. Picker rows show the server summary
+
+Depends on item 9.
+**What:**
+**Goal:** `/server` and `/sub-agents-server` rows render `name — endpoint · ttft 1.8s · 42 tok/s · 2/20 failed` for the model currently bound on that entry (else the last recorded model, shown as `(<model>)`), `· no data` under 5 samples, `— tok/s` when too few samples carry usage; at narrow widths the endpoint drops first, then the summary truncates, never the name; nothing is shown when `server-stats: off`; `layout.md` states the row shape.
+**Regression guard.** Fill the summary in `serverChoices` (upstream.go), the one projection both `serverHost.List` and `delegationHost.Targets` use, so `/sub-agents-server` gets it too. Summaries come from an in-memory index the store loads at Open and updates on Append — List and Targets are asked per draw and never touch the disk. The summary is a pointer field on a still-comparable `ServerChoice`: nil (stats off, unwired host, hand-built values) adds no cell or text; non-nil with under 5 samples renders `· no data`.
+**Approach (assumed at the header base):** Extend `ServerChoice` (`internal/tui/tui.go`) with a summary struct (numbers, not preformatted text) filled by `ServerHost.List()` in cmd/apogee from `serverstats.Summary`; render in `Model.serverRows` (`internal/tui/picker.go`). Formatting of durations/rates lives in the tui package.
+**Files:** internal/tui/tui.go, internal/tui/picker.go, internal/tui/picker_test.go, cmd/apogee/serverstats.go, cmd/apogee/upstream.go, cmd/apogee/delegation.go, cmd/apogee/wire_server.go, internal/serverstats/store.go, layout.md
+**Read first:** internal/tui/picker.go — Model.serverRows, Model.subAgentsServerRows; cmd/apogee/upstream.go — serverChoices; cmd/apogee/wire_server.go — serverHost.List; cmd/apogee/delegation.go — delegationHost.Targets;
+internal/tui/tui.go — ServerChoice; cmd/apogee/upstream_test.go — TestServerChoicesCarryNoSecrets, TestRunRootSwitchServerRepointsTheSession
+**Tests:** frame tests (`docs/design/test-drivers.md`) of both pickers at wide and narrow widths with data, no data, no tok/s, and stats off; the existing row/choice pins (`TestServerPickerRowsIgnoreTheEntryDescription`, `TestSubAgentsServerPickerShowsTheEntryDescription`, `TestServerChoicesCarryNoSecrets`, `TestRunRootSwitchServerRepointsTheSession`) pass unmodified with a nil summary; a summary lookup reads no file.
+**Acceptance:** `go test -race -count=1 -run 'Picker|ServerRows' ./internal/tui/ && go test -race -count=1 ./internal/serverstats/ && go test -race -count=1 -run 'ServerStats|ServerChoices|SwitchServer' ./cmd/apogee/`
+**Commit:** `feat(tui): show each server's measured speed in the server pickers`
+
+## 11. `/inspect` lists upstream attempts
+
+Depends on item 6.
+**What:**
+**Goal:** `/inspect` shows each `UpstreamAttemptEvent` grouped by request id: server, attempt index, ttfb, ttft, duration, tok/s (or `—`), outcome.
+**Regression guard.** `foldEvent` (fold.go) is the folds' only caller, so the attempt fold is wired there (or inside `foldWire`), and item 6's no-op `foldCases` row becomes the rendering row. The item states whether attempts list with wire capture off and what then replaces the disarmed or empty row, keeping `TestInspectorDisarmedNamesTheKey` green; attempt groups follow the run-view scope by (Depth, CallID); the attempt history is a bounded ring rebuilt, never appended in place (ADR 0011).
+**Approach (assumed at the header base):** Fold the event in `internal/tui/inspector.go` beside `foldWire`, following its entry shape and bounded history.
+**Files:** internal/tui/inspector.go, internal/tui/inspector_test.go, internal/tui/fold.go, internal/tui/fold_test.go
+**Read first:** internal/tui/inspector.go — foldWire, inspectorRows, scopedWire, inspectorDisarmedRow; internal/tui/fold.go — Model.foldEvent; internal/tui/fold_test.go — foldCases;
+internal/tui/inspector_test.go — TestInspectorDisarmedNamesTheKey, TestInspectorScopesToTheViewedRun
+**Tests:** frame test: a retried call renders as one group with two attempts; a cancelled attempt shows `cancelled`; a run view lists only that run's attempts; the disarmed-row test passes unmodified.
+**Acceptance:** `go test -race -count=1 -run 'Inspect|FoldEvent' ./internal/tui/`
+**Commit:** `feat(tui): list upstream attempts in the inspector`
+
+## 12. Manual, OpenRouter notes and stale model-binding prose
+
+Depends on items 4 and 9.
+**What:**
+**Goal:** `docs/manual/configuration.md` documents `request-extra:` (merge semantics, reserved keys, an OpenRouter `provider.order` / `allow_fallbacks` example, a `prompt_cache_key` example), `server-stats:`, the picker summary, and OpenRouter notes: variant slugs (`<slug>:nitro`, `:floor`) are accepted as configured, and SSE keepalives count as liveness for `stream-idle-timeout`; every text claiming an unlisted model falls back to the first advertised one is corrected — ADR 0024 decision 6 gets a dated "amended by ADR 0085" note, `heartbeat.NewMonitor`'s doc comment states the as-configured behaviour.
+**Regression guard.** The stale-prose finder is `grep -rn -iE "first advertised|pin vanishes|what is actually loaded|observed reality|hint about reality|binds what is served" docs internal cmd CONTEXT.md` (archived plans and CHANGELOG excluded as historical); it reaches wire_live.go's and delegation.go's monitor comments and configuration.md's `servers:` example (`the heartbeat binds what is served`). Acceptance checks the corrections, not only the new keys. `server-stats:` is already documented by item 9 (its decision); this item only extends that prose.
+**Approach (assumed at the header base):** Extend "The servers you run models on" section. Find stale sites with `grep -rn "first advertised" docs internal cmd CONTEXT.md` and fix every hit that describes the unlisted-model case.
+**Files:** docs/manual/configuration.md, docs/adr/0024-*.md, internal/heartbeat/heartbeat.go, cmd/apogee/wire_live.go, cmd/apogee/delegation.go, README.md
+**Read first:** internal/heartbeat/heartbeat.go — NewMonitor; docs/adr/0024-the-heartbeat-observes-upstream-and-rebind-applies-at-the-boundary.md — decision 6, ADR 0044 struck-clause note (amendment convention); cmd/apogee/wire_live.go — upstream monitor block;
+cmd/apogee/delegation.go — subAgentBeat; docs/manual/configuration.md — "The servers you run models on"; cmd/apogee/docs_settings_test.go — TestManualDocumentsEverySettingsKey; internal/provider/discovery.go — resolveHint
+**Tests:** none (docs + comment).
+**Acceptance:** `go build ./... && grep -q "request-extra" docs/manual/configuration.md && grep -q "server-stats" docs/manual/configuration.md && ! grep -rqiE "pin vanishes|falls back to the server's first advertised" internal/heartbeat cmd/apogee --include=*.go && grep -q "0085" docs/adr/0024-*.md && grep -q ":nitro" docs/manual/configuration.md && go test -count=1 -run 'TestManualDocuments|TestDocsEnv' ./cmd/apogee/`
+**Commit:** `docs: document request-extra, server stats and OpenRouter variant slugs`
