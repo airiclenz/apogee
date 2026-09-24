@@ -3,7 +3,7 @@
 **Date:** 2026-08-27 · **Status:** 🚧 **skeleton** — each section is filled by the plan item named
 under its heading · **Owner ADR:**
 [ADR 0062](../adr/0062-test-drivers-are-drivers.md) ("test drivers are Drivers") ·
-**Realised by:** `docs/plans/2026-08-27 - 02 - test-drivers-kit-plan.md`
+**Realised by:** `docs/plans/archived/2026-08-27 - 02 - test-drivers-kit-plan.md`
 
 > **How to read this file.** It is the practical counterpart to ADR 0062: the ADR says *why* the
 > kit exists and what it may not do, this document says *how to use it*. If you are about to write

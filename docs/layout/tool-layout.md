@@ -1,7 +1,7 @@
 # Tool layout
 
 This file is the canonical tool-block layout spec (grill session 2026-08-10),
-**implemented 2026-08-11** by `docs/plans/2026-08-10 - 04 - tool-display-overhaul-plan.md`.
+**implemented 2026-08-11** by `docs/plans/archived/2026-08-10 - 04 - tool-display-overhaul-plan.md`.
 `layout.md` keeps the global grammar — widths, colors, path shortening, body
 quoting — and its tool sections point here.
 
@@ -16,7 +16,7 @@ one and design call 14 rules out growing the engine for presentation;
 `base...head`, which is the diff the tool actually takes.
 
 The **Grouped Sub-agents** section below landed separately, later the same day,
-by `docs/plans/2026-08-11 - 01 - grouped-sub-agent-display-plan.md`, and two
+by `docs/plans/archived/2026-08-11 - 01 - grouped-sub-agent-display-plan.md`, and two
 things there read differently on screen, each argued in that plan's item notes.
 The prompt opens the span but stands **below** the head's own report rows where
 that report was long enough to lay out as a body, because the head's rows are
@@ -400,7 +400,7 @@ Notes:
 - **2026-08-19** — the five diff-bodied rows above now render through
   `split-diff-layout.md` (Split diff where the width allows, Stacked diff below
   it), delivered by
-  `docs/plans/2026-08-19 - 03 - split-diff-display-plan.md` and ratified by
+  `docs/plans/archived/2026-08-19 - 03 - split-diff-display-plan.md` and ratified by
   ADR 0052. Three things read differently than this table did before:
   `git_diff_range`'s body is parsed and coloured — it was plain, uncoloured tool
   output — and a body the parser cannot read in full falls back to that plain

@@ -1,5 +1,5 @@
 > **Status:** the owner's pinned mockup for the two decision surfaces — implemented by
-> `docs/plans/2026-08-04 - 03 - user-questions-menu-layout-plan.md`, whose ratified design calls
+> `docs/plans/archived/2026-08-04 - 03 - user-questions-menu-layout-plan.md`, whose ratified design calls
 > amend it where the two differ; `layout.md` carries the rules that came out of it.
 
 Arrow keys (up and down) navigate.
@@ -14,7 +14,7 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 > draws are **not** painted — the always-painted hint row under it is. The approval prompt's `[a]` /
 > `[s]` / `[d]` / `[esc]` cells are unaffected: those shortcuts are live (`approvalMenu`).
 
-> Amended 2026-09-06 by `docs/plans/2026-09-06 - 00 - popup-breathing-rows-and-click-to-select-plan.md`:
+> Amended 2026-09-06 by `docs/plans/archived/2026-09-06 - 00 - popup-breathing-rows-and-click-to-select-plan.md`:
 > the arrows are no longer the only way onto a row. **Both prompts take a POINTER**, on the terms
 > `layout.md` states for every boxed pane ("What "height" means"). A click on a row moves the `❯`
 > onto it exactly as `↑↓` do — and on a multi-select question it ticks that row's `[✔]`, exactly as
@@ -35,7 +35,7 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 
 # User Approval:
 
-> Amended 2026-09-06 by `docs/plans/2026-09-06 - 00 - popup-breathing-rows-and-click-to-select-plan.md`,
+> Amended 2026-09-06 by `docs/plans/archived/2026-09-06 - 00 - popup-breathing-rows-and-click-to-select-plan.md`,
 > whose ratified call F makes every PART of the approval body a paragraph: the sub-agent line, the
 > `Reason:`, the `Fix:`, the `Scope:`, the labelled arguments and the notes under them are each set
 > off from the next by one blank line, and a part that wraps keeps the blank after its last line.
@@ -77,7 +77,7 @@ Please refer to the menu system UI-laypout in llama-launcher for reference.
 
 # Multi-select question:
 
-> Pinned 2026-08-05 by `docs/plans/2026-08-05 - 00 - ask-user-multi-select-plan.md`, whose ratified
+> Pinned 2026-08-05 by `docs/plans/archived/2026-08-05 - 00 - ask-user-multi-select-plan.md`, whose ratified
 > design calls amend this file for questions the model marks `multi_select`: `␣` toggles the
 > highlighted row, `⏎` sends every checked row (the highlighted one alone when none is checked), and
 > the marker glyphs are `[✔]` / `[ ]`. The pointer and dim rows are the menu style already drawn

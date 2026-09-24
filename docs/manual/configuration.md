@@ -40,10 +40,12 @@ applies itself to the session you are in — whoever wrote it: the `/settings` p
 GUI editor you left open in another window, a `vim ~/.apogee/config.yaml` in a second terminal.
 Nothing has to be re-entered in the pane: every key that came back
 different is applied exactly as an in-pane edit is, and its row repaints wearing a ` ~` — the marker
-for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Four
+for *a save on disk moved this key*, beside the ` *` a row wears when you changed it in the pane. Thirteen
 keys are the exception to "applied now", because they are read only while a session is being wired:
-`ui.inspector`, `undo-snapshots`, `sessions.max-age` and `sessions.max-count` take the save and honour
-it at the next start, as their `/settings` rows say. An
+`ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five delegation bounds
+(`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`, `delegate-max-tokens`,
+`delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`, `sessions.max-age` and
+`sessions.max-count` take the save and honour it at the next start, as their `/settings` rows say. An
 edit reaches the runs this session raises, too: a `/schedule` firing composes itself from the
 settings the session is running at the moment it fires, so a tool you disabled or a host you denied
 is disabled and denied for it as well. A file that does not parse changes nothing — the session
@@ -868,9 +870,9 @@ or `30m` (default **2h**). Either one, when reached, ends the delegation exactly
 ceiling does — apogee summarizes what the sub-agent has, the tools are taken away, the
 sub-agent is told which limit it hit and spends one closing turn summing up, and your agent
 receives the result marked as partial, its first line naming the limit (`token budget` or
-`time limit`) so it learns which knob its next delegation is up against. `0` switches either off. Both are read when a delegation
-starts, so a change applies to the sub-agents spawned after it and never to one already
-running; like the step ceiling, they bound sub-agents only.
+`time limit`) so it learns which knob its next delegation is up against. `0` switches either off. Both are read when the session is
+built, so an edit applies at the next start and never to a sub-agent already running; like the
+step ceiling, they bound sub-agents only.
 
 The token ceiling announces itself as the step ceiling does: the tool result that closes the
 turn at which the sub-agent's cumulative prompt tokens reach three quarters of

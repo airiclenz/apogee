@@ -350,7 +350,7 @@ config loader consults at resolve time, not a runtime check.
   [`docs/plans/archived/2026-09-08 - 00`](../plans/archived/2026-09-08%20-%2000%20-%20reaction-core-stage-2-plan.md)
   (global file only; the repo layer and adoption pin are bead `apogee-089`).
 - **Plan C (stage 3, gated on B):** the user `advise` and `gate` cells —
-  [`docs/plans/2026-09-09 - 01 - reaction-core-stage-3-plan.md`](../plans/2026-09-09%20-%2001%20-%20reaction-core-stage-3-plan.md):
+  [`docs/plans/archived/2026-09-09 - 01 - reaction-core-stage-3-plan.md`](../plans/archived/2026-09-09%20-%2001%20-%20reaction-core-stage-3-plan.md):
   the advise slot, its fence, cap, redaction and ledger (§2.5) with the resume strip; the gate stage
   of the Approver at `pre-tool-exec`; the sync-lane executor under the contract's §10.4 permit row;
   the `advise:` key shipped only on the admission arm's `Verdict: pass` (ADR 0076 D5).

@@ -115,8 +115,9 @@ Connect(ctx, []ServerConfig, URLGuard, workspaceRoot) → *Client  // dial every
   which server it reaches.
 - **Resume reconnects FRESH (ADR 0008).** The Client holds no serializable state; a resumed Session
   simply calls `Connect` again from the same config. No server-side state is restored — there is no
-  server-side-state promise. (`cmd/apogee/wire.go` establishes the connection on every launch,
-  resume included.)
+  server-side-state promise. (`cmd/apogee/wire_live.go` establishes the connection on every launch,
+  resume included; `cmd/apogee/wire_mcp.go` holds the connected set and the reconnect an
+  `mcp-servers:` edit drives.)
 - **Close** joins every session's teardown error and clears the sessions; it is safe on a dormant or
   already-closed Client. The composition root `defer`s it so no process or connection survives exit.
 

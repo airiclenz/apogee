@@ -12,7 +12,7 @@
 
 ## As shipped (2026-08-06)
 
-The requirements above were built as part of `docs/plans/2026-08-06 - 00 - settings-live-apply-plan.md`
+The requirements above were built as part of `docs/plans/archived/2026-08-06 - 00 - settings-live-apply-plan.md`
 and ratified in [ADR 0037](../adr/0037-every-settings-edit-applies-to-the-running-session.md). The
 mockups below are the pane as it now paints, captured from the renderer, and they replace the
 hand-drawn sketch the requirements were written against. Where the two differed:

@@ -1121,7 +1121,7 @@ handed.
 | ADR 0012 accepted + ADR 0004 amended/cross-referenced | ✅ committed (`54b363c`); this doc adds the implementation-contract pointer |
 | `Confine(fn)` signature settled | §2 — prepare-in-place `*exec.Cmd`; closure form deleted with reasoning |
 | `workspaceScopedWriter` marker specified | §3 — unexported method in `internal/tools`, `workspaceWriteTarget` seam, survives `Subset` |
-| shared confinement-probe contract specified (signatures, escape attempts) | §6 — `confinetest.Probe`/`ProbeNetwork`, the 8-row battery, per-backend checklists |
+| shared confinement-probe contract specified (signatures, escape attempts) | §6 — `confinetest.Probe`/`ProbeNetwork`, the escape battery (8 rows at P3.1, 13 since the §6.2 amendments), per-backend checklists |
 | per-call disposition pinned | §4 — the full table, dangerous-action guard runs first |
 | capability honesty pinned | §5 — startup probe, `AutoEligible()` → `FSWrite`-only |
 | **no production code in P3.1** | ✅ — this is a design document only |

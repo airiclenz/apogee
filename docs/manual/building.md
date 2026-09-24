@@ -33,7 +33,7 @@ A `Makefile` wraps the common Go invocations:
 | `make cross` | Cross-compile every package for all six release targets (Linux/macOS/Windows × amd64/arm64), as a check |
 | `make dist` | Build the publishable release archives into `dist/`, plus `SHA256SUMS` |
 | `make check` | The full acceptance gate — gofmt, `GOOS=windows go vet` over `internal/platform` and `internal/probe`, `golangci-lint`, build, `govulncheck`, race tests, the workflow pin check and `actionlint`, the ADR-0010 import invariant, cross-build, and an `apogee --help` smoke run |
-| `make release-smoke VERSION=v0.18.0` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
+| `make release-smoke VERSION=vX.Y.Z` | Verify a **published** release from the outside (see [Releasing](#releasing)) |
 | `make clean` | Remove the built binary |
 | `make help` | List every target |
 
@@ -57,7 +57,7 @@ proxy.golang.org retains immutably are retracted in `go.mod`, so `@latest` no lo
 resolves to them.)
 
 **Versions and tags.** The top-level `VERSION` file is the single source of truth for the
-release version — one line, carrying the leading `v` (`v0.16.8`); `make dist` strips that
+release version — one line, carrying the leading `v` (`vX.Y.Z`); `make dist` strips that
 `v` for the archive names and nothing else re-states the number. Pushing a commit that
 changes `VERSION` to `main` is what creates the tag: a CI workflow
 (`.github/workflows/tag-on-version-bump.yml`) puts an **annotated** tag on that exact
@@ -220,8 +220,10 @@ settled decisions, `docs/design/` for the contracts, `layout.md` for the TUI spe
 states the conventions you cannot derive from the source. Per-package `doc.go` files
 carry the file-by-file tours from there.
 
-> **Note:** launch the TUI with `apogee --endpoint <openai-compatible-url> --model <name>`
-> to hold a real coding conversation with a local model. All four autonomy modes, the
+> **Note:** launch the TUI with a bare `apogee` — it starts on a `servers:` entry of
+> `~/.apogee/config.yaml` (an entry with `wire: anthropic` speaks the Anthropic Messages API) —
+> or point one session straight at an OpenAI-compatible server with
+> `apogee --endpoint <openai-compatible-url> --model <name>`. All four autonomy modes, the
 > full tool suite, MCP, sub-agents, sessions, and skills are live; `apogee probe`
 > reports which confinement case this machine is in (see
 > [Auto mode's blast radius](configuration.md#auto-modes-blast-radius)).

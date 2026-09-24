@@ -68,7 +68,7 @@ blocks amend-on-published; no dangerous-action guard rule is added ahead of the 
 candidate itself stays unreplicated.
 *(Per-profile tool rosters: GRILLED 2026-08-23 →
 [ADR 0057](../adr/0057-the-tool-roster-is-a-third-model-profile-axis-resolved-axis-wise.md);
-implementation plan `docs/plans/2026-08-23 - 00 - per-profile-tool-rosters-plan.md`.)*
+implementation plan `docs/plans/archived/2026-08-23 - 00 - per-profile-tool-rosters-plan.md`.)*
 
 **Deferred candidates:** env-var parameters on `terminal`/`python_exec` (stable across both Qwen
 sessions); `directory_create`/`directory_delete`; `git_stash`; `git_tag`; `file_metadata`; batch

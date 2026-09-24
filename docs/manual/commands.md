@@ -559,8 +559,11 @@ likely not open when it happens; a re-read that found nothing changed says nothi
 lands at a boundary the session crosses anyway rather than mid-conversation, and says so on
 the row: the `context-files:` keys are part of the prefix every request is cached against, so they take
 effect at the next `/clear` — `· applies at next clear`. A few keys are read only while apogee
-starts — `ui.inspector`, `undo-snapshots`, `delegate-timeout`, `sessions.max-age` and
-`sessions.max-count` — so an edit there is written and takes effect at the next start; the row's
+starts — `ui.inspector`, `undo-snapshots`, `working-window`, `response-reserve`, the five
+delegation bounds (`delegate-max-steps`, `delegate-fanout-rounds`, `delegate-max-depth`,
+`delegate-max-tokens`, `delegate-timeout`), `stream-idle-timeout`, `re-stream-budget`,
+`sessions.max-age` and `sessions.max-count` — so an edit there is written and takes effect at the
+next start; the row's
 `Description:` says so, and the value cell shows what was written. On a key an environment variable or
 a flag is overriding, the edit still applies and is still written, and the row adds that the
 override will win again the next time apogee starts — startup precedence is unchanged. If a
