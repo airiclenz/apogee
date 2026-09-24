@@ -293,8 +293,11 @@ discovered from the live server (`/props` `total_slots`); no signal means the en
 `wire: anthropic`: a hosted server serves parallel requests as a matter of course), **1** —
 strictly serial — for any other, so `parallel-agents: 1` is how a keyed server is held
 serial (ADR 0039 D2 as amended 2026-09-19). It is **structural, not a Reaction** — it only executes calls
-the model already made, so it is on under Bypass — but it is also the width of a guided
-decomposition **batch** (`min(cap, remaining)` delegations per Turn). More parallel agents
+the model already made, so it is on under Bypass — but it also feeds the width the engine states
+to Reactions (`LoopView.ParallelAgents()`: the width dispatch uses — the **Sub-agent server**'s
+cap while a **Delegation target** is latched, else this cap, and **1** on a sub-agent), so an
+engine-origin Reaction that synthesizes delegations batches `min(width, remaining)` of them per
+Turn by the number dispatch will honour. No shipped Reaction does. More parallel agents
 means a **smaller window each**: a llama.cpp `--parallel N` server splits its context into
 N slots, and the reported window is the per-slot share. One reply has ONE width even when its
 children do not share a **Delegation seat**: all-on-one-seat is bounded by that seat's cap, a
@@ -493,8 +496,8 @@ engine payload), "history" (that is the browser's list of records, not one Sessi
 **The loop** (the agent loop):
 Apogee's core control flow: build request → call Upstream → parse response → dispatch
 tools → repeat, emitting typed events at each step. The loop owns tool execution and
-conversation state — which is precisely what lets formerly lab-only Mechanisms (e.g.
-`correct_tool_result`) become first-class. Lives in `internal/agent/loop.go`.
+conversation state — which is precisely what lets a behaviour that once had to live outside the
+loop (a tool-result correction, say) be a first-class seam Reaction. Lives in `internal/agent/loop.go`.
 _Avoid_: "the pipeline" (that was the proxy-era Transform chain — a narrower thing).
 
 **Upstream**:
@@ -1911,8 +1914,9 @@ The model's **own** checklist — the rows it wrote about its own work — held 
 [Session](#identity-and-shape) state and re-rendered into the standing system content on every
 request, so a decomposition survives **Compaction** and a `--resume`. The `task_list` tool is its
 **only** writer: the engine never appends a row, no `/command` edits one, and no
-[Reaction](#reactions-and-moments) injects one — which is what keeps it a tool rather than
-guided decomposition. One call carries the **complete** list and **replaces** it: the array of
+[Reaction](#reactions-and-moments) injects one — which is what keeps it a tool rather than a
+Reaction steering the model's plan (the retired guided decomposition — see
+[Retired terms](#retired-terms)). One call carries the **complete** list and **replaces** it: the array of
 `{text, done}` it is given becomes the list, so ticking a row off is resending it with
 `done: true`, clearing it is sending `[]`, and there are **no item ids** to mint or remember. It
 renders as the **last of the engine's standing blocks**, after the **Delegate report block** and

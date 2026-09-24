@@ -107,7 +107,9 @@ docs/adr/0071-*.md — Amends header, Decision 5 paragraph on ADR 0014/0015; doc
 - `grep -c 'ADR 000[23]\|ADR 001[45]' docs/adr/0076-*.md` ≥ 1; `! grep -n 'ADR 0004' apogee.go`; `go vet .`
 **Commit:** `docs(adr): mark ADRs 0002, 0003, 0014 and 0015 as superseded`
 
-## 4. CONTEXT.md stops describing retired behaviour as live
+## 4. CONTEXT.md stops describing retired behaviour as live — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the Parallel agents wording says `min(width, remaining)` rather than the approach's `min(cap, remaining)`, since the batch follows the stated width (which is the target's cap while latched, 1 on a sub-agent), not the session cap alone.
 
 **What:**
 **Goal:** no live `CONTEXT.md` entry describes guided decomposition or a lab-only Mechanism as current: the Parallel agents entry states the cap as the width the engine reports to Reactions (`LoopView.ParallelAgents()`), the loop entry's "formerly lab-only Mechanisms" sentence no longer names an unported Mechanism, and the Task list entry's contrast links Retired terms.

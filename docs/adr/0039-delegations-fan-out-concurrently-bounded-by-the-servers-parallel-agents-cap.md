@@ -51,6 +51,12 @@ Turn instead of one, with a quiescent boundary between batches (ADR 0014 amendme
 width everywhere, and cap 1 reproduces today's behavior exactly — the serialized floor
 still exists.
 
+> **Noted 2026-09-24.** Trigger (b) has no referent any more: guided decomposition retired (ADR
+> 0071 decision 5, ADR 0014 superseded), and the lab layer with it (ADR 0076 decision 1). What
+> survives is the width itself, stated to Reactions as `LoopView.ParallelAgents()` — the width
+> dispatch uses, which an engine-origin Reaction synthesizing delegations would batch by; no
+> shipped Reaction does. Trigger (a) stands unchanged.
+
 **2 — The cap is pin-else-discover-else-floor, named `parallel-agents`; the floor is 4 for a
 keyed server and 1 otherwise.** A `servers:` entry
 may carry `parallel-agents: N` (N ≥ 1); set, it is a **pin** discovery never overrides —
