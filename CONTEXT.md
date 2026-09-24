@@ -272,12 +272,12 @@ What one **Sub-agent** run is called wherever it is shown — the collapsed call
 the `sub_agent` call carried (normalised to a trimmed first line), else a **generated** one, else
 the delegated task's first line. The generated one comes from a single out-of-band completion on
 the CHILD's own **Upstream** (routed ⇒ the **Sub-agent server**, else the session's), fired only
-when the call named nothing — Mechanism-synthesised delegations included, never over a name the
+when the call named nothing — Reaction-synthesised delegations included, never over a name the
 model gave — concurrent with the child and bounded by its lifetime, so a reply that lands after the
 run finished is dropped. It is gated by the same `auto-title:` key that names a **Session**, silent
 on every failure, and announced as one `SubAgentNamedEvent` so every **Driver** folds the rename by
-the road it already reads its delegations on. It is **not a Mechanism** — it fires at no Hook
-point, runs under Bypass, and adds nothing to any model's context on its own (a capped
+the road it already reads its delegations on. It is **not a Reaction** — it fires at no seam
+Moment, runs under Bypass, and adds nothing to any model's context on its own (a capped
 delegation's result spells the name back as the `continue` handle, but that is the **Step cap**'s
 line, not the namer's) — and it is saved with the run, so a resumed session paints it. Ratified 2026-09-01
 ([ADR 0068](docs/adr/0068-unnamed-delegations-are-named-out-of-band-on-the-childs-upstream.md)).
@@ -292,7 +292,7 @@ discovered from the live server (`/props` `total_slots`); no signal means the en
 **floor** — **4** for a keyed entry (`api-key`/`api-key-cmd`/`api-key-env`, or
 `wire: anthropic`: a hosted server serves parallel requests as a matter of course), **1** —
 strictly serial — for any other, so `parallel-agents: 1` is how a keyed server is held
-serial (ADR 0039 D2 as amended 2026-09-19). It is **structural, not a Mechanism** — it only executes calls
+serial (ADR 0039 D2 as amended 2026-09-19). It is **structural, not a Reaction** — it only executes calls
 the model already made, so it is on under Bypass — but it is also the width of a guided
 decomposition **batch** (`min(cap, remaining)` delegations per Turn). More parallel agents
 means a **smaller window each**: a llama.cpp `--parallel N` server splits its context into
@@ -651,7 +651,7 @@ model's effort never drops its parsing
 A session can overlay the resolved profile with the **`/effort` override** — the human's "keep it
 brief" intent, which rides above whatever profile each model switch resolves, is never persisted,
 and is dropped only when a switch binds a model whose reported levels exclude it. Effort is
-**configuration, not a Mechanism** — it holds under Bypass. The deliberate contrast is the
+**configuration, not a Reaction** — it holds under Bypass. The deliberate contrast is the
 [Thinking channel](#identity-and-shape): the channel says what the reasoning stream *is* and how
 apogee parses it; effort says how much of it to ask for. See
 [ADR 0050](docs/adr/0050-thinking-effort-is-a-profile-axis-with-one-canonical-wire-mapping.md) and
@@ -665,7 +665,7 @@ this per-request dial), "/thinking" for the command (that verb opens the
 
 **Turn**:
 One iteration of the loop — a single *primary* Upstream call and the work that follows it
-(parse → dispatch tools → apply Mechanisms). Compaction's summarisation call is *internal*
+(parse → dispatch tools → apply Reactions). Compaction's summarisation call is *internal*
 to a Turn, not a Turn of its own. The unit of self-regulation and of bench measurement. The
 Turn's lifecycle — its opening, its one permitted overflow fold, and its five exits (complete,
 Exchange-complete, abandoned, cancelled, step-capped) — is owned by the loop's `turnLifecycle` module
@@ -683,7 +683,7 @@ this is not the Reaction correction re-stream, which repairs a tool call within 
 One user input through to the final no-tool response — usually several Turns. The
 user-facing unit of a conversation. In code the Exchange is derived from the conversation —
 the messages strictly after the last user message — as a domain working value
-(`internal/domain`'s `ExchangeView`) consumed by the loop and by Mechanisms. One engine
+(`internal/domain`'s `ExchangeView`) consumed by the loop and by Reactions. One engine
 exception: the abort-rollback boundary stays a cached field read through
 `Agent.exchangeBoundary()`, because a mid-Exchange truncation can drop the opening user
 message the derivation would need
@@ -846,7 +846,7 @@ message at a **between-Steps boundary** — the class of engine call the worker'
 already occupies, where the driving goroutine owns the conversation and the boundary is the
 synchronization, no mutex — so it survives Turns, compaction, and session save/restore. It
 carries `Message.Interjected`, and the derived Exchange **opening skips it**, so the remark
-joins the running Exchange's body rather than starting a new one and every Mechanism reading the
+joins the running Exchange's body rather than starting a new one and every Reaction reading the
 boundary keeps seeing the whole task as shared context. It reaches the model after the tool
 results already in the tail (legal OpenAI chat; strict Gemma-class templates are a model-profile
 concern, ADR 0025). A message typed while the model works is **staged** (queued for the next
@@ -1148,7 +1148,7 @@ on its own, so the no-prompt-**and**-no-context-files posture — since ADR 0064
 key — stays byte-identical on the wire and the **Bypass** floor is untouched. Wire position is
 directly after the prompt —
 prompt → orientation → delegate block (delegations only) → task list (once the model has written
-one) → context files → mechanism directives → tool block — so no workspace text precedes it and a
+one) → context files → Reaction directives → tool block — so no workspace text precedes it and a
 repo file cannot open with a forged copy the
 real one then reads as a correction of; every fact it states moves only on a session-level door, so it is prefix-KV-cache safe between them —
 the Delegations line carries no availability state and moves only on the human doors (`/server`,
@@ -1169,7 +1169,7 @@ delegated one — carries: it tells the child that the agent which delegated the
 this conversation and receives only its **final reply**, so anything not written there is lost, and
 asks it to report what it found, what it changed and what remains unfinished by citing `path:line`
 rather than pasting file contents. Like the **Orientation block** it is **harness text, not persona
-text** — engine-owned, no config key, no **Mechanism** gate, so it is on under **Bypass** and no
+text** — engine-owned, no config key, not a **Reaction**, so it is on under **Bypass** and no
 edit to `system-prompt-text` and no workspace **Context files** can remove it (a context line that
 spells its opening sentence is fenced `[workspace text] `, exactly as a forged orientation header
 is). It is gated on **depth**, not on configuration: every agent below the top level gets it, at any
@@ -1717,15 +1717,15 @@ placeholders — `{{workspace}}`, `{{datetime}}` (the **date** only, so a local 
 cache survives a turn), `{{mode}}`, `{{scratch}}` — and an unknown one is a startup error, never
 raw braces on the wire. It is **request-scoped**: seeded into the
 request projection at position 0 and never committed to the conversation, so it appears in no
-history and in no Session record, and a Mechanism's directives and the Model profile's rendered
+history and in no Session record, and a Reaction's directives and the Model profile's rendered
 tool menu fold in **after** it within that one message, as does the engine's
 **Orientation block** (prompt → orientation → delegate block (delegations only) → task list (once
 the model has written one) → context files → directives → tool block). A
 **Sub-agent inherits** it. Distinct from apogee's two **internal** prompts, which it never
 reaches by construction: the Compaction summariser's instruction and the probe battery's. It is
-**config-tier**, part of the Bypass floor in both arms, never a Mechanism — and which home a new
+**config-tier**, part of the Bypass floor in both arms, never a Reaction — and which home a new
 sentence of guidance belongs in (host fact → Orientation block, standing steering → this template,
-floor-wide and failure-shaped → [Floor guard](#floor-guard), model-gated and measured → Mechanism,
+floor-wide and failure-shaped → [Floor guard](#floor-guard), model-gated and measured → Reaction,
 task-shaped → Skill) is ADR 0064's placement rule. See
 [ADR 0023](docs/adr/0023-the-system-prompt-is-a-configured-template-rendered-per-request.md) and
 [ADR 0064](docs/adr/0064-the-system-prompt-ships-an-embedded-default.md) and
@@ -1743,7 +1743,7 @@ folded into the standing system content beside the [System prompt](#context-and-
 listed name that exists is included, in list order, each **fenced** between a
 `## Workspace context: <name>` header and a `## End of workspace context: <name>` footer, and the
 merged first system message reads **prompt → Orientation block → Delegate report block
-(delegations only) → Task list block (once the model has written one) → context files → Mechanism
+(delegations only) → Task list block (once the model has written one) → context files → Reaction
 directives → tool menu** — the engine's own blocks first, so no workspace text precedes them;
 either configured source alone seeds the message. Content is **data, never a template**: it
 bypasses the placeholder language entirely, so a repo's own `{{braces}}` travel verbatim and can
@@ -1851,7 +1851,7 @@ head/tail before its header against that message's shared reference split, so an
 and `/skills export <id>` copying a shipped skill's folder into the global library, refusing to
 overwrite one already there); the agent resolves. The
 `/token` is not the model's only door: **`load_skill`** is a default-on **tool** — an ordinary
-`tools.enabled`/`tools.disabled` entry, never a Mechanism — with which the model fetches a body on
+`tools.enabled`/`tools.disabled` entry, never a Reaction — with which the model fetches a body on
 its own initiative, one adaptive call returning an exact id's body, a confident match's body plus
 the other ids that matched, or id-and-summary candidates to call again with. The catalog itself
 still never enters the standing prompt. See
@@ -1869,8 +1869,8 @@ steers the model; `load_skill` is a tool that *fetches* that text, the way `read
 file without making a file a tool), "attachment"/"chip" (a skill is text *in* the message, not
 state beside it — chips are retired from every surface: the strip above the box went with ADR 0027
 and the sent block's `✦ name` row with its 2026-08-04 addendum, which paints the `/token` in the
-skill violet where it stands instead). Distinct from a **Mechanism** (a catalogued,
-self-regulating loop behaviour).
+skill violet where it stands instead). Distinct from a **Reaction** (a loop behaviour
+that fires at a Moment).
 
 **Tool-result capping**:
 Per-tool-result truncation of any single result that exceeds its fraction of the Budget,
@@ -1890,7 +1890,7 @@ _Avoid_: "compression", "compaction" (capping is per-result and non-generative),
 **Pruning**:
 The **structural** conversation-level reducer that collapses *stale tool results* — and nothing
 else — to one-line stubs when history outgrows its share of the Budget. Like Compaction and unlike
-Tool-result capping it is **not a Mechanism**: it stays on under Bypass and is gated only by the
+Tool-result capping it is **not a Reaction**: it stays on under Bypass and is gated only by the
 file-only `prune-tool-results:` key (default on). It runs at **every Turn boundary,
 mid-Exchange included**, rewriting committed history: above **70%** of the History allocation it
 stubs the oldest results first, largest first within a Turn, until the fill is back under **50%**,
@@ -1911,7 +1911,7 @@ The model's **own** checklist — the rows it wrote about its own work — held 
 [Session](#identity-and-shape) state and re-rendered into the standing system content on every
 request, so a decomposition survives **Compaction** and a `--resume`. The `task_list` tool is its
 **only** writer: the engine never appends a row, no `/command` edits one, and no
-[Mechanism](#reactions-and-moments) injects one — which is what keeps it a tool rather than
+[Reaction](#reactions-and-moments) injects one — which is what keeps it a tool rather than
 guided decomposition. One call carries the **complete** list and **replaces** it: the array of
 `{text, done}` it is given becomes the list, so ticking a row off is resending it with
 `done: true`, clearing it is sending `[]`, and there are **no item ids** to mint or remember. It
@@ -1959,7 +1959,7 @@ the **facts** a variant carries, which is what the neutral codec in `internal/se
 ([ADR 0052](docs/adr/0052-diff-bodies-render-as-split-diffs-fed-by-tool-recorded-edit-regions.md) §5);
 the rendered view the codec stores keeps its presenter verdicts on the wire, a standing denial
 ([ADR 0083](docs/adr/0083-the-standing-denials-of-the-architecture-reviews.md) §1).
-A Mechanism that rewrites `Content` on the `PostToolResult` seam does not invalidate it: a
+A Reaction that rewrites `Content` at the `post-tool-result` Moment does not invalidate it: a
 summary records what the tool *did*, not what the text *says*.
 _Avoid_: "tool metadata", "tool result type" (the result already has a type; this is its
 structured outcome).
@@ -2121,7 +2121,7 @@ what **starts** a session — the first beat fires immediately and completes dis
 apogee paints before the server has answered and can be started **before** its server exists.
 **Rebind** is the heartbeat's apply half: `Agent.Rebind` swaps *all* the per-model bindings
 together — wire model id, [System prompt](#context-and-history) template, context window, and the
-[Mechanism](#reactions-and-moments) set — at a **quiescent boundary** (idle, or deferred to the
+Model profile with the tool roster its third axis spells — at a **quiescent boundary** (idle, or deferred to the
 end of the running [Exchange](#turns-and-stepping)), never mid-Exchange. A configured
 `context-window:` is a **pin** the heartbeat never overrides; a `servers:` entry's `model`
 is a **trusted** id, never substituted: whenever it is set it is the active model verbatim, and an
@@ -2227,8 +2227,8 @@ The ordinal summary of a battery run — what the model can be **asked** to do (
 structured output, multi-step chaining). Today it is a **reported signal only**: it carries no
 automatism, gates nothing, and changes no request. The *adaptive prompt complexity* idea it exists
 for — slimming tool descriptions and system prompts for a lower tier — is a parked follow-on in
-the issue register (`bd`, `apogee-fsx`), because that is a model-facing **Mechanism** and a
-Mechanism ships on the non-inferiority gate, not on plausibility
+the issue register (`bd`, `apogee-fsx`), because that is a model-shaping **Reaction** and a
+model-shaping Reaction ships on the non-inferiority gate, not on plausibility
 ([ADR 0009](docs/adr/0009-the-ab-decision-rule.md)).
 _Avoid_: "model tier" / "model size" (it describes observed behaviour, not parameters or
 quality), treating it as a config knob (it is an observation).

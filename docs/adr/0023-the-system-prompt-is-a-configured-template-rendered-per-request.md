@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; §8's "no compiled-in fallback" rule and its rejected alternative superseded by ADR 0064, §1's key count by ADR 0067
 ---
 
 # The system prompt is a configured template, rendered per request

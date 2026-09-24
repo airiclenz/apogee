@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 6's editor ladder and diff-on-exit trigger superseded by ADR 0041
 ---
 
 # Every settings edit applies to the running session

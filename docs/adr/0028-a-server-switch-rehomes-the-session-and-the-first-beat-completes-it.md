@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 5's session-scoped half superseded by ADR 0036
 ---
 
 # A server switch rehomes the session, and the first beat completes it

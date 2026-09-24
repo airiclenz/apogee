@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 4's B2 deferral superseded by ADR 0065
 ---
 
 # Skill suggestions are Driver-side, painted over an engine-level matcher

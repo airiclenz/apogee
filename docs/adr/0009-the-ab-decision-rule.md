@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; superseded for structural behaviour (Floor guards) by ADR 0071
 ---
 
 # The A/B decision rule for Mechanism validation

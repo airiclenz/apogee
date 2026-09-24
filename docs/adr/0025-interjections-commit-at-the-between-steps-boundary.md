@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; two rejected options superseded for child agents by ADR 0063
 ---
 
 # Interjections commit at the between-Steps boundary

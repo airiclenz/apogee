@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; rejected option C superseded by ADR 0071
 Amends: ADR 0006 (Bypass floor), ADR 0015 ("EnableMechanisms is the one enable path" — the empty-list engine floor is the one exception, stated below), ADR 0016 (manual-control rule unchanged), ADR 0045 §2 (a present `mechanisms:` map still replaces whole, above the floor)
 ---
 

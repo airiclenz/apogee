@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 6's "no beat-driven text" superseded in part by ADR 0039 (2026-09-20 note)
 Amends: ADR 0045 (Deferred: model-chosen routing), ADR 0066 (decision 7), ADR 0039 (decision 3 — mixed-seat width)
 ---
 

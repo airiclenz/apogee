@@ -1,5 +1,5 @@
 ---
-Status: accepted
+Status: accepted; decision 9 superseded by ADR 0037
 ---
 
 # The settings surface persists one key per deliberate edit
