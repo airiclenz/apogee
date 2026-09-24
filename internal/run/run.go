@@ -630,15 +630,16 @@ func (d *denier) count() int {
 // fact, not an exception to it — a delegated run's fill is real, is nobody else's, and dies
 // with the child Agent unless it is caught here. So the tap BRACKETS each run BY THE CALL THAT
 // ASKED FOR IT: the delegating sub_agent ToolCallEvent opens a bracket under its call id, the
-// child's usage — stamped with that same id as its run identity (domain.EventBase.CallID) —
+// child's usage — stamped with that same id as its spawning call (domain.EventBase.CallID) —
 // updates it, a SubAgentNamedEvent stamped the same way names it (ADR 0068), and the tool result
 // closing that call closes the bracket into Result.SubAgents.
 //
 // The call id is what makes the bracketing survive CONCURRENT delegation (ADR 0039): siblings
 // spawned by one reply share a depth, so a depth-keyed bracket would braid their fills
-// together and report whichever landed last as both. Each run's identity is its own, so
-// nothing accrues across runs — a nested run's fill never lands on the run that spawned it,
-// and a reading with no matching bracket is dropped.
+// together and report whichever landed last as both. The call id is not the run identity,
+// though — that is domain.EventBase.RunID — and two delegations can share one; while their
+// ids differ, nothing accrues across runs — a nested run's fill never lands on the run that
+// spawned it, and a reading with no matching bracket is dropped.
 type eventTap struct {
 	inner domain.EventSink
 	// window is the Firing's context window, the FALLBACK stamped onto a finished run's reading
@@ -725,7 +726,7 @@ func (t *eventTap) Emit(e domain.Event) {
 }
 
 // noteUsage files one accounting event under the agent that reported it: the Firing's own at
-// depth 0, else the sub-agent run the event's own run identity names (callID — the delegating
+// depth 0, else the sub-agent run the event's spawning call names (CallID — the delegating
 // call that spawned the reporting agent). An event with no run to belong to is dropped.
 //
 // TWO readings travel on one event and they fold on different rules. The FILL is the Turn's
