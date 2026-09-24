@@ -361,6 +361,23 @@ func succeededSummary(text string) bool {
 	return strings.HasPrefix(text, delegationDoneVerdict+slotSeparator+delegationSteeredLead)
 }
 
+// endedWithoutReportSummary reads a WORDING for the verdict a delegation that came back with nothing
+// to report wears — `ended without a report`, alone or with the steering cell (delegationVerdict,
+// delegationEndedWithoutReport). It is succeededSummary's sibling and matches the same way, on the
+// WHOLE phrase, so a report line that merely mentions the words is not this verdict.
+//
+// It is read by one seam alone, subAgentFinished, which withholds the done ✓ from such a run. It
+// sets no field on the summary: the verdict is neither a failure nor a success, so it takes no red
+// and no green and reads in the ordinary marker tone `stopped at its step cap` does — and the text
+// it is read from is recovered on the replay path as it is on the live one (fromWireToolView
+// restores the slot's words), so a record needs no field of its own for it.
+func endedWithoutReportSummary(text string) bool {
+	if text == delegationNoReportVerdict {
+		return true
+	}
+	return strings.HasPrefix(text, delegationNoReportVerdict+slotSeparator+delegationSteeredLead)
+}
+
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to
 // cut, and reports the cut. It is clipWrap's arithmetic with no marker and no style — the same
 // hangingPrefixes wrap and the same fitted tail — for the caller that has to keep composing after

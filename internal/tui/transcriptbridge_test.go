@@ -2118,6 +2118,51 @@ func TestTranscriptCodecReplaysAFinishedDelegationGreen(t *testing.T) {
 	}
 }
 
+// TestTranscriptCodecReplaysANoReportDelegationWithoutACheck is the replay half of the no-report
+// verdict (plan "2026-09-24 - 01", item 6): the verdict is recovered from the slot's words the record
+// keeps (fromWireToolView restores them), with no field of its own on the wire, so a delegation that
+// ended without a report replays reading so — and wearing no done ✓ — in both of its shapes, and
+// paints exactly what the live conversation did.
+func TestTranscriptCodecReplaysANoReportDelegationWithoutACheck(t *testing.T) {
+	t.Parallel()
+	const width = 100
+	const slot = "1 tool call · ended without a report"
+
+	for _, report := range []string{"Let me now read X.", "I read a.go and b.go.\nNext I will read c.go."} {
+		t.Run(report, func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			loneDelegation(tr, "s1", "survey", "a.go", report)
+
+			data, err := encodeTranscript(tr)
+			if err != nil {
+				t.Fatalf("encodeTranscript: %v", err)
+			}
+			got, err := decodeTranscript(data)
+			if err != nil {
+				t.Fatalf("decodeTranscript: %v", err)
+			}
+			replayed := &transcript{entries: got}
+
+			if subAgentFinished(replayed.entries[0].painted()) {
+				t.Error("subAgentFinished = true on replay; a run that ended without a report wears no ✓")
+			}
+			painted := renderPlain(replayed, width)
+			if !strings.Contains(painted, slot) {
+				t.Errorf("no replayed row reads %q:\n%s", slot, painted)
+			}
+			if strings.Contains(painted, glyphDone) {
+				t.Errorf("the replayed run wears the done ✓:\n%s", painted)
+			}
+			if live := renderPlain(tr, width); live != painted {
+				t.Errorf("the replay does not paint what the conversation did:\n--- live ---\n%s\n--- replayed ---\n%s",
+					live, painted)
+			}
+		})
+	}
+}
+
 // TestTranscriptCodecReDerivesSkillFetchSolo proves the third verdict decode does not take from the
 // file. A skill fetch is solo by its REGISTRY ROW, the way a delegation head is (toolPresenter.solo,
 // copied by presentToolCall): it groups with its own kind, never with the reads and greps around

@@ -347,7 +347,7 @@ func TestDelegationRecognisersReadThroughTheRoutingNote(t *testing.T) {
 // worded by the existing failure layer from their first line, exactly as a faulted child's is: the
 // engine's line is the summary, the child's text is the body beneath it, and the steering cell
 // still rides the line. Its third shape, the no-report marker, is a non-error result the verdict
-// recogniser does not know, so the slot reads the ordinary `done`.
+// reads as a delegation that ended without a report (delegationEndedWithoutReport).
 func TestDelegationValidationFaultsReadThroughTheErrorSlot(t *testing.T) {
 	t.Parallel()
 
@@ -376,11 +376,81 @@ func TestDelegationValidationFaultsReadThroughTheErrorSlot(t *testing.T) {
 		})
 	}
 
-	t.Run("the no-report marker reads done", func(t *testing.T) {
+	t.Run("the no-report marker ends without a report", func(t *testing.T) {
 		t.Parallel()
 
-		if got := delegationVerdict("[delegate returned no report]"); got != delegationDoneVerdict {
-			t.Errorf("verdict = %q, want %q", got, delegationDoneVerdict)
+		if got := delegationVerdict("[delegate returned no report]"); got != delegationNoReportVerdict {
+			t.Errorf("verdict = %q, want %q", got, delegationNoReportVerdict)
+		}
+	})
+}
+
+// A delegation that reached its own boundary with nothing to report — the no-report marker, or a
+// closing text the shared classifier (floor.IsNonReport) reads as narration of a next step, a pasted
+// file or a grep dump — words its slot `ended without a report` rather than `done` (plan
+// "2026-09-24 - 01", item 6). The bound head outranks it, a real report keeps `done`, the steering
+// cell still rides it, and the engine's own body notes beneath the text are read through, exactly
+// as the bound head reads through them.
+func TestDelegationVerdictReadsANonReport(t *testing.T) {
+	t.Parallel()
+
+	const (
+		note  = "\n" + agent.SeatFallbackNote
+		clamp = "\n[max_steps 120 requested; the configured cap is 80 — 80 applied]"
+	)
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"one line of narration", "Let me now read X.", delegationNoReportVerdict},
+		{"the no-report marker", delegationNoReportMarker, delegationNoReportVerdict},
+		{"a multi-line narration", "I read a.go and b.go.\nNext I will read c.go.", delegationNoReportVerdict},
+		{"a pasted file", "[File: a.go, 40 lines total, showing lines 1-3]\npackage a\n\nfunc A() {}", delegationNoReportVerdict},
+		{"a grep dump", "a.go:3:func A()\nb.go:9:func B()\nc.go:1:package c", delegationNoReportVerdict},
+		{"a steered narration", "Let me now read X." + envelopeSteeredOne, delegationNoReportVerdict + " · steered by 1 message"},
+		{"a fallen-back, clamped narration", "Let me now read X." + note + clamp, delegationNoReportVerdict},
+		{"a fallen-back no-report marker", delegationNoReportMarker + note, delegationNoReportVerdict},
+		{"a real report", "Found 4 gaps\nin the suite", delegationDoneVerdict},
+		{"a one-line report", "all clear", delegationDoneVerdict},
+		{"a fallen-back real report", "all clear" + note + clamp, delegationDoneVerdict},
+		{"a capped narration", envelopeCapMarker + "\nLet me now read X.", delegationCappedVerdict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := delegationVerdict(tc.content); got != tc.want {
+				t.Errorf("delegationVerdict(%q) = %q, want %q", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// The no-report verdict is an OUTCOME ENVELOPE, like the bound head: it takes the slot ahead of a
+// one-line narration the child closed on, which is never promoted into it (delegationDetail), and
+// the line lays out as the body instead. A one-line REPORT is promoted exactly as before.
+func TestDelegationDetailNeverPromotesANonReport(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a one-line narration is body, not the slot", func(t *testing.T) {
+		t.Parallel()
+
+		out := delegationDetail("Let me now read X.")
+		if out.Summary.Text != "" {
+			t.Errorf("summary = %q, want none — the verdict takes the slot", out.Summary.Text)
+		}
+		if lines := out.Details; len(lines) != 1 || lines[0].Text != "Let me now read X." {
+			t.Errorf("details = %+v, want the narration as the one body line", lines)
+		}
+	})
+
+	t.Run("a one-line report is still promoted", func(t *testing.T) {
+		t.Parallel()
+
+		out := delegationDetail("all clear")
+		if out.Summary.Text != "all clear" || !out.Summary.quoted {
+			t.Errorf("summary = %+v, want the report promoted into the slot, quoted", out.Summary)
 		}
 	})
 }

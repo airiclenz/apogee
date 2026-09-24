@@ -160,7 +160,11 @@ internal/agent/subagent_test.go — TestClosingShapeOf_ReadsTheFourNonReportShap
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/` plus the target package's tests
 **Commit:** `refactor: share the delegate report-shape classifier with the TUI`
 
-## 6. A delegation that ended without a report reads so, with no ✓
+## 6. A delegation that ended without a report reads so, with no ✓ — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the one-line case is handled in a new sub_agent `detail` hook (delegationDetail, toolregistry.go) that never promotes a no-report result into the slot, so delegationStat's verdict takes it the same way it does for a multi-line result. toolview.go and toolleader.go's applyStat were therefore left untouched, and toolview.go is not in FILES. subAgentFinished still reads the verdict word wherever it rides (subAgentVerdictWord: Summary.Text when not quoted, else stat), as the regression guard asks.
+NOTES (2026-09-24): beyond the plan text, delegationEndedWithoutReport strips the engine's trailing body notes (SeatFallbackNote, the max_steps clamp note) before classifying (delegationBodyNote, delegationChildText). Without that, a narrating child that fell back to the session server or had its max_steps clamped would still read `done` ✓, which breaks the existing TestDelegationRecognisersReadThroughTheRoutingNote rule that a fallen-back result classifies the same as the plain one. The two note formats are spelled out again as a regex, the same way delegationBoundHead is.
+NOTES (2026-09-24): the doc comment on TestDelegationValidationFaultsReadThroughTheErrorSlot no longer says the no-report marker reads `done`. It now names the new verdict.
 
 **What:** Depends on item 5. This fixes cause #3: a completed child whose final text is narration, markup-free non-report, or `[delegate returned no report]` reads `done` ✓.
 **Regression guard.** The no-report verdict is an outcome envelope, like the bound head. It takes the row's slot ahead of a ONE-LINE report's first line, which today rides tv.stat (toolview.go), and ahead of a multi-line report's `· done`. The ✓ is withheld in both shapes. Tests cover a one-line and a multi-line non-report.

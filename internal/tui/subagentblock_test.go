@@ -1867,6 +1867,80 @@ func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 	})
 }
 
+// A delegation that reached its boundary WITHOUT A REPORT — narration of its next step, a paste, or
+// the no-report marker — reads so on its one row and wears no done ✓ (plan "2026-09-24 - 01", item
+// 6). The verdict takes the slot ahead of a one-line narration exactly as it takes the place of
+// `done` beside a longer one, and it is painted in the marker tone the step cap's verdict reads in:
+// neither the success green nor the failure red.
+func TestSubAgentEndedWithoutReportWearsNoCheck(t *testing.T) {
+	t.Parallel()
+
+	const width = 100
+	cases := []struct {
+		name     string
+		report   string
+		slot     string
+		finished bool
+	}{
+		{"one line of narration", "Let me now read X.", "1 tool call · ended without a report", false},
+		{"the no-report marker", delegationNoReportMarker, "1 tool call · ended without a report", false},
+		{"a multi-line non-report", "I read a.go and b.go.\nNext I will read c.go.", "1 tool call · ended without a report", false},
+		{"a steered narration", "Let me now read X." + envelopeSteeredOne,
+			"1 tool call · ended without a report · steered by 1 message", false},
+		{"a real report", "all clear\nnothing else to report", "1 tool call · done", true},
+		{"a one-line report", "all clear", "1 tool call · all clear", true},
+		{"a capped narration", envelopeCapMarker + "\nLet me now read X.", "1 tool call · stopped at its step cap", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			tr := &transcript{}
+			loneDelegation(tr, "s1", "survey", "a.go", tc.report)
+
+			if got := subAgentFinished(tr.entries[0].painted()); got != tc.finished {
+				t.Errorf("subAgentFinished = %v, want %v", got, tc.finished)
+			}
+			painted := renderPlain(tr, width)
+			if !strings.Contains(painted, tc.slot) {
+				t.Errorf("no row reads %q:\n%s", tc.slot, painted)
+			}
+			if got := strings.Contains(painted, glyphDone); got != tc.finished {
+				t.Errorf("the row wears the done ✓ = %v, want %v:\n%s", got, tc.finished, painted)
+			}
+		})
+	}
+
+	t.Run("the verdict is painted in the marker tone", func(t *testing.T) {
+		t.Parallel()
+
+		th := newTheme(scheme.Default())
+		if !colorActive(th) {
+			t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+		}
+		const slot = "1 tool call · ended without a report"
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", "Let me now read X.")
+
+		row := ""
+		for _, ln := range tr.renderLines(th, width) {
+			if strings.Contains(strip(ln), slot) {
+				row = ln
+			}
+		}
+		if row == "" {
+			t.Fatalf("no painted row carries %q:\n%s", slot, renderPlain(tr, width))
+		}
+		if !strings.Contains(row, th.toolMarker.Render(slot)) {
+			t.Errorf("slot %q does not wear the ordinary marker tone: %q", slot, row)
+		}
+		if strings.Contains(row, th.successMark.Render(slot)) {
+			t.Errorf("a run that ended without a report is painted green: %q", row)
+		}
+	})
+}
+
 // ----------------------------------------------------------------------------
 // A delegation named out of band (ADR 0068)
 // ----------------------------------------------------------------------------

@@ -488,8 +488,28 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 // collapsed line composed for the row (collapsedSubAgentView): that line carries the same verdict
 // on purpose (subAgentSummary), but its TEXT opens with a count of the work, so words read out of
 // it would answer "not a failure" for every failed delegation there is.
+//
+// A run that came back WITHOUT A REPORT has not earned the ✓ either (endedWithoutReportSummary):
+// the child reached its boundary, but what it handed back was narration of a next step, a paste or
+// the no-report marker, and a ✓ beside that is the row calling a delegation done that did not do
+// what it was sent for. It is not a failure — the row stays out of the red, in the marker tone the
+// step cap's verdict reads in — so it is read from the head's verdict WORD (subAgentVerdictWord)
+// rather than from a field.
 func subAgentFinished(head paintInput) bool {
-	return subAgentReported(head) && !head.tool.Summary.failed
+	return subAgentReported(head) && !head.tool.Summary.failed &&
+		!endedWithoutReportSummary(subAgentVerdictWord(head))
+}
+
+// subAgentVerdictWord is the engine's verdict on a finished delegation as the head carries it,
+// wherever it rides: the slot's own text when the presenter WORDED the slot (typedSummary live,
+// namedSummary on replay), else the typed stat standing behind a report line the presenter
+// promoted into the slot (applyStat). The head's own view is read, never the composed row
+// (collapsedSubAgentView), for the reason subAgentFinished gives.
+func subAgentVerdictWord(head paintInput) string {
+	if !head.tool.Summary.quoted {
+		return head.tool.Summary.Text
+	}
+	return head.tool.stat.spell()
 }
 
 // subAgentReported is the display's question "is this delegation over?", and the two answers that
