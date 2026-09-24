@@ -54,7 +54,9 @@
 - 4 (re-check): recast (decision 4, owner 2026-09-23: namingCall and the `apogee probe` battery client carry request-extra — replaces the "out of reach" call and the earlier naming-call supersession; fixes pre-existing: Firing namer binding omitted Wire); guards folded (Bind/Swap test call sites, target name projected onto ServerName with TestServerBindingApplyTo rows and binding() doc updated, bindFiringConfig as the copy site).
 - 6 (re-check): guards folded (Goal narrowed to dialOptions-built Clients; collector stays silent, compaction passes an attempt-only observer; depends on items 4 and 5).
 
-## 1. ADR 0085 — apogee measures upstreams and passes routing through
+## 1. ADR 0085 — apogee measures upstreams and passes routing through — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the two CONTEXT.md terms sit directly after **Heartbeat** in "Probing and model identity" (the section that defines Heartbeat/Beat); the Upstream entry's field list is left for the items that add `request-extra:`.
 
 **What:**
 **Goal:** `docs/adr/0085-apogee-measures-upstreams-and-passes-routing-through.md` exists, records every ratified call in this plan's header, rejects the dynamic scoring router with its reasons (pricing tables are provider-tuned, 1–2-server users have nothing to choose, double-routing above a scoring provider), names Layer 3 fallback pools as future work citing ADR 0028/0047/0082, and `CONTEXT.md` defines **Upstream attempt** and **Server stats** (distinct from ADR 0079's byte-denominated "context cost").

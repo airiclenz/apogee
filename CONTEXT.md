@@ -2163,6 +2163,40 @@ _Avoid_: "health check" (it observes what is served, not merely that something a
 moved — the bindings did), "rehome" as a noun for a server switch (the operation is
 `SwitchUpstream`; these nouns carry the rest).
 
+**Upstream attempt**:
+One HTTP request apogee sends to an [Upstream](#identity-and-shape) — every one, including the
+pre-first-byte retries inside a single stream call — and the **measurement** the provider Client
+takes of it: the attempt index, the server's request id when it returns one, **`ttfb`** (send →
+first body byte; keepalive comments count), **`ttft`** (send → first model delta of any kind:
+reasoning, content or tool call), `last` (send → last model delta), the duration, and an outcome
+from a closed vocabulary — `ok`, the fault class, or `cancelled`. It travels the ordinary event
+path: a `DeltaAttempt` on the Client's Delta stream, a `domain.UpstreamAttemptEvent` from the loop,
+and whatever a Driver subscribes — the TUI's store, headless's `upstream_attempt` line. Attempts
+at every delegation depth and in compaction count. An attempt is a *measurement*, never a routing
+decision: apogee measures Upstreams and passes routing hints through (a `servers:` entry's opaque
+`request-extra:` body overlay) but never routes
+([ADR 0085](docs/adr/0085-apogee-measures-upstreams-and-passes-routing-through.md)).
+_Avoid_: "request" alone (a Turn's request may take several attempts), "retry" for the first
+attempt, "TTFT" for the first byte (a keepalive is a byte, not a token — the two clocks are kept
+apart on purpose).
+
+**Server stats**:
+The **cross-session** record of [Upstream attempts](#probing-and-model-identity) per server,
+kept in `~/.apogee/server-stats.jsonl` — one appended line per attempt, keyed by server name plus
+the endpoint redacted to scheme + host + path, each line naming the model it served; no prompt
+text, body or key name is ever stored, and a file past four times its cap is trimmed at startup to
+the last 50 samples per (name, endpoint, model). Its **summary** — ttft, tok/s (reported output
+tokens ÷ (`last` − `ttft`), never estimated) and the failure count, cancelled attempts excluded —
+is filtered to the model bound on that entry and shown on the `/server` and `/sub-agents-server`
+picker rows (`· no data` under five samples); `/inspect` lists the attempts themselves. The root
+`server-stats: off` stops the writes and the summary; the events still fire
+([ADR 0085](docs/adr/0085-apogee-measures-upstreams-and-passes-routing-through.md)).
+_Avoid_: "cost" or "context cost" (that is [ADR 0079](docs/adr/0079-context-cost-is-a-first-class-engine-report.md)'s
+byte-denominated report of what apogee injects — server stats are wall-clock timings and
+outcomes, and neither is money), "benchmark" (it observes ordinary traffic, it scores nothing),
+"health" (the [Heartbeat](#probing-and-model-identity) observes reachability; this observes
+speed and failures of real requests).
+
 **Behavioral fingerprint**:
 The model identity a completed **model battery** earns — the model's own advertised label, at
 **medium** confidence. The battery raises an identity's *tier*; it never re-spells it (ADR 0021,
