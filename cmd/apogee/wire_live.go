@@ -249,10 +249,10 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 	w.openSessionJournal(ctx, w.host.SessionID())
 
 	// The upstream monitor: one beat every heartbeat.Interval, from inside the running TUI. The
-	// configured model id travels with it as the discovery HINT (decision 10) — while the server
-	// still serves that id, discovery resolves ITS window rather than the first advertised model's,
-	// which is the whole of the pinned-multi-model-server bug; once the pin vanishes from
-	// /v1/models the beat reports what is actually loaded and the rebind below follows it.
+	// configured model id travels with it as the discovery HINT (decision 10) — discovery resolves
+	// ITS window rather than the first advertised model's, which is the whole of the
+	// pinned-multi-model-server bug, and keeps the id as configured even when /v1/models stops
+	// listing it (ADR 0085): the beat then reports it as configured, never a substitute.
 	// The resolved api key rides with it: the monitor talks to the same keyed server the
 	// session does, and a beat that could not authenticate would paint a permanently
 	// unreachable Upstream under a session that is working.

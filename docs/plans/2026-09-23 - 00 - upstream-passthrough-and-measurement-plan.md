@@ -278,7 +278,10 @@ internal/tui/inspector_test.go — TestInspectorDisarmedNamesTheKey, TestInspect
 **Acceptance:** `go test -race -count=1 -run 'Inspect|FoldEvent' ./internal/tui/`
 **Commit:** `feat(tui): list upstream attempts in the inspector`
 
-## 12. Manual, OpenRouter notes and stale model-binding prose
+## 12. Manual, OpenRouter notes and stale model-binding prose — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): README.md named in Files but left untouched — its only model mention (`--model google/gemma-4-31b-it:free`) is already consistent with the as-configured behaviour, and the stale-prose finder has no README hit.
+NOTES (2026-09-24): the picker summary is documented in docs/manual/configuration.md (new "How fast each server answers — the picker summary" subsection) rather than commands.md, which the item's Files do not list; the servers example's `model:` comment ("the heartbeat binds what is served") is rewritten as the finder required.
 
 Depends on items 4 and 9.
 **What:**

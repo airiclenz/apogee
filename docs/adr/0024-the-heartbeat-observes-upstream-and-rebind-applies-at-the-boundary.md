@@ -129,9 +129,16 @@ reports what was actually **bound**, never merely what was observed, and the dis
 the heartbeat, in the display or in the Budget — "leave unset to discover" stays the documented
 semantics, and the pin is the escape hatch for a server that misreports its window. A configured
 model is passed as the **discovery hint** (which fixes the multi-model wrong-window defect at its
-root) and is honoured while the server serves that id; once it vanishes from `/v1/models` the
+root) and is honoured while the server serves that id; ~~once it vanishes from `/v1/models` the
 binding follows observed reality, with a transcript notice. A pin is a hint about reality, never a
-claim that overrides it.
+claim that overrides it.~~
+*(The struck clause is **amended 2026-09-23 by
+[ADR 0085](0085-apogee-measures-upstreams-and-passes-routing-through.md)** decision 3, recording
+the behaviour shipped since b6e51496: a configured `model` is the active model verbatim whether
+or not `/v1/models` lists it — an exact or base-slug match (the part before the first `:`)
+supplies only the window, an unlisted id runs as configured with the window unknown and a
+transcript notice — and it is never replaced by another advertised model. Only an empty `model`
+binds the first advertised one. The `context-window:` pin above is unchanged.)*
 
 The renderer needs **no knowledge of either**. A landed beat is measured against the last
 **observation**, not against the current binding, and the observation is recorded the moment the

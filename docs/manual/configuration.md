@@ -1254,7 +1254,7 @@ entry per server, OpenAI-compatible unless its `wire` says otherwise — and the
 servers:
   - name: workstation
     endpoint: http://192.168.64.1:1111
-    model: gpt-oss-20b           # optional hint; the heartbeat binds what is served
+    model: gpt-oss-20b           # optional; used as written — unset takes the server's first model
   - name: rented-box
     endpoint: https://llm.example.com
     api-key: sk-rented-token     # optional; or api-key-cmd: / api-key-env: — exactly one of the three
@@ -1285,7 +1285,27 @@ shows and which the model reads when you let it pick the seat
 ([below](#letting-the-model-pick-the-seat)) — and `llama-launcher`,
 which lets apogee start, switch and stop that server itself — [below](#local-servers--llama-launcher).
 `bypass` is optional too, and says what *delegations to* that entry run as
-rather than how the server itself behaves — further down this section.
+rather than how the server itself behaves — further down this section — and so
+is `request-extra`, fields added to every request body sent to that server
+([below](#extra-fields-in-every-request--request-extra)).
+
+**A `model:` is used as written.** When an entry names a model, that id is the
+model apogee asks for, whether or not the server's `/v1/models` lists it. A listed
+id takes its context window from the listing; an id with a `:` suffix the server
+does not list — an OpenRouter variant such as `vendor/model:nitro` — takes the
+window of the base id before the `:` when that one is listed; any other unlisted
+id runs with the window unknown, which leaves the Budget and auto-compaction
+inactive until you pin `context-window:`. Either way apogee says so once, in the
+transcript:
+
+    model 'vendor/model:nitro' is not advertised by the server; using it as configured (context window from base 'vendor/model': 128k)
+
+A model you named is never swapped for another the server happens to list — a
+wrong id fails loud on the next request instead of quietly running someone else's
+model. Only an entry with **no** `model:` binds whatever the server lists first,
+and follows it when that changes. See
+[ADR 0085](../adr/0085-apogee-measures-upstreams-and-passes-routing-through.md),
+which amends ADR 0024 on this point.
 
 **Several sub-agents at once.** When one reply asks for several delegations, apogee
 runs them concurrently — as many at a time as that server's cap allows. Unset, the cap
@@ -1462,6 +1482,83 @@ where the backup is. If the fold cannot be made
 safely — no `endpoint:` among those keys, a name the list already uses, a `server:`
 you already set — **nothing is written at all** and the error carries the block to
 paste in their place. A config already in the new schema is never touched.
+
+### Extra fields in every request — `request-extra:`
+
+Some servers take knobs in the request body that apogee has no key for — a
+gateway's routing preferences, a provider's prompt-cache key. `request-extra:` on a
+`servers:` entry carries them: a mapping apogee adds to **every** request body it
+sends that server — your Turns, sub-agents routed there at any depth, compaction
+summaries, the session-title call and `apogee probe`'s model battery alike. Apogee
+does not read it; it only passes it along, so any provider's own vocabulary works.
+
+```yaml
+# ~/.apogee/config.yaml
+servers:
+  - name: openrouter
+    endpoint: https://openrouter.ai/api
+    api-key-env: OPENROUTER_API_KEY
+    model: qwen/qwen3-coder
+    request-extra:
+      provider:
+        order: [cerebras, groq]   # try these providers first, in this order
+        allow_fallbacks: false    # and no others
+  - name: openai
+    endpoint: https://api.openai.com/v1
+    api-key-env: OPENAI_API_KEY
+    request-extra:
+      prompt_cache_key: apogee-main   # keep this workload's prompt cache together
+```
+
+It is merged over the body apogee builds as a JSON Merge Patch
+([RFC 7396](https://www.rfc-editor.org/rfc/rfc7396)): a mapping merges key by key into
+the one already there (so a `request-extra:` `reasoning:` block adds to the reasoning
+object the thinking-effort dial writes rather than replacing it), a plain value or a
+list replaces what was there, and `null` removes the key. The keys apogee writes
+itself — `model`, `messages`, `stream`, `stream_options`, `tools` and `system` — are
+refused at start-up, `null` included, because overriding them would change what the
+session is rather than add a knob beside it; a nested key of the same name inside
+your own block (`provider: {model: …}`) is yours. A value that is not a mapping is
+refused too. With no `request-extra:` the request is byte-for-byte what it was
+without the key.
+
+### How fast each server answers — the picker summary
+
+With [`server-stats:`](#keeping-the-session-store-bounded--sessions) on (the default),
+every request apogee sends is timed, and the `/server` and `/sub-agents-server` pickers
+show what that record says after each entry:
+
+    workstation — http://192.168.64.1:1111 · ttft 1.8s · 42 tok/s · 2/20 failed
+
+`ttft` is the median time from sending a request to the model's first output of any
+kind — reasoning, text or a tool call; `tok/s` is the median rate of the reply after
+that first output, from the token count the server reported (until five replies carry
+a count it reads `— tok/s` — never an estimate); `2/20 failed` counts the attempts, retries
+included, that ended in a fault. The figures cover the newest 50 attempts against that
+entry's endpoint with the model the entry is bound to, or — when it has no record for
+that model yet — the model it last recorded, named in parentheses first so the numbers
+are never read as the bound model's. Attempts you cancelled count toward nothing.
+Under five counted attempts the row says `· no data`. On a narrow terminal the
+endpoint goes first, then the summary is shortened; the entry's name is never cut.
+With `server-stats: off` the pickers show no summary at all. Each attempt's own
+figures — time to the first byte as well as the first token, the total time and how
+it ended — are listed by [`/inspect`](commands.md) and written as `upstream_attempt`
+lines by [`apogee headless`](headless.md).
+
+### OpenRouter notes
+
+- **Variant slugs are used as configured.** `model: vendor/model:nitro` (fastest
+  providers first) or `:floor` (cheapest first) goes to OpenRouter exactly as written,
+  and the window comes from the listed base model — see
+  [A `model:` is used as written](#the-servers-you-run-models-on) above. That makes a
+  variant slug the zero-configuration way to ask for speed or price; `request-extra:`'s
+  `provider:` block is the way to name providers yourself.
+- **Keep-alives count as the stream being alive.** While a provider queues a request,
+  OpenRouter sends SSE comment lines (`: OPENROUTER PROCESSING`) before the first
+  token. Those reset [`stream-idle-timeout:`](#the-terminal-ui--ui)'s clock like any
+  other bytes, so a request that sits in a queue is not cut however long it waits —
+  the timeout only catches a connection that goes wholly silent. The picker's `ttft`
+  is what shows a slow queue.
 
 ### Letting the model pick the seat
 

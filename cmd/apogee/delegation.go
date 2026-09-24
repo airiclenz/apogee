@@ -335,9 +335,9 @@ func newSubAgentServer(entry config.ServerEntry) *subAgentServer {
 // the first beat that has a key in hand and reused by every beat after it.
 //
 // The discovery hint it is built with is the entry's own `model:` pin, empty when it pins none — the
-// session Monitor's contract verbatim (heartbeat.NewMonitor): while the server still serves the
-// pinned id, discovery resolves ITS window rather than the first advertised model's, and once the
-// pin vanishes the beat reports what is actually loaded.
+// session Monitor's contract verbatim (heartbeat.NewMonitor): discovery resolves the pinned id's
+// window rather than the first advertised model's, and an id the server stops listing is still
+// reported as configured, never replaced (ADR 0085).
 //
 // What is deliberately NOT settled at build time is the key. A Monitor holds the key it was built
 // with for its whole life, and the key of an entry whose source is a command is not known until that

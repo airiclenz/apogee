@@ -121,10 +121,11 @@ type Monitor struct {
 }
 
 // NewMonitor builds the Monitor for the Upstream at endpoint. modelHint is the config-pinned
-// model id, "" when nothing is pinned: discovery resolves the pin's model AND its window
-// while the server still serves that id, and falls back to the server's first advertised
-// model once the pin vanishes from /v1/models — the pin is a hint about reality, never a
-// claim that overrides it.
+// model id, "" when nothing is pinned. A pinned id is the beat's ActiveModel as configured
+// (ADR 0085, amending ADR 0024 §6): an exact or base-slug match on /v1/models supplies only
+// its window, and an id the server does not list is still reported verbatim with the window
+// unknown (Resolution says which) — never replaced by another advertised model. Only an
+// empty hint takes the server's first advertised model.
 //
 // apiKey is the upstream bearer token ("" on a keyless local server, which sends no auth
 // header at all). It rides every beat, because a keyed server answers /v1/models with 401
