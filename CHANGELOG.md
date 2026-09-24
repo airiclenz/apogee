@@ -8,6 +8,10 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+- **The run view's breadcrumb is a three-row black band.** The `← main › name   esc back` trail now sits in the middle of a black band, with a blank black row above and below it. A click on any of the three rows goes one level up. The block cursor's stop on the band is the trail row. On a screen too short for the whole header, only the trail stays frozen, so the run's own lines still show beneath it.
+
+- **Fixed:** inside a sub-agent's run view the status line's context gauge now shows that sub-agent's own fill against the window it worked in, never the main agent's. Until the viewed run has reported usage the slot reads `esc back`, as it always meant to; backing out restores the main agent's gauge.
+
 ## [0.23.0] — 2026-09-24
 
 ### Added
