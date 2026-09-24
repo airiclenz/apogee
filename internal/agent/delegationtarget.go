@@ -166,8 +166,9 @@ func (l *delegationLatch) snapshot() *DelegationTarget {
 // mid-Exchange and wait for a quiescent boundary. This one changes nothing about the running
 // session — it changes what the NEXT spawn builds — and beats land whenever the second monitor
 // beats, which is squarely mid-Exchange for any delegation-heavy Turn. So it belongs to the
-// anytime-goroutine-safe class alongside SetParallelAgents: it swaps one live field behind its own
-// lock, and each spawn snapshots whatever is current. A child already running is never re-routed;
+// anytime-goroutine-safe class alongside SetParallelAgents: it swaps the latch behind the latch's
+// own lock — and a usable target's far width behind parallelAgentsMu, below — and each spawn
+// snapshots whatever is current. A child already running is never re-routed;
 // a target that changes mid-fan-out reaches the spawns after it and leaves the ones before it
 // alone.
 //

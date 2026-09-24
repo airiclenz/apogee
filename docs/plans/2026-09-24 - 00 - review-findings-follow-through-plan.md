@@ -143,7 +143,10 @@ internal/domain/docmap_test.go — TestDocMapNamesEveryFile; internal/tui/doc.go
 - `go test -race -count=1 -run 'CwdLine|Strip' ./internal/domain/`; `go test -race -count=1 -run 'CwdLine|Terminal|PythonExec' ./internal/tools/`; `go test -race -count=1 -run 'ToolRegistry|PresentToolCall' ./internal/tui/`; `go test -race -count=1 -run 'Headless' ./cmd/apogee/`
 **Commit:** `refactor(domain): the cwd-line strip lives in domain, so tui no longer imports tools`
 
-## 6. Stale engine and TUI comments state the code
+## 6. Stale engine and TUI comments state the code — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): consequential edit — internal/agent/setlive_test.go: made necessary by dropping the ordinal counts from the anytime-safe class (the test comment called SetParallelAgents "the fifth anytime-safe setter"; now "another")
+NOTES (2026-09-24): by the regression guard's rule, agent.go also drops the "fifth" field ordinal on parallelAgentsMu, restates genMu as the one member covering a compound value (parallelAgentsMu now guards two fields, parallelAgents and farWidth), and restates effortMu's "the one member with NO cfg seed" (the Delegation latch and the seat have none either)
 
 **What:**
 **Goal:** these comments state the shipped code: `internal/tui/doc.go`'s "an arm mutates; Update's tail lays out" names the remaining belt calls as residue (tracked by `apogee-arm-layout-calls-residue`); `internal/agent/subagent.go`'s "nothing is written to the child after it is built" says `newChildAgentOn` writes nothing after construction while `runSubAgent` writes the call-derived roster, output target, baseline and step cap (ADR 0083 §3); `internal/agent/agent.go`'s anytime-safe setter list is complete (SetMode, SetConfineToWorkspace, SetScratchDir, SetReactions, SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents, SetEffortOverride, SetDelegationTarget, SetDelegationSeat) with `SetJournal` and `SwitchUpstream` on the idle-only list, and it says each setter's doc states its class; `internal/tui/sessionsave.go` and ADR 0022's "C7 deliberately still open" settle as "the fold owns ordering, the store owns atomicity".

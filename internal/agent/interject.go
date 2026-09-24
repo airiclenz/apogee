@@ -24,7 +24,7 @@ var errEmptyInterjection = errors.New("apogee: interjection is empty")
 // Contract: call it ONLY from the goroutine driving Step, between Steps — the same class
 // the worker's Snapshot call already occupies (ADR 0025). It is deliberately NOT an
 // anytime-goroutine-safe mutator (not the SetMode / SetConfineToWorkspace class, which
-// guard a single scalar behind a mutex): it appends to the conversation, which the driving
+// move live state behind the mutex that guards it — the Agent type's doc lists them): it appends to the conversation, which the driving
 // goroutine owns outright, so the boundary IS the synchronization. Calling it while a Step
 // is in flight races the loop's own history writes.
 //

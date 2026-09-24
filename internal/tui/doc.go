@@ -1111,9 +1111,11 @@
 // The positioning repaints keep their calls under that reading: [Model.refreshViewportAnchored]
 // (an anchored block), the run view's openRun and upRun (a view landed or restored, runview.go),
 // and the claim walk's [Model.freshenTranscriptClamp] (a pane key answered with its height fresh
-// for whatever the claimant reads next). Everything else is a mutation and a return.
-// TestMouseMotionNeverRepaints pins the one exemption the tail itself makes, and the
-// strip that took the last per-arm calls out is plan "2026-09-16 - 00", items 18–21.
+// for whatever the claimant reads next). Everything else should be a mutation and a return, and
+// is not yet everywhere: arms outside model.go still carry belt layout()/refreshViewport() calls
+// the tail already covers — residue of the strip plan "2026-09-16 - 00" items 18–21 began,
+// tracked by apogee-arm-layout-calls-residue. A new arm adds none.
+// TestMouseMotionNeverRepaints pins the one exemption the tail itself makes.
 //
 // Invariant — untrusted text is escape-stripped at the SEAM it enters the view through, never
 // at each producer. The frame is painted through ultraviolet's cell buffer, which drops most

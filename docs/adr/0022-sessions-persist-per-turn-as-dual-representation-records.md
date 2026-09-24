@@ -344,8 +344,8 @@ by a whole Turn. A probe over `internal/session.Store` lost the newer payload in
 - **The store serializes the same three as a floor.** `internal/session.Store` holds a mutex across
   `Save`, `Delete` and — crucially — the whole of `Rename`'s read-modify-write, so any caller that
   does not come through the fold still cannot interleave. Readers stay unguarded: the atomic write
-  means a reader sees a whole record either way. Which layer *owns* serialization long term is
-  deliberately still open (roadmap C7); today the fold owns ordering and the store owns atomicity.
+  means a reader sees a whole record either way. The split between the two layers is settled
+  (roadmap C7, 2026-09-24): the fold owns ordering and the store owns atomicity.
 - **A title that could not be written is retried, not dropped.** The apply path branches on
   `ActiveID()`, which the host mints at the *start* of the first `Save`, before the atomic write
   lands — so a title answering in that window renamed a record that did not exist yet and was

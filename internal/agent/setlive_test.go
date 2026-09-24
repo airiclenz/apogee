@@ -299,7 +299,7 @@ func TestAgentAnytimeSettersConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-// TestAgentSetParallelAgentsMovesTheFanOutWidth proves the fifth anytime-safe setter: the Parallel
+// TestAgentSetParallelAgentsMovesTheFanOutWidth proves another anytime-safe setter: the Parallel
 // agents cap (ADR 0039) is seeded from the construction Config and moved by SetParallelAgents with
 // no rebuild — which is what a `/server` switch onto a differently-sized server, and a beat that
 // observes one, both need. cfg.ParallelAgents stays the seed and is never read again.

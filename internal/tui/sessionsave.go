@@ -189,8 +189,8 @@ func (m *Model) progressSave() tea.Cmd {
 // waiting on the drain (pumpOrQuit).
 //
 // internal/session.Store holds a mutex over the file-writing calls, which is the floor under any
-// caller that does not come through here. This layer's job is ordering; the store's is atomicity.
-// Which of the two OWNS serialization long term is deliberately still open (C7).
+// caller that does not come through here. That split is settled (C7): the fold owns ordering, the
+// store owns atomicity.
 
 // recordWriteKind names which SessionHost call a queued write makes.
 type recordWriteKind int

@@ -36,7 +36,9 @@ func newAgent(cfg domain.Config, up provider.Responder) (*Agent, error) {
 // the client a routed spawn dialled. cfg is the parent's Config with the spawn's posture and dial
 // facts already applied; d is everything else the child is: its identity, its bounds and the
 // handles it shares with the parent. The constructor copies each of those facts into the Agent
-// once, so a child leaves here complete and nothing is written to it afterwards.
+// once, so a child leaves here complete as far as its composer is concerned: newChildAgentOn writes
+// nothing to it afterwards, and only runSubAgent writes the call-derived roster, output target,
+// baseline and step cap after construction (ADR 0083 §3).
 func newDelegateAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent, error) {
 	return buildAgent(cfg, up, d)
 }

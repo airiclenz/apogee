@@ -42,19 +42,23 @@ import (
 // (newChildAgent), so the Upstream is shared only while nothing is latched. Both tolerate the
 // sharing (the sink through the engine's serializing seam), and a routed child's own client is
 // reached by nobody else — routing only narrows what concurrent siblings touch.
-// The methods touching loop state fall into three call classes. Idle-only calls (Submit,
-// ClearContext, RestoreSession, Compact, Rebind, SwapTools, SetProfile, AbortExchange) need a
-// quiescent boundary with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
+// The methods touching loop state fall into three call classes, and each one's own doc states
+// which class it is in. Idle-only calls (Submit, ClearContext, RestoreSession, Compact, Rebind,
+// SwitchUpstream, SwapTools, SetProfile, SetJournal, AbortExchange) need a quiescent boundary
+// with no Exchange mid-flight. Between-Steps calls by the goroutine DRIVING the loop
 // (Snapshot, Interject) are additionally valid at the boundary between two Steps of an open
 // Exchange: that goroutine owns the conversation there, so the boundary itself is the
 // synchronization — no lock, and no other goroutine may make the call (ADR 0025). The
-// anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetReactions,
-// SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents and SetDelegationTarget — is the exception: each swaps ONE live field
-// behind its own mutex, so the host (the settings surface, Shift+Tab, /confine) may call it
-// while a Step runs and the change lands at that field's next consumption boundary.
-// SetReactions is the one member that swaps a VALUE rather than a field — the Generation
-// carrying Bypass and the Floor enable set together (ADR 0076 A8) — for the reason genMu's own
-// comment gives below.
+// anytime-goroutine-safe class — SetMode, SetConfineToWorkspace, SetScratchDir, SetReactions,
+// SetCompactionEnabled, SetPruneToolResults, SetContextFiles, SetParallelAgents,
+// SetEffortOverride, SetDelegationTarget and SetDelegationSeat — is the exception: each moves
+// live state behind the mutex that guards it, so the host (the settings surface, Shift+Tab,
+// /confine, a heartbeat) may call it while a Step runs and the change lands at that state's next
+// consumption boundary. Most members swap one field; three reach further. SetReactions swaps a
+// VALUE rather than a field — the Generation carrying Bypass and the Floor enable set together
+// (ADR 0076 A8) — for the reason genMu's own comment gives below. SetDelegationTarget moves the
+// latch and, for a usable target, states the far width; SetDelegationSeat moves the seat and
+// forgets that far width (farWidth, below).
 type Agent struct {
 	cfg      domain.Config
 	upstream provider.Responder // provider seam (Decision C): fake in tests, real HTTP via New
@@ -151,8 +155,8 @@ type Agent struct {
 
 	// genMu guards gen AND builtins above — the live Generation the settings surface swaps whole
 	// (SetReactions) and the builtin ladder derived from its Floor. It is the ONE member of the
-	// modeMu class that covers two fields, and the one that covers a compound value rather than a
-	// single flag: ADR 0037 D2's "one mutex, one field" rule is SUPERSEDED here by ADR 0076 A8,
+	// modeMu class that covers a compound value rather than a single flag (parallelAgentsMu below
+	// also guards two fields, but two independent numbers the stated-width seam reads apart): ADR 0037 D2's "one mutex, one field" rule is SUPERSEDED here by ADR 0076 A8,
 	// which makes Bypass and the Floor enable set one value a live swap carries. They stopped
 	// being independent facts the moment the ladder became derived from one of them, so a
 	// per-field lock could hand a reader a half-swapped generation — exactly what A8 exists to
@@ -178,7 +182,7 @@ type Agent struct {
 	contextFilesMu   sync.RWMutex
 	contextFileNames []string // live workspace context-file names; seeded from cfg.ContextFiles, swappable via SetContextFiles
 
-	// parallelAgentsMu guards parallelAgents, a fifth field of the same class and for the same
+	// parallelAgentsMu guards parallelAgents, another field of the same class and for the same
 	// reason: the Parallel agents cap is a property of the SERVER this session is bound to (ADR
 	// 0039), and a `/server` switch or a heartbeat that observes another slot count moves it from
 	// the host's goroutine while a Step may be running. cfg.ParallelAgents stays the immutable
@@ -195,10 +199,10 @@ type Agent struct {
 
 	// delegation is the Delegation-target latch — the Sub-agent server every delegation in this
 	// tree routes to, or nil for today's parent-inheriting spawn (ADR 0045 —
-	// internal/agent/delegationtarget.go). It is a sixth live field of the anytime-safe class, and
+	// internal/agent/delegationtarget.go). It is another live field of the anytime-safe class, and
 	// the one field held by POINTER rather than by value: newChildAgent hands the child the
 	// PARENT's holder, so one latch serves the whole tree and a host pushing to the top-level
-	// Agent reaches a depth-2 spawn too. It carries its own lock for the same reason the five
+	// Agent reaches a depth-2 spawn too. It carries its own lock for the same reason the fields
 	// above carry theirs, and is never nil on a constructed Agent (construction seeds it: a fresh
 	// one at the top level, the parent's for a delegate — construct.go).
 	delegation *delegationLatch
@@ -220,8 +224,8 @@ type Agent struct {
 	// effortMu guards effortOverride, this session's Thinking-effort intent (CONTEXT: Thinking
 	// effort): the level a user asked THIS session to think at, layered above whatever the bound
 	// model's profile carries (ADR 0050). It belongs to the anytime-safe class above — /effort is
-	// settable while a Turn runs and the wire projection reads it once per request — and it is the
-	// one member with NO cfg seed: an override is intent a user states mid-session, never
+	// settable while a Turn runs and the wire projection reads it once per request — and, like the
+	// Delegation latch and the seat above, it has NO cfg seed: an override is intent a user states mid-session, never
 	// configuration an Agent is constructed with, so it starts empty and the profile alone governs
 	// until someone sets it. The zero value is the ABSENCE of an override, not a fifth level.
 	effortMu       sync.RWMutex

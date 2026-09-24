@@ -1600,8 +1600,10 @@ func (a *Agent) newChildAgentOn(seat delegationSeat, spawnCallID, task, name str
 
 	// Everything the child is that its Config cannot say is composed HERE, once, as the one value
 	// its constructor reads (delegation): its identity, its bounds, its seat facts, and every handle
-	// it shares with the parent by reference rather than owning afresh. Nothing is written to the
-	// child after it is built.
+	// it shares with the parent by reference rather than owning afresh. newChildAgentOn writes
+	// nothing to the child after construction; what the spawning CALL alone decides — the narrowed
+	// `tools:` roster, the output target and its baseline, the step cap its max_steps lowers — is
+	// written afterwards by runSubAgent, because those facts arrive later in the spawn (ADR 0083 §3).
 	d := &delegation{
 		depth:        a.depth + 1,
 		spawnCallID:  spawnCallID,
