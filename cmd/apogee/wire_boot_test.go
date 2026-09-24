@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/daemon"
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/provider"
+	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tools"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -1191,8 +1192,8 @@ func TestResolveRootsOverride(t *testing.T) {
 	}
 }
 
-// The prompt-recall host binds THIS run's workspace onto the store and creates the prompts
-// directory on the first recorded prompt — resolveRoots names the path, the store makes it, so a
+// The recall store the root wires binds THIS run's workspace and creates the prompts directory on
+// the first recorded prompt — resolveRoots names the path, the store makes it, so a
 // session that sends nothing leaves no trace under the apogee home.
 func TestRecallHostBindsWorkspace(t *testing.T) {
 	t.Parallel()
@@ -1204,9 +1205,9 @@ func TestRecallHostBindsWorkspace(t *testing.T) {
 		t.Fatalf("resolveRoots: %v", err)
 	}
 
-	host := newRecallHost(roots.prompts, roots.workspace)
+	host := recall.New(roots.prompts, roots.workspace)
 	if _, err := os.Stat(roots.prompts); !os.IsNotExist(err) {
-		t.Errorf("constructing the recall host created %q; the directory is the store's to make lazily", roots.prompts)
+		t.Errorf("constructing the recall store created %q; the directory is the store's to make lazily", roots.prompts)
 	}
 
 	loaded, err := host.LoadPrompts()
@@ -1224,9 +1225,9 @@ func TestRecallHostBindsWorkspace(t *testing.T) {
 		t.Fatalf("the prompts dir was not created by the first append: %v", err)
 	}
 
-	// A second host over the SAME roots reads the same file back — the proof the workspace binding
-	// is what keys it, not the host instance.
-	again, err := newRecallHost(roots.prompts, roots.workspace).LoadPrompts()
+	// A second store over the SAME roots reads the same file back — the proof the workspace binding
+	// is what keys it, not the store instance.
+	again, err := recall.New(roots.prompts, roots.workspace).LoadPrompts()
 	if err != nil {
 		t.Fatalf("LoadPrompts after an append: %v", err)
 	}
@@ -1235,7 +1236,7 @@ func TestRecallHostBindsWorkspace(t *testing.T) {
 	}
 
 	// Another workspace under the same home recalls nothing: recall is per-workspace.
-	other, err := newRecallHost(roots.prompts, t.TempDir()).LoadPrompts()
+	other, err := recall.New(roots.prompts, t.TempDir()).LoadPrompts()
 	if err != nil {
 		t.Fatalf("LoadPrompts for another workspace: %v", err)
 	}

@@ -23,9 +23,14 @@ import (
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/platform"
 	"github.com/airiclenz/apogee/internal/probe"
+	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/scheme"
 	"github.com/airiclenz/apogee/internal/tui"
 )
+
+// A recall store bound to this run's workspace is the prompt-recall seam the TUI drives: the binding
+// is the only thing an adapter here would add, and recall.New already takes it.
+var _ tui.RecallHost = (*recall.Store)(nil)
 
 // options projects the wired session onto [tui.Options] — the renderer's whole view of this host.
 func (w *rootWiring) options() tui.Options {
@@ -214,10 +219,11 @@ func (w *rootWiring) options() tui.Options {
 		// stored scrollback beneath the start-up box and relights the gauge.
 		Sessions: w.host,
 		// Prompt recall: this workspace's own list of sent inputs, which the box walks with ↑/↓.
-		// The workspace is bound HERE — the renderer resolves no paths — and the store is always
-		// wired, because an empty recall file and an unwired seam look identical to the human
-		// until they have sent something.
-		Recall: newRecallHost(w.roots.prompts, w.roots.workspace),
+		// The workspace is bound HERE, into the store itself — the renderer resolves no paths — and
+		// the store is always wired, because an empty recall file and an unwired seam look identical
+		// to the human until they have sent something. recall.New touches no disk: the directory is
+		// created on the first recorded prompt.
+		Recall: recall.New(w.roots.prompts, w.roots.workspace),
 		// The naming half of the same records: the seam that turns a first prompt into a title, and
 		// the `auto-title:` key that says whether a new session names itself without being asked.
 		// The seam is wired either way — the key is a preference about automatism, not a ban on the

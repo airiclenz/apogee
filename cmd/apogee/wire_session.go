@@ -1,11 +1,11 @@
 package main
 
-// The session and prompt-recall seams of the composition root, lifted out of wire.go by concern
-// (ADR 0043).
+// The session seam of the composition root, lifted out of wire.go by concern (ADR 0043).
 //
 // What a run persists between launches: the host that owns the active session's id and the metadata
-// only the binary knows, the workspace-bound host behind prompt recall, and the resume resolution a
-// --resume/--continue start goes through before either of them exists.
+// only the binary knows, and the resume resolution a --resume/--continue start goes through before
+// that host exists. Prompt recall needs no host here: a recall.Store bound to the workspace is the
+// TUI's recall seam itself (wire_options.go).
 
 import (
 	"errors"
@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee"
-	"github.com/airiclenz/apogee/internal/recall"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
 	"github.com/airiclenz/apogee/internal/tui"
@@ -518,37 +517,6 @@ func (h *sessionHost) ActiveID() string {
 	}
 	return h.active.id
 }
-
-// ----------------------------------------------------------------------------
-// The prompt-recall host (the composition root's half of the recall seam)
-// ----------------------------------------------------------------------------
-
-// recallHost adapts a recall.Store to the TUI's [tui.RecallHost] seam by BINDING the workspace this
-// run resolved. That binding is the whole of the adapter's reason to exist: the store is
-// workspace-keyed (one JSONL file per project) while the renderer knows only "this box", and
-// resolving a workspace path is the composition root's job (ADR 0001), never the renderer's.
-//
-// Both methods forward whatever the store reports; deciding that a recall failure is survivable is
-// the TUI's call, made once at its own seam, so nothing is swallowed on this side.
-type recallHost struct {
-	store     *recall.Store
-	workspace string
-}
-
-// recallHost satisfies the prompt-recall seam the TUI drives.
-var _ tui.RecallHost = (*recallHost)(nil)
-
-// newRecallHost builds the host over the recall directory dir, bound to the absolute workspace
-// path. It touches no disk: recall.New creates the directory on the first recorded prompt.
-func newRecallHost(dir, workspace string) *recallHost {
-	return &recallHost{store: recall.New(dir), workspace: workspace}
-}
-
-// AppendPrompt records text as this workspace's newest sent input.
-func (h *recallHost) AppendPrompt(text string) error { return h.store.Append(h.workspace, text) }
-
-// LoadPrompts returns this workspace's recorded inputs, oldest→newest.
-func (h *recallHost) LoadPrompts() ([]string, error) { return h.store.Load(h.workspace) }
 
 // resolveResume loads the session a start restores from, or returns nil when neither --resume nor
 // --continue is set. --resume tries its value as a store id first (the handle /sessions lists) and

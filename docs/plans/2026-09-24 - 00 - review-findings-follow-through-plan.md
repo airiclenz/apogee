@@ -162,7 +162,10 @@ internal/tui/sessionsave.go — recordWriteKind fold comment; docs/adr/0022-*.md
 - `grep -n 'SetDelegationSeat' internal/agent/agent.go | head -3`
 **Commit:** `docs: engine and TUI comments state the setters, the child writes and the save fold as shipped`
 
-## 7. The recall store serves the TUI directly
+## 7. The recall store serves the TUI directly — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): consequential edit — cmd/apogee/wire.go: made necessary by deleting recallHost (its file-map entry called wire_session.go the "session-persistence and prompt-recall hosts"; re-worded like doc.go's)
+NOTES (2026-09-24): ADR 0043 line 78 still lists "session/recall hosts" among cmd/apogee's seams; left as written, since it records the split decision as taken rather than describing the live tree
 
 **What:**
 **Goal:** `cmd/apogee` has no `recallHost` adapter; a `*recall.Store` bound to its workspace satisfies `tui.RecallHost` (asserted in `cmd/apogee/wire_options.go`), with no behaviour change.

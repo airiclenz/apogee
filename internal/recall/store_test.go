@@ -18,22 +18,23 @@ const (
 	workspaceB = "/home/dev/project-b"
 )
 
-// appendAll appends every text in order, failing the test on the first error.
-func appendAll(t *testing.T, s *Store, workspace string, texts ...string) {
+// appendAll appends every text in order to the store's bound workspace, failing the test on the
+// first error.
+func appendAll(t *testing.T, s *Store, texts ...string) {
 	t.Helper()
 	for _, text := range texts {
-		if err := s.Append(workspace, text); err != nil {
-			t.Fatalf("Append(%q, %q): %v", workspace, text, err)
+		if err := s.AppendPrompt(text); err != nil {
+			t.Fatalf("AppendPrompt(%q) for %q: %v", text, s.ws, err)
 		}
 	}
 }
 
-// loadOK loads a workspace's entries, failing the test on error.
-func loadOK(t *testing.T, s *Store, workspace string) []string {
+// loadOK loads the store's bound workspace's entries, failing the test on error.
+func loadOK(t *testing.T, s *Store) []string {
 	t.Helper()
-	got, err := s.Load(workspace)
+	got, err := s.LoadPrompts()
 	if err != nil {
-		t.Fatalf("Load(%q): %v", workspace, err)
+		t.Fatalf("LoadPrompts for %q: %v", s.ws, err)
 	}
 	return got
 }
@@ -51,9 +52,10 @@ func wantEntries(t *testing.T, got, want []string) {
 	}
 }
 
-// seedFile writes count records for ws straight into its file, bypassing Append. Compaction
-// tests need a file already at the threshold without paying for thousands of appends.
-func seedFile(t *testing.T, s *Store, ws string, count int) {
+// seedFile writes count records for the store's bound workspace straight into its file, bypassing
+// AppendPrompt. Compaction tests need a file already at the threshold without paying for thousands
+// of appends.
+func seedFile(t *testing.T, s *Store, count int) {
 	t.Helper()
 	if err := os.MkdirAll(s.dir, dirPerm); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
@@ -61,7 +63,7 @@ func seedFile(t *testing.T, s *Store, ws string, count int) {
 	var buf strings.Builder
 	for i := range count {
 		line, err := json.Marshal(record{
-			Workspace: ws,
+			Workspace: s.ws,
 			At:        time.Now().UTC().Format(time.RFC3339),
 			Text:      fmt.Sprintf("seed %d", i),
 		})
@@ -71,7 +73,7 @@ func seedFile(t *testing.T, s *Store, ws string, count int) {
 		buf.Write(line)
 		buf.WriteByte('\n')
 	}
-	if err := os.WriteFile(s.path(ws), []byte(buf.String()), filePerm); err != nil {
+	if err := os.WriteFile(s.path(), []byte(buf.String()), filePerm); err != nil {
 		t.Fatalf("write seed file: %v", err)
 	}
 }
@@ -94,27 +96,27 @@ func TestAppendLoadRoundTrip(t *testing.T) {
 
 	t.Run("preserves order", func(t *testing.T) {
 		t.Parallel()
-		s := New(t.TempDir())
-		appendAll(t, s, workspaceA, "first", "second", "third")
-		wantEntries(t, loadOK(t, s, workspaceA), []string{"first", "second", "third"})
+		s := New(t.TempDir(), workspaceA)
+		appendAll(t, s, "first", "second", "third")
+		wantEntries(t, loadOK(t, s), []string{"first", "second", "third"})
 	})
 
 	t.Run("preserves multi-line text on one disk line", func(t *testing.T) {
 		t.Parallel()
-		s := New(t.TempDir())
+		s := New(t.TempDir(), workspaceA)
 		multi := "write a test\n\nthen run make check"
-		appendAll(t, s, workspaceA, multi, "after")
-		wantEntries(t, loadOK(t, s, workspaceA), []string{multi, "after"})
-		if lines := countLines(t, s.path(workspaceA)); lines != 2 {
+		appendAll(t, s, multi, "after")
+		wantEntries(t, loadOK(t, s), []string{multi, "after"})
+		if lines := countLines(t, s.path()); lines != 2 {
 			t.Errorf("file has %d lines, want 2 — a multi-line prompt must stay one record", lines)
 		}
 	})
 
 	t.Run("a trailing separator names the same workspace", func(t *testing.T) {
 		t.Parallel()
-		s := New(t.TempDir())
-		appendAll(t, s, workspaceA+"/", "slashed")
-		wantEntries(t, loadOK(t, s, workspaceA), []string{"slashed"})
+		dir := t.TempDir()
+		appendAll(t, New(dir, workspaceA+"/"), "slashed")
+		wantEntries(t, loadOK(t, New(dir, workspaceA)), []string{"slashed"})
 	})
 }
 
@@ -133,9 +135,9 @@ func TestAppendDedupsOnlyConsecutiveEntries(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			s := New(t.TempDir())
-			appendAll(t, s, workspaceA, tc.send...)
-			wantEntries(t, loadOK(t, s, workspaceA), tc.want)
+			s := New(t.TempDir(), workspaceA)
+			appendAll(t, s, tc.send...)
+			wantEntries(t, loadOK(t, s), tc.want)
 		})
 	}
 }
@@ -145,15 +147,15 @@ func TestAppendCompactsPastLimit(t *testing.T) {
 
 	t.Run("compacts to the newest entries once past the threshold", func(t *testing.T) {
 		t.Parallel()
-		s := New(t.TempDir())
-		seedFile(t, s, workspaceA, compactAt)
-		appendAll(t, s, workspaceA, "newest")
+		s := New(t.TempDir(), workspaceA)
+		seedFile(t, s, compactAt)
+		appendAll(t, s, "newest")
 
-		path := s.path(workspaceA)
+		path := s.path()
 		if lines := countLines(t, path); lines != maxEntries {
 			t.Fatalf("file has %d lines after compaction, want %d", lines, maxEntries)
 		}
-		got := loadOK(t, s, workspaceA)
+		got := loadOK(t, s)
 		if len(got) != maxEntries {
 			t.Fatalf("loaded %d entries, want %d", len(got), maxEntries)
 		}
@@ -170,15 +172,15 @@ func TestAppendCompactsPastLimit(t *testing.T) {
 
 	t.Run("leaves a file at the threshold alone", func(t *testing.T) {
 		t.Parallel()
-		s := New(t.TempDir())
-		seedFile(t, s, workspaceA, compactAt-1)
-		appendAll(t, s, workspaceA, "at the line")
+		s := New(t.TempDir(), workspaceA)
+		seedFile(t, s, compactAt-1)
+		appendAll(t, s, "at the line")
 
-		if lines := countLines(t, s.path(workspaceA)); lines != compactAt {
+		if lines := countLines(t, s.path()); lines != compactAt {
 			t.Errorf("file has %d lines, want %d — compaction must not fire at the threshold", lines, compactAt)
 		}
-		if got := loadOK(t, s, workspaceA); len(got) != maxEntries {
-			t.Errorf("Load returned %d entries, want the newest %d", len(got), maxEntries)
+		if got := loadOK(t, s); len(got) != maxEntries {
+			t.Errorf("LoadPrompts returned %d entries, want the newest %d", len(got), maxEntries)
 		}
 	})
 }
@@ -186,54 +188,58 @@ func TestAppendCompactsPastLimit(t *testing.T) {
 func TestLoadFiltersForeignWorkspaceRecords(t *testing.T) {
 	t.Parallel()
 
-	s := New(t.TempDir())
-	appendAll(t, s, workspaceA, "mine")
+	dir := t.TempDir()
+	s := New(dir, workspaceA)
+	appendAll(t, s, "mine")
 
 	// A digest collision would land another workspace's records in this file; they must not
-	// surface as this workspace's recall.
-	stranger, err := encodeRecord(record{Workspace: "/elsewhere", At: "2026-08-04T00:00:00Z", Text: "theirs"})
+	// surface as this workspace's recall. A second store over the same dir writes the stranger's
+	// record, and its file's contents are spliced onto this one's to stand in for the collision.
+	stranger := New(dir, "/elsewhere")
+	appendAll(t, stranger, "theirs")
+	theirs, err := os.ReadFile(stranger.path())
 	if err != nil {
-		t.Fatalf("encodeRecord: %v", err)
+		t.Fatalf("read the stranger's file: %v", err)
 	}
-	if err := appendLine(s.path(workspaceA), stranger); err != nil {
+	if err := appendLine(s.path(), theirs); err != nil {
 		t.Fatalf("appendLine: %v", err)
 	}
 
-	wantEntries(t, loadOK(t, s, workspaceA), []string{"mine"})
+	wantEntries(t, loadOK(t, s), []string{"mine"})
 
 	// Dedup answers for this workspace's view too: the stranger's line must not hide behind
 	// the newest entry of the workspace being appended to.
-	appendAll(t, s, workspaceA, "mine")
-	wantEntries(t, loadOK(t, s, workspaceA), []string{"mine"})
+	appendAll(t, s, "mine")
+	wantEntries(t, loadOK(t, s), []string{"mine"})
 }
 
 func TestLoadSkipsMalformedLines(t *testing.T) {
 	t.Parallel()
 
-	s := New(t.TempDir())
-	appendAll(t, s, workspaceA, "before")
-	path := s.path(workspaceA)
+	s := New(t.TempDir(), workspaceA)
+	appendAll(t, s, "before")
+	path := s.path()
 	if err := appendLine(path, []byte("{not json\n\n")); err != nil {
 		t.Fatalf("appendLine: %v", err)
 	}
-	appendAll(t, s, workspaceA, "after")
+	appendAll(t, s, "after")
 
-	wantEntries(t, loadOK(t, s, workspaceA), []string{"before", "after"})
+	wantEntries(t, loadOK(t, s), []string{"before", "after"})
 }
 
 func TestLoadMissingFileIsEmpty(t *testing.T) {
 	t.Parallel()
 
-	s := New(filepath.Join(t.TempDir(), "never-created"))
-	got, err := s.Load(workspaceA)
+	s := New(filepath.Join(t.TempDir(), "never-created"), workspaceA)
+	got, err := s.LoadPrompts()
 	if err != nil {
-		t.Fatalf("Load on a missing file: %v", err)
+		t.Fatalf("LoadPrompts on a missing file: %v", err)
 	}
 	if len(got) != 0 {
 		t.Errorf("loaded %q, want no entries", got)
 	}
 	if _, err := os.Stat(s.dir); !os.IsNotExist(err) {
-		t.Errorf("Load created the store directory; it must stay lazy (stat err = %v)", err)
+		t.Errorf("LoadPrompts created the store directory; it must stay lazy (stat err = %v)", err)
 	}
 }
 
@@ -241,12 +247,13 @@ func TestTwoWorkspacesTwoFiles(t *testing.T) {
 	t.Parallel()
 
 	dir := t.TempDir()
-	s := New(dir)
-	appendAll(t, s, workspaceA, "a-one", "a-two")
-	appendAll(t, s, workspaceB, "b-one")
+	a := New(dir, workspaceA)
+	b := New(dir, workspaceB)
+	appendAll(t, a, "a-one", "a-two")
+	appendAll(t, b, "b-one")
 
-	wantEntries(t, loadOK(t, s, workspaceA), []string{"a-one", "a-two"})
-	wantEntries(t, loadOK(t, s, workspaceB), []string{"b-one"})
+	wantEntries(t, loadOK(t, a), []string{"a-one", "a-two"})
+	wantEntries(t, loadOK(t, b), []string{"b-one"})
 
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -255,7 +262,7 @@ func TestTwoWorkspacesTwoFiles(t *testing.T) {
 	if len(entries) != 2 {
 		t.Fatalf("store dir holds %d files, want one per workspace", len(entries))
 	}
-	if s.path(workspaceA) == s.path(workspaceB) {
+	if a.path() == b.path() {
 		t.Error("both workspaces resolved to the same file")
 	}
 }
@@ -266,8 +273,8 @@ func TestAppendKeepsRecallPrivate(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("unix permission bits are not meaningful on windows")
 	}
-	s := New(filepath.Join(t.TempDir(), "prompts"))
-	appendAll(t, s, workspaceA, "private")
+	s := New(filepath.Join(t.TempDir(), "prompts"), workspaceA)
+	appendAll(t, s, "private")
 
 	dirInfo, err := os.Stat(s.dir)
 	if err != nil {
@@ -276,7 +283,7 @@ func TestAppendKeepsRecallPrivate(t *testing.T) {
 	if got := dirInfo.Mode().Perm(); got != dirPerm {
 		t.Errorf("store dir mode = %o, want %o", got, dirPerm)
 	}
-	fileInfo, err := os.Stat(s.path(workspaceA))
+	fileInfo, err := os.Stat(s.path())
 	if err != nil {
 		t.Fatalf("stat recall file: %v", err)
 	}

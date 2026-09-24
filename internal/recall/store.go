@@ -22,19 +22,19 @@ const (
 	filePerm os.FileMode = 0o600
 )
 
-// maxEntries is how many of the newest entries Load returns and compaction keeps: far more
+// maxEntries is how many of the newest entries LoadPrompts returns and compaction keeps: far more
 // than an Up-arrow walk exhausts in a session, small enough that reading the whole file on
 // every append stays cheap.
 const maxEntries = 1000
 
-// compactAt is the line count past which Append rewrites the file down to maxEntries. Leaving
+// compactAt is the line count past which AppendPrompt rewrites the file down to maxEntries. Leaving
 // maxEntries of slack above the cap makes compaction rare — one rewrite per maxEntries
 // appends — rather than one rewrite per append once the cap is reached.
 const compactAt = 2 * maxEntries
 
 // nameHexLen is how many hex characters of the workspace digest name its file: short enough
 // to keep the directory legible, and a collision is not a correctness problem because every
-// record names its workspace and Load drops the strangers.
+// record names its workspace and LoadPrompts drops the strangers.
 const nameHexLen = 8
 
 // fileExt is the extension of a workspace's recall file. JSON Lines, not JSON: appending is a
@@ -42,7 +42,7 @@ const nameHexLen = 8
 const fileExt = ".jsonl"
 
 // record is one line of a workspace's recall file. Workspace makes the file self-describing —
-// it is what lets Load filter out the records of a digest-colliding stranger — and the JSON
+// it is what lets LoadPrompts filter out the records of a digest-colliding stranger — and the JSON
 // string encoding of Text keeps a multi-line prompt on one line.
 type record struct {
 	Workspace string `json:"ws"`
@@ -50,39 +50,45 @@ type record struct {
 	Text      string `json:"text"`
 }
 
-// Store is the file-backed prompt recall: one JSONL file per workspace under an injected
-// directory. It is process-local — the mutex serializes this process's appends and loads, but
-// the Store makes no cross-process locking claims in v1 (internal/library's posture). It NEVER
-// reaches for an ambient ~/.apogee: the caller supplies dir (ADR 0001).
+// Store is the file-backed prompt recall of ONE workspace: that workspace's JSONL file under an
+// injected directory. It is bound at construction, so its two methods carry no workspace — which is
+// exactly the shape of the TUI's recall seam, and a *Store is what the composition root hands the
+// renderer (asserted in cmd/apogee/wire_options.go; this package imports no tui). Resolving the
+// workspace path is the caller's job (ADR 0001).
+//
+// It is process-local — the mutex serializes this Store's appends and loads, but the Store makes no
+// cross-process locking claims in v1 (internal/library's posture). It NEVER reaches for an ambient
+// ~/.apogee: the caller supplies dir (ADR 0001).
 type Store struct {
 	mu  sync.Mutex
 	dir string
+	ws  string
 }
 
-// New returns a Store rooted at dir. The directory is created lazily on the first Append, so
-// an apogee run that sends nothing touches no disk.
-func New(dir string) *Store {
-	return &Store{dir: dir}
+// New returns a Store rooted at dir and bound to workspace, an absolute path the caller resolves.
+// The directory is created lazily on the first AppendPrompt, so an apogee run that sends nothing
+// touches no disk.
+func New(dir, workspace string) *Store {
+	return &Store{dir: dir, ws: normalize(workspace)}
 }
 
-// Append records text as workspace's newest prompt. It writes nothing when text already is
-// that workspace's newest entry (consecutive dedup) and compacts the file once it grows past
-// compactAt lines. workspace is an absolute path; the caller resolves it (ADR 0001).
-func (s *Store) Append(workspace, text string) error {
-	ws := normalize(workspace)
-
+// AppendPrompt records text as the workspace's newest prompt. It writes nothing when text already
+// is the workspace's newest entry (consecutive dedup) and compacts the file once it grows past
+// compactAt lines. Every error is reported: deciding that a recall failure is survivable is the
+// caller's call.
+func (s *Store) AppendPrompt(text string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := s.path(ws)
+	path := s.path()
 	recs, lines, err := readRecords(path)
 	if err != nil {
 		return err
 	}
-	if newest, ok := newestFor(recs, ws); ok && newest == text {
+	if newest, ok := newestFor(recs, s.ws); ok && newest == text {
 		return nil
 	}
-	rec := record{Workspace: ws, At: time.Now().UTC().Format(time.RFC3339), Text: text}
+	rec := record{Workspace: s.ws, At: time.Now().UTC().Format(time.RFC3339), Text: text}
 	line, err := encodeRecord(rec)
 	if err != nil {
 		return err
@@ -99,23 +105,21 @@ func (s *Store) Append(workspace, text string) error {
 	return nil
 }
 
-// Load returns workspace's recorded prompts oldest→newest, at most the newest maxEntries. It
-// is total by design — recall is a convenience, never a reason a session fails: a missing file
-// loads empty, malformed lines are skipped, and records naming another workspace (a digest
-// collision) are filtered out. Only an unreadable file is an error.
-func (s *Store) Load(workspace string) ([]string, error) {
-	ws := normalize(workspace)
-
+// LoadPrompts returns the workspace's recorded prompts oldest→newest, at most the newest
+// maxEntries. It is total by design — recall is a convenience, never a reason a session fails: a
+// missing file loads empty, malformed lines are skipped, and records naming another workspace (a
+// digest collision) are filtered out. Only an unreadable file is an error.
+func (s *Store) LoadPrompts() ([]string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	recs, _, err := readRecords(s.path(ws))
+	recs, _, err := readRecords(s.path())
 	if err != nil {
 		return nil, err
 	}
 	texts := make([]string, 0, len(recs))
 	for _, rec := range recs {
-		if rec.Workspace != ws {
+		if rec.Workspace != s.ws {
 			continue
 		}
 		texts = append(texts, rec.Text)
@@ -126,10 +130,10 @@ func (s *Store) Load(workspace string) ([]string, error) {
 	return texts, nil
 }
 
-// path is the file a workspace's entries live in: the digest of the normalized path, so the
-// filename leaks neither the project's name nor its location.
-func (s *Store) path(ws string) string {
-	sum := sha256.Sum256([]byte(ws))
+// path is the file the bound workspace's entries live in: the digest of its normalized path, so
+// the filename leaks neither the project's name nor its location.
+func (s *Store) path() string {
+	sum := sha256.Sum256([]byte(s.ws))
 	return filepath.Join(s.dir, hex.EncodeToString(sum[:])[:nameHexLen]+fileExt)
 }
 
@@ -142,7 +146,7 @@ func normalize(workspace string) string {
 
 // newestFor returns the last entry recorded for ws, which is what consecutive dedup compares
 // against. It scans backwards past any colliding stranger's records so dedup answers for this
-// workspace's view of the file — the same view Load returns.
+// workspace's view of the file — the same view LoadPrompts returns.
 func newestFor(recs []record, ws string) (string, bool) {
 	for i := len(recs) - 1; i >= 0; i-- {
 		if recs[i].Workspace == ws {

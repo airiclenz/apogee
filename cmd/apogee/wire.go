@@ -28,8 +28,9 @@ package main
 //     session onto another set of servers.
 //   - wire_present.go — the presentation ladder this host can walk, and the holder that rebuilds it
 //     and re-installs it on the presenter.
-//   - wire_session.go — the session-persistence and prompt-recall hosts, and the resume resolution a
-//     --resume/--continue start goes through.
+//   - wire_session.go — the session-persistence host, and the resume resolution a --resume/--continue
+//     start goes through. (Prompt recall has no host: a workspace-bound *recall.Store is the seam,
+//     asserted in wire_options.go.)
 //   - wire_engine.go — Agent construction through the public surface, and the late-bound
 //     [tui.Engine] that stands in until a server is picked.
 //   - wire_firing.go — the one construction surface every unattended run is composed through, so

@@ -117,13 +117,14 @@ type SessionHost interface {
 // (AppendPrompt) and read back what this workspace has already recorded (LoadPrompts), which is
 // what the prompt box walks with Up/Down. It is defined here — like [SessionHost] — so the
 // renderer stays unit-testable with a fake while the composition root owns the store, the file
-// format, and the directory it lives in.
+// format, and the directory it lives in. The binary wires an internal/recall Store directly: it
+// satisfies this interface as it stands, with no adapter in between.
 //
 // The WORKSPACE is pre-bound by the host side and appears in neither method. Recall is
 // per-workspace (internal/recall keys its files on the absolute path), and resolving that path is
 // exactly the kind of ambient lookup the renderer does not do (the [Options.ConfigHome] posture):
-// binding it once at the composition root leaves this surface with one workspace it cannot get
-// wrong.
+// the composition root binds it once, when it constructs the store, which leaves this surface with
+// one workspace it cannot get wrong.
 //
 // A nil host means recall is unwired: nothing is loaded at start-up, nothing is recorded, and the
 // arrows keep their cursor duty — the pre-recall behaviour every hand-built test Options relies on.
@@ -1181,7 +1182,7 @@ type Options struct {
 	// while the "is it safe to snapshot" decision stays with the Model that owns the Engine.
 	Sessions SessionHost
 
-	// Recall is the prompt-recall host (the store-backed [RecallHost] the binary wires with this
+	// Recall is the prompt-recall host (the recall store the binary wires, constructed with this
 	// run's workspace already bound); nil ⇒ recall is off and the arrows never leave cursor duty.
 	// The Model drives it exactly twice: one load at start-up, and one fire-and-forget append per
 	// input sent — both off the Update loop, both best-effort, so neither can interrupt a session.

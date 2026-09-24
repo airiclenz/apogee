@@ -48,9 +48,10 @@
 // wire_mcp.go the connected MCP sessions
 // and the validate-then-commit reconnect that moves a session onto another set;
 // wire_present.go the presentation ladder this host can walk and the holder that
-// rebuilds and re-installs it; wire_session.go the session-persistence and
-// prompt-recall hosts plus the resume resolution a --resume/--continue start goes
-// through; wire_engine.go Agent construction through the public surface and the
+// rebuilds and re-installs it; wire_session.go the session-persistence host plus
+// the resume resolution a --resume/--continue start goes through (the prompt-recall
+// host is a workspace-bound *recall.Store, asserted in wire_options.go);
+// wire_engine.go Agent construction through the public surface and the
 // late-bound engine that stands in until a server is picked; wire_server.go the entry a
 // startup selection collapses to, the one step that binds any entry to a session, the
 // config-change wait the reload chain parks on, and the [tui.ServerHost] the six Upstream
