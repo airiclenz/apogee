@@ -382,6 +382,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | run_tests | Tests | path (`· filter` when set) | `PASS/FAIL · 3.1s` | runner summary + failing tests |
 | git_status | Git status | — | `N changed` | changed-file list |
 | git_log | Git log | ref | `N commits` | one line per commit |
+| git_show | Git Show | path (`:12–80` when ranged) `@ ref` (`· locate "…"` when set) | `N lines` | the located lines (`Located "…" on lines: …`) when locate is set, else — |
 | git_branch | Git branch | action + branch name | — | command output |
 | git_commit | Git commit | message subject | short hash | full message + committed files |
 | git_diff_range | Git diff | `base..head` | `+A −R` | split/stacked diff, one header row per file section, see `split-diff-layout.md` |
@@ -397,7 +398,7 @@ its body whole while collapsed, and it appears only when the two differ.
 | load_skill | Skill | the loaded skill (the query until one is) | — | the skill body |
 
 Notes:
-- **2026-08-19** — the five diff-bodied rows above now render through
+- **2026-08-19** — the five diff-bodied rows above (six since `write_file` joined, 2026-09-04) now render through
   `split-diff-layout.md` (Split diff where the width allows, Stacked diff below
   it), delivered by
   `docs/plans/archived/2026-08-19 - 03 - split-diff-display-plan.md` and ratified by

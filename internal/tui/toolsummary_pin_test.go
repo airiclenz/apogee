@@ -51,16 +51,18 @@ const ddgPinPage = `<!DOCTYPE html>
 const pinFileBody = "package main\n\nfunc main() {}"
 
 // TestToolSummariesRenderThroughThePresenter executes for real each summary-bearing tool that
-// needs nothing but a temp workspace — nine of the ten — and pins the card line the presenter
+// needs nothing but a temp workspace — nine of the eleven — and pins the card line the presenter
 // renders from its outcome. Both halves are asserted: that the tool attached a summary at all,
 // and that the view words it the way it always has (the D4 oracle — this card reshaped a seam,
 // it did not change the UI).
 //
-// The tenth is git_status, whose outcome needs a real repository and so a git binary this
-// package's tests otherwise never reach for; its domain.ChangedFiles is pinned against a live
-// repo where the tool lives (internal/tools/git_test.go) and its rendering here by
-// TestChangedFilesStatReadsTheTypedCountsNotTheProse and
-// TestGitStatusReportSurvivesItsTypedSummary (toolpresent_test.go).
+// The other two are git_status and git_show, whose outcomes need a real repository and so a git
+// binary this package's tests otherwise never reach for. Their summaries are pinned against a live
+// repo where the tools live (internal/tools/git_test.go: git_status's domain.ChangedFiles, and
+// git_show's domain.ReadSpan in TestGitShow_ReadsTheEarlierContentAtARef); git_status's rendering
+// here by TestChangedFilesStatReadsTheTypedCountsNotTheProse and
+// TestGitStatusReportSurvivesItsTypedSummary, git_show's by TestPresentToolCall
+// (toolpresent_test.go).
 func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
@@ -173,15 +175,15 @@ func TestToolSummariesRenderThroughThePresenter(t *testing.T) {
 }
 
 // The presenter names the tool the summary came from: every case above uses the tool's own
-// registry key, so a summary can never render under the wrong label. git_status rides this list
-// too — the one summary-bearing tool the pin above cannot execute still has to be spelled the way
-// the registry keys it.
+// registry key, so a summary can never render under the wrong label. git_status and git_show ride
+// this list too — the two summary-bearing tools the pin above cannot execute (both read a git
+// repository) still have to be spelled the way the registry keys them.
 func TestToolSummaryPinUsesRegisteredToolNames(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{
 		"read_file", "write_file", "list_dir", "grep", "view_diff", "web_search",
 		"single_find_and_replace", "multi_find_and_replace", "edit_existing_file",
-		"git_status",
+		"git_status", "git_show",
 	} {
 		if _, ok := toolRegistry[name]; !ok {
 			t.Errorf("%s reports a summary but has no registry entry", name)

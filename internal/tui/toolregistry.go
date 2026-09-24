@@ -221,8 +221,9 @@ const askUserToolName = "ask_user"
 const loadSkillToolName = "load_skill"
 
 // toolRegistry is the open, name-keyed catalogue. Each later tool adds one entry here; the
-// renderer and the transcript never grow a per-tool branch. It covers the full built-in set
-// (internal/tools DefaultToolsWithHost); only a dynamic tool (an MCP server's) falls to the
+// renderer and the transcript never grow a per-tool branch. It covers every tool the build
+// carries (internal/tools KnownToolNames — default-off tools included), pinned by
+// TestToolRegistryCoversEveryBuiltInTool; only a dynamic tool (an MCP server's) falls to the
 // raw-name fallback.
 //
 // Every entry's LABEL, target and stat are the ratified table's three display columns
@@ -232,8 +233,8 @@ const loadSkillToolName = "load_skill"
 // the engine cannot supply without growing a wire (design call 14) is a hook returning false,
 // which leaves the tool's own prose floor in the slot rather than inventing a number.
 //
-// Every detail extractor here renders PROSE. The ten tools that report a typed summary
-// (read_file, list_dir, grep, view_diff, web_search, git_status, and the four writing tools
+// Every detail extractor here renders PROSE. The eleven tools that report a typed summary
+// (read_file, git_show, list_dir, grep, view_diff, web_search, git_status, and the four writing tools
 // write_file, single_find_and_replace, multi_find_and_replace and edit_existing_file) word their slot
 // from that summary through their stat hook — write_file is the one exception, keeping the line
 // count its own REQUEST states (writtenLinesStat) rather than restating the regions it recorded —
@@ -242,8 +243,8 @@ const loadSkillToolName = "load_skill"
 // output and floors on outputDetail — so a degraded card is that tool's own words, never a file
 // dumped into the transcript. A summary-bearing tool whose floor lays out a BODY has to register a
 // body hook as well, because the typed path skips the extractor altogether
-// (toolView.absorbProse) and the body would simply go missing: read_file, view_diff and git_status
-// each set one. git_diff_range sets one ahead of that need — its floor lays out a body too, so the
+// (toolView.absorbProse) and the body would simply go missing: read_file, git_show, view_diff and
+// git_status each set one. git_diff_range sets one ahead of that need — its floor lays out a body too, so the
 // day it reports a typed outcome the card keeps the output git printed instead of losing it. The rest quote their fixed sentence or hand free-form output (a command run, a
 // sub-agent report) on as a body the collapsed paint shows the gist of: the chat compresses it
 // to a first line plus a remainder count until the block is expanded, and the model gets the
@@ -444,6 +445,18 @@ var toolRegistry = map[string]toolPresenter{
 		detail: outputDetail, // one line per commit
 		stat:   commitCountStat,
 	},
+	// git_show is read_file at a revision — the same arguments, the same domain.ReadSpan summary —
+	// so it presents as read_file does: the slot counts the span, the body is the locate report,
+	// and the file content it returned stays the model's. No wireDropped: the content is in the
+	// result, never in the call.
+	"git_show": {
+		label:  "Git Show",
+		verb:   "reading",
+		target: gitShowTarget,   // `path:12–80 @ ref`, plus `· locate "…"` when the call asked
+		detail: firstLineDetail, // floor; the tool's own "[File: path @ ref, …]" header
+		stat:   readSpanStat,
+		body:   readFileBody, // the located line numbers, when a term was asked for
+	},
 	"diagnostics": {
 		label:  "Diagnostics",
 		verb:   "checking",
@@ -556,8 +569,9 @@ var toolRegistry = map[string]toolPresenter{
 // tool's prose sentence in a slot the table says is blank.
 func blankStat(domain.ToolResult) (statValue, bool) { return plainStat(""), true }
 
-// readSpanStat words read_file's slot as the number of lines the call returned, counted off the
-// span the tool reports (domain.ReadSpan, 1-based and inclusive). A file with no lines at all
+// readSpanStat words read_file's slot — and git_show's, which reports the same span — as the
+// number of lines the call returned, counted off the span the tool reports (domain.ReadSpan,
+// 1-based and inclusive). A file with no lines at all
 // yields a span whose End precedes its Start, which is 0 lines rather than a negative count. A read
 // the tool capped by default reports the CAPPED span — 1-400 of a longer file — so the slot says
 // what came back, never how long the file is; a locate's windows report the union's reach.
@@ -1240,6 +1254,24 @@ func qualifiedTarget(head, qualifier string) string {
 // whatever the range (domain.ReadSpan). The lines it was found on lay out beneath the branch
 // (readFileBody).
 func readFileTarget(args map[string]any) string {
+	return fileReadTarget(args, "")
+}
+
+// gitShowTarget leads git_show's branch the way readFileTarget leads read_file's — the tool takes
+// read_file's argument set plus a revision — with the revision joined to the ranged path in the
+// spelling the tool's own header uses (`a.go:1–5 @ HEAD~1`). The ref sits between the range and
+// the locate qualifier because it names WHICH file the range was cut from: two reads of one path
+// at two revisions are two different files, and the row has to say so before it says what was
+// hunted for in either. A call with no ref (a malformed one the tool refuses) is read_file's target.
+func gitShowTarget(args map[string]any) string {
+	return fileReadTarget(args, stringArg("ref")(args))
+}
+
+// fileReadTarget is the one target both file readers share: the path, the requested line range
+// when one was asked for, the revision when the read was of one (" @ <ref>"), and the locate term
+// as the qualifier. It is one function so read_file and git_show can never spell the same
+// arguments two ways.
+func fileReadTarget(args map[string]any, ref string) string {
 	head, _ := args["path"].(string)
 	start, end := intArg(args, "start_line"), intArg(args, "end_line")
 	if start > 0 || end > 0 {
@@ -1252,6 +1284,9 @@ func readFileTarget(args map[string]any) string {
 			span += strconv.Itoa(end)
 		}
 		head += ":" + span
+	}
+	if ref != "" {
+		head += " @ " + ref
 	}
 	locate := stringArg("locate")(args)
 	if locate != "" {
@@ -1769,11 +1804,12 @@ func commitDetail(content string) toolOutcome {
 	return toolOutcome{Details: []detailLine{out.Summary.detailLine}}
 }
 
-// readFileBody lays read_file's LOCATE REPORT out beneath the branch: the lines the requested term
-// was found on, or the statement that it was found on none — a case only the typed summary can
-// tell apart from "no locate was asked for" (domain.ReadSpan's Locate/LocatedOn pair). A read that
-// asked for no term has no report and so no body: the file's content belongs to the model, and the
-// slot's line count already says how much of it came back.
+// readFileBody lays read_file's LOCATE REPORT out beneath the branch — git_show's too, which
+// reports the same domain.ReadSpan: the lines the requested term was found on, or the statement
+// that it was found on none — a case only the typed summary can tell apart from "no locate was
+// asked for" (domain.ReadSpan's Locate/LocatedOn pair). A read that asked for no term has no report
+// and so no body: the file's content belongs to the model, and the slot's line count already says
+// how much of it came back.
 //
 // The numbers are ABSOLUTE and may fall outside the span the row's target names, because the tool
 // scans the whole file whatever range the call asked for — that is the point of asking a ranged

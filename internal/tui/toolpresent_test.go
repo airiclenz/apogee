@@ -41,7 +41,7 @@ func bodyText(tv toolView) string {
 // "running <raw name>") with its arguments shown verbatim (the approval surface never hides
 // the model's request).
 //
-// The ten summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
+// The eleven summary-bearing tools carry the domain.ToolSummary their tool now attaches, so
 // the line comes from the typed outcome rather than from the prose beside it; the "no summary"
 // rows pin the D6 floor, where the same result with no summary degrades to its verbatim first
 // line instead of to a raw dump. Every wantDetail here is unchanged from when the view parsed
@@ -117,6 +117,26 @@ func TestPresentToolCall(t *testing.T) {
 			wantLabel:  "Read",
 			wantVerb:   "reading",
 			wantTarget: `main.go:12–80 · locate "func main"`, wantDetail: `Located "func main" on lines: 5`,
+		},
+		{
+			// git_show is read_file at a revision: the same span in the slot, the ref joined to the
+			// ranged path, and none of the file's content on the card.
+			name: "git_show → Git Show + the ranged path at its ref + the span's line count",
+			call: domain.ToolCall{ID: "1f", Tool: "git_show", Arguments: []byte(`{"ref":"HEAD~1","path":"a.go","start_line":1,"end_line":5}`)},
+			result: domain.ToolResult{CallID: "1f", Content: "[File: a.go @ HEAD~1, 40 lines total, showing lines 1-5]\npackage a",
+				Summary: domain.ReadSpan{Start: 1, End: 5, Total: 40}},
+			wantLabel:  "Git Show",
+			wantVerb:   "reading",
+			wantTarget: "a.go:1–5 @ HEAD~1", wantDetail: "5 lines",
+		},
+		{
+			name: "git_show with locate → the ref before the qualifier, the Located line as body",
+			call: domain.ToolCall{ID: "1g", Tool: "git_show", Arguments: []byte(`{"ref":"main","path":"a.go","locate":"func A"}`)},
+			result: domain.ToolResult{CallID: "1g", Content: "[File: a.go @ main, 40 lines total, showing lines 1-12]\nLocated \"func A\" on lines: 7\npackage a",
+				Summary: domain.ReadSpan{Start: 1, End: 12, Total: 40, Locate: "func A", LocatedOn: []int{7}}},
+			wantLabel:  "Git Show",
+			wantVerb:   "reading",
+			wantTarget: `a.go @ main · locate "func A"`, wantDetail: `Located "func A" on lines: 7`,
 		},
 		{
 			name: "write_file → Write + the line count of what it writes",

@@ -52,7 +52,15 @@
 
 **Out of scope:** Windows ARM confiner failures (`apogee-windows-confiner-test-failures`); the PID-only journal decision in `SECURITY.md`; removing the arm layout belt calls (`apogee-arm-layout-calls-residue`); withholding followers after a refused hold (`apogee-refused-hold-followers-move`); `internal/refs/refs_test.go`'s quoted-path fixture (deliberate).
 
-## 1. git_show gets its own tool card
+## 1. git_show gets its own tool card — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): TestToolRegistryCoversEveryBuiltInTool carries no ask_user/load_skill exemption on its reverse walk: tools.KnownToolNames already includes the host-delegate tools by construction, so the allowance the plan described would have been dead code (the test passes without it, and fails on a renamed git_show key in both directions).
+
+NOTES (2026-09-24): the shared target helper is fileReadTarget(args, ref); readFileTarget and gitShowTarget both call it, so read_file's target is byte-identical to before.
+
+NOTES (2026-09-24): consequential edit — internal/tui/doc.go: made necessary by git_show becoming a summary-bearing card (its "nine of the ten … the tenth, git_status" count now names eleven, with git_show the second repository-bound tool).
+
+NOTES (2026-09-24): the readSpanStat and readFileBody doc comments in toolregistry.go now also name git_show, and toolsummary_pin_test.go's TestToolSummariesRenderThroughThePresenter comment says "nine of the eleven", naming git_show as the second repository-bound tool. Both follow from the same rule.
 
 **What:**
 **Goal:** every name in `tools.KnownToolNames()` has a row in the TUI `toolRegistry`, pinned by a test; `git_show` presents as "Git Show" with target `<path>[:a–b] @ <ref>[ · locate "…"]`, stat `N lines` from its `domain.ReadSpan`, and the `read_file` body (located lines only); the registry's coverage comments are true.

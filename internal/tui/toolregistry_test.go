@@ -10,7 +10,37 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/tasklist"
+	"github.com/airiclenz/apogee/internal/tools"
 )
+
+// TestToolRegistryCoversEveryBuiltInTool pins the registry to the tool set in both directions. A
+// built-in tool with no row falls to the raw-name fallback — its snake_case id for a label and its
+// arguments dumped verbatim — which is how git_show shipped without a card; walking
+// tools.KnownToolNames (the build's whole catalogue, default-off tools included) fails the day a
+// new tool lands without one. The reverse walk catches a row whose tool was renamed or retired: a
+// key no tool answers to is a card nothing can ever reach. The host-delegate rows (ask_user,
+// load_skill, present_document) need no exemption: the catalogue carries those tools by
+// construction even where a Driver leaves them unwired.
+func TestToolRegistryCoversEveryBuiltInTool(t *testing.T) {
+	t.Parallel()
+
+	known := tools.KnownToolNames()
+	knownSet := make(map[string]bool, len(known))
+	for _, name := range known {
+		knownSet[name] = true
+	}
+
+	for _, name := range known {
+		if _, ok := toolRegistry[name]; !ok {
+			t.Errorf("built-in tool %q has no toolRegistry row; its card would fall to the raw-name fallback", name)
+		}
+	}
+	for name := range toolRegistry {
+		if !knownSet[name] {
+			t.Errorf("toolRegistry row %q names no built-in tool (tools.KnownToolNames)", name)
+		}
+	}
+}
 
 // TestGrepTarget pins what a grep row LEADS with. The pattern alone answers "what was searched
 // for" but never "where", and the two searches a reader has to tell apart in a group — the whole
