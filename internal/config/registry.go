@@ -112,8 +112,8 @@ const (
 // is the whole of their contract (a bool, a plain name), and where a validator already exists
 // for the same key at startup it is THAT function this points at, so a value refused at a
 // settings surface and a value refused at launch are refused by one implementation. Startup
-// resolution reaches it only through Set, for the string-spelled keys the file pass lands that
-// way (keyAccessors); every other key it validates on the parsed block it already builds — so
+// resolution reaches it only through Set: at the env pass, and for the checked-text keys the file
+// pass lands that way (checkedField, keyfield.go); every other key it validates on the parsed block it already builds — so
 // this is the write path's guard rather than a second schema.
 //
 // Read, Text and Structure are the row's three projections of a RESOLVED config ([Options]) —
@@ -161,9 +161,11 @@ const (
 //
 // A row may instead carry a FIELD (keyfield.go): one typed declaration of the Options field the
 // key lives in and the fileConfig field that states it, from which bindRows derives the row's
-// Read, its landing and resolution's file projection (fromFile), so a row that has one writes none
-// of the three by hand. Every KindBool row but `context-files.enable`, which owns no field, carries
-// one.
+// Read, its landing and resolution's file, env and flag projections, so a row that has one writes
+// none of them by hand. Every row whose value is one scalar carries one — every bool, count, share,
+// duration, name and word — but `context-files.enable`, which owns no field, `sub-agents-server`,
+// whose Read shows a word for the empty value, and the two system-prompt keys, which resolve with
+// their block; the list and structured rows write theirs by hand.
 type Key struct {
 	Path       string
 	Kind       Kind
@@ -230,8 +232,8 @@ var KeyRegistry = bindRows([]Key{
 		EnvVar: EnvServer, FlagName: "server",
 		Editable: true,
 		Desc:     "Which servers: entry a session starts on; /server records the last one chosen.",
-		Read:     func(o Options) string { return o.StartupServer },
-		Set:      land(asIs, func(o *Options) *string { return &o.StartupServer }),
+		field: stringField(func(o *Options) *string { return &o.StartupServer },
+			func(fc fileConfig) *string { return nonEmpty(fc.Server) }),
 	},
 	{
 		// KindServer for its neighbour's reason — the names it takes are whatever THIS config's
@@ -260,8 +262,13 @@ var KeyRegistry = bindRows([]Key{
 		Validate:   validateSubAgentsChoice,
 		Desc: "Who picks where a delegation runs: fixed = the sub-agents-server key; model = the " +
 			"top-level model may say run_on per delegation.",
-		Read: func(o Options) string { return string(o.SubAgentsChoice) },
-		Set:  land(ParseSubAgentsChoice, func(o *Options) *SubAgentsChoice { return &o.SubAgentsChoice }),
+		// Landed through the row at the file pass, so a word outside the two the key takes is refused
+		// there, by the registry's own validator, rather than carried raw for the startup pass to
+		// refuse later: resolving it silently to `fixed` would leave the file reading as configured
+		// while the model was never offered the choice.
+		field: checkedField(ParseSubAgentsChoice, spelled[SubAgentsChoice],
+			func(o *Options) *SubAgentsChoice { return &o.SubAgentsChoice },
+			func(fc fileConfig) *string { return nonEmpty(fc.SubAgentsChoice) }),
 	},
 	{
 		Path: "mode", Kind: KindEnum, Default: string(domain.ModeAskBefore), EnumValues: modeValues,
@@ -269,8 +276,11 @@ var KeyRegistry = bindRows([]Key{
 		Editable: true, // Shift+Tab drives the same seam this key's live apply does
 		Validate: validateSettingMode,
 		Desc:     "Autonomy mode: how tool calls are gated, from least to most autonomous.",
-		Read:     func(o Options) string { return o.Mode },
-		Set:      land(asIs, func(o *Options) *string { return &o.Mode }),
+		// The file's mode is copied across unjudged, as the flag's is: a mode outside the ladder is
+		// the Driver's own ParseMode's to refuse once every source is in, so `mode: fast` in the file
+		// under `--mode plan` still starts. Only the variable lands through the row (the env pass).
+		field: stringField(func(o *Options) *string { return &o.Mode },
+			func(fc fileConfig) *string { return nonEmpty(fc.Mode) }),
 	},
 	{
 		// Prose rather than a value on a line, so it is the one key the pane edits in a field of its
@@ -380,8 +390,8 @@ var KeyRegistry = bindRows([]Key{
 		Editable: true,
 		Validate: validateSearchEndpoint,
 		Desc:     "Search endpoint the web_search tool queries; unset uses DuckDuckGo, off disables it.",
-		Read:     func(o Options) string { return o.WebSearchEndpoint },
-		Set:      land(asIs, func(o *Options) *string { return &o.WebSearchEndpoint }),
+		field: stringField(func(o *Options) *string { return &o.WebSearchEndpoint },
+			func(fc fileConfig) *string { return nonEmpty(fc.WebSearch) }),
 	},
 	{
 		Path: "mcp-servers", Kind: KindStructured,
@@ -530,8 +540,10 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateDelegateMaxSteps,
 		Desc: "Turns a delegated sub-agent may take before apogee ends it; 0 lets it run " +
 			"unbounded; takes effect at the next start.",
-		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxSteps) },
-		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateMaxSteps }),
+		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
+		// absence of one; a negative one resolves to the default.
+		field: intField(func(o *Options) *int { return &o.DelegateMaxSteps },
+			func(fc fileConfig) *int { return atLeast(0, fc.DelegateMaxSteps) }),
 	},
 	{
 		Path: "delegate-fanout-rounds", Kind: KindInt, Default: strconv.Itoa(defaultDelegateFanOutRounds),
@@ -540,8 +552,9 @@ var KeyRegistry = bindRows([]Key{
 		Desc: "Rounds of the server's parallel-agents width one reply may fan out (calls past " +
 			"rounds × width are refused and must be delegated again); 0 switches the ceiling off; " +
 			"takes effect at the next start.",
-		Read: func(o Options) string { return strconv.Itoa(o.DelegateFanOutRounds) },
-		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateFanOutRounds }),
+		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no ceiling").
+		field: intField(func(o *Options) *int { return &o.DelegateFanOutRounds },
+			func(fc fileConfig) *int { return atLeast(0, fc.DelegateFanOutRounds) }),
 	},
 	{
 		Path: "delegate-max-depth", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxDepth),
@@ -549,8 +562,10 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateDelegateMaxDepth,
 		Desc: "How deep delegation may nest: 1 lets the session delegate and its delegates not; " +
 			"at least 1; takes effect at the next start.",
-		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxDepth) },
-		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateMaxDepth }),
+		// A plain int on disk: 0 is not a value here (the bound is at least 1), so an absent key
+		// and a 0 resolve alike, to the default — the settings surface refuses the 0 outright.
+		field: intField(func(o *Options) *int { return &o.DelegateMaxDepth },
+			func(fc fileConfig) *int { return atLeast(1, &fc.DelegateMaxDepth) }),
 	},
 	{
 		Path: "delegate-max-tokens", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxTokens),
@@ -558,8 +573,9 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateDelegateMaxTokens,
 		Desc: "Prompt tokens a delegated sub-agent may spend in all before apogee ends it; 0 lets " +
 			"it run unbounded; takes effect at the next start.",
-		Read: func(o Options) string { return strconv.Itoa(o.DelegateMaxTokens) },
-		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.DelegateMaxTokens }),
+		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no bound").
+		field: intField(func(o *Options) *int { return &o.DelegateMaxTokens },
+			func(fc fileConfig) *int { return atLeast(0, fc.DelegateMaxTokens) }),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
@@ -571,8 +587,16 @@ var KeyRegistry = bindRows([]Key{
 			"unbounded; takes effect at the next start.",
 		// The limit as a DURATION prints itself (`2h0m0s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
-		Read: func(o Options) string { return o.DelegateTimeout.String() },
-		Set:  land(ParseDelegateTimeout, func(o *Options) *time.Duration { return &o.DelegateTimeout }),
+		//
+		// The file's text lands through the row: an absent key resolves to the default, an explicit
+		// `0` is off, and text no duration can be made of is refused at the file pass in the sentence
+		// that quotes it — a bound that quietly resolved to the default would leave the file reading
+		// as configured while a delegation ran under a limit nobody set, and refusing at the pass
+		// rather than at startup alone is what makes a bad value in a LIVE-edited file refuse on the
+		// re-read too.
+		field: checkedField(ParseDelegateTimeout, time.Duration.String,
+			func(o *Options) *time.Duration { return &o.DelegateTimeout },
+			func(fc fileConfig) *string { return fc.DelegateTimeout }),
 	},
 	{
 		// A length of time, delegate-timeout's posture exactly: the kind carries the shape, the hook
@@ -582,8 +606,11 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateStreamIdleTimeout,
 		Desc: "How long a streamed reply may stay silent before apogee cuts it and re-sends the " +
 			"request; 0 waits for as long as the server takes; takes effect at the next start.",
-		Read: func(o Options) string { return o.StreamIdleTimeout.String() },
-		Set:  land(ParseStreamIdleTimeout, func(o *Options) *time.Duration { return &o.StreamIdleTimeout }),
+		// Landed through the row at the file pass, delegate-timeout's reason: a silence bound that
+		// quietly resolved to the default would cut a slow server's stream under a limit nobody set.
+		field: checkedField(ParseStreamIdleTimeout, time.Duration.String,
+			func(o *Options) *time.Duration { return &o.StreamIdleTimeout },
+			func(fc fileConfig) *string { return fc.StreamIdleTimeout }),
 	},
 	{
 		// A count, delegate-fanout-rounds's posture: 0 is a VALUE (never re-stream) rather than an
@@ -593,8 +620,17 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateRestreamBudget,
 		Desc: "How many times one Turn re-sends a request after a transient upstream fault before " +
 			"the Turn fails; 0 never re-streams; takes effect at the next start.",
-		Read: func(o Options) string { return strconv.Itoa(o.RestreamBudget) },
-		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.RestreamBudget }),
+		// Landed through the row at the file pass rather than copied, stream-idle-timeout's reason:
+		// a negative budget is refused there in the row's own sentence — a Turn whose budget quietly
+		// resolved to the default would ride out faults nobody asked it to.
+		field: checkedField(strconv.Atoi, strconv.Itoa, func(o *Options) *int { return &o.RestreamBudget },
+			func(fc fileConfig) *string {
+				if fc.RestreamBudget == nil {
+					return nil
+				}
+				text := strconv.Itoa(*fc.RestreamBudget)
+				return &text
+			}),
 	},
 	{
 		// A switch, undo-snapshots's shape — but live: the per-server stats store is opened or
@@ -637,8 +673,14 @@ var KeyRegistry = bindRows([]Key{
 		Editable: true,
 		Validate: validateContextWindow,
 		Desc:     "Pin the model context window in tokens; 0 discovers it from the server, live.",
-		Read:     func(o Options) string { return strconv.Itoa(o.ContextWindow) },
-		Set:      land(strconv.Atoi, func(o *Options) *int { return &o.ContextWindow }),
+		// A whole count rather than a pointer on disk, so PRESENCE is the positive value: 0 and absent
+		// both mean unpinned, and the heartbeat's live observation stands (ADR 0024). A fractional or
+		// negative value never gets this far — TokenCount refuses it at the decode.
+		field: intField(func(o *Options) *int { return &o.ContextWindow },
+			func(fc fileConfig) *int {
+				n := int(fc.ContextWindow)
+				return atLeast(1, &n)
+			}),
 	},
 	{
 		// Editable, and the edit is honoured at the NEXT start, for `response-reserve`'s reason below:
@@ -650,8 +692,10 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateWorkingWindow,
 		Desc: "Bound the room the Budget works in to this many tokens; 0 uses the whole " +
 			"window; takes effect at the next start.",
-		Read: func(o Options) string { return strconv.Itoa(o.WorkingWindow) },
-		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.WorkingWindow }),
+		// Presence is the positive value here too, for context-window's reason: 0 and absent both
+		// mean "this run bounds nothing of its own".
+		field: intField(func(o *Options) *int { return &o.WorkingWindow },
+			func(fc fileConfig) *int { return atLeast(1, &fc.WorkingWindow) }),
 	},
 	{
 		// Editable, and the edit is honoured at the NEXT start — the share is read off the file into
@@ -666,8 +710,16 @@ var KeyRegistry = bindRows([]Key{
 		// The share in the SHORTEST spelling that reads back as the same number, which is the spelling
 		// the writer persists too — so the value seeding an edit field is one the next commit writes
 		// back unchanged.
-		Read: func(o Options) string { return strconv.FormatFloat(o.ResponseReserve, 'g', -1, 64) },
-		Set:  land(parseFloat, func(o *Options) *float64 { return &o.ResponseReserve }),
+		//
+		// Presence is the positive value, for context-window's reason: the loader accepts nothing but
+		// 0 and the open range (0, 1), so 0 is "unset" and apogee's built-in share stands.
+		field: floatField(func(o *Options) *float64 { return &o.ResponseReserve },
+			func(fc fileConfig) *float64 {
+				if fc.ResponseReserve <= 0 {
+					return nil
+				}
+				return &fc.ResponseReserve
+			}),
 	},
 	{
 		Path: "present.auto-open", Kind: KindBool, Default: "true",
@@ -680,8 +732,8 @@ var KeyRegistry = bindRows([]Key{
 		Path: "present.command", Kind: KindString,
 		Editable: true,
 		Desc:     "Open presented documents with this application instead of the OS default ({path} = the file).",
-		Read:     func(o Options) string { return o.Present.Command },
-		Set:      landIn(presentOf, PresentSettings.Validate, asIs, func(p *PresentSettings) *string { return &p.Command }),
+		field: presentField(asIs, spelled[string], func(p *PresentSettings) *string { return &p.Command },
+			func(p *presentConfig) *string { return &p.Command }),
 	},
 	{
 		Path: "present.command-on-model-documents", Kind: KindBool, Default: "false",
@@ -702,23 +754,26 @@ var KeyRegistry = bindRows([]Key{
 		Editable: true,
 		Validate: validatePresentPort,
 		Desc:     "The built-in document server's port; 0 picks a free one per session.",
-		Read:     func(o Options) string { return strconv.Itoa(o.Present.Port) },
-		Set:      landIn(presentOf, PresentSettings.Validate, strconv.Atoi, func(p *PresentSettings) *int { return &p.Port }),
+		field: presentField(strconv.Atoi, strconv.Itoa, func(p *PresentSettings) *int { return &p.Port },
+			func(p *presentConfig) *int { return &p.Port }),
 	},
 	{
 		Path: "present.host", Kind: KindString,
 		Editable: true,
 		Desc:     "Address the printed document URL advertises; empty is detected from the SSH connection.",
-		Read:     func(o Options) string { return o.Present.Host },
-		Set:      landIn(presentOf, PresentSettings.Validate, asIs, func(p *PresentSettings) *string { return &p.Host }),
+		field: presentField(asIs, spelled[string], func(p *PresentSettings) *string { return &p.Host },
+			func(p *presentConfig) *string { return &p.Host }),
 	},
 	{
 		Path: "ui.spinner", Kind: KindEnum, Default: "snake", EnumValues: spinnerValues,
 		Editable: true,
 		Validate: validateSpinnerName,
 		Desc:     "The status-line spinner animation shown while a turn runs.",
-		Read:     func(o Options) string { return string(o.UI.Spinner) },
-		Set:      landUI(domain.UIKeySpinner),
+		// Copied across as the file names it: UIPrefs.Validate judges the name at ResolveOptions, so
+		// an unknown one reaches startup as an error rather than being quietly dropped at the load.
+		field: uiField(domain.UIKeySpinner, named[domain.SpinnerStyle], spelled[domain.SpinnerStyle],
+			func(u *domain.UIPrefs) *domain.SpinnerStyle { return &u.Spinner },
+			func(u *uiConfig) *domain.SpinnerStyle { return nonEmptyName[domain.SpinnerStyle](u.Spinner) }),
 	},
 	{
 		Path: "ui.spinner-color", Kind: KindBool, Default: "true",
@@ -742,8 +797,11 @@ var KeyRegistry = bindRows([]Key{
 		Editable: true,
 		Validate: validateColorSchemeName,
 		Desc:     "Palette the screen is drawn in; ~/.apogee/schemes/<name>.yaml shadows a built-in.",
-		Read:     func(o Options) string { return o.UI.ColorScheme },
-		Set:      landUI(domain.UIKeyColorScheme),
+		// Copied across unjudged: an unresolvable name is answered with a warning and the default
+		// palette where wire.go resolves it, never with a load error (ADR 0040).
+		field: uiField(domain.UIKeyColorScheme, asIs, spelled[string],
+			func(u *domain.UIPrefs) *string { return &u.ColorScheme },
+			func(u *uiConfig) *string { return nonEmpty(u.ColorScheme) }),
 	},
 	{
 		// A length of time, which this table has no kind for — and one key is not a vocabulary, so it
@@ -755,8 +813,7 @@ var KeyRegistry = bindRows([]Key{
 		Desc:     "Engine silence after which a running turn is marked quiet on the status line; 0 turns it off.",
 		// The threshold as a DURATION prints itself (`1m30s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
-		Read: func(o Options) string { return o.UI.StallAfter.String() },
-		Set:  landUI(domain.UIKeyStallAfter),
+		field: uiStallAfter(),
 	},
 	{
 		// No validate hook and none possible: a bool's kind IS its whole contract. Editable, and the
@@ -816,8 +873,11 @@ var KeyRegistry = bindRows([]Key{
 		Editable: true,
 		Validate: validateToolsFoldOver,
 		Desc:     "Type rows a Tools umbrella may show before it is large and obeys `ui.tools-open`; 0 makes none large.",
-		Read:     func(o Options) string { return strconv.Itoa(o.UI.ToolsFoldOver) },
-		Set:      landUI(domain.UIKeyToolsFoldOver),
+		// A pointer on disk: the explicit `0` ("never") is told from an absent key, which keeps the
+		// default; a negative count is UIPrefs.Validate's to refuse, not the load's.
+		field: uiField(domain.UIKeyToolsFoldOver, strconv.Atoi, strconv.Itoa,
+			func(u *domain.UIPrefs) *int { return &u.ToolsFoldOver },
+			func(u *uiConfig) *int { return u.ToolsFoldOver }),
 	},
 	{
 		// A length of time, so the writer's plain string with a hook that parses it — `ui.stall-after`'s
@@ -830,8 +890,7 @@ var KeyRegistry = bindRows([]Key{
 			"Takes effect at the next start.",
 		// The age as a DURATION prints itself (`720h0m0s`), a spelling the key takes back — so the
 		// value seeding an edit field is one the next commit persists unchanged.
-		Read: func(o Options) string { return o.Sessions.MaxAge.String() },
-		Set:  landIn(sessionsOf, SessionSettings.Validate, parseSessionsMaxAge, func(s *SessionSettings) *time.Duration { return &s.MaxAge }),
+		field: sessionsMaxAge(),
 	},
 	{
 		// A count, and the range is the whole contract — present.port's shape with a floor and no
@@ -842,16 +901,19 @@ var KeyRegistry = bindRows([]Key{
 		Validate: validateSessionsMaxCount,
 		Desc: "Keep at most this many saved sessions, newest first; 0 keeps every one. " +
 			"Takes effect at the next start.",
-		Read: func(o Options) string { return strconv.Itoa(o.Sessions.MaxCount) },
-		Set:  landIn(sessionsOf, SessionSettings.Validate, strconv.Atoi, func(s *SessionSettings) *int { return &s.MaxCount }),
+		field: sessionsMaxCount(),
 	},
 	{
 		Path: "cursor-shape", Kind: KindEnum, Default: "block", EnumValues: cursorShapeValues,
 		Editable: true,
 		Validate: validateCursorShapeName,
 		Desc:     "The shape the prompt's caret is drawn with; it is always steady.",
-		Read:     func(o Options) string { return o.CursorShape },
-		Set:      land(asIs, func(o *Options) *string { return &o.CursorShape }),
+		// Carried as the NAME, never parsed into a shape — what each name is drawn as is the
+		// renderer's business — but judged at the file pass, through the row, against the vocabulary
+		// internal/domain owns. The empty value is the request for the default and stays empty
+		// (zeroWhenUnstated), as it does everywhere else.
+		field: checkedField(asIs, spelled[string], func(o *Options) *string { return &o.CursorShape },
+			func(fc fileConfig) *string { return nonEmpty(fc.CursorShape) }).zeroWhenUnstated(),
 	},
 	{
 		// Free text with no validate hook, like present.command: the value is a command LINE, and
@@ -862,8 +924,8 @@ var KeyRegistry = bindRows([]Key{
 		// The command AS WRITTEN, blank when the key names none: the value seeds an edit field, so a
 		// word standing in for emptiness ("$EDITOR", "the OS opener") would be a word the next commit
 		// persisted as a command.
-		Read: func(o Options) string { return o.Editor },
-		Set:  land(asIs, func(o *Options) *string { return &o.Editor }),
+		field: stringField(func(o *Options) *string { return &o.Editor },
+			func(fc fileConfig) *string { return nonEmpty(fc.Editor) }),
 	},
 	{
 		Path: "bypass", Kind: KindBool, Default: "false",
@@ -1399,8 +1461,9 @@ func countSummary(n int, noun string) string {
 // field writes not even that: the landing, the Read and the file projection are its field's.
 // bindRows binds the three into the one call Key.Set documents, once, as the table is built.
 
-// bindRows derives every field row's Read, landing and file projection from its field, binds every
-// landing the table holds under the admission its row carries, and hands the table back; a row
+// bindRows derives every field row's Read and landing from its field, binds every landing the
+// table holds under the admission its row carries, derives a field row's file projection over that
+// bound Set (the checked-text keys land through it), and hands the table back; a row
 // with no landing keeps its nil Set. A field row that hand-writes a Read or a Set as well panics:
 // two answers for one key, and nothing would say which the surfaces read. It is called on the
 // literal itself so LookupKey and every table built over the registry (keyAccessors) see the bound
@@ -1415,19 +1478,19 @@ func bindRows(rows []Key) []Key {
 			}
 			rows[i].Read = field.read
 			rows[i].Set = field.landing()
-			rows[i].fromFile = field.fileProjection(rows[i].Path, rows[i].Default)
 		}
-		landing := rows[i].Set
-		if landing == nil {
-			continue
-		}
-		row := rows[i]
-		rows[i].Set = func(value string, o *Options) error {
-			canonical, err := row.admit(value)
-			if err != nil {
-				return err
+		if landing := rows[i].Set; landing != nil {
+			row := rows[i]
+			rows[i].Set = func(value string, o *Options) error {
+				canonical, err := row.admit(value)
+				if err != nil {
+					return err
+				}
+				return landing(canonical, o)
 			}
-			return landing(canonical, o)
+		}
+		if field := rows[i].field; field != nil {
+			rows[i].fromFile = field.fileProjection(rows[i].Path, rows[i].Default, rows[i].Set)
 		}
 	}
 	return rows

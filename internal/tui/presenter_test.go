@@ -342,7 +342,7 @@ func TestPresenterWithholdsAnExecutionCapableRungWithoutTheOptIn(t *testing.T) {
 			wantMethod: domain.PresentShown,
 		},
 		{
-			// The absent key, which toPresentSettings resolves to false: the same row as above,
+			// The absent key, which the config file pass resolves to false: the same row as above,
 			// stated separately because "absent ⇒ off" is the decision this gate rests on.
 			name:       "an override is withheld when the key was never written",
 			override:   "zed {path}",

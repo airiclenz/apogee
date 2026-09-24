@@ -350,30 +350,31 @@ func (s SessionSettings) Validate() error {
 //     states the key, its built-in default where the file does not. Every row has one, and the write
 //     is unconditional — the file is the only source below the default, so there is nothing left to
 //     fall through TO, and a full pass resets every field the schema owns rather than leaving a
-//     stale one standing. That is also what makes [LoadFileConfig] answer with usable Options. It
-//     REFUSES a value the key cannot take, in the row's own sentence: the file pass stays
-//     yaml-typed — a decoded bool or int is landed as the number it already is, never re-parsed
-//     from text — and only the keys the file spells as a STRING with a validate hook to judge it
-//     (`sub-agents-choice`, `delegate-timeout`, `cursor-shape`) land through the row's own Set, so
-//     the startup refusal, the live re-read's and the settings pane's are one wording. A row that
-//     carries a field (keyfield.go) has its fromFile DERIVED from it rather than written in this
-//     table — the file's typed value copied onto the field under the row's own "stated" predicate,
-//     never through Set — which is today every KindBool row but `context-files.enable`.
+//     stale one standing. That is also what makes [LoadFileConfig] answer with usable Options. A
+//     row that carries a field (keyfield.go) — every scalar row — has its fromFile DERIVED from it
+//     rather than written in this table: the file's typed value copied onto the field under the
+//     row's own "stated" predicate, never re-parsed from text and never through Set, so a block the
+//     file carries is judged by its own validator at ResolveOptions. The exceptions REFUSE a value
+//     the key cannot take at the pass, in the row's own sentence: the keys the file spells as a
+//     STRING a parse can fail on (`sub-agents-choice`, `delegate-timeout`, `stream-idle-timeout`,
+//     `re-stream-budget`, `cursor-shape`) land through the row's own Set, so the startup refusal,
+//     the live re-read's and the settings pane's are one wording, and `ui.stall-after` lands
+//     through the block's own duration parser.
 //   - fromEnv projects a variable's text and fromFlag the already-parsed flag value, each onto the
 //     same field. They run only where their source SET the key (a non-empty variable, an explicitly
-//     changed flag), so neither can shadow the value below it. The env projection is the row's own
-//     Set (setThroughRow): the variable's text is admitted and landed exactly as a value typed at
-//     the settings pane is, so a value the pane refuses is a value the environment cannot smuggle
-//     in. Both are nil for a key with no source of that kind, which is most of the schema — a
+//     changed flag), so neither can shadow the value below it. Both derive from the row's field:
+//     the env projection is the row's own bound Set — the variable's text is admitted and landed
+//     exactly as a value typed at the settings pane is, so a value the pane refuses is a value the
+//     environment cannot smuggle in — and the flag projection copies the parsed flag value onto the
+//     field unjudged. Both are nil for a key with no source of that kind, which is most of the schema — a
 //     per-machine or per-model fact does not belong to one invocation, and ADR 0012 fences two keys
 //     to the global file outright. A nil accessor IS that fence: the pass skips the row, so there is
 //     no path for those sources to reach the key.
 //
-// Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
-// context-files keys, the three non-bool present keys, the four non-bool ui keys — each write the
-// whole block their key
-// sits in, because the Options field IS that block and the block's own mapper (toUIPrefs and its
-// siblings) applies the defaults for whatever the file left out. The rows of one block therefore
+// Two shapes need a word. The keys that SHARE a carrier — the four system-prompt keys and the two
+// context-files keys — each write the whole block their key sits in, because the Options field IS
+// that block and the block's own mapper (toSystemPromptSettings, toContextFilesSettings) applies
+// the defaults for whatever the file left out. The rows of one block therefore
 // write the same value, which is why they share one named projection. And confine-to-workspace's
 // accessor carries the file's own value only: the EFFECTIVE one also depends on whether a Host
 // acknowledgement names this machine, which needs the host identity — a fact no row holds, so that
@@ -399,10 +400,10 @@ type keyAccessor struct {
 // flag has the plumbing that reads it, and no entry carries plumbing its row does not name.
 var keyAccessors = accessorsOver(KeyRegistry, handWrittenAccessors)
 
-// handWrittenAccessors is the part of that table no field derives: every row without a field, and
-// the env and flag plumbing of a field row that has a variable or a flag (`bypass`). A field row's
-// entry carries no fromFile — accessorsOver refuses one — because the field already says where the
-// file's value goes. Listed in the registry's order so it reads beside the table it is built over.
+// handWrittenAccessors is the part of that table no field derives: every row without a field — the
+// structured, list and system-prompt rows and `context-files.enable`. A field row has no entry here
+// — accessorsOver refuses one — because the field already says where the file's, the variable's
+// and the flag's value goes. Listed in the registry's order so it reads beside the table it is built over.
 var handWrittenAccessors = []keyAccessor{
 	{
 		// File-only: the list names MACHINES, which is a config act rather than an invocation one —
@@ -417,52 +418,11 @@ var handWrittenAccessors = []keyAccessor{
 		},
 	},
 	{
-		// The one key of the `servers:` neighbourhood with sources above the file: the list is
-		// config, the choice of entry is an invocation.
-		row:      mustKey("server"),
-		fromFile: func(o *Options, fc fileConfig) error { o.StartupServer = fc.Server; return nil },
-		fromEnv:  setThroughRow("server"),
-		fromFlag: func(o *Options, flags Options) { o.StartupServer = flags.StartupServer },
-	},
-	{
 		// File-only, unlike the pointer above it: which machine takes the DELEGATIONS is a config
 		// act — `/sub-agents-server` records the choice back into the file — not something one
 		// invocation overrides, so the key has neither a variable nor a flag.
 		row:      mustKey("sub-agents-server"),
 		fromFile: func(o *Options, fc fileConfig) error { o.SubAgentsServer = fc.SubAgentsServer; return nil },
-	},
-	{
-		// File-only for its neighbour's reason one row up — who gets to choose the seat is a config
-		// act, not something one invocation overrides. The default comes from the row, so the value
-		// resolution starts from and the one /settings shows as "the default" are one string.
-		row: mustKey("sub-agents-choice"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.SubAgentsChoice = SubAgentsChoice(mustKey("sub-agents-choice").Default)
-			if fc.SubAgentsChoice == "" {
-				return nil
-			}
-			// Through the row, so a word outside the two the key takes is refused HERE, by the
-			// registry's own validator, rather than carried raw for the startup pass to refuse
-			// later: resolving it silently to `fixed` would leave the file reading as configured
-			// while the model was never offered the choice.
-			return mustKey("sub-agents-choice").Set(fc.SubAgentsChoice, o)
-		},
-	},
-	{
-		row: mustKey("mode"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			// The default comes from the row, so the mode resolution starts from and the mode /settings
-			// shows as "the default" are one string.
-			o.Mode = mustKey("mode").Default
-			if fc.Mode != "" {
-				o.Mode = fc.Mode
-			}
-			return nil
-		},
-		// Through the row, so a mode outside the ladder is refused HERE — at the pass, with the
-		// variable named — rather than carried raw for the Driver's own ParseMode to refuse later.
-		fromEnv:  setThroughRow("mode"),
-		fromFlag: func(o *Options, flags Options) { o.Mode = flags.Mode },
 	},
 	{
 		// The first of the four keys that are ONE prompt (ADR 0023, ADR 0067) and therefore one carrier. Its
@@ -507,10 +467,6 @@ var handWrittenAccessors = []keyAccessor{
 			}
 			return nil
 		},
-	},
-	{
-		row:      mustKey("web-search-endpoint"),
-		fromFile: func(o *Options, fc fileConfig) error { o.WebSearchEndpoint = fc.WebSearch; return nil },
 	},
 	{
 		// The on-disk entries are mapped across one by one, as they are everywhere else in this
@@ -573,211 +529,6 @@ var handWrittenAccessors = []keyAccessor{
 		},
 	},
 	{
-		// A pointer on disk, unlike context-window below: 0 is a VALUE here ("no cap"), not the
-		// absence of one, so presence cannot stand in for the positive value the way it does there.
-		row: mustKey("delegate-max-steps"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.DelegateMaxSteps = defaultDelegateMaxSteps
-			if fc.DelegateMaxSteps != nil && *fc.DelegateMaxSteps >= 0 {
-				o.DelegateMaxSteps = *fc.DelegateMaxSteps
-			}
-			return nil
-		},
-	},
-	{
-		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no ceiling").
-		row: mustKey("delegate-fanout-rounds"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.DelegateFanOutRounds = defaultDelegateFanOutRounds
-			if fc.DelegateFanOutRounds != nil && *fc.DelegateFanOutRounds >= 0 {
-				o.DelegateFanOutRounds = *fc.DelegateFanOutRounds
-			}
-			return nil
-		},
-	},
-	{
-		// A plain int on disk: 0 is not a value here (the bound is at least 1), so an absent key
-		// and a 0 resolve alike, to the default — the settings surface refuses the 0 outright.
-		row: mustKey("delegate-max-depth"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.DelegateMaxDepth = defaultDelegateMaxDepth
-			if fc.DelegateMaxDepth >= 1 {
-				o.DelegateMaxDepth = fc.DelegateMaxDepth
-			}
-			return nil
-		},
-	},
-	{
-		// A pointer on disk, delegate-max-steps's reason: 0 is a VALUE here ("no bound").
-		row: mustKey("delegate-max-tokens"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.DelegateMaxTokens = defaultDelegateMaxTokens
-			if fc.DelegateMaxTokens != nil && *fc.DelegateMaxTokens >= 0 {
-				o.DelegateMaxTokens = *fc.DelegateMaxTokens
-			}
-			return nil
-		},
-	},
-	{
-		// A duration's text on disk, `ui.stall-after`'s posture: an absent key and an empty value
-		// resolve to the default, an explicit `0` is off, and text no duration can be made of is
-		// refused HERE, through the row, in the sentence that quotes it — a bound that quietly
-		// resolved to the default would leave the file reading as configured while a delegation
-		// ran under a limit nobody set. Refusing at the pass rather than at startup alone is what
-		// makes a bad value in a LIVE-edited file refuse on the re-read too, through the loader's
-		// own error, instead of resolving to the default in silence.
-		row: mustKey("delegate-timeout"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.DelegateTimeout = defaultDelegateTimeout
-			if fc.DelegateTimeout == nil {
-				return nil
-			}
-			return mustKey("delegate-timeout").Set(*fc.DelegateTimeout, o)
-		},
-	},
-	{
-		// delegate-timeout's shape and reason: a duration's text on disk, an absent key resolving
-		// to the default, an explicit `0` off, and text no duration can be made of refused HERE
-		// through the row — a silence bound that quietly resolved to the default would cut a slow
-		// server's stream under a limit nobody set.
-		row: mustKey("stream-idle-timeout"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.StreamIdleTimeout = defaultStreamIdleTimeout
-			if fc.StreamIdleTimeout == nil {
-				return nil
-			}
-			return mustKey("stream-idle-timeout").Set(*fc.StreamIdleTimeout, o)
-		},
-	},
-	{
-		// A pointer on disk, delegate-fanout-rounds's reason: 0 is a VALUE here ("never re-stream").
-		// Landed through the row rather than copied, stream-idle-timeout's reason: a negative
-		// budget is refused HERE in the row's own sentence — a Turn whose budget quietly resolved
-		// to the default would ride out faults nobody asked it to.
-		row: mustKey("re-stream-budget"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.RestreamBudget = defaultRestreamBudget
-			if fc.RestreamBudget == nil {
-				return nil
-			}
-			return mustKey("re-stream-budget").Set(strconv.Itoa(*fc.RestreamBudget), o)
-		},
-	},
-	{
-		// A whole count rather than a pointer on disk, so PRESENCE is the positive value: 0 and
-		// absent both mean unpinned, and the heartbeat's live observation stands (ADR 0024). Only 0
-		// still reaches here as "unpinned" — a fractional or negative value never gets this far,
-		// because TokenCount refuses it at the decode rather than letting it be floored to one.
-		row: mustKey("context-window"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ContextWindow = 0
-			if fc.ContextWindow > 0 {
-				o.ContextWindow = int(fc.ContextWindow)
-			}
-			return nil
-		},
-	},
-	{
-		// Presence is the positive value here too, for the pin above's reason: 0 and absent both mean
-		// "this run bounds nothing of its own", which leaves the advertised window as the working room.
-		row: mustKey("working-window"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.WorkingWindow = 0
-			if fc.WorkingWindow > 0 {
-				o.WorkingWindow = fc.WorkingWindow
-			}
-			return nil
-		},
-	},
-	{
-		// Presence is the positive value here too, for context-window's reason: the loader accepts
-		// nothing but 0 and the open range (0, 1), so 0 is "unset" and apogee's built-in share stands.
-		row: mustKey("response-reserve"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ResponseReserve = 0
-			if fc.ResponseReserve > 0 {
-				o.ResponseReserve = fc.ResponseReserve
-			}
-			return nil
-		},
-	},
-	{
-		// The three non-bool `present:` keys are one carrier, the system-prompt trio's shape: the
-		// block the file carries, with toPresentSettings defaulting the keys it leaves out. The two
-		// bool keys of the block derive their file value from their field (keyfield.go) instead —
-		// the same value, one field at a time.
-		row:      mustKey("present.command"),
-		fromFile: filePresent,
-	},
-	{
-		row:      mustKey("present.port"),
-		fromFile: filePresent,
-	},
-	{
-		row:      mustKey("present.host"),
-		fromFile: filePresent,
-	},
-	{
-		// The four non-bool `ui:` keys are one carrier, the `present:` block's shape — and
-		// independent axes within it: naming a style does not turn the colour loop off (toUIPrefs).
-		// The six bool keys of the block derive their file value from their field (keyfield.go).
-		row:      mustKey("ui.spinner"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.color-scheme"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.stall-after"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.tools-fold-over"),
-		fromFile: fileUI,
-	},
-	{
-		// The two `sessions:` keys are one carrier, the `ui:` block's shape — and independent rules
-		// within it: naming an age does not bound the count (toSessionSettings).
-		row:      mustKey("sessions.max-age"),
-		fromFile: fileSessions,
-	},
-	{
-		row:      mustKey("sessions.max-count"),
-		fromFile: fileSessions,
-	},
-	{
-		// Carried as the NAME, never parsed into a shape — what each name is drawn as is the
-		// renderer's business — but judged HERE, through the row, against the vocabulary
-		// internal/domain owns: drawing a block for a shape no terminal cursor has would leave the
-		// user staring at a caret their config did not ask for. The empty value is the request for
-		// the default and stays empty, as it does everywhere else.
-		row: mustKey("cursor-shape"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.CursorShape = ""
-			if fc.CursorShape == "" {
-				return nil
-			}
-			return mustKey("cursor-shape").Set(fc.CursorShape, o)
-		},
-	},
-	{
-		// File-only (ADR 0041): $VISUAL and $EDITOR are a FALLBACK below this key, read at the launch
-		// site, rather than a source above it — which is why this row names no environment variable.
-		row:      mustKey("editor"),
-		fromFile: func(o *Options, fc fileConfig) error { o.Editor = fc.Editor; return nil },
-	},
-	{
-		// The file value is the row's field's (keyfield.go); the variable and the flag stay written
-		// here until they derive from it too.
-		row: mustKey("bypass"),
-		// A set-but-unparseable value is a hard error, never a silently-ignored boolean: the row's
-		// Set refuses it in the writer's own sentence, and applyEnv adds the variable's name in
-		// front, because the name is the row's to know rather than this table's.
-		fromEnv:  setThroughRow("bypass"),
-		fromFlag: func(o *Options, flags Options) { o.Bypass = flags.Bypass },
-	},
-	{
 		// The user-origin observe lane. A list of blocks is a shape no scalar row writes, so the
 		// projection is the resolver itself (projectReactions) and the row's own value is a count.
 		row:      mustKey("reactions"),
@@ -797,23 +548,14 @@ var handWrittenAccessors = []keyAccessor{
 	},
 }
 
-// setThroughRow is the env pass's projection for a key that lands its variable's text through the
-// registry row itself (Key.Set): the parse, the refusal sentence and the field are the row's, so
-// this table restates none of them — it only turns the row's (value, options) order into the
-// projection's. Looked up once, when the table is built; a path the registry lacks is a defect in
-// this file and panics as mustKey's other callers do.
-func setThroughRow(path string) func(o *Options, text string) error {
-	row := mustKey(path)
-	return func(o *Options, text string) error { return row.Set(text, o) }
-}
-
 // The file projections shared by the key groups that resolve into ONE carrier: four system-prompt
-// keys, two context-files keys, four present keys and ten ui keys. Every key of a block writes the
-// whole block — the Options field IS the block, and the block's mapper defaults whatever the file
-// left out — so the rows of one block differ in nothing but the key they are described by, and a
-// named function is the honest way to say that. context-files is the one that is not a plain copy:
-// Options carries the RESOLVED name list rather than the block, because the composition root has no
-// use for the switch that produced it.
+// keys and two context-files keys. Every key of a block writes the whole block — the Options field
+// IS the block, and the block's mapper defaults whatever the file left out — so the rows of one
+// block differ in nothing but the key they are described by, and a named function is the honest
+// way to say that. context-files is the one that is not a plain copy: Options carries the RESOLVED
+// name list rather than the block, because the composition root has no use for the switch that
+// produced it. The `present:`, `ui:` and `sessions:` blocks have no shared projection: each of their
+// keys carries a field (keyfield.go) that lands its own member of the block.
 func fileSystemPrompt(o *Options, fc fileConfig) error {
 	o.SystemPrompt = fc.toSystemPromptSettings()
 	return nil
@@ -824,53 +566,10 @@ func fileContextFiles(o *Options, fc fileConfig) error {
 	return nil
 }
 
-func filePresent(o *Options, fc fileConfig) error {
-	o.Present = fc.present()
-	return nil
-}
-
-func fileUI(o *Options, fc fileConfig) error {
-	ui, err := fc.ui()
-	if err != nil {
-		return err
-	}
-	o.UI = ui
-	return nil
-}
-
-func fileSessions(o *Options, fc fileConfig) error {
-	o.Sessions = fc.sessions()
-	return nil
-}
-
-// present, ui and contextFiles are the three optional blocks as the file leaves them: the block it
-// carries, or — where it names no block at all — the block its own mapper builds from nothing,
-// which is that block's defaults. Reaching the defaults through the mapper rather than restating
-// them keeps one home for "what an unconfigured `ui:` resolves to".
-func (fc fileConfig) present() PresentSettings {
-	var p presentConfig
-	if fc.Present != nil {
-		p = *fc.Present
-	}
-	return p.toPresentSettings()
-}
-
-func (fc fileConfig) ui() (domain.UIPrefs, error) {
-	var u uiConfig
-	if fc.UI != nil {
-		u = *fc.UI
-	}
-	return u.toUIPrefs()
-}
-
-func (fc fileConfig) sessions() SessionSettings {
-	var c sessionsConfig
-	if fc.Sessions != nil {
-		c = *fc.Sessions
-	}
-	return c.toSessionSettings()
-}
-
+// contextFiles is the optional block as the file leaves it: the block it carries, or — where it
+// names no block at all — the block its own mapper builds from nothing, which is that block's
+// defaults. Reaching the defaults through the mapper rather than restating them keeps one home for
+// "what an unconfigured `context-files:` resolves to".
 func (fc fileConfig) contextFiles() contextFilesSettings {
 	var c contextFilesConfig
 	if fc.ContextFiles != nil {
@@ -2295,8 +1994,9 @@ func ResolveResponseReserve(entry, session float64) float64 {
 }
 
 // presentConfig is the on-disk schema for the `present:` block (ADR 0019). It mirrors
-// PresentSettings with yaml tags; toPresentSettings maps it across so the on-disk shape and the
-// resolved value stay independently evolvable (as mcpServerConfig does for mcp.ServerConfig).
+// PresentSettings with yaml tags; each `present.*` row's field (keyfield.go) lands its one member
+// across — the default where the block leaves the key out — so the on-disk shape and the resolved
+// value stay independently evolvable (as mcpServerConfig does for mcp.ServerConfig).
 type presentConfig struct {
 	// AutoOpen is a pointer so an explicit `auto-open: false` is distinguishable from an absent
 	// key (which keeps the default true).
@@ -2311,24 +2011,6 @@ type presentConfig struct {
 	Port int `yaml:"port"`
 	// Host is the address served URLs advertise; empty ⇒ detected (see PresentSettings.host).
 	Host string `yaml:"host"`
-}
-
-// toPresentSettings maps the on-disk present block onto the resolved value, applying the
-// auto-open default (true) when the key is absent. A block that sets one key therefore leaves the
-// other four at their defaults, which is what makes it usable a line at a time —
-// command-on-model-documents among them, whose default is off.
-func (p presentConfig) toPresentSettings() PresentSettings {
-	s := PresentSettings{
-		AutoOpen:                true,
-		Command:                 p.Command,
-		CommandOnModelDocuments: p.CommandOnModelDocuments,
-		Port:                    p.Port,
-		Host:                    p.Host,
-	}
-	if p.AutoOpen != nil {
-		s.AutoOpen = *p.AutoOpen
-	}
-	return s
 }
 
 // systemPromptEntryConfig is the on-disk schema for one `system-prompt-models:` entry (ADR 0023).
@@ -2351,7 +2033,7 @@ type systemPromptLayerConfig struct {
 }
 
 // toSystemPromptSettings maps the three on-disk system-prompt keys onto the resolved value (the
-// toPresentSettings shape), mapping the per-model entries across one by one so the on-disk schema
+// toSessionSettings shape), mapping the per-model entries across one by one so the on-disk schema
 // and the resolved one stay independently evolvable. It applies no defaults and rejects nothing:
 // an empty source is simply "no prompt configured here", and the contradictions are
 // SystemPromptSettings.Validate's to name.
@@ -2386,7 +2068,7 @@ type contextFilesConfig struct {
 
 // toContextFilesSettings maps the on-disk context-files block onto the resolved value, applying the
 // defaults for the keys the block leaves out — so `enable: false` alone, or `names:` alone, is a
-// usable one-line block (the toPresentSettings shape). It applies no validation: the names are
+// usable one-line block (the toSessionSettings shape). It applies no validation: the names are
 // contextFilesSettings.validate's to refuse.
 func (c contextFilesConfig) toContextFilesSettings() contextFilesSettings {
 	s := defaultContextFilesSettings()
@@ -2400,8 +2082,10 @@ func (c contextFilesConfig) toContextFilesSettings() contextFilesSettings {
 }
 
 // uiConfig is the on-disk schema for the `ui:` block. It mirrors domain.UIPrefs with yaml tags;
-// toUIPrefs maps it across so the on-disk shape and the resolved value stay independently
-// evolvable (as presentConfig does for PresentSettings).
+// each `ui.*` row's field (keyfield.go) lands its one member across — the default where the block
+// leaves the key out — so the on-disk shape and the resolved value stay independently evolvable
+// (as presentConfig does for PresentSettings), and the axes stay independent from the on-disk
+// shape onward: naming a style does not turn the colour loop off.
 type uiConfig struct {
 	// Spinner names the status-line animation — snake | glitter | classic. Empty ⇒ the default.
 	// It stays a raw string here: UIPrefs.Validate parses it once, so an unknown name reaches
@@ -2453,56 +2137,6 @@ type uiConfig struct {
 	// stall-after: yaml's own parse is the only one there is, and the one judgement (below zero) is
 	// UIPrefs.Validate's.
 	ToolsFoldOver *int `yaml:"tools-fold-over"`
-}
-
-// toUIPrefs maps the on-disk ui block onto the resolved value, applying the defaults for the keys
-// the block leaves out. A block that sets one key therefore leaves the others at their defaults,
-// which is what keeps the axes independent from the on-disk shape onward: naming a style does not
-// turn the colour loop off, turning the loop off does not change the style, and neither says
-// anything about the scroll bar. The one key the file carries as text a parse can FAIL on,
-// `stall-after:`, is read through domain.ParseStallAfter — the parser every surface reads the key
-// with — so the refusal is that parser's sentence, quoting the text as written, and it is made at
-// the file pass rather than at ResolveOptions (as `delegate-timeout` is).
-func (u uiConfig) toUIPrefs() (domain.UIPrefs, error) {
-	s := domain.DefaultUIPrefs()
-	if u.Spinner != "" {
-		s.Spinner = domain.SpinnerStyle(u.Spinner) // validated by UIPrefs.Validate, not here
-	}
-	if u.SpinnerColor != nil {
-		s.SpinnerColor = *u.SpinnerColor
-	}
-	if u.ShowScrollbar != nil {
-		s.ShowScrollbar = *u.ShowScrollbar
-	}
-	if u.ColorScheme != "" {
-		s.ColorScheme = u.ColorScheme // resolved against the schemes folder by wire.go, not here
-	}
-	if u.StallAfter != nil {
-		// An empty value reads as an absent key, the posture the two string keys above take — the
-		// parser's own "" ⇒ the default: what the pointer buys is telling an explicit `0` — the
-		// documented spelling of "off" — from a block that never named the key.
-		after, err := domain.ParseStallAfter(*u.StallAfter)
-		if err != nil {
-			return domain.UIPrefs{}, err
-		}
-		s.StallAfter = after
-	}
-	if u.Inspector != nil {
-		s.Inspector = *u.Inspector
-	}
-	if u.SkillSuggestions != nil {
-		s.SkillSuggestions = *u.SkillSuggestions
-	}
-	if u.TaskListOpen != nil {
-		s.TaskListOpen = *u.TaskListOpen
-	}
-	if u.ToolsOpen != nil {
-		s.ToolsOpen = *u.ToolsOpen
-	}
-	if u.ToolsFoldOver != nil {
-		s.ToolsFoldOver = *u.ToolsFoldOver // refused below zero by UIPrefs.Validate, not here
-	}
-	return s, nil
 }
 
 // sessionsConfig is the on-disk schema for the `sessions:` block. It mirrors SessionSettings with
@@ -2910,7 +2544,8 @@ func toProfileEntries(m map[string]modelProfileConfig) []profiles.Entry {
 // described, rather than by a branch someone had to remember to add beside thirty-seven others.
 //
 // A value a key refuses is refused HERE, in the row's own sentence, and the pass stops at it: the
-// string-spelled keys with a validate hook land through the row's Set (keyAccessor). The pass is
+// keys the file spells as text a parse can refuse land through the row's Set (checkedField,
+// keyfield.go), while every other scalar is copied across as typed. The pass is
 // the one projection both startup and every live re-read make, so the refusal is one sentence in
 // both places — and a bad value edited into the file under a running session REFUSES on the
 // re-read, through the loader's error, where it once resolved to the key's default in silence.

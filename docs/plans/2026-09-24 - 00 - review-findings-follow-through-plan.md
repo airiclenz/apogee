@@ -350,7 +350,16 @@ internal/config/doc.go — file map; internal/domain/uiprefs.go — UIPrefs.Set,
 - `go test -race -count=1 -run 'Registry|KeyAccessors|EveryConfigKey|ApplyConfig|Bypass|ContextFillNotice|Field|DocMap' ./internal/config/`
 **Commit:** `refactor(config): a key's typed field derives its accessors, starting with the bool rows`
 
-## 16. Scalar rows, env and flag derive from the descriptor
+## 16. Scalar rows, env and flag derive from the descriptor — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): "string, int, float and duration rows" was read as every scalar row, so the enum, server and scheme rows get a field too (mode, sub-agents-choice, server, ui.spinner, ui.color-scheme, cursor-shape), because the regression guard names them. The rows left without a field are item 17's hand-written set: sub-agents-server, the system-prompt keys, context-files.*, the list rows and the structured rows.
+NOTES (2026-09-24): scalarField has two file modes. `file` is the unvalidated typed copy. `fileText`+`fileLand` is for the rows whose file pass could refuse at base: the five Set-landing rows go through the bound Set (checkedField), ui.stall-after goes through domain.ParseStallAfter, and sessions.max-age keeps its unparsed text for SessionSettings.Validate. max-age's landing runs on every pass (an absent key reads as ""), so a re-read clears stale unparsed text. `zeroWhenUnstated` keeps cursor-shape's "" when absent.
+NOTES (2026-09-24): bindRows now derives a field row's fromFile after the Set is bound, and passes the bound Set in. accessorsOver derives fromEnv (the bound Set) and fromFlag (an unvalidated typed copy) for field rows. Its init guard is wider: any hand-written entry for a field row now panics, not only one carrying a fromFile.
+NOTES (2026-09-24): consequential removals: filePresent, fileUI, fileSessions, fileConfig.present/ui/sessions, presentConfig.toPresentSettings and uiConfig.toUIPrefs lost their last callers once every key of those blocks carried a field. Their defaults are now pinned by TestFieldEmptyFileResolvesBlockDefaults (the empty file resolves to domain.DefaultUIPrefs(), PresentSettings{AutoOpen: true} and defaultSessionSettings()).
+NOTES (2026-09-24): item 15's TestFieldCarriedByEveryBoolRow is renamed TestFieldCarriedByEveryScalarRow. Its assertion covered bool rows only and now covers every scalar row. Its "bypass keeps hand-written env/flag" case now expects a panic, and a new case checks the derived fromEnv/fromFlag.
+NOTES (2026-09-24): consequential edit — internal/config/doc.go: made necessary by keyfield.go now deriving the env and flag projections (file-map line).
+NOTES (2026-09-24): consequential edit — internal/tui/presenter_test.go: made necessary by removing toPresentSettings (a comment named it).
+NOTES (2026-09-24): config_test.go and registry_test.go were in Files but needed no change. The existing registry, accessor, env, flag and LoadFileConfig tests pass unchanged over the derived rows.
 
 **What:**
 **Goal:** string, int, float and duration rows carry a `field`; env sources set through the bound Set; the flag copy is an unvalidated typed copy; `setThroughRow` is gone; the env error lead `apogee: invalid APOGEE_X %q:` and `--mode`'s refusal timing and wording are unchanged. Depends on item 15.
