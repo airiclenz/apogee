@@ -355,7 +355,10 @@ func (s SessionSettings) Validate() error {
 //     yaml-typed — a decoded bool or int is landed as the number it already is, never re-parsed
 //     from text — and only the keys the file spells as a STRING with a validate hook to judge it
 //     (`sub-agents-choice`, `delegate-timeout`, `cursor-shape`) land through the row's own Set, so
-//     the startup refusal, the live re-read's and the settings pane's are one wording.
+//     the startup refusal, the live re-read's and the settings pane's are one wording. A row that
+//     carries a field (keyfield.go) has its fromFile DERIVED from it rather than written in this
+//     table — the file's typed value copied onto the field under the row's own "stated" predicate,
+//     never through Set — which is today every KindBool row but `context-files.enable`.
 //   - fromEnv projects a variable's text and fromFlag the already-parsed flag value, each onto the
 //     same field. They run only where their source SET the key (a non-empty variable, an explicitly
 //     changed flag), so neither can shadow the value below it. The env projection is the row's own
@@ -367,7 +370,8 @@ func (s SessionSettings) Validate() error {
 //     no path for those sources to reach the key.
 //
 // Two shapes need a word. The keys that SHARE a carrier — the three system-prompt keys, the two
-// context-files keys, the four present keys, the ten ui keys — each write the whole block their key
+// context-files keys, the three non-bool present keys, the four non-bool ui keys — each write the
+// whole block their key
 // sits in, because the Options field IS that block and the block's own mapper (toUIPrefs and its
 // siblings) applies the defaults for whatever the file left out. The rows of one block therefore
 // write the same value, which is why they share one named projection. And confine-to-workspace's
@@ -386,14 +390,20 @@ type keyAccessor struct {
 	fromFlag func(o *Options, flags Options)
 }
 
-// keyAccessors is that table: one entry per registry row, in the order the registry lists the keys.
-// The order does not affect the outcome — each key writes its own field, and precedence is the
-// order the SOURCES are applied in — it only keeps the table readable beside the registry it is
-// built over. Its completeness is a test gate rather than an editorial promise
-// (TestKeyAccessorsBindDescribedKeys): every registry row has an entry here, every entry carries the
-// fromFile projection every key needs, and a row advertising a variable or a flag has the plumbing
-// that reads it.
-var keyAccessors = []keyAccessor{
+// keyAccessors is that table: one entry per registry row, in the order the registry lists the keys,
+// built over the registry (accessorsOver) from the rows' derived file projections and the
+// hand-written entries below. The order does not affect the outcome — each key writes its own
+// field, and precedence is the order the SOURCES are applied in. Its completeness is checked twice:
+// accessorsOver panics at init on a row with neither a field nor a hand-written fromFile, and
+// TestKeyAccessorsBindDescribedKeys holds every entry to its row — a row advertising a variable or a
+// flag has the plumbing that reads it, and no entry carries plumbing its row does not name.
+var keyAccessors = accessorsOver(KeyRegistry, handWrittenAccessors)
+
+// handWrittenAccessors is the part of that table no field derives: every row without a field, and
+// the env and flag plumbing of a field row that has a variable or a flag (`bypass`). A field row's
+// entry carries no fromFile — accessorsOver refuses one — because the field already says where the
+// file's value goes. Listed in the registry's order so it reads beside the table it is built over.
+var handWrittenAccessors = []keyAccessor{
 	{
 		// File-only: the list names MACHINES, which is a config act rather than an invocation one —
 		// its invocation-settable neighbour is the `server:` pointer below it.
@@ -487,17 +497,6 @@ var keyAccessors = []keyAccessor{
 		fromFile: fileContextFiles,
 	},
 	{
-		// Global-config-only (ADR 0012): no env, no flag, so the invocation environment cannot loosen
-		// Auto's blast radius. This carries what the FILE says — default true, and an absent key states
-		// the same thing an explicit `true` does; the effective value is resolveConfineToWorkspace's,
-		// because only it holds this machine's identity.
-		row: mustKey("confine-to-workspace"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ConfineToWorkspace = fc.ConfineToWorkspace == nil || *fc.ConfineToWorkspace
-			return nil
-		},
-	},
-	{
 		// Global-config-only for the reason above — a hostile repo must not be able to name your
 		// host — and carried past resolution so the session can report the list back and extend it.
 		row: mustKey("unconfined-hosts"),
@@ -570,99 +569,6 @@ var keyAccessors = []keyAccessor{
 			if fc.URLSafety != nil && len(fc.URLSafety.DenyHosts) > 0 {
 				o.URLDenyHosts = fc.URLSafety.DenyHosts
 			}
-			return nil
-		},
-	},
-	{
-		row: mustKey("use-project-skills"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.UseProjectSkills = fc.UseProjectSkills == nil || *fc.UseProjectSkills
-			return nil
-		},
-	},
-	{
-		row: mustKey("use-shipped-skills"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.UseShippedSkills = fc.UseShippedSkills == nil || *fc.UseShippedSkills
-			return nil
-		},
-	},
-	{
-		row: mustKey("use-default-prompt"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.UseDefaultPrompt = fc.UseDefaultPrompt == nil || *fc.UseDefaultPrompt
-			return nil
-		},
-	},
-	{
-		row: mustKey("auto-compact"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.AutoCompact = fc.AutoCompact == nil || *fc.AutoCompact
-			return nil
-		},
-	},
-	{
-		row: mustKey("prune-tool-results"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.PruneToolResults = fc.PruneToolResults == nil || *fc.PruneToolResults
-			return nil
-		},
-	},
-	{
-		row: mustKey("tool-use-enforcer"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ToolUseEnforcer = fc.ToolUseEnforcer == nil || *fc.ToolUseEnforcer
-			return nil
-		},
-	},
-	{
-		row: mustKey("empty-response-recovery"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.EmptyResponseRecovery = fc.EmptyResponseRecovery == nil || *fc.EmptyResponseRecovery
-			return nil
-		},
-	},
-	{
-		row: mustKey("tool-call-repair"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ToolCallRepair = fc.ToolCallRepair == nil || *fc.ToolCallRepair
-			return nil
-		},
-	},
-	{
-		row: mustKey("tool-call-salvage"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ToolCallSalvage = fc.ToolCallSalvage == nil || *fc.ToolCallSalvage
-			return nil
-		},
-	},
-	{
-		row: mustKey("tool-loop-breaker"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ToolLoopBreaker = fc.ToolLoopBreaker == nil || *fc.ToolLoopBreaker
-			return nil
-		},
-	},
-	{
-		row: mustKey("tool-result-cap"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ToolResultCap = fc.ToolResultCap == nil || *fc.ToolResultCap
-			return nil
-		},
-	},
-	{
-		row: mustKey("read-cache"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ReadCache = fc.ReadCache == nil || *fc.ReadCache
-			return nil
-		},
-	},
-	{
-		// Default OFF, unlike the seven Floor keys above it: a model-facing behaviour above the Floor
-		// ships off until bench evidence turns it on (ADR 0077).
-		row: mustKey("context-fill-notice"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ContextFillNotice = fc.ContextFillNotice != nil && *fc.ContextFillNotice
 			return nil
 		},
 	},
@@ -758,38 +664,6 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// undo-snapshots's shape: on unless the file says otherwise.
-		row: mustKey("server-stats"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.ServerStats = fc.ServerStats == nil || *fc.ServerStats
-			return nil
-		},
-	},
-	{
-		row: mustKey("undo-snapshots"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
-			return nil
-		},
-	},
-	{
-		row: mustKey("auto-title"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.AutoTitle = fc.AutoTitle == nil || *fc.AutoTitle
-			return nil
-		},
-	},
-	{
-		// auto-title's shape: on unless the file says otherwise, the value the starter template
-		// ships as an active line — so a config that omits the key and one seeded on first run
-		// come back the same way.
-		row: mustKey("remember-model"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.RememberModel = fc.RememberModel == nil || *fc.RememberModel
-			return nil
-		},
-	},
-	{
 		// A whole count rather than a pointer on disk, so PRESENCE is the positive value: 0 and
 		// absent both mean unpinned, and the heartbeat's live observation stands (ADR 0024). Only 0
 		// still reaches here as "unpinned" — a fractional or negative value never gets this far,
@@ -828,17 +702,11 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
-		// The five `present:` keys are one carrier, the system-prompt trio's shape: the block the file
-		// carries, with toPresentSettings defaulting the keys it leaves out (auto-open on).
-		row:      mustKey("present.auto-open"),
-		fromFile: filePresent,
-	},
-	{
+		// The three non-bool `present:` keys are one carrier, the system-prompt trio's shape: the
+		// block the file carries, with toPresentSettings defaulting the keys it leaves out. The two
+		// bool keys of the block derive their file value from their field (keyfield.go) instead —
+		// the same value, one field at a time.
 		row:      mustKey("present.command"),
-		fromFile: filePresent,
-	},
-	{
-		row:      mustKey("present.command-on-model-documents"),
 		fromFile: filePresent,
 	},
 	{
@@ -850,17 +718,10 @@ var keyAccessors = []keyAccessor{
 		fromFile: filePresent,
 	},
 	{
-		// The ten `ui:` keys are one carrier, the `present:` block's shape — and independent axes
-		// within it: naming a style does not turn the colour loop off (toUIPrefs).
+		// The four non-bool `ui:` keys are one carrier, the `present:` block's shape — and
+		// independent axes within it: naming a style does not turn the colour loop off (toUIPrefs).
+		// The six bool keys of the block derive their file value from their field (keyfield.go).
 		row:      mustKey("ui.spinner"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.spinner-color"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.show-scrollbar"),
 		fromFile: fileUI,
 	},
 	{
@@ -869,22 +730,6 @@ var keyAccessors = []keyAccessor{
 	},
 	{
 		row:      mustKey("ui.stall-after"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.inspector"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.skill-suggestions"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.task-list-open"),
-		fromFile: fileUI,
-	},
-	{
-		row:      mustKey("ui.tools-open"),
 		fromFile: fileUI,
 	},
 	{
@@ -923,11 +768,9 @@ var keyAccessors = []keyAccessor{
 		fromFile: func(o *Options, fc fileConfig) error { o.Editor = fc.Editor; return nil },
 	},
 	{
+		// The file value is the row's field's (keyfield.go); the variable and the flag stay written
+		// here until they derive from it too.
 		row: mustKey("bypass"),
-		fromFile: func(o *Options, fc fileConfig) error {
-			o.Bypass = fc.Bypass != nil && *fc.Bypass
-			return nil
-		},
 		// A set-but-unparseable value is a hard error, never a silently-ignored boolean: the row's
 		// Set refuses it in the writer's own sentence, and applyEnv adds the variable's name in
 		// front, because the name is the row's to know rather than this table's.

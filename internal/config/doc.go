@@ -29,7 +29,9 @@
 // ApplyConfig fills. registry.go is the declarative table describing every schema key exactly
 // once — its type, default, env var, flag, validator, /settings visibility, and the projections
 // that read its value back out of a resolved [Options] — guarded as a bijection with fileConfig,
-// so a key added to the schema breaks the build gate until it is described. reactions.go is the
+// so a key added to the schema breaks the build gate until it is described. keyfield.go is the typed
+// key descriptor a registry row may carry — one declaration of where a key's value lives, from which
+// the row's Read, its Set landing and resolution's file projection are derived. reactions.go is the
 // `reactions:` block — the on-disk shape of one user-origin Reaction, its mapping onto the values
 // internal/reactions and the agent fire (one per action key the entry spells), the whole-list
 // refusal parseConfigFile runs over it, its projection onto the Options, and the environment

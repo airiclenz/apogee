@@ -329,7 +329,12 @@ internal/stubllm/server.go — Server.Release (Turn await gate); cmd/apogee/wire
 - `go test -race -count=1 -run 'Once|Hold' ./internal/run/`; `go test -race -count=1 -run 'Undo' ./cmd/apogee/`
 **Commit:** `fix(run): a running Firing holds its session record`
 
-## 15. Config key descriptor, proven on the bool rows
+## 15. Config key descriptor, proven on the bool rows — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): re-derived from the binder name `bindRows` at the header base — the binder was `bindSetters` (registry.go), renamed to `bindRows` as the plan's regression guard directs; it derives each field row's Read, landing and file projection and panics on a field row that also hand-writes Read or Set.
+NOTES (2026-09-24): the Approach's "file closures ... closing over the bound Set" is overridden by the item's own regression guard: the derived file projection is an unvalidated typed copy under the row's stated predicate (the file func answering nil), never Set; the row's default is parsed from `Key.Default` once at init.
+NOTES (2026-09-24): the derived file projection is stored on an unexported `Key.fromFile` (beside the unexported `Key.field`), which `accessorsOver` reads — the shape item 17 extends to the hand-written rows.
+NOTES (2026-09-24): config_test.go, registry_test.go were listed in Files but needed no change: TestKeyAccessorsBindDescribedKeys, TestEveryConfigKeyReachesTheOptions, TestRegistrySetIsTheInverseOfRead, TestRegistryDefaultsReadBackFromAnEmptyFile, TestRegistryIsBijectionWithFileConfig and TestUIRowsLandThroughUIPrefsSet pass unchanged over the derived rows.
 
 **What:** Recast at the regression check (2026-09-24).
 **Goal:** `internal/config/keyfield.go` defines an unexported `fieldSpec` interface and a generic `scalarField[T]`; every `KindBool` row of `KeyRegistry` except `context-files.enable` (`present.command-on-model-documents` included) carries a `field` from which Read, Set and its file value derive; those rows have no hand-written `fromFile` (`bypass` keeps its hand-written `fromEnv`/`fromFlag` until item 16), and a field row whose hand-written entry carries a `fromFile`, or a row with neither, panics at init.

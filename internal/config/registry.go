@@ -155,9 +155,15 @@ const (
 // and who may write it is Editable's question.
 //
 // In the table each row writes its LANDING alone (land, or landIn for a block's field: the
-// canonical text onto the typed field) and bindSetters, run once when the table is built, binds
+// canonical text onto the typed field) and bindRows, run once when the table is built, binds
 // that landing under the admission the row already carries — the row cannot name itself inside
 // its own literal, and the hook and the kind it would restate are two fields up.
+//
+// A row may instead carry a FIELD (keyfield.go): one typed declaration of the Options field the
+// key lives in and the fileConfig field that states it, from which bindRows derives the row's
+// Read, its landing and resolution's file projection (fromFile), so a row that has one writes none
+// of the three by hand. Every KindBool row but `context-files.enable`, which owns no field, carries
+// one.
 type Key struct {
 	Path       string
 	Kind       Kind
@@ -174,6 +180,12 @@ type Key struct {
 	Text       func(o Options) string
 	Structure  func(o Options) any
 	Set        func(value string, o *Options) error
+
+	// field is the row's typed descriptor, nil for a row that writes its projections by hand.
+	field fieldSpec
+	// fromFile is resolution's file projection bindRows derived from field; nil for a row without
+	// one, whose projection is its hand-written keyAccessors entry (accessorsOver).
+	fromFile func(o *Options, fc fileConfig) error
 }
 
 // The closed vocabularies of the three enum keys, in the order their parse sites list them.
@@ -196,7 +208,7 @@ var (
 // block, in the order the seeded template (internal/config/defaults/config.yaml) presents them —
 // so a surface that renders the registry top to bottom reads like the file the user edits.
 // model-profiles is the template's closing block, so it sits last here too.
-var KeyRegistry = bindSetters([]Key{
+var KeyRegistry = bindRows([]Key{
 	{
 		Path: "servers", Kind: KindStructured,
 		Desc:      "The servers you run models on — name, endpoint, and what each one needs.",
@@ -306,8 +318,8 @@ var KeyRegistry = bindSetters([]Key{
 		Path: "use-default-prompt", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Fall back to apogee's built-in system prompt when none of the keys above sets one.",
-		Read:     func(o Options) string { return boolValue(o.UseDefaultPrompt) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseDefaultPrompt }),
+		field: boolField(func(o *Options) *bool { return &o.UseDefaultPrompt },
+			func(fc fileConfig) *bool { return fc.UseDefaultPrompt }),
 	},
 	{
 		Path: "system-prompt-models", Kind: KindStructured,
@@ -346,12 +358,15 @@ var KeyRegistry = bindSetters([]Key{
 		Set:      land(parseList, func(o *Options) *[]string { return &o.ContextFiles }),
 	},
 	{
+		// The field carries what the FILE says — an absent key states what an explicit `true` does;
+		// the EFFECTIVE value is resolveConfineToWorkspace's, because only it holds this machine's
+		// identity.
 		Path: "confine-to-workspace", Kind: KindBool, Default: "true",
 		GlobalOnly: true,
 		Editable:   false, // the acknowledgement interlock stays single-homed in /confine (ADR 0012)
 		Desc:       "Auto's blast radius: filesystem writes fenced to the workspace under OS confinement.",
-		Read:       func(o Options) string { return boolValue(o.ConfineToWorkspace) },
-		Set:        land(strconv.ParseBool, func(o *Options) *bool { return &o.ConfineToWorkspace }),
+		field: boolField(func(o *Options) *bool { return &o.ConfineToWorkspace },
+			func(fc fileConfig) *bool { return fc.ConfineToWorkspace }),
 	},
 	{
 		Path: "unconfined-hosts", Kind: KindStructured,
@@ -428,86 +443,86 @@ var KeyRegistry = bindSetters([]Key{
 		Path: "use-project-skills", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Discover skills from the workspace's bare skills/ folder as well as the libraries.",
-		Read:     func(o Options) string { return boolValue(o.UseProjectSkills) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseProjectSkills }),
+		field: boolField(func(o *Options) *bool { return &o.UseProjectSkills },
+			func(fc fileConfig) *bool { return fc.UseProjectSkills }),
 	},
 	{
 		Path: "use-shipped-skills", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Offer the skills apogee ships with, below every skill folder on disk.",
-		Read:     func(o Options) string { return boolValue(o.UseShippedSkills) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.UseShippedSkills }),
+		field: boolField(func(o *Options) *bool { return &o.UseShippedSkills },
+			func(fc fileConfig) *bool { return fc.UseShippedSkills }),
 	},
 	{
 		Path: "auto-compact", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Fold older turns into a compact brief before the context window overflows.",
-		Read:     func(o Options) string { return boolValue(o.AutoCompact) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.AutoCompact }),
+		field: boolField(func(o *Options) *bool { return &o.AutoCompact },
+			func(fc fileConfig) *bool { return fc.AutoCompact }),
 	},
 	{
 		Path: "prune-tool-results", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Collapse stale tool results to one-line stubs when history outgrows its budget share.",
-		Read:     func(o Options) string { return boolValue(o.PruneToolResults) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.PruneToolResults }),
+		field: boolField(func(o *Options) *bool { return &o.PruneToolResults },
+			func(fc fileConfig) *bool { return fc.PruneToolResults }),
 	},
 	{
 		Path: "tool-use-enforcer", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: retry a turn that narrated where the model was asked to act.",
-		Read:     func(o Options) string { return boolValue(o.ToolUseEnforcer) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolUseEnforcer }),
+		field: boolField(func(o *Options) *bool { return &o.ToolUseEnforcer },
+			func(fc fileConfig) *bool { return fc.ToolUseEnforcer }),
 	},
 	{
 		Path: "empty-response-recovery", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: retry an empty reply with a completion-check nudge.",
-		Read:     func(o Options) string { return boolValue(o.EmptyResponseRecovery) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.EmptyResponseRecovery }),
+		field: boolField(func(o *Options) *bool { return &o.EmptyResponseRecovery },
+			func(fc fileConfig) *bool { return fc.EmptyResponseRecovery }),
 	},
 	{
 		Path: "tool-call-repair", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: correct an unknown or malformed tool call and retry it.",
-		Read:     func(o Options) string { return boolValue(o.ToolCallRepair) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolCallRepair }),
+		field: boolField(func(o *Options) *bool { return &o.ToolCallRepair },
+			func(fc fileConfig) *bool { return fc.ToolCallRepair }),
 	},
 	{
 		Path: "tool-loop-breaker", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: break an identical repeated tool call, or an exact A-B-A-B alternation, with a directive naming the repeat.",
-		Read:     func(o Options) string { return boolValue(o.ToolLoopBreaker) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolLoopBreaker }),
+		field: boolField(func(o *Options) *bool { return &o.ToolLoopBreaker },
+			func(fc fileConfig) *bool { return fc.ToolLoopBreaker }),
 	},
 	{
 		Path: "tool-result-cap", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: trim an older oversized tool result to its budget share in the request.",
-		Read:     func(o Options) string { return boolValue(o.ToolResultCap) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolResultCap }),
+		field: boolField(func(o *Options) *bool { return &o.ToolResultCap },
+			func(fc fileConfig) *bool { return fc.ToolResultCap }),
 	},
 	{
 		Path: "read-cache", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: cap a re-read of a file unchanged since apogee last read it.",
-		Read:     func(o Options) string { return boolValue(o.ReadCache) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ReadCache }),
+		field: boolField(func(o *Options) *bool { return &o.ReadCache },
+			func(fc fileConfig) *bool { return fc.ReadCache }),
 	},
 	{
 		Path: "tool-call-salvage", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Floor guard: run a tool call the model wrote as JSON in its text instead of on the wire.",
-		Read:     func(o Options) string { return boolValue(o.ToolCallSalvage) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.ToolCallSalvage }),
+		field: boolField(func(o *Options) *bool { return &o.ToolCallSalvage },
+			func(fc fileConfig) *bool { return fc.ToolCallSalvage }),
 	},
 	{
 		Path: "context-fill-notice", Kind: KindBool, Default: "false",
 		Editable: true,
 		Desc: "Tell the model how close it is to automatic compaction (50/75/90) on its tool " +
 			"results. Not a Floor guard: off until bench evidence turns it on.",
-		Read: func(o Options) string { return boolValue(o.ContextFillNotice) },
-		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.ContextFillNotice }),
+		field: boolField(func(o *Options) *bool { return &o.ContextFillNotice },
+			func(fc fileConfig) *bool { return fc.ContextFillNotice }),
 	},
 	{
 		Path: "delegate-max-steps", Kind: KindInt, Default: strconv.Itoa(defaultDelegateMaxSteps),
@@ -589,31 +604,33 @@ var KeyRegistry = bindSetters([]Key{
 		Editable: true,
 		Desc: "Record how fast and how reliably each server answers into " +
 			"~/.apogee/server-stats.jsonl; off neither writes nor reads the file.",
-		Read: func(o Options) string { return boolValue(o.ServerStats) },
-		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.ServerStats }),
+		field: boolField(func(o *Options) *bool { return &o.ServerStats },
+			func(fc fileConfig) *bool { return fc.ServerStats }),
 	},
 	{
 		Path: "undo-snapshots", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +
 			"covers subprocess and MCP writes; takes effect at the next start.",
-		Read: func(o Options) string { return boolValue(o.UndoSnapshots) },
-		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.UndoSnapshots }),
+		field: boolField(func(o *Options) *bool { return &o.UndoSnapshots },
+			func(fc fileConfig) *bool { return fc.UndoSnapshots }),
 	},
 	{
 		Path: "auto-title", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Name a new session from its first prompt, and an unnamed delegation from its " +
 			"task, with one small extra completion each.",
-		Read: func(o Options) string { return boolValue(o.AutoTitle) },
-		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.AutoTitle }),
+		field: boolField(func(o *Options) *bool { return &o.AutoTitle },
+			func(fc fileConfig) *bool { return fc.AutoTitle }),
 	},
 	{
+		// On unless the file says otherwise, the value the starter template ships as an active line —
+		// so a config that omits the key and one seeded on first run come back the same way.
 		Path: "remember-model", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Record the model you pick into its servers: entry and come back on it next start.",
-		Read:     func(o Options) string { return boolValue(o.RememberModel) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.RememberModel }),
+		field: boolField(func(o *Options) *bool { return &o.RememberModel },
+			func(fc fileConfig) *bool { return fc.RememberModel }),
 	},
 	{
 		Path: "context-window", Kind: KindInt, Default: "0",
@@ -656,8 +673,8 @@ var KeyRegistry = bindSetters([]Key{
 		Path: "present.auto-open", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Open a presented document in its application on a local desktop run.",
-		Read:     func(o Options) string { return boolValue(o.Present.AutoOpen) },
-		Set:      landIn(presentOf, PresentSettings.Validate, strconv.ParseBool, func(p *PresentSettings) *bool { return &p.AutoOpen }),
+		field: presentBool(func(p *PresentSettings) *bool { return &p.AutoOpen },
+			func(p *presentConfig) *bool { return p.AutoOpen }),
 	},
 	{
 		Path: "present.command", Kind: KindString,
@@ -675,9 +692,10 @@ var KeyRegistry = bindSetters([]Key{
 		// whole of "file-only" here.
 		Editable: false,
 		Desc:     "Let present.command run on a document the model named; off = the path is shown instead.",
-		Read:     func(o Options) string { return boolValue(o.Present.CommandOnModelDocuments) },
-		Set: landIn(presentOf, PresentSettings.Validate, strconv.ParseBool,
-			func(p *PresentSettings) *bool { return &p.CommandOnModelDocuments }),
+		// A plain bool on disk, not a pointer: its default is off, so the absent key and `false` are
+		// one answer, and the file states the key whenever it carries the block.
+		field: presentBool(func(p *PresentSettings) *bool { return &p.CommandOnModelDocuments },
+			func(p *presentConfig) *bool { return &p.CommandOnModelDocuments }),
 	},
 	{
 		Path: "present.port", Kind: KindInt, Default: "0",
@@ -706,15 +724,15 @@ var KeyRegistry = bindSetters([]Key{
 		Path: "ui.spinner-color", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Run the ten-second colour loop over the spinner glyph.",
-		Read:     func(o Options) string { return boolValue(o.UI.SpinnerColor) },
-		Set:      landUI(domain.UIKeySpinnerColor),
+		field: uiBool(domain.UIKeySpinnerColor, func(u *domain.UIPrefs) *bool { return &u.SpinnerColor },
+			func(u *uiConfig) *bool { return u.SpinnerColor }),
 	},
 	{
 		Path: "ui.show-scrollbar", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc:     "Paint the scroll bar on the transcript and on any overflowing popup, and reserve its column.",
-		Read:     func(o Options) string { return boolValue(o.UI.ShowScrollbar) },
-		Set:      landUI(domain.UIKeyShowScrollbar),
+		field: uiBool(domain.UIKeyShowScrollbar, func(u *domain.UIPrefs) *bool { return &u.ShowScrollbar },
+			func(u *uiConfig) *bool { return u.ShowScrollbar }),
 	},
 	{
 		// A dynamic vocabulary (KindScheme), so EnumValues is empty and the surface asks the session
@@ -751,8 +769,8 @@ var KeyRegistry = bindSetters([]Key{
 		// What this RUN is capturing, which for a startup-only key is what the file said when it
 		// started: a row edited mid-session goes on reporting the armed state until the next start,
 		// the same fact the description states.
-		Read: func(o Options) string { return boolValue(o.UI.Inspector) },
-		Set:  landUI(domain.UIKeyInspector),
+		field: uiBool(domain.UIKeyInspector, func(u *domain.UIPrefs) *bool { return &u.Inspector },
+			func(u *uiConfig) *bool { return u.Inspector }),
 	},
 	{
 		// A bool like ui.spinner-color beside it, and applied the same way: its whole effect is on
@@ -762,8 +780,8 @@ var KeyRegistry = bindSetters([]Key{
 		Editable: true,
 		Desc: "Show the skills that fit the message you are typing in a band above the input box; " +
 			"Tab opens the / menu on them.",
-		Read: func(o Options) string { return boolValue(o.UI.SkillSuggestions) },
-		Set:  landUI(domain.UIKeySkillSuggestions),
+		field: uiBool(domain.UIKeySkillSuggestions, func(u *domain.UIPrefs) *bool { return &u.SkillSuggestions },
+			func(u *uiConfig) *bool { return u.SkillSuggestions }),
 	},
 	{
 		// A bool like ui.skill-suggestions beside it, applied the same way (the renderer's own
@@ -774,8 +792,8 @@ var KeyRegistry = bindSetters([]Key{
 		Editable: true,
 		Desc: "Start with the task-list cards in the transcript open; a click on one folds them all " +
 			"and records the choice here.",
-		Read: func(o Options) string { return boolValue(o.UI.TaskListOpen) },
-		Set:  landUI(domain.UIKeyTaskListOpen),
+		field: uiBool(domain.UIKeyTaskListOpen, func(u *domain.UIPrefs) *bool { return &u.TaskListOpen },
+			func(u *uiConfig) *bool { return u.TaskListOpen }),
 	},
 	{
 		// ui.task-list-open's twin for the Tools umbrella: a bool the renderer applies to itself and
@@ -786,8 +804,8 @@ var KeyRegistry = bindSetters([]Key{
 		Editable: true,
 		Desc: "Large Tools umbrellas (more type rows than `ui.tools-fold-over`) start open; " +
 			"a click on one folds them all and records the choice here.",
-		Read: func(o Options) string { return boolValue(o.UI.ToolsOpen) },
-		Set:  landUI(domain.UIKeyToolsOpen),
+		field: uiBool(domain.UIKeyToolsOpen, func(u *domain.UIPrefs) *bool { return &u.ToolsOpen },
+			func(u *uiConfig) *bool { return u.ToolsOpen }),
 	},
 	{
 		// A count, and the range is the whole contract — sessions.max-count's shape with a floor and
@@ -852,8 +870,8 @@ var KeyRegistry = bindSetters([]Key{
 		EnvVar: EnvBypass, FlagName: "bypass",
 		Editable: true,
 		Desc:     "Run with advise and shape Reactions of user or bench origin off; Floor guards and structural reducers stay on.",
-		Read:     func(o Options) string { return boolValue(o.Bypass) },
-		Set:      land(strconv.ParseBool, func(o *Options) *bool { return &o.Bypass }),
+		field: boolField(func(o *Options) *bool { return &o.Bypass },
+			func(fc fileConfig) *bool { return fc.Bypass }),
 	},
 	{
 		// Structured because an entry is a block of its own — a Moment list, an argv command or a URL
@@ -1377,15 +1395,28 @@ func countSummary(n int, noun string) string {
 //
 // A row's Set is written in the table as its LANDING alone — which typed field the canonical text
 // goes onto, and through which parse — because the two halves in front of the landing are already
-// on the row (the validate hook, the kind) and a literal cannot name itself. bindSetters binds
-// the three into the one call Key.Set documents, once, as the table is built.
+// on the row (the validate hook, the kind) and a literal cannot name itself. A row that carries a
+// field writes not even that: the landing, the Read and the file projection are its field's.
+// bindRows binds the three into the one call Key.Set documents, once, as the table is built.
 
-// bindSetters binds every landing the table writes under the admission its row carries, and hands
-// the table back; a row with no landing keeps its nil Set. It is called on the literal itself so
-// LookupKey and every table built over the registry (keyAccessors) see the bound Set from the
-// first read — an init-time pass would run after those package-level tables had copied their rows.
-func bindSetters(rows []Key) []Key {
+// bindRows derives every field row's Read, landing and file projection from its field, binds every
+// landing the table holds under the admission its row carries, and hands the table back; a row
+// with no landing keeps its nil Set. A field row that hand-writes a Read or a Set as well panics:
+// two answers for one key, and nothing would say which the surfaces read. It is called on the
+// literal itself so LookupKey and every table built over the registry (keyAccessors) see the bound
+// rows from the first read — an init-time pass would run after those package-level tables had
+// copied their rows.
+func bindRows(rows []Key) []Key {
 	for i := range rows {
+		if field := rows[i].field; field != nil {
+			if rows[i].Read != nil || rows[i].Set != nil {
+				panic("apogee: config registry row " + rows[i].Path +
+					" carries a field and a hand-written Read or Set — the field derives both")
+			}
+			rows[i].Read = field.read
+			rows[i].Set = field.landing()
+			rows[i].fromFile = field.fileProjection(rows[i].Path, rows[i].Default)
+		}
 		landing := rows[i].Set
 		if landing == nil {
 			continue
