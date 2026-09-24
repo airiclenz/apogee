@@ -20,11 +20,13 @@ import (
 // or a routed spawn has to hand the seam TOGETHER — the wire target, the model bound on it and the
 // key it carries — and what the Options asked the client for, read back off a Client built from
 // those Options (provider.Option is opaque; Client.Wire and Client.StreamIdleTimeout are its
-// accessors): the wire it speaks and the silence bound its streams run under.
+// accessors): the wire it speaks, the silence bound its streams run under, and the server identity
+// its attempt measurements carry (Client.ServerIdentity — the entry's name and its endpoint, redacted).
 type dialRecord struct {
 	endpoint, model, apiKey string
 	wire                    provider.Wire
 	idle                    time.Duration
+	server, idEndpoint      string
 }
 
 // fakeDialer is the test double behind WithDialer. It records every dial in order and answers each
@@ -49,15 +51,18 @@ func dialerTo(up provider.Responder) *fakeDialer {
 }
 
 // dial is the Dialer the fake is installed as (WithDialer(d.dial)). The provider Options arm no
-// client — an in-process Responder has none — but they are applied to a throwaway one so the wire
-// and the idle bound they carry are recorded: that is the only way to observe what a real dial
-// would have spoken, and how long it would have let the server stay silent.
+// client — an in-process Responder has none — but they are applied to a throwaway one so the wire,
+// the idle bound and the server identity they carry are recorded: that is the only way to observe
+// what a real dial would have spoken, how long it would have let the server stay silent, and which
+// server its attempt measurements would have named.
 func (d *fakeDialer) dial(endpoint, model, apiKey string, opts ...provider.Option) provider.Responder {
 	client := provider.NewClient("", "", opts...)
+	server, idEndpoint, _ := client.ServerIdentity()
 	d.mu.Lock()
 	d.dials = append(d.dials, dialRecord{
 		endpoint: endpoint, model: model, apiKey: apiKey,
 		wire: client.Wire(), idle: client.StreamIdleTimeout(),
+		server: server, idEndpoint: idEndpoint,
 	})
 	d.mu.Unlock()
 	return d.answer(endpoint)
@@ -82,7 +87,9 @@ func (d *fakeDialer) dialled() []dialRecord {
 // anthropic server again, the spec's value replacing whatever the retired client spoke. The
 // stream idle bound is the opposite kind of fact — the session's, not a server's — so every dial
 // carries cfg.StreamIdleTimeout unchanged: the session's, the routed child's (and grandchild's),
-// and the switched client's alike.
+// and the switched client's alike. The server identity attempt measurements carry (ADR 0085) is a
+// per-server fact again: each dial names the entry it binds — the session's, the routed target's
+// own name and endpoint, the switch's arrived-at server — never the parent's or the departed one's.
 func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	t.Parallel()
 
@@ -109,6 +116,7 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	cfg.APIKey = "session-key"
 	cfg.Model = "smart-70b"
 	cfg.Wire = "anthropic"
+	cfg.ServerName = "session-box"
 	cfg.StreamIdleTimeout = 45 * time.Second
 	cfg.Delegation.MaxDepth = 2 // room for the grandchild below
 	a, err := New(cfg, WithDialer(dialer.dial))
@@ -123,6 +131,7 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 	}
 
 	target := routedTarget()
+	target.ServerName = "grunt-box"
 	a.SetDelegationTarget(target)
 	child := spawn(t, a)
 	if child.upstream != grunt {
@@ -138,7 +147,7 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 		t.Errorf("routed grandchild Upstream = %T, want the inherited Dialer's answer", grandchild.upstream)
 	}
 
-	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: switchedEndpoint, APIKey: "new-key", Wire: "anthropic"}); err != nil {
+	if err := a.SwitchUpstream(UpstreamSpec{Endpoint: switchedEndpoint, APIKey: "new-key", Wire: "anthropic", ServerName: "elsewhere-box"}); err != nil {
 		t.Fatalf("SwitchUpstream: %v", err)
 	}
 	if a.upstream != switched {
@@ -150,10 +159,10 @@ func TestDialerIsUsedForSwitchUpstreamAndRoutedSpawn(t *testing.T) {
 
 	idle := cfg.StreamIdleTimeout
 	want := []dialRecord{
-		{endpoint: sessionEndpoint, model: "smart-70b", apiKey: "session-key", wire: provider.WireAnthropic, idle: idle},
-		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI, idle: idle}, // the target's own unnamed wire, not the parent's
-		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI, idle: idle},
-		{endpoint: switchedEndpoint, model: "", apiKey: "new-key", wire: provider.WireAnthropic, idle: idle}, // a switch binds NO model (ADR 0024)
+		{endpoint: sessionEndpoint, model: "smart-70b", apiKey: "session-key", wire: provider.WireAnthropic, idle: idle, server: "session-box", idEndpoint: sessionEndpoint},
+		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI, idle: idle, server: "grunt-box", idEndpoint: target.Endpoint}, // the target's own unnamed wire, not the parent's
+		{endpoint: target.Endpoint, model: target.Model, apiKey: target.APIKey, wire: provider.WireOpenAI, idle: idle, server: "grunt-box", idEndpoint: target.Endpoint},
+		{endpoint: switchedEndpoint, model: "", apiKey: "new-key", wire: provider.WireAnthropic, idle: idle, server: "elsewhere-box", idEndpoint: switchedEndpoint}, // a switch binds NO model (ADR 0024)
 	}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
 		t.Errorf("dials through the seam = %+v, want %+v", got, want)
@@ -189,7 +198,7 @@ func TestResumeDialsThroughTheDialer(t *testing.T) {
 	if b.upstream != resumed {
 		t.Errorf("Resume bound %T as the Upstream, want the Dialer's answer", b.upstream)
 	}
-	want := []dialRecord{{endpoint: cfg.Endpoint, model: cfg.Model, apiKey: "resumed-key", wire: provider.WireOpenAI, idle: cfg.StreamIdleTimeout}}
+	want := []dialRecord{{endpoint: cfg.Endpoint, model: cfg.Model, apiKey: "resumed-key", wire: provider.WireOpenAI, idle: cfg.StreamIdleTimeout, idEndpoint: cfg.Endpoint}}
 	if got := dialer.dialled(); !slices.Equal(got, want) {
 		t.Errorf("dials through the seam = %+v, want %+v", got, want)
 	}

@@ -152,7 +152,13 @@ NOTES (2026-09-24): `-race` cannot run on this kernel (ThreadSanitizer: unsuppor
 **Acceptance:** `go test -race -count=1 ./internal/provider/`
 **Commit:** `feat(provider): time every upstream HTTP attempt on the delta stream`
 
-## 6. `UpstreamAttemptEvent` — the engine emits every attempt
+## 6. `UpstreamAttemptEvent` — the engine emits every attempt — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): dialOptions stamps `WithServerIdentity(cfg.ServerName, cfg.Endpoint)` unconditionally (like its other Options), so an unnamed server — a bench arm, an embedder — still measures, with an empty Server; the harness's own scriptResponder builds its Client outside dialOptions and stays unstamped, so existing delta/event pins are untouched.
+NOTES (2026-09-24): the Delta → event translation is one helper, `Agent.emitAttempt` in internal/agent/loop.go, shared by streamResponse's observer and compaction's attempt-only observer; collect.go changed only in its doc (its switch already ignored the new kind), and fold.go needed no line (foldEvent's no-op default covers the row).
+NOTES (2026-09-24): consequential edit — internal/agent/switchupstream_test.go: made necessary by dialRecord gaining the server-identity fields (its struct-equality `want` now states the switch's redacted endpoint).
+NOTES (2026-09-24): consequential edit — internal/agent/compact.go and collect.go doc comments: made necessary by the summarizer now passing an attempt-only observer in place of nil.
+NOTES (2026-09-24): `-race` cannot run on this kernel (ThreadSanitizer: unsupported VMA range); the Acceptance ran unraced (agent, domain, root alias, tui fold/progress-save all pass; full ./internal/tui, ./internal/eventjson and ./cmd/apogee also pass) — the raced form must run on a race-capable box.
 
 Depends on items 4 and 5.
 **What:** Recast at the regression check (2026-09-23).

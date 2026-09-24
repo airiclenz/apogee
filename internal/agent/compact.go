@@ -563,8 +563,9 @@ const cappedSummaryNotAskedCause = "the cap went on a reasoning pass this server
 // clock skips the flagged event (the gauge re-measures on the next real Turn's usage) and a reader
 // of the cumulative totals accepts it — the contract on domain.UsageEvent. It reuses the loop's
 // request projection (toProviderRequest) and the loop's Delta collector (collectCompletion, with
-// no observer); a cancelled ctx or a terminal stream fault surfaces as an error, so the reducer
-// leaves the conversation untouched and — having no completed call to account for — emits nothing.
+// an observer that passes on only each HTTP attempt's measurement as an UpstreamAttemptEvent); a
+// cancelled ctx or a terminal stream fault surfaces as an error, so the reducer leaves the
+// conversation untouched and — having no completed call to account for — emits no UsageEvent.
 // A TRANSIENT fault (Delta.Retryable) is re-streamed before it surfaces, under the Turn's own
 // re-stream budget and doubling hold-off, so a momentary 502 during a summary no longer fails the
 // fold.
@@ -625,9 +626,14 @@ func (c compactCompleter) Complete(ctx context.Context, msgs []domain.Message) (
 	// rest of the Exchange (foldFaulted) — a stand-down meant for a history that cannot shrink, not
 	// for a blip. The fault that finds the budget spent, of any class, surfaces as every fault
 	// always did.
+	// The summary stays silent in the transcript, but not in the measurement: its observer passes
+	// on each HTTP attempt's DeltaAttempt as an UpstreamAttemptEvent and ignores every other kind,
+	// so a fold's calls reach the per-server stats like a Turn's do (ADR 0085).
+	turn := c.a.turns.index
+	observeAttempt := func(delta provider.Delta) { c.a.emitAttempt(turn, delta) }
 	var summary completion
 	for restreamed := 0; ; {
-		summary = c.a.collectCompletion(ctx, preq, nil)
+		summary = c.a.collectCompletion(ctx, preq, observeAttempt)
 		if ctx.Err() != nil {
 			return "", ctx.Err() // a cancel masquerades as a stream error; ctx wins (as in respondAndReview)
 		}

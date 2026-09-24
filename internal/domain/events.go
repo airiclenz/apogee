@@ -1,6 +1,9 @@
 package domain
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+)
 
 // ----------------------------------------------------------------------------
 // Events (ADR 0001 — consumed as Go values in-process)
@@ -568,4 +571,44 @@ type WireEvent struct {
 	EventBase
 	Direction string
 	Payload   string
+}
+
+// UpstreamAttemptEvent reports the measurement of ONE HTTP attempt a model call made against its
+// Upstream (ADR 0085): which server it went to, how long the first byte, the first model delta and
+// the last one took, how many output tokens the server reported and how the attempt ended. Every
+// attempt is reported — a retried POST, a failed one and a cancelled one included — at every depth
+// and for compaction's summary call as well as a Turn's, so a Driver that records them (the
+// per-server stats store, the Inspector, the headless stream) sees every request the session made.
+//
+// It is OBSERVATION ONLY: nothing in it reaches history, the transcript, the token accounting or
+// the model, and a Driver that ignores it loses nothing but the measurement. It is emitted only
+// for a call made over a Client stamped with its server's identity (provider.WithServerIdentity,
+// which every engine dial carries); an Upstream that is not such a Client yields none.
+//
+// Every duration is timed from the attempt's send, so TTFB ≤ TTFT ≤ Last ≤ Duration wherever each
+// was reached, and a zero means not reached. Endpoint is already redacted to scheme, host and path.
+// OutputTokens 0 means the server reported none — never an estimate to be made. Outcome is one of
+// the provider's closed vocabulary: "ok", "http_<code>", "overflow", "in_band", "transport",
+// "idle", "stream_fault" or "cancelled" — the last caused by the caller, never by the server.
+type UpstreamAttemptEvent struct {
+	EventBase
+	// Server is the server entry's name; Endpoint its redacted endpoint.
+	Server   string
+	Endpoint string
+	// Model is the model id the server answered with, else the one the request asked for.
+	Model string
+	// RequestID is shared by every attempt of one model call; Index is the attempt's 0-based
+	// position within it.
+	RequestID string
+	Index     int
+	// TTFB is send → first body byte (keep-alives count); TTFT send → first model delta; Last
+	// send → last model delta; Duration send → the attempt's end.
+	TTFB     time.Duration
+	TTFT     time.Duration
+	Last     time.Duration
+	Duration time.Duration
+	// OutputTokens is the completion token count the server reported, 0 when it reported none.
+	OutputTokens int
+	// Outcome is how the attempt ended (see the vocabulary above).
+	Outcome string
 }

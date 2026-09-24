@@ -867,9 +867,38 @@ func (a *Agent) streamResponse(ctx context.Context, turn int, req *domain.Reques
 					u.PromptTokens, u.CompletionTokens, u.TotalTokens, u.CachedPromptTokens,
 				))
 			}
+		case provider.DeltaAttempt:
+			a.emitAttempt(turn, delta)
 		}
 	}
 	return a.collectCompletion(ctx, a.toProviderRequest(req), observe)
+}
+
+// emitAttempt reports one HTTP attempt's measurement (a DeltaAttempt) as an UpstreamAttemptEvent
+// stamped with this Agent's identity at turn — observation only, so the Delta touches nothing the
+// collector folds. It is the one translation from the provider's Attempt to the domain event,
+// shared by the Turn's observer (streamResponse) and the summarizer's attempt-only observer
+// (compactCompleter.Complete). A delta that is not a DeltaAttempt, or carries no Attempt, emits
+// nothing.
+func (a *Agent) emitAttempt(turn int, delta provider.Delta) {
+	at := delta.Attempt
+	if delta.Kind != provider.DeltaAttempt || at == nil {
+		return
+	}
+	a.cfg.Events.Emit(domain.UpstreamAttemptEvent{
+		EventBase:    a.base(turn),
+		Server:       at.Server,
+		Endpoint:     at.Endpoint,
+		Model:        at.Model,
+		RequestID:    at.RequestID,
+		Index:        at.Index,
+		TTFB:         at.TTFB,
+		TTFT:         at.TTFT,
+		Last:         at.Last,
+		Duration:     at.Duration,
+		OutputTokens: at.OutputTokens,
+		Outcome:      at.Outcome,
+	})
 }
 
 // emitVisibleDelta emits the newly-revealed VISIBLE tail of the accumulated content as a

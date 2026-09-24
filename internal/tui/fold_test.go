@@ -312,6 +312,13 @@ func foldCases() []foldCase {
 			event: domain.WireEvent{Direction: domain.WireDirectionRequest, Payload: `{"model":"m"}`},
 		},
 		{
+			name: "UpstreamAttemptEvent is inert in the transcript",
+			// Nothing here: one HTTP attempt's measurement is not a conversation entry, so it must
+			// not disturb the scrollback, the gauge, the status phrase or the progress save. The
+			// per-server stats and `/inspect` are where the measurement surfaces (ADR 0085).
+			event: domain.UpstreamAttemptEvent{Server: "box", Endpoint: "http://h/v1", Model: "m", Index: 0, Outcome: "ok"},
+		},
+		{
 			name: "SeamClosedEvent is inert in the view",
 			// Nothing at all, and by contract: the event is a sink's to consume (the headless
 			// stream writes it only when asked, and never its Value), and its Value is the seam's

@@ -297,6 +297,7 @@ type (
 	UsageEvent             = domain.UsageEvent
 	AuditEvent             = domain.AuditEvent
 	WireEvent              = domain.WireEvent
+	UpstreamAttemptEvent   = domain.UpstreamAttemptEvent
 )
 
 // SubAgentPhase is the phase a SubAgentPhaseEvent reports.

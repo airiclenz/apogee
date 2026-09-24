@@ -57,14 +57,18 @@ type Config struct {
 
 	// ServerName and ServerDescription name the Upstream in the HUMAN's words — the `servers:`
 	// entry this session is bound to and the free-text `description:` beside it (ADR 0069). They
-	// are display facts and never dial facts: nothing routes, authenticates or budgets by them, so
-	// a Driver that names neither — a bench arm, an embedder, every session before this existed —
-	// runs byte-identically to one that does.
+	// are never ROUTING facts: nothing routes, authenticates or budgets by them, so a Driver that
+	// names neither — a bench arm, an embedder, every session before this existed — sends
+	// byte-identical requests to one that does.
 	//
-	// The engine reads them in exactly ONE place: the orientation block's Delegations line, which
-	// tells a model offered `run_on` what the session seat actually IS, so its choice between the
-	// two seats is an informed one rather than a guess about two opaque labels. Both are optional
-	// and independently so — an unnamed server renders no name, an undescribed one no description.
+	// The engine reads them in two places. The orientation block's Delegations line tells a model
+	// offered `run_on` what the session seat actually IS, so its choice between the two seats is
+	// an informed one rather than a guess about two opaque labels. And dialOptions stamps
+	// ServerName (with Endpoint) onto every Client it builds as the server's identity for attempt
+	// measurement (provider.WithServerIdentity, ADR 0085), so each UpstreamAttemptEvent names the
+	// entry it measured — a label on the measurement, never an input to the request. Both are
+	// optional and independently so — an unnamed server renders no name, an undescribed one no
+	// description, and an unnamed server's attempts carry an empty Server.
 	//
 	// Like every other input of that block they are per-session constants (ADR 0023 §6): they move
 	// only where the human moves the server, through SwitchUpstream's `/server` door, which is what

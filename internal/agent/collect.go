@@ -33,7 +33,10 @@ type completion struct {
 // Upstream, folds every Delta into a completion, and hands each Delta to observe (nil for a silent
 // call) BEFORE folding it, so an observer sees the stream exactly as the wire delivered it — the
 // Turn's observer emits the live Token/Reasoning events and the accounting from there; the
-// summarizer passes nothing and stays silent in the transcript. The body is drained to its terminal
+// summarizer's observer passes on only the attempt measurement and stays silent in the transcript.
+// A DeltaAttempt (one HTTP attempt's measurement, ADR 0085) is handed to observe like any Delta
+// and folded into nothing — it never reaches content, tool calls or the completion's accounting —
+// and the collector itself emits nothing, so a nil observer is a fully silent call. The body is drained to its terminal
 // Delta and closed before this returns — so Approval, consulted afterward in dispatchTools, never
 // blocks an open Upstream connection.
 //

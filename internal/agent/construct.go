@@ -433,7 +433,10 @@ type wireTap struct {
 // cfg.StreamIdleTimeout — always, so a zero field disables the cut rather than leaving the Client
 // on its own default), the server entry's `request-extra:` passthrough (provider.WithRequestExtra
 // over cfg.RequestExtra, ADR 0085 — always, since "" merges nothing and sends the codec's bytes;
-// this is the engine's single producer of that Option), and, only when cfg.Inspector asks for
+// this is the engine's single producer of that Option), the server's identity for attempt
+// measurement (provider.WithServerIdentity over cfg.ServerName and cfg.Endpoint, ADR 0085 — always,
+// so every Client the engine dials yields a DeltaAttempt per HTTP attempt, the one producer of that
+// Option too), and, only when cfg.Inspector asks for
 // it, the Inspector's wire observer (armWireCapture). It is called at every dial site — New, Resume, SwitchUpstream and the routed
 // spawn — with the Config of the Agent that will speak over the connection, which is what keeps
 // the wire a per-server fact: a switch dials the arrived-at server's wire, a routed child its
@@ -445,6 +448,7 @@ func dialOptions(cfg domain.Config) ([]provider.Option, *wireTap) {
 		provider.WithWire(provider.WireFor(cfg.Wire)),
 		provider.WithStreamIdleTimeout(cfg.StreamIdleTimeout),
 		provider.WithRequestExtra(cfg.RequestExtra),
+		provider.WithServerIdentity(cfg.ServerName, cfg.Endpoint),
 	}
 	return append(opts, capture...), tap
 }
