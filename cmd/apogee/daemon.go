@@ -225,8 +225,10 @@ func runDaemonWith(ctx context.Context, opts *config.Options, changed func(strin
 	// The teardown the Windows token backend needs to put the disk back (ADR 0020 §2) — the same
 	// optional-interface assertion runRoot and runHeadless make, for the same reason. It is deferred
 	// rather than run at the end of the shutdown sequence so that every refusal below leaves through
-	// it too.
+	// it too. The per-server stats recorder (ADR 0085) is stopped on the same beat, as runRoot stops
+	// the session's.
 	defer func() {
+		wiring.stats.close()
 		if notice := wiring.closeConfiner(); notice != "" {
 			_, _ = fmt.Fprintln(errOut, notice)
 		}

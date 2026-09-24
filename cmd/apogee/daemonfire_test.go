@@ -1092,3 +1092,41 @@ func TestDaemonFireLogsAFailingHookAsOneSanitisedLine(t *testing.T) {
 			found, harness.logged.String())
 	}
 }
+
+// daemonStatsFire fires one daemon Firing whose run emits a single upstream attempt, under a home
+// whose `server-stats:` is on, and returns the home the recorder files under.
+func daemonStatsFire(t *testing.T, on bool) string {
+	t.Helper()
+
+	harness := newDaemonFireHarness(t, config.Options{Endpoint: "http://box.invalid", ServerStats: on})
+	harness.runner.emit = func(sink domain.EventSink) {
+		sink.Emit(domain.UpstreamAttemptEvent{
+			Server:   "box",
+			Endpoint: "http://box.invalid",
+			Model:    "m",
+			Outcome:  "ok",
+		})
+	}
+	harness.fire(t, entryFor(t, "audit", daemon.Action{}))
+	return harness.wiring.opts.ConfigDir
+}
+
+// A daemon Firing records its upstream attempts in the home's server-stats.jsonl, exactly as a
+// headless run's and a session's do (ADR 0085) — the Driver parity the daemon once lacked.
+func TestDaemonFireRecordsServerStats(t *testing.T) {
+	lines := statsLines(t, daemonStatsFire(t, true))
+	if len(lines) != 1 {
+		t.Fatalf("the stats file holds %d lines; the Firing made one attempt: %v", len(lines), lines)
+	}
+	if lines[0]["server"] != "box" || lines[0]["outcome"] != "ok" {
+		t.Errorf("the recorded line is %v; want the Firing's attempt on box, outcome ok", lines[0])
+	}
+}
+
+// `server-stats: off` on a daemon writes nothing: the file is never created.
+func TestDaemonFireServerStatsOffWritesNothing(t *testing.T) {
+	home := daemonStatsFire(t, false)
+	if _, err := os.Stat(serverStatsPath(home)); !os.IsNotExist(err) {
+		t.Errorf("stat the stats file = %v; server-stats: off must neither write nor create it", err)
+	}
+}

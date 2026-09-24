@@ -4,7 +4,7 @@ package main
 // UpstreamAttemptEvent the engine emits into one line of ~/.apogee/server-stats.jsonl. It is a
 // Driver sink rather than an engine facility — the engine only reports the measurement (ADR 0031's
 // wire-silent engine) — and it wraps Config.Events at the two composition sites that own a sink:
-// the TUI session's (wire_boot.go) and every Firing's (wire_firing.go), headless included.
+// the TUI session's (wire_boot.go) and every Firing's (wire_firing.go), headless and daemon included.
 
 import (
 	"path/filepath"

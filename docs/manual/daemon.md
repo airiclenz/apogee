@@ -97,6 +97,11 @@ firing naming the endpoint. A server that answers *something* still runs, even w
 answer is an error: a rate limit or a rejected key is the server saying "not now", not
 "not here".
 
+Every request a firing sends is timed into `~/.apogee/server-stats.jsonl`, the same file a
+session and a headless run append to, so the server pickers' speed summaries count the
+daemon's traffic too. `server-stats: off` in `config.yaml` stops it — the file is then
+neither written nor read (see [configuration](configuration.md)).
+
 ## Which server a schedule talks to
 
 A schedule binds to a server **by name**, out of the `servers:` list in

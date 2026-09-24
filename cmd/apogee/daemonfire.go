@@ -82,6 +82,13 @@ type daemonWiring struct {
 	// caller that owns it rather than built a second time here — two writers over one stream would
 	// interleave halfway through a line, which is exactly what daemonLog's mutex exists to stop.
 	log *daemonLog
+	// stats is the per-server stats recorder (ADR 0085) every Firing of this daemon records its
+	// upstream attempts through (firingInputs.stats), into the same server-stats.jsonl the TUI and
+	// headless Drivers append to. Built once, off `server-stats:` as config.yaml stated it at
+	// startup — the daemon reads that file once (ADR 0055), so there is no live switch to follow —
+	// and, off, it opens nothing, so the file is neither read nor written. The daemon stops it at
+	// shutdown, beside the confinement teardown (daemon.go).
+	stats *statsRecorder
 
 	// mu guards adopted, which the daemon's reload replaces wholesale while Firings read it, and
 	// the two per-process latches below. Firings on different Schedules run on their own
@@ -175,6 +182,7 @@ func newDaemonWiring(opts config.Options, log *daemonLog, deps daemonDeps) (*dae
 		runner:    deps.runner,
 		store:     store,
 		log:       log,
+		stats:     newStatsRecorder(serverStatsPath(roots.config), opts.ServerStats),
 		adopted:   make(map[string]daemon.Entry),
 		prewarmed: make(map[string]struct{}),
 	}, nil
@@ -377,6 +385,9 @@ func (w *daemonWiring) fire(ctx context.Context, f schedule.Firing) (schedule.Ou
 		// sense of time that made it due; nil in production ⇒ the wall clock (clockNow).
 		now:    clockNow(daemonClock),
 		report: reportReaction,
+		// The daemon's one stats recorder, so this Firing's upstream attempts land in the home's
+		// server-stats.jsonl exactly as a headless run's or a session's do (ADR 0085).
+		stats: w.stats,
 	}, f.Prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
 	// What the composition had to say about this binding — a model the server never advertised, a
 	// rebind that had to degrade — reaches the daemon LOG, which is this Driver's whole user

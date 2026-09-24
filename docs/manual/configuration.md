@@ -1236,12 +1236,13 @@ session is being built.
 same reason again. It is a switch that defaults to **on** (`true`; YAML's `on` and `off` spellings
 work too) and is config-file only (no flag, no environment variable). With it on, every request
 apogee sends a server — a Turn's, a sub-agent's at any depth, a compaction summary's, a headless
-run's and a `/schedule` firing's — appends one line to `~/.apogee/server-stats.jsonl`: the server
+run's, a `/schedule` firing's and an `apogee daemon` firing's — appends one line to `~/.apogee/server-stats.jsonl`: the server
 entry's name, its endpoint reduced to scheme, host and path (no password, key, query or fragment),
 the model that answered, the time to the first byte and to the first token, how fast the reply
 streamed and how the attempt ended. No prompt, reply, request body or key name is ever stored. Set
 `server-stats: off` and the file is neither written nor read; the measurement itself still happens, so the headless `upstream_attempt` lines keep coming. An edit
-through `/settings` applies at once — the next request is recorded or not accordingly.
+through `/settings` applies at once — the next request is recorded or not accordingly. The daemon
+reads the key once, at startup, like the rest of `config.yaml`; a change reaches its firings on restart.
 
 ## The servers you run models on
 
