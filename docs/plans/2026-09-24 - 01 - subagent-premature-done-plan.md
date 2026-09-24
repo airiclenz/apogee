@@ -142,7 +142,10 @@ cmd/apogee/testdata/stubllm/parallel-two-delegations.yaml; internal/stubllm/scri
 **Acceptance:** `go test -race -count=1 -run TestE2EParallel ./cmd/apogee/`
 **Commit:** `test(cmd/apogee): an e2e fan-out with colliding child call ids ticks no row early`
 
-## 5. Move the delegate report-shape classifier into a shared package
+## 5. Move the delegate report-shape classifier into a shared package — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): exported ClosingShapeOf and the IsNonReport method as well as the type, its five constants and the IsNonReport function, because internal/agent's capResultHead, cappedResult and cappedResultBody call them across the package boundary now.
+NOTES (2026-09-24): consequential edit — internal/floor/doc.go: made necessary by the new closingshape.go (TestDocMapNamesEveryFile requires every file in the package's file map).
 
 **What:** A refactor so the TUI can read a completed report's shape (cause #3). There is no behaviour change.
 **Regression guard.** The target is a package `internal/agent` imports and that is already in `go list -deps ./internal/tui`: default `internal/floor`, beside `HasToolCallMarkup` (`domain` cannot host it — `floor` imports `domain`).

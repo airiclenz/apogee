@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -92,10 +91,10 @@ const stepCapClampNoteFormat = "[max_steps %d requested; the configured cap is %
 // spawn-named `output_path` (Agent.outputPath), and falls back to whatever the child last said out
 // loud when that Turn produced nothing. The line itself is the same whether that Turn produced a
 // report or nothing at all: it promises a partial result, and a summary of unfinished work is
-// exactly that. Only a closing text that is NOT a report — tool output or narration, closingShapeOf
-// — swaps it for the stepCapNonReportFormat variant below. It is a package constant, pinned by
-// test, because the parent model reads it as the contract for what the rest of the result is. %d
-// is the cap actually applied.
+// exactly that. Only a closing text that is NOT a report — tool output or narration,
+// floor.ClosingShapeOf — swaps it for the stepCapNonReportFormat variant below. It is a package
+// constant, pinned by test, because the parent model reads it as the contract for what the rest of
+// the result is. %d is the cap actually applied.
 const stepCapResultFormat = "[delegate stopped at its step cap (%d steps); partial result — engine summary and closing report follow]"
 
 // tokenCapResultFormat and timeCapResultFormat are stepCapResultFormat for the two other bounds a
@@ -110,15 +109,16 @@ const (
 	timeCapResultFormat  = "[delegate stopped at its time limit (%s); partial result — engine summary and closing report follow]"
 )
 
-// The NON-REPORT variants of the three heads above, written when closingShapeOf judges the capped
-// child's closing text to be tool output or narration rather than a report (P2 of plan 2026-09-18 -
-// 00; owner call, 2026-09-18): the same `[delegate stopped at its <bound>;` prefix — the TUI's
-// delegationBoundHead anchors on it and reads the bound unchanged — but the rest of the line says
-// there is NO closing report, names what the last reply reads as instead (the %s slot, one of the
-// closingShape spellings) and points the parent at the engine summary as the finding. The text is
-// still forwarded whole beneath, under closingNarrationHead, because the parent loses nothing it
-// could have read; only the parent's reading of it is corrected. Package constants, pinned by test,
-// for the same reason the plain heads are. The first %-verb is the bound as in the plain head.
+// The NON-REPORT variants of the three heads above, written when floor.ClosingShapeOf judges the
+// capped child's closing text to be tool output or narration rather than a report (P2 of plan
+// 2026-09-18 - 00; owner call, 2026-09-18): the same `[delegate stopped at its <bound>;` prefix —
+// the TUI's delegationBoundHead anchors on it and reads the bound unchanged — but the rest of the
+// line says there is NO closing report, names what the last reply reads as instead (the %s slot,
+// one of the floor.ClosingShape spellings) and points the parent at the engine summary as the
+// finding. The text is still forwarded whole beneath, under closingNarrationHead, because the
+// parent loses nothing it could have read; only the parent's reading of it is corrected. Package
+// constants, pinned by test, for the same reason the plain heads are. The first %-verb is the bound
+// as in the plain head.
 const (
 	stepCapNonReportFormat  = "[delegate stopped at its step cap (%d steps); no closing report — the delegate's last reply reads as %s, not a finding; engine summary follows]"
 	tokenCapNonReportFormat = "[delegate stopped at its token budget (%d tokens); no closing report — the delegate's last reply reads as %s, not a finding; engine summary follows]"
@@ -136,8 +136,9 @@ const (
 	engineSummaryHead = "[engine summary]"
 	closingReportHead = "[delegate's closing report]"
 	// closingNarrationHead replaces closingReportHead when the closing text is a non-report
-	// (closingShapeOf): the text still follows, whole, but labelled for what it is — the parent
-	// reads the engine summary above it as the finding and this as the noise the child left off on.
+	// (floor.ClosingShapeOf): the text still follows, whole, but labelled for what it is — the
+	// parent reads the engine summary above it as the finding and this as the noise the child left
+	// off on.
 	closingNarrationHead = "[delegate's closing report — read as narration, not a finding]"
 )
 
@@ -194,12 +195,12 @@ func unknownContinueResult(asked string, retained []string) string {
 }
 
 // capResultHead is the marker line a capped delegation's result opens with, for the bound capHit
-// names — the receiver is the CHILD, as in delegationResult. shape is what closingShapeOf judged
-// the child's closing text to be: the plain head for a report (or for no text at all), the
+// names — the receiver is the CHILD, as in delegationResult. shape is what floor.ClosingShapeOf
+// judged the child's closing text to be: the plain head for a report (or for no text at all), the
 // non-report variant naming the shape for anything else. It is the ONE site both heads are written.
-func (a *Agent) capResultHead(shape closingShape) string {
+func (a *Agent) capResultHead(shape floor.ClosingShape) string {
 	reportFormat, nonReportFormat, bound := a.capHeadFormats()
-	if shape.isNonReport() {
+	if shape.IsNonReport() {
 		return fmt.Sprintf(nonReportFormat, bound, string(shape))
 	}
 	return fmt.Sprintf(reportFormat, bound)
@@ -283,120 +284,6 @@ const acknowledgementPunctuation = ".!,;:"
 func isAcknowledgement(text string) bool {
 	word := strings.ToLower(strings.TrimRight(strings.TrimSpace(text), acknowledgementPunctuation))
 	return slices.Contains(acknowledgements, word)
-}
-
-// closingShape is what closingShapeOf judged a CAPPED child's closing text to be. shapeReport is
-// the ordinary case — a report, forwarded under closingReportHead beneath the plain cap head. The
-// other four are the non-report shapes: each value is the phrase the variant cap head's `reads as
-// %s` slot carries (stepCapNonReportFormat and siblings), so the head is worded by shape rather
-// than by one blanket "not a report".
-type closingShape string
-
-const (
-	shapeReport         closingShape = ""
-	shapeToolCallMarkup closingShape = "tool-call markup"
-	shapeFileDump       closingShape = "a file dump"
-	shapeGrepDump       closingShape = "a grep dump"
-	shapeNarration      closingShape = "narration of its next step"
-)
-
-// isNonReport reports whether the shape is one of the four non-report shapes.
-func (s closingShape) isNonReport() bool { return s != shapeReport }
-
-// The line shapes closingShapeOf reads, each pinned by a session-mining fixture (2026-09-18,
-// session 20260918T143011Z-9788d447; plan 2026-09-18 - 00, item 3).
-var (
-	// readFileHeaderLine is the header read_file opens every result with —
-	// `[File: <path>, <n> lines total, showing lines <a>-<b>]` (internal/tools/read_file.go) — the
-	// line a capped delegate pastes when its closing reply is the file it last read rather than a
-	// report on it. Read over the first nonReportHeadLines non-blank lines only: a report that
-	// merely CITES a path never opens with this header, and one that quotes it deep in its body is
-	// still a report.
-	readFileHeaderLine = regexp.MustCompile(`^\[File: .+, \d+ lines total`)
-	// grepHitLine is a grep hit — `path:line:` — the line shape a pasted search dump is made of.
-	// Only a MAJORITY of such lines makes the text a dump: a report cites `path:line` freely, and
-	// three hits quoted in a longer report are evidence, not the reply.
-	grepHitLine = regexp.MustCompile(`^[\w./-]+:\d+:`)
-	// intentAtSentenceStart is a stated next step — "Let me …", "I'll …", "Now I …" — at ANY
-	// sentence start of a line, mid-line included: a closing reply that ENDS on one is a delegate
-	// narrating what it would do next, not reporting what it did.
-	intentAtSentenceStart = regexp.MustCompile(`(?i)(^|[.!?]\s+)(let me|i'll|i will|now i|next i|next, i)\b`)
-	// receiptLine is a structured receipt field — `PHASE: `, `STATUS: `, `OUT: `, `SUMMARY: `,
-	// `COUNTS: `, `FLAG: ` — the shape a skill's report format prescribes. A trailing intent AFTER a
-	// receipt is a report that closes with what remains, so the intent rule yields to it.
-	receiptLine = regexp.MustCompile(`^[A-Z][A-Z_-]*: `)
-)
-
-// nonReportHeadLines is how many leading non-blank lines readFileHeaderLine is read over: a pasted
-// file may follow one line of lead-in ("Now claims 17-20:" was the fixture), not a whole report.
-const nonReportHeadLines = 3
-
-// closingShapeOf judges a capped child's closing text: shapeReport for blank text — the wordless
-// path is the caller's (stepCapNoTextMarker), never a non-report — and for anything that reads as
-// a report; otherwise the first non-report shape that fires, in this order: unparsed tool-call
-// markup (floor.HasToolCallMarkup), a read_file header among the first nonReportHeadLines
-// non-blank lines, grep hits as the majority of non-blank lines, and a trailing stated intent with
-// no receipt line before it. No shape FAULTS the text: the result stays non-error and forwards it
-// whole — the closed acknowledgement list (isAcknowledgement) stays the only wording rule that
-// withholds one, and a one-line report opening "I'll note …" is demoted to narration, never dropped.
-func closingShapeOf(text string) closingShape {
-	lines := nonBlankLines(text)
-	if len(lines) == 0 {
-		return shapeReport
-	}
-	switch {
-	case floor.HasToolCallMarkup(text):
-		return shapeToolCallMarkup
-	case hasReadFileHeader(lines):
-		return shapeFileDump
-	case isGrepMajority(lines):
-		return shapeGrepDump
-	case endsOnIntent(lines):
-		return shapeNarration
-	}
-	return shapeReport
-}
-
-// isNonReport reports whether closingShapeOf judges text a non-report; false for blank text.
-func isNonReport(text string) bool {
-	return closingShapeOf(text).isNonReport()
-}
-
-// nonBlankLines splits text into its non-blank lines, each trimmed of surrounding space.
-func nonBlankLines(text string) []string {
-	var lines []string
-	for _, line := range strings.Split(text, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			lines = append(lines, line)
-		}
-	}
-	return lines
-}
-
-// hasReadFileHeader reports whether any of the first nonReportHeadLines lines is a read_file header.
-func hasReadFileHeader(lines []string) bool {
-	head := lines[:min(len(lines), nonReportHeadLines)]
-	return slices.ContainsFunc(head, readFileHeaderLine.MatchString)
-}
-
-// isGrepMajority reports whether more than half of lines are grep hits.
-func isGrepMajority(lines []string) bool {
-	hits := 0
-	for _, line := range lines {
-		if grepHitLine.MatchString(line) {
-			hits++
-		}
-	}
-	return hits*2 > len(lines)
-}
-
-// endsOnIntent reports whether the last line carries a stated intent and no receipt line precedes it.
-func endsOnIntent(lines []string) bool {
-	last := lines[len(lines)-1]
-	if !intentAtSentenceStart.MatchString(last) {
-		return false
-	}
-	return !slices.ContainsFunc(lines[:len(lines)-1], receiptLine.MatchString)
 }
 
 // A fourth shape a finished child's closing text is checked against, ahead of the three above:
@@ -1852,8 +1739,8 @@ func publishesSeatChoice(roster *domain.ToolRegistry) bool {
 // the child's report, byte for byte, as it always was — up to the absolute cap delegationResult
 // applies to every outcome. The capped outcome runs check (a) only — as a body note, never an
 // error — because its text is a partial report by contract; what it judges instead is the text's
-// SHAPE (closingShapeOf), and a non-report there changes the head and sub-head, never the shape
-// of the result.
+// SHAPE (floor.ClosingShapeOf), and a non-report there changes the head and sub-head, never the
+// shape of the result.
 func (a *Agent) completedResult(callID string) domain.ToolResult {
 	text := a.finalMessageText()
 	if repeats, degenerate := degenerateRepeat(text); degenerate {
@@ -1884,12 +1771,12 @@ func (a *Agent) finalMessageText() string {
 }
 
 // cappedResult renders a capped delegation's whole result: the head line capResultHead writes for
-// the shape closingShapeOf judged the child's closing text (lastVisibleText) to be, then the body
-// cappedResultBody renders for the same text and shape — judged ONCE, so head and body never
+// the shape floor.ClosingShapeOf judged the child's closing text (lastVisibleText) to be, then the
+// body cappedResultBody renders for the same text and shape — judged ONCE, so head and body never
 // disagree about what the text is. The receiver is the CHILD, as in delegationResult.
 func (a *Agent) cappedResult() string {
 	text := a.lastVisibleText()
-	shape := closingShapeOf(text)
+	shape := floor.ClosingShapeOf(text)
 	return a.capResultHead(shape) + "\n" + a.cappedResultBody(text, shape)
 }
 
@@ -1898,12 +1785,12 @@ func (a *Agent) cappedResult() string {
 // closing text — under closingReportHead for a report, under closingNarrationHead for a non-report
 // shape (the text itself is forwarded whole either way), and stepCapNoTextMarker under
 // closingReportHead for a child that never spoke.
-func (a *Agent) cappedResultBody(text string, shape closingShape) string {
+func (a *Agent) cappedResultBody(text string, shape floor.ClosingShape) string {
 	if text == "" {
 		text = stepCapNoTextMarker
 	}
 	head := closingReportHead
-	if shape.isNonReport() {
+	if shape.IsNonReport() {
 		head = closingNarrationHead
 	}
 	return engineSummaryHead + "\n" + a.capFold + "\n\n" + head + "\n" + text

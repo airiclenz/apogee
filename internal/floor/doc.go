@@ -30,9 +30,12 @@
 // ever used a tool at all, or is making progress. readerror.go answers whether a committed result
 // was a FAILED read (the tool's own marker first, an anchored first-line sniff only for a record
 // older than that marker) and canonicalises a path for cross-Turn comparison. intent.go is the
-// lexical action-vs-analysis classifier the tool-use enforcer gates on. correction.go renders the
-// model-facing correction a repair guard hands back with its retry. prompts.go embeds the guards'
-// fixed prose from prompts/*.txt and loads one asset by name.
+// lexical action-vs-analysis classifier the tool-use enforcer gates on. closingshape.go is the
+// delegate report-shape classifier — a closing text read as a report or as one of four non-report
+// shapes (tool-call markup, a file dump, a grep dump, narration) — kept here so internal/agent's
+// capped path and the TUI read one judgment of the same text; it gates no guard. correction.go
+// renders the model-facing correction a repair guard hands back with its retry. prompts.go embeds
+// the guards' fixed prose from prompts/*.txt and loads one asset by name.
 //
 // The guards. repair.go is the tool-call repair guard — an unknown tool, malformed arguments or a
 // missing required parameter answered with the correction the Turn re-streams with, a call naming a

@@ -1,0 +1,3 @@
+<details><summary>Thinking</summary>
+
+I have claim 12 started but need to verify more of it. Let me look at `apogee.FloorConfig` and `internal/agent/builtins.go` floor table.

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/floor"
 	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tools"
@@ -1808,68 +1809,6 @@ func closingShapeFixture(t *testing.T, name string) string {
 	return string(data)
 }
 
-// TestClosingShapeOf_ReadsTheFourNonReportShapes is the table over closingShapeOf (plan 2026-09-18 -
-// 00, item 3): each non-report shape on the fixture that motivated it and on the report it must NOT
-// fire for, and blank text as a report — the wordless path is stepCapNoTextMarker's, never a
-// non-report. The intent case pairs [580]'s trailing "Let me …" against the same line appended to
-// [277]'s receipt block: the receipt exempts it. A DelegateReportBlock-shaped report — found,
-// changed, unfinished, with path:line references mid-line — is the ordinary report.
-func TestClosingShapeOf_ReadsTheFourNonReportShapes(t *testing.T) {
-	t.Parallel()
-
-	const reportCitingAPath = "The cap head is written once (internal/agent/subagent.go:128).\n" +
-		"Its shape is read by the TUI at internal/tui/toolregistry.go:844.\n" +
-		"Nothing was changed.\n" +
-		"The read_file header `[File: x.go, 3 lines total, showing lines 1-3]` is what the TUI hides.\n" +
-		"Unfinished: the token-bound head is unchecked."
-	const reportQuotingThreeHits = "Found three callers of capResultHead:\n" +
-		"internal/agent/subagent.go:852:\t\tContent: a.capResultHead()\n" +
-		"internal/agent/subagent_test.go:1490:\tif want := cappedResult(\n" +
-		"internal/agent/seat_test.go:176:\t\t{\"step capped\"\n" +
-		"All three read the step-cap head.\n" +
-		"Nothing was changed.\n" +
-		"Unfinished: the TUI recogniser was not re-read."
-	const delegateReportShaped = "Found: the cap head is written in capResultHead (internal/agent/subagent.go:128); the TUI reads it at internal/tui/toolregistry.go:844.\n" +
-		"Changed: nothing.\n" +
-		"Unfinished: the token-bound head was not checked."
-	const oneLineIntent = "I'll note that the survey is unfinished."
-	intentLine := strings.TrimSpace(closingShapeFixture(t, "580-trailing-intent"))
-	intentLine = intentLine[strings.LastIndex(intentLine, "\n")+1:]
-
-	cases := []struct {
-		name string
-		text string
-		want closingShape
-	}{
-		{"blank", "", shapeReport},
-		{"whitespace only", " \n\t\n", shapeReport},
-		{"tool-call markup", `<tool_call>{"name": "shell", "arguments": {"cmd": "ls"}}</tool_call>`, shapeToolCallMarkup},
-		{"[892] read_file header on the first line", closingShapeFixture(t, "892-file-dump"), shapeFileDump},
-		{"[442] read_file header on the second line", closingShapeFixture(t, "442-file-dump-after-lead-in"), shapeFileDump},
-		{"a report that cites a path and quotes the header deep in its body", reportCitingAPath, shapeReport},
-		{"[1106] grep hits as the majority of lines", closingShapeFixture(t, "1106-grep-dump"), shapeGrepDump},
-		{"three grep hits in a longer report", reportQuotingThreeHits, shapeReport},
-		{"[580] a mid-line trailing intent", closingShapeFixture(t, "580-trailing-intent"), shapeNarration},
-		{"[277] a receipt block", closingShapeFixture(t, "277-receipt-report"), shapeReport},
-		{"[277] a receipt block followed by [580]'s intent line", closingShapeFixture(t, "277-receipt-report") + "\n\n" + intentLine, shapeReport},
-		{"a one-line report opening on an intent", oneLineIntent, shapeNarration},
-		{"a DelegateReportBlock-shaped report", delegateReportShaped, shapeReport},
-		{"the scripted closing report", childClosingReport, shapeReport},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			if got := closingShapeOf(tc.text); got != tc.want {
-				t.Errorf("closingShapeOf = %q, want %q", got, tc.want)
-			}
-			if got := isNonReport(tc.text); got != tc.want.isNonReport() {
-				t.Errorf("isNonReport = %v, want %v", got, tc.want.isNonReport())
-			}
-		})
-	}
-}
-
 // TestCapResultHead_NonReportVariantsKeepTheBoundPrefix pins the twelve head lines the parent
 // model can read on a bounded delegation — three bounds × (a report, the four non-report shapes)
 // — each keeping the `[delegate stopped at its <bound>;` prefix the TUI's recogniser anchors on,
@@ -1887,7 +1826,7 @@ func TestCapResultHead_NonReportVariantsKeepTheBoundPrefix(t *testing.T) {
 		{"token budget", &Agent{capHit: boundTokens, tokenCap: 20000000}, "[delegate stopped at its token budget (20000000 tokens);"},
 		{"time limit", &Agent{capHit: boundTime, timeCap: 2 * time.Hour}, "[delegate stopped at its time limit (2h0m);"},
 	}
-	shapes := []closingShape{shapeReport, shapeToolCallMarkup, shapeFileDump, shapeGrepDump, shapeNarration}
+	shapes := []floor.ClosingShape{floor.ShapeReport, floor.ShapeToolCallMarkup, floor.ShapeFileDump, floor.ShapeGrepDump, floor.ShapeNarration}
 	for _, b := range bounds {
 		for _, shape := range shapes {
 			t.Run(b.name+"/"+string(shape), func(t *testing.T) {
@@ -1899,7 +1838,7 @@ func TestCapResultHead_NonReportVariantsKeepTheBoundPrefix(t *testing.T) {
 					t.Errorf("head = %q, want the prefix %q", got, b.prefix)
 				}
 				wantTail := " partial result — engine summary and closing report follow]"
-				if shape.isNonReport() {
+				if shape.IsNonReport() {
 					wantTail = " no closing report — the delegate's last reply reads as " + string(shape) + ", not a finding; engine summary follows]"
 				}
 				if !strings.HasSuffix(got, wantTail) {
@@ -1946,7 +1885,7 @@ func TestSubAgent_StepCapNamesANarratingChildsNonReport(t *testing.T) {
 	if sub.IsError {
 		t.Errorf("sub_agent result IsError = true; a non-report is named, never faulted: %q", sub.Content)
 	}
-	want := fmt.Sprintf(stepCapNonReportFormat, 2, shapeNarration) + "\n" +
+	want := fmt.Sprintf(stepCapNonReportFormat, 2, floor.ShapeNarration) + "\n" +
 		engineSummaryHead + "\n" + childFoldSummary + "\n\n" + closingNarrationHead + "\n" + narration
 	if sub.Content != want {
 		t.Errorf("sub_agent result = %q, want %q — variant head, engine summary, the text whole under the narration sub-head", sub.Content, want)
