@@ -295,6 +295,13 @@ type SubAgentNamedEvent struct {
 // the stamp every event that child emits carries — so an observer attributes the delivery to the run it steers
 // without threading anything through. Turn is the Turn the message is about to reach.
 //
+// Reason says WHY a message did not land, and is meaningful only when Landed is false: the child's
+// run ended before the boundary the message was waiting for — completed, capped, faulted or
+// cancelled, as the delegation itself ended — or the child refused the commit while it was still
+// running. It is the zero value on a landed message. The set is open (ADR 0075 §10): a reader
+// meeting the zero value or one it does not know on an undelivered message reads it as
+// UndeliveredCompleted, which is the only account there was before the reason existed.
+//
 // It is emitted only for agents at Depth > 0. A top-level Agent's Run performs no drain and emits
 // no such event: a top-level interjection is the host's own Interject call between the Steps it
 // drives, which stays event-free (ADR 0025).
@@ -302,7 +309,29 @@ type ChildInterjectionEvent struct {
 	EventBase
 	Input  UserInput
 	Landed bool
+	Reason UndeliveredReason
 }
+
+// UndeliveredReason names why a message addressed to a running sub-agent never reached its model —
+// the Reason a Landed:false ChildInterjectionEvent carries. The zero value is "no reason": a landed
+// message, or an emitter that predates the field.
+type UndeliveredReason string
+
+const (
+	// UndeliveredCompleted is a child that finished its run — its own reply — before reaching the
+	// boundary the message was waiting for.
+	UndeliveredCompleted UndeliveredReason = "completed"
+	// UndeliveredCapped is a child the engine stopped at its step cap before that boundary.
+	UndeliveredCapped UndeliveredReason = "capped"
+	// UndeliveredFaulted is a child whose run failed before that boundary: a faulted Exchange, a
+	// Run error, or a recovered panic.
+	UndeliveredFaulted UndeliveredReason = "faulted"
+	// UndeliveredCancelled is a child whose run was cancelled before that boundary.
+	UndeliveredCancelled UndeliveredReason = "cancelled"
+	// UndeliveredRefused is a child still running that refused to commit the message into its
+	// Exchange at the boundary: the message and everything queued behind it never landed.
+	UndeliveredRefused UndeliveredReason = "refused"
+)
 
 // ApprovalPhase names the point in one Approval's life that an ApprovalEvent reports.
 type ApprovalPhase string

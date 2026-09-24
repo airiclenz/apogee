@@ -773,7 +773,9 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // lock — the one a pooled group reserved for this call in call order (dispatchGroup), else the next
 // — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
 // completion order is the model's call order; the row records the child's RESOLVED output target,
-// never the unresolved argument.
+// never the unresolved argument. It is also where the messages the child's mailbox still held at
+// the end are reported undelivered, after the ledger row, because the reason each carries is that
+// same classification (undeliveredReason).
 func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID string) (result domain.ToolResult, outcome dispatchOutcome) {
 	var (
 		spawnIndex   = a.delegations.open(call.ID)
@@ -781,6 +783,11 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		ledgerTarget string
 		ran          bool
 		res          domain.StepResult
+		// reportLeftover is set by the reaping defer below and called here, once the delegation
+		// is classified: that defer runs FIRST, before any outcome exists, so it only takes what
+		// the closed mailbox still held and leaves the reporting — which says why it never
+		// landed — to this one.
+		reportLeftover func(domain.UndeliveredReason)
 	)
 	defer func() {
 		if r := recover(); r != nil {
@@ -801,6 +808,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 			cause:      cause,
 			outputPath: ledgerTarget,
 		})
+		if reportLeftover != nil {
+			reportLeftover(undeliveredReason(ended))
+		}
 	}()
 	if a.depth >= a.maxDepth() {
 		// Defensive floor: the tool is withheld from the menu at the bound, but refuse here
@@ -939,9 +949,14 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		naming.Wait()
 		// Unregister and close the mailbox before the child's resources go: after this the child
 		// is no longer addressable, and anything a human queued for it that never reached a
-		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2).
+		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2). The
+		// report itself waits for the outer defer, which alone knows how the run ended and so why
+		// the message did not land — this defer runs before a recovered panic is even classified.
 		a.children.unregister(call.ID)
-		sub.reportUndelivered(sub.turns.index, sub.mailbox.close())
+		leftover, turn := sub.mailbox.close(), sub.turns.index
+		reportLeftover = func(reason domain.UndeliveredReason) {
+			sub.reportUndelivered(turn, leftover, reason)
+		}
 		_ = sub.Close()
 	}()
 

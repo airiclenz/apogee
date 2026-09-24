@@ -488,7 +488,7 @@ func (a *Agent) drainMailbox(ctx context.Context, turn int) {
 			// (deliverInterjections): an Interject error is a statement about the Exchange, not
 			// about that one message, so pressing on would produce more of the same and deliver
 			// the human's remarks out of order.
-			a.reportUndelivered(turn, queued[i:])
+			a.reportUndelivered(turn, queued[i:], domain.UndeliveredRefused)
 			return
 		}
 		// Counted here and nowhere else: what LANDED is what the parent is told about when this
@@ -502,9 +502,34 @@ func (a *Agent) drainMailbox(ctx context.Context, turn int) {
 // reportUndelivered emits the Landed:false half of the delivery contract for messages that never
 // reached the model — the tail of a refused drain, and whatever the mailbox still held when the
 // child's run ended. Every accepted message is accounted for exactly once, so a Driver never has
-// to guess what became of one it painted as queued.
-func (a *Agent) reportUndelivered(turn int, queued []domain.UserInput) {
+// to guess what became of one it painted as queued. reason is why none of them landed, and rides
+// every event so a Driver can say so rather than guess (domain.UndeliveredReason).
+func (a *Agent) reportUndelivered(turn int, queued []domain.UserInput, reason domain.UndeliveredReason) {
 	for _, in := range queued {
-		a.cfg.Events.Emit(domain.ChildInterjectionEvent{EventBase: a.base(turn), Input: in, Landed: false})
+		a.cfg.Events.Emit(domain.ChildInterjectionEvent{
+			EventBase: a.base(turn),
+			Input:     in,
+			Landed:    false,
+			Reason:    reason,
+		})
+	}
+}
+
+// undeliveredReason maps how a delegation ended (classifyDelegation) onto why the messages its
+// mailbox still held never landed. A refusal can only leave a message behind when the child was
+// registered and then never reached its Run — a panic in between — so it reads as the child not
+// taking the message, which is what happened.
+func undeliveredReason(ended delegationOutcome) domain.UndeliveredReason {
+	switch ended {
+	case delegationCapped:
+		return domain.UndeliveredCapped
+	case delegationFaulted:
+		return domain.UndeliveredFaulted
+	case delegationCancelled:
+		return domain.UndeliveredCancelled
+	case delegationRefused:
+		return domain.UndeliveredRefused
+	default:
+		return domain.UndeliveredCompleted
 	}
 }

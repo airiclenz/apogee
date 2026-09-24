@@ -60,6 +60,7 @@ var (
 	_ apogee.SubAgentNamedEvent
 	_ apogee.ChildInterjectionEvent
 	_ apogee.SubAgentPhase
+	_ apogee.UndeliveredReason
 	_ apogee.ReactionFiredEvent
 	_ apogee.ErrorEvent
 	_ apogee.PruneEvent
@@ -170,6 +171,12 @@ var (
 
 	_ = apogee.SubAgentStarted
 	_ = apogee.SubAgentFinished
+
+	_ = apogee.UndeliveredCompleted
+	_ = apogee.UndeliveredCapped
+	_ = apogee.UndeliveredFaulted
+	_ = apogee.UndeliveredCancelled
+	_ = apogee.UndeliveredRefused
 
 	_ = apogee.WireDirectionRequest
 	_ = apogee.WireDirectionResponse

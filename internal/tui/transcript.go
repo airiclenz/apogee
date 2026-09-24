@@ -1700,10 +1700,11 @@ func (t *transcript) addSubAgentName(e domain.SubAgentNamedEvent) {
 // A message that LANDED becomes that child's own user block, inside its run, at the boundary it
 // actually reached (addUserAt) — a collapsed run elides it with the rest of its span, and an open
 // one shows it railed where the child read it. One that did NOT land becomes a host note instead:
-// the child ended before the boundary its message was waiting for, so there is no run left to put
-// it in and nothing the child ever saw to record. The note names the delegation, falling back to
-// the status line's own word for an unnamed one, and escape-strips through addNote like every
-// other note worded from model-supplied text.
+// the child ended before the boundary its message was waiting for, or refused it there, so there
+// is nothing the child ever saw to record. The note names the delegation, falling back to the
+// status line's own word for an unnamed one, says why the message did not land
+// (undeliveredNote), and escape-strips through addNote like every other note worded from
+// model-supplied text.
 func (t *transcript) addChildInterjection(e domain.ChildInterjectionEvent) {
 	run := runOf(e.EventBase)
 	if e.Landed {
@@ -1714,7 +1715,26 @@ func (t *transcript) addChildInterjection(e domain.ChildInterjectionEvent) {
 	if name == "" {
 		name = subAgentActivityName
 	}
-	t.addNote(name + " finished before your message landed")
+	t.addNote(undeliveredNote(name, e.Reason))
+}
+
+// undeliveredNote words the note for a message that never reached the delegation name, by why it
+// did not (domain.UndeliveredReason). The zero reason and any reason this build does not know read
+// as the child having finished — the set is open (ADR 0075 §10), and that was the only account
+// before the reason existed, so a session recorded then still reads as it did.
+func undeliveredNote(name string, reason domain.UndeliveredReason) string {
+	switch reason {
+	case domain.UndeliveredCapped:
+		return name + " stopped at its cap before your message landed"
+	case domain.UndeliveredFaulted:
+		return name + " failed before your message landed"
+	case domain.UndeliveredCancelled:
+		return name + " was cancelled before your message landed"
+	case domain.UndeliveredRefused:
+		return name + " could not take your message"
+	default:
+		return name + " finished before your message landed"
+	}
 }
 
 // hasOpenToolCall reports whether any tool-call entry is still waiting for its result — the

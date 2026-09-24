@@ -180,17 +180,18 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
 			wantData: `{"input":{"text":"check the manual too",` +
 				`"file_refs":["docs/manual/headless.md"],"skill_ids":["coding-standards"]},` +
-				`"landed":true}`,
+				`"landed":true,"reason":""}`,
 		},
 		{
 			name: "child_interjection with no refs",
 			event: domain.ChildInterjectionEvent{
 				EventBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
 				Input:     domain.UserInput{Text: "stop"},
+				Reason:    domain.UndeliveredCapped,
 			},
 			wantKind: "child_interjection",
 			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
-			wantData: `{"input":{"text":"stop","file_refs":null,"skill_ids":null},"landed":false}`,
+			wantData: `{"input":{"text":"stop","file_refs":null,"skill_ids":null},"landed":false,"reason":"capped"}`,
 		},
 		{
 			name: "approval decided",

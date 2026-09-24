@@ -3549,11 +3549,13 @@ func TestRunHeadPredicates(t *testing.T) {
 
 // childMessage folds one delivery report for a message the human addressed to the run spawn
 // spawned, at the child's own depth — the shape Agent.drainMailbox emits (domain.ChildInterjectionEvent).
-func childMessage(tr *transcript, spawn, text string, depth int, landed bool) {
+// reason is why an undelivered message did not land, and "" for a landed one.
+func childMessage(tr *transcript, spawn, text string, depth int, landed bool, reason domain.UndeliveredReason) {
 	tr.apply(domain.ChildInterjectionEvent{
 		EventBase: domain.EventBase{Depth: depth, CallID: spawn},
 		Input:     domain.UserInput{Text: text},
 		Landed:    landed,
+		Reason:    reason,
 	})
 }
 
@@ -3568,7 +3570,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
-		childMessage(tr, "s1", "check the docs too", 1, true)
+		childMessage(tr, "s1", "check the docs too", 1, true, "")
 
 		if len(tr.entries) != 2 {
 			t.Fatalf("transcript holds %d entries, want the head and the delivered message", len(tr.entries))
@@ -3588,7 +3590,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
-		childMessage(tr, "s1", "check the docs too", 1, true)
+		childMessage(tr, "s1", "check the docs too", 1, true, "")
 
 		// The head's own row and nothing else: the message went INSIDE the run, so the collapsed
 		// run's elision covers it exactly as it covers the delegate's own work. The row reads as a
@@ -3610,7 +3612,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		readCall(tr, "c1", "a.go", 1, 5, 1)
 		subAgentCall(tr, "s2", "survey the docs", 0)
 
-		childMessage(tr, "s1", "check the docs too", 1, true)
+		childMessage(tr, "s1", "check the docs too", 1, true, "")
 
 		// Appended, the message would sit past s2's stretch and subAgentSpan would read it as s2's.
 		// place puts it at the end of s1's own stretch instead: right behind the child's read call,
@@ -3634,7 +3636,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		tr.addUser("delegate it", nil)
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
-		childMessage(tr, "s1", "check the docs too", 1, true)
+		childMessage(tr, "s1", "check the docs too", 1, true, "")
 
 		// One stop, the human's own prompt: a message steering a delegate is drawn like a prompt
 		// and walked past like a delegate's entry, so ctrl+↑/↓ offer only turns the reader started.
@@ -3660,7 +3662,7 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 		tr := &transcript{}
 		subAgentCall(tr, "s1", "survey the tests", 0)
 
-		childMessage(tr, "s1", "check the docs too", 1, false)
+		childMessage(tr, "s1", "check the docs too", 1, false, domain.UndeliveredCompleted)
 
 		if len(tr.entries) != 2 {
 			t.Fatalf("transcript holds %d entries, want the head and the note", len(tr.entries))
@@ -3680,11 +3682,40 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 				Arguments: []byte(`{"name":"repo-scout","task":"survey the tests"}`)},
 		})
 
-		childMessage(tr, "s1", "check the docs too", 1, false)
+		childMessage(tr, "s1", "check the docs too", 1, false, domain.UndeliveredCompleted)
 
 		const want = "repo-scout finished before your message landed"
 		if got := tr.entries[len(tr.entries)-1]; got.text != want {
 			t.Errorf("undelivered note = %q, want %q", got.text, want)
+		}
+	})
+
+	t.Run("the note says why the message did not land", func(t *testing.T) {
+		t.Parallel()
+		cases := []struct {
+			reason domain.UndeliveredReason
+			want   string
+		}{
+			{domain.UndeliveredCompleted, "sub-agent finished before your message landed"},
+			{domain.UndeliveredCapped, "sub-agent stopped at its cap before your message landed"},
+			{domain.UndeliveredFaulted, "sub-agent failed before your message landed"},
+			{domain.UndeliveredCancelled, "sub-agent was cancelled before your message landed"},
+			{domain.UndeliveredRefused, "sub-agent could not take your message"},
+			// The zero reason — a session recorded before the field existed — and one this build
+			// does not know both keep the only wording there used to be (open enum, ADR 0075 §10).
+			{"", "sub-agent finished before your message landed"},
+			{"evicted", "sub-agent finished before your message landed"},
+		}
+		for _, tc := range cases {
+			tr := &transcript{}
+			subAgentCall(tr, "s1", "survey the tests", 0)
+
+			childMessage(tr, "s1", "check the docs too", 1, false, tc.reason)
+
+			if got := tr.entries[len(tr.entries)-1]; got.kind != entryNote || got.text != tc.want {
+				t.Errorf("reason %q: undelivered fold = %v/%q, want an entryNote reading %q",
+					tc.reason, got.kind, got.text, tc.want)
+			}
 		}
 	})
 }

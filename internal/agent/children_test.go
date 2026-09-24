@@ -238,10 +238,57 @@ func TestInterjectChild_QueuedAfterTheLastStepIsReportedUndelivered(t *testing.T
 	if got := events[0]; got.Landed || got.CallID != "c1" || got.Input.Text != remark {
 		t.Errorf("event = %+v, want Landed:false for c1 carrying %q", got, remark)
 	}
+	// The child ran to its own reply, so the reason is that it finished.
+	if got := events[0].Reason; got != domain.UndeliveredCompleted {
+		t.Errorf("Reason = %q, want %q — the child completed before the message could land",
+			got, domain.UndeliveredCompleted)
+	}
 
 	// The child is gone, so the same id is refused from here on.
 	if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); !errors.Is(err, domain.ErrNoSuchChild) {
 		t.Errorf("InterjectChild after the child finished = %v, want ErrNoSuchChild", err)
+	}
+}
+
+// TestInterjectChild_QueuedBeforeAPanicIsReportedFaulted pins the reason's source on the one path
+// where the mailbox closes before the run is classified: a child that panics with a message queued
+// unwinds through the reaping defer first, while no outcome exists, and the message is reported
+// only once the recover has classified the delegation — as faulted, never as finished.
+func TestInterjectChild_QueuedBeforeAPanicIsReportedFaulted(t *testing.T) {
+	const remark = "one more thing"
+
+	sink := &recordingSink{}
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		subAgentCallScript("c1", "survey the repo"), // [0] parent delegates
+		contentScript("never streamed"),             // [1] the child's Turn — panics first
+		contentScript("parent done"),                // [2] parent finishes
+	}}
+	a, err := newAgent(subAgentConfig(sink, domain.ModeAskBefore), responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	responder.before = func(call int) {
+		if call != 1 {
+			return
+		}
+		if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); err != nil {
+			t.Errorf("InterjectChild while the child runs: %v", err)
+		}
+		panic("child boom")
+	}
+	if err := a.Submit(domain.UserInput{Text: "go"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	events := childInterjections(sink.events)
+	if len(events) != 1 {
+		t.Fatalf("ChildInterjectionEvents = %d, want exactly 1", len(events))
+	}
+	if got := events[0]; got.Landed || got.CallID != "c1" || got.Reason != domain.UndeliveredFaulted {
+		t.Errorf("event = %+v, want Landed:false for c1 with Reason %q", got, domain.UndeliveredFaulted)
 	}
 }
 
@@ -461,5 +508,27 @@ func TestDelegationLedger_CauseIsTheHeadLineClamped(t *testing.T) {
 	long := strings.Repeat("x", delegationCauseMaxRunes+5)
 	if got := delegationCause(long); got != strings.Repeat("x", delegationCauseMaxRunes)+"…" {
 		t.Errorf("cause = %q, want %d runes and the ellipsis", got, delegationCauseMaxRunes)
+	}
+}
+
+// TestUndeliveredReason_FollowsTheDelegationOutcome pins the mapping the reaping path reports
+// through: each way a delegation ends names its own reason, so a message left in the mailbox is
+// never told it missed a child that "finished" when the child was capped, failed or cancelled.
+func TestUndeliveredReason_FollowsTheDelegationOutcome(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		ended delegationOutcome
+		want  domain.UndeliveredReason
+	}{
+		{delegationCompleted, domain.UndeliveredCompleted},
+		{delegationCapped, domain.UndeliveredCapped},
+		{delegationFaulted, domain.UndeliveredFaulted},
+		{delegationCancelled, domain.UndeliveredCancelled},
+		{delegationRefused, domain.UndeliveredRefused},
+	}
+	for _, tc := range cases {
+		if got := undeliveredReason(tc.ended); got != tc.want {
+			t.Errorf("undeliveredReason(%q) = %q, want %q", tc.ended, got, tc.want)
+		}
 	}
 }

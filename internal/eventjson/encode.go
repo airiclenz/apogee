@@ -118,6 +118,7 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 		return kindChildInterjection, e.EventBase, childInterjectionData{
 			Input:  userInputOf(e.Input),
 			Landed: e.Landed,
+			Reason: string(e.Reason),
 		}, true
 	case domain.ApprovalEvent:
 		return kindApproval, e.EventBase, approvalData{
@@ -256,10 +257,12 @@ type subAgentNamedData struct {
 }
 
 // childInterjectionData is the child_interjection line: the fate of one message a human addressed
-// to a running sub-agent.
+// to a running sub-agent. Reason is why an undelivered message did not land and "" on a landed one;
+// it is always present, like every other member, and its set is open (ADR 0075 §10).
 type childInterjectionData struct {
 	Input  userInput `json:"input"`
 	Landed bool      `json:"landed"`
+	Reason string    `json:"reason"`
 }
 
 // approvalData is the approval line. Decision is meaningless on the requested phase and carries

@@ -185,7 +185,11 @@ internal/tui/toolview.go — applyStat; internal/tui/toolleader.go — succeeded
 **Acceptance:** `go test -race -count=1 ./internal/tui/`
 **Commit:** `fix(tui): a delegation that ended without a report no longer reads done`
 
-## 7. The undelivered-interjection note names why the message did not land
+## 7. The undelivered-interjection note names why the message did not land — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): regression guard taken by its second option — the reaping defer only closes the mailbox and stashes a `reportLeftover` closure; runSubAgent's outer defer calls it after `classifyDelegation` and the ledger row, so a recovered panic reports `faulted` without a panicking flag. As a result, on a panic the ErrorEvent is now emitted before the undelivered event, and undelivered events are emitted after `sub.Close()` (the sink is shared, so emission still works).
+NOTES (2026-09-24): `delegationRefused` maps to `refused` (reachable only if the child panics after it is registered and before its Run starts); every outcome's mapping is pinned by `TestUndeliveredReason_FollowsTheDelegationOutcome`, a test the plan did not ask for.
+NOTES (2026-09-24): consequential edit — example_test.go: made necessary by the new `apogee.UndeliveredReason` alias and constants in apogee.go (the re-export enumeration lists every alias).
 
 **What:** This fixes cause #4: `<name> finished before your message landed` is shown for capped, faulted and cancelled runs, and for a refusal while the child is still running.
 **Regression guard.** `runSubAgent`'s reaping defer runs BEFORE the outer defer's `classifyDelegation`, so no ledger outcome exists there: call `classifyDelegation` in the reaping defer with a panicking flag (set before `sub.Run`, cleared after) mapped to faulted, or stash `mailbox.close()` and report in the outer defer after classification.

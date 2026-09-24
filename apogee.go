@@ -314,6 +314,18 @@ const (
 	SubAgentFinished = domain.SubAgentFinished
 )
 
+// UndeliveredReason is why a ChildInterjectionEvent's message did not land.
+type UndeliveredReason = domain.UndeliveredReason
+
+// The reasons a message addressed to a running sub-agent did not land.
+const (
+	UndeliveredCompleted = domain.UndeliveredCompleted
+	UndeliveredCapped    = domain.UndeliveredCapped
+	UndeliveredFaulted   = domain.UndeliveredFaulted
+	UndeliveredCancelled = domain.UndeliveredCancelled
+	UndeliveredRefused   = domain.UndeliveredRefused
+)
+
 // The two values WireEvent.Direction takes.
 const (
 	WireDirectionRequest  = domain.WireDirectionRequest
