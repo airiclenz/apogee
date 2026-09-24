@@ -245,6 +245,13 @@ type Model struct {
 	// all.
 	wire []wireRecord
 
+	// attempts is the Inspector's second bounded ring: the most recent maxAttemptRecords upstream
+	// HTTP attempts as the fold recorded them (foldAttempt), each with the (depth, callID) of the
+	// run that made the call and the request id its retries share. Unlike wire it fills whether or
+	// not `ui.inspector` is on — the engine emits every attempt's measurement (ADR 0085) — and it is
+	// rebuilt rather than appended into, on the same value-copy terms (ADR 0011).
+	attempts []attemptRecord
+
 	// settingEdits is the journal of every config key this SESSION changed through the settings surface
 	// — the fact behind each row's ` *` marker (ADR 0037 decision 8). It lives here rather than on the
 	// pane above because its lifetime is the session's and the pane's is one overlay: the human opens

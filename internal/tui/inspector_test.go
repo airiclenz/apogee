@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -1309,5 +1310,150 @@ func BenchmarkWrapReadable(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		wrapReadable(readableTextPrefix, line, readableWrapColumn)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// The upstream attempts (the pane's second ring)
+// ----------------------------------------------------------------------------
+
+// attemptEvent is one upstream HTTP attempt as the engine reports it, stamped with the run that
+// made the call: a call that reached its first byte at 90ms, its first model delta at 1.2s and its
+// last at 3.2s, reporting 84 output tokens over the 2s between them — 42 tok/s.
+func attemptEvent(requestID string, index, turn, depth int, callID, outcome string) domain.UpstreamAttemptEvent {
+	return domain.UpstreamAttemptEvent{
+		EventBase:    domain.EventBase{Turn: turn, Depth: depth, CallID: callID},
+		Server:       "box",
+		Endpoint:     "http://h/v1",
+		Model:        "m",
+		RequestID:    requestID,
+		Index:        index,
+		TTFB:         90 * time.Millisecond,
+		TTFT:         1200 * time.Millisecond,
+		Last:         3200 * time.Millisecond,
+		Duration:     3400 * time.Millisecond,
+		OutputTokens: 84,
+		Outcome:      outcome,
+	}
+}
+
+// headingsAndRows splits the pane's composed rows into its headings and its plain rows.
+func headingsAndRows(t *testing.T, m Model) (headings, plain []string) {
+	t.Helper()
+	rows, kinds := m.inspectorRows()
+	if len(rows) != len(kinds) {
+		t.Fatalf("%d rows against %d kinds — the two are composed in one pass", len(rows), len(kinds))
+	}
+	for i, row := range rows {
+		if kinds[i] == popupRowHeading {
+			headings = append(headings, row[0])
+			continue
+		}
+		plain = append(plain, row[0])
+	}
+	return headings, plain
+}
+
+// TestInspectorGroupsARetriedCallsAttempts pins the grouping: a call that failed once and was
+// retried is ONE group under its request id with both attempts in order — even though another
+// call's attempt landed between them — and each attempt row spells its index, server, the three
+// clocks, the rate and the outcome.
+func TestInspectorGroupsARetriedCallsAttempts(t *testing.T) {
+	t.Parallel()
+	failed := attemptEvent("req-a", 0, 1, 0, "", "http_503")
+	failed.TTFT, failed.Last, failed.OutputTokens = 0, 0, 0
+	m := inspectorModel(t,
+		failed,
+		attemptEvent("req-b", 0, 1, 1, "s1", "ok"),
+		attemptEvent("req-a", 1, 1, 0, "", "ok"),
+	)
+
+	headings, plain := headingsAndRows(t, m)
+
+	wantHeadings := []string{
+		"attempts · request req-a · turn 1",
+		"attempts · request req-b · turn 1 · depth 1",
+	}
+	if !slices.Equal(headings, wantHeadings) {
+		t.Fatalf("headings = %q, want one group per call %q", headings, wantHeadings)
+	}
+	wantPlain := []string{
+		"#0 · box · ttfb 90ms · ttft — · total 3.4s · — tok/s · http_503",
+		"#1 · box · ttfb 90ms · ttft 1.2s · total 3.4s · 42 tok/s · ok",
+		"#0 · box · ttfb 90ms · ttft 1.2s · total 3.4s · 42 tok/s · ok",
+		inspectorEmptyRow,
+	}
+	if !slices.Equal(plain, wantPlain) {
+		t.Errorf("rows =\n%s\nwant\n%s", strings.Join(plain, "\n"), strings.Join(wantPlain, "\n"))
+	}
+}
+
+// TestInspectorNamesACancelledAttempt pins the outcome cell for an attempt the caller abandoned: it
+// says `cancelled`, the word the headless stream and the stats store use, rather than a fault.
+func TestInspectorNamesACancelledAttempt(t *testing.T) {
+	t.Parallel()
+	m := inspectorModel(t, attemptEvent("req-a", 0, 1, 0, "", "cancelled"))
+
+	pane := strip(m.renderReport(inspectReport))
+
+	if !strings.Contains(pane, "· cancelled") {
+		t.Errorf("the pane does not name the cancelled attempt:\n%s", pane)
+	}
+}
+
+// TestInspectorListsAttemptsWithCaptureOff pins the capture-off answer: the engine measures every
+// attempt whatever `ui.inspector` says, so the attempts list — and the wire half below them keeps
+// the disarmed row naming the key, because the bytes are still not being captured.
+func TestInspectorListsAttemptsWithCaptureOff(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	m = m.foldEvent(attemptEvent("req-a", 0, 1, 0, "", "ok"))
+	m.inspector = inspectorPane{open: true}
+
+	headings, plain := headingsAndRows(t, m)
+
+	if want := []string{"attempts · request req-a · turn 1"}; !slices.Equal(headings, want) {
+		t.Errorf("headings = %q, want %q", headings, want)
+	}
+	if len(plain) == 0 || plain[len(plain)-1] != inspectorDisarmedRow {
+		t.Errorf("rows = %q, want the attempt then the disarmed row %q", plain, inspectorDisarmedRow)
+	}
+}
+
+// TestInspectorScopesAttemptsToTheViewedRun pins the attempt half of the run-view scope: with a
+// delegation open the pane lists that run's attempts alone, by the same (depth, callID) the wire
+// records are scoped by.
+func TestInspectorScopesAttemptsToTheViewedRun(t *testing.T) {
+	t.Parallel()
+	m := scopedInspectorModel(t,
+		attemptEvent("child", 0, 1, 1, "s1", "ok"),
+		attemptEvent("sibling", 0, 1, 1, "s2", "ok"),
+		attemptEvent("parent", 0, 1, 0, "", "ok"),
+	)
+
+	headings, _ := headingsAndRows(t, m)
+
+	if want := []string{"attempts · request child · turn 1 · depth 1"}; !slices.Equal(headings, want) {
+		t.Errorf("scoped headings = %q, want only the viewed run's call %q", headings, want)
+	}
+}
+
+// TestAttemptRingKeepsTheLatestRecords pins the attempt ring's bound: the most recent
+// maxAttemptRecords attempts, oldest dropped, arrival order kept.
+func TestAttemptRingKeepsTheLatestRecords(t *testing.T) {
+	t.Parallel()
+	m := newTestModel(t)
+	const sent = maxAttemptRecords + 5
+	for i := range sent {
+		m = m.foldEvent(attemptEvent("r"+strconv.Itoa(i), 0, i, 0, "", "ok"))
+	}
+
+	if len(m.attempts) != maxAttemptRecords {
+		t.Fatalf("ring holds %d attempts, want the %d most recent", len(m.attempts), maxAttemptRecords)
+	}
+	for i, rec := range m.attempts {
+		if want := sent - maxAttemptRecords + i; rec.turn != want {
+			t.Errorf("attempt %d is turn %d, want %d — the ring dropped the wrong end or reordered", i, rec.turn, want)
+		}
 	}
 }

@@ -35,7 +35,7 @@ import (
 const throughputWindowFloor = 250 * time.Millisecond
 
 // foldEvent folds one engine Event into the view: the live token stats, the thinking board, the
-// advice board, the wire ring, then the transcript, then the activity phrase. It mutates the local copy and returns
+// advice board, the wire and attempt rings, then the transcript, then the activity phrase. It mutates the local copy and returns
 // it, like every Update fold; repainting the viewport is the caller's (the eventMsg case's).
 func (m Model) foldEvent(e domain.Event) Model {
 	m = m.foldStats(e)
@@ -51,6 +51,9 @@ func (m Model) foldEvent(e domain.Event) Model {
 	// beside the transcript and disturbs no entry pairing. It reads nothing the other folds
 	// establish, and nothing but /inspect reads what it writes.
 	m = m.foldWire(e)
+	// The Inspector's other ring, on the same terms: one upstream attempt's measurement is not a
+	// conversation entry either, and nothing but /inspect reads what this writes.
+	m = m.foldAttempt(e)
 	m.transcript.apply(e)
 	// The transcript fold's second half, and separate for one reason: a sub-agent's usage reading
 	// is a FILL, so it needs the window it fills — and where the reading names none, that window is

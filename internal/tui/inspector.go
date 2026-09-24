@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
@@ -58,6 +59,15 @@ import (
 // border. The one rendering that arrives already broken to width is the READABLE one: it carries
 // prose rather than protocol, so it is hard-wrapped at readableWrapColumn when the record is folded
 // (wrapReadable) and reaches the pane as flat rows like everything else.
+//
+// The pane holds a SECOND ring beside the wire one: the upstream attempts (ADR 0085) — one row per
+// HTTP attempt a model call made, grouped under the request id its retries share, with the server,
+// the attempt index, the ttfb, ttft and whole-attempt clocks, the generation rate and the outcome.
+// It is not armed: the engine emits every attempt's measurement whatever `ui.inspector` says, so the
+// attempts list with the capture off too, ABOVE the wire half — which then still carries its own
+// disarmed row (or the armed-and-empty one), because the key that captures the bytes is the one
+// actionable answer to their absence and a list of attempts answers a different question. The run
+// view scopes the attempts exactly as it scopes the wire records, by the run's (depth, callID).
 
 // wireRecord is one half of one Upstream round-trip as the Inspector holds it: which half, the
 // Turn, depth and spawning call id of the agent that made the call, and the payload in BOTH of the
@@ -813,6 +823,161 @@ func readableRow(lead string, runes []rune) string {
 	return row.String()
 }
 
+// ----------------------------------------------------------------------------
+// The upstream attempts (the pane's second ring)
+// ----------------------------------------------------------------------------
+
+// attemptRecord is one upstream HTTP attempt as the Inspector holds it: the run and Turn that made
+// the call, the request id its retries share, and the attempt's row rendered ONCE at the fold —
+// the pane re-derives its rows on every frame, and formatting five clocks per attempt per streamed
+// token is the hot-path cost wireRecord keeps its renderings formatted to avoid.
+type attemptRecord struct {
+	turn      int
+	depth     int
+	callID    string
+	requestID string
+	row       string
+}
+
+// maxAttemptRecords is the attempt ring's bound. An attempt is one short row, not a replayed
+// conversation, so the ring runs longer than the wire one: fifty covers the retries of a flaky
+// stretch without holding a session's worth of measurements for a pane that is mostly closed.
+const maxAttemptRecords = 50
+
+// attemptUnreached is what an attempt row prints for a clock the attempt never reached (the
+// event's zero) and for a rate it carries none of — never a zero that reads as a measurement.
+const attemptUnreached = "—"
+
+// foldAttempt files one Event into the attempt ring, and folds nothing else: an
+// UpstreamAttemptEvent is recorded, every other variant passes through untouched. It is called
+// from foldEvent beside foldWire and is the ONLY writer of the ring, which it REBUILDS rather than
+// appends into, on foldWire's value-copy terms (ADR 0011).
+func (m Model) foldAttempt(e domain.Event) Model {
+	ae, ok := e.(domain.UpstreamAttemptEvent)
+	if !ok {
+		return m
+	}
+	keep := m.attempts
+	if len(keep) >= maxAttemptRecords {
+		keep = keep[len(keep)-maxAttemptRecords+1:]
+	}
+	next := make([]attemptRecord, 0, len(keep)+1)
+	next = append(next, keep...)
+	m.attempts = append(next, attemptRecord{
+		turn:      ae.Turn,
+		depth:     ae.Depth,
+		callID:    ae.CallID,
+		requestID: ae.RequestID,
+		row:       attemptRow(ae),
+	})
+	return m
+}
+
+// attemptRow renders one attempt: its index within the call, the server it went to, the three
+// clocks timed from its send (first byte, first model delta, the attempt's end), the generation
+// rate and the outcome — "#1 · box · ttfb 90ms · ttft 1.2s · total 3.4s · 42 tok/s · ok". The
+// server name crosses stripEscapes like every other string this pane shows.
+func attemptRow(ae domain.UpstreamAttemptEvent) string {
+	return strings.Join([]string{
+		"#" + strconv.Itoa(ae.Index),
+		stripEscapes(ae.Server),
+		"ttfb " + attemptClock(ae.TTFB),
+		"ttft " + attemptClock(ae.TTFT),
+		"total " + attemptClock(ae.Duration),
+		attemptRate(ae),
+		stripEscapes(ae.Outcome),
+	}, " · ")
+}
+
+// attemptClock reads one clock the way the picker's summary does (formatSummaryDuration), or
+// attemptUnreached where the attempt never reached it.
+func attemptClock(d time.Duration) string {
+	if d <= 0 {
+		return attemptUnreached
+	}
+	return formatSummaryDuration(d)
+}
+
+// attemptRate is the attempt's generation rate — reported output tokens over the span from its
+// first model delta to its last, the per-attempt rate the server stats take their median of
+// (internal/serverstats) — or attemptUnreached where the server reported no tokens or the span is
+// empty: never an estimate.
+func attemptRate(ae domain.UpstreamAttemptEvent) string {
+	span := ae.Last - ae.TTFT
+	if ae.OutputTokens <= 0 || ae.TTFT <= 0 || span <= 0 {
+		return attemptUnreached + " tok/s"
+	}
+	rate := float64(ae.OutputTokens) / span.Seconds()
+	return strconv.FormatFloat(rate, 'f', 0, 64) + " tok/s"
+}
+
+// scopedAttempts is scopedWire for the attempt ring: the whole ring at the top level, only the
+// viewed run's attempts while a run view is open, and a FRESH slice when scoped (ADR 0011).
+func (m Model) scopedAttempts() []attemptRecord {
+	if !m.inRunView() {
+		return m.attempts
+	}
+	viewed := m.viewedRun()
+	scoped := make([]attemptRecord, 0, len(m.attempts))
+	for _, rec := range m.attempts {
+		if (runRef{depth: rec.depth, spawn: rec.callID}) == viewed {
+			scoped = append(scoped, rec)
+		}
+	}
+	return scoped
+}
+
+// attemptGroupKey names one model call's attempts: the run that made it and the request id its
+// retries share. The run is part of the key because the id is random per call and a fan-out
+// braids calls of several runs into one ring; keying on it too costs nothing and keeps two runs'
+// groups apart even where an id is empty.
+type attemptGroupKey struct {
+	depth     int
+	callID    string
+	requestID string
+}
+
+// attemptRows composes the attempt half of the pane: one heading per model call, in the order the
+// calls first appeared, naming the request id, Turn and — off the top level — depth, then that
+// call's attempts in arrival order. A retried call is therefore ONE group however many other
+// calls' attempts landed between its retries.
+func attemptRows(records []attemptRecord) ([]popupRow, []popupRowKind) {
+	if len(records) == 0 {
+		return nil, nil
+	}
+	var order []attemptGroupKey
+	groups := make(map[attemptGroupKey][]attemptRecord, len(records))
+	for _, rec := range records {
+		key := attemptGroupKey{depth: rec.depth, callID: rec.callID, requestID: rec.requestID}
+		if _, seen := groups[key]; !seen {
+			order = append(order, key)
+		}
+		groups[key] = append(groups[key], rec)
+	}
+	rows := make([]popupRow, 0, len(records)+len(order))
+	kinds := make([]popupRowKind, 0, len(records)+len(order))
+	for _, key := range order {
+		members := groups[key]
+		rows = append(rows, popupRow{attemptGroupHeader(members[0])})
+		kinds = append(kinds, popupRowHeading)
+		for _, rec := range members {
+			rows = append(rows, popupRow{rec.row})
+			kinds = append(kinds, popupRowPlain)
+		}
+	}
+	return rows, kinds
+}
+
+// attemptGroupHeader names one model call's group: "attempts · request <id> · turn N", plus the
+// depth of a delegated run on wireRecordHeader's terms.
+func attemptGroupHeader(rec attemptRecord) string {
+	head := "attempts · request " + rec.requestID + " · turn " + strconv.Itoa(rec.turn)
+	if rec.depth > 0 {
+		head += " · depth " + strconv.Itoa(rec.depth)
+	}
+	return head
+}
+
 // inspectContent is what the pane tells the shared module about itself for one frame: its name, the
 // keys it spells, how tall it likes to be, and the record rows with the kinds composed beside them.
 // It words no empty state of its own — an empty ring is a ROW here, and which one depends on whether
@@ -871,11 +1036,13 @@ func (m Model) scopedWire() []wireRecord {
 	return scoped
 }
 
-// inspectorRows composes the report: for each record the pane speaks for (scopedWire), oldest first,
+// inspectorRows composes the report: first the upstream attempts the pane speaks for, grouped by
+// model call (attemptRows over scopedAttempts — nothing at all when there are none), then for each
+// record the pane speaks for (scopedWire), oldest first,
 // a header row naming the direction and the agent that made the call, then the payload's lines,
 // then — where the cap cut one — the elision the package words every hidden-lines statement with,
 // then — where the list went on without recording the answer — the note that says so
-// (hasUnrecordedReply, asked over that same list). An empty list is ONE row, and which one depends
+// (hasUnrecordedReply, asked over that same list). An empty wire list is ONE row under the attempts, and which one depends
 // on why it is empty: capture off is the one actionable answer and keeps the slot wherever it
 // applies, an empty ring at the top level is a wait, and an empty SCOPE with capture on is a fact
 // about the run being looked at.
@@ -889,6 +1056,7 @@ func (m Model) scopedWire() []wireRecord {
 // a header because of where it was put, and a payload line that happened to look like one would be
 // styled as a section label by any rule read back off the text.
 func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
+	rows, kinds := attemptRows(m.scopedAttempts())
 	records := m.scopedWire()
 	if len(records) == 0 {
 		row := inspectorEmptyRow
@@ -898,10 +1066,8 @@ func (m Model) inspectorRows() ([]popupRow, []popupRowKind) {
 		case m.inRunView():
 			row = inspectorScopedEmptyRow
 		}
-		return []popupRow{{row}}, []popupRowKind{popupRowPlain}
+		return append(rows, popupRow{row}), append(kinds, popupRowPlain)
 	}
-	rows := make([]popupRow, 0, len(records)*2)
-	kinds := make([]popupRowKind, 0, len(records)*2)
 	for i, rec := range records {
 		lines, hidden := rec.readable, rec.readableHidden
 		if m.inspector.raw {

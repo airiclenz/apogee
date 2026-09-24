@@ -55,6 +55,9 @@ type foldCase struct {
 	// a new Event variant must state what the delegation progress save does with it, "nothing"
 	// (the zero value, and the answer for all but three shapes) included.
 	wantProgressSave bool
+	// wantAttempts is how many records the Inspector's attempt ring holds after the fold
+	// (foldAttempt) — 1 for the one variant /inspect lists as an upstream attempt, 0 for every other.
+	wantAttempts int
 }
 
 // foldCases is the variant table: every domain.Event, what it does to the view, and — by way
@@ -312,11 +315,13 @@ func foldCases() []foldCase {
 			event: domain.WireEvent{Direction: domain.WireDirectionRequest, Payload: `{"model":"m"}`},
 		},
 		{
-			name: "UpstreamAttemptEvent is inert in the transcript",
-			// Nothing here: one HTTP attempt's measurement is not a conversation entry, so it must
-			// not disturb the scrollback, the gauge, the status phrase or the progress save. The
-			// per-server stats and `/inspect` are where the measurement surfaces (ADR 0085).
-			event: domain.UpstreamAttemptEvent{Server: "box", Endpoint: "http://h/v1", Model: "m", Index: 0, Outcome: "ok"},
+			name: "UpstreamAttemptEvent lands in the Inspector's attempt ring and nowhere else",
+			// One HTTP attempt's measurement is not a conversation entry, so it must not disturb the
+			// scrollback, the gauge, the status phrase or the progress save. The per-server stats and
+			// `/inspect` are where the measurement surfaces (ADR 0085): the fold files it in the
+			// Inspector's attempt ring, beside the transcript, whether or not the capture is armed.
+			event:        domain.UpstreamAttemptEvent{Server: "box", Endpoint: "http://h/v1", Model: "m", Index: 0, Outcome: "ok"},
+			wantAttempts: 1,
 		},
 		{
 			name: "SeamClosedEvent is inert in the view",
@@ -444,6 +449,9 @@ func TestFoldEventFoldsEveryVariant(t *testing.T) {
 			}
 			if got := liveThinking(m.thinking); got != tc.wantBoard {
 				t.Errorf("in-flight thinking = %q, want %q", got, tc.wantBoard)
+			}
+			if got := len(m.attempts); got != tc.wantAttempts {
+				t.Errorf("attempt ring holds %d records, want %d", got, tc.wantAttempts)
 			}
 		})
 	}

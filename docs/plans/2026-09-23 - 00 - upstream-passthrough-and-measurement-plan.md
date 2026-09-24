@@ -259,7 +259,12 @@ internal/tui/tui.go — ServerChoice; cmd/apogee/upstream_test.go — TestServer
 **Acceptance:** `go test -race -count=1 -run 'Picker|ServerRows' ./internal/tui/ && go test -race -count=1 ./internal/serverstats/ && go test -race -count=1 -run 'ServerStats|ServerChoices|SwitchServer' ./cmd/apogee/`
 **Commit:** `feat(tui): show each server's measured speed in the server pickers`
 
-## 11. `/inspect` lists upstream attempts
+## 11. `/inspect` lists upstream attempts — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): internal/tui/model.go gains the `attempts []attemptRecord` field beside `wire` — the attempt ring needs a Model field and the plan's Files list did not name the file that declares the Model's fields.
+NOTES (2026-09-24): the attempt fold is its own `foldAttempt`, called from foldEvent right after foldWire (the guard allowed either); a bounded 50-record ring rebuilt per fold. Attempts render ABOVE the wire records; with capture off the disarmed row still stands for the wire half (TestInspectorDisarmedNamesTheKey unmodified and green).
+NOTES (2026-09-24): foldCase gained a `wantAttempts` column so the UpstreamAttemptEvent row asserts the ring it now fills; the per-attempt tok/s formula mirrors serverstats' unexported tokensPerSec rather than importing the package into tui.
+NOTES (2026-09-24): Acceptance was run without -race: ThreadSanitizer is unsupported on this host (VMA range 47); `go test -count=1 -run 'Inspect|FoldEvent|AttemptRing' ./internal/tui/` and the full `./internal/tui/` package pass.
 
 Depends on item 6.
 **What:**
