@@ -88,7 +88,12 @@ internal/config/unknownkeys_test.go — TestUnknownKeysWalksTheSchemaAsDeepAsItG
 **Acceptance:** `go test -race -count=1 ./internal/config/ ./internal/domain/`
 **Commit:** `feat(config): accept a request-extra body passthrough on server entries`
 
-## 3. Merge `request-extra` over the encoded body in the Client
+## 3. Merge `request-extra` over the encoded body in the Client — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the merge keeps the codec's top-level member order and appends the patch's new members after it (patch order), rather than re-marshalling a map, so untouched members and their order stay byte-identical.
+NOTES (2026-09-24): a patch that is not a JSON object (only reachable from an embedder, since item 2 validates at config load) is stored at construction and fails every encode with an error naming request-extra — NewClient never fails.
+NOTES (2026-09-24): the Client tests capture the body through the wire observer on a pre-cancelled Respond (nothing is dialled), not a new httptest upstream.
+NOTES (2026-09-24): `go test -race` cannot run on this box (ThreadSanitizer: unsupported VMA range, 47-bit VA); the acceptance ran unraced (`go test -count=1 ./internal/provider/` ok) and golangci-lint reports 0 issues — the parallel-encode test still needs a raced run elsewhere.
 
 **What:** Recast at the regression check (2026-09-23).
 **Goal:** `provider.WithRequestExtra(string)` makes every body the Client sends an RFC 7396 merge of the canonical-JSON patch over the codec's encoded JSON, for both wires; with no option, "" or `{}` the bytes are identical to the codec's output; the wire observer (`/inspect`) sees the merged body.

@@ -185,6 +185,13 @@ type Client struct {
 	// again, so it needs no lock: a server's wire shape is a property of the endpoint, and moving
 	// to another endpoint means another Client.
 	effortDialect EffortDialect
+
+	// requestExtra is the server entry's request-extra merge patch (ADR 0085), decoded once by
+	// WithRequestExtra and only read afterwards; nil ⇒ no merge, and the body is the codec's
+	// bytes exactly. requestExtraErr is the decode fault of a malformed patch, reported by every
+	// encode rather than at construction, which never fails.
+	requestExtra    *mergePatch
+	requestExtraErr error
 }
 
 // wireCodec is the protocol-specific half of a Client: one implementation per Wire, selected
@@ -280,6 +287,24 @@ func WithDiscoveryTimeout(d time.Duration) Option { return func(c *Client) { c.d
 // session. That keeps one channel from detection to the wire whether the answer was detected or
 // configured (ADR 0060).
 func WithEffortDialect(d EffortDialect) Option { return func(c *Client) { c.effortDialect = d } }
+
+// WithRequestExtra overlays a server entry's request-extra — a JSON object in canonical form —
+// onto every body the Client sends, on either wire, as an RFC 7396 JSON Merge Patch: objects
+// merge member by member, null deletes, anything else replaces (ADR 0085). It is opaque: apogee
+// reads none of it, so a provider's routing hints pass through without apogee-side code. The
+// patch is decoded here, once; "" and "{}" install nothing, and the body stays byte-identical to
+// the codec's. A patch that is not a JSON object fails every request that would carry it,
+// because construction never fails. The wire observer sees the merged body — it is what was
+// posted.
+func WithRequestExtra(patch string) Option {
+	return func(c *Client) {
+		c.requestExtra, c.requestExtraErr = parseMergePatch(patch)
+		if c.requestExtraErr != nil {
+			c.requestExtra = nil
+			c.requestExtraErr = fmt.Errorf("request-extra: %w", c.requestExtraErr)
+		}
+	}
+}
 
 // WithWireObserver installs a callback that is handed one WireRecord per direction per
 // Respond/Stream call — the request bytes as posted and, at stream end, the raw SSE
@@ -448,12 +473,25 @@ func (c *Client) Respond(ctx context.Context, req Request) (RawResponse, error) 
 // encode renders req onto the selected wire. The configured model wins over the Request's
 // on every wire — SetModel rebinds it under a running session — so it is resolved here, once,
 // before the codec sees the request. The bool reports whether the body expressed a thinking
-// effort; it gates thinkingEffortHint on the reply's fault.
+// effort; it gates thinkingEffortHint on the reply's fault, and it is the codec's verdict even
+// when request-extra touched the effort members. The request-extra patch, when one is
+// installed, is merged over the codec's bytes here — before send and so before the observer.
 func (c *Client) encode(req Request) (body []byte, carriedEffort bool, err error) {
 	if model := c.activeModel(); model != "" {
 		req.Model = model
 	}
-	return c.codec.encode(req)
+	if c.requestExtraErr != nil {
+		return nil, false, c.requestExtraErr
+	}
+	body, carriedEffort, err = c.codec.encode(req)
+	if err != nil || c.requestExtra == nil {
+		return body, carriedEffort, err
+	}
+	merged, err := c.requestExtra.apply(body)
+	if err != nil {
+		return nil, false, fmt.Errorf("request-extra: %w", err)
+	}
+	return merged, carriedEffort, nil
 }
 
 // send issues the POST with bounded retries and returns the live response together with

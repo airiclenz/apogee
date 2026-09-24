@@ -1144,3 +1144,175 @@ func TestRespond_NonStringReasoningKeepsTheReply(t *testing.T) {
 		t.Errorf("FinishReason = %q, want stop", got.FinishReason)
 	}
 }
+
+// postedBody returns the request body a Client built with opts hands its wire observer for req.
+// The call's context is already cancelled, so the body is recorded and nothing is dialled.
+func postedBody(t *testing.T, req Request, opts ...Option) string {
+	t.Helper()
+	var records []WireRecord
+	opts = append(opts, WithMaxRetries(0), collectWire(&records))
+	client := NewClient("http://127.0.0.1:1", "m", opts...)
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, _ = client.Respond(ctx, req)
+	requests := wireOf(t, records, WireRequest)
+	if len(requests) != 1 {
+		t.Fatalf("request records = %d, want exactly 1", len(requests))
+	}
+	return requests[0]
+}
+
+// TestRequestExtraMergesOverTheEncodedBody pins ADR 0085's passthrough on both wires: the
+// observer sees the patch merged over the codec's body, beside the effort the codec wrote.
+func TestRequestExtraMergesOverTheEncodedBody(t *testing.T) {
+	t.Parallel()
+	const extra = `{"provider":{"order":["x"]},"reasoning":{"exclude":true}}`
+	hi := []Message{{Role: "user", Content: "hi"}}
+
+	t.Run("openai", func(t *testing.T) {
+		t.Parallel()
+		req := Request{Messages: hi, ThinkingEffort: EffortHigh, EffortDialect: EffortDialectReasoning}
+
+		posted := postedBody(t, req, WithRequestExtra(extra))
+
+		var body struct {
+			Reasoning map[string]any `json:"reasoning"`
+			Provider  map[string]any `json:"provider"`
+		}
+		if err := json.Unmarshal([]byte(posted), &body); err != nil {
+			t.Fatalf("decode posted body: %v", err)
+		}
+		if body.Reasoning["effort"] != "high" || body.Reasoning["exclude"] != true {
+			t.Errorf("reasoning = %v, want effort high beside exclude true", body.Reasoning)
+		}
+		if order, _ := body.Provider["order"].([]any); len(order) != 1 || order[0] != "x" {
+			t.Errorf("provider = %v, want order [x]", body.Provider)
+		}
+	})
+
+	t.Run("anthropic", func(t *testing.T) {
+		t.Parallel()
+		req := Request{Messages: hi, ThinkingEffort: EffortHigh}
+
+		posted := postedBody(t, req, WithWire(WireAnthropic), WithRequestExtra(extra))
+
+		var body struct {
+			OutputConfig map[string]any `json:"output_config"`
+			Reasoning    map[string]any `json:"reasoning"`
+			Provider     map[string]any `json:"provider"`
+		}
+		if err := json.Unmarshal([]byte(posted), &body); err != nil {
+			t.Fatalf("decode posted body: %v", err)
+		}
+		if body.OutputConfig["effort"] != "high" {
+			t.Errorf("output_config = %v, want effort high", body.OutputConfig)
+		}
+		if body.Reasoning["exclude"] != true {
+			t.Errorf("reasoning = %v, want exclude true", body.Reasoning)
+		}
+		if order, _ := body.Provider["order"].([]any); len(order) != 1 || order[0] != "x" {
+			t.Errorf("provider = %v, want order [x]", body.Provider)
+		}
+	})
+}
+
+// TestRequestExtraLeavesUntouchedSubtreesByteIdentical pins that a patch naming only `provider`
+// never re-encodes a tool schema.
+func TestRequestExtraLeavesUntouchedSubtreesByteIdentical(t *testing.T) {
+	t.Parallel()
+	req := Request{
+		Messages: []Message{{Role: "user", Content: "hi"}},
+		Tools:    []ToolSpec{{Name: "ls", Description: "list", Parameters: []byte(`{"type":"object","properties":{"z":{"type":"string"},"a":{"description":"<dir>"}}}`)}},
+	}
+	parameters := func(posted string) string {
+		t.Helper()
+		var body struct {
+			Tools []struct {
+				Function struct {
+					Parameters json.RawMessage `json:"parameters"`
+				} `json:"function"`
+			} `json:"tools"`
+		}
+		if err := json.Unmarshal([]byte(posted), &body); err != nil || len(body.Tools) != 1 {
+			t.Fatalf("decode tools from %s: %v", posted, err)
+		}
+		return string(body.Tools[0].Function.Parameters)
+	}
+
+	plain := parameters(postedBody(t, req))
+	merged := parameters(postedBody(t, req, WithRequestExtra(`{"provider":{"order":["x"]}}`)))
+
+	if merged != plain {
+		t.Errorf("tools[0].function.parameters = %s, want the codec's bytes %s", merged, plain)
+	}
+}
+
+// TestRequestExtraEmptyKeepsTheCodecBytes pins that "" and {} install no merge: the posted body
+// is byte-identical to the codec's on both wires.
+func TestRequestExtraEmptyKeepsTheCodecBytes(t *testing.T) {
+	t.Parallel()
+	req := Request{Messages: []Message{{Role: "user", Content: "hi"}}, ThinkingEffort: EffortHigh}
+
+	for _, wire := range []Wire{WireOpenAI, WireAnthropic} {
+		for _, extra := range []string{"", "{}"} {
+			t.Run(string(wire)+"/"+extra, func(t *testing.T) {
+				t.Parallel()
+				want := postedBody(t, req, WithWire(wire))
+
+				got := postedBody(t, req, WithWire(wire), WithRequestExtra(extra))
+
+				if got != want {
+					t.Errorf("body = %s, want the codec's bytes %s", got, want)
+				}
+			})
+		}
+	}
+}
+
+// TestRequestExtraParallelEncodesShareOnePatch drives concurrent encodes through one Client
+// (run under -race): each gets the same merged body and none disturbs another.
+func TestRequestExtraParallelEncodesShareOnePatch(t *testing.T) {
+	t.Parallel()
+	client := NewClient("http://127.0.0.1:1", "m", WithRequestExtra(`{"provider":{"order":["x"],"allow_fallbacks":false}}`))
+	req := Request{Messages: []Message{{Role: "user", Content: "hi"}}}
+	want, _, err := client.encode(req)
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+
+	const workers = 16
+	bodies := make(chan string, workers)
+	for range workers {
+		go func() {
+			body, _, err := client.encode(req)
+			if err != nil {
+				bodies <- "error: " + err.Error()
+				return
+			}
+			bodies <- string(body)
+		}()
+	}
+
+	for range workers {
+		if got := <-bodies; got != string(want) {
+			t.Errorf("parallel encode = %s, want %s", got, want)
+		}
+	}
+}
+
+// TestRequestExtraMalformedFailsTheRequest pins that a patch that is not a JSON object fails
+// each request that would carry it, naming request-extra, rather than posting the codec's body.
+func TestRequestExtraMalformedFailsTheRequest(t *testing.T) {
+	t.Parallel()
+	var records []WireRecord
+	client := NewClient("http://127.0.0.1:1", "m", WithRequestExtra(`[1]`), collectWire(&records))
+
+	_, err := client.Respond(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+
+	if err == nil || !strings.Contains(err.Error(), "request-extra") {
+		t.Errorf("Respond error = %v, want one naming request-extra", err)
+	}
+	if len(records) != 0 {
+		t.Errorf("records = %v, want nothing posted", records)
+	}
+}
