@@ -1351,6 +1351,10 @@ func (a *Agent) executeTool(ctx context.Context, turn int, tool domain.Tool, cal
 		}
 	}()
 
+	// The carriers installed below, and every other context key the engine installs (the box, the
+	// permits, the prompt slot), are listed with their readers and lifetimes in one table:
+	// docs/design/confinement-execution-contract.md §11, "Per-call context carriers".
+	//
 	// Install this Agent's run identity — its nesting depth and the id of the sub_agent call that
 	// spawned it — for EVERY call, the top-level agent's included: depth 0 and an empty spawn id
 	// are the honest identity of the outermost run, not a missing value, so a tool that builds its

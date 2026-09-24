@@ -181,7 +181,9 @@ internal/tui/tui.go — RecallHost, Options.Recall; internal/tui/recall_test.go 
 - `go test -race -count=1 ./internal/recall/`; `go test -race -count=1 -run 'Recall' ./cmd/apogee/`; `go test -race -count=1 -run 'Recall' ./internal/tui/`
 **Commit:** `refactor(recall): the recall store is the TUI's recall host; the adapter goes`
 
-## 8. Per-call context carriers are documented in one table
+## 8. Per-call context carriers are documented in one table — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the §11 table names `tools.RunHookSubprocess` as the `subprocessPermitCtxKey` reader. That is the enforcement item 9 adds in the same wave (the ratified call "SubprocessPermit: enforced in tools.RunHookSubprocess"). At the time of writing there is no production `SubprocessPermitFromContext` reader, so the row is accurate only once item 9 lands.
 
 **What:**
 **Goal:** `docs/design/confinement-execution-contract.md` has a §11 "Per-call context carriers" table listing every production `context.WithValue` key (key, installer, reader, lifetime), and the installers in `internal/agent/dispatch.go` and `internal/domain/doc.go` point at it.

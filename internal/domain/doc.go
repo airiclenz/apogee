@@ -88,7 +88,9 @@
 // it without importing internal/tools. confinement.go is the Confiner interface, its
 // capability and box value types, the per-call Confinement / SubprocessPermit context
 // carriers (ADR 0012), and the WriteEscapePermit that carries one approved out-of-workspace
-// write target (ADR 0049).
+// write target (ADR 0049). Those carriers, the ask.go and promptslot.go ones, and the undo,
+// console and tasklist keys are listed with their installers, readers and lifetimes in
+// docs/design/confinement-execution-contract.md §11, "Per-call context carriers".
 //
 // The remaining facts about a session. contextfile.go is the workspace context files' report
 // — one note per file and the Oversize predicate over their standing cost against the

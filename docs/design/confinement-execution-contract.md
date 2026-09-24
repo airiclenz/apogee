@@ -1387,3 +1387,36 @@ All three of the tool side's execution contracts hold for a hook's child:
   ADR 0071 and `Deps` carries no fields, so a future lab Mechanism that spawns a subprocess re-adds
   it. A hook's child therefore drops exactly the variables `terminal`,
   `python_exec` and `run_tests` drop; a Mechanism that names none leaves the fixed half alone.
+
+## 11. Per-call context carriers (amendment, 2026-09-24)
+
+§2.2 put the Confinement handle on the call's context, not in `domain.Tool.Execute`'s signature,
+and §10 and ADR 0049 added permits alongside it. Other request-scoped values have taken the same
+route since: run identity, the prompt surface, and the engine state a rebuilt tool must not hold.
+This table lists every production `context.WithValue` key in one place (test-only keys, such as
+`internal/stubllm`'s capture key, are not listed). Each key is an unexported struct type owned by
+the package that declares its `With…`/`…From…` pair, so only that pair can write or read it.
+
+| Key (declaring file) | Installer | Reader | Lifetime |
+|---|---|---|---|
+| `confinementCtxKey` (`internal/domain/confinement.go`) | `WithConfinement`, from `executeTool` on a Confine verdict (`box != nil`), `executeRun` on a `confineChildren` Run, and `syncPermitCtx` when confine-to-workspace is on. `WithoutConfinement` shadows it with nil for dispatch's own bookkeeping context (`floorCtx`) | `ConfinementFromContext`: `subprocess.ConfinementHandoff` (confines the cmd), `gitexec`'s and `tools`' `confinementBox` (the exec and read fence's box), `tools.RunHookSubprocess` (argv[0] resolution) | One tool execution, or one sync-reaction command |
+| `subprocessPermitCtxKey` (`internal/domain/confinement.go`) | `WithSubprocessPermit`, from `syncPermitCtx` only (§10.4), called by `runSyncArgv` | `SubprocessPermitFromContext`: `tools.RunHookSubprocess`, the one door a reaction spawns through (§10.5) | One sync-reaction command. Absent is refusal (§10.2) |
+| `writeEscapePermitCtxKey` (`internal/domain/confinement.go`) | `WithWriteEscapePermit`, from `writeEscapeCtx` in `executeRun`, the one minting point (ADR 0049) | `WriteEscapePermitFrom`: `tools.writeScopeOf`, the shared write funnel | One tool execution. An empty `Real` revokes an outer grant |
+| `subAgentDepthCtxKey` (`internal/domain/ask.go`) | `WithSubAgentDepth`, from `executeTool`, on every call | `SubAgentDepthFromContext`: `ask_user`, `present_document` | One tool execution. A nested delegation overwrites its parent's value; 0 is the top-level agent |
+| `spawnCallIDCtxKey` (`internal/domain/ask.go`) | `WithSpawnCallID`, from `executeTool`, on every call | `SpawnCallIDFromContext`: `present_document` | One tool execution. `""` is the top-level agent |
+| `consoleOwnerCtxKey` (`internal/domain/ask.go`) | `WithConsoleOwner`, from `executeTool`, on every call | `ConsoleOwnerFromContext`: `console_open`, `lookupConsole` (the other console tools) | One tool execution. `""` is the top-level agent (ADR 0059 §6) |
+| `subAgentTaskCtxKey` (`internal/domain/ask.go`) | `WithSubAgentTask`, from `executeTool`, on a delegate's calls only | `SubAgentTaskFromContext`: `ask_user` | One tool execution. Absent on the top-level agent |
+| `subAgentNameCtxKey` (`internal/domain/ask.go`) | `WithSubAgentName`, from `executeTool`, on a delegate's calls only (an empty name is still installed) | `SubAgentNameFromContext`: `ask_user` | One tool execution. Absent on the top-level agent |
+| `promptSlotCtxKey` (`internal/domain/promptslot.go`) | `WithPromptSlot`, from `(*Agent).step` (`internal/agent/loop.go`). A no-op when ctx already designates a slot | `PromptSlotFor`: `queuedApprover.Approve` (`internal/agent/construct.go`), `ask_user` | One Step. Every sub-agent inherits it, so the outermost Agent's slot serves the whole tree (ADR 0039) |
+| `journalKey` (`internal/undo/context.go`) | `undo.WithJournal`, from `executeTool`, on every call. A nil journal installs nothing | `undo.FromContext`: `tools.writeScopeOf`, the shared write funnel (ADR 0051) | One tool execution |
+| `registryKey` (`internal/console/context.go`) | `console.WithRegistry`, from `executeTool`, on every call. A nil registry installs nothing | `console.FromContext`: `console_open`, `console_close`, `lookupConsole` (ADR 0059) | One tool execution. The Consoles it holds outlive the call |
+| `listKey` (`internal/tasklist/context.go`) | `tasklist.WithList`, from `executeTool`, on every call. A nil list installs nothing | `tasklist.FromContext`: `task_list` (ADR 0072) | One tool execution. The list itself is the engine's session state |
+
+All installers are in `internal/agent/dispatch.go` except `WithPromptSlot`'s, which is in
+`internal/agent/loop.go`. A new carrier gets a row here, next to its `With…` pair.
+
+The keys stay separate. A single typed `CallContext` was considered and rejected on two grounds:
+`internal/domain` would have to import `undo`, `console` and `tasklist` to hold their handles, and
+the lifetimes do not match. The prompt slot spans a Step and the whole sub-agent tree, the sync
+permit spans one reaction command, and the rest span one tool execution, so no single value
+could be installed at one point for all of them.
