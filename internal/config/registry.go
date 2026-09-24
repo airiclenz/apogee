@@ -154,6 +154,13 @@ const (
 // or not — has one, because what a key's value looks like written down is a fact about the key,
 // and who may write it is Editable's question.
 //
+// Copy moves the key's value from one Options to another and touches nothing else. It is how a
+// value Set landed on a scratch Options is mirrored onto a holder that carries every other key,
+// so the caller never names the key's field a second time. A key of a block (`ui.*`, `present.*`,
+// `sessions.*`) copies its own field of the block, never the whole block: the scratch's other
+// fields are zero values, and copying them would overwrite the holder's. bindRows derives it for
+// a row that carries a field; it is nil for every other row, whose value is not one typed field.
+//
 // In the table each row writes its LANDING alone (land, or landIn for a block's field: the
 // canonical text onto the typed field) and bindRows, run once when the table is built, binds
 // that landing under the admission the row already carries — the row cannot name itself inside
@@ -188,6 +195,7 @@ type Key struct {
 	Text       func(o Options) string
 	Structure  func(o Options) any
 	Set        func(value string, o *Options) error
+	Copy       func(dst, src *Options)
 
 	// field is the row's typed descriptor, nil for a row that writes its projections by hand.
 	field fieldSpec
@@ -1524,9 +1532,9 @@ func bindRows(rows []Key) []Key {
 	for i := range rows {
 		field := rows[i].field
 		switch {
-		case field != nil && (rows[i].Read != nil || rows[i].Set != nil):
+		case field != nil && (rows[i].Read != nil || rows[i].Set != nil || rows[i].Copy != nil):
 			panic("apogee: config registry row " + rows[i].Path +
-				" carries a field and a hand-written Read or Set — the field derives both")
+				" carries a field and a hand-written Read, Set or Copy — the field derives all three")
 		case field != nil && (rows[i].fromFile != nil || rows[i].fromEnv != nil || rows[i].fromFlag != nil):
 			panic("apogee: config registry row " + rows[i].Path + " derives its file, env and flag " +
 				"projections from its field, and hand-writes one as well")
@@ -1536,6 +1544,7 @@ func bindRows(rows []Key) []Key {
 		case field != nil:
 			rows[i].Read = field.read
 			rows[i].Set = field.landing()
+			rows[i].Copy = field.copy
 		}
 		if landing := rows[i].Set; landing != nil {
 			row := rows[i]

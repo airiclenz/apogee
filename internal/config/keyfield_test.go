@@ -299,3 +299,43 @@ func TestFieldSessionsMaxAgeResetsOnARepass(t *testing.T) {
 		t.Errorf("a re-pass over an empty file kept the old text: %v", err)
 	}
 }
+
+// A row's Copy moves the key's own field and nothing else. The holder states every key at a
+// non-default value (everyKeyFileConfig) and the source holds the defaults, so copying one row
+// must move that row's Read and leave every other row's Read as it was. For a block key
+// (`ui.*`, `present.*`, `sessions.*`) this means the block's other fields stay untouched: a Copy
+// that moved the whole block would carry the source's defaults onto the holder's neighbours. A
+// row without a field has no Copy.
+func TestFieldCopyMovesOnlyItsOwnField(t *testing.T) {
+	t.Parallel()
+
+	var defaults, stated Options
+	mustApplyFile(t, &defaults, fileConfig{})
+	mustApplyFile(t, &stated, everyKeyFileConfig())
+	for _, row := range KeyRegistry {
+		if row.field == nil {
+			if row.Copy != nil {
+				t.Errorf("registry row %q carries no field but has a Copy", row.Path)
+			}
+			continue
+		}
+		t.Run(row.Path, func(t *testing.T) {
+			t.Parallel()
+			holder := stated
+
+			row.Copy(&holder, &defaults)
+
+			if got, want := row.Read(holder), row.Read(defaults); got != want {
+				t.Errorf("after Copy the row reads %q, want the source's %q", got, want)
+			}
+			for _, other := range KeyRegistry {
+				if other.Path == row.Path || other.Read == nil {
+					continue
+				}
+				if got, want := other.Read(holder), other.Read(stated); got != want {
+					t.Errorf("Copy of %q moved %q: reads %q, want %q", row.Path, other.Path, got, want)
+				}
+			}
+		})
+	}
+}

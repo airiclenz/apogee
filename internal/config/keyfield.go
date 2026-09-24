@@ -9,12 +9,12 @@ import (
 )
 
 // The typed key descriptor: one declaration of WHERE a key's value lives — its Options field and
-// the fileConfig field that states it — from which the registry row's Read, its Set landing,
-// resolution's file projection and, for a key with a variable or a flag, the env and flag passes
-// are all derived, instead of each being written out beside the others as a restatement of the
-// same field. A row that carries one (Key.field) writes none of them by hand; bindRows derives
-// Read, Set and the file, env and flag projections onto the row as the table is built, and the
-// resolution passes call them off the row.
+// the fileConfig field that states it — from which the registry row's Read, its Set landing, its
+// Copy, resolution's file projection and, for a key with a variable or a flag, the env and flag
+// passes are all derived, instead of each being written out beside the others as a restatement of
+// the same field. A row that carries one (Key.field) writes none of them by hand; bindRows derives
+// Read, Set, Copy and the file, env and flag projections onto the row as the table is built, and
+// the resolution passes call them off the row.
 //
 // What the descriptor deliberately does NOT do is route the file pass through the row's Set. The
 // file value is an UNVALIDATED TYPED COPY: the yaml decode already typed it, and the key's own
@@ -51,6 +51,9 @@ type fieldSpec interface {
 	// flagCopy is the flag pass for a row with a flag: the parsed flag value copied onto the
 	// field, unvalidated.
 	flagCopy() func(o *Options, flags Options)
+	// copy moves the field's value from src onto dst and nothing else — only the key's own field
+	// of a block, never the block: the row's Copy.
+	copy(dst, src *Options)
 }
 
 // scalarField is the descriptor of a key held in one typed field of Options.
@@ -135,6 +138,8 @@ func (f scalarField[T]) zeroWhenUnstated() scalarField[T] {
 func (f scalarField[T]) flagCopy() func(o *Options, flags Options) {
 	return func(o *Options, flags Options) { *f.at(o) = *f.at(&flags) }
 }
+
+func (f scalarField[T]) copy(dst, src *Options) { *f.at(dst) = *f.at(src) }
 
 // boolField is the descriptor of a bool key held in its own Options field, stated in the file by
 // a pointer that is nil when the file leaves the key out.

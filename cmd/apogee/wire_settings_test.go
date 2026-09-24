@@ -580,7 +580,7 @@ func TestStepBudgetNoticeHasNoSettingsRow(t *testing.T) {
 
 // The seven Floor-guard keys are known by name in three places that cannot import one another —
 // the engine's guard table (apogee.FloorGuardKeys), the config keys a file spells and an entry's
-// `id:` is refused against (config.FloorGuardKeys), and this package's key→field map behind
+// `id:` is refused against (config.FloorGuardKeys), and this package's key→row map behind
 // setFloorGuard with the seven table rows that apply through it — so this is the one test that
 // holds them to one SET. Set rather than list: config keeps the enforcer first, the engine keeps
 // salvage first, and neither order is the other's business. A guard added to the engine without a
@@ -623,7 +623,9 @@ func TestFloorGuardTableMatchesTheConfigKeys(t *testing.T) {
 	moved := make([]string, 0, len(engine))
 	for _, key := range engine {
 		var positive config.Options
-		*floorGuardFields[key](&positive) = true
+		if err := floorGuardFields[key].Set("true", &positive); err != nil {
+			t.Fatalf("%s row Set(true): %v", key, err)
+		}
 		gates := reflect.ValueOf(floorFromOptions(positive))
 		for i := 0; i < gateType.NumField(); i++ {
 			if !gates.Field(i).Bool() {
@@ -810,7 +812,7 @@ func TestApplyStreamIdleTimeoutReadsThroughTheOneParser(t *testing.T) {
 			t.Parallel()
 			live := newLiveSettings(config.Options{StreamIdleTimeout: 2 * time.Minute})
 
-			note, err := applyStreamIdleTimeout(settingsApplier{live: live}, "stream-idle-timeout", tt.value)
+			note, err := applyMirror(settingsApplier{live: live}, "stream-idle-timeout", tt.value)
 
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -867,7 +869,7 @@ func TestApplyDelegateTimeoutReadsThroughTheOneParser(t *testing.T) {
 			t.Parallel()
 			live := newLiveSettings(config.Options{DelegateTimeout: 10 * time.Minute})
 
-			note, err := applyDelegateTimeout(settingsApplier{live: live}, "delegate-timeout", tt.value)
+			note, err := applyMirror(settingsApplier{live: live}, "delegate-timeout", tt.value)
 
 			if tt.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
@@ -888,6 +890,49 @@ func TestApplyDelegateTimeoutReadsThroughTheOneParser(t *testing.T) {
 				t.Errorf("DelegateTimeout = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// Every settings row that applies through applyMirror (or applyServerStats, which mirrors the same
+// way) is a key whose registry row carries a Copy: mirrorSetting refuses a key without one, so a
+// row pointed at the mirror over a hand-written registry row would refuse every edit.
+func TestMirrorRowsCarryACopy(t *testing.T) {
+	t.Parallel()
+
+	mirrors := map[uintptr]bool{
+		reflect.ValueOf(applyMirror).Pointer():      true,
+		reflect.ValueOf(applyServerStats).Pointer(): true,
+	}
+	for _, entry := range settingsTable {
+		if !mirrors[reflect.ValueOf(entry.apply).Pointer()] {
+			continue
+		}
+		row, ok := config.LookupKey(entry.key)
+		if !ok || row.Copy == nil {
+			t.Errorf("settings row %q applies through the mirror, but its registry row has no Copy", entry.key)
+		}
+	}
+}
+
+// A mirrored block key moves its own field of the block and leaves the rest of the holder's block
+// as it was: landSetting lands the value on a zero Options, so a mirror that copied the whole `ui:`
+// block would reset the holder's spinner, colour loop and every other `ui.*` field to zero values.
+func TestApplyMirrorMovesOnlyTheKeysFieldOfTheBlock(t *testing.T) {
+	t.Parallel()
+	boot := config.Options{UI: domain.DefaultUIPrefs()}
+	boot.UI.SpinnerColor = false
+	boot.UI.Spinner = domain.SpinnerGlitter
+	live := newLiveSettings(boot)
+
+	note, err := applyMirror(settingsApplier{live: live}, "ui.inspector", "true")
+
+	if err != nil || note != "" {
+		t.Fatalf("apply ui.inspector=true: note %q, err %v; want success with no note", note, err)
+	}
+	want := boot.UI
+	want.Inspector = true
+	if got := live.options().UI; !reflect.DeepEqual(got, want) {
+		t.Errorf("UI after the mirror = %+v, want the boot block with only Inspector moved: %+v", got, want)
 	}
 }
 

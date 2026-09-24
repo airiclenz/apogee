@@ -76,7 +76,7 @@ func TestSettingsApplyLocalSurvivesNoAutoTitleHook(t *testing.T) {
 //
 // `ui.inspector` is the one key of the block left out, on purpose: settingsApplyLocal has no arm
 // for it, because the key routes OUT through [SettingsHost.Apply] (cmd/apogee/wire_settings.go,
-// applyInspector — the wire observer is installed while a provider client is constructed, so the
+// applyMirror — the wire observer is installed while a provider client is constructed, so the
 // flip is mirrored onto the host's live Options for the next Firing to read) and the renderer's own
 // Inspector deliberately keeps the start-up state (the registry's `ui.inspector` row: "takes effect
 // at the next start"). Its Set lands in the seam only, never in m.opts.UI — which the last check

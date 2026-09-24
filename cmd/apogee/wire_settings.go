@@ -659,37 +659,45 @@ func (s *liveSettings) setBypass(on bool) apogee.Generation {
 // an apply that read the rest outside the lock could re-arm a guard a concurrent apply had just
 // taken away.
 //
-// The key is moved in the FILE's positive spelling, on now — the seven positive keys are the overlay's
-// own fields — and the engine's negative spelling is re-derived from them through the one negation
+// landed is the Options the key's value was landed on (landSetting); the key's own field is copied
+// off it through the key's registry row (row.Copy), never the rest of it. The key is moved in the
+// FILE's positive spelling, on now — the seven positive keys are the overlay's own fields — and the
+// engine's negative spelling is re-derived from them through the one negation
 // seam, so this row and a start-up read the same seven keys the same way round and neither has to
 // spell the negation a second time.
 //
 // An unknown key is a programming error the seven table rows cannot make, so it changes nothing and
 // the generation is handed back as it stands. The key set floorGuardFields answers for is pinned to
 // the engine's guard table and the config keys (TestFloorGuardTableMatchesTheConfigKeys).
-func (s *liveSettings) setFloorGuard(key string, on bool) apogee.Generation {
+func (s *liveSettings) setFloorGuard(key string, landed config.Options) apogee.Generation {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if field, known := floorGuardFields[key]; known {
-		*field(&s.now) = on
+	if row, known := floorGuardFields[key]; known {
+		row.Copy(&s.now, &landed)
 	}
 	return generationOf(s.now)
 }
 
-// floorGuardFields maps each Floor-guard key onto the config.Options field that spells it — the
-// key→field mapping setFloorGuard writes through, kept here in the composition root beside
-// floorFromOptions because the file's positive spelling is this package's to know. It is a map
-// rather than a switch so its key set can be read: a test holds it equal to the engine's guard
-// table (apogee.FloorGuardKeys) and the config keys (config.FloorGuardKeys), which is how a guard
-// added to the engine without a row here is caught.
-var floorGuardFields = map[string]func(*config.Options) *bool{
-	"tool-use-enforcer":       func(o *config.Options) *bool { return &o.ToolUseEnforcer },
-	"empty-response-recovery": func(o *config.Options) *bool { return &o.EmptyResponseRecovery },
-	"tool-call-repair":        func(o *config.Options) *bool { return &o.ToolCallRepair },
-	"tool-call-salvage":       func(o *config.Options) *bool { return &o.ToolCallSalvage },
-	"tool-loop-breaker":       func(o *config.Options) *bool { return &o.ToolLoopBreaker },
-	"tool-result-cap":         func(o *config.Options) *bool { return &o.ToolResultCap },
-	"read-cache":              func(o *config.Options) *bool { return &o.ReadCache },
+// floorGuardFields maps each Floor-guard key onto its config registry row, whose Copy is how
+// setFloorGuard moves the one key's field and nothing else — so the key→field mapping is the
+// registry's, never restated here. It is built from config.FloorGuardKeys, and is a map so its key
+// set can be read: a test holds it equal to the engine's guard table (apogee.FloorGuardKeys),
+// which is how a guard added to the engine without a config key is caught. A Floor-guard key with
+// no row, or a row with no Copy, panics at init: the seven keys are this build's own table.
+var floorGuardFields = floorGuardRows()
+
+// floorGuardRows builds floorGuardFields from the registry rows of the seven Floor-guard keys.
+func floorGuardRows() map[string]config.Key {
+	keys := config.FloorGuardKeys()
+	rows := make(map[string]config.Key, len(keys))
+	for _, key := range keys {
+		row, ok := config.LookupKey(key)
+		if !ok || row.Copy == nil {
+			panic("apogee: Floor-guard key " + key + " has no config registry row with a Copy")
+		}
+		rows[key] = row
+	}
+	return rows
 }
 
 // setContextFillNotice moves the `context-fill-notice:` switch on the overlay and hands back the
@@ -1268,43 +1276,43 @@ var settingsTable = []settingsEntry{
 		// No member of the applier is needed: the bound reaches no engine seam and rides no
 		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense.
 		reaches: reachesWithoutAMember,
-		apply:   applyDelegateMaxSteps,
+		apply:   applyMirror,
 	},
 	{
 		key: "delegate-fanout-rounds",
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
-		apply:   applyDelegateFanOutRounds,
+		apply:   applyMirror,
 	},
 	{
 		key: "delegate-max-depth",
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
-		apply:   applyDelegateMaxDepth,
+		apply:   applyMirror,
 	},
 	{
 		key: "delegate-max-tokens",
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
-		apply:   applyDelegateMaxTokens,
+		apply:   applyMirror,
 	},
 	{
 		key: "delegate-timeout",
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
-		apply:   applyDelegateTimeout,
+		apply:   applyMirror,
 	},
 	{
 		key: "stream-idle-timeout",
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
-		apply:   applyStreamIdleTimeout,
+		apply:   applyMirror,
 	},
 	{
 		key: "re-stream-budget",
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
-		apply:   applyRestreamBudget,
+		apply:   applyMirror,
 	},
 	{
 		key: "server-stats",
@@ -1316,26 +1324,19 @@ var settingsTable = []settingsEntry{
 	{
 		key:     "undo-snapshots",
 		reaches: reachesWithoutAMember,
-		apply:   applyUndoSnapshots,
+		apply:   applyMirror,
 	},
 	{
 		key: "remember-model",
 		// The holder alone, and for once that is the literal whole of the apply: the toggle reaches no
-		// engine seam and rides no rebind — the seams it gates read it back out of this holder.
+		// engine seam and rides no rebind — the seams it gates read it back out of this holder. What
+		// it gates is a WRITE apogee will make later — the entry key an explicit `/model` pick or a
+		// committed profile load records — and a decision the next start-up makes, so the seams that
+		// ask (recordModelChoice, recordLaunchProfile, launcherWiring.restore) read it from the holder
+		// at the moment they have something to record. Unlike the other mirror rows it requires the
+		// holder: a Driver without one has nothing the toggle could gate.
 		reaches: reachesTheHolder,
-		apply: func(a settingsApplier, key, value string) (string, error) {
-			landed, err := landSetting(key, value)
-			if err != nil {
-				return "", err
-			}
-			// The one toggle with no engine seam behind it and no re-resolution to ride: what it gates
-			// is a WRITE apogee will make later — the entry key an explicit `/model` pick or a committed
-			// profile load records — and a decision the next start-up makes. So the holder store is the
-			// whole apply, and the seams that ask (recordModelChoice, recordLaunchProfile,
-			// launcherWiring.restore) read it from there at the moment they have something to record.
-			a.live.update(func(o *config.Options) { o.RememberModel = landed.RememberModel })
-			return "", nil
-		},
+		apply:   applyMirror,
 	},
 	{
 		key:     "context-window",
@@ -1358,7 +1359,7 @@ var settingsTable = []settingsEntry{
 		// No member of the applier is needed: the room reaches no engine seam and rides no
 		// re-resolution — the holder it is mirrored onto is optional in reloadServers' sense.
 		reaches: reachesWithoutAMember,
-		apply:   applyWorkingWindow,
+		apply:   applyMirror,
 	},
 	{
 		key:     "response-reserve",
@@ -1388,7 +1389,7 @@ var settingsTable = []settingsEntry{
 	{
 		key:     "ui.inspector",
 		reaches: reachesWithoutAMember,
-		apply:   applyInspector,
+		apply:   applyMirror,
 	},
 	{
 		// The retention sweep runs once while a session is being WIRED, so nothing here can re-sweep
@@ -1688,164 +1689,49 @@ func applyTheWriteAlone(a settingsApplier, key, value string) (string, error) {
 	return "", nil
 }
 
-// applyDelegateMaxSteps is `delegate-max-steps:`, which is the write alone for THIS session and not
-// for the runs it raises. The bound is a field of the Config an Agent was CONSTRUCTED with, so
-// nothing here can tighten the session's own delegations — but a Firing builds a Config of its own
-// out of options(), and mirroring the number onto the holder is what lets a bound the human just
-// set bound the delegations of the runs this session raises.
+// applyMirror is the apply for a key whose live effect is the write for THIS session plus a mirror
+// onto the holder for the runs it raises. The value is a field of something constructed once — the
+// Config an Agent was built with (the delegation bounds, the working room, the stream and re-stream
+// bounds), the provider client's wire observer (`ui.inspector`), the undo store opened with the
+// session (`undo-snapshots`, ADR 0074) — so nothing here can move it on the session already
+// running. But a Firing builds its own out of options(), and mirroring the landed value onto the
+// holder is what lets the value the human just set bound the runs this session raises. The
+// `remember-model` toggle mirrors the same way for a different reason: the seams it gates read it
+// back out of the holder when they have something to record.
 //
 // It answers exactly as applyTheWriteAlone does — success, no note, the Description's "takes effect
-// at the next start" carrying the promise — while parsing the value, for applyInspector's reason: a
-// value that is to be recorded has to be read.
-func applyDelegateMaxSteps(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateMaxSteps = landed.DelegateMaxSteps })
-	}
-	return "", nil
-}
-
-// applyDelegateFanOutRounds is `delegate-fanout-rounds:`, on applyDelegateMaxSteps's footing
-// exactly: the ceiling is a field of the Config an Agent was CONSTRUCTED with, so the write is the
-// whole of the apply for this session, and the mirror onto the holder is what bounds the fan-out of
-// the Firings it raises. Success, no note, the Description's "takes effect at the next start"
-// carrying the promise; the value is parsed because a value that is to be recorded has to be read.
-func applyDelegateFanOutRounds(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateFanOutRounds = landed.DelegateFanOutRounds })
-	}
-	return "", nil
-}
-
-// applyDelegateMaxDepth is `delegate-max-depth:`, on applyDelegateMaxSteps's footing exactly: the
-// bound is a field of the Config an Agent was CONSTRUCTED with, so the write is the whole of the
-// apply for this session, and the mirror onto the holder is what bounds the delegations of the
-// Firings it raises. Success, no note, the Description's "takes effect at the next start" carrying
-// the promise; the value is parsed because a value that is to be recorded has to be read.
-func applyDelegateMaxDepth(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateMaxDepth = landed.DelegateMaxDepth })
-	}
-	return "", nil
-}
-
-// applyDelegateMaxTokens is `delegate-max-tokens:`, on applyDelegateMaxSteps's footing exactly: the
-// budget is a field of the Config a child Agent is constructed with at spawn, so the write is the
-// whole of the apply for this session, and the mirror onto the holder is what bounds the delegations
-// of the Firings it raises. Success, no note, the Description's "takes effect at the next start"
-// carrying the promise; the value is parsed because a value that is to be recorded has to be read.
-func applyDelegateMaxTokens(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateMaxTokens = landed.DelegateMaxTokens })
-	}
-	return "", nil
-}
-
-// applyDelegateTimeout is `delegate-timeout:`, on the same footing, landed through the row whose
-// validator and landing are both the ONE parser of the key (config.ParseDelegateTimeout) — the
-// reading startup resolves by — rather than a second duration parse with an empty-value rule of
-// its own: an empty value is the built-in default there, as it is for an absent key, and `0` is
-// unbounded. A negative one is refused there too rather than trusted from the file, in the
-// parser's own words.
-func applyDelegateTimeout(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.DelegateTimeout = landed.DelegateTimeout })
-	}
-	return "", nil
-}
-
-// applyStreamIdleTimeout is `stream-idle-timeout:`, on applyDelegateTimeout's footing exactly: the
-// bound is a field of the Config an Agent was CONSTRUCTED with — it rides the provider client every
-// dial builds — so the write is the whole of the apply for this session, and the mirror onto the
-// holder is what bounds the streams of the Firings it raises. Landed through the row whose
-// validator and landing are both the ONE parser of the key (config.ParseStreamIdleTimeout): an
-// empty value is the built-in default, `0` is off, and a negative one is refused in the parser's
-// own words.
-func applyStreamIdleTimeout(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.StreamIdleTimeout = landed.StreamIdleTimeout })
-	}
-	return "", nil
-}
-
-// applyRestreamBudget is `re-stream-budget:`, on applyDelegateFanOutRounds's footing exactly: the
-// budget is a field of the Config an Agent was CONSTRUCTED with, so the write is the whole of the
-// apply for this session, and the mirror onto the holder is what bounds the re-streams of the
-// Firings it raises. Success, no note, the Description's "takes effect at the next start" carrying
-// the promise; the value is parsed because a value that is to be recorded has to be read.
-func applyRestreamBudget(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.RestreamBudget = landed.RestreamBudget })
-	}
-	return "", nil
-}
-
-// applyWorkingWindow is `working-window:`, which is the write alone for THIS session and not for the
-// runs it raises. The room is a field of the Config an Agent was CONSTRUCTED with, so nothing here
-// can re-bound the session's own Budget — but a Firing builds a Config of its own out of options(),
-// and a `/server` move resolves an entry's bound over this number, so mirroring it onto the holder
-// is what lets a room the human just set bound both.
+// at the next start" carrying the promise — while still reading the value, because a value that is
+// to be recorded has to be read. It is read through the key's own registry row, so a key whose
+// validator and landing are one parser (config.ParseDelegateTimeout, config.ParseStreamIdleTimeout)
+// takes an empty value as the built-in default and refuses a bad one in that parser's words.
 //
-// It answers exactly as applyDelegateMaxSteps does — success, no note, the Description's "takes
-// effect at the next start" carrying the promise — while parsing the value, for that apply's reason:
-// a value that is to be recorded has to be read.
-func applyWorkingWindow(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.WorkingWindow = landed.WorkingWindow })
-	}
-	return "", nil
+// The holder is optional in the reloadServers sense: a Driver that composed none has no Firing to
+// compose either, and refusing the key over its absence would report a failure over a save that did
+// what the key promises.
+func applyMirror(a settingsApplier, key, value string) (string, error) {
+	_, err := mirrorSetting(a, key, value)
+	return "", err
 }
 
-// applyInspector is `ui.inspector:`, which is the write alone for THIS session and not for the runs
-// it raises. The wire observer is installed while a provider client is CONSTRUCTED (wire_boot.go),
-// so nothing here can arm one on a session already talking to a server — but a Firing builds a
-// client of its own out of options(), and mirroring the flip onto the holder is what lets it.
-//
-// It therefore answers exactly as applyTheWriteAlone does — success, no note, the Description's
-// "takes effect at the next start" carrying the promise — while parsing the value, because a value
-// that is to be recorded has to be read. The holder is optional in the reloadServers sense: a
-// Driver that composed none has no Firing to compose either, and refusing the key over its absence
-// would report a failure over a save that did what the key promises.
-func applyInspector(a settingsApplier, key, value string) (string, error) {
+// mirrorSetting lands value through the key's registry row (landSetting) and mirrors the landed
+// value onto the holder through the row's Copy, which moves the key's own field and nothing else. A
+// block key's scratch Options is zero apart from that field, so copying the block would overwrite
+// the holder's neighbours; Copy never does. It hands the landed Options back for an apply that has
+// a seam to push beside the mirror. A key whose row has no Copy is refused as cannotApply, which
+// the table's rows cannot reach (TestMirrorRowsCarryACopy).
+func mirrorSetting(a settingsApplier, key, value string) (config.Options, error) {
+	row, ok := config.LookupKey(key)
+	if !ok || row.Copy == nil {
+		return config.Options{}, cannotApply(key)
+	}
 	landed, err := landSetting(key, value)
 	if err != nil {
-		return "", err
+		return config.Options{}, err
 	}
 	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.UI.Inspector = landed.UI.Inspector })
+		a.live.update(func(o *config.Options) { row.Copy(o, &landed) })
 	}
-	return "", nil
+	return landed, nil
 }
 
 // applyServerStats is `server-stats:` (ADR 0085), live: the holder takes the flip so the next Firing
@@ -1853,35 +1739,11 @@ func applyInspector(a settingsApplier, key, value string) (string, error) {
 // Firings this session raises share that recorder, so they follow the same switch. Off, the file is
 // neither written nor read from the next upstream attempt on; the events themselves still fire.
 func applyServerStats(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
+	landed, err := mirrorSetting(a, key, value)
 	if err != nil {
 		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.ServerStats = landed.ServerStats })
 	}
 	a.stats.set(landed.ServerStats)
-	return "", nil
-}
-
-// applyUndoSnapshots is `undo-snapshots:`, which is the write alone for THIS session and not for the
-// runs it raises. The session's undo store is opened while the session id is minted and the journal
-// is injected into the Agent then (ADR 0074), so nothing here can open — or close — the store of a
-// session already running; mirroring the flip onto the holder is what lets the next Firing open its
-// own store the way the human has just asked for.
-//
-// It answers exactly as applyInspector does — success, no note, the Description's "takes effect at
-// the next start" carrying the promise — while parsing the value, for that apply's reason: a value
-// that is to be recorded has to be read. The holder is optional in the same sense too: a Driver that
-// composed none has no Firing to compose either.
-func applyUndoSnapshots(a settingsApplier, key, value string) (string, error) {
-	landed, err := landSetting(key, value)
-	if err != nil {
-		return "", err
-	}
-	if a.live != nil {
-		a.live.update(func(o *config.Options) { o.UndoSnapshots = landed.UndoSnapshots })
-	}
 	return "", nil
 }
 
@@ -1900,13 +1762,12 @@ func applyFloorGuard(a settingsApplier, key, value string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// The landed value is read back off the scratch through the same key→field map the holder
-	// writes through, so the row and the overlay cannot name two different fields for one key.
-	field, known := floorGuardFields[key]
-	if !known {
+	// The landed value is copied off the scratch through the key's own registry row, the one the
+	// holder writes through, so the row and the overlay cannot name two different fields for one key.
+	if _, known := floorGuardFields[key]; !known {
 		return "", cannotApply(key)
 	}
-	return "", a.engine.SetReactions(a.live.setFloorGuard(key, *field(&landed)))
+	return "", a.engine.SetReactions(a.live.setFloorGuard(key, landed))
 }
 
 // applyContextFillNotice is the `context-fill-notice:` row's apply, on applyFloorGuard's terms: the

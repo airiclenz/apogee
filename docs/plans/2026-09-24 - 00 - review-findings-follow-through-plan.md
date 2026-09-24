@@ -399,7 +399,13 @@ docs/adr/0036-the-servers-list-is-the-single-definition-and-the-last-switch-is-t
 - `go test -race -count=1 ./internal/config/`
 **Commit:** `refactor(config): every key's file semantics live on its registry row`
 
-## 18. Settings applies mirror through Key.Copy
+## 18. Settings applies mirror through Key.Copy — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): `Key.Copy` is an exported func field that bindRows derives for field rows, the way Read and Set are derived. It is nil on hand-written rows. bindRows's init panic now also catches a field row that hand-writes a Copy.
+NOTES (2026-09-24): the enumeration in the Goal was treated as a floor. `remember-model`'s inline apply was also a pure holder mirror, so it now uses applyMirror and keeps `reachesTheHolder`. applyServerStats stays a separate apply because it also calls the stats recorder, but it mirrors through the same mirrorSetting helper. `context-window`, `auto-compact` and `prune-tool-results` still mirror by hand because they also push to an engine seam, so they are not pure mirrors.
+NOTES (2026-09-24): floorGuardFields is now a `map[string]config.Key` built at init from config.FloorGuardKeys through config.LookupKey, and it panics if a key has no row or no Copy. `setFloorGuard(key, landed config.Options)` moves the key through `row.Copy`. TestFloorGuardTableMatchesTheConfigKeys builds its positive Options with `row.Set("true")`.
+NOTES (2026-09-24): new tests: TestFieldCopyMovesOnlyItsOwnField (keyfield_test.go) checks every field row against the everyKeyFileConfig holder, so sibling `ui.*`, `present.*` and `sessions.*` fields must stay put. TestMirrorRowsCarryACopy and TestApplyMirrorMovesOnlyTheKeysFieldOfTheBlock are in wire_settings_test.go. The two parser tests now call applyMirror in place of applyStreamIdleTimeout and applyDelegateTimeout.
+NOTES (2026-09-24): consequential edit — internal/tui/settingsapply_test.go: made necessary by removing applyInspector (a comment named it).
 
 **What:**
 **Goal:** `config.Key` exports `Copy(dst, src *Options)`; the pure holder-mirror `applyX` functions in `cmd/apogee/wire_settings.go` are one `applyMirror`; `floorGuardFields` derives from the registry rows. Depends on item 16.
