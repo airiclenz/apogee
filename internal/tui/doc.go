@@ -341,6 +341,9 @@
 // paint reads ([Model.legend], with [Model.legendFor] as its view-aware half). Because the
 // claimant swallows esc, the double-tap stop is unreachable from inside a view — the status line
 // says "esc back" where it would otherwise offer the stop, and backing out first is the way to it.
+// The status line's gauge inside a view is the VIEWED run's own fill, never the parent's
+// ([Model.contextGauge], ADR 0063 D4 as amended 2026-09-24); until that run has reported usage the
+// slot is empty of a gauge and the "esc back" hint holds it.
 //
 // Module map — the input cluster has its own home (review candidate #3). prompteditor.go lifts the
 // loose input-side concerns the architecture review called one coherent concept — the textarea, the

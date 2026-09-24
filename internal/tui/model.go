@@ -3926,7 +3926,8 @@ func (m Model) escStopHint(room int) string {
 const quietQualifier = " · quiet"
 
 // statusRight is the status line's right slot: the live context gauge when token usage is
-// known, else a state-appropriate key hint. The gauge is empty only until the first UsageEvent
+// known — the viewed run's inside a run view, never the parent's (contextGauge) — else a
+// state-appropriate key hint. The gauge is empty only until the first UsageEvent
 // folds a turn's total into ctxUsed (or after /clear and /compact zero it) — so the hint shows
 // before any usage is measured and the gauge takes the slot the moment it is. Every branch
 // returns its occupant flush — statusLine appends the trailing margin at one seam, so the whole
@@ -3951,10 +3952,10 @@ func (m Model) statusRight(room int) string {
 	if g := m.contextGauge(); g != "" {
 		return g
 	}
-	// Inside a run view esc goes one level up and never arms the stop — the claimant takes it
-	// (runview.go) — so the slot says what the key actually does, standing in the rung the stop hint
-	// stood in and wearing the breadcrumb's own wording, since the two rows advertise one key. It
-	// yields to stateErrored, whose occupant names the thing to dismiss; the view is still there
+	// Inside a run view whose run has not reported usage yet, esc goes one level up and never arms
+	// the stop — the claimant takes it (runview.go) — so the slot says what the key actually does,
+	// standing in the rung the stop hint stood in and wearing the breadcrumb's own wording, since
+	// the two rows advertise one key. It yields to stateErrored, whose occupant names the thing to dismiss; the view is still there
 	// behind the error. It also yields wherever a pane owns esc (runViewOwnsEsc): there the double-tap
 	// stop is still reachable and the row must keep saying so.
 	if m.runViewOwnsEsc() && m.state != stateErrored {
@@ -3970,12 +3971,32 @@ func (m Model) statusRight(room int) string {
 	}
 }
 
-// contextGauge renders the live token-usage gauge for the status line. Used is the latest
-// top-level UsageEvent's total-token count (foldStats); until the first turn reports usage — or
-// on a server that omits it — Used is 0 and the gauge renders nothing, the static window
-// showing in the footer instead.
+// contextGauge renders the live token-usage gauge for the status line, and is the one place that
+// decides WHOSE fill the chrome states: the run the human is looking at.
+//
+// At the top level that is the session's own agent: Used is the latest top-level UsageEvent's
+// total-token count (foldStats); until the first turn reports usage — or on a server that omits it
+// — Used is 0 and the gauge renders nothing, the static window showing in the footer instead.
+//
+// Inside a run view (ADR 0063 D4, amended 2026-09-24) it is the viewed run's: its head's fill as
+// [transcript.applyUsage] froze it, against the window that run actually filled (childWindow) —
+// the session's only when the reading named none. The top-level fill never shows there: a parent's
+// gauge above a child's transcript is a number about someone else. Until the viewed run has
+// reported usage — or when its head is gone ([Model.viewedChild]) — the gauge renders nothing, and
+// the slot falls through to its hints ([Model.statusRight]), which inside a view say `esc back`.
 func (m Model) contextGauge() string {
-	return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view(m.th)
+	if !m.inRunView() {
+		return contextUsage{Used: m.ctxUsed, Limit: m.opts.ContextWindow}.view(m.th)
+	}
+	head, ok := m.viewedChild()
+	if !ok {
+		return ""
+	}
+	limit := head.ctxLimit
+	if limit == 0 {
+		limit = m.opts.ContextWindow
+	}
+	return contextUsage{Used: head.ctxUsed, Limit: limit}.view(m.th)
 }
 
 // contextUsage is the live context-window gauge's data: tokens Used out of the window Limit.

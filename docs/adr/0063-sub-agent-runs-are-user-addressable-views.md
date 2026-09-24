@@ -93,7 +93,8 @@ transcript slot's content while the status line, prompt box and footer stay exac
 the same frame arithmetic every pane already uses (`frameRowPlan` reserve = 0), so ADR 0035 stands
 and no alternate screen is entered. A clickable breadcrumb header row (`← main › <name>`, chained for
 nested runs) and `esc` each go **one** level up; the status line's right slot reads `esc back` while a
-view is open, and stopping stays whole-run from the top level. The view is **Driver state**: a stack
+view is open (amended 2026-09-24, below: once the viewed run has reported usage the slot states that
+run's context gauge instead), and stopping stays whole-run from the top level. The view is **Driver state**: a stack
 of open runs in the `Model`, never encoded in the transcript, never written to a session record, and
 never restored — a resumed session opens at the top level.
 
@@ -142,3 +143,21 @@ cannot widen it beyond its parent.
   a fact about that human's actions, and the run view only changes what the human sees. There is
   nothing for Bypass to switch off and nothing for a bench arm to measure; the Bypass floor is
   untouched.
+
+## Amendment (2026-09-24) — the status line's gauge is the viewed run's
+
+**Why now.** D4 has the status line's right slot read `esc back` while a view is open, but the slot's
+occupants are ranked and the context gauge outranks every hint: once the top-level agent had reported
+usage — which is every session past its first Turn — the slot inside a view showed the **parent's**
+fill, and `esc back` never appeared. So a reader looking at a child's transcript was shown a number
+about someone else, measured against a window the child may not even have filled (a routed child
+fills its Delegation target's, ADR 0045).
+
+**Decision.** Inside a run view the status line's gauge states the **viewed run's** fill: the
+innermost open run's head, its latest usage reading against the window that reading names — the
+session's window only when the reading names none. The top-level gauge never shows inside a view.
+Until the viewed run has reported usage the slot falls through to its hints, so it reads `esc back`
+there exactly as D4 says; a primed `ctrl+c`, an armed `esc` and a flash still take the slot first.
+The breadcrumb band keeps advertising `esc back` whatever the slot holds, so the way back is always
+on screen. At the top level nothing changes. One function (`Model.contextGauge`) stays the single
+owner of which gauge the chrome shows.

@@ -1275,7 +1275,9 @@ anywhere on the band — any of its three rows — goes **one** level up, and `e
 a set of jump targets, so leaving a run two deep is two presses.
 
 **`esc` means back before it means stop.** While a view is open the status line's right slot reads
-`esc back` where it would otherwise offer `esc×2 stop`, and the stop is deliberately not reachable
+`esc back` where it would otherwise offer `esc×2 stop` — unless the viewed run has reported usage,
+when the slot states that run's own context gauge instead (never the parent's: "Where it ends",
+below) — and the stop is deliberately not reachable
 from inside: stopping is whole-run and belongs to the top level — a child cannot outlive the Turn
 it runs inside — so a reader one level down stops the run in three presses, one to walk out and the
 double-tap there. Each level remembers where the level **below** it was parked, so backing out
@@ -1487,9 +1489,13 @@ the context-usage gauge (`16k/32k 50% █████░░░░░` in the ske
 window they are measured against, because a fill only means something beside the limit it fills,
 and where `░` draws the empty half of the ten-cell track: on screen those cells are a painted
 dark-gray field carrying no glyph of their own), the key hint that stands in for it (`esc×2 stop`
-while a turn runs, `esc back` while a run view is open, `enter dismiss` after an error, the
+while a turn runs, `esc back` while a run view is open and its run has reported no usage yet,
+`enter dismiss` after an error, the
 primed-`ctrl+c` and armed-`esc` lines), and
-the mouse-copy flash. The armed-`esc` line reads `press esc again to stop`, and while a pooled
+the mouse-copy flash. The gauge is the fill of the run the reader is looking at: at the top level the
+session's own agent, inside a run view the viewed run's — its latest reading against the window that
+run filled — and never the parent's there, since a parent's fill above a child's transcript is a
+number about someone else. The armed-`esc` line reads `press esc again to stop`, and while a pooled
 sub-agent group is in flight in the open Turn it says what the second press would cost: `press esc
 again to stop — drops 3 finished delegations; ⏎ a message keeps them` where members have already
 reported (`1 finished delegation` for one), or `press esc again to stop — ⏎ a message instead skips
@@ -1635,7 +1641,9 @@ the status line's gauge states it, beside what the conversation has actually spe
 The window is still a session fact — a change to it is still noted in the transcript — it simply
 has one home in the chrome now. It keeps exactly one: the fill a collapsed sub-agent run states on
 its summary line is a *different agent's* window said on that run's own block, which is transcript
-content and not a second gauge — the chrome gains nothing from a delegate having run.
+content and not a second gauge — at the top level the chrome gains nothing from a delegate having
+run. Inside that run's view the chrome's one gauge is the run's own ("Where it ends"), so the number
+the reader sees is always the fill of the transcript on screen.
 
 **The workdir the slot ends on.** The last segment is the local directory this session is rooted
 in, written with the home directory as `~` (`~/Repos/apogee`). The substitution happens only at a

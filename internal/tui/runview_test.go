@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/format"
 )
 
 // The run view's own suite: what opens one, what leaves one, and what the frame says while one is
@@ -532,12 +533,107 @@ func TestRunViewStatusSlotOffersTheWayBack(t *testing.T) {
 	if got := plainSlot(m.statusRight(m.width)); got != "esc×2 stop" {
 		t.Fatalf("setup: the top level's right slot is %q; want the stop gesture", got)
 	}
+	// The parent has reported usage, so the top level's slot now holds ITS gauge. The view below
+	// is of a run that reported none: the parent's fill is not that run's to show, and the slot
+	// falls through to the key the view actually has.
+	m.ctxUsed = 20000
 
 	m = enterOnLastBlock(t, m)
 
 	if got := plainSlot(m.statusRight(m.width)); got != breadcrumbHint {
 		t.Errorf("the right slot inside a view is %q; want %q — the key it actually has", got, breadcrumbHint)
 	}
+}
+
+// viewedRunUsage folds a delegated run's FILL onto its head the way the live fold does (fold.go): a
+// reading at the child's depth, keyed to the spawning call — the head a test's subAgentCall builds
+// carries no run id, so the call id is the key [entry.headsRunFor] answers to — and stamped with the
+// window that child actually worked against. It must land before the run's report: a done head
+// takes no further readings (openSubAgentHead).
+func viewedRunUsage(m *Model, callID string, depth, total, window int) {
+	m.transcript.applyUsage(domain.UsageEvent{
+		EventBase:     domain.EventBase{Depth: depth, CallID: callID},
+		TotalTokens:   total,
+		ContextWindow: window,
+	}, m.opts.ContextWindow, m.opts.Model)
+}
+
+// TestRunViewGaugeStatesTheViewedRun pins ADR 0063 D4 as amended 2026-09-24: the status line's gauge
+// states the fill of the run the human is LOOKING AT. Inside a view that is the viewed run's own
+// used/limit — never the parent's — and backing out hands the slot back to the parent's.
+func TestRunViewGaugeStatesTheViewedRun(t *testing.T) {
+	t.Parallel()
+
+	const parentUsed = 20000
+	parentGauge := fmt.Sprintf("%s/%s", format.Tokens(parentUsed), format.Tokens(testOpts.ContextWindow))
+
+	t.Run("a view shows its run's gauge, and backing out restores the parent's", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestModel(t)
+		m.transcript.reset()
+		m.transcript.addUser("survey the repo", nil)
+		subAgentCall(&m.transcript, "s1", "survey", 0)
+		viewedRunUsage(&m, "s1", 1, 7000, 8192)
+		readCall(&m.transcript, "r1", "a.go", 1, 5, 1)
+		subAgentReport(&m.transcript, "s1", "all clear", 0)
+		m.ctxUsed = parentUsed
+		m.refreshViewport()
+		childGauge := fmt.Sprintf("%s/%s", format.Tokens(7000), format.Tokens(8192))
+
+		m = enterOnLastBlock(t, m)
+		if got := m.viewedRun().spawn; got != "s1" {
+			t.Fatalf("setup: ⏎ opened run %q; want s1", got)
+		}
+
+		got := plainSlot(m.statusRight(m.width))
+		if !strings.HasPrefix(got, childGauge) {
+			t.Errorf("the right slot inside s1's view is %q; want s1's own gauge %q", got, childGauge)
+		}
+		if strings.Contains(got, parentGauge) {
+			t.Errorf("the right slot inside s1's view states the parent's fill %q: %q", parentGauge, got)
+		}
+
+		m = step(t, m, keyEsc())
+		if m.inRunView() {
+			t.Fatal("setup: esc did not leave the view")
+		}
+		if got := plainSlot(m.statusRight(m.width)); !strings.HasPrefix(got, parentGauge) {
+			t.Errorf("the right slot back at the top level is %q; want the parent's gauge %q", got, parentGauge)
+		}
+	})
+
+	t.Run("a nested view shows the innermost run's gauge", func(t *testing.T) {
+		t.Parallel()
+
+		m := newTestModel(t)
+		m.transcript.reset()
+		m.transcript.addUser("survey the repo", nil)
+		subAgentCall(&m.transcript, "s1", "survey", 0)
+		viewedRunUsage(&m, "s1", 1, 5000, 16384)
+		subAgentCall(&m.transcript, "s2", "read the tests", 1)
+		viewedRunUsage(&m, "s2", 2, 3000, 8192)
+		readCall(&m.transcript, "r1", "a.go", 1, 5, 2)
+		subAgentReport(&m.transcript, "s2", "all clear", 1)
+		subAgentReport(&m.transcript, "s1", "all clear", 0)
+		m.ctxUsed = parentUsed
+		m.refreshViewport()
+		outerGauge := fmt.Sprintf("%s/%s", format.Tokens(5000), format.Tokens(16384))
+		innerGauge := fmt.Sprintf("%s/%s", format.Tokens(3000), format.Tokens(8192))
+
+		m = enterOnLastBlock(t, m)
+		if got := plainSlot(m.statusRight(m.width)); !strings.HasPrefix(got, outerGauge) {
+			t.Errorf("the right slot inside s1's view is %q; want s1's gauge %q", got, outerGauge)
+		}
+
+		m = enterOnLastBlock(t, m)
+		if got := m.viewedRun().spawn; got != "s2" {
+			t.Fatalf("setup: the nested delegation opened run %q", got)
+		}
+		if got := plainSlot(m.statusRight(m.width)); !strings.HasPrefix(got, innerGauge) {
+			t.Errorf("the right slot inside s2's view is %q; want the innermost run's gauge %q", got, innerGauge)
+		}
+	})
 }
 
 // plainSlot is a status-line slot with its styling taken back off, for a claim about the exact words

@@ -78,7 +78,10 @@ internal/tui/subagentblock.go — breadcrumbRow; internal/tui/render_test.go —
 
 **Commit:** `feat(tui): the run view's breadcrumb is a three-row band, clickable as one`
 
-## 2. Inside a run view the status line states the viewed run's gauge
+## 2. Inside a run view the status line states the viewed run's gauge — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the fix lives entirely in `Model.contextGauge` (model.go) via `Model.viewedChild`; `internal/tui/runview.go` needed no change, so it is not in FILES.
+NOTES (2026-09-24): the test helper is named `viewedRunUsage`, not `childUsage`, because `transcript_test.go` already defines a `childUsage`.
 
 **What:**
 **Goal:** While a run view is open, `Model.statusRight` never renders the top-level gauge (`m.ctxUsed` against `m.opts.ContextWindow`).

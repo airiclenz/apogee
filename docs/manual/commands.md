@@ -138,8 +138,10 @@ whole transcript area over to that one run — its task at the top, its own tool
 its answer below, following its latest line as it works. A click on the run's row opens the
 same thing. The black band at the top of the view is the way back: `← main › scout` in its
 middle row, and `esc` — or a click anywhere on the band — goes one level up, one press per
-level. While a view is open the status line says `esc back` in place of the stop hint,
-because stopping is the whole run's and belongs to the top level: back out first, then
+level. While a view is open the status line's right end shows **that run's** context
+gauge once it has reported usage — never the main agent's — and `esc back` until then, in
+place of the stop hint, because stopping is the whole run's and belongs to the top level:
+back out first, then
 `esc` twice. Inside the view of a run that is
 still working the prompt box addresses **that sub-agent** — the box reads
 `Message scout…` and `⏎` sends your message to the delegate, which picks it up between its
