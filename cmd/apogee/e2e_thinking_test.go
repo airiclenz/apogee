@@ -78,6 +78,40 @@ func TestE2EThinkingPaneShowsEitherWireSpelling(t *testing.T) {
 	}
 }
 
+// TestE2EClearEmptiesTheThinkingPane drives a session that reasons, crosses the /clear boundary,
+// and opens /thinking: the fresh session's pane must show the empty row and none of the closed
+// session's thought. The board used to survive /clear, so the new session's pane still carried the
+// old reasoning (apogee-thinking-pane-survives-clear).
+func TestE2EClearEmptiesTheThinkingPane(t *testing.T) {
+	t.Parallel()
+
+	stub := stubllm.New(t, loadScript(t, "thinking"))
+	drv := tuitest.NewDriver(t, e2eSize)
+	launchTUI(t, drv, stub)
+
+	submit(drv, thinkingPrompt)
+	drv.WaitText(thinkingReply)
+
+	// A /clear typed while the turn is still finishing is queued and runs at idle, so waiting for
+	// the reply to leave the transcript waits for the boundary itself, however it was reached.
+	submit(drv, "/clear")
+	drv.WaitGone(thinkingReply)
+
+	submit(drv, "/thinking")
+	drv.WaitText(thinkingPaneMarker)
+	drv.WaitQuiet(settled)
+
+	frame := drv.Frame()
+	if _, _, ok := frame.Find(thinkingEmpty); !ok {
+		t.Errorf("after /clear the /thinking pane does not say %q:\n%s", thinkingEmpty, frame)
+	}
+	if _, _, ok := frame.Find(thinkingThought); ok {
+		t.Errorf("after /clear the /thinking pane still shows %q from the closed session:\n%s",
+			thinkingThought, frame)
+	}
+	closePane(drv, thinkingPaneMarker)
+}
+
 // TestE2EThinkingFixturesDifferOnlyInTheSpelling pins the pairing the test above rests on. If the
 // two fixtures were to drift apart in anything but `reasoning_field`, the subtests would still
 // pass while no longer comparing the two spellings of one conversation — so the drift is caught

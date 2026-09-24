@@ -67,7 +67,9 @@ internal/tui/contextfiles_test.go — clearSession, restoreSession; internal/tui
 
 **Commit:** `fix(tui): /clear, /new, resume and fork empty the thinking and advice boards`
 
-## 2. An e2e run proves /clear empties the /thinking pane
+## 2. An e2e run proves /clear empties the /thinking pane — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): added a `WaitQuiet(settled)` after the pane-marker wait before reading the frame, as the sibling `TestE2EThinkingPaneShowsEitherWireSpelling` does (test-drivers.md rule 4); bite check confirmed: with `m.thinking.reset()` in `resetSessionBoards` commented out the test fails on both assertions.
 
 **What:**
 Test-only. Depends on item 1. In `cmd/apogee/e2e_thinking_test.go`, add `TestE2EClearEmptiesTheThinkingPane`, modelled on `TestE2EThinkingPaneShowsEitherWireSpelling`. It reuses the `thinking` stubllm script and the constants `thinkingPrompt`, `thinkingThought`, `thinkingReply`, `thinkingEmpty` and `thinkingPaneMarker`. The sequence:
