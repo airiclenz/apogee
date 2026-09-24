@@ -106,6 +106,11 @@ by the confirm, so the verb carries decision 7's stamp exactly as `/undo confirm
 reprinted. The verb also holds the session (`session.Store.Hold`) for its whole run, so a session
 open in a live apogee is refused rather than having its journal rewritten under it.
 
+*Note (2026-09-24, `apogee-firing-holds-no-record`):* that covers a Firing in flight too.
+`run.Once` holds the record it will be filed under for the run's whole life (ADR 0022 D7's note),
+so `apogee undo <id>` against a headless or daemon run still writing its journal is refused with
+the hold's own sentence, where before only an interactive session's hold refused it.
+
 **9 — An approved out-of-workspace write stays funnel-journaled and per-process.** A snapshot's
 work-tree is the workspace, so a write executed under an
 [ADR 0049](0049-an-approved-write-escape-executes-through-a-permit-pinned-to-the-disclosed-target.md)

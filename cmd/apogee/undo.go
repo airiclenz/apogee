@@ -40,9 +40,9 @@ import (
 // The verb HOLDS the session for its whole run — the same live-instance hold (session.Store.Hold)
 // a --resume start takes — because the store it rewrites is the one a live apogee running that
 // session would persist over on its next exchange. A held session is refused with the hold's own
-// sentence; the verb's own hold is released when it returns. Headless and daemon runs take no
-// hold of their own, so a Firing in flight is not refused by this — that gap is recorded, not
-// closed here.
+// sentence; the verb's own hold is released when it returns. Headless and daemon Firings hold
+// their record the same way for as long as run.Once runs, so an undo of a Firing still in flight
+// is refused with that sentence too.
 //
 // What it deliberately does NOT take is a workspace. The store images ONE tree, its index says
 // which, and every recorded path is spelled against it: a `--workspace` that disagreed would

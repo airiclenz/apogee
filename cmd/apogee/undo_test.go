@@ -8,12 +8,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/daemon"
+	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/session"
 	"github.com/airiclenz/apogee/internal/snapshot"
+	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/undo"
 )
 
@@ -434,6 +437,54 @@ func TestUndoVerbRefusesAHeldSession(t *testing.T) {
 	}
 	if !bytes.Equal(before, after) {
 		t.Errorf("a refused confirm rewrote journal.json:\n%s\nwant:\n%s", after, before)
+	}
+}
+
+// TestUndoVerbRefusesAFiringInFlight closes the gap the verb's own hold left open: a headless or
+// daemon Firing holds the record it will be filed under for as long as run.Once runs, so an undo of
+// that id while the Firing is mid-Turn is refused with the hold's own sentence rather than rewriting
+// the journal the run is still writing. Once the Firing returns, the same verb gets past the hold.
+func TestUndoVerbRefusesAFiringInFlight(t *testing.T) {
+	const id = "s-undo-11"
+	home := t.TempDir()
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Text: "done", Await: "answer"}}})
+
+	spec := run.Spec{
+		Config:   domain.Config{Endpoint: up.URL, Model: "test-model", Mode: domain.ModePlan},
+		Prompt:   "run while undo knocks",
+		Store:    session.NewStore(filepath.Join(home, "sessions")),
+		RecordID: id,
+	}
+	fired := make(chan error, 1)
+	go func() {
+		_, err := run.Once(context.Background(), spec)
+		fired <- err
+	}()
+	deadline := time.Now().Add(10 * time.Second)
+	for len(up.Requests()) == 0 {
+		if time.Now().After(deadline) {
+			up.Release("answer")
+			t.Fatal("the Firing never reached the Upstream")
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	_, err := runUndoCmd(t, home, id)
+
+	var held *session.HeldError
+	if !errors.As(err, &held) {
+		t.Errorf("an undo of a Firing in flight answered %v, want a *session.HeldError", err)
+	} else if !strings.Contains(err.Error(), "session "+id+" is open in another apogee") {
+		t.Errorf("the refusal reads %q, want the hold's own sentence", err)
+	}
+
+	up.Release("answer")
+	if err := <-fired; err != nil {
+		t.Fatalf("run.Once: %v", err)
+	}
+	_, err = runUndoCmd(t, home, id)
+	if errors.As(err, &held) {
+		t.Errorf("an undo after the Firing returned is still refused: %v", err)
 	}
 }
 

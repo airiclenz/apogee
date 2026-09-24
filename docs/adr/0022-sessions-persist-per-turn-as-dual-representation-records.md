@@ -129,6 +129,13 @@ recorded `ISSUES.md` follow-on, not built here.
 > stated exception to `AcquireLock`'s "never removed" rule, benign because the record is already
 > gone. `/fork` is the sanctioned way to work alongside a live session: the child is a new record
 > nobody holds.
+>
+> **Note (2026-09-24, `apogee-firing-holds-no-record`).** An unattended Firing holds its record
+> too: `run.Once` takes `Store.Hold` on `Spec.RecordID` once the Agent is built and releases it on
+> return, whenever the run has both a Store and a record id — the record is born at the run's
+> start rather than its first Save, because the run's undo journal is written under that id from
+> the first Exchange. A Firing whose id another instance holds is refused with the same
+> `*session.HeldError`; a run with no Store or no id takes no hold and touches no disk.
 
 **8. What is deliberately NOT session state.** The record carries the conversation and the
 scrollback and nothing else about the live host. **Agent mode, the allow-for-session approval

@@ -234,6 +234,168 @@ func TestOnceReportsARecordIDThatCannotNameAFile(t *testing.T) {
 	}
 }
 
+// TestOnceHoldsItsRecordWhileTheFiringRuns pins the live-instance hold on an unattended run: while
+// the Firing is mid-Turn, a second door on the same store — the shape `apogee undo <id>` takes, a
+// fresh Store and one Hold — is refused with a *session.HeldError naming the id, and once Once has
+// returned the same Hold succeeds, because the run let go of it.
+func TestOnceHoldsItsRecordWhileTheFiringRuns(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, stubllm.Script{Turns: []stubllm.Turn{{Text: "done", Await: "answer"}}})
+	dir := t.TempDir()
+	spec := planSpec(up.URL, "run while another door knocks")
+	spec.Store = session.NewStore(dir)
+	spec.RecordID = callerRecordID
+
+	type outcome struct {
+		res Result
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := Once(context.Background(), spec)
+		done <- outcome{res: res, err: err}
+	}()
+	awaitFirstRequest(t, up)
+
+	_, err := session.NewStore(dir).Hold(callerRecordID)
+	var held *session.HeldError
+	if !errors.As(err, &held) {
+		t.Errorf("Hold mid-Firing answered %v, want a *session.HeldError: the running Firing holds nothing", err)
+	} else if held.ID != callerRecordID {
+		t.Errorf("HeldError.ID = %q, want the Firing's record %q", held.ID, callerRecordID)
+	}
+
+	up.Release("answer")
+	got := <-done
+	if got.err != nil {
+		t.Fatalf("Once: %v", got.err)
+	}
+	if got.res.SessionID != callerRecordID {
+		t.Errorf("Result.SessionID = %q, want %q", got.res.SessionID, callerRecordID)
+	}
+	release, err := session.NewStore(dir).Hold(callerRecordID)
+	if err != nil {
+		t.Fatalf("Hold after the Firing returned: %v; want the run to have released its hold", err)
+	}
+	_ = release()
+}
+
+// TestOnceRefusesARecordAnotherInstanceHolds: a Firing whose RecordID a live apogee already holds
+// is refused before its first Turn with that holder's *session.HeldError, so two writers never
+// share one record's journal — nothing reaches the Upstream and nothing is saved.
+func TestOnceRefusesARecordAnotherInstanceHolds(t *testing.T) {
+	t.Parallel()
+
+	up := stubllm.New(t, finalScript("unreached"))
+	dir := t.TempDir()
+	release, err := session.NewStore(dir).Hold(callerRecordID)
+	if err != nil {
+		t.Fatalf("Hold: %v", err)
+	}
+	defer func() { _ = release() }()
+
+	spec := planSpec(up.URL, "run a record someone else holds")
+	spec.Store = session.NewStore(dir)
+	spec.RecordID = callerRecordID
+
+	_, err = Once(context.Background(), spec)
+
+	var held *session.HeldError
+	if !errors.As(err, &held) {
+		t.Fatalf("Once answered %v, want a *session.HeldError", err)
+	}
+	if held.ID != callerRecordID {
+		t.Errorf("HeldError.ID = %q, want %q", held.ID, callerRecordID)
+	}
+	if n := len(up.Requests()); n != 0 {
+		t.Errorf("the Upstream saw %d requests, want none: a refused Firing never starts", n)
+	}
+	metas, err := spec.Store.List()
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(metas) != 0 {
+		t.Errorf("the store holds %d records, want none", len(metas))
+	}
+}
+
+// TestOnceRefusedAtConstructionLeavesNoLock is the hold's ordering guard: it is taken only after
+// the Agent is built, so a Firing agent.New refuses leaves no <id>.lock beside a record that will
+// never exist.
+func TestOnceRefusedAtConstructionLeavesNoLock(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	spec := planSpec("", "never constructed") // no Endpoint: agent.New refuses
+	spec.Store = session.NewStore(dir)
+	spec.RecordID = callerRecordID
+
+	if _, err := Once(context.Background(), spec); err == nil {
+		t.Fatal("Once returned no error for a Config agent.New refuses")
+	}
+	lock := filepath.Join(dir, callerRecordID+".lock")
+	if _, err := os.Stat(lock); !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("stat %s: err = %v; want no lock left by a Firing refused at construction", lock, err)
+	}
+}
+
+// TestOnceTakesNoHoldWithoutAStoreAndARecordID: the hold needs both halves. A store with no id has
+// no record to name until completion, so the store directory ends holding the record alone; an id
+// with no store has nowhere to put a lock, and the run touches nothing under the home.
+func TestOnceTakesNoHoldWithoutAStoreAndARecordID(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a store with no record id", func(t *testing.T) {
+		t.Parallel()
+
+		up := stubllm.New(t, finalScript("minted at completion"))
+		dir := t.TempDir()
+		spec := planSpec(up.URL, "file me under a fresh id")
+		spec.Store = session.NewStore(dir)
+
+		res, err := Once(context.Background(), spec)
+		if err != nil {
+			t.Fatalf("Once: %v", err)
+		}
+		if got, want := dirNames(t, dir), []string{res.SessionID + ".json"}; !slices.Equal(got, want) {
+			t.Errorf("the store directory holds %v, want %v: no lock for a record named only at completion", got, want)
+		}
+	})
+
+	t.Run("a record id with no store", func(t *testing.T) {
+		t.Parallel()
+
+		up := stubllm.New(t, finalScript("kept nowhere"))
+		home := t.TempDir()
+		spec := planSpec(up.URL, "keep nothing")
+		spec.Config.ConfigDir = home
+		spec.Config.WorkspaceDir = t.TempDir()
+		spec.RecordID = callerRecordID
+
+		if _, err := Once(context.Background(), spec); err != nil {
+			t.Fatalf("Once: %v", err)
+		}
+		if added := addedNames([]string{}, dirNames(t, home)); len(added) > 0 {
+			t.Errorf("a store-less run created %v under the home, want nothing", added)
+		}
+	})
+}
+
+// awaitFirstRequest blocks until the stub has logged a request — the point a Firing is past its
+// construction and hold and inside its first Turn — failing the test after a bounded wait.
+func awaitFirstRequest(t *testing.T, up *stubllm.Server) {
+	t.Helper()
+
+	deadline := time.Now().Add(10 * time.Second)
+	for len(up.Requests()) == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the Firing never reached the Upstream")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
 // TestOnceDeniesAGatedActionWithoutParking is the fail-safe denier's proof: a gated tool
 // call is refused, the tool never executes, the refusal is counted, and the Exchange still
 // reaches its boundary — a Firing fails visibly rather than waiting for a human who is not

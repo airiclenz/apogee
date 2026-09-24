@@ -65,6 +65,14 @@
 // Firing's scratch dir, and the undo store this run images its workspace into — has to
 // already carry the record's name.
 //
+// A run that names its record up front and has a Store to file it in HOLDS that record for its
+// whole life — the same live-instance hold (session.Store.Hold, ADR 0022 D7) an interactive host
+// keeps — so `apogee undo <id>` cannot rewrite the journal of a Firing still writing to it. The
+// hold is taken after the Agent is built, so a construction refusal leaves no lock behind; a
+// Firing whose record another instance holds is refused with the hold's *session.HeldError; any
+// other refusal runs unheld and surfaces at the save. A run with no Store or no RecordID takes no
+// hold at all.
+//
 // A caller that wants to observe the run supplies Config.Events; a nil sink is a discard.
 // A Turn the loop abandoned reports domain.StepResult.Faulted and surfaces its own
 // ErrorEvent through that sink — Once does not translate it into a returned error, since

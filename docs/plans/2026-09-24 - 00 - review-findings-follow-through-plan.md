@@ -309,7 +309,11 @@ cmd/apogee/wire_engine_test.go — TestLateEngineRemembersTheDelegationSeatUntil
 - `grep -n '2026-09-24' docs/adr/0069-*.md`; `grep -n '2026-09-24' docs/adr/0083-*.md`
 **Commit:** `fix(cmd/apogee): Bind replays the seat before the target, so the far width survives`
 
-## 14. A running Firing holds its session record
+## 14. A running Firing holds its session record — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): consequential edit — docs/manual/headless.md: made necessary by the Firing hold (the manual said an unattended headless or daemon run takes no hold of its own)
+NOTES (2026-09-24): the hold lives in a small helper, holdRecord(spec), called from Once right after the sync-lane arm and before the undo journal opens; a refused hold is returned wrapped as "apogee: hold the firing's record: …" with the *session.HeldError reachable through errors.As
+NOTES (2026-09-24): cmd/apogee acceptance was run in a scratch worktree at HEAD plus this item's files, because the shared tree's internal/config did not build mid-wave (item 15's in-flight edits); `go test -race -count=1 -run 'Undo' ./cmd/apogee/` passed there, as did -run 'Headless|Daemon|Firing|Schedule|Session' and the whole internal/run package
 
 **What:** Defect: `apogee undo <id>` takes the session hold, but a running Firing holds nothing, so the verb can rewrite a live Firing's journal.
 **Goal:** while `run.Once` runs with both a store and a record id, `store.Hold(spec.RecordID)` is held and released on return; `apogee undo <id>` against that record is refused with `*session.HeldError` naming the id; a run with no store or id takes no hold and touches no disk (ADR 0022).

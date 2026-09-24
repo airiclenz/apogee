@@ -139,7 +139,8 @@ again to walk further back; each `confirm` takes one more exchange. A file that 
 what the agent left is skipped rather than overwritten, so your own edits since the run are
 safe. The verb holds the session for its run, so a session that is open in a live apogee is
 refused with `session <id> is open in another apogee — fork it to work alongside` rather than
-rewritten under it (an unattended headless or daemon run takes no such hold of its own). There
+rewritten under it — and so is a headless or daemon run still in flight, which holds its session
+the same way until it finishes. There
 is no `--workspace` flag and it is refused as unknown: the tree the revert belongs to is
 recorded in the session's own snapshot index, and a workspace given on the command line could
 only disagree with it. A session recorded without snapshots has nothing to revert here and says

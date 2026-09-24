@@ -54,9 +54,12 @@ type Spec struct {
 	// RecordID is the id the saved record is filed under, minted by the CALLER before the
 	// Firing starts so anything the caller keys on that id — the Firing's scratch dir, and the
 	// undo snapshot store this run images its workspace into — exists under the same name from
-	// the first tool call. Empty ⇒ Once mints one at completion, as it always has, and the run
-	// takes the in-memory funnel journal because there is no id to name a store with; the bench
-	// and every caller that keys nothing on the id leave it empty.
+	// the first tool call. With a Store, the id is also HELD (session.Store.Hold) for the whole run,
+	// so no other door rewrites the record's journal under a live Firing, and a Firing whose id
+	// another instance already holds is refused before its first Turn. Empty ⇒ Once mints one at
+	// completion, as it always has, and the run takes the in-memory funnel journal because there
+	// is no id to name a store with; the bench and every caller that keys nothing on the id leave
+	// it empty.
 	RecordID string
 
 	// Title overrides the record's title. Empty ⇒ Once derives one: "<schedule name> —
@@ -278,6 +281,29 @@ func openRecordJournal(ctx context.Context, spec Spec, cfg domain.Config) (*undo
 	return journal, reason
 }
 
+// holdRecord takes the live-instance hold on the record a saved run is filed under
+// (session.Store.Hold) and returns its release, which is always safe to call. A Spec with no
+// Store or no RecordID has no record to hold before completion, so it takes nothing. The only
+// error is a *session.HeldError — another holder is live, and a second writer over its journal is
+// exactly what the hold exists to prevent. Any other refusal (an id that cannot name a file,
+// session.ErrInvalidID) runs the Firing unheld, so Store.Save reports it at completion exactly as
+// it does for a run the hold never touched.
+func holdRecord(spec Spec) (release func() error, err error) {
+	noHold := func() error { return nil }
+	if spec.Store == nil || spec.RecordID == "" {
+		return noHold, nil
+	}
+	release, err = spec.Store.Hold(spec.RecordID)
+	var held *session.HeldError
+	switch {
+	case errors.As(err, &held):
+		return nil, held
+	case err != nil:
+		return noHold, nil
+	}
+	return release, nil
+}
+
 // Once performs one Firing and returns its Result: it validates the mode, constructs a
 // FRESH Agent (no state is carried between Firings — ADR 0033, decision 5), submits the
 // prompt, drives the loop to the quiescent boundary, and saves the resulting session
@@ -343,6 +369,18 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 			return Result{}, fmt.Errorf("apogee: arm the firing's sync lane: %w", err)
 		}
 	}
+
+	// The record this run will be filed under, HELD from here to return (ADR 0022 D7's live-session
+	// hold), so `apogee undo <id>` — and any other door that asks Store.Hold first — is refused
+	// while the Firing can still write that record's journal. It is taken only now, after the
+	// Agent is built and its sync lane armed, so a Firing refused at construction leaves no
+	// <id>.lock behind; and only when the run has both a Store and a RecordID, so a run that keeps
+	// no record takes no hold and touches no disk.
+	release, err := holdRecord(spec)
+	if err != nil {
+		return Result{}, fmt.Errorf("apogee: hold the firing's record: %w", err)
+	}
+	defer func() { _ = release() }()
 
 	// What the workspace context files contributed, read HERE and held: this is session
 	// construction, the boundary an interactive session takes the same measure at, and the
