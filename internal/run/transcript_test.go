@@ -146,3 +146,52 @@ func TestTranscriptFoldRecordsDelegationRunIDs(t *testing.T) {
 		t.Errorf("the child's message lost its fallback spawnCallID: %q", entries[2].SpawnCallID)
 	}
 }
+
+// TestTranscriptFoldClosesACallInItsOwnRun pins how a result closes its call in a Firing's record:
+// by run, never by call id alone. Two sibling delegations share the spawning id call_0 — a
+// text-format parser numbering calls per Turn — and each child's first leaf call is call_0 too, so
+// every open call in the record carries one id. A save taken while the second child is still
+// working must replay that child's leaf and both heads as open: the first child's leaf result
+// closes the first child's leaf alone, and the first delegation's result closes the first head
+// alone.
+func TestTranscriptFoldClosesACallInItsOwnRun(t *testing.T) {
+	t.Parallel()
+
+	first := domain.EventBase{Depth: 1, CallID: "call_0", RunID: "0badc0de.1"}
+	second := domain.EventBase{Depth: 1, CallID: "call_0", RunID: "0badc0de.2"}
+	leaf := domain.ToolCall{ID: "call_0", Tool: "read_file"}
+
+	f := newTranscriptFold("")
+
+	f.fold(domain.ToolCallEvent{Call: domain.ToolCall{ID: "call_0", Tool: "sub_agent"}, SpawnRunID: first.RunID})
+	f.fold(domain.ToolCallEvent{Call: domain.ToolCall{ID: "call_0", Tool: "sub_agent"}, SpawnRunID: second.RunID})
+	f.fold(domain.ToolCallEvent{EventBase: first, Call: leaf})
+	f.fold(domain.ToolCallEvent{EventBase: second, Call: leaf})
+	f.fold(domain.ToolResultEvent{EventBase: first, Result: domain.ToolResult{CallID: "call_0", Content: "a"}})
+	f.fold(domain.ToolResultEvent{
+		Result:     domain.ToolResult{CallID: "call_0", Content: "first's report"},
+		Tool:       "sub_agent",
+		SpawnRunID: first.RunID,
+	})
+
+	want := []struct {
+		name string
+		done bool
+	}{
+		{"first head", true},
+		{"second head", false},
+		{"first child's leaf", true},
+		{"second child's leaf", false},
+	}
+	if len(f.entries) < len(want) {
+		t.Fatalf("the fold wrote %d entries, want at least the four calls: %+v", len(f.entries), f.entries)
+	}
+	for i, w := range want {
+		if f.entries[i].Kind != session.EntryKindToolCall {
+			t.Fatalf("entry %d is a %s, want the %s call", i, f.entries[i].Kind, w.name)
+		}
+		if f.entries[i].Done != w.done {
+			t.Errorf("%s done = %v, want %v", w.name, f.entries[i].Done, w.done)
+		}
+	}
+}

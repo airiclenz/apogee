@@ -429,6 +429,8 @@ point is a **minor** bump, not a breaking change.
 
 ### Fixed
 
+- **A session record saved while a headless run or firing was still delegating could show the wrong sub-agent call as finished.** The record closed an open tool call by its call id alone, and two sibling delegations can share a call id, so one delegation's result could close the other's call or its child's. It now pairs a result with its call by the engine-minted run id, the same way the TUI does (apogee-record-close-by-call-id). Records without run ids still pair by depth and spawning call id. Nothing sent to a model changes.
+
 - **A new session opens with empty `/thinking` and `/advice` panes.** `/clear`, `/new`, a `/sessions` resume and `/fork` used to leave the closed conversation's thinking records and advise firings on both boards, so the new session's panes showed reasoning and advice it never produced. Every session boundary now empties both boards, as a launch does; a pane open across the boundary stays open and shows its empty row. The Inspector's wire ring and the attempt ring still survive `/clear`, as documented. (apogee-thinking-pane-survives-clear)
 
 - **A scheduled or headless run now tells its model the Sub-agent server's width.** When a

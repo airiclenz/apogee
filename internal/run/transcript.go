@@ -149,7 +149,7 @@ func (f *transcriptFold) appendToolCall(ev domain.ToolCallEvent) {
 	})
 }
 
-// appendToolResult closes the call the result answers and appends the result's own entry. The two
+// appendToolResult closes the call the result [answers] and appends the result's own entry. The two
 // halves are one act: a call left open would replay as interrupted work even though its result is
 // in the very same record, and a result with no call to close is still worth keeping — a stray
 // result is exactly what an honest scrollback should show.
@@ -163,7 +163,7 @@ func (f *transcriptFold) appendToolResult(ev domain.ToolResultEvent) {
 	defer f.mu.Unlock()
 	for i := len(f.entries) - 1; i >= 0; i-- {
 		e := &f.entries[i]
-		if e.Kind == session.EntryKindToolCall && !e.Done && e.CallID == ev.Result.CallID {
+		if e.Kind == session.EntryKindToolCall && !e.Done && answers(ev, *e) {
 			e.Done = true
 			break
 		}
@@ -183,6 +183,28 @@ func (f *transcriptFold) appendToolResult(ev domain.ToolResultEvent) {
 		RunID:       ev.RunID,
 		SpawnRunID:  ev.SpawnRunID,
 	})
+}
+
+// answers reports whether ev is the result of call, the open toolCall entry it would close. A call
+// id is the model's or the server's to choose and can collide across a fan-out — two siblings'
+// children numbering their calls alike, two sub_agent calls of one reply under one id — so the id
+// alone would let one run's result close another run's call in a mid-run save. The match mirrors
+// the TUI's own pairing (internal/tui's transcript.addToolResult): the result must come from the
+// run the call was made in, and a delegation's result must answer the run that call spawned.
+//
+// The run is compared on all three halves the entry keeps (RunID, Depth, SpawnCallID), so where
+// the stream carries run ids they decide, and where it carries none — a top-level call, a
+// hand-built stream — the (Depth, SpawnCallID) pair is the legacy key it always was. SpawnRunID is
+// compared only where both sides carry one: a call a pre-tool-exec Reaction redirected INTO
+// sub_agent opened with no run id and is first named one by its result.
+func answers(ev domain.ToolResultEvent, call session.Entry) bool {
+	if call.CallID != ev.Result.CallID {
+		return false
+	}
+	if call.RunID != ev.RunID || call.Depth != ev.Depth || call.SpawnCallID != spawnOf(ev.EventBase) {
+		return false
+	}
+	return call.SpawnRunID == "" || ev.SpawnRunID == "" || call.SpawnRunID == ev.SpawnRunID
 }
 
 // blob returns the Firing's scrollback as the versioned wire form the record keeps, or nil when
