@@ -380,7 +380,9 @@ func upstreamChoices(opts config.Options) []config.ServerEntry {
 // It is the ONE projection both pickers take their rows from, and the description reaches both. Only
 // `/sub-agents-server` renders it (subAgentsServerRows), which is a rendering decision and belongs
 // where rows are composed: a second projector that dropped the field would put the same knowledge in
-// two places and let them drift.
+// two places and let them drift. The measured summary (ADR 0085) is filled onto this projection's
+// output by rootWiring.withStats, the one call both hosts make, so it too reaches both pickers from
+// one place; this function leaves it nil.
 func serverChoices(entries []config.ServerEntry) []tui.ServerChoice {
 	choices := make([]tui.ServerChoice, len(entries))
 	for i, e := range entries {

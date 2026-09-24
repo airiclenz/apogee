@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -95,9 +96,23 @@ func (s Sample) key() sampleKey { return sampleKey{s.Server, s.Endpoint, s.Model
 // this process's own appends and loads; across processes it relies on O_APPEND writes of one whole
 // line each and makes no locking claim — a line lost to a concurrent trim's rename is acceptable
 // (ADR 0085). It never reaches for an ambient ~/.apogee: the caller supplies the path (ADR 0001).
+//
+// Beside the file it keeps an in-memory index — each key's newest keepPerKey samples, read once at
+// Open and extended by every successful Append — which is what Summary answers from, so a picker
+// asking per draw never touches the disk. Another process's appends reach the index at the next
+// Open.
 type Store struct {
 	mu   sync.Mutex
 	path string
+	// index holds each key's newest keepPerKey samples, oldest first; lastModel is the model each
+	// server entry (name, endpoint) recorded last, the fallback an unbound Summary covers.
+	index     map[sampleKey][]Sample
+	lastModel map[entryKey]string
+}
+
+// entryKey is one server entry: its name and redacted endpoint.
+type entryKey struct {
+	server, endpoint string
 }
 
 // Open returns a Store over path, first trimming the file when it has outgrown its slack: when any
@@ -108,7 +123,7 @@ type Store struct {
 // stats are a convenience, never a reason a session fails to start. Neither the file nor its
 // directory is created until the first Append.
 func Open(path string) *Store {
-	s := &Store{path: path}
+	s := &Store{path: path, index: make(map[sampleKey][]Sample), lastModel: make(map[entryKey]string)}
 	s.trimIfOversized()
 	return s
 }
@@ -129,7 +144,11 @@ func (s *Store) Append(sample Sample) error {
 	if err := os.MkdirAll(dir, dirPerm); err != nil {
 		return fmt.Errorf("apogee: create server-stats dir %q: %w", dir, err)
 	}
-	return appendLine(s.path, line)
+	if err := appendLine(s.path, line); err != nil {
+		return err
+	}
+	s.indexSample(sample)
+	return nil
 }
 
 // Load returns every well-formed sample recorded for the server entry name at endpoint, oldest
@@ -152,28 +171,43 @@ func (s *Store) Load(name, endpoint string) ([]Sample, error) {
 	return matched, nil
 }
 
-// Summary loads the server entry's samples and summarises those of model (Summarize). An empty
-// model summarises the model the entry last recorded (LastModel) — the fallback a picker row
-// labels, since the Summary it returns names the model it covers.
-func (s *Store) Summary(name, endpoint, model string) (Summary, error) {
-	samples, err := s.Load(name, endpoint)
-	if err != nil {
-		return Summary{}, err
-	}
+// Summary summarises the server entry's samples of model (Summarize) from the in-memory index —
+// it reads no file, so a picker may ask it on every draw. An empty model summarises the model the
+// entry last recorded (LastModel) — the fallback a picker row labels, since the Summary it returns
+// names the model it covers.
+func (s *Store) Summary(name, endpoint, model string) Summary {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if model == "" {
-		model = LastModel(samples)
+		model = s.lastModel[entryKey{name, endpoint}]
 	}
-	return Summarize(samples, model), nil
+	return Summarize(s.index[sampleKey{name, endpoint, model}], model)
+}
+
+// indexSample adds one sample to the in-memory index, dropping its key's oldest once the key holds
+// more than keepPerKey. Called with the mutex held.
+func (s *Store) indexSample(sample Sample) {
+	k := sample.key()
+	kept := append(s.index[k], sample)
+	if len(kept) > keepPerKey {
+		kept = slices.Clone(kept[len(kept)-keepPerKey:])
+	}
+	s.index[k] = kept
+	s.lastModel[entryKey{sample.Server, sample.Endpoint}] = sample.Model
 }
 
 // trimIfOversized rewrites the file down to keepPerKey samples per key when it has outgrown the
-// slack rule. Every failure — read, encode, temp file, rename — is skipped: the file stays as it
-// was and the next Open tries again.
+// slack rule, and fills the in-memory index from what it read either way. Every failure — read,
+// encode, temp file, rename — is skipped: the file stays as it was and the next Open tries again.
 func (s *Store) trimIfOversized() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	samples, lines, err := readSamples(s.path)
+	for _, sample := range samples {
+		s.indexSample(sample)
+	}
 	if err != nil || !oversized(samples, lines) {
 		return
 	}

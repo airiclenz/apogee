@@ -2177,8 +2177,8 @@ entries in two columns only, `name` and `— endpoint`, with **one more row unde
 whose second cell reads `— no routing; delegations run on this session's own server`. That row
 names no entry — it is an ACTION and not a marker, taking it clears the routing rather than
 pointing it somewhere — and it is offered unconditionally, on a file with two entries as on one
-with ten. There is deliberately no third cell on any of them: the
-`· current` mark means "the session is bound here", which is the one thing a delegation target is
+with ten. There is deliberately no `· current` cell on any of them: the
+mark means "the session is bound here", which is the one thing a delegation target is
 not, and it opens on the FIRST row rather than on a marked one, because which entry takes the
 delegations right now is the wiring's state and a highlight guessed from the session's own server
 would point at the wrong row on every session that routes elsewhere. Taking a row moves where the
@@ -2191,7 +2191,18 @@ word the row carries and what taking it resolved to —
 write's, `· sub-agents-server: cleared`,
 since accepting that row REMOVES the key rather than writing one. The two clauses are never
 interchangeable: claiming "saved" for a removal would send a reader looking in `config.yaml` for a
-line that is no longer there. `/model` has
+line that is no longer there. **Both server pickers carry each entry's measured speed** (ADR 0085)
+while `server-stats:` is on: one more column, last on `/server` (after `· current`, so a truncation
+reaches it before the mark) and third on `/sub-agents-server` — `· ttft 1.8s · 42 tok/s · 2/20
+failed`, so a row reads `name — endpoint · ttft 1.8s · 42 tok/s · 2/20 failed`. The figures are
+the p50 time to first token, the p50 output rate and the failed share of the last attempts,
+cancelled ones not counted, for the model bound on that entry — the session's own model on the
+server it is talking to, else the entry's `model:` — or, with no model bound, for the one the
+entry last recorded, named first in parentheses: `· (qwen) ttft …`. Under five attempts the cell
+reads `· no data`; under five that reported usage the rate reads `— tok/s`. When the pane is too
+narrow for every row, the `— endpoint` column goes first (on `/sub-agents-server` the description
+stays, as `— description`), then the summary truncates at the right edge; the name never does. With
+`server-stats: off` the column is absent and both panes draw exactly the rows above. `/model` has
 two offerings and lists whichever one the session's own server can answer from: while it is on a
 `servers:` entry that names a llama-launcher config,
 the Launch profiles that config defines, in the launcher's own order, in five columns — `name`,

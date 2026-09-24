@@ -3352,3 +3352,169 @@ func TestPickerModeEscapeMovesNothing(t *testing.T) {
 		t.Errorf("engine SetMode = %v, want no call at all", got)
 	}
 }
+
+// measuredServers are twoServers with a measured summary each (ADR 0085): the session's own entry
+// with a full one, the other under the sample floor.
+var measuredServers = []ServerChoice{
+	{Name: "test-host", Endpoint: "http://localhost:1234", Stats: &ServerSummary{
+		Model: "qwen", Total: 20, Failed: 2, TTFT: 1800 * time.Millisecond, HasTTFT: true,
+		TokensPerSec: 42, HasTokensPerSec: true,
+	}},
+	{Name: "remote", Endpoint: "http://remote:8080", Stats: &ServerSummary{Model: "qwen", Total: 3, NoData: true}},
+}
+
+// fullSummaryCell and noDataCell are the summary cells measuredServers draw.
+const (
+	fullSummaryCell = "· ttft 1.8s · 42 tok/s · 2/20 failed"
+	noDataCell      = "· no data"
+)
+
+// seededServerPicker is a ready model whose `/server` picker is open over servers at the given width.
+func seededServerPicker(t *testing.T, servers []ServerChoice, width int) Model {
+	t.Helper()
+	opts := testOpts
+	seams := serverSeams(&opts)
+	seams.list, seams.switchTo = staticServers(servers), (&fakeSwitch{}).switchTo
+	m, _ := seededPicker(t, opts)
+	m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 40})
+	m, _ = typeCommand(t, m, "/server")
+	return m
+}
+
+// On a pane wide enough for everything, a measured server's row reads name — endpoint · summary,
+// the summary a column of its own after the "· current" mark so the painter's right-hand truncation
+// reaches it before the mark; a server under the sample floor says "no data".
+func TestServerPickerRowsShowTheMeasuredSummary(t *testing.T) {
+	t.Parallel()
+	m := seededServerPicker(t, measuredServers, 140)
+
+	want := []popupRow{
+		{"test-host", "— http://localhost:1234", currentRowCell, fullSummaryCell},
+		{"remote", "— http://remote:8080", "", noDataCell},
+	}
+	if got := m.pickerRows(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("rows = %q, want %q", got, want)
+	}
+	got := plain(m.View())
+	for _, want := range []string{"http://localhost:1234", "ttft 1.8s · 42 tok/s · 2/20 failed", "no data"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the pane is missing %q:\n%s", want, got)
+		}
+	}
+}
+
+// At a width the endpoints no longer fit beside the summaries, the endpoint drops first — its column
+// collapses and the name and the whole summary stay; narrower still, the summary truncates and the
+// name is never what goes.
+func TestServerPickerNarrowDropsTheEndpointFirst(t *testing.T) {
+	t.Parallel()
+	m := seededServerPicker(t, measuredServers, 70)
+
+	rows := m.pickerRows()
+	if want := (popupRow{"test-host", "", currentRowCell, fullSummaryCell}); !reflect.DeepEqual(rows[0], want) {
+		t.Fatalf("narrow row = %q, want %q", rows[0], want)
+	}
+	got := plain(m.View())
+	if strings.Contains(got, "http://localhost:1234") {
+		t.Errorf("the narrow pane still shows the endpoint:\n%s", got)
+	}
+	if !strings.Contains(got, "ttft 1.8s · 42 tok/s · 2/20 failed") {
+		t.Errorf("the narrow pane truncated the summary before it had to:\n%s", got)
+	}
+
+	m = seededServerPicker(t, measuredServers, 36)
+	got = plain(m.View())
+	if !strings.Contains(got, "test-host") || !strings.Contains(got, "remote") {
+		t.Errorf("the narrowest pane lost a server name:\n%s", got)
+	}
+	if !strings.Contains(got, "ttft") || strings.Contains(got, "2/20 failed") || !strings.Contains(got, "…") {
+		t.Errorf("the narrowest pane should truncate the summary with an ellipsis:\n%s", got)
+	}
+}
+
+// With `server-stats: off` (every summary nil) the rows are the three cells they always were, and a
+// narrow pane keeps its endpoints — nothing about the summary rule reaches a pane without summaries.
+func TestServerPickerRowsWithoutStatsAreUnchanged(t *testing.T) {
+	t.Parallel()
+	for _, width := range []int{140, 40} {
+		m := seededServerPicker(t, twoServers, width)
+		for i, row := range m.pickerRows() {
+			if len(row) != 3 || row[1] != "— "+twoServers[i].Endpoint {
+				t.Errorf("width %d: rows[%d] = %q, want the plain three cells", width, i, row)
+			}
+		}
+		if got := plain(m.View()); strings.Contains(got, "no data") || strings.Contains(got, "ttft") {
+			t.Errorf("width %d: the pane drew a summary with stats off:\n%s", width, got)
+		}
+	}
+}
+
+// `/sub-agents-server` shows the same summary after the endpoint-and-description cell, and at a
+// narrow width drops the endpoint but keeps the description — the choice's reason, not its address.
+func TestSubAgentsServerPickerShowsTheMeasuredSummary(t *testing.T) {
+	t.Parallel()
+	targets := []ServerChoice{
+		{Name: "grunt", Endpoint: "http://grunt:2222", Description: "fast 4B", Stats: measuredServers[0].Stats},
+		{Name: "plain", Endpoint: "http://plain:3333", Stats: measuredServers[1].Stats},
+	}
+	open := func(width int) Model {
+		m := seededSubAgents(t, &fakeDelegationHost{targets: targets})
+		m = step(t, m, tea.WindowSizeMsg{Width: width, Height: 40})
+		m, _ = typeCommand(t, m, "/sub-agents-server")
+		return m
+	}
+
+	wide := open(140).pickerRows()
+	want := []popupRow{
+		{"grunt", "— http://grunt:2222 · fast 4B", fullSummaryCell},
+		{"plain", "— http://plain:3333", noDataCell},
+		{subAgentsAutoLabel, subAgentsAutoDescription},
+	}
+	if !reflect.DeepEqual(wide, want) {
+		t.Fatalf("wide rows = %q, want %q", wide, want)
+	}
+
+	narrow := open(64)
+	want = []popupRow{
+		{"grunt", "— fast 4B", fullSummaryCell},
+		{"plain", "", noDataCell},
+		{subAgentsAutoLabel, subAgentsAutoDescription},
+	}
+	if got := narrow.pickerRows(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("narrow rows = %q, want %q", got, want)
+	}
+	if got := plain(narrow.View()); strings.Contains(got, "http://grunt:2222") || !strings.Contains(got, "fast 4B") {
+		t.Errorf("the narrow pane should drop the endpoint and keep the description:\n%s", got)
+	}
+}
+
+// The summary cell's wording: a duration under a second in milliseconds, a missing rate as
+// "— tok/s", a missing ttft as "ttft —", and a summary of the last RECORDED model rather than the
+// bound one naming that model first, in parentheses.
+func TestServerRowsSummaryCell(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		in   *ServerSummary
+		want string
+	}{
+		{"nil", nil, ""},
+		{"no data", &ServerSummary{NoData: true}, "· no data"},
+		{"no data, last recorded", &ServerSummary{Model: "llama", LastRecorded: true, NoData: true}, "· (llama) no data"},
+		{"full", measuredServers[0].Stats, fullSummaryCell},
+		{"no tok/s", &ServerSummary{Total: 6, TTFT: 850 * time.Millisecond, HasTTFT: true}, "· ttft 850ms · — tok/s · 0/6 failed"},
+		{"no ttft", &ServerSummary{Total: 5, Failed: 5}, "· ttft — · — tok/s · 5/5 failed"},
+		{"last recorded", &ServerSummary{
+			Model: "qwen", LastRecorded: true, Total: 5, TTFT: 2 * time.Second, HasTTFT: true,
+			TokensPerSec: 30.4, HasTokensPerSec: true,
+		}, "· (qwen) ttft 2.0s · 30 tok/s · 0/5 failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := serverSummaryCell(tc.in); got != tc.want {
+				t.Errorf("serverSummaryCell = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

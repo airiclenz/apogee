@@ -212,8 +212,9 @@ func (h serverHost) Rebind(model string, contextWindow int, effortDialect provid
 // a `servers:` block the human edits mid-session (ADR 0037) is offered by the picker and by the
 // settings pane's server row the moment the edit lands — the same list, in the same order, that the
 // two verbs below resolve a name against. It can be EMPTY (a pre-bound start on a config that lists
-// nothing), which is exactly "nothing to switch to" without a special case.
-func (h serverHost) List() []tui.ServerChoice { return serverChoices(h.w.live.choices(h.w.opts)) }
+// nothing), which is exactly "nothing to switch to" without a special case. Each row carries the
+// entry's measured summary while `server-stats:` is on (rootWiring.withStats).
+func (h serverHost) List() []tui.ServerChoice { return h.w.withStats(h.w.live.choices(h.w.opts)) }
 
 // Switch moves the whole session onto the named entry: the provider client re-pointed, a Monitor for
 // the new server installed, the session record restamped (sessionMover.move).

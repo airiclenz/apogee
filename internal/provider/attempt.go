@@ -102,6 +102,11 @@ func (c *Client) ServerIdentity() (name, endpoint string, ok bool) {
 	return c.identity.name, c.identity.endpoint, true
 }
 
+// RedactEndpoint is the endpoint as WithServerIdentity stamps it — scheme, host and path — so a
+// reader of the attempt records (the per-server stats a picker summarises) can key on exactly the
+// value the records carry.
+func RedactEndpoint(endpoint string) string { return redactEndpoint(endpoint) }
+
 // redactEndpoint reduces an endpoint to scheme, host and path: userinfo, query and fragment are
 // dropped, so a key a URL carries in any of them never reaches a record. An endpoint that does
 // not parse redacts to "" rather than to a string that might still hold one.

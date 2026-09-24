@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/term"
@@ -1405,6 +1406,26 @@ type ServerChoice struct {
 	// because that is the pane where the choice is between two boxes rather than between a box and
 	// the one you are already on; `/server`'s rows are unchanged by it.
 	Description string
+	// Stats is the entry's measured upstream summary (ADR 0085), drawn by BOTH pickers after the
+	// endpoint. It is a pointer so the value stays comparable and so its absence is one state: nil —
+	// `server-stats: off`, an unwired host, a hand-built value — adds no cell and no text at all.
+	Stats *ServerSummary
+}
+
+// ServerSummary is what a picker row says about how a server has been answering: numbers, not
+// preformatted text, so the renderer owns how a duration or a rate reads. It is the binary's
+// projection of its per-server stats summary for one model — the one bound on that entry, else the
+// last one it recorded (LastRecorded, which the row names in parentheses).
+type ServerSummary struct {
+	Model           string // the model the figures cover; "" when the entry has recorded nothing
+	LastRecorded    bool   // Model is the last one recorded rather than the one bound — the row names it
+	Total           int    // attempts counted, cancelled ones excluded
+	Failed          int    // of Total, the attempts that did not end ok
+	NoData          bool   // too few attempts to summarise; the row says "no data"
+	TTFT            time.Duration
+	HasTTFT         bool // TTFT is the p50 of the attempts that reached a first delta
+	TokensPerSec    float64
+	HasTokensPerSec bool // too few attempts reported usage when false; the row says "— tok/s"
 }
 
 // ServerSwitchResult is what the display adopts once a switch has committed: the endpoint now on

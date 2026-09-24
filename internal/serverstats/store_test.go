@@ -141,19 +141,52 @@ func TestSummaryFallsBackToLastModel(t *testing.T) {
 	}
 	appendAll(t, store, keyedSample(testServer, "llama", 0))
 
-	bound, err := store.Summary(testServer, testEndpoint, "qwen")
-	if err != nil {
-		t.Fatalf("Summary: %v", err)
-	}
+	bound := store.Summary(testServer, testEndpoint, "qwen")
 	if bound.Model != "qwen" || bound.Total != 5 || bound.NoData {
 		t.Errorf("bound Summary = %+v, want qwen over 5 samples", bound)
 	}
-	fallback, err := store.Summary(testServer, testEndpoint, "")
-	if err != nil {
-		t.Fatalf("Summary: %v", err)
-	}
+	fallback := store.Summary(testServer, testEndpoint, "")
 	if fallback.Model != "llama" || fallback.Total != 1 || !fallback.NoData {
 		t.Errorf("fallback Summary = %+v, want llama over 1 sample", fallback)
+	}
+}
+
+// TestSummaryReadsNoFile pins the in-memory index: Open reads the file once, Append extends the
+// index, and a Summary asked after the file is gone still answers from memory — a picker asking
+// per draw never touches the disk.
+func TestSummaryReadsNoFile(t *testing.T) {
+	t.Parallel()
+	path := statsPath(t)
+	appendAll(t, Open(path), keyedSample(testServer, "qwen", 0), keyedSample(testServer, "qwen", 1))
+
+	store := Open(path) // the index is loaded from the file here, and only here
+	for i := 2; i < 6; i++ {
+		appendAll(t, store, keyedSample(testServer, "qwen", i))
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatalf("remove stats file: %v", err)
+	}
+
+	got := store.Summary(testServer, testEndpoint, "qwen")
+	if got.Total != 6 || got.NoData {
+		t.Errorf("Summary after the file is gone = %+v, want 6 samples from the index", got)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("Summary recreated or touched the stats file: stat err = %v", err)
+	}
+}
+
+// TestSummaryIndexKeepsTheNewestFifty pins the index's bound: a key appended past keepPerKey keeps
+// its newest keepPerKey samples, so the index a long session builds stays the trim's size.
+func TestSummaryIndexKeepsTheNewestFifty(t *testing.T) {
+	t.Parallel()
+	store := Open(statsPath(t))
+	for i := range keepPerKey + 7 {
+		appendAll(t, store, keyedSample(testServer, "qwen", i))
+	}
+	kept := store.index[sampleKey{testServer, testEndpoint, "qwen"}]
+	if len(kept) != keepPerKey || kept[0].Index != 7 {
+		t.Errorf("index holds %d samples from #%d, want %d from #7", len(kept), kept[0].Index, keepPerKey)
 	}
 }
 

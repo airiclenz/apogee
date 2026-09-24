@@ -11,8 +11,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/serverstats"
+	"github.com/airiclenz/apogee/internal/tui"
 )
 
 // serverStatsFile is the stats file's name under the apogee home.
@@ -124,5 +127,49 @@ func sampleOf(ev domain.UpstreamAttemptEvent, at time.Time) serverstats.Sample {
 		Duration:     ev.Duration,
 		OutputTokens: ev.OutputTokens,
 		Outcome:      ev.Outcome,
+	}
+}
+
+// withStats is serverChoices with each entry's measured summary filled in — what both pickers'
+// seams (serverHost.List, delegationHost.Targets) hand the renderer. The summary comes from the
+// store's in-memory index, so a picker asking on every draw never touches the disk; with the
+// recorder off (or unwired) every choice keeps a nil summary and the rows draw no summary at all.
+func (w *rootWiring) withStats(entries []config.ServerEntry) []tui.ServerChoice {
+	choices := serverChoices(entries)
+	store := w.stats.current()
+	if store == nil {
+		return choices
+	}
+	var bound upstreamBinding
+	if w.holder != nil {
+		bound = w.holder.Binding()
+	}
+	for i, entry := range entries {
+		choices[i].Stats = entrySummary(store, entry, bound)
+	}
+	return choices
+}
+
+// entrySummary is one entry's summary for the model bound on it: the session's bound model when
+// the session is on that entry's server (the same redacted endpoint — two entries on one URL are
+// one server, serving one model), else the entry's own `model:` pin. An entry with neither is
+// summarised for the model it last recorded, and the summary says so (LastRecorded).
+func entrySummary(store *serverstats.Store, entry config.ServerEntry, bound upstreamBinding) *tui.ServerSummary {
+	endpoint := provider.RedactEndpoint(entry.Endpoint)
+	model := entry.Model
+	if bound.Model != "" && provider.RedactEndpoint(bound.Endpoint) == endpoint {
+		model = bound.Model
+	}
+	sum := store.Summary(entry.Name, endpoint, model)
+	return &tui.ServerSummary{
+		Model:           sum.Model,
+		LastRecorded:    model == "",
+		Total:           sum.Total,
+		Failed:          sum.Failed,
+		NoData:          sum.NoData,
+		TTFT:            sum.TTFT,
+		HasTTFT:         sum.HasTTFT,
+		TokensPerSec:    sum.TokensPerSec,
+		HasTokensPerSec: sum.HasTokensPerSec,
 	}
 }

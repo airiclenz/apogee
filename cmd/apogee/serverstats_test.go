@@ -20,6 +20,7 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/run"
 	"github.com/airiclenz/apogee/internal/stubllm"
+	"github.com/airiclenz/apogee/internal/tui"
 	"github.com/airiclenz/apogee/internal/tuitest"
 )
 
@@ -208,5 +209,66 @@ func TestServerStatsOffRecorderNeitherReadsNorTrims(t *testing.T) {
 	}
 	if string(got) != body.String() {
 		t.Error("an off recorder changed the stats file; off must neither read (trim) nor write it")
+	}
+}
+
+// statsAttempt is one completed attempt on entry server, for model, as the recorder files it.
+func statsAttempt(server, endpoint, model string) domain.UpstreamAttemptEvent {
+	return domain.UpstreamAttemptEvent{
+		Server: server, Endpoint: endpoint, Model: model, RequestID: "req",
+		TTFT: time.Second, Last: 3 * time.Second, Duration: 3 * time.Second, OutputTokens: 100, Outcome: "ok",
+	}
+}
+
+// Both pickers' seams hand the renderer each entry's measured summary while the recorder is on:
+// the session's own server is summarised for the model bound on it, an entry the session is not on
+// for its own `model:` pin, and an entry with neither for the model it last recorded — which the
+// summary flags so the row can name it. The redacted endpoint is the key, so a key in the URL's
+// userinfo never splits an entry's record from its row.
+func TestServerStatsFillBothPickersChoices(t *testing.T) {
+	t.Parallel()
+
+	servers := []config.ServerEntry{
+		{Name: "local", Endpoint: "http://user:secret@local:8080/v1"},
+		{Name: "pinned", Endpoint: "http://pinned:8080/v1", Model: "llama"},
+		{Name: "unbound", Endpoint: "http://unbound:8080/v1"},
+	}
+	rec := newStatsRecorder(serverStatsPath(t.TempDir()), true)
+	sink := rec.wrap(nil)
+	for range 5 {
+		sink.Emit(statsAttempt("local", "http://local:8080/v1", "qwen"))
+		sink.Emit(statsAttempt("pinned", "http://pinned:8080/v1", "llama"))
+	}
+	sink.Emit(statsAttempt("local", "http://local:8080/v1", "other"))
+	sink.Emit(statsAttempt("unbound", "http://unbound:8080/v1", "mistral"))
+
+	holder := newUpstreamHolder()
+	holder.Bind(servers[0].Endpoint, "", "qwen", "", "", nil)
+	w := &rootWiring{live: newLiveSettings(config.Options{Servers: servers}), stats: rec, holder: holder}
+
+	for name, choices := range map[string][]tui.ServerChoice{
+		"server":     serverHost{w: w}.List(),
+		"sub-agents": delegationHost{w: w}.Targets(),
+	} {
+		if len(choices) != len(servers) {
+			t.Fatalf("%s: %d choices, want %d", name, len(choices), len(servers))
+		}
+		want := []tui.ServerSummary{
+			{Model: "qwen", Total: 5, TTFT: time.Second, HasTTFT: true, TokensPerSec: 50, HasTokensPerSec: true},
+			{Model: "llama", Total: 5, TTFT: time.Second, HasTTFT: true, TokensPerSec: 50, HasTokensPerSec: true},
+			{Model: "mistral", LastRecorded: true, Total: 1, NoData: true, TTFT: time.Second, HasTTFT: true},
+		}
+		for i, choice := range choices {
+			if choice.Stats == nil || *choice.Stats != want[i] {
+				t.Errorf("%s: %s summary = %+v, want %+v", name, choice.Name, choice.Stats, want[i])
+			}
+		}
+	}
+
+	rec.set(false)
+	for _, choice := range (serverHost{w: w}).List() {
+		if choice.Stats != nil {
+			t.Errorf("with server-stats off, %s carries a summary %+v; want none", choice.Name, choice.Stats)
+		}
 	}
 }

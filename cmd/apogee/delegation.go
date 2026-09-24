@@ -55,9 +55,10 @@ type delegationHost struct{ w *rootWiring }
 // asks the HOLDER on every call rather than a launch snapshot, so an entry added mid-session is a
 // delegation target the moment the edit lands — serverHost.List's contract, minus the one row that
 // list adds: the synthesized ephemeral `--endpoint` startup (upstreamChoices) names no entry, so it
-// could be neither resolved nor recorded here.
+// could be neither resolved nor recorded here. Each target carries the entry's measured summary
+// while `server-stats:` is on, as serverHost.List's rows do (rootWiring.withStats).
 func (h delegationHost) Targets() []tui.ServerChoice {
-	return serverChoices(h.w.live.serverList())
+	return h.w.withStats(h.w.live.serverList())
 }
 
 // Retarget points every delegation spawned from now on at the named entry, through the wiring that

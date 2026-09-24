@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/url"
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -685,17 +686,106 @@ func (m Model) subAgentsTargets() []ServerChoice {
 // is itself talking to. It is an ACTION and not a marker — which is why it costs the pane no third
 // cell — and it is offered unconditionally, because the opt-out is exactly as available on a file
 // with two entries as on one with ten.
+//
+// A target carrying a measured summary ([ServerChoice.Stats]) gains a third cell after that one —
+// serverRows' summary column, dropping the endpoint the same way when the pane is too narrow (the
+// description stays: it is the choice's reason, the endpoint only its address). With no summary on
+// any target the rows are the two cells above, unchanged.
 func (m Model) subAgentsServerRows() []popupRow {
 	targets := m.subAgentsTargets()
-	rows := make([]popupRow, 0, len(targets)+1)
-	for _, choice := range targets {
-		endpoint := "— " + stripEscapes(choice.Endpoint)
-		if described := stripEscapes(choice.Description); described != "" {
-			endpoint += subAgentsDescriptionSeparator + described
+	compose := func(withEndpoint bool) []popupRow {
+		rows := make([]popupRow, 0, len(targets)+1)
+		for _, choice := range targets {
+			parts := make([]string, 0, 2) //nolint:mnd // the endpoint and the description
+			if withEndpoint {
+				parts = append(parts, stripEscapes(choice.Endpoint))
+			}
+			if described := stripEscapes(choice.Description); described != "" {
+				parts = append(parts, described)
+			}
+			second := ""
+			if len(parts) > 0 {
+				second = "— " + strings.Join(parts, subAgentsDescriptionSeparator)
+			}
+			row := popupRow{stripEscapes(choice.Name), second}
+			if summary := serverSummaryCell(choice.Stats); summary != "" {
+				row = append(row, summary)
+			}
+			rows = append(rows, row)
 		}
-		rows = append(rows, popupRow{stripEscapes(choice.Name), endpoint})
+		return append(rows, popupRow{subAgentsAutoLabel, subAgentsAutoDescription})
 	}
-	return append(rows, popupRow{subAgentsAutoLabel, subAgentsAutoDescription})
+	return m.fitServerRows(targets, compose)
+}
+
+// fitServerRows is the narrow-width rule both server pickers share (ADR 0085): the row set compose
+// builds WITH endpoints is kept when it fits the pane, and rebuilt without them when it does not
+// and some row carries a measured summary — the endpoint drops first, then the painter's own
+// truncation shortens the summary, and the name is never what goes. A pane with no summary on any
+// row keeps its endpoints at every width, the rows it drew before summaries existed.
+func (m Model) fitServerRows(choices []ServerChoice, compose func(withEndpoint bool) []popupRow) []popupRow {
+	rows := compose(true)
+	if !anyServerStats(choices) || popupRowsFit(m.th, rows, popupInnerWidth(m.th, m.width)) {
+		return rows
+	}
+	return compose(false)
+}
+
+// anyServerStats reports whether some choice carries a measured summary.
+func anyServerStats(choices []ServerChoice) bool {
+	for _, choice := range choices {
+		if choice.Stats != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// popupRowsFit reports whether every row, laid out in the pane's aligned columns and led by the
+// row marker, fits inner cells — the measure the painter truncates against.
+func popupRowsFit(th theme, rows []popupRow, inner int) bool {
+	widths := popupColumnWidths(th, rows)
+	for _, row := range rows {
+		if popupRowIndent+th.measure.Width(layoutPopupRow(th, row, widths)) > inner {
+			return false
+		}
+	}
+	return true
+}
+
+// serverSummaryCell is a row's measured-summary cell: "" for no summary (the column then costs
+// nothing), "· no data" under the sample floor, else "· ttft 1.8s · 42 tok/s · 2/20 failed". A
+// summary of the last RECORDED model rather than the bound one names it first, in parentheses, so
+// the figures are never read as the bound model's.
+func serverSummaryCell(s *ServerSummary) string {
+	if s == nil {
+		return ""
+	}
+	label := ""
+	if s.LastRecorded && s.Model != "" {
+		label = "(" + stripEscapes(s.Model) + ") "
+	}
+	if s.NoData {
+		return "· " + label + "no data"
+	}
+	ttft := "ttft —"
+	if s.HasTTFT {
+		ttft = "ttft " + formatSummaryDuration(s.TTFT)
+	}
+	rate := "— tok/s"
+	if s.HasTokensPerSec {
+		rate = fmt.Sprintf("%.0f tok/s", s.TokensPerSec)
+	}
+	return fmt.Sprintf("· %s%s · %s · %d/%d failed", label, ttft, rate, s.Failed, s.Total)
+}
+
+// formatSummaryDuration reads a time-to-first-token the way a human compares two servers: whole
+// milliseconds under a second, else seconds to one decimal.
+func formatSummaryDuration(d time.Duration) string {
+	if d < time.Second {
+		return fmt.Sprintf("%dms", d.Milliseconds())
+	}
+	return fmt.Sprintf("%.1fs", d.Seconds())
 }
 
 // retargetSubAgents is the accept path both forms of the verb share — a highlighted row and
@@ -1273,19 +1363,35 @@ func (m Model) modelRows() []popupRow {
 // Three cells — ["name", "— endpoint", "· current"] — so the endpoints start at one column whatever
 // the aliases measure; the mark is an empty cell on every server but one, and when the session is on
 // none of them that third column collapses away.
+//
+// A server carrying a measured summary ([ServerChoice.Stats], ADR 0085) gains a FOURTH cell after
+// the mark — ["name", "— endpoint", "· current", "· ttft 1.8s · 42 tok/s · 2/20 failed"] — so the
+// summaries line up in one column and the painter's right-hand truncation reaches the summary before
+// it could reach the mark. When the pane is too narrow for every row the endpoint cell empties and
+// its column collapses (fitServerRows). With no summary on any row the rows are the three cells
+// above, unchanged.
 func (m Model) serverRows() []popupRow {
 	servers := m.servers()
-	rows := make([]popupRow, 0, len(servers))
-	for _, choice := range servers {
-		current := ""
-		if choice.Name == m.opts.HostAlias {
-			current = currentRowCell
+	compose := func(withEndpoint bool) []popupRow {
+		rows := make([]popupRow, 0, len(servers))
+		for _, choice := range servers {
+			current := ""
+			if choice.Name == m.opts.HostAlias {
+				current = currentRowCell
+			}
+			endpoint := ""
+			if withEndpoint {
+				endpoint = "— " + stripEscapes(choice.Endpoint)
+			}
+			row := popupRow{stripEscapes(choice.Name), endpoint, current}
+			if summary := serverSummaryCell(choice.Stats); summary != "" {
+				row = append(row, summary)
+			}
+			rows = append(rows, row)
 		}
-		rows = append(rows, popupRow{
-			stripEscapes(choice.Name), "— " + stripEscapes(choice.Endpoint), current,
-		})
+		return rows
 	}
-	return rows
+	return m.fitServerRows(servers, compose)
 }
 
 // modePickerTitle names what the pane offers: the session's own autonomy ladder, the same four
