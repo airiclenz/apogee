@@ -964,6 +964,57 @@ func TestOnceCarriesASeatWithoutRoutingAnything(t *testing.T) {
 	}
 }
 
+// TestOnceKeepsTheFarWidthOfTheSpecsTarget pins the order Once applies the two routing fields in.
+// They do not commute: the seat door FORGETS the far width the engine states to the model, and a
+// usable target STATES it (ADR 0069 decision 6, 2026-09-24 note). Applied target-first, the seat
+// wipes the width the target had just stated, and a Firing — which has no heartbeat to re-state it —
+// tells its model the session width for the whole run. The width is observed where the model reads
+// it, the orientation's Delegation bounds clause on the first request, with the two widths distinct
+// so the session width answering instead of the far one cannot pass.
+func TestOnceKeepsTheFarWidthOfTheSpecsTarget(t *testing.T) {
+	t.Parallel()
+
+	const sessionWidth, farWidth = 2, 5
+	up := stubllm.New(t, stubllm.Script{Model: "session-model", Turns: []stubllm.Turn{{Text: "nothing to delegate"}}})
+
+	// The Delegation bounds bullet is rendered only when the Agent's roster holds sub_agent
+	// (delegatingSpec registers it), and the orientation block rides on a standing system
+	// message, so the Config carries a system prompt too. The target names a port nothing
+	// listens on: the run never delegates, so only the width it states is read.
+	spec := delegatingSpec(t, up)
+	spec.Config.SystemPrompt = "You are apogee, a terminal coding agent."
+	spec.Config.ParallelAgents = sessionWidth
+	spec.DelegationSeat = &agent.DelegationSeat{Name: "grunt", Description: "the cheap box", Model: "grunt-model"}
+	spec.DelegationTarget = &agent.DelegationTarget{
+		Endpoint: "http://127.0.0.1:1", ServerName: "grunt", Model: "grunt-model", ParallelAgents: farWidth,
+	}
+
+	if _, err := Once(context.Background(), spec); err != nil {
+		t.Fatalf("Once: %v", err)
+	}
+
+	requests := up.Requests()
+	if len(requests) == 0 {
+		t.Fatal("the Firing sent no request")
+	}
+	system := systemText(requests[0])
+	if want := fmt.Sprintf("up to %d run at once", farWidth); !strings.Contains(system, want) {
+		t.Errorf("the first request's orientation does not state the target's width %q:\n%s", want, system)
+	}
+}
+
+// systemText is a request's system messages joined in wire order — what the orientation block
+// arrives inside.
+func systemText(req stubllm.Request) string {
+	var parts []string
+	for _, msg := range req.Messages {
+		if msg.Role == string(domain.RoleSystem) {
+			parts = append(parts, msg.Content)
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
 // TestOnceReportsEachSubAgentsContextFill is the headline of the per-run readout: a delegated
 // run fills a window of its OWN, and that fill reaches the Firing's caller on
 // Result.SubAgents — labelled by the first line of the task it was given, and without

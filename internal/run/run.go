@@ -416,11 +416,17 @@ func Once(ctx context.Context, spec Spec) (Result, error) {
 	// delegation is already routed — there is no heartbeat here to install it later. Both
 	// fields nil ⇒ neither setter is called and the run is byte-for-byte what it was before
 	// this seam existed.
-	if spec.DelegationTarget != nil {
-		a.SetDelegationTarget(spec.DelegationTarget)
-	}
+	//
+	// The seat BEFORE the target, and the order is load-bearing (ADR 0069 D6): installing a seat
+	// forgets the far width the engine states to the model (Agent.SetDelegationSeat), and a usable
+	// target is what states it. Applied the other way round, the seat would wipe the width the
+	// target had just stated, and with no heartbeat to re-state it the whole Firing would tell its
+	// model the session width.
 	if spec.DelegationSeat != nil {
 		a.SetDelegationSeat(spec.DelegationSeat)
+	}
+	if spec.DelegationTarget != nil {
+		a.SetDelegationTarget(spec.DelegationTarget)
 	}
 
 	// The prompt carries the same @file and /skill grammars a chat message does

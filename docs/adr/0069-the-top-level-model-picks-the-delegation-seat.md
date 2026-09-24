@@ -118,6 +118,11 @@ after the fact, where it costs no cache.
 > reverse order wiped the width the target had just stated and told the model the session width
 > until the next heartbeat beat.
 
+> **Note 2026-09-24 (the same order, on the headless path).** `run.Once` (`internal/run/run.go`)
+> applies a Firing's `Spec.DelegationSeat` BEFORE its `Spec.DelegationTarget` for the same reason.
+> A Firing has no heartbeat, so the reverse order, which it had, told the model the session width
+> for the whole run rather than for one beat.
+
 **7 — A mixed reply is sized by the smaller cap; a single-seat reply keeps its seat's cap — this
 amends [ADR 0039](0039-delegations-fan-out-concurrently-bounded-by-the-servers-parallel-agents-cap.md)
 decision 3.** One depth-0 reply may now fan out to both seats at once, which ADR 0039 never had to
