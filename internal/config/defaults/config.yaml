@@ -705,6 +705,15 @@ context-fill-notice: false
 # re-stream-budget: 3
 
 # =============================================================================
+# Keep per-server speed and reliability stats. With this on, apogee writes one line to
+# ~/.apogee/server-stats.jsonl for every request it sends a server — how long the first byte and
+# the first token took, how fast the reply streamed, and whether it failed. Only the server's
+# name, its address without any password, key or query part, the model and those timings are
+# stored: never a prompt, a reply or a key. Off, the file is neither written nor read.
+# Config-file only (no flag or env). Default: true (on).
+server-stats: true
+
+# =============================================================================
 # Snapshot the workspace for /undo. With this on, apogee images your whole workspace around each
 # exchange — once immediately before the exchange's first write-capable tool call, once when the
 # exchange ends — into a small object database of that session's own under ~/.apogee/snapshots/.

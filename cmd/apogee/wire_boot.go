@@ -232,7 +232,14 @@ func (w *rootWiring) resolveConfig() error {
 	// The Reaction Runner built above, which DECORATES the Bridge's sink: the renderer sees every
 	// Event exactly as it did before this key existed, and the `reactions:` list is fired behind it
 	// (ADR 0073 §2 — observe-only, nothing a Reaction does reaches the model or the record).
-	w.cfg.Events = w.hooks
+	//
+	// The per-server stats recorder (ADR 0085) decorates that Runner in turn: every Event still
+	// reaches the Runner — and so the renderer — first and unchanged, and an UpstreamAttemptEvent is
+	// then appended to ~/.apogee/server-stats.jsonl while `server-stats:` is on. It is built whatever
+	// the key says, because the key is live-editable: an off recorder opens nothing and records
+	// nothing until the `/settings` row switches it on.
+	w.stats = newStatsRecorder(serverStatsPath(w.roots.config), w.opts.ServerStats)
+	w.cfg.Events = w.stats.wrap(w.hooks)
 	// Where a SYNC-lane reaction's trouble is said out loud — a gate or advise command that
 	// failed, timed out or could not be spawned. It is the same seam the Runner reports the
 	// observe lane's failures through (Report above), so one `reactions:` file's trouble reads

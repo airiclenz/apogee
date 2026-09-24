@@ -62,6 +62,7 @@ func fabricatedSettings() config.Options {
 		DelegateTimeout:       90 * time.Minute,
 		StreamIdleTimeout:     45 * time.Second,
 		RestreamBudget:        1,
+		ServerStats:           false,
 		AutoTitle:             false,
 		RememberModel:         true,
 		ContextWindow:         32768,
@@ -418,6 +419,7 @@ func TestSettingsRowsFormatEffectiveValues(t *testing.T) {
 		"delegate-timeout":        "1h30m0s", // a duration prints itself, ui.stall-after's spelling
 		"stream-idle-timeout":     "45s",
 		"re-stream-budget":        "1",
+		"server-stats":            "false", // switched off in the fixture: the row reports the value, never the default
 		"auto-title":              "false",
 		"remember-model":          "true",
 		"context-window":          "32768",

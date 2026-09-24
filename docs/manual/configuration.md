@@ -1232,6 +1232,17 @@ still works on those, and it names the reason so a thinner answer never reads as
 edit through `/settings` takes effect at the next start, because the store is opened while the
 session is being built.
 
+**Recording how fast each server answers — `server-stats:`.** A root key beside the block, for the
+same reason again. It is a switch that defaults to **on** (`true`; YAML's `on` and `off` spellings
+work too) and is config-file only (no flag, no environment variable). With it on, every request
+apogee sends a server — a Turn's, a sub-agent's at any depth, a compaction summary's, a headless
+run's and a `/schedule` firing's — appends one line to `~/.apogee/server-stats.jsonl`: the server
+entry's name, its endpoint reduced to scheme, host and path (no password, key, query or fragment),
+the model that answered, the time to the first byte and to the first token, how fast the reply
+streamed and how the attempt ended. No prompt, reply, request body or key name is ever stored. Set
+`server-stats: off` and the file is neither written nor read; the measurement itself still happens, so the headless `upstream_attempt` lines keep coming. An edit
+through `/settings` applies at once — the next request is recorded or not accordingly.
+
 ## The servers you run models on
 
 The `servers:` list is the **single definition** of what apogee can talk to — one

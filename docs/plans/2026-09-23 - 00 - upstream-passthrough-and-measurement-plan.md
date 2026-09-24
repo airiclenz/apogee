@@ -211,7 +211,17 @@ NOTES (2026-09-24): `go test -race` cannot run on this box (ThreadSanitizer: uns
 **Acceptance:** `go test -race -count=1 ./internal/serverstats/`
 **Commit:** `feat(serverstats): store and summarise per-server upstream attempts`
 
-## 9. Record attempts into the store; `server-stats:` key
+## 9. Record attempts into the store; `server-stats:` key — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the key is a `KindBool` row (Default `true`, template `server-stats: true`), not a separate on|off kind: YAML's `on` / `off` decode into it (TestApplyConfigServerStats pins both), while the `/settings` pane and writer spell it `true` / `false` like every other switch.
+NOTES (2026-09-24): the recorder is `statsRecorder` in cmd/apogee/serverstats.go — one per Driver, holding the `serverstats.Store` only while on (off never calls `serverstats.Open`, so the file is neither trimmed nor read), wrapping Config.Events as a forward-first decorator; the TUI builds it in `resolveConfig` (wire_boot.go) over the Reaction Runner, headless passes it through `firingInputs.stats`, and firingConfig wraps whatever sink stands. The store holds no fd, so `rootWiring.close` just stops it.
+NOTES (2026-09-24): re-derived from the Files list omitting the other Firing call sites — a TUI-raised `/schedule` Firing shares the session's recorder (schedule.go `scheduleWiring.stats`, wired in wire_live.go), headless.go constructs its recorder, and wire_options.go hands the recorder to the settingsApplier; the daemon Driver (daemonfire.go) is not wired, as the Goal names only the TUI and headless Drivers.
+NOTES (2026-09-24): registry Desc, template and manual prose describe only what this item ships (the file and the switch); the picker-summary sentence is left for item 10 / item 12 to add, since the pickers do not show it yet.
+NOTES (2026-09-24): TestRootWiringEmitsThroughTheHookRunner (cmd/apogee/wire_settings_test.go) asserted Config.Events IS the Runner; the plan's wrap at wire_boot makes it the stats sink over the Runner, so the assertion now checks `statsSink.inner == w.hooks` — same guarantee (the Runner is reached), updated to the plan's own design.
+NOTES (2026-09-24): consequential edit — cmd/apogee/wire_settings_test.go: made necessary by the new `stats` settingsApplier member (fullyComposedApplier gains a recorder so TestEveryEditableSettingKeyHasAnApply reaches the new row).
+NOTES (2026-09-24): consequential edit — cmd/apogee/settingsrows_test.go: made necessary by the new registry key (TestSettingsRowsFormatEffectiveValues pins one value per key; fixture sets ServerStats false).
+NOTES (2026-09-24): consequential edit — cmd/apogee/doc.go: made necessary by the new file serverstats.go (TestDocMapNamesEveryFile).
+NOTES (2026-09-24): `go test -race` cannot run on this box (ThreadSanitizer VMA range on the Pi kernel); acceptance ran without `-race`: `go test -count=1 ./internal/config/` and `go test -count=1 -run 'ServerStats|Settings|Manual' ./cmd/apogee/` pass, as do the full `./cmd/apogee/` and `./internal/tui/` packages.
 
 Depends on items 6 and 8.
 **What:**

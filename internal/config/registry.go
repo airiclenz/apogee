@@ -582,6 +582,17 @@ var KeyRegistry = bindSetters([]Key{
 		Set:  land(strconv.Atoi, func(o *Options) *int { return &o.RestreamBudget }),
 	},
 	{
+		// A switch, undo-snapshots's shape — but live: the per-server stats store is opened or
+		// stopped the moment the pane commits the edit (ADR 0037 decision 8), because nothing about
+		// it is wired into the engine; the Driver's recorder holds it (ADR 0085).
+		Path: "server-stats", Kind: KindBool, Default: "true",
+		Editable: true,
+		Desc: "Record how fast and how reliably each server answers into " +
+			"~/.apogee/server-stats.jsonl; off neither writes nor reads the file.",
+		Read: func(o Options) string { return boolValue(o.ServerStats) },
+		Set:  land(strconv.ParseBool, func(o *Options) *bool { return &o.ServerStats }),
+	},
+	{
 		Path: "undo-snapshots", Kind: KindBool, Default: "true",
 		Editable: true,
 		Desc: "Snapshot the workspace around each exchange so /undo survives a relaunch and " +

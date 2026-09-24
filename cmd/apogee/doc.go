@@ -105,7 +105,10 @@
 // composition seams — what a Firing runs against, when it may start, where it narrates
 // (ADR 0033); daemonfire.go that same composition for the daemon — the adopted
 // name→Entry set a Firing resolves its schedule against, the `servers:` entry it binds to
-// by name, and the unattended run composed over the pair (ADR 0034, ADR 0055).
+// by name, and the unattended run composed over the pair (ADR 0034, ADR 0055);
+// serverstats.go the per-server stats recorder — the Driver sink the session's boot and
+// every Firing wrap Config.Events in, appending each upstream attempt to
+// ~/.apogee/server-stats.jsonl while `server-stats:` is on (ADR 0085).
 //
 // The subcommands: headless.go is `apogee headless`, one prompt run to completion with
 // nobody watching, and the binary's only distinct exit codes — with sigpipe_unix.go

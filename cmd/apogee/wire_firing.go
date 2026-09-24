@@ -112,6 +112,10 @@ type firingInputs struct {
 	// nil DROPS the line, exactly as domain.Config.Report's own default does — every composition
 	// test, and a Driver with nowhere to put it.
 	report func(msg string)
+	// stats is the Driver's per-server stats recorder (ADR 0085), which records every
+	// UpstreamAttemptEvent this Firing's engine emits while `server-stats:` is on. nil records
+	// nothing and leaves Config.Events exactly as the Runner above left it.
+	stats *statsRecorder
 	// runner is what the composed Firing is handed to once both gates have passed — run.Once in
 	// production, a recording stub in a composition test that captures the run.Spec and runs
 	// nothing (ADR 0033 decision 6 names the runner an injected seam, and ~40 tests observe the
@@ -466,6 +470,13 @@ func firingConfig(ctx context.Context, in firingInputs) (apogee.Config, firingRo
 	// so the renderer stays outermost and the Reactions stay invisible to it.
 	if in.hooks != nil {
 		cfg.Events = in.hooks
+	}
+	// The per-server stats recorder (ADR 0085) wraps whatever sink stands above — the Runner, or
+	// none — as the session's own does (wire_boot.go): every Event reaches that sink first and
+	// unchanged, and each upstream attempt is then recorded. A Driver that passed no recorder leaves
+	// Events as it was.
+	if in.stats != nil {
+		cfg.Events = in.stats.wrap(cfg.Events)
 	}
 	// And the in-loop twin of that Runner's own report seam: where the SYNC lane's failures are
 	// said out loud. It is assigned beside the sink rather than in the literal so the two stay one

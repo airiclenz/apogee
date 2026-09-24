@@ -409,6 +409,7 @@ func (w *rootWiring) wireSession(ctx context.Context) error {
 		// identically whichever of the two fired it.
 		notifyHook: w.bridge.NotifyHook,
 		upstream:   w.upstream,
+		stats:      w.stats,
 	}
 	w.gate = newIdleGate()
 	w.schedules, err = schedule.New(schedule.Config{

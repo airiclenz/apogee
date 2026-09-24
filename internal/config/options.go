@@ -289,6 +289,12 @@ type Options struct {
 	// its ADDRESS into apogee.Config.RestreamBudget, whose nil keeps the engine's own default.
 	RestreamBudget int
 
+	// serverStats gates the per-server stats store (ADR 0085): on, the Drivers record every
+	// upstream HTTP attempt into ~/.apogee/server-stats.jsonl; off, that file is neither written
+	// nor read. Loaded from the config file only (default true). The composition root opens or
+	// stops the Driver's recorder from it, live on a `/settings` edit.
+	ServerStats bool
+
 	// autoTitle gates the automatic session-naming call — the cosmetic out-of-band completion that
 	// names a new Session record from its first prompt (default true), loaded from the config file
 	// only. ApplyConfig sets it from settings; runRoot folds it into tui.Options.AutoTitle. It gates

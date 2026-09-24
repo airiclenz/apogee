@@ -1003,6 +1003,7 @@ func fullyComposedApplier(t *testing.T) settingsApplier {
 		present: newLivePresentation(config.PresentSettings{AutoOpen: true}, workspace, "darwin",
 			func(string) string { return "" }, func(tui.Presentation) {}),
 		roots: roots,
+		stats: newStatsRecorder(serverStatsPath(roots.config), false),
 	}
 }
 
@@ -4037,7 +4038,8 @@ func TestHookRunnerReplaceNeverReportsOnTheCallersGoroutine(t *testing.T) {
 	}
 }
 
-// The Runner is installed as Config.Events, which is what makes the whole feature reachable at all:
+// The Runner is installed as Config.Events — beneath the per-server stats recorder, which forwards
+// every Event to it first (ADR 0085) — which is what makes the whole feature reachable at all:
 // a root that built one and left the engine emitting into the Bridge's bare sink would run every
 // Reaction never, and one that set Events to a Runner built later would box a nil pointer past
 // apogee.New's required-Events check and nil-deref on the first Emit.
@@ -4052,8 +4054,10 @@ func TestRootWiringEmitsThroughTheHookRunner(t *testing.T) {
 	if w.hooks == nil {
 		t.Fatal("the root built no Reaction Runner")
 	}
-	if w.cfg.Events != domain.EventSink(w.hooks) {
-		t.Fatalf("Config.Events = %T, want the root's own *reactions.Runner", w.cfg.Events)
+	sink, ok := w.cfg.Events.(statsSink)
+	if !ok || sink.inner != domain.EventSink(w.hooks) {
+		t.Fatalf("Config.Events = %T, want the stats recorder over the root's own *reactions.Runner",
+			w.cfg.Events)
 	}
 	// And an Event emitted before wireSession has installed a tool set at all — the first beat of a
 	// cold start — is forwarded: the Runner holds no handle on the registry to dereference.

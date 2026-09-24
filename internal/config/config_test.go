@@ -393,6 +393,7 @@ func wantDefaults() Options {
 		DelegateTimeout:      defaultDelegateTimeout,
 		StreamIdleTimeout:    defaultStreamIdleTimeout,
 		RestreamBudget:       defaultRestreamBudget,
+		ServerStats:          true,
 		AutoTitle:            true, RememberModel: true, ContextFiles: []string{"AGENTS.md"},
 		Present: PresentSettings{AutoOpen: true}, UI: wantUIDefault,
 	}
@@ -632,6 +633,7 @@ func TestEveryConfigKeyReachesTheOptions(t *testing.T) {
 		"DelegateTimeout":      true,
 		"StreamIdleTimeout":    true,
 		"RestreamBudget":       true,
+		"ServerStats":          true,
 		"UseShippedSkills":     true,
 		"UseDefaultPrompt":     true,
 		"AutoTitle":            true, "RememberModel": true,
@@ -695,6 +697,7 @@ func everyKeyFileConfig() fileConfig {
 		DelegateTimeout:      strptr("30m"),
 		StreamIdleTimeout:    strptr("30s"),
 		RestreamBudget:       intptr(1),
+		ServerStats:          boolptr(false),
 		RememberModel:        boolptr(false),
 		ContextWindow:        64000, WorkingWindow: 32000, ResponseReserve: 0.3,
 		MCPServers: []mcpServerConfig{{Name: "docs", Command: "mcp-docs"}},
@@ -1869,6 +1872,40 @@ func TestApplyConfigAutoTitle(t *testing.T) {
 			}
 			if opts.AutoTitle != tt.want {
 				t.Errorf("opts.autoTitle = %v; want %v", opts.AutoTitle, tt.want)
+			}
+		})
+	}
+}
+
+// The server-stats key parses into opts.ServerStats: a file-only, default-ON switch (ADR 0085), so
+// the per-server stats store records unless a config opts out. The YAML `on` / `off` spellings the
+// ADR and the manual use land as the same two values `true` / `false` do.
+func TestApplyConfigServerStats(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		fileYAML string
+		want     bool
+	}{
+		{name: "absent key ⇒ the default", want: true},
+		{name: "an explicit false switches it off", fileYAML: "server-stats: false\n", want: false},
+		{name: "off is the same as false", fileYAML: "server-stats: off\n", want: false},
+		{name: "on is the same as true", fileYAML: "server-stats: on\n", want: true},
+		{name: "the seeded template resolves the default", fileYAML: string(defaultConfigYAML), want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			home := testConfigHome(t, "")
+			if tt.fileYAML != "" {
+				writeConfigHome(t, home, tt.fileYAML)
+			}
+			opts := Options{ConfigDir: home}
+			if err := ApplyConfig(&opts, func(string) bool { return false }, func(string) string { return "" }, os.ReadFile, noNotify); err != nil {
+				t.Fatalf("ApplyConfig: %v", err)
+			}
+			if opts.ServerStats != tt.want {
+				t.Errorf("opts.ServerStats = %v; want %v", opts.ServerStats, tt.want)
 			}
 		})
 	}

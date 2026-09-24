@@ -1,0 +1,6 @@
+# The upstream the per-server stats journeys talk to (ADR 0085): one repeating plain reply, so a
+# Turn is exactly one request and one HTTP attempt — the one line the store must gain.
+model: stats-model
+turns:
+    - repeat: true
+      text: The stats journey got its answer.

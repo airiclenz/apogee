@@ -1012,6 +1012,10 @@ func runHeadlessBody(
 		mode:     mode,
 		report:   reportReaction,
 		runner:   deps.runner,
+		// The per-server stats recorder (ADR 0085): every upstream attempt this run makes is
+		// appended to the home's server-stats.jsonl while `server-stats:` is on. Off, it opens
+		// nothing, so the file is neither read nor written.
+		stats: newStatsRecorder(serverStatsPath(roots.config), opts.ServerStats),
 	}, prompt, nil, store, onID, narrate)
 	for _, n := range notices {
 		cmd.PrintErrln(n)

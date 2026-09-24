@@ -877,6 +877,10 @@ type settingsApplier struct {
 	// a `servers:` entry, so adding, removing or re-pointing it is a `servers:` edit. nil ⇒ this
 	// Driver routes no delegations, and the list applies with routing left where it was.
 	delegation *delegationWiring
+	// stats is the session's per-server stats recorder (ADR 0085), which the `server-stats` row
+	// opens or stops live. nil ⇒ this Driver records no stats, and the row refuses on its own
+	// row rather than reporting an edit that reached nothing.
+	stats *statsRecorder
 }
 
 // applySettingFor builds the dispatcher behind [tui.SettingsHost.Apply]: the one place a key the pane has
@@ -1301,6 +1305,13 @@ var settingsTable = []settingsEntry{
 		// As delegate-max-steps above: no member, no seam, no re-resolution.
 		reaches: reachesWithoutAMember,
 		apply:   applyRestreamBudget,
+	},
+	{
+		key: "server-stats",
+		// The recorder alone: the store it opens or stops is a Driver sink, never an engine seam,
+		// so the switch is in force at the next upstream attempt (ADR 0037 decision 8).
+		reaches: func(a settingsApplier) bool { return a.stats != nil },
+		apply:   applyServerStats,
 	},
 	{
 		key:     "undo-snapshots",
@@ -1834,6 +1845,22 @@ func applyInspector(a settingsApplier, key, value string) (string, error) {
 	if a.live != nil {
 		a.live.update(func(o *config.Options) { o.UI.Inspector = landed.UI.Inspector })
 	}
+	return "", nil
+}
+
+// applyServerStats is `server-stats:` (ADR 0085), live: the holder takes the flip so the next Firing
+// composes under it, and the session's recorder opens the store or stops it on the spot — the
+// Firings this session raises share that recorder, so they follow the same switch. Off, the file is
+// neither written nor read from the next upstream attempt on; the events themselves still fire.
+func applyServerStats(a settingsApplier, key, value string) (string, error) {
+	landed, err := landSetting(key, value)
+	if err != nil {
+		return "", err
+	}
+	if a.live != nil {
+		a.live.update(func(o *config.Options) { o.ServerStats = landed.ServerStats })
+	}
+	a.stats.set(landed.ServerStats)
 	return "", nil
 }
 

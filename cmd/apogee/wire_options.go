@@ -55,6 +55,7 @@ func (w *rootWiring) options() tui.Options {
 		present:    w.presentation,
 		caps:       w.caps,
 		delegation: w.delegation,
+		stats:      w.stats,
 	})
 
 	return tui.Options{

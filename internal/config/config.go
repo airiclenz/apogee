@@ -758,6 +758,14 @@ var keyAccessors = []keyAccessor{
 		},
 	},
 	{
+		// undo-snapshots's shape: on unless the file says otherwise.
+		row: mustKey("server-stats"),
+		fromFile: func(o *Options, fc fileConfig) error {
+			o.ServerStats = fc.ServerStats == nil || *fc.ServerStats
+			return nil
+		},
+	},
+	{
 		row: mustKey("undo-snapshots"),
 		fromFile: func(o *Options, fc fileConfig) error {
 			o.UndoSnapshots = fc.UndoSnapshots == nil || *fc.UndoSnapshots
@@ -1471,6 +1479,12 @@ type fileConfig struct {
 	// `re-stream-budget: 0` is the documented spelling of "never re-stream", which a plain int could
 	// not tell from an absent key (the built-in 3). It feeds domain.Config.RestreamBudget.
 	RestreamBudget *int `yaml:"re-stream-budget"`
+	// ServerStats gates the per-server stats store (ADR 0085): with it on, the Drivers append one
+	// line per upstream HTTP attempt to ~/.apogee/server-stats.jsonl and the server pickers read a
+	// summary back; off, the file is neither written nor read, while the UpstreamAttemptEvents
+	// themselves still fire. File-only (no flag/env), and a pointer for auto-title's reason: absent
+	// ⇒ on. YAML's `on` / `off` spellings decode into it as true / false.
+	ServerStats *bool `yaml:"server-stats"`
 	// UndoSnapshots gates the SNAPSHOT-backed undo store (ADR 0074): with it on, apogee images the
 	// workspace around each exchange in a git object database of the session's own, outside the
 	// workspace, so `/undo` survives a relaunch and reaches writes that never went through apogee's

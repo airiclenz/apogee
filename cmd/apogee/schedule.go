@@ -113,6 +113,10 @@ type scheduleWiring struct {
 	// through a `/load` restart while the footer says online. nil, or a latch nothing has reported
 	// to yet, is "no observation" — the Firing proceeds, exactly as every Firing did before the gate.
 	upstream *upstreamLatch
+
+	// stats is the session's per-server stats recorder (ADR 0085), shared so a Firing's upstream
+	// attempts land in the same file under the same live `server-stats:` switch as the session's.
+	stats *statsRecorder
 }
 
 // fire performs one Firing and reports the record it left behind. It is the value wired into
@@ -188,6 +192,7 @@ func (w scheduleWiring) fire(ctx context.Context, f schedule.Firing) (schedule.O
 			}
 		},
 		report: w.notifyHook,
+		stats:  w.stats,
 	}, f.Prompt, &reactions.ScheduleRef{ID: f.ScheduleID, Name: f.ScheduleName}, w.store, nil, nil)
 
 	// A Firing refused before it began — a composition that would not produce a Config, or a footer

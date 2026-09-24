@@ -223,6 +223,10 @@ type rootWiring struct {
 	// built in resolveConfig — before the Config that carries it — and it is the ONE Runner this
 	// session has; a Firing raised inside the session composes its own (wire_firing.go).
 	hooks *reactions.Runner
+	// stats is this session's per-server stats recorder (ADR 0085): the Driver sink that appends
+	// every UpstreamAttemptEvent to ~/.apogee/server-stats.jsonl while `server-stats:` is on. It
+	// decorates hooks as Config.Events, and the `/settings` row opens or stops it live.
+	stats *statsRecorder
 	// namer names an unnamed delegation out of band on the child's own Upstream (ADR 0068). It is
 	// held rather than left inside cfg because the `auto-title:` gate on it is live: the renderer
 	// flips it through tui.Options.OnAutoTitle when the pane or the file moves the key, long after
@@ -297,6 +301,10 @@ func (w *rootWiring) close() {
 		_ = w.hooks.Close(ctx)
 		cancel()
 	}
+
+	// The stats recorder stops beside the Reactions, before the engine: nothing this session
+	// measures after this point is recorded. It holds no file open, so stopping is the whole close.
+	w.stats.close()
 
 	if w.engine != nil {
 		_ = w.engine.Close()
