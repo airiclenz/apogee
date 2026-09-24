@@ -3778,7 +3778,7 @@ func TestNarrationSinkSummarisesTheFirstStringArgument(t *testing.T) {
 // tool line families: a child's call and result print nothing, because the sub-agent lines stand in
 // for them. The tool is read off the ToolResultEvent itself (Tool), never remembered from the call,
 // so a result whose call never went by is still named. A failed terminal narrates the command's own
-// first line, never the `cwd:` line the tool opens its result with (tools.StripCwdLine).
+// first line, never the `cwd:` line the tool opens its result with (domain.StripCwdLine).
 func TestNarrationSinkWordsTheResult(t *testing.T) {
 	t.Parallel()
 

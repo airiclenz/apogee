@@ -124,7 +124,9 @@ internal/agent/dispatch.go — delegationWidth, delegationCap; internal/agent/lo
 - `grep -n 'ParallelAgents()' CONTEXT.md`
 **Commit:** `docs(context): parallel agents, the loop and the task list stop naming retired behaviour`
 
-## 5. StripCwdLine moves to internal/domain
+## 5. StripCwdLine moves to internal/domain — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the prefix constant is exported as domain.CwdLinePrefix, since internal/tools' subprocessToolResult still writes it from outside the package.
 
 **What:**
 **Goal:** `internal/tui` imports nothing from `internal/tools` (`go list -deps ./internal/tui` shows no `internal/tools`), the cwd-line strip lives in `internal/domain` with its prefix, and `internal/tui/doc.go`'s "does not import internal/tools" sentence is true.

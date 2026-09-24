@@ -451,7 +451,7 @@ func TestPythonExec_WorkspaceDoesNotShadowTheStdlib(t *testing.T) {
 	}
 	// The result opens with the `cwd:` line naming the workspace, so the pin reads the output
 	// beneath it: that is where a shadowed json would spell the workspace path.
-	if output := StripCwdLine(res.Content); strings.Contains(output, root) {
+	if output := domain.StripCwdLine(res.Content); strings.Contains(output, root) {
 		t.Errorf("json resolved inside the workspace: %q", output)
 	}
 	if !strings.HasPrefix(res.Content, "cwd: "+root+"\n") {

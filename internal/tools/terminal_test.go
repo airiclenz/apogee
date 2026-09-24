@@ -514,7 +514,7 @@ func TestTerminal_PreambleLeavesSuccessOutputUntouched(t *testing.T) {
 
 // TestTerminal_ResultOpensWithTheWorkingDirectory pins the `cwd:` line (2026-09-15): the first
 // line of every result names the directory the command ran in — the workspace root by default,
-// the `workdir` the call named otherwise — and StripCwdLine takes exactly that line off again
+// the `workdir` the call named otherwise — and domain.StripCwdLine takes exactly that line off again
 // for the host-side surfaces that already name the command.
 func TestTerminal_ResultOpensWithTheWorkingDirectory(t *testing.T) {
 	if runtime.GOOS == "windows" {
@@ -535,7 +535,7 @@ func TestTerminal_ResultOpensWithTheWorkingDirectory(t *testing.T) {
 	if want := "cwd: " + filepath.Join(root, "sub"); first != want {
 		t.Errorf("first line = %q, want %q", first, want)
 	}
-	if got := StripCwdLine(res.Content); got != rest {
+	if got := domain.StripCwdLine(res.Content); got != rest {
 		t.Errorf("StripCwdLine = %q, want the output after the cwd line %q", got, rest)
 	}
 	if !strings.Contains(rest, "sub") {
@@ -550,26 +550,8 @@ func TestTerminal_ResultOpensWithTheWorkingDirectory(t *testing.T) {
 	if !res.IsError || !strings.HasPrefix(res.Content, "cwd: "+root+"\n") {
 		t.Errorf("failed result = %q (IsError=%v), want it to open with the cwd line", res.Content, res.IsError)
 	}
-	if got := StripCwdLine(res.Content); !strings.HasSuffix(got, "[exit code 1"+failFastExitNote+"]") {
+	if got := domain.StripCwdLine(res.Content); !strings.HasSuffix(got, "[exit code 1"+failFastExitNote+"]") {
 		t.Errorf("stripped failure = %q, want the exit-code marker kept", got)
-	}
-}
-
-// TestStripCwdLine pins the strip on the shapes the consumers hand it: a cwd line comes off
-// whole, a body with none is returned untouched, and a cwd line with nothing after it is empty.
-func TestStripCwdLine(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct{ in, want string }{
-		{"cwd: /ws\nhello\n", "hello\n"},
-		{"cwd: /ws\n\n[exit code 1]", "\n[exit code 1]"},
-		{"hello\n", "hello\n"},
-		{"cwd: /ws", ""},
-		{"", ""},
-		{"\ncwd: /ws\n", "\ncwd: /ws\n"},
-	} {
-		if got := StripCwdLine(tc.in); got != tc.want {
-			t.Errorf("StripCwdLine(%q) = %q, want %q", tc.in, got, tc.want)
-		}
 	}
 }
 

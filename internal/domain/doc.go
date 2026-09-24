@@ -82,7 +82,10 @@
 // tooledit.go is the tool stage's pair of reaction working values — ToolCallEdit and
 // ToolResultEdit, the revision-bearing wrappers the two tool-stage reactions reshape a pending
 // call and a returned result through. toolsummary.go is ToolSummary and its seven variants,
-// the structured half of an outcome, written for a host rather than for the model. confinement.go is the Confiner interface, its
+// the structured half of an outcome, written for a host rather than for the model. cwdline.go
+// is CwdLinePrefix and StripCwdLine — the shape of the `cwd:` line a subprocess tool opens its
+// result with, and the one strip every host-side reader of that result shares, so a host reads
+// it without importing internal/tools. confinement.go is the Confiner interface, its
 // capability and box value types, the per-call Confinement / SubprocessPermit context
 // carriers (ADR 0012), and the WriteEscapePermit that carries one approved out-of-workspace
 // write target (ADR 0049).

@@ -243,31 +243,6 @@ func splitFailFastStop(output string) (command, rest string, ok bool) {
 	return command, trimmed[:start], true
 }
 
-// cwdLinePrefix opens the first line of every result a subprocess tool renders from a run
-// that has a working directory: `cwd: /path/to/dir`. The line says what the command's own
-// relative paths were relative to — the workspace root, or the `workdir` the call named — so a
-// model reading `./build/out` in the output knows where that is without a second call, and a
-// model that changed directories inside the line is reminded it did not change where the NEXT
-// call starts. StripCwdLine is its one reader on the host side; the model reads it as text.
-const cwdLinePrefix = "cwd: "
-
-// StripCwdLine takes the `cwd:` line (cwdLinePrefix) off the front of a terminal or python_exec
-// result's content and returns the rest, or content unchanged when no such line opens it. It is
-// the ONE strip every host-side consumer of that content shares — the TUI's success detail, the
-// TUI's failure body and headless narration — so the three cannot drift into different readings
-// of where the output begins: the line is written for the model, and a card or a narration line
-// that already names the command has nothing to gain from repeating the directory above its
-// first line of output.
-func StripCwdLine(content string) string {
-	if !strings.HasPrefix(content, cwdLinePrefix) {
-		return content
-	}
-	if _, rest, found := strings.Cut(content, "\n"); found {
-		return rest
-	}
-	return ""
-}
-
 // shellHintLine is the line a failed result gains when its output carries one of the tell-tale
 // complaints sh makes about a bash-only construct (bashismSignatures): the model wrote bash,
 // and the description's disclosure of the shell is a dozen calls back. It is rendered on its
@@ -297,7 +272,7 @@ func looksLikeBashism(output string) bool {
 
 // subprocessToolResult renders a captured subprocess outcome as a ToolResult. A result from a
 // run that had a working directory (subprocess.SubprocessResult.Dir) opens with the `cwd:` line
-// (cwdLinePrefix); one built with no dir opens with the output itself. A non-zero
+// (domain.CwdLinePrefix); one built with no dir opens with the output itself. A non-zero
 // exit is an error result (so the model sees the command failed) carrying the captured
 // output and exit code; a clean exit is a success result with the output. A failed run whose
 // output carries a bash-ism complaint (looksLikeBashism) says the shell is sh on the line above
@@ -313,7 +288,7 @@ func looksLikeBashism(output string) bool {
 func subprocessToolResult(callID string, res subprocess.SubprocessResult) domain.ToolResult {
 	var b strings.Builder
 	if res.Dir != "" {
-		b.WriteString(cwdLinePrefix + res.Dir + "\n")
+		b.WriteString(domain.CwdLinePrefix + res.Dir + "\n")
 	}
 	if res.TimedOut {
 		b.WriteString("command timed out\n")

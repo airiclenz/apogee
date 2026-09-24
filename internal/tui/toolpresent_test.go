@@ -726,7 +726,7 @@ func TestPresentToolCallFailedSubprocessNamesItsExitCode(t *testing.T) {
 		wantSummary: "error: exit 1",
 		wantBody:    []string{"fail-fast: the line stopped at `[ -f missing ]`"},
 	}, {
-		// The `cwd:` line the tool opens every run's result with (internal/tools, StripCwdLine) is
+		// The `cwd:` line the tool opens every run's result with (domain.StripCwdLine) is
 		// written for the model and comes off the body on the failure route too: the row names the
 		// command, and the exit code is still read off the marker beneath it.
 		name:        "the cwd line comes off a failed run's body",
@@ -839,7 +839,7 @@ func TestPresentToolCallOutcomeSplit(t *testing.T) {
 			wantSummary: "exit 0",
 		},
 		{
-			// The `cwd:` line the tool writes for the model (internal/tools, StripCwdLine) is not
+			// The `cwd:` line the tool writes for the model (domain.StripCwdLine) is not
 			// output the command printed: `true` still reads "(no output)" with it there.
 			name:        "the cwd line is not output: empty output beneath it is still the exit code alone",
 			call:        domain.ToolCall{ID: "4c", Tool: "terminal", Arguments: []byte(`{"command":"true"}`)},

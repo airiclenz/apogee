@@ -9,7 +9,6 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tasklist"
 	"github.com/airiclenz/apogee/internal/title"
-	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // ----------------------------------------------------------------------------
@@ -767,21 +766,21 @@ func exitCodeFailure(content string) (string, string, bool) {
 }
 
 // subprocessFailure is exitCodeFailure for the two one-shot execution tools, whose result opens
-// with the `cwd:` line the tool writes for the model (internal/tools, StripCwdLine). The line
+// with the `cwd:` line the tool writes for the model (domain.StripCwdLine). The line
 // comes off BEFORE the marker is read, the way consoleDetail takes the status line off a Console
 // result: the row already names the command, and a body opening with the directory it ran in
 // would spend its first line on what the card says nowhere else only because the model needs it.
 // This is the FAILURE route (absorbFailure → failure hook → outputBody), which does not pass
 // through the success detail, so the strip has to be applied on both.
 func subprocessFailure(content string) (string, string, bool) {
-	return exitCodeFailure(tools.StripCwdLine(content))
+	return exitCodeFailure(domain.StripCwdLine(content))
 }
 
 // subprocessDetail is outputDetail for the same two tools on the SUCCESS route, with the `cwd:`
 // line taken off first for the reason subprocessFailure gives; the one-line promotion and the
 // "(no output)" reading are then decided on the output the command actually printed.
 func subprocessDetail(content string) toolOutcome {
-	return outputDetail(tools.StripCwdLine(content))
+	return outputDetail(domain.StripCwdLine(content))
 }
 
 // consoleStatusStat words the slot of the three Console calls that report on a live process

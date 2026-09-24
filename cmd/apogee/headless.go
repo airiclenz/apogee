@@ -321,7 +321,7 @@ func (s *narrationSink) remember(call domain.ToolCall) {
 // the engine dispatched, stamped at the commit point), so the line needs nothing from the call that
 // went by. The first line is the first line the COMMAND wrote: a terminal or python_exec result
 // opens with a `cwd:` line the tool writes for the model, and that comes off first
-// (tools.StripCwdLine — the one strip the TUI's card shares) so the narration never reads
+// (domain.StripCwdLine — the one strip the TUI's card shares) so the narration never reads
 // `← terminal error: cwd: /ws`. A result stamped with no tool name — a stub driving the sink with a
 // bare result, or a slot the engine never resolved — is named by its id alone, so the line still
 // says which result it is.
@@ -333,7 +333,7 @@ func (s *narrationSink) resultLine(ev domain.ToolResultEvent) string {
 	if !result.IsError {
 		return "← " + ev.Tool + " ok"
 	}
-	first, _, _ := strings.Cut(tools.StripCwdLine(result.Content), "\n")
+	first, _, _ := strings.Cut(domain.StripCwdLine(result.Content), "\n")
 	if first = narrationLine(first); first == "" {
 		return "← " + ev.Tool + " error"
 	}
