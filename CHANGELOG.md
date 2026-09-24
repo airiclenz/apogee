@@ -8,6 +8,8 @@ point is a **minor** bump, not a breaking change.
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-09-24
+
 ### Added
 
 - **Internal:** every delegation now has an engine-minted run id (`<prefix>.<n>`: 8 random hex characters drawn once per root Agent, then a counter the whole delegation tree shares). `domain.EventBase` gains `RunID`: empty at depth 0, and at depth > 0 the run id of the delegation the emitting agent runs. A delegation's head `ToolCallEvent` and its `ToolResultEvent` carry the same id as `SpawnRunID`, and so do its `SubAgentPhaseEvent`s and `SubAgentNamedEvent`s through their `EventBase.RunID`. Two delegations never share a run id, even when the model or server gave their calls the same id. That collision is how a sub-agent row could be marked done before its own child had finished (apogee-subagent-premature-done). `EventBase.CallID` is unchanged, and its doc no longer claims it is unique. No id sent to a model is rewritten.
