@@ -22,9 +22,9 @@
 //
 //	ADR 0001  embeddable, steppable, no ambient state; snapshot/resume + hygiene
 //	          (forking is the bench's, composed from these primitives — not exposed)
-//	ADR 0002  Tools are an open extension point; the Reaction set is curated
-//	ADR 0003  Reactions are declared where they fire, not a fixed pipeline
-//	ADR 0004  Auto mode requires Confinement, reported as a capability matrix
+//	ADR 0002  Tools are an open extension point (its Mechanism-catalogue half: ADR 0076)
+//	ADR 0076  one Reaction core over Moments, an origin × class matrix (supersedes 0003)
+//	ADR 0012  Auto mode requires Confinement, reported as a capability matrix (supersedes 0004)
 //	ADR 0005  sub-agent privileges are always ≤ the parent's
 //	ADR 0006  Bypass mode — the honest floor beneath the Reaction surface
 //	ADR 0007  Step / Turn / quiescent boundary; cancellation; recover-at-boundary
@@ -58,7 +58,7 @@ import (
 // (ADR 0025). See internal/agent for the contract.
 type Agent = agent.Agent
 
-// New constructs an Agent from cfg, validating the Auto/Confinement gate (ADR 0004)
+// New constructs an Agent from cfg, validating the Auto/Confinement gate (ADR 0012)
 // and the armed Reaction set (ADR 0076) before returning a ready-to-Step Agent.
 //
 // The Agent it returns records undo in memory, for this process only (ADR 0051). A Driver that
@@ -671,7 +671,7 @@ type ToolResultEdit = domain.ToolResultEdit
 // Confinement (internal/domain; backends in internal/platform)
 // ----------------------------------------------------------------------------
 
-// Confiner is the OS-level confinement facility required for Auto mode (ADR 0004).
+// Confiner is the OS-level confinement facility required for Auto mode (ADR 0012).
 // The interface is public (the host injects it via Config); the backends live in
 // internal/platform.
 type Confiner = domain.Confiner

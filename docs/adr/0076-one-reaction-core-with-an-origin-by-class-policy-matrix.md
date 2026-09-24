@@ -232,6 +232,10 @@ Hooks), gate, and advise once decision 5's arm passes.
   are superseded and gain a pointer note. ADR 0073 keeps decisions 1 (term, as amended by decision 12
   above), 3, 6, 8 and 9 and its plugin and Driver-side-feed rejections; decisions 2, 4, 5 and 7 and
   the veto and lint rejections are superseded and gain a pointer note.
+- *Noted 2026-09-24:* decision 1's deletion of the registry, the catalogue and
+  `Config.EnableMechanisms` retires ADR 0003 and ADR 0015 (`superseded by ADR 0076`) and ADR 0002's
+  Mechanism-catalogue half (its open-Tools half stands); ADR 0014, amended by removal in ADR 0071
+  decision 5, reads `superseded by ADR 0071`. Each carries a pointer note under its header.
 - ADR 0031 stands unchanged. ADR 0033 decision 5 and ADR 0034 §8's payload-discarded / payload-
   injected split, and ADR 0061 §4's B1 deferral, are not reopened here: a daemon Firing's or a
   skill's *own* payload still does not enter the model; a user advise reaction is a different

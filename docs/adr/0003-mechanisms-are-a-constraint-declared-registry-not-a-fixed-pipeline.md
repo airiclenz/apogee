@@ -1,8 +1,11 @@
 ---
-Status: accepted
+Status: superseded by ADR 0076
 ---
 
 # Mechanisms are a constraint-declared registry, not a fixed pipeline
+
+> **Superseded by [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (2026-09-07; noted 2026-09-24).** Its decision 1 deletes the Mechanism registry
+> this record designed; the text below is retained as the historical record.
 
 ## Context
 

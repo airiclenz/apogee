@@ -92,7 +92,7 @@ internal/refs/refs_test.go — quoted-path fixture (excluded)
 - `gofmt -l internal/ cmd/` prints nothing; `go vet ./internal/tui/` ; `go vet ./internal/agent/`
 **Commit:** `docs: code and CI comments point at archived plans`
 
-## 3. ADR statuses name what retired them
+## 3. ADR statuses name what retired them — ✅ DONE (2026-09-24)
 
 **What:**
 **Goal:** ADR 0003 and 0015 read `Status: superseded by ADR 0076`; ADR 0014 reads `Status: superseded by ADR 0071`; ADR 0002 reads `Status: accepted; the Mechanism-catalogue half superseded by ADR 0076`; each carries a one-line dated pointer note under its header; ADR 0076's Consequences name all four; the facade index in `apogee.go` cites the ADR that governs Auto-mode confinement, not superseded ADR 0004.

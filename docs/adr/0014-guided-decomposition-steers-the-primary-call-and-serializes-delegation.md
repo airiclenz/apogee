@@ -1,8 +1,11 @@
 ---
-Status: accepted
+Status: superseded by ADR 0071
 ---
 
 # Guided decomposition steers the primary call and serializes delegation through the recursion point
+
+> **Superseded by [ADR 0071](0071-floor-guards-are-engine-behaviour-and-the-nudge-catalogue-retires.md) (2026-09-03; noted 2026-09-24).** Its decision 5 amends this record by removal:
+> `guided_decomposition` retired, so the text below binds nothing shipped and stands as history.
 
 ## Context
 

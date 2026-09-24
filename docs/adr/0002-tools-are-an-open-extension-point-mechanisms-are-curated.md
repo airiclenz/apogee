@@ -1,8 +1,11 @@
 ---
-Status: accepted
+Status: accepted; the Mechanism-catalogue half superseded by ADR 0076
 ---
 
 # Tools are an open extension point; the Mechanism catalogue is curated
+
+> **Superseded in part by [ADR 0076](0076-one-reaction-core-with-an-origin-by-class-policy-matrix.md) (2026-09-07; noted 2026-09-24).** Its decision 1 deletes the Mechanism
+> registry and catalogue, so the curated-catalogue half is history; the open-Tools half stands.
 
 ## Context
 
