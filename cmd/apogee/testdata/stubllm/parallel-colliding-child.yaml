@@ -1,0 +1,41 @@
+# The CHILD half of the colliding-ids server's script (cmd/apogee/e2e_parallel_test.go): two
+# delegates that run beside each other, one of which finishes while the other is held.
+#
+# Alpha answers its task with TWO calls in one reply. The stub numbers them by position — `call_1`,
+# `call_2` — so alpha's second call wears the very id the parent's reply gave beta's head
+# (parallel-colliding-ids.yaml). Its result comes back while beta is still working, and a pane that
+# paired a result by call id alone would close beta's head with it: beta's row would read done
+# although its child has not said a word.
+#
+# Beta is the one held. Its only turn is behind an `await:` gate the test opens, so for as long as
+# the test watches, beta's child CANNOT have reported — any done mark on its row is the collision's
+# and nothing else. Once the gate opens beta reports and both rows are done.
+#
+# It carries no `model:` on purpose: these turns are appended behind parallel-colliding-ids.yaml's
+# and the model the server advertises is that fixture's.
+turns:
+    # Alpha's report. Its reply after the two calls carries the LAST call's result as its last
+    # message, and no parent request ever ends on a grep. Matched before alpha's opening turn, whose
+    # task every one of alpha's requests still carries.
+    - when:
+        tool_result: grep
+      repeat: true
+      text: The first half is surveyed; nothing else to report.
+    # Alpha's opening: two calls in one reply, numbered call_1 and call_2 by the stub.
+    - when:
+        last_message: first half of the colliding survey
+      repeat: true
+      tool_calls:
+        - name: list_dir
+          arguments: '{"path":"."}'
+        - name: grep
+          arguments: '{"pattern":"hello"}'
+    # Beta's report, held until the test releases it.
+    - when:
+        last_message: second half of the colliding survey
+      repeat: true
+      await: beta-report
+      text: The second half is surveyed; nothing else to report.
+    # Anything neither the parent nor a child claims.
+    - repeat: true
+      text: Nothing else to add.

@@ -124,7 +124,11 @@ internal/tui/thinkingpane.go — inThinkingScope; internal/tui/transcriptbridge.
 **Acceptance:** `go test -race -count=1 ./internal/tui/`
 **Commit:** `fix(tui): pair sub-agent results and phases by run id, not call id`
 
-## 4. Driven e2e: a fan-out with colliding child call ids never ticks early
+## 4. Driven e2e: a fan-out with colliding child call ids never ticks early — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): the pane shows the done verdict as the bare word `done` in the outcome slot after the leader (`⋯ done ▶`), never the literal `· done` the Goal names; the test's `delegationRowDone` asserts the ✓ and the leader-adjacent `done` slot word instead.
+NOTES (2026-09-24): `fanOutScript` now takes the parent and child fixture names, and a `twoDelegationsScript` helper keeps the three existing server-switch callers on their original fixtures; `launchParallelSession` takes the script as its second parameter.
+NOTES (2026-09-24): verified the new test fails at a4e3eb07 (items 1–3 reverted) — beta's row reads `beta ✓ … done` while its report is still held — and passes at HEAD.
 
 **What:** Depends on item 3. This is the journey test for cause #1, using the stub's own per-reply `call_<n>` numbering.
 **Regression guard.** Name the test with the `TestE2EParallel` prefix (e.g. `TestE2EParallelCollidingChildCallIDsTickNoRowEarly`) so Acceptance runs it. `launchParallelSession` hard-wires `fanOutScript`, so give it a script parameter.

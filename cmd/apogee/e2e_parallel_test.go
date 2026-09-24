@@ -19,10 +19,15 @@ package main
 // What is asserted is what a human watching would see: the delegation rows in the transcript. Two of
 // them standing at once, neither queued, is a fan-out; one of them standing alone for as long as the
 // test cares to watch is a session running its delegations one at a time.
+//
+// The same session shape also carries the colliding-ids journey: a fan-out whose children number
+// their calls the way the parent numbered its heads, so one child's inner call wears its sibling's
+// head id — and the sibling's row must still read done only once its own child has reported.
 
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +88,7 @@ const serialWatch = 500 * time.Millisecond
 func TestE2EParallelDelegationsFollowAServerSwitch(t *testing.T) {
 	t.Parallel()
 
-	start, fanOut, drv := launchParallelSession(t, parallelPin)
+	start, fanOut, drv := launchParallelSession(t, twoDelegationsScript(t), parallelPin)
 
 	switchToFanOutServer(t, drv, fanOut)
 	submit(drv, fanOutPrompt)
@@ -112,7 +117,7 @@ func TestE2EParallelDelegationsStaySerialWithoutThePin(t *testing.T) {
 	t.Run("unkeyed", func(t *testing.T) {
 		t.Parallel()
 
-		start, fanOut, drv := launchParallelSession(t, parallelNoPin)
+		start, fanOut, drv := launchParallelSession(t, twoDelegationsScript(t), parallelNoPin)
 
 		switchToFanOutServer(t, drv, fanOut)
 		submit(drv, fanOutPrompt)
@@ -139,7 +144,7 @@ func TestE2EParallelDelegationsStaySerialWithoutThePin(t *testing.T) {
 	t.Run("keyed", func(t *testing.T) {
 		t.Parallel()
 
-		start, fanOut, drv := launchParallelSession(t, parallelKeyed, stubllm.WithAPIKey(fanOutKey))
+		start, fanOut, drv := launchParallelSession(t, twoDelegationsScript(t), parallelKeyed, stubllm.WithAPIKey(fanOutKey))
 
 		switchToFanOutServer(t, drv, fanOut)
 		submit(drv, fanOutPrompt)
@@ -152,6 +157,85 @@ func TestE2EParallelDelegationsStaySerialWithoutThePin(t *testing.T) {
 
 		drv.Kill()
 	})
+}
+
+// The colliding-ids run's words: the prompt parallel-colliding-ids.yaml answers with its two
+// delegations, the task text only the held child's requests carry, the gate that holds that child's
+// report, and the two marks a delegation row wears once its child has reported.
+const (
+	collidingPrompt     = "Fan out two colliding delegations."
+	collidingSecondTask = "second half of the colliding survey"
+	collidingGate       = "beta-report"
+
+	// doneMark and doneVerdict are what a FINISHED delegation's row says — the ✓ beside its name, and
+	// the verdict word its outcome slot carries when it quotes no report (internal/tui's
+	// delegationDoneVerdict). They are restated here for scheduledWord's reason: they are what the
+	// screen promises a human.
+	doneMark    = "✓"
+	doneVerdict = "done"
+
+	// leaderDot is the glyph of the leader a row runs from its target to its outcome slot, which is
+	// how the verdict word is told from the same word inside a quoted report.
+	leaderDot = "⋯"
+)
+
+// TestE2EParallelCollidingChildCallIDsTickNoRowEarly is the journey for a fan-out whose call ids
+// collide across the delegation tree. The parent's reply numbers its two heads call_1 and call_2;
+// alpha's child answers with two calls of its own, numbered the same way, so its second call wears
+// beta's head's id. Alpha finishes while beta's child is held behind an `await:` gate — and for as
+// long as that gate is shut, beta's child cannot have reported, so beta's row must show no ✓ and no
+// done verdict. A pane that paired a result by call id alone would close beta's head with alpha's
+// inner result and tick beta early; runs told apart by the engine's run id cannot.
+func TestE2EParallelCollidingChildCallIDsTickNoRowEarly(t *testing.T) {
+	t.Parallel()
+
+	_, fanOut, drv := launchParallelSession(t,
+		fanOutScript(t, "parallel-colliding-ids", "parallel-colliding-child"), parallelPin)
+
+	switchToFanOutServer(t, drv, fanOut)
+	submit(drv, collidingPrompt)
+
+	// Beta's child is on the wire and held, and alpha's has reported — so alpha's colliding call_2
+	// has already come back by the time the watch below begins.
+	drv.WaitFor(func() bool { return childRequests(fanOut, collidingSecondTask) >= 1 },
+		tuitest.Awaiting("the second delegate to be asking the server, its report held"))
+	awaitPane(t, drv, "the first delegation's row reading done", func(f tuitest.Frame) bool {
+		return delegationRowDone(f, firstDelegate)
+	})
+
+	paneNeverShows(t, drv, "the held delegation's row reading done before its report", func(f tuitest.Frame) bool {
+		return delegationRowDone(f, secondDelegate)
+	})
+
+	// The watch is serialWatch long, well inside stubllm's ten-second await limit, so the release
+	// reaches a request that is still held rather than one the stub has already failed.
+	fanOut.Release(collidingGate)
+
+	awaitPane(t, drv, "both delegation rows reading done", func(f tuitest.Frame) bool {
+		return delegationRowDone(f, firstDelegate) && delegationRowDone(f, secondDelegate)
+	})
+
+	drv.Kill()
+}
+
+// delegationRowDone reports whether a row carrying the delegation's name wears either mark of a
+// finished run — the ✓, or the done verdict standing in the outcome slot straight after the leader.
+func delegationRowDone(f tuitest.Frame, name string) bool {
+	for _, row := range f.Rows() {
+		if !strings.Contains(row, name) {
+			continue
+		}
+		if strings.Contains(row, doneMark) {
+			return true
+		}
+		fields := strings.Fields(row)
+		for i := 1; i < len(fields); i++ {
+			if fields[i] == doneVerdict && strings.Trim(fields[i-1], leaderDot) == "" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // awaitBothDelegatesRunning waits for the two delegations to be running at once, on the wire and on
@@ -173,8 +257,8 @@ func awaitBothDelegatesRunning(t *testing.T, drv *tuitest.Driver, fanOut *stubll
 }
 
 // launchParallelSession starts a driven run on the START server, with the fan-out server configured
-// beside it — built with fanOutOpts, so an arm can gate it on a key — and entryLines appended to its
-// entry. It returns once the session is up and idle.
+// beside it — playing script, built with fanOutOpts so an arm can gate it on a key — and entryLines
+// appended to its entry. It returns once the session is up and idle.
 //
 // The start server's script is one turn it is never asked to play: the first prompt is typed AFTER
 // the switch, so every request in these runs — the session title, the fan-out reply and both
@@ -182,6 +266,7 @@ func awaitBothDelegatesRunning(t *testing.T, drv *tuitest.Driver, fanOut *stubll
 // answered nothing.
 func launchParallelSession(
 	t *testing.T,
+	script stubllm.Script,
 	entryLines string,
 	fanOutOpts ...stubllm.Option,
 ) (start, fanOut *stubllm.Server, drv *tuitest.Driver) {
@@ -191,7 +276,7 @@ func launchParallelSession(
 		Model: "start-model",
 		Turns: []stubllm.Turn{{Repeat: true, Text: "The session should not be asking me anything."}},
 	})
-	fanOut = stubllm.New(t, fanOutScript(t), fanOutOpts...)
+	fanOut = stubllm.New(t, script, fanOutOpts...)
 
 	drv = tuitest.NewDriver(t, parallelSize)
 	launchTUIOn(t, drv, start, parallelHome(t, start, fanOut, entryLines), "")
@@ -200,18 +285,26 @@ func launchParallelSession(
 	return start, fanOut, drv
 }
 
-// fanOutScript is the script the fan-out server plays: parallel-two-delegations.yaml's turns first,
-// parallel-child.yaml's behind them.
+// twoDelegationsScript is the script the server-switch runs' fan-out server plays:
+// parallel-two-delegations.yaml's parent behind parallel-child.yaml's hanging children.
+func twoDelegationsScript(t *testing.T) stubllm.Script {
+	t.Helper()
+
+	return fanOutScript(t, "parallel-two-delegations", "parallel-child")
+}
+
+// fanOutScript is a script for the fan-out server: the parent fixture's turns first, the child
+// fixture's behind them.
 //
 // Two fixtures rather than one because they are two conversations that happen to share an upstream —
 // a parent asking for delegates, and the delegates themselves — and the ORDER is why they are joined
 // here rather than by hand: a turn is offered the requests in file order, so the parent's turns have
 // to stand in front of the child's catch-all or a parent request would be answered as a child's.
-func fanOutScript(t *testing.T) stubllm.Script {
+func fanOutScript(t *testing.T, parentFixture, childFixture string) stubllm.Script {
 	t.Helper()
 
-	script := loadScript(t, "parallel-two-delegations")
-	script.Turns = append(script.Turns, loadScript(t, "parallel-child").Turns...)
+	script := loadScript(t, parentFixture)
+	script.Turns = append(script.Turns, loadScript(t, childFixture).Turns...)
 	return script
 }
 

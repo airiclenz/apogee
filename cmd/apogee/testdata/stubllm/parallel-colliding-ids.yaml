@@ -1,0 +1,35 @@
+# The PARENT half of the colliding-ids server's script (cmd/apogee/e2e_parallel_test.go): one reply
+# that asks for TWO delegations at once, exactly as parallel-two-delegations.yaml does — but whose
+# children, in parallel-colliding-child.yaml, are scripted so that one child's inner call wears the
+# same id as the other child's head.
+#
+# The ids are the stub's own. Neither call names one, so the stub numbers them by their place in the
+# reply — `call_1` for alpha's head, `call_2` for beta's — the per-reply counter some local servers
+# and chat templates really do send. Nothing in the fixture spells an id out, because the collision
+# under test is the one a real server produces without anybody inventing it.
+#
+# The child turns live in parallel-colliding-child.yaml and are appended behind these at load: a
+# parent request must be offered the turns below FIRST, or a child's catch-all would answer it.
+model: colliding-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Two colliding delegations
+    # The parent's wrap-up once the delegations have reported — both of them, since a fan-out's
+    # results return together. Matched before the fan-out turn so a parent request can never be
+    # answered as anything else.
+    - when:
+        tool_result: sub_agent
+      repeat: true
+      text: Both delegates reported.
+    # The fan-out itself: alpha's head is call_1, beta's is call_2.
+    - when:
+        last_message: ^Fan out two colliding delegations
+      repeat: true
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Take the first half of the colliding survey","name":"alpha"}'
+        - name: sub_agent
+          arguments: '{"task":"Take the second half of the colliding survey","name":"beta"}'
