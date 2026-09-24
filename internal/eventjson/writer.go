@@ -131,12 +131,19 @@ func (w *Writer) RunFinished(frame RunFinished) {
 }
 
 // envelope is the line itself. Field order IS the key order of the contract
-// (`event, v, seq, time, session, turn, depth, call_id, data`), because encoding/json marshals a
-// struct in declaration order — so this declaration is the thing a consumer's fixture pins.
+// (`event, v, seq, time, session, turn, depth, call_id, run_id, data`), because encoding/json
+// marshals a struct in declaration order — so this declaration is the thing a consumer's fixture
+// pins.
 //
-// The three pointers are how "always present, null where there is no value" is spelled: a frame
-// belongs to no Turn and no agent, and an Event emitted at Depth 0 was spawned by no call. A
-// consumer therefore tests for a null value and never for a missing key.
+// The pointers are how "always present, null where there is no value" is spelled: a frame belongs
+// to no Turn and no agent, and an Event emitted at Depth 0 was spawned by no call and runs in no
+// delegation. A consumer therefore tests for a null value and never for a missing key.
+//
+// RunID joined the envelope additively (ADR 0075 decision 10), right after the call_id it
+// disambiguates: call_id names the call that spawned the emitting agent, and a model or server can
+// repeat a call id across a fan-out, so run_id — the engine-minted id of the delegation the agent
+// runs (domain.EventBase.RunID) — is what tells two delegations apart. It is null at Depth 0 and on
+// frames, and null too on a delegated event recorded without one.
 type envelope struct {
 	Event   string  `json:"event"`
 	V       int     `json:"v"`
@@ -146,12 +153,13 @@ type envelope struct {
 	Turn    *int    `json:"turn"`
 	Depth   *int    `json:"depth"`
 	CallID  *string `json:"call_id"`
+	RunID   *string `json:"run_id"`
 	Data    any     `json:"data"`
 }
 
 // writeLine stamps one envelope and writes it, flushing so a reader tailing the pipe sees the line
-// the moment the moment happened. base is nil for the two frames, which carry turn, depth and
-// call_id as null.
+// the moment the moment happened. base is nil for the two frames, which carry turn, depth, call_id
+// and run_id as null.
 func (w *Writer) writeLine(kind string, base *domain.EventBase, data any) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -172,6 +180,10 @@ func (w *Writer) writeLine(kind string, base *domain.EventBase, data any) {
 		if base.CallID != "" {
 			callID := base.CallID
 			env.CallID = &callID
+		}
+		if base.RunID != "" {
+			runID := base.RunID
+			env.RunID = &runID
 		}
 	}
 

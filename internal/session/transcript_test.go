@@ -203,6 +203,69 @@ func TestDecodeTranscriptReadsAnUndatedRecordAsZero(t *testing.T) {
 	}
 }
 
+// TestTranscriptRoundTripsTheRunIDs is the golden for the two run-id members: a delegation's head
+// carries the run it spawned as spawnRunID, the entries that run folded carry it as runID beside the
+// spawnCallID they always had, and both come back exactly. The two siblings share a call id on
+// purpose — that collision is what the members exist to survive.
+func TestTranscriptRoundTripsTheRunIDs(t *testing.T) {
+	t.Parallel()
+	entries := []Entry{
+		{Kind: EntryKindToolCall, CallID: "call_0", SpawnRunID: "0badc0de.1", Done: true,
+			Tool: &ToolView{Name: "sub_agent"}},
+		{Kind: EntryKindToolCall, CallID: "call_0", SpawnRunID: "0badc0de.2", Done: true,
+			Tool: &ToolView{Name: "sub_agent"}},
+		{Kind: EntryKindAssistant, Text: "first", Depth: 1, SpawnCallID: "call_0", RunID: "0badc0de.1"},
+		{Kind: EntryKindAssistant, Text: "second", Depth: 1, SpawnCallID: "call_0", RunID: "0badc0de.2"},
+	}
+
+	data, err := EncodeTranscript(entries)
+	if err != nil {
+		t.Fatalf("EncodeTranscript: %v", err)
+	}
+	const golden = `{"version":1,"entries":[` +
+		`{"kind":"toolCall","callID":"call_0","spawnRunID":"0badc0de.1","done":true,"tool":{"name":"sub_agent","summary":{}}},` +
+		`{"kind":"toolCall","callID":"call_0","spawnRunID":"0badc0de.2","done":true,"tool":{"name":"sub_agent","summary":{}}},` +
+		`{"kind":"assistant","text":"first","depth":1,"spawnCallID":"call_0","runID":"0badc0de.1"},` +
+		`{"kind":"assistant","text":"second","depth":1,"spawnCallID":"call_0","runID":"0badc0de.2"}` +
+		`]}`
+	if string(data) != golden {
+		t.Fatalf("golden wire shape mismatch:\n got = %s\nwant = %s", data, golden)
+	}
+
+	got, err := DecodeTranscript(data)
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if !reflect.DeepEqual(got, entries) {
+		t.Errorf("the run ids did not survive the trip:\n got = %#v\nwant = %#v", got, entries)
+	}
+}
+
+// TestDecodeTranscriptReadsARecordWithoutRunIDsAsEmpty pins the tolerant half: a delegated entry
+// written before the run-id members existed still loads, with both members empty and the
+// spawnCallID it was written with intact — the (depth, spawn call id) a reader falls back to.
+func TestDecodeTranscriptReadsARecordWithoutRunIDsAsEmpty(t *testing.T) {
+	t.Parallel()
+	got, err := DecodeTranscript([]byte(`{"version":1,"entries":[` +
+		`{"kind":"toolCall","callID":"s1","done":true,"tool":{"name":"sub_agent","summary":{"text":"ok"}}},` +
+		`{"kind":"assistant","text":"on it","depth":1,"spawnCallID":"s1"}]}`))
+	if err != nil {
+		t.Fatalf("DecodeTranscript: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("decoded %d entries, want 2", len(got))
+	}
+	for i, e := range got {
+		if e.RunID != "" || e.SpawnRunID != "" {
+			t.Errorf("entry %d decoded with runID %q / spawnRunID %q; want both empty", i, e.RunID, e.SpawnRunID)
+		}
+	}
+	if got[1].Depth != 1 || got[1].SpawnCallID != "s1" {
+		t.Errorf("the legacy delegated entry lost its fallback key: depth %d, spawnCallID %q",
+			got[1].Depth, got[1].SpawnCallID)
+	}
+}
+
 // TestTranscriptEncodesAnEmptyScrollbackAsAnEmptyList pins the one byte-level case a nil slice would
 // quietly change: an empty transcript has always written "entries":[], and a codec that wrote null
 // instead would be a new wire shape for the commonest record of all.

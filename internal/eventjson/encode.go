@@ -66,8 +66,8 @@ func Kinds() []string {
 }
 
 // Encode maps one domain.Event to the three things a line is built from: its kind, the EventBase
-// the envelope's turn/depth/call_id are stamped from, and the value that marshals to the line's
-// `data` object.
+// the envelope's turn/depth/call_id/run_id are stamped from, and the value that marshals to the
+// line's `data` object.
 //
 // ok is false for the one SINK-ONLY variant — domain.WireEvent — and for a nil or unrecognised
 // event. The Inspector's raw provider protocol is excluded by ADR 0075 decision 2: putting a wire
@@ -97,12 +97,14 @@ func Encode(ev domain.Event) (kind string, base domain.EventBase, data any, ok b
 		return kindToolCall, e.EventBase, toolCallData{
 			Call:         toolCallOf(e.Call),
 			ResolvedPath: e.ResolvedPath,
+			SpawnRunID:   e.SpawnRunID,
 		}, true
 	case domain.ToolResultEvent:
 		return kindToolResult, e.EventBase, toolResultData{
 			Result:      toolResultOf(e.Result),
 			Tool:        e.Tool,
 			WriteTarget: e.WriteTarget,
+			SpawnRunID:  e.SpawnRunID,
 		}, true
 	case domain.SubAgentPhaseEvent:
 		return kindSubAgentPhase, e.EventBase, subAgentPhaseData{
@@ -216,19 +218,26 @@ type messageData struct {
 }
 
 // toolCallData is the tool_call line: the requested call, and where its path argument really
-// points when that differs from what the argument names.
+// points when that differs from what the argument names. SpawnRunID is the run id of the
+// delegation a sub_agent call spawns — the run_id every line that delegation emits carries in its
+// envelope — and "" for a call that spawns none. It joined the line additively (ADR 0075
+// decision 10), so it sits last.
 type toolCallData struct {
 	Call         toolCall `json:"call"`
 	ResolvedPath string   `json:"resolved_path"`
+	SpawnRunID   string   `json:"spawn_run_id"`
 }
 
 // toolResultData is the tool_result line: one tool's outcome after execution, the tool it ran
-// under, and the path it wrote — "" when the call wrote none. The two trailing members joined the
-// line additively (ADR 0075 decision 10), so they sit after the result rather than before it.
+// under, the path it wrote — "" when the call wrote none — and, for a delegation's result, the
+// run id of the delegation it answers, the same spawn_run_id its tool_call line carried ("" for
+// any other result). The three trailing members joined the line additively (ADR 0075 decision
+// 10), so they sit after the result rather than before it.
 type toolResultData struct {
 	Result      toolResult `json:"result"`
 	Tool        string     `json:"tool"`
 	WriteTarget string     `json:"write_target"`
+	SpawnRunID  string     `json:"spawn_run_id"`
 }
 
 // subAgentPhaseData is the sub_agent_phase line: one delegation crossing a lifecycle boundary.

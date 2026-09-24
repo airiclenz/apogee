@@ -65,7 +65,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "tool_call",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"call":{"id":"call-1","tool":"write_file",` +
-				`"arguments":{"path":"docs/notes.md"}},"resolved_path":"/elsewhere/notes.md"}`,
+				`"arguments":{"path":"docs/notes.md"}},"resolved_path":"/elsewhere/notes.md","spawn_run_id":""}`,
 		},
 		{
 			name: "tool_call with empty arguments",
@@ -75,7 +75,19 @@ func TestEncodeJSONGolden(t *testing.T) {
 			},
 			wantKind: "tool_call",
 			wantBase: domain.EventBase{Turn: 2},
-			wantData: `{"call":{"id":"call-2","tool":"git_status","arguments":null},"resolved_path":""}`,
+			wantData: `{"call":{"id":"call-2","tool":"git_status","arguments":null},"resolved_path":"","spawn_run_id":""}`,
+		},
+		{
+			name: "tool_call of a delegation names the run it spawns",
+			event: domain.ToolCallEvent{
+				EventBase:  domain.EventBase{Turn: 2, Depth: 1, CallID: "call-0", RunID: "0badc0de.1"},
+				Call:       domain.ToolCall{ID: "call-5", Tool: "sub_agent"},
+				SpawnRunID: "0badc0de.2",
+			},
+			wantKind: "tool_call",
+			wantBase: domain.EventBase{Turn: 2, Depth: 1, CallID: "call-0", RunID: "0badc0de.1"},
+			wantData: `{"call":{"id":"call-5","tool":"sub_agent","arguments":null},"resolved_path":"",` +
+				`"spawn_run_id":"0badc0de.2"}`,
 		},
 		{
 			name: "tool_result drops the summary",
@@ -92,7 +104,7 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"result":{"call_id":"call-3","content":"4 matches","is_error":false},` +
-				`"tool":"grep","write_target":""}`,
+				`"tool":"grep","write_target":"","spawn_run_id":""}`,
 		},
 		{
 			name: "tool_result of a write names its target",
@@ -105,7 +117,20 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantKind: "tool_result",
 			wantBase: domain.EventBase{Turn: 2},
 			wantData: `{"result":{"call_id":"call-4","content":"wrote docs/notes.md","is_error":false},` +
-				`"tool":"write_file","write_target":"/work/docs/notes.md"}`,
+				`"tool":"write_file","write_target":"/work/docs/notes.md","spawn_run_id":""}`,
+		},
+		{
+			name: "tool_result of a delegation names the run it answers",
+			event: domain.ToolResultEvent{
+				EventBase:  domain.EventBase{Turn: 2},
+				Result:     domain.ToolResult{CallID: "call-5", Content: "report"},
+				Tool:       "sub_agent",
+				SpawnRunID: "0badc0de.2",
+			},
+			wantKind: "tool_result",
+			wantBase: domain.EventBase{Turn: 2},
+			wantData: `{"result":{"call_id":"call-5","content":"report","is_error":false},` +
+				`"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.2"}`,
 		},
 		{
 			name: "sub_agent_phase started",

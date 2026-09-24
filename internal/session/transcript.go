@@ -110,12 +110,25 @@ type Entry struct {
 	Text   string    `json:"text,omitempty"`
 	Depth  int       `json:"depth,omitempty"`
 	CallID string    `json:"callID,omitempty"`
-	// SpawnCallID is the run identity of a delegated entry: the id of the sub_agent call that
-	// spawned the agent whose event it folded from. A top-level entry writes nothing, and a blob
-	// written before it existed decodes to "" for every entry — the one run a serialized session
-	// ever had, which is how such a record was written and how it still reads.
+	// SpawnCallID is the id of the sub_agent call that spawned the agent whose event a delegated
+	// entry folded from. A top-level entry writes nothing, and a blob written before it existed
+	// decodes to "" for every entry — the one run a serialized session ever had, which is how such
+	// a record was written and how it still reads. A call id is the model's or server's and can
+	// repeat across a fan-out, so it identifies a run only together with Depth, and only where
+	// RunID is "" — a record written before RunID existed.
 	SpawnCallID string `json:"spawnCallID,omitempty"`
-	Done        bool   `json:"done,omitempty"`
+	// RunID is the run identity of a delegated entry: the engine-minted run id of the delegation
+	// whose agent emitted the event the entry folded from (domain.EventBase.RunID). Unlike
+	// SpawnCallID it is distinct for every delegation, however its call id repeats. A top-level
+	// entry writes nothing, and so does a record written before it existed — its reader falls back
+	// to (Depth, SpawnCallID).
+	RunID string `json:"runID,omitempty"`
+	// SpawnRunID is, on the call and result entries of a sub_agent delegation, the run id of the
+	// delegation that call spawned — the RunID every entry the delegation itself folded carries —
+	// so a reader pairs a delegation's head, its entries and its result by it. Empty for any other
+	// entry and for a record written before it existed.
+	SpawnRunID string `json:"spawnRunID,omitempty"`
+	Done       bool   `json:"done,omitempty"`
 	// Aborted marks a prompt entry whose Exchange the engine SCRAPPED before it completed — the
 	// human stopped it, or the loop faulted, while it held no finished Turn — so the engine holds
 	// no Exchange for it (the settle fell back to rolling the conversation back to the boundary the
@@ -356,9 +369,9 @@ func UserMessageCount(entries []Entry) int {
 // so nothing that reaches a frame is left to a Driver to remember. Stripping is idempotent, so a
 // Driver keeping its own pass loses nothing by running it again.
 //
-// Ids are not stripped: CallID and SpawnCallID are match keys, never rendered. Name is stripped
-// even though it is a lookup key rather than display text, because a smuggled escape in it would
-// reach the raw-fallback label a card falls back to when it has no friendly one.
+// Ids are not stripped: CallID, SpawnCallID, RunID and SpawnRunID are match keys, never rendered.
+// Name is stripped even though it is a lookup key rather than display text, because a smuggled
+// escape in it would reach the raw-fallback label a card falls back to when it has no friendly one.
 func stripEntry(e *Entry) {
 	e.Text = sanitize.StripEscapes(e.Text)
 	e.CtxModel = sanitize.StripEscapes(e.CtxModel)

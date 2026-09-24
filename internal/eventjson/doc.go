@@ -2,9 +2,13 @@
 // JSON `apogee headless --format json` writes to stdout (ADR 0075).
 //
 // The contract is ADR 0075 and nothing else: a line is
-// `{"event","v","seq","time","session","turn","depth","call_id","data"}` in that key order, every
-// member always present and null where the line has no value, with the emitting variant's own
-// members nested under `data` rather than flattened into the envelope. The kinds are snake_case
+// `{"event","v","seq","time","session","turn","depth","call_id","run_id","data"}` in that key order,
+// every member always present and null where the line has no value, with the emitting variant's
+// own members nested under `data` rather than flattened into the envelope. `run_id` is the
+// engine-minted id of the delegation the emitting agent runs — null at depth 0 — and is what tells
+// two delegations apart where the model or server repeated a call id; a delegation's tool_call and
+// tool_result carry the same id as `data.spawn_run_id`. Both joined within the current `v`,
+// additively (ADR 0075 decision 10). The kinds are snake_case
 // (`tool_call`, `sub_agent_phase`) and are deliberately a DIFFERENT vocabulary from a notice
 // Moment's kebab-case: `turn-finished` is a Depth-0 moment, `turn` is every depth, and spelling
 // them apart is what stops a reader assuming the two streams are one.

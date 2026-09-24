@@ -105,3 +105,44 @@ func TestTranscriptFoldAttributesAChildsPrune(t *testing.T) {
 			entries[0].Depth, entries[0].SpawnCallID)
 	}
 }
+
+// TestTranscriptFoldRecordsDelegationRunIDs pins the run-id half of the attribution: a
+// delegation's call and result carry the run it spawned, and the entries that run folded carry it
+// as their own — so two siblings whose call ids collide still land as two runs in the record.
+func TestTranscriptFoldRecordsDelegationRunIDs(t *testing.T) {
+	t.Parallel()
+
+	f := newTranscriptFold("")
+
+	f.fold(domain.ToolCallEvent{Call: domain.ToolCall{ID: "call_0", Tool: "sub_agent"}, SpawnRunID: "0badc0de.1"})
+	f.fold(domain.ToolCallEvent{Call: domain.ToolCall{ID: "call_0", Tool: "sub_agent"}, SpawnRunID: "0badc0de.2"})
+	f.fold(domain.MessageEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: "call_0", RunID: "0badc0de.2"},
+		Text:      "second's report",
+	})
+	f.fold(domain.ToolResultEvent{
+		Result:     domain.ToolResult{CallID: "call_0", Content: "second's report"},
+		Tool:       "sub_agent",
+		SpawnRunID: "0badc0de.2",
+	})
+
+	entries := f.entries
+	if len(entries) != 4 {
+		t.Fatalf("the fold wrote %d entries, want two heads, a message and a result: %+v", len(entries), entries)
+	}
+	want := []struct{ runID, spawnRunID string }{
+		{"", "0badc0de.1"},
+		{"", "0badc0de.2"},
+		{"0badc0de.2", ""},
+		{"", "0badc0de.2"},
+	}
+	for i, w := range want {
+		if entries[i].RunID != w.runID || entries[i].SpawnRunID != w.spawnRunID {
+			t.Errorf("entry %d (%s) runID %q / spawnRunID %q; want %q / %q", i, entries[i].Kind,
+				entries[i].RunID, entries[i].SpawnRunID, w.runID, w.spawnRunID)
+		}
+	}
+	if entries[2].SpawnCallID != "call_0" {
+		t.Errorf("the child's message lost its fallback spawnCallID: %q", entries[2].SpawnCallID)
+	}
+}

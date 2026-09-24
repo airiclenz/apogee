@@ -65,7 +65,13 @@ internal/agent/subagent.go — newChildAgentOn, startDelegationNaming; internal/
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/ ./internal/domain/`
 **Commit:** `fix(agent): mint a unique run id per delegation and stamp it on its events`
 
-## 2. Run ids reach the JSON event stream and the session record
+## 2. Run ids reach the JSON event stream and the session record — ✅ DONE (2026-09-24)
+
+NOTES (2026-09-24): re-derived from the assumption that the event lines are at `v:1`: the tree is at `v:2` (lineVersion 2), so `run_id` and `spawn_run_id` are additive within `v:2` and the version is not bumped. The envelope is written in writer.go, as the item's own guard says, not encode.go. encode.go only gains the `spawn_run_id` data members.
+NOTES (2026-09-24): `spawn_run_id` is always present under `data` on every tool_call/tool_result line: `""` when the call spawns no delegation. This follows the package's no-omitempty rule (ADR 0075 decision 3). It sits last in each data object (additive, decision 10).
+NOTES (2026-09-24): on session entries, `runID` is the emitting agent's EventBase.RunID (every delegated entry). `spawnRunID` is set only on the toolCall/toolResult entries of a delegation (ToolCallEvent/ToolResultEvent.SpawnRunID).
+NOTES (2026-09-24): added TestTranscriptFoldRecordsDelegationRunIDs to internal/run/transcript_test.go, which the plan's Files list does not name. It pins the goal's "internal/run's transcript builder fills them". The spawnOf comment in internal/run/transcript.go no longer calls the call id the run identity.
+NOTES (2026-09-24): docs/manual/headless.md still shows the old envelope key set. Item 8 owns that file and the ADR 0075 amendment, so it is left untouched here.
 
 **What:** Depends on item 1.
 **Regression guard.** `run_id` is a new ENVELOPE member of every Event line: always present, null at depth 0 and on frames, per ADR 0075 §3's always-present rule. `spawn_run_id` goes under `data` on a delegation's tool_call/tool_result. Both are additive within `v:1` (ADR 0075 §10), and the version is not bumped. item 2 fills session.Entry run ids in internal/run only; the TUI's own session writer is owned by item 3.

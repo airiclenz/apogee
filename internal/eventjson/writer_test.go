@@ -71,10 +71,15 @@ func TestEventLinesVersionIsTwo(t *testing.T) {
 	}
 }
 
-// TestWriterEnvelopeOrderAndNulls pins whole lines, byte for byte: the nine envelope members in
+// TestWriterEnvelopeOrderAndNulls pins whole lines, byte for byte: the ten envelope members in
 // their contract order, the numbers a line carries for an Event, and the nulls a frame carries in
 // their place. It also pins both frame objects, which are this package's own contract and have no
 // domain type behind them to derive from.
+//
+// run_id sits right after call_id and is null at depth 0 and on a frame; a delegated line carries
+// the delegation's run id, and a delegation's own tool_call and tool_result carry the same id under
+// `data.spawn_run_id` — which is what a reader pairs a delegation's head, its lines and its result
+// by when the call ids repeat.
 func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 	t.Parallel()
 
@@ -82,7 +87,18 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 	w := New(&out, Options{Session: "sess-1", Now: fixedClock})
 
 	w.Emit(domain.TokenEvent{EventBase: domain.EventBase{Turn: 3}, Text: "hel"})
-	w.Emit(domain.TokenEvent{EventBase: domain.EventBase{Turn: 4, Depth: 1, CallID: "call-9"}, Text: "lo"})
+	w.Emit(domain.TokenEvent{EventBase: domain.EventBase{Turn: 4, Depth: 1, CallID: "call-9", RunID: "0badc0de.1"}, Text: "lo"})
+	w.Emit(domain.ToolCallEvent{
+		EventBase:  domain.EventBase{Turn: 3},
+		Call:       domain.ToolCall{ID: "call-9", Tool: "sub_agent"},
+		SpawnRunID: "0badc0de.1",
+	})
+	w.Emit(domain.ToolResultEvent{
+		EventBase:  domain.EventBase{Turn: 3},
+		Result:     domain.ToolResult{CallID: "call-9", Content: "report"},
+		Tool:       "sub_agent",
+		SpawnRunID: "0badc0de.1",
+	})
 	w.RunStarted(RunStarted{
 		Session:   "sess-1",
 		Workspace: "/w",
@@ -95,11 +111,15 @@ func TestWriterEnvelopeOrderAndNulls(t *testing.T) {
 	w.RunFinished(RunFinished{ExitCode: 0, Turns: 2, Saved: true, FinalText: "done"})
 
 	want := []string{
-		`{"event":"token","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"data":{"text":"hel"}}`,
-		`{"event":"token","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":4,"depth":1,"call_id":"call-9","data":{"text":"lo"}}`,
-		`{"event":"run_started","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,` +
+		`{"event":"token","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,"data":{"text":"hel"}}`,
+		`{"event":"token","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":4,"depth":1,"call_id":"call-9","run_id":"0badc0de.1","data":{"text":"lo"}}`,
+		`{"event":"tool_call","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,` +
+			`"data":{"call":{"id":"call-9","tool":"sub_agent","arguments":null},"resolved_path":"","spawn_run_id":"0badc0de.1"}}`,
+		`{"event":"tool_result","v":2,"seq":4,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,` +
+			`"data":{"result":{"call_id":"call-9","content":"report","is_error":false},"tool":"sub_agent","write_target":"","spawn_run_id":"0badc0de.1"}}`,
+		`{"event":"run_started","v":2,"seq":5,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,"run_id":null,` +
 			`"data":{"session":"sess-1","workspace":"/w","model":"gpt-oss-20b","server":"http://host.internal:1111","mode":"auto","bypass":false,"confined":true,"version":"0.20.9"}}`,
-		`{"event":"run_finished","v":2,"seq":4,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,` +
+		`{"event":"run_finished","v":2,"seq":6,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":null,"depth":null,"call_id":null,"run_id":null,` +
 			`"data":{"exit_code":0,"turns":2,"denied":0,"faulted":false,"fault":"","error":null,"title":"","final_text":"done","wrote":null,` +
 			`"context_files":{"files":null,"standing_tokens":0,"system_share":0},` +
 			`"context_cost":{"rows":null,"bytes":0,"tokens":0,"calibrated":false},"undo_note":"","saved":true,` +
@@ -241,10 +261,10 @@ func TestWriterEmitsSeamClosedWhenSeamsIsSet(t *testing.T) {
 	sink.Emit(domain.SeamClosedEvent{EventBase: domain.EventBase{Turn: 3}, Seam: domain.MomentPreToolExec})
 
 	want := []string{
-		`{"event":"token","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"data":{"text":"a"}}`,
-		`{"event":"seam_closed","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":1,"call_id":"call-9",` +
+		`{"event":"token","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,"data":{"text":"a"}}`,
+		`{"event":"seam_closed","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":1,"call_id":"call-9","run_id":null,` +
 			`"data":{"seam":"post-response-finished","fired":["tool-call-repair"]}}`,
-		`{"event":"seam_closed","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,` +
+		`{"event":"seam_closed","v":2,"seq":3,"time":"2026-09-07T12:00:00Z","session":"sess-1","turn":3,"depth":0,"call_id":null,"run_id":null,` +
 			`"data":{"seam":"pre-tool-exec-finished","fired":[]}}`,
 	}
 
@@ -341,7 +361,7 @@ func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
 				Call:      domain.ToolCall{ID: "call-1", Tool: "read_file", Arguments: malformed},
 			},
 			want: `{"event":"tool_call","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
-				`"turn":1,"depth":2,"call_id":"call-1","data":null}`,
+				`"turn":1,"depth":2,"call_id":"call-1","run_id":null,"data":null}`,
 		},
 		{
 			name: "approval",
@@ -351,7 +371,7 @@ func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
 				Request:   domain.ApprovalRequest{Tool: "terminal", Arguments: malformed},
 			},
 			want: `{"event":"approval","v":2,"seq":1,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
-				`"turn":5,"depth":0,"call_id":null,"data":null}`,
+				`"turn":5,"depth":0,"call_id":null,"run_id":null,"data":null}`,
 		},
 	}
 
@@ -380,7 +400,7 @@ func TestWriterMalformedDataFallsBackToNullData(t *testing.T) {
 				t.Errorf("line 1:\n got %s\nwant %s", got[0], tt.want)
 			}
 			wantNext := `{"event":"token","v":2,"seq":2,"time":"2026-09-07T12:00:00Z","session":"sess-3",` +
-				`"turn":6,"depth":0,"call_id":null,"data":{"text":"next"}}`
+				`"turn":6,"depth":0,"call_id":null,"run_id":null,"data":{"text":"next"}}`
 			if got[1] != wantNext {
 				t.Errorf("line 2:\n got %s\nwant %s", got[1], wantNext)
 			}

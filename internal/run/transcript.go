@@ -122,6 +122,7 @@ func (f *transcriptFold) appendText(kind, text string, base domain.EventBase) {
 		Text:        text,
 		Depth:       base.Depth,
 		SpawnCallID: spawnOf(base),
+		RunID:       base.RunID,
 	})
 }
 
@@ -139,6 +140,8 @@ func (f *transcriptFold) appendToolCall(ev domain.ToolCallEvent) {
 		Depth:       ev.Depth,
 		CallID:      ev.Call.ID,
 		SpawnCallID: spawnOf(ev.EventBase),
+		RunID:       ev.RunID,
+		SpawnRunID:  ev.SpawnRunID,
 		Tool: &session.ToolView{
 			Name: ev.Call.Tool,
 			Args: boundArgs(ev.Call.Arguments),
@@ -177,6 +180,8 @@ func (f *transcriptFold) appendToolResult(ev domain.ToolResultEvent) {
 		Text:        text,
 		Depth:       ev.Depth,
 		SpawnCallID: spawnOf(ev.EventBase),
+		RunID:       ev.RunID,
+		SpawnRunID:  ev.SpawnRunID,
 	})
 }
 
@@ -201,9 +206,11 @@ func (f *transcriptFold) blob() json.RawMessage {
 	return data
 }
 
-// spawnOf reports the run identity a delegated event carries: the id of the sub_agent call that
+// spawnOf reports the spawning call a delegated event carries: the id of the sub_agent call that
 // spawned the agent emitting it. A top-level event carries none — its CallID names the call it is
 // ABOUT, not a run — so the member stays empty and the entry replays at the Firing's own level.
+// The call id is the fallback key only: the run identity is EventBase.RunID, which the entry keeps
+// as RunID beside it, because a model or server can repeat a call id across a fan-out.
 func spawnOf(base domain.EventBase) string {
 	if base.Depth == 0 {
 		return ""
