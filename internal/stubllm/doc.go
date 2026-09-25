@@ -50,4 +50,8 @@
 //     GETs land in, and the assertions over them.
 //   - record.go — the recording proxy that turns a real server's traffic — its discovery
 //     answers included — into a Script.
+//   - cassette.go — the Cassette a live capture is stored as: raw reply chunks with their
+//     arrival offsets, verbatim probe answers, and the conversation key an exchange is filed under.
+//   - capture.go — the CassetteRecorder: the recording proxy that captures a live upstream into a
+//     Cassette, carrying the upstream's key so the client's config stays keyless.
 package stubllm

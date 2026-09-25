@@ -67,7 +67,12 @@ NOTES (2026-09-25): verification only — archived plan 01 (run-view-header-band
 **Acceptance.** `test -f "docs/plans/archived/2026-09-24 - 01 - run-view-header-band-and-child-gauge-plan.md" && ! grep -E '^## [0-9]+\.' "docs/plans/archived/2026-09-24 - 01 - run-view-header-band-and-child-gauge-plan.md" | grep -v DONE`
 **Commit:** none (verification only).
 
-## 2. stubllm cassette: capture a live upstream keyed by conversation, not bytes
+## 2. stubllm cassette: capture a live upstream keyed by conversation, not bytes — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): on-disk format is one indented JSON document (`version`, `exchanges`, `probes`), not JSON-lines; a chunk is written as `text` when valid UTF-8 and as `base64` otherwise, so a read that splits a rune loses no byte.
+NOTES (2026-09-25): `Exchange` gains `Truncated` (reply ended before EOF) — the retry rule needs it and replay (item 3) can read it; a body that decodes as neither wire's request is still recorded, under a `raw:`-prefixed digest of its bytes.
+NOTES (2026-09-25): the proxy drops the client's `Accept-Encoding` upstream so the cassette holds uncompressed bytes; `NewCassetteRecorder` refuses a named key variable that is unset or empty.
+NOTES (2026-09-25): capture_test.go uses a raw `httptest` upstream (as the item's Tests line specifies) rather than a stubllm Script — the tests pin exact chunk boundaries and the auth header spelling, which a Script cannot place and the Server's request log does not record.
 
 **What.**
 **Goal:** `internal/stubllm` has a cassette format and a recording proxy: each proxied request is stored with its raw response bytes and per-chunk arrival offsets under a stable key, and the latest `GET /v1/models` and `GET /props` bodies are stored verbatim. The proxy adds `Authorization: Bearer <key>` from an env var it is given, so apogee's config stays keyless.
