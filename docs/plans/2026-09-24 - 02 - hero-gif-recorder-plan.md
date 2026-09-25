@@ -53,7 +53,9 @@
 - 10 (second pass): guard folded — source → output as the continuous inverse
 - 12 (second pass): guard folded — rename grep scope, fonts path, summary secs; lands with item 13 in one run (decision)
 
-## 1. Verify the run-view band and child-gauge plan has shipped
+## 1. Verify the run-view band and child-gauge plan has shipped — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): verification only — archived plan 01 (run-view-header-band-and-child-gauge) exists, archived at b6e02d6f; both `## N.` items carry ✅ DONE (2026-09-24); Acceptance exits 0. No files changed, nothing to commit. Its `**Status:**` header line still reads "unexecuted" despite both items being done (not part of this item's Acceptance).
 
 **What.**
 **Goal:** `docs/plans/archived/2026-09-24 - 01 - run-view-header-band-and-child-gauge-plan.md` exists and every item in it is marked done; the hero scenario's beat 6 films the three-row band and the viewed run's own gauge.
