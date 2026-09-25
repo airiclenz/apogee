@@ -46,6 +46,11 @@ type TermOptions struct {
 	Env []string
 	// Dir is the child's working directory; "" is demorig's own.
 	Dir string
+	// FromFirstPaint starts the take at the program's first paint rather than at its launch:
+	// nothing is recorded until the terminal is on the alternate screen with something drawn on
+	// it, and the take's clock starts there. Whatever ran before — a shell's banner, a script's
+	// output — never reaches the take.
+	FromFirstPaint bool
 }
 
 func (o TermOptions) validate() error {
@@ -80,6 +85,10 @@ type Terminal struct {
 	cursorVisible bool
 	dirty         bool
 	take          *Take
+	// awaitingPaint is true while a FromFirstPaint take has not seen its first paint; painted
+	// closes when it has (at once for a take that records from launch).
+	awaitingPaint bool
+	painted       chan struct{}
 
 	// writeMu serialises the two writers of the master — the rig's input and the emulator's
 	// replies — so a reply cannot be spliced into the middle of a key's byte sequence.
@@ -116,6 +125,8 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 		opts:          opts,
 		emu:           emu,
 		cursorVisible: true,
+		awaitingPaint: opts.FromFirstPaint,
+		painted:       make(chan struct{}),
 		replies:       newReplyQueue(),
 		exited:        make(chan struct{}),
 		stopSampling:  make(chan struct{}),
@@ -136,9 +147,12 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 	t.cmd, t.master = cmd, master
 	t.start = time.Now()
 	t.take = &Take{Cols: opts.Cols, Rows: opts.Rows, FPS: opts.FPS, Started: t.start.UTC().Round(0)}
-	t.mu.Lock()
-	t.sampleLocked(0)
-	t.mu.Unlock()
+	if !opts.FromFirstPaint {
+		t.mu.Lock()
+		t.sampleLocked(0)
+		t.mu.Unlock()
+		close(t.painted)
+	}
 
 	go t.pumpOutput()
 	go t.pumpReplies()
@@ -172,6 +186,10 @@ func (t *Terminal) Current() Snapshot {
 	defer t.mu.Unlock()
 	return t.snapshotLocked(time.Since(t.start))
 }
+
+// Painted closes at the program's first paint when the take records from it, and is already
+// closed otherwise.
+func (t *Terminal) Painted() <-chan struct{} { return t.painted }
 
 // Done closes once the program has exited and been reaped.
 func (t *Terminal) Done() <-chan struct{} { return t.exited }
@@ -231,6 +249,9 @@ func (t *Terminal) pumpOutput() {
 			t.mu.Lock()
 			_, _ = t.emu.Write(buf[:n])
 			t.dirty = true
+			if t.awaitingPaint && t.emu.IsAltScreen() && t.screenDrawnLocked() {
+				t.startAtPaintLocked()
+			}
 			t.mu.Unlock()
 		}
 		if err != nil {
@@ -289,14 +310,14 @@ func (t *Terminal) sample() {
 		case <-ticker.C:
 		case <-t.stopSampling:
 			t.mu.Lock()
-			if t.dirty {
+			if t.dirty && !t.awaitingPaint {
 				t.sampleLocked(time.Since(t.start))
 			}
 			t.mu.Unlock()
 			return
 		}
 		t.mu.Lock()
-		if t.dirty {
+		if t.dirty && !t.awaitingPaint {
 			t.sampleLocked(time.Since(t.start))
 		}
 		t.mu.Unlock()
@@ -308,6 +329,35 @@ func (t *Terminal) sample() {
 func (t *Terminal) sampleLocked(at time.Duration) {
 	t.dirty = false
 	t.take.addSnapshot(t.snapshotLocked(at))
+}
+
+// screenDrawnLocked reports whether any cell of the screen shows something other than a blank.
+// The caller holds mu.
+func (t *Terminal) screenDrawnLocked() bool {
+	for y := range t.emu.Height() {
+		for x := range t.emu.Width() {
+			if c := t.emu.CellAt(x, y); c != nil && c.Content != "" && c.Content != " " {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// startAtPaintLocked restarts the take's clock at the first paint and records that paint as its
+// first snapshot, at 0 s. An event logged before it is moved to 0 s rather than dropped. The
+// caller holds mu.
+func (t *Terminal) startAtPaintLocked() {
+	now := time.Now()
+	shift := now.Sub(t.start)
+	for i := range t.take.Events {
+		t.take.Events[i].At = max(t.take.Events[i].At-shift, 0)
+	}
+	t.start = now
+	t.take.Started = now.UTC().Round(0)
+	t.awaitingPaint = false
+	t.sampleLocked(0)
+	close(t.painted)
 }
 
 // snapshotLocked reads the emulator into a snapshot. The caller holds mu.

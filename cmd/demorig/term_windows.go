@@ -12,10 +12,11 @@ var errNoPTY = errors.New("recording needs a unix pseudo-terminal; not available
 
 // TermOptions is the terminal a take is recorded in; see the unix build for the fields' meaning.
 type TermOptions struct {
-	Cols, Rows int
-	FPS        int
-	Env        []string
-	Dir        string
+	Cols, Rows     int
+	FPS            int
+	Env            []string
+	Dir            string
+	FromFirstPaint bool
 }
 
 // Terminal is the type and nothing else on Windows: [StartTerminal] never returns one.
@@ -32,6 +33,13 @@ func (*Terminal) Event(string, string) {}
 
 // Current is the empty snapshot.
 func (*Terminal) Current() Snapshot { return Snapshot{} }
+
+// Painted is already closed: there is no paint to wait for.
+func (*Terminal) Painted() <-chan struct{} {
+	painted := make(chan struct{})
+	close(painted)
+	return painted
+}
 
 // Done is already closed: there is no program to wait for.
 func (*Terminal) Done() <-chan struct{} {

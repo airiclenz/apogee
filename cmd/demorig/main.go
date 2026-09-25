@@ -6,13 +6,18 @@
 //	demorig beats graphics/demo/storyboards/hero.yaml <take.mp4> <session.json> [--json]
 //	demorig check graphics/demo/storyboards/hero.yaml <session.json> [--stage <dir>]
 //	demorig render graphics/demo/storyboards/hero.yaml <take.mp4> <session.json> [-o out.gif] [--dry-run]
+//	demorig record graphics/demo/storyboards/hero.yaml [--work <dir>]
+//	demorig capture graphics/demo/storyboards/hero.yaml --upstream <url> [--key-env <VAR>] [--work <dir>]
 //
 // `lint` checks the storyboard against its schema and the tape it names, printing every
 // problem and exiting 1 on any. `beats` locates each beat in a raw take from the saved
 // session's timestamps (ffmpeg and ffprobe on PATH). `check` judges a take by its saved
 // session and the stage repo: every expect as a PASS/FAIL row, exit 1 on any FAIL. `render`
 // cuts the GIF from the take as the storyboard frames each beat — speed, hold, zoom, cut —
-// through one ffmpeg filtergraph, then gifsicle when it is on PATH.
+// through one ffmpeg filtergraph, then gifsicle when it is on PATH. `record` resets the rig's
+// stage, replays the storyboard's cassette as the model, runs apogee in a pty through every beat,
+// writes <work>/<clip>.take and checks it; `capture` does the same against a live model behind a
+// recording proxy and saves the cassette. Both record on unix only.
 //
 // It is a dev tool, not a release asset: `make demorig` builds it, and `make dist` does not
 // ship it.
@@ -58,6 +63,8 @@ func newRootCommand() *cobra.Command {
 	cmd.AddCommand(newBeatsCommand())
 	cmd.AddCommand(newCheckCommand())
 	cmd.AddCommand(newRenderCommand(ffmpegTools{}))
+	cmd.AddCommand(newRecordCommand())
+	cmd.AddCommand(newCaptureCommand())
 	return cmd
 }
 

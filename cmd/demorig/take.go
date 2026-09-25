@@ -33,6 +33,9 @@ type Take struct {
 	Rows    int       `json:"rows"`
 	FPS     int       `json:"fps"`
 	Started time.Time `json:"started"`
+	// Session is the session JSON the recorded program saved during the take, by path — what
+	// `check` judges the take's expects against. Empty when the take was recorded without one.
+	Session string `json:"session,omitempty"`
 
 	Snapshots []Snapshot  `json:"-"`
 	Events    []TakeEvent `json:"-"`

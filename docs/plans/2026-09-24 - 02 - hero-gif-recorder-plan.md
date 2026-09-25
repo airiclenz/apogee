@@ -168,7 +168,14 @@ internal/tuitest/pty.go — TTYState, Press; internal/subprocess/teardown_test.g
 **Acceptance.** `go test -race -count=1 -run TestEngine ./cmd/demorig/ && GOOS=windows go build ./cmd/demorig/`
 **Commit:** `feat(demorig): action engine with real SGR clicks and screen waits`
 
-## 8. demorig record and capture subcommands
+## 8. demorig record and capture subcommands — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): re-derived from "record.go alone can see apogee's first paint" — the Terminal owns the emulator, so the first-paint gate is a new `TermOptions.FromFirstPaint` in cmd/demorig/term.go (+ the Windows stub's field and `Painted()`): nothing is sampled until the alternate screen is on with a non-blank cell, the take's clock restarts there and the first snapshot is at 0 s.
+NOTES (2026-09-25): re-derived from "the take header records the session by path" — `Take` had no such field; cmd/demorig/take.go gains `Session string json:"session,omitempty"`.
+NOTES (2026-09-25): rig.env's port key is named `PORT` (the plan names none); item 13's setup.sh must write `PORT=<n>` to rig.env for record/capture to find it.
+NOTES (2026-09-25): `checkTake` takes a v1 `*Storyboard`; record bridges with `checkBoardOf`, anchoring each v2 beat on its first expect's entry selector (a beat with no expect on first-paint) so before/after order against that entry — item 12 re-points check at the take and owns the real ordering rule.
+NOTES (2026-09-25): added a `--work <dir>` flag to both commands (default `$APOGEE_DEMO_WORK`, else `~/.cache/apogee-demo`, as the rig scripts resolve it) so tests need no process env; `capture --key-env` defaults to empty (keyless), matching `NewCassetteRecorder`.
+NOTES (2026-09-25): the apogee child inherits demorig's whole environment (`os.Environ()`); stripping the `config.Env*` variables is item 14's (its guard names `record.go`'s launch). apogee is ended by the terminal's process-group kill after the last beat; the session is found as the newest `*.json` under `<work>/home/.apogee/sessions`. A take whose beats fail is still written but not checked, and capture saves the cassette only when every beat passed.
 
 **What.** Depends on items 3, 7.
 **Goal:** `demorig capture <storyboard> --upstream <url> --key-env <VAR>` and `demorig record <storyboard>` each: run `reset.sh` in the work dir (fail on non-zero), start the cassette proxy (capture) or replayer (record) on `127.0.0.1:<port from rig.env>`, launch `apogee` under the rig's `env.sh` (HOME remap, confinement-safe Go caches) in the pty at the storyboard geometry, run the beats, write `<work>/<clip>.take` and, for capture, the storyboard's `cassette` path; then run `check` (item 12) and exit with its status. The shell prompt never reaches the take: recording starts at apogee's first paint.
