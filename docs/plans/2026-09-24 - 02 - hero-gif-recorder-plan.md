@@ -188,7 +188,12 @@ internal/tui/tui.go — claimAltScreen (the first-paint signal: ESC[?1049h befor
 **Acceptance.** `go test -race -count=1 -run 'TestRecord|TestCapture' ./cmd/demorig/ && GOOS=windows go build ./cmd/demorig/`
 **Commit:** `feat(demorig): record and capture — replay or proxy a model into a take`
 
-## 9. demorig: rasterizer with embedded fonts
+## 9. demorig: rasterizer with embedded fonts — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): licence files are named per family (`SourceCodePro-OFL.txt`, `NotoSansSymbols-OFL.txt` covering Symbols and Symbols 2, which share a repository and copyright line, `NotoSansMath-OFL.txt`) rather than one `OFL.txt`, since the three families share one directory.
+NOTES (2026-09-25): golang.org/x/image pinned at v0.45.0 (the plan's floor) rather than v0.46.0, which would also have bumped x/sys and x/sync; v0.45.0 lifts golang.org/x/text v0.39.0 → v0.41.0 and `go mod tidy` pruned stale go.sum lines.
+NOTES (2026-09-25): the golden hash is SHA-256 over the frame's raw RGBA pixels, not over PNG bytes — PNG/zlib encoder output can change between Go releases while the pixels cannot.
+NOTES (2026-09-25): the rasterizer takes a `Geometry` (Cols, Rows, Padding, FontSize, LineHeight); applying `FrameV2.Scale` to padding and font size is left to the render wiring (item 12). Rounded-corner radius is one stroke short of the cell's half so ╭╮╰╯ leave the cell on a straight run; a multi-rune grapheme draws its first rune; a snapshot's terminal cursor is not drawn (the Goal does not name it).
 
 **What.** Recast at the regression check (2026-09-24). Depends on items 5, 6.
 **Goal:** a take snapshot rasterizes to an RGBA frame at the storyboard geometry: Source Code Pro Regular/Bold/Italic from `graphics/demo/fonts/`, fallback to Noto Sans Symbols 2, then Noto Sans Math, then Noto Sans Symbols per missing rune, box-drawing (U+2500–257F) and block elements (U+2580–259F, incl. eighth blocks the gauge uses) drawn procedurally to fill the cell exactly, Catppuccin Mocha for default fg/bg and the 16 ANSI colours, truecolor passed through, faint at 60 % alpha, reverse swaps, wide cells span two columns. Every rune apogee's TUI paints resolves to a glyph.
