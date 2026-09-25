@@ -42,12 +42,13 @@ const cellWidthProbe = 'M'
 // faintPercent is the share of the foreground a faint cell keeps over its background.
 const faintPercent = 60
 
-// Catppuccin Mocha: the terminal's default foreground and background, and the sixteen ANSI
-// colours (0–7 normal, 8–15 bright) a program's palette indices 0–15 resolve to.
+// The terminal's default foreground and background, and the sixteen ANSI colours (0–7 normal,
+// 8–15 bright) a program's palette indices 0–15 resolve to: Catppuccin Mocha, except the
+// background, a darker near-black (#0e1117) in place of Mocha's blue-grey base.
 var (
-	mochaForeground = color.RGBA{0xcd, 0xd6, 0xf4, 0xff}
-	mochaBackground = color.RGBA{0x1e, 0x1e, 0x2e, 0xff}
-	mochaANSI       = [16]color.RGBA{
+	mochaForeground  = color.RGBA{0xcd, 0xd6, 0xf4, 0xff}
+	canvasBackground = color.RGBA{0x0e, 0x11, 0x17, 0xff}
+	mochaANSI        = [16]color.RGBA{
 		{0x45, 0x47, 0x5a, 0xff}, {0xf3, 0x8b, 0xa8, 0xff}, {0xa6, 0xe3, 0xa1, 0xff}, {0xf9, 0xe2, 0xaf, 0xff},
 		{0x89, 0xb4, 0xfa, 0xff}, {0xf5, 0xc2, 0xe7, 0xff}, {0x94, 0xe2, 0xd5, 0xff}, {0xba, 0xc2, 0xde, 0xff},
 		{0x58, 0x5b, 0x70, 0xff}, {0xf3, 0x8b, 0xa8, 0xff}, {0xa6, 0xe3, 0xa1, 0xff}, {0xf9, 0xe2, 0xaf, 0xff},
@@ -183,7 +184,7 @@ func (r *Rasterizer) Resolves(ru rune) bool {
 // the rest of the frame on the theme background.
 func (r *Rasterizer) Frame(s Snapshot) *image.RGBA {
 	img := image.NewRGBA(image.Rectangle{Max: r.Size()})
-	draw.Draw(img, img.Bounds(), &image.Uniform{C: mochaBackground}, image.Point{}, draw.Src)
+	draw.Draw(img, img.Bounds(), &image.Uniform{C: canvasBackground}, image.Point{}, draw.Src)
 	for y, row := range s.Cells {
 		if y >= r.geometry.Rows {
 			break
@@ -241,7 +242,7 @@ func styleOf(cell TakeCell) fontStyle {
 // (a swap) and faint (the foreground at faintPercent over the background).
 func cellColors(cell TakeCell) (fg, bg color.RGBA) {
 	fg = themeColor(cell.FG, mochaForeground)
-	bg = themeColor(cell.BG, mochaBackground)
+	bg = themeColor(cell.BG, canvasBackground)
 	if cell.Reverse {
 		fg, bg = bg, fg
 	}

@@ -181,7 +181,7 @@ func countInk(img *image.RGBA, rect image.Rectangle) int {
 	inked := 0
 	for y := rect.Min.Y; y < rect.Max.Y; y++ {
 		for x := rect.Min.X; x < rect.Max.X; x++ {
-			if img.RGBAAt(x, y) != mochaBackground {
+			if img.RGBAAt(x, y) != canvasBackground {
 				inked++
 			}
 		}
@@ -198,8 +198,8 @@ func TestRasterFullBlockFillsItsCell(t *testing.T) {
 	img := r.Frame(Snapshot{Cells: cells})
 	rect := cellRect(r, 1, 0, 1)
 	assertFilled(t, img, rect, red)
-	assertFilled(t, img, cellRect(r, 0, 0, 1), mochaBackground)
-	assertFilled(t, img, cellRect(r, 2, 0, 1), mochaBackground)
+	assertFilled(t, img, cellRect(r, 0, 0, 1), canvasBackground)
+	assertFilled(t, img, cellRect(r, 2, 0, 1), canvasBackground)
 }
 
 func TestRasterWideCellSpansTwoColumns(t *testing.T) {
@@ -210,7 +210,7 @@ func TestRasterWideCellSpansTwoColumns(t *testing.T) {
 	cells[0][1] = TakeCell{Width: 0}
 	img := r.Frame(Snapshot{Cells: cells})
 	assertFilled(t, img, cellRect(r, 0, 0, 2), color.RGBA{0, 0xff, 0, 0xff})
-	assertFilled(t, img, cellRect(r, 2, 0, 1), mochaBackground)
+	assertFilled(t, img, cellRect(r, 2, 0, 1), canvasBackground)
 }
 
 func TestRasterColors(t *testing.T) {
@@ -221,11 +221,11 @@ func TestRasterColors(t *testing.T) {
 		wantFG color.RGBA
 		wantBG color.RGBA
 	}{
-		{"defaults", TakeCell{}, mochaForeground, mochaBackground},
+		{"defaults", TakeCell{}, mochaForeground, canvasBackground},
 		{"ansi red on bright black", TakeCell{FG: "@1", BG: "@8"}, mochaANSI[1], mochaANSI[8]},
-		{"truecolor passes through", TakeCell{FG: "#123456"}, color.RGBA{0x12, 0x34, 0x56, 0xff}, mochaBackground},
-		{"palette above 15 is xterm", TakeCell{FG: "@196"}, color.RGBA{0xff, 0, 0, 0xff}, mochaBackground},
-		{"reverse swaps", TakeCell{FG: "@2", Reverse: true}, mochaBackground, mochaANSI[2]},
+		{"truecolor passes through", TakeCell{FG: "#123456"}, color.RGBA{0x12, 0x34, 0x56, 0xff}, canvasBackground},
+		{"palette above 15 is xterm", TakeCell{FG: "@196"}, color.RGBA{0xff, 0, 0, 0xff}, canvasBackground},
+		{"reverse swaps", TakeCell{FG: "@2", Reverse: true}, canvasBackground, mochaANSI[2]},
 		{
 			"faint is 60 percent over the background",
 			TakeCell{FG: "#ffffff", BG: "#000000", Faint: true},
@@ -265,7 +265,7 @@ func TestRasterRoundedCornerCoverage(t *testing.T) {
 			t.Errorf("╭ has no full ink at %v", p)
 		}
 	}
-	if img.RGBAAt(rect.Min.X, rect.Min.Y) != mochaBackground {
+	if img.RGBAAt(rect.Min.X, rect.Min.Y) != canvasBackground {
 		t.Error("╭ inked its top-left corner")
 	}
 	if countInk(img, rect) == 0 {
@@ -276,7 +276,7 @@ func TestRasterRoundedCornerCoverage(t *testing.T) {
 // goldenAxisAlignedHash is the SHA-256 of the RGBA pixels of goldenSnapshot. Only axis-aligned
 // integer fills are in it — straight box lines, blocks, eighths, spaces and colours — so it is the
 // same on every architecture.
-const goldenAxisAlignedHash = "ab4d1a6e3960e3bcac72617020408e95d21e62fd0594d2cd6853b416b596caf6"
+const goldenAxisAlignedHash = "1da0619e9f98f746bc7de7691c81ce30aee23d072161386652b976469381b9fe"
 
 // goldenSnapshot is a fixed 20 × 4 grid of straight and double box lines, blocks, eighths,
 // shades, coloured spaces, a reversed and a faint cell.

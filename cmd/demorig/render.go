@@ -54,12 +54,12 @@ type renderOptions struct {
 }
 
 // The palette encode every render ends with: a per-clip palette of frame.max_colors (much
-// cleaner than ffmpeg's default 256-colour quantiser on flat terminal colours) applied with an
-// ordered dither.
-const (
-	ditherMode  = "bayer"
-	ditherScale = 3
-)
+// cleaner than ffmpeg's default 256-colour quantiser on flat terminal colours) applied without
+// dithering. A palette entry is the mean of the colours it stands for, so the flat background
+// rarely lands on one exactly, and an ordered dither then speckles every blank cell with a
+// pattern of near-background shades; mapped to the nearest entry instead, a flat colour stays
+// flat. The frames are flat colours and glyph edges, with no gradient a dither would rescue.
+const ditherMode = "none"
 
 // renderPlan is everything a render needs once the storyboard and the take are read: the
 // output clock, the rasterizer, the compositor and where the GIF goes.
@@ -155,8 +155,8 @@ func renderTake(ctx context.Context, stdout, stderr io.Writer, options renderOpt
 // ffmpegArgs is the encode's command line: raw RGBA frames of size at frame.fps in on stdin, the
 // palette filtergraph, the GIF out.
 func ffmpegArgs(size image.Point, frame Frame, out string) []string {
-	graph := fmt.Sprintf("[0:v]split[a][b];[a]palettegen=max_colors=%d[p];[b][p]paletteuse=dither=%s:bayer_scale=%d",
-		frame.MaxColors, ditherMode, ditherScale)
+	graph := fmt.Sprintf("[0:v]split[a][b];[a]palettegen=max_colors=%d[p];[b][p]paletteuse=dither=%s",
+		frame.MaxColors, ditherMode)
 	return []string{
 		"ffmpeg", "-y", "-loglevel", "error",
 		"-f", "rawvideo", "-pixel_format", "rgba",
@@ -245,11 +245,10 @@ func runQuiet(ctx context.Context, argv []string) error {
 	return nil
 }
 
-// The gifsicle pass: optional, and typically another 20-40% off with no visible loss.
-const (
-	gifsicleOptimize = "-O3"
-	gifsicleLossy    = "--lossy=80"
-)
+// The gifsicle pass: optional and lossless. Not --lossy: its LZW matching trades exact colours
+// for near ones, which scatters speckles of near-background shades over every flat area, and a
+// terminal clip is almost all flat area.
+const gifsicleOptimize = "-O3"
 
 // optimizeGIF shrinks the GIF in place through gifsicle when it is on PATH, and does nothing
 // otherwise. The result replaces the input only once gifsicle has written it whole.
@@ -258,7 +257,7 @@ func optimizeGIF(ctx context.Context, path string) error {
 		return nil
 	}
 	optimized := path + ".opt"
-	if err := runQuiet(ctx, []string{"gifsicle", gifsicleOptimize, gifsicleLossy, "-o", optimized, path}); err != nil {
+	if err := runQuiet(ctx, []string{"gifsicle", gifsicleOptimize, "-o", optimized, path}); err != nil {
 		return err
 	}
 	return os.Rename(optimized, path)

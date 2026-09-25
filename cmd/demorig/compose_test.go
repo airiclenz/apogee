@@ -125,7 +125,7 @@ func TestComposeZoomCropStaysInsideTheFrame(t *testing.T) {
 			if full := compositor.crop(1 * sec); full != (rectF{W: 1000, H: 600}) {
 				t.Errorf("crop before the zoomed beat: want the whole frame, got %+v", full)
 			}
-			if got := compositor.Compose(4*sec, solidFrame(mochaBackground)).Bounds().Size(); got != image.Pt(500, 300) {
+			if got := compositor.Compose(4*sec, solidFrame(canvasBackground)).Bounds().Size(); got != image.Pt(500, 300) {
 				t.Errorf("composed frame: want 500×300, got %v", got)
 			}
 		})
@@ -195,7 +195,7 @@ func TestComposeZoomedCursorMapsToTheZoomedTarget(t *testing.T) {
 
 	// Where the zoom puts the target cell: paint it red and find it in the output, drawn by a
 	// compositor with the same zoom and no clicks.
-	marked := solidFrame(mochaBackground)
+	marked := solidFrame(canvasBackground)
 	rect := composeLayout.boxRect(box)
 	draw.Draw(marked, image.Rect(int(rect.X), int(rect.Y), int(rect.X+rect.W), int(rect.Y+rect.H)),
 		&image.Uniform{C: color.RGBA{0xff, 0, 0, 0xff}}, image.Point{}, draw.Src)
@@ -208,8 +208,8 @@ func TestComposeZoomedCursorMapsToTheZoomedTarget(t *testing.T) {
 	}
 
 	// Where the cursor lands at the press, over a blank frame.
-	bright := func(c color.RGBA) bool { return c.G > mochaBackground.G+0x30 }
-	cursor, count := centroidWhere(compositor.Compose(press, solidFrame(mochaBackground)), bright)
+	bright := func(c color.RGBA) bool { return c.G > canvasBackground.G+0x30 }
+	cursor, count := centroidWhere(compositor.Compose(press, solidFrame(canvasBackground)), bright)
 	if count == 0 {
 		t.Fatal("no cursor drawn at the press")
 	}
@@ -240,10 +240,10 @@ func TestComposeClickInsideACutBeatDrawsNoCursor(t *testing.T) {
 	if len(compositor.cursor.Marks) != 0 {
 		t.Fatalf("cursor marks: want the cut click dropped, got %+v", compositor.cursor.Marks)
 	}
-	blank := solidFrame(mochaBackground)
+	blank := solidFrame(canvasBackground)
 	for _, frame := range schedule.Frames(10) {
 		composed := compositor.Compose(frame.Out, blank)
-		if _, count := centroidWhere(composed, func(c color.RGBA) bool { return c != mochaBackground }); count != 0 {
+		if _, count := centroidWhere(composed, func(c color.RGBA) bool { return c != canvasBackground }); count != 0 {
 			t.Fatalf("frame at %s: want nothing drawn over the background, got %d pixels", frame.Out, count)
 		}
 	}

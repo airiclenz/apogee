@@ -37,10 +37,10 @@ so a retake loop is `until ./demorig record graphics/demo/storyboards/hero.yaml;
 
 `render` reads that take by default (pass another take as its second argument), writes the
 storyboard's `ship:` path unless `-o` names another, and `--dry-run` prints the ffmpeg command
-line instead of running it. It needs `ffmpeg` on PATH and uses `gifsicle` when it finds it
-(typically another 20–40% off with no visible loss). `./demorig lint <storyboard>` checks a
-storyboard's schema without touching the rig; `./demorig check <storyboard> [<take>] --stage
-<dir>` re-judges a take by hand. `go run ./cmd/demorig …` works in place of `make demorig`.
+line instead of running it. It needs `ffmpeg` on PATH and uses `gifsicle` when it finds it, for
+a lossless pass — never `--lossy`, whose near-colour matches speckle flat backgrounds.
+`./demorig lint <storyboard>` checks a storyboard's schema without touching the rig;
+`./demorig check <storyboard> [<take>] --stage <dir>` re-judges a take by hand. `go run ./cmd/demorig …` works in place of `make demorig`.
 
 **The server alias and the model id are on camera** in the footer for the whole clip, so pick
 both deliberately. `setup.sh` defaults them to the `openrouter` alias and
@@ -270,9 +270,10 @@ was sent to.
 ## Fonts and licences
 
 Frames are rasterized in Go from the take's cells — no terminal, browser or screen recorder in
-the loop — on the Catppuccin Mocha theme: its foreground and background for the terminal
-defaults, its sixteen ANSI colours for palette entries 0–15, anything else as sent. The chrome is
-a plain padded terminal on the theme background, no window bar. The faces, all under
+the loop — on the Catppuccin Mocha theme: its foreground for the terminal default, its sixteen
+ANSI colours for palette entries 0–15, anything else as sent. The default background is not
+Mocha's blue-grey base but a near-black `#0e1117`. The chrome is a plain padded terminal on that
+background, no window bar. The faces, all under
 `fonts/`:
 
 | file | role | licence |
@@ -389,3 +390,4 @@ link.
 | `history/2026-09-25-hero/` | the v2 rig's first clip (v0.23 surface): a mode click to Auto, a sub-agent fan-out and its run view, a queued CHANGELOG message, the split-diff card opened by click, a zoom on the context gauge — captured once from OpenRouter `deepseek-v4-flash`, replayed and rendered by `demorig` |
 | `history/2026-09-25-hero-repaced/` | the same take re-paced: the fix wait split into its own fast-forwarded beat so the split-diff clicks play at 1×, the context-gauge zoom cut |
 | `history/2026-09-25-hero-smooth/` | slowed and smoothed: pauses before every click, eased 900 ms cursor glides and 1 s zoom ramps, at most 3.4× anywhere, and the queued message names `@CHANGELOG.md` — re-captured from OpenRouter `deepseek-v4-flash` |
+| `history/2026-09-25-hero-dark/` | the same cassette on a `#0e1117` background, no zoom, the cursor to the prompt before typing, a readable `@` completion, clicks on titles, and an even 1–2.4× pace |

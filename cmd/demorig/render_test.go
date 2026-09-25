@@ -48,7 +48,7 @@ func TestRenderDryRunPrintsTheFfmpegLine(t *testing.T) {
 	for _, want := range []string{
 		"ffmpeg -y -loglevel error -f rawvideo -pixel_format rgba -video_size 160x",
 		"-framerate 10 -i pipe:0",
-		`"[0:v]split[a][b];[a]palettegen=max_colors=16[p];[b][p]paletteuse=dither=bayer:bayer_scale=3"`,
+		`"[0:v]split[a][b];[a]palettegen=max_colors=16[p];[b][p]paletteuse=dither=none"`,
 		gifPath,
 	} {
 		if !strings.Contains(out, want) {

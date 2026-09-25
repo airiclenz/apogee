@@ -49,8 +49,8 @@ const (
 	cursorFadeOut = 400 * time.Millisecond
 )
 
-// cursorOutlineColor is the dot's dark outline: Catppuccin Mocha's crust, darker than any
-// background the TUI paints.
+// cursorOutlineColor is the dot's dark outline: Catppuccin Mocha's crust, which keeps the dot's
+// edge legible where it crosses a light row (a selection, a diff line).
 var cursorOutlineColor = color.RGBA{0x11, 0x11, 0x1b, 0xff}
 
 // cursorColor is the dot's and the ring's fill.
@@ -245,7 +245,7 @@ func (c *Compositor) Compose(t time.Duration, src *image.RGBA) *image.RGBA {
 	if crop.W >= float64(c.layout.Size.X) {
 		draw.CatmullRom.Scale(dst, dst.Bounds(), src, src.Bounds(), draw.Src, nil)
 	} else {
-		draw.Draw(dst, dst.Bounds(), &image.Uniform{C: mochaBackground}, image.Point{}, draw.Src)
+		draw.Draw(dst, dst.Bounds(), &image.Uniform{C: canvasBackground}, image.Point{}, draw.Src)
 		sx, sy := float64(c.out.X)/crop.W, float64(c.out.Y)/crop.H
 		transform := f64.Aff3{sx, 0, -crop.X * sx, 0, sy, -crop.Y * sy}
 		draw.CatmullRom.Transform(dst, transform, src, src.Bounds(), draw.Src, nil)

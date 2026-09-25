@@ -244,7 +244,7 @@ func TestLoadHeroStoryboard(t *testing.T) {
 		t.Errorf("frame: want %+v, got %+v", wantFrame, board.Frame)
 	}
 	// Beat 9, the context-gauge zoom, is cut: performed, never rendered, so it has no duration.
-	wantSeconds := []int{2, 5, 4, 7, 5, 7, 11, 6, 0, 4, 3}
+	wantSeconds := []int{2, 5, 6, 10, 6, 7, 5, 6, 0, 4, 3}
 	if got := len(board.Beats); got != len(wantSeconds) {
 		t.Fatalf("beats: want %d, got %d", len(wantSeconds), got)
 	}
