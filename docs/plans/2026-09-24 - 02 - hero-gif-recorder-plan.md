@@ -288,7 +288,9 @@ NOTES (2026-09-25): the ambient-variable list lives in record.go as `ambientApog
 **Acceptance.** `APOGEE_DEMO_E2E=1 go test -race -count=1 -run TestE2E ./cmd/demorig/`
 **Commit:** `test(demorig): end-to-end record, check and render over a fixture cassette`
 
-## 15. Rewrite the rig README
+## 15. Rewrite the rig README — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): the README says the cassette key leaves the model id out (per `internal/stubllm/cassette.go`), which contradicts `graphics/demo/setup.sh`'s header comment ("keyed by conversation, model id included"); setup.sh was left untouched as outside this item's Files.
 
 **What.** Depends on item 13.
 **Goal:** `graphics/demo/README.md` documents the v2 rig: quick start (`setup.sh`, `demorig capture` once with the key, `demorig record`, `demorig render`), the storyboard v2 schema with hero beat 6 as the worked example, targets and areas, capture/replay and the cassette key (when to re-capture: an unknown-key 500), section durations, zoom and cursor, fonts and licences, settled facts that still hold (endpoint without `/v1`, Go caches in the workspace, prompt wording is load-bearing, mode before prompt). Every VHS section is gone; the history table stays.
