@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 # Build the demo rig: an isolated apogee home, the taskman stage repo with its planted
-# bug, and the env.sh that tapes source. Idempotent — re-run it any time; it rebuilds
-# the stage from the templates in stage/ and leaves the warm Go cache alone.
+# bug, the env.sh a take launches apogee under, and rig.env. Idempotent — re-run it any
+# time; it rebuilds the stage from the templates in stage/ and leaves the warm Go cache alone.
 #
 #   ./setup.sh
 #
 # Overridable:
 #   APOGEE_DEMO_WORK        where the rig is built    (default ~/.cache/apogee-demo)
-#   APOGEE_DEMO_ENDPOINT    LLM server URL            (default https://openrouter.ai/api — apogee appends /v1/…)
+#   APOGEE_DEMO_PORT        the local model port      (default 18181)
 #   APOGEE_DEMO_HOST_ALIAS  the name in the footer    (default openrouter)
 #   APOGEE_DEMO_MODEL       the model in the footer   (default ~deepseek/deepseek-v4-flash-latest)
-#   APOGEE_DEMO_KEY_ENV     env var holding the key   (default OPENROUTER_API_KEY; empty = keyless)
 #
-# Both the alias and the model id are ON CAMERA in the footer for the whole clip. The key is
-# never written anywhere: the config carries `api-key-env: <name>` and apogee reads the variable
-# from the environment the recording runs in (record.sh refuses to start without it).
+# apogee never talks to a live server directly: its one server entry points at
+# http://127.0.0.1:<port>, keyless, where `demorig record` serves the clip's cassette and
+# `demorig capture` serves a recording proxy to the live model (the proxy holds the key).
+# Both the alias and the model id are ON CAMERA in the footer for the whole clip, and the
+# cassette is keyed by conversation, model id included — change either and re-capture.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
 
 WORK="${APOGEE_DEMO_WORK:-$HOME/.cache/apogee-demo}"
-ENDPOINT="${APOGEE_DEMO_ENDPOINT:-https://openrouter.ai/api}"
+PORT="${APOGEE_DEMO_PORT:-18181}"
 HOST_ALIAS="${APOGEE_DEMO_HOST_ALIAS:-openrouter}"
 MODEL="${APOGEE_DEMO_MODEL:-~deepseek/deepseek-v4-flash-latest}"
-KEY_ENV="${APOGEE_DEMO_KEY_ENV-OPENROUTER_API_KEY}"
 
 DEMO_HOME="$WORK/home"
 STAGE="$DEMO_HOME/Repos/taskman"
@@ -52,22 +52,20 @@ git -C "$STAGE" -c user.email=demo@local -c user.name=demo \
 # `server:` names the entry a session starts on (ADR 0036); the entry's own name IS the alias the
 # footer shows, so one value does both jobs. `model:` pins what goes on the wire so no picker
 # beat is needed on camera, and it is quoted because an OpenRouter "latest" alias starts with
-# `~`. Isolation is via HOME rather than --config so the on-screen command stays a bare
-# `apogee …` and sessions never land in the real ~/.apogee.
-key_line=""
-[ -n "$KEY_ENV" ] && key_line="$(printf '    api-key-env: %s\n' "$KEY_ENV")"
+# `~`. `parallel-agents: 4` pins the sub-agent width, so the fan-out does not depend on what the
+# local port advertises. The entry carries no key: the cassette replayer needs none, and the
+# capture proxy authenticates upstream itself. Isolation is via HOME rather than --config so
+# sessions never land in the real ~/.apogee.
 {
   cat "$REPO/internal/config/defaults/config.yaml"
-  printf '\nservers:\n  - name: %s\n    endpoint: %s\n    model: "%s"\n' \
-      "$HOST_ALIAS" "$ENDPOINT" "$MODEL"
-  [ -n "$key_line" ] && printf '%s\n' "$key_line"
+  printf '\nservers:\n  - name: %s\n    endpoint: http://127.0.0.1:%s\n    model: "%s"\n    parallel-agents: 4\n' \
+      "$HOST_ALIAS" "$PORT" "$MODEL"
   printf '\nserver: %s\n' "$HOST_ALIAS"
 } > "$DEMO_HOME/.apogee/config.yaml"
 
 # env.sh is generated (not checked in) because it bakes in machine-specific absolute paths.
-# Tapes source it from a Hide block so none of this appears on camera. The API key is NOT
-# baked in: VHS's shell inherits the environment record.sh runs in, and api-key-env reads it
-# from there.
+# `demorig record` and `demorig capture` source it before they exec apogee in the take's pty,
+# so none of this appears on camera.
 cat > "$WORK/env.sh" <<ENV
 export HOME=$DEMO_HOME
 export PATH=$(dirname "$(command -v apogee || echo /usr/local/bin/apogee)"):\$PATH
@@ -81,11 +79,10 @@ export GOPATH="\$PWD/.gopath"
 export GOMODCACHE="\$PWD/.gopath/pkg/mod"
 export TMPDIR="\$PWD/.gotmp"
 mkdir -p "\$GOCACHE" "\$GOPATH" "\$TMPDIR"
-
-clear
 ENV
 
-printf 'KEY_ENV=%s\n' "$KEY_ENV" > "$WORK/rig.env"
+# rig.env is read by demorig: PORT is where a take serves the model apogee's server entry names.
+printf 'PORT=%s\n' "$PORT" > "$WORK/rig.env"
 
 cp "$HERE/reset.sh" "$WORK/reset.sh"
 chmod +x "$WORK/reset.sh"
@@ -96,13 +93,6 @@ chmod +x "$WORK/reset.sh"
 echo "demo rig ready"
 echo "  work dir : $WORK"
 echo "  stage    : $STAGE"
-echo "  endpoint : $ENDPOINT   server: $HOST_ALIAS   model: $MODEL"
-if [ -n "$KEY_ENV" ]; then
-  if [ -n "${!KEY_ENV:-}" ]; then
-    echo "  api key  : from \$$KEY_ENV (set)"
-  else
-    echo "  api key  : from \$$KEY_ENV — NOT SET in this shell; record.sh will refuse until it is"
-  fi
-fi
+echo "  server   : $HOST_ALIAS at http://127.0.0.1:$PORT   model: $MODEL"
 echo
-echo "next: ./record.sh hero    (or any tape name under tapes/)"
+echo "next (from the repo root): go run ./cmd/demorig record graphics/demo/storyboards/hero.yaml"

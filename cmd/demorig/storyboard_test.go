@@ -230,3 +230,33 @@ func TestExpectValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadHeroStoryboard(t *testing.T) {
+	t.Parallel()
+
+	board, err := Load(filepath.Join("..", "..", "graphics", "demo", "storyboards", "hero.yaml"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	wantFrame := Frame{Cols: 135, Rows: 44, Padding: 32, FontSize: 30, LineHeight: 1.2, Scale: 2, Width: 1250, FPS: 24, MaxColors: 192}
+	if board.Frame != wantFrame {
+		t.Errorf("frame: want %+v, got %+v", wantFrame, board.Frame)
+	}
+	wantSeconds := []int{2, 3, 4, 4, 4, 6, 6, 3, 4, 3}
+	if got := len(board.Beats); got != len(wantSeconds) {
+		t.Fatalf("beats: want %d, got %d", len(wantSeconds), got)
+	}
+	for index, seconds := range wantSeconds {
+		beat := board.Beats[index]
+		if beat.ID != index+1 {
+			t.Errorf("beat %d: want id %d", beat.ID, index+1)
+		}
+		if want := time.Duration(seconds) * time.Second; beat.Duration != want {
+			t.Errorf("beat %d duration: want %s, got %s", beat.ID, want, beat.Duration)
+		}
+	}
+	if board.Expect.Stage != StageDirty {
+		t.Errorf("expect.stage: want %s, got %q", StageDirty, board.Expect.Stage)
+	}
+}

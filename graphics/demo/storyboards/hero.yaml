@@ -1,169 +1,174 @@
-# The README hero clip, beat by beat — the durable storyboard behind graphics/demo.gif.
+# The README hero clip, beat by beat — the single source of graphics/demo.gif.
 #
-# This file is the director's notes: what each beat is FOR, where it sits in a take, how it is
-# framed when the GIF is rendered, and what a keeper take must contain. The tape
-# (../tapes/hero.tape) keeps only VHS mechanics — what to type and when — and points here for the
-# reasoning behind every timing it carries. A re-record starts by editing this file, not the tape.
+# This file is the whole clip: what the recorder does at each beat (`do`), how long the beat lasts
+# in the render (`duration`, `zoom`), and what a keeper take must show (`expect`). `why` and
+# `notes` carry the reasoning behind every choice, so a re-record starts by editing this file.
 #
-# Read by humans and by `demorig` (`make demorig`): `lint` checks the schema, `beats` locates
-# each beat in a raw take from the saved session, `check` judges the take, `render` cuts the GIF.
-# The schema is documented in ../README.md, "Storyboards".
+# Read by `demorig` (`make demorig`): `lint` checks the schema, `capture` records a take against a
+# live model and saves its replies as the cassette, `record` replays the cassette into apogee and
+# checks the take, `render` cuts the GIF from the take. The schema is documented in ../README.md,
+# "Storyboards".
+#
+# Every on-screen minus the TUI draws in a diffstat is U+2212 (−), never an ASCII hyphen, and every
+# pattern below spells it so.
 
 clip: hero
-tape: ../tapes/hero.tape         # relative to this storyboard file's own directory
-ship: ../../demo.gif             # likewise
-frame: {width: 1250, scale: 2, fps: 24, max_colors: 192}
-# first_prompt_at is the VIDEO time of the first prompt's Enter, fixed by the tape's head: VHS records
-# from `Show`; launch Enter at 1.775s (Sleep 500ms + 775ms typing + Sleep 500ms), + Sleep 4s + 3.382s
-# prompt typing (type.sh GOLDEN_TOTALS_MS) + Sleep 800ms. Re-derive when the head or the typing profile changes.
-align: {scene_threshold: 0.4, first_prompt_at: 9.96s}
-paint_lag: 300ms                 # commit→paint only: a session entry's `at` is stamped at commit, the frame paints this much later
-regions: {edit-card: [0, 0.45, 1, 0.55]}                      # fractional x,y,w,h of the frame
-# The "nothing reverted" proof for beat 7: the stage repo still carries the fix (and the CHANGELOG
-# entry) after the take. It is the only proof there is — the /undo preview is committed live and
-# never persisted (internal/tui/undo.go noteRevert), so no session entry can vouch for it.
+ship: ../../demo.gif             # relative to this storyboard file's own directory
+cassette: hero.cassette          # likewise; written by `demorig capture`, replayed by `demorig record`
+fonts: ../fonts                  # likewise
+# 135 × 44 cells rasterize to ≈ 2494 × 1648 px at scale 2 (≈ 1.5 : 1); the render downscales to a
+# 1250-wide GIF, so a zoom has ≥2× of real pixels to draw on.
+frame: {cols: 135, rows: 44, padding: 32, font_size: 30, line_height: 1.2, scale: 2, width: 1250, fps: 24, max_colors: 192}
+# The fix and the CHANGELOG entry are still in the stage repo after the take: nothing reverted them.
 expect: {stage: dirty}
 
 beats:
   - id: 1
-    title: the clip opens already inside apogee, footer shows auto
-    why: no dead air; OS-confined Auto is a README pillar
-    tape: beat 1
-    anchor: {video: first-paint}                                # the shell→TUI scene change; the head before it is trimmed
-    frame: {hold: 1s}
+    title: the clip opens inside apogee, footer shows ask before
+    why: no dead air — the take starts at apogee's first paint, so there is no shell launch to cut
+    do:
+      - wait: {screen: "◐ ask before", timeout: 30s}
+    duration: 2s
     notes: |
-      The launch (`apogee --mode auto` typed into the shell) is recorded and cut: the GIF starts
-      on the TUI's first paint. The footer carries the server alias, the model id and
-      `~/Repos/taskman` for the whole clip, so all three are chosen deliberately (README, "Quick
-      start" and "How the isolation works").
+      apogee starts in its default mode, ask before, so the next beat has something to change.
+      The footer carries the server alias, the model id and `~/Repos/taskman` for the whole clip
+      (setup.sh chooses all three), so all three are on camera deliberately.
 
   - id: 2
-    title: the prompt — one natural sentence, no flags
-    why: one sentence and no ceremony is the whole pitch of a coding agent
-    tape: beat 2
-    anchor: {kind: user}                                        # the first user entry; its `at` is the alignment pin
-    frame: {speed: 1}
-    expect: [{contains: "the test suite is failing"}]
+    title: click the mode marker, pick Auto — confined
+    why: OS-confined Auto is a README pillar, and the mouse works
+    do:
+      - click: {target: {text: "◐ ask before", area: footer}}
+      - pause: {for: 400ms}
+      - click: {target: {text: "⏵⏵ auto"}, times: 2}
+      - wait: {screen: "auto · confined", timeout: 5s}
+    duration: 3s
+    expect: [{seen: "auto · confined"}]
     notes: |
-      The typing is humanized (gen.sh + type.sh) and runs 3.382s; the tape's `Sleep 800ms` after
-      it is the beat the eye needs before Enter. This entry's `at` is pinned to
-      `align.first_prompt_at`, and every later session anchor maps through that offset.
+      The switch happens BEFORE the prompt on purpose: a sub-agent keeps the mode it was spawned
+      in (ADR 0013), so a switch made after the fan-out would leave the children gated. The click
+      on the footer marker opens the mode picker; the picker row is clicked twice — the first
+      click lands the picker's cursor on it, the second picks it. The word after the marker is
+      Auto's blast radius on this host (confinementWord, internal/tui/model.go): a take that shows
+      `unconfined` or `gated` is recorded on a host that cannot fence, and is not a keeper.
 
   - id: 3
-    title: tool cards stream, the first go test comes back red
-    why: the agentic loop is real — it runs the tests itself and sees them fail
-    tape: beat 3
-    anchor: {kind: toolCall, tool: Tests}                       # first Tests card; its stat reads FAIL on a keeper
-    frame: {speed: 1.5}
-    expect: [{contains: FAIL}]
+    title: the prompt — one natural sentence, no flags
+    why: one sentence and no ceremony is the whole pitch of a coding agent
+    do:
+      - type: {text: "tests are failing — send a sub-agent to find out why, then fix it"}
+      - pause: {for: 600ms}
+      - key: {name: enter}
+    duration: 4s
     notes: |
-      The model reproduces the failure with a red `go test` before fixing in roughly 3 of 8 takes
-      (2026-08-24 tally); the other takes fix on sight and only run the tests green afterwards,
-      which loses the red→green arc. Judge every take on this beat before rendering.
+      The typing is humanized (cmd/demorig/typing.go); the pause before Enter is the beat the eye
+      needs to read the sentence. The sentence asks for a sub-agent by name so the fan-out in the
+      next beat is the model doing what it was told, not a coincidence.
 
   - id: 4
-    title: the interjection — typed while cards still stream, visibly queued
-    why: the headline UX — type while it works; delivered at the next tool boundary
-    tape: beat 4
-    anchor: {beat: 2, offset: 10.3s}                            # the interjection's Enter: Sleep 8s + 1.791s typing + Sleep 500ms
-    frame: {hold: 1.5s}
-    expect: [{entry: {kind: interjected}, before: 6}]
+    title: the sub-agent fan-out
+    why: delegation is visible — a child run with its own tool calls, summarized in the parent
+    do:
+      - wait: {screen: "Sub-Agent", timeout: 90s}
+      - wait: {screen: "tool calls", timeout: 90s}
+    duration: 4s
+    expect: [{entry: {kind: toolCall, tool: Sub-Agent}, contains: Sub-Agent}]
     notes: |
-      KNOB 1 in the tape is the `Sleep 8s` before this beat's typing. It must land while tool
-      cards are still streaming, which is what makes it visibly QUEUED (`thinking · 3s · 1 queued`
-      with the pending row above the input box) rather than an ordinary next turn. Against
-      OpenRouter deepseek-v4-flash the exchange runs ~19–29s end to end, so submitting at ~10.3s
-      after the prompt's Enter lands mid-stream with margin on both sides; the old 18s was tuned
-      for a local model and fired AFTER the exchange had closed. The tell is the session JSON:
-      the entry reads `user` instead of `interjected` on a miss, and `/undo` then covers only the
-      CHANGELOG write. Retune when the model's pace changes; the anchor offset is 8s + the
-      generated typing total (type.sh GOLDEN_TOTALS_MS, `type.sh --check` pins it) + 500ms —
-      re-derive it when the tape or the typing profile changes.
-
-      The anchor is a beat offset, not a session entry, because the `interjected` entry is
-      stamped at DELIVERY (transcript.go addInterjected), not at the keypress. Delivery happens at
-      the Step boundary AFTER the fix's Replace card paints (worker.go stepToBoundary →
-      deliverInterjections), which is why the expect says `before: 6` and never `before: 5`.
-      Hit rate: the interjection lands mid-run in about 6 of 8 takes.
-
-      Wording matters more than it looks: "also note the fix in the CHANGELOG" made the model
-      read CHANGELOG.md and then forget to write it. The imperative form lands it first try.
+      The wait is on the card label `Sub-Agent`, never on its `✦` lead: the lead blinks while the
+      child runs, so a screen can miss it. `tool calls` is the member row's summary
+      (subAgentSummaryLine, internal/tui/subagentblock.go), painted once the child has made at
+      least two calls. The expect selects the card by its label — `tool:` prefix-matches the
+      card's label, and the label is `Sub-Agent`, not the tool name `sub_agent`.
 
   - id: 5
-    title: the fix lands — split diff on camera
-    why: biggest visual upgrade since the last clip
-    tape: beat 5                                               # `# beat 5` section header in the tape
-    anchor: {kind: toolCall, tool: Replace, target: task.go}   # first match unless nth: N | last
-    frame: {hold: 4s, zoom: {region: edit-card, factor: 1.5, in: 400ms, hold: 2500ms, out: 400ms}, speed: 1.5}
-    expect: [{contains: "+1 −1"}]                              # U+2212, as the TUI spells it
+    title: a message typed while it works, visibly queued
+    why: the headline UX — type while it works; delivered at the next tool boundary
+    do:
+      - type: {text: "also add a CHANGELOG entry for the fix"}
+      - pause: {for: 500ms}
+      - key: {name: enter}
+      - wait: {screen: "⧖", timeout: 10s}
+    duration: 4s
+    expect: [{entry: {kind: interjected}, contains: CHANGELOG}]
     notes: |
-      Keep the card open and on screen; the PageDowns re-attach the viewport (layout.md).
-
-      KNOB 3 in the tape is the gesture that opens this card. Tool blocks paint COLLAPSED, always
-      (layout.md, "Collapsed and expanded blocks"), so the fix lands as one row — `Replace ↳
-      task.go … +1 −1 · +N more lines ▶` — and the split diff (two panes, tinted add/del bands)
-      paints only once something opens it. Nothing opens itself, so the tape does, with the
-      keyboard block cursor (⌥↑ then ⏎, blockcursor.go). The target is only right while the edit
-      is the MOST RECENT block — once the next tool call starts, ⌥↑ stands on that one instead.
-
-      WHAT THE TAPE WAITS ON, and the measurement behind it. This used to be a fixed ten-second
-      `Sleep` from the interjection's Enter, and a clock cannot track this beat: the window is the
-      gap between the fix's Replace card painting and the queued interjection being DELIVERED,
-      which is UNDER A SECOND, while against OpenRouter deepseek-v4-flash the run varies ~19s to
-      ~29s end to end and slides that window by ~8s. Measured hit rate with the Sleep: about one
-      take in seven, and both misses cost the take. Too LATE opens the CHANGELOG card instead
-      (`+3 −0 ▼` while task.go stays `+1 −1 · +8 more lines ▶`, and this beat has no split diff);
-      too EARLY (measured at 3s) leaves the block cursor nothing settled to stand on, the leading
-      ESC of the CSI is read alone, and the run is CANCELLED — the session JSON ends
-      `note: cancelled` with the stage tree clean. So the tape waits on the SCREEN instead
-      (`Wait+Screen@40s /\+1 −1/`): the fix card's own diffstat, which is exactly what tells that
-      card from the CHANGELOG one, and a timeout is a LOUD failure (vhs exits non-zero) where the
-      old miss was silent. The 40s sits well past the ~29s worst case.
-
-      A changed edit size means a changed pattern — here and in `expect` above: `+1 −1` is this
-      fix's diffstat spelled with the table's typographic minus U+2212 (diffCounts,
-      internal/tui/toolview.go). Reseed the bug, or let the model fix it differently, and both
-      must be re-derived from the new card.
+      Typed while the fan-out still runs, so the message is QUEUED (the `⧖` staged row above the
+      prompt box) rather than an ordinary next turn. The tell of a miss is the session: the entry
+      reads `user` instead of `interjected`. Wording matters more than it looks: "also note the
+      fix in the CHANGELOG" made the model read CHANGELOG.md and then forget to write it; the
+      imperative form lands it first try.
 
   - id: 6
-    title: the CHANGELOG entry lands and go test runs green
-    why: red → green closes the arc, and the interjection provably mattered
-    tape: beat 6
-    anchor: {kind: toolCall, tool: Tests, nth: last}            # the closing Tests card; PASS on a keeper
-    frame: {speed: 1.25}
-    expect: [{contains: PASS}, {after: 5}]
+    title: click into the sub-agent's run view and back
+    why: every child run is inspectable — one click in, one click out
+    do:
+      - click: {target: {text: "┕ .*tool calls", nth: last, area: transcript}}
+      - wait: {screen: "← main ›", timeout: 5s}
+      - pause: {for: 2500ms}
+      - click: {target: {text: "← main ›"}}
+      - wait: {screen: "← main ›", gone: true, timeout: 5s}
+    duration: 6s
+    zoom: {target: {text: "← main ›"}, factor: 1.5}
     notes: |
-      KNOB 2 in the tape is the `Sleep 12s` that covers this beat: it must outlast the run's
-      tail. Undershooting costs the take — `/undo` typed while the run is still going is QUEUED
-      as a message instead of executing, and beat 7 is gone. It counts from AFTER the knob-3
-      gesture (its Escape, not the interjection's Enter), so it measures what is left of the tail
-      — the CHANGELOG write and the closing green `go test` — not the whole run. Against
-      OpenRouter deepseek-v4-flash that tail measures ~3s, so 12s overshoots ~4×. Overshoot is
-      NOT free: every idle second here is dead air in the middle of the clip unless the render
-      cuts it (the old 45s left ~27s of it). Give it margin for a slow take, not an unbounded
-      cushion.
+      The member row (`┕ … tool calls`, the LAST one on screen — the newest run) opens the run
+      view; its header band reads `← main › <run>`, and clicking the band goes back up. The zoom
+      pushes into the band while the view is open, so the reader sees where they are.
 
   - id: 7
-    title: /undo previews the exchange's writes — Esc, nothing reverted
-    why: preview only — "you're always in control" — the fix stays
-    tape: beat 7
-    anchor: {video: end, offset: -6.5s}                         # the tape's fixed tail: /undo Enter → 4s → Escape → 2s
-    frame: {hold: 3s}
+    title: the fix lands — the Replace card opened by a click, split diff on camera
+    why: the split diff is the biggest visual upgrade since the last clip
+    do:
+      - wait: {screen: "\\+1 −1", timeout: 120s}
+      - click: {target: {text: "\\+1 −1", nth: last, area: transcript}}
+      - pause: {for: 2500ms}
+      - key: {name: pgdown, repeat: 4}
+    duration: 6s
+    expect: [{entry: {kind: toolCall, tool: Replace, target: task.go}, contains: "+1 −1"}]
     notes: |
-      Bare `/undo` PREVIEWS and changes nothing: the preview is a plain transcript note listing
-      every path the exchange wrote — task.go and CHANGELOG.md together, because an interjection
-      joins the Exchange it steered instead of opening a new undo group (ADR 0025, ADR 0051).
-      Nothing here is modal, so there is nothing to dismiss; the Escape is the "walked away, kept
-      the fix" gesture. The note is never persisted (internal/tui/undo.go noteRevert), so this
-      beat is a video anchor off the tape's fixed tail and carries no session expect; the
-      top-level `expect: {stage: dirty}` — `git -C <stage> diff --stat` still non-empty after
-      the take — is the proof. Never type `/undo confirm`: it would unfix the bug on camera.
+      Tool blocks paint COLLAPSED, always (layout.md, "Collapsed and expanded blocks"), so the fix
+      lands as one row — `Replace ↳ task.go … +1 −1 …` — and the split diff paints only once
+      something opens it. The click toggles that row open. A toggle keeps the toggled row where it
+      is on screen, which detaches the viewport from the live tail; the PageDowns re-attach it
+      (layout.md), or every later beat paints below the fold. Extra presses clamp at the bottom and
+      cost nothing.
+
+      `+1 −1` is this fix's diffstat as the TUI spells it (diffCounts, internal/tui/toolview.go). A
+      changed edit size means a changed pattern — here and in the expect: re-derive both from the
+      new card when the planted bug or the model's fix changes.
 
   - id: 8
+    title: zoom on the context gauge
+    why: the gauge says how full the window is — a small-model pillar
+    do:
+      - wait: {screen: "\\d+(\\.\\d)?[kMG]?/\\d+(\\.\\d)?[kMG] \\d+%", timeout: 30s}
+      - pause: {for: 2s}
+    duration: 3s
+    zoom: {target: {text: "\\d+(\\.\\d)?[kMG]?/\\d+(\\.\\d)?[kMG] \\d+%", area: status}, factor: 2}
+    notes: |
+      The gauge is the status line's right slot (layout.md, "The status line's right slot"): used
+      out of the window, then the fill. The pattern follows layout.md, "How a size is spelled" —
+      a bare count below a thousand, one decimal below ten of a unit.
+
+  - id: 9
+    title: the CHANGELOG entry lands and the tests run green
+    why: red → green closes the arc, and the queued message provably mattered
+    do:
+      - wait: {screen: "PASS", timeout: 120s}
+      - pause: {for: 1s}
+    duration: 4s
+    expect:
+      - {entry: {kind: toolCall, target: CHANGELOG.md}, after: 5}
+      - {entry: {kind: toolCall, tool: Tests, nth: last}, contains: PASS}
+    notes: |
+      The CHANGELOG edit must come after the queued message was delivered (beat 5's entry), or the
+      message did nothing. The closing Tests card's stat is the bare verdict (testVerdictStat,
+      internal/tui/toolregistry.go), so a green run reads PASS.
+
+  - id: 10
     title: hold on the final frame
     why: loop-read comfort
-    tape: beat 8
-    anchor: {video: end}
-    frame: {hold: 2s}
+    do:
+      - pause: {for: 2s}
+    duration: 3s
     notes: |
-      The tape's closing `Sleep 2s` plus this hold is what the eye gets before the GIF loops.
+      The render freezes the last frame for whatever this beat's recording runs short of its
+      duration, so the eye gets a still frame before the GIF loops.

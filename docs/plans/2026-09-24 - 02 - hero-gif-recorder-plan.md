@@ -253,7 +253,13 @@ cmd/demorig/anchors.go — findEntry; graphics/demo/record.sh — check/render c
 **Acceptance.** `go test -race -count=1 ./cmd/demorig/ && go vet ./cmd/demorig/ && ! ls cmd/demorig/filtergraph.go cmd/demorig/align.go 2>/dev/null`
 **Commit:** `feat(demorig)!: render and check from the take; retire the VHS alignment pipeline`
 
-## 13. The hero v2 storyboard and rig scripts
+## 13. The hero v2 storyboard and rig scripts — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): re-derived from the v2 loader being named `LoadV2` — it is `Load` in cmd/demorig/storyboard.go; TestLoadHeroStoryboard calls that.
+NOTES (2026-09-25): beat 4's expect is `{entry: {kind: toolCall, tool: Sub-Agent}, contains: Sub-Agent}` and beat 5's `{entry: {kind: interjected}, contains: CHANGELOG}` — the validator requires an entry expect to carry contains/before/after, so the bare-entry forms in the guard would not lint.
+NOTES (2026-09-25): beat 9 puts `after: 5` on the CHANGELOG edit (`{entry: {kind: toolCall, target: CHANGELOG.md}, after: 5}`) and `contains: PASS` on the last Tests card, per the Regression guard in place of the Goal's `ok`.
+NOTES (2026-09-25): setup.sh drops the APOGEE_DEMO_ENDPOINT and APOGEE_DEMO_KEY_ENV overrides (the entry is keyless at http://127.0.0.1:<port>), adds APOGEE_DEMO_PORT (default 18181), writes `PORT=` to rig.env, and drops env.sh's trailing `clear` (a VHS-era screen wipe; demorig sources env.sh to /dev/null). reset.sh needed no change and is not in FILES.
+NOTES (2026-09-25): graphics/demo/README.md still describes the VHS pipeline and the retired scripts — item 15 rewrites it.
 
 **What.** Depends on item 12.
 **Goal:** `graphics/demo/storyboards/hero.yaml` encodes the ratified ten-beat scenario (header "Scenario") with durations 2, 3, 4, 4, 4, 6, 6, 3, 4, 3 s, and `demorig lint` passes on it. Targets: footer `◐ ask before`; picker row `⏵⏵ auto` clicked twice; wait `auto · confined`; wait `Sub-Agent` (no ✦ — it blinks) and `tool calls`; queued `⧖`; the sub-agent member row `┕ .*tool calls` (last); the run-view band `← main ›` (zoom, then click it to go back); the Replace row matched on `\+1 −1` (last) opened by click, then the viewport re-attached to the live tail as `layout.md` prescribes; gauge `\d+k/\d+k \d+%` (area status). Expects: beat 2 `seen: auto · confined`; beat 4 a `toolCall` `sub_agent` entry; beat 5 an `interjected` entry; beat 7 `contains: "+1 −1"`; beat 9 a CHANGELOG edit `after: 5` and `go test` output containing `ok`; stage dirty. `setup.sh` writes a keyless server entry at `http://127.0.0.1:<port>` with `parallel-agents: 4` pinned and the model id and alias unchanged, writes the port to `rig.env`, and no longer checks for `vhs`. `record.sh`, `gen.sh`, `type.sh` and `tapes/` are deleted.
