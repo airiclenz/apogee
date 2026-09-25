@@ -123,6 +123,50 @@ func TestRecordTakeStartsAtFirstPaint(t *testing.T) {
 	}
 }
 
+// TestRecordTakeEndsApogeeByQuitting pins how a take ends: apogee is quit, not killed, so a session
+// it saves on the way out is on disk before the check reads it — and what it paints on the way out
+// never reaches the take. The fake apogee saves its session only when it is interrupted, the way
+// apogee's ⌃c⌃c flushes; a take that killed it would find no session.
+func TestRecordTakeEndsApogeeByQuitting(t *testing.T) {
+	t.Parallel()
+	work := t.TempDir()
+	writeFakeRig(t, work, "#!/bin/sh\n:\n", freePort(t))
+	r, err := openRig(work)
+	if err != nil {
+		t.Fatalf("openRig: %v", err)
+	}
+	session := filepath.Join(r.sessionsDir(), "take.json")
+	bin := filepath.Join(work, "bin")
+	writeRigFile(t, filepath.Join(bin, "apogee"), "#!/bin/sh\n"+
+		"trap 'trap \"\" INT; sleep 0.2; mkdir -p "+shellQuote(r.sessionsDir())+"; "+
+		"echo {} > "+shellQuote(session)+"; printf \"\\033[2J\\033[Hgoodbye\"; exit 0' INT\n"+
+		"printf '\\033[?1049h\\033[2J\\033[Hpainted'\nwhile :; do sleep 0.05; done\n")
+	if err := os.Chmod(filepath.Join(bin, "apogee"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeRigFile(t, filepath.Join(work, "env.sh"), "export PATH="+shellQuote(bin)+":$PATH\n")
+	board := &Storyboard{
+		Clip:  "tiny",
+		Frame: Frame{Cols: 40, Rows: 5, FPS: 30},
+		Beats: []Beat{{ID: 1, Title: "open", Do: []Action{
+			{Wait: &WaitAction{Screen: "painted", Timeout: 5 * time.Second}},
+		}}},
+	}
+
+	take, err := runTake(context.Background(), board, r, http.NotFoundHandler(), io.Discard)
+	if err != nil {
+		t.Fatalf("runTake: %v", err)
+	}
+	if _, err := os.Stat(session); err != nil {
+		t.Errorf("the session apogee saves on quitting is not on disk after the take: %v", err)
+	}
+	for i, snap := range take.Snapshots {
+		if row := rowText(snap, 0); strings.Contains(row, "goodbye") {
+			t.Errorf("snapshot %d at %s shows what apogee painted on its way out: %q", i, snap.At, row)
+		}
+	}
+}
+
 // writeFakeRig lays out a work dir openRig accepts: env.sh, the given reset.sh and a rig.env
 // naming port.
 func writeFakeRig(t *testing.T, work, reset string, port int) {

@@ -32,6 +32,21 @@ const rigPortKey = "PORT"
 // firstPaintTimeout bounds how long a take waits for apogee's first paint after launch.
 const firstPaintTimeout = 30 * time.Second
 
+// How a take ends apogee (endTake). settleQuiet is how long apogee must have painted nothing
+// before it counts as idle — its spinner animates while a turn is in flight — and settleTimeout
+// bounds that wait. quitTimeout bounds the wait for apogee to exit once asked, after which it is
+// killed.
+const (
+	settleQuiet   = time.Second
+	settleTimeout = 15 * time.Second
+	quitTimeout   = 10 * time.Second
+)
+
+// quitKeys is apogee's clean quit, ⌃c⌃c: the first press arms it, the second — well inside the
+// one-second window — confirms it. A clean quit flushes the session to disk before it exits, and
+// on a busy apogee stops the turn first and flushes what it had.
+var quitKeys = [][]byte{{0x03}, {0x03}}
+
 // serverShutdownTimeout bounds how long the model source is given to finish its in-flight
 // replies once the take has ended.
 const serverShutdownTimeout = 5 * time.Second
@@ -286,7 +301,21 @@ func runTake(ctx context.Context, board *Storyboard, r rig, handler http.Handler
 		return nil, err
 	}
 	runErr := performBeats(ctx, term, board.Beats)
-	return term.Close(), runErr
+	return endTake(ctx, term), runErr
+}
+
+// endTake ends the take after the last beat and returns it. The take is frozen first, so the way
+// out never reaches the clip; then apogee is given the chance to finish what is in flight and is
+// quit the way a person quits it, so the session is on disk — its last entry included — before
+// the check reads it. Killing it outright, as Close does, could land between a reply reaching the
+// screen and the session saving it. An apogee that will not quit is killed after quitTimeout.
+func endTake(ctx context.Context, term *Terminal) *Take {
+	term.Freeze()
+	if ctx.Err() == nil {
+		term.Settle(ctx, settleQuiet, settleTimeout)
+		term.Quit(quitKeys, keyRepeatGap, quitTimeout)
+	}
+	return term.Close()
 }
 
 // ambientApogeeEnv are the APOGEE_* variables that would steer the apogee a take launches away

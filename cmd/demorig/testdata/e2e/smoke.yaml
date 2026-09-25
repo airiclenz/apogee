@@ -35,11 +35,11 @@ beats:
       - type: {text: "why are the tests failing?"}
       - key: {name: enter}
       - wait: {screen: "one task short", timeout: 60s}
-      - pause: {for: 2s}
     duration: 3s
     expect:
       - {entry: {kind: toolCall, tool: Read, target: task.go}, contains: Read}
       - {entry: {kind: assistant}, contains: one task short}
     notes: |
-      The pause is the hold the hero's last beat has too: a take ends by killing apogee, and the
-      reply is on screen while it streams, before the session has saved the assistant entry.
+      No hold after the wait: a take ends by quitting apogee once it has gone idle, and the quit
+      flushes the session, so the assistant entry is saved even though the reply was on screen
+      before it was.

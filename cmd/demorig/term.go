@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -89,6 +90,10 @@ type Terminal struct {
 	// closes when it has (at once for a take that records from launch).
 	awaitingPaint bool
 	painted       chan struct{}
+	// frozen is true once [Terminal.Freeze] has ended the take: from then on nothing reaches it.
+	frozen bool
+	// lastOutput is when the program last wrote anything — what [Terminal.Settle] waits on.
+	lastOutput time.Time
 
 	// writeMu serialises the two writers of the master — the rig's input and the emulator's
 	// replies — so a reply cannot be spliced into the middle of a key's byte sequence.
@@ -146,6 +151,7 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 	}
 	t.cmd, t.master = cmd, master
 	t.start = time.Now()
+	t.lastOutput = t.start
 	t.take = &Take{Cols: opts.Cols, Rows: opts.Rows, FPS: opts.FPS, Started: t.start.UTC().Round(0)}
 	if !opts.FromFirstPaint {
 		t.mu.Lock()
@@ -176,6 +182,9 @@ func (t *Terminal) Send(p []byte) error {
 func (t *Terminal) Event(kind, detail string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.frozen {
+		return
+	}
 	t.take.Events = append(t.take.Events, TakeEvent{At: time.Since(t.start), Kind: kind, Detail: detail})
 }
 
@@ -199,11 +208,77 @@ func (t *Terminal) Match(match func(Snapshot) bool) bool {
 	if !match(screen) {
 		return false
 	}
-	if !t.awaitingPaint {
+	if !t.awaitingPaint && !t.frozen {
 		t.dirty = false
 		t.take.addSnapshot(screen)
 	}
 	return true
+}
+
+// Freeze ends the take where it stands: the screen is recorded one last time if it changed since
+// the last sample, and from then on no snapshot or event reaches the take, though the program
+// keeps running and its output is still read. What a program paints on its way out — a quit hint,
+// its restored primary screen — is how the recording ended, not part of the clip.
+func (t *Terminal) Freeze() {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.dirty && !t.awaitingPaint {
+		t.sampleLocked(time.Since(t.start))
+	}
+	t.frozen = true
+}
+
+// Settle waits until the program has written nothing for quiet, and reports whether it did so —
+// or exited — within timeout. A program with work in flight is seldom silent that long: a TUI
+// animates while it is busy and goes still when it is idle.
+func (t *Terminal) Settle(ctx context.Context, quiet, timeout time.Duration) bool {
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	poll := time.NewTicker(waitPollInterval)
+	defer poll.Stop()
+	for {
+		t.mu.Lock()
+		silent := time.Since(t.lastOutput)
+		t.mu.Unlock()
+		if silent >= quiet {
+			return true
+		}
+		select {
+		case <-poll.C:
+		case <-t.exited:
+			return true
+		case <-deadline.C:
+			return false
+		case <-ctx.Done():
+			return false
+		}
+	}
+}
+
+// Quit asks the program to exit by sending each of keys as input, gap apart, and reports whether
+// it exited within timeout of the last. A program already gone reports true at once.
+func (t *Terminal) Quit(keys [][]byte, gap, timeout time.Duration) bool {
+	for index, key := range keys {
+		select {
+		case <-t.exited:
+			return true
+		default:
+		}
+		if index > 0 {
+			time.Sleep(gap)
+		}
+		if t.Send(key) != nil {
+			break // the program closed its input on the way out; wait for the exit below
+		}
+	}
+	deadline := time.NewTimer(timeout)
+	defer deadline.Stop()
+	select {
+	case <-t.exited:
+		return true
+	case <-deadline.C:
+		return false
+	}
 }
 
 // Painted closes at the program's first paint when the take records from it, and is already
@@ -221,7 +296,8 @@ func (t *Terminal) ExitCode() int {
 }
 
 // Close ends the recording and returns the take. A program still running is killed with its whole
-// process group; whatever it painted before it went is flushed into the take first. Close waits for
+// process group — [Terminal.Quit] is the gentle way out, Close the sure one; whatever it painted
+// before it went is flushed into the take first, unless [Terminal.Freeze] ended the take earlier. Close waits for
 // every goroutine the terminal started, and a second call returns the same take.
 func (t *Terminal) Close() *Take {
 	t.closing.Do(func() {
@@ -268,7 +344,8 @@ func (t *Terminal) pumpOutput() {
 			t.mu.Lock()
 			_, _ = t.emu.Write(buf[:n])
 			t.dirty = true
-			if t.awaitingPaint && t.emu.IsAltScreen() && t.screenDrawnLocked() {
+			t.lastOutput = time.Now()
+			if t.awaitingPaint && !t.frozen && t.emu.IsAltScreen() && t.screenDrawnLocked() {
 				t.startAtPaintLocked()
 			}
 			t.mu.Unlock()
@@ -346,6 +423,9 @@ func (t *Terminal) sample() {
 // sampleLocked adds the current screen to the take unless it matches the last snapshot. The caller
 // holds mu.
 func (t *Terminal) sampleLocked(at time.Duration) {
+	if t.frozen {
+		return
+	}
 	t.dirty = false
 	t.take.addSnapshot(t.snapshotLocked(at))
 }

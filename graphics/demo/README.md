@@ -79,7 +79,11 @@ first paint, and performs the beats in order. The terminal is emulated with
 take's clock (sampled no faster than `frame.fps`, identical grids collapsed), beside a log of what
 the rig did — each beat's start, each typed string, key and click, and the cell every target
 resolved to. That is the take file: the render draws from it and never goes back to apogee or the
-pty. The take starts at apogee's first paint, so there is no shell launch to trim.
+pty. The take starts at apogee's first paint, so there is no shell launch to trim, and it ends
+with the last beat: the rig then waits for apogee to go idle (a second without a paint, at most
+15 s) and quits it with ⌃c⌃c, so the session is flushed to disk before the check reads it —
+killing apogee only if it has not exited 10 s later. Nothing apogee paints on its way out
+reaches the take.
 
 A beat whose action fails — a wait that times out, a click target not on screen — ends the take
 with that error; the take is still written, because it is what shows why, but it is not checked
