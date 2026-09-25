@@ -66,7 +66,8 @@ type BeatV2 struct {
 	Expect   []ExpectV2    `yaml:"expect"`
 }
 
-// ZoomV2 is a push into an on-screen target: Factor is the magnification, In and Out the ramps.
+// ZoomV2 is a push into an on-screen target: Factor is the magnification — absent (0), the
+// compositor fits it to the target — and In and Out the ramps, 400 ms each when absent.
 type ZoomV2 struct {
 	Target Target        `yaml:"target"`
 	Factor float64       `yaml:"factor"`
@@ -347,7 +348,8 @@ func (z ZoomV2) validate(report reporter) {
 	z.Target.validate(func(format string, args ...any) {
 		report("target."+format, args...)
 	})
-	if z.Factor < minZoomFactor || z.Factor > maxZoomFactor {
+	// An absent factor is auto-fit by the compositor.
+	if z.Factor != 0 && (z.Factor < minZoomFactor || z.Factor > maxZoomFactor) {
 		report("factor: want in [%d, %d], got %g", minZoomFactor, maxZoomFactor, z.Factor)
 	}
 	if z.In < 0 {
