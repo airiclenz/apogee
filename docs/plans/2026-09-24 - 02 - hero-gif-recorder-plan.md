@@ -206,7 +206,9 @@ graphics/demo/tapes/hero.tape — FontSize/Padding/Theme; go.mod — require blo
 **Acceptance.** `go test -count=1 -run TestRaster ./cmd/demorig/ && go build ./cmd/demorig/`
 **Commit:** `feat(demorig): rasterize takes with Source Code Pro and procedural box glyphs`
 
-## 10. demorig: section timing — durations to a frame schedule
+## 10. demorig: section timing — durations to a frame schedule — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): the take has no explicit end marker, so the last beat ends at the later of the take's last snapshot and its last event (`takeEnd`). Source → output also reports absent before the first beat's start (the launch head is not in the clip), in addition to inside cut beats.
 
 **What.** Recast at the regression check (2026-09-24). Depends on item 6.
 **Goal:** a pure function maps a take's beat boundaries and each beat's `duration`/`hold`/`cut` to an output frame schedule (output time → source time): a beat of real length L, hold H, target D plays 1× for H then at speed (L−H)/(D−H); when L ≤ D it plays 1× and freezes its last frame for D−L; `cut` beats vanish; the clip's total length equals the sum of the non-cut durations to within one frame. A speed above 6× is reported as a warning naming the beat.
