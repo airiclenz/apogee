@@ -149,7 +149,13 @@ cmd/demorig/testdata — bad-expect-without-entry.yaml
 **Acceptance.** `go test -count=1 -run 'TestLoadV2' ./cmd/demorig/ && go vet ./cmd/demorig/`
 **Commit:** `feat(demorig)!: storyboard v2 — actions, targets and section durations`
 
-## 7. demorig: the action engine — targets, real clicks, waits
+## 7. demorig: the action engine — targets, real clicks, waits — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): engine.go carries no build tag — it uses only Terminal's Send/Event/Current/Done, which item 5's term_windows.go already stubs, so the `!windows` split lives in the test file alone (engine_test.go is `//go:build !windows`); `GOOS=windows go build` passes.
+NOTES (2026-09-25): `transcript` is defined as the rows above the `▔` top rule over the status line (the plan's "the rest"); a `footer`/`status`/`transcript` target on a screen without the floor hairline, prompt box or top rule fails the action rather than falling back to another row.
+NOTES (2026-09-25): a click lands on the centre cell of the resolved match box; the key bytes and SGR reports reuse internal/tuitest's Key constants and Click/Release, so there is one spelling of each. Unknown key names fail at run time — LoadV2 (item 6) does not validate key names.
+NOTES (2026-09-25): every key press is followed by a 100 ms gap (above Bubble Tea's 50 ms escape timeout) so an esc is never read glued to the next write as alt+<key>; typing and click pacing come from the item's own numbers.
+NOTES (2026-09-25): the fake TUI is the re-executed test binary via a helper test `TestFakeTUIHelper` (skips unless DEMORIG_FAKE_TUI is set), put in raw mode with charmbracelet/x/term MakeRaw; the events test compares the input byte stream rather than read boundaries, since a loaded box coalesces unpaced writes.
 
 **What.** Depends on items 4, 5, 6.
 **Goal:** a storyboard's beats run against a live session: `type` sends humanized keystrokes (item 4); `key` sends the named key; `click` resolves its target on the current snapshot and writes an SGR press `ESC[<0;col+1;row+1M` then release `…m` (≥ 40 ms apart, `times` pairs ≥ 250 ms apart); `wait` blocks until the regex matches (or, with `gone`, no longer matches) or fails the beat at its timeout. Every beat start, action start/end, click cell and resolved target box (cells) is appended to the take's event log.
