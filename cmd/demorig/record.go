@@ -22,15 +22,10 @@ import (
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
-// The rig's layout, as graphics/demo/setup.sh builds it. The work dir defaults to
-// ~/.cache/apogee-demo and follows APOGEE_DEMO_WORK, exactly as the rig's scripts resolve it.
-const (
-	workDirEnv     = "APOGEE_DEMO_WORK"
-	defaultWorkDir = ".cache/apogee-demo"
-	// rigPortKey is the rig.env key naming the port apogee's configured server listens on — the
-	// port a take's cassette proxy or replayer is bound to on 127.0.0.1.
-	rigPortKey = "PORT"
-)
+// rigPortKey is the rig.env key naming the port apogee's configured server listens on — the
+// port a take's cassette proxy or replayer is bound to on 127.0.0.1. The rig's work dir itself
+// is resolved by [workDir].
+const rigPortKey = "PORT"
 
 // firstPaintTimeout bounds how long a take waits for apogee's first paint after launch.
 const firstPaintTimeout = 30 * time.Second
@@ -51,7 +46,7 @@ func newRecordCommand() *cobra.Command {
 			"status. The take starts at apogee's first paint.",
 		Args: cobra.ExactArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			board, err := LoadV2(args[0])
+			board, err := Load(args[0])
 			if err != nil {
 				return err
 			}
@@ -85,7 +80,7 @@ func newCaptureCommand() *cobra.Command {
 			"The take and the check follow as for record.",
 		Args: cobra.ExactArgs(1),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			board, err := LoadV2(args[0])
+			board, err := Load(args[0])
 			if err != nil {
 				return err
 			}
@@ -158,16 +153,10 @@ type rig struct {
 
 // openRig resolves the work dir — the flag, else APOGEE_DEMO_WORK, else ~/.cache/apogee-demo —
 // and checks it holds a built rig with a port to serve the model on.
-func openRig(work string) (rig, error) {
-	if work == "" {
-		work = os.Getenv(workDirEnv)
-	}
-	if work == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return rig{}, fmt.Errorf("resolve the rig's work dir: %w", err)
-		}
-		work = filepath.Join(home, defaultWorkDir)
+func openRig(flag string) (rig, error) {
+	work, err := workDir(flag)
+	if err != nil {
+		return rig{}, err
 	}
 	r := rig{work: work}
 	for _, script := range []string{r.envScript(), r.resetScript()} {
@@ -191,7 +180,7 @@ func (r rig) sessionsDir() string { return filepath.Join(r.home(), ".apogee", "s
 func (r rig) addr() string        { return net.JoinHostPort("127.0.0.1", strconv.Itoa(r.port)) }
 
 // takePath is where a clip's take is written.
-func (r rig) takePath(clip string) string { return filepath.Join(r.work, clip+".take") }
+func (r rig) takePath(clip string) string { return takeFile(r.work, clip) }
 
 // readRigPort reads the PORT line of rig.env, the shell-sourced KEY=VALUE file setup.sh writes.
 func readRigPort(path string) (int, error) {
@@ -223,7 +212,7 @@ func readRigPort(path string) (int, error) {
 // file carrying that session's path, the model source's finish, and last the check, whose
 // status is the command's. A take whose beats failed is still written — it is what shows why —
 // but is neither finished nor checked.
-func recordClip(ctx context.Context, stdout, stderr io.Writer, board *StoryboardV2, r rig, source modelSource) error {
+func recordClip(ctx context.Context, stdout, stderr io.Writer, board *Storyboard, r rig, source modelSource) error {
 	if _, err := fmt.Fprintf(stderr, "recording %s …\n", board.Clip); err != nil {
 		return err
 	}
@@ -252,14 +241,14 @@ func recordClip(ctx context.Context, stdout, stderr io.Writer, board *Storyboard
 			return err
 		}
 	}
-	return judgeRecording(ctx, stdout, board, session, r.stage())
+	return judgeRecording(ctx, stdout, board, take, r.stage())
 }
 
 // runTake resets the stage, serves the model source on the rig's port, launches apogee under
 // env.sh in a pty at the storyboard's frame, waits for its first paint and performs every beat.
 // It returns the take whenever apogee was launched, together with the first thing that went
 // wrong; a nil take means nothing was recorded.
-func runTake(ctx context.Context, board *StoryboardV2, r rig, handler http.Handler, logs io.Writer) (*Take, error) {
+func runTake(ctx context.Context, board *Storyboard, r rig, handler http.Handler, logs io.Writer) (*Take, error) {
 	reset := exec.CommandContext(ctx, r.resetScript()) //nolint:gosec // the rig's own script
 	reset.Env = append(os.Environ(), workDirEnv+"="+r.work)
 	reset.Stdout, reset.Stderr = logs, logs
@@ -299,7 +288,7 @@ func runTake(ctx context.Context, board *StoryboardV2, r rig, handler http.Handl
 }
 
 // performBeats waits for the program's first paint, then runs the beats.
-func performBeats(ctx context.Context, term *Terminal, beats []BeatV2) error {
+func performBeats(ctx context.Context, term *Terminal, beats []Beat) error {
 	timeout := time.NewTimer(firstPaintTimeout)
 	defer timeout.Stop()
 	select {
@@ -346,14 +335,11 @@ func newestSession(dir string) (string, error) {
 // errChecksFailed is what a recording whose check found a FAIL row returns.
 var errChecksFailed = errors.New("expect(s) failed")
 
-// judgeRecording checks the take's saved session against the storyboard's expects and the stage,
-// printing the check table to w and failing when any row fails.
-func judgeRecording(ctx context.Context, w io.Writer, board *StoryboardV2, session, stage string) error {
-	entries, err := loadEntries(session)
-	if err != nil {
-		return err
-	}
-	rows, err := checkTake(ctx, checkBoardOf(board), entries, stage)
+// judgeRecording checks the take — the session it saved and the screens it recorded — against
+// the storyboard's expects and the stage, printing the check table to w and failing when any row
+// fails.
+func judgeRecording(ctx context.Context, w io.Writer, board *Storyboard, take *Take, stage string) error {
+	rows, err := checkTake(ctx, board, take, stage)
 	if err != nil {
 		return err
 	}
@@ -364,33 +350,4 @@ func judgeRecording(ctx context.Context, w io.Writer, board *StoryboardV2, sessi
 		return fmt.Errorf("%d %w", failed, errChecksFailed)
 	}
 	return nil
-}
-
-// checkBoardOf restates a v2 storyboard as the storyboard checkTake judges. A v2 beat has no
-// anchor, so each beat is anchored on the entry its first expect selects — which is what a v2
-// expect's before/after orders against — and a beat without an expect on the take's first
-// paint, which judges nothing.
-func checkBoardOf(board *StoryboardV2) *Storyboard {
-	checked := &Storyboard{Path: board.Path, Clip: board.Clip, Ship: board.Ship, Expect: board.Expect}
-	for _, beat := range board.Beats {
-		b := Beat{ID: beat.ID, Title: beat.Title, Anchor: Anchor{Video: VideoFirstPaint}}
-		for _, expect := range beat.Expect {
-			entry := anchorOf(expect.Entry)
-			b.Expect = append(b.Expect, Expect{Entry: &entry, Contains: expect.Contains, Before: expect.Before, After: expect.After})
-		}
-		if len(b.Expect) > 0 {
-			b.Anchor = *b.Expect[0].Entry
-		}
-		checked.Beats = append(checked.Beats, b)
-	}
-	return checked
-}
-
-// anchorOf spells an entry selector as the session anchor it is; LoadV2 guarantees an expect
-// carries one.
-func anchorOf(selector *EntrySelector) Anchor {
-	if selector == nil {
-		return Anchor{}
-	}
-	return Anchor{Kind: selector.Kind, Text: selector.Text, Tool: selector.Tool, Target: selector.Target, Nth: selector.Nth}
 }

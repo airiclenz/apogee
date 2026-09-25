@@ -209,7 +209,7 @@ type Compositor struct {
 // NewCompositor plans the zooms and the cursor of a clip: board's frame gives the shipped width
 // and its beats the zooms, take the clicks and the snapshots targets resolve on, schedule the
 // output clock and layout where cells sit in a source frame.
-func NewCompositor(board *StoryboardV2, take *Take, schedule *Schedule, layout CellLayout) (*Compositor, error) {
+func NewCompositor(board *Storyboard, take *Take, schedule *Schedule, layout CellLayout) (*Compositor, error) {
 	if layout.Size.X <= 0 || layout.Size.Y <= 0 || layout.CellWidth <= 0 || layout.LineHeight <= 0 {
 		return nil, fmt.Errorf("compose: invalid cell layout %+v", layout)
 	}
@@ -336,7 +336,7 @@ func clickEvents(take *Take) ([]takeEngineEvent, error) {
 // planZooms plans every kept section's zoom: its target box, the factor given or auto-fit, and
 // its ramps — zero means defaultZoomRamp — shrunk in proportion when together they outrun the
 // section.
-func planZooms(board *StoryboardV2, take *Take, schedule *Schedule, layout CellLayout, events []takeEngineEvent) ([]zoomPlan, error) {
+func planZooms(board *Storyboard, take *Take, schedule *Schedule, layout CellLayout, events []takeEngineEvent) ([]zoomPlan, error) {
 	sections := make(map[int]Section, len(schedule.Sections))
 	for _, section := range schedule.Sections {
 		sections[section.Beat] = section
@@ -376,7 +376,7 @@ func planZooms(board *StoryboardV2, take *Take, schedule *Schedule, layout CellL
 // zoomBox finds the beat's zoom target: the box a click of the same beat resolved on the same
 // target, as the take logged it, else the target resolved on the beat's snapshots — the latest
 // one it is on, so the push lands where the beat settles.
-func zoomBox(beat BeatV2, section Section, take *Take, events []takeEngineEvent) (CellBox, error) {
+func zoomBox(beat Beat, section Section, take *Take, events []takeEngineEvent) (CellBox, error) {
 	for _, event := range events {
 		detail := event.Detail
 		if event.Kind != EventTarget || detail.Beat != beat.ID || detail.Box == nil ||

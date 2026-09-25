@@ -113,7 +113,7 @@ type Engine struct {
 func NewEngine(term *Terminal) *Engine { return &Engine{term: term} }
 
 // Run performs beats in order and stops at the first that fails, returning its *BeatError.
-func (e *Engine) Run(ctx context.Context, beats []BeatV2) error {
+func (e *Engine) Run(ctx context.Context, beats []Beat) error {
 	for _, beat := range beats {
 		if err := e.RunBeat(ctx, beat); err != nil {
 			return err
@@ -124,7 +124,7 @@ func (e *Engine) Run(ctx context.Context, beats []BeatV2) error {
 
 // RunBeat performs one beat's actions in order. A failing action ends the beat with a
 // *BeatError naming the beat and the action; its action-end event is then never logged.
-func (e *Engine) RunBeat(ctx context.Context, beat BeatV2) error {
+func (e *Engine) RunBeat(ctx context.Context, beat Beat) error {
 	e.logEvent(EventBeatStart, EngineEventDetail{Beat: beat.ID, Title: beat.Title})
 	for index, action := range beat.Do {
 		step := EngineEventDetail{Beat: beat.ID, Action: index, Form: actionForm(action)}

@@ -201,7 +201,7 @@ func beatStart(t *testing.T, at time.Duration, beat int) TakeEvent {
 
 func TestScheduleSpansFromTake(t *testing.T) {
 	t.Parallel()
-	board := &StoryboardV2{Beats: []BeatV2{
+	board := &Storyboard{Beats: []Beat{
 		{ID: 1, Duration: 2 * sec},
 		{ID: 2, Duration: 4 * sec, Hold: sec},
 		{ID: 3, Cut: true},

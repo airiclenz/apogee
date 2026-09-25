@@ -92,10 +92,10 @@ func TestRecordTakeStartsAtFirstPaint(t *testing.T) {
 	if err != nil {
 		t.Fatalf("openRig: %v", err)
 	}
-	board := &StoryboardV2{
+	board := &Storyboard{
 		Clip:  "tiny",
-		Frame: FrameV2{Cols: 40, Rows: 5, FPS: 30},
-		Beats: []BeatV2{{ID: 1, Title: "open", Do: []Action{
+		Frame: Frame{Cols: 40, Rows: 5, FPS: 30},
+		Beats: []Beat{{ID: 1, Title: "open", Do: []Action{
 			{Wait: &WaitAction{Screen: "painted", Timeout: 5 * time.Second}},
 			{Pause: &PauseAction{For: 100 * time.Millisecond}},
 		}}},
@@ -160,7 +160,7 @@ func freePort(t *testing.T) int {
 	return port
 }
 
-// tinyStoryboard is a one-beat v2 storyboard naming cassette.
+// tinyStoryboard is a one-beat storyboard naming cassette.
 func tinyStoryboard(cassette string) string {
 	return "clip: tiny\nship: tiny.gif\ncassette: " + cassette + "\nfonts: fonts\n" +
 		"frame: {cols: 40, rows: 5, padding: 0, font_size: 14, line_height: 1.2, scale: 1, width: 400, fps: 24, max_colors: 64}\n" +

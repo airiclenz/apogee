@@ -193,7 +193,7 @@ func (s *Schedule) Frames(fps int) []ScheduledFrame {
 // SpansFrom reads each storyboard beat's span out of the take: a beat starts at its beat-start
 // event and runs to the next beat's start, the last beat to the take's end. Every beat must
 // have started exactly once.
-func SpansFrom(board *StoryboardV2, take *Take) ([]BeatSpan, error) {
+func SpansFrom(board *Storyboard, take *Take) ([]BeatSpan, error) {
 	starts := make(map[int]time.Duration, len(board.Beats))
 	for _, event := range take.Events {
 		if event.Kind != EventBeatStart {

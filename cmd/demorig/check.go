@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
@@ -16,28 +18,33 @@ import (
 )
 
 // newCheckCommand judges a take against the storyboard's expects: one row per expect (or per
-// beat without one), then the take-level stage row, and exit 1 on any FAIL. The take's video
-// is never read — a take is judged by what its session recorded and what it left in the stage.
+// beat without one), then the take-level stage row, and exit 1 on any FAIL.
 func newCheckCommand() *cobra.Command {
 	var stage string
 	cmd := &cobra.Command{
-		Use:   "check <storyboard.yaml> <session.json> [--stage <dir>]",
-		Short: "Judge a take's saved session against the storyboard's expects",
-		Long: "check resolves every anchor of the storyboard against the take's saved session and\n" +
-			"evaluates the expects: contains on the anchored entry's text, tool label or stat,\n" +
-			"before/after on the entries' order, and expect.stage against the stage repo named by\n" +
-			"--stage (reported SKIP when it is not given). One row per expect; exit 1 on any FAIL.",
-		Args: cobra.ExactArgs(2),
+		Use:   "check <storyboard.yaml> [<take>] [--stage <dir>]",
+		Short: "Judge a take against the storyboard's expects",
+		Long: "check judges every expect of the storyboard against a take: an entry expect on the\n" +
+			"session the take saved (contains on the entry's text, tool label or stat, before/after\n" +
+			"on the order of the entries the beats' first entry expects locate), a seen expect on the\n" +
+			"screens the take recorded inside its beat, and expect.stage against the stage repo named\n" +
+			"by --stage (reported SKIP when it is not given). One row per expect; exit 1 on any FAIL.\n" +
+			"The take defaults to <work>/<clip>.take, the work dir following $" + workDirEnv + ".",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
 			board, err := Load(args[0])
 			if err != nil {
 				return err
 			}
-			entries, err := loadEntries(args[1])
+			path, err := takeArg(args[1:], board.Clip)
 			if err != nil {
 				return err
 			}
-			rows, err := checkTake(cmd.Context(), board, entries, stage)
+			take, err := LoadTake(path)
+			if err != nil {
+				return err
+			}
+			rows, err := checkTake(cmd.Context(), board, take, stage)
 			if err != nil {
 				return err
 			}
@@ -77,29 +84,28 @@ type checkRow struct {
 // stageSubject is the subject of the take-level stage row.
 const stageSubject = "stage"
 
-// noVideo is the FirstPainter check hands the resolver: the take's video is never read, so its
-// fixed points are placeholders here — a check only ever reads the entries the anchors select.
-type noVideo struct{}
+// takeEvidence is what a take offers its expects: the transcript entries of the session it
+// saved, the entry each beat's first entry expect locates (noEntry when it locates none, or the
+// beat has no entry expect), and the snapshots on screen during each beat.
+type takeEvidence struct {
+	entries []session.Entry
+	anchors map[int]int
+	screens map[int][]Snapshot
+}
 
-func (noVideo) FirstPaint(context.Context) (time.Duration, error) { return 0, nil }
-
-// checkTake resolves the storyboard against the session and judges every expect, in storyboard
-// order, with the stage row last when the storyboard declares expect.stage. An anchor that
-// resolves to nothing is an error naming its beat, the resolver's own: without every anchor
-// resolved, no ordering can be judged. The stage row is SKIP when stage is empty and FAIL when
-// git cannot judge the directory it names.
-func checkTake(ctx context.Context, board *Storyboard, entries []session.Entry, stage string) ([]checkRow, error) {
-	times, err := resolveBeats(ctx, board, entries, noVideo{}, 0)
+// checkTake judges every expect of the storyboard against the take, in storyboard order, with
+// the stage row last when the storyboard declares expect.stage. The session is read only when
+// some expect judges an entry, and the beats are located in the take only when some expect
+// judges a screen; a take that cannot serve what its expects need is an error. The stage row is
+// SKIP when stage is empty and FAIL when git cannot judge the directory it names.
+func checkTake(ctx context.Context, board *Storyboard, take *Take, stage string) ([]checkRow, error) {
+	evidence, err := gatherEvidence(board, take)
 	if err != nil {
 		return nil, err
 	}
-	byID := make(map[int]BeatTime, len(times))
-	for _, beat := range times {
-		byID[beat.ID] = beat
-	}
 	var rows []checkRow
 	for _, beat := range board.Beats {
-		rows = append(rows, beat.judge(entries, byID)...)
+		rows = append(rows, beat.judge(evidence)...)
 	}
 	if board.Expect.Stage != "" {
 		row, err := judgeStage(ctx, stage)
@@ -111,78 +117,142 @@ func checkTake(ctx context.Context, board *Storyboard, entries []session.Entry, 
 	return rows, nil
 }
 
+// gatherEvidence reads what the storyboard's expects need out of the take.
+func gatherEvidence(board *Storyboard, take *Take) (takeEvidence, error) {
+	evidence := takeEvidence{anchors: make(map[int]int, len(board.Beats))}
+	judgesEntries, judgesScreens := false, false
+	for _, beat := range board.Beats {
+		for _, expect := range beat.Expect {
+			judgesEntries = judgesEntries || expect.Entry != nil
+			judgesScreens = judgesScreens || expect.Seen != ""
+		}
+	}
+	if judgesEntries {
+		if take.Session == "" {
+			return takeEvidence{}, errors.New("the take names no saved session, so its entry expects cannot be judged")
+		}
+		entries, err := loadEntries(take.Session)
+		if err != nil {
+			return takeEvidence{}, err
+		}
+		evidence.entries = entries
+	}
+	for _, beat := range board.Beats {
+		evidence.anchors[beat.ID] = beat.anchorEntry(evidence.entries)
+	}
+	if judgesScreens {
+		spans, err := SpansFrom(board, take)
+		if err != nil {
+			return takeEvidence{}, err
+		}
+		evidence.screens = beatScreens(take.Snapshots, spans)
+	}
+	return evidence, nil
+}
+
+// anchorEntry is the index of the entry the beat's first entry expect locates — what another
+// beat's before/after orders against — or noEntry.
+func (b Beat) anchorEntry(entries []session.Entry) int {
+	for _, expect := range b.Expect {
+		if expect.Entry == nil {
+			continue
+		}
+		found, err := findEntry(entries, *expect.Entry)
+		if err != nil {
+			return noEntry
+		}
+		return found.Index
+	}
+	return noEntry
+}
+
+// beatScreens groups the snapshots by the beat they were on screen during: a snapshot belongs to
+// every beat whose span its display interval — from its own time to the next snapshot's —
+// overlaps, so the screen showing when a beat starts counts for that beat. Spans are half-open
+// except the last, which keeps the take's final instant.
+func beatScreens(snapshots []Snapshot, spans []BeatSpan) map[int][]Snapshot {
+	screens := make(map[int][]Snapshot, len(spans))
+	for index, span := range spans {
+		last := index == len(spans)-1
+		for at, snapshot := range snapshots {
+			shownUntil := time.Duration(math.MaxInt64)
+			if at+1 < len(snapshots) {
+				shownUntil = snapshots[at+1].At
+			}
+			startsInside := snapshot.At < span.End || (last && snapshot.At <= span.End)
+			if startsInside && shownUntil > span.Start {
+				screens[span.Beat] = append(screens[span.Beat], snapshot)
+			}
+		}
+	}
+	return screens
+}
+
 // judge evaluates the beat's expects, one row each; a beat without one gets a single PASS row
 // so the table still accounts for it.
-func (b Beat) judge(entries []session.Entry, times map[int]BeatTime) []checkRow {
+func (b Beat) judge(evidence takeEvidence) []checkRow {
 	subject := fmt.Sprintf("beat %d", b.ID)
 	if len(b.Expect) == 0 {
 		return []checkRow{{Subject: subject, Verdict: verdictPass, Detail: "no expect"}}
 	}
 	rows := make([]checkRow, 0, len(b.Expect))
 	for _, expect := range b.Expect {
-		row := checkRow{Subject: subject, Verdict: verdictPass}
-		row.Verdict, row.Detail = expect.judge(b, entries, times)
+		row := checkRow{Subject: subject}
+		row.Verdict, row.Detail = expect.judge(evidence, evidence.screens[b.ID])
 		rows = append(rows, row)
 	}
 	return rows
 }
 
-// judge evaluates one expect: the judged entry is the expect's own selector when it has one,
-// the beat's anchor entry otherwise; then every clause set — contains, before, after — must
-// hold. The detail spells the entry and the first clause that failed, or every clause that
-// passed.
-func (e Expect) judge(beat Beat, entries []session.Entry, times map[int]BeatTime) (verdict, string) {
-	judged, err := e.judgedEntry(beat, entries, times)
-	if err != nil {
-		return verdictFail, err.Error()
+// judge evaluates one expect: its entry clauses — contains, before, after — on the entry its
+// selector locates, then its seen clause on the beat's screens; every clause must hold. The
+// detail spells the entry and the first clause that failed, or every clause that passed.
+func (e Expect) judge(evidence takeEvidence, screens []Snapshot) (verdict, string) {
+	var prefix string
+	var judged located
+	if e.Entry != nil {
+		found, err := findEntry(evidence.entries, *e.Entry)
+		if err != nil {
+			return verdictFail, err.Error()
+		}
+		judged, prefix = found, describeEntry(found)+": "
 	}
 	var passed []string
-	for _, clause := range e.clauses() {
-		detail, ok := clause(judged, times)
+	for _, clause := range e.clauses(evidence.anchors, screens) {
+		detail, ok := clause(judged)
 		if !ok {
-			return verdictFail, describeEntry(judged) + ": " + detail
+			return verdictFail, prefix + detail
 		}
 		passed = append(passed, detail)
 	}
-	return verdictPass, describeEntry(judged) + ": " + strings.Join(passed, ", ")
+	return verdictPass, prefix + strings.Join(passed, ", ")
 }
 
-// judgedEntry selects the entry an expect is judged on. The storyboard's validation guarantees
-// an expect without its own selector sits on a session-anchored beat; the noEntry guard is for
-// a Storyboard built without Load.
-func (e Expect) judgedEntry(beat Beat, entries []session.Entry, times map[int]BeatTime) (located, error) {
-	if e.Entry != nil {
-		return findEntry(entries, *e.Entry)
-	}
-	index := times[beat.ID].Index
-	if index == noEntry {
-		return located{}, fmt.Errorf("%s anchors no session entry to judge", beat.Anchor)
-	}
-	return located{Index: index, Entry: entries[index]}, nil
-}
-
-// clause judges one assertion of an expect against the judged entry, returning the detail to
-// print and whether it held.
-type clause func(judged located, times map[int]BeatTime) (string, bool)
+// clause judges one assertion of an expect, returning the detail to print and whether it held.
+// The entry clauses read the judged entry; the seen clause ignores it.
+type clause func(judged located) (string, bool)
 
 // clauses lists the assertions the expect sets, in the order the schema names them.
-func (e Expect) clauses() []clause {
+func (e Expect) clauses(anchors map[int]int, screens []Snapshot) []clause {
 	var clauses []clause
 	if e.Contains != "" {
 		clauses = append(clauses, containsClause(e.Contains))
 	}
 	if e.Before != 0 {
-		clauses = append(clauses, orderClause("before", e.Before, func(judged, other int) bool { return judged < other }))
+		clauses = append(clauses, orderClause("before", e.Before, anchors[e.Before], func(judged, other int) bool { return judged < other }))
 	}
 	if e.After != 0 {
-		clauses = append(clauses, orderClause("after", e.After, func(judged, other int) bool { return judged > other }))
+		clauses = append(clauses, orderClause("after", e.After, anchors[e.After], func(judged, other int) bool { return judged > other }))
+	}
+	if e.Seen != "" {
+		clauses = append(clauses, seenClause(e.Seen, screens))
 	}
 	return clauses
 }
 
 // containsClause holds when the entry's text, tool label or tool stat contains the substring.
 func containsClause(want string) clause {
-	return func(judged located, _ map[int]BeatTime) (string, bool) {
+	return func(judged located) (string, bool) {
 		if entryContains(judged.Entry, want) {
 			return fmt.Sprintf("contains %q", want), true
 		}
@@ -190,18 +260,35 @@ func containsClause(want string) clause {
 	}
 }
 
-// orderClause holds when the judged entry's list position relates to the other beat's anchor
-// entry as holds says. A beat with no session entry cannot be ordered against.
-func orderClause(name string, other int, holds func(judged, other int) bool) clause {
-	return func(judged located, times map[int]BeatTime) (string, bool) {
-		otherIndex := times[other].Index
+// orderClause holds when the judged entry's list position relates to the entry beat other's
+// first entry expect locates (otherIndex) as holds says. A beat that locates no entry cannot be
+// ordered against, and the row names it.
+func orderClause(name string, other, otherIndex int, holds func(judged, other int) bool) clause {
+	return func(judged located) (string, bool) {
 		if otherIndex == noEntry {
-			return fmt.Sprintf("%s beat %d: that beat anchors no session entry to order against", name, other), false
+			return fmt.Sprintf("%s beat %d: beat %d locates no session entry to order against", name, other, other), false
 		}
 		if holds(judged.Index, otherIndex) {
 			return fmt.Sprintf("%s beat %d (entry %d)", name, other, otherIndex), true
 		}
 		return fmt.Sprintf("is not %s beat %d (entry %d)", name, other, otherIndex), false
+	}
+}
+
+// seenClause holds when the regex matches the screen of any of the beat's snapshots; the detail
+// names the first that matched, on the take's clock.
+func seenClause(pattern string, screens []Snapshot) clause {
+	return func(located) (string, bool) {
+		re, err := regexp.Compile(pattern)
+		if err != nil {
+			return fmt.Sprintf("seen /%s/: %v", pattern, err), false
+		}
+		for _, screen := range screens {
+			if re.MatchString(screenText(screen)) {
+				return fmt.Sprintf("seen /%s/ at %s", pattern, screen.At.Round(time.Millisecond)), true
+			}
+		}
+		return fmt.Sprintf("not seen /%s/ on any of the beat's %d screen(s)", pattern, len(screens)), false
 	}
 }
 

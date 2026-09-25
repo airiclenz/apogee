@@ -236,7 +236,11 @@ NOTES (2026-09-25): API for item 12 — `NewCompositor(board, take, schedule, Ce
 **Acceptance.** `go test -count=1 -run TestCompose ./cmd/demorig/`
 **Commit:** `feat(demorig): compositor with target zoom and a gliding click cursor`
 
-## 12. demorig render and check on the take; retire the VHS pipeline
+## 12. demorig render and check on the take; retire the VHS pipeline — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): the v2 schema moved into storyboard.go/storyboard_test.go (storyboard_v2*.go deleted) and its fixtures from testdata/v2/ up to testdata/, their `fonts:` repointed at ../../../graphics/demo/fonts; testdata/session-hero.json, heroEntries and TestFindEntry stay (findEntry now takes an EntrySelector), and new testdata/check.yaml + testdata/render.yaml + render_test.go carry the check and render tests.
+NOTES (2026-09-25): expect rules: an expect needs `entry` or `seen`; contains/before/after need an entry, and an entry needs one of them. `seen` matches any snapshot on screen during the beat — the one showing at its start included. The render refuses a take whose cols×rows differ from the storyboard's frame, and rasterizes at frame.scale (padding and font size multiplied through).
+NOTES (2026-09-25): the work-dir constants and one resolver (workDir/takeFile/takeArg) moved from record.go into main.go so check and render share them on every OS. graphics/demo/storyboards/hero.yaml (still VHS-era) no longer lints and record.sh's `check` call no longer works — item 13 (same run) replaces both; graphics/demo/README.md's demorig lines are item 15's rewrite.
 
 **What.** Recast at the regression check (2026-09-24). Depends on items 8, 11.
 **Goal:** `demorig render <storyboard> [<take>] [-o out.gif] [--dry-run]` streams composed frames as rawvideo into `ffmpeg` (palettegen/paletteuse at `max_colors`) then `gifsicle -O3 --lossy=80` when present, writing `ship:` by default and printing `<path>  <size>  <secs>s` plus per-beat effective speeds. `demorig check <storyboard> [<take>] [--stage dir]` judges session expects (`contains`, `before`, `after`, `entry`) and a new `seen: <regex>` expect (matched on any snapshot inside the beat) plus `expect.stage`, one `beat N | PASS/FAIL | detail` row each, exit 1 on any FAIL. `align.go`, `filtergraph.go`, `beats.go`, the `beats` subcommand and their tests and goldens are deleted. Items 12 and 13 land in the same execution run — no run closeout between them, because between them the v1 hero.yaml and record.sh's `check` call no longer work with the v2 demorig.

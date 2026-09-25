@@ -39,7 +39,7 @@ func clickAt(t *testing.T, at time.Duration, beat int, box CellBox) []TakeEvent 
 }
 
 // newTestCompositor schedules the take over the board's beats and builds its compositor.
-func newTestCompositor(t *testing.T, board *StoryboardV2, take *Take) (*Compositor, *Schedule) {
+func newTestCompositor(t *testing.T, board *Storyboard, take *Take) (*Compositor, *Schedule) {
 	t.Helper()
 	board.Frame.Width = composeWidth
 	spans, err := SpansFrom(board, take)
@@ -56,15 +56,15 @@ func newTestCompositor(t *testing.T, board *StoryboardV2, take *Take) (*Composit
 
 // zoomClickTake is a two-beat take: beat 1 idles for 2 s, beat 2 clicks box at 3 s and runs to
 // 6 s. Every beat fits its duration, so source and output clocks agree.
-func zoomClickTake(t *testing.T, box CellBox) (*StoryboardV2, *Take) {
+func zoomClickTake(t *testing.T, box CellBox) (*Storyboard, *Take) {
 	t.Helper()
 	target := Target{Text: "target"}
-	board := &StoryboardV2{Beats: []BeatV2{
+	board := &Storyboard{Beats: []Beat{
 		{ID: 1, Duration: 2 * sec},
 		{
 			ID: 2, Duration: 4 * sec,
 			Do:   []Action{{Click: &ClickAction{Target: target}}},
-			Zoom: &ZoomV2{Target: target, Factor: 2},
+			Zoom: &Zoom{Target: target, Factor: 2},
 		},
 	}}
 	events := []TakeEvent{beatStart(t, 0, 1), beatStart(t, 2*sec, 2)}
@@ -134,7 +134,7 @@ func TestComposeZoomCropStaysInsideTheFrame(t *testing.T) {
 
 func TestComposeCursorGlidesAlongTheSegment(t *testing.T) {
 	t.Parallel()
-	board := &StoryboardV2{Beats: []BeatV2{{ID: 1, Duration: 10 * sec}}}
+	board := &Storyboard{Beats: []Beat{{ID: 1, Duration: 10 * sec}}}
 	events := []TakeEvent{beatStart(t, 0, 1)}
 	events = append(events, clickAt(t, 2*sec, 1, CellBox{X: 4, Y: 2, W: 1, H: 1})...)
 	events = append(events, clickAt(t, 5*sec, 1, CellBox{X: 40, Y: 11, W: 1, H: 1})...)
@@ -226,7 +226,7 @@ func TestComposeZoomedCursorMapsToTheZoomedTarget(t *testing.T) {
 
 func TestComposeClickInsideACutBeatDrawsNoCursor(t *testing.T) {
 	t.Parallel()
-	board := &StoryboardV2{Beats: []BeatV2{
+	board := &Storyboard{Beats: []Beat{
 		{ID: 1, Duration: 2 * sec},
 		{ID: 2, Cut: true, Do: []Action{{Click: &ClickAction{Target: Target{Text: "x"}}}}},
 		{ID: 3, Duration: 2 * sec},
@@ -266,8 +266,8 @@ func TestComposeZoomResolvesItsTargetOnTheSnapshot(t *testing.T) {
 		grid[y] = row("")
 	}
 	grid[3] = row("     ctx 42%")
-	board := &StoryboardV2{Beats: []BeatV2{
-		{ID: 1, Duration: 4 * sec, Zoom: &ZoomV2{Target: Target{Text: `ctx \d+%`}}},
+	board := &Storyboard{Beats: []Beat{
+		{ID: 1, Duration: 4 * sec, Zoom: &Zoom{Target: Target{Text: `ctx \d+%`}}},
 	}}
 	take := &Take{
 		Snapshots: []Snapshot{{At: 0, Cells: grid}, {At: 4 * sec, Cells: grid}},
@@ -306,7 +306,7 @@ func TestComposeAutoFitFactor(t *testing.T) {
 		}
 	}
 	var problems []string
-	ZoomV2{Target: Target{Text: "gauge"}}.validate(func(format string, args ...any) {
+	Zoom{Target: Target{Text: "gauge"}}.validate(func(format string, args ...any) {
 		problems = append(problems, fmt.Sprintf(format, args...))
 	})
 	if len(problems) != 0 {

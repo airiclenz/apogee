@@ -1,7 +1,7 @@
 clip: tiny
 ship: tiny.gif
 cassette: tiny.cassette
-fonts: ../fonts
+fonts: ../../../graphics/demo/fonts
 frame: {cols: 80, rows: 24, padding: 16, font_size: 14, line_height: 1.2, scale: 2, width: 600, fps: 24, max_colors: 128}
 expect: {stage: dirty}
 beats:
@@ -14,7 +14,7 @@ beats:
   - id: 2
     title: mode click
     do:
-      - click: {target: {text: "Auto", nth: first, area: header}, times: 2}
+      - click: {target: {text: "Auto", nth: first, area: footer}, times: 2}
       - pause: {for: 300ms}
     duration: 3s
     hold: 1s
@@ -25,7 +25,7 @@ beats:
       - type: {text: "tests are failing"}
       - type: {text: "/", humanize: false}
       - key: {name: enter, repeat: 2}
-      - wait: {screen: "Tests", gone: true, timeout: 3m}
+      - wait: {screen: "Tests", gone: true, timeout: 181s}
     duration: 4s
     expect: [{entry: {kind: toolCall, tool: Tests, nth: last}, contains: PASS, after: 2}]
   - id: 4

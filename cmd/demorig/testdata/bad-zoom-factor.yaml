@@ -1,7 +1,7 @@
 clip: tiny
 ship: tiny.gif
 cassette: tiny.cassette
-fonts: ../fonts
+fonts: ../../../graphics/demo/fonts
 frame: {cols: 80, rows: 24, padding: 16, font_size: 14, line_height: 1.2, scale: 2, width: 600, fps: 24, max_colors: 128}
 expect: {stage: dirty}
 beats:
@@ -18,14 +18,14 @@ beats:
       - pause: {for: 300ms}
     duration: 3s
     hold: 1s
-    zoom: {target: {text: "ctx \\d+%", nth: last, area: status}, factor: 1.5, in: 200ms, out: 200ms}
+    zoom: {target: {text: "ctx \\d+%", nth: last, area: status}, factor: 4, in: 200ms, out: 200ms}
   - id: 3
     title: prompt
     do:
       - type: {text: "tests are failing"}
       - type: {text: "/", humanize: false}
       - key: {name: enter, repeat: 2}
-      - wait: {screen: "Tests", gone: true, timeout: 181s}
+      - wait: {screen: "Tests", gone: true, timeout: 3m}
     duration: 4s
     expect: [{entry: {kind: toolCall, tool: Tests, nth: last}, contains: PASS, after: 2}]
   - id: 4

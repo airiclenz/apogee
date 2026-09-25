@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"os/exec"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,24 +16,28 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// newRenderCommand cuts the shipped GIF from a take, the storyboard's framing deciding every
-// pace, hold, zoom and cut. tools is the seam to ffprobe and ffmpeg's scene scan, so a dry run
-// in a test needs neither on PATH.
-func newRenderCommand(tools renderTools) *cobra.Command {
+// newRenderCommand renders the shipped GIF from a take, the storyboard deciding every section's
+// length, hold, zoom and cut.
+func newRenderCommand() *cobra.Command {
 	var out string
 	var dryRun bool
 	cmd := &cobra.Command{
-		Use:   "render <storyboard.yaml> <take.mp4> <session.json> [-o out.gif] [--dry-run]",
-		Short: "Cut the shipped GIF from a take, framed as the storyboard says",
-		Long: "render locates the storyboard's beats in the take (as beats does), builds one ffmpeg\n" +
-			"filtergraph from their framing — speed, hold, zoom and cut per beat, the head before\n" +
-			"the first beat dropped — encodes the GIF through a per-clip palette, and shrinks it\n" +
-			"with gifsicle when that is on PATH. The output defaults to the storyboard's ship path.\n" +
-			"--dry-run prints the ffmpeg command line instead of running it.",
-		Args: cobra.ExactArgs(3),
+		Use:   "render <storyboard.yaml> [<take>] [-o out.gif] [--dry-run]",
+		Short: "Render the shipped GIF from a take, framed as the storyboard says",
+		Long: "render lays each beat of the take onto its section's duration — the hold at 1×, the\n" +
+			"rest sped up to fit or frozen on its last frame — rasterizes every frame at the\n" +
+			"storyboard's frame, composes the zooms and the click cursor, and streams the frames into\n" +
+			"ffmpeg for a per-clip palette encode, then shrinks the GIF with gifsicle when that is on\n" +
+			"PATH. The take defaults to <work>/<clip>.take (the work dir following $" + workDirEnv + "),\n" +
+			"the output to the storyboard's ship path. --dry-run prints the ffmpeg command line instead\n" +
+			"of rendering.",
+		Args: cobra.RangeArgs(1, 2),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
-			options := renderOptions{Storyboard: args[0], Take: args[1], Session: args[2], Out: out, DryRun: dryRun}
-			return renderTake(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), tools, options)
+			options := renderOptions{Storyboard: args[0], Out: out, DryRun: dryRun}
+			if len(args) > 1 {
+				options.Take = args[1]
+			}
+			return renderTake(cmd.Context(), cmd.OutOrStdout(), cmd.ErrOrStderr(), options)
 		}),
 	}
 	cmd.Flags().StringVarP(&out, "output", "o", "", "the GIF to write (default: the storyboard's ship path)")
@@ -39,141 +45,180 @@ func newRenderCommand(tools renderTools) *cobra.Command {
 	return cmd
 }
 
-// renderOptions is one render's command line.
+// renderOptions is one render's command line. An empty Take is the clip's default take.
 type renderOptions struct {
 	Storyboard string
 	Take       string
-	Session    string
 	Out        string
 	DryRun     bool
 }
 
-// takeInfo is what the probe reports about a take: its pixel size and its length.
-type takeInfo struct {
-	Size     Size
-	Duration time.Duration
+// The palette encode every render ends with: a per-clip palette of frame.max_colors (much
+// cleaner than ffmpeg's default 256-colour quantiser on flat terminal colours) applied with an
+// ordered dither.
+const (
+	ditherMode  = "bayer"
+	ditherScale = 3
+)
+
+// renderPlan is everything a render needs once the storyboard and the take are read: the
+// output clock, the rasterizer, the compositor and where the GIF goes.
+type renderPlan struct {
+	board      *Storyboard
+	take       *Take
+	schedule   *Schedule
+	rasterizer *Rasterizer
+	compositor *Compositor
+	out        string
 }
 
-// renderTools are the external programs a render reads the take through, behind one seam: the
-// probe for its geometry and length, and the scene scan behind the first-paint anchor. The
-// ffmpeg adapters are production; a test hands in fixed values. The encode itself (ffmpeg,
-// gifsicle) is not behind it — a dry run never reaches it.
-type renderTools interface {
-	Probe(ctx context.Context, take string) (takeInfo, error)
-	Painter(take string, threshold float64) FirstPainter
-}
-
-// ffmpegTools is the production renderTools: ffprobe and ffmpeg on PATH.
-type ffmpegTools struct{}
-
-// Probe reads the first video stream's width and height and the container's duration.
-func (ffmpegTools) Probe(ctx context.Context, take string) (takeInfo, error) {
-	cmd := exec.CommandContext(ctx, "ffprobe",
-		"-v", "error",
-		"-select_streams", "v:0",
-		"-show_entries", "stream=width,height:format=duration",
-		"-of", "default=noprint_wrappers=1",
-		take,
-	)
-	out, err := cmd.Output()
-	if err != nil {
-		return takeInfo{}, fmt.Errorf("ffprobe %s: %w", take, err)
-	}
-	return parseProbe(take, string(out))
-}
-
-// parseProbe reads ffprobe's key=value lines; every field must be present and numeric.
-func parseProbe(take, out string) (takeInfo, error) {
-	fields := make(map[string]string)
-	for _, line := range strings.Split(out, "\n") {
-		if key, value, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
-			fields[key] = value
-		}
-	}
-	var info takeInfo
-	var err error
-	if info.Size.Width, err = strconv.Atoi(fields["width"]); err != nil {
-		return takeInfo{}, fmt.Errorf("ffprobe %s: width %q: %w", take, fields["width"], err)
-	}
-	if info.Size.Height, err = strconv.Atoi(fields["height"]); err != nil {
-		return takeInfo{}, fmt.Errorf("ffprobe %s: height %q: %w", take, fields["height"], err)
-	}
-	if info.Duration, err = parseSeconds(fields["duration"]); err != nil {
-		return takeInfo{}, fmt.Errorf("ffprobe %s: duration: %w", take, err)
-	}
-	return info, nil
-}
-
-// Painter is the ffmpeg scene scan over the take's head.
-func (ffmpegTools) Painter(take string, threshold float64) FirstPainter {
-	return ffmpegFirstPainter{Take: take, Threshold: threshold}
-}
-
-// renderTake resolves the beats, builds the filtergraph and encodes the GIF, or on a dry run
-// prints the ffmpeg command line it would have run. A take narrower than the storyboard's zoom
-// assumes (frame.width × frame.scale) still renders, with a warning: the zoom draws on pixels
-// that are not there.
-func renderTake(ctx context.Context, stdout, stderr io.Writer, tools renderTools, options renderOptions) error {
+// planRender loads the storyboard and the take and builds the schedule, the rasterizer and the
+// compositor. The take must have been recorded at the storyboard's frame: its cells are what the
+// rasterizer lays out and its targets are resolved on. Frames are rasterized at frame.scale —
+// padding and font size multiplied through — so a zoom has pixels to draw on.
+func planRender(stderr io.Writer, options renderOptions) (*renderPlan, error) {
 	board, err := Load(options.Storyboard)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	entries, err := loadEntries(options.Session)
-	if err != nil {
-		return err
-	}
-	info, err := tools.Probe(ctx, options.Take)
-	if err != nil {
-		return err
-	}
-	painter := tools.Painter(options.Take, board.Align.SceneThreshold)
-	times, err := resolveBeats(ctx, board, entries, painter, info.Duration)
-	if err != nil {
-		return err
-	}
-	segments := segmentsFrom(board, times, info.Duration)
-	graph, err := Build(segments, board.Frame, info.Size)
-	if err != nil {
-		return err
-	}
-	if wanted := board.Frame.Width * board.Frame.Scale; info.Size.Width < wanted && hasZoom(segments) {
-		_, err := fmt.Fprintf(stderr, "warning: %s is %dpx wide; the storyboard's zoom assumes %d (frame.width %d × scale %d), so it will blur\n",
-			options.Take, info.Size.Width, wanted, board.Frame.Width, board.Frame.Scale)
-		if err != nil {
-			return err
+	path := options.Take
+	if path == "" {
+		if path, err = takeArg(nil, board.Clip); err != nil {
+			return nil, err
 		}
+	}
+	take, err := LoadTake(path)
+	if err != nil {
+		return nil, err
+	}
+	frame := board.Frame
+	if take.Cols != frame.Cols || take.Rows != frame.Rows {
+		return nil, fmt.Errorf("%s was recorded at %d×%d cells; the storyboard's frame is %d×%d — re-record it",
+			path, take.Cols, take.Rows, frame.Cols, frame.Rows)
+	}
+	spans, err := SpansFrom(board, take)
+	if err != nil {
+		return nil, err
+	}
+	schedule, err := NewSchedule(spans)
+	if err != nil {
+		return nil, err
+	}
+	for _, warning := range schedule.Warnings {
+		if _, err := fmt.Fprintln(stderr, "warning:", warning); err != nil {
+			return nil, err
+		}
+	}
+	rasterizer, err := NewRasterizer(board.Fonts, Geometry{
+		Cols: frame.Cols, Rows: frame.Rows, Padding: frame.Padding * frame.Scale,
+		FontSize: frame.FontSize * float64(frame.Scale), LineHeight: frame.LineHeight,
+	})
+	if err != nil {
+		return nil, err
+	}
+	layout := CellLayout{
+		Size: rasterizer.Size(), Padding: frame.Padding * frame.Scale,
+		CellWidth: rasterizer.CellWidth(), LineHeight: rasterizer.LineHeight(), Scale: frame.Scale,
+	}
+	compositor, err := NewCompositor(board, take, schedule, layout)
+	if err != nil {
+		return nil, err
 	}
 	out := options.Out
 	if out == "" {
 		out = board.Ship
 	}
-	argv := ffmpegArgs(options.Take, graph, out)
+	return &renderPlan{board: board, take: take, schedule: schedule, rasterizer: rasterizer, compositor: compositor, out: out}, nil
+}
+
+// renderTake renders the GIF and prints its summary, or on a dry run prints the ffmpeg command
+// line it would have run.
+func renderTake(ctx context.Context, stdout, stderr io.Writer, options renderOptions) error {
+	plan, err := planRender(stderr, options)
+	if err != nil {
+		return err
+	}
+	argv := ffmpegArgs(plan.compositor.Size(), plan.board.Frame, plan.out)
 	if options.DryRun {
 		_, err := fmt.Fprintln(stdout, shellLine(argv))
 		return err
 	}
-	if err := runQuiet(ctx, argv); err != nil {
+	if err := plan.encode(ctx, argv); err != nil {
 		return err
 	}
-	if err := optimizeGIF(ctx, out); err != nil {
+	if err := optimizeGIF(ctx, plan.out); err != nil {
 		return err
 	}
-	return writeRenderSummary(ctx, stdout, out)
+	return writeRenderSummary(stdout, plan.out, plan.schedule)
 }
 
-// hasZoom reports whether any kept segment zooms.
-func hasZoom(segments []Segment) bool {
-	for _, segment := range segments {
-		if !segment.Frame.Cut && segment.Frame.Zoom != nil {
-			return true
+// ffmpegArgs is the encode's command line: raw RGBA frames of size at frame.fps in on stdin, the
+// palette filtergraph, the GIF out.
+func ffmpegArgs(size image.Point, frame Frame, out string) []string {
+	graph := fmt.Sprintf("[0:v]split[a][b];[a]palettegen=max_colors=%d[p];[b][p]paletteuse=dither=%s:bayer_scale=%d",
+		frame.MaxColors, ditherMode, ditherScale)
+	return []string{
+		"ffmpeg", "-y", "-loglevel", "error",
+		"-f", "rawvideo", "-pixel_format", "rgba",
+		"-video_size", fmt.Sprintf("%dx%d", size.X, size.Y),
+		"-framerate", strconv.Itoa(frame.FPS),
+		"-i", "pipe:0",
+		"-filter_complex", graph,
+		out,
+	}
+}
+
+// encode streams every scheduled frame, composed, into ffmpeg as raw RGBA. A snapshot shown by
+// consecutive frames is rasterized once.
+func (p *renderPlan) encode(ctx context.Context, argv []string) error {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // a fixed program; the arguments are ours
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("%s: %w", argv[0], err)
+	}
+	writeErr := p.writeFrames(stdin)
+	closeErr := stdin.Close()
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("%s: %w\n%s", argv[0], err, strings.TrimSpace(stderr.String()))
+	}
+	if writeErr != nil {
+		return fmt.Errorf("stream frames to %s: %w", argv[0], writeErr)
+	}
+	return closeErr
+}
+
+// writeFrames writes each output frame's pixels, in order.
+func (p *renderPlan) writeFrames(w io.Writer) error {
+	shown := -1
+	var source *image.RGBA
+	for _, frame := range p.schedule.Frames(p.board.Frame.FPS) {
+		index := snapshotAt(p.take.Snapshots, frame.Source)
+		if index < 0 {
+			return fmt.Errorf("the take holds no snapshot to show at %s", frame.Source)
+		}
+		if index != shown {
+			source, shown = p.rasterizer.Frame(p.take.Snapshots[index]), index
+		}
+		if _, err := w.Write(p.compositor.Compose(frame.Out, source).Pix); err != nil {
+			return err
 		}
 	}
-	return false
+	return nil
 }
 
-// ffmpegArgs is the encode's command line: the take in, the filtergraph, the GIF out.
-func ffmpegArgs(take, graph, out string) []string {
-	return []string{"ffmpeg", "-y", "-loglevel", "error", "-i", take, "-filter_complex", graph, out}
+// snapshotAt is the index of the snapshot on screen at source time t — the last one taken at or
+// before it, or the first when t precedes them all — and -1 for a take without snapshots.
+func snapshotAt(snapshots []Snapshot, t time.Duration) int {
+	if len(snapshots) == 0 {
+		return -1
+	}
+	after := sort.Search(len(snapshots), func(i int) bool { return snapshots[i].At > t })
+	return max(after-1, 0)
 }
 
 // shellLine joins an argv for a human to read or paste: an argument the shell would split or
@@ -219,19 +264,31 @@ func optimizeGIF(ctx context.Context, path string) error {
 	return os.Rename(optimized, path)
 }
 
-// writeRenderSummary prints the one line the retired render.sh ended with: path, size, duration.
-func writeRenderSummary(ctx context.Context, w io.Writer, path string) error {
+// writeRenderSummary prints what was rendered: path, size and the clip's length — the
+// schedule's total — then one row per beat with the speed its section plays at.
+func writeRenderSummary(w io.Writer, path string, schedule *Schedule) error {
 	stat, err := os.Stat(path)
 	if err != nil {
 		return err
 	}
-	duration, err := takeDuration(ctx, path)
-	if err != nil {
+	if _, err := fmt.Fprintf(w, "%s  %s  %ss\n", path, humanSize(stat.Size()), number(schedule.Length.Seconds())); err != nil {
 		return err
 	}
-	_, err = fmt.Fprintf(w, "%s  %s  %ss\n", path, humanSize(stat.Size()), number(duration.Seconds()))
-	return err
+	for _, section := range schedule.Sections {
+		row := fmt.Sprintf("  beat %d  cut", section.Beat)
+		if !section.Cut {
+			row = fmt.Sprintf("  beat %d  %.2f×  %s of take in %s",
+				section.Beat, section.Speed, section.length().Round(time.Millisecond), section.Duration)
+		}
+		if _, err := fmt.Fprintln(w, row); err != nil {
+			return err
+		}
+	}
+	return nil
 }
+
+// number spells a float in its shortest round-trip form.
+func number(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 
 // humanSize spells a byte count the way `du -h` does: one decimal below ten units, whole units
 // above, in K, M or G.

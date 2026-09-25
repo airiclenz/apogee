@@ -1,8 +1,8 @@
 clip: tiny
 ship: tiny.gif
 cassette: tiny.cassette
-fonts: ../fonts
-frame: {cols: 80, rows: 24, padding: 16, font_size: 14, line_height: 1.2, scale: 2, width: 600, fps: 24, max_colors: 300}
+fonts: ../../../graphics/demo/fonts
+frame: {cols: 80, rows: 24, padding: 16, font_size: 14, line_height: 1.2, scale: 2, width: 600, fps: 24, max_colors: 128}
 expect: {stage: dirty}
 beats:
   - id: 1
@@ -21,6 +21,7 @@ beats:
     zoom: {target: {text: "ctx \\d+%", nth: last, area: status}, factor: 1.5, in: 200ms, out: 200ms}
   - id: 3
     title: prompt
+    anchor: {video: end}
     do:
       - type: {text: "tests are failing"}
       - type: {text: "/", humanize: false}

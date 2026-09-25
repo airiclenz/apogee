@@ -1,23 +1,35 @@
 clip: tiny
-tape: tiny.tape
 ship: tiny.gif
-frame: {width: 600, scale: 2, fps: 24, max_colors: 128}
-align: {scene_threshold: 0.4, first_prompt_at: 2s}
-paint_lag: 300ms
-regions: {card: [0, 0.5, 1, 0.5]}
+cassette: tiny.cassette
+fonts: ../../../graphics/demo/fonts
+frame: {cols: 80, rows: 24, padding: 16, font_size: 14, line_height: 1.2, scale: 2, width: 600, fps: 24, max_colors: 128}
 expect: {stage: dirty}
 beats:
   - id: 1
     title: open
-    tape: beat 1
-    anchor: {video: first-paint}
+    why: the first paint
+    do:
+      - wait: {screen: "Auto|Plan", timeout: 20s}
+    duration: 2s
   - id: 1
-    title: middle
-    tape: beat 2
-    anchor: {kind: toolCall, tool: Tests, nth: last}
-    frame: {speed: 1.5, zoom: {region: card, factor: 1.5, in: 200ms, hold: 1s, out: 200ms}}
-    expect: [{contains: PASS}]
+    title: mode click
+    do:
+      - click: {target: {text: "Auto", nth: first, area: footer}, times: 2}
+      - pause: {for: 300ms}
+    duration: 3s
+    hold: 1s
+    zoom: {target: {text: "ctx \\d+%", nth: last, area: status}, factor: 1.5, in: 200ms, out: 200ms}
   - id: 3
-    title: end
-    tape: beat 3
-    anchor: {video: end}
+    title: prompt
+    do:
+      - type: {text: "tests are failing"}
+      - type: {text: "/", humanize: false}
+      - key: {name: enter, repeat: 2}
+      - wait: {screen: "Tests", gone: true, timeout: 3m}
+    duration: 4s
+    expect: [{entry: {kind: toolCall, tool: Tests, nth: last}, contains: PASS, after: 2}]
+  - id: 4
+    title: dropped
+    do:
+      - pause: {for: 1s}
+    cut: true

@@ -1,0 +1,32 @@
+# The check tests' storyboard: its entry expects match anchors_test.go's heroEntries, its seen
+# expects the screens check_test.go's checkFixtureTake records.
+clip: checked
+ship: checked.gif
+cassette: checked.cassette
+fonts: ../../../graphics/demo/fonts
+frame: {cols: 40, rows: 3, padding: 8, font_size: 14, line_height: 1.2, scale: 1, width: 400, fps: 24, max_colors: 64}
+expect: {stage: dirty}
+beats:
+  - id: 1
+    title: prompt
+    duration: 2s
+    expect:
+      - {entry: {kind: user}, contains: failing}
+      - {seen: "Auto"}
+  - id: 2
+    title: failing tests
+    duration: 2s
+    expect: [{entry: {kind: toolCall, tool: Tests}, contains: FAIL, after: 1}]
+  - id: 3
+    title: queued message
+    duration: 2s
+    expect: [{entry: {kind: interjected}, after: 2, before: 4}]
+  - id: 4
+    title: green
+    duration: 2s
+    expect:
+      - {entry: {kind: toolCall, tool: Tests, nth: last}, contains: PASS}
+      - {seen: "ok\\s+taskman"}
+  - id: 5
+    title: hold
+    duration: 2s

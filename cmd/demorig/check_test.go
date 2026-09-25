@@ -9,22 +9,68 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/airiclenz/apogee/internal/session"
+	"time"
 )
 
-// heroCheck judges the shipped hero storyboard against the given entries, with no stage.
-func heroCheck(t *testing.T, entries []session.Entry) (*Storyboard, []checkRow) {
-	t.Helper()
-	board, err := Load(heroStoryboard)
-	if err != nil {
-		t.Fatalf("Load(%s): %v", heroStoryboard, err)
+// checkStoryboard is the check tests' storyboard; its entry expects match heroEntries.
+const checkStoryboard = "testdata/check.yaml"
+
+// textSnapshot is a snapshot at at whose rows read lines, one cell per rune.
+func textSnapshot(at time.Duration, lines ...string) Snapshot {
+	cells := make([][]TakeCell, 0, len(lines))
+	for _, line := range lines {
+		row := make([]TakeCell, 0, len(line))
+		for _, r := range line {
+			row = append(row, TakeCell{Rune: string(r), Width: 1})
+		}
+		cells = append(cells, row)
 	}
-	rows, err := checkTake(context.Background(), board, entries, "")
+	return Snapshot{At: at, Cells: cells}
+}
+
+// checkFixtureTake is a take of checkStoryboard: its five beats start two seconds apart, its
+// session is the committed hero fixture, and its screens show "Auto" at the first paint, the
+// typed prompt from 1s — still on screen when beat 2 starts — and the green test line inside
+// beat 4 only.
+func checkFixtureTake(t *testing.T) *Take {
+	t.Helper()
+	sessionPath, err := filepath.Abs(heroFixture)
+	if err != nil {
+		t.Fatalf("abs %s: %v", heroFixture, err)
+	}
+	take := &Take{
+		Cols: 40, Rows: 3, FPS: 24, Session: sessionPath,
+		Snapshots: []Snapshot{
+			textSnapshot(0, "mode Auto"),
+			textSnapshot(sec, "tests are failing"),
+			textSnapshot(6500*time.Millisecond, "ok   taskman 0.1s"),
+			textSnapshot(10*sec, "done"),
+		},
+	}
+	for beat := 1; beat <= 5; beat++ {
+		take.Events = append(take.Events, beatStart(t, time.Duration(beat-1)*2*sec, beat))
+	}
+	return take
+}
+
+// loadCheckStoryboard loads checkStoryboard.
+func loadCheckStoryboard(t *testing.T) *Storyboard {
+	t.Helper()
+	board, err := Load(checkStoryboard)
+	if err != nil {
+		t.Fatalf("Load(%s): %v", checkStoryboard, err)
+	}
+	return board
+}
+
+// checkRows judges board against the fixture take, with no stage.
+func checkRows(t *testing.T, board *Storyboard) []checkRow {
+	t.Helper()
+	rows, err := checkTake(context.Background(), board, checkFixtureTake(t), "")
 	if err != nil {
 		t.Fatalf("checkTake: %v", err)
 	}
-	return board, rows
+	return rows
 }
 
 // rowsFor returns the rows of one subject.
@@ -38,14 +84,23 @@ func rowsFor(rows []checkRow, subject string) []checkRow {
 	return matched
 }
 
-func TestCheckTakeHero_AllPass(t *testing.T) {
-	t.Parallel()
-	entries, err := loadEntries(heroFixture)
-	if err != nil {
-		t.Fatalf("loadEntries: %v", err)
+// beatByID returns a pointer to the board's beat id, for a test to rewrite.
+func beatByID(t *testing.T, board *Storyboard, id int) *Beat {
+	t.Helper()
+	for index := range board.Beats {
+		if board.Beats[index].ID == id {
+			return &board.Beats[index]
+		}
 	}
+	t.Fatalf("no beat %d", id)
+	return nil
+}
 
-	board, rows := heroCheck(t, entries)
+func TestCheckTake_AllPass(t *testing.T) {
+	t.Parallel()
+	board := loadCheckStoryboard(t)
+
+	rows := checkRows(t, board)
 
 	if failed := countFailed(rows); failed != 0 {
 		t.Errorf("want no FAIL row, got %d:\n%s", failed, renderRows(t, rows))
@@ -55,9 +110,12 @@ func TestCheckTakeHero_AllPass(t *testing.T) {
 			t.Errorf("beat %d: no row in the table", beat.ID)
 		}
 	}
-	beat4 := rowsFor(rows, "beat 4")
-	if len(beat4) != 1 || beat4[0].Verdict != verdictPass || !strings.Contains(beat4[0].Detail, "before beat 6") {
-		t.Errorf("beat 4: want one PASS row on `before: 6`, got %+v", beat4)
+	beat3 := rowsFor(rows, "beat 3")
+	if len(beat3) != 1 || !strings.Contains(beat3[0].Detail, "before beat 4 (entry 8), after beat 2 (entry 2)") {
+		t.Errorf("beat 3: want the order against beats 2 and 4's first entry expects, got %+v", beat3)
+	}
+	if beat5 := rowsFor(rows, "beat 5"); len(beat5) != 1 || beat5[0].Detail != "no expect" {
+		t.Errorf("beat 5: want one PASS row reading `no expect`, got %+v", beat5)
 	}
 	stage := rowsFor(rows, stageSubject)
 	if len(stage) != 1 || stage[0].Verdict != verdictSkip {
@@ -65,130 +123,118 @@ func TestCheckTakeHero_AllPass(t *testing.T) {
 	}
 }
 
-// TestCheckTakeHero_BeforeFiveFails rewrites beat 4's ordering expect to `before: 5` — the
-// delivery order the fixture mirrors puts the interjection AFTER the fix card — and checks the
-// row fails.
-func TestCheckTakeHero_BeforeFiveFails(t *testing.T) {
+func TestCheckTake_Seen(t *testing.T) {
 	t.Parallel()
-	board, err := Load(heroStoryboard)
-	if err != nil {
-		t.Fatalf("Load(%s): %v", heroStoryboard, err)
-	}
-	for index := range board.Beats {
-		if board.Beats[index].ID == 4 {
-			board.Beats[index].Expect[0].Before = 5
-		}
-	}
-
-	rows, err := checkTake(context.Background(), board, heroEntries(), "")
-
-	if err != nil {
-		t.Fatalf("checkTake: %v", err)
-	}
-	beat4 := rowsFor(rows, "beat 4")
-	if len(beat4) != 1 || beat4[0].Verdict != verdictFail || !strings.Contains(beat4[0].Detail, "is not before beat 5") {
-		t.Errorf("beat 4: want a FAIL row on `before: 5`, got %+v", beat4)
-	}
-	if countFailed(rows) != 1 {
-		t.Errorf("want exactly one FAIL row, got:\n%s", renderRows(t, rows))
-	}
-}
-
-// TestCheckTakeHero_MissedInterjectionNamesTheKind mutates the fixture the way a missed
-// interjection looks in a real take — the entry reads `user` instead of `interjected` — and
-// checks beat 4 fails naming the kind it wanted.
-func TestCheckTakeHero_MissedInterjectionNamesTheKind(t *testing.T) {
-	t.Parallel()
-	entries := heroEntries()
-	for index := range entries {
-		if entries[index].Kind == session.EntryKindInterjected {
-			entries[index].Kind = session.EntryKindUser
-		}
-	}
-
-	_, rows := heroCheck(t, entries)
-
-	beat4 := rowsFor(rows, "beat 4")
-	if len(beat4) != 1 || beat4[0].Verdict != verdictFail {
-		t.Fatalf("beat 4: want one FAIL row, got %+v", beat4)
-	}
-	if !strings.Contains(beat4[0].Detail, "interjected") {
-		t.Errorf("beat 4: want the detail to name the kind interjected, got %q", beat4[0].Detail)
-	}
-	if countFailed(rows) != 1 {
-		t.Errorf("want exactly one FAIL row, got:\n%s", renderRows(t, rows))
-	}
-}
-
-// TestCheckTakeHero_BeatWithoutExpectPasses pins beat 7: a video anchor with no expect needs
-// no session entry and still reports a row.
-func TestCheckTakeHero_BeatWithoutExpectPasses(t *testing.T) {
-	t.Parallel()
-
-	_, rows := heroCheck(t, heroEntries())
-
-	beat7 := rowsFor(rows, "beat 7")
-	if len(beat7) != 1 || beat7[0].Verdict != verdictPass || beat7[0].Detail != "no expect" {
-		t.Errorf("beat 7: want one PASS row reading `no expect`, got %+v", beat7)
-	}
-}
-
-func TestCheckTake_UnresolvedAnchorIsAnError(t *testing.T) {
-	t.Parallel()
-	board := testBoard(Beat{ID: 3, Anchor: Anchor{Kind: "toolCall", Tool: "Git"}, Expect: []Expect{{Contains: "x"}}})
-
-	_, err := checkTake(context.Background(), board, heroEntries(), "")
-
-	if err == nil || !strings.HasPrefix(err.Error(), "beat 3: no entry matches") {
-		t.Fatalf("want the resolver's error naming beat 3, got %v", err)
-	}
-}
-
-func TestExpectJudge_Contains(t *testing.T) {
-	t.Parallel()
-	entries := heroEntries()
-	times := map[int]BeatTime{3: {ID: 3, Index: 2}, 8: {ID: 8, Index: noEntry}, 9: {ID: 9, Index: 9}}
 	cases := []struct {
 		name    string
-		beat    Beat
-		expect  Expect
+		beat    int
+		seen    string
 		verdict verdict
 		detail  string
 	}{
-		{name: "tool stat", beat: Beat{ID: 3}, expect: Expect{Contains: "FAIL"},
-			verdict: verdictPass, detail: `entry 2 toolCall Tests FAIL: contains "FAIL"`},
-		{name: "tool label", beat: Beat{ID: 3}, expect: Expect{Contains: "Tests"},
-			verdict: verdictPass, detail: `contains "Tests"`},
-		{name: "text", beat: Beat{ID: 9}, expect: Expect{Contains: "suite passes"},
-			verdict: verdictPass, detail: `contains "suite passes"`},
-		{name: "missing", beat: Beat{ID: 3}, expect: Expect{Contains: "PASS"},
-			verdict: verdictFail, detail: `entry 2 toolCall Tests FAIL: does not contain "PASS"`},
-		{name: "own selector", beat: Beat{ID: 3}, expect: Expect{Entry: &Anchor{Kind: "user"}, Contains: "failing"},
-			verdict: verdictPass, detail: `entry 0 user`},
-		{name: "no session entry", beat: Beat{ID: 8, Anchor: Anchor{Video: VideoEnd}}, expect: Expect{Contains: "x"},
-			verdict: verdictFail, detail: `{video: end} anchors no session entry to judge`},
+		{name: "inside the beat", beat: 4, seen: `ok\s+taskman`, verdict: verdictPass, detail: `seen /ok\s+taskman/ at 6.5s`},
+		{name: "the screen showing at the beat's start", beat: 2, seen: `tests are failing`, verdict: verdictPass,
+			detail: `seen /tests are failing/ at 1s`},
+		{name: "only outside the beat", beat: 4, seen: `Auto`, verdict: verdictFail,
+			detail: `not seen /Auto/ on any of the beat's 2 screen(s)`},
+		{name: "nowhere", beat: 1, seen: `Plan`, verdict: verdictFail, detail: `not seen /Plan/`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			board := loadCheckStoryboard(t)
+			beat := beatByID(t, board, tc.beat)
+			beat.Expect = []Expect{{Seen: tc.seen}}
 
-			verdict, detail := tc.expect.judge(tc.beat, entries, times)
+			rows := rowsFor(checkRows(t, board), fmt.Sprintf("beat %d", tc.beat))
 
-			if verdict != tc.verdict || !strings.Contains(detail, tc.detail) {
-				t.Errorf("want %s containing %q, got %s %q", tc.verdict, tc.detail, verdict, detail)
+			if len(rows) != 1 || rows[0].Verdict != tc.verdict || !strings.Contains(rows[0].Detail, tc.detail) {
+				t.Errorf("want one %s row containing %q, got %+v", tc.verdict, tc.detail, rows)
 			}
 		})
 	}
 }
 
-func TestExpectJudge_OrderAgainstBeatWithoutEntryFails(t *testing.T) {
+func TestCheckTake_Order(t *testing.T) {
 	t.Parallel()
-	times := map[int]BeatTime{2: {ID: 2, Index: 0}, 7: {ID: 7, Index: noEntry}}
+	cases := []struct {
+		name    string
+		rewrite func(board *Storyboard)
+		verdict verdict
+		detail  string
+	}{
+		{name: "after the beat's first entry expect",
+			rewrite: func(board *Storyboard) { board.Beats[2].Expect[0].Before = 0 },
+			verdict: verdictPass, detail: "after beat 2 (entry 2)"},
+		{name: "out of order",
+			rewrite: func(board *Storyboard) { board.Beats[2].Expect[0].After, board.Beats[2].Expect[0].Before = 0, 2 },
+			verdict: verdictFail, detail: "is not before beat 2 (entry 2)"},
+		{name: "a beat without an entry expect",
+			rewrite: func(board *Storyboard) { board.Beats[2].Expect[0].After, board.Beats[2].Expect[0].Before = 5, 0 },
+			verdict: verdictFail, detail: "after beat 5: beat 5 locates no session entry to order against"},
+		{name: "a beat whose entry expect locates nothing",
+			rewrite: func(board *Storyboard) {
+				board.Beats[1].Expect[0].Entry = &EntrySelector{Kind: "toolCall", Tool: "Git"}
+				board.Beats[2].Expect[0].Before = 0
+			},
+			verdict: verdictFail, detail: "after beat 2: beat 2 locates no session entry to order against"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			board := loadCheckStoryboard(t)
+			tc.rewrite(board)
 
-	verdict, detail := (Expect{Before: 7}).judge(Beat{ID: 2}, heroEntries(), times)
+			rows := rowsFor(checkRows(t, board), "beat 3")
 
-	if verdict != verdictFail || !strings.Contains(detail, "beat 7: that beat anchors no session entry") {
-		t.Errorf("want FAIL naming beat 7, got %s %q", verdict, detail)
+			if len(rows) != 1 || rows[0].Verdict != tc.verdict || !strings.Contains(rows[0].Detail, tc.detail) {
+				t.Errorf("want one %s row containing %q, got %+v", tc.verdict, tc.detail, rows)
+			}
+		})
+	}
+}
+
+func TestCheckTake_ContainsAndLocation(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		expect  Expect
+		verdict verdict
+		detail  string
+	}{
+		{name: "tool stat", expect: Expect{Entry: &EntrySelector{Kind: "toolCall", Tool: "Tests"}, Contains: "FAIL"},
+			verdict: verdictPass, detail: `entry 2 toolCall Tests FAIL: contains "FAIL"`},
+		{name: "text", expect: Expect{Entry: &EntrySelector{Kind: "assistant", Nth: NthLast}, Contains: "suite passes"},
+			verdict: verdictPass, detail: `contains "suite passes"`},
+		{name: "missing", expect: Expect{Entry: &EntrySelector{Kind: "toolCall", Tool: "Tests"}, Contains: "PASS"},
+			verdict: verdictFail, detail: `entry 2 toolCall Tests FAIL: does not contain "PASS"`},
+		{name: "unlocated", expect: Expect{Entry: &EntrySelector{Kind: "toolCall", Tool: "Git"}, Contains: "x"},
+			verdict: verdictFail, detail: "no entry matches {kind: toolCall, tool: Git}"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			board := loadCheckStoryboard(t)
+			beatByID(t, board, 5).Expect = []Expect{tc.expect}
+
+			rows := rowsFor(checkRows(t, board), "beat 5")
+
+			if len(rows) != 1 || rows[0].Verdict != tc.verdict || !strings.Contains(rows[0].Detail, tc.detail) {
+				t.Errorf("want one %s row containing %q, got %+v", tc.verdict, tc.detail, rows)
+			}
+		})
+	}
+}
+
+func TestCheckTake_TakeWithoutSessionIsAnError(t *testing.T) {
+	t.Parallel()
+	take := checkFixtureTake(t)
+	take.Session = ""
+
+	_, err := checkTake(context.Background(), loadCheckStoryboard(t), take, "")
+
+	if err == nil || !strings.Contains(err.Error(), "names no saved session") {
+		t.Fatalf("want an error naming the missing session, got %v", err)
 	}
 }
 
@@ -283,18 +329,38 @@ func TestJudgeStage_NotARepoIsAFailRow(t *testing.T) {
 	}
 }
 
-// TestCheckCommand_ExitStatus drives the subcommand: the fixture passes with exit 0 and the
+// saveCheckTake writes the fixture take into dir as the check storyboard's clip take, and returns
+// its path.
+func saveCheckTake(t *testing.T, dir string) string {
+	t.Helper()
+	path := takeFile(dir, "checked")
+	if err := SaveTake(path, checkFixtureTake(t)); err != nil {
+		t.Fatalf("SaveTake: %v", err)
+	}
+	return path
+}
+
+// runRoot runs the demorig command line args and returns what it printed and its error.
+func runRoot(t *testing.T, args ...string) (string, error) {
+	t.Helper()
+	root := newRootCommand()
+	var out bytes.Buffer
+	root.SetOut(&out)
+	root.SetErr(&out)
+	root.SetArgs(args)
+	err := root.ExecuteContext(context.Background())
+	return out.String(), err
+}
+
+// TestCheckCommand_ExitStatus drives the subcommand: the fixture take passes with exit 0 and the
 // stage row SKIP when no --stage is given, a clean stage fails the run with exit 1, and a
 // --stage dir git cannot judge fails the same way with every beat row still printed.
 func TestCheckCommand_ExitStatus(t *testing.T) {
 	t.Parallel()
 	clean := stageRepo(t)
-	board, err := Load(heroStoryboard)
-	if err != nil {
-		t.Fatal(err)
-	}
+	take := saveCheckTake(t, t.TempDir())
 	var beatRows []string
-	for _, beat := range board.Beats {
+	for _, beat := range loadCheckStoryboard(t).Beats {
 		beatRows = append(beatRows, fmt.Sprintf("beat %d |", beat.ID))
 	}
 	cases := []struct {
@@ -303,26 +369,22 @@ func TestCheckCommand_ExitStatus(t *testing.T) {
 		exitCode int
 		want     []string
 	}{
-		{name: "no stage", args: []string{"check", heroStoryboard, heroFixture},
+		{name: "no stage", args: []string{"check", checkStoryboard, take},
 			exitCode: 0, want: []string{"stage  | SKIP |"}},
-		{name: "clean stage", args: []string{"check", heroStoryboard, heroFixture, "--stage", clean},
+		{name: "clean stage", args: []string{"check", checkStoryboard, take, "--stage", clean},
 			exitCode: exitRunFailed, want: []string{"stage  | FAIL |"}},
-		{name: "missing stage", args: []string{"check", heroStoryboard, heroFixture, "--stage", filepath.Join(clean, "missing")},
+		{name: "missing stage", args: []string{"check", checkStoryboard, take, "--stage", filepath.Join(clean, "missing")},
 			exitCode: exitRunFailed, want: append(beatRows, "stage  | FAIL |")},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			root := newRootCommand()
-			var out bytes.Buffer
-			root.SetOut(&out)
-			root.SetArgs(tc.args)
 
-			err := root.ExecuteContext(context.Background())
+			out, err := runRoot(t, tc.args...)
 
 			for _, want := range tc.want {
-				if !strings.Contains(out.String(), want) {
-					t.Errorf("want the table to carry %q, got:\n%s", want, out.String())
+				if !strings.Contains(out, want) {
+					t.Errorf("want the table to carry %q, got:\n%s", want, out)
 				}
 			}
 			if tc.exitCode == 0 {
@@ -335,6 +397,44 @@ func TestCheckCommand_ExitStatus(t *testing.T) {
 				t.Fatalf("want exit %d, got %v", tc.exitCode, err)
 			}
 		})
+	}
+}
+
+// TestCheckCommand_DefaultTakeFollowsTheWorkDir leaves the take off the command line: check reads
+// <$APOGEE_DEMO_WORK>/<clip>.take.
+func TestCheckCommand_DefaultTakeFollowsTheWorkDir(t *testing.T) {
+	work := t.TempDir()
+	t.Setenv(workDirEnv, work)
+	saveCheckTake(t, work)
+
+	out, err := runRoot(t, "check", checkStoryboard)
+
+	if err != nil {
+		t.Fatalf("want a clean run from the default take, got %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "beat 4 | PASS | entry 8 toolCall Tests PASS") {
+		t.Errorf("want the default take judged, got:\n%s", out)
+	}
+}
+
+func TestTakeArgDefaultsIntoTheWorkDir(t *testing.T) {
+	work := t.TempDir()
+	t.Setenv(workDirEnv, work)
+
+	defaulted, err := takeArg(nil, "hero")
+	if err != nil {
+		t.Fatalf("takeArg: %v", err)
+	}
+	given, err := takeArg([]string{"elsewhere.take"}, "hero")
+	if err != nil {
+		t.Fatalf("takeArg: %v", err)
+	}
+
+	if want := filepath.Join(work, "hero.take"); defaulted != want {
+		t.Errorf("default take: want %q, got %q", want, defaulted)
+	}
+	if given != "elsewhere.take" {
+		t.Errorf("given take: want it kept, got %q", given)
 	}
 }
 

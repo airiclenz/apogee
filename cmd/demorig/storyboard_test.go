@@ -1,6 +1,9 @@
 package main
 
 import (
+	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -9,74 +12,141 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// heroStoryboard is the shipped hero clip's storyboard, reached from this package's directory
-// (go test runs with cwd cmd/demorig).
-const heroStoryboard = "../../graphics/demo/storyboards/hero.yaml"
+// fixture is a storyboard fixture under testdata.
+func fixture(name string) string {
+	return filepath.Join("testdata", name)
+}
 
-func TestLoadHeroStoryboard(t *testing.T) {
+func TestLoadGoodFixture(t *testing.T) {
 	t.Parallel()
 
-	board, err := Load(heroStoryboard)
+	board, err := Load(fixture("good.yaml"))
 	if err != nil {
-		t.Fatalf("Load(%s): %v", heroStoryboard, err)
+		t.Fatalf("Load: %v", err)
 	}
 
-	if got := len(board.Beats); got != 8 {
-		t.Fatalf("beats: want 8, got %d", got)
+	dir := "testdata"
+	for _, resolved := range []struct{ name, got, want string }{
+		{"ship", board.Ship, filepath.Join(dir, "tiny.gif")},
+		{"cassette", board.Cassette, filepath.Join(dir, "tiny.cassette")},
+		{"fonts", board.Fonts, filepath.Join("..", "..", "graphics", "demo", "fonts")},
+	} {
+		if resolved.got != resolved.want {
+			t.Errorf("%s: want %q, got %q", resolved.name, resolved.want, resolved.got)
+		}
 	}
-	if !strings.HasSuffix(filepath.ToSlash(board.Tape), "graphics/demo/tapes/hero.tape") {
-		t.Errorf("tape: want a path ending graphics/demo/tapes/hero.tape, got %q", board.Tape)
+	wantFrame := Frame{Cols: 80, Rows: 24, Padding: 16, FontSize: 14, LineHeight: 1.2, Scale: 2, Width: 600, FPS: 24, MaxColors: 128}
+	if board.Frame != wantFrame {
+		t.Errorf("frame: want %+v, got %+v", wantFrame, board.Frame)
 	}
-	if !strings.HasSuffix(filepath.ToSlash(board.Ship), "graphics/demo.gif") {
-		t.Errorf("ship: want a path ending graphics/demo.gif, got %q", board.Ship)
-	}
-	if want := 9960 * time.Millisecond; board.Align.FirstPromptAt != want {
-		t.Errorf("align.first_prompt_at: want %s, got %s", want, board.Align.FirstPromptAt)
-	}
-	if board.Frame.Scale != 2 || board.Frame.Width != 1250 {
-		t.Errorf("frame: want width 1250 scale 2, got %+v", board.Frame)
-	}
-
-	beats := make(map[int]Beat, len(board.Beats))
-	for _, beat := range board.Beats {
-		beats[beat.ID] = beat
-	}
-	if got := beats[1].Anchor; got != (Anchor{Video: VideoFirstPaint}) {
-		t.Errorf("beat 1 anchor: want {video: first-paint}, got %+v", got)
-	}
-	if got := beats[8].Anchor; got != (Anchor{Video: VideoEnd}) {
-		t.Errorf("beat 8 anchor: want {video: end}, got %+v", got)
-	}
-	if got, want := beats[4].Anchor, (Anchor{Beat: 2, Offset: 10300 * time.Millisecond}); got != want {
-		t.Errorf("beat 4 anchor: want %+v, got %+v", want, got)
-	}
-	if expects := beats[4].Expect; len(expects) != 1 || expects[0].Before != 6 ||
-		expects[0].Entry == nil || expects[0].Entry.Kind != "interjected" {
-		t.Errorf("beat 4 expect: want [{entry: {kind: interjected}, before: 6}], got %+v", expects)
-	}
-	if got, want := beats[7].Anchor, (Anchor{Video: VideoEnd, Offset: -6500 * time.Millisecond}); got != want {
-		t.Errorf("beat 7 anchor: want %+v, got %+v", want, got)
-	}
-	if len(beats[7].Expect) != 0 {
-		t.Errorf("beat 7 expect: want none, got %+v", beats[7].Expect)
+	if got := len(board.Beats); got != 4 {
+		t.Fatalf("beats: want 4, got %d", got)
 	}
 
-	zoom := beats[5].Frame.Zoom
-	if zoom == nil {
-		t.Fatalf("beat 5 zoom: want one, got none")
+	click := board.Beats[1].Do[0].Click
+	if click == nil {
+		t.Fatalf("beat 2 do[0]: want a click, got %+v", board.Beats[1].Do[0])
 	}
-	want := Zoom{Region: "edit-card", Factor: 1.5, In: 400 * time.Millisecond, Hold: 2500 * time.Millisecond, Out: 400 * time.Millisecond}
-	if *zoom != want {
-		t.Errorf("beat 5 zoom: want %+v, got %+v", want, *zoom)
+	wantTarget := Target{Text: "Auto", Nth: TargetFirst, Area: AreaFooter}
+	if click.Target != wantTarget || click.Times != 2 {
+		t.Errorf("beat 2 click: want target %+v times 2, got %+v", wantTarget, *click)
 	}
-	if _, declared := board.Regions[zoom.Region]; !declared {
-		t.Errorf("beat 5 zoom region %q: not declared under regions", zoom.Region)
+	if zoom := board.Beats[1].Zoom; zoom == nil || zoom.Target.Nth != TargetLast || zoom.Factor != 1.5 {
+		t.Errorf("beat 2 zoom: want a last-match target at 1.5×, got %+v", zoom)
 	}
-	if got := beats[5].Frame.Rate(); got != 1.5 {
-		t.Errorf("beat 5 speed: want 1.5, got %g", got)
+	if got := board.Beats[1].Hold; got != time.Second {
+		t.Errorf("beat 2 hold: want 1s, got %s", got)
 	}
-	if got := beats[6].Anchor.Nth; got != NthLast {
-		t.Errorf("beat 6 nth: want last, got %d", got)
+	if got := board.Beats[0].Hold; got != 0 {
+		t.Errorf("beat 1 hold: want 0 when unset, got %s", got)
+	}
+
+	typed := board.Beats[2].Do
+	if !typed[0].Type.IsHumanized() {
+		t.Errorf("beat 3 do[0]: want humanized by default")
+	}
+	if typed[1].Type.IsHumanized() {
+		t.Errorf("beat 3 do[1]: want humanize: false honoured")
+	}
+	if wait := typed[3].Wait; wait == nil || !wait.Gone || wait.Timeout != 3*time.Minute {
+		t.Errorf("beat 3 do[3]: want a gone wait with a 3m timeout, got %+v", wait)
+	}
+	expect := board.Beats[2].Expect[0]
+	if expect.Entry == nil || expect.Entry.Kind != "toolCall" || expect.Entry.Nth != NthLast {
+		t.Errorf("beat 3 expect: want a last toolCall entry, got %+v", expect.Entry)
+	}
+	if !board.Beats[3].Cut || board.Beats[3].Duration != 0 {
+		t.Errorf("beat 4: want a cut beat without a duration, got %+v", board.Beats[3])
+	}
+}
+
+func TestLoadRejectsBadFixtures(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		fixture string
+		wantErr string
+	}{
+		{"bad-retired-header.yaml", "field tape not found"},
+		{"bad-retired-anchor.yaml", "field anchor not found"},
+		{"bad-missing-fonts.yaml", "fonts: missing"},
+		{"bad-max-colors.yaml", "frame.max_colors: want 2..256, got 300"},
+		{"bad-duplicate-id.yaml", "beat 1: id: duplicate"},
+		{"bad-duration.yaml", "beat 2: duration: want >0"},
+		{"bad-hold.yaml", "beat 2: hold: want less than duration 3s, got 3s"},
+		{"bad-zoom-factor.yaml", "beat 2: zoom.factor: want in [1, 3], got 4"},
+		{"bad-wait-timeout.yaml", "beat 3: do[3]: wait.timeout: want in (0, 3m0s], got 3m1s"},
+		{"bad-target-regex.yaml", "beat 2: do[0]: click.target.text: error parsing regexp"},
+		{"bad-target-area.yaml", `beat 2: do[0]: click.target.area: want one of footer, status, transcript, any, got "header"`},
+		{"bad-target-nth.yaml", `nth: want first, last or a positive integer, got "0"`},
+		{"bad-action-forms.yaml", "beat 2: do[1]: want exactly one of type, key, click, wait or pause"},
+		{"bad-pause.yaml", "beat 2: do[1]: pause.for: want >0"},
+		{"bad-expect-without-entry.yaml", "beat 3: expect[0]: want entry or seen"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.fixture, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := Load(fixture(tc.fixture))
+
+			if err == nil {
+				t.Fatalf("want an error containing %q, got none", tc.wantErr)
+			}
+			if !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("want an error containing %q, got:\n%v", tc.wantErr, err)
+			}
+		})
+	}
+}
+
+func TestLoadReportsEveryProblem(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "many.yaml")
+	board := `clip: many
+frame: {cols: 80, rows: 24, font_size: 14, line_height: 1.2, scale: 2, width: 600, fps: 24, max_colors: 128}
+beats:
+  - id: 1
+    title: open
+    duration: 1s
+    do: [{wait: {screen: "x", timeout: 0s}}]
+`
+	if err := os.WriteFile(path, []byte(board), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+
+	_, err := Load(path)
+
+	var invalid *ValidationError
+	if !errors.As(err, &invalid) {
+		t.Fatalf("want a *ValidationError, got %v", err)
+	}
+	for _, want := range []string{"ship: missing", "cassette: missing", "fonts: missing", "beat 1: do[0]: wait.timeout"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("want a problem containing %q, got:\n%v", want, err)
+		}
+	}
+	if got := len(invalid.Problems); got != 4 {
+		t.Errorf("problems: want 4, got %d:\n%v", got, err)
 	}
 }
 
@@ -119,50 +189,44 @@ func TestNthUnmarshalYAML(t *testing.T) {
 	}
 }
 
-func TestLoadRejectsBadFixtures(t *testing.T) {
+func TestExpectValidate(t *testing.T) {
 	t.Parallel()
-
+	ids := map[int]bool{1: true, 2: true}
+	entry := &EntrySelector{Kind: "toolCall"}
 	cases := []struct {
-		fixture string
-		wantErr string
+		name   string
+		expect Expect
+		want   []string
 	}{
-		{"bad-unknown-field.yaml", "field colour not found"},
-		{"bad-missing-tape-header.yaml", "beat 2: tape: no `# beat 9` header"},
-		{"bad-undeclared-region.yaml", `beat 2: frame: zoom.region: "nowhere" is not declared`},
-		{"bad-duplicate-id.yaml", "beat 1: id: duplicate"},
-		{"bad-missing-first-paint.yaml", "beat 1: anchor: the first beat must anchor {video: first-paint}"},
-		{"bad-missing-end.yaml", "beat 3: anchor: the last beat must anchor {video: end}"},
-		{"bad-later-beat-ref.yaml", "beat 2: anchor: beat: 3 is not an earlier beat"},
-		{"bad-expect-without-entry.yaml", "beat 2: expect[0]: entry: required"},
+		{name: "seen alone", expect: Expect{Seen: `Auto`}},
+		{name: "entry with contains", expect: Expect{Entry: entry, Contains: "PASS"}},
+		{name: "entry, order and seen", expect: Expect{Entry: entry, After: 1, Seen: `PASS`}},
+		{name: "neither entry nor seen", expect: Expect{}, want: []string{"want entry or seen"}},
+		{name: "contains without entry", expect: Expect{Seen: "x", Contains: "PASS"},
+			want: []string{"contains, before and after judge an entry: set entry"}},
+		{name: "entry without a clause", expect: Expect{Entry: entry},
+			want: []string{"entry: want at least one of contains, before or after with it"}},
+		{name: "bad seen regex", expect: Expect{Seen: "("}, want: []string{"seen: error parsing regexp"}},
+		{name: "order against itself", expect: Expect{Entry: entry, Before: 2},
+			want: []string{"before: 2 is not another beat"}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.fixture, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
+			var got []string
 
-			_, err := Load(filepath.Join("testdata", tc.fixture))
+			tc.expect.validate(2, ids, func(format string, args ...any) {
+				got = append(got, fmt.Sprintf(format, args...))
+			})
 
-			if err == nil {
-				t.Fatalf("want an error containing %q, got none", tc.wantErr)
+			if len(got) != len(tc.want) {
+				t.Fatalf("want %d problem(s) %q, got %q", len(tc.want), tc.want, got)
 			}
-			if !strings.Contains(err.Error(), tc.wantErr) {
-				t.Fatalf("want an error containing %q, got:\n%v", tc.wantErr, err)
+			for index, want := range tc.want {
+				if !strings.Contains(got[index], want) {
+					t.Errorf("problem %d: want %q, got %q", index, want, got[index])
+				}
 			}
 		})
-	}
-}
-
-func TestLoadGoodFixtureResolvesTapeAgainstItsDirectory(t *testing.T) {
-	t.Parallel()
-
-	board, err := Load(filepath.Join("testdata", "good.yaml"))
-	if err != nil {
-		t.Fatalf("Load: %v", err)
-	}
-
-	if want := filepath.Join("testdata", "tiny.tape"); board.Tape != want {
-		t.Errorf("tape: want %q, got %q", want, board.Tape)
-	}
-	if want := filepath.Join("testdata", "tiny.gif"); board.Ship != want {
-		t.Errorf("ship: want %q, got %q", want, board.Ship)
 	}
 }

@@ -99,7 +99,7 @@ func startFakeTUI(t *testing.T, screen, next string) (*Terminal, string) {
 
 	firstRow := strings.TrimSpace(strings.SplitN(screen, "\n", 2)[0])
 	wait := Action{Wait: &WaitAction{Screen: regexpQuote(firstRow), Timeout: engineTestTimeout}}
-	if err := NewEngine(terminal).RunBeat(context.Background(), BeatV2{ID: 99, Title: "ready", Do: []Action{wait}}); err != nil {
+	if err := NewEngine(terminal).RunBeat(context.Background(), Beat{ID: 99, Title: "ready", Do: []Action{wait}}); err != nil {
 		t.Fatalf("the fake TUI never painted: %v", err)
 	}
 	return terminal, filepath.Join(dir, fakeInputLogFile)
@@ -175,8 +175,8 @@ func awaitStream(t *testing.T, path, want string) {
 }
 
 // clickBeat is a one-action beat clicking target times times.
-func clickBeat(target Target, times int) BeatV2 {
-	return BeatV2{ID: 1, Title: "click", Do: []Action{{Click: &ClickAction{Target: target, Times: times}}}}
+func clickBeat(target Target, times int) Beat {
+	return Beat{ID: 1, Title: "click", Do: []Action{{Click: &ClickAction{Target: target, Times: times}}}}
 }
 
 // engineEvents decodes the take's engine events of kind.
@@ -242,7 +242,7 @@ func TestEngineClickOnLastHitsTheLowerRowWithCompleteReports(t *testing.T) {
 func TestEngineWaitTimesOutNamingTheBeat(t *testing.T) {
 	t.Parallel()
 	terminal, _ := startFakeTUI(t, "idle\n", "")
-	beat := BeatV2{ID: 7, Title: "stalls", Do: []Action{
+	beat := Beat{ID: 7, Title: "stalls", Do: []Action{
 		{Pause: &PauseAction{For: time.Millisecond}},
 		{Wait: &WaitAction{Screen: "never shown", Timeout: 200 * time.Millisecond}},
 	}}
@@ -264,7 +264,7 @@ func TestEngineEventsAreMonotonicAndCoverEveryAction(t *testing.T) {
 	t.Parallel()
 	terminal, inputs := startFakeTUI(t, "before\n", "after typing\n")
 	isHumanized := false
-	beat := BeatV2{ID: 3, Title: "prompt", Do: []Action{
+	beat := Beat{ID: 3, Title: "prompt", Do: []Action{
 		{Type: &TypeAction{Text: "go"}},
 		{Wait: &WaitAction{Screen: "after typing", Timeout: engineTestTimeout}},
 		{Wait: &WaitAction{Screen: "before", Gone: true, Timeout: engineTestTimeout}},

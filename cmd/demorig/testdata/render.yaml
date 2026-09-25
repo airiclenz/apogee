@@ -1,0 +1,13 @@
+# The render tests' storyboard: two beats of a tiny terminal, the first sped up, the second frozen.
+clip: rendered
+ship: rendered.gif
+cassette: rendered.cassette
+fonts: ../../../graphics/demo/fonts
+frame: {cols: 20, rows: 4, padding: 4, font_size: 10, line_height: 1.2, scale: 2, width: 160, fps: 10, max_colors: 16}
+beats:
+  - id: 1
+    title: typing
+    duration: 1s
+  - id: 2
+    title: hold
+    duration: 1500ms
