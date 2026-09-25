@@ -116,7 +116,10 @@ NOTES (2026-09-25): Humanize panics on a seed outside 1..2^31-2 (the range type.
 **Acceptance.** `go test -count=1 -run TestHumanize ./cmd/demorig/`
 **Commit:** `feat(demorig): humanized typing profile ported from type.sh`
 
-## 5. demorig: pty terminal session and the take file
+## 5. demorig: pty terminal session and the take file — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): the take's snapshots are stamped with the sampler tick that took them (not the time of the last output byte), so consecutive snapshots are never closer than 1/fps; a final flush on Close records the program's last paint. Colours are kept as `@N` palette indexes (resolved by the theme later) or `#rrggbb` truecolor, `""` for the terminal default.
+NOTES (2026-09-25): Terminal.Close bounds the post-exit drain at 2 s and then closes the master, as tuitest's PTYDriver does, so a grandchild still holding the pty slave cannot hang a recording.
 
 **What.**
 **Goal:** `demorig` can launch a command in a pty of a given cols×rows, emulate it with `x/vt`, keep the emulator's reply pipe drained, and write a **take**: a timestamped stream of full-style cell-grid snapshots (rune, width, fg, bg, bold, faint, italic, underline, reverse; cursor position and visibility) coalesced to at most the storyboard fps, plus an event log. A take file round-trips through write/read.

@@ -62,7 +62,7 @@ var fullRepaintMarks = [][]byte{
 // that paints into it has stopped — the drain is a goroutine, and [CheckLeaks] counts it.
 func NewScreen(w, h int) *Screen {
 	term := vt.NewEmulator(w, h)
-	clampMargins(term)
+	ClampMargins(term)
 	s := &Screen{
 		term:     term,
 		lastByte: time.Now(),
@@ -73,7 +73,7 @@ func NewScreen(w, h int) *Screen {
 	return s
 }
 
-// clampMargins keeps the emulator's scroll region inside the buffer that region indexes, which is
+// ClampMargins keeps the emulator's scroll region inside the buffer that region indexes, which is
 // what makes [Screen.Resize] safe on a SHRINK.
 //
 // x/vt resets the region when it resizes the buffer, so a stale region does not survive the resize
@@ -90,7 +90,10 @@ func NewScreen(w, h int) *Screen {
 // a slice over its own parameter storage, which is exactly where x/vt's handler reads them back
 // from, so a renderer asking for more rows than the terminal has now gets the answer a real
 // terminal gives it — the margin it could have had.
-func clampMargins(term *vt.Emulator) {
+//
+// It is exported for the one other emulator in the tree, cmd/demorig's recording terminal: the
+// workaround has one owner, here, and every x/vt a program paints into goes through it.
+func ClampMargins(term *vt.Emulator) {
 	// DECSTBM: the bottom margin cannot sit below the last row.
 	term.RegisterCsiHandler('r', func(params ansi.Params) bool {
 		clampParam(params, 1, term.Height())
@@ -164,7 +167,7 @@ func (s *Screen) Render() string {
 // size changed — a tea.WindowSizeMsg in process, a real SIGWINCH through a pty.
 //
 // It is safe over its whole input range, a height shrink under live output included: the bytes of
-// a frame laid out for the old size go on arriving after the resize, and [clampMargins] is what
+// a frame laid out for the old size go on arriving after the resize, and [ClampMargins] is what
 // keeps the scroll region they carry inside the buffer that shrank underneath them.
 func (s *Screen) Resize(w, h int) {
 	s.mu.Lock()
