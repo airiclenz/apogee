@@ -38,17 +38,23 @@ beats:
     title: click the mode marker, pick Auto — confined
     why: OS-confined Auto is a README pillar, and the mouse works
     do:
+      - pause: {for: 1200ms}
       - click: {target: {text: "◐ ask before", area: footer}}
-      - pause: {for: 400ms}
-      - click: {target: {text: "⏵⏵ auto"}, times: 2}
+      - pause: {for: 1200ms}
+      - click: {target: {text: "⏵⏵ auto"}}
+      - pause: {for: 700ms}
+      - click: {target: {text: "⏵⏵ auto"}}
       - wait: {screen: "auto · confined", timeout: 5s}
-    duration: 3s
+    duration: 5s
     expect: [{seen: "auto · confined"}]
     notes: |
       The switch happens BEFORE the prompt on purpose: a sub-agent keeps the mode it was spawned
       in (ADR 0013), so a switch made after the fan-out would leave the children gated. The click
       on the footer marker opens the mode picker; the picker row is clicked twice — the first
-      click lands the picker's cursor on it, the second picks it. The word after the marker is
+      click lands the picker's cursor on it, the second picks it. Every click is preceded by a
+      pause of at least the render's cursor glide (900 ms, cmd/demorig/compose.go), so the drawn
+      cursor travels at its eased pace instead of being cut short by the next press; the two
+      picker clicks are separate actions for the same reason. The word after the marker is
       Auto's blast radius on this host (confinementWord, internal/tui/model.go): a take that shows
       `unconfined` or `gated` is recorded on a host that cannot fence, and is not a keeper.
 
@@ -71,42 +77,48 @@ beats:
     do:
       - wait: {screen: "Sub-Agent", timeout: 90s}
       - wait: {screen: "tool calls", timeout: 90s}
-    duration: 4s
+    duration: 7s
     expect: [{entry: {kind: toolCall, tool: Sub-Agent}, contains: Sub-Agent}]
     notes: |
       The wait is on the card label `Sub-Agent`, never on its `✦` lead: the lead blinks while the
       child runs, so a screen can miss it. `tool calls` is the member row's summary
       (subAgentSummaryLine, internal/tui/subagentblock.go), painted once the child has made at
       least two calls. The expect selects the card by its label — `tool:` prefix-matches the
-      card's label, and the label is `Sub-Agent`, not the tool name `sub_agent`.
+      card's label, and the label is `Sub-Agent`, not the tool name `sub_agent`. About 24 s of
+      take play in 7 s (3.4×): at 5× the child's rows streamed past too fast to read.
 
   - id: 5
     title: a message typed while it works, visibly queued
     why: the headline UX — type while it works; delivered at the next tool boundary
     do:
-      - type: {text: "also add a CHANGELOG entry for the fix"}
-      - pause: {for: 500ms}
+      - type: {text: "also add an entry to @CHANGELOG.md for the fix"}
+      - pause: {for: 800ms}
       - key: {name: enter}
       - wait: {screen: "⧖", timeout: 10s}
-    duration: 4s
+    duration: 5s
     expect: [{entry: {kind: interjected}, contains: CHANGELOG}]
     notes: |
       Typed while the fan-out still runs, so the message is QUEUED (the `⧖` staged row above the
       prompt box) rather than an ordinary next turn. The tell of a miss is the session: the entry
       reads `user` instead of `interjected`. Wording matters more than it looks: "also note the
       fix in the CHANGELOG" made the model read CHANGELOG.md and then forget to write it; the
-      imperative form lands it first try.
+      imperative form lands it first try. The file is named as an `@` reference, so the `@` file
+      completion opens on camera while it is typed, and the file rides the queued message into
+      the model's context (docs/manual/commands.md) — which makes the reference part of the
+      request, so changing it needs a re-capture. The token sits mid-sentence on purpose: the
+      space after it closes the completion, so the Enter is a plain send.
 
   - id: 6
     title: click into the sub-agent's run view and back
     why: every child run is inspectable — one click in, one click out
     do:
+      - pause: {for: 1s}
       - click: {target: {text: "┕ .*tool calls", nth: last, area: transcript}}
       - wait: {screen: "← main ›", timeout: 5s}
-      - pause: {for: 2500ms}
+      - pause: {for: 3s}
       - click: {target: {text: "← main ›"}}
       - wait: {screen: "← main ›", gone: true, timeout: 5s}
-    duration: 6s
+    duration: 7s
     zoom: {target: {text: "← main ›"}, factor: 1.5}
     notes: |
       The member row (`┕ … tool calls`, the LAST one on screen — the newest run) opens the run
@@ -114,14 +126,31 @@ beats:
       pushes into the band while the view is open, so the reader sees where they are.
 
   - id: 7
-    title: the fix lands — the Replace card opened by a click, split diff on camera
-    why: the split diff is the biggest visual upgrade since the last clip
+    title: the model writes the fix, fast-forwarded
+    why: the work happens on camera, but nobody wants to watch it at 1×
     do:
       - wait: {screen: "Replace \\(2\\)", timeout: 120s}
+    duration: 11s
+    notes: |
+      The stretch from the run view closing to the fix and the CHANGELOG edit landing as one
+      `Replace (2)` row. Its length is the model's: 42 s in the 2026-09-25 cassette, 10 s in the
+      current one, so 11 s plays the current take at 1× and a 42 s one at about 3.8×, under the
+      render's 6× advisory. It is its own beat so the clicks that
+      open the card (beat 8) play at 1×: folded into one beat with them, the whole section
+      played at 7× and the split diff flashed by.
+      Waiting for `(2)` rather than the first `+1 −1` matters: a click on the lone first Replace
+      row is carried onto the group row when the CHANGELOG edit joins it, and the card never opens.
+
+  - id: 8
+    title: the Replace card opened by a click, split diff on camera
+    why: the split diff is the biggest visual upgrade since the last clip
+    do:
+      - pause: {for: 1s}
       - click: {target: {text: "Replace \\(2\\)", nth: last, area: transcript}}
       - wait: {screen: "task\\.go ⋯", timeout: 5s}
+      - pause: {for: 1s}
       - click: {target: {text: "task\\.go ⋯.*\\+1 −1", nth: last, area: transcript}}
-      - pause: {for: 2500ms}
+      - pause: {for: 3s}
       - key: {name: pgdown, repeat: 4}
     duration: 6s
     expect: [{entry: {kind: toolCall, tool: Replace, target: task.go}, contains: "+1 −1"}]
@@ -129,31 +158,33 @@ beats:
       Tool blocks paint COLLAPSED, always (layout.md, "Collapsed and expanded blocks"), and the
       fix and the CHANGELOG edit land in one `Tools` group as a `Replace (2)` row — so the split
       diff paints only once two clicks open it: the first expands `Replace (2)` into its members,
-      the second opens the `task.go … +1 −1` card. Waiting for `(2)` rather than the first `+1 −1`
-      matters: a click on the lone first Replace row is carried onto the group row when the
-      CHANGELOG edit joins it, and the card never opens. A toggle keeps the toggled row where it
-      is on screen, which detaches the viewport from the live tail; the PageDowns re-attach it
-      (layout.md), or every later beat paints below the fold. Extra presses clamp at the bottom and
-      cost nothing.
+      the second opens the `task.go … +1 −1` card. The beat runs about 5 s of take, so it plays
+      at 1× and holds its last frame. A toggle keeps the toggled row where it is on screen, which
+      detaches the viewport from the live tail; the PageDowns re-attach it (layout.md), or every
+      later beat paints below the fold. Extra presses clamp at the bottom and cost nothing.
 
       `+1 −1` is this fix's diffstat as the TUI spells it (diffCounts, internal/tui/toolview.go). A
       changed edit size means a changed pattern — here and in the expect: re-derive both from the
       new card when the planted bug or the model's fix changes.
 
-  - id: 8
-    title: zoom on the context gauge
+  - id: 9
+    title: zoom on the context gauge — performed, cut from the render
     why: the gauge says how full the window is — a small-model pillar
     do:
       - wait: {screen: "\\d+(\\.\\d)?[kMG]?/\\d+(\\.\\d)?[kMG] \\d+%", timeout: 30s}
       - pause: {for: 2s}
-    duration: 3s
+    cut: true
     zoom: {target: {text: "\\d+(\\.\\d)?[kMG]?/\\d+(\\.\\d)?[kMG] \\d+%", area: status}, factor: 2}
     notes: |
-      The gauge is the status line's right slot (layout.md, "The status line's right slot"): used
-      out of the window, then the fill. The pattern follows layout.md, "How a size is spelled" —
-      a bare count below a thousand, one decimal below ten of a unit.
+      Cut: on the rig's model (a 1.3M-token window) the zoom lands on `9k/1.3M 0%`, which sells
+      nothing. Pinning a small `context-window:` would make the gauge read well but misstate the
+      model on camera. The beat is still performed, so a future clip on a small-window model
+      only has to drop `cut:` and give it a `duration:` (3s). The gauge is the status line's right
+      slot (layout.md, "The status line's right slot"): used out of the window, then the fill. The
+      pattern follows layout.md, "How a size is spelled" — a bare count below a thousand, one
+      decimal below ten of a unit.
 
-  - id: 9
+  - id: 10
     title: the CHANGELOG entry lands and the tests run green
     why: red → green closes the arc, and the queued message provably mattered
     do:
@@ -168,7 +199,7 @@ beats:
       message did nothing. The closing Tests card's stat is the bare verdict (testVerdictStat,
       internal/tui/toolregistry.go), so a green run reads PASS.
 
-  - id: 10
+  - id: 11
     title: hold on the final frame
     why: loop-read comfort
     do:

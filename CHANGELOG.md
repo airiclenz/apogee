@@ -38,6 +38,10 @@ The demo rig's README (`graphics/demo/README.md`) now documents the v2 recorder:
 
 - demorig: a beat that ends on a `wait` no longer risks failing its `seen` expect — the screen the wait matched is now always recorded into the take, even when it came and went between two frame samples.
 
+- **Hero clip re-paced.** The wait for the fix is now its own fast-forwarded beat (about 42 s of take in 8 s, 5.25×, under the 6× advisory), so the clicks that open the `Replace (2)` card and its split diff play at 1× instead of flashing past at 7×. The context-gauge zoom is cut from the render: on the rig's 1.3M-token model it read `9k/1.3M 0%`. It is still performed, so a small-window clip can bring it back by dropping `cut:` (apogee-hero-beat-pacing).
+
+- **Hero clip slowed and smoothed.** The clip grows from 42 s to 54 s and nothing plays faster than 3.4×: the sub-agent beat was 4.9× and the fix wait 5.25×. The drawn cursor now glides over 900 ms instead of 450, and zooms ramp over 1 s instead of 400 ms. Both ease with smootherstep, so they gather speed and settle instead of starting and stopping on a jolt. A zoom now scales at an even rate rather than rushing its start. The storyboard pauses before every click so the glide is never cut short, and the queued message names the file as `@CHANGELOG.md`, so the `@` file completion shows on camera. That makes it a new request, so the cassette was re-captured.
+
 - demorig: a take whose launch the kernel refuses with EPERM (`fork/exec /usr/bin/bash: operation not permitted`, seen on about one e2e second take in twelve) is retried up to three times on a fresh pty. The refusal comes before the program runs, so nothing runs twice. The cause is not pinned: 20 e2e runs and 2,000 back-to-back pty starts did not reproduce it (apogee-demorig-take-start-eperm).
 
 - **demorig check** now matches a `contains` expect against a tool call's summary as well as its text, label and stat, so the hero storyboard's edit-diffstat (`+1 −1`) and tests-verdict (`PASS`) expects can pass against a real apogee session.

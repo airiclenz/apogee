@@ -251,18 +251,20 @@ a re-render, never another take.
 ## Zoom and cursor
 
 **Zoom.** A beat's `zoom: {target, factor, in, out}` pushes into an on-screen target for the
-whole of its section: eased in over `in`, held, eased back out over `out` (400 ms each when
+whole of its section: eased in over `in`, held, eased back out over `out` (1 s each when
 absent, shrunk in proportion when together they outrun the section). `factor` is the
 magnification, 1–3; left off, the render fits it so the target plus two cells each side fills 70%
 of the frame width, clamped to 1.25–2.5. The target resolves where a click of the same beat on the
 same target landed (as the take logged it), else on the latest of the beat's snapshots it is on,
-so the push lands where the beat settles.
+so the push lands where the beat settles. Every ramp and glide eases with smootherstep — speed
+and acceleration both zero at each end — and a zoom eases its factor's exponent, so each frame
+of a push scales by the same ratio rather than rushing the start and crawling at the end.
 
 **Cursor.** Every click draws a translucent white dot with a dark outline (Catppuccin Mocha's
-crust), kept at constant size whatever the zoom. Per beat that clicks, it fades in (300 ms) at the
+crust), kept at constant size whatever the zoom. Per beat that clicks, it fades in (400 ms) at the
 previous click point — the frame's centre column on the last row before the first — glides to
-each click over 450 ms ending on the press, grows a ring pulse (350 ms) on it, lingers 1.2 s after
-the beat's last press and fades out over 300 ms. The dot always sits on the cell the real click
+each click over 900 ms ending on the press, grows a ring pulse (500 ms) on it, lingers 1.5 s after
+the beat's last press and fades out over 400 ms. The dot always sits on the cell the real click
 was sent to.
 
 ## Fonts and licences
@@ -331,7 +333,7 @@ model — and remember that a reworded prompt is a new cassette key, so it needs
 **Nothing on camera opens itself.** Tool blocks paint collapsed, always (`layout.md`, "Collapsed
 and expanded blocks"), and consecutive tool calls fold into one `Tools` group: the fix and the
 CHANGELOG edit land as a single `Replace (2)` row, and the split diff is not on camera unless a beat
-opens it. Beat 7 waits for that `(2)`, clicks the row open, clicks its `task.go … +1 −1` member
+opens it. Beat 7 waits for that `(2)`; beat 8 clicks the row open, clicks its `task.go … +1 −1` member
 open, then pages back to the bottom. Clicking the lone first `Replace` row instead does not work:
 when the second edit joins it the click carries onto the group row and the card stays shut. The
 page-down matters too: a toggle keeps the toggled row at its screen position, which detaches the
@@ -385,3 +387,5 @@ link.
 | `history/2026-08-05-hero/` | the first hero clip: red → green with a queued CHANGELOG interjection, local model |
 | `history/2026-08-24-hero/` | the v0.16 refresh: same arc plus the split-diff edit card and a closing `/undo` preview, OpenRouter `deepseek-v4-flash` |
 | `history/2026-09-25-hero/` | the v2 rig's first clip (v0.23 surface): a mode click to Auto, a sub-agent fan-out and its run view, a queued CHANGELOG message, the split-diff card opened by click, a zoom on the context gauge — captured once from OpenRouter `deepseek-v4-flash`, replayed and rendered by `demorig` |
+| `history/2026-09-25-hero-repaced/` | the same take re-paced: the fix wait split into its own fast-forwarded beat so the split-diff clicks play at 1×, the context-gauge zoom cut |
+| `history/2026-09-25-hero-smooth/` | slowed and smoothed: pauses before every click, eased 900 ms cursor glides and 1 s zoom ramps, at most 3.4× anywhere, and the queued message names `@CHANGELOG.md` — re-captured from OpenRouter `deepseek-v4-flash` |

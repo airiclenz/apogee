@@ -21,7 +21,7 @@ const (
 	autoFitShare       = 0.70
 	autoFitMin         = 1.25
 	autoFitMax         = 2.5
-	defaultZoomRamp    = 400 * time.Millisecond
+	defaultZoomRamp    = 1000 * time.Millisecond
 )
 
 // The cursor's look, in design pixels — pixels of a frame rasterized at designScale; a frame at
@@ -42,11 +42,11 @@ const (
 // point, glides to each click over cursorGlide ending at the press, rings for ringPulse after it,
 // and starts fading out — over cursorFadeOut — cursorLinger after the beat's last click.
 const (
-	cursorFadeIn  = 300 * time.Millisecond
-	cursorGlide   = 450 * time.Millisecond
-	ringPulse     = 350 * time.Millisecond
-	cursorLinger  = 1200 * time.Millisecond
-	cursorFadeOut = 300 * time.Millisecond
+	cursorFadeIn  = 400 * time.Millisecond
+	cursorGlide   = 900 * time.Millisecond
+	ringPulse     = 500 * time.Millisecond
+	cursorLinger  = 1500 * time.Millisecond
+	cursorFadeOut = 400 * time.Millisecond
 )
 
 // cursorOutlineColor is the dot's dark outline: Catppuccin Mocha's crust, darker than any
@@ -111,7 +111,9 @@ type zoomPlan struct {
 }
 
 // factorAt is the magnification at output time t: 1 outside the section, eased up over In from
-// its start, held, and eased back to 1 over Out before its end.
+// its start, held, and eased back to 1 over Out before its end. The ease runs on the factor's
+// exponent, so each frame of a ramp scales by the same ratio at the same eased pace — a linear
+// factor would rush the start of a push-in and crawl at its end.
 func (z zoomPlan) factorAt(t time.Duration) float64 {
 	if t < z.Start || t >= z.End {
 		return 1
@@ -123,7 +125,7 @@ func (z zoomPlan) factorAt(t time.Duration) float64 {
 	if z.Out > 0 {
 		fall = easeInOut(float64(z.End-t) / float64(z.Out))
 	}
-	return 1 + (z.Factor-1)*min(rise, fall)
+	return math.Pow(z.Factor, min(rise, fall))
 }
 
 // clickMark is one click the cursor makes: its press on the output clock, the beat it belongs
@@ -469,10 +471,12 @@ func blendPixel(dst *image.RGBA, x, y int, colour color.RGBA, alpha float64) {
 	pixel[3] = 0xff
 }
 
-// easeInOut is the smoothstep ease over progress clamped to [0, 1].
+// easeInOut is the smootherstep ease over progress clamped to [0, 1]: speed and acceleration
+// are both zero at either end, so a glide or a zoom gathers speed and settles rather than
+// starting and stopping on a jolt.
 func easeInOut(progress float64) float64 {
 	p := clamp01(progress)
-	return p * p * (3 - 2*p)
+	return p * p * p * (p*(6*p-15) + 10)
 }
 
 // clamp01 clamps f to [0, 1].

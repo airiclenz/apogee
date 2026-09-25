@@ -174,9 +174,9 @@ func TestComposeRingGrowsLinearly(t *testing.T) {
 	board, take := zoomClickTake(t, CellBox{X: 20, Y: 6, W: 3, H: 1})
 	compositor, _ := newTestCompositor(t, board, take)
 
-	diameter, opacity, _, ok := compositor.cursor.ring(3*sec + 175*time.Millisecond)
+	diameter, opacity, _, ok := compositor.cursor.ring(3*sec + ringPulse/2)
 	if !ok || math.Abs(diameter-50) > 0.5 || math.Abs(opacity-0.4) > 0.01 {
-		t.Errorf("ring at press+175ms: want ≈50 px at 40%%, got %g px at %g (shown %v)", diameter, opacity, ok)
+		t.Errorf("ring half-way through its pulse: want ≈50 px at 40%%, got %g px at %g (shown %v)", diameter, opacity, ok)
 	}
 	if diameter, _, _, _ := compositor.cursor.ring(3 * sec); diameter != cursorDiameter {
 		t.Errorf("ring at the press: want %g px, got %g", cursorDiameter, diameter)
@@ -311,5 +311,36 @@ func TestComposeAutoFitFactor(t *testing.T) {
 	})
 	if len(problems) != 0 {
 		t.Errorf("a zoom with no factor: want it accepted for auto-fit, got %v", problems)
+	}
+}
+
+func TestEaseInOutSettlesAtBothEnds(t *testing.T) {
+	t.Parallel()
+	const h = 1e-4
+	for _, edge := range []float64{0, 1} {
+		if got := easeInOut(edge); got != edge {
+			t.Errorf("ease(%g): want %g, got %g", edge, edge, got)
+		}
+	}
+	if got := easeInOut(0.5); got != 0.5 {
+		t.Errorf("ease(0.5): want the half-way point 0.5, got %g", got)
+	}
+	// Speed and acceleration both vanish at the ends: the second difference is O(h³), not O(h²).
+	if got := easeInOut(2*h) - 2*easeInOut(h) + easeInOut(0); math.Abs(got) > h*h*1e-2 {
+		t.Errorf("ease at its start: want no acceleration, got a second difference of %g", got)
+	}
+}
+
+func TestZoomRampScalesGeometrically(t *testing.T) {
+	t.Parallel()
+	zoom := zoomPlan{Start: 0, End: 10 * sec, In: 2 * sec, Out: 2 * sec, Factor: 4}
+	if got := zoom.factorAt(sec); math.Abs(got-2) > 1e-9 {
+		t.Errorf("half-way up a 4× push: want the geometric middle 2, got %g", got)
+	}
+	if got := zoom.factorAt(5 * sec); got != 4 {
+		t.Errorf("held: want 4, got %g", got)
+	}
+	if got := zoom.factorAt(0); got != 1 {
+		t.Errorf("at the section's start: want 1, got %g", got)
 	}
 }
