@@ -34,6 +34,13 @@ const replySentinel = "\x00demorig-close\x00"
 // hand over the program's last bytes.
 const drainTimeout = 2 * time.Second
 
+// startAttempts and startRetryGap bound how [StartTerminal] retries a launch the kernel refused
+// with EPERM (see startRetryingEPERM).
+const (
+	startAttempts = 3
+	startRetryGap = 100 * time.Millisecond
+)
+
 // TermOptions is the terminal a take is recorded in.
 type TermOptions struct {
 	// Cols and Rows are the terminal's size in cells.
@@ -119,11 +126,6 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 	if err := opts.validate(); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(name, args...) //nolint:gosec // the rig runs the program its operator named
-	// exec keeps the LAST definition of a duplicated variable, so appending is how these two win.
-	cmd.Env = append(append([]string{}, opts.Env...), "TERM=xterm-256color", "COLORTERM=truecolor")
-	cmd.Dir = opts.Dir
-
 	emu := vt.NewEmulator(opts.Cols, opts.Rows)
 	tuitest.ClampMargins(emu)
 	t := &Terminal{
@@ -143,9 +145,9 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 	// The callback runs inside emu.Write, which only ever runs with mu held.
 	emu.SetCallbacks(vt.Callbacks{CursorVisibility: func(visible bool) { t.cursorVisible = visible }})
 
-	master, err := pty.StartWithAttrs(cmd,
-		&pty.Winsize{Rows: uint16(opts.Rows), Cols: uint16(opts.Cols)}, //nolint:gosec // bounded by validate
-		&syscall.SysProcAttr{Setsid: true, Setctty: true})
+	cmd, master, err := startRetryingEPERM(func() (*exec.Cmd, *os.File, error) {
+		return startUnderPTY(name, args, opts)
+	}, startAttempts, startRetryGap)
 	if err != nil {
 		return nil, fmt.Errorf("start %s under a pty: %w", name, err)
 	}
@@ -166,6 +168,37 @@ func StartTerminal(name string, args []string, opts TermOptions) (*Terminal, err
 	go t.sample()
 	go t.reap()
 	return t, nil
+}
+
+// startUnderPTY launches name under a fresh opts-sized pty, as a session leader with the pty as
+// its controlling terminal.
+func startUnderPTY(name string, args []string, opts TermOptions) (*exec.Cmd, *os.File, error) {
+	cmd := exec.Command(name, args...) //nolint:gosec // the rig runs the program its operator named
+	// exec keeps the LAST definition of a duplicated variable, so appending is how these two win.
+	cmd.Env = append(append([]string{}, opts.Env...), "TERM=xterm-256color", "COLORTERM=truecolor")
+	cmd.Dir = opts.Dir
+	master, err := pty.StartWithAttrs(cmd,
+		&pty.Winsize{Rows: uint16(opts.Rows), Cols: uint16(opts.Cols)}, //nolint:gosec // bounded by validate
+		&syscall.SysProcAttr{Setsid: true, Setctty: true})
+	return cmd, master, err
+}
+
+// startRetryingEPERM runs start up to attempts times, pausing gap between tries, for as long as it
+// fails with EPERM. The e2e smoke saw about one launch in a dozen refused that way —
+// `fork/exec /usr/bin/bash: operation not permitted` on a take started right after another
+// (apogee-demorig-take-start-eperm) — and it never reproduced on demand, so the cause is not
+// pinned. What is certain is that a fork/exec error comes from the child before it runs the
+// program, so nothing has run twice, and start builds a fresh command on a fresh pty each time,
+// which is what a refusal of this launch's setsid-and-controlling-tty setup needs. Any other error,
+// and the last EPERM, are returned as they are.
+func startRetryingEPERM(start func() (*exec.Cmd, *os.File, error), attempts int, gap time.Duration) (*exec.Cmd, *os.File, error) {
+	for attempt := 1; ; attempt++ {
+		cmd, master, err := start()
+		if err == nil || !errors.Is(err, syscall.EPERM) || attempt >= attempts {
+			return cmd, master, err
+		}
+		time.Sleep(gap)
+	}
 }
 
 // Send writes p to the program as input: typed text, a key's escape sequence, a mouse report.

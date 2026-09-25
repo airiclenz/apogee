@@ -3,8 +3,12 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
+	"os/exec"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -181,5 +185,44 @@ func TestStartTerminal_RejectsBadOptions(t *testing.T) {
 		if _, err := StartTerminal("true", nil, opts); err == nil {
 			t.Errorf("StartTerminal(%+v) succeeded, want an error", opts)
 		}
+	}
+}
+
+func TestStartRetryingEPERM(t *testing.T) {
+	t.Parallel()
+	refused := &os.PathError{Op: "fork/exec", Path: "/usr/bin/bash", Err: syscall.EPERM}
+	other := errors.New("no such pty")
+	for _, tc := range []struct {
+		name      string
+		failures  []error // what the attempts return before one succeeds
+		wantCalls int
+		wantErr   error
+	}{
+		{name: "first try starts", wantCalls: 1},
+		{name: "EPERM then a start", failures: []error{refused}, wantCalls: 2},
+		{name: "EPERM on every try", failures: []error{refused, refused, refused}, wantCalls: 3, wantErr: syscall.EPERM},
+		{name: "another error is not retried", failures: []error{other}, wantCalls: 1, wantErr: other},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			calls := 0
+			start := func() (*exec.Cmd, *os.File, error) {
+				calls++
+				if calls <= len(tc.failures) {
+					return nil, nil, fmt.Errorf("start: %w", tc.failures[calls-1])
+				}
+				return &exec.Cmd{}, nil, nil
+			}
+			cmd, _, err := startRetryingEPERM(start, 3, time.Millisecond)
+			if calls != tc.wantCalls {
+				t.Errorf("start ran %d time(s), want %d", calls, tc.wantCalls)
+			}
+			if tc.wantErr == nil && (err != nil || cmd == nil) {
+				t.Errorf("got (%v, %v), want the started command", cmd, err)
+			}
+			if tc.wantErr != nil && !errors.Is(err, tc.wantErr) {
+				t.Errorf("err = %v, want %v", err, tc.wantErr)
+			}
+		})
 	}
 }

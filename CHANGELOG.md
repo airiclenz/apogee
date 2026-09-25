@@ -38,6 +38,8 @@ The demo rig's README (`graphics/demo/README.md`) now documents the v2 recorder:
 
 - demorig: a beat that ends on a `wait` no longer risks failing its `seen` expect — the screen the wait matched is now always recorded into the take, even when it came and went between two frame samples.
 
+- demorig: a take whose launch the kernel refuses with EPERM (`fork/exec /usr/bin/bash: operation not permitted`, seen on about one e2e second take in twelve) is retried up to three times on a fresh pty. The refusal comes before the program runs, so nothing runs twice. The cause is not pinned: 20 e2e runs and 2,000 back-to-back pty starts did not reproduce it (apogee-demorig-take-start-eperm).
+
 - **demorig check** now matches a `contains` expect against a tool call's summary as well as its text, label and stat, so the hero storyboard's edit-diffstat (`+1 −1`) and tests-verdict (`PASS`) expects can pass against a real apogee session.
 
 - **The run view's breadcrumb is a three-row black band.** The `← main › name   esc back` trail now sits in the middle of a black band, with a blank black row above and below it. A click on any of the three rows goes one level up. The block cursor's stop on the band is the trail row. On a screen too short for the whole header, only the trail stays frozen, so the run's own lines still show beneath it.
