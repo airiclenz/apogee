@@ -14,8 +14,10 @@
 # apogee never talks to a live server directly: its one server entry points at
 # http://127.0.0.1:<port>, keyless, where `demorig record` serves the clip's cassette and
 # `demorig capture` serves a recording proxy to the live model (the proxy holds the key).
-# Both the alias and the model id are ON CAMERA in the footer for the whole clip, and the
-# cassette is keyed by conversation, model id included — change either and re-capture.
+# Both the alias and the model id are ON CAMERA in the footer for the whole clip. The
+# cassette is keyed by conversation (wire, stream flag, tool names, first user message and
+# the assistant turns) and leaves the model id out, so a changed model still replays the
+# old model's replies without complaint — change either and re-capture.
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
