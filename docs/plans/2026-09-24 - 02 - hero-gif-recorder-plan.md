@@ -272,7 +272,11 @@ internal/tui/subagentblock.go — subAgentSummaryLine; cmd/demorig/storyboard_te
 **Acceptance.** `go run ./cmd/demorig lint graphics/demo/storyboards/hero.yaml && bash -n graphics/demo/setup.sh && bash -n graphics/demo/reset.sh && ! test -e graphics/demo/tapes && ! grep -rnE 'record\.sh|gen\.sh|type\.sh|tapes/|\bvhs\b' graphics/demo/*.sh graphics/demo/storyboards/ && go test -count=1 ./cmd/demorig/`
 **Commit:** `feat(demo): hero v2 storyboard — mode click, run view, queued message, gauge`
 
-## 14. End-to-end smoke: record → check → render against a fixture cassette
+## 14. End-to-end smoke: record → check → render against a fixture cassette — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): the storyboard and the upstream are YAML fixtures under cmd/demorig/testdata/e2e/ (upstream.yaml is a stubllm Script, loaded with stubllm.Load and served with stubllm.New); the test copies smoke.yaml into a temp dir beside a `fonts` symlink to graphics/demo/fonts so the cassette and GIF never land in testdata. The test reuses record_test.go's freePort.
+NOTES (2026-09-25): smoke beat 2 waits on `auto · \w+` (any confinement word) rather than `auto · confined`, so the smoke passes on a host that cannot fence; beat 2 ends with a 300ms pause and beat 3 with a 2s pause — without them the seen expect and the assistant-entry expect fail intermittently (see the receipt's FOLLOW-UP).
+NOTES (2026-09-25): the ambient-variable list lives in record.go as `ambientApogeeEnv` + `apogeeEnv`, applied to the pty launch; the test applies the same filter to setup.sh and unsets the variables for the in-process run.
 
 **What.** Depends on item 13.
 **Goal:** a test builds `apogee`, sets up a throwaway rig in `t.TempDir()`, and records a three-beat storyboard (open, click the mode marker to Auto, type a prompt answered by a two-turn fixture cassette with one tool call) through replay; `check` passes and `render --dry-run` succeeds. It proves the whole pipeline without a network or key.

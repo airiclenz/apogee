@@ -1,0 +1,30 @@
+# The model TestE2ERecordCheckRender captures its cassette from: a two-turn conversation with one
+# tool call. The test runs `demorig capture` against this script — the cassette is recorded
+# through the real proxy, never hand-assembled — and then `demorig record` replays it with this
+# server closed.
+#
+# The turns with a `when:` are matched before the ordered one, first match wins, so the order
+# below is a precedence.
+model: demo-model
+turns:
+  # The session title apogee asks for off the first prompt; matched before the prompt's own turn
+  # or it would take it.
+  - when:
+      last_message: The user's first request
+    repeat: true
+    text: Failing tests
+  # Turn 1 — the prompt answers with one tool call.
+  - when:
+      last_message: ^why are the tests failing
+    tool_calls:
+      - name: read_file
+        arguments: '{"path":"task.go"}'
+  # Turn 2 — the tool result answers with the verdict the storyboard waits for.
+  - when:
+      tool_result: read_file
+    text: Pending() stops one task short of the end of the list.
+    token_delay: 1ms
+    chunk_runes: 6
+  # Anything else apogee asks on its own account.
+  - repeat: true
+    text: OK.

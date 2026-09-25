@@ -13,12 +13,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/spf13/cobra"
 
+	"github.com/airiclenz/apogee/internal/config"
 	"github.com/airiclenz/apogee/internal/stubllm"
 )
 
@@ -278,13 +280,34 @@ func runTake(ctx context.Context, board *Storyboard, r rig, handler http.Handler
 	launch := "source " + shellQuote(r.envScript()) + " >/dev/null && exec apogee"
 	term, err := StartTerminal("bash", []string{"-c", launch}, TermOptions{
 		Cols: board.Frame.Cols, Rows: board.Frame.Rows, FPS: board.Frame.FPS,
-		Env: os.Environ(), Dir: r.work, FromFirstPaint: true,
+		Env: apogeeEnv(os.Environ()), Dir: r.work, FromFirstPaint: true,
 	})
 	if err != nil {
 		return nil, err
 	}
 	runErr := performBeats(ctx, term, board.Beats)
 	return term.Close(), runErr
+}
+
+// ambientApogeeEnv are the APOGEE_* variables that would steer the apogee a take launches away
+// from the rig: another config file or workspace, another server, endpoint or model than the
+// one the cassette was captured from, another starting mode, bypass. The rig's config.yaml is
+// the whole of what a take runs on, so none of them reaches it.
+var ambientApogeeEnv = []string{
+	config.EnvConfig, config.EnvServer, config.EnvEndpoint, config.EnvModel, config.EnvMode,
+	config.EnvBypass, config.EnvWorkspace,
+}
+
+// apogeeEnv is environ less every variable in ambientApogeeEnv.
+func apogeeEnv(environ []string) []string {
+	kept := make([]string, 0, len(environ))
+	for _, entry := range environ {
+		name, _, _ := strings.Cut(entry, "=")
+		if !slices.Contains(ambientApogeeEnv, name) {
+			kept = append(kept, entry)
+		}
+	}
+	return kept
 }
 
 // performBeats waits for the program's first paint, then runs the beats.

@@ -1,0 +1,46 @@
+# The three-beat clip TestE2ERecordCheckRender records: open, click the mode marker to Auto, one
+# prompt answered through a tool call. The test copies this file into a temp dir beside a `fonts`
+# link to graphics/demo/fonts, so the cassette and the GIF land there, never in testdata.
+clip: smoke
+ship: smoke.gif
+cassette: smoke.cassette
+fonts: fonts
+frame: {cols: 120, rows: 36, padding: 16, font_size: 14, line_height: 1.2, scale: 1, width: 600, fps: 12, max_colors: 64}
+
+beats:
+  - id: 1
+    title: open
+    do:
+      - wait: {screen: "◐ ask before", timeout: 30s}
+    duration: 1s
+
+  - id: 2
+    title: click the mode marker, pick Auto
+    why: a real SGR click on the footer marker, then twice on the picker row
+    do:
+      - click: {target: {text: "◐ ask before", area: footer}}
+      - pause: {for: 400ms}
+      - click: {target: {text: "⏵⏵ auto"}, times: 2}
+      - wait: {screen: "auto · \\w+", timeout: 5s}
+      - pause: {for: 300ms}
+    duration: 2s
+    expect: [{seen: "auto · \\w+"}]
+    notes: |
+      The word after the marker depends on whether this host can fence, so any word passes. The
+      pause lets the sampler (one snapshot a frame) take the screen the wait matched before the
+      beat ends, or the seen expect can miss it.
+
+  - id: 3
+    title: one prompt, one tool call, one answer
+    do:
+      - type: {text: "why are the tests failing?"}
+      - key: {name: enter}
+      - wait: {screen: "one task short", timeout: 60s}
+      - pause: {for: 2s}
+    duration: 3s
+    expect:
+      - {entry: {kind: toolCall, tool: Read, target: task.go}, contains: Read}
+      - {entry: {kind: assistant}, contains: one task short}
+    notes: |
+      The pause is the hold the hero's last beat has too: a take ends by killing apogee, and the
+      reply is on screen while it streams, before the session has saved the assistant entry.
