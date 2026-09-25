@@ -296,6 +296,25 @@ line, not the namer's) — and it is saved with the run, so a resumed session pa
 _Avoid_: "title" (that is the **Session**'s — a delegation has a name, and no `^r` to change it),
 "label", "sub-agent title".
 
+**Retained delegation**:
+A finished **Sub-agent** run the parent can pick up again with `sub_agent`'s `continue: "<name>"`,
+kept under its **Delegation name** for the rest of the **Session** — saved with it, restored on
+resume, dropped by `/clear`, cut by a fork and restored by a cancelled Turn's rollback. A run
+completed normally is retained only when its call **named** it; a capped, faulted or **stopped**
+one is retained under any name it ended wearing. A continuation re-spawns a fresh child from the
+original task and the run's rounds of reports, never resuming the old one. Ratified 2026-09-25
+([ADR 0086](docs/adr/0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md));
+until it lands, retention is the capped or faulted run's, for its Exchange only.
+_Avoid_: "suspended sub-agent" (ADR 0007's reserved slot, which stays empty), "resumed child".
+
+**Stop (a delegation)**:
+The human ending **one** running **Sub-agent** — and everything under it — while the parent's Turn
+goes on: nothing rolls back, and the parent receives a partial result with the engine's summary of
+the work so far. Its delegate-ledger outcome is `stopped`. It is distinct from **cancel**, which is
+`esc×2` ending and rolling back the whole Turn, and from **capped**, the engine ending a run at a
+bound. Ratified 2026-09-25 (ADR 0086), not yet shipped.
+_Avoid_: "stopped" for a run the engine capped (say **capped**), "kill", "abort".
+
 **Parallel agents**:
 The per-server cap on how many sub-agents the top-level agent may run **concurrently**.
 Resolved per `servers:` entry, pin-else-discover-else-floor: an explicit `parallel-agents: N`
