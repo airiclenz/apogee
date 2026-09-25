@@ -180,11 +180,30 @@ func (t *Terminal) Event(kind, detail string) {
 }
 
 // Current is what the terminal shows right now, stamped on the take's clock. It is read, not
-// recorded: the take gets its snapshots from the sampler alone.
+// recorded: the take gets its snapshots from the sampler and from [Terminal.Match] alone.
 func (t *Terminal) Current() Snapshot {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.snapshotLocked(time.Since(t.start))
+}
+
+// Match reports whether match holds for the screen as it stands, and when it does records that
+// very screen into the take, stamped now. The sampler takes one snapshot a frame, so a screen the
+// rig waited on could otherwise come and go between two samples — and a beat's seen expect judges
+// the take, not what the rig saw. Matching and recording happen under one lock, so the screen
+// recorded is exactly the screen that matched.
+func (t *Terminal) Match(match func(Snapshot) bool) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	screen := t.snapshotLocked(time.Since(t.start))
+	if !match(screen) {
+		return false
+	}
+	if !t.awaitingPaint {
+		t.dirty = false
+		t.take.addSnapshot(screen)
+	}
+	return true
 }
 
 // Painted closes at the program's first paint when the take records from it, and is already
@@ -298,8 +317,8 @@ func (t *Terminal) pumpAnswers() {
 }
 
 // sample records the screen at most FPS times a second, and only when output arrived since the
-// last sample. A snapshot is stamped with the tick that took it, so consecutive snapshots are
-// never closer than one frame. On stop it takes one last sample, so the take ends on what the
+// last sample. A snapshot is stamped with the tick that took it, so consecutive samples are never
+// closer than one frame ([Terminal.Match] may add a matched screen between two). On stop it takes one last sample, so the take ends on what the
 // program last painted.
 func (t *Terminal) sample() {
 	defer close(t.samplerDone)

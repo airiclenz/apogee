@@ -34,6 +34,9 @@ func (*Terminal) Event(string, string) {}
 // Current is the empty snapshot.
 func (*Terminal) Current() Snapshot { return Snapshot{} }
 
+// Match judges the empty snapshot and records nothing.
+func (*Terminal) Match(match func(Snapshot) bool) bool { return match(Snapshot{}) }
+
 // Painted is already closed: there is no paint to wait for.
 func (*Terminal) Painted() <-chan struct{} {
 	painted := make(chan struct{})

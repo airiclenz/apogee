@@ -239,6 +239,52 @@ func TestEngineClickOnLastHitsTheLowerRowWithCompleteReports(t *testing.T) {
 	}
 }
 
+// A screen shown for less than a frame is one the sampler can miss. The wait that matched it
+// must still land it in the take, inside its beat, or the beat's seen expect judges a take that
+// never showed what the rig saw.
+func TestEngineWaitRecordsTheScreenItMatched(t *testing.T) {
+	t.Parallel()
+	// One sample a second, and "ready" is gone after 300ms: the sampler's first tick never sees it.
+	terminal, err := StartTerminal("sh", []string{"-c", `printf ready; sleep 0.3; printf '\033[2J\033[Hgone'; sleep 5`},
+		TermOptions{Cols: 40, Rows: 5, FPS: 1, Env: os.Environ()})
+	if err != nil {
+		t.Fatalf("StartTerminal: %v", err)
+	}
+	t.Cleanup(func() { terminal.Close() })
+	beat := Beat{ID: 2, Title: "ends on a wait", Do: []Action{
+		{Wait: &WaitAction{Screen: "^ready", Timeout: engineTestTimeout}},
+	}}
+	if err := NewEngine(terminal).RunBeat(context.Background(), beat); err != nil {
+		t.Fatalf("RunBeat: %v", err)
+	}
+	next := Beat{ID: 3, Title: "after", Do: []Action{
+		{Wait: &WaitAction{Screen: "^gone", Timeout: engineTestTimeout}},
+	}}
+	if err := NewEngine(terminal).RunBeat(context.Background(), next); err != nil {
+		t.Fatalf("RunBeat: %v", err)
+	}
+	take := terminal.Close()
+
+	spans := []BeatSpan{{Beat: 2}, {Beat: 3}}
+	for _, event := range take.Events {
+		if event.Kind == EventBeatStart {
+			var detail EngineEventDetail
+			if err := json.Unmarshal([]byte(event.Detail), &detail); err != nil {
+				t.Fatal(err)
+			}
+			spans[detail.Beat-2].Start = event.At
+		}
+	}
+	spans[0].End, spans[1].End = spans[1].Start, takeEnd(take)
+	for _, screen := range beatScreens(take.Snapshots, spans)[2] {
+		if rowText(screen, 0) == "ready" {
+			return
+		}
+	}
+	t.Fatalf("no snapshot of beat 2 shows the \"ready\" its wait matched; the take holds %d snapshot(s)",
+		len(take.Snapshots))
+}
+
 func TestEngineWaitTimesOutNamingTheBeat(t *testing.T) {
 	t.Parallel()
 	terminal, _ := startFakeTUI(t, "idle\n", "")

@@ -22,13 +22,12 @@ beats:
       - pause: {for: 400ms}
       - click: {target: {text: "⏵⏵ auto"}, times: 2}
       - wait: {screen: "auto · \\w+", timeout: 5s}
-      - pause: {for: 300ms}
     duration: 2s
     expect: [{seen: "auto · \\w+"}]
     notes: |
       The word after the marker depends on whether this host can fence, so any word passes. The
-      pause lets the sampler (one snapshot a frame) take the screen the wait matched before the
-      beat ends, or the seen expect can miss it.
+      beat ends on its wait: the screen a wait matched is recorded into the take, so the seen
+      expect finds it without a settle pause.
 
   - id: 3
     title: one prompt, one tool call, one answer

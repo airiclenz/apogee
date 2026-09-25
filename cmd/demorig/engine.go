@@ -103,8 +103,10 @@ func (e *BeatError) Unwrap() error { return e.Err }
 // Engine performs a storyboard's beats against a live [Terminal]: it types, presses keys, clicks
 // on-screen targets with real SGR mouse reports and waits on the screen, logging every beat
 // start, action start and end, resolved target and click into the terminal's take. It reads the
-// screen only through [Terminal.Current] and writes only through [Terminal.Send], so what it
-// sees is what the take records and what it sends is what the program reads.
+// screen only through [Terminal.Current] and [Terminal.Match] and writes only through
+// [Terminal.Send], so what it sees is what the take records — a screen a wait matched is
+// recorded even when the sampler would have missed it — and what it sends is what the program
+// reads.
 type Engine struct {
 	term *Terminal
 }
@@ -243,8 +245,10 @@ func (e *Engine) click(ctx context.Context, step EngineEventDetail, action Click
 	return nil
 }
 
-// wait polls the screen until the regex matches it (or, with Gone, no longer does). It fails at
-// the timeout, or at once when the program exits first.
+// wait polls the screen until the regex matches it (or, with Gone, no longer does). The screen
+// that satisfies it is recorded into the take ([Terminal.Match]), so a seen expect on a beat
+// that ends on a wait always finds the screen the wait saw. It fails at the timeout, or at once
+// when the program exits first.
 func (e *Engine) wait(ctx context.Context, action WaitAction) error {
 	pattern, err := regexp.Compile(action.Screen)
 	if err != nil {
@@ -259,7 +263,9 @@ func (e *Engine) wait(ctx context.Context, action WaitAction) error {
 	poll := time.NewTicker(waitPollInterval)
 	defer poll.Stop()
 	for {
-		if pattern.MatchString(screenText(e.term.Current())) != action.Gone {
+		if e.term.Match(func(screen Snapshot) bool {
+			return pattern.MatchString(screenText(screen)) != action.Gone
+		}) {
 			return nil
 		}
 		select {
