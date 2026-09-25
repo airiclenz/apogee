@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/airiclenz/apogee/internal/session"
 )
 
 // checkStoryboard is the check tests' storyboard; its entry expects match heroEntries.
@@ -221,6 +223,42 @@ func TestCheckTake_ContainsAndLocation(t *testing.T) {
 
 			if len(rows) != 1 || rows[0].Verdict != tc.verdict || !strings.Contains(rows[0].Detail, tc.detail) {
 				t.Errorf("want one %s row containing %q, got %+v", tc.verdict, tc.detail, rows)
+			}
+		})
+	}
+}
+
+// summaryShapedTranscript carries a Replace and a Tests entry exactly as apogee saves them: the
+// outcome rides in tool.summary.text and the stat is left empty.
+const summaryShapedTranscript = `{"version": 1, "entries": [
+	{"kind": "toolCall", "callID": "call_1", "done": true, "tool": {"label": "Replace", "verb": "editing",
+		"target": "task.go", "name": "single_find_and_replace",
+		"summary": {"text": "+1 \u22121", "stat": {"added": 1, "removed": 1}}}},
+	{"kind": "toolCall", "callID": "call_2", "done": true, "tool": {"label": "Tests",
+		"verb": "running tests", "name": "run_tests", "summary": {"text": "PASS"}}}
+]}`
+
+func TestEntryContains_ReadsTheToolSummary(t *testing.T) {
+	t.Parallel()
+	entries, err := session.DecodeTranscript([]byte(summaryShapedTranscript))
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	cases := []struct {
+		name  string
+		entry session.Entry
+		want  string
+		holds bool
+	}{
+		{name: "edit diffstat", entry: entries[0], want: "+1 −1", holds: true},
+		{name: "tests verdict", entry: entries[1], want: "PASS", holds: true},
+		{name: "absent", entry: entries[1], want: "FAIL", holds: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := entryContains(tc.entry, tc.want); got != tc.holds {
+				t.Errorf("entryContains(%q) = %v, want %v", tc.want, got, tc.holds)
 			}
 		})
 	}

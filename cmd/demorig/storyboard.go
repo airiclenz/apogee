@@ -180,7 +180,7 @@ func (n *TargetNth) UnmarshalYAML(value *yaml.Node) error {
 
 // Expect is one thing a keeper take must show at a beat, judged on the take's saved session,
 // on its screens, or both. Entry selects the session entry judged; Contains is a substring of its
-// text, tool label or stat, and Before and After order it against the entry another beat's first
+// text, tool label, tool stat or tool summary, and Before and After order it against the entry another beat's first
 // entry expect locates — all three need an Entry. Seen is a regex that must match the screen of
 // at least one snapshot inside the beat. An expect sets Entry, Seen or both.
 type Expect struct {

@@ -25,10 +25,11 @@ func newCheckCommand() *cobra.Command {
 		Use:   "check <storyboard.yaml> [<take>] [--stage <dir>]",
 		Short: "Judge a take against the storyboard's expects",
 		Long: "check judges every expect of the storyboard against a take: an entry expect on the\n" +
-			"session the take saved (contains on the entry's text, tool label or stat, before/after\n" +
-			"on the order of the entries the beats' first entry expects locate), a seen expect on the\n" +
-			"screens the take recorded inside its beat, and expect.stage against the stage repo named\n" +
-			"by --stage (reported SKIP when it is not given). One row per expect; exit 1 on any FAIL.\n" +
+			"session the take saved (contains on the entry's text, tool label, tool stat or tool\n" +
+			"summary, before/after on the order of the entries the beats' first entry expects\n" +
+			"locate), a seen expect on the screens the take recorded inside its beat, and\n" +
+			"expect.stage against the stage repo named by --stage (reported SKIP when it is not\n" +
+			"given). One row per expect; exit 1 on any FAIL.\n" +
 			"The take defaults to <work>/<clip>.take, the work dir following $" + workDirEnv + ".",
 		Args: cobra.RangeArgs(1, 2),
 		RunE: runE(func(cmd *cobra.Command, args []string) error {
@@ -250,7 +251,8 @@ func (e Expect) clauses(anchors map[int]int, screens []Snapshot) []clause {
 	return clauses
 }
 
-// containsClause holds when the entry's text, tool label or tool stat contains the substring.
+// containsClause holds when the entry's text, tool label, tool stat or tool summary contains the
+// substring.
 func containsClause(want string) clause {
 	return func(judged located) (string, bool) {
 		if entryContains(judged.Entry, want) {
@@ -292,13 +294,23 @@ func seenClause(pattern string, screens []Snapshot) clause {
 	}
 }
 
-// entryContains reports whether the entry's text, tool label or tool stat carries the substring.
+// entryContains reports whether the entry's text, tool label, tool stat or tool summary carries
+// the substring. The summary is read because apogee writes most tool outcomes there rather than
+// in the stat — an edit's diffstat ("+1 −1") and a test run's verdict ("PASS") ride in
+// tool.summary.text, and the stat stays empty for both.
 func entryContains(entry session.Entry, want string) bool {
 	if strings.Contains(entry.Text, want) {
 		return true
 	}
-	return entry.Tool != nil &&
-		(strings.Contains(entry.Tool.Label, want) || strings.Contains(entry.Tool.Stat, want))
+	if entry.Tool == nil {
+		return false
+	}
+	for _, field := range []string{entry.Tool.Label, entry.Tool.Stat, entry.Tool.Summary.Text} {
+		if strings.Contains(field, want) {
+			return true
+		}
+	}
+	return false
 }
 
 // describeEntry spells a located entry for a table row: its index and kind, then the tool card's

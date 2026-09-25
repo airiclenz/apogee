@@ -226,8 +226,9 @@ selects one session entry in the session-anchor grammar — `{kind, text, tool, 
 `kind` is an entry kind as the session JSON spells it (`user`, `toolCall`, `interjected`, …),
 `text`/`tool`/`target` are prefix matches on the entry's text, tool label and tool target, and
 `nth` is a positive integer or `last` — and the entry clauses judge it: `contains` (a substring of
-its text, tool label or stat), `before: <id>` and `after: <id>` (ordering against the entry
-another beat's first entry expect locates). `seen` is a regex that must match at least one screen
+its text, tool label, tool stat or tool summary — where apogee saves an edit's diffstat and a test
+run's verdict), `before: <id>` and `after: <id>` (ordering against the entry another beat's first
+entry expect locates). `seen` is a regex that must match at least one screen
 the take recorded inside the beat. The top-level `expect: {stage: dirty}` asserts the stage repo
 still carries the exchange's writes after the take.
 
