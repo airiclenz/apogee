@@ -117,16 +117,21 @@ beats:
     title: the fix lands — the Replace card opened by a click, split diff on camera
     why: the split diff is the biggest visual upgrade since the last clip
     do:
-      - wait: {screen: "\\+1 −1", timeout: 120s}
-      - click: {target: {text: "\\+1 −1", nth: last, area: transcript}}
+      - wait: {screen: "Replace \\(2\\)", timeout: 120s}
+      - click: {target: {text: "Replace \\(2\\)", nth: last, area: transcript}}
+      - wait: {screen: "task\\.go ⋯", timeout: 5s}
+      - click: {target: {text: "task\\.go ⋯.*\\+1 −1", nth: last, area: transcript}}
       - pause: {for: 2500ms}
       - key: {name: pgdown, repeat: 4}
     duration: 6s
     expect: [{entry: {kind: toolCall, tool: Replace, target: task.go}, contains: "+1 −1"}]
     notes: |
-      Tool blocks paint COLLAPSED, always (layout.md, "Collapsed and expanded blocks"), so the fix
-      lands as one row — `Replace ↳ task.go … +1 −1 …` — and the split diff paints only once
-      something opens it. The click toggles that row open. A toggle keeps the toggled row where it
+      Tool blocks paint COLLAPSED, always (layout.md, "Collapsed and expanded blocks"), and the
+      fix and the CHANGELOG edit land in one `Tools` group as a `Replace (2)` row — so the split
+      diff paints only once two clicks open it: the first expands `Replace (2)` into its members,
+      the second opens the `task.go … +1 −1` card. Waiting for `(2)` rather than the first `+1 −1`
+      matters: a click on the lone first Replace row is carried onto the group row when the
+      CHANGELOG edit joins it, and the card never opens. A toggle keeps the toggled row where it
       is on screen, which detaches the viewport from the live tail; the PageDowns re-attach it
       (layout.md), or every later beat paints below the fold. Extra presses clamp at the bottom and
       cost nothing.

@@ -301,7 +301,14 @@ NOTES (2026-09-25): the README says the cassette key leaves the model id out (pe
 **Acceptance.** `! grep -niE '\bvhs\b|\.tape\b|type\.sh|gen\.sh|record\.sh' graphics/demo/README.md | grep -v 'history/' && grep -q '^## Storyboards' graphics/demo/README.md`
 **Commit:** `docs(demo): the v2 recording rig`
 
-## 16. Capture, record and ship the new hero clip
+## 16. Capture, record and ship the new hero clip — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): capture attempt 1 of 8 (previous dispatch, apogee v0.23.1+g540b5667d499 from HEAD first on PATH via setup.sh) is the shipped cassette; it failed the check only on the `contains`-vs-tool-summary defect fixed in c4690e70, so it was not re-captured. The cassette carries no key, authorization, bearer or api-key string (grep count 0). The key came from the openrouter-ds4 entry's api-key-cmd into that one command's environment only.
+NOTES (2026-09-25): apogee rebuilt from HEAD c4690e70 into ~/.cache/apogee-demo/bin before record; `apogee --version` → v0.23.1+gc4690e70fdfa.dirty (dirty = the untracked cassette). No apogee source changed between 540b5667 and c4690e70.
+NOTES (2026-09-25): consequential edit — graphics/demo/storyboards/hero.yaml: made necessary by the first replay's frames — beat 7 clicked the lone first `Replace … +1 −1` row, the CHANGELOG edit then folded it into a `Replace (2)` group row, the click carried onto the group and the split diff never reached camera although every check passed. Beat 7 now waits for `Replace \(2\)`, clicks it open, then clicks the `task\.go ⋯.*\+1 −1` member; the second replay shows the split diff from the end of beat 7 to the end of the clip. Its notes were updated to match. Expects unchanged.
+NOTES (2026-09-25): consequential edit — graphics/demo/README.md: made necessary by the beat-7 change (the "Nothing on camera opens itself" paragraph described the single-row click); the History table also gains the 2026-09-25-hero row as the item asks.
+NOTES (2026-09-25): render warns beat 7 plays at 7.0× (42.2 s of take in 6 s, above the 6× advisory), and beat 4 at 4.9×; the gauge on camera reads `9k/1.3M 0%` (the 1.3M window makes the fill tiny). Both are pacing/presentation choices in the storyboard, left as is.
+NOTES (2026-09-25): pre-existing TUI behaviour seen: an open tool card that a later call folds into a `(2)` group loses its open state (the toggle lands on the group row) — not a regression of this run; recorded here only.
 
 **What.** Depends on items 14, 15. Needs `OPENROUTER_API_KEY`, `ffmpeg`, `gifsicle` on the host; missing any → stop and report, never substitute.
 **Goal:** `graphics/demo/storyboards/hero.cassette` holds a capture whose `demorig check` passes; `graphics/demo.gif` is the render of a replayed take (1250 px wide); `graphics/demo/history/<today>-hero/` holds `demo.gif` and `NOTES.md` (model, alias, endpoint, apogee commit, storyboard, cassette, render line, capture attempts); the README history table gains the row.

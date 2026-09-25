@@ -329,10 +329,13 @@ try. If a beat silently doesn't happen during a capture, suspect the verb before
 model — and remember that a reworded prompt is a new cassette key, so it needs a re-capture.
 
 **Nothing on camera opens itself.** Tool blocks paint collapsed, always (`layout.md`, "Collapsed
-and expanded blocks"), so the fix arrives as a single `Replace ↳ task.go … +1 −1 …` row and the
-split diff is not on camera unless a beat opens it. Beat 7 clicks the row open, then pages back to
-the bottom: a toggle keeps the toggled row at its screen position, which detaches the viewport
-from the live tail, and left detached every later beat paints below the fold.
+and expanded blocks"), and consecutive tool calls fold into one `Tools` group: the fix and the
+CHANGELOG edit land as a single `Replace (2)` row, and the split diff is not on camera unless a beat
+opens it. Beat 7 waits for that `(2)`, clicks the row open, clicks its `task.go … +1 −1` member
+open, then pages back to the bottom. Clicking the lone first `Replace` row instead does not work:
+when the second edit joins it the click carries onto the group row and the card stays shut. The
+page-down matters too: a toggle keeps the toggled row at its screen position, which detaches the
+viewport from the live tail, and left detached every later beat paints below the fold.
 
 **Budget captures, not takes.** The live model is nondeterministic: the 2026-08-24 session needed
 8 takes to bank one that carried every beat (the red test before the fix landed in roughly 3 of 8
@@ -381,3 +384,4 @@ link.
 |---|---|
 | `history/2026-08-05-hero/` | the first hero clip: red → green with a queued CHANGELOG interjection, local model |
 | `history/2026-08-24-hero/` | the v0.16 refresh: same arc plus the split-diff edit card and a closing `/undo` preview, OpenRouter `deepseek-v4-flash` |
+| `history/2026-09-25-hero/` | the v2 rig's first clip (v0.23 surface): a mode click to Auto, a sub-agent fan-out and its run view, a queued CHANGELOG message, the split-diff card opened by click, a zoom on the context gauge — captured once from OpenRouter `deepseek-v4-flash`, replayed and rendered by `demorig` |

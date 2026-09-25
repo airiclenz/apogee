@@ -22,7 +22,7 @@ OpenAI-compatible endpoint, at OpenRouter, or at Claude over the Anthropic API, 
 same agent runs there. One binary for Windows, macOS and Linux.
 
 <p align="center">
-  <img src="graphics/demo.gif" alt="apogee, an AI coding agent in the terminal, finding a failing Go test, fixing the bug and proving the tests pass — with a follow-up instruction typed mid-run, queued and delivered at the next tool boundary, the fix shown as a side-by-side diff, and a closing /undo preview that reverts nothing">
+  <img src="graphics/demo.gif" alt="apogee, an AI coding agent in the terminal: a click switches the mode to Auto, then asked to fix failing Go tests it sends a sub-agent to find the cause, takes a follow-up instruction typed mid-run and queues it, opens the sub-agent's run view and comes back, shows the fix as a side-by-side diff, zooms on its context gauge, and finishes with a CHANGELOG entry and the tests passing">
 </p>
 
 Either way you get a real coding agent: it reads your code, edits files, runs commands
