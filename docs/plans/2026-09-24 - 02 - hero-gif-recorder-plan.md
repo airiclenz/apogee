@@ -132,7 +132,11 @@ Makefile — cross; .github/workflows/ci.yml — cross job
 **Acceptance.** `go test -race -count=1 ./cmd/demorig/ ./internal/tuitest/ && GOOS=windows go build ./cmd/demorig/`
 **Commit:** `feat(demorig): pty terminal session writing a timestamped take`
 
-## 6. demorig: storyboard v2 schema and lint
+## 6. demorig: storyboard v2 schema and lint — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): v2 types carry a V2 suffix (StoryboardV2, FrameV2, BeatV2, ZoomV2, ExpectV2) or new names (Action, Target, TargetNth, EntrySelector) so they sit beside the untouched v1 types in one package; item 12 can drop the suffix when it deletes v1.
+NOTES (2026-09-25): an expect's `entry:` is required in v2 (a v2 beat has no anchor to default to); its selector is a new EntrySelector {kind, text, tool, target, nth} carrying v1 `Nth` (last/N), without v1's video/beat/offset forms.
+NOTES (2026-09-25): `cassette:` is resolved against the storyboard's directory like `ship:` and `fonts:`; `wait.timeout` is required and bounded to (0, 180s]; `key.repeat` and `click.times` of 0 mean once; a `nth: first` target decodes to 1 (the zero value also means first); `zoom` requires a `factor` in [1, 3]; empty `area` means any.
 
 **What.** Recast at the regression check (2026-09-24).
 **Goal:** a storyboard is the single source of a clip: header `clip`, `ship`, `cassette`, `frame{cols, rows, padding, font_size, line_height, scale, width, fps, max_colors}` (width = shipped GIF width), top-level `expect{stage}`; beats `{id, title, why, notes, do[], duration, hold, cut, zoom{target, factor, in, out}, expect[]}`. Actions in `do`: `type{text, humanize (default true)}`, `key{name, repeat}`, `click{target, times}`, `wait{screen, gone, timeout}`, `pause{for}`. A **target** is `{text: <regex>, nth: first|last|N, area: footer|status|transcript|any}`. `LoadV2` validates strictly and reports every problem; `lint` switches to it in item 12.
