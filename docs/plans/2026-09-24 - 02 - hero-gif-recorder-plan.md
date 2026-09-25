@@ -19,6 +19,7 @@
 - **Cursor:** a translucent dot that glides to each click target and grows a ring pulse on the click.
 - **Sections:** every beat carries a target `duration:`; the render derives the speed, freezes the last frame when a beat runs short.
 - **Scenario:** 1 open · 2 click mode marker → Auto (before the prompt: a child keeps its spawn mode, ADR 0013) · 3 prompt "tests are failing — send a sub-agent to find out why, then fix it" · 4 sub-agent fan-out · 5 queued "also add a CHANGELOG entry for the fix" · 6 click into the run view and back · 7 click the Replace card open · 8 zoom on the gauge · 9 CHANGELOG + green tests · 10 hold. `/undo` dropped.
+- **Aspect:** the hero terminal is 135 × 44 cells (≈ 1.5 : 1; shipped 1250 × ≈826 px) — owner, 2026-09-25.
 - **Clicks are real:** every on-camera click is an SGR press+release delivered to apogee at the target's computed cell; nothing is faked by keyboard.
 
 **Standing requirements:**
@@ -101,7 +102,9 @@ NOTES (2026-09-25): consequential edit — internal/stubllm/doc.go: replay.go jo
 **Acceptance.** `go test -race -count=1 ./internal/stubllm/`
 **Commit:** `feat(stubllm): cassette replay — keyed, paced, concurrent`
 
-## 4. demorig: the humanized-typing profile in Go
+## 4. demorig: the humanized-typing profile in Go — ✅ DONE (2026-09-25)
+
+NOTES (2026-09-25): Humanize panics on a seed outside 1..2^31-2 (the range type.sh refused); a `validTypingSeed` helper returns the error for storyboard validation to call first. Added a draw-for-draw sequence test for "apogee --mode auto" and edge cases beyond the plan's listed goldens. Hero goldens pinned: prompt 3187 ms, queued text 1791 ms.
 
 **What.**
 **Goal:** `cmd/demorig` generates per-character keystroke delays byte-for-byte equivalent to `graphics/demo/type.sh`: MINSTD (`s=16807*s mod 2147483647`, seed 4242, first draw discarded, `draw(lo,hi)=lo+s%(hi-lo+1)`), bands letter 25–45 ms, after space 60–90, after `.,-!` 90–140, thinking pause 300–500 replacing a space gap when `draw(1,8)==1` and fewer than 2 pauses so far (the draw is consumed on every space), band chosen by the character just typed, no gap after the last character, `/` a letter.
