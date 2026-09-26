@@ -183,7 +183,9 @@ Folded guards: `helpKeyStop` is left to item 5; a new cell `helpKeyStopRun = "^x
 - `go test -race -count=1 -run 'E2ESubAgentView|Engine' ./cmd/apogee/`
 **Commit:** `feat(tui): ctrl+x stops the viewed sub-agent run or the cursor's member row`
 
-## 7. End-to-end: `^x` stops a hanging delegate and the parent goes on
+## 7. End-to-end: `^x` stops a hanging delegate and the parent goes on — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): openWorkingRun is not reused verbatim — it waits on the view test's fixed `← main › scout` crumb; the new file carries openRunNamed, the same ⌥↑ ⏎ keystrokes waiting on a crumb it is given (`← main › survey`). frameWhen, holds, rowContaining, carriesTask and resultBody are reused; statusRow was not needed.
 
 **What:** Depends on item 6.
 **Goal:** a driven e2e test opens a running delegate's run view, reads the `^x stop` hint from the frame, presses `^x`, and sees the member row settle as `stopped by you` while the parent's Turn continues to its final answer; the parent's next request carries the `[stopped by the user — engine summary follows]` head.

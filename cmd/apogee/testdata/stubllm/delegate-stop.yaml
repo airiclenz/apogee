@@ -1,0 +1,51 @@
+# The upstream the one-run stop test talks to (ADR 0086 D4, D5): one named delegation whose child
+# does a little real work and then hangs until the human stops it with ^x.
+#
+# The hang is what makes the stop observable at all: a child that answered would finish on its own
+# and a ^x pressed at it would stop nothing. It is released only by the request's own context — the
+# stop cancels the child's ctx, the provider drops the request, and the stub's sleep returns — so
+# the rest of the script is what the engine does AFTER the stop: the engine fold of the child's
+# conversation, then the parent reading the stopped result and giving its final answer.
+#
+# Order matters, because the first matching turn answers. The fold and the parent's wrap-up sit
+# ABOVE the child's turns: the fold's rendered transcript echoes the child's task, which the child's
+# unanchored task-keyed turn would otherwise claim, and a parent request must never be answered as
+# a child's.
+model: stop-model
+turns:
+    # The session title, matched before the prompt's own turn (see smoke.yaml).
+    - when:
+        last_message: The user's first request
+      repeat: true
+      text: Stopped survey
+    # The prompt that delegates.
+    - when:
+        last_message: ^Delegate a survey and let me stop it
+      tool_calls:
+        - name: sub_agent
+          arguments: '{"task":"Survey every file in the workspace and say what is in it","name":"survey"}'
+    # The ENGINE FOLD written at the stop (Agent.finishAtStop): a tool-less request whose system
+    # prompt is the delegate-fold instruction (internal/context/prompts/delegate-fold-instruction.txt).
+    - when:
+        system: summarizing the work of a sub-agent for the agent that delegated
+      repeat: true
+      text: 'Engine fold: the delegate read a.txt before it was stopped.'
+    # The parent, reading the stopped result: its final answer, which ends the Turn.
+    - when:
+        tool_result: sub_agent
+      text: The delegate was stopped; it had read a.txt, which says hello.
+      token_delay: 1ms
+      chunk_runes: 6
+    # The child's first turn: one read, so the child has a completed Turn for the fold to summarize.
+    - when:
+        last_message: Survey every file in the workspace
+      tool_calls:
+        - name: read_file
+          arguments: '{"path":"a.txt"}'
+    # The child's second turn: never answered. It hangs until the stop cancels the request.
+    - when:
+        tool_result: read_file
+      hang: 1h
+    # Anything apogee asks on its own account.
+    - repeat: true
+      text: OK.
