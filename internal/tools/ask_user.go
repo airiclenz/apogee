@@ -137,6 +137,15 @@ func queuedAsks(ap domain.Asker) domain.Asker {
 // the disposition runs it freely in every mode — including Plan.
 func (t *AskUser) ReadOnly() bool { return true }
 
+// ArgRoles declares `question` (the prompt shown) and `choices` (the answers offered) as
+// payload (domain.ArgRolePayload): text put in front of the user, never acted on.
+func (t *AskUser) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{
+		"question": domain.ArgRolePayload,
+		"choices":  domain.ArgRolePayload,
+	}
+}
+
 // Execute puts the question to the human via the Asker and returns the typed answer. A
 // cancelled ctx (the human abandoned the prompt) is a Go error so the loop rolls the Turn
 // back (ADR 0007); any other Asker error is surfaced as a result. An empty question is a

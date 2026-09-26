@@ -47,6 +47,13 @@ func NewWriteFile(root string) *WriteFile { return &WriteFile{toolSpec: writeFil
 // that the loop must gate it through Approval in Ask-Before (domain.ReadOnlyTool).
 func (t *WriteFile) ReadOnly() bool { return false }
 
+// ArgRoles declares `content` — the body written — as payload (domain.ArgRolePayload): text
+// the tool stores, not an action, so a document that merely names a guarded path is not
+// judged by what it mentions. The target `path` stays fully inspected.
+func (t *WriteFile) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"content": domain.ArgRolePayload}
+}
+
 // workspaceWriteTarget resolves the absolute path this call would write so dispatch can
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker,
 // confinement-execution-contract §3). It performs no write — pure path resolution using

@@ -43,6 +43,12 @@ func NewViewDiff(root string) *ViewDiff { return &ViewDiff{toolSpec: viewDiffSpe
 // Plan and never gates.
 func (t *ViewDiff) ReadOnly() bool { return true }
 
+// ArgRoles declares `newContent` — the proposed body — as payload (domain.ArgRolePayload);
+// the compared `path` stays fully inspected.
+func (t *ViewDiff) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"newContent": domain.ArgRolePayload}
+}
+
 // Execute reads the file named in call.Arguments and returns a deterministic unified-style
 // line diff against newContent, honouring ctx cancellation. A file that does not exist yet
 // diffs against EMPTY — the preview of a file the model is about to create is every line

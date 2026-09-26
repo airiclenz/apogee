@@ -70,6 +70,15 @@ func NewSingleFindReplace(root string) *SingleFindReplace {
 // it returns false, the signal the loop gates it through Approval in Ask-Before.
 func (t *SingleFindReplace) ReadOnly() bool { return false }
 
+// ArgRoles declares `oldText` (the text searched for) and `newText` (the text swapped in) as
+// payload (domain.ArgRolePayload); the target `path` stays fully inspected.
+func (t *SingleFindReplace) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{
+		"oldText": domain.ArgRolePayload,
+		"newText": domain.ArgRolePayload,
+	}
+}
+
 // workspaceWriteTarget resolves the absolute path this call would write, so dispatch can
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker,
 // confinement-execution-contract §3). It performs no write — pure path resolution
@@ -202,6 +211,14 @@ func NewMultiFindReplace(root string) *MultiFindReplace {
 
 // ReadOnly reports that multi_find_and_replace is write-capable (domain.ReadOnlyTool).
 func (t *MultiFindReplace) ReadOnly() bool { return false }
+
+// ArgRoles declares `replacements` as payload (domain.ArgRolePayload): its elements carry only
+// the `oldText`/`newText` pairs, so the whole array is the text searched for and swapped in,
+// and a declaration on the top-level key is the one that reaches them. The target `path`
+// stays fully inspected.
+func (t *MultiFindReplace) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"replacements": domain.ArgRolePayload}
+}
 
 // workspaceWriteTarget resolves the absolute path this call would write so dispatch can
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker).

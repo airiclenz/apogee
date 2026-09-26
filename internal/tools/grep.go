@@ -176,6 +176,13 @@ func NewGrep(root string, mounts ReadMounts) *Grep {
 // ReadOnly reports that grep performs no writes (domain.ReadOnlyTool).
 func (t *Grep) ReadOnly() bool { return true }
 
+// ArgRoles declares `pattern` — the search regex — as payload (domain.ArgRolePayload): a
+// search FOR a guarded literal is not an action on it. The searched paths stay fully
+// inspected.
+func (t *Grep) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"pattern": domain.ArgRolePayload}
+}
+
 // Execute searches the file or directory named in call.Arguments — or each of its `paths` —
 // honouring ctx cancellation. A pattern that is not a valid regex is treated as a literal
 // substring; a missing path, a path escaping every root or an include glob carrying a slash is an

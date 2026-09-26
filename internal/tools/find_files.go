@@ -71,6 +71,12 @@ func NewFindFiles(root string, mounts ReadMounts) *FindFiles {
 // ReadOnly reports that find_files performs no writes (domain.ReadOnlyTool).
 func (t *FindFiles) ReadOnly() bool { return true }
 
+// ArgRoles declares `pattern` — the name glob searched for — as payload
+// (domain.ArgRolePayload); the searched `path` stays fully inspected.
+func (t *FindFiles) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"pattern": domain.ArgRolePayload}
+}
+
 // Execute walks the workspace (or the subtree named by path) and returns the root-relative
 // paths whose base name matches pattern, honouring ctx cancellation. A missing pattern, a
 // missing path, or a path escaping every root is an IsError result.

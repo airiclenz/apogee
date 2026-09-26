@@ -56,7 +56,10 @@ NOTES (2026-09-26): the test `TestPromptArgKeysAreNoneForAToolThatDeclaresNone` 
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/domain/ && go test -race -count=1 ./internal/security/ && go test -race -count=1 ./internal/tools/`
 **Commit:** `refactor(domain): one per-tool argument-role declaration replaces three optional interfaces`
 
-## 2. Built-in tools declare their payload arguments
+## 2. Built-in tools declare their payload arguments — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): the Goal's tool names map to the registry's real names — `file_edit` is `edit_existing_file`, `diff` is `view_diff`, `find_replace` is `single_find_and_replace`, `git` commit is `git_commit`; each declares the listed key(s) via `ArgRoles()`. The registry walk runs over `builtinTools(root, HostTools{})` so default-off and host-delegate tools (console family, load_skill, ask_user, present_document) are covered.
+NOTES (2026-09-26): the test mirrors `internal/security`'s unexported `payloadKeys` as its own `payloadSpellings` set (the guard's map is unexported and `security` cannot import `tools`); it also adds `TestBuiltinToolArgRolesNameSchemaKeys`, which fails when any built-in tool declares a role for a key its schema lacks (catches a misspelled declaration). Guard behaviour is unchanged: `Inspect` does not yet read `ArgRolePayload` (item 3). No CHANGELOG entry — nothing user-observable changes until item 3 moves the exclusion onto the declaration.
 
 **What:** Depends on item 1.
 **Regression guard.** `multi_find_and_replace` (`MultiFindReplace`, `internal/tools/find_replace.go`) also declares its top-level `replacements` key with the payload role, so the registry test additionally asserts that declaration, since nested `oldText`/`newText` are reached only through it.

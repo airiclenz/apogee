@@ -66,6 +66,12 @@ func NewLoadSkill(lookup domain.SkillLookup) *LoadSkill {
 // the disposition runs it freely in every mode, including Plan.
 func (t *LoadSkill) ReadOnly() bool { return true }
 
+// ArgRoles declares `query` — the terms the skill catalog is searched with — as payload
+// (domain.ArgRolePayload).
+func (t *LoadSkill) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"query": domain.ArgRolePayload}
+}
+
 // Execute searches the catalog for the query and returns the one answer it earned. Every outcome is
 // a successful RESULT rather than a Go error: a miss is information the model can act on (ask again
 // in other words, or carry on without a skill), not a fault that should roll the Turn back.

@@ -92,6 +92,12 @@ func NewHTTPRequest(guard security.URLGuard) *HTTPRequest {
 // ExternalEffect reports that http_request reaches the network (kind network).
 func (t *HTTPRequest) ExternalEffect() domain.ExternalEffectKind { return domain.EffectNetwork }
 
+// ArgRoles declares `body` — the request payload — as payload (domain.ArgRolePayload); the
+// `url` it is sent to stays fully inspected.
+func (t *HTTPRequest) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"body": domain.ArgRolePayload}
+}
+
 // Execute performs the request. A blocked URL, an unsupported method, or a transport error
 // are surfaced as results; only ctx cancellation is a Go error (ADR 0007).
 func (t *HTTPRequest) Execute(ctx context.Context, call domain.ToolCall) (domain.ToolResult, error) {

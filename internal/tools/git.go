@@ -520,6 +520,12 @@ func newGitCommit(root string, host execHost) *GitCommit {
 // repository's index and history.
 func (t *GitCommit) ReadOnly() bool { return false }
 
+// ArgRoles declares `message` — the commit message — as payload (domain.ArgRolePayload): the
+// text git records, not an action the host performs.
+func (t *GitCommit) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"message": domain.ArgRolePayload}
+}
+
 // Subprocess reports that git_commit launches an OS subprocess (the system git) —
 // the marker the disposition confines in Auto (domain.SubprocessTool).
 func (t *GitCommit) Subprocess() bool { return true }

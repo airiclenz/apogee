@@ -143,6 +143,11 @@ func resolveSearchEndpoint(endpoint string) (string, searchProvider, bool) {
 // ExternalEffect reports that web_search reaches the network (kind network).
 func (t *WebSearch) ExternalEffect() domain.ExternalEffectKind { return domain.EffectNetwork }
 
+// ArgRoles declares `query` — the search terms — as payload (domain.ArgRolePayload).
+func (t *WebSearch) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"query": domain.ArgRolePayload}
+}
+
 // Execute runs the search. A disabled tool (off sentinel) is a graceful "disabled" result;
 // a blocked endpoint URL, a transport error, or a non-2xx status are surfaced as results;
 // only ctx cancellation is a Go error (ADR 0007). A render that carries a numbered result

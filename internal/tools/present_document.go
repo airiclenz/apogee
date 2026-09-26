@@ -87,6 +87,12 @@ func NewPresentDocument(root string, mounts ReadMounts, presenter domain.Present
 // nothing), so the disposition runs it freely in every mode — including Plan.
 func (t *PresentDocument) ReadOnly() bool { return true }
 
+// ArgRoles declares `title` — the display heading — as payload (domain.ArgRolePayload); the
+// presented `path` stays fully inspected.
+func (t *PresentDocument) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"title": domain.ArgRolePayload}
+}
+
 // IsExecutionCapable forwards the host Presenter's own answer: whether the opener rung the host
 // wired can execute a program of the user's choosing (a configured present.command on a local
 // session). It asks the delegate the tool already holds rather than a live handle, so the seam

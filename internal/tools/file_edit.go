@@ -46,6 +46,12 @@ func NewEditExistingFile(root string) *EditExistingFile {
 // ReadOnly reports that edit_existing_file is write-capable (domain.ReadOnlyTool).
 func (t *EditExistingFile) ReadOnly() bool { return false }
 
+// ArgRoles declares `content` — the body written — as payload (domain.ArgRolePayload); the
+// target `path` stays fully inspected.
+func (t *EditExistingFile) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"content": domain.ArgRolePayload}
+}
+
 // workspaceWriteTarget resolves the absolute path this call would write so dispatch can
 // classify in- vs out-of-workspace before Execute (the workspaceScopedWriter marker).
 func (t *EditExistingFile) workspaceWriteTarget(call domain.ToolCall) (writeTarget, bool) {
