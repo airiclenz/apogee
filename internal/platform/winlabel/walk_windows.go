@@ -3,6 +3,7 @@
 package winlabel
 
 import (
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -44,12 +45,16 @@ import (
 // The walk must recurse: the label carries no inheritance flags (lowSDDL), so nothing but the
 // walk reaches an existing file, and a file that predates the labelling is implicitly Medium —
 // a Low child editing an existing source file would be denied. Inheritance is left off on
-// purpose: SetNamedSecurityInfo propagates an inheritable ACE to every existing descendant the
-// instant the root is labelled, which would put the label on the hard links below before the
-// walk's skip could refuse them.
+// purpose: a SACL write propagates an inheritable ACE to every existing descendant the instant
+// the root is labelled, which would put the label on the hard links below before the walk's
+// skip could refuse them.
 //
-// Symlinks and other reparse points are skipped entirely — SetNamedSecurityInfo follows the
-// link, so labelling one would silently mutate a target outside the box. HARD links are
+// Every label read and write, root and descendant alike, goes through ONE handle per object
+// opened on the path itself and refused when it is a reparse point (labelRoot,
+// labelDescendant, openLabelHandle), so the object journalled is the object labelled. That is
+// what keeps a symlink or junction from being labelled through to a target outside the box —
+// including a box ROOT swapped for a junction after resolveBoxRoot vetted it, which fails the
+// pass (ADR 0020 §6) — and walked reparse points are skipped before any open. HARD links are
 // skipped for the same reason by a different mechanism (hardLinkCount): they are not reparse
 // points, but every name of a file shares one NTFS security descriptor, so labelling the
 // in-box name labels the file at all its other names too. A failure on the ROOT fails the box
@@ -74,23 +79,8 @@ func LabelTree(root string, j *Journal) error {
 	if j.isLabelled(root) {
 		return nil
 	}
-	prior, err := ReadSDDL(root)
-	if err != nil {
-		return fmt.Errorf("cannot read the mandatory label of %q: %v", root, err)
-	}
-	// The identity is read BEFORE the label goes on, so the journal names the object this
-	// pass is about to mutate. A failed read journals no identity (withIdentity) and is not a
-	// refusal: the root is labelled exactly as it was before the identity existed.
-	rootStat, rootStatErr := j.stat(root)
-	journalled, err := j.record(withIdentity(Entry{Path: root, Root: true, PriorSDDL: prior}, rootStat, rootStatErr))
-	if err != nil {
+	if err := labelRoot(root, j); err != nil {
 		return err
-	}
-	if err := SetSDDL(root, lowSDDL); err != nil {
-		if journalled {
-			j.unwind(root)
-		}
-		return fmt.Errorf("cannot label %q Low: %v", root, err)
 	}
 
 	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
@@ -106,36 +96,101 @@ func LabelTree(root string, j *Journal) error {
 		if shouldSkip, walkResult := skipEntry(entry); shouldSkip {
 			return walkResult
 		}
-		prior, priorErr := ReadSDDL(path)
-		// One open per path: the link count the decision needs and the identity the journal
-		// records come from the same handle (statHandle).
-		st, statErr := j.stat(path)
-		shouldJournal, shouldLabel := descendantDecision(descendantFacts{
-			prior: prior, priorErr: priorErr, links: st.links, linksErr: statErr,
-		})
-		if !shouldLabel {
-			// Either the prior could not be read — so labelling would destroy a
-			// possibly-foreign label with no journalled record to restore it from — or the
-			// path is (or may be) a hard link, whose descriptor is shared with every other
-			// name of the same file, including names outside the box. The path takes the
-			// tolerated-descendant rung instead (descendantDecision): it stays unlabelled,
-			// and only that one path is opaque to the confined child.
-			return nil
-		}
-		if shouldJournal {
-			// A Low prior here is apogee's own label — a tree being re-walked, or one a
-			// concurrent session labelled — and the journal drops it rather than recording
-			// an instruction to put it back.
-			if _, err := j.record(withIdentity(Entry{Path: path, PriorSDDL: prior}, st, statErr)); err != nil {
-				return err
-			}
-		}
-		_ = SetSDDL(path, lowSDDL)
-		return nil
+		return labelDescendant(path, j)
 	}); err != nil {
 		return err
 	}
 	j.markLabelled(root)
+	return nil
+}
+
+// labelRoot reads, journals and labels one box root through ONE reparse-checked handle
+// (openLabelHandle), so the object whose prior is journalled is the object the label lands on:
+// a root swapped for a junction after resolveBoxRoot vetted it is refused at the open, and one
+// swapped while the handle is held is irrelevant, because the handle stays on the object it
+// opened. Every failure fails the box. The identity the journal records still comes from
+// Journal.stat, and must name the handle's own object when that read succeeds — a different
+// object means the path was swapped between the two opens, and nothing is journalled or
+// written.
+//
+// The caller holds j.mu (LabelTree).
+func labelRoot(root string, j *Journal) error {
+	handle, err := openLabelHandle(root, labelReadWriteAccess)
+	if err != nil {
+		return fmt.Errorf("cannot open %q to label it: %v", root, err)
+	}
+	defer handle.close()
+
+	prior, err := handle.readSDDL()
+	if err != nil {
+		return fmt.Errorf("cannot read the mandatory label of %q: %v", root, err)
+	}
+	// The identity is read BEFORE the label goes on, so the journal names the object this
+	// pass is about to mutate. A failed read journals no identity (withIdentity) and is not a
+	// refusal: the root is labelled exactly as it was before the identity existed.
+	rootStat, rootStatErr := j.stat(root)
+	if rootStatErr == nil && !handle.names(rootStat) {
+		return fmt.Errorf("cannot label %q: the path named a different object by the time its identity was read", root)
+	}
+	journalled, err := j.record(withIdentity(Entry{Path: root, Root: true, PriorSDDL: prior}, rootStat, rootStatErr))
+	if err != nil {
+		return err
+	}
+	if err := handle.setSDDL(lowSDDL); err != nil {
+		if journalled {
+			j.unwind(root)
+		}
+		return fmt.Errorf("cannot label %q Low: %v", root, err)
+	}
+	return nil
+}
+
+// labelDescendant reads, journals and labels one walked descendant through ONE reparse-checked
+// handle, the same one-object discipline labelRoot keeps, and never fails the walk: every
+// refusal is the tolerated-descendant rung, leaving that one path unlabelled and opaque to the
+// confined child. A path the handle cannot open — a reparse point that appeared after the
+// entry skip, a path gone since the walk listed it, an object this token may not write a label
+// to — is left untouched with nothing journalled.
+//
+// The caller holds j.mu (LabelTree).
+func labelDescendant(path string, j *Journal) error {
+	handle, err := openLabelHandle(path, labelReadWriteAccess)
+	if err != nil {
+		return nil
+	}
+	defer handle.close()
+
+	prior, priorErr := handle.readSDDL()
+	// One open per path for the facts: the link count the decision needs and the identity the
+	// journal records come from the same stat (Journal.stat), which must describe the handle's
+	// own object — otherwise the count belongs to whatever the path named a moment later.
+	st, statErr := j.stat(path)
+	if statErr == nil && !handle.names(st) {
+		return nil
+	}
+	shouldJournal, shouldLabel := descendantDecision(descendantFacts{
+		prior: prior, priorErr: priorErr, links: st.links, linksErr: statErr,
+	})
+	if !shouldLabel {
+		// Either the prior could not be read — so labelling would destroy a possibly-foreign
+		// label with no journalled record to restore it from — or the path is (or may be) a
+		// hard link, whose descriptor is shared with every other name of the same file,
+		// including names outside the box. The path takes the tolerated-descendant rung
+		// instead (descendantDecision): it stays unlabelled, and only that one path is opaque
+		// to the confined child.
+		return nil
+	}
+	if shouldJournal {
+		// A Low prior here is apogee's own label — a tree being re-walked, or one a concurrent
+		// session labelled — and the journal drops it rather than recording an instruction to
+		// put it back.
+		if _, err := j.record(withIdentity(Entry{Path: path, PriorSDDL: prior}, st, statErr)); err != nil {
+			return err
+		}
+	}
+	// A failed write is the tolerated rung too: a locked or foreign-owned file stays
+	// read-only to the confined child, exactly as if it were read-only on disk.
+	_ = handle.setSDDL(lowSDDL)
 	return nil
 }
 
@@ -146,14 +201,12 @@ func LabelTree(root string, j *Journal) error {
 // one security descriptor, so labelling the in-box name marks the file Low wherever else it is
 // linked (descendantDecision).
 //
-// The count comes from a HANDLE (statHandle, which opens it): nothing in fs.FileInfo carries
-// it on Windows.
-// FILE_READ_ATTRIBUTES is the whole access asked for — the least the query needs, and one an
-// exclusively-locked file still grants — every share mode is allowed so opening never disturbs
-// another process, FILE_FLAG_BACKUP_SEMANTICS lets the same call answer for directories (which
-// NTFS never hard-links, so they report one), and FILE_FLAG_OPEN_REPARSE_POINT keeps the
-// handle on the path itself rather than on a link target, the same posture the walk's own skip
-// takes.
+// The count comes from a HANDLE (statHandle, which opens it through openHandle): nothing in
+// fs.FileInfo carries it on Windows. FILE_READ_ATTRIBUTES is the whole access asked for — the
+// least the query needs, and one an exclusively-locked file still grants — and the open
+// answers for directories too (which NTFS never hard-links, so they report one). ClearTree
+// consults it only when its write handle cannot be opened (clearDescendant); the label walk
+// reads the same count through Journal.stat.
 func hardLinkCount(path string) (uint32, error) {
 	st, err := statHandle(path)
 	return st.links, err
@@ -164,29 +217,51 @@ func hardLinkCount(path string) (uint32, error) {
 // 64-bit NTFS file index, which together name one file on the machine however many names it
 // has or gains. LabelTree reads both through this single open (Journal.stat, osStat), so
 // journalling the identity costs no second CreateFile per descendant; the open semantics are
-// hardLinkCount's own, reparse points included — the handle is on the path, never a target.
+// openHandle's, reparse points included — the handle is on the path, never a target — but a
+// reparse point is NOT refused here: an identity read answers for whatever object the path
+// names.
 func statHandle(path string) (fileStat, error) {
+	handle, info, err := openHandle(path, windows.FILE_READ_ATTRIBUTES)
+	if err != nil {
+		return fileStat{}, err
+	}
+	_ = windows.CloseHandle(handle)
+	return statOf(info), nil
+}
+
+// openHandle is the one CreateFile behind every handle this file takes: access as asked,
+// every share mode allowed so the open never disturbs another process,
+// FILE_FLAG_BACKUP_SEMANTICS so directories open too, and FILE_FLAG_OPEN_REPARSE_POINT so the
+// handle is on the path itself, never a link target. It returns the object's file information
+// with the open handle, which the caller closes; a failure comes back as an *os.PathError, so
+// os.IsNotExist and errors.Is(fs.ErrNotExist) both recognise a path that is gone.
+func openHandle(path string, access uint32) (windows.Handle, windows.ByHandleFileInformation, error) {
+	var info windows.ByHandleFileInformation
 	pathW, err := windows.UTF16PtrFromString(path)
 	if err != nil {
-		return fileStat{}, fmt.Errorf("encode %q: %w", path, err)
+		return 0, info, &os.PathError{Op: "encode", Path: path, Err: err}
 	}
-	handle, err := windows.CreateFile(pathW, windows.FILE_READ_ATTRIBUTES,
+	handle, err := windows.CreateFile(pathW, access,
 		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
 		nil, windows.OPEN_EXISTING,
 		windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
 	if err != nil {
-		return fileStat{}, fmt.Errorf("open %q to read its file information: %w", path, err)
+		return 0, info, &os.PathError{Op: "open", Path: path, Err: err}
 	}
-	defer func() { _ = windows.CloseHandle(handle) }()
-	var info windows.ByHandleFileInformation
 	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
-		return fileStat{}, fmt.Errorf("read the file information of %q: %w", path, err)
+		_ = windows.CloseHandle(handle)
+		return 0, info, &os.PathError{Op: "read the file information of", Path: path, Err: err}
 	}
+	return handle, info, nil
+}
+
+// statOf folds one handle's file information into the facts the label walk reads.
+func statOf(info windows.ByHandleFileInformation) fileStat {
 	return fileStat{
 		links:  info.NumberOfLinks,
 		volume: info.VolumeSerialNumber,
 		index:  uint64(info.FileIndexHigh)<<32 | uint64(info.FileIndexLow),
-	}, nil
+	}
 }
 
 // osStat supplies the Windows build's half of Journal's stat seam: the real handle read.
@@ -203,12 +278,16 @@ func osStat() statFunc { return statHandle }
 // or recovery retries.
 //
 // It skips exactly what LabelTree skips, and that pairing is the point: reparse points, whose
-// target SetNamedSecurityInfo would follow out of the box, and any entry whose Info() fails,
-// since it may be one (both through entrySkipDecision), and hard links, whose descriptor is
+// target a label write would reach out of the box, and any entry whose Info() fails, since it
+// may be one (both through entrySkipDecision, and again at the write's own reparse-checked
+// handle — clearDescendant), and hard links, whose descriptor is
 // the same NTFS record as every other name of the file (clearDescendantDecision). The clear is
 // a WRITE — a NULL SACL — so clearing a path the label pass refused would destroy a label on a
 // record apogee never wrote to, which is the mirror image of the harm the label-side skip
-// exists to prevent. A skipped path is not a failure and is not counted.
+// exists to prevent. A skipped path is not a failure and is not counted. The ROOT is cleared
+// through the same reparse-checked handle (SetSDDL), and a root that has become a reparse point
+// since it was labelled is refused with an error rather than cleared through to its target,
+// which keeps the journal.
 func ClearTree(root string) error {
 	if err := SetSDDL(root, clearSDDL); err != nil {
 		if os.IsNotExist(err) {
@@ -243,22 +322,46 @@ func ClearTree(root string) error {
 			// a NULL SACL written through a link lands on its target outside the box.
 			return walkResult
 		}
-		links, linksErr := hardLinkCount(path)
-		if !clearDescendantDecision(links, linksErr) {
-			// The path is — or may be — one name of a file whose descriptor is shared with
-			// names outside the box, so the NULL SACL below would land on all of them.
-			// LabelTree skipped this same path for the same reason, so nothing of apogee's is
-			// on it to clear (descendantDecision, clearDescendantDecision). The skip is not
-			// counted: a failure here would keep the journal forever over a path apogee never
-			// labelled.
-			return nil
-		}
-		if err := SetSDDL(path, clearSDDL); err != nil && !os.IsNotExist(err) {
+		if err := clearDescendant(path); err != nil {
 			fail(path, err)
 		}
 		return nil
 	})
 	return clearTreeOutcome(root, failures, first)
+}
+
+// clearDescendant writes the NULL SACL onto one walked descendant through ONE reparse-checked
+// handle, so the hard-link count that clears the path and the object the write lands on are
+// the same object. It returns only a failure ClearTree must count; everything the label pass
+// skipped — a reparse point, a hard link — and a path gone since the walk listed it return nil.
+//
+// A handle that cannot be opened for the write falls back to the path's own link count before
+// the failure is counted, because the open asks for WRITE_OWNER: a hard link the label pass
+// skipped may well deny it, and counting it would keep the journal forever over a path apogee
+// never labelled (clearDescendantDecision).
+func clearDescendant(path string) error {
+	handle, err := openLabelHandle(path, labelWriteAccess)
+	if err != nil {
+		if os.IsNotExist(err) || errors.Is(err, errReparsePoint) {
+			return nil
+		}
+		links, linksErr := hardLinkCount(path)
+		if !clearDescendantDecision(links, linksErr) {
+			return nil
+		}
+		return err
+	}
+	defer handle.close()
+
+	if !clearDescendantDecision(handle.info.NumberOfLinks, nil) {
+		// The path is — or may be — one name of a file whose descriptor is shared with names
+		// outside the box, so the NULL SACL below would land on all of them. LabelTree skipped
+		// this same path for the same reason, so nothing of apogee's is on it to clear
+		// (descendantDecision, clearDescendantDecision). The skip is not counted: a failure
+		// here would keep the journal forever over a path apogee never labelled.
+		return nil
+	}
+	return handle.setSDDL(clearSDDL)
 }
 
 // skipEntry reads one walked entry's Info() and hands the outcome to entrySkipDecision, the
@@ -309,7 +412,7 @@ func revertSparingLiveSiblings(home, own string, alive func(pid int, started uin
 		}
 		siblings := siblingJournals(home, own)
 		restore, handoff := restorablePriors(r, siblings)
-		clear, spared := revertibleRoots(r, siblings, alive, ReadSDDL, statHandle)
+		clear, spared := revertibleRoots(r, siblings, alive, readJudgedLabel, statHandle)
 		if err := revertJournal(clear, restore); err != nil {
 			return nil, err
 		}
@@ -377,7 +480,7 @@ func revertSparingLiveSiblings(home, own string, alive func(pid int, started uin
 // instruction to do nothing — while an entry that still names a ROOT keeps its clear
 // obligation and only loses its prior.
 func judgePriors(r Record, own string) error {
-	judged, priorJudged, err := judgeEntries(r.Entries, ReadSDDL, statHandle)
+	judged, priorJudged, err := judgeEntries(r.Entries, readJudgedLabel, statHandle)
 	if err != nil {
 		return err
 	}
@@ -555,10 +658,102 @@ func creationTime(handle windows.Handle) (uint64, bool) {
 // ReadSDDL returns the object's mandatory-label descriptor in SDDL form, or "" when it carries
 // no explicit label (the state teardown restores by clearing). Only a descriptor actually
 // containing a label ACE is reported, so the journal never records "S:" noise as something to
-// put back. It is exported for package platform's Windows-tagged lifecycle tests, which assert
-// against real SACLs (D6).
+// put back. The read goes through one reparse-checked handle (openLabelHandle): a path that is a
+// reparse point is refused with errReparsePoint rather than read through to its target, and a
+// path that does not exist reports an error os.IsNotExist recognises. It is exported for
+// package platform's Windows-tagged lifecycle tests, which assert against real SACLs (D6).
 func ReadSDDL(path string) (string, error) {
-	sd, err := windows.GetNamedSecurityInfo(path, windows.SE_FILE_OBJECT, windows.LABEL_SECURITY_INFORMATION)
+	handle, err := openLabelHandle(path, labelReadAccess)
+	if err != nil {
+		return "", err
+	}
+	defer handle.close()
+	return handle.readSDDL()
+}
+
+// SetSDDL writes sddl's SACL as the object's mandatory label, through one reparse-checked
+// handle (openLabelHandle): a path that is a reparse point is refused with errReparsePoint, so
+// the write can never land on a link's target outside the box, however the path changed since
+// anything above it was checked. Only LABEL_SECURITY_INFORMATION is written, which needs
+// WRITE_OWNER on the object and no privilege — the caller owns its workspace, and asking for
+// SACL_SECURITY_INFORMATION instead would demand SeSecurityPrivilege and fail for an ordinary
+// user. It is exported alongside ReadSDDL for the same tests (D6).
+func SetSDDL(path, sddl string) error {
+	handle, err := openLabelHandle(path, labelWriteAccess)
+	if err != nil {
+		return err
+	}
+	defer handle.close()
+	return handle.setSDDL(sddl)
+}
+
+// readJudgedLabel is the label read the pre-clear judgement takes (judgePriors,
+// revertibleRoots): ReadSDDL, except that a path which is now a reparse point reads as carrying
+// no label. apogee never labels a reparse point — the walks skip them and every label write
+// refuses them — so nothing of apogee's is on one, and "no label" is the verdict that neither
+// writes through the link nor wedges the journal: a prior carries (priorRestorable) and a root
+// is spared (rootClearable), where the refusal itself would abort the whole revert.
+func readJudgedLabel(path string) (string, error) {
+	label, err := ReadSDDL(path)
+	if errors.Is(err, errReparsePoint) {
+		return "", nil
+	}
+	return label, err
+}
+
+// The access each kind of label handle asks for. Reading a mandatory label needs READ_CONTROL
+// and writing one needs WRITE_OWNER (LABEL_SECURITY_INFORMATION); FILE_READ_ATTRIBUTES is what
+// the reparse check reads the object's attributes with.
+const (
+	labelReadAccess      = windows.READ_CONTROL | windows.FILE_READ_ATTRIBUTES
+	labelWriteAccess     = windows.WRITE_OWNER | windows.FILE_READ_ATTRIBUTES
+	labelReadWriteAccess = labelReadAccess | labelWriteAccess
+)
+
+// errReparsePoint is what a label handle reports for a path that is a reparse point: a label
+// read or written there would reach the link's target, wherever it points.
+var errReparsePoint = errors.New("the path is a reparse point (a junction or symlink), whose mandatory label would be its target's")
+
+// labelHandle is one open of an object that its mandatory-label reads and writes go through,
+// opened ON the path itself (FILE_FLAG_OPEN_REPARSE_POINT) and already vetted as no reparse
+// point. Holding it pins the object: whatever the path is renamed or re-pointed to afterwards,
+// every read and write through the handle reaches the object the check passed, which is what
+// closes the window a path-based SetNamedSecurityInfo left between a check and its write.
+type labelHandle struct {
+	path   string
+	handle windows.Handle
+	info   windows.ByHandleFileInformation
+}
+
+// openLabelHandle opens path for the label access asked for and refuses it — handle closed,
+// error wrapping errReparsePoint — when the object's own attributes carry
+// FILE_ATTRIBUTE_REPARSE_POINT. The caller closes the handle it gets.
+func openLabelHandle(path string, access uint32) (labelHandle, error) {
+	handle, info, err := openHandle(path, access)
+	if err != nil {
+		return labelHandle{}, err
+	}
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+		_ = windows.CloseHandle(handle)
+		return labelHandle{}, &os.PathError{Op: "open", Path: path, Err: errReparsePoint}
+	}
+	return labelHandle{path: path, handle: handle, info: info}, nil
+}
+
+// close releases the handle. Nothing is flushed through it, so a close failure has nothing to
+// report.
+func (h labelHandle) close() { _ = windows.CloseHandle(h.handle) }
+
+// names reports whether st — a stat taken through another open of the same path — describes
+// this handle's object, by the identity both reads report.
+func (h labelHandle) names(st fileStat) bool {
+	own := statOf(h.info)
+	return st.volume == own.volume && st.index == own.index
+}
+
+// readSDDL reads the object's mandatory label through the handle, with ReadSDDL's contract.
+func (h labelHandle) readSDDL() (string, error) {
+	sd, err := windows.GetSecurityInfo(h.handle, windows.SE_FILE_OBJECT, windows.LABEL_SECURITY_INFORMATION)
 	if err != nil {
 		return "", err
 	}
@@ -569,12 +764,9 @@ func ReadSDDL(path string) (string, error) {
 	return text, nil
 }
 
-// SetSDDL writes sddl's SACL as the object's mandatory label. Only
-// LABEL_SECURITY_INFORMATION is requested, which needs WRITE_OWNER on the object and no
-// privilege — the caller owns its workspace, and asking for SACL_SECURITY_INFORMATION
-// instead would demand SeSecurityPrivilege and fail for an ordinary user. It is exported
-// alongside ReadSDDL for the same tests (D6).
-func SetSDDL(path, sddl string) error {
+// setSDDL writes sddl's SACL as the object's mandatory label through the handle, with
+// SetSDDL's contract.
+func (h labelHandle) setSDDL(sddl string) error {
 	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return fmt.Errorf("parse label %q: %w", sddl, err)
@@ -583,6 +775,6 @@ func SetSDDL(path, sddl string) error {
 	if err != nil {
 		return fmt.Errorf("read label SACL from %q: %w", sddl, err)
 	}
-	return windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
+	return windows.SetSecurityInfo(h.handle, windows.SE_FILE_OBJECT,
 		windows.LABEL_SECURITY_INFORMATION, nil, nil, nil, sacl)
 }

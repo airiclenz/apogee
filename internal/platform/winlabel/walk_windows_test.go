@@ -5,6 +5,7 @@ package winlabel
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -499,5 +500,92 @@ func TestRecoverCarriesAPriorWhoseObjectWasReplaced(t *testing.T) {
 				t.Errorf("carried entry = %+v lost the identity of %+v", *carried, journalled)
 			}
 		})
+	}
+}
+
+// The root-swap half of the audit's "Windows confinement TOCTOU" (2026-09-26): resolveBoxRoot
+// refuses a box root that is a reparse point, but only once, before the label pass. Every
+// label read and write now goes through a handle opened on the path itself and refused when
+// that object is a reparse point, so a root swapped for a junction after the check is refused
+// at the write — never labelled, or cleared, through to the junction's target.
+
+// junctionTo creates a directory junction at link pointing to target. A junction needs no
+// administrator rights and no developer mode, which is what makes it the swap an unprivileged
+// process can make.
+func junctionTo(t *testing.T, link, target string) {
+	t.Helper()
+
+	if out, err := exec.Command("cmd", "/c", "mklink", "/J", link, target).CombinedOutput(); err != nil {
+		t.Fatalf("mklink /J %q %q: %v (%s)", link, target, err, out)
+	}
+}
+
+// foreignLabelledTarget returns a directory carrying foreignSDDL with one file beneath it, and
+// the label the directory reads back with — the state a junction's target outside the box is
+// in, against which "unchanged" is judged.
+func foreignLabelledTarget(t *testing.T) (target, child, label string) {
+	t.Helper()
+
+	target = t.TempDir()
+	child = filepath.Join(target, "outside.txt")
+	if err := os.WriteFile(child, []byte("x"), 0o600); err != nil {
+		t.Fatalf("plant a file in the junction target: %v", err)
+	}
+	labelOrSkip(t, target, foreignSDDL)
+	return target, child, mustReadLabel(t, target)
+}
+
+func TestLabelTreeRefusesARootSwappedForAJunction(t *testing.T) {
+	// The root resolved as a plain directory; by the time the label pass runs it is a
+	// junction to a tree outside the box. The pass must fail — confinement unavailable, as
+	// for a root that was a junction up front — and leave the target exactly as it was.
+	lowLabelledDir(t) // skips when the host cannot label at all
+	target, child, before := foreignLabelledTarget(t)
+	root := filepath.Join(t.TempDir(), "swapped")
+	junctionTo(t, root, target)
+
+	j := Open(t.TempDir())
+	err := LabelTree(root, j)
+	if err == nil {
+		_ = ClearTree(target)
+		t.Fatalf("LabelTree(%q) over a junction to %q succeeded; want a refusal", root, target)
+	}
+	if !strings.Contains(err.Error(), "reparse point") {
+		t.Errorf("LabelTree error = %v; want the reparse-point refusal", err)
+	}
+	if after := mustReadLabel(t, target); after != before {
+		t.Errorf("junction target label = %q, want it unchanged at %q", after, before)
+	}
+	if label := mustReadLabel(t, child); label != "" {
+		t.Errorf("label of %q under the junction target = %q, want none", child, label)
+	}
+	if entries := j.Entries(); len(entries) != 0 {
+		t.Errorf("journal entries = %+v, want none: nothing was labelled", entries)
+	}
+}
+
+func TestLabelWritesRefuseAJunction(t *testing.T) {
+	// The primitives every walk and the revert write through: neither a label nor a NULL SACL
+	// written at a junction's path may reach its target, and the refusal is the one the
+	// judgement and the clear walk recognise (errReparsePoint).
+	lowLabelledDir(t)
+	target, _, before := foreignLabelledTarget(t)
+	link := filepath.Join(t.TempDir(), "link")
+	junctionTo(t, link, target)
+
+	if err := SetSDDL(link, lowSDDL); !errors.Is(err, errReparsePoint) {
+		t.Errorf("SetSDDL(junction) = %v; want errReparsePoint", err)
+	}
+	if _, err := ReadSDDL(link); !errors.Is(err, errReparsePoint) {
+		t.Errorf("ReadSDDL(junction) = %v; want errReparsePoint", err)
+	}
+	if err := ClearTree(link); err == nil {
+		t.Errorf("ClearTree(junction) succeeded; want the root refused")
+	}
+	if label, err := readJudgedLabel(link); err != nil || label != "" {
+		t.Errorf("readJudgedLabel(junction) = %q, %v; want no label and no error", label, err)
+	}
+	if after := mustReadLabel(t, target); after != before {
+		t.Errorf("junction target label = %q, want it unchanged at %q", after, before)
 	}
 }

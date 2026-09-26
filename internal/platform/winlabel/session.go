@@ -48,6 +48,9 @@ type Journal struct {
 	// a per-journal field for the same reason revert is: a test can hand one journal a stat
 	// that fails for a chosen path without a global another test could race over. The
 	// non-Windows stat reports unsupported with a zero identity, and nothing there labels.
+	// A stat that succeeds must name the object the walk's reparse-checked label handle holds
+	// (labelRoot, labelDescendant): an identity read answers by path, the label by handle, and
+	// a path swapped between the two is refused rather than journalled as the wrong object.
 	stat statFunc
 }
 

@@ -78,8 +78,9 @@ func IsLowLabel(sddl string) bool {
 // what the walk callback then returns (nil, or fs.SkipDir to leave a whole subtree).
 //
 //   - A symlink or other reparse point (ModeSymlink, ModeIrregular) is skipped, and as a
-//     directory its whole subtree with it: SetNamedSecurityInfo follows the link, so a label
-//     or a NULL SACL written through it would land on a target outside the box.
+//     directory its whole subtree with it: a label or a NULL SACL written through the link
+//     would land on a target outside the box, which the write's own reparse-checked handle
+//     refuses too (openLabelHandle) — the skip keeps the walk from reaching that refusal.
 //   - A descendant whose Info() FAILS is skipped too, because the walk cannot rule out that it
 //     is such a link — and writing on a guess is exactly what the reparse-point skip refuses.
 //     Only the path itself is skipped; a directory is still walked beneath, as it always was

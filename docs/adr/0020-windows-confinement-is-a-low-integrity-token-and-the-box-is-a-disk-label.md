@@ -82,7 +82,8 @@ Because the token cannot carry the box, the only place a `ConfinementBox`'s *wri
 be expressed is on the objects themselves. Each root gets `S:(ML;;NW;;;LW)` — a mandatory
 label ACE, `NO_WRITE_UP`, Low, **no inheritance flags** — via
 `SecurityDescriptorFromString` → `SACL()` → `SetNamedSecurityInfo(…, LABEL_SECURITY_INFORMATION,
-…)`.
+…)`. *(Amended 2026-09-27: the write is `SetSecurityInfo` on a handle opened with
+`FILE_FLAG_OPEN_REPARSE_POINT` and refused when it is a reparse point — see §6.)*
 
 - **It must recurse over existing contents.** The label is not inheritable, so nothing but the
   walk reaches a file that predates the labelling; such a file is implicitly Medium, and a Low
@@ -205,6 +206,17 @@ no special case: a below-floor Windows host is exactly today's Windows host.
   is resolved to its final on-disk form before the guardrails run, and trailing dots and spaces
   (which Win32 canonicalization strips) fold off in the component comparison, so `C:\Windows.`
   compares equal to `C:\Windows`.
+- **The refusal holds at the write, not only at the check** (amended 2026-09-27, code audit
+  2026-09-26). The up-front refusal runs once, before the label pass, so a root swapped for a
+  junction after it was vetted would still have been labelled through to the junction's
+  target. Every mandatory-label read and write — roots and descendants, in the label pass, the
+  clear walk and the revert — therefore opens the object ONCE with
+  `FILE_FLAG_OPEN_REPARSE_POINT`, refuses it when the handle's attributes carry
+  `FILE_ATTRIBUTE_REPARSE_POINT`, and reads (`GetSecurityInfo`) and writes (`SetSecurityInfo`)
+  the label on that handle. A root that became a reparse point after resolution fails the label
+  pass with confinement unavailable, exactly as an up-front reparse root does; a descendant
+  that did so takes the tolerated-descendant rung; and the revert's judgement reads a reparse
+  point as carrying no label of apogee's, so it neither clears nor restores through one.
 
 **7. Probe expectations (the escape battery on Windows).**
 

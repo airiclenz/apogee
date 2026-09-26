@@ -38,7 +38,7 @@ type hostRules struct {
 	// (junctions and symlinks) traversed, 8.3 aliases expanded, the trailing dots and
 	// spaces Win32 canonicalization strips removed — reporting whether it answered. The
 	// token backend resolves each box root through it before the labelling guardrails run
-	// (resolveBoxRoots): SetNamedSecurityInfo mutates the final form, so the guardrails
+	// (resolveBoxRoots): the label write mutates the final form, so the guardrails
 	// must judge that form, not the spelling — and resolves the journal directory those
 	// guardrails fence the same way (windowsJournalFence). Like longPath it is nil in the
 	// pure rule sets and wired to the real OS resolver (GetFinalPathNameByHandle) by

@@ -301,7 +301,9 @@ func (c *tokenConfiner) Close() error {
 //
 // The roots are first resolved to their final on-disk form — and a reparse-point root
 // refused — by resolveBoxRoots, so the guardrails, the journal and the label pass all see
-// the location the OS will actually mutate rather than a spelling of it.
+// the location the OS will actually mutate rather than a spelling of it. That refusal is a
+// CHECK, taken once; what makes it hold at the write is winlabel's own reparse-checked handle
+// (winlabel.LabelTree), which refuses a root swapped for a junction since, failing the box.
 //
 // winlabel returns its failures PLAIN, so the confinement sentinel is wrapped here, once
 // (D4): the rendered message is what it always was, and every caller's errors.Is still holds,
@@ -335,7 +337,7 @@ func (c *tokenConfiner) labelBox(box domain.ConfinementBox) error {
 
 // resolveBoxRoots returns box with each root replaced by its final on-disk form, or a
 // refusal wrapping ErrConfinementUnavailable. It runs BEFORE windowsBoxRoots because the
-// guardrails there are lexical while SetNamedSecurityInfo is not: the OS strips the
+// guardrails there are lexical while the label write is not: the OS strips the
 // trailing dots and spaces Win32 canonicalization ignores and follows every reparse point,
 // so a guardrail judging the SPELLING would wave through a root whose label write then
 // lands on a protected location — `C:\Windows.` is C:\Windows, and a junction is wherever
@@ -364,7 +366,10 @@ func (c *tokenConfiner) resolveBoxRoots(box domain.ConfinementBox) (domain.Confi
 //   - A root that IS a reparse point (a junction or symlink) is refused outright: labelling
 //     it would silently mutate its target, which is why the label walk skips descendant
 //     reparse points entirely (winlabel.LabelTree) — the root was the one spelling that
-//     escaped that rule, and no resolution makes it honestly labellable.
+//     escaped that rule, and no resolution makes it honestly labellable. This check runs
+//     once, ahead of the label pass; a root that becomes a reparse point AFTER it is refused
+//     again at the write, by the reparse-checked handle every winlabel label read and write
+//     goes through, so the box fails rather than labelling the junction's target.
 //   - Every other root must resolve through the finalPath seam (GetFinalPathNameByHandle),
 //     so the guardrails judge the answer; a root the resolver cannot answer for is refused,
 //     never guessed about — the same posture windowsLabelGuardrail takes with a path split
