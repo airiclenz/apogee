@@ -1065,8 +1065,10 @@ editable live in `/settings`) whose key names it:
   tool call answered with the completion-check nudge.
 - **tool-use enforcer** (`tool-use-enforcer`) — a second narration where an action was asked for
   answered with the tool menu and the instruction to call one of it.
-- **read cache** (`read-cache`) — a redundant re-read of a file already read successfully and not
-  written since, capped to a header slice so the copy already in the conversation stands.
+- **read cache** (`read-cache`) — a redundant re-read of a file already read successfully, with no
+  write to it and no call to a non-read-only tool since (a shell command or an MCP tool may rewrite
+  a file without naming it), capped to a header slice so the copy already in the conversation
+  stands.
 - **tool-result cap** (`tool-result-cap`) — every older tool result that outgrew its fraction of
   the Budget trimmed in the **request projection**, the conversation itself untouched (see
   [Tool-result capping](#tool-result-capping)).

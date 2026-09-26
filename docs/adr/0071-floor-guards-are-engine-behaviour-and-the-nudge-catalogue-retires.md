@@ -74,7 +74,7 @@ Six catalogued rows pass the test and are promoted, keeping their decision logic
 | `validate` | **tool-call repair** | Fires only on a tool call the engine has already rejected as malformed — post-failure by construction. |
 | `tool_loop_interceptor` | **tool-loop breaker** | Fires only on an identical repeat Turn — a failure the model has already committed twice — or, since the 2026-09-15 amendment, on an exact A-B-A-B alternation whose repeated pair drew identical results. |
 | `tool_result_cap` | **tool-result cap** | Shapes the request (a 40%-budget per-result cap, most-recent Turn protected); says nothing to the model about what to do. |
-| `cached_content_intercept` | **read cache** | Intercepts a redundant successful re-read; the one row with measured evidence (`catalogue.md:191`). |
+| `cached_content_intercept` | **read cache** | Intercepts a redundant successful re-read; the one row with measured evidence (`catalogue.md:191`). A re-read counts as redundant only while no write to the file and no call to a non-read-only tool has run since the last read (2026-09-26: a shell command can rewrite a file it never names). |
 
 **Floor guards carry no strikes-3 suppression and no Turn-Budget throttle.** The per-Turn
 `maxPostResponseRetries` bound is their only limiter. This supersedes the `SuppressStrikesThree`

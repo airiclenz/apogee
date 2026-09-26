@@ -189,7 +189,13 @@ NOTES (2026-09-26): the wrap-up menu's single write_file entry (toolMenu's wrapp
 **Acceptance:** `go build ./... && go test -race -count=1 ./internal/agent/ && go test -race -count=1 ./internal/domain/`
 **Commit:** `feat(domain): tool definitions carry the read-only bit`
 
-## 10. Read cache is invalidated by any non-read-only call
+## 10. Read cache is invalidated by any non-read-only call — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): a non-read-only call in the same assistant message as the last read counts as after it (matching the existing write-since comparison); a tool the menu does not list invalidates too, per the Goal.
+NOTES (2026-09-26): consequential edit — internal/floor/toolnames.go: made necessary by the new invalidatesReadCache predicate (isFileMutatingTool's comment now names the wider read-cache question it deliberately does not answer); the plan's Approach names these comments but Files omits the path.
+NOTES (2026-09-26): consequential edit — internal/floor/doc.go: made necessary by readcache.go's changed invalidation (the file's one-line summary said "not written since").
+NOTES (2026-09-26): consequential edit — internal/config/config.go: made necessary by readcache.go's changed invalidation (the ReadCache field comment said "not written since").
+NOTES (2026-09-26): internal/config/options.go and the registry.go /settings Desc still read "unchanged since apogee last read it" — left untouched as still true (the fix makes it truer) and user-visible text outside the item's Files.
 
 **What:** Depends on item 9. Fixes the audit's High "Read cache serves stale content after a shell command rewrites a file".
 **Goal:** after a successful read of a path, any later call to a tool whose `ToolDef.ReadOnly` is false (or that is unknown to the view) makes the next read of that path return full content, not the capped header; calls to read-only tools (`grep`, `list_dir`, `git_status`) keep the cache.

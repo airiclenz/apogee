@@ -818,7 +818,8 @@ type fileConfig struct {
 	// ToolResultCap gates trimming older oversized tool results in the PROJECTED request; the
 	// conversation itself is never rewritten.
 	ToolResultCap *bool `yaml:"tool-result-cap"`
-	// ReadCache gates capping a re-read of a file already read successfully and not written since.
+	// ReadCache gates capping a re-read of a file already read successfully, with no write to it and
+	// no non-read-only tool call since.
 	ReadCache *bool `yaml:"read-cache"`
 	// ContextFillNotice gates the engine's CONTEXT-FILL NOTICE (ADR 0077): the advise line on a tool
 	// result that tells the model how far it has climbed toward automatic Compaction. It sits after

@@ -46,8 +46,9 @@
 // enforcer — a second narration where an action was asked for answered with the correction that
 // lists the menu and tells the model to call one of it. emptyreply.go is the empty-response
 // recovery — a reply carrying neither text nor a tool call answered with the completion-check
-// nudge. readcache.go is the read cache — a re-read of a file already read successfully and not
-// written since, capped to a header-only slice so the copy already in the conversation stands.
+// nudge. readcache.go is the read cache — a re-read of a file already read successfully, with no
+// write to it and no non-read-only tool call since, capped to a header-only slice so the copy
+// already in the conversation stands.
 // resultcap.go is the tool-result cap — every older tool result that has outgrown its fraction of
 // the Budget trimmed to the shared head/tail elision in the projected request, the conversation
 // itself untouched. salvage.go is the tool-call salvage guard — a reply that carries no wire call

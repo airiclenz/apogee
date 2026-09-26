@@ -70,7 +70,7 @@ tool-call-salvage: true        # run a tool call the model wrote as JSON in its 
 tool-loop-breaker: true        # break an identical repeated tool call, or an exact A-B-A-B alternation, with a directive naming the repeat
 empty-response-recovery: true  # retry an empty reply with a completion-check nudge
 tool-use-enforcer: true        # retry a turn that narrated where the model was asked to act
-read-cache: true               # cap a re-read of a file unchanged since apogee last read it
+read-cache: true               # cap a re-read of a file when no write and no non-read-only tool call ran since apogee last read it
 tool-result-cap: true          # trim an older oversized tool result in the outgoing request
 ```
 

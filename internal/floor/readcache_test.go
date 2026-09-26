@@ -224,3 +224,83 @@ func TestCacheReadSchemaGateConservativeFallbacks(t *testing.T) {
 		})
 	}
 }
+
+// shellCall is a terminal call whose command rewrites a file it never names as a path argument —
+// the audit's stale-cache trigger (`sed -i` through the shell).
+func shellCall(id string) domain.ToolCall {
+	return domaintest.Call(id, "terminal", map[string]string{"command": "sed -i s/F/G/ a.go"})
+}
+
+// A call to any tool that is not read-only — or that the menu does not list at all — after the last
+// successful read may have rewritten the file without naming it, so the next read of that path gets
+// the whole file. A read-only tool (grep, list_dir, git_status) keeps the cache: it cannot have
+// changed anything.
+func TestCacheReadYieldsAfterANonReadOnlyCall(t *testing.T) {
+	t.Parallel()
+	menu := []domain.ToolDef{
+		readFileTool,
+		{Name: "terminal"},
+		{Name: "mcp__fs__rewrite"},
+		{Name: "grep", ReadOnly: true},
+		{Name: "list_dir", ReadOnly: true},
+		{Name: "git_status", ReadOnly: true},
+	}
+	cases := []struct {
+		name    string
+		between domain.ToolCall
+		wantCap bool
+	}{
+		{name: "terminal", between: shellCall("x1")},
+		{name: "MCP tool", between: domaintest.Call("x1", "mcp__fs__rewrite", map[string]string{"target": "a.go"})},
+		{name: "tool absent from the menu", between: domaintest.Call("x1", "python_exec", map[string]string{"code": "open('a.go','w')"})},
+		{name: "grep", between: domaintest.Call("x1", "grep", map[string]string{"pattern": "F"}), wantCap: true},
+		{name: "list_dir", between: domaintest.Call("x1", "list_dir", map[string]string{"path": "."}), wantCap: true},
+		{name: "git_status", between: domaintest.Call("x1", "git_status", map[string]string{}), wantCap: true},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			history := []domain.Message{
+				userMsg("edit a.go"),
+				assistantCall(readCall("r1", "a.go")),
+				toolResult("r1", "package a\nfunc F() {}"),
+				assistantCall(tc.between),
+				toolResult("x1", "ok"),
+				assistantCall(readCall("r2", "a.go")),
+			}
+			got, ok := cacheReadWithTools(history, readCall("r2", "a.go"), menu)
+			if ok != tc.wantCap || hasMaxLines(got.Arguments) != tc.wantCap {
+				t.Errorf("after a %s call: capped = %v (args %s), want %v", tc.name, ok, got.Arguments, tc.wantCap)
+			}
+		})
+	}
+}
+
+// A non-read-only call in the SAME assistant message as the read may have run after it, so it voids
+// the cached copy too; one issued BEFORE the read (an earlier message) does not.
+func TestCacheReadOrdersANonReadOnlyCallAgainstTheRead(t *testing.T) {
+	t.Parallel()
+	menu := []domain.ToolDef{readFileTool, {Name: "terminal"}}
+	sameMessage := []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(readCall("r1", "a.go"), shellCall("x1")),
+		toolResult("r1", "package a"),
+		toolResult("x1", "ok"),
+		assistantCall(readCall("r2", "a.go")),
+	}
+	if got, ok := cacheReadWithTools(sameMessage, readCall("r2", "a.go"), menu); ok || hasMaxLines(got.Arguments) {
+		t.Errorf("a shell call beside the read left the cache in force; args = %s", got.Arguments)
+	}
+	before := []domain.Message{
+		userMsg("edit a.go"),
+		assistantCall(shellCall("x1")),
+		toolResult("x1", "ok"),
+		assistantCall(readCall("r1", "a.go")),
+		toolResult("r1", "package a"),
+		assistantCall(readCall("r2", "a.go")),
+	}
+	if got, ok := cacheReadWithTools(before, readCall("r2", "a.go"), menu); !ok || !hasMaxLines(got.Arguments) {
+		t.Errorf("a shell call before the read voided the cache; args = %s", got.Arguments)
+	}
+}

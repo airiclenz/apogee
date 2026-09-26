@@ -682,6 +682,53 @@ func TestFloorGuard_ReadCacheLeavesAReadAfterAWriteUntouched(t *testing.T) {
 	}
 }
 
+// A call to a tool whose ToolDef is not read-only — here a terminal whose shell line could rewrite
+// a.go without naming it — voids the cached copy: the next read of a.go is dispatched whole. A call
+// to a read-only tool (grep) in the same slot leaves the cache in force and the re-read is capped.
+func TestFloorGuard_ReadCacheYieldsAfterANonReadOnlyCall(t *testing.T) {
+	cases := []struct {
+		name      string
+		between   fakeTool
+		args      string
+		wantFires int
+	}{
+		{name: "terminal", between: fakeTool{name: "terminal", result: "ok"}, args: `{"command":"sed -i s/F/G/ a.go"}`},
+		{name: "grep", between: fakeTool{name: "grep", readOnly: true, result: "a.go:2:func F() {}"}, args: `{"pattern":"F"}`, wantFires: 1},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			sink := &recordingSink{}
+			var seen []string
+			cfg := configWithTools(sink, readFileRecorder(readFileSchemaWithMaxLines, &seen), tc.between)
+			cfg.Bypass = true
+			responder := scriptedResponder(t,
+				toolCallTurn("r1", "read_file", `{"path":"a.go"}`),
+				toolCallTurn("x1", tc.between.name, tc.args),
+				toolCallTurn("r2", "read_file", `{"path":"a.go"}`),
+				contentTurn("done"),
+			)
+
+			a, err := newAgent(cfg, responder)
+			if err != nil {
+				t.Fatalf("newAgent: %v", err)
+			}
+			runExchange(t, a, "read a.go, run a command, read it again")
+
+			if len(seen) != 2 {
+				t.Fatalf("read_file ran %d times, want 2: %v", len(seen), seen)
+			}
+			capped := strings.Contains(seen[1], `"max_lines":1`)
+			if capped != (tc.wantFires > 0) {
+				t.Errorf("after a %s call the re-read dispatched as %s; capped = %v, want %v", tc.name, seen[1], capped, tc.wantFires > 0)
+			}
+			if n := guardFireCountFor(sink.events, guardReadCache); n != tc.wantFires {
+				t.Errorf("the read cache fired %d times after a %s call, want %d", n, tc.name, tc.wantFires)
+			}
+		})
+	}
+}
+
 // A read tool whose schema does not declare max_lines (a strict MCP server with
 // additionalProperties:false) is inspected but never mutated: appending an undeclared argument
 // would earn a rejection, so the redundant re-read simply proceeds uncapped.

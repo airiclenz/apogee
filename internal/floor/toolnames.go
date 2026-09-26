@@ -51,6 +51,9 @@ func isReadTool(name string) bool { return readToolNames[name] }
 // over the apogee-complete superset above. It is deliberately NOT "does this call carry a full file
 // payload to syntax-check": a fragment edit and a move mutate the workspace while carrying no file
 // body. That narrower question belonged to the retired content-repair rows; no Floor guard asks it.
+// Nor is it "could this call have changed a file": a shell line rewrites files it never names, so
+// the read cache asks that wider question through its own invalidatesReadCache, over the tool
+// menu's read-only bit, and leaves this set — which loopbreak, intent and tool-use share — alone.
 func isFileMutatingTool(name string) bool { return wave4WriteTools[name] }
 
 // IsFileMutatingTool is isFileMutatingTool's exported face, for the ONE cross-package question this
