@@ -139,7 +139,10 @@ NOTES (2026-09-26): consequential edit — cmd/apogee/testdata/eventlines/identi
 **Acceptance:** `go test -race -count=1 ./internal/tui/ && go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(tui): a salvaged tool call is announced in the default transcript`
 
-## 7. Anchored denial watch writer and a merged-stdout spec flag
+## 7. Anchored denial watch writer and a merged-stdout spec flag — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): the constructor is `platform.NewAnchoredDenialKillWriter` (the DenialKillWriter now carries its own line matcher; `LooksLikeConfinementDenial` and the scan share one `anyLineMatches` helper); `WatchMergedStdout` is also ignored on a `RunSubprocessTo` run (streamed stdout is a payload, like SplitStdout), and the SplitStdout exclusion got a test case of its own.
+NOTES (2026-09-26): no CHANGELOG entry for this item — the flag has no caller until item 8 arms it from `terminal`, which is where the user-visible fix lands.
 
 **What:** Fixes (with item 8) the audit's High "Merged stdout hides the OS denial message".
 **Regression guard.** `internal/subprocess/subprocess.go:327` sets `res.DenialStopped` from the stderr watch alone; OR both watches' `Detected()` into it (or share one atomic flag) — `res.DenialStopped = (denialWatch != nil && denialWatch.Detected()) || (stdoutWatch != nil && stdoutWatch.Detected())` — so a kill the new stdout-only watch triggers still reports `DenialStopped` and renders `confinementDenialStopLabel`.

@@ -200,3 +200,60 @@ func TestDenialKillWriterIgnoresCleanOutput(t *testing.T) {
 		t.Errorf("forwarded output = %q", got)
 	}
 }
+
+// TestAnchoredDenialKillWriterMatchesAnchoredSignatureOnly pins the merged-stdout watch's
+// stricter judgement: a line ENDING in the anchored denial signature kills, while a bare errno
+// name — mid-line or at the line's end, the half NewDenialKillWriter also accepts — streams
+// through untouched, since a merged stdout still carries the command's data.
+func TestAnchoredDenialKillWriterMatchesAnchoredSignatureOnly(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name     string
+		output   string
+		wantKill bool
+	}{
+		{"anchored denial kills", "mkdir: cannot create directory '/x': Operation not permitted\n", true},
+		{"anchored denial without newline kills", "touch: /x: Read-only file system", true},
+		{"errno mid-line ignored", "Error: EACCES: permission denied, open '/x'\n", false},
+		{"errno at line end ignored", "write failed: EPERM\n", false},
+		{"phrase mid-line ignored", "note: permission denied earlier\n", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var out strings.Builder
+			kills := 0
+			w := NewAnchoredDenialKillWriter(&out, func() { kills++ })
+
+			if _, err := w.Write([]byte(tc.output)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+
+			if got := kills == 1 && w.Detected(); got != tc.wantKill {
+				t.Errorf("kills=%d Detected=%v, want kill=%v", kills, w.Detected(), tc.wantKill)
+			}
+			if out.String() != tc.output {
+				t.Errorf("forwarded output = %q, want %q", out.String(), tc.output)
+			}
+		})
+	}
+}
+
+// TestDenialKillWriterStillMatchesErrnoNames pins that the anchored-only judgement is the new
+// writer's alone: the default stderr watch keeps killing on a bounded errno name mid-line.
+func TestDenialKillWriterStillMatchesErrnoNames(t *testing.T) {
+	t.Parallel()
+
+	var out strings.Builder
+	kills := 0
+	w := NewDenialKillWriter(&out, func() { kills++ })
+
+	if _, err := w.Write([]byte("Error: EACCES: permission denied, open '/x'\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if kills != 1 || !w.Detected() {
+		t.Errorf("errno-name line not detected by the default watch: kills=%d Detected=%v", kills, w.Detected())
+	}
+}

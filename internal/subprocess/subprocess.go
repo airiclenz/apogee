@@ -70,6 +70,16 @@ type SubprocessSpec struct {
 	// (see CappedBuffer). RunSubprocessTo implies it: there the payload leaves through the
 	// caller's writer instead.
 	SplitStdout bool
+	// WatchMergedStdout asks a CONFINED run to watch its standard output for a denial too, not
+	// its stderr alone: a caller whose shell line merges its own streams (`2>&1`, `>&2`, `&>`,
+	// `|&`) sets it, because such a line's denials reach stdout, where the stderr-only watch
+	// never sees them. That second watch is the stricter one
+	// (platform.NewAnchoredDenialKillWriter): a stdout line must END in the anchored denial
+	// signature — a bare errno name mid-line never kills, since stdout is still the command's
+	// data. It is ignored on an unconfined run, and on a run whose stdout is a payload
+	// (SplitStdout, RunSubprocessTo), which never merges into what the model reads. Left false,
+	// stdout stays unwatched (ADR 0056 D2).
+	WatchMergedStdout bool
 	// Cmdline, when non-empty, is the verbatim process command line to launch Argv with
 	// instead of letting os/exec join it (platform.Shell.CommandLine). It is empty on
 	// POSIX and for any argv that is a real argv; a caller handing a SHELL LINE to
@@ -295,15 +305,22 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	// incident). `set -e` cannot do this alone: POSIX exempts every command of an AND-OR
 	// list but the last, so a denied `mkdir d && cd d` chain does not abort the script and
 	// the unguarded lines after it run with the cwd unchanged — the incident's clobber.
-	// Stdout is never watched (2026-09-16, ADR 0056 D2 amendment): it is the command's
-	// data, and a confined `cat` of a log whose lines end in a real denial must not be
-	// killed for quoting one. The watch wraps the same capped buffer stdout already feeds,
+	// Stdout is not watched by default (2026-09-16, ADR 0056 D2 amendment): it is the
+	// command's data, and a confined `cat` of a log whose lines end in a real denial must not
+	// be killed for quoting one. The watch wraps the same capped buffer stdout already feeds,
 	// so CombinedOutput stays one capture — through two of exec's copiers now, which is why
 	// CappedBuffer locks. Unconfined runs are never watched.
-	var denialWatch *platform.DenialKillWriter
+	var denialWatch, stdoutWatch *platform.DenialKillWriter
 	if confined {
 		denialWatch = platform.NewDenialKillWriter(&out, cancel)
 		cmd.Stderr = denialWatch
+	}
+	// The one exception (2026-09-26): a line that merged its own streams sends its denials to
+	// stdout, so a caller that saw the merge opts stdout into the anchored-only watch. A split
+	// or streamed stdout is a payload, not what the model reads, and is never wrapped.
+	if confined && spec.WatchMergedStdout && streamStdout == nil && !spec.SplitStdout {
+		stdoutWatch = platform.NewAnchoredDenialKillWriter(&out, cancel)
+		cmd.Stdout = stdoutWatch
 	}
 
 	runErr := platform.RunWithTeardown(cmd, teardown)
@@ -324,7 +341,10 @@ func run(ctx context.Context, spec SubprocessSpec, streamStdout io.Writer) (Subp
 	if res.DrainWedged && res.ExitCode == 0 {
 		res.ExitCode = -1
 	}
-	res.DenialStopped = denialWatch != nil && denialWatch.Detected()
+	// Either watch's kill is a denial stop: a merged-stdout kill must render the same
+	// stopped-by-confinement label a stderr kill does.
+	res.DenialStopped = (denialWatch != nil && denialWatch.Detected()) ||
+		(stdoutWatch != nil && stdoutWatch.Detected())
 	res.FailFast = spec.FailFast
 	res.Dir = spec.Dir
 	return res, nil

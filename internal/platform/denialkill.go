@@ -68,9 +68,22 @@ func looksLikeDenialLine(line string) bool {
 // applies live, exported so the execution tools label a finished result with the identical
 // judgement.
 func LooksLikeConfinementDenial(output string) bool {
+	return anyLineMatches(output, looksLikeDenialLine)
+}
+
+// looksLikeAnchoredDenialLine reports whether one line — already trimmed of denialLineTrim —
+// ENDS in the anchored signature alone. It is the stricter judgement a merged-stdout watch
+// applies (see NewAnchoredDenialKillWriter): a bare errno name mid-line is not enough there.
+func looksLikeAnchoredDenialLine(line string) bool {
+	return denialLinePattern.MatchString(line)
+}
+
+// anyLineMatches reports whether matchLine accepts one of output's lines, each trimmed of
+// denialLineTrim; the final line counts whether or not a newline ends it.
+func anyLineMatches(output string, matchLine func(string) bool) bool {
 	for len(output) > 0 {
 		line, rest, _ := strings.Cut(output, "\n")
-		if looksLikeDenialLine(strings.TrimRight(line, denialLineTrim)) {
+		if matchLine(strings.TrimRight(line, denialLineTrim)) {
 			return true
 		}
 		output = rest
@@ -90,12 +103,15 @@ func LooksLikeConfinementDenial(output string) bool {
 // it run with the cwd unchanged — the incident's exact clobber.
 //
 // The match is line-anchored (denialLinePattern): a line whose tail IS a denial, not a line
-// that merely contains the phrase. Since 2026-09-16 the pipe path watches stderr alone —
-// stdout is a command's data, and the incident this closed (session-mining fc413fb5) was a
-// confined `cat` of a log to STDOUT whose lines ended in a real Go denial
+// that merely contains the phrase. Since 2026-09-16 the pipe path watches stderr alone by
+// default — stdout is a command's data, and the incident this closed (session-mining
+// fc413fb5) was a confined `cat` of a log to STDOUT whose lines ended in a real Go denial
 // (`open /dev/ptmx: permission denied`), killed as if the cat itself had been denied. The
-// PTY console keeps its single stream (a terminal has no second one) under the same anchored
-// rule. The watch is still best-effort in both directions and its caller must treat it so:
+// exception (2026-09-26) is a line that merges its streams itself (`2>&1`, `&>`, `|&`): its
+// denials reach stdout, so the caller opts that stream into a second, stricter watch built by
+// NewAnchoredDenialKillWriter, which drops the bare errno names and keeps the anchored
+// signature alone. The PTY console keeps its single stream (a terminal has no second one)
+// under the same anchored rule. The watch is still best-effort in both directions and its caller must treat it so:
 // the kill races the shell's next command (the denial's stderr reaches the parent through a
 // pipe), and a confined command whose stderr line legitimately ends in a signature is killed
 // too — that false positive surfaces loudly as a labeled error the model can react to.
@@ -106,16 +122,29 @@ func LooksLikeConfinementDenial(output string) bool {
 // Write is single-writer by contract (os/exec drives one copier per writer). Detected is
 // safe to read from another goroutine after the run.
 type DenialKillWriter struct {
-	next     io.Writer
-	kill     func()
-	carry    []byte
-	detected atomic.Bool
+	next      io.Writer
+	kill      func()
+	matchLine func(string) bool
+	carry     []byte
+	detected  atomic.Bool
 }
 
 // NewDenialKillWriter returns a watch forwarding to next that calls kill exactly once
-// when the stream first carries an OS-denial signature.
+// when the stream first carries an OS-denial signature — the anchored pattern or a bounded
+// errno name, the same judgement as LooksLikeConfinementDenial. It is the watch for a
+// stream that carries a command's complaints: a pipe run's stderr, a console's PTY.
 func NewDenialKillWriter(next io.Writer, kill func()) *DenialKillWriter {
-	return &DenialKillWriter{next: next, kill: kill}
+	return &DenialKillWriter{next: next, kill: kill, matchLine: looksLikeDenialLine}
+}
+
+// NewAnchoredDenialKillWriter returns a watch forwarding to next that calls kill exactly
+// once when a LINE of the stream ends in the anchored denial signature (denialLinePattern)
+// — never on a bare errno name (denialErrnoPattern), which a command's data mentions far
+// more often than it reports one. It is the watch for the stdout of a line that merged its
+// own stderr into it (`2>&1`, `>&2`, `&>`, `|&`): the denial the fence provoked lands there,
+// but so does the command's data, so only the stricter half of the signature may kill.
+func NewAnchoredDenialKillWriter(next io.Writer, kill func()) *DenialKillWriter {
+	return &DenialKillWriter{next: next, kill: kill, matchLine: looksLikeAnchoredDenialLine}
 }
 
 // Write forwards p to the underlying writer, then scans it (joined with the carried
@@ -133,12 +162,12 @@ func (w *DenialKillWriter) Write(p []byte) (int, error) {
 // Detected reports whether the watch matched a denial signature (and so issued its kill).
 func (w *DenialKillWriter) Detected() bool { return w.detected.Load() }
 
-// scan matches the carried unfinished line plus p, line by line — the newline-less tail
-// included — fires the kill on the first match, and otherwise keeps that tail (capped at
+// scan matches the carried unfinished line plus p, line by line with the writer's own line
+// judgement — the newline-less tail included — fires the kill on the first match, and otherwise keeps that tail (capped at
 // denialLineCarry) as the carry for the next write.
 func (w *DenialKillWriter) scan(p []byte) {
 	window := append(w.carry, p...)
-	if LooksLikeConfinementDenial(string(window)) {
+	if anyLineMatches(string(window), w.matchLine) {
 		w.detected.Store(true)
 		w.carry = nil
 		w.kill()

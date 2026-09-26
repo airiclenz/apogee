@@ -297,6 +297,96 @@ func TestRunSubprocessDenialWatchIgnoresStdout(t *testing.T) {
 	}
 }
 
+// TestRunSubprocessMergedStdoutWatchKillsConfinedRun pins the opt-in stdout watch: a CONFINED
+// run whose spec sets WatchMergedStdout — a line that merged its own streams, so its denial
+// reaches STDOUT — is killed by the anchored stdout watch before its later, unguarded write
+// runs, and the stdout-only kill still reports DenialStopped, so the caller renders the
+// stopped-by-confinement label as it does for a stderr kill.
+func TestRunSubprocessMergedStdoutWatchKillsConfinedRun(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the watch keys on POSIX EPERM spellings only")
+	}
+	t.Parallel()
+
+	dir := t.TempDir()
+	clobber := filepath.Join(dir, "clobber.txt")
+	script := `echo "mkdir: cannot create directory '/outside': Operation not permitted"` + "\n" +
+		"sleep 5\n" +
+		"echo clobbered > " + clobber + "\n"
+	ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+		Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+		Box:      domain.ConfinementBox{WorkspaceRoot: dir},
+	})
+	spec := SubprocessSpec{Argv: []string{"/bin/sh", "-c", script}, WatchMergedStdout: true}
+
+	res, err := RunSubprocess(ctx, spec)
+
+	if err != nil {
+		t.Fatalf("RunSubprocess err = %v, want nil (a denial kill is a result, not a Go error)", err)
+	}
+	if !res.DenialStopped {
+		t.Error("DenialStopped = false, want the stdout watch's kill reported as a denial stop")
+	}
+	if res.ExitCode == 0 {
+		t.Error("ExitCode = 0, want non-zero for the killed run")
+	}
+	if res.TimedOut {
+		t.Error("timedOut = true, want the denial kill reported as a kill, not a timeout")
+	}
+	if _, statErr := os.Stat(clobber); !errors.Is(statErr, os.ErrNotExist) {
+		t.Errorf("stat %q = %v, want not-exist — the kill must land before the unguarded write", clobber, statErr)
+	}
+}
+
+// TestRunSubprocessMergedStdoutWatchSparesData pins the two ways a WatchMergedStdout run still
+// leaves stdout alone: a stdout line that merely names an errno mid-line (the anchored-only
+// watch never matches a bare errno name), and a SplitStdout run, whose stdout is a payload and
+// is never wrapped even when a line ends in a real denial. Neither is killed; both finish.
+func TestRunSubprocessMergedStdoutWatchSparesData(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell script; the watch keys on POSIX EPERM spellings only")
+	}
+	t.Parallel()
+
+	cases := []struct {
+		name        string
+		line        string
+		splitStdout bool
+	}{
+		{"errno mid-line", "Error: EACCES: permission denied, open '/x'", false},
+		{"split stdout is a payload", "open /dev/ptmx: permission denied", true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			written := filepath.Join(dir, "after.txt")
+			script := "echo \"" + tc.line + "\"\n" + "echo landed > " + written + "\n"
+			ctx := domain.WithConfinement(context.Background(), domain.Confinement{
+				Confiner: &fakeConfiner{caps: domain.ConfinementCaps{FSWrite: true}},
+				Box:      domain.ConfinementBox{WorkspaceRoot: dir},
+			})
+			spec := SubprocessSpec{
+				Argv:              []string{"/bin/sh", "-c", script},
+				WatchMergedStdout: true,
+				SplitStdout:       tc.splitStdout,
+			}
+
+			res, err := RunSubprocess(ctx, spec)
+
+			if err != nil {
+				t.Fatalf("RunSubprocess err = %v, want nil", err)
+			}
+			if res.DenialStopped || res.ExitCode != 0 {
+				t.Errorf("DenialStopped=%v ExitCode=%d, want the run to complete untouched", res.DenialStopped, res.ExitCode)
+			}
+			if _, statErr := os.Stat(written); statErr != nil {
+				t.Errorf("stat %q = %v, want the write after the stdout line to land", written, statErr)
+			}
+		})
+	}
+}
+
 // TestCappedBufferConcurrentWrites pins the lock a confined run relies on: two writers — the
 // shape of exec's stdout copier and the denial watch's stderr copier feeding one buffer —
 // land every chunk whole, the cap holds, and the discard count is exact, under -race.
