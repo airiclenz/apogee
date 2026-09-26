@@ -2,9 +2,13 @@ package doctext
 
 import (
 	"bytes"
+	"compress/flate"
 	"compress/zlib"
 	"context"
+	"encoding/ascii85"
+	"encoding/binary"
 	"fmt"
+	"hash/adler32"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1021,6 +1025,196 @@ func TestExtractPDF_ChargesAContentStreamWhateverItsLabel(t *testing.T) {
 	t.Parallel()
 
 	data := onePagePDF(t, flateStreamObject(deflatedZeros(t, 80<<20), "/Type /XObject /Subtype /Image"))
+
+	_, _, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
+		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+	}
+}
+
+// bombInflated is how far every inflate-bomb fixture below inflates: past the whole budget, so a
+// charge that sees the stream refuses it, and small enough that an unrefused parse still fits in
+// a test's memory.
+const bombInflated = 80 << 20
+
+// decoyedZeros returns a zlib stream that inflates to a short decoy followed by `inflated` zero
+// bytes, with the decoy — which spells `endstream` — written as a STORED deflate block, so its
+// bytes appear verbatim in the compressed stream. A locator that ends a stream body at the first
+// literal `endstream` cuts this stream off a few bytes in; the parser, which reads by /Length,
+// inflates all of it.
+func decoyedZeros(t *testing.T, decoy string, inflated int) []byte {
+	t.Helper()
+
+	const (
+		zlibHeader         = "\x78\x01"
+		storedNonFinalByte = 0x00
+		chunk              = 1 << 16
+	)
+
+	var compressed bytes.Buffer
+	compressed.WriteString(zlibHeader)
+	compressed.WriteByte(storedNonFinalByte)
+	length := uint16(len(decoy))
+	compressed.Write(binary.LittleEndian.AppendUint16(nil, length))
+	compressed.Write(binary.LittleEndian.AppendUint16(nil, ^length))
+	compressed.WriteString(decoy)
+
+	checksum := adler32.New()
+	checksum.Write([]byte(decoy))
+	deflater, err := flate.NewWriter(&compressed, flate.BestCompression)
+	if err != nil {
+		t.Fatalf("open the deflater: %v", err)
+	}
+	zeros := make([]byte, chunk)
+	for written := 0; written < inflated; written += chunk {
+		block := zeros[:min(chunk, inflated-written)]
+		checksum.Write(block)
+		if _, err := deflater.Write(block); err != nil {
+			t.Fatalf("deflate the zeros: %v", err)
+		}
+	}
+	if err := deflater.Close(); err != nil {
+		t.Fatalf("close the deflater: %v", err)
+	}
+	compressed.Write(binary.BigEndian.AppendUint32(nil, checksum.Sum32()))
+	return compressed.Bytes()
+}
+
+// ascii85Body encodes data the way the parser's ASCII85 filter can read it back: without the
+// `z` shorthand for a zero group, which the parser's alphaReader drops rather than expands, and
+// closed by the `~>` end-of-data marker.
+func ascii85Body(data []byte) string {
+	encoded := make([]byte, ascii85.MaxEncodedLen(len(data)))
+	encoded = encoded[:ascii85.Encode(encoded, data)]
+	return strings.ReplaceAll(string(encoded), "z", "!!!!!") + "~>"
+}
+
+// TestExtractPDF_RefusesABombBehindADecoyEndstream pins the first half of the audit 2026-09-26
+// PDF finding: a stream body is located by its declared /Length, as the parser locates it, so a
+// literal `endstream` smuggled into the compressed bytes cannot cut the charge short while the
+// parser inflates the whole stream.
+func TestExtractPDF_RefusesABombBehindADecoyEndstream(t *testing.T) {
+	t.Parallel()
+
+	data := onePagePDF(t, flateStreamObject(decoyedZeros(t, "\nendstream\n", bombInflated)))
+
+	_, _, failMessage := ExtractPDF(context.Background(), data, 0)
+
+	if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
+		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+	}
+}
+
+// TestExtractPDF_ChargesTheFilterTheDictionaryDeclares pins the second half of that finding: the
+// decode layers are the /Filter entry the parser reads, never a count of the times the bytes
+// spell /FlateDecode. A second spelling — in a comment, under another key, inside a string —
+// once chained a bogus extra zlib layer that failed at once and charged the bomb nothing.
+func TestExtractPDF_ChargesTheFilterTheDictionaryDeclares(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		extra string
+	}{
+		{name: "a second FlateDecode in a comment", extra: " % /FlateDecode\n"},
+		{name: "a second FlateDecode under another key", extra: " /Alternate /FlateDecode"},
+		{name: "a second FlateDecode inside a string", extra: " /Title (/FlateDecode)"},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+
+			deflated := deflatedZeros(t, bombInflated)
+			stream := fmt.Sprintf("<< /Length %d /Filter /FlateDecode%s >>\nstream\n%s\nendstream",
+				len(deflated), testCase.extra, deflated)
+			data := onePagePDF(t, stream)
+
+			_, _, failMessage := ExtractPDF(context.Background(), data, 0)
+
+			if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
+				t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+			}
+		})
+	}
+}
+
+// TestExtractPDF_DecodesAnASCII85WrappedChain pins the filter ORDER: the parser applies an
+// ASCII85Decode ahead of a FlateDecode, so the charge must decode the ASCII85 text before it
+// inflates — inflating the raw text fails at once and once charged a wrapped bomb nothing. The
+// same chain on an ordinary page still reads.
+func TestExtractPDF_DecodesAnASCII85WrappedChain(t *testing.T) {
+	t.Parallel()
+
+	wrapped := func(inflated string) string {
+		var compressed bytes.Buffer
+		writer := zlib.NewWriter(&compressed)
+		if _, err := writer.Write([]byte(inflated)); err != nil {
+			t.Fatalf("deflate the page: %v", err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatalf("close the deflater: %v", err)
+		}
+		return ascii85Body(compressed.Bytes())
+	}
+	streamOf := func(body string) string {
+		return fmt.Sprintf("<< /Length %d /Filter [/ASCII85Decode /FlateDecode] >>\nstream\n%s\nendstream",
+			len(body), body)
+	}
+
+	t.Run("a wrapped bomb is refused", func(t *testing.T) {
+		t.Parallel()
+
+		data := onePagePDF(t, streamOf(ascii85Body(deflatedZeros(t, bombInflated))))
+
+		_, _, failMessage := ExtractPDF(context.Background(), data, 0)
+
+		if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
+			t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+		}
+	})
+
+	t.Run("a wrapped page reads", func(t *testing.T) {
+		t.Parallel()
+
+		data := onePagePDF(t, streamOf(wrapped(contentBody("Wrapped Apogee"))))
+
+		text, pages, failMessage := ExtractPDF(context.Background(), data, 0)
+
+		if failMessage != "" {
+			t.Fatalf("ExtractPDF failed: %s", failMessage)
+		}
+		if pages != 1 || !strings.Contains(text, "Wrapped Apogee") {
+			t.Errorf("text = %q, pages = %d, want the page's own words", text, pages)
+		}
+	})
+}
+
+// TestExtractPDF_ChargesAnIndirectLengthThroughTheEnd pins the resolution order for an indirect
+// /Length: the parser resolves `N G R` through the cross-reference table, which the raw bytes
+// cannot see, so the preflight never looks the reference up in them and charges the body through
+// the end of the file instead. The fixture plants the trap a raw lookup would fall into: object
+// 5 is a stream whose own /Length is a forward reference, so its body is still unresolved when
+// object 6 is read, and that body carries a decoy `endstream`, `endobj` and a `7 0 obj 10`
+// definition. Object 6 — the page's bomb, itself behind a decoy `endstream` — declares
+// `/Length 7 0 R`; the parser follows the xref to the real object 7 and inflates everything,
+// while a lookup that trusted the decoy would charge ten bytes.
+func TestExtractPDF_ChargesAnIndirectLengthThroughTheEnd(t *testing.T) {
+	t.Parallel()
+
+	const decoy = "endstream\nendobj\n7 0 obj\n10\nendobj\n"
+	bomb := decoyedZeros(t, "\nendstream\n", bombInflated)
+	data := hostilePDF(t,
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"+
+			" /Resources << /Font << /F1 3 0 R >> >> /Contents 6 0 R >>",
+		fmt.Sprintf("<< /Length 8 0 R >>\nstream\n%s\nendstream", decoy),
+		fmt.Sprintf("<< /Length 7 0 R /Filter /FlateDecode >>\nstream\n%s\nendstream", bomb),
+		fmt.Sprint(len(bomb)),
+		fmt.Sprint(len(decoy)))
 
 	_, _, failMessage := ExtractPDF(context.Background(), data, 0)
 

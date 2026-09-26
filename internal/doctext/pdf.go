@@ -4,11 +4,12 @@ import (
 	"bytes"
 	"compress/zlib"
 	"context"
+	"encoding/ascii85"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
-	"regexp"
+	"math"
 	"strconv"
 	"strings"
 
@@ -455,23 +456,25 @@ func (b *budgetedReaderAt) failureFor(reported any) string {
 	return fmt.Sprintf(pdfUnreadableFormat, reported)
 }
 
-// pdfStreamBody matches one stream object's body: the `stream` keyword — never the tail of
-// `endstream`, which the word boundary excludes — its mandatory end-of-line, and every byte up to
-// the nearest `endstream`.
-var pdfStreamBody = regexp.MustCompile(`(?s)\bstream\r?\n.*?endstream`)
-
 // withoutStreamBodies returns the spans of data that lie outside every stream body, in order, in
-// one pass. A `stream` keyword with no `endstream` after it terminates nothing and opens no span:
-// its bytes stay in the result, so a truncated stream cannot become a place to hide the trailer
-// from a guard that reads these spans.
+// one pass over the streams locatePDFStreams finds. Each body is skipped from its `stream`
+// keyword to its skipEnd — the SHORTER of its declared /Length and its first literal
+// `endstream` — so neither a /Length that runs past the object nor a decoy `endstream` can make
+// the skip longer than the old literal match was. A `stream` keyword with no `endstream` after it
+// skips nothing: its bytes stay in the result, so a truncated stream cannot become a place to
+// hide the trailer from a guard that reads these spans. A keyword inside a body already skipped
+// opens no second skip.
 func withoutStreamBodies(data []byte) [][]byte {
-	bodies := pdfStreamBody.FindAllIndex(data, -1)
+	streams := locatePDFStreams(data)
 
-	spans := make([][]byte, 0, len(bodies)+1)
+	spans := make([][]byte, 0, len(streams)+1)
 	cursor := 0
-	for _, body := range bodies {
-		spans = append(spans, data[cursor:body[0]])
-		cursor = body[1]
+	for _, stream := range streams {
+		if stream.keyword < cursor || stream.skipEnd == stream.keyword {
+			continue
+		}
+		spans = append(spans, data[cursor:stream.keyword])
+		cursor = stream.skipEnd
 	}
 	return append(spans, data[cursor:])
 }
@@ -503,18 +506,21 @@ func refuseAbsurdObjectCount(data []byte) string {
 // preflightPDF returns the cause of a refusal when the document's raw bytes name an allocation
 // or an inflation the parser must not be allowed to make, or "" when it may run. It sits between
 // refuseAbsurdObjectCount and pdf.NewReader and bounds the three numbers that guard does not: how
-// far the FlateDecode streams the text path decodes inflate (read.go applyFilter inflates a
-// stream with no ceiling but the stream's own), how wide a predictor row is (a pngUpReader
-// allocates two buffers of /Columns bytes each), and how wide a cross-reference row is (read.go
-// readXrefStreamData allocates the sum of /W). Every bound is read the way the parser's lexer
-// would read it, so a comment or a NUL between a key and its number hides nothing.
+// far the streams the text path decodes inflate (read.go applyFilter inflates a stream with no
+// ceiling but the stream's own), how wide a predictor row is (a pngUpReader allocates two buffers
+// of /Columns bytes each), and how wide a cross-reference row is (read.go readXrefStreamData
+// allocates the sum of /W). Every bound is read the way the parser's lexer would read it, so a
+// comment or a NUL between a key and its number hides nothing.
 //
 // The inflate budget is ONE budget for the whole document, charged only to the streams the text
 // path decodes — see chargesInflation for the rule — so a document that embeds a large image or
 // font goes uncharged for it while a bomb wired as page content is caught before the parser
-// materialises it. A stream that fails to inflate is skipped, not refused: the parser will report
-// it. A page dictionary compressed inside an object stream hides its /Contents reference from
-// this raw scan; that gap is known and bounded — an object stream is itself charged.
+// materialises it. Each stream is charged over the bytes the parser reads for it and through the
+// filter chain the parser applies to it (see locatePDFStreams), never over a literal `endstream`
+// or a count of filter names, both of which the document's own bytes can forge. A stream that
+// fails to inflate is skipped, not refused: the parser will report it. A page dictionary
+// compressed inside an object stream hides its /Contents reference from this raw scan; that gap
+// is known and bounded — an object stream is itself charged.
 func preflightPDF(ctx context.Context, data []byte) string {
 	for _, columns := range declaredIntegers(data, "Columns") {
 		if exceedsBound(columns, pdfMaxPredictorColumns) {
@@ -522,20 +528,19 @@ func preflightPDF(ctx context.Context, data []byte) string {
 		}
 	}
 
-	objects := indexPDFObjects(data)
-	decoded := decodedReferences(data, objects)
+	decoded := decodedReferences(data, indexPDFObjects(data))
 	remaining := int64(pdfMaxInflatedBytes)
-	for _, object := range objects {
-		if object.body == nil {
+	for _, stream := range locatePDFStreams(data) {
+		if !stream.owned {
 			continue
 		}
-		if cause := refuseAbsurdXrefWidths(object.value); cause != "" {
+		if cause := refuseAbsurdXrefWidths(stream.dictionary); cause != "" {
 			return cause
 		}
-		if !chargesInflation(object, decoded) {
+		if !chargesInflation(stream, decoded) {
 			continue
 		}
-		inflated := inflatedSize(ctx, object.body, countPDFNames(object.value, "FlateDecode"), remaining)
+		inflated := largestInflation(ctx, stream, remaining)
 		if ctx.Err() != nil {
 			return pdfCancelledCause
 		}
@@ -547,57 +552,623 @@ func preflightPDF(ctx context.Context, data []byte) string {
 	return ""
 }
 
-// pdfObject is one `N G obj` header the raw scan found outside every stream body: its number,
-// the bytes that follow the keyword — the whole dictionary for a stream object, the leading
-// value for any other — and, for a stream object, the body between `stream` and `endstream`.
+// largestInflation charges one stream: the most any of its candidate decode chains inflates its
+// body to, measured no further than limit+1 bytes (see inflatedSize). A stream whose chain was
+// read carries exactly one candidate; one whose /Filter could not be read carries the chains
+// pdfUnreadChains names, and is charged for the worst of them.
+func largestInflation(ctx context.Context, stream pdfStream, limit int64) int64 {
+	var largest int64
+	for _, chain := range stream.chains {
+		largest = max(largest, inflatedSize(ctx, stream.body, chain, limit))
+		if largest > limit || ctx.Err() != nil {
+			break
+		}
+	}
+	return largest
+}
+
+// pdfObject is one `N G obj` header the raw scan found outside every stream body: its number and
+// the bytes that follow the keyword — the whole dictionary for a stream object, the leading value
+// for any other. It is what decodedReferences resolves an array object through.
 type pdfObject struct {
 	number int64
 	value  []byte
-	body   []byte
 }
 
-// indexPDFObjects lists every object header in the document, in file order, pairing the last
-// header before each stream keyword with that stream's body. A stream whose keyword follows no
-// header is unreachable — the cross-reference table addresses objects by their headers — so it
-// is not listed and never charged.
+// indexPDFObjects lists every object header outside the document's stream bodies, in file
+// order, each with the bytes up to the next header or the end of its span.
 func indexPDFObjects(data []byte) []pdfObject {
-	bodies := pdfStreamBody.FindAllIndex(data, -1)
-
 	var objects []pdfObject
-	cursor := 0
-	for gap := 0; gap <= len(bodies); gap++ {
-		gapEnd := len(data)
-		if gap < len(bodies) {
-			gapEnd = bodies[gap][0]
-		}
-		headers := pdfObjectHeaders(data[cursor:gapEnd])
+	for _, span := range withoutStreamBodies(data) {
+		headers := pdfObjectHeaders(span)
 		for index, header := range headers {
-			valueEnd := gapEnd
+			valueEnd := len(span)
 			if index+1 < len(headers) {
-				valueEnd = cursor + headers[index+1].start
+				valueEnd = headers[index+1].start
 			}
-			object := pdfObject{number: header.number, value: data[cursor+header.end : valueEnd]}
-			if index == len(headers)-1 && gap < len(bodies) {
-				object.body = streamBodyBytes(data, bodies[gap])
-			}
-			objects = append(objects, object)
-		}
-		if gap < len(bodies) {
-			cursor = bodies[gap][1]
+			objects = append(objects, pdfObject{number: header.number, value: span[header.end:valueEnd]})
 		}
 	}
 	return objects
 }
 
-// streamBodyBytes returns the content bytes of one pdfStreamBody match: what lies between the
-// keyword's end-of-line and `endstream`.
-func streamBodyBytes(data []byte, match []int) []byte {
-	start := match[0] + len("stream")
-	if data[start] == '\r' {
-		start++
+const (
+	// pdfStreamKeyword and pdfEndStreamKeyword are the two keywords that frame a stream body.
+	pdfStreamKeyword    = "stream"
+	pdfEndStreamKeyword = "endstream"
+
+	// pdfFlateDecode and pdfASCII85Decode are the two filters the parser decodes (read.go
+	// applyFilter); any other name panics before a byte is read.
+	pdfFlateDecode   = "FlateDecode"
+	pdfASCII85Decode = "ASCII85Decode"
+
+	// pdfMaxOwnerCandidates bounds how many `N G obj` headers before one stream keyword are tried
+	// as the one whose dictionary introduces it. The nearest header is the owner in every real
+	// document; the ones before it are tried only because a header-shaped string inside the
+	// dictionary itself can sit between the two, and the bound keeps a file full of such strings
+	// from making the scan quadratic.
+	pdfMaxOwnerCandidates = 8
+
+	// pdfMaxNesting bounds how deeply the dictionary reader descends into nested dictionaries
+	// and arrays, so a document cannot size the preflight's stack. No real stream dictionary
+	// nests more than a handful of levels.
+	pdfMaxNesting = 64
+)
+
+// pdfUnreadChains are the decode chains a stream is charged for when its /Filter could not be
+// read — an indirect reference, or a dictionary the reader below could not follow: plain
+// FlateDecode, and FlateDecode behind ASCII85Decode. Between them they cover every chain real
+// producers write, and the worst of them is what the stream is charged.
+var pdfUnreadChains = [][]string{{pdfFlateDecode}, {pdfASCII85Decode, pdfFlateDecode}}
+
+// pdfStream is one `stream` keyword the locator found. keyword is the keyword's index; skipEnd
+// is where the span the dictionary scans skip ends (== keyword when nothing is skipped). A stream
+// is owned when an `N G obj` header before it introduces it: only then does it carry the owner's
+// number, the dictionary bytes between `obj` and the keyword, the body the parser may decode, and
+// the candidate decode chains (none when the parser inflates nothing). An unowned stream is
+// unreachable — the cross-reference table addresses objects by their headers — and is never
+// charged.
+type pdfStream struct {
+	keyword    int
+	skipEnd    int
+	owned      bool
+	number     int64
+	dictionary []byte
+	body       []byte
+	chains     [][]string
+}
+
+// pdfStreamSite is one `stream` keyword: the keyword's index and the index its body starts at.
+type pdfStreamSite struct {
+	keyword, bodyStart int
+}
+
+// locatePDFStreams finds every stream the parser could decode and what it would decode of each.
+// The parser reads a stream by its declared /Length and never looks for `endstream` (read.go
+// Value.Reader), and it reaches an object through the cross-reference table, which can point at
+// any header — one inside another stream's body included. So every `stream` keyword in the file
+// is located, nested ones too, and each is described from its own dictionary:
+//
+//   - body: a direct integer /Length is exactly what the parser reads, clamped to the end of the
+//     file. Any other /Length — an `N G R` reference, a missing or malformed one — is charged
+//     through the end of the file. A reference is never looked up in the raw bytes: the parser
+//     resolves it through the cross-reference table, which a hostile file can point at a
+//     definition the raw scan never sees (inside another stream's body, or compressed in an
+//     object stream), while a raw lookup would read whatever header-shaped bytes a decoy planted.
+//     Charging through the end costs a real stream nothing — inflation stops at the stream's own
+//     end-of-data marker — and bounds every length the parser could resolve.
+//   - chains: the ordered /Filter name or array, decoded in order (see pdfDecodeChains).
+//
+// skipEnd is the shorter of the declared body and the first literal `endstream` after it (see
+// withoutStreamBodies). The streams come back in file order.
+func locatePDFStreams(data []byte) []pdfStream {
+	sites := pdfStreamSites(data)
+	ends := pdfKeywordIndexes(data, pdfEndStreamKeyword)
+
+	streams := make([]pdfStream, 0, len(sites))
+	windowStart, nextEnd := 0, 0
+	for _, site := range sites {
+		for nextEnd < len(ends) && ends[nextEnd] < site.bodyStart {
+			nextEnd++
+		}
+		skipEnd := site.keyword
+		if nextEnd < len(ends) {
+			skipEnd = ends[nextEnd] + len(pdfEndStreamKeyword)
+		}
+
+		stream, declaredEnd := describePDFStream(data, windowStart, site)
+		if declaredEnd >= 0 && skipEnd > site.keyword {
+			skipEnd = min(skipEnd, declaredEnd)
+		}
+		stream.skipEnd = skipEnd
+		streams = append(streams, stream)
+		windowStart = site.bodyStart
 	}
-	start++
-	return data[start : match[1]-len("endstream")]
+	return streams
+}
+
+// describePDFStream finds the header that owns one stream keyword and reads the stream from its
+// dictionary. The owner is searched for between windowStart — the previous keyword's body start —
+// and the keyword, nearest header first: the nearest header whose dictionary the reader follows
+// right up to this keyword is the owner. When headers exist but none of them reads — a
+// dictionary the reader cannot follow — the nearest one is taken as the owner and the stream is
+// charged for pdfUnreadChains through the end of the file. It also returns where a direct
+// /Length ends the body, or -1 when the length is not a direct integer.
+func describePDFStream(data []byte, windowStart int, site pdfStreamSite) (pdfStream, int) {
+	stream := pdfStream{keyword: site.keyword}
+	headers := pdfObjectHeaders(data[windowStart:site.keyword])
+	if len(headers) == 0 {
+		return stream, -1
+	}
+
+	// The reader sees the keyword and nothing after it, so no candidate can read past it.
+	span := data[:site.keyword+len(pdfStreamKeyword)]
+	for tried := 0; tried < min(len(headers), pdfMaxOwnerCandidates); tried++ {
+		header := headers[len(headers)-1-tried]
+		dictionary, ok := readPDFStreamDictionary(span, windowStart+header.end, site.keyword)
+		if !ok {
+			continue
+		}
+		stream.owned, stream.number = true, header.number
+		stream.dictionary = data[windowStart+header.end : site.keyword]
+		filter, hasFilter := dictionary["Filter"]
+		stream.chains = pdfDecodeChains(filter, hasFilter)
+		bodyEnd := len(data)
+		declaredEnd := -1
+		if length, ok := directPDFLength(dictionary); ok {
+			bodyEnd = site.bodyStart + int(min(length, int64(len(data)-site.bodyStart)))
+			declaredEnd = bodyEnd
+		}
+		stream.body = data[site.bodyStart:bodyEnd]
+		return stream, declaredEnd
+	}
+
+	nearest := headers[len(headers)-1]
+	stream.owned, stream.number = true, nearest.number
+	stream.dictionary = data[windowStart+nearest.end : site.keyword]
+	stream.chains = pdfUnreadChains
+	stream.body = data[site.bodyStart:]
+	return stream, -1
+}
+
+// directPDFLength returns the stream dictionary's /Length when it is a direct, non-negative
+// integer — the only form whose value the raw bytes state for certain.
+func directPDFLength(dictionary map[string]pdfValue) (int64, bool) {
+	length, ok := dictionary["Length"]
+	if !ok || length.kind != pdfValueInteger {
+		return 0, false
+	}
+	value, err := strconv.ParseInt(length.text, 10, 64)
+	if err != nil || value < 0 {
+		return 0, false
+	}
+	return value, true
+}
+
+// pdfDecodeChains returns the decode chains a stream's /Filter value makes the parser apply, in
+// the order it applies them (read.go Value.Reader): a name is a one-filter chain, an array is its
+// names in order. It returns nil — nothing to charge — when there is no filter, when the chain
+// contains no FlateDecode (only FlateDecode inflates), or when the parser would refuse the chain
+// before reading a byte: a filter it does not know, an array member that is not a name, a value
+// of any other kind. A reference, as the value or as an array member, cannot be read from the
+// raw bytes and is charged as pdfUnreadChains.
+func pdfDecodeChains(filter pdfValue, present bool) [][]string {
+	if !present {
+		return nil
+	}
+	switch filter.kind {
+	case pdfValueName:
+		return inflatingChain([]string{filter.text})
+	case pdfValueReference:
+		return pdfUnreadChains
+	case pdfValueArray:
+		names := make([]string, 0, len(filter.members))
+		for _, member := range filter.members {
+			switch member.kind {
+			case pdfValueName:
+				names = append(names, member.text)
+			case pdfValueReference:
+				return pdfUnreadChains
+			default:
+				return nil
+			}
+		}
+		return inflatingChain(names)
+	}
+	return nil
+}
+
+// inflatingChain returns names as the stream's single candidate chain when the parser decodes
+// every filter in it and at least one of them inflates, or nil otherwise.
+func inflatingChain(names []string) [][]string {
+	inflates := false
+	for _, name := range names {
+		switch name {
+		case pdfFlateDecode:
+			inflates = true
+		case pdfASCII85Decode:
+		default:
+			return nil
+		}
+	}
+	if !inflates {
+		return nil
+	}
+	return [][]string{names}
+}
+
+// pdfStreamSites returns every `stream` keyword in data, in order. A keyword is matched as the
+// lexer reads one: a token of its own — the byte before it is not a regular byte, which excludes
+// the tail of `endstream` — followed by the end-of-line the parser requires, CR LF, LF or a lone
+// CR (lex.go readDict). The body starts just past that end-of-line.
+func pdfStreamSites(data []byte) []pdfStreamSite {
+	var sites []pdfStreamSite
+	for _, at := range pdfKeywordIndexes(data, pdfStreamKeyword) {
+		if at > 0 && isPDFRegular(data[at-1]) {
+			continue
+		}
+		bodyStart := at + len(pdfStreamKeyword)
+		switch {
+		case bytes.HasPrefix(data[bodyStart:], []byte("\r\n")):
+			bodyStart += 2
+		case bodyStart < len(data) && (data[bodyStart] == '\r' || data[bodyStart] == '\n'):
+			bodyStart++
+		default:
+			continue
+		}
+		sites = append(sites, pdfStreamSite{keyword: at, bodyStart: bodyStart})
+	}
+	return sites
+}
+
+// pdfKeywordIndexes returns the index of every occurrence of keyword in data, in order.
+func pdfKeywordIndexes(data []byte, keyword string) []int {
+	var indexes []int
+	for from := 0; ; {
+		at := bytes.Index(data[from:], []byte(keyword))
+		if at < 0 {
+			return indexes
+		}
+		indexes = append(indexes, from+at)
+		from += at + len(keyword)
+	}
+}
+
+// pdfASCII85Cleaner is the parser's alphaReader (ascii85.go) reproduced byte for byte, so the
+// ASCII85 layer the preflight measures decodes exactly what the parser's does: every byte outside
+// `!`…`u` reads as a NUL, which the decoder skips — `z` included, which the parser drops rather
+// than expands — and a `>` after a `~` ends the chunk being read, not the stream.
+type pdfASCII85Cleaner struct {
+	source io.Reader
+}
+
+// Read reads one chunk from the source and cleans it in place.
+func (c pdfASCII85Cleaner) Read(p []byte) (int, error) {
+	n, err := c.source.Read(p)
+	if err != nil {
+		return n, err
+	}
+	tilde := false
+	for i := range n {
+		switch {
+		case p[i] == '>' && tilde:
+			clear(p[i:n])
+			return n, nil
+		case p[i] == '~':
+			tilde = true
+			p[i] = 0
+		case p[i] < '!' || p[i] > 'u':
+			p[i] = 0
+		}
+	}
+	return n, nil
+}
+
+// pdfValueKind classifies the values readPDFStreamDictionary distinguishes; every kind the
+// preflight never inspects — a string, a number other than an integer, a boolean, null, a nested
+// dictionary — reads as pdfValueOther.
+type pdfValueKind int
+
+const (
+	pdfValueOther pdfValueKind = iota
+	pdfValueName
+	pdfValueInteger
+	pdfValueReference
+	pdfValueArray
+)
+
+// pdfValue is one value of a stream dictionary: its kind, a name's decoded text or an integer's
+// digits, and an array's members.
+type pdfValue struct {
+	kind    pdfValueKind
+	text    string
+	members []pdfValue
+}
+
+// pdfTokenKind classifies the lexer's tokens. pdfTokenInvalid covers both the end of the span and
+// every byte sequence the parser's lexer panics on.
+type pdfTokenKind int
+
+const (
+	pdfTokenInvalid pdfTokenKind = iota
+	pdfTokenDelimiter
+	pdfTokenName
+	pdfTokenString
+	pdfTokenWord
+)
+
+// pdfToken is one token: its kind, its text — a delimiter's bytes, a name's decoded text, a
+// word's bytes — and the index it starts at.
+type pdfToken struct {
+	kind  pdfTokenKind
+	text  string
+	start int
+}
+
+// pdfLexer reads a stream dictionary the way the parser's lexer and object reader do (lex.go
+// readToken, readObject, readDict), so the /Length and /Filter it reports are the entries the
+// parser reads: a comment, a string or a nested dictionary that merely spells `/FlateDecode`
+// names no filter, and a key written twice means its last value. Anything the parser would panic
+// on fails the read instead.
+type pdfLexer struct {
+	span  []byte
+	at    int
+	depth int
+}
+
+// readPDFStreamDictionary reads the dictionary that starts at `from` and reports it only when the
+// token right after it is the `stream` keyword at keywordAt — i.e. when this is the dictionary
+// the parser reads for that stream.
+func readPDFStreamDictionary(span []byte, from, keywordAt int) (map[string]pdfValue, bool) {
+	lexer := pdfLexer{span: span, at: from}
+	if open := lexer.next(); open.kind != pdfTokenDelimiter || open.text != "<<" {
+		return nil, false
+	}
+	dictionary, ok := lexer.readDictionary()
+	if !ok {
+		return nil, false
+	}
+	keyword := lexer.next()
+	return dictionary, keyword.kind == pdfTokenWord && keyword.text == pdfStreamKeyword && keyword.start == keywordAt
+}
+
+// readDictionary reads a dictionary's entries after its `<<`, through its `>>`.
+func (l *pdfLexer) readDictionary() (map[string]pdfValue, bool) {
+	if l.depth++; l.depth > pdfMaxNesting {
+		return nil, false
+	}
+	defer func() { l.depth-- }()
+
+	dictionary := map[string]pdfValue{}
+	for {
+		key := l.next()
+		if key.kind == pdfTokenDelimiter && key.text == ">>" {
+			return dictionary, true
+		}
+		if key.kind != pdfTokenName {
+			return nil, false
+		}
+		value, ok := l.readValue()
+		if !ok {
+			return nil, false
+		}
+		dictionary[key.text] = value
+	}
+}
+
+// readArray reads an array's members after its `[`, through its `]`.
+func (l *pdfLexer) readArray() (pdfValue, bool) {
+	if l.depth++; l.depth > pdfMaxNesting {
+		return pdfValue{}, false
+	}
+	defer func() { l.depth-- }()
+
+	array := pdfValue{kind: pdfValueArray}
+	for {
+		mark := l.at
+		if token := l.next(); token.kind == pdfTokenDelimiter && token.text == "]" {
+			return array, true
+		} else if token.kind == pdfTokenInvalid {
+			return pdfValue{}, false
+		}
+		l.at = mark
+		member, ok := l.readValue()
+		if !ok {
+			return pdfValue{}, false
+		}
+		array.members = append(array.members, member)
+	}
+}
+
+// readValue reads one value. A stray `>>` reads as null, as the parser's readObject has it.
+func (l *pdfLexer) readValue() (pdfValue, bool) {
+	token := l.next()
+	switch token.kind {
+	case pdfTokenName:
+		return pdfValue{kind: pdfValueName, text: token.text}, true
+	case pdfTokenString:
+		return pdfValue{}, true
+	case pdfTokenWord:
+		return l.readWord(token)
+	case pdfTokenDelimiter:
+		switch token.text {
+		case "<<":
+			_, ok := l.readDictionary()
+			return pdfValue{}, ok
+		case "[":
+			return l.readArray()
+		case ">>":
+			return pdfValue{}, true
+		}
+	}
+	return pdfValue{}, false
+}
+
+// readWord reads a value that starts with a word token: null, a boolean, a real, an integer, or
+// an `N G R` reference — an integer that fits an object number followed by one that fits a
+// generation and the `R` keyword. An `N G obj` definition nested inside a value, and any other
+// keyword, fail the read.
+func (l *pdfLexer) readWord(token pdfToken) (pdfValue, bool) {
+	switch {
+	case token.text == "null" || token.text == "true" || token.text == "false" || isPDFReal(token.text):
+		return pdfValue{}, true
+	case !isPDFInteger(token.text):
+		return pdfValue{}, false
+	}
+	number, err := strconv.ParseInt(token.text, 10, 64)
+	if err != nil {
+		return pdfValue{}, false
+	}
+	integer := pdfValue{kind: pdfValueInteger, text: token.text}
+	if number < 0 || number > math.MaxUint32 {
+		return integer, true
+	}
+
+	mark := l.at
+	generation := l.next()
+	if generation.kind == pdfTokenWord && isPDFInteger(generation.text) {
+		value, err := strconv.ParseInt(generation.text, 10, 64)
+		if err == nil && value >= 0 && value <= math.MaxUint16 {
+			switch keyword := l.next(); {
+			case keyword.kind == pdfTokenWord && keyword.text == "R":
+				return pdfValue{kind: pdfValueReference, text: token.text}, true
+			case keyword.kind == pdfTokenWord && keyword.text == "obj":
+				return pdfValue{}, false
+			}
+		}
+	}
+	l.at = mark
+	return integer, true
+}
+
+// next reads one token after skipping whitespace and comments.
+func (l *pdfLexer) next() pdfToken {
+	l.at = skipPDFSpace(l.span, l.at)
+	start := l.at
+	if start >= len(l.span) {
+		return pdfToken{start: start}
+	}
+	switch c := l.span[start]; {
+	case (c == '<' || c == '>') && start+1 < len(l.span) && l.span[start+1] == c:
+		l.at += 2
+		return pdfToken{kind: pdfTokenDelimiter, text: string(l.span[start:l.at]), start: start}
+	case c == '[' || c == ']' || c == '{' || c == '}':
+		l.at++
+		return pdfToken{kind: pdfTokenDelimiter, text: string(c), start: start}
+	case c == '<':
+		return l.readHexString(start)
+	case c == '(':
+		return l.readLiteralString(start)
+	case c == '/':
+		name, end := readPDFName(l.span, start+1)
+		if end < len(l.span) && l.span[end] == '#' {
+			return pdfToken{start: start}
+		}
+		l.at = end
+		return pdfToken{kind: pdfTokenName, text: name, start: start}
+	case isPDFDelimiter(c):
+		return pdfToken{start: start}
+	}
+	end := start
+	for end < len(l.span) && isPDFRegular(l.span[end]) {
+		end++
+	}
+	l.at = end
+	return pdfToken{kind: pdfTokenWord, text: string(l.span[start:end]), start: start}
+}
+
+// readHexString reads a `<…>` string: hex digits in pairs, whitespace anywhere between them.
+func (l *pdfLexer) readHexString(start int) pdfToken {
+	digits := 0
+	for at := start + 1; at < len(l.span); at++ {
+		c := l.span[at]
+		switch {
+		case c == '>':
+			if digits%2 != 0 {
+				return pdfToken{start: start}
+			}
+			l.at = at + 1
+			return pdfToken{kind: pdfTokenString, start: start}
+		case isPDFSpace(c):
+		case isPDFHexDigit(c):
+			digits++
+		default:
+			return pdfToken{start: start}
+		}
+	}
+	return pdfToken{start: start}
+}
+
+// readLiteralString reads a `(…)` string: balanced parentheses, and the escapes the parser
+// accepts — any other escape, or an octal one above 255, is a read the parser panics on.
+func (l *pdfLexer) readLiteralString(start int) pdfToken {
+	depth := 1
+	for at := start + 1; at < len(l.span); at++ {
+		switch l.span[at] {
+		case '(':
+			depth++
+		case ')':
+			if depth--; depth == 0 {
+				l.at = at + 1
+				return pdfToken{kind: pdfTokenString, start: start}
+			}
+		case '\\':
+			next, ok := skipPDFEscape(l.span, at+1)
+			if !ok {
+				return pdfToken{start: start}
+			}
+			at = next - 1
+		}
+	}
+	return pdfToken{start: start}
+}
+
+// skipPDFEscape returns the index just past the escape whose first byte (after the backslash) is
+// at `at`, and false for an escape the parser refuses.
+func skipPDFEscape(span []byte, at int) (int, bool) {
+	if at >= len(span) {
+		return at, false
+	}
+	switch c := span[at]; {
+	case strings.IndexByte("nrbtf()\\\n", c) >= 0:
+		return at + 1, true
+	case c == '\r':
+		if at+1 < len(span) && span[at+1] == '\n' {
+			return at + 2, true
+		}
+		return at + 1, true
+	case c >= '0' && c <= '7':
+		value, end := int(c-'0'), at+1
+		for ; end < len(span) && end < at+3 && span[end] >= '0' && span[end] <= '7'; end++ {
+			value = value*8 + int(span[end]-'0')
+		}
+		return end, value <= math.MaxUint8
+	}
+	return at, false
+}
+
+// isPDFInteger and isPDFReal are the lexer's number shapes (lex.go isInteger, isReal): an
+// optional sign, then digits — with exactly one dot for a real.
+func isPDFInteger(word string) bool {
+	word = withoutPDFSign(word)
+	return word != "" && strings.Trim(word, "0123456789") == ""
+}
+
+func isPDFReal(word string) bool {
+	word = withoutPDFSign(word)
+	return strings.Count(word, ".") == 1 && strings.Trim(word, "0123456789.") == ""
+}
+
+// withoutPDFSign drops the one leading sign a number may carry.
+func withoutPDFSign(word string) string {
+	if word != "" && (word[0] == '+' || word[0] == '-') {
+		return word[1:]
+	}
+	return word
+}
+
+func isPDFHexDigit(b byte) bool {
+	return isPDFDigit(b) || b >= 'a' && b <= 'f' || b >= 'A' && b <= 'F'
 }
 
 // pdfObjectHeader locates one `N G obj` keyword in a span: the object number, the index of its
@@ -656,7 +1227,9 @@ func decodedReferences(data []byte, objects []pdfObject) map[int64]bool {
 			for _, site := range pdfNameSites(span, key) {
 				for _, number := range pdfReferencesAt(span, site) {
 					named[number] = true
-					if object, ok := byNumber[number]; ok && object.body == nil {
+					// A stream object's value is its dictionary, which names no reference at
+					// its start, so only an array object resolves to members here.
+					if object, ok := byNumber[number]; ok {
 						for _, member := range pdfReferencesAt(object.value, 0) {
 							named[member] = true
 						}
@@ -669,24 +1242,25 @@ func decodedReferences(data []byte, objects []pdfObject) map[int64]bool {
 }
 
 // chargesInflation decides whether a stream's inflation counts against the document's budget:
-// only a FlateDecode stream the text path will decode does. An untyped stream — page content is
+// only a stream with an inflating decode chain (see pdfDecodeChains) that the text path will
+// decode does. An untyped stream — page content is
 // untyped — is always charged. A stream whose dictionary carries a /Type or /Subtype is charged
 // when its type is one the parser decodes (/XRef, /ObjStm, /CMap) or a /Contents or /ToUnicode
 // reference names it, and skipped otherwise: an image or form XObject, an embedded font, an
 // attached file. Type and reference win over any label, so a /Subtype /Image on an xref stream
 // exempts nothing.
-func chargesInflation(object pdfObject, decoded map[int64]bool) bool {
-	if countPDFNames(object.value, "FlateDecode") == 0 {
+func chargesInflation(stream pdfStream, decoded map[int64]bool) bool {
+	if len(stream.chains) == 0 {
 		return false
 	}
-	if len(pdfNameSites(object.value, "Type")) == 0 && len(pdfNameSites(object.value, "Subtype")) == 0 {
+	if len(pdfNameSites(stream.dictionary, "Type")) == 0 && len(pdfNameSites(stream.dictionary, "Subtype")) == 0 {
 		return true
 	}
-	switch pdfNameValue(object.value, "Type") {
+	switch pdfNameValue(stream.dictionary, "Type") {
 	case "XRef", "ObjStm", "CMap":
 		return true
 	}
-	return decoded[object.number]
+	return decoded[stream.number]
 }
 
 // refuseAbsurdXrefWidths returns the cause for a cross-reference stream dictionary whose /W
@@ -718,15 +1292,21 @@ func refuseAbsurdXrefWidths(dictionary []byte) string {
 	return ""
 }
 
-// inflatedSize reports how many bytes body inflates to through the given number of zlib layers,
-// reading no further than limit+1 bytes so a bomb is never materialised: a result above limit
-// means "more than the budget", never the exact count. An inflate error — the bytes were not
-// zlib, or ran out early — ends the count where it stands; the parser will report the error,
-// and what inflated before it is still charged. Cancellation is read between chunks and reported
-// through the context, which the caller consults.
-func inflatedSize(ctx context.Context, body []byte, layers int, limit int64) int64 {
+// inflatedSize reports how many bytes body decodes to through chain — FlateDecode and
+// ASCII85Decode filters, applied in order as the parser applies them — reading no further than
+// limit+1 bytes so a bomb is never materialised: a result above limit means "more than the
+// budget", never the exact count. A FlateDecode layer whose zlib header does not read charges
+// nothing: the parser panics on it before a byte is decoded. An inflate error past the header —
+// the bytes ran out early or went bad — ends the count where it stands; the parser will report
+// the error, and what inflated before it is still charged. Cancellation is read between chunks
+// and reported through the context, which the caller consults.
+func inflatedSize(ctx context.Context, body []byte, chain []string, limit int64) int64 {
 	var reader io.Reader = bytes.NewReader(body)
-	for range layers {
+	for _, filter := range chain {
+		if filter == pdfASCII85Decode {
+			reader = ascii85.NewDecoder(pdfASCII85Cleaner{source: reader})
+			continue
+		}
 		inflater, err := zlib.NewReader(reader)
 		if err != nil {
 			return 0
@@ -785,11 +1365,6 @@ func pdfNameSites(span []byte, key string) []int {
 		}
 		from = end
 	}
-}
-
-// countPDFNames reports how many times the `/key` name token occurs in span.
-func countPDFNames(span []byte, key string) int {
-	return len(pdfNameSites(span, key))
 }
 
 // pdfNameValue returns the name written as the value of the first `/key` in span — "XRef" for
