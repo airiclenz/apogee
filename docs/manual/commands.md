@@ -29,7 +29,7 @@ a typo is visible before you send.
 | `@<path>` | Hand a workspace file to the model | ✅ rides the queued message |
 | `/skills` | List the discovered skills — id, name, summary, any declared `triggers:`, and where each came from; `/skills export <id>` copies a skill apogee [ships](configuration.md#skills-apogee-ships--use-shipped-skills) into `~/.apogee/skills/<id>/` so you can edit it | ✅ listing only |
 | `/version` | Show the apogee version | ✅ |
-| `/help` | List every command with its one-line summary, then the key legend — `⏎ send`, the newline chord your terminal delivers (`⌥⏎`, or `⇧⏎/⌥⏎` once the enhanced keyboard protocol is negotiated), `↑/↓ recall`, `esc×2 stop`, `⌃c quit`, `⇧⇥ mode`, `PgUp/PgDn scroll` — as a transcript note | ✅ |
+| `/help` | List every command with its one-line summary, then the key legend — `⏎ send`, the newline chord your terminal delivers (`⌥⏎`, or `⇧⏎/⌥⏎` once the enhanced keyboard protocol is negotiated), `↑/↓ recall`, `esc×2 cancel`, `^x stop`, `⌃c quit`, `⇧⇥ mode`, `PgUp/PgDn scroll` — as a transcript note | ✅ |
 | `/usage` | What this session has spent — one row for the main agent, one per sub-agent, and a session total; a `cached` column joins them when the server reports how much of a prompt it answered from its own cache, and a `served:` line above the rows names the models the server actually answered with once a reply has carried one | ✅ |
 | `/inspect` | The request and response traffic of the recent model calls, **readable** by default — each request summarised as `N messages · N tools · model …` (`system + N messages` when the wire hoists the system prompt), each response as the passages its stream spells, thinking and reply as wrapped prose and every tool call named — on the anthropic wire also the served model, the stop reason and the token counts, which arrive as events of their own; `ctrl+r` flips the pane to the raw pretty-printed protocol and back. It opens on the newest record and follows it, so traffic arriving while the pane is open is shown until you scroll up off the end. With a sub-agent's run view open the pane shows that run's traffic alone and names it in its title — close the view for the whole ring. Armed by `ui.inspector` (off by default) | ✅ |
 | `/thinking` | The model's thinking as plain text — the reasoning it streams beside its answer, one record per completed turn, newest last, with no protocol and no prefixes. Opens on the newest record and follows it, so reasoning arriving while the pane is open is shown until you scroll up off the end; with a sub-agent's run view open it shows that run's thinking alone and names it in its title, and at the top level the main agent's alone. Always recorded, nothing to arm, nothing saved with the session — emptied at `/clear`, `/new`, a `/sessions` resume and `/fork` | ✅ |
@@ -82,34 +82,35 @@ A command that needs a quiet engine queues the same way — `⏎` on `/clear` mi
 `queued command: /clear` row above the box, below any queued messages, and the queued commands
 run in the order you typed them the moment the model is idle, **before** any queued message is
 sent, so a `/clear` typed ahead of a message clears first. `⌫` on an empty box takes the newest
-row back into the editor — a queued command first, then a queued message. Stopping the run does
+row back into the editor — a queued command first, then a queued message. Cancelling the run does
 not drop a queued command: it runs at that idle, while queued messages are held for your next
 `⏎` — `⇧⏎`/`⌥⏎` opens a new line, `↑`/`↓` walk back and forward through the
-prompts you have already sent in this workspace, `esc` twice stops a run, `⌃c` quits.
-Stopping is a double-tap, like quitting: the first `esc` arms the gesture for one second —
-the status line says `press esc again to stop` for as long as it is armed — and a second
-`esc` inside that window stops the run. Let the window lapse and the gesture disarms
+prompts you have already sent in this workspace, `esc` twice cancels a run, `⌃c` quits.
+Cancelling is a double-tap, like quitting: the first `esc` arms the gesture for one second —
+the status line says `press esc again to cancel` for as long as it is armed — and a second
+`esc` inside that window cancels the run. Let the window lapse and the gesture disarms
 itself, so a stray `esc` never kills a turn that is under way; a run that ends on its
 own inside the window disarms it too, so the hint never outlives what it offered to
-stop. A stop keeps what the run had finished: the steps completed before it — the tool
+cancel. A cancel keeps what the run had finished: the steps completed before it — the tool
 calls and their results — stay in the conversation and in the saved session, only the step
-under way is dropped, and the model is told at its next request that you stopped the run
+under way is dropped, and the model is told at its next request that you cut the run short
 there, so it neither redoes that work nor mistakes its silence for an answer. One thing a
-stop does not keep: a group of delegations still in flight is dropped **whole**, the
+cancel does not keep: a group of delegations still in flight is dropped **whole**, the
 sub-agents that had already finished along with the ones still running, because the whole
 group is one step of your agent's until the last of them returns. While such a group is
 running the first `esc`'s hint says what the second would cost and names the alternative —
-`press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them` (or
+`press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them` (or
 `1 finished delegation`), or, when none has finished yet and some are still waiting for a
-slot, `press esc again to stop — ⏎ a message instead skips the 5 queued`. Either long form
+slot, `press esc again to cancel — ⏎ a message instead skips the 5 queued`. Either long form
 shows only where the status line has room for the whole sentence; on a row too narrow for it
-the hint falls back to the plain `press esc again to stop`, never a truncated half. Sending a message
+the hint falls back to the plain `press esc again to cancel`, never a truncated half. Sending a message
 instead of the second `esc` keeps everything: the running sub-agents finish, the ones not yet
 started are skipped and the model is told so, and your message lands once the running ones
-finish — the queue rule above. A stop that
+finish — the queue rule above. To end **one** delegation and let the rest of the turn go on,
+stop it with `^x` instead (see the run view below). A cancel that
 finds nothing finished — the model had not completed a single step — leaves nothing behind
 instead: the prompt itself comes back out of the conversation, as if it had never been sent.
-Only `/clear` throws a stopped exchange away. The box
+Only `/clear` throws a cancelled exchange away. The box
 advertises `⇧⏎` only on terminals that negotiated the enhanced (kitty) keyboard
 protocol — the thing that makes that chord arrive as anything other than a plain `⏎`;
 everywhere else the legend names `⌥⏎` alone, which works on every terminal. Beyond
@@ -124,25 +125,37 @@ call is awaiting approval or a question from the model is up — and `⇧⇥` st
 call, the approval prompt's decision keys — `a`, `s`, `d`, and the `⏎` that takes the
 highlighted row — take effect a moment after the prompt appears, so a keystroke already
 in flight cannot answer a call you have not read; `esc` is live from the instant the
-prompt is up, and stops the run on the second press within the window, exactly as it does
+prompt is up, and cancels the run on the second press within the window, exactly as it does
 anywhere else while the model works — the pane's own `[esc]` Cancel row is the one-press
-spelling of the same stop. A question from the model is the one carve-out: there a single `esc`
+spelling of the same cancel. A question from the model is the one carve-out: there a single `esc`
 cancels — the pane's hint reads `esc cancel` — because backing out of a question is not
 abandoning a turn you lost track of; and on a multi-select question `space` ticks and un-ticks
 the highlighted row. `⌥↑`/`⌥↓` light a
 bar on the transcript and hand the arrows to it: `↑`/`↓` walk from one foldable block to
 the next — a tool call, a group member, a type row — `⏎` opens or closes the one under
-the bar, and `esc`, or simply typing your next message, gives the keys back. `⏎` on a
+the bar, and `esc`, or simply typing your next message, gives the keys back. `^x` on a
+delegation's row — a member of a `✦ Sub-Agent (N)` group, or a nested delegation inside a run
+view — stops that one run, and leaves the bar where it was so the row can say how it ended. `⏎` on a
 **sub-agent** does something else: it opens that delegation's **run view**, which gives the
 whole transcript area over to that one run — its task at the top, its own tool calls and
 its answer below, following its latest line as it works. A click on the run's row opens the
 same thing. The black band at the top of the view is the way back: `← main › scout` in its
 middle row, and `esc` — or a click anywhere on the band — goes one level up, one press per
 level. While a view is open the status line's right end shows **that run's** context
-gauge once it has reported usage — never the main agent's — and `esc back` until then, in
-place of the stop hint, because stopping is the whole run's and belongs to the top level:
-back out first, then
-`esc` twice. Inside the view of a run that is
+gauge once it has reported usage — never the main agent's — and `esc back` until then
+(`esc back · ^x stop` while the run can still be stopped), in place of the cancel hint, because
+cancelling is the whole run's and belongs to the top level: back out first, then `esc` twice.
+What a view does have is **`^x`**, which stops the run on screen — that one delegation and any
+sub-agent it started in turn — while the rest of the turn goes on. It asks for no confirmation,
+because nothing is rolled back: files the sub-agent already wrote stay written, apogee summarizes
+what it had done, and your agent receives that as the delegation's result under
+`[stopped by the user — engine summary follows]`, followed by the sub-agent's last words and
+the line that lets your agent [continue it](configuration.md#the-terminal-ui--ui). A
+delegation still waiting for a slot is stopped before it starts: it runs nothing, and your agent
+is told it was never started. The run's row then reads `stopped by you`, and a message you had
+sent it that never landed is noted as `<name> was stopped by you before your message landed`.
+On a run that is already over, `^x` does nothing, and the header drops the `^x stop` hint.
+Inside the view of a run that is
 still working the prompt box addresses **that sub-agent** — the box reads
 `Message scout…` and `⏎` sends your message to the delegate, which picks it up between its
 own steps, exactly as a message to the main agent is picked up between its. A run that has

@@ -325,7 +325,10 @@ Folded guard: the `stopped by you` verdict and "capped" bound wording are gated 
 - `go vet ./internal/tui/`
 **Commit:** `docs(layout): ctrl+x stops one sub-agent run`
 
-## 14. Reference manual
+## 14. Reference manual — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): the ledger note's "your next message clears it" (configuration.md, a true statement about the per-exchange `[engine — delegations]` note, not retention) was reworded to "the next exchange starts without it" because the item's joined-text Acceptance gate matches that phrase anywhere in the file.
+NOTES (2026-09-26): the esc×2 prose in commands.md and sessions.md now says cancel throughout (not only the renamed labels), and the model-facing note it describes reads "cut short", so "stopped" in the manual names only the human's `^x` stop; the delegation section's link target is configuration.md#the-terminal-ui--ui, the heading it actually sits under.
 
 **What:** Depends on items 6, 9 and 10.
 **Goal:** `docs/manual/` states `^x` and what a stop returns, that a named delegation stays continuable for the session and survives `--resume`, what `/clear` and a fork do to it, the ledger outcome `stopped`, the headless `child_interjection` `data.reason` `"stopped"`, and "capped" for bounds; no manual page says `continue:` is Exchange-only, memory-only or unavailable after `--resume`.
