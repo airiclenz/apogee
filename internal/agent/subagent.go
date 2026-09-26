@@ -170,38 +170,106 @@ const engineFoldUnavailableFormat = "[engine summary unavailable — %v]"
 // is the post-join display name, exactly as the retention keys it.
 const continueLineFormat = "[to continue this delegate: sub_agent with continue: %q]"
 
-// The two heads of a continued child's opening task (continuationTask): the retained task as the
-// spawning call spelled it, then the engine fold of the capped or faulted attempt under
-// previousAttemptHead, then what the parent now asks for under continuationInstructionsHead. They
-// are package constants because the child reads them as the contract for which part of its task is
-// whose — the work, what an earlier run of it found, and what to do next.
+// The heads of a continued child's opening task (continuationTask): the retained task as the
+// first spawning call spelled it, then roundsOmittedFormat when older rounds did not fit the seed
+// budget, then each kept round — its instructions under roundInstructionsFormat (from round 2; round
+// 1's are the task) and its report under roundReportFormat, or under roundSummaryFormat when the
+// report is the engine fold and closing text of a capped, faulted or stopped run — then what the
+// parent now asks for under continuationInstructionsHead. They are package constants because the
+// child reads them as the contract for which part of its task is whose — the work, what the earlier
+// runs of it were asked and found, and what to do next. Each %d is a 1-based round number, bar
+// roundsOmittedFormat's, which counts the rounds dropped.
 const (
-	previousAttemptHead          = "[previous attempt — engine summary]"
+	roundsOmittedFormat          = "[%d earlier rounds omitted]"
+	roundInstructionsFormat      = "[round %d — instructions]"
+	roundReportFormat            = "[round %d — report]"
+	roundSummaryFormat           = "[round %d — engine summary]"
 	continuationInstructionsHead = "[continuation instructions]"
 )
+
+// continuationSeedTokens is the budget the rounds of a continuation's seed are laid into, newest
+// first (ADR 0086 D2): the same 4096 tokens the engine fold is held to (compactMaxTokens). The
+// newest round is laid in whole even when it alone exceeds it.
+const continuationSeedTokens = compactMaxTokens
+
+// seedTokens estimates the tokens of s for the seed budget. It is deliberately the FIXED default
+// ratio, never an Agent's calibrating estimator, so continuationTask stays a pure function of what
+// it is handed.
+func seedTokens(s string) int {
+	return domain.Budget{CharsPerToken: apogeectx.DefaultCharsPerToken}.EstimateTokens(len(s))
+}
 
 // unknownContinueFormat is the error result a `continue` naming NO retained delegation is refused
 // with: the name as the call spelled it, then the names that ARE retained — the only correction the
 // model can act on — or unknownContinueNone when nothing is. %q is the asked name, %s the list.
+// The list names at most unknownContinueListed entries, most recently used first, and closes on
+// unknownContinueMoreFormat counting the rest, so the refusal stays bounded however long the
+// session runs (ADR 0086 D2).
 const (
-	unknownContinueFormat = "[no delegate named %q to continue — retained: %s]"
-	unknownContinueNone   = "none"
+	unknownContinueFormat     = "[no delegate named %q to continue — retained: %s]"
+	unknownContinueNone       = "none"
+	unknownContinueMoreFormat = " (and %d more)"
+	unknownContinueListed     = 16
 )
 
 // continuationTask composes the opening task of a child continued from prior: the retained task,
-// the fold the capped or faulted attempt left (the engineFoldUnavailableFormat marker when that
-// fold could not be made — never an empty body under the head), and the instructions the
-// continuing call carries in `task`.
+// then prior's rounds — kept newest first while they fit continuationSeedTokens, the newest always
+// whole, and laid in chronologically under a marker counting any dropped — then the instructions
+// the continuing call carries in `task`. A pure function of its arguments.
 func continuationTask(prior retainedDelegate, instructions string) string {
-	return prior.task + "\n\n" + previousAttemptHead + "\n" + prior.fold + "\n\n" + continuationInstructionsHead + "\n" + instructions
+	blocks := make([]string, len(prior.rounds))
+	for i, round := range prior.rounds {
+		blocks[i] = renderRound(i+1, round)
+	}
+	first := len(blocks) - 1
+	used := 0
+	if first >= 0 {
+		used = seedTokens(blocks[first])
+	}
+	for first > 0 {
+		cost := seedTokens(blocks[first-1])
+		if used+cost > continuationSeedTokens {
+			break
+		}
+		used += cost
+		first--
+	}
+	parts := []string{prior.task}
+	if first > 0 {
+		parts = append(parts, fmt.Sprintf(roundsOmittedFormat, first))
+	}
+	if first >= 0 {
+		parts = append(parts, blocks[first:]...)
+	}
+	parts = append(parts, continuationInstructionsHead+"\n"+instructions)
+	return strings.Join(parts, "\n\n")
+}
+
+// renderRound lays one round into a continuation's seed: its instructions under their head from
+// round 2 on, then its report under the report or engine-summary head. k is the 1-based round number.
+func renderRound(k int, round delegateRound) string {
+	head := roundReportFormat
+	if round.summary {
+		head = roundSummaryFormat
+	}
+	report := fmt.Sprintf(head, k) + "\n" + round.report
+	if k == 1 {
+		return report
+	}
+	return fmt.Sprintf(roundInstructionsFormat, k) + "\n" + round.instructions + "\n\n" + report
 }
 
 // unknownContinueResult renders the refusal for a `continue` naming no retained delegation, listing
-// the names retained in sorted order (retainedDelegates.names).
+// the names retained most recently used first (retainedDelegates.names), at most
+// unknownContinueListed of them and a count of the rest.
 func unknownContinueResult(asked string, retained []string) string {
 	list := unknownContinueNone
 	if len(retained) > 0 {
-		list = strings.Join(retained, ", ")
+		shown := retained[:min(len(retained), unknownContinueListed)]
+		list = strings.Join(shown, ", ")
+		if rest := len(retained) - len(shown); rest > 0 {
+			list += fmt.Sprintf(unknownContinueMoreFormat, rest)
+		}
 	}
 	return fmt.Sprintf(unknownContinueFormat, asked, list)
 }
@@ -846,31 +914,37 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		return errorToolResult(call.ID, "sub_agent requires a non-empty task"), dispatchDone
 	}
 
-	// A CONTINUATION (P6 of plan 2026-09-18 - 00): the call names a delegation this Agent retained
-	// after the engine stopped it at a bound, and the child built below starts from that run's
-	// engine fold instead of from nothing. The entry is CONSUMED — a fold is continued once, and a
-	// continued child that caps again is retained anew under the same name — and the call's own
-	// `task` becomes the continuation instructions under the retained task and fold
-	// (continuationTask). Name, roster and output path are inherited from the entry wherever the
-	// call leaves them unset, so `continue` with a task is a complete call; and an unknown name is
-	// refused with the names that are retained, resolved BEFORE the seat and roster for the reason
-	// those are resolved before the child: a refusal costs no child. A refusal also costs no FOLD
-	// (apogee-if9): the entry is taken here, ahead of the seat and roster refusals below — an
+	// A CONTINUATION (P6 of plan 2026-09-18 - 00; ADR 0086 D2): the call names a delegation this
+	// Agent retained, and the child built below starts from that entry's task and rounds instead of
+	// from nothing. The entry is CONSUMED — its rounds are continued once — and the continued run
+	// is appended to it as a new round and the entry retained anew, whatever the run's outcome but a
+	// cancel; the call's own `task` becomes the continuation instructions under the retained task and
+	// rounds (continuationTask). Name, roster and output path are inherited from the entry wherever
+	// the call leaves them unset, so `continue` with a task is a complete call; and an unknown name
+	// is refused with the names that are retained, resolved BEFORE the seat and roster for the
+	// reason those are resolved before the child: a refusal costs no child. A refusal also costs no
+	// ENTRY (apogee-if9): the entry is taken here, ahead of the seat and roster refusals below — an
 	// inherited roster can be refused when the parent's menu changed since the cap — and every
 	// refusal between this take and the child's Submit gives it back (giveBack), so a corrected
-	// retry still finds the delegate it names; once Submit succeeds the child owns the fold, and a
-	// second cap retains it anew. The task retained if this child caps again stays the ORIGINAL,
-	// so a second continuation composes over one fold, never a fold of a fold.
-	task, retainTask := args.Task, args.Task
-	var inheritedName string
+	// retry still finds the delegate it names; once Submit succeeds the child owns the entry. The
+	// task the entry keeps stays the ORIGINAL, so every continuation composes over the rounds, never
+	// over a seed of a seed.
+	task := args.Task
+	var (
+		prior         retainedDelegate
+		continuing    bool
+		inheritedName string
+	)
 	giveBack := func() {}
 	if args.Continue != "" {
-		prior, ok := a.retained.take(args.Continue)
+		var ok bool
+		prior, ok = a.retained.take(args.Continue)
 		if !ok {
 			return errorToolResult(call.ID, unknownContinueResult(args.Continue, a.retained.names())), dispatchDone
 		}
+		continuing = true
 		giveBack = func() { a.retained.retain(prior) }
-		task, retainTask = continuationTask(prior, args.Task), prior.task
+		task = continuationTask(prior, args.Task)
 		if delegationName(args.Name) == "" {
 			args.Name, inheritedName = prior.name, prior.name
 		}
@@ -1049,31 +1123,54 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	}
 	result, outcome = sub.delegationResult(call.ID, res, err)
 	// A child the engine stopped at a bound is RETAINED for the rest of this Exchange (P6) — the
-	// fold and closing text the result carried, and everything the call asked for, so the parent
-	// can continue the work from the fold rather than re-spawn it from nothing. A child whose
+	// fold and closing text the result carried as its first round, and everything the call asked
+	// for, so the parent can continue the work rather than re-spawn it from nothing. A child whose
 	// Exchange FAULTED with the parent's ctx still live is retained the same way (ADR 0082): its
 	// fold was written at the fault (Agent.finishAtFault) and its last words stand as the closing
 	// text, so the Turns it spent before its upstream died are continued from rather than lost —
-	// the error result stays an error result, and only gains the continue line. A CANCEL is still
-	// neither: it returns no result and retains nothing, so the contract at the head of this file
-	// — no partial result surfaces and no snapshot lands mid-sub-agent — holds unchanged. Read
+	// the error result stays an error result, and only gains the continue line. A STOPPED child is
+	// retained the same way (ADR 0086 D4): its fold was written at the stop (Agent.finishAtStop). A
+	// CONTINUATION is retained whatever its outcome (ADR 0086 D2): its run is appended to the entry
+	// it took as the next round. A CANCEL is still none of these: it returns no result and retains
+	// nothing — a cancelled continuation's entry included — so the contract at the head of this
+	// file — no partial result surfaces and no snapshot lands mid-sub-agent — holds unchanged. Read
 	// AFTER the namer is joined, so a delegation named out of band is retained under the name the
-	// parent model has been told (ADR 0068); an unnamed one has no handle and is not retained.
-	// A STOPPED child is retained the same way (ADR 0086 D4): its fold was written at the stop
-	// (Agent.finishAtStop) and its result carries the continue line.
-	if res.StepCapped || res.Faulted || stopped {
-		a.retained.retain(retainedDelegate{
-			task:          retainTask,
-			name:          sub.displayName(),
-			tools:         args.Tools,
-			outputPath:    args.OutputPath,
-			fold:          sub.capFold,
-			closingReport: sub.lastVisibleText(),
-			bound:         sub.capHit,
-			spawnCallID:   call.ID,
-		})
+	// parent model has been told (ADR 0068); an unnamed one has no handle and is not retained. A
+	// continuation is keyed by the name its continue line spells — the one the call gave, or the
+	// entry's own when it gave none.
+	if outcome != dispatchCancelled && (res.StepCapped || res.Faulted || stopped || continuing) {
+		report, summary := sub.roundReport(result, res, err, stopped)
+		entry := retainedDelegate{task: args.Task}
+		if continuing {
+			entry = prior
+		}
+		entry.name, entry.tools, entry.outputPath, entry.bound = sub.displayName(), args.Tools, args.OutputPath, sub.capHit
+		round := delegateRound{report: report, summary: summary, spawnCallID: call.ID}
+		if continuing {
+			round.instructions = args.Task
+		}
+		a.retained.retain(entry.withRound(round))
 	}
 	return result, outcome
+}
+
+// roundReport is the report the run just read is retained with as a round (ADR 0086 D2), and
+// whether it is the engine fold and closing text (summary) rather than a report — the receiver is
+// the CHILD. A capped, faulted or stopped run keeps its fold and closing text, as its result carried
+// them; a Run error or an error-shaped completion keeps the result it returned; a completed run
+// keeps the child's own final report.
+func (a *Agent) roundReport(result domain.ToolResult, res domain.StepResult, err error, stopped bool) (report string, summary bool) {
+	switch {
+	case err != nil:
+		return result.Content, false
+	case stopped || res.Faulted || res.StepCapped:
+		text := a.lastVisibleText()
+		return a.foldWithClosing(text, floor.ClosingShapeOf(text)), true
+	case result.IsError:
+		return result.Content, false
+	default:
+		return a.finalMessageText(), false
+	}
 }
 
 // classifyDelegation reads how a delegation ended off what runSubAgent is returning for it — the
@@ -1881,6 +1978,14 @@ func (a *Agent) cappedResult() string {
 // shape (the text itself is forwarded whole either way), and stepCapNoTextMarker under
 // closingReportHead for a child that never spoke.
 func (a *Agent) cappedResultBody(text string, shape floor.ClosingShape) string {
+	return engineSummaryHead + "\n" + a.foldWithClosing(text, shape)
+}
+
+// foldWithClosing renders the engine fold (capFold), a blank line, then text under closingReportHead
+// — or closingNarrationHead for a non-report shape, and stepCapNoTextMarker for a child that never
+// spoke. It is the body of a capped or stopped result below its engine-summary head
+// (cappedResultBody), and the report a capped, faulted or stopped round is retained with.
+func (a *Agent) foldWithClosing(text string, shape floor.ClosingShape) string {
 	if text == "" {
 		text = stepCapNoTextMarker
 	}
@@ -1888,7 +1993,7 @@ func (a *Agent) cappedResultBody(text string, shape floor.ClosingShape) string {
 	if shape.IsNonReport() {
 		head = closingNarrationHead
 	}
-	return engineSummaryHead + "\n" + a.capFold + "\n\n" + head + "\n" + text
+	return a.capFold + "\n\n" + head + "\n" + text
 }
 
 // lastVisibleText returns the text of the last assistant message that carried any — the child's

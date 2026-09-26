@@ -1,11 +1,13 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io/fs"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -189,25 +191,41 @@ func (r *childRegistry) all() []*Agent {
 var errDelegationStopped = errors.New("delegation stopped by the user")
 
 // retainedDelegate is what a parent keeps of ONE delegation the engine stopped at a bound (plan
-// 2026-09-18 - 00, P6), that FAULTED with the parent still live (ADR 0082), or that the human
-// stopped (StopChild, ADR 0086 D4): everything a
-// continuation needs to spawn a fresh child that picks up where the capped or faulted one left
-// off — the task and roster the spawning call asked for, the output path it named, the engine
-// fold and closing text the child left, and which bound ended it. It is a value: every field is
-// copied at retention, after the child's run has been read and reported, so nothing here aliases
-// a child that runSubAgent's defer is about to close.
+// 2026-09-18 - 00, P6), that FAULTED with the parent still live (ADR 0082), that the human
+// stopped (StopChild, ADR 0086 D4), or that a continuation ran under its name: everything a
+// continuation needs to spawn a fresh child that picks up where the earlier runs left off — the
+// ORIGINAL task and the roster and output path the latest call asked for, and one round per run
+// under the name (ADR 0086 D2), oldest first. It is a value: every field is copied at retention,
+// after the child's run has been read and reported, so nothing here aliases a child that
+// runSubAgent's defer is about to close; rounds is never appended to in place (withRound).
 type retainedDelegate struct {
-	task          string               // the delegated task, as the spawning call spelled it
-	name          string               // the display name the child ended its run wearing — the key it is retained under
-	tools         tools.SubAgentRoster // the `tools` argument as the call asked it, unresolved: re-resolved against the parent's menu on a continuation
-	outputPath    string               // the `output_path` argument as the call spelled it; "" when it named none
-	fold          string               // the engine fold written at the bound or the fault (Agent.capFold) — under `[engine summary]` in a capped result, retained only for a faulted one
-	closingReport string               // the child's last words (Agent.lastVisibleText): the closing text a capped result forwarded, the last narration a faulted child committed; "" for a wordless child
-	bound         delegateBound        // which bound ended a capped child (Agent.capHit); the zero value for a faulted one, which no bound ended
-	spawnCallID   string               // the sub_agent call the retained child answered
+	task       string               // the ORIGINAL delegated task, as the first spawning call spelled it — a continuation never replaces it
+	name       string               // the display name the child ended its latest run wearing — the key it is retained under
+	tools      tools.SubAgentRoster // the `tools` argument as the latest call asked it, unresolved: re-resolved against the parent's menu on a continuation
+	outputPath string               // the `output_path` argument as the latest call spelled it; "" when it named none
+	rounds     []delegateRound      // one per run under the name, oldest first; never empty for a retained entry
+	bound      delegateBound        // which bound ended the latest run when it was capped (Agent.capHit); the zero value otherwise
+	used       uint64               // the use sequence retainedDelegates.retain stamped: the higher, the more recently this entry was retained — names orders by it
 }
 
-// retainedDelegates is the set of capped, faulted or stopped delegations ONE Agent holds for the rest of
+// delegateRound is ONE run of a retained delegation (ADR 0086 D2): what it was asked to do and
+// what it reported. The first round's instructions are the entry's task and are left empty here;
+// every later round's are the `task` its continuing call carried.
+type delegateRound struct {
+	instructions string // the continuation instructions; "" for round 1, whose instructions are the entry's task
+	report       string // completed: the child's final report; capped, faulted or stopped: the engine fold and closing text (Agent.foldAndClosing); a Run error or error-shaped completion: its result Content
+	summary      bool   // report is the engine fold and closing text — laid in under the engine-summary head rather than the report head
+	spawnCallID  string // the sub_agent call that spawned this run
+}
+
+// withRound returns d with round appended, on a fresh backing array so the entry it was taken from
+// never sees the append.
+func (d retainedDelegate) withRound(round delegateRound) retainedDelegate {
+	d.rounds = append(slices.Clone(d.rounds), round)
+	return d
+}
+
+// retainedDelegates is the set of retained delegations ONE Agent holds for the rest of
 // its Exchange, keyed by delegation name — the handle the parent model already knows a delegation
 // by, and the only one it can spell back. It exists in memory only: the map is cleared as the next Exchange
 // opens (Agent.step) and never reaches the session snapshot (ADR 0022 D8, ADR 0013 §5 — a
@@ -219,12 +237,16 @@ type retainedDelegate struct {
 type retainedDelegates struct {
 	mu     sync.Mutex
 	byName map[string]retainedDelegate
+	seq    uint64 // the last use sequence stamped (retain)
 }
 
-// retain keeps d under its name. The same name replaces an earlier entry: two retained children a
-// parent named alike are two attempts at one piece of work, and the latest is the one a
-// continuation should pick up from. An unnamed delegation (d.name == "") is not retained — there is
-// no handle a continuation could name it by.
+// retain keeps d under its name and stamps it as the most recently used entry. The same name
+// replaces an earlier entry: two retained children a parent named alike are two attempts at one
+// piece of work, and the latest is the one a continuation should pick up from. An unnamed
+// delegation (d.name == "") is not retained — there is no handle a continuation could name it by.
+// retain is the only stamp a use needs: every take is followed by a retain — the continuation's
+// round re-retained, or the entry given back on a refusal — except a cancelled continuation, which
+// retains nothing.
 func (r *retainedDelegates) retain(d retainedDelegate) {
 	if d.name == "" {
 		return
@@ -234,6 +256,8 @@ func (r *retainedDelegates) retain(d retainedDelegate) {
 	if r.byName == nil {
 		r.byName = make(map[string]retainedDelegate, 1)
 	}
+	r.seq++
+	d.used = r.seq
 	r.byName[d.name] = d
 }
 
@@ -246,8 +270,9 @@ func (r *retainedDelegates) lookup(name string) (retainedDelegate, bool) {
 }
 
 // take returns the delegation retained under name and FORGETS it: a continuation consumes
-// the entry it starts from, so the same fold is never continued twice — the continued child is
-// retained anew, under the same name, if it caps or faults again.
+// the entry it starts from, so the same rounds are never continued twice — the continued child's
+// run is appended to them as a round and the entry retained anew under the name that run ended
+// wearing, whatever its outcome but a cancel.
 func (r *retainedDelegates) take(name string) (retainedDelegate, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -258,16 +283,21 @@ func (r *retainedDelegates) take(name string) (retainedDelegate, bool) {
 	return d, ok
 }
 
-// names returns the retained names, sorted, so a refusal that lists them reads the same on every
-// run. Empty when nothing is retained.
+// names returns the retained names, most recently used first (the use sequence retain stamps), so a
+// refusal that lists them leads with the delegations the parent touched last. Empty when nothing
+// is retained.
 func (r *retainedDelegates) names() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	names := make([]string, 0, len(r.byName))
-	for name := range r.byName {
-		names = append(names, name)
+	entries := make([]retainedDelegate, 0, len(r.byName))
+	for _, d := range r.byName {
+		entries = append(entries, d)
 	}
-	sort.Strings(names)
+	slices.SortFunc(entries, func(x, y retainedDelegate) int { return cmp.Compare(y.used, x.used) })
+	names := make([]string, len(entries))
+	for i, d := range entries {
+		names[i] = d.name
+	}
 	return names
 }
 

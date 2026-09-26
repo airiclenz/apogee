@@ -73,11 +73,12 @@ const (
 	// asking it to sum up. It is deliberately not childFinalWords: a frame carrying one and not the
 	// other is proof of which of the two runs — capped or unbounded — produced it.
 	childReportWords = "Stopped short — I read a.txt and listed the workspace"
-	// The continuation's three engine lines (internal/agent's continueLineFormat, previousAttemptHead
-	// and continuationInstructionsHead) and the CONTINUED child's own closing words — its report on
-	// the fresh cap, distinct from every capped wording above.
+	// The continuation's three engine lines (internal/agent's continueLineFormat, the round-1 head
+	// roundSummaryFormat spells for a capped first run, and continuationInstructionsHead) and the
+	// CONTINUED child's own closing words — its report on the fresh cap, distinct from every capped
+	// wording above.
 	continueLine              = `[to continue this delegate: sub_agent with continue: "survey to continue"]`
-	previousAttemptHead       = "[previous attempt — engine summary]"
+	previousAttemptHead       = "[round 1 — engine summary]"
 	continuationInstructions  = "[continuation instructions]"
 	childContinuedWords       = "Survey finished on the continuation"
 	childContinuedInstruction = "Carry on from the engine summary"

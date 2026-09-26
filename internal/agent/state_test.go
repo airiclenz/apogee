@@ -718,7 +718,7 @@ func TestSnapshot_NeverCarriesRetainedDelegates(t *testing.T) {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	a.retained.retain(retainedDelegate{task: "trawl the repo", name: "Repo Survey", fold: "the fold", spawnCallID: "c1"})
+	a.retained.retain(retainedDelegate{task: "trawl the repo", name: "Repo Survey", rounds: []delegateRound{{report: "the fold", summary: true, spawnCallID: "c1"}}})
 	after, err := a.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot with a retained delegation: %v", err)

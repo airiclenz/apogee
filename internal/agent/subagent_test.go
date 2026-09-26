@@ -3923,16 +3923,14 @@ func TestSubAgent_CappedChildIsRetainedWithItsFold(t *testing.T) {
 		t.Fatalf("no delegation retained under %q; retained names = %v", retainedSurveyName, a.retained.names())
 	}
 	want := retainedDelegate{
-		task:          retainedSurveyTask,
-		name:          retainedSurveyName,
-		tools:         tools.SubAgentRoster{Names: []string{"read_thing"}},
-		outputPath:    "notes/survey.md",
-		fold:          childFoldSummary,
-		closingReport: childClosingReport,
-		bound:         boundSteps,
-		spawnCallID:   "c1",
+		task:       retainedSurveyTask,
+		name:       retainedSurveyName,
+		tools:      tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath: "notes/survey.md",
+		rounds:     []delegateRound{{report: summaryReport(childFoldSummary, childClosingReport), summary: true, spawnCallID: "c1"}},
+		bound:      boundSteps,
 	}
-	if !reflect.DeepEqual(got, want) {
+	if !reflect.DeepEqual(unstamped(got), want) {
 		t.Errorf("retained delegate = %+v, want %+v", got, want)
 	}
 	if names := a.retained.names(); !slices.Equal(names, []string{retainedSurveyName}) {
@@ -3973,9 +3971,9 @@ func TestSubAgent_LatestCappedChildIsRetainedUnderTheSharedName(t *testing.T) {
 	if !ok {
 		t.Fatalf("no delegation retained under %q", retainedSurveyName)
 	}
-	if got.spawnCallID != "c2" || got.task != "survey part two" {
-		t.Errorf("retained under %q = call %q task %q, want the latest capped child c2 / %q",
-			retainedSurveyName, got.spawnCallID, got.task, "survey part two")
+	if len(got.rounds) != 1 || got.rounds[0].spawnCallID != "c2" || got.task != "survey part two" {
+		t.Errorf("retained under %q = %+v, want the latest capped child c2 / %q alone",
+			retainedSurveyName, got, "survey part two")
 	}
 	if names := a.retained.names(); len(names) != 1 {
 		t.Errorf("retained names = %v, want the one name both children shared", names)
@@ -4057,7 +4055,7 @@ func TestSubAgent_ANamerThatAnswersAfterTheCapStillNamesTheRetainedChild(t *test
 	if !ok {
 		t.Fatalf("no delegation retained under the generated name %q; retained names = %v", retainedSurveyName, a.retained.names())
 	}
-	if got.task != retainedSurveyTask || got.fold != childFoldSummary {
+	if got.task != retainedSurveyTask || len(got.rounds) != 1 || got.rounds[0].report != summaryReport(childFoldSummary, childClosingReport) {
 		t.Errorf("retained delegate = %+v, want the capped child's task and fold", got)
 	}
 }
@@ -4149,11 +4147,14 @@ func TestFanOut_CappedChildrenAreRetainedFromThePool(t *testing.T) {
 		t.Fatalf("parent result = %+v, want a clean exchange-complete", res)
 	}
 
-	if names := a.retained.names(); !slices.Equal(names, []string{"Alpha", "Beta"}) {
-		t.Fatalf("retained names = %v, want both capped children, Alpha and Beta", names)
+	names := a.retained.names()
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"Alpha", "Beta"}) {
+		t.Fatalf("retained names = %v, want both capped children, Alpha and Beta, in any order", names)
 	}
 	for name, want := range map[string]string{"Alpha": "c1", "Beta": "c2"} {
-		if got, _ := a.retained.lookup(name); got.spawnCallID != want || got.fold != childFoldSummary {
+		if got, _ := a.retained.lookup(name); len(got.rounds) != 1 || got.rounds[0].spawnCallID != want ||
+			got.rounds[0].report != summaryReport(childFoldSummary, childClosingReport) {
 			t.Errorf("retained %q = %+v, want call %q with the engine fold", name, got, want)
 		}
 	}
@@ -4171,6 +4172,29 @@ func TestFanOut_CappedChildrenAreRetainedFromThePool(t *testing.T) {
 
 // continueInstructions is what the parent asks the continued child to do next.
 const continueInstructions = "read the remaining file and finish the survey"
+
+// summaryReport is the report a capped, faulted or stopped round is retained with: the engine
+// fold, then the closing text under closingReportHead — closingNarrationHead for a non-report.
+func summaryReport(fold, closing string) string {
+	head := closingReportHead
+	if floor.ClosingShapeOf(closing).IsNonReport() {
+		head = closingNarrationHead
+	}
+	return fold + "\n\n" + head + "\n" + closing
+}
+
+// firstRoundSeed is the opening task of a child continued from a retainedSurveyTask entry holding
+// ONE capped, faulted or stopped round that reported report.
+func firstRoundSeed(report, instructions string) string {
+	return retainedSurveyTask + "\n\n" + fmt.Sprintf(roundSummaryFormat, 1) + "\n" + report + "\n\n" + continuationInstructionsHead + "\n" + instructions
+}
+
+// unstamped returns d without its use sequence, which counts retains rather than describing the
+// entry, so a test can compare an entry by value.
+func unstamped(d retainedDelegate) retainedDelegate {
+	d.used = 0
+	return d
+}
 
 // continueArgs is the sub_agent payload of a continuation that sets nothing but the handle and the
 // instructions — the shape that inherits everything else from the retained entry.
@@ -4238,7 +4262,7 @@ func TestSubAgent_ContinueSpawnsAChildFromTheFoldWithAFreshCap(t *testing.T) {
 	// The continued child's opening request: call 6 (0: spawn, 1–3: turns, 4: fold, 5: wrap-up,
 	// 6: the continue call, 7: the child's first Turn).
 	opening := responder.requests[7]
-	wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + childFoldSummary + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+	wantTask := firstRoundSeed(summaryReport(childFoldSummary, childClosingReport), continueInstructions)
 	if got := lastUserText(opening); got != wantTask {
 		t.Errorf("the continued child opened on\n%s\nwant\n%s", got, wantTask)
 	}
@@ -4252,8 +4276,104 @@ func TestSubAgent_ContinueSpawnsAChildFromTheFoldWithAFreshCap(t *testing.T) {
 	if !ok || completed.IsError || completed.Content != "the survey is now complete" {
 		t.Errorf("the continued child's result = %+v, want its completed report on a fresh cap", completed)
 	}
-	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after the continuation completed, want none — the entry is consumed", names)
+	// The continuation completed, and its run is the entry's second round (ADR 0086 D2): the
+	// capped round kept as it was, then the instructions and the child's own final report.
+	retained, ok := a.retained.lookup(retainedSurveyName)
+	wantRounds := []delegateRound{
+		{report: summaryReport(childFoldSummary, childClosingReport), summary: true, spawnCallID: "c1"},
+		{instructions: continueInstructions, report: "the survey is now complete", spawnCallID: "c2"},
+	}
+	if !ok || retained.task != retainedSurveyTask || !slices.Equal(retained.rounds, wantRounds) {
+		t.Errorf("retained delegate = %+v (found %v), want the task and rounds %+v", retained, ok, wantRounds)
+	}
+	if names := a.retained.names(); !slices.Equal(names, []string{retainedSurveyName}) {
+		t.Errorf("retained names = %v, want exactly %q", names, retainedSurveyName)
+	}
+}
+
+// TestContinuationTask_LaysTheRoundsInAfterTheTask pins the seed's exact text for one, two and
+// many rounds: round 1 under its report or engine-summary head alone, later rounds with their
+// instructions first, all chronological, and the omitted marker counting the rounds the budget
+// dropped — oldest first.
+func TestContinuationTask_LaysTheRoundsInAfterTheTask(t *testing.T) {
+	capped := delegateRound{report: "fold one\n\n[delegate's closing report]\nclosing one", summary: true}
+	completed := delegateRound{instructions: "do part two", report: "part two done"}
+	// ~1500 tokens each at the default ratio: two fit the 4096-token budget, a third does not.
+	bulky := func(k int) delegateRound {
+		return delegateRound{instructions: fmt.Sprintf("part %d", k), report: strings.Repeat("x", 6000), summary: k%2 == 0}
+	}
+
+	cases := []struct {
+		name   string
+		rounds []delegateRound
+		want   string
+	}{
+		{
+			name:   "one round",
+			rounds: []delegateRound{capped},
+			want: "the task\n\n[round 1 — engine summary]\nfold one\n\n[delegate's closing report]\nclosing one" +
+				"\n\n[continuation instructions]\nnext",
+		},
+		{
+			name:   "two rounds",
+			rounds: []delegateRound{capped, completed},
+			want: "the task\n\n[round 1 — engine summary]\nfold one\n\n[delegate's closing report]\nclosing one" +
+				"\n\n[round 2 — instructions]\ndo part two\n\n[round 2 — report]\npart two done" +
+				"\n\n[continuation instructions]\nnext",
+		},
+		{
+			name:   "many rounds",
+			rounds: []delegateRound{capped, bulky(2), bulky(3), bulky(4), bulky(5)},
+			want: "the task\n\n[3 earlier rounds omitted]" +
+				"\n\n[round 4 — instructions]\npart 4\n\n[round 4 — engine summary]\n" + strings.Repeat("x", 6000) +
+				"\n\n[round 5 — instructions]\npart 5\n\n[round 5 — report]\n" + strings.Repeat("x", 6000) +
+				"\n\n[continuation instructions]\nnext",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := continuationTask(retainedDelegate{task: "the task", rounds: tc.rounds}, "next")
+			if got != tc.want {
+				t.Errorf("continuationTask =\n%s\nwant\n%s", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestContinuationTask_TheNewestRoundIsLaidInWholeOverBudget pins the one exception to the budget:
+// a newest round alone past 4096 tokens is still laid in whole, and every older round is dropped.
+func TestContinuationTask_TheNewestRoundIsLaidInWholeOverBudget(t *testing.T) {
+	huge := strings.Repeat("y", 4*continuationSeedTokens+400)
+	prior := retainedDelegate{task: "the task", rounds: []delegateRound{
+		{report: "small", summary: true},
+		{instructions: "go big", report: huge},
+	}}
+
+	got := continuationTask(prior, "next")
+
+	want := "the task\n\n[1 earlier rounds omitted]\n\n[round 2 — instructions]\ngo big\n\n[round 2 — report]\n" + huge +
+		"\n\n[continuation instructions]\nnext"
+	if got != want {
+		t.Errorf("continuationTask laid in %d bytes, want the newest round whole behind the omitted marker (%d bytes)", len(got), len(want))
+	}
+}
+
+// TestUnknownContinueResult_ListsTheSixteenMostRecentNames pins the refusal's bound: every name
+// when there are few, the first sixteen and a count of the rest when there are many — in the order
+// handed in, which retainedDelegates.names makes most recently used first.
+func TestUnknownContinueResult_ListsTheSixteenMostRecentNames(t *testing.T) {
+	few := []string{"Gamma", "Alpha", "Beta"}
+	if got, want := unknownContinueResult("Nope", few), `[no delegate named "Nope" to continue — retained: Gamma, Alpha, Beta]`; got != want {
+		t.Errorf("refusal for 3 names = %q, want %q", got, want)
+	}
+
+	many := make([]string, 20)
+	for i := range many {
+		many[i] = fmt.Sprintf("D%02d", 20-i)
+	}
+	want := `[no delegate named "Nope" to continue — retained: ` + strings.Join(many[:16], ", ") + ` (and 4 more)]`
+	if got := unknownContinueResult("Nope", many); got != want {
+		t.Errorf("refusal for 20 names = %q, want %q", got, want)
 	}
 }
 
@@ -4368,7 +4488,7 @@ func TestSubAgent_ARefusedContinueKeepsTheRetainedDelegate(t *testing.T) {
 			if !ok {
 				t.Fatalf("the refusal forgot the delegate: nothing retained under %q; retained names = %v", retainedSurveyName, a.retained.names())
 			}
-			if kept.fold != childFoldSummary || kept.spawnCallID != "c1" {
+			if len(kept.rounds) != 1 || kept.rounds[0].report != summaryReport(childFoldSummary, childClosingReport) || kept.rounds[0].spawnCallID != "c1" {
 				t.Errorf("retained delegate after the refusal = %+v, want the capped entry with fold %q from c1", kept, childFoldSummary)
 			}
 
@@ -4390,15 +4510,15 @@ func TestSubAgent_ARefusedContinueKeepsTheRetainedDelegate(t *testing.T) {
 			}
 			// Request 8 is the continued child's opening (0: spawn, 1–3: turns, 4: fold, 5: wrap-up,
 			// 6: the refused continue, 7: the corrected continue, 8: the child's first Turn).
-			wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + childFoldSummary + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+			wantTask := firstRoundSeed(summaryReport(childFoldSummary, childClosingReport), continueInstructions)
 			if len(responder.requests) < 9 {
 				t.Fatalf("%d upstream requests, want the corrected continue to have spawned a child (9+)", len(responder.requests))
 			}
 			if got := lastUserText(responder.requests[8]); got != wantTask {
 				t.Errorf("the continued child opened on\n%s\nwant\n%s", got, wantTask)
 			}
-			if names := a.retained.names(); len(names) != 0 {
-				t.Errorf("retained names = %v after the corrected continue completed, want none — the entry is consumed", names)
+			if kept, ok := a.retained.lookup(retainedSurveyName); !ok || len(kept.rounds) != 2 || kept.rounds[1].spawnCallID != "c3" {
+				t.Errorf("retained delegate after the corrected continue = %+v (found %v), want the capped round and c3's", kept, ok)
 			}
 		})
 	}
@@ -4406,7 +4526,8 @@ func TestSubAgent_ARefusedContinueKeepsTheRetainedDelegate(t *testing.T) {
 
 // TestSubAgent_AContinuedChildThatCapsAgainIsRetainedAnew pins the second cap: the continued child
 // is retained under the inherited name, with the ORIGINAL task (never the composed one, so a third
-// attempt composes over one fold), the inherited roster and output path, and the new spawn id; its
+// attempt composes over the rounds), the inherited roster and output path, and a second round
+// holding the new instructions, the second fold and the new spawn id; its
 // result carries the clamp note — max_steps is clamped exactly as on a fresh spawn — and then the
 // continue line, in that order, so the notes stay ahead of the handle.
 func TestSubAgent_AContinuedChildThatCapsAgainIsRetainedAnew(t *testing.T) {
@@ -4424,16 +4545,17 @@ func TestSubAgent_AContinuedChildThatCapsAgainIsRetainedAnew(t *testing.T) {
 		t.Fatalf("the continued child is not retained under %q; retained names = %v", retainedSurveyName, a.retained.names())
 	}
 	want := retainedDelegate{
-		task:          retainedSurveyTask,
-		name:          retainedSurveyName,
-		tools:         tools.SubAgentRoster{Names: []string{"read_thing"}},
-		outputPath:    "notes/survey.md",
-		fold:          childFoldSummary,
-		closingReport: childClosingReport,
-		bound:         boundSteps,
-		spawnCallID:   "c2",
+		task:       retainedSurveyTask,
+		name:       retainedSurveyName,
+		tools:      tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath: "notes/survey.md",
+		rounds: []delegateRound{
+			{report: summaryReport(childFoldSummary, childClosingReport), summary: true, spawnCallID: "c1"},
+			{instructions: continueInstructions, report: summaryReport(childFoldSummary, childClosingReport), summary: true, spawnCallID: "c2"},
+		},
+		bound: boundSteps,
 	}
-	if !reflect.DeepEqual(got, want) {
+	if !reflect.DeepEqual(unstamped(got), want) {
 		t.Errorf("retained delegate = %+v, want %+v", got, want)
 	}
 	second, ok := subAgentResultFor(sink.events, "c2")
@@ -4548,21 +4670,19 @@ func TestSubAgent_FaultedDelegateIsRetainedAndContinuable(t *testing.T) {
 		t.Fatal("the faulted delegation was not retained before the continue call")
 	}
 	want := retainedDelegate{
-		task:          retainedSurveyTask,
-		name:          retainedSurveyName,
-		tools:         tools.SubAgentRoster{Names: []string{"read_thing"}},
-		outputPath:    "notes/survey.md",
-		fold:          childFoldSummary,
-		closingReport: "reading file 1",
-		spawnCallID:   "c1",
+		task:       retainedSurveyTask,
+		name:       retainedSurveyName,
+		tools:      tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath: "notes/survey.md",
+		rounds:     []delegateRound{{report: summaryReport(childFoldSummary, "reading file 1"), summary: true, spawnCallID: "c1"}},
 	}
-	if !reflect.DeepEqual(retained, want) {
+	if !reflect.DeepEqual(unstamped(retained), want) {
 		t.Errorf("retained delegate = %+v, want %+v", retained, want)
 	}
 	// The continued child's opening request: call 5 (0: spawn, 1–2: turns, 3: the fault, 4: the
 	// fold, 5: the continue call, 6: the child's first Turn).
 	opening := responder.requests[6]
-	wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + childFoldSummary + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+	wantTask := firstRoundSeed(summaryReport(childFoldSummary, "reading file 1"), continueInstructions)
 	if got := lastUserText(opening); got != wantTask {
 		t.Errorf("the continued child opened on\n%s\nwant\n%s", got, wantTask)
 	}
@@ -4570,15 +4690,15 @@ func TestSubAgent_FaultedDelegateIsRetainedAndContinuable(t *testing.T) {
 	if !ok || completed.IsError || completed.Content != "the survey is now complete" {
 		t.Errorf("the continued child's result = %+v, want its completed report", completed)
 	}
-	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after the continuation completed, want none — the entry is consumed", names)
+	if kept, ok := a.retained.lookup(retainedSurveyName); !ok || len(kept.rounds) != 2 || kept.rounds[1].report != "the survey is now complete" {
+		t.Errorf("retained delegate after the continuation = %+v (found %v), want the faulted round and the completed one", kept, ok)
 	}
 }
 
 // TestSubAgent_FaultedDelegateFoldFailureRetainsTheUnavailableMarker keeps the cap path's fold
 // contract on the fault path: a summary call that faults too retains the unavailable marker naming
 // its cause, the error result still carries the continue line, and the continuation's task shows
-// that marker under the previous-attempt head rather than an empty body.
+// that marker under the round-1 engine-summary head rather than an empty body.
 func TestSubAgent_FaultedDelegateFoldFailureRetainsTheUnavailableMarker(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
@@ -4595,16 +4715,17 @@ func TestSubAgent_FaultedDelegateFoldFailureRetainsTheUnavailableMarker(t *testi
 	}
 	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
 	opening := lastUserText(responder.requests[6])
-	head := previousAttemptHead + "\n[engine summary unavailable — "
+	roundHead := fmt.Sprintf(roundSummaryFormat, 1)
+	head := roundHead + "\n[engine summary unavailable — "
 	if !strings.Contains(opening, head) || !strings.Contains(opening, "summarizer exploded") {
-		t.Errorf("the continued child opened on\n%s\nwant the unavailable marker naming the summarizer's fault under %q", opening, previousAttemptHead)
+		t.Errorf("the continued child opened on\n%s\nwant the unavailable marker naming the summarizer's fault under %q", opening, roundHead)
 	}
 }
 
 // TestSubAgent_ZeroTurnFaultedDelegateSkipsTheFold pins the zero-Turn gate: a child that faults on
 // its FIRST request has no history worth a summary call, so none is made; it is still retained
 // with its closing text (none) and the continue line, and the continuation's task carries the
-// unavailable marker naming the reason under the previous-attempt head — never an empty body.
+// unavailable marker naming the reason under the round-1 engine-summary head — never an empty body.
 func TestSubAgent_ZeroTurnFaultedDelegateSkipsTheFold(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
@@ -4628,7 +4749,7 @@ func TestSubAgent_ZeroTurnFaultedDelegateSkipsTheFold(t *testing.T) {
 	}
 	assertFaultedResultContinuable(t, faulted, retainedSurveyName)
 	opening := lastUserText(responder.requests[3])
-	wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + fmt.Sprintf(engineFoldUnavailableFormat, zeroTurnFoldCause) + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+	wantTask := firstRoundSeed(summaryReport(fmt.Sprintf(engineFoldUnavailableFormat, zeroTurnFoldCause), stepCapNoTextMarker), continueInstructions)
 	if opening != wantTask {
 		t.Errorf("the continued child opened on\n%s\nwant\n%s", opening, wantTask)
 	}
@@ -4658,8 +4779,8 @@ func TestSubAgent_FaultedDelegateFoldIsBounded(t *testing.T) {
 		t.Fatalf("no delegation retained under %q", retainedSurveyName)
 	}
 	want := fmt.Sprintf(engineFoldUnavailableFormat, fmt.Sprintf(foldBoundExceededFormat, "20ms"))
-	if retained.fold != want {
-		t.Errorf("retained fold = %q, want %q", retained.fold, want)
+	if len(retained.rounds) != 1 || !strings.HasPrefix(retained.rounds[0].report, want+"\n\n") {
+		t.Errorf("retained rounds = %+v, want one whose report opens on the fold %q", retained.rounds, want)
 	}
 }
 
@@ -4701,6 +4822,70 @@ func TestSubAgent_CancelledDelegateIsNotRetained(t *testing.T) {
 	}
 	if _, ok := subAgentResultFor(sink.events, "c1"); ok {
 		t.Error("a cancelled delegation surfaced a result")
+	}
+}
+
+// TestSubAgent_ACancelledContinuationRetainsNothing keeps D2 on the continue path: a cancel while
+// the continued child runs unwinds the delegation, and the entry it took is not retained anew — no
+// round is appended for a run that returned no result.
+func TestSubAgent_ACancelledContinuationRetainsNothing(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+	scripts := cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName)
+	scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, continueInstructions, 0)))
+	// 0: spawn, 1–3: turns, 4: fold, 5: wrap-up, 6: the continue call, 7: the continued child blocks.
+	responder := &blockAtResponder{scripts: scripts, blockAt: 7, started: make(chan struct{})}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("parent result = %+v, want a cancel", res)
+	}
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v after a cancelled continuation, want none", names)
+	}
+	if _, ok := subAgentResultFor(sink.events, "c2"); ok {
+		t.Error("a cancelled continuation surfaced a result")
+	}
+}
+
+// TestSubAgent_ARenamingContinuationIsKeptUnderTheNewName pins the key a continuation re-retains
+// under: the name its call gave — the one its continue line spells — not the entry's old name,
+// which is forgotten; the rounds carry over under the new key.
+func TestSubAgent_ARenamingContinuationIsKeptUnderTheNewName(t *testing.T) {
+	const renamed = "Survey Part Two"
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	renaming, _ := json.Marshal(tools.SubAgentArgs{Task: continueInstructions, Continue: retainedSurveyName, Name: renamed})
+	scripts := cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName)
+	scripts = append(scripts, toolCallScript("c2", tools.SubAgentToolName, string(renaming)))
+	scripts = append(scripts, contentScript("the survey is now complete"), contentScript("parent done"))
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+
+	if names := a.retained.names(); !slices.Equal(names, []string{renamed}) {
+		t.Fatalf("retained names = %v, want exactly the new name %q", names, renamed)
+	}
+	kept, _ := a.retained.lookup(renamed)
+	if kept.name != renamed || kept.task != retainedSurveyTask || len(kept.rounds) != 2 || kept.rounds[1].spawnCallID != "c2" {
+		t.Errorf("retained under %q = %+v, want the original task and both rounds", renamed, kept)
 	}
 }
 

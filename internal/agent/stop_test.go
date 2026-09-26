@@ -182,15 +182,13 @@ func TestStopChild_StopsOneDelegationAndTheTurnGoesOn(t *testing.T) {
 	}
 	retained, ok := a.retained.lookup(retainedSurveyName)
 	wantRetained := retainedDelegate{
-		task:          retainedSurveyTask,
-		name:          retainedSurveyName,
-		tools:         tools.SubAgentRoster{Names: []string{"read_thing"}},
-		outputPath:    "notes/survey.md",
-		fold:          childFoldSummary,
-		closingReport: "reading file 0",
-		spawnCallID:   "c1",
+		task:       retainedSurveyTask,
+		name:       retainedSurveyName,
+		tools:      tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath: "notes/survey.md",
+		rounds:     []delegateRound{{report: summaryReport(childFoldSummary, "reading file 0"), summary: true, spawnCallID: "c1"}},
 	}
-	if !ok || !reflect.DeepEqual(retained, wantRetained) {
+	if !ok || !reflect.DeepEqual(unstamped(retained), wantRetained) {
 		t.Errorf("retained delegate = %+v (found %v), want %+v", retained, ok, wantRetained)
 	}
 }
@@ -213,13 +211,15 @@ func TestStopChild_ASecondStopSkipsTheFold(t *testing.T) {
 	if got, ok := subAgentResultFor(sink.events, "c1"); !ok || got.IsError || got.Content != want {
 		t.Errorf("stopped result = %+v, want a non-error result\n%s", got, want)
 	}
-	if retained, ok := a.retained.lookup(retainedSurveyName); !ok || retained.fold != marker {
-		t.Errorf("retained fold = %q (found %v), want the unavailable marker %q", retained.fold, ok, marker)
+	wantReport := summaryReport(marker, "reading file 0")
+	if retained, ok := a.retained.lookup(retainedSurveyName); !ok || len(retained.rounds) != 1 || retained.rounds[0].report != wantReport {
+		t.Errorf("retained delegate = %+v (found %v), want one round reporting the unavailable marker %q", retained, ok, marker)
 	}
 }
 
 // TestStopChild_AStoppedDelegationIsContinuable drives stop → continue → completion: the continued
-// child opens on the retained task, the fold written at the stop and the new instructions.
+// child opens on the retained task, the fold written at the stop and the new instructions, and its
+// completed run is kept as the entry's second round.
 func TestStopChild_AStoppedDelegationIsContinuable(t *testing.T) {
 	scripts := stoppedSurveyScripts("c1")
 	scripts = append(scripts,
@@ -229,15 +229,16 @@ func TestStopChild_AStoppedDelegationIsContinuable(t *testing.T) {
 	a, responder, sink := runStoppedSurveyParent(t, scripts, map[int]bool{2: true}, -1)
 
 	// Call 5 is the continued child's opening request (4: the continue call).
-	wantTask := retainedSurveyTask + "\n\n" + previousAttemptHead + "\n" + childFoldSummary + "\n\n" + continuationInstructionsHead + "\n" + continueInstructions
+	wantTask := firstRoundSeed(summaryReport(childFoldSummary, "reading file 0"), continueInstructions)
 	if got := lastUserText(responder.requests[5]); got != wantTask {
 		t.Errorf("the continued child opened on\n%s\nwant\n%s", got, wantTask)
 	}
 	if completed, ok := subAgentResultFor(sink.events, "c2"); !ok || completed.IsError || completed.Content != "the survey is now complete" {
 		t.Errorf("the continued child's result = %+v, want its completed report", completed)
 	}
-	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after the continuation completed, want none", names)
+	retained, ok := a.retained.lookup(retainedSurveyName)
+	if !ok || len(retained.rounds) != 2 || retained.rounds[1] != (delegateRound{instructions: continueInstructions, report: "the survey is now complete", spawnCallID: "c2"}) {
+		t.Errorf("retained delegate = %+v (found %v), want the stopped round and the completed continuation", retained, ok)
 	}
 }
 

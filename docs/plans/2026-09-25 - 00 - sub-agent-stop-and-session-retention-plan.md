@@ -197,7 +197,13 @@ NOTES (2026-09-26): openWorkingRun is not reused verbatim — it waits on the vi
 - `go test -race -count=1 -run 'E2ESubAgentStop' ./cmd/apogee/`
 **Commit:** `test(e2e): ctrl+x stops a hanging delegate and the parent's Turn goes on`
 
-## 8. A retained entry holds the task and its rounds
+## 8. A retained entry holds the task and its rounds — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): consequential edit — internal/agent/stop_test.go: made necessary by replacing retainedDelegate's fold/closingReport/spawnCallID with rounds (its literals and the stopped-then-continued seed); its "continuation retains nothing" assertion now pins the second round, per the ratified continuation-retention call.
+NOTES (2026-09-26): the use sequence is stamped by retain only, not take — every take is followed by a retain (the continuation's round, or giveBack on a refusal) except a cancelled continuation, which retains nothing, so a take stamp would never be read.
+NOTES (2026-09-26): spawnCallID moved from the entry onto each round (delegateRound.spawnCallID), the per-round call id item 10's fork cut reads; the entry keeps bound for its latest run. The capped/faulted/stopped round report reuses the capped result's body below its engine-summary head (new Agent.foldWithClosing, which cappedResultBody now wraps byte-identically), so a wordless child's round carries stepCapNoTextMarker.
+NOTES (2026-09-26): the omitted marker is spelled literally `[N earlier rounds omitted]` for every N, including 1, as the Goal line writes it.
+NOTES (2026-09-26): the first-run retention gate now also requires outcome != dispatchCancelled (was implied by delegationResult's case order); a recovered panic in a continued child still drops the taken entry, as it did before this item.
 
 **What:** Depends on item 3.
 **Goal:** a retained entry holds the original task and one round per run under its name — instructions (round 1: none, the task) and report (completed: the child's final report; capped, faulted, stopped: fold plus closing text); a `continue:` seed renders the task, then `[N earlier rounds omitted]` when rounds were dropped, then each kept round chronologically as `[round K — instructions]` (K ≥ 2) and `[round K — report]` or `[round K — engine summary]`, then `[continuation instructions]` and the new instructions; rounds are kept newest-first within 4096 tokens and the newest is always whole; the unknown-name refusal lists the 16 most recently used names, newest first, then `(and N more)`.

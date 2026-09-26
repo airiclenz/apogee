@@ -512,30 +512,63 @@ func TestInterjectChild_PendingMailboxSkipsAGrandchild(t *testing.T) {
 }
 
 // TestRetainedDelegates_KeepsTheLatestUnderEachName pins the set's contract: a name maps to the
-// latest capped delegation retained under it, an unnamed one is never kept, names come back sorted,
-// and clear forgets everything.
+// latest delegation retained under it, an unnamed one is never kept, names come back most recently
+// used first — a take and its re-retain move a name to the front — and clear forgets everything.
 func TestRetainedDelegates_KeepsTheLatestUnderEachName(t *testing.T) {
 	var r retainedDelegates
-
-	r.retain(retainedDelegate{name: "Beta", spawnCallID: "c1"})
-	r.retain(retainedDelegate{name: "Alpha", spawnCallID: "c2"})
-	r.retain(retainedDelegate{name: "Beta", spawnCallID: "c3"})
-	r.retain(retainedDelegate{name: "", spawnCallID: "c4"})
-
-	if names := r.names(); !slices.Equal(names, []string{"Alpha", "Beta"}) {
-		t.Errorf("names = %v, want the two named entries, sorted", names)
+	entry := func(name, callID string) retainedDelegate {
+		return retainedDelegate{name: name, rounds: []delegateRound{{spawnCallID: callID}}}
 	}
-	if got, ok := r.lookup("Beta"); !ok || got.spawnCallID != "c3" {
-		t.Errorf("lookup(Beta) = %+v, %v; want the latest entry c3", got, ok)
+
+	r.retain(entry("Beta", "c1"))
+	r.retain(entry("Alpha", "c2"))
+	r.retain(entry("Gamma", "c3"))
+	r.retain(entry("Beta", "c4"))
+	r.retain(entry("", "c5"))
+
+	if names := r.names(); !slices.Equal(names, []string{"Beta", "Gamma", "Alpha"}) {
+		t.Errorf("names = %v, want the three named entries, most recently used first", names)
+	}
+	if got, ok := r.lookup("Beta"); !ok || got.rounds[0].spawnCallID != "c4" {
+		t.Errorf("lookup(Beta) = %+v, %v; want the latest entry c4", got, ok)
 	}
 	if _, ok := r.lookup(""); ok {
 		t.Error("an unnamed delegation was retained; it has no handle a continuation could name")
+	}
+
+	taken, ok := r.take("Alpha")
+	if !ok {
+		t.Fatal("take(Alpha) found nothing")
+	}
+	if names := r.names(); !slices.Equal(names, []string{"Beta", "Gamma"}) {
+		t.Errorf("names after take(Alpha) = %v, want Alpha forgotten", names)
+	}
+	r.retain(taken)
+	if names := r.names(); !slices.Equal(names, []string{"Alpha", "Beta", "Gamma"}) {
+		t.Errorf("names after Alpha was re-retained = %v, want Alpha first", names)
 	}
 
 	r.clear()
 
 	if names := r.names(); len(names) != 0 {
 		t.Errorf("names after clear = %v, want none", names)
+	}
+}
+
+// TestRetainedDelegate_WithRoundNeverAliasesTheEntryItExtends pins withRound's copy: appending a
+// round to a taken entry leaves the entry it came from exactly as it was.
+func TestRetainedDelegate_WithRoundNeverAliasesTheEntryItExtends(t *testing.T) {
+	base := retainedDelegate{name: "Survey", rounds: make([]delegateRound, 1, 4)}
+	base.rounds[0] = delegateRound{report: "round one"}
+
+	first := base.withRound(delegateRound{instructions: "go on", report: "round two"})
+	second := base.withRound(delegateRound{instructions: "other", report: "round two again"})
+
+	if len(base.rounds) != 1 {
+		t.Errorf("base rounds = %d, want the one it had", len(base.rounds))
+	}
+	if first.rounds[1].report != "round two" || second.rounds[1].report != "round two again" {
+		t.Errorf("rounds = %+v and %+v, want each extension to keep its own round", first.rounds, second.rounds)
 	}
 }
 
