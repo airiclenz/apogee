@@ -117,7 +117,12 @@ Binding addition — the folded stopped result is a non-error result (IsError=fa
 - `go test -race -count=1 ./internal/domain/`
 **Commit:** `feat(agent): stop one running delegation, fold it and let the parent's Turn go on`
 
-## 4. A stop reaches a queued pooled child and a nested child
+## 4. A stop reaches a queued pooled child and a nested child — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): the queued set lives on the parent's childRegistry (a `queued` map of run id to stop mark, under the registry's one lock) rather than as a separate Agent field; `childRegistry.stop` marks a queued id, the pool worker's `runPooledSlot` reads the mark at dequeue (`stopQueuedDelegation`, checked before `preemptDelegation`), `arm` carries a mark set after the dequeue into the child ctx, and the worker `unqueue`s every slot as it settles.
+NOTES (2026-09-26): fanout_test.go needed no change — the new tests reuse its threeWayFanOutParent, phasesFor and subAgentResults from stop_test.go; a registry-level unit test pins the dequeue-to-arm window.
+NOTES (2026-09-26): a stop marked after the dequeue on a delegation that runSubAgent then refuses before arming a child (bad arguments, unknown continue name) returns nil but changes nothing — the refusal result stands, and the mark is dropped at unqueue.
+NOTES (2026-09-26): consequential edit — internal/agent/subagent.go: made necessary by stopQueuedDelegation booking a ledger row outside runSubAgent (the runSubAgent ledger doc) and by arm carrying a post-dequeue stop (the arm-site comment).
 
 **What:** Recast at the regression check (2026-09-25). Depends on item 3.
 **Goal:** `StopChild` on the run id of a pooled delegation that has not started makes it run nothing and fold nothing, returning the error-shaped `sub-agent not started: the user stopped it before it started; delegate again if the task is still needed` with ledger outcome `stopped`, while its siblings run on; `StopChild` on a grandchild's run id stops only that grandchild and its own parent child continues.

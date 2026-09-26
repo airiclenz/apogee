@@ -779,9 +779,11 @@ const SeatFallbackNote = "note: ran on the session server — the sub-agents ser
 // frame (children.go, apogee-clb): it runs last of all, after the recover has settled the named
 // results, so every way out of this frame — a refusal before any child exists, a cancel, a fault, a
 // cap, a completion, a recovered panic — is classified from the ToolResult and dispatchOutcome
-// actually returned (classifyDelegation) and lands as one row. The one call that never reaches it
-// is a delegation refused past the reply's fan-out ceiling, and dispatchGroup books that row itself
-// (recordCeilingRefusal, dispatch.go) — the ceiling's own second site. The spawn index is taken FIRST, under the ledger's
+// actually returned (classifyDelegation) and lands as one row. Two calls that never reach it book
+// their rows themselves: a delegation refused past the reply's fan-out ceiling, which dispatchGroup
+// books (recordCeilingRefusal, dispatch.go) — the ceiling's own second site — and a pooled
+// delegation the human stopped before a worker took it, which the pool books at the dequeue
+// (stopQueuedDelegation, dispatch.go). The spawn index is taken FIRST, under the ledger's
 // lock — the one a pooled group reserved for this call in call order (dispatchGroup), else the next
 // — because a pool fan-out runs several of these frames at once and neither its dequeue nor its
 // completion order is the model's call order; the row records the child's RESOLVED output target,
@@ -990,7 +992,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// And stoppable for as long as its Run can still be cut short (ADR 0086 D4): the child runs on a
 	// context of its own, a child of the parent's, whose cancel is the run's stop handle. It is
 	// withdrawn the moment Run returns, so a stop landing while the namer is joined or the result
-	// rendered finds nothing armed and leaves a completed or capped result exactly as it is.
+	// rendered finds nothing armed and leaves a completed or capped result exactly as it is. A
+	// pooled delegation the human stopped after a worker took it but before this point carries the
+	// stop in here: arm cancels the context at once, and the run is stopped like any other.
 	childCtx, stopRun := context.WithCancelCause(ctx)
 	defer stopRun(nil)
 	a.children.arm(runID, stopRun)

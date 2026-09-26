@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
@@ -348,4 +349,170 @@ func conversationCarriesToolResult(msgs []domain.Message, callID, content string
 		}
 	}
 	return false
+}
+
+// TestStopChild_AQueuedPooledDelegationNeverStarts pins the stop on a pooled delegation still
+// waiting for a worker: at width 2 a three-way group holds c3 queued while c1 and c2 run; the stop
+// lands then, so c3 makes no request and folds nothing, commits the exact error-shaped unstarted
+// result in call order with a finished phase alone, and its ledger row reads `stopped` — while
+// both running siblings complete and the Turn goes on.
+func TestStopChild_AQueuedPooledDelegationNeverStarts(t *testing.T) {
+	sink := &recordingSink{}
+	var requests atomic.Int32
+	arrived := make(chan struct{}, 3)
+	release := make(chan struct{})
+	gate := func(ctx context.Context) {
+		requests.Add(1)
+		arrived <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	a := threeWayFanOutParent(t, sink, 2, gate)
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
+	stopErr := make(chan error, 1)
+	go func() {
+		for i := 0; i < 2; i++ {
+			<-arrived
+		}
+		stopErr <- a.StopChild(thirdRunID)
+		close(release)
+	}()
+
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if err := <-stopErr; err != nil {
+		t.Fatalf("StopChild on the queued delegation = %v, want nil", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Fatalf("parent result = %+v, want a clean exchange-complete", res)
+	}
+	if got := requests.Load(); got != 2 {
+		t.Errorf("child requests = %d, want 2: the stopped queued delegation makes none", got)
+	}
+	if folds := engineFoldUsage(sink.events, 1); len(folds) != 0 {
+		t.Errorf("engine fold usage events at depth 1 = %d, want none: a queued stop folds nothing", len(folds))
+	}
+
+	results := subAgentResults(sink.events)
+	if len(results) != 3 || results[0].CallID != "c1" || results[1].CallID != "c2" || results[2].CallID != "c3" {
+		t.Fatalf("depth-0 results = %+v, want c1, c2, c3 in call order", results)
+	}
+	for i, want := range []string{"child one done", "child two done"} {
+		if results[i].IsError || !strings.Contains(results[i].Content, want) {
+			t.Errorf("%s result = %+v, want the running sibling's real result", results[i].CallID, results[i])
+		}
+	}
+	if !results[2].IsError || results[2].Content != stoppedQueuedDelegationContent {
+		t.Errorf("c3 result = %+v, want the exact queued-stop content as an error result", results[2])
+	}
+	const wantContent = "sub-agent not started: the user stopped it before it started; delegate again if the task is still needed"
+	if stoppedQueuedDelegationContent != wantContent {
+		t.Errorf("queued-stop content = %q, want %q", stoppedQueuedDelegationContent, wantContent)
+	}
+	phases := phasesFor(sink.events, "c3")
+	if len(phases) != 1 || phases[0].Phase != domain.SubAgentFinished || phases[0].Cancelled ||
+		phases[0].Result.Content != stoppedQueuedDelegationContent {
+		t.Errorf("c3 phases = %+v, want one finished phase carrying the queued-stop result", phases)
+	}
+	for _, ae := range auditEvents(sink.events) {
+		if ae.CallID == "c3" {
+			t.Errorf("c3 was audit-recorded (%+v); a delegation that never ran books no record", ae)
+		}
+	}
+
+	outcomes := map[string]delegationOutcome{}
+	for _, row := range a.delegations.rows() {
+		outcomes[row.callID] = row.outcome
+	}
+	want := map[string]delegationOutcome{"c1": delegationCompleted, "c2": delegationCompleted, "c3": delegationStopped}
+	if !reflect.DeepEqual(outcomes, want) {
+		t.Errorf("ledger outcomes = %v, want %v", outcomes, want)
+	}
+	if err := a.StopChild(thirdRunID); !errors.Is(err, domain.ErrNoSuchChild) {
+		t.Errorf("StopChild on the settled queued delegation = %v, want ErrNoSuchChild", err)
+	}
+}
+
+// TestChildRegistry_AStopAfterTheDequeueReachesTheArmedChild pins the window between the pool's
+// dequeue and the child's arming: a stop marked there is carried into arm, which cancels the
+// child's context as it is created, with the stop as its cause.
+func TestChildRegistry_AStopAfterTheDequeueReachesTheArmedChild(t *testing.T) {
+	var r childRegistry
+	r.queue(firstRunID)
+	if r.dequeue(firstRunID) {
+		t.Fatal("dequeue of an unmarked delegation reported it stopped")
+	}
+	if !r.stop(firstRunID) {
+		t.Fatal("stop between the dequeue and the arm did not reach the delegation")
+	}
+	ctx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+	r.arm(firstRunID, cancel)
+	if !errors.Is(context.Cause(ctx), errDelegationStopped) {
+		t.Errorf("child context cause = %v, want the stop carried into arm", context.Cause(ctx))
+	}
+	r.unregister(firstRunID)
+	if r.stop(firstRunID) {
+		t.Error("stop on an unregistered run still reached something")
+	}
+}
+
+// TestStopChild_ReachesANestedDelegationAndItsParentGoesOn pins the nested reach: a stop on a
+// grandchild's run id stops that grandchild alone — its parent child receives the stopped result
+// like any tool result, runs on and completes, and the top-level Turn is untouched.
+func TestStopChild_ReachesANestedDelegationAndItsParentGoesOn(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxDepth = 2 // a grandchild exists only under a bound above the default
+	scripts := [][]provider.Delta{
+		subAgentCallScript("c1", "coordinate the survey"), // 0: the parent delegates
+		subAgentCallScript("g1", "trawl the vendor tree"), // 1: the child delegates in turn
+	}
+	scripts = append(scripts, cappedChildTurns(1)...) // 2: the grandchild's working Turn
+	scripts = append(scripts,
+		nil,                          // 3: the grandchild's next Turn, blocked and stopped
+		foldScript(700, 40),          // 4: the engine fold of the stopped grandchild
+		contentScript("child done"),  // 5: the child goes on and completes
+		contentScript("parent done")) // 6: the parent's reply
+	responder := &stopResponder{scripts: scripts, block: map[int]bool{3: true}}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
+	responder.before = func(call int) {
+		if call != 3 {
+			return
+		}
+		if err := a.StopChild(secondRunID); err != nil {
+			t.Errorf("StopChild on the grandchild = %v, want nil", err)
+		}
+	}
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(context.Background())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusExchangeComplete || res.Faulted {
+		t.Fatalf("parent result = %+v, want a clean exchange-complete", res)
+	}
+	if len(responder.requests) != 7 {
+		t.Fatalf("upstream calls = %d, want 7", len(responder.requests))
+	}
+	if !requestCarriesToolResult(responder.requests[5], "g1", stoppedResultHead+"\n") {
+		t.Errorf("the child's next request does not carry the grandchild's stopped result: %+v", responder.requests[5].Messages)
+	}
+	if got, ok := subAgentResultFor(sink.events, "c1"); !ok || got.IsError || got.Content != "child done" {
+		t.Errorf("child result = %+v (found %v), want the child's completed report", got, ok)
+	}
+	if rows := a.delegations.rows(); len(rows) != 1 || rows[0].outcome != delegationCompleted {
+		t.Errorf("parent ledger rows = %+v, want the child recorded %q", rows, delegationCompleted)
+	}
 }

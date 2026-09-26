@@ -44,11 +44,21 @@ import (
 // the child's Run, then the fold a stopped run is given — and withdrawn between the two, so a stop
 // that lands once the run has returned finds nothing to cancel (StopChild).
 //
+// And it holds the run ids of a pooled group's delegations that have not been armed yet (ADR 0086
+// D4: a stop reaches a queued child too). dispatchGroup enters every pooled delegation here before
+// the pool starts; each entry is the stop mark a StopChild sets, read at the pool's dequeue
+// (dequeue) and, for a slot dequeued before its child is armed, carried into arm, which cancels the
+// child's context as it is created. The mark and its readers share this one lock, so a stop lands
+// either before the dequeue — the child never starts — or after it, on the child it becomes.
+//
 // The zero value is ready to use.
 type childRegistry struct {
 	mu      sync.Mutex
 	byRunID map[string]*Agent
 	stops   map[string]context.CancelCauseFunc
+	// queued maps the run id of a pooled delegation not yet armed to its stop mark: false while
+	// nothing has asked to stop it, true once a StopChild has.
+	queued map[string]bool
 }
 
 // register publishes child under its run id. Run ids are minted unique within the tree, so a
@@ -74,6 +84,9 @@ func (r *childRegistry) unregister(runID string) {
 
 // arm makes the run registered under runID stoppable through cancel until disarm withdraws it.
 // Arming again replaces the handle: the fold a stopped run is given takes the one its Run held.
+// A run still held as queued leaves that set here, and a stop marked on it after the pool dequeued
+// it — in the window before this arm — is carried in: cancel fires at once, so the child's context
+// is cancelled as it is created.
 func (r *childRegistry) arm(runID string, cancel context.CancelCauseFunc) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -81,6 +94,49 @@ func (r *childRegistry) arm(runID string, cancel context.CancelCauseFunc) {
 		r.stops = make(map[string]context.CancelCauseFunc, 1)
 	}
 	r.stops[runID] = cancel
+	if marked, ok := r.queued[runID]; ok {
+		delete(r.queued, runID)
+		if marked {
+			cancel(errDelegationStopped)
+		}
+	}
+}
+
+// queue holds runID as a pooled delegation that has not started, stoppable by a mark until the
+// pool dequeues it (dequeue) and its child is armed (arm). A run id of "" is never queued.
+func (r *childRegistry) queue(runID string) {
+	if runID == "" {
+		return
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.queued == nil {
+		r.queued = make(map[string]bool, 1)
+	}
+	r.queued[runID] = false
+}
+
+// dequeue is the pool's read of runID's stop mark as a worker takes the slot. A marked slot leaves
+// the set and true is returned: the delegation is not started. An unmarked one stays held until
+// its child is armed (arm) or the slot settles without one (unqueue), so a stop landing in between
+// still reaches it.
+func (r *childRegistry) dequeue(runID string) (stopped bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.queued[runID] {
+		delete(r.queued, runID)
+		return true
+	}
+	return false
+}
+
+// unqueue forgets runID's queued entry — the pool's closing act for a slot, so a delegation that
+// settled without ever arming a child (a refusal before one exists, a pre-empted slot) leaves no
+// stop mark behind to report a stop that changed nothing. A no-op once arm has taken the entry.
+func (r *childRegistry) unqueue(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.queued, runID)
 }
 
 // disarm withdraws runID's stop handle; the run stays registered and addressable otherwise.
@@ -90,16 +146,21 @@ func (r *childRegistry) disarm(runID string) {
 	delete(r.stops, runID)
 }
 
-// stop cancels runID's armed work with errDelegationStopped as the cause and reports whether a
-// handle was armed. A cancel func never blocks, so calling it under the lock is safe.
+// stop cancels runID's armed work with errDelegationStopped as the cause, or marks runID stopped
+// while it is still held as queued, and reports whether either reached it. A cancel func never
+// blocks, so calling it under the lock is safe.
 func (r *childRegistry) stop(runID string) bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	cancel, ok := r.stops[runID]
-	if ok {
+	if cancel, ok := r.stops[runID]; ok {
 		cancel(errDelegationStopped)
+		return true
 	}
-	return ok
+	if _, ok := r.queued[runID]; ok {
+		r.queued[runID] = true
+		return true
+	}
+	return false
 }
 
 // lookup returns the running child registered under runID.
@@ -308,7 +369,9 @@ func (l *delegationLedger) reserve(callID string) {
 // every entry into runSubAgent, refused ones included — and every call refused past the reply's
 // fan-out ceiling, which never enters runSubAgent and is opened and recorded by dispatchGroup
 // itself (recordCeilingRefusal), after a pooled group's running slots have been reserved, so the
-// refused rows number behind them.
+// refused rows number behind them — and every pooled delegation the human stopped before it
+// started, which never enters runSubAgent either and takes the index its group reserved for it
+// (stopQueuedDelegation).
 func (l *delegationLedger) open(callID string) int {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -525,6 +588,13 @@ func (a *Agent) InterjectChild(runID string, in domain.UserInput) error {
 // and returns; the child's own goroutine unwinds its run and reports it. The cancel is the only
 // mechanism (ADR 0031): the child's context is a child of the parent's, so a whole-Turn cancel
 // still reaches it.
+//
+// A pooled delegation still waiting for a worker is stopped too: it is marked, and the pool's
+// dequeue settles it without starting it — no child, no fold — on the error-shaped
+// stoppedQueuedDelegationContent, recorded `stopped` in the ledger, while its siblings run on
+// (runPool). One dequeued but not yet running takes the mark into its child, whose context is
+// cancelled as it is created. A stopped grandchild's result goes to its own parent child like any
+// tool result, and that child runs on.
 //
 // It returns domain.ErrNoSuchChild when runID names no run a stop can still cut short — one that
 // never existed, has finished, or has returned from its run and is being reported — and nothing

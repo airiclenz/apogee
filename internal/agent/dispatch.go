@@ -390,6 +390,12 @@ func (a *Agent) dispatchGroup(ctx context.Context, turn, width int, calls []doma
 		if slots[i].verdict.kind == resolveDelegate {
 			a.delegations.reserve(call.ID)
 		}
+		// And held as queued — stoppable before a worker takes it (StopChild) — from here, before
+		// runPool's unbuffered send can hand any slot to a worker, so no pooled delegation is ever
+		// unreachable between being prepared and being armed.
+		if slots[i].run && slots[i].verdict.kind == resolveDelegate {
+			a.children.queue(slots[i].runID)
+		}
 	}
 	for i := range slots {
 		a.recordCeilingRefusal(&slots[i])
@@ -691,7 +697,10 @@ func everySlotRan(slots []dispatchSlot) bool {
 // skip result and only a finished phase, at once, so a Driver's row leaves "scheduled"
 // immediately — while every child already started runs to its boundary untouched. Dequeue is
 // the pooled counterpart of the width-1 rule, where prepareCall pre-empts the delegation the
-// instant it is reached: at either width the delegation about to START is the one skipped.
+// instant it is reached: at either width the delegation about to START is the one skipped. The
+// dequeue is also where the human's stop reaches a delegation still waiting for a worker
+// (stopQueuedDelegation, ADR 0086 D4): a slot marked stopped is settled unstarted, ahead of the
+// pre-emption check, and its siblings run on (runPooledSlot).
 func (a *Agent) runPool(ctx context.Context, turn, width int, slots []dispatchSlot) {
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -700,10 +709,7 @@ func (a *Agent) runPool(ctx context.Context, turn, width int, slots []dispatchSl
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				if a.preemptDelegation(turn, &slots[i]) {
-					continue
-				}
-				a.runCall(ctx, turn, &slots[i])
+				a.runPooledSlot(ctx, turn, &slots[i])
 			}
 		}()
 	}
@@ -715,6 +721,49 @@ func (a *Agent) runPool(ctx context.Context, turn, width int, slots []dispatchSl
 	close(jobs)
 	wg.Wait()
 }
+
+// runPooledSlot is one pool worker's handling of the slot it dequeued: a delegation the human
+// stopped while it waited is settled unstarted (stopQueuedDelegation), then one a queued message
+// pre-empts (preemptDelegation), and anything else runs. The slot's queued entry is forgotten once
+// it has settled, whichever way it went.
+func (a *Agent) runPooledSlot(ctx context.Context, turn int, slot *dispatchSlot) {
+	defer a.children.unqueue(slot.runID)
+	if a.stopQueuedDelegation(turn, slot) || a.preemptDelegation(turn, slot) {
+		return
+	}
+	a.runCall(ctx, turn, slot)
+}
+
+// stopQueuedDelegation settles a pooled delegation the human stopped before a worker took it (ADR
+// 0086 D4): read at the dequeue under the registry's lock (childRegistry.dequeue), a marked slot
+// runs nothing and folds nothing. It takes the stopped-unstarted result and its finished phase at
+// once (skipDelegation), its run flag is cleared so commitCall books no audit record for a child
+// that never ran, and its delegate-ledger row is booked here — as recordCeilingRefusal books a
+// refusal's, since the call never reaches runSubAgent — classified `stopped` by the rule every row
+// is (classifyDelegation). True is returned for a stopped slot.
+func (a *Agent) stopQueuedDelegation(turn int, slot *dispatchSlot) bool {
+	if slot.runID == "" || !a.children.dequeue(slot.runID) {
+		return false
+	}
+	slot.run = false
+	slot.result = a.skipDelegation(turn, slot, errorToolResult(slot.call.ID, stoppedQueuedDelegationContent))
+	ended, cause := classifyDelegation(slot.result, dispatchDone, false, true, domain.StepResult{})
+	a.delegations.record(delegationRecord{
+		spawnIndex: a.delegations.open(slot.call.ID),
+		callID:     slot.call.ID,
+		name:       delegationLabel("", slot.call),
+		outcome:    ended,
+		cause:      cause,
+	})
+	return true
+}
+
+// stoppedQueuedDelegationContent is the whole tool result of a pooled delegation the human stopped
+// before it started (stopQueuedDelegation). It takes the unstarted results' shape — error-shaped,
+// under the same `sub-agent not started:` head as the pre-emption and the fan-out ceiling — so a
+// Driver and the model read every unstarted kind alike, and it is a constant because it is the
+// model's only account of a child that never ran.
+const stoppedQueuedDelegationContent = "sub-agent not started: the user stopped it before it started; delegate again if the task is still needed"
 
 // skippedDelegationContent is the whole tool result a delegation pre-empted by a queued user
 // message carries. It is a constant because it is the model's only account of a child that never
@@ -762,9 +811,10 @@ func (a *Agent) interjectionPending() bool {
 // skipDelegation closes one delegation that has not started with result: it emits the finished
 // phase that closes the child's bracket without a started one — carrying that result, not
 // Cancelled, since nothing is rolled back — and returns it for the caller to commit in call order.
-// Its callers are the two ways a delegation is settled before it starts, preemptDelegation (a
+// Its callers are the ways a delegation is settled before it starts, preemptDelegation (a
 // queued message) and refusePastCeiling (the fan-out ceiling), at either width, so a lone
-// delegation is closed exactly as a pooled one. The phase carries the run id the slot's head
+// delegation is closed exactly as a pooled one — and stopQueuedDelegation (the human's stop on a
+// pooled delegation still waiting for a worker), which only a pool has. The phase carries the run id the slot's head
 // ToolCallEvent carried, so the bracket closes the block that event opened.
 func (a *Agent) skipDelegation(turn int, slot *dispatchSlot, result domain.ToolResult) domain.ToolResult {
 	a.emitSubAgentPhase(turn, slot.call, slot.runID, domain.SubAgentPhaseEvent{Phase: domain.SubAgentFinished, Result: result})
