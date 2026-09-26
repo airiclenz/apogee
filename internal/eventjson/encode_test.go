@@ -194,6 +194,17 @@ func TestEncodeJSONGolden(t *testing.T) {
 			wantData: `{"input":{"text":"stop","file_refs":null,"skill_ids":null},"landed":false,"reason":"capped"}`,
 		},
 		{
+			name: "child_interjection undelivered to a stopped child",
+			event: domain.ChildInterjectionEvent{
+				EventBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
+				Input:     domain.UserInput{Text: "also check the vendor directory"},
+				Reason:    domain.UndeliveredStopped,
+			},
+			wantKind: "child_interjection",
+			wantBase: domain.EventBase{Depth: 1, Turn: 3, CallID: "call-9"},
+			wantData: `{"input":{"text":"also check the vendor directory","file_refs":null,"skill_ids":null},"landed":false,"reason":"stopped"}`,
+		},
+		{
 			name: "approval decided",
 			event: domain.ApprovalEvent{
 				EventBase: domain.EventBase{Turn: 4},

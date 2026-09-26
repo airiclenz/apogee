@@ -39,10 +39,16 @@ import (
 // running at the moment of the lookup. It is guarded because the depth-0 fan-out registers and
 // unregisters from several pool workers at once, while lookups arrive from the host's goroutine.
 //
+// Beside each entry the registry holds the run's STOP HANDLE (ADR 0086 D4): the cancel of the
+// context the child's work runs under, armed only while a stop can still cut that work short —
+// the child's Run, then the fold a stopped run is given — and withdrawn between the two, so a stop
+// that lands once the run has returned finds nothing to cancel (StopChild).
+//
 // The zero value is ready to use.
 type childRegistry struct {
 	mu      sync.Mutex
 	byRunID map[string]*Agent
+	stops   map[string]context.CancelCauseFunc
 }
 
 // register publishes child under its run id. Run ids are minted unique within the tree, so a
@@ -63,6 +69,37 @@ func (r *childRegistry) unregister(runID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.byRunID, runID)
+	delete(r.stops, runID)
+}
+
+// arm makes the run registered under runID stoppable through cancel until disarm withdraws it.
+// Arming again replaces the handle: the fold a stopped run is given takes the one its Run held.
+func (r *childRegistry) arm(runID string, cancel context.CancelCauseFunc) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.stops == nil {
+		r.stops = make(map[string]context.CancelCauseFunc, 1)
+	}
+	r.stops[runID] = cancel
+}
+
+// disarm withdraws runID's stop handle; the run stays registered and addressable otherwise.
+func (r *childRegistry) disarm(runID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.stops, runID)
+}
+
+// stop cancels runID's armed work with errDelegationStopped as the cause and reports whether a
+// handle was armed. A cancel func never blocks, so calling it under the lock is safe.
+func (r *childRegistry) stop(runID string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cancel, ok := r.stops[runID]
+	if ok {
+		cancel(errDelegationStopped)
+	}
+	return ok
 }
 
 // lookup returns the running child registered under runID.
@@ -86,8 +123,13 @@ func (r *childRegistry) all() []*Agent {
 	return children
 }
 
+// errDelegationStopped is the cancel cause a human's stop carries (StopChild): read back through
+// context.Cause, it is what tells a run the human stopped from one whose parent was cancelled.
+var errDelegationStopped = errors.New("delegation stopped by the user")
+
 // retainedDelegate is what a parent keeps of ONE delegation the engine stopped at a bound (plan
-// 2026-09-18 - 00, P6), or that FAULTED with the parent still live (ADR 0082): everything a
+// 2026-09-18 - 00, P6), that FAULTED with the parent still live (ADR 0082), or that the human
+// stopped (StopChild, ADR 0086 D4): everything a
 // continuation needs to spawn a fresh child that picks up where the capped or faulted one left
 // off — the task and roster the spawning call asked for, the output path it named, the engine
 // fold and closing text the child left, and which bound ended it. It is a value: every field is
@@ -104,7 +146,7 @@ type retainedDelegate struct {
 	spawnCallID   string               // the sub_agent call the retained child answered
 }
 
-// retainedDelegates is the set of capped or faulted delegations ONE Agent holds for the rest of
+// retainedDelegates is the set of capped, faulted or stopped delegations ONE Agent holds for the rest of
 // its Exchange, keyed by delegation name — the handle the parent model already knows a delegation
 // by, and the only one it can spell back. It exists in memory only: the map is cleared as the next Exchange
 // opens (Agent.step) and never reaches the session snapshot (ADR 0022 D8, ADR 0013 §5 — a
@@ -191,7 +233,7 @@ func (r *retainedDelegates) clear() {
 // 0022 D8): the note is a per-request projection, never a conversation message.
 
 // delegationOutcome is how one delegation ended, as the engine classified it from the result and
-// dispatch outcome runSubAgent returned — the five words the ledger's rows spell.
+// dispatch outcome runSubAgent returned — the six words the ledger's rows spell.
 type delegationOutcome string
 
 const (
@@ -204,8 +246,12 @@ const (
 	// a recovered panic, a loop-level Run error, or a reply the engine refused to hand over as a
 	// report (a missing output file, tool-call markup, a degenerate repeat).
 	delegationFaulted delegationOutcome = "faulted"
-	// delegationCancelled is a child the human stopped; its Turn was rolled back with the parent's.
+	// delegationCancelled is a child the human cancelled with the whole Turn; its Turn was rolled
+	// back with the parent's.
 	delegationCancelled delegationOutcome = "cancelled"
+	// delegationStopped is a child the human stopped singly (StopChild, ADR 0086 D4): the parent's
+	// Turn went on and read the engine fold of the child's work as a partial result.
+	delegationStopped delegationOutcome = "stopped"
 	// delegationRefused is a sub_agent call no child was ever built or started for: the depth
 	// bound, bad arguments, an unknown `continue`, a bad seat or roster, a construction or Submit
 	// failure — the parent read an error result and no delegation ran.
@@ -467,6 +513,42 @@ func (a *Agent) InterjectChild(runID string, in domain.UserInput) error {
 	return domain.ErrNoSuchChild
 }
 
+// StopChild stops the RUNNING sub-agent whose run id is runID, anywhere in this Agent's tree, and
+// every delegation under it, while the Turn that spawned it goes on (ADR 0086 D4). Nothing rolls
+// back: the stopped child's work is folded by the engine (Agent.finishAtStop) and its tool result —
+// a non-error partial result opening on stoppedResultHead — is committed like any other, the run is
+// retained for a `continue` as a capped one is, and the delegate ledger records it `stopped`. A
+// second StopChild on the same run id while that fold is running skips the fold, and the result
+// carries the unavailable marker in its place.
+//
+// Contract: non-blocking and safe from ANY goroutine, like InterjectChild — it cancels a context
+// and returns; the child's own goroutine unwinds its run and reports it. The cancel is the only
+// mechanism (ADR 0031): the child's context is a child of the parent's, so a whole-Turn cancel
+// still reaches it.
+//
+// It returns domain.ErrNoSuchChild when runID names no run a stop can still cut short — one that
+// never existed, has finished, or has returned from its run and is being reported — and nothing
+// was changed.
+func (a *Agent) StopChild(runID string) error {
+	if runID == "" {
+		return domain.ErrNoSuchChild
+	}
+	if a.children.stop(runID) {
+		return nil
+	}
+	if _, ok := a.children.lookup(runID); ok {
+		// Registered but disarmed: the run has returned and its result is being rendered, so
+		// the stop can no longer change what the parent reads.
+		return domain.ErrNoSuchChild
+	}
+	for _, child := range a.children.all() {
+		if err := child.StopChild(runID); err == nil {
+			return nil
+		}
+	}
+	return domain.ErrNoSuchChild
+}
+
 // drainMailbox commits everything queued for this child into its open Exchange, in queue order,
 // and reports each message's fate. It is called by Run at a between-Steps boundary it is about to
 // step past — the one place Interject's caller rule is satisfied without a host driving Step —
@@ -531,6 +613,8 @@ func undeliveredReason(ended delegationOutcome) domain.UndeliveredReason {
 		return domain.UndeliveredFaulted
 	case delegationCancelled:
 		return domain.UndeliveredCancelled
+	case delegationStopped:
+		return domain.UndeliveredStopped
 	case delegationRefused:
 		return domain.UndeliveredRefused
 	default:

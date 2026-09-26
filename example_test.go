@@ -176,6 +176,7 @@ var (
 	_ = apogee.UndeliveredCapped
 	_ = apogee.UndeliveredFaulted
 	_ = apogee.UndeliveredCancelled
+	_ = apogee.UndeliveredStopped
 	_ = apogee.UndeliveredRefused
 
 	_ = apogee.WireDirectionRequest

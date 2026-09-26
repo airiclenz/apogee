@@ -296,8 +296,8 @@ type SubAgentNamedEvent struct {
 // without threading anything through. Turn is the Turn the message is about to reach.
 //
 // Reason says WHY a message did not land, and is meaningful only when Landed is false: the child's
-// run ended before the boundary the message was waiting for — completed, capped, faulted or
-// cancelled, as the delegation itself ended — or the child refused the commit while it was still
+// run ended before the boundary the message was waiting for — completed, capped, faulted,
+// cancelled or stopped, as the delegation itself ended — or the child refused the commit while it was still
 // running. It is the zero value on a landed message. The set is open (ADR 0075 §10): a reader
 // meeting the zero value or one it does not know on an undelivered message reads it as
 // UndeliveredCompleted, which is the only account there was before the reason existed.
@@ -328,6 +328,9 @@ const (
 	UndeliveredFaulted UndeliveredReason = "faulted"
 	// UndeliveredCancelled is a child whose run was cancelled before that boundary.
 	UndeliveredCancelled UndeliveredReason = "cancelled"
+	// UndeliveredStopped is a child the human stopped singly (Agent.StopChild) before that
+	// boundary; the parent's Turn went on without it.
+	UndeliveredStopped UndeliveredReason = "stopped"
 	// UndeliveredRefused is a child still running that refused to commit the message into its
 	// Exchange at the boundary: the message and everything queued behind it never landed.
 	UndeliveredRefused UndeliveredReason = "refused"

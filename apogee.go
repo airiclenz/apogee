@@ -324,6 +324,7 @@ const (
 	UndeliveredFaulted   = domain.UndeliveredFaulted
 	UndeliveredCancelled = domain.UndeliveredCancelled
 	UndeliveredRefused   = domain.UndeliveredRefused
+	UndeliveredStopped   = domain.UndeliveredStopped
 )
 
 // The two values WireEvent.Direction takes.
@@ -809,8 +810,8 @@ var (
 	// mirror of ErrInputPending. Match with errors.Is.
 	ErrNoOpenExchange = domain.ErrNoOpenExchange
 
-	// ErrNoSuchChild is returned by Agent.InterjectChild when the run id names no
-	// RUNNING sub-agent in this agent tree — the child finished, was cancelled, or never
+	// ErrNoSuchChild is returned by Agent.InterjectChild and Agent.StopChild when the run id
+	// names no RUNNING sub-agent in this agent tree — the child finished, was cancelled, or never
 	// existed. Addressing a child is inherently racy, so this is a normal outcome a Driver
 	// reports rather than a fault; nothing was queued. Match with errors.Is.
 	ErrNoSuchChild = domain.ErrNoSuchChild

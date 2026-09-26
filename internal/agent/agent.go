@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"slices"
@@ -456,6 +457,12 @@ type Agent struct {
 	// (engineFoldUnavailableFormat) when the summary call faulted, or was never made because the
 	// faulted delegate had completed no Turn.
 	capFold string
+	// stoppedByUser marks a delegate the human stopped singly (Agent.StopChild, ADR 0086 D4) and
+	// whose run the stop cut short; stopUndelivered is what its mailbox still held at the stop. Both
+	// are set by the spawning parent's runSubAgent on the CHILD, after the stopped fold, and read by
+	// delegationResult alone: the stopped branch and the undelivered notes of its result.
+	stoppedByUser   bool
+	stopUndelivered []domain.UserInput
 
 	// outputPath and outputTarget are the file a delegation was spawned to write — the `output_path`
 	// argument of its sub_agent call (tools.SubAgentArgs.OutputPath), set on the CHILD by
@@ -984,9 +991,37 @@ func (a *Agent) finishAtFault(ctx context.Context, res domain.StepResult) {
 	a.capFold = a.foldForParent(ctx, a.cfg.StreamIdleTimeout)
 }
 
-// zeroTurnFoldCause is the cause the unavailable marker names when finishAtFault skipped the fold
-// because the faulted delegate had completed no Turn.
+// zeroTurnFoldCause is the cause the unavailable marker names when finishAtFault or finishAtStop
+// skipped the fold because the delegate had completed no Turn.
 const zeroTurnFoldCause = "the delegate completed no Turn"
+
+// finishAtStop is the STOPPED delegate's counterpart to finishAtFault (ADR 0086 D4), run by the
+// spawning parent's runSubAgent once a human's stop (StopChild) cut the child's Run short: it
+// writes the engine fold of the conversation as it stands at the stop into capFold, so the
+// stopped result carries it and the retention a continuation reads keeps it. No wrap-up Turn is
+// spent — the human asked for the work to end — and the fold runs under the one
+// Config.StreamIdleTimeout bound finishAtFault's does.
+//
+// ctx is the fold's own context, derived from the parent's and armed as the run's stop handle for
+// the fold's duration: a SECOND stop cancels it, which skips the fold and leaves the unavailable
+// marker naming that stop (secondStopFoldCause). A cancel of the parent's own context leaves
+// capFold empty — that is the whole Turn's cancel, which the caller reads off its own context.
+// A delegate that completed no Turn is given the zero-Turn marker without a summary call, as
+// finishAtFault gives it.
+func (a *Agent) finishAtStop(ctx context.Context) {
+	if a.turns.exchangeTurns == 0 {
+		a.capFold = fmt.Sprintf(engineFoldUnavailableFormat, zeroTurnFoldCause)
+		return
+	}
+	a.capFold = a.foldForParent(ctx, a.cfg.StreamIdleTimeout)
+	if a.capFold == "" && errors.Is(context.Cause(ctx), errDelegationStopped) {
+		a.capFold = fmt.Sprintf(engineFoldUnavailableFormat, secondStopFoldCause)
+	}
+}
+
+// secondStopFoldCause is the cause the unavailable marker names when a second stop skipped a
+// stopped delegate's fold (finishAtStop).
+const secondStopFoldCause = "the user stopped the delegate again before the summary finished"
 
 // foldForParent runs the ENGINE FOLD of a capped or faulted delegate's conversation — the summary
 // the parent reads under `[engine summary]` whatever the wrap-up Turn then produces

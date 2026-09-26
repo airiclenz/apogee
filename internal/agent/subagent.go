@@ -142,13 +142,25 @@ const (
 	closingNarrationHead = "[delegate's closing report — read as narration, not a finding]"
 )
 
+// stoppedResultHead is the marker line the PARENT model receives when the human stopped the
+// delegation (Agent.StopChild, ADR 0086 D4): a NON-error result whose body is cappedResultBody's —
+// the engine fold written at the stop (Agent.finishAtStop), then the child's last words — followed
+// by any undelivered interjections (undeliveredInterjectionHead) and the continue line. A package
+// constant, pinned by test, because the parent reads it as the contract for the rest of the result.
+const stoppedResultHead = "[stopped by the user — engine summary follows]"
+
+// undeliveredInterjectionHead opens each message the human addressed to a stopped delegation that
+// never reached it, in a stopped result's note slot; the message text follows on the next line.
+const undeliveredInterjectionHead = "[the user's message to this delegate, never delivered before the stop]"
+
 // engineFoldUnavailableFormat stands in for the engine fold when its summary call faulted
 // (Agent.foldForParent): the parent still reads the closing report under a head that says the
 // summary is MISSING and why, rather than a body silently missing its first part. %v is the cause.
 const engineFoldUnavailableFormat = "[engine summary unavailable — %v]"
 
 // continueLineFormat is the body note a CAPPED or FAULTED delegation's result carries when the
-// parent retained the child (P6 of plan 2026-09-18 - 00; faults since ADR 0082): the one line that
+// parent retained the child (P6 of plan 2026-09-18 - 00; faults since ADR 0082; a human's stop
+// since ADR 0086): the one line that
 // tells the parent model the handle it can spell back — `sub_agent` with `continue` naming the
 // delegation — instead of re-spawning the work from nothing. It rides the note slot
 // delegationResult fills after the missing-output (or draft-output), seat and
@@ -783,6 +795,12 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		ledgerTarget string
 		ran          bool
 		res          domain.StepResult
+		// stopped is set once a human's stop (StopChild) is known to have cut the child's Run
+		// short; the ledger reads it before any error case (classifyDelegation).
+		stopped bool
+		// stopLeftover is what the child's mailbox held when a stopped run's result was rendered:
+		// the result lists it, and the reaping defer still reports it undelivered.
+		stopLeftover []domain.UserInput
 		// reportLeftover is set by the reaping defer below and called here, once the delegation
 		// is classified: that defer runs FIRST, before any outcome exists, so it only takes what
 		// the closed mailbox still held and leaves the reporting — which says why it never
@@ -799,7 +817,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 			result = errorToolResult(call.ID, fmt.Sprintf("tool %q panicked", call.Tool))
 			outcome = dispatchDone
 		}
-		ended, cause := classifyDelegation(result, outcome, ran, res)
+		ended, cause := classifyDelegation(result, outcome, ran, stopped, res)
 		a.delegations.record(delegationRecord{
 			spawnIndex: spawnIndex,
 			callID:     call.ID,
@@ -953,7 +971,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		// report itself waits for the outer defer, which alone knows how the run ended and so why
 		// the message did not land — this defer runs before a recovered panic is even classified.
 		a.children.unregister(runID)
-		leftover, turn := sub.mailbox.close(), sub.turns.index
+		leftover, turn := append(stopLeftover, sub.mailbox.close()...), sub.turns.index
 		reportLeftover = func(reason domain.UndeliveredReason) {
 			sub.reportUndelivered(turn, leftover, reason)
 		}
@@ -969,6 +987,13 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// the identity it already paints (ADR 0063 D1), and two delegations whose call ids collide stay
 	// two addresses (ADR 0086).
 	a.children.register(runID, sub)
+	// And stoppable for as long as its Run can still be cut short (ADR 0086 D4): the child runs on a
+	// context of its own, a child of the parent's, whose cancel is the run's stop handle. It is
+	// withdrawn the moment Run returns, so a stop landing while the namer is joined or the result
+	// rendered finds nothing armed and leaves a completed or capped result exactly as it is.
+	childCtx, stopRun := context.WithCancelCause(ctx)
+	defer stopRun(nil)
+	a.children.arm(runID, stopRun)
 	// A name a continuation INHERITED is re-announced for the new spawn id: the call that spawned
 	// this child named nothing, so every Driver reads its block off the call's `task` — the
 	// continuation instructions — until told the name the continued delegation already wears. It is
@@ -982,7 +1007,8 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// starting the work would buy a better label at the price of the thing it labels.
 	stopNaming = a.startDelegationNaming(ctx, call.ID, sub, &naming)
 	ran = true
-	res, err = sub.Run(ctx)
+	res, err = sub.Run(childCtx)
+	a.children.disarm(runID)
 	// The namer is stopped and JOINED here, before the run is read, rather than left to the defer
 	// alone (whose copies are then no-ops): the name a retained child is kept under below must be
 	// the name it ended its run wearing, and the namer's late-drop check reads its context — still
@@ -993,6 +1019,30 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	}
 	naming.Wait()
 	ledgerName = sub.displayName()
+	// A STOP is read off the cause of the child's context, and only where it cut the Run short: the
+	// Run returned cancelled, or faulted with finishAtFault's fold cancelled under it. The parent's
+	// own context must still be live — a whole-Turn cancel reaches a grandchild through the stopped
+	// child's context carrying that child's cause, and is still the grandchild's cancel. A stop
+	// that landed as the child finished leaves the finished result standing.
+	stopped = err == nil && ctx.Err() == nil && errors.Is(context.Cause(childCtx), errDelegationStopped) &&
+		(res.Status == domain.StatusCancelled || (res.Faulted && sub.capFold == ""))
+	if stopped {
+		// The fold of the stopped work (finishAtStop), under a context of its own that is re-armed
+		// as the run's stop handle: a second stop skips it. A cancel of the parent's context during
+		// the fold is the whole Turn's cancel, and the run is then reported as the cancel it is.
+		foldCtx, stopFold := context.WithCancelCause(ctx)
+		a.children.arm(runID, stopFold)
+		sub.finishAtStop(foldCtx)
+		a.children.disarm(runID)
+		stopFold(nil)
+		stopped = ctx.Err() == nil
+	}
+	if stopped {
+		// Closed HERE rather than in the reaping defer, so the result can list what the human
+		// wrote to the child that never reached it; the defer still reports each one undelivered.
+		stopLeftover = sub.mailbox.close()
+		sub.stoppedByUser, sub.stopUndelivered = true, stopLeftover
+	}
 	result, outcome = sub.delegationResult(call.ID, res, err)
 	// A child the engine stopped at a bound is RETAINED for the rest of this Exchange (P6) — the
 	// fold and closing text the result carried, and everything the call asked for, so the parent
@@ -1005,7 +1055,9 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// — no partial result surfaces and no snapshot lands mid-sub-agent — holds unchanged. Read
 	// AFTER the namer is joined, so a delegation named out of band is retained under the name the
 	// parent model has been told (ADR 0068); an unnamed one has no handle and is not retained.
-	if res.StepCapped || res.Faulted {
+	// A STOPPED child is retained the same way (ADR 0086 D4): its fold was written at the stop
+	// (Agent.finishAtStop) and its result carries the continue line.
+	if res.StepCapped || res.Faulted || stopped {
 		a.retained.retain(retainedDelegate{
 			task:          retainTask,
 			name:          sub.displayName(),
@@ -1021,17 +1073,21 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 }
 
 // classifyDelegation reads how a delegation ended off what runSubAgent is returning for it — the
-// result, the dispatch outcome, whether the child's Run was reached (ran) and what it returned
-// (res) — into the ledger's outcome word and, for a fault or refusal, the head line of the result
-// that told the parent. A cancel is read first: it returns no result at all. An error result is
+// result, the dispatch outcome, whether the child's Run was reached (ran), whether a human's stop
+// cut it short (stopped) and what it returned (res) — into the ledger's outcome word and, for a
+// fault or refusal, the head line of the result that told the parent. A cancel is read first: it
+// returns no result at all. A stop is read next, ahead of every error case, because a stopped
+// run's result is the non-error partial result whatever state the stop left the child in. An error result is
 // then a refusal when no child ever ran (every early return, and a Submit that failed) and a fault
 // otherwise — the child's own fault, a Run error, a recovered panic, or a completed reply the
 // engine would not hand over as a report (completedResult's error shapes). A non-error result is
 // capped when the child's Run said so and completed otherwise.
-func classifyDelegation(result domain.ToolResult, outcome dispatchOutcome, ran bool, res domain.StepResult) (delegationOutcome, string) {
+func classifyDelegation(result domain.ToolResult, outcome dispatchOutcome, ran, stopped bool, res domain.StepResult) (delegationOutcome, string) {
 	switch {
 	case outcome == dispatchCancelled:
 		return delegationCancelled, ""
+	case stopped:
+		return delegationStopped, ""
 	case result.IsError && !ran:
 		return delegationRefused, delegationCause(result.Content)
 	case result.IsError:
@@ -1160,6 +1216,18 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 		// localise — surface it as an error result to the parent model rather than failing
 		// the parent Turn.
 		result = errorToolResult(callID, "sub-agent failed: "+err.Error())
+	case a.stoppedByUser:
+		// The HUMAN stopped this one delegation (StopChild, ADR 0086 D4) and the parent's Turn goes
+		// on — ahead of the cancel and fault cases, because the stop is what left the child
+		// cancelled or with a cancelled fault fold. Like a capped result it is NON-error partial
+		// work: the head saying who ended it, then the fold written at the stop (finishAtStop) and
+		// the child's last words under the same sub-heads a capped result uses.
+		text := a.lastVisibleText()
+		result = domain.ToolResult{
+			CallID:  callID,
+			Content: stoppedResultHead + "\n" + a.cappedResultBody(text, floor.ClosingShapeOf(text)),
+			IsError: false,
+		}
 	case res.Status == domain.StatusCancelled:
 		// The cancel reached the nested loop's boundary and it returned resumably; the parent
 		// Turn must now roll back wholesale (D2: the recovery point is the pre-sub_agent
@@ -1216,6 +1284,13 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// subAgentFaultPrefix) are inside the kept head, so the cut never re-classifies a result.
 	result.Content = capDelegateResult(result.Content)
 
+	// What the human wrote to a STOPPED child that never reached it, first in the note slot, one
+	// head line and the message text each: the parent reads the fold as the child's work, and these
+	// as what the human still wanted of it when they stopped it.
+	for _, in := range a.stopUndelivered {
+		result.Content += "\n" + undeliveredInterjectionHead + "\n" + in.Text
+	}
+
 	// The routing note, for a child whose call ASKED for the Sub-agent server and was built on the
 	// session server instead (ADR 0069 decision 9). It rides every outcome that produces a result,
 	// for the same reason the trailer below does: a parent whose routing decision was overruled
@@ -1241,7 +1316,7 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	// left behind (ADR 0082) — a file that predates the spawn earns no note (draftOutputSurvives).
 	// The head still says the delegation faulted; the note, like the continue line below it, says
 	// what survived.
-	if res.Faulted && a.draftOutputSurvives() {
+	if (res.Faulted || a.stoppedByUser) && a.draftOutputSurvives() {
 		result.Content += "\n" + fmt.Sprintf(draftOutputNoteFormat, a.outputPath)
 	}
 	if a.seatFallback {
@@ -1253,13 +1328,13 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	if a.capRequested > 0 {
 		result.Content += "\n" + fmt.Sprintf(stepCapClampNoteFormat, a.capRequested, a.stepCap, a.stepCap)
 	}
-	// And the continue line, LAST of the body notes, for a capped or faulted child the parent
+	// And the continue line, LAST of the body notes, for a capped, faulted or stopped child the parent
 	// retains — one that ended its run wearing a name (runSubAgent joins the namer before rendering
 	// this, so the name read here is the one the retention keys on). A completed child has nothing
 	// to continue from and an unnamed one has no handle, so neither carries it. On the fault path
 	// it rides the ERROR result: the head still says the delegation faulted and why, and the line
 	// below it says the work is not lost.
-	if res.StepCapped || res.Faulted {
+	if res.StepCapped || res.Faulted || a.stoppedByUser {
 		if name := a.displayName(); name != "" {
 			result.Content += "\n" + fmt.Sprintf(continueLineFormat, name)
 		}

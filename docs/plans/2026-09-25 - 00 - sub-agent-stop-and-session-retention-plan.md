@@ -94,7 +94,13 @@ NOTES (2026-09-26): CONTEXT.md's Sub-agent entry still says a child is addressed
 **Closes:** apogee-interject-by-run-id
 **Commit:** `refactor(agent): address a child's interjection by run id, not spawn call id`
 
-## 3. Engine stops one running delegation and folds it
+## 3. Engine stops one running delegation and folds it — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): internal/eventjson/encode.go needed no change — it already encodes `Reason` as `string(e.Reason)`, so `stopped` is carried as-is; encode_test.go pins the new value instead.
+NOTES (2026-09-26): consequential edit — internal/domain/errors.go: made necessary by StopChild now also returning ErrNoSuchChild (doc comment).
+NOTES (2026-09-26): consequential edit — example_test.go: made necessary by the new exported UndeliveredStopped (the compile-time export enumeration).
+NOTES (2026-09-26): the stopped result renders each undelivered message as `[the user's message to this delegate, never delivered before the stop]` plus its text (text only, no file/skill refs), first in the note slot; the draft-output note also rides a stopped result when the spawn-named file was written during the run, as on a fault.
+NOTES (2026-09-26): the stop state reaches delegationResult through two child fields (stoppedByUser, stopUndelivered) rather than a new parameter, leaving its existing test call sites untouched; the second-stop marker cause is `the user stopped the delegate again before the summary finished`.
 
 **What:** Depends on item 2.
 **Goal:** `(*Agent).StopChild(runID string) error` stops that running delegation (and everything under it) while the parent's Turn continues; the delegation's tool result is committed with head `[stopped by the user — engine summary follows]`, then the fold, the closing text, undelivered interjections and the continue line; the ledger outcome is `stopped`; the run is retained as a capped run is; a second stop during the fold skips it and leaves the unavailable marker; an unknown or finished run id returns `ErrNoSuchChild`.

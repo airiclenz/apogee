@@ -36,11 +36,11 @@ var (
 	// the caller wants Submit, so the refusal is loud rather than a silent promotion.
 	ErrNoOpenExchange = errors.New("apogee: interject requires an open Exchange")
 
-	// ErrNoSuchChild is returned by Agent.InterjectChild when the run id it was handed
-	// names no RUNNING sub-agent anywhere in this agent tree — the child finished, was cancelled,
-	// or never existed. Addressing a child is inherently racy (the human types while the child
-	// runs), so this is a normal outcome a Driver reports rather than a fault: the message was
-	// never queued, so no ChildInterjectionEvent will ever account for it.
+	// ErrNoSuchChild is returned by Agent.InterjectChild and Agent.StopChild when the run id it
+	// was handed names no RUNNING sub-agent anywhere in this agent tree — the child finished, was
+	// cancelled, or never existed. Addressing a child is inherently racy (the human types while the
+	// child runs), so this is a normal outcome a Driver reports rather than a fault: a message was
+	// never queued, so no ChildInterjectionEvent will ever account for it, and a stop changed nothing.
 	ErrNoSuchChild = errors.New("apogee: no running sub-agent with that run id")
 
 	// ErrDuplicateTool is returned by ToolRegistry.Register when a tool with the same
