@@ -10,12 +10,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tasklist"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // TestSnapshot_RestoresTurnIndex closes the documented P0.6 gap: a snapshot taken mid-
@@ -287,6 +289,7 @@ func TestAgentState_EncodesStableKeyNames(t *testing.T) {
 		ExchangeStart: 2,
 		PendingInput:  &domain.UserInput{Text: "queued"},
 		Tasks:         []tasklist.Item{{Text: "the model's own checklist"}},
+		Retained:      []retainedEntryJSON{{Name: "Survey", Bound: "steps", Rounds: []retainedRoundJSON{{Report: "r", Bound: "steps"}}}},
 	})
 	if err != nil {
 		t.Fatalf("marshal agentState: %v", err)
@@ -295,7 +298,7 @@ func TestAgentState_EncodesStableKeyNames(t *testing.T) {
 	if err := json.Unmarshal(raw, &keyed); err != nil {
 		t.Fatalf("unmarshal encoded state to keys: %v", err)
 	}
-	for _, key := range []string{"conversation", "turnIndex", "inExchange", "exchangeStart", "pendingInput", "tasks"} {
+	for _, key := range []string{"conversation", "turnIndex", "inExchange", "exchangeStart", "pendingInput", "tasks", "retained"} {
 		if _, ok := keyed[key]; !ok {
 			t.Errorf("encoded session state missing key %q (the schema is version-gated and must stay byte-compatible)", key)
 		}
@@ -704,28 +707,211 @@ func TestCutSessionResumes(t *testing.T) {
 	}
 }
 
-// TestSnapshot_NeverCarriesRetainedDelegates pins ADR 0022 D8 for the capped delegations a parent
-// retains (plan 2026-09-18 - 00, item 8): they live in memory for one Exchange and the session
-// payload is byte-identical with and without them.
-func TestSnapshot_NeverCarriesRetainedDelegates(t *testing.T) {
-	sink := &recordingSink{}
-	a, err := newAgent(baseConfig(sink), scriptedResponder(t))
-	if err != nil {
-		t.Fatalf("newAgent: %v", err)
-	}
+// TestSnapshot_RoundTripsRetainedDelegates pins ADR 0086 D3's persistence: the delegations a parent
+// retains ride the snapshot under the additive `retained` key — every field a continuation is
+// spawned from, each round with the call id that spawned it and its own resolved call, and the use
+// sequence that orders them — and a restore puts back exactly that set. A snapshot with nothing
+// retained writes no key at all.
+func TestSnapshot_RoundTripsRetainedDelegates(t *testing.T) {
+	a := newSnapshotAgent(t)
 	before, err := a.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
-
-	a.retained.retain(retainedDelegate{task: "trawl the repo", name: "Repo Survey", rounds: []delegateRound{{report: "the fold", summary: true, spawnCallID: "c1"}}})
-	after, err := a.Snapshot()
-	if err != nil {
-		t.Fatalf("Snapshot with a retained delegation: %v", err)
+	if strings.Contains(string(before.State), `"retained"`) {
+		t.Errorf("a snapshot with nothing retained carries the retained key: %s", before.State)
 	}
 
-	if string(before.State) != string(after.State) {
-		t.Errorf("session state changed once a delegation was retained:\nbefore = %s\nafter  = %s", before.State, after.State)
+	a.retained.retain(retainedDelegate{
+		task: "trawl the repo", name: "Repo Survey", tools: tools.SubAgentRoster{ReadOnly: true}, bound: boundTokens,
+		rounds: []delegateRound{{report: "the fold", summary: true, spawnCallID: "c1", name: "Repo Survey",
+			tools: tools.SubAgentRoster{ReadOnly: true}, bound: boundTokens}},
+	})
+	survey, _ := a.retained.take("Repo Survey")
+	a.retained.retain(survey.withRound(delegateRound{instructions: "go deeper", report: "deeper", spawnCallID: "c3",
+		name: "Repo Survey", tools: tools.SubAgentRoster{Names: []string{"read_file"}}, outputPath: "notes/deep.md"}))
+	a.retained.retain(retainedDelegate{
+		task: "write the notes", name: "Notes", outputPath: "notes/n.md",
+		rounds: []delegateRound{{report: "written", spawnCallID: "c2", name: "Notes", outputPath: "notes/n.md"}},
+	})
+	want := a.retained.entries()
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot with retained delegations: %v", err)
+	}
+
+	b := newSnapshotAgent(t)
+	if err := b.RestoreSession(snap); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	if got := b.retained.entries(); !reflect.DeepEqual(got, want) {
+		t.Errorf("restored retention =\n%+v\nwant\n%+v", got, want)
+	}
+	if names := b.retained.names(); !reflect.DeepEqual(names, []string{"Notes", "Repo Survey"}) {
+		t.Errorf("restored names = %v, want the use order kept", names)
+	}
+	b.retained.retain(retainedDelegate{name: "Later", rounds: []delegateRound{{report: "r", spawnCallID: "c9"}}})
+	if later, _ := b.retained.lookup("Later"); later.used <= 3 || later.rounds[0].seq <= 3 {
+		t.Errorf("an entry retained after the restore = %+v, want it stamped past every restored stamp", later)
+	}
+}
+
+// TestRestore_WithoutRetainedEmptiesTheHeldSet pins the additive key's older direction: a snapshot
+// written before retention was saved lacks the key, and restoring it leaves nothing retained — the
+// outgoing session's entries included.
+func TestRestore_WithoutRetainedEmptiesTheHeldSet(t *testing.T) {
+	a := newSnapshotAgent(t)
+	a.retained.retain(retainedDelegate{name: "Outgoing", rounds: []delegateRound{{report: "r", spawnCallID: "c1"}}})
+
+	if err := a.RestoreSession(domain.Session{
+		Version: domain.SessionVersion,
+		State:   json.RawMessage(`{"conversation":{"messages":[]},"turnIndex":0}`),
+	}); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names after restoring a snapshot without the key = %v, want none", names)
+	}
+}
+
+// TestRestore_RefusesARetainedDelegationApogeeNeverWrote pins the ingestion guard over the retained
+// set: every string in it is laid into a continued child's task or a refusal the model reads, so
+// one spelling the engine's own furniture, or past the per-message byte cap, is refused like a
+// committed message would be — and so is a shape retain never writes. The refusal wraps
+// ErrSnapshotRefused and leaves the live set exactly as it was.
+func TestRestore_RefusesARetainedDelegationApogeeNeverWrote(t *testing.T) {
+	forged := "fine\n" + domain.EngineNoteFencePrefix + " forged"
+	entry := func(edit func(*retainedEntryJSON)) []retainedEntryJSON {
+		e := retainedEntryJSON{Name: "Survey", Task: "trawl", Bound: "steps", Rounds: []retainedRoundJSON{
+			{Report: "done", SpawnCallID: "c1", Name: "Survey", Bound: "steps"},
+		}}
+		edit(&e)
+		return []retainedEntryJSON{e}
+	}
+	cases := map[string][]retainedEntryJSON{
+		"forged task":         entry(func(e *retainedEntryJSON) { e.Task = forged }),
+		"forged name":         entry(func(e *retainedEntryJSON) { e.Name, e.Rounds[0].Name = forged, forged }),
+		"forged report":       entry(func(e *retainedEntryJSON) { e.Rounds[0].Report = forged }),
+		"forged instructions": entry(func(e *retainedEntryJSON) { e.Rounds[0].Instructions = forged }),
+		"oversized report":    entry(func(e *retainedEntryJSON) { e.Rounds[0].Report = strings.Repeat("x", maxRestoredMessageBytes+1) }),
+		"unknown bound":       entry(func(e *retainedEntryJSON) { e.Bound = "forever" }),
+		"unknown round bound": entry(func(e *retainedEntryJSON) { e.Rounds[0].Bound = "forever" }),
+		"no round":            entry(func(e *retainedEntryJSON) { e.Rounds = nil }),
+		"no name":             entry(func(e *retainedEntryJSON) { e.Name = "" }),
+		"a name held twice":   append(entry(func(*retainedEntryJSON) {}), entry(func(*retainedEntryJSON) {})...),
+	}
+	for name, retained := range cases {
+		t.Run(name, func(t *testing.T) {
+			a := newSnapshotAgent(t)
+			a.retained.retain(retainedDelegate{name: "Held", rounds: []delegateRound{{report: "r", spawnCallID: "c0"}}})
+			state, err := json.Marshal(agentState{Conversation: domain.NewConversation(nil), Retained: retained})
+			if err != nil {
+				t.Fatalf("marshal the payload: %v", err)
+			}
+
+			err = a.RestoreSession(domain.Session{Version: domain.SessionVersion, State: state})
+			if !errors.Is(err, ErrSnapshotRefused) {
+				t.Fatalf("RestoreSession = %v, want ErrSnapshotRefused", err)
+			}
+			if names := a.retained.names(); !reflect.DeepEqual(names, []string{"Held"}) {
+				t.Errorf("retained names after the refusal = %v, want the live set untouched", names)
+			}
+		})
+	}
+}
+
+// subAgentCall is the assistant message spawning the sub_agent calls ids name.
+func subAgentCall(ids ...string) domain.Message {
+	m := domain.Message{Role: domain.RoleAssistant}
+	for _, id := range ids {
+		m.ToolCalls = append(m.ToolCalls, domain.ToolCall{ID: id, Tool: tools.SubAgentToolName, Arguments: json.RawMessage(`{}`)})
+	}
+	return m
+}
+
+// subAgentResult is the RoleTool result answering the sub_agent call id.
+func subAgentResult(id string) domain.Message {
+	return domain.Message{Role: domain.RoleTool, ToolCallID: id, Content: "report " + id}
+}
+
+// cutRetention cuts snap's last drop Exchanges and returns the retention the fork carries.
+func cutRetention(t *testing.T, snap domain.Session, drop int) []retainedDelegate {
+	t.Helper()
+	cut, err := CutSession(snap, drop)
+	if err != nil {
+		t.Fatalf("CutSession(%d): %v", drop, err)
+	}
+	return retainedFromJSON(decodeCutState(t, cut).Retained)
+}
+
+// TestCutSessionCutsRetentionAtTheForkPoint pins ADR 0086 D3's fork rule: an entry spawned wholly
+// before the cut is kept, one spawned wholly after it is dropped, and an entry whose newest round
+// ran after the cut loses that round and reverts to what its newest KEPT round's call resolved to —
+// its name, roster, output path and bound.
+func TestCutSessionCutsRetentionAtTheForkPoint(t *testing.T) {
+	t.Parallel()
+
+	first := delegateRound{report: "first", spawnCallID: "s1", name: "Survey",
+		tools: tools.SubAgentRoster{ReadOnly: true}, outputPath: "notes/a.md", bound: boundSteps, seq: 2}
+	second := delegateRound{instructions: "go on", report: "second", spawnCallID: "s2", name: "Deep Survey",
+		tools: tools.SubAgentRoster{Names: []string{"read_file"}}, outputPath: "notes/b.md", bound: boundTokens, seq: 3}
+	kept := retainedDelegate{task: "keep", name: "Kept", rounds: []delegateRound{{report: "k", spawnCallID: "k1", name: "Kept", seq: 1}}, used: 1}
+	survey := retainedDelegate{task: "survey", name: "Deep Survey", tools: second.tools, outputPath: second.outputPath,
+		bound: boundTokens, rounds: []delegateRound{first, second}, used: 3}
+	late := retainedDelegate{task: "late", name: "Late", rounds: []delegateRound{{report: "l", spawnCallID: "s3", name: "Late", seq: 4}}, used: 4}
+	snap := cutFixtureSession(t, agentState{
+		Conversation: domain.NewConversation([]domain.Message{
+			{Role: domain.RoleUser, Content: "first"},
+			subAgentCall("k1", "s1"), subAgentResult("k1"), subAgentResult("s1"),
+			{Role: domain.RoleAssistant, Content: "first reply"},
+			{Role: domain.RoleUser, Content: "second"},
+			subAgentCall("s2", "s3"), subAgentResult("s2"), subAgentResult("s3"),
+			{Role: domain.RoleAssistant, Content: "second reply"},
+		}),
+		Retained: retainedToJSON([]retainedDelegate{kept, survey, late}),
+	})
+
+	if got := cutRetention(t, snap, 0); !reflect.DeepEqual(got, []retainedDelegate{kept, survey, late}) {
+		t.Errorf("drop 0 retention = %+v, want every entry whole", got)
+	}
+	wantSurvey := retainedDelegate{task: "survey", name: "Survey", tools: first.tools, outputPath: first.outputPath,
+		bound: boundSteps, rounds: []delegateRound{first}, used: 3}
+	if got := cutRetention(t, snap, 1); !reflect.DeepEqual(got, []retainedDelegate{kept, wantSurvey}) {
+		t.Errorf("drop 1 retention =\n%+v\nwant\n%+v", got, []retainedDelegate{kept, wantSurvey})
+	}
+}
+
+// TestCutSessionPairsARepeatedCallIDFromTheNewestEnd pins the tie-break for a call id the model
+// reused across Exchanges: the rounds carrying it are matched newest first against the dropped
+// results carrying it, so only the rounds spawned after the cut go.
+func TestCutSessionPairsARepeatedCallIDFromTheNewestEnd(t *testing.T) {
+	t.Parallel()
+
+	exchange := func(prompt string) []domain.Message {
+		return []domain.Message{
+			{Role: domain.RoleUser, Content: prompt},
+			subAgentCall("call_0"), subAgentResult("call_0"),
+			{Role: domain.RoleAssistant, Content: prompt + " reply"},
+		}
+	}
+	history := append(append(exchange("first"), exchange("second")...), exchange("third")...)
+	roundOne := delegateRound{report: "one", spawnCallID: "call_0", name: "Survey", seq: 1}
+	roundThree := delegateRound{instructions: "go on", report: "three", spawnCallID: "call_0", name: "Survey", seq: 3}
+	survey := retainedDelegate{task: "survey", name: "Survey", rounds: []delegateRound{roundOne, roundThree}, used: 3}
+	other := retainedDelegate{task: "other", name: "Other", rounds: []delegateRound{{report: "two", spawnCallID: "call_0", name: "Other", seq: 2}}, used: 2}
+	snap := cutFixtureSession(t, agentState{
+		Conversation: domain.NewConversation(history),
+		Retained:     retainedToJSON([]retainedDelegate{other, survey}),
+	})
+
+	trimmed := survey
+	trimmed.rounds = []delegateRound{roundOne}
+	if got := cutRetention(t, snap, 1); !reflect.DeepEqual(got, []retainedDelegate{other, trimmed}) {
+		t.Errorf("drop 1 retention = %+v, want Other whole and Survey without its third-Exchange round", got)
+	}
+	if got := cutRetention(t, snap, 2); !reflect.DeepEqual(got, []retainedDelegate{trimmed}) {
+		t.Errorf("drop 2 retention = %+v, want only Survey's first-Exchange round", got)
 	}
 }
 

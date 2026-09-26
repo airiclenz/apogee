@@ -239,7 +239,16 @@ Folded guards: the "completed" gate excludes cancel, Run error and cap/fault (`e
 - `go test -race -count=1 ./internal/tools/`
 **Commit:** `feat(agent): a named delegation stays continuable for the whole session`
 
-## 10. Retention is saved with the session and cut by a fork
+## 10. Retention is saved with the session and cut by a fork — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): consequential edit — internal/agent/subagent.go: made necessary by delegateRound gaining its own call fields (runSubAgent stamps each new round with the name, roster, output path and bound its run resolved to).
+NOTES (2026-09-26): consequential edit — internal/agent/stop_test.go: made necessary by delegateRound holding a tools.SubAgentRoster (no longer comparable with !=); the assertion now compares the round's text fields through a new sameRoundText helper.
+NOTES (2026-09-26): consequential edit — internal/agent/subagent_test.go: made necessary by the new per-round fields: unstamped also zeroes each round's seq, the DeepEqual wants go through a new everyRoundAsTheEntry helper, and one slices.Equal over rounds became slices.EqualFunc(…, sameRoundText).
+NOTES (2026-09-26): each round keeps its own name, roster, output path and bound (not only roster and path) plus a use-sequence stamp (seq, set by retain on the newest round); a fork trim re-derives the entry from its newest kept round, so a continuation that renamed the entry and was cut reverts to the old name; a name collision after that re-derivation keeps the more recently used entry.
+NOTES (2026-09-26): CutSession's tie-break for a repeated call id pairs from the newest end: the rounds carrying the id (newest first by seq, across entries) are matched one for one against the dropped RoleTool results carrying it. Any RoleTool result counts, not only sub_agent ones, so a reused id on a call that retained nothing can over-cut an older round. That errs toward losing a continuation, never toward keeping one spawned after the cut.
+NOTES (2026-09-26): a restored `retained` entry is refused (ErrSnapshotRefused) if it has no name, reuses a name, has no rounds or has an unknown bound word. Every name, task, output path and round instructions/report string is bounded at maxRestoredMessageBytes and checked through forgesRestoredStructure. There is no cap on the number of entries or rounds, so no ordinary session can become unresumable.
+NOTES (2026-09-26): the retention-comment sweep has nothing left to change: the two remaining hits (agent.go delegations field, children.go delegate-ledger doc) describe the delegate ledger, which is still never snapshotted. The Agent.retained field comment, the retainedDelegates doc, the agentState doc (new `retained` bullet), CutSession's doc and checkRestoredStructure's doc were restated.
+NOTES (2026-09-26): item 9's TestRestoreSession_EmptiesRetention became TestRestoreSession_ReplacesRetention (the incoming snapshot's set replaces the outgoing one; a snapshot with none restores with none). TestResume_StartsWithNoRetention became TestResume_ContinuesANamedDelegation.
 
 **What:** Depends on item 9.
 **Goal:** the engine snapshot carries retention under an additive `retained` key (no record-version bump) and `--resume`, `--continue` and live restore load it; each round records the call id that spawned it; `CutSession` keeps only the rounds whose spawning result is not in the cut tail and drops an entry left with none; a snapshot without the key restores with no retention.

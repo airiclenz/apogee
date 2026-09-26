@@ -1153,7 +1153,10 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 			entry = prior
 		}
 		entry.name, entry.tools, entry.outputPath, entry.bound = sub.displayName(), args.Tools, args.OutputPath, sub.capHit
-		round := delegateRound{report: report, summary: summary, spawnCallID: call.ID}
+		round := delegateRound{
+			report: report, summary: summary, spawnCallID: call.ID,
+			name: entry.name, tools: entry.tools, outputPath: entry.outputPath, bound: entry.bound,
+		}
 		if continuing {
 			round.instructions = args.Task
 		}

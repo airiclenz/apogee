@@ -3930,7 +3930,7 @@ func TestSubAgent_CappedChildIsRetainedWithItsFold(t *testing.T) {
 		rounds:     []delegateRound{{report: summaryReport(childFoldSummary, childClosingReport), summary: true, spawnCallID: "c1"}},
 		bound:      boundSteps,
 	}
-	if !reflect.DeepEqual(unstamped(got), want) {
+	if !reflect.DeepEqual(unstamped(got), everyRoundAsTheEntry(want)) {
 		t.Errorf("retained delegate = %+v, want %+v", got, want)
 	}
 	if names := a.retained.names(); !slices.Equal(names, []string{retainedSurveyName}) {
@@ -3964,7 +3964,7 @@ func TestSubAgent_NamedCompletedChildIsRetained(t *testing.T) {
 		outputPath: "notes/survey.md",
 		rounds:     []delegateRound{{report: "the survey is complete", spawnCallID: "c1"}},
 	}
-	if !reflect.DeepEqual(unstamped(got), want) {
+	if !reflect.DeepEqual(unstamped(got), everyRoundAsTheEntry(want)) {
 		t.Errorf("retained delegate = %+v, want %+v", got, want)
 	}
 }
@@ -4290,7 +4290,23 @@ func firstRoundSeed(report, instructions string) string {
 // entry, so a test can compare an entry by value.
 func unstamped(d retainedDelegate) retainedDelegate {
 	d.used = 0
+	d.rounds = slices.Clone(d.rounds)
+	for i := range d.rounds {
+		d.rounds[i].seq = 0
+	}
 	return d
+}
+
+// everyRoundAsTheEntry returns want with every round's call fields — name, roster, output path and
+// bound — set to the entry's own: the shape of an entry whose every run resolved alike, which is
+// what the retention tests' continuations inherit.
+func everyRoundAsTheEntry(want retainedDelegate) retainedDelegate {
+	want.rounds = slices.Clone(want.rounds)
+	for i := range want.rounds {
+		r := &want.rounds[i]
+		r.name, r.tools, r.outputPath, r.bound = want.name, want.tools, want.outputPath, want.bound
+	}
+	return want
 }
 
 // continueArgs is the sub_agent payload of a continuation that sets nothing but the handle and the
@@ -4380,7 +4396,7 @@ func TestSubAgent_ContinueSpawnsAChildFromTheFoldWithAFreshCap(t *testing.T) {
 		{report: summaryReport(childFoldSummary, childClosingReport), summary: true, spawnCallID: "c1"},
 		{instructions: continueInstructions, report: "the survey is now complete", spawnCallID: "c2"},
 	}
-	if !ok || retained.task != retainedSurveyTask || !slices.Equal(retained.rounds, wantRounds) {
+	if !ok || retained.task != retainedSurveyTask || !slices.EqualFunc(retained.rounds, wantRounds, sameRoundText) {
 		t.Errorf("retained delegate = %+v (found %v), want the task and rounds %+v", retained, ok, wantRounds)
 	}
 	if names := a.retained.names(); !slices.Equal(names, []string{retainedSurveyName}) {
@@ -4652,7 +4668,7 @@ func TestSubAgent_AContinuedChildThatCapsAgainIsRetainedAnew(t *testing.T) {
 		},
 		bound: boundSteps,
 	}
-	if !reflect.DeepEqual(unstamped(got), want) {
+	if !reflect.DeepEqual(unstamped(got), everyRoundAsTheEntry(want)) {
 		t.Errorf("retained delegate = %+v, want %+v", got, want)
 	}
 	second, ok := subAgentResultFor(sink.events, "c2")
@@ -4773,7 +4789,7 @@ func TestSubAgent_FaultedDelegateIsRetainedAndContinuable(t *testing.T) {
 		outputPath: "notes/survey.md",
 		rounds:     []delegateRound{{report: summaryReport(childFoldSummary, "reading file 1"), summary: true, spawnCallID: "c1"}},
 	}
-	if !reflect.DeepEqual(unstamped(retained), want) {
+	if !reflect.DeepEqual(unstamped(retained), everyRoundAsTheEntry(want)) {
 		t.Errorf("retained delegate = %+v, want %+v", retained, want)
 	}
 	// The continued child's opening request: call 5 (0: spawn, 1–2: turns, 3: the fault, 4: the

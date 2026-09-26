@@ -11,12 +11,15 @@ import (
 	"encoding/json"
 	"errors"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/provider"
 	"github.com/airiclenz/apogee/internal/stubllm"
 	"github.com/airiclenz/apogee/internal/tasklist"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // containsUser reports whether the conversation holds a user-role message whose content contains
@@ -482,44 +485,88 @@ func TestRestoreSession_ShapeRefusalLeavesTheLiveSessionStanding(t *testing.T) {
 	}
 }
 
-// TestRestoreSession_EmptiesRetention proves the retention half of the boundary (ADR 0086 D1): a
-// retained delegation belongs to the session a live restore swaps out, so none of the outgoing
-// session's entries is continuable in the restored one.
-func TestRestoreSession_EmptiesRetention(t *testing.T) {
+// TestRestoreSession_ReplacesRetention proves the retention half of the boundary (ADR 0086 D3): a
+// retained delegation belongs to the session it was retained in, so a live restore replaces the
+// outgoing session's set whole with the one the restored snapshot carries — none of the outgoing
+// entries survives, and a snapshot with none restores with nothing retained.
+func TestRestoreSession_ReplacesRetention(t *testing.T) {
 	t.Parallel()
 
 	a := idleAgentWithHistory(t)
-	snap, err := a.Snapshot()
+	empty, err := a.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 	a.retained.retain(retainedDelegate{task: "survey", name: "Repo Survey", rounds: []delegateRound{{report: "done"}}})
+	carrying, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	a.retained.clear()
+	a.retained.retain(retainedDelegate{task: "outgoing", name: "Outgoing", rounds: []delegateRound{{report: "done"}}})
 
-	if err := a.RestoreSession(snap); err != nil {
+	if err := a.RestoreSession(carrying); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	if names := a.retained.names(); !slices.Equal(names, []string{"Repo Survey"}) {
+		t.Errorf("retained names after RestoreSession = %v, want exactly the snapshot's", names)
+	}
+	if err := a.RestoreSession(empty); err != nil {
 		t.Fatalf("RestoreSession: %v", err)
 	}
 	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names after RestoreSession = %v, want none", names)
+		t.Errorf("retained names after restoring a snapshot with none = %v, want none", names)
 	}
 }
 
-// TestResume_StartsWithNoRetention proves the construction-time restore leaves retention empty: a
-// snapshot taken while the Agent held a retained delegation resumes into an Agent that holds none.
-func TestResume_StartsWithNoRetention(t *testing.T) {
+// TestResume_ContinuesANamedDelegation proves the retention survives --resume end to end (ADR 0086
+// D3): a named delegation that completed before the snapshot is continued by a `continue` in the
+// resumed Agent, spawned from the rounds the snapshot saved, and appended to as their next round.
+func TestResume_ContinuesANamedDelegation(t *testing.T) {
 	t.Parallel()
 
-	a := idleAgentWithHistory(t)
-	a.retained.retain(retainedDelegate{task: "survey", name: "Repo Survey", rounds: []delegateRound{{report: "done"}}})
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName)),
+		contentScript("the survey is complete"),
+		contentScript("parent done"),
+	}})
 	snap, err := a.Snapshot()
 	if err != nil {
 		t.Fatalf("Snapshot: %v", err)
 	}
 
-	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, echoResponder(t, "resumed reply"))
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, "now go deeper", 0)),
+		contentScript("the deeper survey is complete"),
+		contentScript("resumed done"),
+	}}
+	b, err := resumeAgent(cfg, snap, responder)
 	if err != nil {
 		t.Fatalf("resumeAgent: %v", err)
 	}
-	if names := b.retained.names(); len(names) != 0 {
-		t.Errorf("retained names after Resume = %v, want none", names)
+	if err := b.Submit(domain.UserInput{Text: "continue the survey"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := b.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res, ok := subAgentResultFor(sink.events, "c2"); !ok || res.IsError {
+		t.Fatalf("continuation result = %+v (found %v), want a completed continuation", res, ok)
+	}
+	wantSeed := continuationTask(retainedDelegate{
+		task:   retainedSurveyTask,
+		rounds: []delegateRound{{report: "the survey is complete"}},
+	}, "now go deeper")
+	if got := lastUserText(responder.requests[1]); got != wantSeed {
+		t.Errorf("continued child's task =\n%s\nwant\n%s", got, wantSeed)
+	}
+	got, ok := b.retained.lookup(retainedSurveyName)
+	if !ok || len(got.rounds) != 2 || got.rounds[0].spawnCallID != "c1" || got.rounds[1].spawnCallID != "c2" {
+		t.Errorf("retained under %q = %+v (found %v), want the saved round then the resumed continuation", retainedSurveyName, got, ok)
 	}
 }

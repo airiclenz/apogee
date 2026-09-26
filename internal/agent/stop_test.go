@@ -188,7 +188,7 @@ func TestStopChild_StopsOneDelegationAndTheTurnGoesOn(t *testing.T) {
 		outputPath: "notes/survey.md",
 		rounds:     []delegateRound{{report: summaryReport(childFoldSummary, "reading file 0"), summary: true, spawnCallID: "c1"}},
 	}
-	if !ok || !reflect.DeepEqual(unstamped(retained), wantRetained) {
+	if !ok || !reflect.DeepEqual(unstamped(retained), everyRoundAsTheEntry(wantRetained)) {
 		t.Errorf("retained delegate = %+v (found %v), want %+v", retained, ok, wantRetained)
 	}
 }
@@ -237,7 +237,7 @@ func TestStopChild_AStoppedDelegationIsContinuable(t *testing.T) {
 		t.Errorf("the continued child's result = %+v, want its completed report", completed)
 	}
 	retained, ok := a.retained.lookup(retainedSurveyName)
-	if !ok || len(retained.rounds) != 2 || retained.rounds[1] != (delegateRound{instructions: continueInstructions, report: "the survey is now complete", spawnCallID: "c2"}) {
+	if !ok || len(retained.rounds) != 2 || !sameRoundText(retained.rounds[1], delegateRound{instructions: continueInstructions, report: "the survey is now complete", spawnCallID: "c2"}) {
 		t.Errorf("retained delegate = %+v (found %v), want the stopped round and the completed continuation", retained, ok)
 	}
 }
@@ -516,4 +516,11 @@ func TestStopChild_ReachesANestedDelegationAndItsParentGoesOn(t *testing.T) {
 	if rows := a.delegations.rows(); len(rows) != 1 || rows[0].outcome != delegationCompleted {
 		t.Errorf("parent ledger rows = %+v, want the child recorded %q", rows, delegationCompleted)
 	}
+}
+
+// sameRoundText reports whether got carries want's instructions, report, summary flag and spawning
+// call id — the round's text, leaving out what its call resolved to and the use sequence retain stamps.
+func sameRoundText(got, want delegateRound) bool {
+	return got.instructions == want.instructions && got.report == want.report &&
+		got.summary == want.summary && got.spawnCallID == want.spawnCallID
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/tasklist"
+	"github.com/airiclenz/apogee/internal/tools"
 )
 
 // The engine's conversation storage is domain.Conversation: it is already library-complete
@@ -40,6 +41,12 @@ import (
 //     snapshot preserves nothing it does not understand only in the payload it rewrites — a
 //     concern the list is deliberately cheap enough to accept, being sentences the model can
 //     restate.
+//   - retained     : the delegations the parent keeps continuable for the session (ADR 0086 D3,
+//     retainedDelegates) — each one's task, name, roster, output path and bound, and its rounds
+//     with the call id that spawned each, so a resumed or live-restored session still continues
+//     the delegations its conversation named, and a fork can cut away the rounds spawned after its
+//     cut (CutSession). Additive exactly as tasks is: omitempty, no SessionVersion bump, and a
+//     snapshot written before it existed restores with nothing retained.
 //
 // The per-message Interjected marker rides the conversation's own marshal as an omitempty
 // sibling, so it needs NO SessionVersion bump in either direction: a snapshot written before
@@ -82,6 +89,100 @@ type agentState struct {
 	ExchangeStart int                  `json:"exchangeStart,omitempty"`
 	PendingInput  *domain.UserInput    `json:"pendingInput,omitempty"`
 	Tasks         []tasklist.Item      `json:"tasks,omitempty"`
+	Retained      []retainedEntryJSON  `json:"retained,omitempty"`
+}
+
+// retainedEntryJSON is one retained delegation (retainedDelegate) as the session snapshot spells
+// it. The bound rides as a word (delegateBound.word) rather than its iota, so reordering the
+// constants can never re-read a saved bound as another; the roster rides through
+// tools.SubAgentRoster's own wire form, the one the sub_agent call spelled it in.
+type retainedEntryJSON struct {
+	Name       string               `json:"name"`
+	Task       string               `json:"task"`
+	Tools      tools.SubAgentRoster `json:"tools"`
+	OutputPath string               `json:"outputPath,omitempty"`
+	Bound      string               `json:"bound"`
+	Used       uint64               `json:"used"`
+	Rounds     []retainedRoundJSON  `json:"rounds"`
+}
+
+// retainedRoundJSON is one round of a retained delegation (delegateRound) as the snapshot spells it.
+type retainedRoundJSON struct {
+	Instructions string               `json:"instructions,omitempty"`
+	Report       string               `json:"report"`
+	Summary      bool                 `json:"summary,omitempty"`
+	SpawnCallID  string               `json:"spawnCallId"`
+	Name         string               `json:"name"`
+	Tools        tools.SubAgentRoster `json:"tools"`
+	OutputPath   string               `json:"outputPath,omitempty"`
+	Bound        string               `json:"bound"`
+	Seq          uint64               `json:"seq"`
+}
+
+// The words a delegateBound is saved as — the bound's own name, as the capped result heads spell
+// the resource that ran out.
+var delegateBoundWords = map[delegateBound]string{
+	boundSteps:  "steps",
+	boundTokens: "tokens",
+	boundTime:   "time",
+}
+
+// word is the word the session snapshot saves b as.
+func (b delegateBound) word() string { return delegateBoundWords[b] }
+
+// parseDelegateBound reads a saved bound word back; false for a word this build never writes.
+func parseDelegateBound(word string) (delegateBound, bool) {
+	for b, w := range delegateBoundWords {
+		if w == word {
+			return b, true
+		}
+	}
+	return 0, false
+}
+
+// retainedToJSON spells entries in the snapshot's form, in the order given; nil for none, so a
+// session with nothing retained writes no `retained` key.
+func retainedToJSON(entries []retainedDelegate) []retainedEntryJSON {
+	if len(entries) == 0 {
+		return nil
+	}
+	out := make([]retainedEntryJSON, len(entries))
+	for i, d := range entries {
+		rounds := make([]retainedRoundJSON, len(d.rounds))
+		for j, r := range d.rounds {
+			rounds[j] = retainedRoundJSON{
+				Instructions: r.instructions, Report: r.report, Summary: r.summary, SpawnCallID: r.spawnCallID,
+				Name: r.name, Tools: r.tools, OutputPath: r.outputPath, Bound: r.bound.word(), Seq: r.seq,
+			}
+		}
+		out[i] = retainedEntryJSON{
+			Name: d.name, Task: d.task, Tools: d.tools, OutputPath: d.outputPath,
+			Bound: d.bound.word(), Used: d.used, Rounds: rounds,
+		}
+	}
+	return out
+}
+
+// retainedFromJSON reads entries back from the snapshot's form. Every bound word in them has been
+// checked already (checkRestoredRetained, at the decode seam), so it cannot fail.
+func retainedFromJSON(entries []retainedEntryJSON) []retainedDelegate {
+	out := make([]retainedDelegate, len(entries))
+	for i, e := range entries {
+		rounds := make([]delegateRound, len(e.Rounds))
+		for j, r := range e.Rounds {
+			bound, _ := parseDelegateBound(r.Bound)
+			rounds[j] = delegateRound{
+				instructions: r.Instructions, report: r.Report, summary: r.Summary, spawnCallID: r.SpawnCallID,
+				name: r.Name, tools: r.Tools, outputPath: r.OutputPath, bound: bound, seq: r.Seq,
+			}
+		}
+		bound, _ := parseDelegateBound(e.Bound)
+		out[i] = retainedDelegate{
+			task: e.Task, name: e.Name, tools: e.Tools, outputPath: e.OutputPath,
+			rounds: rounds, bound: bound, used: e.Used,
+		}
+	}
+	return out
 }
 
 // encodeState serializes the Agent's quiescent-boundary state into a Session.State payload.
@@ -96,6 +197,7 @@ func (a *Agent) encodeState() (json.RawMessage, error) {
 		ExchangeStart: turns.exchangeStart,
 		PendingInput:  turns.pendingInput,
 		Tasks:         a.tasks.Items(),
+		Retained:      retainedToJSON(a.retained.entries()),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("apogee: encode session state: %w", err)
@@ -166,10 +268,10 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 		exchangeStart: exchangeStart,
 		pendingInput:  st.PendingInput,
 	})
-	// Retained delegations belong to the session this swap replaced, and none crosses into the
-	// restored one (ADR 0086 D1): Resume starts from none and a live restore empties the outgoing
-	// session's.
-	a.retained.clear()
+	// Retained delegations belong to the session they were retained in (ADR 0086 D3): the restored
+	// snapshot's set REPLACES the outgoing session's whole, so a snapshot that carries none — one
+	// written before the key existed included — restores with nothing retained.
+	a.retained.load(retainedFromJSON(st.Retained))
 	return nil
 }
 
@@ -310,7 +412,9 @@ func messageBytes(m domain.Message) int {
 // the engine's own boundaries exactly, where an ordinal counted from the start would name a
 // message the summary folded away. Walking backwards, the last dropExchanges openings are dropped
 // together with everything after them, so the history ends at the surviving opening's Exchange
-// end; dropExchanges == 0 leaves the message history untouched. Either way the result is
+// end; dropExchanges == 0 leaves the message history untouched. The retained delegations are cut
+// with the history (ADR 0086 D3): a round whose spawning sub_agent result the cut drops goes, and
+// an entry left with no round goes whole (cutRetainedRounds). Either way the result is
 // normalised to a clean boundary: the deferred-correction queue is cleared, no Exchange is open
 // (InExchange false, ExchangeStart 0), no input is pending, and the task list is empty — a fork at
 // the newest prompt clears the checklist exactly like a fork at an earlier one. The Turn counter
@@ -337,8 +441,18 @@ func CutSession(snap domain.Session, dropExchanges int) (domain.Session, error) 
 			"apogee: cut session: cannot drop %d of %d exchanges", dropExchanges, len(openings),
 		)
 	}
+	// The call ids of the tool results the cut drops: a retained round whose spawning result is
+	// among them was spawned after the fork point and is cut with it (cutRetainedRounds).
+	dropped := make(map[string]int)
 	if dropExchanges > 0 {
-		conv.DropRange(openings[len(openings)-dropExchanges], conv.Len())
+		from := openings[len(openings)-dropExchanges]
+		conv.Range(func(i int, m domain.Message) bool {
+			if i >= from && m.Role == domain.RoleTool && m.ToolCallID != "" {
+				dropped[m.ToolCallID]++
+			}
+			return true
+		})
+		conv.DropRange(from, conv.Len())
 	}
 	conv.ClearDeferred()
 	state, err := json.Marshal(agentState{
@@ -348,6 +462,7 @@ func CutSession(snap domain.Session, dropExchanges int) (domain.Session, error) 
 		ExchangeStart: 0,
 		PendingInput:  nil,
 		Tasks:         nil,
+		Retained:      retainedToJSON(cutRetainedRounds(retainedFromJSON(st.Retained), dropped)),
 	})
 	if err != nil {
 		return domain.Session{}, fmt.Errorf("apogee: encode session state: %w", err)
@@ -396,9 +511,10 @@ func dropLeadingSystem(conv *domain.Conversation) int {
 // The threat it closes is unattributable injection. Everything it walks reaches the model as text
 // apogee itself appears to have written — a committed message body, a task row the standing block
 // renders under the engine's own header, a deferred correction the loop injects as an
-// unattributed USER message at the role-safe position (domain.Request.InjectContext), and the
-// pending input a resumed session submits as the human's own words. A line of any of them opening
-// with a context-file header or footer, the delegate report's opening sentence, an advice fence or
+// unattributed USER message at the role-safe position (domain.Request.InjectContext), the pending
+// input a resumed session submits as the human's own words, and the retained delegations whose task
+// and rounds a continuation lays into a child's task (checkRestoredRetained). A line of any of them
+// opening with a context-file header or footer, the delegate report's opening sentence, an advice fence or
 // an engine-note fence is a stranger's text dressed as the harness's, and the ratified call
 // (apogee-mre) is refusal of the WHOLE payload rather than a silent rewrite: this is a session
 // file apogee did not write, not a repo file to be fenced.
@@ -442,6 +558,9 @@ func checkRestoredStructure(st *agentState) error {
 			)
 		}
 	}
+	if err := checkRestoredRetained(st.Retained); err != nil {
+		return err
+	}
 	if st.PendingInput != nil {
 		if n := len(st.PendingInput.Text); n > maxRestoredMessageBytes {
 			return fmt.Errorf(
@@ -481,6 +600,57 @@ func checkRestoredDeferred(conv *domain.Conversation) error {
 				"apogee: decode session state: deferred correction %d opens a line with %q, which apogee never commits: %w",
 				i, fence, ErrSnapshotRefused,
 			)
+		}
+	}
+	return nil
+}
+
+// checkRestoredRetained checks the retained delegations a snapshot carries (agentState.Retained).
+// Every string in them reaches the model as text apogee appears to have written — the task and
+// rounds are laid into a continued child's task (continuationTask), the names are listed in a
+// refused continue — so each is held to what a committed message is: bounded at
+// maxRestoredMessageBytes and spelling none of the engine's own furniture (forgesRestoredStructure).
+// The shape is held to what retain writes too: every entry named, no name twice, at least one round,
+// and every bound one of the words delegateBound.word spells. Each refusal wraps
+// ErrSnapshotRefused.
+func checkRestoredRetained(entries []retainedEntryJSON) error {
+	seen := make(map[string]bool, len(entries))
+	for i, e := range entries {
+		refuse := func(format string, args ...any) error {
+			return fmt.Errorf("apogee: decode session state: retained delegation %d "+format+": %w",
+				append(append([]any{i}, args...), ErrSnapshotRefused)...)
+		}
+		switch {
+		case e.Name == "":
+			return refuse("has no name")
+		case seen[e.Name]:
+			return refuse("repeats the name %q", e.Name)
+		case len(e.Rounds) == 0:
+			return refuse("has no round")
+		}
+		seen[e.Name] = true
+		if _, ok := parseDelegateBound(e.Bound); !ok {
+			return refuse("has the unknown bound %q", e.Bound)
+		}
+		fields := []struct{ what, text string }{{"name", e.Name}, {"task", e.Task}, {"output path", e.OutputPath}}
+		for j, r := range e.Rounds {
+			if _, ok := parseDelegateBound(r.Bound); !ok {
+				return refuse("round %d has the unknown bound %q", j+1, r.Bound)
+			}
+			fields = append(fields,
+				struct{ what, text string }{fmt.Sprintf("round %d name", j+1), r.Name},
+				struct{ what, text string }{fmt.Sprintf("round %d instructions", j+1), r.Instructions},
+				struct{ what, text string }{fmt.Sprintf("round %d report", j+1), r.Report},
+				struct{ what, text string }{fmt.Sprintf("round %d output path", j+1), r.OutputPath},
+			)
+		}
+		for _, f := range fields {
+			if n := len(f.text); n > maxRestoredMessageBytes {
+				return refuse("%s is %d bytes, over the %d-byte limit", f.what, n, maxRestoredMessageBytes)
+			}
+			if fence, forged := forgesRestoredStructure(f.text); forged {
+				return refuse("%s opens a line with %q, which apogee never commits", f.what, fence)
+			}
 		}
 	}
 	return nil

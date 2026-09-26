@@ -211,11 +211,22 @@ type retainedDelegate struct {
 // delegateRound is ONE run of a retained delegation (ADR 0086 D2): what it was asked to do and
 // what it reported. The first round's instructions are the entry's task and are left empty here;
 // every later round's are the `task` its continuing call carried.
+//
+// A round also keeps what its OWN call resolved to — the name the run ended wearing, the roster
+// and output path it asked for, and the bound that capped it — which the entry carries for its
+// newest round only. They are what a fork re-derives the entry from when it cuts the newest rounds
+// away (cutRetainedRounds, ADR 0086 D3): the entry a fork keeps is the one the parent held when its
+// newest kept round had just run.
 type delegateRound struct {
-	instructions string // the continuation instructions; "" for round 1, whose instructions are the entry's task
-	report       string // completed: the child's final report; capped, faulted or stopped: the engine fold and closing text (Agent.foldAndClosing); a Run error or error-shaped completion: its result Content
-	summary      bool   // report is the engine fold and closing text — laid in under the engine-summary head rather than the report head
-	spawnCallID  string // the sub_agent call that spawned this run
+	instructions string               // the continuation instructions; "" for round 1, whose instructions are the entry's task
+	report       string               // completed: the child's final report; capped, faulted or stopped: the engine fold and closing text (Agent.foldAndClosing); a Run error or error-shaped completion: its result Content
+	summary      bool                 // report is the engine fold and closing text — laid in under the engine-summary head rather than the report head
+	spawnCallID  string               // the sub_agent call that spawned this run — what a fork reads to tell a round before its cut from one after it
+	name         string               // the display name this run ended wearing
+	tools        tools.SubAgentRoster // the `tools` argument this run's call resolved to, unresolved against the menu
+	outputPath   string               // the `output_path` argument this run's call resolved to; "" when none
+	bound        delegateBound        // which bound capped this run (Agent.capHit); the zero value otherwise
+	seq          uint64               // the use sequence retainedDelegates.retain stamped when this round was first retained: orders rounds across entries for a fork's cut
 }
 
 // withRound returns d with round appended, on a fresh backing array so the entry it was taken from
@@ -228,9 +239,11 @@ func (d retainedDelegate) withRound(round delegateRound) retainedDelegate {
 // retainedDelegates is the set of retained delegations ONE Agent holds for the rest of its
 // session (ADR 0086 D1), keyed by delegation name — the handle the parent model already knows a
 // delegation by, and the only one it can spell back. It outlives the Exchange that retained an
-// entry: the map is emptied only by /clear (Agent.ClearContext) and by a restore that swaps the
-// session out (Agent.restoreState). It is guarded because the depth-0 fan-out retains from several
-// pool workers at once (ADR 0039).
+// entry and rides the session snapshot under the `retained` key (agentState, ADR 0086 D3): the map
+// is emptied by /clear (Agent.ClearContext) and REPLACED by a restore with the set the restored
+// snapshot carries (Agent.restoreState — none, for a snapshot without the key), and a fork keeps
+// only the rounds spawned before its cut (CutSession). It is guarded because the depth-0 fan-out
+// retains from several pool workers at once (ADR 0039).
 //
 // The zero value is ready to use.
 type retainedDelegates struct {
@@ -257,7 +270,43 @@ func (r *retainedDelegates) retain(d retainedDelegate) {
 	}
 	r.seq++
 	d.used = r.seq
+	if n := len(d.rounds); n > 0 && d.rounds[n-1].seq == 0 {
+		d.rounds = slices.Clone(d.rounds)
+		d.rounds[n-1].seq = r.seq
+	}
 	r.byName[d.name] = d
+}
+
+// entries returns every retained delegation, least recently used first — the order the session
+// snapshot writes them in, so an unchanged set encodes byte-identically.
+func (r *retainedDelegates) entries() []retainedDelegate {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	entries := make([]retainedDelegate, 0, len(r.byName))
+	for _, d := range r.byName {
+		entries = append(entries, d)
+	}
+	slices.SortFunc(entries, func(x, y retainedDelegate) int { return cmp.Compare(x.used, y.used) })
+	return entries
+}
+
+// load REPLACES the retained set with entries — a restored session's (Agent.restoreState) — and
+// resumes the use sequence past every stamp they carry, so an entry retained after the restore
+// still sorts as the most recently used and its round after every restored one.
+func (r *retainedDelegates) load(entries []retainedDelegate) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byName, r.seq = nil, 0
+	for _, d := range entries {
+		if r.byName == nil {
+			r.byName = make(map[string]retainedDelegate, len(entries))
+		}
+		r.byName[d.name] = d
+		r.seq = max(r.seq, d.used)
+		for _, round := range d.rounds {
+			r.seq = max(r.seq, round.seq)
+		}
+	}
 }
 
 // lookup returns the delegation retained under name.
@@ -298,6 +347,75 @@ func (r *retainedDelegates) names() []string {
 		names[i] = d.name
 	}
 	return names
+}
+
+// cutRetainedRounds is a fork's cut of the retained set (CutSession, ADR 0086 D3): entries with
+// every round whose spawning sub_agent result lies in the dropped tail removed, and an entry left
+// with no round dropped whole. dropped counts, per call id, the RoleTool results the cut drops. A
+// round whose call id the tail does not carry was spawned before the cut — including one whose
+// result a fold has since compacted away — and is kept.
+//
+// A call id can repeat within a session (a model that numbers its calls afresh every Turn), so an id
+// found both before and after the cut is paired FROM THE NEWEST END: the rounds carrying it, newest
+// first by the use sequence retain stamped (delegateRound.seq), are matched one for one against the
+// dropped results carrying it, and those matched are cut. Pairing from the newest end is what keeps
+// the pairing true when a fold has compacted the oldest results away. Where a dropped result with a
+// repeated id answered a call that retained nothing (a completed delegation left unnamed, or another
+// tool), the pairing cuts one older round too many: the fork loses a continuation it could have
+// kept, never gains one from after its cut.
+//
+// An entry that lost its newest rounds is re-derived from its newest KEPT one — the name, roster,
+// output path and bound that round's run resolved to — so it is the entry the parent held just after
+// that round ran. Should the name it reverts to collide with another kept entry, the more recently
+// used of the two wins, as it would have when both were retained. The result is least recently used
+// first, like retainedDelegates.entries.
+func cutRetainedRounds(entries []retainedDelegate, dropped map[string]int) []retainedDelegate {
+	type roundRef struct {
+		entry, round int
+		seq          uint64
+	}
+	refs := make(map[string][]roundRef)
+	for i, d := range entries {
+		for j, round := range d.rounds {
+			if round.spawnCallID != "" && dropped[round.spawnCallID] > 0 {
+				refs[round.spawnCallID] = append(refs[round.spawnCallID], roundRef{entry: i, round: j, seq: round.seq})
+			}
+		}
+	}
+	cut := make(map[[2]int]bool)
+	for id, matches := range refs {
+		slices.SortStableFunc(matches, func(x, y roundRef) int { return cmp.Compare(y.seq, x.seq) })
+		for _, m := range matches[:min(dropped[id], len(matches))] {
+			cut[[2]int{m.entry, m.round}] = true
+		}
+	}
+	byName := make(map[string]retainedDelegate, len(entries))
+	for i, d := range entries {
+		kept := make([]delegateRound, 0, len(d.rounds))
+		for j, round := range d.rounds {
+			if !cut[[2]int{i, j}] {
+				kept = append(kept, round)
+			}
+		}
+		if len(kept) == 0 {
+			continue
+		}
+		if len(kept) < len(d.rounds) {
+			newest := kept[len(kept)-1]
+			d.name, d.tools, d.outputPath, d.bound = newest.name, newest.tools, newest.outputPath, newest.bound
+		}
+		d.rounds = kept
+		if held, ok := byName[d.name]; ok && held.used > d.used {
+			continue
+		}
+		byName[d.name] = d
+	}
+	out := make([]retainedDelegate, 0, len(byName))
+	for _, d := range byName {
+		out = append(out, d)
+	}
+	slices.SortFunc(out, func(x, y retainedDelegate) int { return cmp.Compare(x.used, y.used) })
+	return out
 }
 
 // clear forgets every retained delegation — the session that owned them has been cleared or
