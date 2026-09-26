@@ -8,7 +8,8 @@ import (
 // TestHelpNoteListsEveryVerb pins the /help note to the registry and the box: every commandSpecs
 // row is a "/name — summary" line, a blank line separates the list from the legend, and the legend
 // trailer spells the newline chord as the idle legend for THAT terminal does — ⌥⏎ alone until key
-// disambiguation is confirmed, ⇧⏎/⌥⏎ after — and the stop as the running legend does. Each copied
+// disambiguation is confirmed, ⇧⏎/⌥⏎ after — the stop as the running legend does, and the one-run
+// stop as a run view's header does. Each copied
 // cell is asserted against the prompteditor.go constant it copies, so /help can never teach a
 // spelling the box has stopped showing.
 func TestHelpNoteListsEveryVerb(t *testing.T) {
@@ -44,7 +45,7 @@ func TestHelpNoteListsEveryVerb(t *testing.T) {
 			// The legend trailer names the fixed cells, with the newline chord this terminal delivers.
 			legend := lines[len(lines)-1]
 			if want := helpLegendPrefix + strings.Join([]string{
-				helpKeySend, c.wantNewline, helpKeyRecall, helpKeyStop, helpKeyQuit, helpKeyMode, helpKeyScroll,
+				helpKeySend, c.wantNewline, helpKeyRecall, helpKeyStop, helpKeyStopRun, helpKeyQuit, helpKeyMode, helpKeyScroll,
 			}, helpCellSeparator); legend != want {
 				t.Errorf("legend = %q, want %q", legend, want)
 			}
@@ -56,6 +57,9 @@ func TestHelpNoteListsEveryVerb(t *testing.T) {
 			}
 			if !strings.Contains(runningPlaceholder, helpKeyStop) {
 				t.Errorf("stop cell %q is not spelled by the running legend %q", helpKeyStop, runningPlaceholder)
+			}
+			if !strings.HasSuffix(breadcrumbStopHint, helpCellSeparator+helpKeyStopRun) {
+				t.Errorf("one-run stop cell %q is not spelled by the run view's hint %q", helpKeyStopRun, breadcrumbStopHint)
 			}
 		})
 	}

@@ -5,7 +5,8 @@ import "strings"
 // The /help key legend, cell by cell, in the vocabulary the prompt box's own legends use
 // (prompteditor.go) so a reader meets one spelling of each gesture across the program. The cells
 // that the box already advertises are spelled EXACTLY as the box spells them — the newline chord as
-// idlePlaceholder / idleShiftPlaceholder do, the stop as runningPlaceholder does — and
+// idlePlaceholder / idleShiftPlaceholder do, the stop as runningPlaceholder does, the one-run stop as
+// a run view's header does (breadcrumbStopHint, which is built from it) — and
 // TestHelpNoteListsEveryVerb pins each to the legend constant it copies, so a rewording of the box
 // cannot leave /help teaching a spelling the box no longer shows. The rest name gestures the box
 // has no room for: the down half of recall, the autonomy-mode cycle and transcript scrolling
@@ -16,6 +17,7 @@ const (
 	helpKeyNewlineShift = "⇧⏎/⌥⏎ newline" // once key disambiguation is negotiated (idleShiftPlaceholder)
 	helpKeyRecall       = "↑/↓ recall"
 	helpKeyStop         = "esc×2 cancel" // as the running legend spells it (runningPlaceholder)
+	helpKeyStopRun      = "^x stop"      // as a run view's header spells it (breadcrumbStopHint)
 	helpKeyQuit         = "⌃c quit"
 	helpKeyMode         = "⇧⇥ mode"
 	helpKeyScroll       = "PgUp/PgDn scroll"
@@ -59,6 +61,7 @@ func helpKeyLegend(keyDisambiguation bool) string {
 		newline,
 		helpKeyRecall,
 		helpKeyStop,
+		helpKeyStopRun,
 		helpKeyQuit,
 		helpKeyMode,
 		helpKeyScroll,

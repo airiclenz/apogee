@@ -1109,15 +1109,22 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 		if _, isToolResult := msg.Event.(domain.ToolResultEvent); isToolResult {
 			m, reassert = m.reassertMouse()
 		}
+		// A delegation has reported — a run the human stopped among them — so a pane whose parked
+		// call that stop abandoned is taken down and the keys go back to the prompt
+		// (withdrawAbandonedDecision, approval.go); the Exchange itself goes on.
+		var resumed tea.Cmd
+		if phase, isPhase := msg.Event.(domain.SubAgentPhaseEvent); isPhase && phase.Phase == domain.SubAgentFinished {
+			m, resumed = m.withdrawAbandonedDecision()
+		}
 		// A delegation was just issued, or a child of one crossed a tool boundary: re-persist the
 		// record so anyone reading it while the Turn runs sees the delegation and its progress
 		// (progressSaveTrigger, fold.go). Scheduled AFTER the fold, so the transcript it encodes
 		// already holds the event that asked for it; every other Event leaves the record where the
 		// last save put it.
 		if progressSaveTrigger(msg.Event) {
-			return m, tea.Batch(m.progressSave(), reassert)
+			return m, tea.Batch(m.progressSave(), reassert, resumed)
 		}
-		return m, reassert
+		return m, tea.Batch(reassert, resumed)
 
 	case approvalReqMsg:
 		// The worker's Approver hands the gate to the Update loop: record the request and switch
@@ -1516,9 +1523,11 @@ var keyClaimOrder = []keyClaimant{
 	// esc that closes a report opened inside a run view is the esc the human means for it.
 	paneClaimant(paneAdvice, "advice pane"),
 	{
-		// An open run view claims exactly one key — esc, which goes one level up (runview.go, ADR
-		// 0063) — and lets every other key fall through, so typing, scrolling and the block cursor's
-		// own gestures work inside a view exactly as they do outside it.
+		// An open run view claims two keys — esc, which goes one level up (runview.go, ADR 0063), and
+		// ctrl+x, which stops the run on screen (ADR 0086 D5) — and lets every other key fall
+		// through, so typing, scrolling and the block cursor's own gestures work inside a view exactly
+		// as they do outside it. Its ctrl+x steps aside for a block cursor standing on a delegation's
+		// row, so the rung below stops the row the human is pointing at instead.
 		//
 		// It sits BELOW the panes above because each of them answers its own esc first: a report a
 		// keystroke opened is dismissed by the esc the human means for it, and the view is still there
@@ -3932,9 +3941,9 @@ const quietQualifier = " · quiet"
 // before any usage is measured and the gauge takes the slot the moment it is. Every branch
 // returns its occupant flush — statusLine appends the trailing margin at one seam, so the whole
 // slot moves together and no branch has to remember an inset of its own. room is the columns the
-// slot may spend (statusLine), read by the one occupant that has a longer form to offer
-// (escStopHint); the others are composed as they are and dropped whole by statusLine if they
-// do not fit.
+// slot may spend (statusLine), read by the two occupants that have a longer form to offer
+// (escStopHint, and the run view's hint through fitBreadcrumbHint); the others are composed as they
+// are and dropped whole by statusLine if they do not fit.
 func (m Model) statusRight(room int) string {
 	// A primed Ctrl+C takes the slot: tell the human a second press inside the window quits.
 	if !m.lastCtrlC.IsZero() {
@@ -3955,11 +3964,13 @@ func (m Model) statusRight(room int) string {
 	// Inside a run view whose run has not reported usage yet, esc goes one level up and never arms
 	// the stop — the claimant takes it (runview.go) — so the slot says what the key actually does,
 	// standing in the rung the stop hint stood in and wearing the breadcrumb's own wording, since
-	// the two rows advertise one key. It yields to stateErrored, whose occupant names the thing to dismiss; the view is still there
+	// the two rows advertise one key — and, while the viewed run can still be stopped, the stop it has
+	// instead (`esc back · ^x stop`, [Model.backHint]), in its short form where the slot cannot hold
+	// it (fitBreadcrumbHint). It yields to stateErrored, whose occupant names the thing to dismiss; the view is still there
 	// behind the error. It also yields wherever a pane owns esc (runViewOwnsEsc): there the double-tap
 	// stop is still reachable and the row must keep saying so.
 	if m.runViewOwnsEsc() && m.state != stateErrored {
-		return m.th.statusBar.Render(breadcrumbHint)
+		return m.th.statusBar.Render(fitBreadcrumbHint(m.th.measure, m.backHint(), room))
 	}
 	switch m.state {
 	case stateRunning:

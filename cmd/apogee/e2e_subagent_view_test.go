@@ -65,9 +65,11 @@ const (
 	steeredOutcome = countedOutcome + " · steered by 1 message"
 
 	// The run view's own furniture: the header naming the way back, and the key hint both it and
-	// the status line's right slot carry while a view is open.
-	runViewCrumb = "← main › " + longDelegate
-	runViewHint  = "esc back"
+	// the status line's right slot carry while a view is open — with the one-run stop behind it
+	// while the viewed run is still working (ADR 0086 D5).
+	runViewCrumb    = "← main › " + longDelegate
+	runViewHint     = "esc back"
+	runViewStopHint = runViewHint + " · ^x stop"
 
 	// The staged row's label while a message is waiting for the child, and the legend the box wears
 	// once that child's run is over.
@@ -122,8 +124,8 @@ func TestE2ESubAgentView(t *testing.T) {
 	})
 
 	crumb := rowContaining(t, opened, runViewCrumb)
-	if !strings.HasSuffix(strings.TrimRight(crumb, " "), runViewHint) {
-		t.Errorf("the breadcrumb does not carry the key that leaves the view: %q", crumb)
+	if !strings.HasSuffix(strings.TrimRight(crumb, " "), runViewStopHint) {
+		t.Errorf("the breadcrumb of a working run does not carry the keys that leave and stop it: %q", crumb)
 	}
 	assertFirstBodyRow(t, opened, runViewCrumb, longTask)
 	assertLastBodyRow(t, opened, childParkedLine)
@@ -206,7 +208,12 @@ func TestE2ESubAgentView(t *testing.T) {
 	openLastRun(drv)
 	drv.WaitText(runViewCrumb)
 	drv.WaitQuiet(settled)
-	tuitest.Golden(t, "t18-run-view-finished", drv.Frame(), goldenRedactions(sess)...)
+	finished := drv.Frame()
+	if crumb := strings.TrimRight(rowContaining(t, finished, runViewCrumb), " "); !strings.HasSuffix(crumb, runViewHint) ||
+		strings.HasSuffix(crumb, runViewStopHint) {
+		t.Errorf("the breadcrumb of a finished run should offer the way back alone: %q", crumb)
+	}
+	tuitest.Golden(t, "t18-run-view-finished", finished, goldenRedactions(sess)...)
 
 	if err := sess.Quit(); err != nil {
 		t.Fatalf("the run returned %v; want a clean quit", err)

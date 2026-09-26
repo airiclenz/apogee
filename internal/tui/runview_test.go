@@ -3,6 +3,7 @@ package tui
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/airiclenz/apogee/internal/domain"
 	"github.com/airiclenz/apogee/internal/format"
+	"github.com/airiclenz/apogee/internal/scheme"
 )
 
 // The run view's own suite: what opens one, what leaves one, and what the frame says while one is
@@ -1213,4 +1215,130 @@ func TestRunViewBreadcrumbHintFollowsTheKey(t *testing.T) {
 			}
 		})
 	}
+}
+
+// ----------------------------------------------------------------------------
+// ^x — stopping the run on screen (ADR 0086 D5)
+// ----------------------------------------------------------------------------
+
+func keyCtrlX() tea.KeyPressMsg { return tea.KeyPressMsg{Code: 'x', Mod: tea.ModCtrl} }
+
+// finishStampedChild folds the finished phase of the run modelViewingStampedChild opened the view on,
+// the way the engine reports a delegation that is over.
+func finishStampedChild(m Model, runID string) Model {
+	stampedPhase(&m.transcript, runRef{depth: 1, spawn: "s1", id: runID}, domain.SubAgentFinished, "all clear")
+	m.refreshViewport()
+	return m
+}
+
+// TestRunViewCtrlXStopsTheViewedRun pins the view's second key: `^x` inside the view of a running
+// delegation asks the engine to stop THAT run, by its run id, with no confirmation; on a run that is
+// over it does nothing; and esc goes on meaning back either way.
+func TestRunViewCtrlXStopsTheViewedRun(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		finished bool
+		want     []string
+	}{
+		{name: "a running view stops its run", want: []string{"run-s1"}},
+		{name: "a finished view stops nothing", finished: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			eng := &fakeEngine{}
+			m := modelViewingStampedChild(t, eng, "run-s1")
+			if tc.finished {
+				m = finishStampedChild(m, "run-s1")
+			}
+
+			m = step(t, m, keyCtrlX())
+
+			if got := eng.stoppedChildren(); !slices.Equal(got, tc.want) {
+				t.Errorf("StopChild calls = %v; want %v", got, tc.want)
+			}
+			if !m.inRunView() {
+				t.Fatal("^x left the view; it stops the run and leaves the reader where they are")
+			}
+			if m = step(t, m, keyEsc()); m.inRunView() {
+				t.Error("esc after ^x left the view open; esc still means back")
+			}
+		})
+	}
+}
+
+// TestRunViewCtrlXStopsTheCursorsRowInsteadOfTheView pins the one place the view's `^x` steps aside:
+// inside a running child's view, a block cursor standing on a running GRANDCHILD's row points at that
+// run, so the key stops the grandchild alone and the child the view is open on runs on.
+func TestRunViewCtrlXStopsTheCursorsRowInsteadOfTheView(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := modelViewingStampedChild(t, eng, "run-s1")
+	child := runRef{depth: 1, spawn: "s1", id: "run-s1"}
+	grandchild := stampedDelegation(&m.transcript, child, "g1", "run-g1", "grand-scout")
+	stampedPhase(&m.transcript, grandchild, domain.SubAgentStarted, "")
+	m.refreshViewport()
+
+	m = step(t, m, keyAltUp())
+	if head, ok := m.cursorRunHead(); !ok || head.spawnRunID != "run-g1" {
+		t.Fatalf("setup: the cursor stands on %+v (a run row: %v); want the grandchild's row", head.spawnRunID, ok)
+	}
+	m = step(t, m, keyCtrlX())
+
+	if got := eng.stoppedChildren(); !slices.Equal(got, []string{"run-g1"}) {
+		t.Errorf("StopChild calls = %v; want only the grandchild's run, run-g1", got)
+	}
+	if !m.inRunView() || m.viewedRun().id != "run-s1" {
+		t.Errorf("the view is on %+v; want it still open on run-s1", m.viewedRun())
+	}
+}
+
+// TestRunViewHintOffersTheStopWhileTheRunRuns pins the header and the status slot to the keys the
+// view has in each frame: `esc back · ^x stop` while the viewed run can still be stopped, the plain
+// `esc back` once it is over — and the plain form, too, wherever the long one does not fit.
+func TestRunViewHintOffersTheStopWhileTheRunRuns(t *testing.T) {
+	t.Parallel()
+
+	header := func(t *testing.T, m Model) string {
+		t.Helper()
+		m.refreshViewport()
+		return strip(m.lines[breadcrumbTrailRow])
+	}
+
+	t.Run("running, then finished", func(t *testing.T) {
+		t.Parallel()
+		m := modelViewingStampedChild(t, &fakeEngine{}, "run-s1")
+		if got := header(t, m); !strings.HasSuffix(strings.TrimRight(got, " "), breadcrumbStopHint) {
+			t.Errorf("the running header is %q; want it to end in %q", got, breadcrumbStopHint)
+		}
+		if got := plainSlot(m.statusRight(m.width)); got != breadcrumbStopHint {
+			t.Errorf("the running status slot is %q; want %q", got, breadcrumbStopHint)
+		}
+
+		m = finishStampedChild(m, "run-s1")
+		if got := header(t, m); strings.Contains(got, helpKeyStopRun) || !strings.HasSuffix(strings.TrimRight(got, " "), breadcrumbHint) {
+			t.Errorf("the finished header is %q; want it to end in %q alone", got, breadcrumbHint)
+		}
+		if got := plainSlot(m.statusRight(m.width)); got != breadcrumbHint {
+			t.Errorf("the finished status slot is %q; want %q", got, breadcrumbHint)
+		}
+	})
+
+	t.Run("a narrow row falls back to the way back", func(t *testing.T) {
+		t.Parallel()
+		th := newTheme(scheme.Default())
+		const trail = "← main › repo-scout"
+		width := th.measure.Width(bodyIndent+trail) + th.measure.Width(breadcrumbHint+bodyIndent) + 2
+
+		row := strip(breadcrumbRow(th, trail, width, breadcrumbStopHint))
+		if strings.Contains(row, helpKeyStopRun) || !strings.HasSuffix(row, breadcrumbHint+bodyIndent) {
+			t.Errorf("the row is %q at %d columns; want the short hint %q", row, width, breadcrumbHint)
+		}
+
+		m := modelViewingStampedChild(t, &fakeEngine{}, "run-s1")
+		if got := plainSlot(m.statusRight(th.measure.Width(breadcrumbStopHint) - 1)); got != breadcrumbHint {
+			t.Errorf("the status slot is %q with no room for the long hint; want %q", got, breadcrumbHint)
+		}
+	})
 }

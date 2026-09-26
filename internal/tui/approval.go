@@ -222,6 +222,48 @@ func (m Model) foldApprovalArmed(msg approvalArmedMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// withdrawAbandonedDecision takes down a standing approval or ask pane whose parked call nobody is
+// left to answer, and hands the keys back to the prompt. That is what a stop of ONE delegation
+// leaves behind (ADR 0086 D4): the stop cancels the context the child's call waits under, so the
+// call returns abandoned ([parkCall]) — but the Exchange goes on, and no terminal fold
+// ([Model.finishWorker]) arrives to clear a pane that now answers nothing. A pane raised by a
+// run BENEATH the stopped one is abandoned by the same stop, since a child's context is a child of
+// its parent's.
+//
+// Update asks it when a delegation's finished phase lands — the stopped run's own report is one —
+// and the pane's own parked context is what decides, not the run the phase names: the request
+// carries no run id to match, and the context is the one fact that says nobody is waiting. A
+// WHOLE-Turn stop is left alone: its terminal fold clears the pane with the rest of the Exchange,
+// exactly as it always has.
+func (m Model) withdrawAbandonedDecision() (Model, tea.Cmd) {
+	if m.acts.at(runRef{}).act.kind == actStopping {
+		return m, nil
+	}
+	switch {
+	case m.state == stateAwaitingApproval && m.pending != nil && isAbandoned(m.pending.Abandoned):
+	case m.state == stateAwaitingAsk && m.pendingAsk != nil && isAbandoned(m.pendingAsk.Abandoned):
+	default:
+		return m, nil
+	}
+	m.pendingDecision.reset()
+	m.restoreAskDraft()
+	tick := m.resumeRunning()
+	return m, tick
+}
+
+// isAbandoned reports whether a parked call's context has ended, without waiting for it to.
+func isAbandoned(done <-chan struct{}) bool {
+	if done == nil {
+		return false
+	}
+	select {
+	case <-done:
+		return true
+	default:
+		return false
+	}
+}
+
 // handleApprovalKey resolves a pending Approval while awaitingApproval. A decision key sends
 // its verdict back over the rendezvous reply channel (sendApproval); ↑/↓ move the menu's highlight,
 // clamped and non-wrapping, the way the ask prompt's choice arrows move (D5), leaving ⏎ to take

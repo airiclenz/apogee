@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -399,4 +400,81 @@ func TestModelApprovalForcedPaneKeepsADecisionRowAtTheFloor(t *testing.T) {
 			}
 		})
 	}
+}
+
+// childApprovalPane stands an approval pane raised by the running child modelViewingStampedChild
+// opened the view on (run-s1): its parked call waits under the context the returned cancel ends —
+// the context a stop of that child cancels (ADR 0086 D4).
+func childApprovalPane(t *testing.T) (Model, context.CancelFunc) {
+	t.Helper()
+	m := modelViewingStampedChild(t, &fakeEngine{}, "run-s1")
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m = step(t, m, approvalReqMsg{
+		Request:   domain.ApprovalRequest{Tool: "terminal", CacheKey: ordinaryGateKey, SubAgentName: "repo-scout"},
+		Reply:     make(chan domain.ApprovalDecision, 1),
+		Abandoned: ctx.Done(),
+	})
+	if m.state != stateAwaitingApproval {
+		t.Fatalf("setup: state = %v, want the approval pane standing", m.state)
+	}
+	return m, cancel
+}
+
+// finishedPhase is the finished phase of run id runID at depth 1, as the engine emits it.
+func finishedPhase(spawn, runID string) eventMsg {
+	return eventMsg{Event: domain.SubAgentPhaseEvent{
+		EventBase: domain.EventBase{Depth: 1, CallID: spawn, RunID: runID},
+		Phase:     domain.SubAgentFinished,
+		Result:    domain.ToolResult{CallID: spawn, Content: "partial"},
+	}}
+}
+
+// TestStoppedChildWithdrawsItsApprovalPane is the regression guard on the one-run stop: stopping a
+// child cancels the context its parked approval waits on, and the call returns abandoned without the
+// Exchange ending — so no terminal fold clears the pane. The stopped run's finished phase must take
+// the pane down and hand the keys back to the prompt; a pane whose call is still waited on stays,
+// and a WHOLE-Turn stop leaves the pane to its own terminal fold.
+func TestStoppedChildWithdrawsItsApprovalPane(t *testing.T) {
+	t.Parallel()
+
+	t.Run("the stop withdraws the pane", func(t *testing.T) {
+		t.Parallel()
+		m, stop := childApprovalPane(t)
+
+		stop()
+		m = step(t, m, finishedPhase("s1", "run-s1"))
+
+		if m.state != stateRunning || m.pending != nil {
+			t.Fatalf("state = %v, pending = %v after the stopped run reported; want the pane gone and the run going on", m.state, m.pending != nil)
+		}
+		m = step(t, m, keyRune('k'))
+		if got := m.input.Value(); got != "k" {
+			t.Errorf("the prompt holds %q after typing k; want the keys back at the prompt", got)
+		}
+	})
+
+	t.Run("a sibling's report leaves a live pane standing", func(t *testing.T) {
+		t.Parallel()
+		m, _ := childApprovalPane(t)
+
+		m = step(t, m, finishedPhase("s2", "run-s2"))
+
+		if m.state != stateAwaitingApproval || m.pending == nil {
+			t.Errorf("state = %v after another run reported; want the pane still waiting for its answer", m.state)
+		}
+	})
+
+	t.Run("a whole-Turn stop leaves the pane to the terminal fold", func(t *testing.T) {
+		t.Parallel()
+		m, stop := childApprovalPane(t)
+		m.stopWorker()
+
+		stop()
+		m = step(t, m, finishedPhase("s1", "run-s1"))
+
+		if m.state != stateAwaitingApproval {
+			t.Errorf("state = %v mid whole-Turn stop; want the pane left for finishWorker to clear", m.state)
+		}
+	})
 }

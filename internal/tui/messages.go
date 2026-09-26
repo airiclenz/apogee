@@ -54,6 +54,12 @@ type eventMsg struct {
 type approvalReqMsg struct {
 	Request domain.ApprovalRequest
 	Reply   chan domain.ApprovalDecision
+	// Abandoned is the Done channel of the context the parked call waits under: closed once nobody
+	// is left to read the Reply. A stop of the one delegation that raised the pane closes it
+	// without ending the Exchange, and the pane is then withdrawn when a delegation's finished
+	// phase lands (withdrawAbandonedDecision). Nil — a request built without a context — never
+	// reads as abandoned.
+	Abandoned <-chan struct{}
 }
 
 // approvalArmedMsg arms the pending approval prompt's decision keys on the BACKSTOP the fold
@@ -80,6 +86,8 @@ type approvalArmedMsg struct {
 type askReqMsg struct {
 	Request domain.AskRequest
 	Reply   chan domain.AskAnswer
+	// Abandoned is approvalReqMsg.Abandoned's twin: the parked call's context's Done channel.
+	Abandoned <-chan struct{}
 }
 
 // presentedMsg hands a finished presentation to the Update loop (ADR 0019). The uiPresenter

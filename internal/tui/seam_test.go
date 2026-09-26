@@ -163,6 +163,9 @@ type fakeEngine struct {
 	compactFn        func(context.Context) (skipped bool, err error)
 	interjectFn      func(domain.UserInput) error         // scripted Interject error (nil ⇒ committed)
 	interjectChildFn func(string, domain.UserInput) error // scripted InterjectChild error (nil ⇒ queued)
+
+	childStops  []string           // records StopChild calls (^x on a delegation), by run id, in order
+	stopChildFn func(string) error // scripted StopChild error (nil ⇒ stopped)
 }
 
 // childInterjection is one recorded InterjectChild call: the run it addressed and the message.
@@ -233,6 +236,26 @@ func (f *fakeEngine) InterjectChild(runID string, in domain.UserInput) error {
 		return fn(runID, in)
 	}
 	return nil
+}
+
+// StopChild records the run the UI asked to stop and answers with whatever the test scripted
+// (nil ⇒ stopped). Called from the Update goroutine like InterjectChild, so it takes the same mutex.
+func (f *fakeEngine) StopChild(runID string) error {
+	f.mu.Lock()
+	f.childStops = append(f.childStops, runID)
+	fn := f.stopChildFn
+	f.mu.Unlock()
+	if fn != nil {
+		return fn(runID)
+	}
+	return nil
+}
+
+// stoppedChildren returns a copy of the run ids StopChild was called with, in order.
+func (f *fakeEngine) stoppedChildren() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]string(nil), f.childStops...)
 }
 
 // childInterjections reports the calls InterjectChild was handed, in order — empty when the UI

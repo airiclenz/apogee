@@ -38,7 +38,7 @@ var _ domain.Asker = (*uiAsker)(nil)
 func (a *uiAsker) Ask(ctx context.Context, req domain.AskRequest) (domain.AskAnswer, error) {
 	return parkCall(ctx, a.prog,
 		func(reply chan domain.AskAnswer) tea.Msg {
-			return askReqMsg{Request: req, Reply: reply}
+			return askReqMsg{Request: req, Reply: reply, Abandoned: ctx.Done()}
 		},
 		domain.AskAnswer{})
 }

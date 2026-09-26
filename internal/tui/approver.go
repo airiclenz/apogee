@@ -36,7 +36,7 @@ var _ domain.Approver = (*uiApprover)(nil)
 func (a *uiApprover) Approve(ctx context.Context, req domain.ApprovalRequest) (domain.ApprovalDecision, error) {
 	return parkCall(ctx, a.prog,
 		func(reply chan domain.ApprovalDecision) tea.Msg {
-			return approvalReqMsg{Request: req, Reply: reply}
+			return approvalReqMsg{Request: req, Reply: reply, Abandoned: ctx.Done()}
 		},
 		domain.ApprovalDeny)
 }

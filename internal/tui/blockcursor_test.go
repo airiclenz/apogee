@@ -2,10 +2,13 @@ package tui
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/airiclenz/apogee/internal/domain"
 )
 
 // The chord that opens the walk. Alt rather than a bare key because ↑/↓ are already the prompt's
@@ -372,4 +375,77 @@ func TestBlockCursorReachesTheLastBlockUnderAPane(t *testing.T) {
 	if !blockExpanded(t, m, last) {
 		t.Error("⏎ on the newest block did not open it — the cursor reached a row the toggle refuses")
 	}
+}
+
+// modelWithRunningFanOut is a model mid-Exchange whose scrollback holds a ✦ Sub-Agent umbrella over
+// two delegations the engine stamped as it does live — scout-a (run-a) and scout-b (run-b), both
+// started — so each member row names a run a stop can reach.
+func modelWithRunningFanOut(t *testing.T, eng *fakeEngine) Model {
+	t.Helper()
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+	first := stampedDelegation(&m.transcript, runRef{}, "s1", "run-a", "scout-a")
+	second := stampedDelegation(&m.transcript, runRef{}, "s2", "run-b", "scout-b")
+	stampedPhase(&m.transcript, first, domain.SubAgentStarted, "")
+	stampedPhase(&m.transcript, second, domain.SubAgentStarted, "")
+	m.refreshViewport()
+	if painted := strip(strings.Join(m.lines, "\n")); !strings.Contains(painted, "Sub-Agent (2)") {
+		t.Fatalf("setup: the two delegations are not under one ✦ Sub-Agent umbrella:\n%s", painted)
+	}
+	return m
+}
+
+// cursorOnRun walks the block cursor up from the prompt until it stands on runID's row.
+func cursorOnRun(t *testing.T, m Model, runID string) Model {
+	t.Helper()
+	m = step(t, m, keyAltUp())
+	for range len(m.lineTargets) {
+		if head, ok := m.cursorRunHead(); ok && head.spawnRunID == runID {
+			return m
+		}
+		m = step(t, m, keyUp())
+	}
+	t.Fatalf("setup: the block cursor never stood on %s's row", runID)
+	return m
+}
+
+// TestBlockCursorCtrlXStopsTheMemberRowItStandsOn pins `^x` on a ✦ Sub-Agent umbrella's member row:
+// it stops that row's run and no other, leaves the walk standing, and does nothing on a member that
+// is already over.
+func TestBlockCursorCtrlXStopsTheMemberRowItStandsOn(t *testing.T) {
+	t.Parallel()
+
+	t.Run("a running member", func(t *testing.T) {
+		t.Parallel()
+		eng := &fakeEngine{}
+		m := cursorOnRun(t, modelWithRunningFanOut(t, eng), "run-a")
+
+		m = step(t, m, keyCtrlX())
+
+		if got := eng.stoppedChildren(); !slices.Equal(got, []string{"run-a"}) {
+			t.Errorf("StopChild calls = %v; want only the row's run, run-a", got)
+		}
+		if !m.cursor.active {
+			t.Error("^x ended the walk; the row is still there to read")
+		}
+		if m.inRunView() {
+			t.Error("^x opened a run view; it stops the row, it does not open it")
+		}
+	})
+
+	t.Run("a finished member", func(t *testing.T) {
+		t.Parallel()
+		eng := &fakeEngine{}
+		m := modelWithRunningFanOut(t, eng)
+		stampedPhase(&m.transcript, runRef{depth: 1, spawn: "s2", id: "run-b"}, domain.SubAgentFinished, "done")
+		m.refreshViewport()
+		m = cursorOnRun(t, m, "run-b")
+
+		step(t, m, keyCtrlX())
+
+		if got := eng.stoppedChildren(); len(got) != 0 {
+			t.Errorf("StopChild calls = %v; want none — the run is over", got)
+		}
+	})
 }

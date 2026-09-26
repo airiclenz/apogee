@@ -41,6 +41,9 @@ const (
 	AltDown Key = "\x1b[1;3B"
 
 	CtrlC Key = "\x03"
+	// CtrlX is the stop of one delegation: inside a run view, or on a delegation's row under the
+	// block cursor (ADR 0086 D5).
+	CtrlX Key = "\x18"
 
 	// F1–F4 are SS3 sequences and F5 upwards are CSI ~ sequences — the historical split every
 	// terminal still carries.

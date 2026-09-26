@@ -831,9 +831,10 @@ type DelegationHost interface {
 // with a fake engine. The worker goroutine is the only caller of the Exchange-driving
 // methods (Submit/Step, and Interject at the boundary between them); ClearContext/Compact
 // are driven from the Update goroutine but only at idle, when no worker runs — so the
-// single-driver contract holds (phase-2 detail plan §3 C1). Three calls stand outside it
+// single-driver contract holds (phase-2 detail plan §3 C1). Four calls stand outside it
 // deliberately, and all are engine-side-guarded rather than boundary-guarded: AbortExchange,
-// SettleExchange and InterjectChild, which the Update goroutine may make while a worker drives.
+// SettleExchange, InterjectChild and StopChild, which the Update goroutine may make while a worker
+// drives.
 type Engine interface {
 	// Submit enqueues user input to begin or continue an Exchange.
 	Submit(domain.UserInput) error
@@ -866,9 +867,9 @@ type Engine interface {
 	// interjection, committed by the goroutine that owns the child's Steps, with the child's own
 	// tools, mode and confinement unchanged: addressing a child grants it nothing (ADR 0063).
 	//
-	// Unlike Interject above it is NOT the worker's call. It is the one engine call besides
-	// AbortExchange and SettleExchange that the program goroutine may make while a worker drives
-	// the loop: a non-blocking enqueue onto a guarded mailbox that touches no conversation, so it
+	// Unlike Interject above it is NOT the worker's call. It is one of the engine calls besides
+	// AbortExchange and SettleExchange (StopChild below is the other) that the program goroutine
+	// may make while a worker drives the loop: a non-blocking enqueue onto a guarded mailbox that touches no conversation, so it
 	// needs neither the between-Steps boundary nor the single-driver contract.
 	//
 	// It refuses with domain.ErrNoSuchChild when runID names no running sub-agent — the
@@ -877,6 +878,21 @@ type Engine interface {
 	// one such event reports the message's fate, Landed either way, and the fold turns it into the
 	// delivered block inside the run or the note that it never got there (transcript.apply).
 	InterjectChild(runID string, in domain.UserInput) error
+	// StopChild stops the ONE delegation whose run id is runID, anywhere in the engine's tree,
+	// while the Turn that spawned it goes on: the child's work is folded into a partial result
+	// its parent reads like any other tool result, and a pooled delegation still waiting for a
+	// worker is settled without starting (ADR 0086 D4). It is the human's `^x` inside a run view
+	// or on a delegation's row (runview.go, blockcursor.go).
+	//
+	// Like InterjectChild it is the program goroutine's call, made while a worker drives: it
+	// cancels one child's context and returns, touching no conversation, so it needs neither the
+	// between-Steps boundary nor the single-driver contract. The cancel is the only mechanism
+	// (ADR 0031) — the child's context is a child of the parent's, so a whole-Turn cancel still
+	// reaches it.
+	//
+	// It refuses with domain.ErrNoSuchChild when runID names no run a stop can still cut short —
+	// one that never existed, has finished, or is already being reported — and nothing changed.
+	StopChild(runID string) error
 	// ClearContext drops the model's conversation history (the /clear command); the
 	// host's visible transcript is unaffected. Called only at idle (no worker running).
 	ClearContext() error

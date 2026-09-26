@@ -287,30 +287,79 @@ func (m Model) runViewOwnsEsc() bool {
 	return m.state != stateAwaitingAsk && m.state != stateAwaitingApproval
 }
 
-// backHint is the wording the view's sticky breadcrumb advertises for esc in THIS frame, and the
-// header's half of the one rule [Model.statusRight] keeps for the status line: the two rows
-// advertise one key, so neither may name a press the other does not have. While a child's ask or
-// approval pane stands inside the view esc answers the pane ([Model.runViewOwnsEsc]), and the header
-// says nothing rather than promising a way out the key no longer takes; the trail itself stays, so
-// the reader can still see where they are.
+// backHint is the wording the view's sticky breadcrumb advertises for its keys in THIS frame, and
+// the header's half of the one rule [Model.statusRight] keeps for the status line: the two rows
+// advertise the same keys, so neither may name a press the other does not have. While the viewed run
+// can still be stopped it is [breadcrumbStopHint] — the way back and `^x` — and once the run is over
+// it is the plain [breadcrumbHint], since `^x` then does nothing ([Model.runViewKey]). While a child's
+// ask or approval pane stands inside the view esc answers the pane ([Model.runViewOwnsEsc]), and the
+// header says nothing rather than promising a way out the key no longer takes; the trail itself
+// stays, so the reader can still see where they are.
 //
 // It deliberately does NOT carry statusRight's stateErrored half. There esc still walks one level up
 // — the claimant keeps the key — and only the status slot yields, to name the thing to dismiss; the
 // header goes on advertising what the press actually does.
+//
+// The long form is only ever the PREFERRED one: each row that paints it gives way to the plain
+// [breadcrumbHint] where it does not fit ([fitBreadcrumbHint]).
 func (m Model) backHint() string {
-	if m.runViewOwnsEsc() {
-		return breadcrumbHint
+	if !m.runViewOwnsEsc() {
+		return ""
 	}
-	return ""
+	if head, ok := m.viewedChild(); ok && stoppable(head) {
+		return breadcrumbStopHint
+	}
+	return breadcrumbHint
 }
 
-// runViewKey is the view's whole key contract: esc goes one level up, and every other key falls
-// through untouched — to the block cursor below it in the claim order, and to the prompt box below
-// that. Claiming esc is also what keeps the stop gesture out of a view: m.lastEsc never arms while
-// the claimant is open, so esc×2 cannot stop the run from inside it (ADR 0063 — back out first).
+// runViewKey is the view's whole key contract: esc goes one level up, `^x` stops the run on screen
+// (ADR 0086 D5), and every other key falls through untouched — to the block cursor below it in the
+// claim order, and to the prompt box below that. Claiming esc is also what keeps the WHOLE-Turn
+// cancel out of a view: m.lastEsc never arms while the claimant is open, so esc×2 cannot cancel the
+// Turn from inside it (ADR 0063 — back out first); `^x` is the stop a view does have, and it reaches
+// that one run alone.
+//
+// `^x` needs no confirmation: what it discards is only the rest of one delegation's work, and the
+// engine folds what that run had done into the result its parent reads. On a run that is over, or
+// one that never learned a run id, it does nothing. The one place it steps aside is a block cursor
+// standing on a delegation's row inside the view: there the human is pointing at THAT run, so the
+// key is left to [Model.blockCursorKey], which stops the row rather than the view.
 func (m Model) runViewKey(msg tea.KeyPressMsg) (bool, tea.Model, tea.Cmd) {
-	if msg.String() != "esc" {
-		return false, m, nil
+	switch msg.String() {
+	case "esc":
+		return true, m.upRun(), nil
+	case "ctrl+x":
+		if _, onRow := m.cursorRunHead(); onRow {
+			return false, m, nil
+		}
+		if head, ok := m.viewedChild(); ok {
+			m.stopRun(head)
+		}
+		return true, m, nil
 	}
-	return true, m.upRun(), nil
+	return false, m, nil
+}
+
+// stoppable reports whether head is a delegation a stop can still reach: a run head that carries
+// the run id the engine addresses it by and has not reported. A pooled delegation still QUEUED for a
+// worker is one — the engine settles it without starting it (ADR 0086 D4) — so the answer reads the
+// display's own "is this delegation over?" ([subAgentReported]) rather than the running phase alone.
+func stoppable(head entry) bool {
+	return head.headsRun() && head.spawnRunID != "" && !subAgentReported(head.painted())
+}
+
+// stopRun asks the engine to stop head's run, and does nothing for a head that is not [stoppable].
+// It is called from the Update goroutine, which the seam is written for: StopChild cancels one
+// child's context and returns (tui.go, agent/children.go). The frame changes only when the stopped
+// run reports — its row then says `stopped by you` — so nothing is folded here.
+func (m Model) stopRun(head entry) {
+	if !stoppable(head) {
+		return
+	}
+	if err := m.eng.StopChild(head.spawnRunID); err != nil {
+		// A refusal is the race the frame lost: the run finished — or its report is already being
+		// rendered — between the paint that showed it live and this key. Its own finished row is
+		// the whole account of how it ended, so the refusal adds nothing to the frame.
+		return
+	}
 }

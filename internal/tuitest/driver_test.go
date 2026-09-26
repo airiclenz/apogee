@@ -159,6 +159,7 @@ func TestKeysDecodeAsIntended(t *testing.T) {
 		{key: F10, code: tea.KeyF10, name: "f10"},
 		{key: F11, code: tea.KeyF11, name: "f11"},
 		{key: F12, code: tea.KeyF12, name: "f12"},
+		{key: CtrlX, code: 'x', mod: tea.ModCtrl, name: "ctrl+x"},
 		// Esc is last on purpose: it resolves only after the reader's escape timeout, so a key
 		// pressed behind it would arrive first and make the order a lie.
 		{key: Esc, code: tea.KeyEscape, name: "esc"},

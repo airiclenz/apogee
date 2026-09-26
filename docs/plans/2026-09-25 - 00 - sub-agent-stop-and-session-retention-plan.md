@@ -161,7 +161,12 @@ cmd/apogee/e2e_smoke_test.go — escStopArmedHint, stopRun; internal/tui/transcr
 - `go test -race -count=1 -run 'E2E' ./cmd/apogee/` (re-record any golden only when its diff is exactly the capped or cancel rewording)
 **Commit:** `feat(tui): render a stopped delegation, and say capped for an engine bound`
 
-## 6. `^x` stops the viewed run or the cursor's member row
+## 6. `^x` stops the viewed run or the cursor's member row — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): re-derived from the assumption that a standing approval/ask pane knows the run id that raised it — domain.ApprovalRequest carries none, so approvalReqMsg/askReqMsg (messages.go) now carry their parked call's ctx.Done() (set in approver.go/asker.go), and a delegation's finished phase withdraws a pane whose own call was abandoned (withdrawAbandonedDecision, approval.go) — which is exactly "that run or any run beneath it", since a child's ctx is a child of its parent's. A whole-Turn stop (actStopping) is left to finishWorker as before. The alternative (parkCall sending a withdraw msg) was rejected because approver_test/asker_test pin exactly one sent msg after a cancel.
+NOTES (2026-09-26): "running" is read as "not yet reported" (stoppable: headsRun, non-empty spawnRunID, !subAgentReported) for both the key and the hint, so a queued pooled delegation — which item 4's engine stop settles without starting — is stoppable too, and the hint never hides a live key.
+NOTES (2026-09-26): TestRunViewStatusSlotOffersTheWayBack keeps its want: its fixture (modelWithRun) is a finished run with no run id, where `esc back` stays correct; the running want is pinned by the new TestRunViewHintOffersTheStopWhileTheRunRuns instead.
+NOTES (2026-09-26): internal/tui/doc.go's run-view paragraph ("the status line says esc back…") is left to item 13, which owns doc.go.
 
 **What:** Depends on items 3 and 5.
 **Goal:** `ctrl+x` inside a run view of a running delegation calls `Engine.StopChild` with that run's run id; `ctrl+x` with the block cursor on a running member row of a `✦ Sub-Agent (N)` umbrella stops that row's run; there is no confirmation; `esc` still means back and `esc×2` at the top level still cancels the Turn; the run view's header hint and status right slot read `esc back · ^x stop` while the viewed run runs and `esc back` otherwise; `/help` lists `^x`.

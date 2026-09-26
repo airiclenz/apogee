@@ -124,7 +124,8 @@ func (m Model) blockCursorOwnsKeys() bool {
 // swallowed by the walk they were in (design call 7).
 //
 // ⌥↑ / ⌥↓ both enter and move, so the mode costs no separate gesture to open. Inside it plain ↑/↓
-// move, ⏎ opens or closes the surface under the highlight, and esc leaves without typing anything.
+// move, ⏎ opens or closes the surface under the highlight, `^x` stops the delegation whose row it
+// stands on, and esc leaves without typing anything.
 // Every other key — ⌃c, PgUp, ⇧⇥ — is left alone and leaves the mode standing: they are the frame's
 // own verbs, and none of them is a reason to lose your place in the scrollback.
 func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
@@ -151,6 +152,17 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 	case "esc":
 		m.cursor = blockCursor{}
 		return m, nil, true
+	case "ctrl+x":
+		// `^x` on a delegation's row stops that run alone — a member of a ✦ Sub-Agent umbrella, or a
+		// grandchild's row inside a view (ADR 0086 D5) — and leaves the mode standing: the row is
+		// still there, and says how the run ended once it has. Anywhere else the key is not the
+		// cursor's, and inside a view it goes on to stop nothing (the view's claimant declined it).
+		head, ok := m.cursorRunHead()
+		if !ok {
+			return m, nil, false
+		}
+		m.stopRun(head)
+		return m, nil, true
 	}
 	if msg.Text != "" {
 		// Typing is the way out that needs no key of its own: the human has stopped reading and
@@ -160,6 +172,26 @@ func (m Model) blockCursorKey(msg tea.KeyPressMsg) (Model, tea.Cmd, bool) {
 		return m, nil, false
 	}
 	return m, nil, false
+}
+
+// cursorRunHead is the delegation the highlight stands on, when it stands on one: an active cursor
+// whose line the paint marked as a header ([targetHeader]) of an entry that heads a run — a
+// delegation's collapsed row at any depth, a ✦ Sub-Agent umbrella's member rows included. It reads
+// the paint's own accounting (m.lineTargets), as [Model.toggleBlockAt] does, so the row `^x` stops is
+// the row the human sees highlighted.
+func (m Model) cursorRunHead() (entry, bool) {
+	if !m.cursor.active || m.cursor.line < 0 || m.cursor.line >= len(m.lineTargets) {
+		return entry{}, false
+	}
+	target := m.lineTargets[m.cursor.line]
+	if target.kind != targetHeader || target.entry < 0 || target.entry >= len(m.transcript.entries) {
+		return entry{}, false
+	}
+	head := m.transcript.entries[target.entry]
+	if !head.headsRun() {
+		return entry{}, false
+	}
+	return head, true
 }
 
 // moveBlockCursor moves the highlight one stop in dir, entering the mode when it is not already on.

@@ -346,6 +346,16 @@ func (e *lateEngine) InterjectChild(runID string, in apogee.UserInput) error {
 	return agent.InterjectChild(runID, in)
 }
 
+// StopChild stops one running sub-agent; unbound there is no tree to reach into, and the refusal
+// is errNoServerBound for InterjectChild's reason.
+func (e *lateEngine) StopChild(runID string) error {
+	agent := e.bound()
+	if agent == nil {
+		return errNoServerBound
+	}
+	return agent.StopChild(runID)
+}
+
 // ClearContext drops the model's history; unbound there is no history to drop.
 func (e *lateEngine) ClearContext() error {
 	agent := e.bound()

@@ -161,6 +161,22 @@ const (
 	breadcrumbHint = "esc back"
 )
 
+// breadcrumbStopHint is the header's key hint while the viewed run can still be stopped: the way
+// back, then the stop that reaches that run alone ([Model.runViewKey]). Its stop cell IS the /help
+// legend's ([helpKeyStopRun]), so the view and /help spell the one gesture once between them.
+const breadcrumbStopHint = breadcrumbHint + helpCellSeparator + helpKeyStopRun
+
+// fitBreadcrumbHint returns hint where room columns can hold it, and otherwise its shorter form: the
+// stop hint gives way to the plain [breadcrumbHint] — a key the view still has — before a row gives
+// the hint up whole, exactly as the armed-esc hint falls back to its plain form ([Model.escStopHint]).
+// Any other hint comes back as it is, for the caller's own drop-it-whole rule to judge.
+func fitBreadcrumbHint(measure widthAuthority, hint string, room int) string {
+	if hint == breadcrumbStopHint && measure.Width(hint) > room {
+		return breadcrumbHint
+	}
+	return hint
+}
+
 // breadcrumbTrail is the header's TEXT for a paint rooted at run: the trail of run
 // names from the human's own conversation down to that run — "← main › planner › repo-scout" — so a
 // reader two levels in sees both where they are and what stands between them and the top.
@@ -201,7 +217,8 @@ func breadcrumbTrail(entries []entry, run runRef) string {
 // header still advertising `esc back` would name a key the press does not have. An empty hint paints
 // the trail alone — the two rows advertise one key, so they fall silent together ([Model.backHint]).
 //
-// Where the width cannot pay for both, the hint gives way whole: the trail is what the header is
+// Where the width cannot pay for both, a long hint first gives way to its short form
+// ([fitBreadcrumbHint]), and a hint that still does not fit gives way whole: the trail is what the header is
 // FOR, and a truncated key hint would advertise a keystroke nobody could read. The row is squared to
 // the width either way, so the field runs the whole way across rather than showing the terminal's
 // own background through the gap.
@@ -210,6 +227,7 @@ func breadcrumbRow(th theme, trail string, width int, hint string) string {
 	if hint == "" {
 		return th.breadcrumb.Render(squareLine(th.measure, body, width))
 	}
+	hint = fitBreadcrumbHint(th.measure, hint, width-th.measure.Width(body)-th.measure.Width(bodyIndent)-1)
 	hint += bodyIndent
 	gap := width - th.measure.Width(body) - th.measure.Width(hint)
 	if gap < 1 {
