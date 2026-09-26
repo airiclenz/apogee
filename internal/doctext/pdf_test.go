@@ -5,6 +5,8 @@ import (
 	"compress/flate"
 	"compress/zlib"
 	"context"
+	"crypto/md5"
+	"crypto/rc4"
 	"encoding/ascii85"
 	"encoding/binary"
 	"fmt"
@@ -15,6 +17,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ledongthuc/pdf"
 )
 
 // readPDFFixture returns the bytes of a committed PDF under testdata. The fixtures are
@@ -1220,5 +1224,209 @@ func TestExtractPDF_ChargesAnIndirectLengthThroughTheEnd(t *testing.T) {
 
 	if want := fmt.Sprintf(pdfInflatedCause, pdfMaxInflatedBytes>>20); !strings.Contains(failMessage, want) {
 		t.Fatalf("failMessage = %q, want it to carry %q", failMessage, want)
+	}
+}
+
+// pdfPasswordPad is the standard security handler's password padding (PDF 32000-1:2008,
+// §7.6.3.3, Algorithm 2), which the parser keys an empty user password from.
+var pdfPasswordPad = []byte{
+	0x28, 0xBF, 0x4E, 0x5E, 0x4E, 0x75, 0x8A, 0x41, 0x64, 0x00, 0x4E, 0x56, 0xFF, 0xFA, 0x01, 0x08,
+	0x2E, 0x2E, 0x00, 0xB6, 0xD0, 0x68, 0x3E, 0x80, 0x2F, 0x0C, 0xA9, 0xFE, 0x64, 0x53, 0x69, 0x7A,
+}
+
+// encryptedTrailerPlacement says where encryptedPDF writes the trailer that names /Encrypt.
+type encryptedTrailerPlacement int
+
+const (
+	// trailerInTheOpen is the classic layout: the xref table and trailer after the last object.
+	trailerInTheOpen encryptedTrailerPlacement = iota
+	// trailerInsideAStreamBody puts the xref table and trailer inside the body of an otherwise
+	// unreferenced stream object, with startxref pointing into that body — where a scan that
+	// skips stream bodies never looks, and where the parser reads its trailer all the same.
+	trailerInsideAStreamBody
+)
+
+// encryptedPDF builds a one-page document encrypted the way the parser decrypts one on its own:
+// the standard security handler at revision 2 with a 40-bit RC4 key and an EMPTY user password,
+// the page's content stream enciphered under its object key (read.go initEncrypt, cryptKey). The
+// content stream carries body under the extra dictionary entries given, so a test can make the
+// page plain text or a FlateDecode bomb. Object 6 is the /Encrypt dictionary the trailer names.
+func encryptedPDF(t *testing.T, placement encryptedTrailerPlacement, body []byte, entries ...string) []byte {
+	t.Helper()
+
+	const (
+		contentObject  = 5
+		documentIDText = "apogee-fixture-1"
+	)
+	// The permission flags are a signed 32-bit integer in the dictionary and its unsigned bits in
+	// the key hash; a variable, because a constant -4 does not convert to uint32.
+	permissions := int32(-4)
+	owner := bytes.Repeat([]byte{0x4f}, 32)
+	documentID := []byte(documentIDText)
+
+	keyHash := md5.New()
+	keyHash.Write(pdfPasswordPad)
+	keyHash.Write(owner)
+	keyHash.Write(binary.LittleEndian.AppendUint32(nil, uint32(permissions)))
+	keyHash.Write(documentID)
+	fileKey := keyHash.Sum(nil)[:5]
+
+	user := rc4Enciphered(t, fileKey, pdfPasswordPad)
+	objectKey := md5.Sum(append(append([]byte{}, fileKey...), contentObject, 0, 0, 0, 0))
+	cipherBody := rc4Enciphered(t, objectKey[:], body)
+
+	dictionary := strings.Join(append(append([]string{}, entries...), fmt.Sprintf("/Length %d", len(cipherBody))), " ")
+	objects := []string{
+		"<< /Type /Catalog /Pages 2 0 R >>",
+		"<< /Type /Pages /Kids [4 0 R] /Count 1 >>",
+		"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+		"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]" +
+			" /Resources << /Font << /F1 3 0 R >> >> /Contents 5 0 R >>",
+		fmt.Sprintf("<< %s >>\nstream\n%s\nendstream", dictionary, cipherBody),
+		fmt.Sprintf("<< /Filter /Standard /V 1 /R 2 /O <%x> /U <%x> /P %d >>", owner, user, permissions),
+	}
+
+	var document bytes.Buffer
+	document.WriteString("%PDF-1.4\n")
+	offsets := make([]int, 0, len(objects)+1)
+	for index, object := range objects {
+		offsets = append(offsets, document.Len())
+		fmt.Fprintf(&document, "%d 0 obj\n%s\nendobj\n", index+1, object)
+	}
+
+	// The trailer section's rows are fixed-width, so its length — and with it the hiding stream's
+	// /Length — is known before the section is written.
+	section := func(objectCount int) string {
+		var rows strings.Builder
+		fmt.Fprintf(&rows, "xref\n0 %d\n0000000000 65535 f \n", objectCount+1)
+		for _, offset := range offsets {
+			fmt.Fprintf(&rows, "%010d 00000 n \n", offset)
+		}
+		fmt.Fprintf(&rows, "trailer\n<< /Size %d /Root 1 0 R /Encrypt 6 0 R /ID [<%x> <%x>] >>\n",
+			objectCount+1, documentID, documentID)
+		return rows.String()
+	}
+
+	switch placement {
+	case trailerInTheOpen:
+		xref := document.Len()
+		document.WriteString(section(len(objects)))
+		fmt.Fprintf(&document, "startxref\n%d\n%%%%EOF\n", xref)
+	case trailerInsideAStreamBody:
+		offsets = append(offsets, document.Len())
+		hidden := section(len(objects) + 1)
+		header := fmt.Sprintf("%d 0 obj\n<< /Length %d >>\nstream\n", len(objects)+1, len(hidden))
+		xref := document.Len() + len(header)
+		document.WriteString(header + hidden + "\nendstream\nendobj\n")
+		fmt.Fprintf(&document, "startxref\n%d\n%%%%EOF\n", xref)
+	}
+	return document.Bytes()
+}
+
+// rc4Enciphered returns plain enciphered under key, as the standard security handler does.
+func rc4Enciphered(t *testing.T, key, plain []byte) []byte {
+	t.Helper()
+
+	cipher, err := rc4.NewCipher(key)
+	if err != nil {
+		t.Fatalf("rc4 key: %v", err)
+	}
+	enciphered := make([]byte, len(plain))
+	cipher.XORKeyStream(enciphered, plain)
+	return enciphered
+}
+
+// TestExtractPDF_EncryptedFixtureOpensWithTheEmptyPassword proves the fixtures below are real
+// encrypted documents: the parser opens each one with no password asked of anyone and reads the
+// page's text in the clear. That is the bypass the refusal closes — the parser decrypts and then
+// inflates streams whose raw bytes the preflight could only see as ciphertext.
+func TestExtractPDF_EncryptedFixtureOpensWithTheEmptyPassword(t *testing.T) {
+	t.Parallel()
+
+	const pageText = "Hello Apogee"
+	for name, placement := range map[string]encryptedTrailerPlacement{
+		"trailer in the open":          trailerInTheOpen,
+		"trailer inside a stream body": trailerInsideAStreamBody,
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			data := encryptedPDF(t, placement, []byte(contentBody(pageText)))
+			reader, err := pdf.NewReader(bytes.NewReader(data), int64(len(data)))
+			if err != nil {
+				t.Fatalf("the parser refused the fixture: %v", err)
+			}
+			text, err := reader.Page(1).GetPlainText(nil)
+			if err != nil {
+				t.Fatalf("read page 1: %v", err)
+			}
+			if !strings.Contains(text, pageText) {
+				t.Errorf("page 1 text = %q, want the decrypted %q", text, pageText)
+			}
+		})
+	}
+}
+
+// TestExtractPDF_RefusesAnEncryptedDocument pins the refusal: a document whose trailer — or
+// whose cross-reference stream dictionary — names /Encrypt is refused before the parser sees it,
+// with encryption named as the reason. The bomb case is the one the refusal exists for: the page's
+// content inflates past the whole budget once decrypted, and the preflight, reading ciphertext,
+// could never have charged it. The hidden case puts the trailer where the stream-free scan does
+// not look; only the scan from startxref's offset finds it.
+func TestExtractPDF_RefusesAnEncryptedDocument(t *testing.T) {
+	t.Parallel()
+
+	const crossReferenceRow = "\x00\x00\x00\x00"
+	xrefStream := fmt.Sprintf("%%PDF-1.5\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n"+
+		"2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n"+
+		"3 0 obj\n<< /Type /XRef /Size 5 /W [1 2 1] /Root 1 0 R /Encr#79pt 4 0 R /Length %d >>"+
+		"\nstream\n%s\nendstream\nendobj\n", len(crossReferenceRow), crossReferenceRow)
+	xrefStream += fmt.Sprintf("startxref\n%d\n%%%%EOF\n", strings.Index(xrefStream, "3 0 obj"))
+
+	cases := map[string]func(t *testing.T) []byte{
+		"trailer": func(t *testing.T) []byte {
+			return encryptedPDF(t, trailerInTheOpen, []byte(contentBody("Hello Apogee")))
+		},
+		"trailer inside a stream body": func(t *testing.T) []byte {
+			return encryptedPDF(t, trailerInsideAStreamBody, []byte(contentBody("Hello Apogee")))
+		},
+		"cross-reference stream dictionary": func(*testing.T) []byte {
+			return []byte(xrefStream)
+		},
+		"inflate bomb": func(t *testing.T) []byte {
+			return encryptedPDF(t, trailerInTheOpen, deflatedZeros(t, bombInflated), "/Filter /FlateDecode")
+		},
+	}
+	for name, build := range cases {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+
+			text, pages, failMessage := ExtractPDF(context.Background(), build(t), 0)
+
+			if !strings.Contains(failMessage, pdfEncryptedCause) {
+				t.Fatalf("failMessage = %q, want the refusal naming encryption", failMessage)
+			}
+			if text != "" || pages != 0 {
+				t.Errorf("failure returned text %q and pages %d, want both empty", text, pages)
+			}
+		})
+	}
+}
+
+// TestExtractPDF_ReadsEncryptSpelledInsideAStreamAsContent pins that the refusal leaves an
+// unencrypted document alone even when its page text spells a trailer's /Encrypt entry: a stream
+// body is content, and the trailer the parser reads carries no such key.
+func TestExtractPDF_ReadsEncryptSpelledInsideAStreamAsContent(t *testing.T) {
+	t.Parallel()
+
+	const spelled = "/Encrypt 6 0 R"
+
+	text, pages, failMessage := ExtractPDF(context.Background(), textPagesPDF(t, spelled), 0)
+
+	if failMessage != "" {
+		t.Fatalf("ExtractPDF failed: %s", failMessage)
+	}
+	if pages != 1 || !strings.Contains(text, spelled) {
+		t.Errorf("text = %q, pages = %d, want the single page carrying %q", text, pages, spelled)
 	}
 }

@@ -64,7 +64,9 @@ its text — page by page, with a `[Page N]` marker before each — and the head
 says as much: `(PDF, 27 pages; extracted text, read-only)`, so the model knows it is
 looking at a transcription and not at something it can edit in place. A scanned PDF has no
 text to read: apogee says so, sends your message without that reference, and the turn goes
-ahead — ask for a text version of that one. A very large reference is not dropped either.
+ahead — ask for a text version of that one. An encrypted PDF is refused the same way, even
+one that opens without a password: its streams cannot be checked for size before they are
+decrypted, so apogee does not read it — ask for an unencrypted copy. A very large reference is not dropped either.
 The model is shown its head and its tail with a note in between saying the middle was cut
 to fit the context budget, and it can pull back the parts it needs with `read_file` on the
 same path. Several references in one message share that room between them, so a message

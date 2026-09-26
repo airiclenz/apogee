@@ -94,6 +94,11 @@ const (
 	pdfPredictorCause = "declares a predictor row of %s columns"
 	pdfXrefWidthCause = "declares cross-reference field widths of [%s]"
 
+	// pdfEncryptedCause words the refusal of an encrypted document (see pdfEncrypted). It names
+	// encryption as the reason because that is the fact the reader can act on: the user holds the
+	// password, or a decrypted copy, and the model holds neither.
+	pdfEncryptedCause = "the document is encrypted, and encrypted PDFs are not read"
+
 	// pdfPagesOmittedFormat is the last block of a walk that stopped before the document's final
 	// page: the range that was not extracted and why. It is a BLOCK rather than a failure because
 	// the pages above it are real text the model can use — the marker exists so the model reads
@@ -521,7 +526,14 @@ func refuseAbsurdObjectCount(data []byte) string {
 // fails to inflate is skipped, not refused: the parser will report it. A page dictionary
 // compressed inside an object stream hides its /Contents reference from this raw scan; that gap
 // is known and bounded — an object stream is itself charged.
+//
+// An encrypted document is refused before any of that (see pdfEncrypted): its stream bodies are
+// ciphertext in the raw bytes, which the budget cannot measure, and the parser decrypts them
+// anyway whenever the user password is empty.
 func preflightPDF(ctx context.Context, data []byte) string {
+	if pdfEncrypted(data) {
+		return pdfEncryptedCause
+	}
 	for _, columns := range declaredIntegers(data, "Columns") {
 		if exceedsBound(columns, pdfMaxPredictorColumns) {
 			return fmt.Sprintf(pdfPredictorCause, columns)
@@ -550,6 +562,54 @@ func preflightPDF(ctx context.Context, data []byte) string {
 		remaining -= inflated
 	}
 	return ""
+}
+
+// pdfEncrypted reports whether the parser would treat data as an encrypted document: whether the
+// trailer it reads — a classic trailer or a cross-reference stream's dictionary — names an
+// /Encrypt entry. The parser opens such a document with the empty user password (read.go
+// NewReaderEncrypted, initEncrypt("")), which most encrypted files carry, and decrypts every
+// stream before it inflates it. The preflight measures the raw bytes, where each of those bodies is
+// ciphertext that fails to inflate and is skipped uncharged — so an encrypted bomb reaches the
+// parser with its whole inflation unbudgeted. Rather than decrypt a document to measure it, apogee
+// refuses to read it.
+//
+// Two scans cover the trailer the parser reads. The first is every span outside stream bodies (see
+// withoutStreamBodies), where each trailer and each cross-reference stream dictionary of a real
+// document sits. The second is the bytes from the offset every final `startxref` names through the
+// end of the file: the parser reads its trailer there, and a hostile file can place that offset
+// inside another stream's body, which the first scan skips. The name is matched as the lexer
+// decodes it, so `/Encr#79pt` is caught as well.
+func pdfEncrypted(data []byte) bool {
+	for _, span := range withoutStreamBodies(data) {
+		if len(pdfNameSites(span, pdfEncryptKey)) > 0 {
+			return true
+		}
+	}
+	offset, found := pdfTrailerOffset(data)
+	return found && len(pdfNameSites(data[offset:], pdfEncryptKey)) > 0
+}
+
+// pdfTrailerOffset returns the lowest offset a `startxref` keyword in the file's final
+// pdfStartXrefWindow bytes names, and whether any names one inside the file. The parser takes the
+// last line-bounded keyword in that window (read.go findLastLine); taking every keyword there and
+// the lowest offset among them gives a scan window that always contains the parser's, without
+// reproducing its line rules.
+func pdfTrailerOffset(data []byte) (int, bool) {
+	windowStart := max(0, len(data)-pdfStartXrefWindow)
+	lowest, found := len(data), false
+	for _, at := range pdfKeywordIndexes(data[windowStart:], pdfStartXrefKeyword) {
+		lexer := pdfLexer{span: data, at: windowStart + at + len(pdfStartXrefKeyword)}
+		token := lexer.next()
+		if token.kind != pdfTokenWord {
+			continue
+		}
+		offset, err := strconv.ParseInt(token.text, 10, 64)
+		if err != nil || offset < 0 || offset >= int64(lowest) {
+			continue
+		}
+		lowest, found = int(offset), true
+	}
+	return lowest, found
 }
 
 // largestInflation charges one stream: the most any of its candidate decode chains inflates its
@@ -596,6 +656,15 @@ const (
 	// pdfStreamKeyword and pdfEndStreamKeyword are the two keywords that frame a stream body.
 	pdfStreamKeyword    = "stream"
 	pdfEndStreamKeyword = "endstream"
+
+	// pdfStartXrefKeyword introduces the offset of the cross-reference section the parser reads
+	// first, and pdfStartXrefWindow is how far from the end of the file the parser looks for it
+	// (read.go NewReaderEncrypted's endChunk).
+	pdfStartXrefKeyword = "startxref"
+	pdfStartXrefWindow  = 100
+
+	// pdfEncryptKey is the trailer key whose presence makes the parser decrypt the document.
+	pdfEncryptKey = "Encrypt"
 
 	// pdfFlateDecode and pdfASCII85Decode are the two filters the parser decodes (read.go
 	// applyFilter); any other name panics before a byte is read.

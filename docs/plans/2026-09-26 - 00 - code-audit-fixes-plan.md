@@ -225,7 +225,13 @@ NOTES (2026-09-27): the doctext package takes ~77 s under -race on the Pi 5 (up 
 **Acceptance:** `go test -race -count=1 ./internal/doctext/`
 **Commit:** `fix(doctext): PDF preflight charges streams by /Length and the declared filter chain`
 
-## 12. Encrypted PDFs are refused
+## 12. Encrypted PDFs are refused — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): `pdfEncrypted` runs two scans for `/Encrypt`, with the name decoded the way the lexer decodes it, so `#`-escapes count. The first covers every span outside stream bodies (`withoutStreamBodies`). The second runs from the lowest offset any `startxref` in the file's last 100 bytes names, through EOF. It is there because a hostile file can put its real trailer inside another stream's body and point startxref at it, which the first scan skips. A fixture shows the second scan is needed: with that scan disabled, the hidden-trailer case is read.
+NOTES (2026-09-27): the standing "new tests fail pre-item" rule does not hold for one test. `TestExtractPDF_ReadsEncryptSpelledInsideAStreamAsContent` is a guard for the Goal's "unencrypted PDFs are unaffected" and passes on the pre-item tree by design. The four refusal cases all fail pre-item. Three of them pass straight through (the bomb case inflates 80 MiB in about 24 s and returns the scan message). The xref-stream case fails with the parser's own EOF error.
+NOTES (2026-09-27): `TestExtractPDF_EncryptedFixtureOpensWithTheEmptyPassword` opens each encrypted fixture with `ledongthuc/pdf` directly and reads its text in the clear. It proves the fixtures really are encrypted and readable with the empty password (RC4, R2, 40-bit), which is the bypass this refusal closes.
+NOTES (2026-09-27): consequential edit — docs/manual/commands.md: made necessary by the user-visible refusal of encrypted PDFs in `preflightPDF`. The @-reference paragraph now says an encrypted PDF is refused the same way a scanned one is.
+NOTES (2026-09-27): known limit: `pdfNameSites` does not skip strings or comments, so an unencrypted PDF whose trailer region or other non-stream bytes spell `/Encrypt` inside a literal string or a comment is refused too. This is the same raw-scan limit the `/Size` and `/Columns` guards already have.
 
 **What:** Depends on item 11 (same file). Fixes the recon-found empty-password-encryption bypass of the inflate budget.
 **Goal:** reading a PDF whose trailer (or cross-reference stream dictionary) carries `/Encrypt` returns a refusal naming encryption as the reason; unencrypted PDFs are unaffected.
