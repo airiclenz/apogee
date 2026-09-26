@@ -264,7 +264,13 @@ Folded guards: every restored retained string (task, name, each round's instruct
 - `go test -race -count=1 ./internal/session/`
 **Commit:** `feat(agent): save retained delegations with the session and cut them with a fork`
 
-## 11. A cancelled Turn restores retention to its start
+## 11. A cancelled Turn restores retention to its start — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): the Turn-start and Exchange-start copies are held on retainedDelegates itself (atTurn / atExchange, shallow map clones, safe because rounds are never written in place), so turnRolledBack keeps its no-argument signature. step() takes markExchange at the Exchange opening and markTurn right after armRequest (not inside it, since refold re-arms mid-Turn). load() resets both copies to the loaded set and clear() empties them.
+NOTES (2026-09-26): the abort restore reaches the Agent through a new third observer method, exchangeAborted, fired by turnLifecycle.abort after the rollback and before closeExchange, so AbortExchange and a settle that falls through to abort both restore the Exchange-start set, while a settle that keeps its Turns does not. countingObserver and TestTurnLifecycleNotifiesItsObserver were extended to cover it.
+NOTES (2026-09-26): consequential edit — internal/agent/agent.go: made necessary by the rollback; the Agent.retained field comment now says a cancel puts the set back.
+NOTES (2026-09-26): TestSubAgent_ACancelledContinuationRetainsNothing pinned the leak this item fixes (it asserted no entry after a cancelled continuation). It is now TestSubAgent_ACancelledContinuationLeavesTheEntryItTook: the taken entry is back, still with one round. The use sequence is not rewound on a restore, since stamps only order.
+NOTES (2026-09-26): "a stop does not restore anything" is pinned by the unchanged TestStopChild_StopsOneDelegationAndTheTurnGoesOn (stop_test.go), which still finds the stopped child retained after the parent's Turn goes on; no new stop test was added. The three new behaviour tests and the inverted one all fail with the non-test changes stashed.
 
 **What:** Depends on item 9. Depends on item 10.
 **Goal:** a Turn rolled back by cancel leaves retention exactly as it was at the Turn's start, and an aborted Exchange leaves it as it was at the Exchange's start; so a pooled sibling capped before the cancel is not retained, and a continuation cancelled after it spawned leaves the entry it consumed in place.

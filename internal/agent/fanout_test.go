@@ -358,6 +358,87 @@ func TestFanOut_CancelRollsTheWholeTurnBack(t *testing.T) {
 	}
 }
 
+// gatedTaskResponder runs gate on the asking agent's goroutine before any request whose last user
+// message contains key is answered by next — the seam a pooled test holds one child at.
+type gatedTaskResponder struct {
+	next provider.Responder
+	key  string
+	gate func(context.Context)
+}
+
+func (r gatedTaskResponder) Stream(ctx context.Context, req provider.Request) iter.Seq[provider.Delta] {
+	if strings.Contains(lastUserText(req), r.key) {
+		r.gate(ctx)
+	}
+	return r.next.Stream(ctx, req)
+}
+
+// TestFanOut_CancelForgetsASiblingRetainedBeforeIt pins D3's Turn rollback on the pool: a sibling
+// capped — and so retained — before the human cancels the Turn is forgotten with the Turn, since
+// the rollback drops the result that would have told the parent its name.
+func TestFanOut_CancelForgetsASiblingRetainedBeforeIt(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.ParallelAgents = 2
+	cfg.Delegation.MaxSteps = 2
+	spawn := []provider.Delta{
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c1", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentNamedArgs("task one", "Alpha")},
+		}},
+		{Kind: provider.DeltaToolCall, ToolCall: &provider.ToolCall{
+			ID: "c2", Type: "function",
+			Function: provider.FunctionCall{Name: tools.SubAgentToolName, Arguments: subAgentNamedArgs("task two", "Beta")},
+		}},
+		{Kind: provider.DeltaDone, FinishReason: "tool_calls"},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var a *Agent
+	var alphaRetained atomic.Bool
+	// Beta holds its first request until Alpha is retained, then the human presses Esc.
+	holdBeta := func(c context.Context) {
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if _, ok := a.retained.lookup("Alpha"); ok {
+				alphaRetained.Store(true)
+				break
+			}
+			time.Sleep(time.Millisecond)
+		}
+		cancel()
+		<-c.Done()
+	}
+	up := newTaskRoutedResponder().
+		route("delegate two things", spawn).
+		route("task one", append(cappedChildTurns(2), foldScript(700, 40), contentScript(childClosingReport))...).
+		route("task two", []provider.Delta{{Kind: provider.DeltaError, Err: "context canceled"}})
+
+	var err error
+	a, err = newAgent(cfg, gatedTaskResponder{next: up, key: "task two", gate: holdBeta})
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("parent status = %q, want %q", res.Status, domain.StatusCancelled)
+	}
+	if !alphaRetained.Load() {
+		t.Fatal("Alpha was never retained before the cancel; the test did not reach the leak it pins")
+	}
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names = %v after the Turn was cancelled, want none — Alpha goes with the rolled-back Turn", names)
+	}
+}
+
 // TestFanOut_ChildPanicRecoversWithoutKillingTheSibling pins the per-child fault boundary (ADR
 // 0007) on the pooled path — runSubAgent's frame, inside each worker goroutine's call chain: a
 // panic raised inside one worker's nested Agent becomes that call's error result, and the sibling

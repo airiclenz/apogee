@@ -155,10 +155,11 @@ func buildAgent(cfg domain.Config, up provider.Responder, d *delegation) (*Agent
 	// Wire the Turn lifecycle owner AFTER the literal so conv points at the Agent's field: a later
 	// restoreState value-assigns a.conv, and the pointer keeps that write visible through a.turns.
 	// The Agent rides along as the lifecycle's exchangeObserver for the same reason: the lifecycle
-	// owns the moment an Exchange ends and the moment a cancelled Turn is rolled back, the Agent
-	// owns what each costs — the undo journal's closing capture (ADR 0074) and the two notices
-	// that rode the tool results the rollback drops, the context-fill ladder (ADR 0077 D4) and the
-	// step-budget notice's latch (stepnotice.go).
+	// owns the moment an Exchange ends, the moment a cancelled Turn is rolled back and the moment
+	// an Exchange is aborted, the Agent owns what each costs — the undo journal's closing capture
+	// (ADR 0074); the two notices that rode the tool results the rollback drops, the context-fill
+	// ladder (ADR 0077 D4) and the step-budget notice's latch (stepnotice.go); and the retained
+	// delegations a rollback or an abort restores (ADR 0086 D3).
 	a.turns = &turnLifecycle{
 		conv:     &a.conv,
 		observer: a,
@@ -172,8 +173,19 @@ func (a *Agent) exchangeClosed() { a.closeUndoGroup() }
 
 // turnRolledBack is the Agent's half of the exchangeObserver contract for a cancelled Turn's
 // ROLLBACK (turnLifecycle.end's endCancelled row): the two notices that rode the dropped tool
-// results are re-armed (rearmNotices, stepnotice.go).
-func (a *Agent) turnRolledBack() { a.rearmNotices() }
+// results are re-armed (rearmNotices, stepnotice.go), and the retained delegations are put back as
+// the Turn began (retainedDelegates.rollBackTurn, ADR 0086 D3) — a pooled sibling capped before
+// the cancel is not kept, and an entry a cancelled continuation took is back. The Turn-start copy
+// is held on the retained set itself (markTurn, taken by step), so the observer needs no argument.
+func (a *Agent) turnRolledBack() {
+	a.rearmNotices()
+	a.retained.rollBackTurn()
+}
+
+// exchangeAborted is the Agent's half of the exchangeObserver contract for an Exchange's ABORT
+// (turnLifecycle.abort): the retained delegations are put back as the Exchange opened
+// (retainedDelegates.rollBackExchange, from the copy step's markExchange took at the opening).
+func (a *Agent) exchangeAborted() { a.retained.rollBackExchange() }
 
 // seedTopLevel gives a top-level Agent the fields it owns afresh — the ones a delegate takes from
 // its parent instead (delegation.seed). Empty and per-process, every one of them, because this

@@ -270,7 +270,9 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 	})
 	// Retained delegations belong to the session they were retained in (ADR 0086 D3): the restored
 	// snapshot's set REPLACES the outgoing session's whole, so a snapshot that carries none — one
-	// written before the key existed included — restores with nothing retained.
+	// written before the key existed included — restores with nothing retained. The Turn-start and
+	// Exchange-start copies a rollback or an abort restores are reset to the loaded set with it, so a
+	// session restored mid-Exchange and then aborted keeps what it loaded.
 	a.retained.load(retainedFromJSON(st.Retained))
 	return nil
 }

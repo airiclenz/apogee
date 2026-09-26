@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -274,6 +275,40 @@ func TestSnapshot_RoundTripsExchangeBoundaryForAbort(t *testing.T) {
 	}
 	if err := b.Submit(domain.UserInput{Text: "next"}); err != nil {
 		t.Errorf("Submit after abort: %v, want accepted (the aborted Exchange closed)", err)
+	}
+}
+
+// TestResume_MidExchangeAbortKeepsTheLoadedRetention pins the restore half of D3's rollback: a
+// session snapshotted mid-Exchange and resumed resets the Exchange-start copy an abort restores to
+// the set it loaded, so aborting the resumed Exchange keeps what the snapshot carried rather than
+// the empty set a fresh Agent began with.
+func TestResume_MidExchangeAbortKeepsTheLoadedRetention(t *testing.T) {
+	cfg := configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"})
+	a, err := newAgent(cfg, scriptedResponder(t, toolCallTurn("c1", "lookup", "{}")))
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	if err := a.Submit(domain.UserInput{Text: "look it up"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if res, err := a.Step(context.Background()); err != nil || res.Status != domain.StatusTurnComplete {
+		t.Fatalf("Step = %+v, %v; want a tool Turn that keeps the Exchange open", res, err)
+	}
+	// Retained mid-Exchange, after the opening's mark: the snapshot carries it with the open Exchange.
+	a.retained.retain(retainedDelegate{task: "survey", name: "Repo Survey", rounds: []delegateRound{{report: "done"}}})
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	b, err := resumeAgent(configWithTools(&recordingSink{}, fakeTool{name: "lookup", readOnly: true, result: "42"}), snap, echoResponder(t, "unused"))
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	b.AbortExchange()
+
+	if names := b.retained.names(); !slices.Equal(names, []string{"Repo Survey"}) {
+		t.Errorf("retained names after aborting the resumed Exchange = %v, want the loaded set", names)
 	}
 }
 

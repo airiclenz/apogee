@@ -103,6 +103,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		// Exchange opens (children.go, apogee-clb). Retained delegations are NOT: a named delegation
 		// stays continuable for the whole session (ADR 0086 D1; ClearContext drops them).
 		a.delegations.clear()
+		// Mark the retained set as this Exchange opens: an aborted Exchange restores it
+		// (Agent.exchangeAborted), since every Turn that changed it is dropped with the abort.
+		a.retained.markExchange()
 		// The message itself — skill blocks, @file blocks, then the text — is composed by the
 		// helper an interjection shares (composeUserMessage), so both doors read identically.
 		a.conv.Append(a.composeUserMessage(ctx, turn, *in, false))
@@ -122,6 +125,11 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 	// Derive this Turn's request-scoped working values (rollback boundary, request, deferred
 	// floor) from the current conversation — the same trio refold re-derives after a fold.
 	a.armRequest(t)
+	// Mark the retained set as this Turn begins: a cancel that rolls the Turn back restores it
+	// (Agent.turnRolledBack), so a delegation this Turn retained or took is undone with the Turn
+	// (ADR 0086 D3). Here, not in armRequest, because refold re-arms mid-Turn and a mark is per
+	// Turn attempt; nothing between here and the tool dispatch changes the set.
+	a.retained.markTurn()
 
 	// The PREDICTIVE half of overflow protection: when the calibrated estimate already says this
 	// request cannot fit, fold BEFORE spending the round-trip that would be rejected — and cover

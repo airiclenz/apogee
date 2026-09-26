@@ -4938,10 +4938,11 @@ func TestSubAgent_CancelledDelegateIsNotRetained(t *testing.T) {
 	}
 }
 
-// TestSubAgent_ACancelledContinuationRetainsNothing keeps D2 on the continue path: a cancel while
-// the continued child runs unwinds the delegation, and the entry it took is not retained anew — no
-// round is appended for a run that returned no result.
-func TestSubAgent_ACancelledContinuationRetainsNothing(t *testing.T) {
+// TestSubAgent_ACancelledContinuationLeavesTheEntryItTook keeps D2 on the continue path and D3's
+// rollback: a cancel while the continued child runs unwinds the delegation, so no round is appended
+// for a run that returned no result — and the Turn's rollback puts back the entry the continuation
+// took, exactly as the Turn began, so the parent can still continue it.
+func TestSubAgent_ACancelledContinuationLeavesTheEntryItTook(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
@@ -4971,11 +4972,57 @@ func TestSubAgent_ACancelledContinuationRetainsNothing(t *testing.T) {
 	if res.Status != domain.StatusCancelled {
 		t.Fatalf("parent result = %+v, want a cancel", res)
 	}
-	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after a cancelled continuation, want none", names)
+	kept, ok := a.retained.lookup(retainedSurveyName)
+	if !ok || len(kept.rounds) != 1 || kept.rounds[0].spawnCallID != "c1" {
+		t.Errorf("retained under %q = %+v (found %v) after a cancelled continuation, want the entry it took with its one round", retainedSurveyName, kept, ok)
 	}
 	if _, ok := subAgentResultFor(sink.events, "c2"); ok {
 		t.Error("a cancelled continuation surfaced a result")
+	}
+}
+
+// TestAbortExchange_RestoresRetentionToTheExchangeStart pins the aborted Exchange's half of D3's
+// rollback: a delegation a finished Turn of the aborted Exchange retained goes with the Turns the
+// abort drops, and the set the Exchange opened with is what stands.
+func TestAbortExchange_RestoresRetentionToTheExchangeStart(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, reader)
+	cfg.Delegation.MaxSteps = 3
+	// 0: spawn, 1–3: turns, 4: fold, 5: wrap-up, 6: the parent's next Turn blocks.
+	responder := &blockAtResponder{scripts: cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName), blockAt: 6, started: make(chan struct{})}
+	a, err := newAgent(cfg, responder)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.retained.retain(retainedDelegate{task: "earlier work", name: "Earlier", rounds: []delegateRound{{report: "done"}}})
+	if err := a.Submit(domain.UserInput{Text: "please research"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-responder.started
+		cancel()
+	}()
+
+	res, err := a.Run(ctx)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.Status != domain.StatusCancelled {
+		t.Fatalf("parent result = %+v, want a cancel", res)
+	}
+	// The cancelled Turn retained nothing, so its rollback keeps what the finished Turn retained.
+	names := a.retained.names()
+	slices.Sort(names)
+	if !slices.Equal(names, []string{"Earlier", retainedSurveyName}) {
+		t.Fatalf("retained names after the cancel = %v, want the earlier entry and the finished Turn's", names)
+	}
+
+	a.AbortExchange()
+
+	if names := a.retained.names(); !slices.Equal(names, []string{"Earlier"}) {
+		t.Errorf("retained names after AbortExchange = %v, want only the set the Exchange opened with", names)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"slices"
 	"sort"
@@ -242,14 +243,25 @@ func (d retainedDelegate) withRound(round delegateRound) retainedDelegate {
 // entry and rides the session snapshot under the `retained` key (agentState, ADR 0086 D3): the map
 // is emptied by /clear (Agent.ClearContext) and REPLACED by a restore with the set the restored
 // snapshot carries (Agent.restoreState — none, for a snapshot without the key), and a fork keeps
-// only the rounds spawned before its cut (CutSession). It is guarded because the depth-0 fan-out
-// retains from several pool workers at once (ADR 0039).
+// only the rounds spawned before its cut (CutSession). A cancel puts it back as it stood: a Turn
+// rolled back by cancel restores the set its Turn began with (markTurn / rollBackTurn), and an
+// aborted Exchange the set its Exchange opened with (markExchange / rollBackExchange), so what a
+// cancelled Turn retained or took is undone with the conversation it rode (ADR 0086 D3). It is
+// guarded because the depth-0 fan-out retains from several pool workers at once (ADR 0039).
 //
 // The zero value is ready to use.
 type retainedDelegates struct {
 	mu     sync.Mutex
 	byName map[string]retainedDelegate
 	seq    uint64 // the last use sequence stamped (retain)
+
+	// atTurn and atExchange are the set as the running Turn began and as the open Exchange opened —
+	// what a cancelled Turn's rollback and an aborted Exchange restore. They are shallow copies of
+	// byName, which is safe because an entry's rounds are never written in place (retain and
+	// withRound clone before they write). Neither is serialized: a restore resets both to the set it
+	// loads (load), and clear empties them with the set.
+	atTurn     map[string]retainedDelegate
+	atExchange map[string]retainedDelegate
 }
 
 // retain keeps d under its name and stamps it as the most recently used entry. The same name
@@ -292,7 +304,10 @@ func (r *retainedDelegates) entries() []retainedDelegate {
 
 // load REPLACES the retained set with entries — a restored session's (Agent.restoreState) — and
 // resumes the use sequence past every stamp they carry, so an entry retained after the restore
-// still sorts as the most recently used and its round after every restored one.
+// still sorts as the most recently used and its round after every restored one. The Turn-start and
+// Exchange-start copies are reset to the loaded set: a restore can land mid-Exchange (a snapshot
+// taken after a cancelled Turn), and the Exchange that opened in the outgoing session held a set
+// the incoming one never had, so a later rollback or abort must fall back to what was loaded.
 func (r *retainedDelegates) load(entries []retainedDelegate) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -307,6 +322,43 @@ func (r *retainedDelegates) load(entries []retainedDelegate) {
 			r.seq = max(r.seq, round.seq)
 		}
 	}
+	r.atTurn, r.atExchange = maps.Clone(r.byName), maps.Clone(r.byName)
+}
+
+// markTurn records the set as a Turn begins (Agent.step) — what rollBackTurn restores should the
+// Turn be cancelled.
+func (r *retainedDelegates) markTurn() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.atTurn = maps.Clone(r.byName)
+}
+
+// markExchange records the set as an Exchange opens (Agent.step, at turnLifecycle.open) — what
+// rollBackExchange restores should the Exchange be aborted.
+func (r *retainedDelegates) markExchange() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.atExchange = maps.Clone(r.byName)
+}
+
+// rollBackTurn restores the set the cancelled Turn began with (Agent.turnRolledBack): a pooled
+// sibling the Turn retained before the cancel is forgotten, and an entry a continuation took is
+// back in place. The use sequence is not rewound — a stamp is never reused, and a stamp only
+// orders. Idempotent, as the observer contract requires: a re-attempted Turn cancelled again
+// restores the same mark its re-attempt took.
+func (r *retainedDelegates) rollBackTurn() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byName = maps.Clone(r.atTurn)
+}
+
+// rollBackExchange restores the set the aborted Exchange opened with (Agent.exchangeAborted), undoing
+// every Turn of it that the abort drops from the conversation.
+func (r *retainedDelegates) rollBackExchange() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.byName = maps.Clone(r.atExchange)
+	r.atTurn = maps.Clone(r.atExchange)
 }
 
 // lookup returns the delegation retained under name.
@@ -320,7 +372,8 @@ func (r *retainedDelegates) lookup(name string) (retainedDelegate, bool) {
 // take returns the delegation retained under name and FORGETS it: a continuation consumes
 // the entry it starts from, so the same rounds are never continued twice — the continued child's
 // run is appended to them as a round and the entry retained anew under the name that run ended
-// wearing, whatever its outcome but a cancel.
+// wearing, whatever its outcome but a cancel — and a cancel's Turn rollback puts the taken entry
+// back (rollBackTurn).
 func (r *retainedDelegates) take(name string) (retainedDelegate, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -418,12 +471,12 @@ func cutRetainedRounds(entries []retainedDelegate, dropped map[string]int) []ret
 	return out
 }
 
-// clear forgets every retained delegation — the session that owned them has been cleared or
-// swapped out.
+// clear forgets every retained delegation, and the Turn-start and Exchange-start copies a rollback
+// would restore with them — the session that owned them has been cleared or swapped out.
 func (r *retainedDelegates) clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.byName = nil
+	r.byName, r.atTurn, r.atExchange = nil, nil, nil
 }
 
 // ----------------------------------------------------------------------------

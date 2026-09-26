@@ -77,19 +77,21 @@ type turnLifecycle struct {
 	// Written on the Agent's own loop goroutine, read by the parent only after Run has returned.
 	lastFault string
 
-	// observer is told the two MOMENTS this type owns that mean something outside it: an Exchange
-	// ENDING (exchangeClosed, fired by closeExchange) and a cancelled Turn's ROLLBACK
-	// (turnRolledBack, fired by end()'s endCancelled row). It is an interface rather than an Agent
-	// for the same reason conv is a pointer: this type owns the moments and knows nothing of what
-	// an Agent wants to do about them — the undo journal's closing capture hangs off the first
-	// (Agent.closeUndoGroup, agent.go), the context-fill ladder's re-arm and the step-budget
-	// note's latch off the second (Agent.rearmNotices, stepnotice.go) — and neither fire site carries a context
-	// or an Agent to hand one. nil is inert, never an error — a bare lifecycle in a unit test has
+	// observer is told the three MOMENTS this type owns that mean something outside it: an Exchange
+	// ENDING (exchangeClosed, fired by closeExchange), a cancelled Turn's ROLLBACK (turnRolledBack,
+	// fired by end()'s endCancelled row) and an Exchange's ABORT (exchangeAborted, fired by abort).
+	// It is an interface rather than an Agent for the same reason conv is a pointer: this type owns
+	// the moments and knows nothing of what an Agent wants to do about them — the undo journal's
+	// closing capture hangs off the first (Agent.closeUndoGroup, agent.go), the context-fill
+	// ladder's re-arm, the step-budget note's latch (Agent.rearmNotices, stepnotice.go) and the
+	// retained delegations' Turn-start restore off the second, the retained delegations'
+	// Exchange-start restore off the third (retainedDelegates, children.go) — and no fire site
+	// carries a context or an Agent to hand one. nil is inert, never an error — a bare lifecycle in a unit test has
 	// no Agent behind it, and an engine that records nothing simply hangs nothing here.
 	observer exchangeObserver
 }
 
-// exchangeObserver is what turnLifecycle notifies at the two moments it owns that reach past it
+// exchangeObserver is what turnLifecycle notifies at the three moments it owns that reach past it
 // (turnLifecycle.observer); the Agent is its one implementation (construct.go).
 //
 // exchangeClosed fires on every row that ends an Exchange and on none that leaves one open, which
@@ -100,10 +102,17 @@ type turnLifecycle struct {
 // Turn's boundary. The rollback drops the Turn's committed tool results, including the one a
 // notice rode on, so what tracks against the dropped conversation ends here exactly as it does
 // on AbortExchange. A Step-driven host may re-attempt the Turn and cancel again, so an
-// implementation must be idempotent (the re-arm is).
+// implementation must be idempotent (the re-arm and the retention restore are).
+//
+// exchangeAborted fires once per Exchange ABORT (abort — AbortExchange, and a settle that finds no
+// finished Turn to keep), after the conversation is dropped back to the Exchange's boundary and
+// before the Exchange closes (exchangeClosed follows it). Every Turn the Exchange committed goes
+// with the rollback, so what those Turns changed outside the conversation is put back too. A
+// settle that keeps the finished Turns fires only exchangeClosed: what they changed stands.
 type exchangeObserver interface {
 	exchangeClosed()
 	turnRolledBack()
+	exchangeAborted()
 }
 
 // turnRun is the working state of one Turn attempt — the values step() used to thread as five
@@ -337,7 +346,8 @@ func (l *turnLifecycle) open() *domain.UserInput {
 // back to the boundary the Exchange began at — dropping the un-answered user message and any tool
 // Turns committed so far — re-arms the context-fill ladder, closes the Exchange and drops any
 // input queued behind it. No-op when no Exchange is open. It is the explicit throw-away; settle
-// is the exit that keeps the finished Turns.
+// is the exit that keeps the finished Turns. The observer hears of it (exchangeAborted) so what
+// the dropped Turns changed outside the conversation is rolled back with them.
 //
 // The ladder re-arms because the tool results the scrapped Exchange committed go with it —
 // including the one that carried a context-fill notice — so the climb ends here as it does after
@@ -351,6 +361,9 @@ func (l *turnLifecycle) abort() {
 	}
 	l.conv.DropRange(l.exchangeStart, l.conv.Len())
 	l.rearmFill()
+	if l.observer != nil {
+		l.observer.exchangeAborted()
+	}
 	l.closeExchange()
 	l.pendingInput = nil
 }

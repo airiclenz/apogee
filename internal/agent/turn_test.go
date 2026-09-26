@@ -251,16 +251,18 @@ func TestOpenExchange(t *testing.T) {
 
 // countingObserver is a bare exchangeObserver for the lifecycle's notification contract: it
 // counts each moment and does nothing else, standing where the Agent stands in construct.go.
-type countingObserver struct{ closed, rolledBack int }
+type countingObserver struct{ closed, rolledBack, aborted int }
 
-func (o *countingObserver) exchangeClosed() { o.closed++ }
-func (o *countingObserver) turnRolledBack() { o.rolledBack++ }
+func (o *countingObserver) exchangeClosed()  { o.closed++ }
+func (o *countingObserver) turnRolledBack()  { o.rolledBack++ }
+func (o *countingObserver) exchangeAborted() { o.aborted++ }
 
-// The lifecycle owns two moments that reach past it and tells its observer about each exactly
+// The lifecycle owns three moments that reach past it and tells its observer about each exactly
 // once: an Exchange END (closeExchange — every row that ends an Exchange, none that leaves one
-// open) and a cancelled Turn's ROLLBACK (end()'s endCancelled row). The rows are mutually
-// exclusive on purpose: a cancel leaves the Exchange open for the re-attempt, so it must never
-// read as a close, and a close is not a rollback.
+// open), a cancelled Turn's ROLLBACK (end()'s endCancelled row) and an Exchange's ABORT (abort,
+// which also ends it). The first two are mutually exclusive on purpose: a cancel leaves the
+// Exchange open for the re-attempt, so it must never read as a close, and a close is not a
+// rollback. An abort is a close too, but a settle that keeps its finished Turns is not an abort.
 func TestTurnLifecycleNotifiesItsObserver(t *testing.T) {
 	past := time.Now().Add(-time.Millisecond)
 
@@ -303,7 +305,52 @@ func TestTurnLifecycleNotifiesItsObserver(t *testing.T) {
 		}
 	})
 
-	t.Run("a nil observer is inert on both rows", func(t *testing.T) {
+	t.Run("abort tells the observer of the abort once, then of the close", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
+		conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a"})
+		obs := &countingObserver{}
+		l := &turnLifecycle{conv: conv, inExchange: true, exchangeStart: 0, observer: obs}
+
+		l.abort()
+		l.abort() // no Exchange open any more: a no-op, no second notification
+
+		if obs.aborted != 1 || obs.closed != 1 || obs.rolledBack != 0 {
+			t.Errorf("abort notified aborted=%d closed=%d rolledBack=%d, want 1/1/0", obs.aborted, obs.closed, obs.rolledBack)
+		}
+	})
+
+	t.Run("a settle that keeps its finished Turns is a close, never an abort", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
+		conv.Append(domain.Message{Role: domain.RoleAssistant, Content: "a"})
+		conv.Append(domain.Message{Role: domain.RoleTool, Content: "result"})
+		obs := &countingObserver{}
+		l := &turnLifecycle{conv: conv, inExchange: true, exchangeStart: 0, observer: obs}
+
+		if dropped := l.settle(); dropped {
+			t.Fatal("settle dropped an Exchange that holds a finished Turn")
+		}
+		if obs.aborted != 0 || obs.closed != 1 {
+			t.Errorf("settle notified aborted=%d closed=%d, want 0/1", obs.aborted, obs.closed)
+		}
+	})
+
+	t.Run("a settle with no finished Turn falls through to the abort", func(t *testing.T) {
+		conv := domain.NewConversation(nil)
+		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
+		obs := &countingObserver{}
+		l := &turnLifecycle{conv: conv, inExchange: true, exchangeStart: 0, observer: obs}
+
+		if dropped := l.settle(); !dropped {
+			t.Fatal("settle kept an Exchange that holds no finished Turn")
+		}
+		if obs.aborted != 1 || obs.closed != 1 {
+			t.Errorf("settle notified aborted=%d closed=%d, want 1/1", obs.aborted, obs.closed)
+		}
+	})
+
+	t.Run("a nil observer is inert on every row", func(t *testing.T) {
 		conv := domain.NewConversation(nil)
 		conv.Append(domain.Message{Role: domain.RoleUser, Content: "u"})
 		rollback := conv.Len()
@@ -312,9 +359,11 @@ func TestTurnLifecycleNotifiesItsObserver(t *testing.T) {
 
 		l.end(&turnRun{turn: 5, start: past, rollback: rollback}, endCancelled) // must not panic
 		l.end(&turnRun{turn: 5, start: past}, endExchangeDone)                  // must not panic
+		l.inExchange = true
+		l.abort() // must not panic
 
 		if l.inExchange {
-			t.Error("inExchange still set after endExchangeDone with no observer")
+			t.Error("inExchange still set after the closing rows with no observer")
 		}
 	})
 }

@@ -411,8 +411,9 @@ type Agent struct {
 	// delegation name (children.go, ADR 0086 D1): what a continuation is spawned from. Filled by
 	// runSubAgent after a capped, faulted, stopped, continued or named completed child's result is
 	// read; it survives later Exchanges and rides the session snapshot, is emptied by /clear
-	// (ClearContext), replaced by a restore with the restored snapshot's set (restoreState) and cut
-	// by a fork (CutSession).
+	// (ClearContext), replaced by a restore with the restored snapshot's set (restoreState), cut
+	// by a fork (CutSession), and put back as it stood by a cancel — a rolled-back Turn to its
+	// start (turnRolledBack), an aborted Exchange to its opening (exchangeAborted).
 	retained retainedDelegates
 	// delegations is the ledger of every delegation THIS Agent spawned in its current Exchange —
 	// spawn order, outcome, cause and resolved output target (children.go, apogee-clb): what the
