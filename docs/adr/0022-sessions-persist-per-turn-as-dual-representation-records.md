@@ -558,3 +558,14 @@ narrated text under a head saying so; it was scavenged narration then and is an 
 when: the 2026-08-25 addendum's progress save still fires on the same child events during a
 continuation as during a first run, and its engine half is still the last quiescent-boundary
 snapshot, which never held a delegation in flight and holds no retained fold now.
+
+> **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md) D3) — the retention half is reversed; D8 stands.** A
+> retained delegation is now session state: the parent Agent's retained set rides the engine
+> snapshot under an additive `retained` key — no schema version bump, the precedent `Tasks`
+> (ADR 0072) set — written at the same quiescent boundaries every snapshot is, so `--resume`,
+> `--continue` and the live restore load it, and "a `continue` after a resume is refused with
+> `retained: none`, by design" no longer holds. `/clear` drops it, a fork (`CutSession`) keeps only
+> the rounds spawned before its cut, and a Turn rolled back by cancel restores the set it began
+> with. Decision 8 itself stands: a child's `Session` is still never a record, and the retained
+> entry is the parent's engine state, not the child's. The 2026-08-25 addendum's progress save and
+> its engine half are unchanged.

@@ -138,6 +138,15 @@ behind the same single-shot driver seam.
 > Turns before the delegating one stand. A finer cut inside the pool — keeping the children that
 > finished before the Esc — is Stage B and stays on `apogee-2un`. Plan `2026-09-19 - 01`.
 
+> **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md) D4).** §5 gains a third ending. A child completes
+> inside the parent's Turn, or a cancel rolls that Turn back with no partial result — or the human
+> **stops** that one delegation (`Agent.StopChild(runID)`, `^x` in the TUI): the child and every
+> delegation under it end with the parent's ctx still live, the engine folds the child's
+> conversation at the stop as `finishAtFault` folds it at a fault (no wrap-up Turn), and the parent
+> receives a non-error partial result opening `[stopped by the user — engine summary follows]` and
+> goes on, nothing rolled back. (a) and (c) are unchanged: no snapshot lands mid-child, and resume
+> stays coarse.
+
 ## Considered options
 
 - **Thread `Guards` verbatim (share breaker + audit + floor)** — *rejected* (the carried
@@ -354,3 +363,19 @@ calls fans out with them at depth 0, and the retention map is guarded for exactl
 > fault head, then the draft note when a spawn-named `output_path` was written before the fault,
 > then the continue line. §5 is unmoved: a cancel unwinds the whole delegation and retains
 > nothing, and the heading's "capped child" reads "capped or faulted child" from this date.
+
+> **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md) D1–D3).** Two things above no longer hold. The
+> retained entry is not "engine memory that dies with the Exchange": a delegation capped, faulted,
+> **stopped** by the human, or completed under a name its call gave is retained for the rest of the
+> Session, saved in the engine snapshot under an additive `retained` key, dropped by `/clear`, cut by
+> a fork and restored to its Turn-start value when a cancel rolls the Turn back. And the entry is no
+> longer `{task, name, tools, output_path, fold, closing report, bound}` seeded under a single
+> `[previous attempt — engine summary]` head: it keeps the original task and one **round** per run
+> under the name, and a continuation lays the rounds in newest first within a 4096-token budget —
+> the newest always whole — rendered oldest first under `[round N — instructions]` (from round 2)
+> and `[round N — report]` or `[round N — engine summary]`, behind `[N earlier rounds omitted]`
+> when any were dropped, then `[continuation instructions]`. A continuation's own run, whatever its
+> outcome but a cancel, is appended to the entry as its next round. The rest stands: a continuation
+> is still a fresh atomic child Run re-spawned from what the engine kept, never ADR 0007's suspended
+> slot, and §5 is unmoved — the heading's child reads "capped, faulted, stopped or named" from this
+> date.

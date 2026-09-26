@@ -221,6 +221,13 @@ reshaping the ADR 0011/0031 contract for no gain).
 > and the ids on the wire are never rewritten. Addressing a running child (`InterjectChild`,
 > ADR 0063 D1) still goes by the spawning call-ID.
 
+> **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md) D5, `apogee-interject-by-run-id`).** The last
+> sentence above no longer holds: `Agent.InterjectChild` is addressed by the run id, as is the
+> per-child stop `Agent.StopChild` that ADR 0086 adds, because the call-ID it went by may repeat
+> across one fan-out. D4 stands — a stop is not a cancel, a pool still joins every child before the
+> parent continues and a stopped child simply reaches that join sooner; a pooled child stopped
+> before a worker starts it is settled without running.
+
 **6 — The TUI renders one live block per child.** At fan-out, one block per child appears
 in call order; each accretes its own child's events via the call-ID and shows a live tail
 under the existing collapsed cap, expandable like any tool block. Approvals from concurrent

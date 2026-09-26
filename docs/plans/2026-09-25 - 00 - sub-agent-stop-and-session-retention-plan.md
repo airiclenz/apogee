@@ -285,7 +285,10 @@ Folded guard: `exchangeObserver.turnRolledBack()` takes no argument, so the item
 - `go test -race -count=1 ./internal/agent/`
 **Commit:** `fix(agent): a cancelled Turn restores retained delegations to its start`
 
-## 12. Glossary and ADR amendments
+## 12. Glossary and ADR amendments — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): CONTEXT.md's **Run view** entry also said "stopping stays whole-run from the top level" (false since item 6); restated against `^x` / `esc×2` in the same file, beside the entries the item names.
+NOTES (2026-09-26): the delegate-ledger sentence in **Sub-agent** ("cleared as the next Exchange opens beside the retained delegations") read as if retention also cleared; restated so only the ledger clears. The ADR amendments are dated 2026-09-26 (ship date), not 2026-09-25 (ratification).
 
 **What:** Depends on items 3–11.
 **Goal:** `CONTEXT.md`'s **Retained delegation** and **Stop (a delegation)** carry no "not yet shipped"/"until it lands" markers; **Sub-agent** and **Step cap** describe session-long, saved retention and the stop; no `CONTEXT.md` prose calls an engine bound "stopped" — the quoted `[delegate stopped at its …]` engine heads stay verbatim; ADRs 0013 §5 and its 2026-09-18 amendment, 0022's 2026-09-18 addendum, 0039 (run-id interjection) and 0063 D1, D4 and "What stays out" carry dated amendment lines pointing at ADR 0086.

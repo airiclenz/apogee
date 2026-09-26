@@ -72,6 +72,11 @@ itself. The child is different for one reason only — nobody else can drive its
 unchanged in every other respect: the parent's Turn is still atomic, a cancel still rolls the whole
 Turn back, and nothing about a child newly persists.
 
+> **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md) D5).** A child is addressed by its engine-minted
+> **run id** (ADR 0039's 2026-09-24 amendment), not its spawn call-ID, which may repeat across one
+> fan-out: the signature is `Agent.InterjectChild(runID string, in domain.UserInput) error` and the
+> registry is keyed by run id. The same key reaches `Agent.StopChild(runID)`, the per-child stop.
+
 **D2 — Delivery is observable, so a Driver can paint it honestly.** `domain.ErrNoSuchChild` names a
 child that is not running (the user aimed at a run that has just finished), and the engine emits
 `domain.ChildInterjectionEvent{Input, Landed}` for every queued message through the same shared sink
@@ -97,6 +102,11 @@ view is open (amended 2026-09-24, below: once the viewed run has reported usage 
 run's context gauge instead), and stopping stays whole-run from the top level. The view is **Driver state**: a stack
 of open runs in the `Model`, never encoded in the transcript, never written to a session record, and
 never restored — a resumed session opens at the top level.
+
+> **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md) D4, D5).** "Stopping stays whole-run from the top
+> level" no longer holds. `ctrl+x` stops the viewed run alone — and every delegation under it —
+> while the parent's Turn goes on, and the slot reads `esc back · ^x stop` while the viewed run is
+> running; `esc` still goes back, and `esc×2` at the top level still cancels the whole Turn.
 
 **D5 — Expanding a framed delegation opens its run view.** Expand, from the block cursor or from a
 click on the run's header, no longer flips a fold flag: it opens the view, at the run's latest line,
@@ -139,6 +149,10 @@ cannot widen it beyond its parent.
   read-only). Per-child stop, auto-naming children (`IDEAS.md:16`) and any CLI surface for addressing
   a child from headless or the daemon are deferred — the engine seam is sufficient for them, so no
   Driver is blocked by the deferral.
+  > **Amended 2026-09-26 ([ADR 0086](0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md)).** Per-child stop has shipped (`Agent.StopChild`,
+  > `^x` in the TUI). A run view of a finished child stays read-only: the human messages a running
+  > child, and the parent continues a finished one with `continue:` (ADR 0086 D1). Child
+  > conversation persistence and a CLI or headless surface for addressing a child stay out.
 - **Nothing here is a Mechanism.** A message to a child is the human's own input, the trailer reports
   a fact about that human's actions, and the run view only changes what the human sees. There is
   nothing for Bypass to switch off and nothing for a bench arm to measure; the Bypass floor is

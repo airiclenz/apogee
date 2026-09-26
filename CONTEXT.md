@@ -194,23 +194,26 @@ dangerous-action floor** (unloosenable one level down), and recursion is depth-b
 delegates and its delegates are never offered `sub_agent`; `2` lets a sub-agent delegate in turn
 (ADR 0013 decision 4, superseded 2026-09-15). A `max_steps` ask above `delegate-max-steps` is
 applied as the cap and the delegation's result says so in one appended line. A delegation the
-engine stopped at a **Step cap** (or its token or time sibling), or whose Exchange **faulted**
-(ADR 0082), can be picked up again rather than re-spawned: the call's `continue: "<name>"`
-argument names a capped or faulted delegation the parent still
-retains — for the rest of its Exchange, in memory only — and spawns a fresh child from that run's
-engine fold under a cap of its own, with `task` as the continuation instructions; the retained
+engine capped at a **Step cap** (or its token or time sibling), whose Exchange **faulted**
+(ADR 0082), that the human **stopped** (**Stop (a delegation)**), or that completed under a name its
+call gave, can be picked up again rather than re-spawned: the call's `continue: "<name>"`
+argument names a **Retained delegation** — kept for the rest of the **Session**, saved with it and
+restored on resume — and spawns a fresh child from the original task and that delegation's rounds
+under a cap of its own, with `task` as the continuation instructions; the retained
 name, `tools` and `output_path` are inherited wherever the call leaves them unset.
 The parent also reads the **delegate ledger** (2026-09-19, ADR 0076 addendum, `apogee-clb`): the
 engine's own row per delegation of the current Exchange — spawn order (the model's call order,
 reserved per pooled group), the delegation's name, its outcome (`completed | capped | faulted |
-cancelled | refused`, the last a call no child was built or started for), the head line of a fault
+cancelled | stopped | refused` — `stopped` the human's stop of that one delegation, ADR 0086 D4;
+`refused` a call no child was built or started for), the head line of a fault
 or refusal, and the RESOLVED `output_path` target — rendered onto every request tail as the engine
 note `[engine — delegations]` … `[end engine — delegations]` (`#<n> <name> — <outcome>[: <cause>] —
 output <present|missing|none>`, presence read from disk at render time) once the Exchange holds
 two or more delegations or any that did not complete, ahead of the wrap-up directive, with the
 same system-prompt fallback for a tail that is not a tool result. Facts, no imperatives; structural
-(no key, on under Bypass); in memory only, cleared as the next Exchange opens beside the retained
-delegations, never in the conversation or the snapshot (`internal/agent/children.go`).
+(no key, on under Bypass); in memory only, cleared as the next Exchange opens — the retained
+delegations outlive it, the ledger does not — never in the conversation or the snapshot
+(`internal/agent/children.go`).
 The tool subset a child inherits is the parent's menu **minus the human's seat**: `ask_user`
 and `present_document` are withheld from every sub-agent at every depth (owner call,
 2026-09-14 — a delegation has no seat at the human's prompt; a child reports the question or
@@ -243,10 +246,11 @@ queue, so nothing is ever skipped there.
 What a delegation is CALLED is its **Delegation name**, and the rule is three-deep: the name its
 call gave — an optional `name` argument on the `sub_agent` call, normalised to a trimmed first
 line — else a **generated** one that lands once the run is under way, else the delegated task's
-first line. It is display identity — and, for a capped or faulted delegation, the handle
+first line. It is display identity — and, for a retained delegation, the handle
 `continue` spells back — never privilege.
-A **running** child is **addressable**, and by the handle it already has: the spawning call-ID.
-`Agent.InterjectChild(spawnCallID, in)` appends a message to that child's engine-side **mailbox**,
+A **running** child is **addressable**, and by the handle it already has: its engine-minted **run
+id**, which never repeats where a call-ID may (ADR 0086 D5, `apogee-interject-by-run-id`).
+`Agent.InterjectChild(runID, in)` appends a message to that child's engine-side **mailbox**,
 recursing into registered children so a grandchild is reachable from the top-level agent and
 answering `domain.ErrNoSuchChild` when no such child is running; the goroutine driving that child
 pops the mailbox before every Step after the first and delivers each message through
@@ -255,8 +259,9 @@ pops the mailbox before every Step after the first and delivers each message thr
 else can drive a child's Steps. Every queued message earns one
 `domain.ChildInterjectionEvent{Input, Landed, Reason}` on the shared sink, so a Driver never has to
 guess whether it arrived — nor, for one that did not, why: the `Reason` says the child `completed`,
-was `capped`, `faulted` or was `cancelled` before the boundary the message waited for, or `refused`
-it there. A child that received such messages returns its result with the trailer
+was `capped`, `faulted`, `stopped` by the human or was `cancelled` before the boundary the message
+waited for, or `refused` it there. `Agent.StopChild(runID)`, keyed and recursing the same way,
+is the other call a Driver makes on a running child — see **Stop (a delegation)**. A child that received such messages returns its result with the trailer
 `(the user sent N message(s) to this sub-agent while it ran)` on every outcome but a cancelled
 dispatch — a parent reading a result shaped by instructions it never issued must be able to see
 that from the result alone. Every `sub_agent` result — report or fault — is **capped at 64 KiB**
@@ -303,16 +308,22 @@ resume, dropped by `/clear`, cut by a fork and restored by a cancelled Turn's ro
 completed normally is retained only when its call **named** it; a capped, faulted or **stopped**
 one is retained under any name it ended wearing. A continuation re-spawns a fresh child from the
 original task and the run's rounds of reports, never resuming the old one. Ratified 2026-09-25
-([ADR 0086](docs/adr/0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md));
-until it lands, retention is the capped or faulted run's, for its Exchange only.
+([ADR 0086](docs/adr/0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md)).
 _Avoid_: "suspended sub-agent" (ADR 0007's reserved slot, which stays empty), "resumed child".
 
 **Stop (a delegation)**:
 The human ending **one** running **Sub-agent** — and everything under it — while the parent's Turn
 goes on: nothing rolls back, and the parent receives a partial result with the engine's summary of
-the work so far. Its delegate-ledger outcome is `stopped`. It is distinct from **cancel**, which is
+the work so far. The engine call is `Agent.StopChild(runID)`, addressed by the run id as an
+**Interjection** to a child is; the TUI binds it to `^x`, on the viewed run of a **Run view** or on
+the cursor's member row of the `✦ Sub-Agent (N)` umbrella, with no confirmation since nothing rolls
+back. The engine folds the child at the stop — no wrap-up Turn — and the non-error result opens
+`[stopped by the user — engine summary follows]`; a pooled child stopped before it started runs
+and folds nothing, and returns `sub-agent not started: the user stopped it before it started;
+delegate again if the task is still needed`. A stopped run is a **Retained delegation** under its
+name. Its delegate-ledger outcome is `stopped`. It is distinct from **cancel**, which is
 `esc×2` ending and rolling back the whole Turn, and from **capped**, the engine ending a run at a
-bound. Ratified 2026-09-25 (ADR 0086), not yet shipped.
+bound. Ratified 2026-09-25 (ADR 0086).
 _Avoid_: "stopped" for a run the engine capped (say **capped**), "kill", "abort".
 
 **Parallel agents**:
@@ -437,8 +448,9 @@ following it as it grows, while the status line, prompt box and footer stay exac
 (a pane inside apogee's own frame, never an alternate screen — ADR 0035 stands). A clickable
 breadcrumb header (`← main › planner › repo-scout`) and `esc` each go **one** level up, the status
 line's right slot states the **viewed run's** context gauge once that run has reported usage — never
-the top-level agent's — and reads `esc back` until it has, and stopping stays whole-run from the top
-level. Inside a view of a **running** child the prompt box addresses that child (see
+the top-level agent's — and reads `esc back` until it has (`esc back · ^x stop` while the viewed run
+is running). `^x` stops the viewed run alone (**Stop (a delegation)**); `esc×2` at the top level
+still cancels the whole Turn. Inside a view of a **running** child the prompt box addresses that child (see
 **Interjection**); a view of a finished or scheduled one opens **read-only**. A run therefore has
 exactly two shapes — the collapsed row and the run view — while the `✦ Sub-Agent (N)` umbrella
 still opens inline to its member rows. It is **Driver state**: a stack of open runs in the TUI's
@@ -818,36 +830,50 @@ its next step>, not a finding; engine summary follows]` and the text follows the
 `[delegate's closing report — read as narration, not a finding]`. The prefix is unchanged, so the
 TUI still reads the bound; blank text is the wordless path above, never a non-report; and no
 wording rule faults a finding — the closed acknowledgement list is the only text withheld. A
-bound is not the end of the work, either (2026-09-18, P6): the parent **retains** every capped
-delegation that ended its run wearing a **Delegation name** (one its call gave or the namer
-generated; the task-first-line fallback is a Driver's display rule, not a name) — the task as the call spelled it, the
-`tools` roster and `output_path` it asked for, the fold, the closing text and the bound — **in
-memory only**, keyed by that name, for the rest of its own Exchange: the map is cleared as the next
-Exchange opens, nothing is serialised (ADR 0022 D8, ADR 0013 §5 stand), so a resumed session has
-nothing to continue. A **faulted** delegation is retained the same way (2026-09-20, ADR 0082,
+bound is not the end of the work, either (2026-09-18, P6; session-long since 2026-09-25, ADR 0086):
+the parent **retains** every capped delegation that ended its run wearing a **Delegation name** (one
+its call gave or the namer generated; the task-first-line fallback is a Driver's display rule, not a
+name) as a **Retained delegation** — the task as the first call spelled it, the `tools` roster and
+`output_path` the latest call asked for, the bound, and one **round** per run under the name: its
+instructions (the first round's are the task) and its report, which for a capped run is the fold
+and the closing text — keyed by that name, for the rest of the **Session**. The set rides the
+engine snapshot under an additive `retained` key (no schema bump; ADR 0022 D8 stands — the child's
+own Session is still never a record), so `--resume`, `--continue` and a live restore load it,
+`/clear` drops it, a fork keeps only the rounds spawned before its cut, and a Turn rolled back by
+cancel restores the set it began with; Compaction and `/undo` leave it alone. A **faulted**
+delegation is retained the same way (2026-09-20, ADR 0082,
 `apogee-60x`): its Run ends abandoned with the parent's ctx still live, the engine writes the fold
 at the fault — no wrap-up Turn, the fold is the only model call, under one `stream-idle-timeout`
 of its own so the error result lands at most one idle window late; a child that completed no Turn
 is retained without a fold request, its fold the unavailable marker saying so, and a fold that
 fails retains the marker naming the cause — and its last narration stands as the closing text;
 the error result keeps its fault head and gains the continue line. A cancel still unwinds the
-whole delegation and retains nothing (D2). The fault that reaches retention is one the child's
+whole delegation, and its Turn's rollback leaves retention as the Turn began. The fault that
+reaches retention is one the child's
 Turn has already ridden out to its **re-stream budget** — the same three re-sends under the
 doubling hold-off depth 0 gets, each idle window counted — so a retained faulted delegate is one
 whose Upstream stayed down past that budget, never one that met a blip
 ([ADR 0082](docs/adr/0082-a-silent-stream-is-cut-and-a-transient-fault-is-ridden-out-under-a-budget.md)).
-The capped or faulted result's last body note spells
+A delegation the human **stopped** is retained the same way too, folded at the stop as at a fault
+(**Stop (a delegation)**), and so is a **completed** one whose call gave it a name — a generated
+name never reaches the model for a completed run, so it retains nothing. The capped, faulted or
+stopped result's last body note spells
 the handle back — `[to continue
 this delegate: sub_agent with continue: "<name>"]` — and a `sub_agent` call carrying
-`continue: "<name>"` spawns a **fresh child** whose opening task is the retained task, the fold
-under `[previous attempt — engine summary]` and the call's own `task` under `[continuation
+`continue: "<name>"` spawns a **fresh child** whose opening task is the retained task, then the
+rounds — chosen newest first into the same 4096-token budget the fold is held to, the newest always
+whole, and laid in oldest first, each under `[round N — instructions]` (from round 2) and
+`[round N — report]` or, for a fold, `[round N — engine summary]`, behind `[K earlier rounds
+omitted]` when any were dropped — and the call's own `task` under `[continuation
 instructions]`; the name, roster and `output_path` are inherited wherever the call leaves them
-unset (an inherited name is re-announced for the new run), the latest capped or faulted child
-under that name wins, the entry is consumed by the continuation that SPAWNS — a continue call
+unset (an inherited name is re-announced for the new run), and the same name replaces an earlier
+entry. A continuation takes its entry as it SPAWNS — a continue call
 refused on its own arguments (an invalid `run_on`, an unknown tool name) keeps it, so a corrected
-retry still finds it (a child that caps or faults again is retained anew, under the same name and over the ORIGINAL
-task, so a second continuation composes over one fold, never a fold of a fold), and an unknown
-name is refused with an error result naming the retained names (`[no delegate named "<name>" to
+retry still finds it — and its run, whatever the outcome but a cancel, is appended as the next
+round and retained anew under the name that run ended wearing, still over the ORIGINAL task, so a
+later continuation composes over the rounds, never a fold of a fold. An unknown
+name is refused with an error result naming the retained names — the 16 most recently used, then
+`(and N more)` — (`[no delegate named "<name>" to
 continue — retained: <a, b | none>]`). Each continuation
 is a new Run with a cap of its own — the engine puts no limit on how many times a delegation is
 continued, and an unnamed delegation, having no handle, is not retained. The cap
@@ -922,10 +948,10 @@ rejected (a Run drain, an interjection Event) are superseded for **depth > 0 onl
 ([ADR 0063](docs/adr/0063-sub-agent-runs-are-user-addressable-views.md)). A staged row addressed to
 a child names its run (`queued for <name> — …`), and the child's own delivery report is what takes
 it off the band: a message that landed becomes that child's user block inside its run, and one that
-did not becomes a note naming why — `<name> finished before your message landed`, `<name> stopped
-at its cap before your message landed`, `<name> failed before your message landed`, `<name> was
-cancelled before your message landed`, or `<name> could not take your message` where the child,
-still running, refused it at the boundary.
+did not becomes a note naming why — `<name> finished before your message landed`, `<name> was
+capped before your message landed`, `<name> was stopped by you before your message landed`, `<name>
+failed before your message landed`, `<name> was cancelled before your message landed`, or `<name>
+could not take your message` where the child, still running, refused it at the boundary.
 _Avoid_: "steering" / "steer" (ADR 0014's guided-decomposition sense — a Mechanism shaping the
 model's own primary call, not a human speaking), "scheduled message" (nothing is clock-timed;
 it means deliver-at-the-next-boundary), "queued input" alone (the queue is the staging, the
