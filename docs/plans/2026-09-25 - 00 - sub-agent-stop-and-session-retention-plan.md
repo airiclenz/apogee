@@ -54,7 +54,7 @@
 - 13: guard folded (owner decision: stop/cancel split with the renamed labels; bound wording gated, excluding layout.md's unrelated "stopped at its last word").
 - 14: guard folded (owner decision: previous-attempt label and cancel labels swept; gate replaced, since `rest of the exchange` hits the unrelated `/undo` prose at commands.md:481).
 
-## 1. Land the ADR 0086 spec documents
+## 1. Land the ADR 0086 spec documents — ✅ ALREADY-DONE (afb48417)
 
 **What:**
 **Goal:** `docs/adr/0086-a-delegation-is-stopped-singly-and-a-named-one-stays-continuable-for-the-session.md`, the `CONTEXT.md` entries **Retained delegation** and **Stop (a delegation)**, and the three beads' rows in `.beads/issues.jsonl` are committed.
