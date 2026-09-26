@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/airiclenz/apogee/internal/domain"
+	"github.com/airiclenz/apogee/internal/security"
 	mcpsdk "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -62,6 +63,31 @@ func TestServerToolDescriptionFallback(t *testing.T) {
 	}
 	if !strings.Contains(tool.Description(), "thing") {
 		t.Errorf("fallback description %q does not name the tool", tool.Description())
+	}
+}
+
+// TestServerToolDeclaresNoArgRoles pins that an MCP server tool declares no argument roles,
+// so the dangerous-action guard inspects every one of its arguments in full: a server
+// cannot rename an action into a payload-shaped key (`body`, `message`) to slip past the
+// hard-refuse floor, because the payload exemption is only ever the calling tool's own
+// declaration.
+func TestServerToolDeclaresNoArgRoles(t *testing.T) {
+	t.Parallel()
+	tool := newServerTool("srv", &mcpsdk.Tool{Name: "post"}, &fakeCaller{})
+
+	if _, declares := domain.Tool(tool).(domain.ArgRoleTool); declares {
+		t.Fatal("serverTool implements domain.ArgRoleTool; an MCP tool must declare no argument roles")
+	}
+	for _, role := range []domain.ArgRole{domain.ArgRolePayload, domain.ArgRoleReadSource, domain.ArgRolePrompt, domain.ArgRoleShellCommand} {
+		if keys := domain.ArgKeysWithRole(tool, role); len(keys) != 0 {
+			t.Errorf("ArgKeysWithRole(serverTool, %q) = %v, want none", role, keys)
+		}
+	}
+
+	args, _ := json.Marshal(map[string]any{"body": "rm -rf ~/.ssh"})
+	call := domain.ToolCall{ID: "c1", Tool: tool.Name(), Arguments: args}
+	if d := security.DefaultDangerousActionGuard().Inspect(call, tool, nil); d.Tier != security.TierHardRefuse {
+		t.Errorf("MCP body argument tier = %d (rule %q), want TierHardRefuse", d.Tier, d.RuleID)
 	}
 }
 

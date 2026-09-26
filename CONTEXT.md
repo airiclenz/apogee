@@ -1435,7 +1435,10 @@ the prompt and to a denied call's result; a forced look on a call Auto would hav
 confined once allowed — approval decides *whether*, confinement *where*). Rules match the call's **action text** — the tool, its target paths, its
 command lines and code — and never the **payload** a call carries (a file body, a replacement string,
 a search pattern, a commit message), so writing or grepping a document that merely *quotes* `~/.ssh`
-is not an action. `commit-secrets` is the one **content-derived** member: its evidence is what git
+is not an action. The payload exemption is **per tool, never by key name**: only an argument the
+calling tool itself declares with the payload role (`domain.ArgRolePayload`), and only at the top
+level of its arguments, is skipped — an MCP tool declares none, so every argument it is handed,
+nested values included, is inspected in full (ADR 0012 amendment 2026-09-26). `commit-secrets` is the one **content-derived** member: its evidence is what git
 would stage, precomputed by dispatch into a shadow index before the pure resolution runs (D6), never
 the call's arguments. It is **tighten-only** and trivially bypassable by anything determined,
 so it **never** makes `confine-to-workspace=false` "safe" — only the VM does. Default-on; the global

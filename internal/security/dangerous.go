@@ -43,7 +43,8 @@ func (d Decision) Triggered() bool { return d.Tier != TierNone }
 
 // Rule is one dangerous-action pattern. The pattern is matched against the call's
 // whitespace-normalized inspectable text — the tool name, its target paths and its command
-// lines, but NOT the payload a write carries (see payloadKeys). Matching is deliberately
+// lines, but NOT the payload a write carries (a key its tool declares domain.ArgRolePayload,
+// see inspectableText). Matching is deliberately
 // narrow literal/regex — there is no obfuscation-chasing (this is a footgun-guard catching
 // obvious mistakes, NOT an adversary boundary, ADR 0012).
 type Rule struct {
@@ -133,8 +134,9 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 // Inspect reports the guard's verdict for call, resolved by tool — nil when the call
 // names no known tool, which is treated as write-capable and fully inspected, the
 // conservative direction. It extracts the call's inspectable text (the tool name plus
-// every string value in its JSON arguments except the payload-bearing ones —
-// payloadKeys — and any value the tool declares a delegation prompt, domain.ArgRolePrompt),
+// every string value in its JSON arguments except the top-level ones the tool itself
+// declares payload, domain.ArgRolePayload, or a delegation prompt, domain.ArgRolePrompt —
+// a nil tool, an MCP tool or an undeclared key is inspected in full, nested values included),
 // normalizes it, and returns the strictest matching rule's Decision (TierNone when
 // nothing matches). A WritesOnly rule additionally respects the tool's own declared
 // class: it is skipped when the tool is read-only, and judges a text that omits the
@@ -155,16 +157,22 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 	// EVERY rule's sight, not just the write-shaped ones: it describes an action rather
 	// than performing one, and the delegated agent's own calls are inspected one level
 	// down, at the action site.
+	// A value the tool declares its payload — inert text it stores, transmits or searches
+	// for — is out of every rule's sight too, but only by the calling tool's own declaration.
 	prompts := domain.ArgKeysWithRole(tool, domain.ArgRolePrompt)
-	full := maskExempt(normalize(inspectableText(call, prompts)), exemptPaths)
+	payloads := domain.ArgKeysWithRole(tool, domain.ArgRolePayload)
+	hidden := make([]string, 0, len(prompts)+len(payloads))
+	hidden = append(hidden, prompts...)
+	hidden = append(hidden, payloads...)
+	full := maskExempt(normalize(inspectableText(call, hidden)), exemptPaths)
 	readOnly := domain.IsReadOnly(tool)
 
 	// The write-shaped view of the same call: identical unless the tool declares
 	// read-source keys, in which case those values are out of a write rule's sight too.
 	writes := full
 	sources := domain.ArgKeysWithRole(tool, domain.ArgRoleReadSource)
-	dropped := make([]string, 0, len(prompts)+len(sources))
-	dropped = append(dropped, prompts...)
+	dropped := make([]string, 0, len(hidden)+len(sources))
+	dropped = append(dropped, hidden...)
 	dropped = append(dropped, sources...)
 	if len(sources) > 0 {
 		writes = maskExempt(normalize(inspectableText(call, dropped)), exemptPaths)
@@ -214,10 +222,10 @@ func (g *DangerousActionGuard) Rules() []Rule {
 	return out
 }
 
-// payloadKeys are the argument keys whose value is inert TEXT the tool stores, transmits or
+// Payload exclusion: an argument whose value is inert TEXT the tool stores, transmits or
 // searches for — a file body, a replacement string, a search pattern, a commit message —
-// rather than something the host will act on. Their values are excluded from the
-// inspectable text.
+// rather than something the host will act on is excluded from the inspectable text, but
+// only when the call's OWN tool declares that argument with domain.ArgRolePayload.
 //
 // The rules describe ACTIONS, and an action is the tool plus its target path, command line
 // or code — never the payload it carries. Matching payload text made the guard fire on
@@ -226,67 +234,56 @@ func (g *DangerousActionGuard) Rules() []Rule {
 // was refused as a write. That is precision-over-recall inverted — the near-miss failure
 // mode ADR 0012 forbids.
 //
-// This is a DENY-list, not an allow-list: an unrecognized key — an MCP tool's arbitrary
-// argument — stays inspected, so recall narrows only for keys deliberately classified here.
-// The keys that decide what the host does are deliberately absent: `command`, `code`,
-// `path` and `url` are all still inspected, so a shell heredoc writing to ~/.ssh still
-// matches (the heredoc lives in `command`).
+// The exemption is per tool, never by key name: a nil tool, an MCP tool (which declares no
+// roles) and any key its tool did not declare stay fully inspected, so a third-party tool
+// cannot rename an action into a payload-shaped `body` or `message` to slip past the
+// floor. It also applies at the TOP LEVEL of the arguments only — a declaration names an
+// argument key, and a declared key's whole value (arrays and objects included) is dropped
+// — so a payload-shaped key nested inside an undeclared argument is still inspected. The
+// keys that decide what the host does are never declared payload: `command`, `code`, `path`
+// and `url` are all still inspected, so a shell heredoc writing to ~/.ssh still matches (the
+// heredoc lives in `command`).
 //
-// A delegation prompt is exempt by a different route: not this global list, but the calling
-// tool's OWN declaration (domain.ArgRolePrompt — sub_agent declares `task` and `name`), so an
-// MCP tool with a coincidental `task` argument stays fully inspected. That exemption costs
-// no coverage: the delegated agent's tool calls are each inspected one level down, where
-// the text is an action the host performs rather than a description of one.
-var payloadKeys = map[string]bool{
-	"content":    true, // file_edit: the body written
-	"newcontent": true, // diff: the proposed body
-	"oldtext":    true, // find_replace: the text searched for
-	"newtext":    true, // find_replace: the text swapped in
-	"pattern":    true, // grep: the search regex
-	"message":    true, // git: the commit message
-	"query":      true, // web_search: the search terms
-	"question":   true, // ask_user: the prompt shown
-	"choices":    true, // ask_user: the answers offered
-	"title":      true, // present_document: the display heading
-	"body":       true, // http_request: the request payload (its `url` stays inspected)
-}
+// A delegation prompt (domain.ArgRolePrompt — sub_agent declares `task` and `name`) and a
+// read-only source (domain.ArgRoleReadSource) are exempt by the same per-tool route. The
+// prompt exemption costs no coverage: the delegated agent's tool calls are each inspected
+// one level down, where the text is an action the host performs rather than a description
+// of one.
 
 // keyPunctuation strips the separators that distinguish spellings of one argument name.
 var keyPunctuation = strings.NewReplacer("_", "", "-", "")
 
-// keySpelling reduces an argument key to the spelling payloadKeys, dropKeys and shellKeys are
-// matched under: domain.FoldArgumentKey — the fold the dispatcher decodes the same bytes with,
-// so a key the executor reads as `message` (`meſſage`, U+017F folding to `s`) is `message` here
-// too — and then the separators removed, so `newContent`, `new_content` and `new-content` all
-// resolve to the same entry. The guard owns no case fold of its own: lower-casing here would
-// disagree with dispatch on exactly the runes a substitution hides behind.
+// keySpelling reduces an argument key to the spelling a tool's declared keys (payload, prompt,
+// read-source, shell command line) are matched under: domain.FoldArgumentKey — the fold the
+// dispatcher decodes the same bytes with, so a key the executor reads as `message` (`meſſage`,
+// U+017F folding to `s`) is `message` here too — and then the separators removed, so
+// `newContent`, `new_content` and `new-content` all resolve to the same declared key. The
+// guard owns no case fold of its own: lower-casing here would disagree with dispatch on
+// exactly the runes a substitution hides behind.
 func keySpelling(key string) string {
 	return keyPunctuation.Replace(domain.FoldArgumentKey(key))
 }
 
-// isPayloadKey reports whether an argument key carries payload text rather than an action.
-func isPayloadKey(key string) bool {
-	return payloadKeys[keySpelling(key)]
+// spellingSet builds the keySpelling-reduced membership set of every key in lists.
+func spellingSet(lists ...[]string) map[string]bool {
+	set := make(map[string]bool)
+	for _, keys := range lists {
+		for _, k := range keys {
+			set[keySpelling(k)] = true
+		}
+	}
+	return set
 }
 
 // inspectableText pulls the strings the guard matches against out of a tool call: the
 // tool name and every string leaf in the JSON arguments (command lines, paths, scripts)
-// except the payload-bearing ones (isPayloadKey) and the values under dropKeys — the
-// argument keys the tool itself declared out of a rule's sight: its delegation prompts in
-// the full view, those plus its read-only sources in the write-shaped view a WritesOnly
-// rule matches (nil when the tool declares neither). A non-object / malformed
-// argument payload degrades to the raw argument bytes, so a guard rule still sees the
-// text even when the shape is unexpected.
+// except the values under dropKeys — the top-level argument keys the tool itself declared
+// out of a rule's sight: its payloads and delegation prompts in the full view, those plus
+// its read-only sources in the write-shaped view a WritesOnly rule matches (nil when the
+// tool declares none, so every leaf is inspected). A non-object / malformed argument
+// payload degrades to the raw argument bytes, so a guard rule still sees the text even
+// when the shape is unexpected.
 func inspectableText(call domain.ToolCall, dropKeys []string) string {
-	skip := isPayloadKey
-	if len(dropKeys) > 0 {
-		dropped := make(map[string]bool, len(dropKeys))
-		for _, k := range dropKeys {
-			dropped[keySpelling(k)] = true
-		}
-		skip = func(key string) bool { return isPayloadKey(key) || dropped[keySpelling(key)] }
-	}
-
 	var b strings.Builder
 	b.WriteString(call.Tool)
 	b.WriteByte(' ')
@@ -296,37 +293,27 @@ func inspectableText(call domain.ToolCall, dropKeys []string) string {
 		b.Write(call.Arguments) // unparseable args: match against the raw bytes
 		return b.String()
 	}
-	collectStrings(decoded, &b, skip)
+	collectArgs(decoded, &b, spellingSet(dropKeys))
 	return b.String()
 }
 
 // shellWriteText is inspectableText's shell-aware twin for the write view a ShellWriteView
-// rule matches: the tool name and every string leaf in the arguments except the payload
-// keys, dropKeys and the shell command-line keys — whose values contribute their write
-// targets (writeTargetsOf) instead of their words. ok is false when the arguments are not a
-// JSON object, in which case the caller keeps the write-shaped view it already has (the raw
-// bytes, fully judged): the narrowing is earned by a well-formed call, never by a malformed one.
+// rule matches: the tool name and every string leaf in the arguments except dropKeys and the
+// shell command-line keys — whose values contribute their write targets (writeTargetsOf)
+// instead of their words. ok is false when the arguments are not a JSON object, in which
+// case the caller keeps the write-shaped view it already has (the raw bytes, fully judged):
+// the narrowing is earned by a well-formed call, never by a malformed one.
 func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string) (text string, ok bool) {
 	var args map[string]any
 	if err := json.Unmarshal(call.Arguments, &args); err != nil {
 		return "", false
 	}
-	shell := make(map[string]bool, len(shellKeys))
-	for _, k := range shellKeys {
-		shell[keySpelling(k)] = true
-	}
-	dropped := make(map[string]bool, len(dropKeys))
-	for _, k := range dropKeys {
-		dropped[keySpelling(k)] = true
-	}
-	skip := func(key string) bool {
-		return isPayloadKey(key) || dropped[keySpelling(key)] || shell[keySpelling(key)]
-	}
+	shell := spellingSet(shellKeys)
 
 	var b strings.Builder
 	b.WriteString(call.Tool)
 	b.WriteByte(' ')
-	collectStrings(args, &b, skip)
+	collectArgs(args, &b, spellingSet(shellKeys, dropKeys))
 	for key, value := range args {
 		line, isString := value.(string)
 		if !shell[keySpelling(key)] || !isString {
@@ -338,26 +325,41 @@ func shellWriteText(call domain.ToolCall, shellKeys, dropKeys []string) (text st
 	return b.String(), true
 }
 
+// collectArgs appends the string leaves of a decoded argument value, dropping the whole value
+// of every TOP-LEVEL key whose spelling is in skip. Only depth 0 is skipped: a declaration
+// names one of the tool's own argument keys, so a key of the same spelling nested inside
+// another argument is inspected like any other leaf — a nested `{"x":{"body":"rm -rf /"}}`
+// never borrows an exemption its tool did not declare. A declared array or object (a
+// multi_find_and_replace `replacements`) is dropped whole.
+func collectArgs(args any, b *strings.Builder, skip map[string]bool) {
+	obj, isObject := args.(map[string]any)
+	if !isObject {
+		collectStrings(args, b)
+		return
+	}
+	for k, e := range obj {
+		if skip[keySpelling(k)] {
+			continue
+		}
+		collectStrings(e, b)
+	}
+}
+
 // collectStrings walks a decoded JSON value appending every string leaf (space-joined) so
-// the guard inspects command lines and paths regardless of which argument key carries them.
-// A skipped key's value is dropped whole, at any depth — that covers a nested payload
-// such as a find_replace `replacements[].newText`, whose enclosing array stays inspected
-// so any future action-bearing sibling key is still seen.
-func collectStrings(v any, b *strings.Builder, skip func(string) bool) {
+// the guard inspects command lines and paths regardless of which argument key carries them,
+// at any depth.
+func collectStrings(v any, b *strings.Builder) {
 	switch t := v.(type) {
 	case string:
 		b.WriteString(t)
 		b.WriteByte(' ')
 	case []any:
 		for _, e := range t {
-			collectStrings(e, b, skip)
+			collectStrings(e, b)
 		}
 	case map[string]any:
-		for k, e := range t {
-			if skip(k) {
-				continue
-			}
-			collectStrings(e, b, skip)
+		for _, e := range t {
+			collectStrings(e, b)
 		}
 	}
 }

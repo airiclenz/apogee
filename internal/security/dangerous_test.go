@@ -153,71 +153,13 @@ func TestDangerousActionGuard_PrecisionNearMissesNotBlocked(t *testing.T) {
 	}
 }
 
-func TestDangerousActionGuard_PayloadTextNotInspected(t *testing.T) {
-	t.Parallel()
-	g := DefaultDangerousActionGuard()
-
-	// A payload is not an action: text a tool merely writes, transmits or searches for
-	// must never fire a rule, however dangerous the literal it quotes. Documenting the
-	// guard's own ruleset — this repo's ADR 0012 and CONTEXT.md both name ~/.ssh — is the
-	// case that first hit it, and a hard-refuse has no per-call override to escape with.
-	cases := []struct {
-		name string
-		call domain.ToolCall
-	}{
-		{"write a doc quoting ~/.ssh", argCall("write_file", map[string]any{
-			"path":    "docs/adr/0012-confinement.md",
-			"content": "Tier 1 hard-refuses writes under `~/.ssh` and to `~/.bashrc`.",
-		})},
-		{"write a doc quoting rm -rf /etc", argCall("write_file", map[string]any{
-			"path":    "CHANGELOG.md",
-			"content": "The guard refuses `rm -rf /etc` outright.",
-		})},
-		{"grep for the ~/.ssh literal", argCall("grep", map[string]any{
-			"pattern": `~/\.ssh`,
-			"path":    "docs",
-		})},
-		{"commit message naming ~/.ssh", argCall("git", map[string]any{
-			"action":  "commit",
-			"message": "fix(security): stop refusing writes that mention ~/.ssh",
-		})},
-		{"find_replace payload naming .bashrc", argCall("find_replace", map[string]any{
-			"path":    "internal/security/rules.go",
-			"oldText": "~/.bashrc",
-			"newText": "~/.zshrc",
-		})},
-		{"nested replacements payload", argCall("find_replace", map[string]any{
-			"path": "docs/security.md",
-			"replacements": []any{
-				map[string]any{"oldText": "old", "newText": "writes under ~/.ssh are refused"},
-			},
-		})},
-		{"web search about ~/.ssh", argCall("web_search", map[string]any{
-			"query": "how to configure ~/.ssh/config on macOS",
-		})},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			d := g.Inspect(tc.call, nil, nil)
-
-			if d.Triggered() {
-				t.Fatalf("Inspect(%q) wrongly triggered on payload text: tier=%d rule=%q reason=%q",
-					tc.name, d.Tier, d.RuleID, d.Reason)
-			}
-		})
-	}
-}
-
 func TestDangerousActionGuard_ActionKeysStillInspected(t *testing.T) {
 	t.Parallel()
 	g := DefaultDangerousActionGuard()
 
-	// The payload exclusion is a deny-list over keys that carry text, not a hole in the
-	// floor: every key that decides what the host DOES stays inspected, and so does any
-	// key the list does not recognize.
+	// The payload exclusion is a per-tool declaration over keys that carry text, not a hole
+	// in the floor: every key that decides what the host DOES stays inspected, and so does
+	// any key no tool declared — with no tool at all (nil) every argument is inspected.
 	cases := []struct {
 		name string
 		call domain.ToolCall
@@ -238,6 +180,12 @@ func TestDangerousActionGuard_ActionKeysStillInspected(t *testing.T) {
 		{"payload key does not shield a sibling path", argCall("find_replace", map[string]any{
 			"path":    "/root/.ssh/id_rsa",
 			"newText": "harmless",
+		})},
+		{"a payload-shaped key is no exemption without a declaring tool", argCall("mcp_x", map[string]any{
+			"body": "rm -rf ~/.ssh",
+		})},
+		{"a nested payload-shaped key is no exemption either", argCall("mcp_x", map[string]any{
+			"x": map[string]any{"body": "rm -rf /"},
 		})},
 	}
 
@@ -262,12 +210,14 @@ func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
 	// NewContent gets the same exclusion as the declared newContent. The fold is the
 	// dispatcher's own (domain.FoldArgumentKey) with the separators stripped on top, so a
 	// key the executor reads as `message` — `meſſage`, U+017F LONG S folding to `s` — is the
-	// payload key here too, never a spelling the guard inspects while dispatch stores it.
+	// declared payload key here too, never a spelling the guard inspects while dispatch
+	// stores it.
+	differ := stubTool{name: "view_diff", payloadKeys: []string{"newContent", "message"}}
 	for _, key := range []string{"newContent", "new_content", "new-content", "NEWCONTENT", "me\u017f\u017fage"} {
 		t.Run(key, func(t *testing.T) {
 			t.Parallel()
 
-			d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}), nil, nil)
+			d := g.Inspect(argCall("view_diff", map[string]any{"path": "docs/x.md", key: "mentions ~/.ssh"}), differ, nil)
 
 			if d.Triggered() {
 				t.Fatalf("key %q was inspected as an action: tier=%d rule=%q", key, d.Tier, d.RuleID)
@@ -275,11 +225,51 @@ func TestDangerousActionGuard_PayloadKeySpellingVariants(t *testing.T) {
 		})
 	}
 
-	// The control: a key that folds to nothing on the payload list stays inspected — the
-	// exclusion is earned by the fold landing on a listed key, not by the fold itself.
-	d := g.Inspect(argCall("diff", map[string]any{"path": "docs/x.md", "target": "mentions ~/.ssh"}), nil, nil)
+	// The control: a key that folds to nothing the tool declared stays inspected — the
+	// exclusion is earned by the fold landing on a declared key, not by the fold itself.
+	d := g.Inspect(argCall("view_diff", map[string]any{"path": "docs/x.md", "target": "mentions ~/.ssh"}), differ, nil)
 	if !d.Triggered() {
-		t.Fatalf("an unlisted key was excluded from inspection: tier=%d rule=%q", d.Tier, d.RuleID)
+		t.Fatalf("an undeclared key was excluded from inspection: tier=%d rule=%q", d.Tier, d.RuleID)
+	}
+}
+
+// TestDangerousActionGuard_PayloadExclusionIsPerTool pins that the payload exclusion rests on
+// the calling tool's OWN declaration (domain.ArgRolePayload), at the top level of its
+// arguments only — never on a key's name. A tool that declares no roles (an MCP tool), a
+// nil tool, and a key the tool did not declare are inspected in full, and a key spelled like
+// a declared payload but nested inside another argument earns no exemption.
+func TestDangerousActionGuard_PayloadExclusionIsPerTool(t *testing.T) {
+	t.Parallel()
+	g := DefaultDangerousActionGuard()
+	mcpTool := stubTool{name: "mcp_x"}
+	poster := stubTool{name: "http_request", payloadKeys: []string{"body"}}
+
+	cases := []struct {
+		name string
+		call domain.ToolCall
+		tool domain.Tool
+		want Tier
+	}{
+		{"an MCP tool's body is inspected", argCall("mcp_x", map[string]any{"body": "rm -rf ~/.ssh"}), mcpTool, TierHardRefuse},
+		{"an MCP tool's message is inspected", argCall("mcp_x", map[string]any{"message": "rm -rf /"}), mcpTool, TierHardRefuse},
+		{"an unknown tool's body is inspected", argCall("mcp_x", map[string]any{"body": "rm -rf ~/.ssh"}), nil, TierHardRefuse},
+		{"a nested body under an undeclared key is inspected", argCall("mcp_x", map[string]any{"x": map[string]any{"body": "rm -rf /"}}), mcpTool, TierHardRefuse},
+		{"a nested body under a nil tool is inspected", argCall("mcp_x", map[string]any{"x": map[string]any{"body": "rm -rf /"}}), nil, TierHardRefuse},
+		{"a declared payload key nested elsewhere is inspected", argCall("http_request", map[string]any{"x": map[string]any{"body": "rm -rf /"}}), poster, TierHardRefuse},
+		{"an undeclared payload-shaped sibling is inspected", argCall("http_request", map[string]any{"body": "fine", "message": "rm -rf /"}), poster, TierHardRefuse},
+		{"the declaring tool's own top-level payload is excluded", argCall("http_request", map[string]any{"url": "https://example.com", "body": "rm -rf ~/.ssh"}), poster, TierNone},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			d := g.Inspect(tc.call, tc.tool, nil)
+
+			if d.Tier != tc.want {
+				t.Fatalf("Inspect(%q) tier = %d (rule %q), want %d", tc.name, d.Tier, d.RuleID, tc.want)
+			}
+		})
 	}
 }
 
@@ -365,15 +355,16 @@ func TestDangerousActionGuard_UnparseableArgsStillInspected(t *testing.T) {
 
 // stubTool is the minimal domain.Tool the class-aware cases need: a name, an inert
 // Execute, and the optional class declarations under test (domain.ReadOnlyTool via
-// readOnly; domain.ArgRoleTool's read-source, prompt and shell-command roles via sourceKeys,
-// promptKeys and shellKeys — nil declares no key in that role, which ArgKeysWithRole reads
-// as "none").
+// readOnly; domain.ArgRoleTool's read-source, prompt, shell-command and payload roles via
+// sourceKeys, promptKeys, shellKeys and payloadKeys — nil declares no key in that role, which
+// ArgKeysWithRole reads as "none").
 type stubTool struct {
-	name       string
-	readOnly   bool
-	sourceKeys []string
-	promptKeys []string
-	shellKeys  []string
+	name        string
+	readOnly    bool
+	sourceKeys  []string
+	promptKeys  []string
+	shellKeys   []string
+	payloadKeys []string
 }
 
 func (s stubTool) Name() string            { return s.name }
@@ -381,10 +372,10 @@ func (s stubTool) Description() string     { return "" }
 func (s stubTool) Schema() json.RawMessage { return nil }
 func (s stubTool) ReadOnly() bool          { return s.readOnly }
 
-// ArgRoles folds the three per-role key lists into the one declaration domain.ArgRoleTool asks
+// ArgRoles folds the four per-role key lists into the one declaration domain.ArgRoleTool asks
 // for.
 func (s stubTool) ArgRoles() map[string]domain.ArgRole {
-	roles := make(map[string]domain.ArgRole, len(s.sourceKeys)+len(s.promptKeys)+len(s.shellKeys))
+	roles := make(map[string]domain.ArgRole, len(s.sourceKeys)+len(s.promptKeys)+len(s.shellKeys)+len(s.payloadKeys))
 	for _, k := range s.sourceKeys {
 		roles[k] = domain.ArgRoleReadSource
 	}
@@ -393,6 +384,9 @@ func (s stubTool) ArgRoles() map[string]domain.ArgRole {
 	}
 	for _, k := range s.shellKeys {
 		roles[k] = domain.ArgRoleShellCommand
+	}
+	for _, k := range s.payloadKeys {
+		roles[k] = domain.ArgRolePayload
 	}
 	return roles
 }

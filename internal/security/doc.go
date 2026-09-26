@@ -42,9 +42,14 @@
 //     project may only add — MergeDangerousRules, the ADR 0012 merge seam no config key
 //     calls today; apogee-089 would wire it). It matches a call's ACTION text —
 //     the tool, its target paths, its command lines and code — and never the payload a
-//     write carries, so a document that merely quotes a guarded path is not an action
-//     (payloadKeys in dangerous.go). Two tool-declared argument classes narrow it further,
-//     each with its own reach. A declared delegation prompt (domain.ArgRolePrompt —
+//     write carries, so a document that merely quotes a guarded path is not an action.
+//     That payload exemption is the calling tool's OWN declaration (domain.ArgRolePayload —
+//     write_file's content, grep's pattern, http_request's body), never a key's name, and it
+//     drops a declared top-level argument's whole value only: a nil tool, an MCP tool (which
+//     declares no roles) and every undeclared key are inspected in full, nested values
+//     included, so no tool can rename an action into a payload-shaped key to slip past the
+//     floor. Three more tool-declared argument classes narrow it further, each with its own
+//     reach. A declared delegation prompt (domain.ArgRolePrompt —
 //     sub_agent's task and name) is out of EVERY rule's sight: prose handed to another
 //     agent describes an action instead of performing one, and the delegated agent's own
 //     calls are each inspected one level down at the action site, so the exemption moves
@@ -81,7 +86,8 @@
 // machinery. dangerous.go is the mechanism: the two Tiers, the Rule and Decision types (including
 // the WritesOnly class that keeps a write-shaped rule off declared reads), Inspect,
 // and the inspectable-text derivation that reads a call's ACTION — tool name, target paths,
-// command lines, code — while skipping the payload keys a write carries and, for every rule,
+// command lines, code — while skipping the top-level payload keys the calling tool declares
+// (domain.ArgRolePayload) and, for every rule,
 // the prompt keys a dispatch merely forwards (domain.ArgRolePrompt), so neither a document that
 // quotes a guarded path nor a delegated task that names one is an action. rules.go is the
 // content: DefaultDangerousRules, the narrow precision-over-recall built-in floor with a comment

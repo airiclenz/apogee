@@ -647,6 +647,14 @@ computed in a fixed, load-bearing order:
    something the host performs. The declaration is per KEY, not per tool: an undeclared argument of
    a prompt-declaring tool stays inspected, as do `command`, `code`, `path` and `url` everywhere,
    and a key whose value this host would itself execute, open or write through must not be declared.
+   **Payload text is exempt the same way — per tool (amendment 2026-09-26).** A value under a
+   top-level argument key the tool itself declares with the payload role (`domain.ArgRolePayload` —
+   `write_file`'s `content`, `grep`'s `pattern`, `http_request`'s `body`, `multi_find_and_replace`'s
+   whole `replacements` array) is inert text the tool stores, transmits or searches for, and is
+   dropped from every rule's view. The exemption was once a global list of key names applied to
+   every tool; it is now only ever the calling tool's own declaration, applied at depth 0 only. A
+   nil tool, an MCP server tool (which declares no roles) and any undeclared key — nested values
+   included — are inspected in full, so an MCP tool's `{"body":"rm -rf ~/.ssh"}` is refused.
 2. **`sub_agent` ⇒ `Delegate`** (ADR 0013): the recursion point drives a nested Agent, not a leaf
    tool. A Tier-2 force is **deliberately not** applied here — nothing executes at delegation, so the
    shared read-only floor re-fires on the child's own dangerous call. At the depth bound the

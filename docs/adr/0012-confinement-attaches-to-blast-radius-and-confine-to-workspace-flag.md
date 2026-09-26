@@ -428,3 +428,33 @@ the ladder row and the qualified legend are in
 the announcing side is ADR 0056 D3 and ADR 0023 §6 (each with a dated reversal note), and
 CONTEXT.md's **Agent mode**, **Scratch dir**, **Orientation block** and **Confinement** entries
 carry the prose.
+
+## Amendment (2026-09-26) — the payload exemption is declared per tool; MCP arguments are fully inspected
+
+**Why now.** The dangerous-action guard (the Tier-1/Tier-2 floor this ADR fixes) never matches the
+**payload** a call carries — a file body, a search pattern, a commit message — because a document
+that merely quotes `~/.ssh` is not an action. That exemption was a global list of argument-key
+names applied to *every* tool, third-party MCP tools included, so an MCP server could rename an
+action into a payload-shaped key — `{"body":"rm -rf ~/.ssh"}` — and step past the hard-refuse
+floor this ADR promises holds in every mode (code audit 2026-09-26, bead `apogee-ws7`).
+
+**Decision.** The payload exemption is **per tool, never by key name**. An argument is excluded
+from the inspectable text only when the calling tool itself declares it with the payload role
+(`domain.ArgRolePayload`, the one per-tool argument-role declaration beside read-source, prompt and
+shell-command), and only at the **top level** of the arguments — a declared key's whole value is
+dropped (so `multi_find_and_replace`'s declared `replacements` array keeps its nested
+`oldText`/`newText` out of sight), while a payload-shaped key nested inside any other argument is
+inspected. **The default is full inspection:** a nil tool, an MCP server tool — which declares no
+roles — and every undeclared key are inspected in full, nested values included.
+
+**What this does not change.** The precision-over-recall stance stands: built-in tools keep
+exactly the exemptions they had, each now declared on the tool (`write_file`/`edit_existing_file`
+`content`, `view_diff` `newContent`, the find-and-replace `oldText`/`newText`/`replacements`,
+`grep`/`find_files` `pattern`, `git_commit` `message`, `web_search`/`load_skill` `query`,
+`ask_user` `question`/`choices`, `present_document` `title`, `http_request` `body`). The guard is
+still a footgun-guard, not an adversary boundary; this closes a rename that needed no
+obfuscation at all, which is the class of mistake the floor exists to catch.
+
+The mechanism is in `internal/security/dangerous.go` (`inspectableText`, `collectArgs`); the
+contract's §4 "What the floor never sees" carries the dated note, and CONTEXT.md's
+**Dangerous-action guard** entry and the manual's "The dangerous-action guard" section the prose.

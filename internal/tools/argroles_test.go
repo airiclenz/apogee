@@ -9,12 +9,12 @@ import (
 	"github.com/airiclenz/apogee/internal/domain"
 )
 
-// payloadSpellings are the argument-key spellings the dangerous-action guard treats as
-// payload text (internal/security payloadKeys), reduced the way that guard reduces a key:
-// domain.FoldArgumentKey, then `_` and `-` removed. A built-in tool whose schema carries a
-// key with one of these spellings must declare that key with domain.ArgRolePayload itself,
-// so the payload exclusion can rest on the tool's own declaration rather than on a key name
-// any MCP tool might share.
+// payloadSpellings are the argument-key spellings the dangerous-action guard once treated as
+// payload text by name alone (a global list since replaced by per-tool declarations), reduced
+// the way that guard reduces a key: domain.FoldArgumentKey, then `_` and `-` removed. A
+// built-in tool whose schema carries a key with one of these spellings must declare that key
+// with domain.ArgRolePayload itself, because the payload exclusion rests on the tool's own
+// declaration rather than on a key name any MCP tool might share.
 var payloadSpellings = map[string]bool{
 	"content":    true,
 	"newcontent": true,

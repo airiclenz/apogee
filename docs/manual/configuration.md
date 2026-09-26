@@ -2205,6 +2205,14 @@ rule reads a terminal command for what it *writes*: `cat .git/config` or `ls -la
 passes as the read it is, while `echo x > .git/config`, `rm -rf .git/hooks` or a program the
 guard does not know naming that path still refuses.
 
+The guard judges what a call *does*, not the text it carries: the body `write_file` writes,
+the pattern `grep` searches for, the message `git_commit` records and the body `http_request`
+sends are left out, so writing or searching a document that merely quotes `~/.ssh` is not a
+dangerous action. That exemption belongs to each built-in tool, which declares which of its
+own arguments are such text — it is never granted by an argument's name. A tool from an MCP
+server declares none, so every argument it is handed is checked in full: an MCP tool whose
+`body` argument reads `rm -rf ~/.ssh` is refused like any other.
+
 **Tier 2 forces the approval prompt**, even on the auto rung where nothing else would ask.
 These are the idioms that are usually legitimate and occasionally catastrophic: `curl … |
 sh`, `sudo`, and a terminal command naming apogee's own `~/.apogee` control plane — where a
