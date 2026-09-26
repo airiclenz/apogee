@@ -100,10 +100,12 @@ func (t *ConsoleOpen) ReadOnly() bool { return false }
 // keys on to confine it in Auto rather than gating it (domain.SubprocessTool).
 func (t *ConsoleOpen) Subprocess() bool { return true }
 
-// ShellCommandKeys declares `command` as the shell command line this tool hands to the shell —
-// the marker (domain.ShellCommandTool) that lets a write-shaped dangerous-action rule judge what
+// ArgRoles declares `command` as the shell command line this tool hands to the shell —
+// the role (domain.ArgRoleShellCommand) that lets a write-shaped dangerous-action rule judge what
 // the line writes rather than every word it names.
-func (t *ConsoleOpen) ShellCommandKeys() []string { return []string{"command"} }
+func (t *ConsoleOpen) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"command": domain.ArgRoleShellCommand}
+}
 
 // DefaultOff reports that console_open ships registered but off the default menu (ADR 0057): the
 // Console family is enabled by configuration for the models that want it, not by every roster.

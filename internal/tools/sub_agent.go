@@ -278,7 +278,7 @@ func NewSubAgentWith(opts SubAgentOptions) *SubAgent {
 // that published no `run_on` is a value the model could not have been told about.
 func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
 
-// PromptArgKeys declares `task`, `name` and `continue` as delegation prompts (domain.PromptTool):
+// ArgRoles declares `task`, `name` and `continue` as delegation prompts (domain.ArgRolePrompt):
 // all three carry prose written FOR the nested agent, never an action this host performs. The
 // dangerous-action guard therefore matches no rule against their text — a task that merely
 // NAMES a guarded path ("report on the readable git surfaces — .git/config") is a
@@ -289,7 +289,13 @@ func (t *SubAgent) OffersSeatChoice() bool { return t.seatChoice }
 // asked for.
 // `max_steps`, `run_on` and `tools` are NOT declared: none of them carries prose, so none needs an
 // exemption from a guard that matches rules against text.
-func (t *SubAgent) PromptArgKeys() []string { return []string{"task", "name", "continue"} }
+func (t *SubAgent) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{
+		"task":     domain.ArgRolePrompt,
+		"name":     domain.ArgRolePrompt,
+		"continue": domain.ArgRolePrompt,
+	}
+}
 
 // Execute is never reached on the real path: dispatch recognises SubAgentToolName as the
 // recursion point and drives a nested Agent instead. Reaching it means the recursion point

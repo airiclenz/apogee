@@ -103,10 +103,12 @@ func (t *Terminal) ReadOnly() bool { return false }
 // keys on to confine it in Auto rather than gating it (domain.SubprocessTool).
 func (t *Terminal) Subprocess() bool { return true }
 
-// ShellCommandKeys declares `command` as the shell command line this tool hands to the shell —
-// the marker (domain.ShellCommandTool) that lets a write-shaped dangerous-action rule judge what
+// ArgRoles declares `command` as the shell command line this tool hands to the shell —
+// the role (domain.ArgRoleShellCommand) that lets a write-shaped dangerous-action rule judge what
 // the line writes rather than every word it names.
-func (t *Terminal) ShellCommandKeys() []string { return []string{"command"} }
+func (t *Terminal) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"command": domain.ArgRoleShellCommand}
+}
 
 // Execute runs the command line through the platform shell, honouring ctx cancellation and
 // the confinement handle the disposition installed (if any). A command line the target shell

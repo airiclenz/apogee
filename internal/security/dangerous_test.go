@@ -364,11 +364,10 @@ func TestDangerousActionGuard_UnparseableArgsStillInspected(t *testing.T) {
 }
 
 // stubTool is the minimal domain.Tool the class-aware cases need: a name, an inert
-// Execute, and the four optional class declarations under test (domain.ReadOnlyTool via
-// readOnly, domain.ReadSourceTool via sourceKeys, domain.PromptTool via promptKeys,
-// domain.ShellCommandTool via shellKeys — nil means no declaration takes effect, since
-// ReadSourceArgKeys, PromptArgKeys and ShellCommandArgKeys all treat an empty answer as
-// "none").
+// Execute, and the optional class declarations under test (domain.ReadOnlyTool via
+// readOnly; domain.ArgRoleTool's read-source, prompt and shell-command roles via sourceKeys,
+// promptKeys and shellKeys — nil declares no key in that role, which ArgKeysWithRole reads
+// as "none").
 type stubTool struct {
 	name       string
 	readOnly   bool
@@ -377,13 +376,26 @@ type stubTool struct {
 	shellKeys  []string
 }
 
-func (s stubTool) Name() string               { return s.name }
-func (s stubTool) Description() string        { return "" }
-func (s stubTool) Schema() json.RawMessage    { return nil }
-func (s stubTool) ReadOnly() bool             { return s.readOnly }
-func (s stubTool) ReadSourceKeys() []string   { return s.sourceKeys }
-func (s stubTool) PromptArgKeys() []string    { return s.promptKeys }
-func (s stubTool) ShellCommandKeys() []string { return s.shellKeys }
+func (s stubTool) Name() string            { return s.name }
+func (s stubTool) Description() string     { return "" }
+func (s stubTool) Schema() json.RawMessage { return nil }
+func (s stubTool) ReadOnly() bool          { return s.readOnly }
+
+// ArgRoles folds the three per-role key lists into the one declaration domain.ArgRoleTool asks
+// for.
+func (s stubTool) ArgRoles() map[string]domain.ArgRole {
+	roles := make(map[string]domain.ArgRole, len(s.sourceKeys)+len(s.promptKeys)+len(s.shellKeys))
+	for _, k := range s.sourceKeys {
+		roles[k] = domain.ArgRoleReadSource
+	}
+	for _, k := range s.promptKeys {
+		roles[k] = domain.ArgRolePrompt
+	}
+	for _, k := range s.shellKeys {
+		roles[k] = domain.ArgRoleShellCommand
+	}
+	return roles
+}
 
 // shellTool is the stub shaped like terminal: write-capable, its `command` declared a shell
 // command line. Every shell-write-view case passes it — never nil — so the narrowing is
@@ -453,7 +465,7 @@ func TestCommandShapedRulesIgnoreTheToolClass(t *testing.T) {
 
 // TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource pins the argument half of
 // Rule.WritesOnly: a write-capable tool that declares an argument key a read-only source
-// (domain.ReadSourceTool) has that VALUE dropped from the write-shaped view — copy_file
+// (domain.ArgRoleReadSource) has that VALUE dropped from the write-shaped view — copy_file
 // materializing a skill resource out of ~/.apogee/skills is the sanctioned step this
 // protects. The other two directions hold the floor: the same tool's WRITE half (its
 // destination) still matches, and a tool WITHOUT the declaration (move_file — its source
@@ -490,7 +502,7 @@ func TestWritesOnlyRulesJudgeTheWriteTargetNotADeclaredReadSource(t *testing.T) 
 }
 
 // TestEveryRuleSkipsADeclaredPromptKey pins the delegation exemption: a tool that declares
-// an argument key a prompt for ANOTHER agent (domain.PromptTool) has that value dropped
+// an argument key a prompt for ANOTHER agent (domain.ArgRolePrompt) has that value dropped
 // from BOTH views, so NO rule — write-shaped or command-shaped — fires on a task
 // description that merely NAMES a guarded literal. The load-bearing row is the live repro:
 // a security-audit delegation whose task prose listed the readable git surfaces was
@@ -635,7 +647,7 @@ func TestWriteShapedDefaultRulesCarryWritesOnly(t *testing.T) {
 }
 
 // TestShellWriteViewJudgesWhatTheCommandWrites pins the shell write view (apogee-2ay): through
-// a tool that declares its command line (domain.ShellCommandTool), the one rule that opted in —
+// a tool that declares its command line (domain.ArgRoleShellCommand), the one rule that opted in —
 // write-git-control-plane — sees only what the line writes, so the three review commands that
 // tripped it pass, while a redirect or a mutating leader naming the control plane still
 // refuses. The rules that did NOT opt in keep the full text: the secret-file reads stay refused

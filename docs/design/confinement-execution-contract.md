@@ -638,7 +638,7 @@ computed in a fixed, load-bearing order:
    rare failure case asks the human the second, different question rather than assuming the first
    yes covered it.
    **What the floor never sees (amendment 2026-08-13).** A value under an argument key the tool
-   itself declares a delegation prompt (`domain.PromptArgKeys` / `domain.PromptTool` — `sub_agent`
+   itself declares a delegation prompt (`domain.ArgRolePrompt`, read through `domain.ArgKeysWithRole` — `sub_agent`
    declares `task` and `name`) is dropped from the inspectable text of **every** rule, not only the
    write-shaped ones: prose addressed to another agent *describes* an action instead of performing
    one, so a task that merely names `~/.ssh` or `.git/config` is not a dangerous call. The coverage

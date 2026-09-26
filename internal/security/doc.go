@@ -44,15 +44,15 @@
 //     the tool, its target paths, its command lines and code — and never the payload a
 //     write carries, so a document that merely quotes a guarded path is not an action
 //     (payloadKeys in dangerous.go). Two tool-declared argument classes narrow it further,
-//     each with its own reach. A declared delegation prompt (domain.PromptTool —
+//     each with its own reach. A declared delegation prompt (domain.ArgRolePrompt —
 //     sub_agent's task and name) is out of EVERY rule's sight: prose handed to another
 //     agent describes an action instead of performing one, and the delegated agent's own
 //     calls are each inspected one level down at the action site, so the exemption moves
 //     the coverage rather than losing it. A declared read-source argument
-//     (domain.ReadSourceTool — copy_file's source) is out of the WRITE-shaped rules'
+//     (domain.ArgRoleReadSource — copy_file's source) is out of the WRITE-shaped rules'
 //     sight only (Rule.WritesOnly), which a read-only tool skips outright, so listing or
 //     materializing the home skill library under ~/.apogee is not judged a "write". A
-//     declared shell command line (domain.ShellCommandTool — terminal's and console_open's
+//     declared shell command line (domain.ArgRoleShellCommand — terminal's and console_open's
 //     command) is read for what it WRITES by the one write-shaped rule that opted in
 //     (Rule.ShellWriteView — write-git-control-plane; shellwrites.go), so `cat .git/config`
 //     is the read it is while `echo x > .git/config` still refuses. Tools that declare
@@ -82,7 +82,7 @@
 // the WritesOnly class that keeps a write-shaped rule off declared reads), Inspect,
 // and the inspectable-text derivation that reads a call's ACTION — tool name, target paths,
 // command lines, code — while skipping the payload keys a write carries and, for every rule,
-// the prompt keys a dispatch merely forwards (domain.PromptArgKeys), so neither a document that
+// the prompt keys a dispatch merely forwards (domain.ArgRolePrompt), so neither a document that
 // quotes a guarded path nor a delegated task that names one is an action. rules.go is the
 // content: DefaultDangerousRules, the narrow precision-over-recall built-in floor with a comment
 // per rule saying where its boundary is, and MergeDangerousRules, which encodes who may loosen it
@@ -91,7 +91,7 @@
 // write view those two lean on: writeTargetsOf, the verb-aware reading of a command line that
 // keeps its redirect targets and the operands of mutating or unknown leaders and drops what a
 // read leader names, for the rule that opted in (Rule.ShellWriteView) on a tool that declared
-// its command-line argument (domain.ShellCommandTool).
+// its command-line argument (domain.ArgRoleShellCommand).
 //
 // secrets.go is the one rule whose evidence is not in the call at all but in what git has staged:
 // SecretFindings, the pure scan of a shadow-index staged diff (added lines only, attributed to

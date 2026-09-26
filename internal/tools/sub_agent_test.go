@@ -10,10 +10,10 @@ import (
 	"github.com/airiclenz/apogee/internal/security"
 )
 
-// Compile-time proof sub_agent declares its prompt-carrying arguments (domain.PromptTool).
+// Compile-time proof sub_agent declares its prompt-carrying arguments (domain.ArgRoleTool).
 // The guard's exemption for delegated prose hangs off this declaration: lose it and a task
 // that merely names a guarded path is hard-refused again.
-var _ domain.PromptTool = (*SubAgent)(nil)
+var _ domain.ArgRoleTool = (*SubAgent)(nil)
 
 // TestSubAgentDescriptionInvitesConcurrentDelegations guards the one sentence that tells the
 // model it may fan out: the ADR 0039 concurrent dispatch is only ever exercised when the model
@@ -107,10 +107,10 @@ func TestSubAgentSchemaAsksForADelegationName(t *testing.T) {
 func TestSubAgentDeclaresBothArgumentsAsDelegationPrompts(t *testing.T) {
 	t.Parallel()
 
-	got := domain.PromptArgKeys(NewSubAgent())
+	got := domain.ArgKeysWithRole(NewSubAgent(), domain.ArgRolePrompt)
 
-	if want := []string{"task", "name", "continue"}; !slices.Equal(got, want) {
-		t.Errorf("PromptArgKeys = %v, want %v", got, want)
+	if want := []string{"continue", "name", "task"}; !slices.Equal(got, want) {
+		t.Errorf("ArgKeysWithRole(prompt) = %v, want %v", got, want)
 	}
 }
 
@@ -141,7 +141,7 @@ func TestSubAgentContinueNamingAGuardedPathPassesTheGuard(t *testing.T) {
 func TestPromptArgKeysAreNoneForAToolThatDeclaresNone(t *testing.T) {
 	t.Parallel()
 
-	got := domain.PromptArgKeys(NewTerminal(t.TempDir(), nil))
+	got := domain.ArgKeysWithRole(NewTerminal(t.TempDir(), nil), domain.ArgRolePrompt)
 
 	if got != nil {
 		t.Errorf("terminal declares prompt keys %v, want none — its command text is acted on", got)

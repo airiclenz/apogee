@@ -70,7 +70,7 @@ type Rule struct {
 	// WritesOnly marks a rule whose Pattern names a WRITE or DELETE target (the write-*
 	// rules). Such a rule is skipped for a tool that declares itself read-only
 	// (domain.ReadOnlyTool), and is matched against text that omits any argument value
-	// the tool declares as a read-only source (domain.ReadSourceTool — copy_file's
+	// the tool declares as a read-only source (domain.ArgRoleReadSource — copy_file's
 	// `source`): a declared read cannot perform the action the rule names, and what a
 	// read may see is the read fence's decision, not this guard's — the home skill
 	// library lives under ~/.apogee and is listed, read and copied FROM as the ordinary
@@ -80,14 +80,14 @@ type Rule struct {
 	// rule is matched against the full text of every call, the pre-field behaviour.
 	WritesOnly bool
 	// ShellWriteView opts a WritesOnly rule into the shell write view: for a tool that
-	// declares which argument carries a shell command line (domain.ShellCommandTool —
+	// declares which argument carries a shell command line (domain.ArgRoleShellCommand —
 	// terminal, console_open), the rule is matched against what that line can WRITE
 	// (writeTargetsOf: redirect targets and the operands of leaders that mutate or are
 	// unknown) in place of the line's every word, so `ls -la .git/hooks` or `cat .git/config`
 	// is the read it is. It is opt-in per rule, and only `write-git-control-plane` opts in
 	// (owner call, 2026-09-14 — ADR 0049): the secret-file rules and the `~/.apogee` forced
 	// look keep the full shell text, so what they refuse or put to the human is unchanged.
-	// A tool without the marker — python_exec, every MCP tool — is judged on its full text
+	// A tool without that declaration — python_exec, every MCP tool — is judged on its full text
 	// whatever the rule says. Meaningless without WritesOnly.
 	ShellWriteView bool
 
@@ -134,12 +134,12 @@ func DefaultDangerousActionGuard() *DangerousActionGuard {
 // names no known tool, which is treated as write-capable and fully inspected, the
 // conservative direction. It extracts the call's inspectable text (the tool name plus
 // every string value in its JSON arguments except the payload-bearing ones —
-// payloadKeys — and any value the tool declares a delegation prompt, domain.PromptTool),
+// payloadKeys — and any value the tool declares a delegation prompt, domain.ArgRolePrompt),
 // normalizes it, and returns the strictest matching rule's Decision (TierNone when
 // nothing matches). A WritesOnly rule additionally respects the tool's own declared
 // class: it is skipped when the tool is read-only, and judges a text that omits the
 // tool's declared read-source values (see the Rule field's doc); one that also carries
-// ShellWriteView judges a tool's declared shell command line (domain.ShellCommandTool) by
+// ShellWriteView judges a tool's declared shell command line (domain.ArgRoleShellCommand) by
 // what it writes rather than by every word it names. It never errors and never executes
 // anything — pure inspection.
 //
@@ -155,14 +155,14 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 	// EVERY rule's sight, not just the write-shaped ones: it describes an action rather
 	// than performing one, and the delegated agent's own calls are inspected one level
 	// down, at the action site.
-	prompts := domain.PromptArgKeys(tool)
+	prompts := domain.ArgKeysWithRole(tool, domain.ArgRolePrompt)
 	full := maskExempt(normalize(inspectableText(call, prompts)), exemptPaths)
 	readOnly := domain.IsReadOnly(tool)
 
 	// The write-shaped view of the same call: identical unless the tool declares
 	// read-source keys, in which case those values are out of a write rule's sight too.
 	writes := full
-	sources := domain.ReadSourceArgKeys(tool)
+	sources := domain.ArgKeysWithRole(tool, domain.ArgRoleReadSource)
 	dropped := make([]string, 0, len(prompts)+len(sources))
 	dropped = append(dropped, prompts...)
 	dropped = append(dropped, sources...)
@@ -174,7 +174,7 @@ func (g *DangerousActionGuard) Inspect(call domain.ToolCall, tool domain.Tool, e
 	// the tool declares a shell command-line argument, in which case that argument is
 	// replaced by what its command line can write (writeTargetsOf).
 	shellWrites := writes
-	if shellKeys := domain.ShellCommandArgKeys(tool); len(shellKeys) > 0 {
+	if shellKeys := domain.ArgKeysWithRole(tool, domain.ArgRoleShellCommand); len(shellKeys) > 0 {
 		if text, ok := shellWriteText(call, shellKeys, dropped); ok {
 			shellWrites = maskExempt(normalize(text), exemptPaths)
 		}
@@ -233,7 +233,7 @@ func (g *DangerousActionGuard) Rules() []Rule {
 // matches (the heredoc lives in `command`).
 //
 // A delegation prompt is exempt by a different route: not this global list, but the calling
-// tool's OWN declaration (domain.PromptTool — sub_agent declares `task` and `name`), so an
+// tool's OWN declaration (domain.ArgRolePrompt — sub_agent declares `task` and `name`), so an
 // MCP tool with a coincidental `task` argument stays fully inspected. That exemption costs
 // no coverage: the delegated agent's tool calls are each inspected one level down, where
 // the text is an action the host performs rather than a description of one.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 
@@ -189,6 +190,64 @@ func TestIsDefaultOff_ReadsTheMarkerAndDefaultsToOnTheMenu(t *testing.T) {
 
 			if got := domain.IsDefaultOff(tc.tool); got != tc.want {
 				t.Errorf("IsDefaultOff(%s) = %v, want %v", tc.name, got, tc.want)
+			}
+		})
+	}
+}
+
+// argRoleStub is a stubTool that also carries the per-tool argument-role declaration.
+type argRoleStub struct {
+	stubTool
+	roles map[string]domain.ArgRole
+}
+
+func (a argRoleStub) ArgRoles() map[string]domain.ArgRole { return a.roles }
+
+// TestArgKeysWithRole covers the one helper the dangerous-action guard reads a tool's argument
+// roles through: a nil tool and a tool that declares nothing have no key in any role (the safe
+// default — every argument stays fully inspected), and a declaring tool answers each role with
+// exactly the keys it gave that role, sorted, never a key of another role.
+func TestArgKeysWithRole(t *testing.T) {
+	t.Parallel()
+
+	mixed := argRoleStub{stubTool: stubTool{name: "mixed"}, roles: map[string]domain.ArgRole{
+		"task":     domain.ArgRolePrompt,
+		"name":     domain.ArgRolePrompt,
+		"source":   domain.ArgRoleReadSource,
+		"command":  domain.ArgRoleShellCommand,
+		"content":  domain.ArgRolePayload,
+		"oldtext":  domain.ArgRolePayload,
+		"untagged": "",
+	}}
+
+	cases := []struct {
+		name string
+		tool domain.Tool
+		role domain.ArgRole
+		want []string
+	}{
+		{name: "nil tool", tool: nil, role: domain.ArgRolePrompt, want: nil},
+		{name: "undeclared", tool: stubTool{name: "plain"}, role: domain.ArgRolePayload, want: nil},
+		{
+			name: "declaration with no roles",
+			tool: argRoleStub{stubTool: stubTool{name: "empty"}},
+			role: domain.ArgRoleShellCommand,
+			want: nil,
+		},
+		{name: "payload", tool: mixed, role: domain.ArgRolePayload, want: []string{"content", "oldtext"}},
+		{name: "read-source", tool: mixed, role: domain.ArgRoleReadSource, want: []string{"source"}},
+		{name: "prompt", tool: mixed, role: domain.ArgRolePrompt, want: []string{"name", "task"}},
+		{name: "shell-command", tool: mixed, role: domain.ArgRoleShellCommand, want: []string{"command"}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := domain.ArgKeysWithRole(tc.tool, tc.role)
+
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("ArgKeysWithRole(%s, %q) = %q, want %q", tc.name, tc.role, got, tc.want)
 			}
 		})
 	}

@@ -1,7 +1,7 @@
 package main
 
 // The shell write view, end to end (apogee-t74): internal/security's `write-git-control-plane` rule
-// reads the command line the registry's REAL Terminal declares (domain.ShellCommandTool), rather
+// reads the command line the registry's REAL Terminal declares (domain.ArgRoleShellCommand), rather
 // than the stub tool internal/security's own tests hand it. A driven run through the composition
 // root is the only place that declaration and the rule meet.
 

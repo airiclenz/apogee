@@ -64,54 +64,72 @@ func IsReadOnly(t Tool) bool {
 	return ok && ro.ReadOnly()
 }
 
-// ReadSourceTool is an optional interface a write-capable Tool implements to declare
-// which of its argument keys name a path the tool only READS — a copy's source, never
-// its destination. The dangerous-action guard consults it so a rule that names a
-// write/delete target does not fire on a value the tool cannot write through. It
-// declares ARGUMENT ROLES, not read permission: what the tool may actually read is still
-// the read fence's decision (its own path scope and the extra read-only roots). A tool
-// that deletes or moves its source must NOT implement this — that source is a write
-// target by another name. ReadSourceArgKeys is the helper the guard calls rather than
-// the type assertion directly.
-type ReadSourceTool interface {
+// ArgRole names what one argument's value IS to the tool that declares it — the argument's
+// role, never a grant of trust. A tool declares its roles through ArgRoleTool; the
+// dangerous-action guard reads them (via ArgKeysWithRole) to decide which of a call's values a
+// rule may see and in what shape. An argument a tool declares no role for gets no narrowing
+// from this declaration — the safe default, so a tool that declares nothing (every MCP tool)
+// cannot narrow the floor by declaring.
+type ArgRole string
+
+const (
+	// ArgRolePayload marks inert TEXT the tool stores, transmits or searches for — a file
+	// body, a replacement string, a search pattern — rather than something the host acts on.
+	ArgRolePayload ArgRole = "payload"
+
+	// ArgRoleReadSource marks a path the tool only READS — a copy's source, never its
+	// destination — so a rule that names a write/delete target does not fire on a value the
+	// tool cannot write through. What the tool may actually read is still the read fence's
+	// decision (its own path scope and the extra read-only roots). A tool that deletes or
+	// moves its source must NOT declare it: that source is a write target by another name.
+	ArgRoleReadSource ArgRole = "read-source"
+
+	// ArgRolePrompt marks instruction PROSE addressed to ANOTHER agent — a delegated task,
+	// never something this host itself acts on — so no rule matches text the tool only
+	// forwards: a delegation prompt that merely NAMES a guarded path is a description, and
+	// the delegated agent's own tool calls are each inspected at the action site one level
+	// down, so the exemption loses no coverage. A key whose value this host would itself
+	// execute, open or write through must NOT be declared a prompt.
+	ArgRolePrompt ArgRole = "prompt"
+
+	// ArgRoleShellCommand marks a SHELL COMMAND LINE — text a POSIX shell parses into
+	// leaders, operands, pipelines and redirects — so a write-shaped rule that has opted into
+	// the shell write view judges only what that line can WRITE (its redirect targets and the
+	// operands of leaders that mutate) instead of every word of it: `ls -la .git/hooks` names
+	// a repository's control plane and cannot touch it. Only a SubprocessTool that hands the
+	// value to a shell as a command line may declare it (terminal, console_open). An
+	// interpreter tool (python_exec) carries a program no shell grammar describes, an MCP tool
+	// carries whatever it likes, and neither declares it — they stay fully inspected.
+	ArgRoleShellCommand ArgRole = "shell-command"
+)
+
+// ArgRoleTool is the optional interface a Tool implements to declare the role of some of its
+// argument keys (ArgRole) — the one per-tool argument-role declaration the dangerous-action
+// guard consults. It declares ARGUMENT ROLES, not trust or permission. ArgKeysWithRole is the
+// helper the guard calls rather than the type assertion directly.
+type ArgRoleTool interface {
 	Tool
-	// ReadSourceKeys returns the argument keys whose value names a read-only source path.
-	ReadSourceKeys() []string
+	// ArgRoles maps each declared argument key to its role; an absent key has no role.
+	ArgRoles() map[string]ArgRole
 }
 
-// ReadSourceArgKeys returns the argument keys t has declared as read-only source paths
-// via ReadSourceTool. A tool that makes no such declaration — including a nil t — has
-// none, the safe default: every argument is judged as a potential write target.
-func ReadSourceArgKeys(t Tool) []string {
-	if rs, ok := t.(ReadSourceTool); ok {
-		return rs.ReadSourceKeys()
+// ArgKeysWithRole returns the argument keys t has declared with role r via ArgRoleTool, in
+// sorted order so the answer is stable across calls. A tool that makes no such declaration —
+// including a nil t — has none, the safe default: every one of its arguments stays fully
+// inspected.
+func ArgKeysWithRole(t Tool, r ArgRole) []string {
+	declared, ok := t.(ArgRoleTool)
+	if !ok {
+		return nil
 	}
-	return nil
-}
-
-// PromptTool is an optional interface a Tool implements to declare which of its argument
-// keys carry instruction PROSE addressed to ANOTHER agent — a delegated task, never
-// something this host itself acts on. The dangerous-action guard consults it so no rule
-// matches text the tool only forwards: a delegation prompt that merely NAMES a guarded path
-// is a description, and the delegated agent's own tool calls are each inspected at the
-// action site one level down, so the exemption loses no coverage. It declares ARGUMENT
-// ROLES, not trust: a key whose value this host would itself execute, open or write through
-// must NOT be declared here. PromptArgKeys is the helper the guard calls rather than the
-// type assertion directly.
-type PromptTool interface {
-	Tool
-	// PromptArgKeys returns the argument keys whose value is prose for another agent.
-	PromptArgKeys() []string
-}
-
-// PromptArgKeys returns the argument keys t has declared as delegation prompts via
-// PromptTool. A tool that makes no such declaration — including a nil t — has none, the
-// safe default: every one of its arguments stays fully inspected.
-func PromptArgKeys(t Tool) []string {
-	if pt, ok := t.(PromptTool); ok {
-		return pt.PromptArgKeys()
+	var keys []string
+	for key, role := range declared.ArgRoles() {
+		if role == r {
+			keys = append(keys, key)
+		}
 	}
-	return nil
+	sort.Strings(keys)
+	return keys
 }
 
 // SubprocessTool is an optional interface a Tool implements to declare that it launches
@@ -136,34 +154,6 @@ type SubprocessTool interface {
 func IsSubprocessTool(t Tool) bool {
 	st, ok := t.(SubprocessTool)
 	return ok && st.Subprocess()
-}
-
-// ShellCommandTool is an optional interface a SubprocessTool implements to declare which of
-// its argument keys carry a SHELL COMMAND LINE — text a POSIX shell parses into leaders,
-// operands, pipelines and redirects. The dangerous-action guard consults it so a write-shaped
-// rule that has opted into the shell write view judges only what that line can WRITE — its
-// redirect targets and the operands of leaders that mutate — instead of every word of it:
-// `ls -la .git/hooks` names a repository's control plane and cannot touch it. It declares an
-// ARGUMENT SHAPE, not trust: only a tool that hands the value to a shell as a command line
-// may implement it (terminal, console_open). An interpreter tool (python_exec) carries a
-// program no shell grammar describes, an MCP tool carries whatever it likes, and neither
-// implements this — they stay fully inspected, so a third-party tool cannot narrow the floor
-// by declaration. ShellCommandArgKeys is the helper the guard calls rather than the type
-// assertion directly.
-type ShellCommandTool interface {
-	Tool
-	// ShellCommandKeys returns the argument keys whose value is a shell command line.
-	ShellCommandKeys() []string
-}
-
-// ShellCommandArgKeys returns the argument keys t has declared as shell command lines via
-// ShellCommandTool. A tool that makes no such declaration — including a nil t — has none, the
-// safe default: every one of its arguments is judged as written, word for word.
-func ShellCommandArgKeys(t Tool) []string {
-	if sc, ok := t.(ShellCommandTool); ok {
-		return sc.ShellCommandKeys()
-	}
-	return nil
 }
 
 // DefaultOffTool is an optional interface a Tool implements to declare that it is present in

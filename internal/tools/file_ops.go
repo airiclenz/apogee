@@ -99,12 +99,14 @@ func NewCopyFile(root string, mounts ReadMounts) *CopyFile {
 // must gate it through Approval in Ask-Before (domain.ReadOnlyTool).
 func (t *CopyFile) ReadOnly() bool { return false }
 
-// ReadSourceKeys declares `source` as a read-only source path (domain.ReadSourceTool), so the
+// ArgRoles declares `source` as a read-only source path (domain.ArgRoleReadSource), so the
 // dangerous-action guard's write-shaped rules judge the DESTINATION alone — copy_file reads its
 // source and writes only its destination, and copying a resource OUT of the home skill library
 // (an extra read root under ~/.apogee) is the ordinary skill-materialization step. MoveFile
 // deliberately makes no such declaration: its source is deleted, a write by another name.
-func (t *CopyFile) ReadSourceKeys() []string { return []string{"source"} }
+func (t *CopyFile) ArgRoles() map[string]domain.ArgRole {
+	return map[string]domain.ArgRole{"source": domain.ArgRoleReadSource}
+}
 
 // workspaceWriteTarget resolves the absolute path this call would write — its DESTINATION — so
 // dispatch can classify in- vs out-of-workspace before Execute (the workspaceScopedWriter
@@ -627,7 +629,7 @@ func checkFileOpsDestination(args fileOpsArgs, target writeTarget, sourceIsDir b
 var (
 	_ domain.Tool           = (*CopyFile)(nil)
 	_ workspaceScopedWriter = (*CopyFile)(nil)
-	_ domain.ReadSourceTool = (*CopyFile)(nil)
+	_ domain.ArgRoleTool    = (*CopyFile)(nil)
 	_ domain.Tool           = (*MoveFile)(nil)
 	_ workspaceScopedWriter = (*MoveFile)(nil)
 )

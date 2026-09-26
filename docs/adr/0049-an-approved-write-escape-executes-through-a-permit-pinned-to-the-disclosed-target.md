@@ -189,7 +189,7 @@ call — and the terminal declares none, so `ls -la .git/hooks`, `cat .git/confi
 not by parsing shell text" — is superseded for this one rule.
 
 **The shell write view.** A tool that hands an argument to the shell as a command line declares
-it (`domain.ShellCommandTool` — `terminal` and `console_open`, never `python_exec` or an MCP
+it (`domain.ArgRoleShellCommand` — `terminal` and `console_open`, never `python_exec` or an MCP
 tool), and a rule that opts in (`Rule.ShellWriteView`) judges that argument by what the line can
 WRITE (`internal/security/shellwrites.go`, `writeTargetsOf`): its output-redirect targets and the
 operands of leaders that mutate (`rm`, `mv`, `cp`, `tee`, `sed -i`, a `git` verb that writes, …)

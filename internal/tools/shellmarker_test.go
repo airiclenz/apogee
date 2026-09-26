@@ -8,7 +8,7 @@ import (
 
 // TestShellCommandMarkerOnTheRealShellTools pins the declaration the shell write view rests on
 // (apogee-t74): the registry's REAL `terminal` and `console_open` tools — built as the composition
-// root builds them, not a test double — are domain.ShellCommandTool, and each names `command` as
+// root builds them, not a test double — are domain.ArgRoleTool, and each names `command` as
 // its one shell command line. internal/security's `write-git-control-plane` rule judges what a
 // command WRITES through exactly this declaration; a tool that lost it would silently fall back to
 // the text floor, where `ls -la .git/hooks` reads as a write.
@@ -33,12 +33,12 @@ func TestShellCommandMarkerOnTheRealShellTools(t *testing.T) {
 			if !ok {
 				t.Fatalf("the roster does not carry %q", name)
 			}
-			if _, ok := tool.(domain.ShellCommandTool); !ok {
-				t.Fatalf("%T does not implement domain.ShellCommandTool", tool)
+			if _, ok := tool.(domain.ArgRoleTool); !ok {
+				t.Fatalf("%T does not implement domain.ArgRoleTool", tool)
 			}
-			keys := domain.ShellCommandArgKeys(tool)
+			keys := domain.ArgKeysWithRole(tool, domain.ArgRoleShellCommand)
 			if len(keys) != 1 || keys[0] != "command" {
-				t.Errorf("ShellCommandArgKeys(%s) = %q, want [command]", name, keys)
+				t.Errorf("ArgKeysWithRole(%s, shell-command) = %q, want [command]", name, keys)
 			}
 		})
 	}
