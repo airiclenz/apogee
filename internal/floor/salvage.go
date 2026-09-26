@@ -3,9 +3,11 @@ package floor
 import (
 	"bytes"
 	"encoding/json"
+	"reflect"
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/airiclenz/apogee/internal/domain"
 )
@@ -82,11 +84,24 @@ func isJSONObject(body string) bool {
 // object, empty normalised to "{}" — except that IDs are left empty for the engine to assign: the
 // model never wrote one, and inventing one here would put this package's spelling on the wire.
 //
+// A block the model QUOTED rather than wrote is never salvaged. history is the conversation the
+// response answers, and a block that reproduces JSON found in any of its prior tool results — its
+// decoded name and arguments equal to a call read out of that result with the same three
+// containers, or its text, with all whitespace removed, a substring of the result's text with all
+// whitespace removed — is left in the text as written: a README, a web page or a child's report
+// that carries a call-shaped object is content the model was shown, and echoing it back is not the
+// model asking to run it. The other blocks of the same reply are still salvaged. A nil history is a
+// response with no prior conversation, and refuses nothing.
+//
 // The guard changes only what the model sees after its OWN failure to use the wire, which is why it
-// needs no per-model proof and stays on under Bypass. It is pure: it reads nothing but resp and
-// offered — no clock, no filesystem, no state between calls — so the same response always yields
-// the same answer.
-func SalvageToolCall(resp *domain.Response, offered []string) (calls []domain.ToolCall, text string, fired bool) {
+// needs no per-model proof and stays on under Bypass. It is pure: it reads nothing but resp,
+// offered and history — no clock, no filesystem, no state between calls — so the same response
+// always yields the same answer.
+func SalvageToolCall(
+	resp *domain.Response,
+	offered []string,
+	history domain.ConversationView,
+) (calls []domain.ToolCall, text string, fired bool) {
 	if len(resp.ToolCalls()) != 0 {
 		return nil, "", false
 	}
@@ -98,20 +113,26 @@ func SalvageToolCall(resp *domain.Response, offered []string) (calls []domain.To
 	matches := salvageFromContainers(raw, offered)
 	if len(matches) == 0 {
 		call, ok := parseSalvagedCall(raw, offered)
-		if !ok {
+		if !ok || quotesIn(history, offered).reproduce(raw, call) {
 			return nil, "", false
 		}
 		return []domain.ToolCall{call}, "", true
 	}
 
+	matches = quotesIn(history, offered).dropReproduced(matches)
+	if len(matches) == 0 {
+		return nil, "", false
+	}
 	return callsOf(matches), textWithout(raw, matches), true
 }
 
 // salvagedBlock is one container in the response text that parsed as a tool call: the byte span the
-// container occupies, so the text can be handed back without it, and the call it yielded.
+// container occupies, so the text can be handed back without it, the body the call was read from,
+// so it can be matched against quoted content, and the call it yielded.
 type salvagedBlock struct {
 	start int
 	end   int
+	body  string
 	call  domain.ToolCall
 }
 
@@ -126,12 +147,112 @@ func salvageFromContainers(raw string, offered []string) []salvagedBlock {
 			if !ok {
 				continue
 			}
-			blocks = append(blocks, salvagedBlock{start: span[0], end: span[1], call: call})
+			blocks = append(blocks, salvagedBlock{
+				start: span[0],
+				end:   span[1],
+				body:  raw[span[2]:span[3]],
+				call:  call,
+			})
 		}
 	}
 
 	sort.Slice(blocks, func(i, j int) bool { return blocks[i].start < blocks[j].start })
 	return blocks
+}
+
+// toolResultQuotes is what the prior tool results of a conversation hold that a written call could
+// have been copied from: each result's text with all whitespace removed, and every call the
+// salvage containers read out of a result.
+type toolResultQuotes struct {
+	compactTexts []string
+	calls        []domain.ToolCall
+}
+
+// quotesIn collects the quotable content of every tool-result message in history. It is built only
+// once a block has already parsed as a call, so a reply that salvages nothing never scans the
+// conversation. A nil history yields no quotes.
+func quotesIn(history domain.ConversationView, offered []string) toolResultQuotes {
+	var quotes toolResultQuotes
+	if history == nil {
+		return quotes
+	}
+
+	history.Range(func(_ int, message domain.Message) bool {
+		if message.Role != domain.RoleTool {
+			return true
+		}
+		quotes.compactTexts = append(quotes.compactTexts, withoutWhitespace(message.Content))
+		quotes.calls = append(quotes.calls, callsWrittenIn(message.Content, offered)...)
+		return true
+	})
+	return quotes
+}
+
+// callsWrittenIn reads every call a text carries with the same three containers the guard salvages
+// from — fenced blocks and <tool_call> pairs, or the whole trimmed text when it holds neither.
+func callsWrittenIn(text string, offered []string) []domain.ToolCall {
+	if blocks := salvageFromContainers(text, offered); len(blocks) != 0 {
+		return callsOf(blocks)
+	}
+	if call, ok := parseSalvagedCall(text, offered); ok {
+		return []domain.ToolCall{call}
+	}
+	return nil
+}
+
+// dropReproduced returns the blocks that reproduce no quoted content, in their original order.
+func (q toolResultQuotes) dropReproduced(blocks []salvagedBlock) []salvagedBlock {
+	kept := make([]salvagedBlock, 0, len(blocks))
+	for _, block := range blocks {
+		if !q.reproduce(block.body, block.call) {
+			kept = append(kept, block)
+		}
+	}
+	return kept
+}
+
+// reproduce reports whether a block — its body and the call read from it — copies a prior tool
+// result: its whitespace-free text sits inside one, or its call decodes equal to one read out of
+// one. The first test catches a call quoted from prose no container wraps; the second catches the
+// same call re-spelled — reindented, its arguments string-encoded, its key "parameters".
+func (q toolResultQuotes) reproduce(body string, call domain.ToolCall) bool {
+	compactBody := withoutWhitespace(body)
+	for _, compactText := range q.compactTexts {
+		if strings.Contains(compactText, compactBody) {
+			return true
+		}
+	}
+	for _, quoted := range q.calls {
+		if sameCall(quoted, call) {
+			return true
+		}
+	}
+	return false
+}
+
+// sameCall reports whether two calls name the same tool with decoded-equal arguments, so key order
+// and spacing inside the arguments object do not tell a copy from its original.
+func sameCall(first, second domain.ToolCall) bool {
+	if first.Tool != second.Tool {
+		return false
+	}
+	var firstArguments, secondArguments any
+	if json.Unmarshal(first.Arguments, &firstArguments) != nil ||
+		json.Unmarshal(second.Arguments, &secondArguments) != nil {
+		return false
+	}
+	return reflect.DeepEqual(firstArguments, secondArguments)
+}
+
+// withoutWhitespace returns text with every whitespace rune removed — the form in which a
+// reindented or rewrapped copy of a JSON object still matches its original.
+func withoutWhitespace(text string) string {
+	return strings.Map(func(r rune) rune {
+		if unicode.IsSpace(r) {
+			return -1
+		}
+		return r
+	}, text)
 }
 
 // callsOf projects the salvaged blocks onto the calls they yielded, preserving document order.

@@ -1049,7 +1049,9 @@ editable live in `/settings`) whose key names it:
 - **tool-call salvage** (`tool-call-salvage`) — a reply from a **native-profile** model that carries
   no wire call but wrote one out as JSON in its own text — fenced, wrapped in `<tool_call>` tags, or
   as the whole trimmed content — read back as the call the model meant, and the text handed on
-  without the block it salvaged. Alone among the seven it **completes** a response rather than
+  without the block it salvaged. A block that **reproduces** JSON from a prior tool result (the same
+  decoded call, or its whitespace-free text inside the result's) is quoted content, not a call, and
+  stays as text. Alone among the seven it **completes** a response rather than
   correcting one, so it runs **first** and does not short-circuit: the four repair guards below it
   judge the response the model meant rather than a Turn that only looked empty.
 - **tool-loop breaker** (`tool-loop-breaker`) — a response repeating the previous Turn's exact

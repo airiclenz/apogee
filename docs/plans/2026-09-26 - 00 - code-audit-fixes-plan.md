@@ -108,7 +108,10 @@ NOTES (2026-09-26): docs/manual/configuration.md left unchanged — its `curl �
 **Acceptance:** `go test -race -count=1 ./internal/security/`
 **Commit:** `fix(security): remote-pipe-to-shell matches a shell at any later pipeline stage`
 
-## 5. Salvage refuses tool-call JSON quoted from a prior tool result
+## 5. Salvage refuses tool-call JSON quoted from a prior tool result — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): re-derived from "the probe passes its response's (empty) `.View().Conversation()`" — `domain.NewResponse(..., nil)` carries a nil view, so calling `Conversation()` on it would panic; `salvageableCallName` passes a nil history instead, which `SalvageToolCall` treats as no prior conversation (same answer, no quotes).
+NOTES (2026-09-26): "whitespace-collapsed" is implemented as all whitespace removed from both the block and the tool result before the substring test, so a reindented copy still matches; it can only refuse more, never salvage more.
 
 **What:** Fixes the audit's High "Tool-call salvage can execute attacker-planted JSON".
 **Regression guard.** Add `internal/probe/battery.go` to Files — `salvageableCallName` builds its response first and passes that response's empty conversation view as the new argument, so the probe's answer is unchanged.

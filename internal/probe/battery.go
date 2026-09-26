@@ -179,11 +179,14 @@ func malformedToolCallsDetail(calls []provider.ToolCall, content string) string 
 // entry" while the loop went on to dispatch the call anyway would describe a session the user
 // never has. The guard is pure and takes a *domain.Response, so the probe's raw reply is wrapped
 // as one; the canary tool is the only offered name, because an object naming anything else is not
-// a call this probe's own request could have produced.
+// a call this probe's own request could have produced. The probe's request carries no tool result
+// for a written call to have been quoted from, and the wrapped reply carries no view, so the guard
+// is handed no history.
 func salvageableCallName(content string) (string, bool) {
 	calls, _, fired := floor.SalvageToolCall(
 		domain.NewResponse(content, "", nil, "", nil),
 		[]string{echoTool.Name},
+		nil,
 	)
 	if !fired || len(calls) == 0 {
 		return "", false

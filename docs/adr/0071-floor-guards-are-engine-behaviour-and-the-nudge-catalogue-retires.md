@@ -251,6 +251,16 @@ expected back — and not the floor. That seam is exactly what this guard sits b
 parse seam alone and recovers the call the server passed through as visible content, which is the
 failure that entry recorded.
 
+**It never salvages content the model was shown (2026-09-26).** A block that reproduces JSON found
+in a prior tool result of the conversation — its decoded name and arguments equal to a call read
+out of that result with the same three containers, or its text, with all whitespace removed, a
+substring of the result's — stays in the reply as text and is not dispatched; the reply's other
+blocks are salvaged as before. A README, a fetched page or a child's report can carry a
+call-shaped object, and a model echoing it back has quoted it, not asked to run it
+(`docs/reviews/code-audit-2026-09-26.md`). The refusal reads only history the guard is handed, so
+it stays pure, and it takes nothing from Decision 1's test: it narrows what salvage reads back
+and says nothing to the model.
+
 ## Amendment (2026-09-09) — the `/settings` row
 
 **Decision 5's seven keys — the 2026-09-07 amendment already reads its "six" as seven — are

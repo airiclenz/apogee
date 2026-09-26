@@ -245,6 +245,10 @@ func classedBuiltin(id, action string, class domain.Class, on domain.Moment, han
 // repair guard's question. A name the menu withdrew is not a call to run: the mode that withdrew
 // it owes the model its own answer, exactly as it does for a native call carrying that name.
 //
+// The history it salvages AGAINST is the request's conversation, resp.View().Conversation(): a
+// block that reproduces a call-shaped object from a prior tool result — a README, a fetched page,
+// a child's report — is content the model was shown, and the guard leaves it in the text.
+//
 // Each salvaged call is given a deterministic Turn-derived ID in the loop's own synthesized
 // style (loop.go's text_call_<turn>), extended with the call's position because one Turn's text
 // may hold several: snapshot, resume and tests stay stable across runs. The Detail names what
@@ -254,7 +258,8 @@ func (a *Agent) salvageToolCall(_ context.Context, resp *domain.Response) (domai
 		return domain.Outcome{}, nil
 	}
 
-	calls, text, fired := floor.SalvageToolCall(resp, offeredToolNames(resp.View()))
+	view := resp.View()
+	calls, text, fired := floor.SalvageToolCall(resp, offeredToolNames(view), view.Conversation())
 	if !fired {
 		return domain.Outcome{}, nil
 	}
