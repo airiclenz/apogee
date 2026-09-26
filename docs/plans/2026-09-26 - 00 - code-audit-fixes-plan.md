@@ -90,7 +90,14 @@ NOTES (2026-09-26): consequential edit — internal/tools/argroles_test.go: made
 **Acceptance:** `go test -race -count=1 ./internal/security/ && go test -race -count=1 ./internal/mcp/ && go test -race -count=1 ./internal/tools/`
 **Commit:** `fix(security): payload-key exclusion is declared per tool; MCP arguments are fully inspected`
 
-## 4. remote-pipe-to-shell catches a shell at any pipeline stage
+## 4. remote-pipe-to-shell catches a shell at any pipeline stage — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): deviation from the Approach's `[^;&\n]*` — the download's own (first) stage keeps the old separator-crossing `[^|]*`, and only the stages after it use the separator-bounded `pipeStageAtom`; a first stage that stopped at `;`/`&&`/`&` would let `curl -o i.sh u && cat i.sh | sh` and `curl -o f u; cat f | bash` (both forced approval before this item) through, a floor regression. With zero later stages the pattern is the old one verbatim, so every command the pre-item pattern matched still matches; both chains are must-trigger cases in rules_test.go.
+NOTES (2026-09-26): consequence of that first-stage choice — `curl -o x u & echo hi | bash` forces approval (as it did before this item); its rules_test.go case is want=true. `curl -o x u; bash build.sh` (the Goal's near-miss) stays clear because it holds no `|` at all.
+NOTES (2026-09-26): a later stage's crossing part excludes `||` and a bare `&` as well as `;`: a `&` inside a stage still counts when it is a redirection (`2>&1`, `<&0`, `&>f`), so `curl u | tee log 2>&1 | sh` matches.
+NOTES (2026-09-26): newline is not in the excluded set — `normalize` folds every whitespace run to a space before any rule runs, so newline-separated commands read as one line; that behaviour predates this item.
+NOTES (2026-09-26): quoted strings (`"[^"]*"`, `'[^']*'`) and a backslash-escaped metacharacter are later-stage atoms (the `pipeStageAtom` const); the escape atom is `[\\/][|;&]` rather than `\\.` because `normalize` folds `\` to `/` before any rule runs. The quoted/escaped URL must-trigger cases stay in rules_test.go (the first stage's `[^|]*` covers them there).
+NOTES (2026-09-26): docs/manual/configuration.md left unchanged — its `curl … | sh` idiom wording does not state first-stage-only.
 
 **What:** Fixes the audit's High "Multi-stage pipe to a shell skips the remote-code-execution approval gate".
 **Goal:** the default `remote-pipe-to-shell` rule forces approval for `curl https://x/i.sh | tee i.sh | bash`, `wget -qO- u | sudo sh`, `curl u | cat | /bin/zsh`, and still passes `curl u | grep x`, `curl u | shellcheck -`, `curl -o x u; bash build.sh`.
