@@ -1,6 +1,9 @@
 package winlabel
 
-import "strings"
+import (
+	"io/fs"
+	"strings"
+)
 
 // The mandatory-label SDDL strings the backend writes (ADR 0020 §2).
 //
@@ -67,6 +70,38 @@ func IsLowLabel(sddl string) bool {
 		}
 		rest = rest[end+1:]
 	}
+}
+
+// entrySkipDecision is the first decision BOTH walks make for one descendant, before any of
+// its descriptor is read: from the outcome of entry.Info() and whether the entry is a
+// directory, shouldSkip reports whether the walk leaves the path untouched, and walkResult is
+// what the walk callback then returns (nil, or fs.SkipDir to leave a whole subtree).
+//
+//   - A symlink or other reparse point (ModeSymlink, ModeIrregular) is skipped, and as a
+//     directory its whole subtree with it: SetNamedSecurityInfo follows the link, so a label
+//     or a NULL SACL written through it would land on a target outside the box.
+//   - A descendant whose Info() FAILS is skipped too, because the walk cannot rule out that it
+//     is such a link — and writing on a guess is exactly what the reparse-point skip refuses.
+//     Only the path itself is skipped; a directory is still walked beneath, as it always was
+//     on the label side.
+//   - Everything else goes on to the descriptor reads (descendantDecision,
+//     clearDescendantDecision).
+//
+// It is ONE decision for the reason descriptorMayBeShared is: LabelTree and ClearTree must
+// skip the same paths, or the clear writes a NULL SACL through a link the label pass refused
+// to follow. The two walks once carried separate copies, and the clear's copy wrote through
+// an entry whose Info() failed. It is pure so the decision is table-testable on any OS.
+func entrySkipDecision(mode fs.FileMode, infoErr error, isDir bool) (shouldSkip bool, walkResult error) {
+	if infoErr != nil {
+		return true, nil
+	}
+	if mode&(fs.ModeSymlink|fs.ModeIrregular) == 0 {
+		return false, nil
+	}
+	if isDir {
+		return true, fs.SkipDir
+	}
+	return true, nil
 }
 
 // descendantFacts are the two OS reads one descendant's label decision is made from, paired

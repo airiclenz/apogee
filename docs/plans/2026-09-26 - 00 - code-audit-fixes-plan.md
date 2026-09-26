@@ -242,7 +242,7 @@ NOTES (2026-09-27): known limit: `pdfNameSites` does not skip strings or comment
 **Acceptance:** `go test -race -count=1 ./internal/doctext/`
 **Commit:** `fix(doctext): refuse encrypted PDFs the inflate preflight cannot charge`
 
-## 13. ClearTree skips exactly what LabelTree skips
+## 13. ClearTree skips exactly what LabelTree skips — ✅ DONE (2026-09-27)
 
 **What:** Fixes half of the audit's High "Windows confinement TOCTOU" (the `Info()`-error asymmetry).
 **Goal:** a descendant whose `entry.Info()` fails is skipped by both `winlabel.LabelTree` and `winlabel.ClearTree`, via one shared pure decision helper with a table test that runs on every OS.

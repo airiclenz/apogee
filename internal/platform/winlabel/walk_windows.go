@@ -103,15 +103,8 @@ func LabelTree(root string, j *Journal) error {
 		if path == root {
 			return nil
 		}
-		info, err := entry.Info()
-		if err != nil {
-			return nil
-		}
-		if info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+		if shouldSkip, walkResult := skipEntry(entry); shouldSkip {
+			return walkResult
 		}
 		prior, priorErr := ReadSDDL(path)
 		// One open per path: the link count the decision needs and the identity the journal
@@ -210,7 +203,8 @@ func osStat() statFunc { return statHandle }
 // or recovery retries.
 //
 // It skips exactly what LabelTree skips, and that pairing is the point: reparse points, whose
-// target SetNamedSecurityInfo would follow out of the box, and hard links, whose descriptor is
+// target SetNamedSecurityInfo would follow out of the box, and any entry whose Info() fails,
+// since it may be one (both through entrySkipDecision), and hard links, whose descriptor is
 // the same NTFS record as every other name of the file (clearDescendantDecision). The clear is
 // a WRITE — a NULL SACL — so clearing a path the label pass refused would destroy a label on a
 // record apogee never wrote to, which is the mirror image of the harm the label-side skip
@@ -244,11 +238,10 @@ func ClearTree(root string) error {
 		if path == root {
 			return nil
 		}
-		if info, err := entry.Info(); err == nil && info.Mode()&(fs.ModeSymlink|fs.ModeIrregular) != 0 {
-			if entry.IsDir() {
-				return fs.SkipDir
-			}
-			return nil
+		if shouldSkip, walkResult := skipEntry(entry); shouldSkip {
+			// The same skip LabelTree takes (entrySkipDecision), an unreadable Info() included:
+			// a NULL SACL written through a link lands on its target outside the box.
+			return walkResult
 		}
 		links, linksErr := hardLinkCount(path)
 		if !clearDescendantDecision(links, linksErr) {
@@ -266,6 +259,17 @@ func ClearTree(root string) error {
 		return nil
 	})
 	return clearTreeOutcome(root, failures, first)
+}
+
+// skipEntry reads one walked entry's Info() and hands the outcome to entrySkipDecision, the
+// shared skip both LabelTree and ClearTree take before touching a descendant's descriptor.
+func skipEntry(entry fs.DirEntry) (shouldSkip bool, walkResult error) {
+	var mode fs.FileMode
+	info, err := entry.Info()
+	if err == nil {
+		mode = info.Mode()
+	}
+	return entrySkipDecision(mode, err, entry.IsDir())
 }
 
 // osRevert supplies the Windows build's half of Journal's revert seam: the production revert

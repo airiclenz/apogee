@@ -2,6 +2,7 @@ package winlabel
 
 import (
 	"errors"
+	"io/fs"
 	"testing"
 )
 
@@ -131,6 +132,72 @@ func TestDescendantClearDecision(t *testing.T) {
 			if got := clearDescendantDecision(tt.links, tt.linksErr); got != tt.wantShouldClear {
 				t.Errorf("clearDescendantDecision(%d, %v) = %v, want %v",
 					tt.links, tt.linksErr, got, tt.wantShouldClear)
+			}
+		})
+	}
+}
+
+func TestEntrySkipDecision(t *testing.T) {
+	t.Parallel()
+
+	// The skip both walks take before reading a descendant's descriptor, proven on every OS.
+	// LabelTree and ClearTree call this one decision, so a path the label pass refuses to write
+	// through is one the clear pass refuses too. The case that once split them is an entry whose
+	// Info() fails: the label walk skipped it, the clear walk wrote a NULL SACL through it — and
+	// SetNamedSecurityInfo follows a reparse point to its target outside the box.
+	infoErr := errors.New("access is denied")
+	tests := []struct {
+		name           string
+		mode           fs.FileMode
+		infoErr        error
+		isDir          bool
+		wantShouldSkip bool
+		wantWalkResult error
+	}{
+		{name: "unreadable_info_file_is_skipped", infoErr: infoErr, wantShouldSkip: true},
+		{
+			name:           "unreadable_info_directory_is_skipped_but_still_walked",
+			mode:           fs.ModeDir,
+			infoErr:        infoErr,
+			isDir:          true,
+			wantShouldSkip: true,
+		},
+		{
+			name:           "unreadable_info_wins_over_a_plain_mode",
+			mode:           0o644,
+			infoErr:        infoErr,
+			wantShouldSkip: true,
+		},
+		{name: "symlink_file_is_skipped", mode: fs.ModeSymlink, wantShouldSkip: true},
+		{
+			name:           "symlink_directory_skips_its_subtree",
+			mode:           fs.ModeSymlink | fs.ModeDir,
+			isDir:          true,
+			wantShouldSkip: true,
+			wantWalkResult: fs.SkipDir,
+		},
+		{name: "irregular_file_is_skipped", mode: fs.ModeIrregular, wantShouldSkip: true},
+		{
+			name:           "junction_directory_skips_its_subtree",
+			mode:           fs.ModeIrregular | fs.ModeDir,
+			isDir:          true,
+			wantShouldSkip: true,
+			wantWalkResult: fs.SkipDir,
+		},
+		{name: "plain_file_is_visited", mode: 0o644},
+		{name: "plain_directory_is_visited", mode: fs.ModeDir | 0o755, isDir: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			shouldSkip, walkResult := entrySkipDecision(tt.mode, tt.infoErr, tt.isDir)
+
+			if shouldSkip != tt.wantShouldSkip || walkResult != tt.wantWalkResult {
+				t.Errorf("entrySkipDecision(%v, %v, %v) = (%v, %v), want (%v, %v)",
+					tt.mode, tt.infoErr, tt.isDir, shouldSkip, walkResult,
+					tt.wantShouldSkip, tt.wantWalkResult)
 			}
 		})
 	}
