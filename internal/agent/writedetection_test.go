@@ -134,3 +134,66 @@ func TestFileMutatingToolNamesIsASortedCopy(t *testing.T) {
 		t.Error("a second call sees the first call's mutation — it must be a fresh slice")
 	}
 }
+
+// TestLoopViewToolDefsCarryTheReadOnlyBit pins that the tool menu a LoopView exposes stamps each
+// entry's ReadOnly from domain.IsReadOnly of the tool it describes — the bit a tool-stage hook
+// reads to tell a read-only call from a write-capable one without holding the Tool. It walks the
+// whole built-in roster (default-off tools lifted, as above) plus an MCP-shaped tool, and names
+// the calls whose classification the read cache leans on: the Console family splits down the
+// middle (ADR 0059 §2), and a tool that declares nothing — every MCP tool — reads false.
+func TestLoopViewToolDefsCarryTheReadOnlyBit(t *testing.T) {
+	t.Parallel()
+	toolset := tools.DefaultToolsWithHost(t.TempDir(), tools.HostTools{
+		Asker:       stubAsker{},
+		Presenter:   stubPresenter{},
+		SkillLookup: stubSkillLookup{},
+		Enabled:     tools.KnownToolNames(),
+	})
+	toolset = append(toolset, mcpServerTool{name: "github__create_issue", alias: "github"})
+	byName := make(map[string]domain.Tool, len(toolset))
+	for _, tool := range toolset {
+		byName[tool.Name()] = tool
+	}
+
+	defs := planMenuAgent(t, domain.ModeAuto, toolset).loopView(0).Tools()
+	if len(defs) != len(toolset) {
+		t.Fatalf("LoopView menu has %d tools, want all %d", len(defs), len(toolset))
+	}
+	got := make(map[string]bool, len(defs))
+	for _, def := range defs {
+		tool, ok := byName[def.Name]
+		if !ok {
+			t.Fatalf("LoopView menu offers %q, which is not in the registered toolset", def.Name)
+		}
+		if want := domain.IsReadOnly(tool); def.ReadOnly != want {
+			t.Errorf("ToolDef %q ReadOnly = %v, want domain.IsReadOnly = %v", def.Name, def.ReadOnly, want)
+		}
+		got[def.Name] = def.ReadOnly
+	}
+
+	tests := []struct {
+		name     string
+		readOnly bool
+	}{
+		{"github__create_issue", false},
+		{"terminal", false},
+		{"python_exec", false},
+		{"console_open", false},
+		{"console_send", false},
+		{"sub_agent", false},
+		{"git_branch", false},
+		{"console_read", true},
+		{"console_close", true},
+		{"read_file", true},
+	}
+	for _, tt := range tests {
+		readOnly, ok := got[tt.name]
+		if !ok {
+			t.Errorf("LoopView menu does not offer %q", tt.name)
+			continue
+		}
+		if readOnly != tt.readOnly {
+			t.Errorf("ToolDef %q ReadOnly = %v, want %v", tt.name, readOnly, tt.readOnly)
+		}
+	}
+}

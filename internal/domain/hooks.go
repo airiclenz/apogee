@@ -281,6 +281,11 @@ type ToolDef struct {
 	Name        string
 	Description string
 	Schema      json.RawMessage // JSON-schema of arguments
+	// ReadOnly is IsReadOnly of the tool this entry describes, stamped where the loop builds its
+	// menu, so a hook reading the LoopView can tell a read-only call from a write-capable one
+	// without holding the Tool itself. A tool that makes no ReadOnlyTool declaration (every MCP
+	// tool) reads false — the safe default.
+	ReadOnly bool
 }
 
 // Budget is the read-only context-budget view a hook reads to gate token-sensitive

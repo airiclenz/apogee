@@ -1625,6 +1625,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 			Name:        writer.Name(),
 			Description: writer.Description(),
 			Schema:      writer.Schema(),
+			ReadOnly:    domain.IsReadOnly(writer),
 		}}
 	}
 	planMode := a.Mode() == domain.ModePlan
@@ -1643,6 +1644,7 @@ func (a *Agent) toolMenu() []domain.ToolDef {
 			Name:        t.Name(),
 			Description: t.Description(),
 			Schema:      t.Schema(),
+			ReadOnly:    domain.IsReadOnly(t),
 		})
 	}
 	return menu

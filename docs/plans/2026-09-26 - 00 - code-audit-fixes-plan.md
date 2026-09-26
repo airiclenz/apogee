@@ -175,7 +175,9 @@ NOTES (2026-09-26): the merge check arms on every platform, not POSIX alone — 
 **Acceptance:** `go test -race -count=1 ./internal/tools/ && go test -race -count=1 ./internal/platform/...`
 **Commit:** `fix(tools): terminal watches merged stdout for confinement denials`
 
-## 9. Tool definitions carry a read-only bit
+## 9. Tool definitions carry a read-only bit — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): the wrap-up menu's single write_file entry (toolMenu's wrappingUp branch) is stamped too, so every ToolDef the loop builds carries the bit; the new test TestLoopViewToolDefsCarryTheReadOnlyBit reads the menu through loopView(0).Tools() and was confirmed to fail with the loop.go stamping removed.
 
 **What:**
 **Regression guard.** Correct the Goal's console family enumeration: `console_open`, `console_send` read false; `console_read`, `console_close` read true (`ConsoleRead.ReadOnly()`/`ConsoleClose.ReadOnly()` already return `true`, pinned by `TestPlanAdmitsTheReadOnlyHalfOfTheConsoleFamily`) — item 10's cache-invalidation depends on this split holding.
