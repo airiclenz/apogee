@@ -60,9 +60,12 @@ func planTreeKill(started, treeHeld bool) treeKillAction {
 // over.
 type ProcessTeardown interface {
 	// Contain places the started process (cmd.Process is non-nil) under whatever holds its
-	// descendants. It is best-effort: a failure degrades the cancel path to a leader-only
-	// kill (planTreeKill), never an error the tool surfaces — teardown is a safety net, not
-	// the confinement fence (ADR 0020).
+	// descendants. Every caller runs it immediately after cmd.Start returns, before the
+	// process is handed any input — RunWithTeardown here, mcp's stdioTransport.Connect before
+	// a stdio server's handshake — because on Windows a descendant spawned before the
+	// assignment escapes the Job Object (teardown_windows.go). It is best-effort: a failure
+	// degrades the cancel path to a leader-only kill (planTreeKill), never an error the tool
+	// surfaces — teardown is a safety net, not the confinement fence (ADR 0020).
 	Contain(cmd *exec.Cmd)
 	// Reap tears the tree down once the run is over — the clean-exit counterpart of
 	// cmd.Cancel, which only ever fires when the run's context is done. The execution tools

@@ -273,7 +273,9 @@ NOTES (2026-09-27): the two new Windows-tagged tests (TestLabelTreeRefusesARootS
 **Acceptance:** `GOOS=windows go vet ./internal/platform/... && GOOS=windows go test -c -o /dev/null ./internal/platform/winlabel/ && go test -race -count=1 ./internal/platform/...`
 **Commit:** `fix(winlabel): label reads and writes pin one reparse-checked handle`
 
-## 15. MCP stdio server joins its teardown before the handshake
+## 15. MCP stdio server joins its teardown before the handshake — ✅ DONE (2026-09-27)
+
+NOTES (2026-09-27): the recording fake reaches connectOne through a new package-var seam `newStdioTeardown` (defaults to `platform.NewProcessTeardown`, the same pattern as `stdioHost`); the plan did not name the seam. The ordering is observed through a new gated fixture mode (`APOGEE_MCP_TEST_GATED_SERVER`): the server answers nothing until the recorder's Contain opens its gate, so a handshake can only complete if Contain ran first. Both new tests (`TestConnect_StdioContainPrecedesTheHandshake`, `TestConnect_FailedStdioHandshakeReapsAContainedTree`) were run with Contain moved back after the handshake, and both failed.
 
 **What:** Fixes the audit's High "MCP stdio server's grandchild can escape the Windows Job Object".
 **Regression guard.** Add `internal/platform/teardown_windows.go` to Files beside `teardown.go` — the "sub-millisecond window" known-gap comment this item updates lives at `teardown_windows.go:34-45`, not in `teardown.go`, which carries no such paragraph.

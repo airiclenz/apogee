@@ -13,6 +13,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -38,6 +39,12 @@ import (
 const (
 	runAsServerEnv       = "APOGEE_MCP_TEST_SERVER"
 	runAsWedgedServerEnv = "APOGEE_MCP_TEST_WEDGED_SERVER"
+	// runAsGatedServerEnv names a gate file: the gated fixture answers nothing until that file
+	// exists, and exits without serving if it never appears within gatedServerWait.
+	runAsGatedServerEnv = "APOGEE_MCP_TEST_GATED_SERVER"
+	// gatedServerMuteEnv makes the gated fixture exit as soon as the gate opens instead of
+	// serving, so the handshake the client has started fails on EOF.
+	gatedServerMuteEnv = "APOGEE_MCP_TEST_GATED_MUTE"
 )
 
 // fixtureToolSchema is the input schema the fixture's echo tool advertises (a single string
@@ -59,6 +66,10 @@ func TestMain(m *testing.M) {
 	}
 	if os.Getenv(runAsWedgedServerEnv) != "" {
 		runWedgedFixtureServer()
+		return
+	}
+	if gate := os.Getenv(runAsGatedServerEnv); gate != "" {
+		runGatedFixtureServer(gate, os.Getenv(gatedServerMuteEnv) != "")
 		return
 	}
 	os.Exit(m.Run())
@@ -159,6 +170,32 @@ func runWedgedFixtureServer() {
 	for {
 		time.Sleep(time.Minute)
 	}
+}
+
+// gatedServerWait bounds how long the gated fixture waits for its gate before giving up; it is
+// well inside the tests' connect timeout, so a gate that never opens surfaces as a failed
+// handshake rather than a hung test.
+const gatedServerWait = 10 * time.Second
+
+// runGatedFixtureServer holds the fixture server back until the gate file exists — it reads
+// nothing and writes nothing before then, so no handshake can complete while the gate is shut.
+// With mute set it exits the moment the gate opens instead of serving, which fails the handshake
+// the client already started. A gate that never opens ends the process unserved.
+func runGatedFixtureServer(gate string, mute bool) {
+	deadline := time.Now().Add(gatedServerWait)
+	for {
+		if _, err := os.Stat(gate); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			os.Exit(2)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if mute {
+		os.Exit(3)
+	}
+	runFixtureServer()
 }
 
 // stdioServerConfig returns a ServerConfig that launches THIS test binary as the fixture MCP
@@ -507,6 +544,135 @@ func TestBuildStdioTransport_CancelArmsTheCmdsTeardown(t *testing.T) {
 	case <-waited:
 	case <-time.After(bound):
 		t.Fatalf("cmd.Wait did not return within %v of the cancel; the stdio Cmd's context is inert, so cmd.Cancel and cmd.WaitDelay never fire", bound)
+	}
+}
+
+// recordingTeardown wraps the stdio server's real platform teardown and records each hook as it
+// runs. Its Contain opens the gated fixture's gate: the gated server answers nothing until the
+// gate exists, so a handshake can only complete once Contain has run — which is what makes
+// "Contain precedes the handshake" observable rather than inferred.
+type recordingTeardown struct {
+	inner platform.ProcessTeardown
+	gate  string
+
+	mu     sync.Mutex
+	events []string
+}
+
+func (r *recordingTeardown) record(event string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.events = append(r.events, event)
+}
+
+// Contain records "contain" for a started process ("contain-unstarted" otherwise), opens the gate
+// and hands the process to the real teardown.
+func (r *recordingTeardown) Contain(cmd *exec.Cmd) {
+	if cmd == nil || cmd.Process == nil {
+		r.record("contain-unstarted")
+	} else {
+		r.record("contain")
+	}
+	_ = os.WriteFile(r.gate, nil, 0o600)
+	r.inner.Contain(cmd)
+}
+
+func (r *recordingTeardown) Reap(cmd *exec.Cmd) {
+	r.record("reap")
+	r.inner.Reap(cmd)
+}
+
+func (r *recordingTeardown) Release() {
+	r.record("release")
+	r.inner.Release()
+}
+
+func (r *recordingTeardown) recorded() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.events...)
+}
+
+// recordStdioTeardowns substitutes a recorder for every stdio teardown the test builds, each
+// opening gate from its Contain, and restores the production builder when the test ends. The
+// seam is a package var, so a test calling it must not run in parallel.
+func recordStdioTeardowns(t *testing.T, gate string) *[]*recordingTeardown {
+	t.Helper()
+	var built []*recordingTeardown
+	prev := newStdioTeardown
+	newStdioTeardown = func(cmd *exec.Cmd) platform.ProcessTeardown {
+		rec := &recordingTeardown{inner: prev(cmd), gate: gate}
+		built = append(built, rec)
+		return rec
+	}
+	t.Cleanup(func() { newStdioTeardown = prev })
+	return &built
+}
+
+// gatedStdioServerConfig is stdioServerConfig pointed at the GATED fixture, waiting on gate; mute
+// makes it exit at the gate instead of serving.
+func gatedStdioServerConfig(t *testing.T, gate string, mute bool) ServerConfig {
+	t.Helper()
+	cfg := stdioServerConfig(t)
+	cfg.Env = []string{runAsGatedServerEnv + "=" + gate}
+	if mute {
+		cfg.Env = append(cfg.Env, gatedServerMuteEnv+"=1")
+	}
+	return cfg
+}
+
+// TestConnect_StdioContainPrecedesTheHandshake pins the audit's Windows Job Object fix on the
+// path that succeeds: the server process joins its teardown inside the transport's Connect,
+// straight after Start, not once the handshake has returned. The gated fixture answers the
+// initialize request only after Contain has opened its gate, so on a tree where Contain ran after
+// the handshake the connect never completes; and exactly one Contain proves connectOne no longer
+// contains the process a second time.
+func TestConnect_StdioContainPrecedesTheHandshake(t *testing.T) {
+	gate := filepath.Join(t.TempDir(), "gate")
+	built := recordStdioTeardowns(t, gate)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, []ServerConfig{gatedStdioServerConfig(t, gate, false)}, security.URLGuard{}, t.TempDir())
+	if err != nil {
+		t.Fatalf("Connect to the gated fixture: %v (the handshake cannot complete unless Contain ran before it)", err)
+	}
+	if len(*built) != 1 {
+		t.Fatalf("built %d stdio teardowns, want 1", len(*built))
+	}
+	rec := (*built)[0]
+	if got, want := rec.recorded(), []string{"contain"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("teardown hooks after a successful connect = %v, want %v (Contain once, on the started process)", got, want)
+	}
+	if err := c.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if got, want := rec.recorded(), []string{"contain", "reap", "release"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("teardown hooks after Close = %v, want %v", got, want)
+	}
+}
+
+// TestConnect_FailedStdioHandshakeReapsAContainedTree pins the failure half: a server that dies
+// mid-handshake was already contained when the handshake began, so connectOne's reap terminates a
+// tree the teardown holds rather than one it never took. The muted gated fixture exits the moment
+// Contain opens its gate, so the handshake fails on EOF — and without that Contain it would sit
+// out gatedServerWait and the recorder would show a reap with no contain before it.
+func TestConnect_FailedStdioHandshakeReapsAContainedTree(t *testing.T) {
+	gate := filepath.Join(t.TempDir(), "gate")
+	built := recordStdioTeardowns(t, gate)
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	c, err := Connect(ctx, []ServerConfig{gatedStdioServerConfig(t, gate, true)}, security.URLGuard{}, t.TempDir())
+	if err == nil {
+		_ = c.Close()
+		t.Fatal("Connect to a server that exits mid-handshake returned nil error, want the handshake failure")
+	}
+	if len(*built) != 1 {
+		t.Fatalf("built %d stdio teardowns, want 1", len(*built))
+	}
+	if got, want := (*built)[0].recorded(), []string{"contain", "reap", "release"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("teardown hooks after a failed handshake = %v, want %v (contained before the handshake, then reaped and released)", got, want)
 	}
 }
 

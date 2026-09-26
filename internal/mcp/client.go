@@ -145,11 +145,12 @@ func Admit(servers []ServerConfig, guard security.URLGuard) (admitted []ServerCo
 // back). The session is recorded BEFORE listing tools so a list failure still tears the
 // just-opened session down on rollback.
 //
-// A stdio server's process exists from the moment stdioTransport.Connect started it, so the teardown
-// takes it as soon as Connect returns — the same sub-millisecond Windows window the tools funnel
-// documents (platform.NewProcessTeardown), since no OS lets a process be created directly into a
-// job. A handshake that FAILED never yields a session to record, so its process and the teardown's
-// own handle are reaped here: the rollback below can only reach what was recorded.
+// A stdio server's process joins its teardown inside stdioTransport.Connect, immediately after
+// Start and before the handshake sends a byte — the same sub-millisecond Windows window the tools
+// funnel documents (platform.NewProcessTeardown), since no OS lets a process be created directly
+// into a job — so connectOne never contains it itself. A handshake that FAILED never yields a
+// session to record, so its already-contained process and the teardown's own handle are reaped
+// here: the rollback below can only reach what was recorded.
 func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard security.URLGuard, workspaceRoot string) error {
 	transport, cmd, td, cancel, err := buildTransport(ctx, cfg, guard, workspaceRoot)
 	if err != nil {
@@ -164,9 +165,6 @@ func (c *Client) connectOne(ctx context.Context, cfg ServerConfig, guard securit
 		}
 		reapProcess(cmd, td)
 		return fmt.Errorf("mcp: connect to server %q: %w", cfg.Name, err)
-	}
-	if td != nil {
-		td.Contain(cmd)
 	}
 	c.sessions = append(c.sessions, liveSession{session: session, cmd: cmd, td: td, cancel: cancel})
 

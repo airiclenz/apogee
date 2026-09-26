@@ -60,7 +60,11 @@ tools execute on the server side, outside any OS fence. Two consequences shape t
   less-trusted server: named non-nil, the launch inherits only those keys plus the platform's
   essentials, PATH scoped away from the workspace as `gitexec.SafeEnv` scopes git's, and `cfg.Env` is
   appended last either way. The launched process is held in a **process group** (POSIX) / **Job Object**
-  (Windows) via `platform.NewProcessTeardown`, and `Close` reaps that container after the session's
+  (Windows) via `platform.NewProcessTeardown`. The process joins it inside `stdioTransport.Connect`
+  immediately after `cmd.Start`, before the handshake sends a byte (2026-09-27): on Windows a
+  descendant spawned before the Job Object assignment escapes the job, so the window is the
+  sub-millisecond one the tools funnel has, never the whole initialize round-trip, and a handshake
+  that fails is reaped as a contained tree. `Close` reaps that container after the session's
   own shutdown, so a descendant the server spawned cannot outlive the session — apogee's
   spec-shaped shutdown ladder (`stdinLadder.Close`) signals the leader alone. That `Cmd` carries a
   **session-scoped cancellable context** (never the connect ctx, which would kill every server the

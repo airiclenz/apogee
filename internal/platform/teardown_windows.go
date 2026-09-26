@@ -19,9 +19,11 @@ import (
 //     JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE. That limit is the crash net: if apogee dies mid-run
 //     the handle closes with it and the kernel reaps the tree, the closest Windows has to the
 //     POSIX guarantee that a cancelled command never leaves descendants behind.
-//   - RunWithTeardown assigns the started process to the job (Contain). A child cannot escape
-//     a job it is assigned to unless the job permits breakaway, which this one does not, so
-//     every descendant it spawns from then on is held too.
+//   - The caller assigns the started process to the job (Contain) the moment Start returns —
+//     RunWithTeardown for the execution tools, mcp's stdioTransport.Connect for a stdio MCP
+//     server, before its handshake. A child cannot escape a job it is assigned to unless the job
+//     permits breakaway, which this one does not, so every descendant it spawns from then on is
+//     held too.
 //   - cmd.Cancel terminates the JOB — not the leader — when the run's context is cancelled or
 //     times out, which is the negative-PID kill's counterpart. If the job never took the
 //     process it falls back to killing the leader alone (planTreeKill's degraded rung).
@@ -42,7 +44,9 @@ import (
 // escape the job. A real shell has to start and parse its command line first, so the window
 // closes long before it can spawn anything; the alternative — a suspended start — is
 // unreachable because os/exec closes the process's initial thread handle, leaving nothing to
-// resume.
+// resume. The window stays that small only because every caller runs Contain straight after
+// cmd.Start and before handing the process any input: a caller that let a protocol exchange
+// run first (an MCP server's handshake) would widen it to that whole round-trip.
 func NewProcessTeardown(cmd *exec.Cmd) ProcessTeardown {
 	td := &jobTeardown{job: windows.InvalidHandle}
 	if job, err := newTreeJob(); err == nil {

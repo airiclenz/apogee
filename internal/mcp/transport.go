@@ -184,10 +184,16 @@ func buildStdioTransport(cfg ServerConfig, workspaceRoot string) (mcpsdk.Transpo
 	}
 	// Built before the transport starts the command, as the facility requires: on POSIX the
 	// process group is a fork-time property of the Cmd, and on Windows the Job Object has to exist
-	// before there is a process to assign to it.
-	td := platform.NewProcessTeardown(cmd)
-	return &stdioTransport{cmd: cmd, terminateDuration: stdioTerminateDuration}, cmd, td, cancel, nil
+	// before there is a process to assign to it. The transport carries it too, because Connect is
+	// where the process starts and so where it must join its container.
+	td := newStdioTeardown(cmd)
+	return &stdioTransport{cmd: cmd, td: td, terminateDuration: stdioTerminateDuration}, cmd, td, cancel, nil
 }
+
+// newStdioTeardown builds the container a stdio server's process tree is held in. It is a package
+// var only so a test can wrap the platform teardown in a recorder that observes when Contain runs
+// relative to the handshake; production never reassigns it.
+var newStdioTeardown = platform.NewProcessTeardown
 
 // stdioHost is the platform facility a stdio server's env-allowlist is scoped through (the
 // allowlisted keys, the platform's own essentials, PATH scoped away from the workspace). It is a
@@ -212,13 +218,21 @@ const defaultStdioTerminateDuration = 5 * time.Second
 // past maxMCPMessageBytes (bounded.go), and the shutdown ladder apogee's own (stdinLadder). It is
 // built start-free by buildStdioTransport; Connect is what starts the process.
 type stdioTransport struct {
-	cmd               *exec.Cmd
+	cmd *exec.Cmd
+	// td holds the launched process's tree; Connect hands it the process the moment Start
+	// returns. Nil only in a transport built by hand without one.
+	td                platform.ProcessTeardown
 	terminateDuration time.Duration
 }
 
-// Connect takes the Cmd's stdout and stdin pipes, starts the process and connects the SDK's
-// IOTransport over them. A failed Start returns before any session exists, which is what lets
-// connectOne reap the never-launched process's teardown. The reader is NopCloser-wrapped, as the
+// Connect takes the Cmd's stdout and stdin pipes, starts the process, places it under its teardown
+// and connects the SDK's IOTransport over them. The Contain runs immediately after Start, before
+// the handshake has sent a byte: on Windows a process joins its Job Object only by assignment after
+// CreateProcess, and every descendant it spawns before that assignment escapes the job, so the
+// window must be the sub-millisecond gap the tools funnel has (platform.RunWithTeardown), never the
+// whole initialize round-trip — and a handshake that goes on to fail still leaves a contained tree
+// for connectOne's reap to terminate. A failed Start returns before any session exists, which is
+// what lets connectOne reap the never-launched process's teardown. The reader is NopCloser-wrapped, as the
 // SDK's CommandTransport wraps it: closing the connection is the stdin ladder alone, never a close
 // of the stdout pipe, so a server is asked to exit before it is signalled.
 func (t *stdioTransport) Connect(ctx context.Context) (mcpsdk.Connection, error) {
@@ -232,6 +246,9 @@ func (t *stdioTransport) Connect(ctx context.Context) (mcpsdk.Connection, error)
 	}
 	if err := t.cmd.Start(); err != nil {
 		return nil, err
+	}
+	if t.td != nil {
+		t.td.Contain(t.cmd)
 	}
 	terminate := t.terminateDuration
 	if terminate <= 0 {

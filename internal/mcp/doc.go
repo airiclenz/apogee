@@ -36,7 +36,9 @@
 //     instead: the command is resolved on PATH to an absolute program and one
 //     resolving inside the workspace is refused at connect time, and the process is
 //     held in a process group / Job Object that Close reaps, so no descendant of a
-//     configured server outlives the session.
+//     configured server outlives the session. The process joins that container the
+//     moment it starts, before the handshake, so a failed handshake is reaped as a
+//     tree too.
 //
 // # Lifecycle
 //
