@@ -1017,9 +1017,9 @@ func TestCollapsedRunDemotionKeepsTheLineAndNoBody(t *testing.T) {
 
 	const (
 		doneLine   = "1 tool call · 36k/1.3M · done"
-		cappedLine = "1 tool call · 36k/1.3M · stopped at its step cap"
+		cappedLine = "1 tool call · 36k/1.3M · capped at its step cap"
 		quotedGist = "1 tool call · 36k/1.3M · <sentence>"
-		cappedWord = "stopped at its step cap"
+		cappedWord = "capped at its step cap"
 	)
 
 	for _, tc := range []struct {
@@ -3155,7 +3155,7 @@ var sanitizeExemptToolViewMembers = map[string]string{
 	"name":       "the registry lookup key, never rendered — Label carries the displayed copy of it, and Label is stripped",
 	"argStat":    "a value the presenter COMPOSES out of its own counts (a diffstat, a plural), never a producer's text; it reaches the screen through Summary, which is stripped",
 	"args":       "the parsed request, display state's raw material and never painted: every line built from it is a body line, and the seam strips those",
-	"runVerdict": "a paint-time word the ENGINE spelled for a collapsed run (done, stopped at its step cap), never wire or producer text; it decides a demotion and never reaches the screen itself",
+	"runVerdict": "a paint-time word the ENGINE spelled for a collapsed run (done, capped at its step cap), never wire or producer text; it decides a demotion and never reaches the screen itself",
 }
 
 // TestToolViewSanitizeReachesEveryStringMember is the structural guard on the tool card's escape

@@ -530,7 +530,7 @@ func TestRunViewStatusSlotOffersTheWayBack(t *testing.T) {
 
 	m := modelWithRun(t)
 	startStubWorker(t, &m)
-	if got := plainSlot(m.statusRight(m.width)); got != "esc×2 stop" {
+	if got := plainSlot(m.statusRight(m.width)); got != "esc×2 cancel" {
 		t.Fatalf("setup: the top level's right slot is %q; want the stop gesture", got)
 	}
 	// The parent has reported usage, so the top level's slot now holds ITS gauge. The view below

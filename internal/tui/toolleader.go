@@ -348,7 +348,7 @@ func failedSummary(text string) bool {
 // It is failedSummary's mirror and is read at the same seams, once, on the way in (namedSummary,
 // typedSummary), so no painter asks the words again. What it deliberately is NOT is a general
 // vocabulary of good news: it is anchored on the delegation constants and matches nothing else, so
-// `stopped at its step cap` — a run the engine stopped mid-task, which did not finish — stays in the
+// `capped at its step cap` — a run the engine capped mid-task, which did not finish — stays in the
 // ordinary marker tone, and diagnostics' `clean`, a test command's `PASS` and a process's `exit 0`
 // are readings a TOOL made of its own work rather than a verdict apogee reached about a run it drove
 // (ratified call 3 of docs/plans/archived/"2026-08-31 - 05"). The match is on the WHOLE phrase for the same
@@ -368,7 +368,7 @@ func succeededSummary(text string) bool {
 //
 // It is read by one seam alone, subAgentFinished, which withholds the done ✓ from such a run. It
 // sets no field on the summary: the verdict is neither a failure nor a success, so it takes no red
-// and no green and reads in the ordinary marker tone `stopped at its step cap` does — and the text
+// and no green and reads in the ordinary marker tone `capped at its step cap` does — and the text
 // it is read from is recovered on the replay path as it is on the live one (fromWireToolView
 // restores the slot's words), so a record needs no field of its own for it.
 func endedWithoutReportSummary(text string) bool {
@@ -376,6 +376,20 @@ func endedWithoutReportSummary(text string) bool {
 		return true
 	}
 	return strings.HasPrefix(text, delegationNoReportVerdict+slotSeparator+delegationSteeredLead)
+}
+
+// stoppedSummary reads a WORDING for the verdict a delegation the HUMAN stopped wears — `stopped by
+// you`, alone or with the steering cell (delegationVerdict, delegationStoppedByUser; ADR 0086 D4) —
+// matched like endedWithoutReportSummary, on the WHOLE phrase. Its one reader is subAgentFinished,
+// which withholds the done ✓: a stopped run did not do what it was sent for. It sets no field, so it
+// reads in the step cap's ordinary marker tone — neither the red of a failure nor the green of done
+// — and a queued stop, whose result is error-shaped, is worded here too rather than red
+// (toolView.absorbFailure), because the human's stop is not the child's failure.
+func stoppedSummary(text string) bool {
+	if text == delegationStoppedVerdict {
+		return true
+	}
+	return strings.HasPrefix(text, delegationStoppedVerdict+slotSeparator+delegationSteeredLead)
 }
 
 // clipCells fits text into ONE row of at most cells columns, ending it in clipTail when it had to

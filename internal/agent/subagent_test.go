@@ -1809,6 +1809,36 @@ func closingShapeFixture(t *testing.T, name string) string {
 	return string(data)
 }
 
+// TestBoundErrText_SaysCapped pins the human-facing ErrorEvent a capped delegate surfaces for each
+// of its three bounds: it says "capped", because "stopped" is the human's word for their own stop
+// (ADR 0086 D4), while the model-facing result head keeps "stopped at its" byte for byte
+// (TestCapResultHead_NonReportVariantsKeepTheBoundPrefix).
+func TestBoundErrText_SaysCapped(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		child *Agent
+		want  string
+	}{
+		{"step cap", &Agent{stepCap: 3},
+			"delegate capped at its step cap (3 steps) — asking it to sum up; narrow the task or raise delegate-max-steps"},
+		{"token budget", &Agent{capHit: boundTokens, tokenCap: 20000000},
+			"delegate capped at its token budget (20000000 tokens) — asking it to sum up; narrow the task or raise delegate-max-tokens"},
+		{"time limit", &Agent{capHit: boundTime, timeCap: 2 * time.Hour},
+			"delegate capped at its time limit (2h0m) — asking it to sum up; narrow the task or raise delegate-timeout"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := tc.child.boundErrText(); got != tc.want {
+				t.Errorf("boundErrText = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestCapResultHead_NonReportVariantsKeepTheBoundPrefix pins the twelve head lines the parent
 // model can read on a bounded delegation — three bounds × (a report, the four non-report shapes)
 // — each keeping the `[delegate stopped at its <bound>;` prefix the TUI's recogniser anchors on,

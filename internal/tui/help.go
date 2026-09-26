@@ -15,7 +15,7 @@ const (
 	helpKeyNewline      = "⌥⏎ newline"    // the chord every terminal delivers (idlePlaceholder)
 	helpKeyNewlineShift = "⇧⏎/⌥⏎ newline" // once key disambiguation is negotiated (idleShiftPlaceholder)
 	helpKeyRecall       = "↑/↓ recall"
-	helpKeyStop         = "esc×2 stop" // as the running legend spells it (runningPlaceholder)
+	helpKeyStop         = "esc×2 cancel" // as the running legend spells it (runningPlaceholder)
 	helpKeyQuit         = "⌃c quit"
 	helpKeyMode         = "⇧⇥ mode"
 	helpKeyScroll       = "PgUp/PgDn scroll"

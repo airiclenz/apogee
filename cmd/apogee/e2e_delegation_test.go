@@ -61,13 +61,13 @@ const (
 	interruptedCall       = "interrupted — the run did not finish"
 	progressSaved         = "saved while a delegation was still running"
 	resumedNote           = "resumed: "
-	stepCapErrLead        = "delegate stopped at its step cap (3 steps)"
+	stepCapErrLead        = "delegate capped at its step cap (3 steps)"
 	stepCapErrTail        = "raise delegate-max-steps"
 	// stepCapSlot is what the CONVERSATION's own row says about a capped delegation — the outcome
 	// slot internal/tui words from the result envelope the engine wrapped the partial answer in
 	// (delegationVerdict). It is the parent-side half of the same fact stepCapErrLead is the
 	// child-side half of, and the only place a reader who never opens the run meets it.
-	stepCapSlot     = "stopped at its step cap"
+	stepCapSlot     = "capped at its step cap"
 	childFinalWords = "The workspace holds a.txt and it says hello."
 	// childReportWords is what the CAPPED child says in the one tool-less Turn the engine spends
 	// asking it to sum up. It is deliberately not childFinalWords: a frame carrying one and not the
@@ -272,7 +272,7 @@ func TestE2EDelegationStepCap(t *testing.T) {
 		// happened.
 		collapsed := drv.Frame()
 		if _, _, ok := collapsed.Find("tool calls · " + stepCapSlot); !ok {
-			t.Errorf("the conversation's row does not say the delegation stopped at its cap:\n%s", collapsed)
+			t.Errorf("the conversation's row does not say the delegation was capped at its cap:\n%s", collapsed)
 		}
 
 		// Step 7 — the delegation is NOT painted as a failure. A step cap is a stop, not an error.
@@ -499,7 +499,7 @@ func TestJudgeDelegationStepCap(t *testing.T) {
 	tones := schemeTones()
 	judge.Require(t, t.Context(), judge.Rubric{
 		Item: "T-04",
-		Claim: "the expanded delegation block tells a human the delegate was stopped at its step " +
+		Claim: "the expanded delegation block tells a human the delegate was capped at its step " +
 			"cap and that what came back is partial, without reading as a failure",
 		PassWhen: "the capped delegation ends at the configured number of steps, the human sees one " +
 			"error line naming the cap and the key that raises it, and the parent receives a " +

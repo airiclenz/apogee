@@ -493,14 +493,16 @@ type Agent struct {
 }
 
 // stepCapErrFormat is the ErrorEvent text a delegate surfaces when it reaches its step cap — the
-// human-facing half of the bound, and the only thing that says the delegation was STOPPED rather
-// than finished. It is emitted at the cap and the Exchange then runs ONE further Turn — tool-less,
+// human-facing half of the bound, and the only thing that says the delegation was CAPPED rather
+// than finished. It says "capped" where the model-facing result head (stepCapResultFormat) keeps
+// "stopped at its": "stopped" is the human's word for their own stop (ADR 0086 D4), and the head is
+// the parent model's byte-stable contract. It is emitted at the cap and the Exchange then runs ONE further Turn — tool-less,
 // bar write_file to a spawn-named `output_path` (Agent.outputPath) —
 // for the child's closing report (finishAtStepCap), which is why the middle clause says what the
 // engine does next rather than what it already has. It is a package constant, pinned by test,
 // because the line names the key that raises the bound and a watcher acts on it. %d is the cap
 // actually applied.
-const stepCapErrFormat = "delegate stopped at its step cap (%d steps) — asking it to sum up; " +
+const stepCapErrFormat = "delegate capped at its step cap (%d steps) — asking it to sum up; " +
 	"narrow the task or raise delegate-max-steps"
 
 // tokenCapErrFormat and timeCapErrFormat are stepCapErrFormat for the two other bounds a delegate
@@ -508,9 +510,9 @@ const stepCapErrFormat = "delegate stopped at its step cap (%d steps) — asking
 // the engine does the same thing next, and each names the key that raises ITS bound. %d is the
 // token budget applied; %s is the time limit, spelled by boundDurationText.
 const (
-	tokenCapErrFormat = "delegate stopped at its token budget (%d tokens) — asking it to sum up; " +
+	tokenCapErrFormat = "delegate capped at its token budget (%d tokens) — asking it to sum up; " +
 		"narrow the task or raise delegate-max-tokens"
-	timeCapErrFormat = "delegate stopped at its time limit (%s) — asking it to sum up; " +
+	timeCapErrFormat = "delegate capped at its time limit (%s) — asking it to sum up; " +
 		"narrow the task or raise delegate-timeout"
 )
 

@@ -1228,7 +1228,7 @@ func TestRunAggregateCarriesItsFailureVerdict(t *testing.T) {
 // The outcome slot's ONE non-failure verdict: a delegation the engine drove to its own boundary
 // says `done`, and that word takes the scheme's `success` role — the very green the done ✓ beside
 // the run's name already wears, so a finished run is marked once in one colour rather than twice in
-// two. Everything else on the row is unmoved: a run stopped at its step cap did not finish and keeps
+// two. Everything else on the row is unmoved: a run capped at its step cap did not finish and keeps
 // the marker tone, and a failed one is red, since the success verdict may never talk a failure out
 // of its red.
 func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
@@ -1272,10 +1272,10 @@ func TestDelegationDoneReadsInTheSuccessTone(t *testing.T) {
 			tone: th.successMark,
 		},
 		{
-			name: "a run stopped at its step cap did not finish",
+			name: "a run capped at its step cap did not finish",
 			content: "[delegate stopped at its step cap (3 steps); partial result — its last " +
 				"visible text follows]\nhalfway there",
-			slot: "stopped at its step cap",
+			slot: "capped at its step cap",
 			tone: th.toolMarker,
 		},
 		{
@@ -1331,9 +1331,9 @@ func TestSummaryStyleGreensOnlyTheDelegationVerdict(t *testing.T) {
 		{"done · steered by 1 message", true},
 		{"done · steered by 3 messages", true},
 		{delegationCappedVerdict, false},
-		{"stopped at its step cap · steered by 1 message", false},
-		{"stopped at its token budget", false},
-		{"stopped at its time limit", false},
+		{"capped at its step cap · steered by 1 message", false},
+		{"capped at its token budget", false},
+		{"capped at its time limit", false},
 		{"clean", false},
 		{"PASS", false},
 		{"exit 0", false},

@@ -823,7 +823,7 @@ func TestModelStopKeys(t *testing.T) {
 		if next.lastEsc.IsZero() {
 			t.Error("a single esc did not arm the stop gesture")
 		}
-		if got := plain(next.View()); !strings.Contains(got, "press esc again to stop") {
+		if got := plain(next.View()); !strings.Contains(got, "press esc again to cancel") {
 			t.Errorf("the arm hint is not shown after one esc:\n%s", got)
 		}
 		if _, isQuit := cmdMsg(cmd).(tea.QuitMsg); isQuit {
@@ -877,7 +877,7 @@ func TestModelStopKeys(t *testing.T) {
 		m := newTestModel(t)
 		startStubWorker(t, &m)
 		armed := step(t, m, keyEsc())
-		if got := plain(armed.View()); !strings.Contains(got, "press esc again to stop") {
+		if got := plain(armed.View()); !strings.Contains(got, "press esc again to cancel") {
 			t.Fatalf("the arm hint is not shown while the worker is still busy:\n%s", got)
 		}
 		// The Exchange reaches its own quiescent boundary inside the window: nothing is left to
@@ -886,7 +886,7 @@ func TestModelStopKeys(t *testing.T) {
 		if !done.lastEsc.IsZero() {
 			t.Error("the finished worker left the stop gesture armed")
 		}
-		if got := plain(done.View()); strings.Contains(got, "press esc again to stop") {
+		if got := plain(done.View()); strings.Contains(got, "press esc again to cancel") {
 			t.Errorf("the arm hint lingers on the idle status line after the worker finished:\n%s", got)
 		}
 	})
@@ -1088,14 +1088,14 @@ func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
 		want  string
 	}{
 		{"finished 3 / running 4 / queued 1 drops the three", fanOutOf(3, 4, 1),
-			"press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them"},
+			"press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them"},
 		{"finished 1 reads the singular", fanOutOf(1, 2, 0),
-			"press esc again to stop — drops 1 finished delegation; ⏎ a message keeps them"},
+			"press esc again to cancel — drops 1 finished delegation; ⏎ a message keeps them"},
 		{"finished 0 / queued 5 reads the skips wording", fanOutOf(0, 2, 5),
-			"press esc again to stop — ⏎ a message instead skips the 5 queued"},
-		{"finished 0 / queued 0 is the plain hint", fanOutOf(0, 3, 0), "press esc again to stop"},
-		{"a lone delegation is the plain hint", fanOutOf(0, 0, 1), "press esc again to stop"},
-		{"an idle model is the plain hint", func(*transcript) {}, "press esc again to stop"},
+			"press esc again to cancel — ⏎ a message instead skips the 5 queued"},
+		{"finished 0 / queued 0 is the plain hint", fanOutOf(0, 3, 0), "press esc again to cancel"},
+		{"a lone delegation is the plain hint", fanOutOf(0, 0, 1), "press esc again to cancel"},
+		{"an idle model is the plain hint", func(*transcript) {}, "press esc again to cancel"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1111,7 +1111,7 @@ func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
 	t.Run("the long form lands on a wide status line", func(t *testing.T) {
 		t.Parallel()
 		m := armedEscModel(t, wide, fanOutOf(3, 4, 1))
-		assertStatusRightTail(t, m, "press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them"+bodyIndent)
+		assertStatusRightTail(t, m, "press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them"+bodyIndent)
 	})
 
 	// A group whose result burst has landed is over: the Turn it belonged to is not the one a
@@ -1123,7 +1123,7 @@ func TestEscStopHintNamesWhatASecondEscDiscards(t *testing.T) {
 			subAgentReport(tr, "f1", "done", 0)
 			subAgentReport(tr, "f2", "done", 0)
 		})
-		if got := plainSlot(m.statusRight(m.width)); got != "press esc again to stop" {
+		if got := plainSlot(m.statusRight(m.width)); got != "press esc again to cancel" {
 			t.Errorf("statusRight = %q, want the plain hint once the group's results are paired", got)
 		}
 	})
@@ -1139,7 +1139,7 @@ func TestEscStopHintFallsBackWhereTheLongFormDoesNotFit(t *testing.T) {
 	if got := statusCells(t, m); strings.Contains(got, "drops 3") {
 		t.Fatalf("the long form was composed onto an 80-column row:\n%s", got)
 	}
-	assertStatusRightTail(t, m, "press esc again to stop"+bodyIndent)
+	assertStatusRightTail(t, m, "press esc again to cancel"+bodyIndent)
 }
 
 // TestEscStopHintIgnoresDelegationsThatNeverStarted proves a head whose result opens with the
@@ -1157,7 +1157,7 @@ func TestEscStopHintIgnoresDelegationsThatNeverStarted(t *testing.T) {
 	if !ok || finished != 3 || queued != 0 {
 		t.Errorf("inFlightFanOut = (%d, %d, %v), want (3, 0, true): the two refused heads must count as neither", finished, queued, ok)
 	}
-	if got := plainSlot(m.statusRight(m.width)); got != "press esc again to stop — drops 3 finished delegations; ⏎ a message keeps them" {
+	if got := plainSlot(m.statusRight(m.width)); got != "press esc again to cancel — drops 3 finished delegations; ⏎ a message keeps them" {
 		t.Errorf("statusRight = %q", got)
 	}
 }
@@ -5378,7 +5378,7 @@ func TestStatusLineRightSlotOccupantsShareTheMargin(t *testing.T) {
 		m := newTestModel(t)
 		m.input.SetValue("hello")
 		m = step(t, m, keyEnter()) // no usage yet, so the hint holds the slot
-		assertStatusRightTail(t, m, "esc×2 stop"+bodyIndent)
+		assertStatusRightTail(t, m, "esc×2 cancel"+bodyIndent)
 	})
 
 	t.Run("errored hint", func(t *testing.T) {

@@ -24,7 +24,7 @@
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Guarded commands ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
   approval needed
 ╭──────────────────────────────────────────────────────────╮
-│ queue a message…  ⏎ queue · ↑ recall · esc×2 stop        │
+│ queue a message…  ⏎ queue · ↑ recall · esc×2 cancel      │
 ╰──────────────────────────────────────────────────────────╯
   probe-target ✦ guard-model <footer tail>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

@@ -375,7 +375,7 @@
 // frame's local copy of the textarea (a value receiver's move, as View sizes its local viewport —
 // ADR 0011), so the Model's own widget carries no placeholder and no transition has a legend to
 // forget. The derivation: the idle legend ("⏎ send") at idle and errored, runningPlaceholder
-// ("⏎ queue · esc×2 stop") while a worker runs, so the chrome names what ⏎ will actually do — and
+// ("⏎ queue · esc×2 cancel") while a worker runs, so the chrome names what ⏎ will actually do — and
 // the idle legend again while an ask borrows the box for an answer. Inside a run view there is a
 // third invitation, and it outranks both: the box addresses the child on screen (ADR 0063), so
 // childLegend names that run and names esc as the way back — and only a RUNNING child is invited

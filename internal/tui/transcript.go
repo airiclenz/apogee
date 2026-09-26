@@ -1725,7 +1725,9 @@ func (t *transcript) addChildInterjection(e domain.ChildInterjectionEvent) {
 func undeliveredNote(name string, reason domain.UndeliveredReason) string {
 	switch reason {
 	case domain.UndeliveredCapped:
-		return name + " stopped at its cap before your message landed"
+		return name + " was capped before your message landed"
+	case domain.UndeliveredStopped:
+		return name + " was stopped by you before your message landed"
 	case domain.UndeliveredFaulted:
 		return name + " failed before your message landed"
 	case domain.UndeliveredCancelled:
@@ -2273,15 +2275,17 @@ func subAgentGroupAt(entries []entry, i int) (group []groupBlock, pos int, ok bo
 }
 
 // unstartedDelegationPrefix opens the result of a delegation the engine settled BEFORE it started —
-// pre-empted by a queued user message or refused past the reply's fan-out ceiling
-// (internal/agent/dispatch.go's skippedDelegationContent and fanOutCeilingResultFormat, ADR 0039).
-// It is restated here because this package cannot read the engine's constants: the two unstarted
-// kinds share the head so a reader can tell them from a child's own failure, and a rewording over
+// pre-empted by a queued user message, refused past the reply's fan-out ceiling, or stopped by the
+// human while it queued (internal/agent/dispatch.go's skippedDelegationContent,
+// fanOutCeilingResultFormat and stoppedQueuedDelegationContent; ADR 0039, ADR 0086 D4). It is
+// restated here because this package cannot read the engine's constants: the unstarted kinds share
+// the head so a reader can tell them from a child's own failure, and a rewording over
 // there has to fail the test that pins it here.
 const unstartedDelegationPrefix = "sub-agent not started:"
 
-// neverStarted reports whether a run head's result says its child never ran — the pre-emption and
-// the ceiling refusal, which are the only results opening with unstartedDelegationPrefix. Such a
+// neverStarted reports whether a run head's result says its child never ran — the pre-emption, the
+// ceiling refusal and the queued stop, which are the only results opening with
+// unstartedDelegationPrefix. Such a
 // head is neither finished work nor a queued job, whatever its phase says: the engine closes it
 // through its finished phase alone (skipDelegation), so a count that read the phase would take a
 // refused delegation for a report a stop discards. The result's head line is the first line of the

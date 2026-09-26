@@ -137,7 +137,11 @@ Binding addition — the queued-stop result takes the existing unstarted shape s
 - `go test -race -count=1 ./internal/agent/`
 **Commit:** `feat(agent): a stop reaches a queued pooled delegation and a nested one`
 
-## 5. TUI renders a stopped run; human-facing text says capped and cancel
+## 5. TUI renders a stopped run; human-facing text says capped and cancel — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): internal/tui/toolview.go (a Read-first anchor, not on **Files:**) carries the queued-stop recognition: toolView.absorbFailure words an error-shaped `sub-agent not started: the user stopped it …` result on a run head as `stopped by you` in the marker tone (not `error`, not red) and keeps the text as the failure body, so entry.neverStarted still reads it — the sub_agent failure hook can only word an `error: …` slot, so the goal's queued-stop row could not be reached from toolregistry.go alone.
+NOTES (2026-09-26): consequential edit — internal/tui/doc.go: made necessary by renaming the running legend's `esc×2 stop` to `esc×2 cancel` (package prose quoted the old label).
+NOTES (2026-09-26): delegationBoundLead is now `capped at its `; delegationBoundHead still matches the engine's `[delegate stopped at its …;` head byte-for-byte. A new delegationStoppedByUser (stopped head at the body's start, or the queued-stop whole text) outranks the bound head and the no-report reading; stoppedSummary is ANDed into subAgentFinished. help_test.go and interject_test.go needed no change (help_test pins helpKeyStop through the constant and the running legend). Public docs (layout.md, docs/layout/tool-layout.md, docs/manual/commands.md) still carry the old wording — owned by items 13 and 14.
 
 **What:** Recast at the regression check (2026-09-25). Depends on item 3.
 **Goal:** a delegation result headed `[stopped by the user — engine summary follows]` renders the verdict `stopped by you` in the step-cap tone with no ✓ in its leader and umbrella member row; an undelivered interjection with reason `stopped` renders `<name> was stopped by you before your message landed`; every human-facing TUI text for an engine bound says "capped" (verdict `capped at its step cap` etc., undelivered note for a capped run); the engine's `[delegate stopped at its …]` heads still parse.

@@ -225,9 +225,9 @@ func TestDelegationBoundHeadReadsEveryBoundsHead(t *testing.T) {
 		head string
 		want string
 	}{
-		{"step cap", "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]", "stopped at its step cap"},
-		{"token budget", "[delegate stopped at its token budget (20000000 tokens); partial result — engine summary and closing report follow]", "stopped at its token budget"},
-		{"time limit", "[delegate stopped at its time limit (2h0m); partial result — engine summary and closing report follow]", "stopped at its time limit"},
+		{"step cap", "[delegate stopped at its step cap (3 steps); partial result — engine summary and closing report follow]", "capped at its step cap"},
+		{"token budget", "[delegate stopped at its token budget (20000000 tokens); partial result — engine summary and closing report follow]", "capped at its token budget"},
+		{"time limit", "[delegate stopped at its time limit (2h0m); partial result — engine summary and closing report follow]", "capped at its time limit"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -260,9 +260,9 @@ func TestDelegationBoundHeadReadsTheNonReportVariants(t *testing.T) {
 		bound string
 		want  string
 	}{
-		{"step cap (3 steps)", "stopped at its step cap"},
-		{"token budget (20000000 tokens)", "stopped at its token budget"},
-		{"time limit (2h0m)", "stopped at its time limit"},
+		{"step cap (3 steps)", "capped at its step cap"},
+		{"token budget (20000000 tokens)", "capped at its token budget"},
+		{"time limit (2h0m)", "capped at its time limit"},
 	}
 	shapes := []string{"tool-call markup", "a file dump", "a grep dump", "narration of its next step"}
 	for _, b := range bounds {
@@ -278,6 +278,61 @@ func TestDelegationBoundHeadReadsTheNonReportVariants(t *testing.T) {
 					t.Errorf("delegationVerdict = %q, want %q", got, b.want)
 				}
 			})
+		}
+	}
+}
+
+// The HUMAN's stop (ADR 0086 D4) words its own verdict, `stopped by you`, off the two results the
+// engine gives a stopped delegation: the non-error partial result under stoppedResultHead, and the
+// error-shaped unstarted result of a pooled child stopped before it ran. It outranks every other
+// reading — the fold beneath the head is body, so a narrating closing report under it is no
+// no-report — keeps the steering cell, and is anchored at the START, so a child that merely printed
+// the head's words mid-report is still `done`. An engine bound's head, a session recorded before
+// the stop existed included, still reads as the bound, worded `capped`.
+func TestDelegationVerdictReadsTheHumansStop(t *testing.T) {
+	t.Parallel()
+
+	const fold = "\n[engine summary]\nThe delegate read a.txt; b.txt is unread.\n\n[delegate's closing report]\nLet me now read b.txt."
+	cases := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"a stopped run", delegationStoppedHead + fold, delegationStoppedVerdict},
+		{"a stopped, steered run", delegationStoppedHead + fold + envelopeSteeredOne, delegationStoppedVerdict + " · steered by 1 message"},
+		{"a queued stop", delegationStoppedQueuedContent, delegationStoppedVerdict},
+		{"the head quoted mid-report", "I found this line:\n" + delegationStoppedHead, delegationDoneVerdict},
+		{"an old session's capped head", envelopeCapMarker + fold, delegationCappedVerdict},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := delegationVerdict(tc.content); got != tc.want {
+				t.Errorf("delegationVerdict(%q) = %q, want %q", tc.content, got, tc.want)
+			}
+		})
+	}
+	if delegationCappedVerdict != "capped at its step cap" {
+		t.Errorf("delegationCappedVerdict = %q, want the human-facing %q", delegationCappedVerdict, "capped at its step cap")
+	}
+	if delegationStoppedVerdict != "stopped by you" {
+		t.Errorf("delegationStoppedVerdict = %q, want %q", delegationStoppedVerdict, "stopped by you")
+	}
+}
+
+// Neither stopped text is PROMOTED into the slot, however short: the slot is the stopped verdict's,
+// as it is the no-report verdict's, and the text lays out as a body beneath it.
+func TestDelegationDetailDoesNotPromoteAStoppedText(t *testing.T) {
+	t.Parallel()
+
+	for _, content := range []string{delegationStoppedHead, delegationStoppedQueuedContent} {
+		out := delegationDetail(content)
+		if out.Summary.Text != "" {
+			t.Errorf("delegationDetail(%q) promoted %q into the slot; want it laid out as a body", content, out.Summary.Text)
+		}
+		if len(out.Details) == 0 {
+			t.Errorf("delegationDetail(%q) laid out no body", content)
 		}
 	}
 }

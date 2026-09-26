@@ -359,7 +359,7 @@ func TestPromptEditorIdleLegendFollowsKeyDisambiguation(t *testing.T) {
 func TestRunningPlaceholderAnnouncesTheDoubleEsc(t *testing.T) {
 	t.Parallel()
 
-	const want = "queue a message…  ⏎ queue · ↑ recall · esc×2 stop"
+	const want = "queue a message…  ⏎ queue · ↑ recall · esc×2 cancel"
 
 	if runningPlaceholder != want {
 		t.Errorf("runningPlaceholder = %q, want the double-tap legend %q", runningPlaceholder, want)

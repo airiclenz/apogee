@@ -1708,7 +1708,7 @@ const (
 )
 
 // A run collapses to ONE row in the parent's conversation (collapsedSubAgentView), so that row is
-// the only place a reader of that conversation can learn a delegation was stopped at its step cap,
+// the only place a reader of that conversation can learn a delegation was capped at its step cap,
 // faulted, or was steered while it ran. The envelope the engine wraps the child's answer in carries
 // all three; the row's outcome slot is where it has to land. Before this the slot said the fixed
 // word "done" over a capped run and over a steered one alike, which is the regression this pins.
@@ -1747,22 +1747,22 @@ func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
 		{
 			name:    "a capped run says it was stopped short",
 			content: envelopeCapMarker + "\nI had read two files so far",
-			want:    "stopped at its step cap",
+			want:    "capped at its step cap",
 		},
 		{
-			name:    "a run stopped at its token budget names that bound, never done",
+			name:    "a run capped at its token budget names that bound, never done",
 			content: envelopeTokenMarker + "\nI had read two files so far",
-			want:    "stopped at its token budget",
+			want:    "capped at its token budget",
 		},
 		{
-			name:    "a run stopped at its time limit names that bound, never done",
+			name:    "a run capped at its time limit names that bound, never done",
 			content: envelopeTimeMarker + "\nI had read two files so far",
-			want:    "stopped at its time limit",
+			want:    "capped at its time limit",
 		},
 		{
 			name:    "a capped run whose closing text was no report still says it was stopped short",
 			content: envelopeNonReportMarker + "\n[engine summary]\nRead two files.\n\n[delegate's closing report — read as narration, not a finding]\nLet me read the third.",
-			want:    "stopped at its step cap",
+			want:    "capped at its step cap",
 		},
 		{
 			name:    "a steered run says how many messages reached it",
@@ -1772,12 +1772,12 @@ func TestCollapsedRunSlotCarriesTheResultEnvelope(t *testing.T) {
 		{
 			name:    "a capped run that was steered says both",
 			content: envelopeCapMarker + "\nI had read two files so far" + envelopeSteeredOne,
-			want:    "stopped at its step cap · steered by 1 message",
+			want:    "capped at its step cap · steered by 1 message",
 		},
 		{
 			name:    "a retained capped run's continue line leaves both readable",
 			content: envelopeCapMarker + "\nI had read two files so far" + envelopeContinueLine + envelopeSteeredOne,
-			want:    "stopped at its step cap · steered by 1 message",
+			want:    "capped at its step cap · steered by 1 message",
 		},
 		{
 			name:    "a faulted run keeps its cause and gains the steering",
@@ -1849,7 +1849,7 @@ func TestResultEnvelopeIsReadOffTheEnginesOwnLinesOnly(t *testing.T) {
 // (subAgentSummary). A painter reading the composed words instead would find no verdict in them.
 //
 // The other half of the claim is that the green is anchored on the delegation vocabulary and not on
-// the row's spelling: a run stopped at its step cap did not finish, keeps the ordinary marker tone,
+// the row's spelling: a run capped at its step cap did not finish, keeps the ordinary marker tone,
 // and wears no ✓.
 func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 	t.Parallel()
@@ -1905,10 +1905,10 @@ func TestSubAgentFinishedRunReadsInTheSuccessTone(t *testing.T) {
 		}
 	})
 
-	t.Run("a run stopped at its step cap keeps the marker tone", func(t *testing.T) {
+	t.Run("a run capped at its step cap keeps the marker tone", func(t *testing.T) {
 		t.Parallel()
 
-		const slot = "1 tool call · stopped at its step cap"
+		const slot = "1 tool call · capped at its step cap"
 
 		tr := &transcript{}
 		loneDelegation(tr, "s1", "survey", "a.go",
@@ -1947,7 +1947,7 @@ func TestSubAgentEndedWithoutReportWearsNoCheck(t *testing.T) {
 			"1 tool call · ended without a report · steered by 1 message", false},
 		{"a real report", "all clear\nnothing else to report", "1 tool call · done", true},
 		{"a one-line report", "all clear", "1 tool call · all clear", true},
-		{"a capped narration", envelopeCapMarker + "\nLet me now read X.", "1 tool call · stopped at its step cap", true},
+		{"a capped narration", envelopeCapMarker + "\nLet me now read X.", "1 tool call · capped at its step cap", true},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1995,6 +1995,136 @@ func TestSubAgentEndedWithoutReportWearsNoCheck(t *testing.T) {
 		}
 		if strings.Contains(row, th.successMark.Render(slot)) {
 			t.Errorf("a run that ended without a report is painted green: %q", row)
+		}
+	})
+}
+
+// A delegation the HUMAN stopped (ADR 0086 D4) reads `stopped by you` on its row and wears no done ✓
+// — in its leader and in an umbrella's member row, live and on replay — painted in the step cap's
+// marker tone, neither green nor red. The queued stop, whose result is error-shaped, reads the same
+// verdict rather than `error`, and still counts as never started (entry.neverStarted), its text the
+// body behind the ▶.
+func TestSubAgentStoppedByYouWearsNoCheck(t *testing.T) {
+	t.Parallel()
+
+	const (
+		width   = 100
+		stopped = "[stopped by the user — engine summary follows]\n[engine summary]\nThe delegate read a.go.\n\n" +
+			"[delegate's closing report]\nLet me now read b.go."
+		queuedStop = "sub-agent not started: the user stopped it before it started; delegate again if the task is still needed"
+		slot       = "1 tool call · stopped by you"
+	)
+	replay := func(t *testing.T, tr *transcript) *transcript {
+		t.Helper()
+		data, err := encodeTranscript(tr)
+		if err != nil {
+			t.Fatalf("encodeTranscript: %v", err)
+		}
+		got, err := decodeTranscript(data)
+		if err != nil {
+			t.Fatalf("decodeTranscript: %v", err)
+		}
+		return &transcript{entries: got}
+	}
+
+	t.Run("a lone stopped run, live and replayed", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", stopped)
+		back := replay(t, tr)
+		for name, view := range map[string]*transcript{"live": tr, "replayed": back} {
+			if subAgentFinished(view.entries[0].painted()) {
+				t.Errorf("%s: subAgentFinished = true; a stopped run wears no ✓", name)
+			}
+			painted := renderPlain(view, width)
+			if !strings.Contains(painted, slot) {
+				t.Errorf("%s: no row reads %q:\n%s", name, slot, painted)
+			}
+			if strings.Contains(painted, glyphDone) {
+				t.Errorf("%s: the stopped run wears the done ✓:\n%s", name, painted)
+			}
+		}
+		if live, painted := renderPlain(tr, width), renderPlain(back, width); live != painted {
+			t.Errorf("the replay does not paint what the conversation did:\n--- live ---\n%s\n--- replayed ---\n%s", live, painted)
+		}
+	})
+
+	t.Run("an umbrella's member row", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", "all clear\nnothing else to report")
+		loneDelegation(tr, "s2", "build", "b.go", stopped)
+		for name, view := range map[string]*transcript{"live": tr, "replayed": replay(t, tr)} {
+			rows := strings.Split(renderPlain(view, width), "\n")
+			if len(rows) < 3 {
+				t.Fatalf("%s: want an umbrella header and two member rows:\n%s", name, strings.Join(rows, "\n"))
+			}
+			if !strings.Contains(rows[1], glyphDone) {
+				t.Errorf("%s: the finished member lost its ✓: %q", name, rows[1])
+			}
+			if !strings.Contains(rows[2], slot) || strings.Contains(rows[2], glyphDone) {
+				t.Errorf("%s: the stopped member row = %q; want %q and no ✓", name, rows[2], slot)
+			}
+		}
+	})
+
+	t.Run("a queued stop reads stopped, never error", func(t *testing.T) {
+		t.Parallel()
+
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", "all clear\nnothing else to report")
+		subAgentCall(tr, "s2", "build", 0)
+		result := domain.ToolResult{CallID: "s2", Content: queuedStop, IsError: true}
+		tr.apply(domain.SubAgentPhaseEvent{
+			EventBase: domain.EventBase{Depth: 1, CallID: "s2"},
+			Phase:     domain.SubAgentFinished,
+			Result:    result,
+		})
+		tr.apply(domain.ToolResultEvent{Result: result})
+		head := len(tr.entries) - 1
+		for name, view := range map[string]*transcript{"live": tr, "replayed": replay(t, tr)} {
+			e := view.entries[head]
+			if !e.neverStarted() {
+				t.Errorf("%s: neverStarted = false; a queued stop never ran", name)
+			}
+			if subAgentFinished(e.painted()) {
+				t.Errorf("%s: subAgentFinished = true; a queued stop wears no ✓", name)
+			}
+			rows := strings.Split(renderPlain(view, width), "\n")
+			row := rows[len(rows)-1]
+			if !strings.Contains(row, "build") || !strings.Contains(row, delegationStoppedVerdict) ||
+				strings.Contains(row, erroredSummary) || strings.Contains(row, glyphDone) {
+				t.Errorf("%s: the queued stop's row = %q; want %q, no %q and no ✓", name, row, delegationStoppedVerdict, erroredSummary)
+			}
+		}
+	})
+
+	t.Run("the verdict is painted in the marker tone", func(t *testing.T) {
+		t.Parallel()
+
+		th := newTheme(scheme.Default())
+		if !colorActive(th) {
+			t.Skip("no colour profile in this environment; the SGR assertion would be vacuous")
+		}
+		tr := &transcript{}
+		loneDelegation(tr, "s1", "survey", "a.go", stopped)
+
+		row := ""
+		for _, ln := range tr.renderLines(th, width) {
+			if strings.Contains(strip(ln), slot) {
+				row = ln
+			}
+		}
+		if row == "" {
+			t.Fatalf("no painted row carries %q:\n%s", slot, renderPlain(tr, width))
+		}
+		if !strings.Contains(row, th.toolMarker.Render(slot)) {
+			t.Errorf("slot %q does not wear the ordinary marker tone: %q", slot, row)
+		}
+		if strings.Contains(row, th.successMark.Render(slot)) {
+			t.Errorf("a stopped run is painted green: %q", row)
 		}
 	})
 }
@@ -2457,7 +2587,7 @@ func TestCollapsedRunKeepsItsCountWhenTheGistIsDemoted(t *testing.T) {
 		loneDelegation(tr, "s1", "survey", "a.go", sentence)
 		tr.entries[0].tool.stat = plainStat(delegationBoundLead + "step cap")
 
-		const capped = "1 tool call · stopped at its step cap"
+		const capped = "1 tool call · capped at its step cap"
 		if got := renderPlain(tr, 80); !strings.Contains(got, capped) {
 			t.Errorf("narrow row does not carry %q:\n%s", capped, got)
 		}

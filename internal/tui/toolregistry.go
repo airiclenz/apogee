@@ -837,16 +837,19 @@ func cleanStat(domain.ToolResult) (statValue, bool) { return plainStat("clean"),
 
 // The words a delegation's outcome slot is built from. `done` is the ordinary verdict — a child
 // that reached its own boundary and reported; a bound verdict replaces it wholesale, because a
-// run the engine stopped mid-task did not finish — delegationCappedVerdict is the step cap's, and
+// run the engine capped mid-task did not finish — delegationCappedVerdict is the step cap's, and
 // the token and time bounds word theirs from the same lead and the bound's own name
-// (delegationBoundVerdict); `ended without a report` replaces it for a child that reached its
-// boundary with nothing to hand back (delegationEndedWithoutReport); and the steering cell is
-// appended to whichever verdict stands, since a human may steer a child on any outcome (ADR 0063
-// D3).
+// (delegationBoundVerdict); `stopped by you` replaces it for a run the HUMAN stopped (ADR 0086 D4,
+// delegationStoppedByUser) — "stopped" is the human's word alone, which is why an engine bound
+// reads "capped" here although the engine's own result head still says "stopped at its"; `ended
+// without a report` replaces it for a child that reached its boundary with nothing to hand back
+// (delegationEndedWithoutReport); and the steering cell is appended to whichever verdict stands,
+// since a human may steer a child on any outcome (ADR 0063 D3).
 const (
 	delegationDoneVerdict     = "done"
 	delegationNoReportVerdict = "ended without a report"
-	delegationBoundLead       = "stopped at its "
+	delegationStoppedVerdict  = "stopped by you"
+	delegationBoundLead       = "capped at its "
 	delegationCappedVerdict   = delegationBoundLead + "step cap"
 	delegationSteeredLead     = "steered by "
 	delegationSteeredMessage  = "message"
@@ -861,9 +864,11 @@ const (
 var delegationBoundHead = regexp.MustCompile(
 	`^\[delegate stopped at its (step cap \(\d+ steps?\)|token budget \(\d+ tokens?\)|time limit \([^)]+\));`)
 
-// delegationBoundVerdict words the slot for the bound a matched head names: `stopped at its step
-// cap`, `stopped at its token budget`, `stopped at its time limit` — the name without its
-// parenthesis, which is the number the parent model reads and the row has no room for.
+// delegationBoundVerdict words the slot for the bound a matched head names: `capped at its step
+// cap`, `capped at its token budget`, `capped at its time limit` — the name without its
+// parenthesis, which is the number the parent model reads and the row has no room for. The head
+// itself keeps the engine's "stopped at its" (delegationBoundHead): it is the model's contract,
+// byte-identical across sessions, and only the row's wording is the human's.
 func delegationBoundVerdict(bound string) string {
 	name, _, _ := strings.Cut(bound, " (")
 	return delegationBoundLead + name
@@ -899,6 +904,28 @@ func delegationSteeredCell(steered int) string {
 	return delegationSteeredLead + plural(steered, delegationSteeredMessage)
 }
 
+// delegationStoppedHead is the marker line a delegation the HUMAN stopped opens with (internal/agent's
+// stoppedResultHead, ADR 0086 D4): a non-error partial result, the engine fold and the child's last
+// words beneath it. delegationStoppedQueuedContent is the whole of the error-shaped result a pooled
+// delegation stopped before it started carries (internal/agent's stoppedQueuedDelegationContent),
+// under the unstarted head (unstartedDelegationPrefix) every never-ran kind shares. Both are spelled
+// again here as the bound head is: the engine formats them deliberately, and this package reads them
+// off the output rather than growing the engine for presentation.
+const (
+	delegationStoppedHead          = "[stopped by the user — engine summary follows]"
+	delegationStoppedQueuedContent = "sub-agent not started: the user stopped it before it started; " +
+		"delegate again if the task is still needed"
+)
+
+// delegationStoppedByUser reads the human's stop off a delegation's result: the stopped head as the
+// body's first line — anchored at the START, where the engine writes it, so a line the child printed
+// cannot be read as the marker — or the queued stop's whole text. body is the result with the
+// steering notice already taken off (readDelegationSteering).
+func delegationStoppedByUser(body string) bool {
+	head, _, _ := strings.Cut(body, "\n")
+	return head == delegationStoppedHead || strings.TrimSpace(body) == delegationStoppedQueuedContent
+}
+
 // delegationNoReportMarker is the whole of the result a child gets back to its parent when its
 // closing text was a bare acknowledgement — "Done.", "OK" (internal/agent's noReportMarker, spelled
 // again here as the bound head is: the engine formats it deliberately, and this package reads it
@@ -918,7 +945,7 @@ const delegationNoReportMarker = "[delegate returned no report]"
 // internal/agent's capped path judges the same text with, so the row and the capped head cannot
 // come to disagree about what a report is.
 func delegationEndedWithoutReport(body string) bool {
-	if delegationBoundHead.MatchString(body) {
+	if delegationBoundHead.MatchString(body) || delegationStoppedByUser(body) {
 		return false
 	}
 	text := delegationChildText(body)
@@ -949,13 +976,14 @@ func delegationChildText(body string) string {
 }
 
 // delegationDetail lays a finished delegation's result out as outputDetail does, with one
-// exception: a result that ended without a report (delegationEndedWithoutReport) is never PROMOTED
-// into the slot, however short it is. That verdict is an outcome envelope, like the bound head: the
+// exception: a result that ended without a report (delegationEndedWithoutReport), or one the human
+// stopped (delegationStoppedByUser), is never PROMOTED into the slot, however short it is. That
+// verdict is an outcome envelope, like the bound head: the
 // slot is the engine's word about how the run ended, so the verdict takes it (delegationStat) ahead
 // of a one-line narration the child closed on, exactly as it takes the place of `done` beside a
 // longer one — and the text lays out as a body, the shape a line the promote-guard refused lands in.
 func delegationDetail(content string) toolOutcome {
-	if body, _ := readDelegationSteering(content); delegationEndedWithoutReport(body) {
+	if body, _ := readDelegationSteering(content); delegationEndedWithoutReport(body) || delegationStoppedByUser(body) {
 		return toolOutcome{Details: outputBody(content)}
 	}
 	return outputDetail(content)
@@ -966,14 +994,17 @@ func delegationDetail(content string) toolOutcome {
 // the parent notice it closes with. The first and last are the engine's own lines rather than the
 // child's, and since a run's block collapsed to a single row (collapsedSubAgentView) the slot is the
 // ONE place in the parent's conversation any of them can be read — the reader who has to know a
-// delegation was stopped short, came back with nothing to report, or was steered, is reading that
-// row and nothing else. It is read off the output for the reason every other stat here is (design
+// delegation was capped, was stopped by the human (delegationStoppedByUser, which outranks the
+// bound head), came back with nothing to report, or was steered, is reading that row and nothing
+// else. It is read off the output for the reason every other stat here is (design
 // call 14: the engine is not grown for presentation), anchored on lines the engine formats
 // deliberately, and TOTAL: a shape it does not recognise is the ordinary `done`.
 func delegationVerdict(content string) string {
 	body, steered := readDelegationSteering(content)
 	verdict := delegationDoneVerdict
-	if m := delegationBoundHead.FindStringSubmatch(body); m != nil {
+	if delegationStoppedByUser(body) {
+		verdict = delegationStoppedVerdict
+	} else if m := delegationBoundHead.FindStringSubmatch(body); m != nil {
 		verdict = delegationBoundVerdict(m[1])
 	} else if delegationEndedWithoutReport(body) {
 		verdict = delegationNoReportVerdict

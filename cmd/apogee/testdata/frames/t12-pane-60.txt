@@ -18,7 +18,7 @@
 ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔ Hostile file names ▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔▔
   approval needed
 ╭──────────────────────────────────────────────────────────╮
-│ queue a message…  ⏎ queue · ↑ recall · esc×2 stop        │
+│ queue a message…  ⏎ queue · ↑ recall · esc×2 cancel      │
 ╰──────────────────────────────────────────────────────────╯
   probe-target ✦ hostile-model <footer tail>
 ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁

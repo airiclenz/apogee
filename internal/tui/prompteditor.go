@@ -118,7 +118,7 @@ type promptEditor struct {
 const (
 	idlePlaceholder      = "Send a message…  ⏎ send · ⌥⏎ newline · ↑ recall · ⌃c quit"
 	idleShiftPlaceholder = "Send a message…  ⏎ send · ⇧⏎/⌥⏎ newline · ↑ recall · ⌃c quit"
-	runningPlaceholder   = "queue a message…  ⏎ queue · ↑ recall · esc×2 stop"
+	runningPlaceholder   = "queue a message…  ⏎ queue · ↑ recall · esc×2 cancel"
 )
 
 // The prompt's third invitation, in the three forms a run view takes it. Inside a view the box

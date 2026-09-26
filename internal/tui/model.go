@@ -1082,7 +1082,7 @@ func (m Model) Update(msg tea.Msg) (next tea.Model, cmd tea.Cmd) {
 
 	case escStopResetMsg:
 		// The Esc stop window elapsed without a second press: disarm the gesture so the
-		// "press esc again to stop" hint clears (handleKey's esc case). A tick scheduled by an
+		// "press esc again to cancel" hint clears (handleKey's esc case). A tick scheduled by an
 		// earlier arm is stale and changes nothing.
 		if msg.gen == m.escGen {
 			m.lastEsc = time.Time{}
@@ -1379,7 +1379,7 @@ type ctrlCResetMsg struct{ gen int }
 const escStopWindow = time.Second
 
 // escStopResetMsg disarms the Esc stop gesture once the window elapses, clearing the
-// "press esc again to stop" hint when the human does not follow through. gen is the arm that
+// "press esc again to cancel" hint when the human does not follow through. gen is the arm that
 // scheduled it (Model.escGen); a tick for an earlier arm is a no-op.
 type escStopResetMsg struct{ gen int }
 
@@ -1679,7 +1679,7 @@ func (m Model) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		now := time.Now()
 		if !m.lastEsc.IsZero() && now.Sub(m.lastEsc) <= escStopWindow {
 			// Disarm BEFORE stopping: statusRight's armed branch sits above every occupant, so a
-			// stamp left standing would keep "press esc again to stop" on an idle status line for
+			// stamp left standing would keep "press esc again to cancel" on an idle status line for
 			// the rest of the window after the worker unwound.
 			m.lastEsc = time.Time{}
 			m.stopWorker()
@@ -3875,19 +3875,19 @@ func (m Model) runningPhrase(view runRef, now time.Time, quiet bool) string {
 // escStopHintPlain is the armed-esc hint as it always read: a second press inside escStopWindow
 // stops the run. It is the whole hint wherever nothing pooled is in flight, and the fallback of the
 // two longer forms below where the row has no room for them.
-const escStopHintPlain = "press esc again to stop"
+const escStopHintPlain = "press esc again to cancel"
 
 // escStopHintDropsFormat is the armed-esc hint while a pooled fan-out holds finished delegations
 // whose reports the stop's rollback would discard (its arguments: the count, and `delegation` or
 // `delegations` for it): what a second esc throws away, and that a queued message keeps it — the
 // message waits for the group to join and the reports land with the Turn (ADR 0025, ADR 0039).
-const escStopHintDropsFormat = "press esc again to stop — drops %d finished %s; ⏎ a message keeps them"
+const escStopHintDropsFormat = "press esc again to cancel — drops %d finished %s; ⏎ a message keeps them"
 
 // escStopHintSkipsFormat is the armed-esc hint while a pooled fan-out holds no finished delegation
 // yet but does hold QUEUED ones (its argument: how many): a queued message pre-empts those
 // instead of stopping anything (preemptDelegation), which is the alternative the human is choosing
 // against with a second esc.
-const escStopHintSkipsFormat = "press esc again to stop — ⏎ a message instead skips the %d queued"
+const escStopHintSkipsFormat = "press esc again to cancel — ⏎ a message instead skips the %d queued"
 
 // escStopHint words the armed-esc hint for the room the slot has. While a pooled sub_agent group
 // is in flight in the open Turn (transcript.inFlightFanOut) the hint says what a second esc would
@@ -3963,7 +3963,7 @@ func (m Model) statusRight(room int) string {
 	}
 	switch m.state {
 	case stateRunning:
-		return m.th.statusBar.Render("esc×2 stop")
+		return m.th.statusBar.Render("esc×2 cancel")
 	case stateErrored:
 		return m.th.statusBar.Render("enter dismiss")
 	default:

@@ -3697,7 +3697,8 @@ func TestChildInterjectionLandsInsideItsRun(t *testing.T) {
 			want   string
 		}{
 			{domain.UndeliveredCompleted, "sub-agent finished before your message landed"},
-			{domain.UndeliveredCapped, "sub-agent stopped at its cap before your message landed"},
+			{domain.UndeliveredCapped, "sub-agent was capped before your message landed"},
+			{domain.UndeliveredStopped, "sub-agent was stopped by you before your message landed"},
 			{domain.UndeliveredFaulted, "sub-agent failed before your message landed"},
 			{domain.UndeliveredCancelled, "sub-agent was cancelled before your message landed"},
 			{domain.UndeliveredRefused, "sub-agent could not take your message"},

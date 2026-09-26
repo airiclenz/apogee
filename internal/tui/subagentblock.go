@@ -512,10 +512,12 @@ func renderSubAgentGroup(th theme, count int, members []subAgentMember, width in
 // the no-report marker, and a ✓ beside that is the row calling a delegation done that did not do
 // what it was sent for. It is not a failure — the row stays out of the red, in the marker tone the
 // step cap's verdict reads in — so it is read from the head's verdict WORD (subAgentVerdictWord)
-// rather than from a field.
+// rather than from a field. A run the human STOPPED (stoppedSummary, ADR 0086 D4) is withheld the ✓
+// on the same reading and for the same reason: it came back, but not because it was done.
 func subAgentFinished(head paintInput) bool {
+	verdict := subAgentVerdictWord(head)
 	return subAgentReported(head) && !head.tool.Summary.failed &&
-		!endedWithoutReportSummary(subAgentVerdictWord(head))
+		!endedWithoutReportSummary(verdict) && !stoppedSummary(verdict)
 }
 
 // subAgentVerdictWord is the engine's verdict on a finished delegation as the head carries it,
@@ -732,7 +734,7 @@ func collapsedSubAgentView(head paintInput, span []paintInput) toolView {
 // While the run WORKS the line trails the step cap the child runs under (subAgentStepCap) — the one
 // cell that is a bound rather than a reading, and so the one a finished row has no use for: once
 // the child has reported, how far it was allowed to go is history the slot's verdict already tells
-// (`· stopped at its step cap` where the bound is what ended it). It is composed here rather than
+// (`· capped at its step cap` where the bound is what ended it). It is composed here rather than
 // in the painter because this line is composed for every spanned member, reported or not, so the
 // gate on having reported has to stand where the cells are joined.
 func subAgentSummary(head paintInput, span []paintInput) branchSummary {

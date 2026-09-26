@@ -493,7 +493,7 @@ func submit(drv driven, text string) {
 // escStopArmedHint is the opening of every wording of the armed-esc hint (internal/tui's
 // escStopHintPlain and the fan-out forms that add what a stop would discard), so waiting for it
 // recognises an armed gesture whatever room the status line had to say it in.
-const escStopArmedHint = "press esc again to stop"
+const escStopArmedHint = "press esc again to cancel"
 
 // idlePromptHead opens the prompt box's placeholder while nothing is in flight, and
 // runningPromptHead the one it wears while a worker does (internal/tui's idlePlaceholder and
@@ -515,7 +515,7 @@ const stopRunAttempts = 3
 // the last attempt is the one that carries the generous backstop.
 const stopRunRetryBudget = 5 * time.Second
 
-// stopRun performs the esc×2 stop gesture and does not return until the worker has folded.
+// stopRun performs the esc×2 cancel gesture and does not return until the worker has folded.
 //
 // The gesture is a pair, and internal/tui measures the pair's window (escStopWindow, one second)
 // when each press is FOLDED, not when it is sent: two presses the kit puts 70 ms apart on the wire
@@ -523,7 +523,7 @@ const stopRunRetryBudget = 5 * time.Second
 // — mid-reply, with the rest of the parallel suite on the same cores — and the second press then
 // RE-ARMS the gesture instead of confirming it. The run carries on, and the test waits for an idle
 // screen that is never coming: that is how TestE2EStreamCancelKeepsWhatArrived timed out against
-// the 400-line fixture with line 342 of 400 painted and the prompt box still reading "esc×2 stop".
+// the 400-line fixture with line 342 of 400 painted and the prompt box still reading "esc×2 cancel".
 //
 // So the step does what the human it stands for does: press, WATCH FOR THE HINT the arming puts on
 // the status line, press again — and if the run is still going, press again. Waiting on the hint is
@@ -548,7 +548,7 @@ func stopRun(t *testing.T, drv driven) {
 			return
 		}
 	}
-	t.Fatalf("the run was still in flight after %d esc×2 stop gestures; the last frame is:\n%s",
+	t.Fatalf("the run was still in flight after %d esc×2 cancel gestures; the last frame is:\n%s",
 		stopRunAttempts, drv.Frame())
 }
 

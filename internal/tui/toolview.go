@@ -593,7 +593,7 @@ type toolView struct {
 	finished bool
 
 	// runVerdict is the ENGINE's verdict word for a COLLAPSED RUN whose row a painter composed —
-	// `done`, `stopped at its step cap` (head.tool.stat.spell(), delegationStat) — and "" on every
+	// `done`, `capped at its step cap` (head.tool.stat.spell(), delegationStat) — and "" on every
 	// view that is not a collapsed run's reading. There is no bool beside it: this member is the whole
 	// gate. Where it is set, the promote-guard's refusal swaps the GIST out of the composed line for
 	// the engine's verdict and nothing lands in a body (demoted), which is what keeps a run's row
@@ -1274,7 +1274,17 @@ func (tv *toolView) enrichWithResult(result domain.ToolResult, ws workspaceRoot)
 // (shortenPaths): a body is quoted text and the shortening seam deliberately never touches one, so
 // read_file failing on an in-workspace path carries that path absolute beneath a branch whose slot
 // now names nothing at all.
+//
+// The one error-shaped result that is not a failure is a delegation the human stopped before it
+// started (delegationStoppedQueuedContent, ADR 0086 D4): its slot takes the stopped verdict in the
+// ordinary marker tone (stoppedSummary) rather than the red, and its text lays out as the same
+// failure body, so the head line entry.neverStarted reads stays where it looks.
 func (tv *toolView) absorbFailure(content string) {
+	if tv.headsRun() && delegationStoppedByUser(content) {
+		tv.Summary = namedSummary(detailLine{Text: delegationStoppedVerdict})
+		tv.Details = tv.Details.with(failureBody(content))
+		return
+	}
 	if p, known := toolRegistry[tv.name]; known && p.failure != nil {
 		if word, output, ok := p.failure(content); ok {
 			tv.Summary = namedSummary(detailLine{Text: errorSummaryPrefix + word})
