@@ -2634,12 +2634,13 @@ func runSteeredDelegation(t *testing.T, answer string, remarks ...string) domain
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	responder.before = func(call int) {
 		if call != 1 {
 			return
 		}
 		for _, remark := range remarks {
-			if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); err != nil {
+			if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); err != nil {
 				t.Errorf("InterjectChild while the child runs: %v", err)
 			}
 		}

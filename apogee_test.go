@@ -204,7 +204,7 @@ func TestInterjectChild_NoSuchChildMatchableThroughRoot(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 
-	err = a.InterjectChild("no-such-call-id", apogee.UserInput{Text: "hello"})
+	err = a.InterjectChild("no-such-run-id", apogee.UserInput{Text: "hello"})
 	if !errors.Is(err, apogee.ErrNoSuchChild) {
 		t.Errorf("InterjectChild(unknown id) err = %v, want ErrNoSuchChild", err)
 	}

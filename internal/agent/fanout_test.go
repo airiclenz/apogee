@@ -1231,7 +1231,7 @@ func TestFanOut_WidthLineSitsAboveTheSteeredTrailer(t *testing.T) {
 	// LANDS at the child's next boundary. Its answer is then routed by the landed remark, which is
 	// the child's last user message from there on.
 	steer := func(context.Context) {
-		if err := parent.Load().InterjectChild("c3", domain.UserInput{Text: "focus on the tests"}); err != nil {
+		if err := parent.Load().InterjectChild(thirdRunID, domain.UserInput{Text: "focus on the tests"}); err != nil {
 			t.Errorf("InterjectChild while the child runs: %v", err)
 		}
 	}
@@ -1249,6 +1249,7 @@ func TestFanOut_WidthLineSitsAboveTheSteeredTrailer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	parent.Store(a)
 	if err := a.Submit(domain.UserInput{Text: "delegate three things"}); err != nil {
 		t.Fatalf("Submit: %v", err)

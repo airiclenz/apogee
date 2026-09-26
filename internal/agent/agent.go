@@ -400,7 +400,7 @@ type Agent struct {
 	name   string // this Agent's display identity in words: the short name the spawning sub_agent call supplied (normalised to a trimmed first line) or the one the namer generated for it; empty = unnamed, and every display falls back to task. Display only, never privilege (ADR 0005)
 
 	// children and mailbox are the child-addressing pair (ADR 0063 D1 — internal/agent/children.go):
-	// children is the set of sub-agents THIS Agent currently has running, keyed by spawn call-ID, and
+	// children is the set of sub-agents THIS Agent currently has running, keyed by run id, and
 	// mailbox is what a human queued for THIS Agent while it runs as somebody's child. They are
 	// separate because they sit on opposite ends of the same hop: a message is addressed through the
 	// parent's registry and delivered out of the child's mailbox, by the child's own Run.

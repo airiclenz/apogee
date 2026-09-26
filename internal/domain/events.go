@@ -280,7 +280,7 @@ type SubAgentNamedEvent struct {
 }
 
 // ChildInterjectionEvent reports the fate of ONE user message a human addressed to a running
-// sub-agent through Agent.InterjectChild (ADR 0063 D2). Landed is true when the message was
+// sub-agent, by its run id, through Agent.InterjectChild (ADR 0063 D2, ADR 0086). Landed is true when the message was
 // committed into the child's open Exchange at a between-Steps boundary and the child's next
 // request therefore carries it, and false when it never reached the model — the child ended
 // before the boundary the message was waiting for, or the commit itself was refused.

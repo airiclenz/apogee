@@ -338,12 +338,12 @@ func (e *lateEngine) Interject(ctx context.Context, in apogee.UserInput) error {
 // The refusal is the same errNoServerBound every other conversation-touching call answers — a
 // session with no server has no children either, so the miss is the missing server, not a missing
 // child (which would be apogee.ErrNoSuchChild).
-func (e *lateEngine) InterjectChild(spawnCallID string, in apogee.UserInput) error {
+func (e *lateEngine) InterjectChild(runID string, in apogee.UserInput) error {
 	agent := e.bound()
 	if agent == nil {
 		return errNoServerBound
 	}
-	return agent.InterjectChild(spawnCallID, in)
+	return agent.InterjectChild(runID, in)
 }
 
 // ClearContext drops the model's history; unbound there is no history to drop.

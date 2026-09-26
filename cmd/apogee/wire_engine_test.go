@@ -42,7 +42,7 @@ func TestLateEngineInterjectChildRefusesUnbound(t *testing.T) {
 	t.Parallel()
 
 	var engine lateEngine
-	err := engine.InterjectChild("call-1", apogee.UserInput{Text: "check the docs too"})
+	err := engine.InterjectChild("run-1", apogee.UserInput{Text: "check the docs too"})
 	if !errors.Is(err, errNoServerBound) {
 		t.Errorf("InterjectChild err = %v; want errNoServerBound", err)
 	}

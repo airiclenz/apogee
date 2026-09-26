@@ -952,7 +952,7 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		// boundary is reported undelivered rather than left unaccounted for (ADR 0063 D2). The
 		// report itself waits for the outer defer, which alone knows how the run ended and so why
 		// the message did not land — this defer runs before a recovered panic is even classified.
-		a.children.unregister(call.ID)
+		a.children.unregister(runID)
 		leftover, turn := sub.mailbox.close(), sub.turns.index
 		reportLeftover = func(reason domain.UndeliveredReason) {
 			sub.reportUndelivered(turn, leftover, reason)
@@ -964,10 +964,11 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		giveBack()
 		return errorToolResult(call.ID, "could not start sub-agent: "+err.Error()), dispatchDone
 	}
-	// The child is addressable for exactly as long as it runs: published under the id the model
-	// chose for this call — the same id the child stamps on every Event it emits, so a Driver
-	// addresses it by the identity it already paints (ADR 0063 D1).
-	a.children.register(call.ID, sub)
+	// The child is addressable for exactly as long as it runs: published under its run id — the
+	// engine-minted identity the child stamps on every Event it emits, so a Driver addresses it by
+	// the identity it already paints (ADR 0063 D1), and two delegations whose call ids collide stay
+	// two addresses (ADR 0086).
+	a.children.register(runID, sub)
 	// A name a continuation INHERITED is re-announced for the new spawn id: the call that spawned
 	// this child named nothing, so every Driver reads its block off the call's `task` — the
 	// continuation instructions — until told the name the continued delegation already wears. It is

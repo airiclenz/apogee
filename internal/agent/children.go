@@ -16,7 +16,7 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Child addressing (ADR 0063) — a running sub-agent is reachable by its spawn call-ID
+// Child addressing (ADR 0063, ADR 0086) — a running sub-agent is reachable by its run id
 // ----------------------------------------------------------------------------
 //
 // A delegation is opaque to everything outside the engine: runSubAgent drives the child to its
@@ -27,9 +27,12 @@ import (
 // but the id it already paints the delegation by, and they add no goroutine: the child's own
 // Step-driving loop does the delivering.
 
-// childRegistry is the set of sub-agents ONE Agent currently has running, keyed by the id of the
-// sub_agent call that spawned each — the same id the child stamps on every Event it emits, so a
-// caller addresses a child by the identity it already sees.
+// childRegistry is the set of sub-agents ONE Agent currently has running, keyed by each child's
+// run id (domain.EventBase.RunID) — the engine-minted identity the child stamps on every Event it
+// emits, so a caller addresses a child by the identity it already sees. It is keyed by run id and
+// not by the spawning call's id because a call id is the model's to choose and can collide (ADR
+// 0059 §6): two delegations sharing one call id would share one entry, and a message meant for
+// one would reach the other. Run ids are unique within the tree (runIDMinter).
 //
 // Membership is exactly the child's run: runSubAgent registers before it drives the child and
 // unregisters in the defer that closes it, so a lookup that succeeds names a child that was
@@ -38,35 +41,35 @@ import (
 //
 // The zero value is ready to use.
 type childRegistry struct {
-	mu       sync.Mutex
-	byCallID map[string]*Agent
+	mu      sync.Mutex
+	byRunID map[string]*Agent
 }
 
-// register publishes child under its spawn call-ID. Registering the same id twice replaces the
-// entry: ids are the model's to choose and two calls of one Turn can collide (ADR 0059 §6), so
-// last-in wins rather than the pair silently sharing a mailbox.
-func (r *childRegistry) register(spawnCallID string, child *Agent) {
+// register publishes child under its run id. Run ids are minted unique within the tree, so a
+// second registration under one id does not arise; were it to, the later child replaces the
+// earlier rather than the pair silently sharing a mailbox.
+func (r *childRegistry) register(runID string, child *Agent) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if r.byCallID == nil {
-		r.byCallID = make(map[string]*Agent, 1)
+	if r.byRunID == nil {
+		r.byRunID = make(map[string]*Agent, 1)
 	}
-	r.byCallID[spawnCallID] = child
+	r.byRunID[runID] = child
 }
 
-// unregister removes the entry for spawnCallID. It is a no-op for an id that is not registered,
-// so the defer that calls it is safe on every early return runSubAgent takes before registering.
-func (r *childRegistry) unregister(spawnCallID string) {
+// unregister removes the entry for runID. It is a no-op for an id that is not registered, so the
+// defer that calls it is safe on every early return runSubAgent takes before registering.
+func (r *childRegistry) unregister(runID string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	delete(r.byCallID, spawnCallID)
+	delete(r.byRunID, runID)
 }
 
-// lookup returns the running child registered under spawnCallID.
-func (r *childRegistry) lookup(spawnCallID string) (*Agent, bool) {
+// lookup returns the running child registered under runID.
+func (r *childRegistry) lookup(runID string) (*Agent, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	child, ok := r.byCallID[spawnCallID]
+	child, ok := r.byRunID[runID]
 	return child, ok
 }
 
@@ -76,8 +79,8 @@ func (r *childRegistry) lookup(spawnCallID string) (*Agent, bool) {
 func (r *childRegistry) all() []*Agent {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	children := make([]*Agent, 0, len(r.byCallID))
-	for _, child := range r.byCallID {
+	children := make([]*Agent, 0, len(r.byRunID))
+	for _, child := range r.byRunID {
 		children = append(children, child)
 	}
 	return children
@@ -428,7 +431,7 @@ func (m *childMailbox) close() []domain.UserInput {
 	return queued
 }
 
-// InterjectChild queues a user message for the RUNNING sub-agent spawned by spawnCallID, anywhere
+// InterjectChild queues a user message for the RUNNING sub-agent whose run id is runID, anywhere
 // in this Agent's tree: its own children first, then — recursively — theirs, so a host holding
 // only the top-level Agent reaches a grandchild at depth 2. The message lands at that child's next
 // between-Steps boundary as an ordinary interjection (Agent.Interject), with the child's own tool
@@ -439,15 +442,16 @@ func (m *childMailbox) close() []domain.UserInput {
 // host's own goroutine while the loop runs, beside AbortExchange; the delivery it schedules is
 // performed by the goroutine that owns the child's Steps.
 //
-// It returns domain.ErrNoSuchChild when spawnCallID names no running sub-agent — the child
+// runID is the child's run identity (domain.EventBase.RunID), the id every Event it emits carries.
+// It returns domain.ErrNoSuchChild when runID names no running sub-agent — the child
 // finished, was cancelled, or never existed — and that refusal is the message's whole account:
 // nothing was queued, so no ChildInterjectionEvent follows. On success exactly one
 // ChildInterjectionEvent will report the message's fate, Landed either way.
-func (a *Agent) InterjectChild(spawnCallID string, in domain.UserInput) error {
-	if spawnCallID == "" {
+func (a *Agent) InterjectChild(runID string, in domain.UserInput) error {
+	if runID == "" {
 		return domain.ErrNoSuchChild
 	}
-	if child, ok := a.children.lookup(spawnCallID); ok {
+	if child, ok := a.children.lookup(runID); ok {
 		if child.mailbox.add(in) {
 			return nil
 		}
@@ -456,7 +460,7 @@ func (a *Agent) InterjectChild(spawnCallID string, in domain.UserInput) error {
 		return domain.ErrNoSuchChild
 	}
 	for _, child := range a.children.all() {
-		if err := child.InterjectChild(spawnCallID, in); err == nil {
+		if err := child.InterjectChild(runID, in); err == nil {
 			return nil
 		}
 	}

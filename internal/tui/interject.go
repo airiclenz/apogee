@@ -31,15 +31,16 @@ import (
 //     off domain.UserInput because the engine has no use for an offset (the wire-silent boundary,
 //     ADR 0031) and captured HERE because a delivered row becomes a transcript block later, by
 //     which time the parse that located them is long gone.
-//   - spawn is the RUN the row is addressed to: the spawn call-ID of the child whose engine-side
-//     mailbox took it ([Model.stageChildMessage], ADR 0063), and empty for a row staged for the
-//     human's own conversation. It is what the band labels the row by and what the delivery fold
-//     reconciles against ([Model.foldChildDelivery]) — a child row is never in the [interjectBox],
-//     because the engine mailbox IS its queue.
+//   - spawn is the spawn call id of the child whose engine-side mailbox took the row
+//     ([Model.stageChildMessage], ADR 0063), and empty for a row staged for the human's own
+//     conversation. It is what marks a row as a child's and what the delivery fold reconciles
+//     against ([Model.foldChildDelivery]) — a child row is never in the [interjectBox], because the
+//     engine mailbox IS its queue. It is not the engine's address for the child: that is the run id
+//     the view's head carries (ADR 0086), since a call id can collide with a sibling's.
 //   - run is the whole run ref of that child ([runRef], the viewed run at staging), run id included:
-//     spawn is the engine's ADDRESS for the child and can collide with a sibling's, so the band's
-//     label is resolved from run instead ([Model.runLabel]). Zero on a row for the human's own
-//     conversation, exactly as spawn is empty there.
+//     spawn can collide with a sibling's, so the band's label is resolved from run instead
+//     ([Model.runLabel]). Zero on a row for the human's own conversation, exactly as spawn is empty
+//     there.
 //
 // A child row therefore only ever waits out the window between the ⏎ and the child's own account
 // of it, and that window closes strictly inside the Exchange: the delegation's scope reports every
@@ -364,9 +365,13 @@ func (m Model) stageChildMessage() (tea.Model, tea.Cmd) {
 		return m.refuseChildMessage(childNotRunningNote(m.runLabel(run)))
 	}
 	in := domain.UserInput{Text: parsed.text, FileRefs: parsed.fileRefs, SkillIDs: parsed.skillIDs}
+	// The child is addressed by its RUN ID, read off the head the view resolved rather than off the
+	// view's own ref: a head a Reaction redirected into sub_agent is opened with no run id and adopts
+	// one only at its started phase (addSubAgentPhase), so the head is where the id lives. A head
+	// that never learned one sends "", which the engine refuses as no such child.
 	// Called from the Update goroutine, which the seam is written for: InterjectChild only appends
 	// to a guarded mailbox and never touches the child's conversation (tui.go, agent/children.go).
-	if err := m.eng.InterjectChild(spawn, in); err != nil {
+	if err := m.eng.InterjectChild(head.spawnRunID, in); err != nil {
 		return m.refuseChildMessage(childGoneNote(usageAgentName(head)))
 	}
 	m.interjectSeq++

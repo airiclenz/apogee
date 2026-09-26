@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"iter"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -13,12 +14,24 @@ import (
 )
 
 // ----------------------------------------------------------------------------
-// Child addressing (ADR 0063) — InterjectChild, the mailbox drain, the delivery event
+// Child addressing (ADR 0063, ADR 0086) — InterjectChild, the mailbox drain, the delivery event
 // ----------------------------------------------------------------------------
 //
 // A delegation runs synchronously inside the parent's Turn, so the ONLY window a test has to act
 // "while the child runs" is inside the responder's Stream for one of the child's own Turns — the
-// child is registered before its Run starts, so it is addressable from there.
+// child is registered before its Run starts, so it is addressable from there. A child is addressed
+// by its run id, so every test here that addresses one pins the tree's minter to testRunIDPrefix
+// and names the Nth delegation the tree spawned by firstRunID / secondRunID.
+
+// testRunIDPrefix is the fixed run-id prefix these tests inject (newRunIDMinter), so the run ids the
+// tree mints — in spawn order, across every depth — are known ahead of the run.
+const testRunIDPrefix = "0badc0de"
+
+const (
+	firstRunID  = testRunIDPrefix + ".1" // the run id of the first delegation the tree spawns
+	secondRunID = testRunIDPrefix + ".2" // the run id of the second
+	thirdRunID  = testRunIDPrefix + ".3" // the run id of the third
+)
 
 // requestLogResponder is scriptedResponder plus the two seams these tests need: it keeps every
 // request the loop sent, in order, so an assertion can read what the model actually saw, and it
@@ -102,15 +115,16 @@ func TestInterjectChild_LandsAtTheChildsNextStep(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	responder.before = func(call int) {
 		if call != 1 {
 			return
 		}
 		var ok bool
-		if child, ok = a.children.lookup("c1"); !ok {
-			t.Error("the running child is not registered under its spawn call-ID")
+		if child, ok = a.children.lookup(firstRunID); !ok {
+			t.Error("the running child is not registered under its run id")
 		}
-		if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); err != nil {
+		if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); err != nil {
 			t.Errorf("InterjectChild while the child runs: %v", err)
 		}
 	}
@@ -158,6 +172,79 @@ func TestInterjectChild_LandsAtTheChildsNextStep(t *testing.T) {
 	got := events[0]
 	if !got.Landed || got.Depth != 1 || got.CallID != "c1" || got.Input.Text != remark {
 		t.Errorf("event = %+v, want Landed at Depth 1 for c1 carrying %q", got, remark)
+	}
+}
+
+// TestInterjectChild_SharedCallIDsAddressTwoRuns is the case a spawn-call-id key got wrong (ADR
+// 0086 D5): two concurrent delegations whose calls share one id "c1" are two running children, and
+// an interjection by each one's run id lands on that child alone. Keyed by call id, the second
+// registration replaced the first, so both remarks reached one child and the other never saw its
+// own.
+func TestInterjectChild_SharedCallIDsAddressTwoRuns(t *testing.T) {
+	const (
+		remarkOne = "remark for one"
+		remarkTwo = "remark for two"
+	)
+
+	sink := newLockedSink() // two children emit from two pool workers at once
+	// Both children are held inside their first Turn until each is registered and addressed, so
+	// the two interjections go out while both runs are live at once.
+	arrived := make(chan struct{}, 2)
+	release := make(chan struct{})
+	gate := func(ctx context.Context) {
+		arrived <- struct{}{}
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+	}
+	up := newRoutedResponder().
+		route("delegate two things", nil, fanOutScript([2]string{"c1", "task one"}, [2]string{"c1", "task two"})).
+		route("task one", gate, toolCallScript("t1", "look", `{}`)).
+		route("task two", gate, toolCallScript("t1", "look", `{}`)).
+		route(remarkOne, nil, contentScript("child one done")).
+		route(remarkTwo, nil, contentScript("child two done")).
+		route("delegate two things", nil, contentScript("parent done"))
+	cfg := subAgentConfig(sink, domain.ModeAskBefore, fakeTool{name: "look", readOnly: true, result: "looked"})
+	cfg.ParallelAgents = 2
+	a, err := newAgent(cfg, up)
+	if err != nil {
+		t.Fatalf("newAgent: %v", err)
+	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
+	go func() {
+		<-arrived
+		<-arrived
+		if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remarkOne}); err != nil {
+			t.Errorf("InterjectChild(%s): %v", firstRunID, err)
+		}
+		if err := a.InterjectChild(secondRunID, domain.UserInput{Text: remarkTwo}); err != nil {
+			t.Errorf("InterjectChild(%s): %v", secondRunID, err)
+		}
+		close(release)
+	}()
+	if err := a.Submit(domain.UserInput{Text: "delegate two things"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	landedOn := map[string]string{}
+	sink.mu.Lock()
+	events := childInterjections(sink.events)
+	sink.mu.Unlock()
+	for _, ev := range events {
+		if !ev.Landed {
+			t.Errorf("%q did not land (reason %q); each remark had a running child to reach", ev.Input.Text, ev.Reason)
+			continue
+		}
+		landedOn[ev.Input.Text] = ev.RunID
+	}
+	want := map[string]string{remarkOne: firstRunID, remarkTwo: secondRunID}
+	if !maps.Equal(landedOn, want) {
+		t.Errorf("remarks landed on runs %v, want each on its own run %v", landedOn, want)
 	}
 }
 
@@ -216,11 +303,12 @@ func TestInterjectChild_QueuedAfterTheLastStepIsReportedUndelivered(t *testing.T
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	responder.before = func(call int) {
 		if call != 1 {
 			return
 		}
-		if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); err != nil {
+		if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); err != nil {
 			t.Errorf("InterjectChild while the child runs: %v", err)
 		}
 	}
@@ -245,7 +333,7 @@ func TestInterjectChild_QueuedAfterTheLastStepIsReportedUndelivered(t *testing.T
 	}
 
 	// The child is gone, so the same id is refused from here on.
-	if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); !errors.Is(err, domain.ErrNoSuchChild) {
+	if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); !errors.Is(err, domain.ErrNoSuchChild) {
 		t.Errorf("InterjectChild after the child finished = %v, want ErrNoSuchChild", err)
 	}
 }
@@ -267,11 +355,12 @@ func TestInterjectChild_QueuedBeforeAPanicIsReportedFaulted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	responder.before = func(call int) {
 		if call != 1 {
 			return
 		}
-		if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); err != nil {
+		if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); err != nil {
 			t.Errorf("InterjectChild while the child runs: %v", err)
 		}
 		panic("child boom")
@@ -315,11 +404,12 @@ func TestInterjectChild_ReachesAGrandchild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	responder.before = func(call int) {
 		if call != 2 {
 			return
 		}
-		if err := a.InterjectChild("c2", domain.UserInput{Text: remark}); err != nil {
+		if err := a.InterjectChild(secondRunID, domain.UserInput{Text: remark}); err != nil {
 			t.Errorf("InterjectChild for a grandchild through the top-level agent: %v", err)
 		}
 	}
@@ -360,11 +450,12 @@ func TestInterjectChild_PendingMailboxSkipsAGrandchild(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	responder.before = func(call int) {
 		if call != 1 {
 			return
 		}
-		if err := a.InterjectChild("c1", domain.UserInput{Text: remark}); err != nil {
+		if err := a.InterjectChild(firstRunID, domain.UserInput{Text: remark}); err != nil {
 			t.Errorf("InterjectChild while the child runs: %v", err)
 		}
 	}

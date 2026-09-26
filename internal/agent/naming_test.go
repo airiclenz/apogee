@@ -241,7 +241,7 @@ func TestDelegationNaming_FiresOnlyForAnUnnamedChild(t *testing.T) {
 
 // TestDelegationNaming_TheRunningChildWearsTheNewName is the other half of the announcement: the
 // event says what the run is now called, and the run itself must AGREE — the child registered
-// under the spawning call id reports the generated name from the moment the event fires, while it
+// under its run id reports the generated name from the moment the event fires, while it
 // is still running. Asserted from the child's own goroutine, which is the only place a running
 // delegation can be observed.
 func TestDelegationNaming_TheRunningChildWearsTheNewName(t *testing.T) {
@@ -257,7 +257,7 @@ func TestDelegationNaming_TheRunningChildWearsTheNewName(t *testing.T) {
 	// is registered and — once the rename has landed — must already answer to the new name.
 	gate := func(context.Context) {
 		sink.awaitRename()
-		if child, ok := parent.children.lookup("c1"); ok {
+		if child, ok := parent.children.lookup(firstRunID); ok {
 			found, seen = true, child.displayName()
 		}
 	}
@@ -274,6 +274,7 @@ func TestDelegationNaming_TheRunningChildWearsTheNewName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newAgent: %v", err)
 	}
+	a.runIDs = newRunIDMinter(testRunIDPrefix)
 	parent = a
 	runNamingParent(t, a)
 

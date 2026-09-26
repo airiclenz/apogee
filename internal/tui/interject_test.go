@@ -1907,13 +1907,91 @@ func TestInterjectBoxRaceClean(t *testing.T) {
 // Messaging the child on screen — ⏎ inside a run view (ADR 0063)
 // ----------------------------------------------------------------------------
 
+// modelViewingStampedChild is modelViewingChild over a delegation the engine stamped as it does in a
+// live session: the sub_agent call carries the run id minted for it (domain.ToolCallEvent.SpawnRunID)
+// and the child's started phase is stamped with that run's identity, so the view is open on a
+// running child that has a run id to be addressed by.
+func modelViewingStampedChild(t *testing.T, eng *fakeEngine, runID string) Model {
+	t.Helper()
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+	if m.state != stateRunning {
+		t.Fatalf("setup: state = %v, want running", m.state)
+	}
+	run := stampedDelegation(&m.transcript, runRef{}, "s1", runID, "repo-scout")
+	stampedPhase(&m.transcript, run, domain.SubAgentStarted, "")
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	if !m.inRunView() {
+		t.Fatal("setup: ⏎ on the delegation opened no run view, so the box addresses nobody")
+	}
+	return m
+}
+
+// TestRunViewAddressesTheChildByRunIDNotItsCallID pins the key the view steers by (ADR 0086 D5):
+// two delegations of one reply share the spawn call id "s1", and a message typed inside the view on
+// the second reaches the engine under THAT run's id — the one address the two do not share.
+func TestRunViewAddressesTheChildByRunIDNotItsCallID(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+	first := stampedDelegation(&m.transcript, runRef{}, "s1", "run-a", "scout-a")
+	second := stampedDelegation(&m.transcript, runRef{}, "s1", "run-b", "scout-b")
+	stampedPhase(&m.transcript, first, domain.SubAgentStarted, "")
+	stampedPhase(&m.transcript, second, domain.SubAgentStarted, "")
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	if got := m.viewedRun(); got.id != "run-b" {
+		t.Fatalf("setup: the view is open on run %+v; want the second delegation, run-b", got)
+	}
+
+	m.input.SetValue("check the tests too")
+	step(t, m, keyEnter())
+
+	got := eng.childInterjections()
+	if len(got) != 1 || got[0].runID != "run-b" {
+		t.Errorf("InterjectChild calls = %+v; want one, addressed to run-b", got)
+	}
+}
+
+// TestRunViewSteersARedirectedDelegationByItsAdoptedRunID covers the head a pre-tool-exec Reaction
+// redirected INTO sub_agent: its call went out with no run id, so a view opened on it before the
+// child started holds a ref whose id is "". The started phase names the id and the head adopts it
+// (addSubAgentPhase); the message typed in that view must go out under the adopted id — read off the
+// head, not off the view's stale ref, which would address nobody.
+func TestRunViewSteersARedirectedDelegationByItsAdoptedRunID(t *testing.T) {
+	t.Parallel()
+	eng := &fakeEngine{}
+	m := newTestModelEng(t, eng, recallOpts(&fakeRecallHost{}))
+	m.input.SetValue("survey the repo")
+	m, _ = stepCmd(t, m, keyEnter())
+	stampedDelegation(&m.transcript, runRef{}, "s1", "", "repo-scout")
+	m.refreshViewport()
+	m = enterOnLastBlock(t, m)
+	if !m.inRunView() || m.viewedRun().id != "" {
+		t.Fatalf("setup: want a view open on a run with no run id; got open=%v ref=%+v", m.inRunView(), m.viewedRun())
+	}
+	stampedPhase(&m.transcript, runRef{depth: 1, spawn: "s1", id: "run-late"}, domain.SubAgentStarted, "")
+
+	m.input.SetValue("check the tests too")
+	step(t, m, keyEnter())
+
+	got := eng.childInterjections()
+	if len(got) != 1 || got[0].runID != "run-late" {
+		t.Errorf("InterjectChild calls = %+v; want one, addressed to the adopted run id run-late", got)
+	}
+}
+
 // TestRunViewInterjectsIntoTheViewedChild is the whole of the new send: ⏎ inside a view addresses
 // the run on screen through the engine seam, labels the staged row with it, and leaves the
 // conversation's own mailbox untouched — the child's engine-side mailbox IS the queue.
 func TestRunViewInterjectsIntoTheViewedChild(t *testing.T) {
 	t.Parallel()
 	eng := &fakeEngine{}
-	m := modelViewingChild(t, eng, childRunning)
+	m := modelViewingStampedChild(t, eng, "run-s1")
 	box := m.worker.box
 
 	m.input.SetValue("check the tests too")
@@ -1923,8 +2001,8 @@ func TestRunViewInterjectsIntoTheViewedChild(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("InterjectChild calls = %+v; want exactly the message typed in the view", got)
 	}
-	if got[0].spawn != "s1" {
-		t.Errorf("addressed run = %q; want the run the view is open on", got[0].spawn)
+	if got[0].runID != "run-s1" {
+		t.Errorf("addressed run id = %q; want the run id of the run the view is open on", got[0].runID)
 	}
 	if got[0].input.Text != "check the tests too" {
 		t.Errorf("message = %q; want the parsed text", got[0].input.Text)

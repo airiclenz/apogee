@@ -860,8 +860,8 @@ type Engine interface {
 	// performs, so a cancelled Step stops an extraction mid-walk; a cancel is NOT a third
 	// refusal: the cut-short reference is skipped with an ErrorEvent and the message commits.
 	Interject(context.Context, domain.UserInput) error
-	// InterjectChild queues a user message for the RUNNING sub-agent that the sub_agent call
-	// spawnCallID spawned, anywhere in the engine's tree — its own children, and recursively
+	// InterjectChild queues a user message for the RUNNING sub-agent whose run id
+	// (domain.EventBase.RunID) is runID, anywhere in the engine's tree — its own children, and recursively
 	// theirs. The message lands at that child's next between-Steps boundary as an ordinary
 	// interjection, committed by the goroutine that owns the child's Steps, with the child's own
 	// tools, mode and confinement unchanged: addressing a child grants it nothing (ADR 0063).
@@ -871,12 +871,12 @@ type Engine interface {
 	// the loop: a non-blocking enqueue onto a guarded mailbox that touches no conversation, so it
 	// needs neither the between-Steps boundary nor the single-driver contract.
 	//
-	// It refuses with domain.ErrNoSuchChild when spawnCallID names no running sub-agent — the
+	// It refuses with domain.ErrNoSuchChild when runID names no running sub-agent — the
 	// child finished, was cancelled, or never existed — and that refusal is the message's whole
 	// account: nothing was queued and no domain.ChildInterjectionEvent follows. On success exactly
 	// one such event reports the message's fate, Landed either way, and the fold turns it into the
 	// delivered block inside the run or the note that it never got there (transcript.apply).
-	InterjectChild(spawnCallID string, in domain.UserInput) error
+	InterjectChild(runID string, in domain.UserInput) error
 	// ClearContext drops the model's conversation history (the /clear command); the
 	// host's visible transcript is unaffected. Called only at idle (no worker running).
 	ClearContext() error

@@ -167,7 +167,7 @@ type fakeEngine struct {
 
 // childInterjection is one recorded InterjectChild call: the run it addressed and the message.
 type childInterjection struct {
-	spawn string
+	runID string
 	input domain.UserInput
 }
 
@@ -224,13 +224,13 @@ func (f *fakeEngine) interjections() []domain.UserInput {
 // without needing a live child tree. Like Interject it records the call whether or not it is
 // refused — and unlike Interject it is called from the Update goroutine, so it takes the same mutex
 // every other fake seam does.
-func (f *fakeEngine) InterjectChild(spawn string, in domain.UserInput) error {
+func (f *fakeEngine) InterjectChild(runID string, in domain.UserInput) error {
 	f.mu.Lock()
-	f.childInterjected = append(f.childInterjected, childInterjection{spawn: spawn, input: in})
+	f.childInterjected = append(f.childInterjected, childInterjection{runID: runID, input: in})
 	fn := f.interjectChildFn
 	f.mu.Unlock()
 	if fn != nil {
-		return fn(spawn, in)
+		return fn(runID, in)
 	}
 	return nil
 }

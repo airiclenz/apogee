@@ -71,7 +71,12 @@
 - `git show HEAD:.beads/issues.jsonl | grep -c '"id":"apogee-single-delegation-stop"\|"id":"apogee-session-delegate-retention"'` prints `2`
 **Commit:** `docs(adr): 0086 — a delegation is stopped singly, and a named one stays continuable for the session`
 
-## 2. Address a child's interjection by run id
+## 2. Address a child's interjection by run id — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): internal/tui/runview_test.go was listed in Files but needed no change — the existing viewOn fixture is left as it is; the run-id cases are driven by new stamped-event tests in interject_test.go (modelViewingStampedChild, TestRunViewAddressesTheChildByRunIDNotItsCallID, TestRunViewSteersARedirectedDelegationByItsAdoptedRunID).
+NOTES (2026-09-26): domain.ErrNoSuchChild's message now reads "apogee: no running sub-agent with that run id" (was "… with that call-ID"), per the item's call-ID prose sweep.
+NOTES (2026-09-26): foldChildDelivery still matches a staged row to its ChildInterjectionEvent by spawn call id (row.spawn == e.CallID), so two colliding-call-id children could clear each other's band row; pre-existing, display-only, left as is.
+NOTES (2026-09-26): CONTEXT.md's Sub-agent entry still says a child is addressed by its spawning call-ID (`Agent.InterjectChild(spawnCallID, in)`); that sweep belongs to item 12 (not yet done), whose rule greps `spawn call` in CONTEXT.md.
 
 **What:**
 **Goal:** `InterjectChild` takes the delegation's run id; the child registry is keyed by run id; the TUI's run view steers the child whose run id it shows; a view whose run id is `""` gets `ErrNoSuchChild`.
