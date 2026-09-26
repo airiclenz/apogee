@@ -407,16 +407,17 @@ type Agent struct {
 	// parent's registry and delivered out of the child's mailbox, by the child's own Run.
 	children childRegistry
 	mailbox  childMailbox
-	// retained is the set of capped delegations THIS Agent keeps for the rest of its Exchange,
-	// keyed by delegation name (children.go, plan 2026-09-18 - 00 P6): what a continuation of a
-	// capped child is spawned from. Filled by runSubAgent after a capped child's result is read,
-	// cleared as the next Exchange opens (step), and never snapshotted (ADR 0022 D8).
+	// retained is the set of delegations THIS Agent keeps for the rest of its session, keyed by
+	// delegation name (children.go, ADR 0086 D1): what a continuation is spawned from. Filled by
+	// runSubAgent after a capped, faulted, stopped, continued or named completed child's result is
+	// read; it survives later Exchanges and is emptied by /clear (ClearContext) and by a restore
+	// (restoreState).
 	retained retainedDelegates
 	// delegations is the ledger of every delegation THIS Agent spawned in its current Exchange —
 	// spawn order, outcome, cause and resolved output target (children.go, apogee-clb): what the
 	// `[engine — delegations]` note buildRequest stamps on the request tail is rendered from, once
 	// the Exchange holds two delegations or one that did not complete. Opened and recorded by
-	// runSubAgent, cleared beside retained as the next Exchange opens (step), never snapshotted.
+	// runSubAgent, cleared as the next Exchange opens (step), never snapshotted.
 	delegations delegationLedger
 	// steered counts the mailbox messages that LANDED in this Agent while it ran as somebody's
 	// child — what its result tells the parent model about in the steered trailer
@@ -1767,6 +1768,9 @@ func (a *Agent) CutSnapshot(dropExchanges int) (domain.Session, error) {
 // model reading a plan for a job it can no longer see. The list is the model's to write, and a
 // new session starts with a blank one.
 //
+// The retained delegations are dropped whole here too (ADR 0086 D3): a `continue` names work the
+// forgotten conversation delegated, and the new session never delegated it.
+//
 // The cumulative usage tally is zeroed here too, exactly as RestoreSession zeroes it: the tally is
 // PER CONTEXT — the sums and the call count belong to the conversation this call drops — so the
 // first UsageEvent of the new session counts one call, not the forgotten session's calls plus one.
@@ -1779,6 +1783,7 @@ func (a *Agent) ClearContext() error {
 	}
 	a.consoles.CloseAll()
 	_ = a.tasks.Replace(nil) // clearing cannot break a cap, so the validated error is not one
+	a.retained.clear()       // a continuation belongs to the session this call drops (ADR 0086 D3)
 	a.usage = usageTally{}   // the sums belong to the conversation that just left
 	a.reloadContextFiles()
 	a.conv = *domain.NewConversation(nil)

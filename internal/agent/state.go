@@ -166,6 +166,10 @@ func (a *Agent) restoreState(state json.RawMessage) error {
 		exchangeStart: exchangeStart,
 		pendingInput:  st.PendingInput,
 	})
+	// Retained delegations belong to the session this swap replaced, and none crosses into the
+	// restored one (ADR 0086 D1): Resume starts from none and a live restore empties the outgoing
+	// session's.
+	a.retained.clear()
 	return nil
 }
 

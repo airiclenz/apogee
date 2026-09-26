@@ -225,13 +225,12 @@ func (d retainedDelegate) withRound(round delegateRound) retainedDelegate {
 	return d
 }
 
-// retainedDelegates is the set of retained delegations ONE Agent holds for the rest of
-// its Exchange, keyed by delegation name — the handle the parent model already knows a delegation
-// by, and the only one it can spell back. It exists in memory only: the map is cleared as the next Exchange
-// opens (Agent.step) and never reaches the session snapshot (ADR 0022 D8, ADR 0013 §5 — a
-// delegation is opaque to everything outside the engine, and a continuation belongs to the
-// Exchange that started the work it continues). It is guarded because the depth-0 fan-out retains
-// from several pool workers at once (ADR 0039).
+// retainedDelegates is the set of retained delegations ONE Agent holds for the rest of its
+// session (ADR 0086 D1), keyed by delegation name — the handle the parent model already knows a
+// delegation by, and the only one it can spell back. It outlives the Exchange that retained an
+// entry: the map is emptied only by /clear (Agent.ClearContext) and by a restore that swaps the
+// session out (Agent.restoreState). It is guarded because the depth-0 fan-out retains from several
+// pool workers at once (ADR 0039).
 //
 // The zero value is ready to use.
 type retainedDelegates struct {
@@ -301,7 +300,8 @@ func (r *retainedDelegates) names() []string {
 	return names
 }
 
-// clear forgets every retained delegation — the Exchange that owned them has ended.
+// clear forgets every retained delegation — the session that owned them has been cleared or
+// swapped out.
 func (r *retainedDelegates) clear() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -319,9 +319,9 @@ func (r *retainedDelegates) clear() {
 // as an engine note (delegationsNoteTopic, Agent.buildRequest) once the Exchange holds two or more
 // delegations or any one that did not complete. It states facts and asks nothing: what to do about
 // a faulted delegate or a missing file is the coordinator's call, and a note that issued orders
-// would be a Reaction wearing the engine's header. Like retainedDelegates it lives in memory only,
-// is cleared as the next Exchange opens (Agent.step) and never reaches the session snapshot (ADR
-// 0022 D8): the note is a per-request projection, never a conversation message.
+// would be a Reaction wearing the engine's header. It lives in memory only, is cleared as the next
+// Exchange opens (Agent.step) and never reaches the session snapshot (ADR 0022 D8): the note is a
+// per-request projection, never a conversation message.
 
 // delegationOutcome is how one delegation ended, as the engine classified it from the result and
 // dispatch outcome runSubAgent returned — the six words the ledger's rows spell.

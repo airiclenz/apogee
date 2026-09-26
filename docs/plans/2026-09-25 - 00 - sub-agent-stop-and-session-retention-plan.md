@@ -218,7 +218,12 @@ NOTES (2026-09-26): the first-run retention gate now also requires outcome != di
 - `go test -race -count=1 -run TestE2EDelegationStepCap ./cmd/apogee/`
 **Commit:** `feat(agent): a retained delegation keeps its task and every round, laid into a continue within budget`
 
-## 9. Named delegations stay retained for the session
+## 9. Named delegations stay retained for the session — ✅ DONE (2026-09-26)
+
+NOTES (2026-09-26): consequential edit — internal/agent/testdata/contextcost.golden: made necessary by the widened `continue` schema description (tool menu 23859 → 23886 bytes), regenerated with `-update` as the golden's own failure message directs.
+NOTES (2026-09-26): the "completed" gate is `err == nil && res.Status != domain.StatusCancelled` beside the existing `outcome != dispatchCancelled`; the retention emptying on restore sits at the tail of Agent.restoreState, so it covers both Resume and RestoreSession and runs only after a clean decode (a refused restore keeps retention).
+NOTES (2026-09-26): the ClearContext test lives in subagent_test.go (beside the retention tests, reusing their fixtures) rather than console_test.go; console_test.go is untouched. The `continue` description now also says the child restarts from "its task and earlier reports" rather than "that run's engine summary", which the round seed of item 8 made false.
+NOTES (2026-09-26): the delegate-ledger comment in children.go that compared its lifetime to retainedDelegates' ("Like retainedDelegates it lives in memory only, is cleared as the next Exchange opens") and the continue-line comment in delegationResult ("A completed child has nothing to continue from") were restated, since this item made both false.
 
 **What:** Depends on item 8.
 **Goal:** a delegation that completes normally is retained when its `sub_agent` call gave a name (a namer-generated name does not retain it); a continuation retains per item 8; retention survives into later Exchanges; `/clear` (`ClearContext`) drops it whole; the `sub_agent` schema's `continue` description and the `SubAgentArgs.Continue` Go doc say a named delegation of this session, and "capped" for a bound.

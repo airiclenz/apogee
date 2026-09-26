@@ -99,10 +99,9 @@ func (a *Agent) step(ctx context.Context) (domain.StepResult, error) {
 		if a.journal != nil && !a.isDelegate() {
 			a.journal.BeginGroup()
 		}
-		// The capped delegations the PREVIOUS Exchange retained are forgotten here, at the one
-		// site an Exchange opens: a continuation belongs to the Exchange that started the work it
-		// continues, and nothing outside the engine holds them (children.go, ADR 0022 D8).
-		a.retained.clear()
+		// The delegate ledger of the PREVIOUS Exchange is forgotten here, at the one site an
+		// Exchange opens (children.go, apogee-clb). Retained delegations are NOT: a named delegation
+		// stays continuable for the whole session (ADR 0086 D1; ClearContext drops them).
 		a.delegations.clear()
 		// The message itself — skill blocks, @file blocks, then the text — is composed by the
 		// helper an interjection shares (composeUserMessage), so both doors read identically.

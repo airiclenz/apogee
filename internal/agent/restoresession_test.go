@@ -481,3 +481,45 @@ func TestRestoreSession_ShapeRefusalLeavesTheLiveSessionStanding(t *testing.T) {
 		t.Fatalf("emitted %d UsageEvents, want %d", len(got), counted+1)
 	}
 }
+
+// TestRestoreSession_EmptiesRetention proves the retention half of the boundary (ADR 0086 D1): a
+// retained delegation belongs to the session a live restore swaps out, so none of the outgoing
+// session's entries is continuable in the restored one.
+func TestRestoreSession_EmptiesRetention(t *testing.T) {
+	t.Parallel()
+
+	a := idleAgentWithHistory(t)
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	a.retained.retain(retainedDelegate{task: "survey", name: "Repo Survey", rounds: []delegateRound{{report: "done"}}})
+
+	if err := a.RestoreSession(snap); err != nil {
+		t.Fatalf("RestoreSession: %v", err)
+	}
+	if names := a.retained.names(); len(names) != 0 {
+		t.Errorf("retained names after RestoreSession = %v, want none", names)
+	}
+}
+
+// TestResume_StartsWithNoRetention proves the construction-time restore leaves retention empty: a
+// snapshot taken while the Agent held a retained delegation resumes into an Agent that holds none.
+func TestResume_StartsWithNoRetention(t *testing.T) {
+	t.Parallel()
+
+	a := idleAgentWithHistory(t)
+	a.retained.retain(retainedDelegate{task: "survey", name: "Repo Survey", rounds: []delegateRound{{report: "done"}}})
+	snap, err := a.Snapshot()
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+
+	b, err := resumeAgent(baseConfig(&recordingSink{}), snap, echoResponder(t, "resumed reply"))
+	if err != nil {
+		t.Fatalf("resumeAgent: %v", err)
+	}
+	if names := b.retained.names(); len(names) != 0 {
+		t.Errorf("retained names after Resume = %v, want none", names)
+	}
+}

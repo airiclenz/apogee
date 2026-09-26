@@ -3938,20 +3938,96 @@ func TestSubAgent_CappedChildIsRetainedWithItsFold(t *testing.T) {
 	}
 }
 
-// TestSubAgent_CompletedChildIsNotRetained is the floor: a delegation that ran to completion has
-// nothing to continue from, so the parent keeps nothing of it.
-func TestSubAgent_CompletedChildIsNotRetained(t *testing.T) {
+// TestSubAgent_NamedCompletedChildIsRetained pins ADR 0086 D1's opt-in: a delegation that ran to
+// completion is retained when its call NAMED it — the task, what the call asked for, and one round
+// whose report is the child's own final reply, laid under the report head rather than the engine
+// summary's.
+func TestSubAgent_NamedCompletedChildIsRetained(t *testing.T) {
 	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	scripts := [][]provider.Delta{
 		toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName)),
 		contentScript("the survey is complete"),
 		contentScript("parent done"),
 	}
 
-	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore), &requestLogResponder{scripts: scripts})
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
 
+	got, ok := a.retained.lookup(retainedSurveyName)
+	if !ok {
+		t.Fatalf("no delegation retained under %q after a named completed delegation", retainedSurveyName)
+	}
+	want := retainedDelegate{
+		task:       retainedSurveyTask,
+		name:       retainedSurveyName,
+		tools:      tools.SubAgentRoster{Names: []string{"read_thing"}},
+		outputPath: "notes/survey.md",
+		rounds:     []delegateRound{{report: "the survey is complete", spawnCallID: "c1"}},
+	}
+	if !reflect.DeepEqual(unstamped(got), want) {
+		t.Errorf("retained delegate = %+v, want %+v", got, want)
+	}
+}
+
+// TestSubAgent_GeneratedNameCompletedChildIsNotRetained is the other half of the opt-in: a
+// completed delegation the model left unnamed is named out of band (ADR 0068), but that name never
+// reached the parent model, so there is no handle it could continue the delegation by and nothing
+// is retained. The gate holds the child until the rename has landed, so the run ends wearing the
+// generated name and the refusal to retain is the gate's, not a missing name's.
+func TestSubAgent_GeneratedNameCompletedChildIsNotRetained(t *testing.T) {
+	sink := newLockedSink()
+	namer := &stubNamer{reply: "Generated Name"}
+	a := namingParent(t, sink, namer, "", func(context.Context) { sink.awaitRename() })
+
+	runNamingParent(t, a)
+
+	if named := sink.namings(); len(named) != 1 || named[0].Name != "Generated Name" {
+		t.Fatalf("SubAgentNamedEvents = %+v, want the one generated rename", named)
+	}
 	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after a completed delegation, want none", names)
+		t.Errorf("retained names = %v after a completed delegation named by the namer, want none", names)
+	}
+}
+
+// TestSubAgent_NamedCompletedChildIsContinuableInTheNextExchange pins the session lifetime (ADR
+// 0086 D1): a named completed delegation outlives the Exchange that ran it, and a `continue` in a
+// later Exchange spawns from it — its round-1 report laid into the continued child's task — and
+// appends the continued run as round 2.
+func TestSubAgent_NamedCompletedChildIsContinuableInTheNextExchange(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	responder := &requestLogResponder{scripts: [][]provider.Delta{
+		toolCallScript("c1", tools.SubAgentToolName, cappedSurveyArgs(retainedSurveyTask, retainedSurveyName)),
+		contentScript("the survey is complete"),
+		contentScript("parent done"),
+		toolCallScript("c2", tools.SubAgentToolName, continueArgs(retainedSurveyName, "now go deeper", 0)),
+		contentScript("the deeper survey is complete"),
+		contentScript("second done"),
+	}}
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), responder)
+	if err := a.Submit(domain.UserInput{Text: "continue the survey"}); err != nil {
+		t.Fatalf("Submit: %v", err)
+	}
+	if _, err := a.Run(context.Background()); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	res, ok := subAgentResultFor(sink.events, "c2")
+	if !ok || res.IsError {
+		t.Fatalf("continuation result = %+v (found %v), want a completed continuation", res, ok)
+	}
+	wantSeed := continuationTask(retainedDelegate{
+		task:   retainedSurveyTask,
+		rounds: []delegateRound{{report: "the survey is complete"}},
+	}, "now go deeper")
+	if got := lastUserText(responder.requests[4]); got != wantSeed {
+		t.Errorf("continued child's task =\n%s\nwant\n%s", got, wantSeed)
+	}
+	got, ok := a.retained.lookup(retainedSurveyName)
+	if !ok || len(got.rounds) != 2 || got.rounds[1].report != "the deeper survey is complete" {
+		t.Errorf("retained under %q = %+v (found %v), want two rounds ending on the continued report",
+			retainedSurveyName, got, ok)
 	}
 }
 
@@ -3980,9 +4056,9 @@ func TestSubAgent_LatestCappedChildIsRetainedUnderTheSharedName(t *testing.T) {
 	}
 }
 
-// TestSubAgent_RetainedChildIsForgottenAsTheNextExchangeOpens pins the lifetime: a capped delegation is held for the
-// rest of the Exchange that spawned it and forgotten as the next one opens.
-func TestSubAgent_RetainedChildIsForgottenAsTheNextExchangeOpens(t *testing.T) {
+// TestSubAgent_RetainedChildSurvivesTheNextExchange pins the lifetime (ADR 0086 D1): a capped
+// delegation is held past the Exchange that spawned it — opening the next one forgets nothing.
+func TestSubAgent_RetainedChildSurvivesTheNextExchange(t *testing.T) {
 	sink := &recordingSink{}
 	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
 	scripts := append(cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName), contentScript("parent done"))
@@ -4000,8 +4076,29 @@ func TestSubAgent_RetainedChildIsForgottenAsTheNextExchangeOpens(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
+	if names := a.retained.names(); !slices.Equal(names, []string{retainedSurveyName}) {
+		t.Errorf("retained names = %v after a new Exchange opened, want %q still retained", names, retainedSurveyName)
+	}
+}
+
+// TestSubAgent_ClearContextDropsRetention pins /clear (ADR 0086 D3): the retained delegations
+// belong to the conversation ClearContext drops, so none survives it.
+func TestSubAgent_ClearContextDropsRetention(t *testing.T) {
+	sink := &recordingSink{}
+	reader := fakeTool{name: "read_thing", readOnly: true, result: "package main"}
+	scripts := append(cappedSurveyScripts("c1", retainedSurveyTask, retainedSurveyName), contentScript("parent done"))
+
+	a := runCappedSurveyParent(t, subAgentConfig(sink, domain.ModeAskBefore, reader), &requestLogResponder{scripts: scripts})
+	if _, ok := a.retained.lookup(retainedSurveyName); !ok {
+		t.Fatalf("the capped delegation is not retained before the clear")
+	}
+
+	if err := a.ClearContext(); err != nil {
+		t.Fatalf("ClearContext: %v", err)
+	}
+
 	if names := a.retained.names(); len(names) != 0 {
-		t.Errorf("retained names = %v after a new Exchange opened, want none", names)
+		t.Errorf("retained names = %v after ClearContext, want none", names)
 	}
 }
 

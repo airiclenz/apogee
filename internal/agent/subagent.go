@@ -930,6 +930,10 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 	// task the entry keeps stays the ORIGINAL, so every continuation composes over the rounds, never
 	// over a seed of a seed.
 	task := args.Task
+	// Whether the CALL named the delegation, read before a continuation fills args.Name from the
+	// entry it takes: a completed run is retained only on the parent's own opt-in (ADR 0086 D1), and
+	// a name the namer generates out of band never reached the model for a completed run.
+	callNamed := delegationName(args.Name) != ""
 	var (
 		prior         retainedDelegate
 		continuing    bool
@@ -1122,23 +1126,27 @@ func (a *Agent) runSubAgent(ctx context.Context, call domain.ToolCall, runID str
 		sub.stoppedByUser, sub.stopUndelivered = true, stopLeftover
 	}
 	result, outcome = sub.delegationResult(call.ID, res, err)
-	// A child the engine stopped at a bound is RETAINED for the rest of this Exchange (P6) — the
-	// fold and closing text the result carried as its first round, and everything the call asked
-	// for, so the parent can continue the work rather than re-spawn it from nothing. A child whose
+	// A child the engine stopped at a bound is RETAINED for the rest of the session (P6; ADR 0086
+	// D1) — the fold and closing text the result carried as its first round, and everything the
+	// call asked for, so the parent can continue the work rather than re-spawn it from nothing. A child whose
 	// Exchange FAULTED with the parent's ctx still live is retained the same way (ADR 0082): its
 	// fold was written at the fault (Agent.finishAtFault) and its last words stand as the closing
 	// text, so the Turns it spent before its upstream died are continued from rather than lost —
 	// the error result stays an error result, and only gains the continue line. A STOPPED child is
 	// retained the same way (ADR 0086 D4): its fold was written at the stop (Agent.finishAtStop). A
 	// CONTINUATION is retained whatever its outcome (ADR 0086 D2): its run is appended to the entry
-	// it took as the next round. A CANCEL is still none of these: it returns no result and retains
-	// nothing — a cancelled continuation's entry included — so the contract at the head of this
+	// it took as the next round. A run that COMPLETED — no Run error, not cancelled, not capped,
+	// faulted or stopped — is retained only when its call NAMED it (ADR 0086 D1): naming is the
+	// parent's own opt-in, and a namer-generated name never reached the model for a completed run,
+	// so there is no handle the parent knows to continue it by. A CANCEL is still none of these: it
+	// returns no result and retains nothing — a cancelled continuation's entry included — so the contract at the head of this
 	// file — no partial result surfaces and no snapshot lands mid-sub-agent — holds unchanged. Read
 	// AFTER the namer is joined, so a delegation named out of band is retained under the name the
 	// parent model has been told (ADR 0068); an unnamed one has no handle and is not retained. A
 	// continuation is keyed by the name its continue line spells — the one the call gave, or the
 	// entry's own when it gave none.
-	if outcome != dispatchCancelled && (res.StepCapped || res.Faulted || stopped || continuing) {
+	completed := err == nil && res.Status != domain.StatusCancelled
+	if outcome != dispatchCancelled && (res.StepCapped || res.Faulted || stopped || continuing || (callNamed && completed)) {
 		report, summary := sub.roundReport(result, res, err, stopped)
 		entry := retainedDelegate{task: args.Task}
 		if continuing {
@@ -1431,8 +1439,9 @@ func (a *Agent) delegationResult(callID string, res domain.StepResult, err error
 	}
 	// And the continue line, LAST of the body notes, for a capped, faulted or stopped child the parent
 	// retains — one that ended its run wearing a name (runSubAgent joins the namer before rendering
-	// this, so the name read here is the one the retention keys on). A completed child has nothing
-	// to continue from and an unnamed one has no handle, so neither carries it. On the fault path
+	// this, so the name read here is the one the retention keys on). A completed child never
+	// carries it (ADR 0086 D1): when its call named it, the parent already holds the handle it gave;
+	// when it did not, it is not retained. An unnamed child has no handle at all. On the fault path
 	// it rides the ERROR result: the head still says the delegation faulted and why, and the line
 	// below it says the work is not lost.
 	if res.StepCapped || res.Faulted || a.stoppedByUser {
